@@ -1,8 +1,8 @@
 // Service worker di Archivio Orologi (generato dalla build): tiene in memoria tutti i file dell'app, così funziona
 // offline. Non tocca mai i dati dell'archivio (che stanno in IndexedDB) e non contatta nessun server: risponde dalla cache
 // e, solo per i file dell'app, prova la rete se un file manca (aggiornamenti).
-const CACHE = 'archivio-orologi-20261020184824480';
-const FILE = ["./","./apple-touch-icon.png","./assets/index-BI01PLfX.css","./assets/index-BpMQjx6X.js","./assets/sqlite3-DBpDb1lf.wasm","./assets/sqlite3-opfs-async-proxy-C_otN2ZJ.js","./assets/sqlite3-worker1-bundler-friendly-Cp4kN0G-.js","./icona-192.png","./icona-512.png","./index.html","./manifest.webmanifest"];
+const CACHE = 'archivio-orologi-20261020190645122';
+const FILE = ["./","./apple-touch-icon.png","./assets/index-BI01PLfX.css","./assets/index-DFX8mjPv.js","./assets/sqlite3-DBpDb1lf.wasm","./assets/sqlite3-opfs-async-proxy-C_otN2ZJ.js","./assets/sqlite3-worker1-bundler-friendly-Cp4kN0G-.js","./icona-192.png","./icona-512.png","./index.html","./manifest.webmanifest"];
 
 self.addEventListener('install', (evento) => {
   evento.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILE)));
