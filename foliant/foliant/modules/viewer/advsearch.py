@@ -457,13 +457,7 @@ class AdvancedSearchController(QObject):
         if view.document.path is not None:
             self.ctx.open_path(str(view.document.path))   # porta in primo piano la scheda esistente
             return
-        w = self.ctx.window
-        tabs = getattr(w, "tabs", None)
-        stack = getattr(w, "docs_stack", None)
-        if stack is not None and tabs is not None:
-            stack.setCurrentWidget(tabs)
-        if tabs is not None:
-            tabs.setCurrentWidget(view)
+        self.ctx.activate_view(view)
 
     def go_to(self, index: int):
         if not (0 <= index < len(self.hits)):

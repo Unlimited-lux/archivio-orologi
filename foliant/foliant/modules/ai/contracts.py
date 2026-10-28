@@ -191,6 +191,28 @@ def review_markdown(clauses: list[Clause]) -> str:
     return "\n".join(lines) + "\n\n> " + disclaimer()
 
 
+def review_pdf(clauses: list[Clause], risks: RisksResult | None = None) -> bytes:
+    """Rapporto PDF della revisione (clausole e, se valutati, rischi e fonti) con l'avvertenza."""
+    from . import report_pdf
+    level = {"alta": "hi", "media": "mid"}
+    table = report_pdf.Table(
+        _("Clausole"), [_("N."), _("Titolo"), _("Pagina"), _("Criticità"), _("Sintesi"), _("Lacune"), _("Proposta"),
+                        _("Verifica")],
+        [[c.numero, c.titolo, c.pagina + 1 if c.pagina is not None else "", c.criticita, c.sintesi, c.lacune,
+          c.proposta, "" if c.verified else _("non verificato")] for c in clauses],
+        [["", "", "", level.get(c.criticita, "")] for c in clauses])
+    tables = [table]
+    if risks is not None:
+        tables.append(report_pdf.Table(
+            _("Rischi"), [_("Rischio"), _("Clausola"), _("Probabilità"), _("Impatto"), _("Mitigazione")],
+            [[r.descrizione, r.clausola, r.probabilita, r.impatto, r.mitigazione] for r in risks.risks]))
+        tables.append(report_pdf.Table(
+            _("Fonti"), [_("Riferimento"), _("Citazione"), _("Origine")],
+            [[s.riferimento, s.citazione, s.origine + (" — " + _("da verificare") if s.da_verificare else "")]
+             for s in risks.sources]))
+    return report_pdf.render(_("Revisione del contratto"), tables, [disclaimer()], landscape=True)
+
+
 def communication_source(clauses: list[Clause]) -> str:
     """Testo di partenza per «Prepara comunicazione al cliente» (AI-31): le clausole critiche."""
     crit = [c for c in clauses if c.criticita in ("media", "alta")]

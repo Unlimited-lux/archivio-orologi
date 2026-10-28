@@ -118,6 +118,7 @@ def register(ctx: Context) -> None:
     ctx.add_menu_action(act_self, _("Firma"))
 
     panel = SignaturesPanel(c)
+    c.panel = panel
     ctx.add_sidebar_panel("firme", _("Firme"), "file-badge", panel, order=90)
     ctx.add_view_menu_provider(c.menu_provider)
     ctx.add_home_action(_("Firma un PDF"), "signature", lambda: _home(ctx), _("Firma grafica o digitale"), 90)

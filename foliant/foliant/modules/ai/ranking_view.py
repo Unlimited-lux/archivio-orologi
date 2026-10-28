@@ -71,10 +71,13 @@ class RankingDialog(QDialog):
         row = QHBoxLayout()
         b_csv = QPushButton(_("Esporta CSV…"))
         b_csv.clicked.connect(lambda: self.export_csv())
+        b_pdf = QPushButton(_("Esporta PDF…"))
+        b_pdf.clicked.connect(lambda: self.export_pdf())
         close = QPushButton(_("Chiudi"))
         close.clicked.connect(self.reject)
         row.addStretch(1)
         row.addWidget(b_csv)
+        row.addWidget(b_pdf)
         row.addWidget(close)
         lay.addLayout(row)
 
@@ -186,3 +189,11 @@ class RankingDialog(QDialog):
         path = path or self.ask_save_path(_("Esporta classifica"), "classifica.csv", "CSV (*.csv)", ".csv")
         if path:
             atomic_write(path, ranking.to_csv(self.rows, getattr(self, "_crit", [])).encode("utf-8"))
+
+    def export_pdf(self, path: str | None = None) -> str | None:
+        if not self.rows:
+            return None
+        path = path or self.ask_save_path(_("Esporta classifica"), "classifica.pdf", "PDF (*.pdf)", ".pdf")
+        if path:
+            atomic_write(path, ranking.to_pdf(self.rows, getattr(self, "_crit", [])))
+        return path

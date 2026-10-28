@@ -199,7 +199,7 @@ class _Side(QWidget):
     def from_pdf(self) -> bool:
         doc = self.owner.ctx.current_document()
         if doc is None:
-            self.owner.ctx.info(_("Nessun documento"), _("Apri prima un PDF."))
+            self.owner.ctx.notify(_("Apri prima un PDF."))
             return False
         with ENGINE_LOCK:
             text = "\n".join(page.get_text("text", sort=True) for page in doc.pdf)
