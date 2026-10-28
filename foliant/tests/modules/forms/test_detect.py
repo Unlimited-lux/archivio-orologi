@@ -369,3 +369,62 @@ def test_page_needs_ocr():
     assert page_needs_ocr(doc, 0)
     assert not page_needs_ocr(doc, 1)          # immagine piccola
     assert not page_needs_ocr(doc, 2)          # pagina vuota
+
+
+# ------------------------------------------------------ scansione inclinata
+
+
+def test_skewed_scan_3_degrees():
+    import io
+    import math
+
+    from PIL import Image
+
+    src, page = _doc()
+    lines = [(150, 120), (150, 200), (200, 280)]     # (x0, y), lunghe 250 pt
+    for i, (x, y) in enumerate(lines):
+        page.insert_text((60, y - 2), f"Campo {i}:", fontsize=10)
+        page.draw_line((x, y), (x + 250, y))
+    boxes = [pymupdf.Rect(150, 360, 162, 372), pymupdf.Rect(300, 360, 312, 372)]
+    for b in boxes:
+        page.draw_rect(b)
+        page.insert_text((b.x1 + 4, b.y1 - 2), "Scelta", fontsize=10)
+    pix = page.get_pixmap(dpi=200)
+    im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    im = im.rotate(3, expand=False, fillcolor="white")
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    doc = pymupdf.open()
+    scan = doc.new_page(width=595, height=842)
+    scan.insert_image(scan.rect, stream=buf.getvalue())
+
+    # rotazione antioraria di 3° attorno al centro (y verso il basso)
+    t = math.radians(3)
+    cx, cy = 595 / 2, 842 / 2
+
+    def rot(x, y):
+        return (cx + (x - cx) * math.cos(t) + (y - cy) * math.sin(t),
+                cy - (x - cx) * math.sin(t) + (y - cy) * math.cos(t))
+
+    cands = detect_page(doc, 0, raster=True)
+    texts = [c for c in cands if c.kind == "text"]
+    checks = [c for c in cands if c.kind == "checkbox"]
+    assert all(c.angle == pytest.approx(3, abs=0.5) for c in cands)
+    for x, y in lines:
+        # centro del campo (1 pt sopra la linea, alto 18) dopo la rotazione
+        ex, ey = rot(x + 125, y - 10)
+        best = min(texts, key=lambda c: math.hypot(
+            (c.rect.x0 + c.rect.x1) / 2 - ex, (c.rect.y0 + c.rect.y1) / 2 - ey))
+        mx = (best.rect.x0 + best.rect.x1) / 2
+        my = (best.rect.y0 + best.rect.y1) / 2
+        assert math.hypot(mx - ex, my - ey) <= 2, (best.rect, ex, ey)
+        # bordo inferiore rispetto alla linea inclinata nello stesso punto x
+        lx, ly = rot(x + 125, y)
+        line_y = ly - (mx - lx) * math.tan(t)
+        assert best.rect.y1 == pytest.approx(line_y - 1, abs=2)
+        assert best.rect.width == pytest.approx(250, abs=4)
+    for b in boxes:
+        ex, ey = rot((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2)
+        assert any(math.hypot((c.rect.x0 + c.rect.x1) / 2 - ex,
+                              (c.rect.y0 + c.rect.y1) / 2 - ey) <= 3
+                   for c in checks), (checks, ex, ey)

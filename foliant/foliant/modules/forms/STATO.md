@@ -33,7 +33,7 @@ Test in `tests/modules/forms/` (file abbreviati: `engine` = `test_engine.py`, `f
 | FRM-24 Elenco campi | P1 | fatto | fields: tutti | |
 | FRM-25 Anteprima | P1 | fatto | design: `test_preview_fill_and_back`, `test_preview_discard`, `test_submit_blocked_and_preview` | |
 | FRM-26 Riconoscimento (piatti) | P1 | fatto | detect: tutti (benchmark 20/20); data: `test_detect_and_create_subset_single_undo` | Linee, rettangoli, caselle, pettini, sottolineature; nomi dalle etichette. |
-| FRM-27 Riconoscimento (scansioni) | P2 | parziale | detect: `test_scanned_page`, `test_scanned_rotated_page`, `test_page_needs_ocr`; design: `test_detect_offers_ocr_on_scans` | Linee e caselle sull'immagine; proposta di OCR; correzione dell'inclinazione non fatta. |
+| FRM-27 Riconoscimento (scansioni) | P2 | parziale | detect: `test_scanned_page`, `test_scanned_rotated_page`, `test_page_needs_ocr`; design: `test_detect_offers_ocr_on_scans` | Linee e caselle sull'immagine; proposta di OCR; correzione dell'inclinazione fino a 10° (detect: `test_skewed_scan_3_degrees`). |
 | FRM-28 Esportazione dati | P1 | fatto | data: `test_roundtrip_formats`, `test_csv_rfc4180_and_rows`, `test_export_import_into_blank_copy`, `test_export_skips_password_and_noexport`, `test_json_list_is_array` | FDF/XFDF scritti e letti in proprio; anche XML semplice e TXT delimitato da tabulazioni (specifica v2). |
 | FRM-29 Importazione dati | P1 | fatto | data: `test_import_report_unknown_rejected_and_single_undo`, `test_import_csv_second_row`, `test_fdf_flag_instructions_ignored` | |
 | FRM-30 Elaborazione multipla | P2 | fatto | batch: tutti; data: `test_collect_and_series_from_window` | |
