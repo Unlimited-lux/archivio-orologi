@@ -21,8 +21,8 @@ from .fill import FormFiller
 if TYPE_CHECKING:
     from foliant.api import Context, DocumentView
 
-DATA_FILTER = "FDF (*.fdf);;XFDF (*.xfdf);;CSV (*.csv);;JSON (*.json)"
-IMPORT_FILTER = _("Dati del modulo") + " (*.fdf *.xfdf *.csv *.json *.xml);;" + DATA_FILTER
+DATA_FILTER = "FDF (*.fdf);;XFDF (*.xfdf);;CSV (*.csv);;JSON (*.json);;XML (*.xml);;TXT (*.txt)"
+IMPORT_FILTER = _("Dati del modulo") + " (*.fdf *.xfdf *.csv *.json *.xml *.txt);;" + DATA_FILTER
 
 CREATE_KINDS = [E.TEXT, E.CHECKBOX, E.RADIO, E.COMBO, E.LIST, E.BUTTON, "image", "date", E.SIGNATURE]
 
@@ -806,7 +806,7 @@ class FormsModule(QObject):
         with open(path, "rb") as fh:
             data = fh.read()
         fmt = X.format_of(path, data)
-        if fmt == "csv":
+        if fmt in ("csv", "txt"):
             records = X.csv_records(data)
             if not records:
                 raise X.InterchangeError(_("Il file CSV non contiene righe di dati."))
@@ -871,14 +871,12 @@ class FormsModule(QObject):
         view = self.ctx.current_view()
         if view is None:
             return
+        # UX-13: nessuna conferma, l'operazione si annulla con Annulla. In modifica modulo con
+        # una selezione si reimpostano solo i campi selezionati, altrimenti tutti.
         sel = self.selected_fields(view) if self.design_active else []
-        from .dialogs import ask_reset
-        choice = ask_reset(self.ctx.window, len(sel))
-        if choice is None:
-            return
-        names = list(dict.fromkeys(f.name for f in sel)) if choice == "selected" else None
+        names = list(dict.fromkeys(f.name for f in sel)) if sel else None
         n = self.reset(names)
-        self.ctx.status(_("Campi reimpostati: {n}").format(n=n))
+        self.ctx.status(_("Campi reimpostati: {n} (Annulla per ripristinarli)").format(n=n))
 
     def flatten(self, pages: list[int] | None = None, view=None) -> int:
         view = view or self.ctx.current_view()
@@ -965,8 +963,8 @@ class FormsModule(QObject):
             self.ctx.error(_("Moduli XML"), _("La conversione dei moduli XML dinamici non è disponibile: "
                                               "i dati si possono comunque esportare."))
             return
-        if self.ctx.confirm(_("Moduli XML"), _("Rimuovere la parte XML e mantenere solo i campi standard?")):
-            self._change(_("Converti in modulo standard"), E.remove_xfa, view)
+        if self._change(_("Converti in modulo standard"), E.remove_xfa, view):
+            self.ctx.status(_("Parte XML rimossa: restano i campi standard (Annulla per ripristinarla)."))
 
     def export_xfa_dialog(self) -> None:
         view = self.ctx.current_view()

@@ -298,4 +298,7 @@ EN: dict[str, str] = {
     'Compilazione consentita.': 'Filling in allowed.',
     'Campi copiati: {n}': 'Fields copied: {n}',
     'Incolla campi': 'Paste fields',
+    'Campi reimpostati: {n} (Annulla per ripristinarli)': 'Fields reset: {n} (Undo to restore them)',
+    'Parte XML rimossa: restano i campi standard (Annulla per ripristinarla).': 'XML part removed: the standard fields remain (Undo to restore it).',
+    'Il file XML non contiene campi («field» con attributo «name»).': 'The XML file contains no fields (“field” with a “name” attribute).',
 }

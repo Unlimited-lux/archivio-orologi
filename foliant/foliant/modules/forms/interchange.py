@@ -27,6 +27,8 @@ FORMATS = {
     "xfdf": "XFDF (*.xfdf)",
     "csv": "CSV (*.csv)",
     "json": "JSON (*.json)",
+    "xml": "XML (*.xml)",
+    "txt": "TXT (*.txt)",
 }
 
 
@@ -332,6 +334,39 @@ def parse_json(data: bytes) -> dict[str, Any]:
     return out
 
 
+# ====================================================================== XML semplice e TXT
+def export_xml(values: dict[str, Any]) -> bytes:
+    """XML semplice: <fields><field name="..."><value>...</value></field></fields>."""
+    root = ET.Element("fields")
+    for name, value in values.items():
+        el = ET.SubElement(root, "field", {"name": name})
+        for item in (value if isinstance(value, (list, tuple)) else [value]):
+            v = ET.SubElement(el, "value")
+            v.text = "" if item is None else str(item)
+    ET.indent(root)
+    body = ET.tostring(root, encoding="utf-8").replace(b"\r", b"&#13;")
+    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + body
+
+
+def parse_xml(data: bytes) -> dict[str, Any]:
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        line, col = e.position
+        raise InterchangeError(_("Il file XML non è ben formato (riga {l}, colonna {c}).").format(l=line, c=col + 1)) from e
+    out: dict[str, Any] = {}
+    for el in root.iter():
+        if _local(el.tag) != "field" or not el.get("name"):
+            continue
+        vals = [(v.text or "") for v in el if _local(v.tag) == "value"]
+        if not vals and not len(el):
+            vals = [el.text or ""]
+        out[el.get("name")] = vals[0] if len(vals) == 1 else vals
+    if not out:
+        raise InterchangeError(_("Il file XML non contiene campi («field» con attributo «name»)."))
+    return out
+
+
 # ====================================================================== scelta del formato
 def format_of(path: str, data: bytes | None = None) -> str:
     ext = os.path.splitext(path)[1].lower().lstrip(".")
@@ -357,6 +392,10 @@ def export_data(fmt: str, values: dict[str, Any], pdf_name: str = "", button_nam
         return export_csv(values)
     if fmt == "json":
         return export_json(values)
+    if fmt == "xml":
+        return export_xml(values)
+    if fmt == "txt":
+        return export_csv(values, delimiter="\t")
     raise InterchangeError(_("Formato non supportato: {f}").format(f=fmt))
 
 
@@ -369,4 +408,8 @@ def parse_data(fmt: str, data: bytes) -> dict[str, Any]:
         return parse_csv(data)
     if fmt == "json":
         return parse_json(data)
+    if fmt == "xml":
+        return parse_xml(data)
+    if fmt == "txt":
+        return parse_csv(data)
     raise InterchangeError(_("Formato non supportato: {f}").format(f=fmt))

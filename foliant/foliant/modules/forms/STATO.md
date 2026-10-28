@@ -34,16 +34,17 @@ Test in `tests/modules/forms/` (file abbreviati: `engine` = `test_engine.py`, `f
 | FRM-25 Anteprima | P1 | fatto | design: `test_preview_fill_and_back`, `test_preview_discard`, `test_submit_blocked_and_preview` | |
 | FRM-26 Riconoscimento (piatti) | P1 | fatto | detect: tutti (benchmark 20/20); data: `test_detect_and_create_subset_single_undo` | Linee, rettangoli, caselle, pettini, sottolineature; nomi dalle etichette. |
 | FRM-27 Riconoscimento (scansioni) | P2 | parziale | detect: `test_scanned_page`, `test_scanned_rotated_page`, `test_page_needs_ocr`; design: `test_detect_offers_ocr_on_scans` | Linee e caselle sull'immagine; proposta di OCR; correzione dell'inclinazione non fatta. |
-| FRM-28 Esportazione dati | P1 | fatto | data: `test_roundtrip_formats`, `test_csv_rfc4180_and_rows`, `test_export_import_into_blank_copy`, `test_export_skips_password_and_noexport`, `test_json_list_is_array` | FDF/XFDF scritti e letti in proprio. |
+| FRM-28 Esportazione dati | P1 | fatto | data: `test_roundtrip_formats`, `test_csv_rfc4180_and_rows`, `test_export_import_into_blank_copy`, `test_export_skips_password_and_noexport`, `test_json_list_is_array` | FDF/XFDF scritti e letti in proprio; anche XML semplice e TXT delimitato da tabulazioni (specifica v2). |
 | FRM-29 Importazione dati | P1 | fatto | data: `test_import_report_unknown_rejected_and_single_undo`, `test_import_csv_second_row`, `test_fdf_flag_instructions_ignored` | |
 | FRM-30 Elaborazione multipla | P2 | fatto | batch: tutti; data: `test_collect_and_series_from_window` | |
-| FRM-31 Reimposta | P0 | fatto | data: `test_reset_all_and_undo`, `test_reset_dialog_selected`; engine: `test_reset_selected_only`; fill: `test_reset_skips_signature_locked` | |
+| FRM-31 Reimposta | P0 | fatto | data: `test_reset_all_and_undo`, `test_reset_dialog_selected`; engine: `test_reset_selected_only`; fill: `test_reset_skips_signature_locked` | Senza conferma (UX-13): si annulla con Annulla; in modifica modulo agisce sui campi selezionati. |
 | FRM-32 Appiattisci | P1 | fatto | data: `test_flatten_pages_scope`, `test_flatten_all_renders_same`; engine: `test_flatten` | Ambito per pagine, campi nascosti esclusi, campi firma firmati conservati. |
 | FRM-33 XML dinamici | P0 | fatto | data: `test_xfa_detection`, `test_xfa_dynamic_saved_unchanged` | |
 | FRM-34 XML statici | P1 | parziale | data: `test_xfa_static_sync_on_fill`, `test_xfa_data_wins_on_open_and_iso_dates` | Associazione per nome finale del campo; manca il dialogo per associazioni non risolvibili. |
 | FRM-35 Dati XML | P2 | fatto | data: `test_xfa_export_import_data` | |
 | FRM-36 Conversione XML | P2 | parziale | data: `test_convert_hybrid_removes_xfa` | Solo moduli statici (rimozione della parte XML); i dinamici non si convertono. |
 
-Altre note: richieste al nucleo in `CORE_REQUESTS.md`; nessuna nuova dipendenza (`DEPS.txt`);
+Altre note: dopo la specifica v2 restano da allineare i testi che citano gli script (oggi «script personalizzati»), la conferma all'unione dei campi omonimi e all'uscita dall'anteprima.
+ richieste al nucleo in `CORE_REQUESTS.md`; nessuna nuova dipendenza (`DEPS.txt`);
 traduzioni inglesi in `i18n_en.py` e nelle costanti `TRANSLATIONS` di pannelli, formule ed
 elaborazione multipla.

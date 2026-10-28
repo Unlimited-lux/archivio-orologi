@@ -27,7 +27,7 @@ def module():
 
 
 # ---------------------------------------------------------------- formati puri
-@pytest.mark.parametrize("fmt", ["fdf", "xfdf", "json"])
+@pytest.mark.parametrize("fmt", ["fdf", "xfdf", "json", "xml"])
 def test_roundtrip_formats(fmt):
     vals = {"a": "x", "b.c": "Àèì ε 日本", "b.d": ["1", "2"], "chk": "Off", "e": "riga1\rriga2"}
     data = X.export_data(fmt, vals, "m.pdf", {"chk"})
@@ -66,7 +66,7 @@ def test_bad_files():
 
 
 # ---------------------------------------------------------------- esporta/importa nella finestra
-@pytest.mark.parametrize("fmt", ["fdf", "xfdf", "csv", "json"])
+@pytest.mark.parametrize("fmt", ["fdf", "xfdf", "csv", "json", "xml", "txt"])
 def test_export_import_into_blank_copy(window, tmp_path, form_pdf, fmt):
     view = open_form(window, form_pdf)
     module().import_values(FILLED, view)
@@ -156,8 +156,7 @@ def test_reset_dialog_selected(window, form_pdf, monkeypatch):
     window.ctx.set_mode("moduli")
     fs = [f for f in E.list_fields(view.document.pdf) if f.name in ("nome", "cognome")]
     module().set_selection([(f.page, f.xref) for f in fs])
-    monkeypatch.setattr(dialogs, "ask_reset", lambda parent, n: "selected")
-    module().reset_dialog()
+    module().reset_dialog()  # nessuna conferma (UX-13): selezione → solo i campi selezionati
     v = values(view)
     assert v["nome"] == "" and v["cognome"] == "" and v["paese"] == "FR"
 
