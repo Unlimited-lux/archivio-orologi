@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import weakref
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QRadioButton, QStackedWidget, QToolButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -115,6 +115,8 @@ class LayersPanel(QWidget):
         self.hint.setProperty("muted", True)
         layout.addWidget(self.hint)
 
+        self._dirty = False          # albero da ricostruire alla prossima visualizzazione
+        self._pending = False        # ricostruzione già programmata (raggruppa le modifiche)
         ctx.documentChanged.connect(self._on_document_changed)
         ctx.documentOpened.connect(self._on_document_opened)
         self.set_view(None)
@@ -181,6 +183,23 @@ class LayersPanel(QWidget):
         if changed:
             self._refresh_view(view)
         if view is self.view:
+            # l'albero si ricostruisce solo a pannello visibile, una volta per giro di eventi
+            self._dirty = True
+            if self.isVisible() and not self._pending:
+                self._pending = True
+                QTimer.singleShot(0, self._flush)
+
+    def _flush(self) -> None:
+        try:
+            self._pending = False
+            if self._dirty and self.isVisible():
+                self.rebuild()
+        except RuntimeError:
+            pass     # pannello già distrutto
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._dirty:
             self.rebuild()
 
     def _read(self, fn, default=None):
@@ -204,6 +223,7 @@ class LayersPanel(QWidget):
 
     # ------------------------------------------------------------------ albero
     def rebuild(self) -> None:
+        self._dirty = False
         self._syncing = True
         self.tree.clear()
         self._widgets = {}
