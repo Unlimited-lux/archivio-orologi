@@ -98,3 +98,22 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     contenuto.» nella barra di stato. Il comportamento è corretto (verificato da
     `tests/modules/viewer/test_protection.py`): resta da allineare il testo, e per la copia
     usare `ctx.notify` invece della barra di stato.
+
+20. **Selezione e copia del testo** (VIS-28, P0) — lo strumento Seleziona è del nucleo
+    (`foliant/ui/tools.py`, `DocumentView.words`). Criteri verificati in
+    `tests/modules/viewer/test_selection.py`; quelli ancora mancanti sono `xfail(strict=True)`
+    e diventeranno errori quando il nucleo li soddisferà (allora basta togliere il segno):
+    - **ordine di lettura**: `DocumentView.words()` usa `get_text("words")` nell'ordine del
+      flusso; con la colonna destra scritta per prima, la copia mette la destra prima della
+      sinistra. Proposta: ordinare i blocchi come `foliant.modules.viewer.engine.reading_order`
+      (colonne per sovrapposizione orizzontale da sinistra a destra, blocchi per y0, blocchi a
+      tutta larghezza come separatori) e numerare le parole in quell'ordine;
+    - **trattino di sillabazione**: `words_to_text` lascia «infor-» + «mazione»; proposta: se
+      una riga finisce con lettera + «-» e la successiva inizia con una lettera, unire senza
+      trattino né a capo (come `engine.extract_page_text`);
+    - **triplo clic** (riga/paragrafo), **Maiusc+clic** e **Maiusc+frecce** per estendere,
+      **F7** cursore di testo, **Ctrl+A** su tutto il documento (oggi solo la pagina corrente)
+      con copia in background oltre un limite;
+    - **`/ActualText`**, **artefatti** esclusi (opzione) e **testo bidirezionale**: dipendono
+      dall'estrazione; con PyMuPDF `get_text(..., flags=TEXT_ACCURATE_BBOXES)` e
+      `page.get_texttrace()` si possono riconoscere i contenuti marcati.
