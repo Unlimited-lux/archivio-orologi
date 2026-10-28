@@ -106,3 +106,12 @@ Nota per il modulo Annotazioni: `_after_save` (programmato con `QTimer.singleSho
 su SAVED) chiama `view.viewport()` senza verificare che la vista esista ancora. Se la
 finestra viene distrutta prima che il timer scatti, compare «Internal C++ object
 (DocumentView) already deleted». Basta un `shiboken6.isValid(view)`.
+
+## 13. Apertura dei PDF cifrati con certificato (SEC-09)
+
+MuPDF 1.28 non apre i file con /Filter /Adobe.PubSec («Failed to open stream»), e
+quindi il comando Apri del nucleo mostra un errore generico. Proposta: un gancio
+`ctx.add_open_handler(predicate(bytes) -> bool, open(path, data) -> Document | None)`,
+interrogato quando `open_document_bytes` fallisce. Il modulo security iscriverebbe
+`certenc.is_pubkey` e il proprio flusso «Apri con certificato…» (scelta del PKCS#12,
+decifratura in memoria, permessi del destinatario). Per ora c'è un comando a parte.

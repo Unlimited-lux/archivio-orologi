@@ -76,6 +76,26 @@ def ask_vault_unsaved(parent, names: list[str]) -> str | None:
     return "save" if clicked is save else "discard" if clicked is discard else None
 
 
+def ask_cert_recipients(parent):
+    from . import certenc_ui as CU
+    dlg = CU.CertEncryptDialog(parent)
+    return dlg if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_cert_credentials(parent, expected: list[str]) -> tuple[str, str] | None:
+    from . import certenc_ui as CU
+    dlg = CU.CertOpenDialog(parent, expected)
+    if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.path.text():
+        return None
+    return dlg.path.text(), dlg.password.text()
+
+
+def choose_pdf(parent) -> str | None:
+    from PySide6.QtWidgets import QFileDialog
+    path, _f = QFileDialog.getOpenFileName(parent, _("Apri con certificato"), "", _("PDF (*.pdf)"))
+    return path or None
+
+
 def choose_vault_files(parent) -> list[str]:
     from PySide6.QtWidgets import QFileDialog
     files, _f = QFileDialog.getOpenFileNames(parent, _("Aggiungi allo spazio protetto"), "", _("PDF (*.pdf)"))
@@ -161,6 +181,7 @@ class SecurityController:
         self._mark_pages: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
         self._pending: "weakref.WeakSet" = weakref.WeakSet()
         self.vault_docs: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # doc → id nello spazio
+        self.cert_docs: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()    # doc → file d'origine
         self.panel = RedactionPanel(self)
         self._load_style()
 
@@ -438,6 +459,84 @@ class SecurityController:
             return False
         self.ctx.status(_("Busta di sicurezza salvata: {n}").format(n=os.path.basename(path)))
         return True
+
+    # ------------------------------------------- cifratura con certificato (SEC-09)
+    def encrypt_with_certificate(self) -> bool:
+        """Proteggi › Cifra con certificato: salva una copia cifrata per i destinatari."""
+        from . import certenc as CE
+        doc = self.document()
+        if doc is None:
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        dlg = ask_cert_recipients(self.parent)
+        if dlg is None:
+            return False
+        warnings = []
+        if not any(r.mine for r in dlg.recipients):
+            warnings.append(_("Il tuo certificato non è tra i destinatari: non potrai più aprire il documento "
+                              "cifrato."))
+        if self._has_signatures(doc):
+            warnings.append(_("Le firme digitali del documento risulteranno non valide nella copia cifrata."))
+        if warnings and not confirm(self.parent, _("Cifrare comunque?"), "\n\n".join(warnings), _("Cifra")):
+            return False
+        path = self.ctx.ask_save_path(_("Salva copia cifrata"), f"{Path(doc.display_name).stem}{_('_cifrato')}.pdf")
+        if not path:
+            return False
+        with ENGINE_LOCK:
+            data = doc.pdf.tobytes(garbage=1, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
+        try:
+            out = CE.encrypt_for(data, dlg.recipients, dlg.encrypt_metadata.isChecked())
+            with open(path, "wb") as f:
+                f.write(out)
+        except Exception as e:
+            self.ctx.error(_("Cifratura non riuscita"), str(e))
+            return False
+        self.ctx.status(_("Copia cifrata per {n} destinatari salvata: {f}").format(
+            n=len(dlg.recipients), f=os.path.basename(path)))
+        return True
+
+    def open_with_certificate(self, path: str | None = None, pkcs12: str | None = None,
+                              password: str | None = None):
+        """Proteggi › Apri con certificato: decifra in memoria con la propria chiave privata."""
+        from foliant.core.document import Document
+        from . import certenc as CE
+        path = path or choose_pdf(self.parent)
+        if not path:
+            return None
+        try:
+            data = open(path, "rb").read()
+        except OSError as e:
+            self.ctx.error(_("Apri con certificato"), _("Impossibile leggere il file: {e}").format(e=e.strerror))
+            return None
+        if not CE.is_pubkey(data):
+            self.ctx.info(_("Apri con certificato"), _("Il documento non è cifrato con certificato: aprilo "
+                                                       "normalmente."))
+            return None
+        if pkcs12 is None:
+            chosen = ask_cert_credentials(self.parent, CE.expected_recipients(data))
+            if chosen is None:
+                return None
+            pkcs12, password = chosen
+        try:
+            res = CE.decrypt_with_pkcs12(data, pkcs12, password or "")
+            doc = Document.from_bytes(res.data, display_name=os.path.basename(path), modified=False)
+        except Exception as e:
+            self.ctx.error(_("Apertura non riuscita"), str(e))
+            return None
+        self.cert_docs[doc] = path
+        view = self.ctx.open_document(doc)
+        if not res.full_access:
+            self.ctx.status(_("Aperto con i permessi del tuo certificato"))
+        return view
+
+    def cert_save_guard(self, view, info: dict) -> bool:
+        if view is None or view.document not in self.cert_docs:
+            return True
+        return confirm(self.parent, _("Salvare senza la cifratura con certificato?"),
+                       _("Il documento verrà salvato con una cifratura diversa da quella con certificato (o senza, "
+                         "se hai tutti i permessi). Per cifrarlo di nuovo per i destinatari usa «Cifra con "
+                         "certificato»."), _("Salva"))
 
     # ------------------------------------------------- spazio protetto (SEC-31)
     VAULT_FOLDER_KEY = "security/vault/folder"
