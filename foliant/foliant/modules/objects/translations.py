@@ -404,4 +404,7 @@ EN = {
     "Aggiungi guida verticale…": "Add vertical guide…",
     "Aggiungi guida orizzontale…": "Add horizontal guide…",
     "Rimuovi le guide": "Remove guides",
+    "Annulla": "Cancel",
+    "OK": "OK",
+    "Operazione annullata.": "Operation cancelled.",
 }

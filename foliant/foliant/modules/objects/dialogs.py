@@ -25,6 +25,14 @@ _session_style = L.LinkStyle()
 _filter_kinds = {IMAGE, PATH, FORM, SHADING}
 
 
+def button_box() -> QDialogButtonBox:
+    """OK / Annulla con testi tradotti (i pulsanti standard di Qt non lo sono)."""
+    bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    bb.button(QDialogButtonBox.StandardButton.Ok).setText(_("OK"))
+    bb.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+    return bb
+
+
 def select_filter() -> set:
     return set(_filter_kinds)
 
@@ -69,7 +77,7 @@ class ReplaceDialog(QDialog):
         self.all.setVisible(occurrences > 1)
         self.all.toggled.connect(self._on_all)
         lay.addWidget(self.all)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
@@ -244,7 +252,7 @@ class LinkDialog(QDialog):
         self.error.setStyleSheet(f"color: {theme.hex_color('danger')};")
         self.error.setWordWrap(True)
         lay.addWidget(self.error)
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons = button_box()
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
@@ -376,7 +384,7 @@ class UrlScopeDialog(QDialog):
         lay.addRow(_("Pagine:"), self.range)
         lay.addRow("", self.web)
         lay.addRow("", self.email)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
@@ -436,7 +444,7 @@ class FoundUrlsDialog(QDialog):
             it.setCheckState(Qt.CheckState.Checked)
             self.list.addItem(it)
         lay.addWidget(self.list)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
@@ -475,7 +483,7 @@ class DeleteLinksDialog(QDialog):
             lay.addRow("", cb)
         self.preview = QLabel()
         lay.addRow(self.preview)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
@@ -529,7 +537,7 @@ class ReplicateDialog(QDialog):
         lay.addRow(_("Pagine:"), self.scope)
         lay.addRow("", self.range)
         lay.addRow("", self.skip)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
@@ -581,7 +589,7 @@ class TransformDialog(QDialog):
                          (_("Spostamento Y:"), self.dy)):
             lay.addRow(label, w)
         lay.addRow("", self.each)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
@@ -621,7 +629,7 @@ class AdjustDialog(QDialog):
         reset.clicked.connect(lambda: [sl.setValue(0) for sl in self.sliders.values()])
         for w in (self.gray, self.invert, self.all, reset):
             lay.addRow("", w)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.button(QDialogButtonBox.StandardButton.Ok).setText(_("Applica"))
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
@@ -664,7 +672,7 @@ class OptimizeDialog(QDialog):
         lay.addRow(_("Qualità JPEG:"), self.quality)
         lay.addRow("", self.gray)
         lay.addRow(self.info)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
@@ -717,7 +725,7 @@ class PathStyleDialog(QDialog):
         lay.addRow(fb, self.no_fill)
         lay.addRow(_("Spessore:"), self.width)
         lay.addRow(_("Tratteggio:"), self.dash)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
