@@ -310,9 +310,6 @@ class EditTextTool(Tool):
             return True
         if event.matches(QKeySequence.StandardKey.Paste):
             return self.ctrl.paste_block(view)
-        if key == Qt.Key.Key_D and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            self.ctrl.duplicate_block(view, page, block)
-            return True
         return False
 
     # ------------------------------------------------------------ disegno

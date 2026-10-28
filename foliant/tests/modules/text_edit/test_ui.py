@@ -366,7 +366,7 @@ def test_copy_paste_block_shortcuts(window, paragraphs_pdf, quiet, qtbot):
     ctrl = ctrl_of(window)
     block = block_with(ctrl, view, "contratto")
     view.tool.select(view, 0, block)
-    qtbot.keyClick(view, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
+    ctrl.duplicate_block(view, 0, block)   # Duplica dal menu contestuale (Ctrl+D non usato, specifica v2)
     assert view.document.page_text(0).count("contratto") == 2
     qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
     qtbot.keyClick(view, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
