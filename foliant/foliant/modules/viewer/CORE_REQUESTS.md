@@ -10,7 +10,7 @@ pagina e `ctx.refresh_state`), 5 (`ctx.toggle_sidebar_panel`), 6 (`ctx.activate_
 (`ctx.replace_recent`/`remove_recent`), 18 (`ctx.close_view(view, discard=True)`), oltre a
 `ctx.set_selected_pages_provider` e `ctx.add_tab_menu_provider`.
 **Ancora aperte:** 1 (segnale di salto), 8 (area per barre di modulo: la ricerca usa ancora
-una barra nell'area inferiore), 13 (limiti dello zoom), 14 (registrazione del generatore di
+una barra nell'area inferiore), 14 (registrazione del generatore di
 miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomina:
 `window._update_tab_title`), 17 (recenti non disponibili nella Home).
 
@@ -63,9 +63,11 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     aggira; anche altri moduli che eliminano allegati (protezione, sanificazione) devono
     tenerne conto.
 
-13. **Zoom**: la specifica chiede Ctrl+0 = adatta pagina, Ctrl+1 = dimensione reale; il nucleo
-    usa scorciatoie diverse. (I limiti 1%–6400% ci sono: oltre ~16 megapixel la vista disegna
-    la pagina a tasselle.)
+13. **Zoom** — *soddisfatta* (scorciatoie Ctrl+0/1/2 e limiti 1%–6400%, verificati da
+    `tests/modules/viewer/test_zoom.py`). Restano piccole differenze dalla specifica: Ctrl+rotella
+    è continuo (non «un passo»), al limite il comando non lo segnala, nessun gesto di pizzico né
+    calibrazione dei dpi. «Adatta all'altezza» e «Adatta al contenuto» li aggiunge il viewer
+    (`zoomfit.py`); se il nucleo li offrirà come modalità di adattamento, `zoomfit` si toglie.
 
 14. **Generatore di miniature per il file manager** (VIS-53): `packaging/install.sh` dovrebbe
     installare un eseguibile `foliant-thumbnailer` che lancia
