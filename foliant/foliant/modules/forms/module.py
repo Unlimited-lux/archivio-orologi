@@ -1380,13 +1380,21 @@ class FormsModule(QObject):
         address = unquote(urlsplit(url).path)
         ext = {"xfdf": "xfdf", "pdf": "pdf", "html": "txt"}.get(fmt, "fdf")
         stem = Path(view.document.display_name).stem or "modulo"
-        folder = tempfile.mkdtemp(prefix="foliant-invio-")
-        _forget_on_exit(folder)   # riservatezza: nessun file con nomi o dati resta dopo la chiusura
-        path = Path(folder) / f"{stem}_{_('dati')}.{ext}"
-        path.write_bytes(data)
+        name = f"{stem}_{_('dati')}.{ext}"
+        # riservatezza: la cartella provvisoria nasce solo dopo la conferma (se l'utente annulla
+        # non resta nulla su disco) e viene cancellata alla chiusura di Foliant
         if not self.ctx.confirm(_("Invia modulo"), _(
                 "Aprire il programma di posta per inviare a {a} il file «{f}» con i dati del modulo?").format(
-                a=address, f=path.name)):
+                a=address, f=name)):
+            return False
+        folder = tempfile.mkdtemp(prefix="foliant-invio-")
+        _forget_on_exit(folder)
+        path = Path(folder) / name
+        try:
+            path.write_bytes(data)
+        except OSError as e:
+            remove_temp_files(folder)
+            self.ctx.error(_("Invia modulo"), _("Invio non riuscito: {e}").format(e=e))
             return False
         subject = _("Dati del modulo {n}").format(n=view.document.display_name)
         if self.launch_mail(address, subject, str(path)):
@@ -1457,8 +1465,14 @@ def _forget_on_exit(folder: str) -> None:
     _TEMP_DIRS.append(folder)
 
 
-def remove_temp_files() -> None:
+def remove_temp_files(folder: str | None = None) -> None:
+    """Cancella le cartelle provvisorie dell'invio per posta (tutte, o solo `folder`)."""
     import shutil
+    if folder is not None:
+        if folder in _TEMP_DIRS:
+            _TEMP_DIRS.remove(folder)
+        shutil.rmtree(folder, ignore_errors=True)
+        return
     while _TEMP_DIRS:
         shutil.rmtree(_TEMP_DIRS.pop(), ignore_errors=True)
 

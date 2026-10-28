@@ -1334,8 +1334,8 @@ class SnapshotTool(_DragTool):
         with ENGINE_LOCK:
             pix = view.document.pdf[page].get_pixmap(clip=r, matrix=pymupdf.Matrix(3, 3), annots=True)
             png = pix.tobytes("png")
-        n = len([d for d in self.ctrl.custom_stamps() if d["name"].startswith(_("Istantanea"))]) + 1
-        name = f"{_('Istantanea')} {n}"
+        from .ui_actions import generic_stamp_name
+        name = generic_stamp_name(self.ctrl, _("Istantanea"))   # primo numero libero: mai un doppione
         self.ctrl.add_custom_stamp(name, png)
         self.ctrl.ctx.status(_("Timbro «{n}» aggiunto alla libreria.").format(n=name))
         if self.on_done:

@@ -528,6 +528,27 @@ def test_old_per_document_guides_purged(ui, tmp_path):
     del view
 
 
+@pytest.fixture
+def old_guides_settings(settings):
+    import hashlib
+    import json
+    for name in ("a.pdf", "b.pdf"):
+        key = "objects/guides/" + hashlib.sha1(f"/home/rossi/{name}".encode()).hexdigest()
+        settings.setValue(key, json.dumps({"x": [72.0], "y": []}))
+    settings.setValue("objects/smart_guides", "false")
+    settings.sync()
+    return settings
+
+
+def test_old_per_document_guides_purged_at_startup(old_guides_settings, window):
+    """Riservatezza: il gruppo objects/guides/<sha1 del percorso> delle versioni precedenti si
+    cancella all'avvio del modulo, senza aprire documenti; le preferenze generali restano."""
+    s = old_guides_settings
+    s.sync()
+    assert not [k for k in s.allKeys() if k.startswith("objects/guides")]
+    assert s.value("objects/smart_guides") == "false"
+
+
 def test_link_from_multiline_multipage_selection(ui, tmp_path, monkeypatch):
     from foliant.api import selection_from_words
     from foliant.modules.objects import dialogs as D
