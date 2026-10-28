@@ -36,7 +36,7 @@ layout_dialogs, images, images_dialogs). Funzioni del motore riusabili dagli alt
 | PAG-08 Da immagini | P1 | fatto | test_images (jpeg_*, png_alpha_*, tiff_*, exif_*, …), test_images_dialogs | TIFF bitonali in Flate (non CCITT G4); HEIC solo con pillow-heif |
 | PAG-09 Dagli appunti | P1 | fatto | test_images: clipboard_*, text_200_lines_round_trip; test_images_dialogs: paste_* | |
 | PAG-10 Da scanner | P1 | parziale | test_dialogs: scanner_none, scanner_fake_device, scanned_bw_one_bit_and_blank_discard, scanner_preset_remembered | SANE/`scanimage`, alimentatore, scarto pagine vuote, ultime impostazioni ricordate, bianco e nero a 1 bit; manca l'anteprima con riacquisizione/rotazione delle singole facciate |
-| PAG-11 Elimina | P0 | fatto | test_engine: delete_*; test_organizer: delete_selected_and_undo, delete_all_refused | riepilogo segnalibri/link/campi nella conferma |
+| PAG-11 Elimina | P0 | fatto | test_engine: delete_*; test_organizer: delete_selected_and_undo, delete_all_refused; test_regressions: delete_without_confirmation, delete_page_with_field_and_image_leaves_no_orphans | senza conferma (annullabile, UX-13); widget e campi delle pagine eliminate rimossi, nessun oggetto orfano |
 | PAG-12 Estrai in PDF | P0 | fatto | test_engine: extract_*; test_dialogs: extract_single_opens_tab, extract_each_page_files_and_delete | file unico, per pagina, per intervallo; modello del nome |
 | PAG-13 Estrai come immagini | P1 | fatto | test_images: export_*; test_images_dialogs: export_* | WebP senza dpi nei metadati |
 | PAG-14 Trascinamento | P1 | fatto | test_organizer: drag_out_creates_pdf, drop_pages_from_other_document, drop_file_from_file_manager | PDF temporaneo «{nome} (pagine …)»; Maiusc = sposta |
@@ -56,6 +56,25 @@ layout_dialogs, images, images_dialogs). Funzioni del motore riusabili dagli alt
 | PAG-28 Formato pagina | P1 | fatto | test_layout: resize_*, match_page_size_to_first; test_layout_dialogs: resize_dialog_* | scala (contieni/riempi/non proporzionale) o tela; avviso testo < 4 pt; /UserUnit non usato oltre 14.400 pt (rifiutato) |
 | PAG-29 Dividi pagina | P1 | fatto | test_layout: split_*, detect_fold_dark_bright_and_none; test_layout_dialogs: split_dialog* | griglia, tagli manuali, piega centrale rilevata, rimozione del testo esterno |
 | PAG-30 N-up | P1 | fatto | test_layout: nup_*; test_layout_dialogs: nup_dialog_opens_new_document | |
+
+## Voci aggiunte nella specifica v2 (PAG-31…41)
+| ID | Pr. | Stato | Test | Note |
+|---|---|---|---|---|
+| PAG-31 Opuscolo | P2 | non fatto | — | |
+| PAG-32 Campi dinamici | P1 | parziale | test_fields: page_of_total, zero_padding_in_file_names, date_format, unknown_placeholder_blocked, fallback_literals_and_empty, document_and_page_values | `fields.py` completo e usato per i nomi dei file (estrai, dividi); numeri/intestazioni/filigrane usano ancora i loro segnaposto ({n}, {total}, {date}, {file}); manca il menu «Inserisci campo» |
+| PAG-33 Numeri di pagina | P1 | parziale | test_stamp: page_numbers_* | posizione, formato con {n}/{total}, numero iniziale, salto prima pagina, rimozione con rendering identico; mancano posizione speculare, formati romani/lettere, marcatura come artefatto |
+| PAG-34 Intestazioni e piè | P1 | parziale | test_stamp: header_footer_* | sei aree, segnaposto, rimozione; mancano pari/dispari/prima pagina diversa, logo, modelli salvabili, «Modifica» con parametri salvati |
+| PAG-35 Bates | P1 | parziale | test_stamp: bates_*; test_stamp_dialogs: bates_dialog | documento corrente con prefisso/cifre/suffisso; manca la numerazione su più file con registro CSV (lavoro del subagente interrotto dal limite di spesa, non incluso) |
+| PAG-36 Filigrane | P1 | parziale | test_stamp: watermark_*, remove_*, update_watermark_replaces | testo/immagine, opacità, rotazione, 9 ancoraggi, sopra/sotto, modifica e rimozione con rendering identico; mancano mosaico, visibilità solo stampa/schermo, sorgente da pagina PDF |
+| PAG-37 Filigrana a posizione fissa | P2 | non fatto | — | |
+| PAG-38 Sfondi | P1 | parziale | test_stamp: background_* | colore e immagine, rimozione; mancano carta intestata da PDF con alternanza e visibilità schermo/stampa |
+| PAG-39 Etichette di pagina | P1 | parziale | test_stamp: page_labels_*; test_engine: labels_interpretation | definizione, anteprima, rimozione, voce per l'indice 0; manca l'ancoraggio degli intervalli dopo inserimenti/eliminazioni |
+| PAG-40 Pagine vuote e duplicate | P1 | parziale | test_engine: split_separators_and_text (rilevazione pagine vuote) | rilevazione pagine vuote nel motore (`page_is_blank`); manca lo strumento dedicato con duplicati (lavoro del subagente interrotto, non incluso) |
+| PAG-41 Pulizia guidata | P1 | non fatto | — | |
+
+Nota: alle 04:30 UTC i tre subagenti si sono fermati per il limite di spesa e la sessione è rimasta
+inattiva fino alle 07:47; il loro lavoro incompleto (Bates su più file, rilevazione duplicati, pulizia)
+non è stato incluso perché non verificato.
 
 ## Funzioni richieste oltre la sezione 2 (filigrane, numeri, intestazioni, etichette)
 | Funzione | Stato | Test |
