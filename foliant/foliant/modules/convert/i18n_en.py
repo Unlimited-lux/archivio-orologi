@@ -892,3 +892,18 @@ EN.update({"Da fotocamera…": "From camera…", "Scatta le pagine con la webcam
            "video). Vuoi importare invece le foto dei documenti scattate con il telefono?":
                "No camera available (not connected or access denied: the user must be allowed to use video "
                "devices). Do you want to import photos of the documents taken with your phone instead?"})
+
+# CNV-34: cartelle del portfolio e PDF/A
+EN.update({"Cartella:": "Folder:", "Cartella (vuota = radice del portfolio):": "Folder (empty = portfolio root):",
+           "Nome di cartella non valido.": "Invalid folder name.", "Il portfolio non ha cartelle.":
+               "The portfolio has no folders.", "Esiste già una cartella «{n}».": "A folder “{n}” already exists.",
+           "Nome di cartella non valido o già usato.": "Folder name invalid or already in use.",
+           "La cartella «{n}» non esiste.": "The folder “{n}” does not exist.", "Nuovo nome:": "New name:",
+           "Sposta in cartella": "Move to folder", "Sposta in cartella…": "Move to folder…",
+           "Rinomina cartella": "Rename folder", "Rinomina cartella…": "Rename folder…",
+           "Struttura del portfolio non supportata per questa modifica.":
+               "Portfolio structure not supported for this change.",
+           "Il documento dichiara la conformità PDF/A-{n}, che non ammette questi allegati: dopo la modifica non "
+           "sarà più conforme. Vuoi continuare?":
+               "The document declares PDF/A-{n} conformance, which does not allow these attachments: after the "
+               "change it will no longer conform. Continue?"})

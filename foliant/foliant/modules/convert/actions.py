@@ -751,7 +751,8 @@ class ConvertController:
         return view
 
     def edit_portfolio(self):
-        """CNV-34: aggiunge o rimuove file del portfolio aperto (anche creato da altri programmi)."""
+        """CNV-34: aggiunge, rimuove e sposta file e rinomina cartelle del portfolio aperto (anche
+        creato da altri programmi), in un solo passo annullabile."""
         from . import portfolio
         from .portfolio_dialog import EditPortfolioDialog
         view = self.ctx.current_view()
@@ -764,19 +765,40 @@ class ConvertController:
                 info = doc.pdf.embfile_info(name)
                 files.append((name, int(info.get("size") or 0), info.get("description") or ""))
             folders = sorted(portfolio.folder_map(doc.pdf))
-        dlg = EditPortfolioDialog(self.window, files, folders,
+            file_folders = {name: portfolio.folder_of(doc.pdf, name) for name, _s, _d in files}
+            part = portfolio.pdfa_part(doc.pdf)
+        dlg = EditPortfolioDialog(self.window, files, folders, file_folders=file_folders,
                                   ask_files=lambda: self.ctx.ask_open_paths(_("Aggiungi file"), _("Tutti i file (*)")))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         added, removed = dlg.changes()
-        if not added and not removed:
+        moves = {k: f for k, f in dlg.moves.items() if f != file_folders.get(k, "")}
+        if not (added or removed or moves or dlg.renames):
             return []
+        if added and part in (1, 2) and not self.ctx.confirm(
+                _("Modifica portfolio"),
+                _("Il documento dichiara la conformità PDF/A-{n}, che non ammette questi allegati: dopo la modifica "
+                  "non sarà più conforme. Vuoi continuare?").format(n=part)):
+            return None
         try:
             with doc.change(_("Modifica portfolio")) as pdf:
+                for old, new in dlg.renames:
+                    portfolio.rename_folder(pdf, old, new)
+                by_target: dict[str, list[str]] = {}
+                for key, folder in moves.items():
+                    if key not in removed:
+                        by_target.setdefault(folder, []).append(key)
+                for folder, keys in by_target.items():
+                    portfolio.move_files(pdf, keys, folder)
                 portfolio.remove_files(pdf, removed)
                 names = portfolio.add_files(pdf, added)
+                if part >= 3 and names:
+                    portfolio.declare_associated_files(pdf, names)   # PDF/A-3: relazione /AF dichiarata
         except OSError as e:
             self.ctx.error(_("Modifica portfolio"), _("File non leggibile: {e}").format(e=e.strerror or e))
+            return None
+        except FoliantError as e:
+            self.ctx.error(_("Modifica portfolio"), str(e))
             return None
         except Exception as e:
             self.ctx.error(_("Modifica portfolio"), _("Errore imprevisto: {e}").format(e=e))

@@ -208,7 +208,8 @@ def _ensure_collection(pdf: pymupdf.Document) -> int:
     if kind == "xref":
         return int(val.split()[0])
     cx = pdf.get_new_xref()
-    pdf.update_object(cx, "<</Type/Collection/View/D>>")
+    # un /Collection diretto (altri programmi) diventa un oggetto con lo stesso contenuto
+    pdf.update_object(cx, val if kind == "dict" else "<</Type/Collection/View/D>>")
     pdf.xref_set_key(pdf.pdf_catalog(), "Collection", f"{cx} 0 R")
     return cx
 
@@ -260,3 +261,283 @@ def add_files(pdf: pymupdf.Document, entries: list[dict]) -> list[str]:
 def remove_files(pdf: pymupdf.Document, names: list[str]) -> None:
     for name in names:
         pdf.embfile_del(name)
+
+
+# ------------------------------------------------------------ albero dei nomi
+def _pdf_string(raw: bytes) -> str:
+    if raw.startswith(b"\xfe\xff"):
+        return raw[2:].decode("utf-16-be", "replace")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw[3:].decode("utf-8", "replace")
+    return raw.decode("latin-1")
+
+
+def _array_items(text: str) -> list:
+    """Elementi di un array PDF come lo restituisce `xref_get_key`: stringhe (decodificate),
+    riferimenti («N 0 R») e dizionari diretti («<<…>>»)."""
+    data = text.strip()
+    if data.startswith("["):
+        data = data[1:]
+    if data.endswith("]"):
+        data = data[:-1]
+    out: list = []
+    i, n = 0, len(data)
+    esc = {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "(": "(", ")": ")", "\\": "\\"}
+    while i < n:
+        c = data[i]
+        if c.isspace():
+            i += 1
+        elif c == "(":
+            depth, buf, i = 1, bytearray(), i + 1
+            while i < n and depth:
+                ch = data[i]
+                if ch == "\\" and i + 1 < n:
+                    nx = data[i + 1]
+                    if nx in esc:
+                        buf += esc[nx].encode("latin-1")
+                        i += 2
+                    elif nx.isdigit():
+                        j = i + 1
+                        while j < n and j < i + 4 and data[j] in "01234567":
+                            j += 1
+                        buf.append(int(data[i + 1:j], 8) & 0xFF)
+                        i = j
+                    else:
+                        i += 2
+                    continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if not depth:
+                        i += 1
+                        break
+                buf += ch.encode("latin-1", "replace")
+                i += 1
+            out.append(("str", _pdf_string(bytes(buf))))
+        elif data.startswith("<<", i):
+            depth, j = 0, i
+            while j < n:
+                if data.startswith("<<", j):
+                    depth += 1
+                    j += 2
+                elif data.startswith(">>", j):
+                    depth -= 1
+                    j += 2
+                    if not depth:
+                        break
+                else:
+                    j += 1
+            out.append(("dict", data[i:j]))
+            i = j
+        elif c == "<":
+            j = data.index(">", i)
+            out.append(("str", _pdf_string(bytes.fromhex(data[i + 1:j].replace(" ", "")))))
+            i = j + 1
+        else:
+            j = i
+            while j < n and not data[j].isspace() and data[j] not in "([<":
+                j += 1
+            tok = data[i:j]
+            parts = data[j:].split(None, 2)
+            if tok.isdigit() and len(parts) >= 2 and parts[0].isdigit() and parts[1].startswith("R"):
+                out.append(("ref", int(tok)))
+                k = data.index("R", j) + 1
+                i = k
+            else:
+                out.append(("tok", tok))
+                i = j
+    return out
+
+
+def embedded_entries(pdf: pymupdf.Document) -> list[tuple[str, int | str]]:
+    """(chiave, specifica del file) dell'albero /EmbeddedFiles, anche con /Kids: la specifica è
+    un xref oppure il testo del dizionario diretto (come lo scrive `embfile_add`)."""
+    cat = pdf.pdf_catalog()
+    kind, val = pdf.xref_get_key(cat, "Names/EmbeddedFiles")
+    entries: list[tuple[str, int]] = []
+    if kind == "null":
+        return entries
+
+    def walk(path_or_xref, depth=0):
+        if depth > 32:
+            return
+        if isinstance(path_or_xref, int):
+            names = pdf.xref_get_key(path_or_xref, "Names")
+            kids = pdf.xref_get_key(path_or_xref, "Kids")
+        else:
+            names = pdf.xref_get_key(cat, path_or_xref + "/Names")
+            kids = pdf.xref_get_key(cat, path_or_xref + "/Kids")
+        if names[0] == "array":
+            items = _array_items(names[1])
+            for k in range(0, len(items) - 1, 2):
+                if items[k][0] == "str" and items[k + 1][0] in ("ref", "dict"):
+                    entries.append((items[k][1], items[k + 1][1]))
+                elif items[k][0] == "str":
+                    raise ConversionError(_("Struttura del portfolio non supportata per questa modifica."))
+        if kids[0] == "array":
+            for kind_k, x in _array_items(kids[1]):
+                if kind_k == "ref":
+                    walk(x, depth + 1)
+    walk(int(val.split()[0]) if kind == "xref" else "Names/EmbeddedFiles")
+    return entries
+
+
+def _write_tree(pdf: pymupdf.Document, entries: list[tuple[str, int | str]]) -> None:
+    """Riscrive l'albero /EmbeddedFiles come un unico nodo ordinato (le specifiche restano le stesse)."""
+    pairs = sorted(entries, key=lambda kv: kv[0].encode("utf-16-be"))
+    tree = "[" + " ".join(f"{_s(k)} {x if isinstance(x, str) else f'{x} 0 R'}" for k, x in pairs) + "]"
+    cat = pdf.pdf_catalog()
+    node = pdf.get_new_xref()
+    pdf.update_object(node, f"<</Names {tree}>>")
+    if pdf.xref_get_key(cat, "Names")[0] == "null":
+        pdf.xref_set_key(cat, "Names", f"<</EmbeddedFiles {node} 0 R>>")
+    else:
+        pdf.xref_set_key(cat, "Names/EmbeddedFiles", f"{node} 0 R")
+
+
+def _folder_xrefs(pdf: pymupdf.Document) -> dict[str, int]:
+    out: dict[str, int] = {}
+    kind, val = pdf.xref_get_key(pdf.pdf_catalog(), "Collection/Folders")
+    if kind != "xref":
+        return out
+    seen: set[int] = set()
+    stack = [int(val.split()[0])]
+    while stack:
+        x = stack.pop()
+        if x in seen:
+            continue
+        seen.add(x)
+        name = pdf.xref_get_key(x, "Name")
+        if name[0] == "string" and name[1]:
+            out[name[1]] = x
+        for key in ("Child", "Next"):
+            k, v = pdf.xref_get_key(x, key)
+            if k == "xref":
+                stack.append(int(v.split()[0]))
+    return out
+
+
+def folder_of(pdf: pymupdf.Document, key: str) -> str:
+    """Cartella di un file del portfolio (dal prefisso «<ID>» della chiave), "" se nella radice."""
+    if key.startswith("<") and ">" in key:
+        try:
+            fid = int(key[1:key.index(">")])
+        except ValueError:
+            return ""
+        for name, i in folder_map(pdf).items():
+            if i == fid:
+                return name
+    return ""
+
+
+def rename_folder(pdf: pymupdf.Document, old: str, new: str) -> None:
+    """Rinomina una cartella (i file restano dove sono: la chiave usa l'ID, non il nome)."""
+    new = new.strip()
+    xrefs = _folder_xrefs(pdf)
+    if old not in xrefs:
+        raise ConversionError(_("La cartella «{n}» non esiste.").format(n=old))
+    if not new or "/" in new:
+        raise ConversionError(_("Nome di cartella non valido."))
+    if new != old and new in xrefs:
+        raise ConversionError(_("Esiste già una cartella «{n}».").format(n=new))
+    pdf.xref_set_key(xrefs[old], "Name", _s(new))
+
+
+def move_files(pdf: pymupdf.Document, keys: list[str], folder: str) -> dict[str, str]:
+    """Sposta i file nella cartella indicata ("" = radice), creandola se serve. Restituisce
+    {vecchia chiave: nuova chiave}; contenuti e proprietà dei file non cambiano."""
+    folder = folder.strip()
+    entries = embedded_entries(pdf)
+    by_key = dict(entries)
+    folders = folder_map(pdf)
+    prefix = ""
+    if folder:
+        fid = folders.get(folder) or _add_folder(pdf, folder, folders)
+        prefix = f"<{fid}>"
+    moving = [k for k in keys if k in by_key]
+    used = {k.lower() for k, _x in entries if k not in moving}
+    renamed: dict[str, str] = {}
+    for key in moving:
+        display = key[key.index(">") + 1:] if key.startswith("<") and ">" in key else key
+        new, n = prefix + display, 1
+        while new.lower() in used:
+            n += 1
+            stem, ext = os.path.splitext(display)
+            new = f"{prefix}{stem} ({n}){ext}"
+        used.add(new.lower())
+        renamed[key] = new
+    if not renamed:
+        return {}
+    _write_tree(pdf, [(renamed.get(k, k), x) for k, x in entries])
+    first = initial_file(pdf)
+    if first in renamed:
+        # sull'oggetto /Collection stesso: con il percorso «Collection/D» PyMuPDF scrive un segnaposto
+        kind, val = pdf.xref_get_key(pdf.pdf_catalog(), "Collection")
+        if kind == "xref":
+            pdf.xref_set_key(int(val.split()[0]), "D", _s(renamed[first]))
+        else:
+            pdf.xref_set_key(_ensure_collection(pdf), "D", _s(renamed[first]))
+    return renamed
+
+
+def initial_file(pdf: pymupdf.Document) -> str | None:
+    """Chiave del file mostrato all'apertura (/Collection /D), letta dall'oggetto grezzo: le
+    chiavi con «<ID>» non sono restituite correttamente da `xref_get_key`."""
+    import re
+    kind, val = pdf.xref_get_key(pdf.pdf_catalog(), "Collection")
+    if kind == "xref":
+        raw = pdf.xref_object(int(val.split()[0]), compressed=True)
+    elif kind == "dict":
+        raw = val
+    else:
+        return None
+    m = re.search(r"/D\s*(\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]*>(?!>))", raw)
+    if not m:
+        return None
+    items = _array_items("[" + m.group(1) + "]")
+    return items[0][1] if items and items[0][0] == "str" else None
+
+
+def pdfa_part(pdf: pymupdf.Document) -> int:
+    """Parte PDF/A dichiarata nei metadati XMP (0 se il documento non è PDF/A)."""
+    import re
+    xmp = pdf.get_xml_metadata() or ""
+    m = re.search(r"pdfaid:part(?:=\"|>)\s*(\d)", xmp)
+    return int(m.group(1)) if m else 0
+
+
+def declare_associated_files(pdf: pymupdf.Document, keys: list[str] | None = None) -> int:
+    """PDF/A-3: ogni file (o quelli indicati) ha /AFRelationship e /Subtype ed è elencato in /AF
+    del catalogo. Restituisce quanti file sono stati dichiarati."""
+    import mimetypes
+    cat = pdf.pdf_catalog()
+    kind, val = pdf.xref_get_key(cat, "AF")
+    listed = {x for k, x in _array_items(val) if k == "ref"} if kind == "array" else set()
+    count = 0
+    entries = embedded_entries(pdf)
+    if any(isinstance(fs, str) for _k, fs in entries):
+        # /AF richiede specifiche indirette: i dizionari diretti diventano oggetti (stesso contenuto)
+        materialized = []
+        for key, fs in entries:
+            if isinstance(fs, str):
+                x = pdf.get_new_xref()
+                pdf.update_object(x, fs)
+                fs = x
+            materialized.append((key, fs))
+        _write_tree(pdf, materialized)
+        entries = materialized
+    for key, fs in entries:
+        if keys is not None and key not in keys:
+            continue
+        if pdf.xref_get_key(fs, "AFRelationship")[0] == "null":
+            pdf.xref_set_key(fs, "AFRelationship", "/Unspecified")
+        k, ef = pdf.xref_get_key(fs, "EF/F")
+        if k == "xref" and pdf.xref_get_key(int(ef.split()[0]), "Subtype")[0] == "null":
+            mime = mimetypes.guess_type(key.split(">")[-1])[0] or "application/octet-stream"
+            pdf.xref_set_key(int(ef.split()[0]), "Subtype", "/" + mime.replace("/", "#2F"))
+        listed.add(fs)
+        count += 1
+    if listed:
+        pdf.xref_set_key(cat, "AF", "[" + " ".join(f"{x} 0 R" for x in sorted(listed)) + "]")
+    return count
