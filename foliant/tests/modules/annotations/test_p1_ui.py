@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 import pymupdf
 from PySide6.QtCore import Qt
 
@@ -721,7 +719,6 @@ def test_ann38_history_menu(comments, monkeypatch):
     assert shown and shown[0].index("Accettato") < shown[0].index("Completato")
 
 
-@pytest.mark.xfail(reason="appiattimento della sola selezione disattivato: risultato non affidabile", strict=False)
 def test_ann40_flatten_selection(comments):
     """ANN-40: appiattendo 2 annotazioni su 4 le altre 2 restano modificabili."""
     window, view, module = comments
@@ -730,6 +727,13 @@ def test_ann40_flatten_selection(comments):
     assert ui_actions.flatten(module.ctrl, selection=True) == 2
     left = {i.xref for i in module.ctrl.annotations()}
     assert left == {xs[2], xs[3]}
+    with view.document.lock:   # i due appiattiti sono nel contenuto della pagina
+        pix = view.document.pdf[0].get_pixmap(annots=False)
+
+    def red(x0):
+        return any(pix.pixel(x, y)[0] - pix.pixel(x, y)[1] > 60
+                   for x in range(x0 - 3, x0 + 4) for y in range(436, 444))
+    assert red(100) and red(200) and not red(300) and not red(400)
 
 
 def test_ann29_pdfa1_blocks_attachments(comments, tmp_path, monkeypatch):

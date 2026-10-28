@@ -50,7 +50,7 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-37 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_reply_structure_after_save, test_cyclic_irt_chain_lists_all, test_delete_root_removes_replies | |
 | ANN-38 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_status_* , test_marked_on_then_off | «Cronologia degli stati…» nel menu (test_ann38_history_menu). |
 | ANN-39 | P1 | fatto | test_ann39_hide_annotations | Soluzione locale (CORE_REQUESTS 2). |
-| ANN-40 | P1 | parziale | test_ann40_flatten_from_ui, test_flatten_* | Tutto il documento o pagina corrente (l'ambito «selezione» è disattivato: test_ann40_flatten_selection in xfail); non stampabili esclusi; annullabile. Manca l'ambito «annotazioni filtrate». |
+| ANN-40 | P1 | fatto | test_ann40_flatten_from_ui, test_ann40_flatten_selection, test_flatten_* | Tutto il documento, pagina corrente o selezione; non stampabili esclusi; annullabile. Manca l'ambito «annotazioni filtrate». |
 | ANN-41 | P1 | fatto | test_ann41_42_export_import_ui, test_export_xfdf_*, test_export_fdf | XFDF (con aspetto dei timbri) e FDF. |
 | ANN-42 | P1 | fatto | test_ann41_42_export_import_ui, test_ann42_import_from_pdf_and_malformed, test_xfdf_* | XFDF, FDF, PDF; duplicati saltati; un passo di annullamento. |
 | ANN-43 | P1 | fatto | test_ann43_summary_files, test_ann43_page_layout_numbers, test_summary_* | PDF «solo elenco» o «pagine con commenti numerati» (marcatori e connettori), CSV (riga per risposta con padre), testo, HTML. Manca l'anteprima/stampa diretta. |
@@ -63,5 +63,5 @@ elenco commenti con risposte e stato, maniglie di selezione e vertici).
 ## Note finali
 - Specifica v2 applicata: nessuna conferma per le operazioni annullabili (eliminazione di discussioni,
   «Elimina tutti», appiattimento); scorciatoie del modulo limitate alla modalità Commenta.
-- Non verificato: rilettura su pagine ruotate con CropBox più grande del MediaBox (`core/placement.py`):
-  il modulo usa ancora le coordinate del motore.
+- Coordinate convertite con `core/placement.py` (CropBox diverso dal MediaBox, pagine ruotate):
+  test_placement.py::test_reread_rotated_crop_larger_than_media.

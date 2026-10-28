@@ -246,12 +246,29 @@ def get_annot(page: pymupdf.Page, xref: int) -> pymupdf.Annot:
     return annot
 
 
+def _placement():
+    try:
+        from foliant.core import placement
+        return placement
+    except Exception:   # pragma: no cover - nucleo senza il modulo di posizionamento
+        return None
+
+
 def to_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
+    """Coordinate standard (area visibile, y verso il basso) → spazio utente PDF."""
+    pl = _placement()
+    if pl is not None:
+        p = pymupdf.Point(x, y) * pl.page_to_pdf_matrix(page)
+        return p.x, p.y
     mb = page.mediabox
     return x + mb.x0, mb.y1 - y
 
 
 def from_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
+    pl = _placement()
+    if pl is not None:
+        p = pymupdf.Point(x, y) * pl.pdf_to_page_matrix(page)
+        return p.x, p.y
     mb = page.mediabox
     return x - mb.x0, mb.y1 - y
 
@@ -356,7 +373,7 @@ def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequenc
     xref = _finish(annot, author, contents, kind=kind)
     if area:
         pdf.xref_set_key(xref, AREA_KEY, "true")
-        _fit_area_rect(pdf, page, xref)
+        _fit_area_rect(pdf, page, xref, quads[0].rect if len(quads) == 1 else None)
     if contents:
         ensure_popup(pdf, page_no, xref)
     return xref
@@ -365,8 +382,12 @@ def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequenc
 AREA_KEY = "FoliantArea"
 
 
-def _fit_area_rect(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
+def _fit_area_rect(pdf: pymupdf.Document, page: pymupdf.Page, xref: int, rect=None) -> None:
     """Evidenziazione ad area: /Rect coincide con il quadrilatero (ANN-11)."""
+    if rect is not None:
+        r = pymupdf.Rect(rect)
+        pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, r)))
+        return
     annot = get_annot(page, xref)
     v = annot.vertices or []
     if len(v) == 4:
@@ -1200,6 +1221,14 @@ ANGLE_KEY = "FoliantAngle"
 SIZE_KEY = "FoliantSize"
 
 
+def _std_rect(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> pymupdf.Rect:
+    """/Rect in coordinate standard letto dal dizionario (Annot.rect del motore sbaglia su alcuni ritagli)."""
+    raw = _array(pdf, xref, "Rect")
+    if raw and len(raw) == 4:
+        return from_pdf_rect(page, raw)
+    return pymupdf.Rect(get_annot(page, xref).rect)
+
+
 def _rotation(pdf: pymupdf.Document, xref: int) -> tuple[float, tuple[float, float] | None]:
     k, v = pdf.xref_get_key(xref, ANGLE_KEY)
     angle = float(v) if k in ("int", "real") else 0.0
@@ -1215,7 +1244,7 @@ def _rotated_box(w: float, h: float, angle: float) -> tuple[float, float]:
 def _apply_rotation(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
     """Ruota l'aspetto (/Matrix del Form XObject) e adatta /Rect all'ingombro ruotato."""
     angle, size = _rotation(pdf, xref)
-    annot = get_annot(page, xref)
+    get_annot(page, xref)
     k, v = pdf.xref_get_key(xref, "AP/N")
     if k != "xref" or size is None:
         return
@@ -1230,7 +1259,7 @@ def _apply_rotation(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> Non
         sx, sy = w / max(bbox[2] - bbox[0], 1e-6), h / max(bbox[3] - bbox[1], 1e-6)
         pdf.xref_set_key(ap, "Matrix", f"[{c * sx:.6f} {s_ * sx:.6f} {-s_ * sy:.6f} {c * sy:.6f} 0 0]")
     rw, rh = _rotated_box(w, h, angle)
-    r = annot.rect
+    r = _std_rect(pdf, page, xref)
     cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
     new = pymupdf.Rect(cx - rw / 2, cy - rh / 2, cx + rw / 2, cy + rh / 2)
     pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, new)))
@@ -1246,7 +1275,7 @@ def rotate_annot(pdf: pymupdf.Document, page_no: int, xref: int, degrees: float)
         raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
     angle, size = _rotation(pdf, xref)
     if size is None:
-        r = annot.rect
+        r = _std_rect(pdf, page, xref)
         size = (r.width, r.height)
         pdf.xref_set_key(xref, SIZE_KEY, f"[{size[0]:.3f} {size[1]:.3f}]")
     angle = (angle + degrees) % 360
@@ -2361,7 +2390,7 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
     Con `pages` si appiattiscono solo quelle pagine. I campi modulo restano."""
     selected = set(only) if only is not None else None
     if selected is not None:
-        pages = {p for p, _x in selected}
+        return _flatten_selected(pdf, selected)
     targets = set(pages) if pages is not None else set(range(pdf.page_count))
     count = 0
     for i in targets:
@@ -2382,6 +2411,7 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
             if i not in targets:
                 saved[xref] = pdf.xref_get_key(xref, "Annots")
                 pdf.xref_set_key(xref, "Annots", "null")
+                page = pdf.reload_page(page)
                 continue
             keep = [a.xref for a in page.annots()
                     if a.type[0] in NON_COMMENT_TYPES or a.flags & pymupdf.PDF_ANNOT_IS_PRINT
@@ -2400,6 +2430,11 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
                 partial[xref] = noprint
                 _, _k, refs = _annots_array(pdf, page)
                 pdf.xref_set_key(xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in refs if x not in noprint) + "]")
+                page = pdf.reload_page(page)   # il motore rilegge l'elenco delle annotazioni
+        # nessuna pagina deve restare aperta: il motore userebbe l'elenco di annotazioni in memoria
+        page = None
+        import gc
+        gc.collect()
         pdf.bake(annots=True, widgets=False)
     finally:
         for xref, (kind, value) in saved.items():
@@ -2408,6 +2443,48 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
             k, v = pdf.xref_get_key(xref, "Annots")
             now = [int(x) for x in re.findall(r"(\d+)\s+0\s+R", v)] if k == "array" else []
             pdf.xref_set_key(xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in keep_refs + now) + "]")
+    return count
+
+
+def _flatten_selected(pdf: pymupdf.Document, selected: set[tuple[int, int]]) -> int:
+    """Appiattisce solo le annotazioni scelte: si cuociono in una copia che contiene soltanto
+    quelle (senza il contenuto della pagina) e il risultato si sovrappone alla pagina."""
+    from foliant.core import placement
+
+    pages = sorted({p for p, _x in selected})
+    tmp = pymupdf.open(stream=pdf.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE), filetype="pdf")
+    count = 0
+    try:
+        for page_no in range(tmp.page_count):
+            tp = tmp[page_no]
+            chosen = {x for p, x in selected if p == page_no}
+            keep = set()
+            for a in tp.annots():
+                if a.xref in chosen and a.flags & pymupdf.PDF_ANNOT_IS_PRINT and not a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+                    keep.add(a.xref)
+            for x in [a.xref for a in tp.annots() if a.xref not in keep
+                      and a.type[0] not in (pymupdf.PDF_ANNOT_WIDGET,)]:
+                a = find_annot(tp, x)
+                if a is not None:
+                    tp.delete_annot(a)
+            count += len(keep)
+            if page_no in pages:
+                for cx in tp.get_contents():
+                    tmp.update_stream(cx, b" ")
+        if not count:
+            return 0
+        tmp.bake(annots=True, widgets=False)
+        for page_no in pages:
+            page = pdf[page_no]
+            placement.show_pdf_page(page, placement.page_rect(page), tmp, page_no, keep_proportion=False,
+                                    overlay=True, as_displayed=False)
+            done = {x for p, x in selected if p == page_no}
+            for x in list(done):
+                a = find_annot(page, x)
+                if a is not None and a.flags & pymupdf.PDF_ANNOT_IS_PRINT:
+                    delete_annot(pdf, page_no, x, force=True)
+    finally:
+        tmp.close()
     return count
 
 
