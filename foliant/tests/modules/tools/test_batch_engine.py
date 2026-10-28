@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 
 import pymupdf
+import pytest
 
 from foliant.api import OperationCancelled
 from foliant.modules.tools import engine as be
@@ -869,3 +870,32 @@ def test_not_enough_space_blocks_start(tmp_path, monkeypatch):
     monkeypatch.setattr(be.shutil, "disk_usage", lambda p: Usage(100, 100, 10))
     errors, _w = be.validate_settings(items, settings)
     assert any("Spazio insufficiente" in e for e in errors)
+
+
+# ----------------------------------------------------------------- pagine ruotate e ritagliate
+@pytest.mark.parametrize("rot", [0, 90, 180, 270])
+@pytest.mark.parametrize("crop", [False, True])
+def test_marks_on_rotated_and_cropped_pages(tmp_path, rot, crop):
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 100), "corpo", fontsize=12)
+    if crop:
+        page.set_cropbox(pymupdf.Rect(50, 60, 545, 800))
+    page.set_rotation(rot)
+    src = tmp_path / "in.pdf"
+    doc.save(str(src))
+    steps = [be.Step("watermark", {"text": "BOZZA"}), be.Step("bates", {"prefix": "ACME-"}),
+             be.Step("header_footer", {"header_left": "TESTATA", "footer_center": "PIEDE"})]
+    report = be.run_job(None, [be.analyze_file(str(src))], be.JobSettings(steps=steps,
+                                                                          destination=str(tmp_path / "out")))
+    assert report.counts()["ok"] + report.counts()["warning"] == 1
+    out = pymupdf.open(str(tmp_path / "out" / "in.pdf"))[0]
+    m = out.rotation_matrix
+    pos = {}
+    for w in out.get_text("words"):
+        c = pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2) * m
+        pos[w[4]] = (c.x / out.rect.width, c.y / out.rect.height)
+    assert abs(pos["BOZZA"][0] - 0.5) < 0.05 and abs(pos["BOZZA"][1] - 0.5) < 0.05
+    assert pos["ACME-000001"][0] > 0.6 and pos["ACME-000001"][1] > 0.8
+    assert pos["TESTATA"][0] < 0.4 and pos["TESTATA"][1] < 0.15
+    assert abs(pos["PIEDE"][0] - 0.5) < 0.1 and pos["PIEDE"][1] > 0.85

@@ -1006,12 +1006,15 @@ def add_watermark(data: bytes, text: str, fontsize: int = 60, opacity: int = 30,
                     check()
                 page = doc[pno]
                 before = page.get_contents()
-                r = page.rect
+                r = page.rect   # pagina visualizzata (rotazione inclusa)
                 width = pymupdf.get_text_length(text, fontname="helv", fontsize=fontsize)
-                center = pymupdf.Point(r.width / 2, r.height / 2)
-                start = pymupdf.Point(center.x - width / 2, center.y + fontsize * 0.35)
+                # posizioni calcolate sulla pagina visualizzata e riportate alle coordinate del motore,
+                # così la filigrana resta centrata e diritta anche sulle pagine ruotate
+                derot = page.derotation_matrix
+                center = pymupdf.Point(r.width / 2, r.height / 2) * derot
+                start = pymupdf.Point(r.width / 2 - width / 2, r.height / 2 + fontsize * 0.35) * derot
                 page.insert_text(start, text, fontsize=fontsize, fontname="helv", color=_rgb(color),
-                                 fill_opacity=max(0.01, min(1.0, opacity / 100.0)),
+                                 fill_opacity=max(0.01, min(1.0, opacity / 100.0)), rotate=page.rotation,
                                  morph=(center, pymupdf.Matrix(-float(rotation))), overlay=True)
                 _mark_new_contents(doc, page, before, "watermark")
             return _save(doc)
