@@ -529,3 +529,18 @@ def test_large_form_bar_fast_and_commit_fast(qtbot, window, tmp_path, pages, per
     f.commit_active()
     assert time.time() - t < 0.5
     assert [x for x in f.state.fields if x.name == "c0_37"][0].value == "veloce"
+
+
+def test_deferred_callbacks_after_window_destroyed(qtbot, settings, form_pdf):
+    """Regressione: i callback differiti del modulo non toccano oggetti già distrutti."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from foliant.ui.main_window import MainWindow
+    win = MainWindow(settings)
+    win.show()
+    view = win.ctx.open_path(form_pdf)  # l'analisi iniziale è in coda, non ancora eseguita
+    assert view is not None
+    view.document._saved_state = view.document._state
+    win.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()  # nessuna eccezione dai timer del modulo
