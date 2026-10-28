@@ -20,7 +20,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap, QIco
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QRadioButton,
-    QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout,
+    QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QStackedWidget, QToolButton, QVBoxLayout,
     QWidget,
 )
 
@@ -31,6 +31,7 @@ from . import formats as fm
 from . import formula as FX
 
 TRANSLATIONS: dict[str, str] = {
+    "Sezione": "Section",
     "Vincoli per chi firma": "Signer constraints",
     "qualunque motivo": "any reason",
     "Motivi ammessi, separati da punto e virgola": "Allowed reasons, separated by semicolons",
@@ -300,6 +301,78 @@ def _tuple(q: QColor) -> tuple:
     return (round(q.redF(), 4), round(q.greenF(), 4), round(q.blueF(), 4))
 
 
+class SectionTabs(QWidget):
+    """Sezioni del pannello scelte da una tendina (al posto delle schede): con sei sezioni le
+    schede non entrano nel pannello stretto e alcune restavano nascoste dietro le frecce.
+    Offre i metodi di QTabWidget usati dal pannello."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.chooser = QComboBox()
+        self.chooser.setAccessibleName(_("Sezione"))
+        self.stack = QStackedWidget()
+        lay.addWidget(self.chooser)
+        lay.addWidget(self.stack, 1)
+        self._titles: list[str] = []
+        self._visible: list[bool] = []
+        self.chooser.currentIndexChanged.connect(self._on_chosen)
+
+    def addTab(self, widget: QWidget, title: str) -> int:
+        self.stack.addWidget(widget)
+        self._titles.append(title)
+        self._visible.append(True)
+        self._rebuild()
+        return len(self._titles) - 1
+
+    def count(self) -> int:
+        return len(self._titles)
+
+    def indexOf(self, widget: QWidget) -> int:
+        return self.stack.indexOf(widget)
+
+    def tabText(self, index: int) -> str:
+        return self._titles[index]
+
+    def isTabVisible(self, index: int) -> bool:
+        return self._visible[index]
+
+    def setTabVisible(self, index: int, visible: bool) -> None:
+        if self._visible[index] != visible:
+            self._visible[index] = visible
+            self._rebuild()
+
+    def currentIndex(self) -> int:
+        return self.stack.currentIndex()
+
+    def setCurrentIndex(self, index: int) -> None:
+        if 0 <= index < len(self._titles) and self._visible[index]:
+            self.stack.setCurrentIndex(index)
+            self.chooser.blockSignals(True)
+            self.chooser.setCurrentIndex(max(0, self.chooser.findData(index)))
+            self.chooser.blockSignals(False)
+
+    def _rebuild(self) -> None:
+        current = self.stack.currentIndex()
+        self.chooser.blockSignals(True)
+        self.chooser.clear()
+        for i, (title, visible) in enumerate(zip(self._titles, self._visible)):
+            if visible:
+                self.chooser.addItem(title, i)
+        self.chooser.blockSignals(False)
+        if current < 0 or not self._visible[current]:
+            current = next((i for i, v in enumerate(self._visible) if v), -1)
+        if current >= 0:
+            self.setCurrentIndex(current)
+
+    def _on_chosen(self, row: int) -> None:
+        index = self.chooser.itemData(row)
+        if index is not None:
+            self.stack.setCurrentIndex(int(index))
+
+
 class ColorButton(QToolButton):
     """Pulsante con campione di colore; facoltativamente con la scelta «Trasparente» (None)."""
 
@@ -402,9 +475,7 @@ class FieldPropertiesPanel(QWidget):
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
         lay.addWidget(self.placeholder, 1)
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.setUsesScrollButtons(True)
+        self.tabs = SectionTabs()   # tendina di sezione: tutte raggiungibili anche nel pannello stretto
         lay.addWidget(self.tabs, 1)
         self._pages: dict[str, QWidget] = {}
 

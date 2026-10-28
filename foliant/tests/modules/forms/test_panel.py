@@ -672,3 +672,26 @@ def test_signature_constraints_applied(qtbot):
     assert E.field_info(pdf, 0, x).sv == {"reasons": ["Venditore", "Acquirente"], "certify": 2}
     panel.set_fields([E.field_info(pdf, 0, x)], ["Firma"])
     assert panel.sv_reasons.text() == "Venditore; Acquirente" and panel.sv_certify.currentData() == 2
+
+
+def test_all_sections_reachable_in_narrow_panel(qtbot):
+    """C14: con un campo di testo, a 300 px tutte le sezioni (anche Validazione e Calcolo) si
+    raggiungono dalla tendina, senza scorrimento orizzontale."""
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "prezzo")
+    panel = FieldPropertiesPanel(lambda *a: True)
+    qtbot.addWidget(panel)
+    panel.set_fields([E.field_info(pdf, 0, x)], ["prezzo"])
+    panel.resize(300, 800)
+    panel.show()
+    qtbot.waitExposed(panel)
+    tabs = panel.tabs
+    visible = [tabs.tabText(i) for i in range(tabs.count()) if tabs.isTabVisible(i)]
+    choices = [tabs.chooser.itemText(i) for i in range(tabs.chooser.count())]
+    assert choices == visible and {"Validazione", "Calcolo"} <= set(choices)
+    assert panel.minimumSizeHint().width() <= 300 and tabs.chooser.width() <= 300
+    for i in range(tabs.chooser.count()):   # ogni sezione si apre dalla tendina
+        tabs.chooser.setCurrentIndex(i)
+        assert tabs.tabText(tabs.currentIndex()) == choices[i]
