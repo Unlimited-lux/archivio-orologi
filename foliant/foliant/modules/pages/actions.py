@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMenu, QToolButton
 
+from foliant.i18n import pgettext
 from foliant.api import _, bind_icon
 
 from . import engine as E
@@ -174,7 +175,7 @@ def build_actions(ctx, c, mode) -> None:
         c.act_move_to, c.act_move_start, c.act_move_end, None, c.act_reverse, c.act_swap, c.act_swap_pairs,
         c.act_collate, None, c.act_rotate_180]))
     mode.add_separator()
-    mode.add_widget(menu_button(_("Formato"), "crop", [
+    mode.add_widget(menu_button(pgettext("menu", "Formato"), "crop", [
         c.act_crop, c.act_margins, c.act_resize, c.act_boxes, None, c.act_nup]))
     mode.add_widget(menu_button(_("Timbri"), "stamp", [
         c.act_numbers, c.act_bates, c.act_header, None, c.act_watermark, c.act_background, c.act_remove_stamps,

@@ -80,7 +80,7 @@ EN = {
     "Inserisci": "Insert",
     "Dividi e unisci": "Split and merge",
     "Disponi": "Arrange",
-    "Formato": "Layout",
+    "menu\x04Formato": "Layout",
     "Timbri": "Stamps",
     "Altro": "More",
     "Unisci PDF": "Merge PDFs",
