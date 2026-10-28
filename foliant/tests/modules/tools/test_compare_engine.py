@@ -608,3 +608,22 @@ def test_cancel_within_two_seconds_on_500_pages(tmp_path):
     progress.cancel()
     th.join(10)
     assert "cancelled" in box and box["cancelled"] - t0 < 2.0
+
+
+def test_scan_preset_with_real_ocr_module(tmp_path):
+    import shutil
+    if shutil.which("tesseract") is None or ce._ocr_function() is None:
+        pytest.skip("OCR non disponibile")
+
+    def scan(name, amount):
+        src = pymupdf.open()
+        src.new_page().insert_text((72, 120), f"Importo dovuto {amount} euro", fontsize=22)
+        img = src[0].get_pixmap(dpi=200).tobytes("png")
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_image(page.rect, stream=img)
+        doc.save(str(tmp_path / name))
+        return str(tmp_path / name)
+    r = run(scan("a.pdf", "1250"), scan("b.pdf", "1350"), preset="scan", sensitivity="low")
+    mods = [d for d in r.differences if d.kind == ce.MODIFIED]
+    assert len(mods) == 1 and mods[0].text_a == "1250" and mods[0].text_b == "1350"

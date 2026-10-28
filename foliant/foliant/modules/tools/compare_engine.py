@@ -1118,7 +1118,9 @@ def _ocr_in_memory(doc: pymupdf.Document, options: CompareOptions, progress) -> 
     fn = _ocr_function()
     with ENGINE_LOCK:
         plain = doc.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE)
-    data = fn(plain, options.ocr_languages, "all", None, None)
+    from .engine import run_ocr
+    langs = [x for x in re.split(r"[+,\s]+", options.ocr_languages or "ita+eng") if x]
+    data = run_ocr(fn, plain, langs)
     with ENGINE_LOCK:
         new = pymupdf.open(stream=data, filetype="pdf")
         doc.close()

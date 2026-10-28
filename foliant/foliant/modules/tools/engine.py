@@ -51,6 +51,25 @@ def _ocr_function() -> Callable | None:
     return ocr_pdf_bytes
 
 
+def run_ocr(fn: Callable, data: bytes, languages: list[str], redo: bool = False) -> bytes:
+    """Chiama `ocr_pdf_bytes` del modulo OCR in modalità «ricercabile» (aspetto invariato).
+
+    `redo`: rifà anche il livello OCR delle pagine che hanno già testo invisibile."""
+    import inspect
+    try:
+        accepts_options = "options" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        accepts_options = False
+    if accepts_options:
+        try:
+            from foliant.modules.ocr.engine import REPLACE, SKIP, OcrOptions
+            opts = OcrOptions(languages=list(languages), existing_text=REPLACE if redo else SKIP)
+            return fn(data, list(languages), "searchable", None, None, options=opts)
+        except ImportError:
+            pass
+    return fn(data, list(languages), "searchable", None, None)
+
+
 def _convert_function() -> Callable | None:
     try:
         from foliant.modules.convert.engine import convert_pdf
@@ -1677,7 +1696,7 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         if mode == "skip_text" and _has_text_everywhere(data):
             raise BatchError("OCR-01", _("Nessuna pagina da riconoscere."), status="skipped")
         langs = [x for x in re.split(r"[+,\s]+", p.get("languages", "ita+eng")) if x]
-        return fn(data, langs, mode, None, None), protection
+        return run_ocr(fn, data, langs, redo=(mode == "all")), protection
     if a in EXTRA_PDF_ACTIONS:
         return EXTRA_PDF_ACTIONS[a](data, p, item, ctx), protection
     raise BatchError("GEN-02", _("Operazione non gestita: {a}").format(a=a))
