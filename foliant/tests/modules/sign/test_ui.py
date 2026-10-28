@@ -1,0 +1,368 @@
+"""Integrazione del modulo Firma nella finestra: dialoghi, strumenti, flusso di
+firma digitale, pannello firme e avvisi sui documenti firmati."""
+
+from __future__ import annotations
+
+import math
+import os
+from pathlib import Path
+
+import pymupdf
+import pytest
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtWidgets import QMessageBox
+
+from foliant.api import PageEvent
+from foliant.modules.sign import digital, graphic as g, store
+
+from .conftest import PASSWORD
+
+
+@pytest.fixture(autouse=True)
+def _no_modal(monkeypatch):
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Ok)
+
+
+def _ctl(window):
+    return window.ctx.sign_controller
+
+
+def _panel(window):
+    return window._sidebar["firme"][2]
+
+
+def _ev(page, x, y, button=Qt.MouseButton.LeftButton, mods=Qt.KeyboardModifier.NoModifier):
+    return PageEvent(page=page, point=pymupdf.Point(x, y), pos=QPointF(0, 0), button=button, buttons=button,
+                     modifiers=mods)
+
+
+def _sign_file(window, monkeypatch, path, target, id_a, *, invisible=False, rect=(100, 600, 300, 680),
+               certify=False, level=2):
+    """Esegue il flusso «Firma digitale» con i dialoghi simulati."""
+    from foliant.modules.sign import ui_digital
+    view = window.open_path(str(path))
+    c = _ctl(window)
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(reason="Approvo", location="Milano", certify=certify,
+                                          docmdp_level=level)
+        return True
+
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(target))
+    if invisible:
+        ok = c.digital_sign(view, invisible=True, certify=certify)
+    else:
+        ok = c.digital_sign(view, page=0, rect=pymupdf.Rect(*rect), certify=certify)
+    assert ok
+    return window.current_view()
+
+
+def test_mode_panel_and_actions(window):
+    assert "firma" in window.modes
+    assert "firme" in window._sidebar
+    texts = [a.text() for a in window.modes["firma"].toolbar.actions()]
+    assert "Crea firma" in texts and "Firma digitale" in texts and "Verifica firme" in texts
+
+
+def test_draw_tab_use_disabled_until_stroke(qtbot):
+    from foliant.modules.sign.ui_create import CreateSignatureDialog
+    dlg = CreateSignatureDialog()
+    qtbot.addWidget(dlg)
+    assert not dlg.use_button.isEnabled()
+    pad = dlg.draw.pad
+    pad.add_point(10, 10, start=True)
+    pad.add_point(12, 11)
+    pad.end_stroke()
+    assert not dlg.use_button.isEnabled()          # tratto sotto la lunghezza minima
+    for i in range(40):
+        pad.add_point(20 + i * 5, 60 + (i % 7) * 3, 0.2 + i / 60, start=(i == 0))
+    pad.end_stroke()
+    assert dlg.use_button.isEnabled()
+    pad.undo_stroke()
+    assert not dlg.use_button.isEnabled()
+    pad.add_point(20, 60, start=True)
+    pad.add_point(200, 70)
+    pad.end_stroke()
+    dlg._accept()
+    assert dlg.item is not None and dlg.item.origin == "disegnata" and dlg.save_to_library
+
+
+def test_type_tab_previews_and_incompatible(qtbot):
+    from foliant.modules.sign.ui_create import TypeTab
+    tab = TypeTab("Mario Rossi")
+    qtbot.addWidget(tab)
+    assert tab.preview_count() >= 8
+    assert tab.is_valid()
+    tab.text.setText("   ")
+    tab.refresh()
+    assert not tab.is_valid()
+
+
+def test_image_tab_reports_unsupported(qtbot, tmp_path):
+    from foliant.modules.sign.ui_create import ImageTab
+    tab = ImageTab()
+    qtbot.addWidget(tab)
+    p = tmp_path / "x.png"
+    p.write_bytes(b"%PDF-1.4 finto")
+    tab.load_path(str(p))
+    assert "PDF" in tab.error.text() and not tab.is_valid()
+
+
+def test_place_move_resize_undo(window, sample_pdf):
+    view = window.open_path(sample_pdf)
+    c = _ctl(window)
+    raw = [[(10 + i * 4, 40 + (i % 9) * 2, 1.0) for i in range(60)]]
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes(raw)))
+    c.start_placement(view, item)
+    tool = view.tool
+    assert tool.pending is item
+    assert tool.press(view, _ev(0, 200, 300))
+    tool.release(view, _ev(0, 200, 300))
+    with view.document.lock:
+        sigs = g.placed_signatures(view.document.pdf, 0)
+    assert len(sigs) == 1
+    r = sigs[0].rect
+    assert abs((r.x0 + r.x1) / 2 - 200) < 1
+    # ridimensionamento da maniglia: proporzioni invariate
+    aspect = r.width / r.height
+    tool.selected = (0, sigs[0].xref)
+    tool.press(view, _ev(0, r.x1, r.y1))
+    tool._drag["now"] = pymupdf.Point(r.x1 + 60, r.y1 + 5)
+    tool.release(view, _ev(0, r.x1 + 60, r.y1 + 5))
+    with view.document.lock:
+        r2 = g.placed_signatures(view.document.pdf, 0)[0].rect
+    assert abs(r2.width / r2.height - aspect) / aspect < 0.005
+    assert r2.width > r.width
+    assert view.document.undo()
+    assert view.document.undo()
+    with view.document.lock:
+        assert g.placed_signatures(view.document.pdf, 0) == []
+
+
+def test_repeat_group_undone_in_one_step(window, tmp_path):
+    from tests.conftest import make_pdf
+    view = window.open_path(make_pdf(tmp_path / "dieci.pdf", pages=10))
+    c = _ctl(window)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    xref = c.place(view, 0, pymupdf.Rect(450, 780, 540, 800), item)
+    from foliant.modules.sign import ui_digital
+
+    class FakeRepeat:
+        def __init__(self, *a):
+            self.pages, self.anchor = [1, 2, 3, 7], "auto"
+
+        def exec(self):
+            return True
+
+    ui_digital_repeat = ui_digital.RepeatDialog
+    ui_digital.RepeatDialog = FakeRepeat
+    try:
+        c.repeat(view, 0, xref)
+    finally:
+        ui_digital.RepeatDialog = ui_digital_repeat
+    with view.document.lock:
+        counts = [len(g.placed_signatures(view.document.pdf, p)) for p in range(10)]
+    assert counts == [1, 1, 1, 1, 0, 0, 0, 1, 0, 0]
+    view.document.undo()
+    with view.document.lock:
+        counts = [len(g.placed_signatures(view.document.pdf, p)) for p in range(10)]
+    assert counts == [1] + [0] * 9
+
+
+def test_digital_sign_flow_and_panel_valid(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """Firma con certificato di test → riapertura → la verifica riporta «valida»."""
+    store.TrustStore().add(id_a[1])
+    original = Path(sample_pdf).read_bytes()
+    target = tmp_path / "esempio_firmato.pdf"
+    view = _sign_file(window, monkeypatch, sample_pdf, target, id_a)
+    assert Path(view.document.path) == target
+    assert Path(sample_pdf).read_bytes() == original           # originale intatto
+    assert target.read_bytes().startswith(original)            # salvataggio incrementale
+    st = _ctl(window).state(view)
+    assert [s.status for s in st.statuses] == ["valida"]
+    panel = _panel(window)
+    assert panel.view is view
+    assert panel.list.count() == 1 and "Valida" in panel.list.item(0).text()
+    assert "valide" in panel.banner.text()
+    panel.list.setCurrentRow(0)
+    assert "Mario Rossi" in panel.details.toPlainText()
+
+
+def test_untrusted_then_trust_from_panel(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "f.pdf", id_a, invisible=True)
+    c = _ctl(window)
+    st = c.state(view)
+    assert st.statuses[0].status == "indeterminata"
+    assert st.statuses[0].invisible
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: True)
+    c.trust_signer(view, st.statuses[0])
+    assert c.state(view).statuses[0].status == "valida"
+
+
+def test_later_modification_detected(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """Una modifica successiva alla firma viene rilevata dalla verifica."""
+    store.TrustStore().add(id_a[1])
+    target = tmp_path / "firmato.pdf"
+    _sign_file(window, monkeypatch, sample_pdf, target, id_a)
+    data = bytearray(target.read_bytes())
+    i = data.find(b"Orologeria")
+    data[i] = ord("X")                                   # byte alterato nell'intervallo firmato
+    altered = tmp_path / "alterato.pdf"
+    altered.write_bytes(bytes(data))
+    view = window.open_path(str(altered))
+    st = _ctl(window).state(view)
+    assert st.statuses and st.statuses[0].status == "non valida"
+    assert "presenta problemi" in _panel(window).banner.text()
+
+
+def test_wrong_certificate_password_message(window, qtbot, sample_pdf, id_a):
+    from foliant.modules.sign.ui_digital import DigitalSignDialog
+    window.open_path(sample_pdf)
+    dlg = DigitalSignDialog(window, _ctl(window))
+    qtbot.addWidget(dlg)
+    dlg._reload_ids(str(id_a[0]))
+    dlg.password.setText("sbagliata")
+    dlg._accept()
+    assert "Password errata" in dlg.error.text()
+    assert dlg.password.text() == "" and dlg.digital_id is None
+    dlg.password.setText(PASSWORD)
+    dlg._accept()
+    assert dlg.digital_id is not None and dlg.options.reason
+
+
+def test_expired_certificate_blocked_in_dialog(window, qtbot, sample_pdf, expired_id):
+    from foliant.modules.sign.ui_digital import DigitalSignDialog
+    window.open_path(sample_pdf)
+    dlg = DigitalSignDialog(window, _ctl(window))
+    qtbot.addWidget(dlg)
+    dlg._reload_ids(str(expired_id[0]))
+    dlg.password.setText(PASSWORD)
+    dlg._accept()
+    assert dlg.digital_id is None
+    assert expired_id[1].not_after.strftime("%d/%m/%Y") in dlg.error.text()
+    assert not dlg.allow_expired.isHidden()
+
+
+def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """SIG-21: una modifica a un documento firmato chiede conferma; «Annulla» la ritira."""
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "w.pdf", id_a)
+    c = _ctl(window)
+    asked = []
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")
+    with view.document.change("Ruota pagina") as pdf:
+        pdf[0].set_rotation(90)
+    assert asked == ["Ruota pagina"]
+    assert not view.document.is_modified
+    # «Lavora su una copia senza firme»
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "copy")
+    with view.document.change("Ruota pagina") as pdf:
+        pdf[0].set_rotation(90)
+    copy_view = window.current_view()
+    assert copy_view is not view and "senza firme" in copy_view.document.display_name
+    assert not digital.has_signatures(copy_view.document.to_bytes())
+    # «Procedi comunque»: l'avviso non si ripete
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "proceed")
+    window.tabs.setCurrentWidget(view)
+    with view.document.change("Ruota pagina") as pdf:
+        pdf[0].set_rotation(90)
+    with view.document.change("Ruota pagina") as pdf:
+        pdf[0].set_rotation(180)
+    assert view.document.is_modified and asked.count("Ruota pagina") == 2
+
+
+def test_graphic_signature_on_signed_doc_asks_first(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "g.pdf", id_a)
+    c = _ctl(window)
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "cancel")
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]])))
+    assert c.place(view, 0, pymupdf.Rect(10, 10, 100, 40), item) is None
+    assert not view.document.is_modified
+
+
+def test_panel_valid_invalid_and_empty_field(window, monkeypatch, tmp_path, id_a, id_b):
+    """SIG-18: firma corretta, firma alterata e campo vuoto → 3 voci e barra «problemi»."""
+    from tests.conftest import make_pdf
+    store.TrustStore().add(id_a[1])
+    store.TrustStore().add(id_b[1])
+    base = Path(make_pdf(tmp_path / "tre.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(base, "Cliente", 0, (300, 700, 500, 760))
+    data = digital.sign_pdf(data, id_a[2], digital.SignOptions(rect=(60, 700, 250, 760)))
+    data = digital.sign_pdf(data, id_b[2], digital.SignOptions(rect=(60, 600, 250, 660)))
+    # altera un byte coperto dalla seconda firma soltanto (nella sua revisione)
+    statuses = digital.verify_pdf(data, trusted=[id_a[1], id_b[1]])
+    first_end = min(s.revision_end for s in statuses)
+    buf = bytearray(data)
+    pos = buf.find(b"Lucia Bianchi", first_end)
+    buf[pos] = ord("l")
+    path = tmp_path / "misto.pdf"
+    path.write_bytes(bytes(buf))
+    view = window.open_path(str(path))
+    st = _ctl(window).state(view)
+    assert sorted(s.status for s in st.statuses) == ["non valida", "valida"]
+    panel = _panel(window)
+    texts = [panel.list.item(i).text() for i in range(panel.list.count())]
+    assert len(texts) == 3
+    assert any(t.startswith("Valida") for t in texts) and any(t.startswith("Non valida") for t in texts)
+    assert any(t.startswith("Da firmare") for t in texts)
+    assert "presenta problemi" in panel.banner.text()
+    assert not panel.btn_next.isHidden()
+
+
+def test_signed_version_opens_prefix(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    target = tmp_path / "v.pdf"
+    view = _sign_file(window, monkeypatch, sample_pdf, target, id_a)
+    c = _ctl(window)
+    s = c.state(view).statuses[0]
+    new_view = c.open_signed_version(view, s)
+    assert new_view is not None
+    assert target.read_bytes()[:s.revision_end] == digital.signed_revision(target.read_bytes(), s)
+
+
+def test_add_empty_field_to_unsigned_document(window, monkeypatch, sample_pdf):
+    from foliant.modules.sign import ui_digital
+    view = window.open_path(sample_pdf)
+    c = _ctl(window)
+    monkeypatch.setattr(ui_digital.FieldDialog, "exec", lambda self: True)
+    c.add_field(view, 0, pymupdf.Rect(100, 600, 300, 660))
+    assert view.document.is_modified
+    st = c.state(view)
+    assert [f.name for f in st.fields] == ["Firma"] and not st.fields[0].signed
+    view.document.undo()
+    assert not view.document.is_modified
+
+
+def test_unsaved_changes_asked_before_signing(window, monkeypatch, sample_pdf):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Ruota") as pdf:
+        pdf[0].set_rotation(90)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert _ctl(window).digital_sign(view, invisible=True) is False
+
+
+@pytest.mark.parametrize("dark", [False, True])
+def test_screenshot(window, monkeypatch, sample_pdf, tmp_path, id_a, dark):
+    """Cattura per la verifica visiva (non confronta pixel)."""
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.ui import theme
+    if dark:
+        theme.apply(QApplication.instance(), "dark")
+    store.TrustStore().add(id_a[1])
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "s.pdf", id_a)
+    window.set_mode("firma")
+    raw = [[(10 + i * 4, 40 + 15 * math.sin(i / 5), 0.3 + i / 80) for i in range(50)]]
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes(raw)), color="#1d3fb8")
+    c = _ctl(window)
+    c.start_placement(view, item)
+    view.tool.hover = (0, pymupdf.Point(400, 300))
+    view.flush_rendering()
+    shot = tmp_path / f"firma-{'scuro' if dark else 'chiaro'}.png"
+    assert window.grab().save(str(shot))
+    dest = os.environ.get("FOLIANT_SHOTS")
+    if dest:
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        window.grab().save(str(Path(dest) / shot.name))
+    theme.apply(QApplication.instance(), "light")

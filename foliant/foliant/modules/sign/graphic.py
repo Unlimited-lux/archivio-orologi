@@ -249,6 +249,8 @@ def typed_styles(min_count: int = 8) -> list[TypedStyle]:
     scripts = [f for f in families if any(h in lower[f] for h in _SCRIPT_HINTS)]
     styles: list[TypedStyle] = []
     for f in scripts:
+        if missing_characters("AaMmRr", TypedStyle(f"{f}|n", f)):
+            continue
         styles.append(TypedStyle(f"{f}|n", f, italic=False, label=f))
     fallback = fallback_family()
     others = [f for f in families if f not in scripts]
@@ -263,6 +265,8 @@ def typed_styles(min_count: int = 8) -> list[TypedStyle]:
             sid = f"{f}|{'i' if italic else 'n'}{'b' if bold else ''}"
             if any(s.id == sid for s in styles):
                 continue
+            if missing_characters("AaMmRr", TypedStyle(sid, f, italic, bold)):
+                continue    # alias o font senza alfabeto latino
             label = f + (" " + _("corsivo") if italic else "") + (" " + _("grassetto") if bold else "")
             styles.append(TypedStyle(sid, f, italic, bold, label))
     styles.append(TypedStyle(f"{fallback}|i", fallback, italic=True, label=_("Riserva ({f})").format(f=fallback)))

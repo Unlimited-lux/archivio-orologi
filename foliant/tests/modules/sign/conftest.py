@@ -106,3 +106,16 @@ def rotated_pdf_bytes(tmp_path) -> bytes:
         page.set_rotation(90)
 
     return Path(make_pdf(tmp_path / "ruotato.pdf", pages=1, extra=rotate)).read_bytes()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    """Al termine di ogni test segna come salvati i documenti aperti nella finestra,
+    così la chiusura della finestra non apre la richiesta di salvataggio."""
+    try:
+        return (yield)
+    finally:
+        win = getattr(item, "funcargs", {}).get("window")
+        if win is not None:
+            for view in list(win.views()):
+                view.document._saved_state = view.document._state

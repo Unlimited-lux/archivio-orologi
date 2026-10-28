@@ -191,9 +191,13 @@ class SignaturesPanel(QWidget):
                 text += "\n" + _("Il documento ha modifiche non salvate: salvandolo, le firme non saranno più "
                                  "valide.")
             self.banner.setText(text)
-        bad = any(s.status != "valida" for s in st.statuses)
-        color = theme.hex_color("danger" if bad else "success" if st.statuses else "text_muted")
-        self.banner.setStyleSheet(f"#signBanner {{ border-left: 4px solid {color}; padding: 6px; }}")
+        bad = any(s.status != "valida" for s in st.statuses) or bool(st.error)
+        tone = "danger" if bad else "success" if st.statuses else "warning" if empties else "text_muted"
+        c = theme.color(tone)
+        self.banner.setStyleSheet(
+            f"#signBanner {{ border: 1px solid {c.name()}; border-left: 4px solid {c.name()}; border-radius: 4px;"
+            f" padding: 6px 8px; background: rgba({c.red()}, {c.green()}, {c.blue()}, 28);"
+            f" color: {theme.hex_color('text')}; }}")
         if self.list.count():
             self.list.setCurrentRow(0)
         self._set_buttons()

@@ -329,6 +329,7 @@ class TypeTab(QWidget):
         self.slant = QSpinBox()
         self.slant.setRange(-20, 30)
         self.slant.setSuffix("°")
+        self.slant.setMinimumWidth(72)
         row.addWidget(self.slant)
         lay.addLayout(row)
         self.styles = g.typed_styles()
