@@ -296,10 +296,21 @@ class Controller(QObject):
         return self.read(engine.list_annotations, view=view) or []
 
     def info(self, page: int, xref: int, view=None) -> engine.AnnotInfo | None:
-        try:
-            return self.read(engine.annotation, page, xref, view=view)
-        except Exception:
+        """Dati di un'annotazione; in cache finché il documento non cambia (usata a ogni ridisegno)."""
+        view = view or self.view()
+        if view is None:
             return None
+        key = (id(view), view.document.version, getattr(self, "_saves", 0))
+        cache = getattr(self, "_info_cache", None)
+        if cache is None or cache[0] != key:
+            cache = (key, {})
+            self._info_cache = cache
+        if (page, xref) not in cache[1]:
+            try:
+                cache[1][(page, xref)] = self.read(engine.annotation, page, xref, view=view)
+            except Exception:
+                cache[1][(page, xref)] = None
+        return cache[1][(page, xref)]
 
     def _on_document_changed(self, view) -> None:
         if view is not self._sel_view or not self.selection:
