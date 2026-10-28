@@ -138,7 +138,7 @@ class Job:
         Usa il modulo OCR di Foliant se presente, altrimenti l'OCR del motore
         (Tesseract). Da chiamare tenendo ENGINE_LOCK.
         """
-        data = work.tobytes(garbage=0)
+        data = work.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE)
         if self.ocr == "never":
             return data
         scanned = [i for i in range(work.page_count)
@@ -192,7 +192,7 @@ class Job:
                 raise
             except Exception:
                 self.warn(_("OCR non riuscito a pagina {p}.").format(p=self.source_index(i) + 1))
-        return doc.tobytes(garbage=0)
+        return doc.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE)
 
 
 _LANGS = {"it": "ita", "en": "eng", "de": "deu", "fr": "fra", "es": "spa", "pt": "por", "nl": "nld"}
@@ -212,8 +212,8 @@ def _lang_to_tesseract(pdf: pymupdf.Document) -> str:
 def _make_work_document(src: pymupdf.Document, pages: list[int]) -> pymupdf.Document:
     """Documento con le sole pagine scelte, nell'ordine scelto (link e segnalibri adattati)."""
     if pages == list(range(src.page_count)):
-        return pymupdf.open(stream=src.tobytes(garbage=0), filetype="pdf")
-    work = pymupdf.open(stream=src.tobytes(garbage=0), filetype="pdf")
+        return pymupdf.open(stream=src.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE), filetype="pdf")
+    work = pymupdf.open(stream=src.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE), filetype="pdf")
     work.select(pages)
     return work
 
@@ -232,6 +232,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
     check(progress, 0.0, _("Apertura del documento…"))
     with ENGINE_LOCK:
         src = open_source(source, options.get("password"), need_extract=not fmt.startswith("pdfa"))
+        work = None
         try:
             pages = options.get("pages")
             if isinstance(pages, (list, tuple)):
@@ -250,22 +251,30 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
                 options["language"] = _lang_to_tesseract(src)
             if fmt.startswith("pdfa"):
                 work = None
-                src_bytes = src.tobytes(garbage=0) if page_list == list(range(src.page_count)) else None
+                src_bytes = src.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE) if page_list == list(range(src.page_count)) else None
                 if src_bytes is None:
                     tmpdoc = _make_work_document(src, page_list)
-                    src_bytes = tmpdoc.tobytes(garbage=0)
+                    src_bytes = tmpdoc.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE)
                     tmpdoc.close()
             else:
-                work = _make_work_document(src, page_list)
+                # il sorgente è già una copia indipendente (file o byte): diventa il documento di lavoro
+                if page_list != list(range(src.page_count)):
+                    src.select(page_list)
+                work, src = src, None
                 signed = False
                 try:
                     signed = any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and w.field_value
-                                 for p in src for w in (p.widgets() or []))
+                                 for p in work for w in (p.widgets() or []))
                 except Exception:
                     pass
-                embedded = src.embfile_count() if hasattr(src, "embfile_count") else 0
+                embedded = work.embfile_count() if hasattr(work, "embfile_count") else 0
+        except BaseException:
+            if work is not None:
+                work.close()
+            raise
         finally:
-            src.close()
+            if src is not None:
+                src.close()
 
     try:
         return _run_job(work, Job(fmt, name, page_list, progress, dict(options)), fmt, output_path,

@@ -853,3 +853,13 @@ def test_many_pages_fast(tmp_path):
     out = convert_pdf(path, tmp_path / "g.txt", "txt")[0]
     assert time.time() - t < 30
     assert open(out, encoding="utf-8").read().count("\f") == 299
+
+
+def test_encrypted_faithful_docx_and_pdfa(encrypted_pdf, tmp_path):
+    import docx
+    out = convert_pdf(encrypted_pdf, tmp_path / "e.docx", "docx", layout="faithful", password="segreta")[0]
+    assert "Riservato" in "\n".join(p.text for p in docx.Document(out).paragraphs)
+    if __import__("shutil").which("gs"):
+        pdf = convert_pdf(encrypted_pdf, tmp_path / "e.pdf", "pdfa-2b", password="segreta")[0]
+        d = pymupdf.open(pdf)
+        assert not d.needs_pass and "Riservato" in d[0].get_text()
