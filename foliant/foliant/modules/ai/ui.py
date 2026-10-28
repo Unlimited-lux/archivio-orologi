@@ -34,6 +34,7 @@ class Services:
         self.panel: AIPanel | None = None
         self.mindmap_widget = None
         self._history = None
+        self.embedder = None      # funzione vettori simulabile nei test
 
     def gateway(self) -> Gateway:
         return Gateway(self.store, self.log, provider_factory=self.provider_factory)
@@ -63,6 +64,10 @@ class Services:
             self.panel.refresh_state()
         for a in getattr(self, "doc_actions", []):
             a.setEnabled(self.store.active() is not None and self.ctx.current_view() is not None)
+        for a in getattr(self, "profile_actions", []):
+            a.setEnabled(self.store.active() is not None)
+        for a in getattr(self, "local_actions", []):
+            a.setEnabled(self.ctx.current_view() is not None)
 
     # ---------------------------------------------------------------- dialoghi
     def open_settings(self, parent=None) -> None:
@@ -349,6 +354,315 @@ class Controller:
         self.show_report(report)
         return report
 
+    # ---------------------------------------------------------------- utilità comuni
+    def _job(self, progress):
+        return engine.Job(self.services.gateway(), cancel=_CancelBridge(progress),
+                          language=self.services.panel._answer_language() if self.services.panel else "it")
+
+    def _run(self, title, fn):
+        """Esegue `fn(job)` con avanzamento; None se annullato o in errore (già segnalato)."""
+        try:
+            return self.ctx.run_task(title, lambda progress: fn(self._job(progress)))
+        except OperationCancelled:
+            self.ctx.status(_("Operazione annullata."))
+        except engine.ConsentRequired:
+            self.ctx.error(title, _("Accetta l'informativa del profilo prima di inviare dati."))
+        except FoliantError as e:
+            self.ctx.error(title, str(e))
+        except Exception as e:  # noqa: BLE001 - un errore del modulo non chiude l'app
+            from .providers import AIError
+            self.ctx.error(title, e.user_message() if isinstance(e, AIError) else str(e))
+        return None
+
+    def _ready_view(self):
+        view = self.ctx.current_view()
+        panel = self.services.panel
+        if view is None or panel is None:
+            return None
+        if not content.extraction_allowed(view.document.pdf):
+            self.ctx.error(_("Assistente IA"), content.blocked_reason(view.document.pdf))
+            return None
+        if not panel._ensure_ready():
+            return None
+        return view
+
+    # ---------------------------------------------------------------- attività (AI-20)
+    def open_tasks(self):
+        from .tasks_library import TaskStore
+        from .tasks_view import TasksDialog
+        view = self.ctx.current_view()
+        panel = self.services.panel
+        dlg = TasksDialog(TaskStore(), self.ctx.window, has_document=view is not None,
+                          has_selection=bool(view and view.text_selection),
+                          ask_save_path=self.ctx.ask_save_path,
+                          ask_open_path=lambda: (self.ctx.ask_open_paths(_("Importa attività"), "JSON (*.json)",
+                                                                         multiple=False) or [None])[0],
+                          on_error=lambda m: self.ctx.error(_("Attività"), m))
+        if self.exec_dialog(dlg) != QDialog.DialogCode.Accepted or dlg.chosen is None:
+            return dlg
+        self.ctx.set_mode("ia")
+        if view is not None:
+            self.ctx.show_properties("ia")
+        panel.run_template(dlg.chosen, dlg.values(), dlg.scope())
+        return dlg
+
+    # ---------------------------------------------------------------- scrittura (AI-19)
+    def open_writer(self):
+        from . import writer
+        from .write_view import WriteDialog
+        view = self.ctx.current_view()
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+        doc = view.document if view is not None else None
+
+        def generate(params):
+            scope = None
+            if params.get("use_document") and doc is not None:
+                if not content.extraction_allowed(doc.pdf):
+                    raise FoliantError(content.blocked_reason(doc.pdf))
+                scope = engine.build_scope(doc.pdf, engine.DOCUMENT, cache=self.services.cache,
+                                           fingerprint=content.content_fingerprint(doc.pdf))
+            ans = self._run(_("Scrittura in corso…"), lambda job: writer.write_text(
+                job, params["kind"], params["instructions"], params["tone"], params["length_words"],
+                params["language"], scope))
+            return ans if ans is not None else ""
+
+        def insert(text):
+            if doc is None or doc.closed:
+                return
+            dlg.accept()
+            self.status_pick = True
+            self.ctx.status(_("Fai clic sul punto della pagina in cui inserire il testo."))
+            self.ctx.set_tool(_PointTool(lambda page, point: self._insert_written(doc, page, point, text)))
+
+        def new_pdf(text):
+            from foliant.api import Document
+            data = writer.text_to_new_pdf(text)
+            self.ctx.open_document(Document.from_bytes(data, display_name=_("Testo generato.pdf")))
+            dlg.accept()
+
+        dlg = WriteDialog(generate, on_insert=insert, on_new_pdf=new_pdf, has_document=doc is not None,
+                          language=panel._answer_language(), parent=self.ctx.window)
+        self.exec_dialog(dlg)
+        return dlg
+
+    def _insert_written(self, doc, page, point, text):
+        from . import writer
+        self.ctx.set_tool(None)
+        try:
+            writer.insert_text_box_at(doc, page, (point.x, point.y), text)
+        except FoliantError as e:
+            self.ctx.error(_("Inserisci nel documento"), str(e))
+
+    # ---------------------------------------------------------------- segnalibri (AI-22)
+    def generate_bookmarks(self):
+        from . import bookmarks_ai
+        from .write_view import BookmarksDialog
+        view = self._ready_view()
+        if view is None:
+            return None
+        doc = view.document
+        result = self._run(_("Generazione dei segnalibri…"), lambda job: bookmarks_ai.propose_bookmarks(job, doc.pdf))
+        if result is None:
+            return None
+        nodes, warnings = result
+        with ENGINE_LOCK:
+            has_existing = bool(doc.pdf.get_toc())
+        dlg = BookmarksDialog(nodes, warnings, has_existing=has_existing,
+                              on_apply=lambda n, m: bookmarks_ai.apply_bookmarks(doc, n, m), parent=self.ctx.window)
+        self.exec_dialog(dlg)
+        return dlg
+
+    def summarize_section(self):
+        """Riassunto della sezione (segnalibro) che contiene la pagina corrente."""
+        from . import bookmarks_ai
+        view = self.ctx.current_view()
+        panel = self.services.panel
+        if view is None or panel is None:
+            return None
+        with ENGINE_LOCK:
+            toc = view.document.pdf.get_toc(simple=False)
+        page = view.current_page
+        index = None
+        for i, entry in enumerate(toc):
+            if entry[2] - 1 <= page:
+                index = i
+        if index is None:
+            self.ctx.info(_("Riassumi sezione"), _("Il documento non ha segnalibri prima di questa pagina."))
+            return None
+        pages = bookmarks_ai.section_pages(toc, index, view.page_count)
+        self.ctx.set_mode("ia")
+        self.ctx.show_properties("ia")
+        panel.set_function("summary")
+        panel.set_scope("pages", engine.compact_ranges(pages).replace("–", "-"))
+        return panel.send()
+
+    # ---------------------------------------------------------------- estrazione dati (AI-10)
+    def extract_data(self, kind: str = "tables", fields=None):
+        from . import extract
+        from .extract_view import ExtractDialog
+        view = self._ready_view()
+        if view is None:
+            return None
+        panel = self.services.panel
+        doc = view.document
+        kind_scope = panel.scope_kind()
+        try:
+            if kind_scope == engine.SELECTION and view.text_selection:
+                scope = engine.build_scope(doc.pdf, engine.SELECTION, selection=view.text_selection)
+            elif kind_scope == engine.PAGES:
+                scope = engine.build_scope(doc.pdf, engine.PAGES, pages=content.parse_page_range(
+                    panel.pages_edit.text(), doc.page_count), cache=self.services.cache,
+                    fingerprint=content.content_fingerprint(doc.pdf))
+            else:
+                scope = engine.build_scope(doc.pdf, engine.DOCUMENT, cache=self.services.cache,
+                                           fingerprint=content.content_fingerprint(doc.pdf))
+        except ValueError as e:
+            self.ctx.error(_("Estrai dati"), str(e))
+            return None
+        try:
+            result = self.ctx.run_task(_("Estrazione dei dati…"), lambda progress: extract.extract_data(
+                self._job(progress), scope, kind, fields, source_name=doc.display_name))
+        except OperationCancelled:
+            return None
+        except extract.ExtractError as e:
+            from .extract_view import RawDialog
+            self.ctx.error(_("Estrai dati"), str(e))
+            self.exec_dialog(RawDialog(e.raw, self.ctx.window))
+            return None
+        except FoliantError as e:
+            self.ctx.error(_("Estrai dati"), str(e))
+            return None
+        except Exception as e:  # noqa: BLE001
+            from .providers import AIError
+            self.ctx.error(_("Estrai dati"), e.user_message() if isinstance(e, AIError) else str(e))
+            return None
+        dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=doc.display_name)
+        self.exec_dialog(dlg)
+        return dlg
+
+    def choose_extraction(self):
+        from PySide6.QtWidgets import QInputDialog
+        kinds = [(_("Tabelle"), "tables"), (_("Fattura o ricevuta"), "invoice")]
+        label, ok = QInputDialog.getItem(self.ctx.window, _("Estrai dati"), _("Tipo di dati:"),
+                                         [k[0] for k in kinds], 0, False)
+        if ok:
+            return self.extract_data(dict(kinds)[label])
+        return None
+
+    # ---------------------------------------------------------------- ricerca per significato (AI-21)
+    def semantic_search(self, query: str | None = None):
+        from . import semantic
+        from .semantic_view import SemanticSearchDialog, result_quads
+        view = self._ready_view()
+        if view is None:
+            return None
+        doc = view.document
+        services = self.services
+        if not hasattr(services, "vectors"):
+            services.vectors = semantic.VectorCache()
+
+        def run(q):
+            profile = services.store.active()
+            embed = None
+            if profile is not None and profile.embed_model:
+                if services.embedder is not None:
+                    embed = services.embedder
+                elif profile.protocol == "openai":
+                    prov = services.store.provider_for(profile)
+                    embed = lambda texts: semantic.embed_openai(prov, profile.embed_model, texts)  # noqa: E731
+            fp = content.content_fingerprint(doc.pdf)
+            return self._run(_("Ricerca per significato…"), lambda job: semantic.search(
+                job, doc.pdf, q, embed=embed, embed_model=profile.embed_model if profile else "", fingerprint=fp,
+                cache=services.vectors))
+
+        def open_result(r):
+            if view.document.closed:
+                return
+            quads = result_quads(r)
+            view.go_to_page(r.page)
+            view.set_search_hits({r.page: quads}, (r.page, 0) if quads else None)
+            if quads:
+                view.ensure_visible(r.page, quads[0].rect)
+
+        def ask(r):
+            panel = services.panel
+            self.ctx.set_mode("ia")
+            self.ctx.show_properties("ia")
+            panel.set_function("chat")
+            panel.set_scope("pages", str(r.page + 1))
+            panel.input.setPlainText(_("A proposito di questo passaggio: «{t}» — ").format(t=r.excerpt[:300]))
+
+        def highlight(r):
+            with doc.change(_("Evidenzia risultato")) as pdf:
+                annot = pdf[r.page].add_highlight_annot(result_quads(r))
+                annot.update()
+
+        dlg = SemanticSearchDialog(run, open_result, ask, highlight, self.ctx.window)
+        if query:
+            dlg.search(query)
+        self.exec_dialog(dlg)
+        return dlg
+
+    # ---------------------------------------------------------------- più documenti (AI-13)
+    def open_collection(self):
+        from . import collection
+        from .collection_view import CollectionDialog
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+
+        def open_docs():
+            return {str(v.document.path): v.document for v in self.ctx.views() if v.document.path}
+
+        def run_chat(conv, prepared, question):
+            return self._run(_("Domanda sulla raccolta…"), lambda job: collection.chat(job, conv, prepared, question))
+
+        def open_ref(path, page):
+            view = next((v for v in self.ctx.views() if str(v.document.path) == path), None)
+            if view is None:
+                view = self.ctx.open_path(path)
+            else:
+                self.ctx.window.tabs.setCurrentWidget(view)
+            if view is not None and 0 <= page < view.page_count:
+                view.go_to_page(page)
+
+        def ask_paths():
+            return self.ctx.ask_open_paths(_("Aggiungi documenti"))
+
+        dlg = CollectionDialog(self.ctx, run_chat, open_ref, ask_paths, open_docs(), self.ctx.window,
+                               cache=self.services.cache)
+        self.exec_dialog(dlg)
+        return dlg
+
+    # ---------------------------------------------------------------- analisi pagine (AI-24)
+    def analyze_pages(self):
+        from . import page_analysis
+        from .page_analysis_view import PageAnalysisDialog
+        view = self.ctx.current_view()
+        if view is None:
+            return None
+        doc = view.document
+        try:
+            issues = self.ctx.run_task(_("Analisi delle pagine…"), lambda progress: page_analysis.analyze(
+                doc.pdf, progress))
+        except OperationCancelled:
+            return None
+        job_factory = None
+        if self.services.store.active() is not None and content.extraction_allowed(doc.pdf):
+            job_factory = lambda: engine.Job(self.services.gateway())  # noqa: E731
+        dlg = PageAnalysisDialog(doc, issues, job_factory, self.ctx.window)
+        self.exec_dialog(dlg)
+        result = getattr(dlg, "result", None)
+        if result is not None and getattr(result, "annotations_text", ""):
+            InfoTextDialog(_("Annotazioni estratte"), "<pre>" + result.annotations_text.replace("<", "&lt;") +
+                           "</pre>", self.ctx.window).exec()
+        return dlg
+
+    def exec_dialog(self, dlg) -> int:
+        return dlg.exec()
+
     def show_report(self, report) -> None:
         buttons = [(_("Ritenta pagine non riuscite"), "retry")] if report.failed_pages else []
         dlg = InfoTextDialog(_("Rapporto della traduzione"),
@@ -365,6 +679,24 @@ class Controller:
             return None
         return self._run_translation(t["source"], t["pages"], t["options"], t["path"],
                                      sorted(t["report"].failed_pages), t["data"])
+
+
+class _PointTool:
+    """Strumento usa e getta: un clic sulla pagina restituisce (pagina, punto)."""
+
+    def __new__(cls, callback):
+        from foliant.api import Tool
+
+        class PointTool(Tool):
+            id = "ai-point"
+            cursor = Qt.CursorShape.CrossCursor
+
+            def press(self, view, ev):
+                if ev.page is None or ev.button != Qt.MouseButton.LeftButton:
+                    return False
+                callback(ev.page, ev.point)
+                return True
+        return PointTool()
 
 
 class _CancelBridge:
@@ -458,15 +790,32 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_area = act(_("Chiedi su un'area"), "square-dashed-mouse-pointer",
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
+    a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_tasks = act(_("Attività"), "briefcase", lambda: controller.open_tasks(), requires=False)
+    a_write = act(_("Scrivi"), "pen-line", lambda: controller.open_writer(), requires=False)
+    a_extract = act(_("Estrai dati"), "table", lambda: controller.choose_extraction())
+    a_sem = act(_("Cerca per significato"), "search", lambda: controller.semantic_search())
+    a_bm = act(_("Genera segnalibri"), "bookmark-plus", lambda: controller.generate_bookmarks())
+    a_section = act(_("Riassumi sezione"), "bookmark", lambda: controller.summarize_section())
+    a_pages = act(_("Analizza pagine"), "scan-search", lambda: controller.analyze_pages())
     a_hist = act(_("Cronologia"), "history", lambda: services.show_history(), requires=False)
     a_log = act(_("Registro degli invii"), "list", lambda: services.show_log(), requires=False)
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
-    services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf]
+    services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
+                            a_section, a_sem]
+    services.profile_actions = [a_tasks, a_write, a_coll]
+    services.local_actions = [a_pages]   # funziona anche senza profilo (controlli locali)
     for a in (a_chat, a_sum, a_tr, a_exp, a_rw):
         mode.add_action(a)
     mode.add_separator()
-    for a in (a_out, a_map, a_area, a_trpdf):
+    for a in (a_out, a_map, a_area, a_trpdf, a_extract, a_sem, a_bm, a_section, a_pages):
         mode.add_action(a)
+    mode.add_separator()
+    for a in (a_coll, a_tasks, a_write):
+        mode.add_action(a)
+    pages_mode = ctx.mode("pagine")
+    if pages_mode is not None:
+        pages_mode.add_action(a_pages)
     mode.add_separator()
     for a in (a_hist, a_log, a_set):
         mode.add_action(a)

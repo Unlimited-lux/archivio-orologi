@@ -606,10 +606,10 @@ def parse_json_payload(text: str):
     fence = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
     if fence:
         t = fence.group(1).strip()
-    for opener, closer in (("[", "]"), ("{", "}")):
-        start = t.find(opener)
+    pairs = sorted(((t.find(o), o, c) for o, c in (("[", "]"), ("{", "}")) if t.find(o) != -1))
+    for start, _opener, closer in pairs:
         end = t.rfind(closer)
-        if start != -1 and end > start:
+        if end > start:
             try:
                 return json.loads(t[start:end + 1])
             except ValueError:

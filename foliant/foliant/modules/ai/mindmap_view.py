@@ -216,7 +216,7 @@ class MindMapView(QWidget):
         self.btn_zoom_in.clicked.connect(lambda: self.map_view.zoom(1.25))
         self.btn_zoom_out.clicked.connect(lambda: self.map_view.zoom(0.8))
         ref = weakref.ref(self)
-        theme.on_change(lambda: (w := ref()) is not None and w._rebuild())
+        theme.on_change(lambda: (w := ref()) is not None and __import__('shiboken6').isValid(w) and w._rebuild())
         self._rebuild()
 
     # ------------------------------------------------------------------ API

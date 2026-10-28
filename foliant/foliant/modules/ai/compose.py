@@ -102,7 +102,7 @@ def _dominant_span(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> tuple[dict 
         for line in block.get("lines", []):
             for span in line["spans"]:
                 r = pymupdf.Rect(span["bbox"])
-                if any((r & s).get_area() > 0.3 * max(r.get_area(), 1e-6) or s.contains(r) for s in rects) \
+                if any((r & s).get_area() > 0.5 * max(min(r.get_area(), s.get_area()), 1e-6) for s in rects) \
                         and span["text"].strip():
                     spans.append(span)
     if not spans:
@@ -186,8 +186,7 @@ def replace_text(document: Document, page: int, rects: list, new_text: str, *,
         area = pymupdf.Rect(rr[0])
         for r in rr[1:]:
             area |= r
-        for s in spans:
-            area |= pymupdf.Rect(s["bbox"])
+        all_words = p.get_text("words")
         fontname, buf, same = _font_for(pdf, p, dom, new_text)
         if not same:
             warnings.append(_("Il carattere originale non contiene tutti i glifi: è stato usato un carattere simile."))
@@ -195,12 +194,29 @@ def replace_text(document: Document, page: int, rects: list, new_text: str, *,
         color = pymupdf.sRGB_to_pdf(dom["color"])
         for r in rr:
             p.add_redact_annot(r)
-        for s in spans:
-            p.add_redact_annot(pymupdf.Rect(s["bbox"]))
         p.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                            text=pymupdf.PDF_REDACT_TEXT_REMOVE)
         if buf:
             p.insert_font(fontname=fontname, fontbuffer=buf)
+        # una sola riga d'origine: si riscrive sulla stessa linea di base se c'è spazio a destra
+        single = len({round(r.y1) for r in rr}) == 1 and "\n" not in new_text
+        if single:
+            right = p.rect.width - 36
+            for w in all_words:
+                wr = pymupdf.Rect(w[:4])
+                c = (wr.x0 + wr.x1) / 2
+                if c > area.x1 and wr.y1 > area.y0 and wr.y0 < area.y1:
+                    right = min(right, wr.x0 - 2)
+            try:
+                font = pymupdf.Font(fontbuffer=buf) if buf else pymupdf.Font(fontname)
+                width = font.text_length(new_text, fontsize=size)
+            except Exception:  # noqa: BLE001
+                width = None
+            baseline = spans[0]["origin"][1]
+            if width is not None and area.x0 + width <= max(right, area.x1):
+                origin = (area.x0, baseline)
+                p.insert_text(origin, new_text, fontname=fontname, fontsize=size, color=color)
+                return warnings
         box = pymupdf.Rect(area.x0, area.y0, max(area.x1, area.x0 + 20), area.y1)
         # il riquadro si allarga in basso, poi il corpo si riduce
         fs = size

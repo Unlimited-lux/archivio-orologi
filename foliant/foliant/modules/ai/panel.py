@@ -52,6 +52,20 @@ IMAGE_ACTIONS = [("describe", "Descrivi"), ("chart", "Spiega il grafico"), ("ocr
                  ("translate", "Traduci il testo"), ("", "Domanda libera")]
 
 
+def _safe_callback(widget, method: str):
+    """Callback del tema che ignora i widget già distrutti."""
+    import weakref
+
+    import shiboken6
+    ref = weakref.ref(widget)
+
+    def call() -> None:
+        w = ref()
+        if w is not None and shiboken6.isValid(w):
+            getattr(w, method)()
+    return call
+
+
 class AreaTool(Tool):
     """Trascina un rettangolo sulla pagina per chiedere all'IA (AI-11)."""
 
@@ -148,7 +162,7 @@ class AIPanel(QWidget):
         self.setObjectName("aiPanel")
         self.setMinimumWidth(320)
         self._build()
-        theme.on_change(self._render)
+        theme.on_change(_safe_callback(self, "_render"))
         self.refresh_state()
 
     # ================================================================ costruzione
@@ -371,10 +385,10 @@ class AIPanel(QWidget):
         pl = QVBoxLayout(self.proposal_box)
         pl.setContentsMargins(0, 0, 0, 0)
         self.diff_view = QTextBrowser()
-        self.diff_view.setMaximumHeight(110)
+        self.diff_view.setMaximumHeight(64)
         pl.addWidget(self.diff_view)
         self.proposal_edit = QPlainTextEdit()
-        self.proposal_edit.setMaximumHeight(80)
+        self.proposal_edit.setMaximumHeight(56)
         self.proposal_edit.setToolTip(_("Puoi ritoccare la proposta prima di accettarla"))
         pl.addWidget(self.proposal_edit)
         pr = QHBoxLayout()
@@ -384,7 +398,8 @@ class AIPanel(QWidget):
         self.discard_btn = QPushButton(_("Scarta"))
         bind_icon(self.discard_btn, "x")
         self.discard_btn.clicked.connect(self.discard_proposal)
-        self.annot_btn = QPushButton(_("Aggiungi come annotazione di sostituzione"))
+        self.annot_btn = QPushButton(_("Annotazione"))
+        self.annot_btn.setToolTip(_("Aggiungi come annotazione di sostituzione"))
         self.annot_btn.clicked.connect(self.annotate_proposal)
         pr.addWidget(self.accept_btn)
         pr.addWidget(self.discard_btn)
@@ -580,6 +595,7 @@ class AIPanel(QWidget):
     def _function_changed(self) -> None:
         key = self.function_key()
         self.options.setCurrentIndex(self._opt_pages.get(key, 0))
+        self.options.setVisible(key != "chat")
         placeholders = {
             "chat": _("Scrivi una domanda sul documento…"),
             "summary": _("Indicazioni facoltative per il riassunto"),
@@ -871,6 +887,8 @@ class AIPanel(QWidget):
         if doc is not None and doc.path:
             conv.path = str(doc.path)
         label = dict((k, _(t)) for k, t, _i in FUNCTIONS).get(fn, fn)
+        if fn == "task":
+            label = self._task_args[0].name
         user_text = text if fn == "chat" else (f"{label}: {text}" if text else label)
         if not regenerate:
             conv.messages.append(ChatMessage("user", user_text, function=fn, model=profile.model,
@@ -884,6 +902,8 @@ class AIPanel(QWidget):
         self.proposal_box.setVisible(False)
         self._set_actions_enabled(False)
         options = self._collect_options(fn)
+        if fn == "task":
+            options["task"] = self._task_args
         self._last.options = options
         pdf = doc.pdf if doc is not None else None
         history_conv = Conversation(messages=[m for m in conv.messages[:-2]]) if fn == "chat" else Conversation()
@@ -914,6 +934,10 @@ class AIPanel(QWidget):
                                       options["nodes"])
             if fn == "image":
                 return engine.ask_image(job, scope, options["image_action"], text)
+            if fn == "task":
+                from . import tasks_library
+                task, values = options["task"]
+                return tasks_library.run_task(job, task, values, scope)
             raise FoliantError(_("Funzione non disponibile."))
 
         lang = options.get("target") if fn == "translate" else self._answer_language()
@@ -1214,6 +1238,10 @@ class AIPanel(QWidget):
                                       _("Markdown (*.md);;Testo (*.txt)"), ".md")
         if not path:
             return
+        quiz = getattr(self._last.answer, "data", None) if self._last else None
+        if isinstance(quiz, list) and quiz and isinstance(quiz[0], dict) and "question" in quiz[0]:
+            from . import tasks_library
+            text = tasks_library.quiz_markdown(quiz, with_solutions=True)
         data = render.plain_text(text) if path.endswith(".txt") else text
         from foliant.api import atomic_write
         try:
@@ -1248,6 +1276,38 @@ class AIPanel(QWidget):
             return
         self.regenerate()
 
+    # ================================================================ attività (AI-20)
+    _task_args = None
+
+    def run_template(self, task, values: dict, scope_kind: str | None = None, pages: str = ""):
+        """Esegue un modello di attività sull'ambito indicato."""
+        if self.worker is not None and self.worker.running:
+            return None
+        profile = self._ensure_ready()
+        if profile is None:
+            return None
+        if scope_kind:
+            self.set_scope(scope_kind, pages or None)
+        if self.blocked_reason() and self.scope_kind() != NONE:
+            self.show_error(_("Assistente IA"), self.blocked_reason())
+            return None
+        try:
+            if self.scope_kind() == NONE or self.document() is None:
+                if task.scope == "document":
+                    raise FoliantError(_("Questa attività richiede un documento."))
+                prepared = (Scope(kind=NONE), [], "")
+            else:
+                prepared = self._prepare_scope("summary" if self.scope_kind() != SELECTION else "explain",
+                                               profile, "")
+        except (ValueError, FoliantError) as e:
+            self.show_error(_("Attività"), str(e))
+            return None
+        if prepared is None:
+            return None
+        scope, ocr_pages, ocr_lang = prepared
+        self._task_args = (task, dict(values))
+        return self._launch("task", scope, "", ocr_pages, ocr_lang)
+
     # ================================================================ riscrittura (AI-09)
     def _show_proposal(self, answer) -> None:
         scope = self._last.scope
@@ -1273,6 +1333,7 @@ class AIPanel(QWidget):
         self.accept_btn.setToolTip(why or _("Sostituisci nel documento"))
         self.annot_btn.setEnabled(doc is not None and scope.selection_page is not None)
         self.replace_reason.setText(why)
+        self.replace_reason.setVisible(bool(why))
         self.proposal_box.setVisible(True)
 
     def proposal_obsolete(self) -> bool:

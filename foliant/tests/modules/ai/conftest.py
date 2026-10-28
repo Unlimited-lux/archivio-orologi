@@ -182,3 +182,18 @@ def text_pdf(tmp_path):
         return str(path)
 
     return make
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item):
+    """Documenti modificati dai test: niente richiesta di salvataggio alla chiusura della finestra."""
+    window = getattr(item, "funcargs", {}).get("window")
+    if window is None:
+        return (yield)
+    services = getattr(window.ctx, "ai_services", None)
+    for w in list(getattr(services, "workers", [])):
+        w.cancel()
+        w.wait(5)
+    for view in list(window.views()):
+        view.document._saved_state = view.document._state
+    return (yield)

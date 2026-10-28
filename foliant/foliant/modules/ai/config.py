@@ -96,6 +96,7 @@ class Profile:
     protocol: str = "anthropic"
     model: str = "claude-opus-5-5"
     image_model: str = ""
+    embed_model: str = ""                # modello per vettori semantici (facoltativo)
     context_window: int = 1_000_000      # token
     max_output: int = 4096
     connect_timeout: float = 15.0
