@@ -2305,6 +2305,15 @@ def _xfa_map(pdf: pymupdf.Document) -> tuple[dict[str, str], dict[str, FieldInfo
     return paths, fields
 
 
+def xfa_unmapped(pdf: pymupdf.Document) -> list[str]:
+    """Campi compilabili di un modulo XML statico senza un nodo dati corrispondente."""
+    if not xfa_data(pdf):
+        return []
+    paths, _fields = _xfa_map(pdf)
+    names = list(dict.fromkeys(f.name for f in list_fields(pdf) if f.kind in FILLABLE))
+    return [n for n in names if n not in paths]
+
+
 def sync_xfa_from_fields(pdf: pymupdf.Document) -> int:
     """Nei moduli XML statici copia i valori dei campi nei dati XML (date e ore in forma ISO)."""
     paths, fields = _xfa_map(pdf)

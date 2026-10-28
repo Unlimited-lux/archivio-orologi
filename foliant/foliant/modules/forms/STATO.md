@@ -40,7 +40,7 @@ Test in `tests/modules/forms/` (file abbreviati: `engine` = `test_engine.py`, `f
 | FRM-31 Reimposta | P0 | fatto | data: `test_reset_all_and_undo`, `test_reset_dialog_selected`; engine: `test_reset_selected_only`; fill: `test_reset_skips_signature_locked` | Senza conferma (UX-13): si annulla con Annulla; in modifica modulo agisce sui campi selezionati. |
 | FRM-32 Appiattisci | P1 | fatto | data: `test_flatten_pages_scope`, `test_flatten_all_renders_same`; engine: `test_flatten` | Ambito per pagine, campi nascosti esclusi, campi firma firmati conservati. |
 | FRM-33 XML dinamici | P0 | fatto | data: `test_xfa_detection`, `test_xfa_dynamic_saved_unchanged` | |
-| FRM-34 XML statici | P1 | parziale | data: `test_xfa_static_sync_on_fill`, `test_xfa_data_wins_on_open_and_iso_dates` | Associazione per nome finale del campo; manca il dialogo per associazioni non risolvibili. |
+| FRM-34 XML statici | P1 | parziale | data: `test_xfa_static_sync_on_fill`, `test_xfa_data_wins_on_open_and_iso_dates` | Associazione per nome finale del campo; i campi senza nodo dati sono segnalati nella barra (data: `test_xfa_unmapped_fields_reported`). Manca il dialogo con «annulla» al salvataggio (serve un aggancio del nucleo che possa annullare il salvataggio). |
 | FRM-35 Dati XML | P2 | fatto | data: `test_xfa_export_import_data` | |
 | FRM-36 Conversione XML | P2 | parziale | data: `test_convert_hybrid_removes_xfa` | Solo moduli statici (rimozione della parte XML); i dinamici non si convertono. |
 

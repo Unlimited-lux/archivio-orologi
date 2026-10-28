@@ -50,6 +50,7 @@ class FormState:
         self.blocked: str | None = None
         self.custom: list[tuple[str, str]] = []
         self.unlocked = False  # password del proprietario inserita
+        self.xfa_unmapped: list[str] = []
 
     def refresh(self, force: bool = False) -> None:
         doc = self.view.document
@@ -65,6 +66,7 @@ class FormState:
                 perms = doc.original_protection.get("permissions") if doc.original_protection else None
                 self.blocked = None if self.unlocked else E.fill_blocked_reason(pdf, perms)
                 self.custom = E.custom_scripts(pdf, self.fields)
+                self.xfa_unmapped = E.xfa_unmapped(pdf) if self.xfa == "hybrid" else []
             except Exception:  # file danneggiato: nessun modulo utilizzabile
                 self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
         self.version = doc.version
@@ -518,11 +520,17 @@ class FormFiller(QObject):
                          if req else _("nessun campo obbligatorio da compilare"))
             if st.xfa == "hybrid":
                 parts.append(_("modulo XML statico: i dati XML vengono aggiornati"))
+                if st.xfa_unmapped:
+                    parts.append(tr_count(len(st.xfa_unmapped), _("{n} campo senza dati XML associati"),
+                                          _("{n} campi senza dati XML associati")))
             if st.custom:
                 parts.append(_("script personalizzati non eseguiti: calcoli non aggiornati"))
             text = ", ".join(parts)
         self.bar.label.setText(text)
-        self.bar.label.setToolTip("\n".join(f"{n}: {ev}" for n, ev in st.custom) if st.custom else "")
+        tips = [f"{n}: {ev}" for n, ev in st.custom]
+        if st.xfa_unmapped:
+            tips.append(_("Valori non salvati nei dati XML: {l}").format(l=", ".join(st.xfa_unmapped[:20])))
+        self.bar.label.setToolTip("\n".join(tips))
         fill = st.xfa != "dynamic" and not st.blocked and not self.design
         self.bar.buttons["highlight"].setVisible(fill)
         self.bar.buttons["highlight"].setChecked(self.highlight)

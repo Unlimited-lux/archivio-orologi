@@ -386,3 +386,14 @@ def test_export_name_tm(window, tmp_path, form_pdf):
     view2 = open_form(window, blank)
     report = module().import_data(str(out), view=view2)
     assert values(view2)["cognome"] == "Bianchi" and not report["unknown"]
+
+
+def test_xfa_unmapped_fields_reported(window, tmp_path):
+    make_xfa(tmp_path / "s.pdf", True)
+    pdf = pymupdf.open(str(tmp_path / "s.pdf"))
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 250, 120), "form1.extra")
+    pdf.save(str(tmp_path / "s2.pdf"))
+    assert E.xfa_unmapped(pymupdf.open(str(tmp_path / "s2.pdf"))) == ["form1.extra"]
+    view = open_form(window, tmp_path / "s2.pdf")
+    bar = forms.instance().filler(view).text_of_bar()
+    assert "1 campo senza dati XML associati" in bar

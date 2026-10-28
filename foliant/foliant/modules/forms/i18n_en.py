@@ -305,4 +305,7 @@ EN: dict[str, str] = {
     'I caratteri di sistema sono disponibili solo per i campi di testo.': 'System fonts are only available for text fields.',
     'Il carattere «{f}» non è installato.': 'The font “{f}” is not installed.',
     'Analisi del modulo…': 'Analysing the form…',
+    '{n} campo senza dati XML associati': '{n} field without associated XML data',
+    '{n} campi senza dati XML associati': '{n} fields without associated XML data',
+    'Valori non salvati nei dati XML: {l}': 'Values not saved in the XML data: {l}',
 }
