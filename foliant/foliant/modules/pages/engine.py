@@ -1480,7 +1480,7 @@ def merge_files(paths: Sequence[str | os.PathLike | MergeEntry], *, bookmarks: b
                 keep_bookmarks: bool = True, annots: bool = True, widgets: bool = True,
                 blank_after_odd: bool = False, metadata: dict | None = None,
                 progress: Callable[[float, str], None] | None = None,
-                errors: list[str] | None = None) -> bytes:
+                errors: list[str] | None = None, metadata_update: dict | None = None) -> bytes:
     """Unisce più file (PDF, immagini, altri formati convertibili) in un nuovo PDF.
 
     Ogni elemento può essere un percorso o un `MergeEntry` (con intervallo e
@@ -1537,7 +1537,8 @@ def merge_files(paths: Sequence[str | os.PathLike | MergeEntry], *, bookmarks: b
             raise PageOpError(_("Nessun file è stato unito."))
         with ENGINE_LOCK:
             _set_toc_safe(out, toc)
-            meta = metadata if metadata is not None else first_meta or {}
+            meta = dict(metadata if metadata is not None else first_meta or {})
+            meta.update({k: v for k, v in (metadata_update or {}).items() if v})
             meta = {k: v for k, v in meta.items() if v and k not in ("encryption", "format")}
             try:
                 out.set_metadata(meta)

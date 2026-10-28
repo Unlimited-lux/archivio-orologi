@@ -157,6 +157,9 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "come il primo file": "same as the first file",
+    "Titolo del risultato:": "Result title:",
+    "Autore del risultato:": "Result author:",
     "Fai clic su una pagina per iniziare lì una nuova parte (o togliere il taglio)": "Click a page to start a new part there (or remove the cut)",
     "Parte {k}": "Part {k}",
     "Esclusa": "Excluded",
@@ -1146,6 +1149,14 @@ class MergeDialog(BaseDialog):
         for cb in (self.bookmarks, self.keep_bookmarks, self.keep_annots, self.blank_odd, self.alternate,
                    self.alternate_reverse):
             self.layout_.addWidget(cb)
+        meta_form = QFormLayout()
+        self.meta_title = QLineEdit()
+        self.meta_title.setPlaceholderText(_("come il primo file"))
+        self.meta_author = QLineEdit()
+        self.meta_author.setPlaceholderText(_("come il primo file"))
+        meta_form.addRow(_("Titolo del risultato:"), self.meta_title)
+        meta_form.addRow(_("Autore del risultato:"), self.meta_author)
+        self.layout_.addLayout(meta_form)
         self.rb_open = QRadioButton(_("Apri il risultato in una nuova scheda"))
         self.rb_save = QRadioButton(_("Salva direttamente su file"))
         self.rb_open.setChecked(True)
@@ -1278,6 +1289,7 @@ class MergeDialog(BaseDialog):
         return {"entries": self.entries(), "bookmarks": self.bookmarks.isChecked(),
                 "keep_bookmarks": self.keep_bookmarks.isChecked(), "annots": self.keep_annots.isChecked(),
                 "blank_after_odd": self.blank_odd.isChecked(), "open": self.rb_open.isChecked(),
+                "metadata_update": {"title": self.meta_title.text().strip(), "author": self.meta_author.text().strip()},
                 "alternate": self.alternate.isChecked(), "alternate_reverse": self.alternate_reverse.isChecked()}
 
 
@@ -1297,7 +1309,8 @@ def open_merge_dialog(ctx, view=None, selected=None, paths: list[str] | None = N
                                      password_b=b.password)
         return E.merge_files(o["entries"], bookmarks=o["bookmarks"], keep_bookmarks=o["keep_bookmarks"],
                              annots=o["annots"], widgets=o["annots"], blank_after_odd=o["blank_after_odd"],
-                             progress=lambda f, t: progress.update(f, t), errors=errors)
+                             progress=lambda f, t: progress.update(f, t), errors=errors,
+                             metadata_update=o["metadata_update"])
     try:
         data = ctx.run_task(_("Unione in corso…"), work)
     except FoliantError as e:

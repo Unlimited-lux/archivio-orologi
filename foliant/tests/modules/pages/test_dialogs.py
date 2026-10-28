@@ -424,3 +424,18 @@ def test_split_preview_colors_and_click_cuts(window, ten_pdf):
     assert "3 file" in dlg.preview.text()
     dlg._toggle_cut(dlg.strip.item(5))          # toglie il taglio prima della pagina 6
     assert dlg.ranges.text() == "1-2; 3-10"
+
+
+def test_merge_custom_metadata(window, accept, tmp_path):
+    """PAG-24: metadati del risultato dal primo file o personalizzati."""
+    a = tmp_path / "A.pdf"
+    d = pymupdf.open()
+    d.new_page()
+    d.set_metadata({"title": "Contratto", "author": "Verdi", "subject": "Rolex"})
+    d.save(str(a))
+    b = save_numbered(tmp_path / "B.pdf", 1, prefix="B")
+    accept(lambda dlg: (dlg.add_path(b), dlg.meta_title.setText("Dossier cliente")))
+    assert D.open_merge_dialog(window.ctx, paths=[str(a)])
+    with E.ENGINE_LOCK:
+        meta = window.current_view().document.pdf.metadata
+    assert meta["title"] == "Dossier cliente" and meta["author"] == "Verdi" and meta["subject"] == "Rolex"
