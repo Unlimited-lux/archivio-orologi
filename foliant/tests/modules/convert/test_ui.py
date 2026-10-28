@@ -697,14 +697,10 @@ def test_compress_document_reduction_survives_save(window, ctrl, tmp_path, monke
 def test_export_uses_thumbnail_selection(window, ctrl, twenty_pages, tmp_path, monkeypatch, messages):
     view = window.open_path(twenty_pages)
 
-    class FakeThumbs:
-        def __init__(self, v):
-            self.view = v
-
-        def selected_pages(self):
-            return [1, 4, 6]
-
-    monkeypatch.setitem(window._sidebar, "thumbnails", ("Miniature", "x", FakeThumbs(view), 10, None))
+    previous = window.selected_pages_provider
+    window.ctx.set_selected_pages_provider(lambda v: [1, 4, 6] if v is view else [])
+    monkeypatch.setattr(window, "selected_pages_provider", window.selected_pages_provider)
+    _ = previous
 
     def fake_exec(dlg):
         assert dlg.selected == [1, 4, 6]
