@@ -638,11 +638,23 @@ def ask_transform(parent):
 
 
 class AdjustDialog(QDialog):
-    def __init__(self, parent, occurrences: int):
+    def __init__(self, parent, occurrences: int, preview_png: bytes | None = None):
         super().__init__(parent)
         self.setWindowTitle(_("Regola immagine"))
         lay = QFormLayout(self)
         self.sliders = {}
+        self.preview = QLabel()
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setMinimumSize(240, 160)
+        self._base = None
+        if preview_png:
+            try:
+                from .imaging import preview_base
+                self._base = preview_base(preview_png)
+            except Exception:
+                self._base = None
+        if self._base is not None:
+            lay.addRow(self.preview)
         from PySide6.QtWidgets import QSlider
         for key, text in (("brightness", _("Luminosità:")), ("contrast", _("Contrasto:")),
                           ("saturation", _("Saturazione:"))):
@@ -659,6 +671,11 @@ class AdjustDialog(QDialog):
         reset.clicked.connect(lambda: [sl.setValue(0) for sl in self.sliders.values()])
         for w in (self.gray, self.invert, self.all, reset):
             lay.addRow("", w)
+        for sl in self.sliders.values():
+            sl.valueChanged.connect(self.update_preview)
+        self.gray.toggled.connect(self.update_preview)
+        self.invert.toggled.connect(self.update_preview)
+        self.update_preview()
         bb = button_box()
         bb.button(QDialogButtonBox.StandardButton.Ok).setText(_("Applica"))
         bb.accepted.connect(self.accept)
@@ -671,9 +688,22 @@ class AdjustDialog(QDialog):
                  all_occurrences=self.all.isChecked())
         return v
 
+    def update_preview(self, *_a) -> None:
+        if self._base is None:
+            return
+        from PySide6.QtGui import QImage, QPixmap
+        from .imaging import preview_adjusted
+        v = self.values()
+        v.pop("all_occurrences")
+        arr = preview_adjusted(self._base, **v)
+        h, w = arr.shape[:2]
+        self._preview_arr = arr
+        img = QImage(arr.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+        self.preview.setPixmap(QPixmap.fromImage(img))
 
-def ask_adjust(parent, occurrences: int):
-    dlg = AdjustDialog(parent, occurrences)
+
+def ask_adjust(parent, occurrences: int, preview_png: bytes | None = None):
+    dlg = AdjustDialog(parent, occurrences, preview_png)
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return None
     return dlg.values()

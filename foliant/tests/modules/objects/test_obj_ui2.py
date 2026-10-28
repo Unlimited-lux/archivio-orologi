@@ -202,7 +202,7 @@ def test_image_tools_actions(ui, tmp_path, monkeypatch):
     from foliant.modules.objects import dialogs as D
     view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 150, 120)], paths=[(300, 300, 400, 380)]))
     ui.c.set_selection(view, 0, [0])
-    monkeypatch.setattr(D, "ask_adjust", lambda parent, n: dict(grayscale=True))
+    monkeypatch.setattr(D, "ask_adjust", lambda parent, n, *a: dict(grayscale=True))
     O._state["actions"]["adjust"].trigger()
     with O.ENGINE_LOCK:
         o = objs(view)[0]
@@ -630,3 +630,16 @@ def test_link_dialog_new_named_destination_from_view(ui, tmp_path, monkeypatch):
     assert xref
     with O.ENGINE_LOCK:
         assert L.named_destinations(view.document.pdf)["listino"]["page"] == 2
+
+
+def test_adjust_dialog_live_preview(ui, tmp_path):
+    from foliant.modules.objects import dialogs as D
+    dlg = D.AdjustDialog(None, 1, png_bytes(40, 20, (200, 30, 30)))
+    before = dlg._preview_arr.copy()
+    assert not dlg.preview.pixmap().isNull()
+    dlg.gray.setChecked(True)
+    after = dlg._preview_arr
+    assert (after[..., 0] == after[..., 1]).all() and (after != before).any()
+    dlg.gray.setChecked(False)
+    dlg.sliders["brightness"].setValue(50)
+    assert dlg._preview_arr.mean() > before.mean()

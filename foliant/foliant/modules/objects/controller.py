@@ -569,7 +569,13 @@ class ObjectsController(QObject):
         if o.xref:
             with ENGINE_LOCK:
                 occ = len(E.image_occurrences(view.document.pdf, o.xref))
-        vals = D.ask_adjust(self.ctx.window, occ)
+        preview = None
+        try:
+            with ENGINE_LOCK:
+                preview = E.extract_image(view.document.pdf, o, "png").data
+        except Exception:
+            preview = None
+        vals = D.ask_adjust(self.ctx.window, occ, preview)
         if vals is None:
             return
         page = self.sel_page
