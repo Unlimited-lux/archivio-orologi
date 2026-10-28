@@ -207,6 +207,7 @@ class PrintController:
         ctx.add_menu_action(self.action, _("File"))
         ctx.currentViewChanged.connect(lambda _v: self.update_state())
         ctx.documentChanged.connect(lambda _v: self.update_state())
+        ctx.documentAccessChanged.connect(lambda _v: self.update_state())   # sblocco/blocco (SEC-02)
         self.update_state()
 
     # ------------------------------------------------------------------ stato

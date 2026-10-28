@@ -116,3 +116,23 @@ def iou(a, b) -> float:
     if inter.is_empty:
         return 0.0
     return abs(inter) / (abs(a) + abs(b) - abs(inter))
+
+
+def unextractable_pdf(path, text="Contratto di vendita orologio numero 42"):
+    """PDF con testo visibile in un font la cui /ToUnicode punta all'area d'uso privato:
+    la copia produce caratteri illeggibili (testo non estraibile)."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    font = pymupdf.Font(fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    tw = pymupdf.TextWriter(page.rect)
+    tw.append((72, 100), text, font=font, fontsize=14)
+    tw.append((72, 130), text, font=font, fontsize=14)
+    tw.write_text(page)
+    fx = [f[0] for f in doc.get_page_fonts(0)][0]
+    tu = doc.xref_get_key(fx, "ToUnicode")[1].split()[0]
+    cmap = ("/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /X def "
+            "1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfrange <0000> <FFFF> <E000> "
+            "endbfrange endcmap CMapName currentdict /CMap defineresource pop end end")
+    doc.update_stream(int(tu), cmap.encode())
+    doc.save(str(path))
+    return str(path)

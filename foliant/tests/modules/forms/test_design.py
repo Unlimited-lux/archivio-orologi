@@ -513,6 +513,7 @@ def test_signature_field_blank_appearance(window, tmp_path, rotation):
         ap = int(doc.xref_get_key(x, "AP/N")[1].split()[0])
         stream = doc.xref_stream(ap)
         assert b"SIGN" not in stream and b"Tj" not in stream and b"Do" not in stream
+        assert b" RG 1 w " in stream and b"re S" in stream  # bordo /MK /BC con /BS /W anche senza rotazione
         assert doc.xref_get_key(ap, "Resources") == ("dict", "<<>>")
         bbox = ps.parse(doc.xref_get_key(ap, "BBox")[1])
         assert sorted(bbox[2:]) == [40, 150]  # dimensioni del riquadro

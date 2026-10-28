@@ -363,14 +363,100 @@ def recognize_array(img: np.ndarray, languages: list[str], dpi: float, popts: Pr
     return lines, prep, color
 
 
-def _render_job(pdf: pymupdf.Document, index: int, opts: OcrOptions) -> tuple[PageResult, np.ndarray | None]:
+def _render_job(pdf: pymupdf.Document, index: int, opts: OcrOptions,
+                renderer=None) -> tuple[PageResult, np.ndarray | None]:
+    """Classifica la pagina e la rende. Con `renderer` (processo separato) la resa avviene senza
+    tenere ENGINE_LOCK: l'interfaccia non si blocca mentre l'OCR lavora in background."""
+    res, page_needed = _classify_job(pdf, index, opts)
+    if not page_needed:
+        return res, None
+    if renderer is not None:
+        try:
+            img, zoom, notes = renderer(index, opts.dpi)
+            res.zoom = zoom
+            res.notes[:0] = notes
+            return res, img
+        except _RenderLocally:
+            pass
+    with ENGINE_LOCK:
+        img, zoom, notes = render_page(pdf[index], opts.dpi)
+    res.zoom = zoom
+    res.notes[:0] = notes
+    return res, img
+
+
+class ProcessRenderer:
+    """Resa delle pagine in un processo separato (`render_worker`), per non tenere ENGINE_LOCK nel
+    processo dell'interfaccia durante l'OCR in background. Se il processo non parte o si guasta,
+    la resa torna locale (con il lock)."""
+
+    def __init__(self, data: bytes):
+        import subprocess
+        import sys
+        import tempfile
+        self.proc = None
+        self.path = None
+        try:
+            fd, self.path = tempfile.mkstemp(prefix="foliant-ocr-", suffix=".pdf")
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            env = dict(os.environ)
+            env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+            self.proc = subprocess.Popen([sys.executable, "-m", "foliant.modules.ocr.render_worker", self.path],
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL, env=env, cwd=root)
+        except Exception:
+            self.close()
+
+    def __call__(self, index: int, dpi: int):
+        import json
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.stdin.write(f"{index} {int(dpi)}\n".encode())
+                self.proc.stdin.flush()
+                header = json.loads(self.proc.stdout.readline().decode("utf-8"))
+                if "error" not in header:
+                    n = header["h"] * header["w"] * header["c"]
+                    buf = self.proc.stdout.read(n)
+                    if len(buf) == n:
+                        shape = (header["h"], header["w"]) if header["c"] == 1 else \
+                            (header["h"], header["w"], header["c"])
+                        img = np.frombuffer(buf, np.uint8).reshape(shape).copy()
+                        return img, float(header["zoom"]), list(header.get("notes", []))
+            except Exception:
+                self.close()
+        raise _RenderLocally()
+
+    def close(self) -> None:
+        if self.proc is not None:
+            try:
+                self.proc.stdin.close()
+                self.proc.kill()
+                self.proc.wait(timeout=5)
+            except Exception:
+                pass
+            self.proc = None
+        if self.path:
+            try:
+                os.unlink(self.path)
+            except OSError:
+                pass
+            self.path = None
+
+
+class _RenderLocally(Exception):
+    pass
+
+
+def _classify_job(pdf: pymupdf.Document, index: int, opts: OcrOptions) -> tuple[PageResult, bool]:
     with ENGINE_LOCK:
         page = pdf[index]
         info = detect.classify_page(page)
         res = PageResult(index=index, category=info.category, page_rotation=page.rotation)
         if info.category == detect.EMPTY:
             res.status, res.message = "skipped", _("pagina vuota")
-            return res, None
+            return res, False
         # in modalità modificabile un livello OCR invisibile viene sempre convertito (OCR-06);
         # con «sostituisci» il livello invisibile viene rifatto (OCR-14)
         redo_layer = info.category == detect.OCR_LAYER and (opts.mode == EDITABLE or opts.existing_text == REPLACE)
@@ -379,23 +465,25 @@ def _render_job(pdf: pymupdf.Document, index: int, opts: OcrOptions) -> tuple[Pa
             res.message = _("livello OCR presente") if info.category == detect.OCR_LAYER else _("testo presente")
             if opts.mode == TEXT_ONLY:
                 res.existing_text = page.get_text("text", sort=True)
-            return res, None
+            return res, False
+        if info.category == detect.UNEXTRACTABLE and opts.existing_text != FORCE and opts.mode != TEXT_ONLY:
+            # convertire il testo non estraibile è distruttivo (la pagina diventa immagine): solo con «Forza OCR»
+            res.status = "skipped"
+            res.message = _("testo non estraibile: scegli «Forza OCR» per riconoscerlo")
+            return res, False
         res.remove_layer = redo_layer
         res.rasterize = info.category in (detect.TEXT, detect.UNEXTRACTABLE) or (
             info.category == detect.OCR_LAYER and not redo_layer)
         res.mixed = info.category == detect.MIXED and opts.existing_text != FORCE
         if info.category == detect.MIXED and opts.existing_text == FORCE:
             res.rasterize = True
-        img, zoom, notes = render_page(page, opts.dpi)
-        res.zoom = zoom
-        res.notes.extend(notes)
         if info.low_resolution:
             res.notes.append(_("Risoluzione bassa ({d} dpi): accuratezza ridotta.").format(d=int(info.dpi)))
         if res.mixed:
             # area del testo vettoriale esistente in coordinate visualizzate
             m = placement.page_to_display_matrix(page)
             res.patches = [("text", tuple(pymupdf.Rect(r) * m)) for r in info.text_rects]
-        return res, img
+        return res, True
 
 
 def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Callable[[], bool]) -> PageResult:
@@ -455,7 +543,7 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
 
 
 def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int] | None = None,
-                       progress=None) -> OcrResult:
+                       progress=None, render_data: bytes | None = None) -> OcrResult:
     """Riconosce le pagine indicate (tutte se None). Non modifica il documento.
 
     Le pagine vengono rese una alla volta tenendo ENGINE_LOCK e riconosciute in
@@ -491,6 +579,7 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
             progress.update(done / len(indices), text)
 
     workers = min(opts.worker_count(), len(indices))
+    renderer = ProcessRenderer(render_data) if render_data is not None else None
     results: dict[int, PageResult] = {}
     done = 0
     report(0, _("Riconoscimento della pagina {n} di {t}…").format(n=1, t=len(indices)))
@@ -527,7 +616,7 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
                     if cancelled():
                         raise OcrCancelled()
                     try:
-                        res, img = _render_job(pdf, index, opts)
+                        res, img = _render_job(pdf, index, opts, renderer)
                     except Exception as e:
                         res, img = PageResult(index=index, status="failed",
                                               message=_("Impossibile leggere la pagina: {e}").format(e=e)), None
@@ -562,6 +651,9 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
     except BaseException:
         cancel_event.set()
         raise
+    finally:
+        if renderer is not None:
+            renderer.close()
     result.pages = [results[i] for i in indices if i in results]
     return result
 

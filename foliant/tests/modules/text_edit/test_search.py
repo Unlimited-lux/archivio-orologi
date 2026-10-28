@@ -412,3 +412,124 @@ def test_delete_without_recompose_keeps_positions(tmp_path):
     for word in ("Prima", "dopo", "la", "parola", "Seconda", "intatta"):
         assert abs(after[word][0] - before[word][0]) <= 0.5 and abs(after[word][1] - before[word][1]) <= 0.5
     assert d.undo() and "BOZZA" in d.page_text(0)
+
+
+INVOICE_HTML = """<html><body style="font-family:Carlito; font-size:11pt">
+<h2>Orologeria Verdi — Fattura n. 42</h2>
+<table width="100%" cellpadding="2" style="border-collapse:collapse{border}">
+<colgroup><col width="55%"><col width="15%"><col width="30%"></colgroup>
+<tr><td{cell}>Descrizione</td><td{cell}>Q.tà</td><td{cell} align="right">Prezzo</td></tr>
+<tr><td{cell}>Revisione e lucidatura</td><td{cell}>1</td><td{cell} align="right">€ 350,00</td></tr>
+<tr><td{cell}>Rolex Submariner 16610 con garanzia</td><td{cell}>1</td><td{cell} align="right">€ 9.500,00</td></tr>
+<tr><td{cell}>Spedizione assicurata</td><td{cell}>1</td><td{cell} align="right">€ 100,00</td></tr>
+</table>
+<p style="text-align:justify; margin-top:0">Totale documento: € 9.950,00 — il pagamento è dovuto entro trenta
+giorni dalla data della fattura. Pagamento mediante bonifico bancario sulle coordinate indicate in calce,
+salvo diversi accordi scritti tra le parti e fatte salve le condizioni generali di vendita.</p>
+</body></html>"""
+
+
+@pytest.mark.parametrize("bordered", [False, True])
+def test_invoice_replace_keeps_table_and_justification(tmp_path, bordered):
+    """Fattura da LibreOffice: «9.950,00» → «9.960,00» non sposta le celle della tabella e il
+    paragrafo resta giustificato con le stesse linee di base."""
+    import shutil
+    import subprocess
+    import pymupdf as _pm
+    from foliant.api import Document as _Doc
+    from foliant.modules.text_edit import analysis as _an
+    from foliant.modules.text_edit import search as _search
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        pytest.skip("LibreOffice non disponibile")
+    html = INVOICE_HTML.replace("{border}", "; border:1px solid black" if bordered else "") \
+        .replace("{cell}", ' style="border:1px solid black"' if bordered else "")
+    src = tmp_path / "fattura.html"
+    src.write_text(html, encoding="utf-8")
+    subprocess.run([soffice, "--headless", f"-env:UserInstallation=file://{tmp_path}/lo", "--convert-to",
+                    "pdf:writer_pdf_Export", "--outdir", str(tmp_path), str(src)],
+                   capture_output=True, timeout=180)
+    pdf_path = tmp_path / "fattura.pdf"
+    if not pdf_path.exists():
+        pytest.skip("conversione LibreOffice non riuscita")
+    d = _Doc.open(str(pdf_path))
+    with d.lock:
+        page = d.pdf[0]
+        before_words = {(w[4], round(w[1])): w[:4] for w in page.get_text("words")}
+        para = [b for b in _an.analyze_page(page, 0) if "Totale" in b.text][0]
+        assert not any("Revisione" in ln.text for ln in para.lines)
+        assert para.align == "justify"
+        old_lines = [(round(ln.baseline, 2), round(ln.bbox.x1, 1)) for ln in para.lines]
+    s = _search.replace_all(d, "9.950,00", "9.960,00", _search.SearchOptions(case_sensitive=True))
+    assert s.replaced == 1
+    with d.lock:
+        page = d.pdf[0]
+        after_words = {(w[4], round(w[1])): w[:4] for w in page.get_text("words")}
+        new_para = [b for b in _an.analyze_page(page, 0) if "Totale" in b.text][0]
+    for key, r in before_words.items():
+        if r[1] < para.bbox.y0 - 1:          # parole della tabella e dell'intestazione: invariate
+            assert key in after_words, key
+            assert abs(after_words[key][0] - r[0]) < 0.2, key
+    new_lines = [(round(ln.baseline, 2), round(ln.bbox.x1, 1)) for ln in new_para.lines]
+    assert [b for b, _x in new_lines] == [b for b, _x in old_lines]
+    assert new_para.align == "justify"
+    for (b0, x0), (b1, x1) in zip(old_lines[:-1], new_lines[:-1]):
+        assert abs(x1 - x0) <= 0.6
+
+
+@pytest.mark.parametrize("rule", [False, True])
+def test_invoice_row_just_above_justified_paragraph(tmp_path, rule):
+    """Riga di tabella (cella «1» a 140 pt) subito sopra un paragrafo giustificato, con o senza filetto:
+    la sostituzione nel paragrafo non riscrive la cella e mantiene la giustificazione."""
+    import pymupdf as _pm
+    from foliant.api import Document as _Doc
+    from foliant.modules.text_edit import analysis as _an
+    from foliant.modules.text_edit import search as _search
+    from foliant.modules.text_edit.layout import Composer
+    from foliant.modules.text_edit.fonts import FontResolver
+    from foliant.modules.text_edit.model import Run, Style
+    carlito = "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf"
+    import os
+    fontfile = carlito if os.path.exists(carlito) else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    doc = _pm.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_font(fontname="F1", fontfile=fontfile)
+    f = _pm.Font(fontfile=fontfile)
+    page.insert_text((58.2, 95), "Revisione e lucidatura", fontname="F1", fontsize=11)
+    page.insert_text((58.2 + f.text_length("Revisione e lucidatura", 11) + 140, 95), "1", fontname="F1", fontsize=11)
+    price = "€ 350,00"
+    page.insert_text((569.5 - f.text_length(price, 11), 95), price, fontname="F1", fontsize=11)
+    if rule:
+        page.draw_line((56, 99), (570, 99), width=0.5)
+    path = tmp_path / "riga.pdf"
+    doc.save(str(path))
+    d = _Doc.open(str(path))
+    text = ("Totale documento: € 9.950,00 — il pagamento è dovuto entro trenta giorni dalla data della "
+            "fattura. Pagamento mediante bonifico bancario sulle coordinate indicate in calce, salvo diversi "
+            "accordi scritti tra le parti e fatte salve le condizioni generali di vendita indicate sul sito.")
+    st = Style(font=f.name, size=11)
+    from foliant.modules.text_edit import engine as _engine
+    with d.change("Paragrafo") as pdf:
+        _engine.add_text(pdf, 0, _pm.Point(56.8, 98.5), [[Run(text, st)]], width=512.7, align="justify",
+                         leading=13.4)
+    d._saved_state = d._state
+    with d.lock:
+        page = d.pdf[0]
+        para = [b for b in _an.analyze_page(page, 0) if "Totale" in b.text][0]
+        row = {w[4]: w[:4] for w in page.get_text("words") if w[3] < 100}
+    assert not any("Revisione" in ln.text for ln in para.lines)
+    assert para.align == "justify" and len(para.lines) >= 3
+    old = [(round(ln.baseline, 2), round(ln.bbox.x1, 1)) for ln in para.lines]
+    s = _search.replace_all(d, "9.950,00", "9.960,00", _search.SearchOptions(case_sensitive=True))
+    assert s.replaced == 1
+    with d.lock:
+        page = d.pdf[0]
+        new_para = [b for b in _an.analyze_page(page, 0) if "Totale" in b.text][0]
+        row_after = {w[4]: w[:4] for w in page.get_text("words") if w[3] < 100}
+    for word, r in row.items():
+        assert word in row_after and abs(row_after[word][0] - r[0]) < 0.2 and abs(row_after[word][1] - r[1]) < 0.2
+    new = [(round(ln.baseline, 2), round(ln.bbox.x1, 1)) for ln in new_para.lines]
+    assert [b for b, _x in new] == [b for b, _x in old]
+    assert new_para.align == "justify"
+    for (_b0, x0), (_b1, x1) in zip(old[:-1], new[:-1]):
+        assert abs(x1 - x0) <= 0.6

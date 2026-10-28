@@ -509,3 +509,51 @@ def test_foto_in_prospettiva(tmp_path):
         for b in d[0].get_text("dict")["blocks"]:
             for ln in b.get("lines", []):
                 assert abs(ln["dir"][1]) < 0.01                    # righe orizzontali
+
+
+def test_testo_non_estraibile_solo_con_forza_ocr(tmp_path):
+    """OCR-14: le pagine con testo non estraibile non si convertono in immagine senza «Forza OCR»;
+    con «Forza OCR» il testo diventa estraibile; in «solo testo» vengono riconosciute (non distruttivo)."""
+    from .conftest import unextractable_pdf
+    data = open(unextractable_pdf(tmp_path / "u.pdf"), "rb").read()
+    with pymupdf.open(stream=data) as pdf:
+        assert detect.classify_page(pdf[0]).category == detect.UNEXTRACTABLE
+        skipped = engine.recognize_document(pdf, engine.OcrOptions(languages=["ita"])).pages[0]
+        assert skipped.status == "skipped" and "Forza OCR" in skipped.message
+        text_only = engine.recognize_document(pdf, engine.OcrOptions(languages=["ita"], mode=engine.TEXT_ONLY))
+        assert "orologio" in text_only.pages[0].text
+    out = engine.ocr_pdf_bytes(data, ["ita"], "searchable", options=engine.OcrOptions(existing_text=engine.FORCE))
+    with pymupdf.open(stream=out) as d:
+        assert "Contratto di vendita orologio" in d[0].get_text()
+    same = engine.ocr_pdf_bytes(data, ["ita"], "searchable")
+    with pymupdf.open(stream=data) as a, pymupdf.open(stream=same) as b:
+        assert b"".join(a.xref_stream(x) for x in a[0].get_contents()) == \
+            b"".join(b.xref_stream(x) for x in b[0].get_contents())
+
+
+def test_resa_in_processo_separato_senza_lock(tmp_path):
+    """L'OCR in background rende le pagine in un altro processo: il lock del motore resta libero."""
+    import threading
+    import time
+    from foliant.core.engine import ENGINE_LOCK
+    data = open(image_pdf(tmp_path / "r.pdf", [scan_image(lines=FRASI[:3], dpi=200)] * 2, dpi=200), "rb").read()
+    waits = []
+    stop = threading.Event()
+
+    def probe():
+        while not stop.is_set():
+            t = time.monotonic()
+            with ENGINE_LOCK:
+                pass
+            waits.append(time.monotonic() - t)
+            time.sleep(0.005)
+    th = threading.Thread(target=probe)
+    th.start()
+    try:
+        with pymupdf.open(stream=data) as pdf:
+            res = engine.recognize_document(pdf, engine.OcrOptions(languages=["ita"]), render_data=data)
+    finally:
+        stop.set()
+        th.join()
+    assert len(res.recognized) == 2 and "compravendita" in res.pages[1].text
+    assert max(waits) < 0.06, max(waits)

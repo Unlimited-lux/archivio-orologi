@@ -337,9 +337,15 @@ def test_piece_info_preserved(window, tmp_path, quiet, qtbot):
     assert "AltroProgramma" in re.xref_get_key(re[0].xref, "PieceInfo")[1]
 
 
-def test_scanned_page_suggests_ocr(window, scanned_pdf, quiet, qtbot):
+def test_scanned_page_suggests_ocr(window, tmp_path, quiet, qtbot):
+    from .conftest import render_text_image
+    doc = pymupdf.open()
+    doc.new_page(width=595, height=842).insert_image(
+        pymupdf.Rect(0, 0, 595, 842), stream=render_text_image("Contratto 2019", size=(794, 1123), fontsize=60))
+    path = tmp_path / "scansione_testo.pdf"
+    doc.save(str(path))
     quiet["answer"] = False
-    view = open_in_edit_mode(window, scanned_pdf)
+    view = open_in_edit_mode(window, str(path))
     click(qtbot, view, 0, 200, 150)
     assert any("OCR" in m for m in quiet["status"])
     assert any("scansione" in m for _t, m in quiet["confirms"])
@@ -690,3 +696,16 @@ def test_shared_content_this_or_all_pages(window, tmp_path, quiet, qtbot, all_pa
         assert ("2026" in texts[i]) == all_pages
     view.document.undo()
     assert all("2024" in view.document.page_text(i) for i in range(3))
+
+
+def test_no_ocr_proposal_for_small_image(window, tmp_path, quiet, qtbot):
+    """Pagina «vuota» con una piccola immagine (logo): nessuna proposta di OCR."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20), False)
+    pix.clear_with(120)
+    page.insert_image(pymupdf.Rect(50, 50, 90, 90), pixmap=pix)
+    path = tmp_path / "logo.pdf"
+    doc.save(str(path))
+    open_in_edit_mode(window, str(path))
+    assert not any("scansione" in m for _t, m in quiet["confirms"])

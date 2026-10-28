@@ -720,3 +720,14 @@ def test_rtl_value_appearance():
     y = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 350, 122), "ar")
     E.set_value(pdf, 0, y, "مرحبا")
     assert E.field_info(pdf, 0, y).value == "مرحبا"
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_blank_signature_appearance_has_border(rotation):
+    """Il campo firma vuoto ha nel file sfondo e bordo (/MK /BC, /BS /W), su pagine ruotate e no."""
+    pdf = pymupdf.open()
+    pdf.new_page().set_rotation(rotation)
+    x = E.create_field(pdf, 0, E.SIGNATURE, pymupdf.Rect(50, 50, 250, 100), "Firma")
+    stream = pdf.xref_stream(int(pdf.xref_get_key(x, "AP/N")[1].split()[0]))
+    assert b"0.45 0.5 0.58 RG 1 w" in stream and b"re S" in stream
+    assert b"1 1 1 rg" in stream
