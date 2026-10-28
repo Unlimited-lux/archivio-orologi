@@ -157,6 +157,9 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Pagine acquisite": "Scanned pages",
+    "Ruota": "Rotate",
+    "Acquisisci ancora": "Scan more",
     "Inserisci campo": "Insert field",
     "Esempio: {f}": "Example: {f}",
     "Capitolo": "Chapter",
@@ -1484,7 +1487,8 @@ def scanned_to_pdf(images: list[bytes], dpi: int, discard_blank: bool = False) -
 
     Con `discard_blank` le facciate vuote (es. retri bianchi) vengono scartate."""
     out = pymupdf.open()
-    for data in images:
+    for item in images:
+        data, rotation = item if isinstance(item, tuple) else (item, 0)
         if discard_blank:
             tmp = pymupdf.open()
             pix = pymupdf.Pixmap(data)
@@ -1498,6 +1502,8 @@ def scanned_to_pdf(images: list[bytes], dpi: int, discard_blank: bool = False) -
         w, h = pix.width * 72.0 / dpi, pix.height * 72.0 / dpi
         page = out.new_page(width=w, height=h)
         page.insert_image(page.rect, stream=data)
+        if rotation % 360:
+            page.set_rotation(rotation % 360)
     return out
 
 
@@ -1548,6 +1554,77 @@ class ScannerDialog(BaseDialog):
             settings.setValue(f"pages/scan_{key}", o[key])
 
 
+class ScanReviewDialog(BaseDialog):
+    """Facciate acquisite in anteprima: ruota, elimina, acquisisci ancora, poi inserisci (PAG-10)."""
+
+    def __init__(self, parent, images: list[bytes], scan_more=None):
+        super().__init__(parent, _("Pagine acquisite"), _("Inserisci"))
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QListView, QListWidget
+        self.pages: list[list] = [[d, 0] for d in images]
+        self.scan_more = scan_more
+        self.list = QListWidget()
+        self.list.setViewMode(QListView.ViewMode.IconMode)
+        self.list.setIconSize(QSize(110, 150))
+        self.list.setMovement(QListView.Movement.Static)
+        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.list.setMinimumSize(520, 300)
+        self.layout_.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        for text, ic, slot in ((_("Ruota"), "rotate-cw", self.rotate), (_("Elimina"), "trash-2", self.remove),
+                               (_("Acquisisci ancora"), "scan", self.more)):
+            b = QPushButton(icon(ic), text)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        self.more_button = row.itemAt(2).widget()
+        self.more_button.setEnabled(scan_more is not None)
+        row.addStretch(1)
+        self.layout_.addLayout(row)
+        self.finish_layout()
+        self.refresh()
+
+    def refresh(self) -> None:
+        from PySide6.QtGui import QIcon, QImage, QPixmap, QTransform
+        from PySide6.QtWidgets import QListWidgetItem
+        self.list.clear()
+        for n, (data, rot) in enumerate(self.pages, 1):
+            img = QImage.fromData(data)
+            if not img.isNull():
+                img = img.scaled(220, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                if rot:
+                    img = img.transformed(QTransform().rotate(rot))
+            self.list.addItem(QListWidgetItem(QIcon(QPixmap.fromImage(img)), str(n)))
+        self.set_error(None if self.pages else _("Nessuna pagina da inserire."))
+
+    def selected_rows(self) -> list[int]:
+        rows = sorted({i.row() for i in self.list.selectedIndexes()})
+        return rows or ([len(self.pages) - 1] if self.pages else [])
+
+    def rotate(self) -> None:
+        for r in self.selected_rows():
+            self.pages[r][1] = (self.pages[r][1] + 90) % 360
+        self.refresh()
+
+    def remove(self) -> None:
+        for r in reversed(self.selected_rows()):
+            del self.pages[r]
+        self.refresh()
+
+    def more(self) -> None:
+        if self.scan_more is None:
+            return
+        try:
+            new = self.scan_more()
+        except FoliantError as e:   # dispositivo scollegato: le pagine già acquisite restano
+            self.set_note(str(e))
+            return
+        self.pages += [[d, 0] for d in new or []]
+        self.refresh()
+
+    def result_pages(self) -> list[tuple[bytes, int]]:
+        return [(d, r) for d, r in self.pages]
+
+
 def open_scanner_dialog(ctx, view, selected: list[int]) -> bool:
     devices = list_scanners()
     if not devices:
@@ -1559,14 +1636,19 @@ def open_scanner_dialog(ctx, view, selected: list[int]) -> bool:
         return False
     dlg.save_preset(ctx.settings())
     o = dlg.options()
+    def acquire():
+        return ctx.run_task(_("Acquisizione in corso…"),
+                            lambda progress: scan_pages(o["device"], o["dpi"], o["mode"], batch=o["batch"]))
     try:
-        images = ctx.run_task(_("Acquisizione in corso…"),
-                              lambda progress: scan_pages(o["device"], o["dpi"], o["mode"], batch=o["batch"]))
+        images = acquire()
     except FoliantError as e:
         ctx.error(_("Acquisizione da scanner"), str(e))
         return False
+    review = ScanReviewDialog(ctx.window, images, scan_more=acquire)
+    if not _exec(review) or not review.pages:
+        return False   # annullamento: documento invariato
     at = dlg.position.index(selected, view.page_count)
-    src = scanned_to_pdf(images, o["dpi"], o["discard"])
+    src = scanned_to_pdf(review.result_pages(), o["dpi"], o["discard"])
     if src.page_count == 0:
         src.close()
         ctx.info(_("Acquisizione da scanner"), _("Tutte le pagine acquisite erano vuote."))
