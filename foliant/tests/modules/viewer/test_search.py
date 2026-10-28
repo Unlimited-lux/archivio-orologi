@@ -202,3 +202,21 @@ def test_phrase_continuing_on_next_page(viewer_window, tmp_path):
 def test_hyphenated_word_across_pages(viewer_window, tmp_path):
     viewer_window.open_path(_pdf(tmp_path, [["una infor-"], ["mazione utile"]]))
     assert _ctl(viewer_window).search("informazione") == 1
+
+
+def test_search_also_in_comments(viewer_window, tmp_path):
+    path = tmp_path / "commenti.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Testo della pagina", fontsize=12)
+    page.add_text_annot((300, 300), "Da verificare con il cliente")
+    doc.new_page()
+    doc.save(str(path))
+    view = viewer_window.open_path(str(path))
+    ctl = _ctl(viewer_window)
+    assert ctl.search("verificare", comments=False) == 0
+    assert ctl.search("verificare", comments=True) == 1
+    hit = ctl.hits[0]
+    assert hit.comment and hit.page == 0
+    assert "commento" in ctl.panel.tree.topLevelItem(0).child(0).text(0)
+    assert 0 in view.search_hits

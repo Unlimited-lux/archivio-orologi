@@ -701,3 +701,37 @@ def verify_outline(items: list[Bookmark], page_count: int) -> list[tuple[int, st
         seen.setdefault(key, i)
     return problems
 
+
+
+def outline_from_regex(pdf: pymupdf.Document, pattern: str, case_sensitive: bool = False,
+                       progress=None) -> list[Bookmark]:
+    """Segnalibri dalle righe di testo che corrispondono all'espressione regolare (un livello;
+    se l'espressione ha un gruppo chiamato `level` con cifre, quello indica il livello)."""
+    try:
+        rx = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(str(e)) from e
+    out: list[Bookmark] = []
+    for i in range(pdf.page_count):
+        if progress is not None:
+            progress(i / max(1, pdf.page_count))
+        try:
+            data = pdf[i].get_text("dict", sort=True)
+        except Exception:
+            continue
+        for block in data.get("blocks", []):
+            for line in block.get("lines", []):
+                text = " ".join(s.get("text", "").strip() for s in line.get("spans", [])).strip()
+                if not text or len(text) > 200:
+                    continue
+                m = rx.search(text)
+                if not m:
+                    continue
+                level = 1
+                if "level" in rx.groupindex and m.group("level"):
+                    level = max(1, min(6, m.group("level").count(".") + 1))
+                prev = out[-1].level if out else 0
+                level = min(level, prev + 1)
+                out.append(Bookmark(level, text, i, {"kind": pymupdf.LINK_GOTO, "page": i,
+                                                     "to": pymupdf.Point(0, max(0.0, line["bbox"][1] - 10))}))
+    return out

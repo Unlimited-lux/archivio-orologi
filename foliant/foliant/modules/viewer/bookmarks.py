@@ -73,6 +73,10 @@ TRANSLATIONS = {
         "No headings recognised: the document may be a scan (use OCR).",
     "Trovati {n} titoli. Creare i segnalibri?": "Found {n} headings. Create the bookmarks?",
     "Ogni quante pagine?": "Every how many pages?",
+    "Genera da un'espressione regolare…": "Generate from a regular expression…",
+    "Espressione regolare delle righe da usare come titoli:": "Regular expression of the lines to use as titles:",
+    "Espressione regolare non valida: {e}": "Invalid regular expression: {e}",
+    "Nessuna riga corrisponde all'espressione.": "No line matches the expression.",
     "Pagine {a}-{b}": "Pages {a}-{b}",
     "Nessun problema trovato nei segnalibri.": "No problems found in the bookmarks.",
     "{n} segnalibri con problemi:": "{n} bookmarks with problems:",
@@ -190,6 +194,7 @@ class BookmarksPanel(QWidget):
         tools.addSeparator()
         self.act_gen_headings = tools.addAction(_("Genera dai titoli del testo"), lambda: self.generate("headings"))
         self.act_gen_every = tools.addAction(_("Genera ogni N pagine…"), lambda: self.generate("every"))
+        self.act_gen_regex = tools.addAction(_("Genera da un'espressione regolare…"), lambda: self.generate("regex"))
         tools.addSeparator()
         tools.addAction(_("Verifica segnalibri"), self.verify)
         self.tools_button.setMenu(tools)
@@ -349,7 +354,7 @@ class BookmarksPanel(QWidget):
             else:
                 act.setEnabled(has_view and self.editable and sel is not None)
         for act in (getattr(self, "act_import", None), getattr(self, "act_gen_headings", None),
-                    getattr(self, "act_gen_every", None)):
+                    getattr(self, "act_gen_every", None), getattr(self, "act_gen_regex", None)):
             if act is not None:
                 act.setEnabled(has_view and self.editable)
         tip = None if self.editable or not has_view else _("Il documento non consente modifiche: segnalibri in sola lettura.")
@@ -702,7 +707,8 @@ def _bookmark_tools(panel_cls):
             return False
         return self._merge(_("Importa segnalibri"), items, replace)
 
-    def generate(self, method: str, n: int | None = None, replace: bool | None = None) -> bool:
+    def generate(self, method: str, n: int | None = None, replace: bool | None = None,
+                 pattern: str | None = None) -> bool:
         view = self.view
         if view is None or not self.editable:
             return False
@@ -714,6 +720,23 @@ def _bookmark_tools(panel_cls):
                 if not ok:
                     return False
             items = E.outline_every_n(view.page_count, n, _("Pagine {a}-{b}"))
+        elif method == "regex":
+            if pattern is None:
+                from PySide6.QtWidgets import QInputDialog
+                pattern, ok = QInputDialog.getText(self, _("Genera segnalibri"),
+                                                   _("Espressione regolare delle righe da usare come titoli:"),
+                                                   text=r"^(?P<level>\d+(\.\d+)*)\s+\S")
+                if not ok or not pattern.strip():
+                    return False
+            try:
+                with ENGINE_LOCK:
+                    items = E.outline_from_regex(view.document.pdf, pattern)
+            except ValueError as e:
+                self.ctx.error(_("Genera segnalibri"), _("Espressione regolare non valida: {e}").format(e=e))
+                return False
+            if not items:
+                self.ctx.info(_("Genera segnalibri"), _("Nessuna riga corrisponde all'espressione."))
+                return False
         else:
             document = view.document
 

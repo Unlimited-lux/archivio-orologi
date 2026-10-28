@@ -48,6 +48,8 @@ TRANSLATIONS = {
     "Nessun documento aperto": "No document open",
     "Vista": "View",
     "Espressione regolare": "Regular expression",
+    "Cerca anche nei commenti": "Also search comments",
+    "commento": "comment",
     "Espressione non valida: {e}": "Invalid expression: {e}",
     "Esporta i risultati (CSV)…": "Export results (CSV)…",
     "Esporta risultati": "Export results",
@@ -71,12 +73,14 @@ class Hit:
     found: str = ""
     after: str = ""
     cont: tuple | None = None     # (pagina successiva, rettangoli) se la frase prosegue
+    comment: bool = False         # occorrenza nel testo di un commento
 
 
 class SearchJob:
     """Ricerca su tutte le pagine, a partire da `start`, con ripresa dall'inizio."""
 
-    def __init__(self, query: str, opts: SearchOptions, page_count: int, start: int):
+    def __init__(self, query: str, opts: SearchOptions, page_count: int, start: int, get_comments=None):
+        self.get_comments = get_comments   # pagina -> [(testo, riquadro)] se si cerca anche nei commenti
         self.page_count = page_count
         self.query = query
         self.opts = opts
@@ -97,8 +101,16 @@ class SearchJob:
         page = self.order[self.pos]
         self.pos += 1
         pt: PageText = get_text(page)
+        comment_hits = []
+        if self.get_comments is not None:
+            for content, rect in self.get_comments(page):
+                cpt = PageText(content, [pymupdf.Rect(rect)] * len(content), [0] * len(content))
+                for _rects in find_in_page_text(cpt, self.query, self.opts):
+                    comment_hits.append(Hit(page, [pymupdf.Rect(rect)], "", content[:80], "", comment=True))
         if not pt.has_text:
             self.no_text += 1
+            if comment_hits:
+                self.results[page] = comment_hits
             return page
         hits = []
         for rects in find_in_page_text(pt, self.query, self.opts):
@@ -110,6 +122,7 @@ class SearchJob:
                 b, f, _a = context_snippet(pt, ra, width=28)
                 _b, f2, a2 = context_snippet(nxt, rb, width=28)
                 hits.append(Hit(page, ra, b, f + " " + f2, a2, cont=(page + 1, rb)))
+        hits.extend(comment_hits)
         if hits:
             self.results[page] = hits
         return page
@@ -217,8 +230,11 @@ class ResultsPanel(QWidget):
         item.setData(0, Qt.ItemDataRole.UserRole, flat_start)
         for n, h in enumerate(hits):
             child = QTreeWidgetItem(item)
-            child.setText(0, "…" + html.escape(h.before) + "<b>" + html.escape(h.found) + "</b>"
-                          + html.escape(h.after) + "…")
+            if h.comment:
+                child.setText(0, f"<i>[{html.escape(_('commento'))}]</i> " + html.escape(h.found))
+            else:
+                child.setText(0, "…" + html.escape(h.before) + "<b>" + html.escape(h.found) + "</b>"
+                              + html.escape(h.after) + "…")
             child.setData(0, Qt.ItemDataRole.UserRole, flat_start + n)
         # inserimento in ordine di pagina
         pages = sorted(self._page_items)
@@ -291,6 +307,7 @@ class SearchBar(QToolBar):
         self.opt_word = self._toggle(_("Parola intera"), "whole-word", "viewer/search_word")
         self.opt_accents = self._toggle(_("Ignora accenti"), "a-large-small", "viewer/search_accents")
         self.opt_regex = self._toggle(_("Espressione regolare"), "regex", "viewer/search_regex")
+        self.opt_comments = self._toggle(_("Cerca anche nei commenti"), "message-square-text", "viewer/search_comments")
         spacer = QWidget(self)
         from PySide6.QtWidgets import QSizePolicy
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -386,6 +403,18 @@ class SearchController(QObject):
                 self._labels = page_labels(self.view.document.pdf)
         return self._labels
 
+    def page_comments(self, page: int) -> list[tuple[str, pymupdf.Rect]]:
+        """Testo dei commenti della pagina con il loro riquadro (chiamata con ENGINE_LOCK)."""
+        out = []
+        try:
+            for annot in self.view.document.pdf[page].annots() or []:
+                content = (annot.info or {}).get("content", "") or ""
+                if content.strip():
+                    out.append((content, pymupdf.Rect(annot.rect)))
+        except Exception:
+            pass
+        return out
+
     def page_text(self, page: int) -> PageText:
         view = self.view
         if self._texts_version != view.document.version:
@@ -435,10 +464,12 @@ class SearchController(QObject):
                              regex=self.bar.opt_regex.isChecked())
 
     def search(self, text: str, *, case_sensitive: bool | None = None, whole_word: bool | None = None,
-               ignore_accents: bool | None = None, regex: bool | None = None, wait: bool = True) -> int:
+               ignore_accents: bool | None = None, regex: bool | None = None, comments: bool | None = None,
+               wait: bool = True) -> int:
         """Avvia una ricerca (usata anche dai test); con `wait` la completa subito."""
         for act, value in ((self.bar.opt_case, case_sensitive), (self.bar.opt_word, whole_word),
-                           (self.bar.opt_accents, ignore_accents), (self.bar.opt_regex, regex)):
+                           (self.bar.opt_accents, ignore_accents), (self.bar.opt_regex, regex),
+                           (self.bar.opt_comments, comments)):
             if value is not None:
                 act.blockSignals(True)
                 act.setChecked(value)
@@ -483,7 +514,8 @@ class SearchController(QObject):
             self.bar.counter.setText(_("Espressione non valida: {e}").format(e=e)[:60])
             self.bar.counter.setToolTip(str(e))
             return
-        self.job = SearchJob(text, self.options(), self.view.page_count, start)
+        self.job = SearchJob(text, self.options(), self.view.page_count, start,
+                             self.page_comments if self.bar.opt_comments.isChecked() else None)
         self._pending_select = True
         self._timer.start(0)
 
