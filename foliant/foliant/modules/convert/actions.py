@@ -108,10 +108,15 @@ class ConvertController:
             return doc.pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_NONE)
 
     def _check_extract_permission(self, doc: Document) -> bool:
-        with ENGINE_LOCK:
-            encrypted = bool((doc.pdf.metadata or {}).get("encryption")) or bool(doc.original_protection)
-            perms = doc.pdf.permissions
-        if encrypted and not perms & pymupdf.PDF_PERM_COPY:
+        """Permesso «copia del contenuto» secondo il nucleo (aggiornato dopo lo sblocco con la password)."""
+        allows = getattr(doc, "allows", None)
+        if allows is not None:
+            permitted = bool(allows(pymupdf.PDF_PERM_COPY))
+        else:
+            with ENGINE_LOCK:
+                encrypted = bool((doc.pdf.metadata or {}).get("encryption")) or bool(doc.original_protection)
+                permitted = not encrypted or bool(doc.pdf.permissions & pymupdf.PDF_PERM_COPY)
+        if not permitted:
             self.ctx.error(_("Conversione non consentita"),
                            _("Il documento non consente l'estrazione del contenuto (permesso «copia del "
                              "contenuto»). Serve la password del proprietario."))

@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from foliant.api import FoliantError, _, icon, theme
+from foliant.api import FoliantError, OperationCancelled, _, icon, theme
 
 from .spell import (
     TRANSLATIONS, Issue, SpellService, apply_corrections, choose_language, document_language, match_case,
@@ -503,6 +503,8 @@ class SpellCheckDialog(QDialog):
         self._applying = True
         try:
             summary = apply_corrections(view.document, corrections, granularity=self.granularity)
+        except OperationCancelled:
+            return
         except FoliantError as e:
             self.ctx.error(_("Correzione non riuscita"), str(e))
             return

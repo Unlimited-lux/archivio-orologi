@@ -360,15 +360,12 @@ class LayersPanel(QWidget):
 
     @staticmethod
     def _refresh_view(view) -> None:
-        # La vista non ha un metodo pubblico per ridisegnare senza cambio di
-        # contenuto: soluzione locale (richiesta al nucleo: `view.refresh()`).
+        # il testo visibile cambia con i livelli: le parole in cache (selezione, ricerca)
+        # vanno rilette; la resa si rifà con l'API del nucleo
         words = getattr(view, "_words", None)
         if isinstance(words, dict):
             words.clear()
-        invalidate = getattr(view, "_invalidate_render", None)
-        if callable(invalidate):
-            invalidate()
-        view.viewport().update()
+        view.refresh_rendering()
 
 
 def install(ctx):

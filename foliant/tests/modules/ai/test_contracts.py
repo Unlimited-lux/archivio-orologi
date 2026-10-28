@@ -96,3 +96,27 @@ def test_prepare_customer_communication_from_review(qtbot, window, tmp_path):
     req = fake.requests[-1]
     assert "Clausola 1" in req.system and "Clausola 3" in req.system and "Clausola 2" not in req.system
     assert "cordiale" in req.system or "formale" in req.system
+
+
+def test_review_and_risks_exported_to_pdf(window, tmp_path):
+    services, fake = _ready(window)
+    path = _contract(tmp_path, 3)
+    before = open(path, "rb").read()
+    window.open_path(path)
+    fake.responses = [_clauses_reply(["bassa", "alta", "media"]),
+                      json.dumps({"risks": [{"descrizione": "Penale elevata", "clausola": "2"}],
+                                  "sources": [{"riferimento": "art. 1382 c.c.", "citazione": "clausola penale"}]})]
+    dlg = services.controller.open_contracts()
+    assert dlg.export_pdf(str(tmp_path / "vuoto.pdf")) is None      # niente da esportare prima della revisione
+    dlg.review()
+    dlg.party.setText("acquirente")
+    dlg.assess()
+    out = tmp_path / "revisione.pdf"
+    assert dlg.export_pdf(str(out)) == str(out)
+    pdf = pymupdf.open(str(out))
+    text = " ".join(" ".join(p.get_text(flags=0).split()) for p in pdf)   # legature «ﬁ» espanse
+    assert "Revisione del contratto" in text and "T2" in text and "alta" in text
+    assert "Penale elevata" in text and "art. 1382 c.c." in text and "da verificare" in text
+    assert "non sostituisce il parere di un professionista" in text
+    assert pdf.metadata["title"] == "Revisione del contratto"
+    assert open(path, "rb").read() == before                      # il contratto non viene toccato

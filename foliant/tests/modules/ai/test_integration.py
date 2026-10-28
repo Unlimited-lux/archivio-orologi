@@ -314,6 +314,70 @@ def test_command_out_of_range_rejected(window, ready, fake, text_pdf):
     assert view.current_page == 0
 
 
+def _commands_exec(dlg):
+    from foliant.modules.ai.commands_view import ParamsDialog
+    return dlg.confirm() if isinstance(dlg, ParamsDialog) else dlg.choose()
+
+
+def test_command_rotate_prefilled_and_undoable(window, ready, fake, text_pdf, monkeypatch):
+    view = window.open_path(text_pdf(6))
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: notes.append(text))
+    fake.responses = [json.dumps({"proposals": [{"tool": "ruota-pagine", "params": {"pages": "3-5", "angle": 90}}]})]
+    seen = []
+
+    def run(dlg):
+        from foliant.modules.ai.commands_view import ParamsDialog
+        if isinstance(dlg, ParamsDialog):
+            seen.append((dlg.pages.text(), dlg.angle.currentData()))
+        return _commands_exec(dlg)
+    ready.controller.exec_dialog = run
+    ready.controller.open_commands("ruota di 90° le pagine 3-5")
+    assert seen == [("3–5", 90)]                      # strumento aperto con i parametri proposti
+    doc = view.document
+    with doc.lock:
+        assert [doc.pdf[i].rotation for i in range(6)] == [0, 0, 90, 90, 90, 0]
+    assert "3–5" in notes[-1]
+    doc.undo()                                        # un solo passo annullabile
+    with doc.lock:
+        assert [doc.pdf[i].rotation for i in range(6)] == [0] * 6
+
+
+def test_command_delete_needs_confirmation(window, ready, fake, text_pdf):
+    view = window.open_path(text_pdf(4))
+    fake.responses = [json.dumps({"proposals": [{"tool": "elimina-pagine", "params": {"pages": [2, 4]}}]})]
+    ready.controller.exec_dialog = lambda dlg: dlg.choose() if hasattr(dlg, "choose") else False   # «Annulla»
+    ready.controller.open_commands("elimina le pagine pari")
+    assert view.page_count == 4
+    fake.responses = [json.dumps({"proposals": [{"tool": "elimina-pagine", "params": {"pages": [2, 4]}}]})]
+    ready.controller.exec_dialog = _commands_exec
+    ready.controller.open_commands("elimina le pagine pari")
+    assert view.page_count == 2
+
+
+def test_command_invalid_angle_rejected(window, ready, text_pdf):
+    from foliant.modules.ai import commands
+    window.open_path(text_pdf(3))
+    cat = ready.controller.tool_catalog()
+    ok, rej = commands.validate({"proposals": [{"tool": "ruota-pagine", "params": {"pages": "1", "angle": 45}}]},
+                                cat, 3)
+    assert not ok and rej
+
+
+def test_command_opens_pages_dialog_with_pages(window, ready, fake, text_pdf, monkeypatch):
+    from foliant.modules.pages import dialogs as page_dialogs
+    view = window.open_path(text_pdf(6))
+    opened = []
+    monkeypatch.setattr(page_dialogs, "_exec", lambda dlg: opened.append(dlg) or False)
+    fake.responses = [json.dumps({"proposals": [{"tool": "estrai-pagine", "params": {"pages": "2, 4-5"}}]})]
+    ready.controller.exec_dialog = _commands_exec
+    ready.controller.open_commands("estrai le pagine 2, 4 e 5")
+    dlg = opened[0]
+    assert dlg.scope.selected == [1, 3, 4] and dlg.scope.rb_selected.isChecked()
+    assert dlg.scope.pages() == [1, 3, 4]
+    assert view.page_count == 6                       # niente eseguito senza conferma nel dialogo
+
+
 def test_command_catalog_contains_app_actions(window, ready):
     from foliant.modules.ai import commands
     cat = ready.controller.tool_catalog()

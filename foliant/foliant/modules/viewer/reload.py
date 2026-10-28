@@ -20,10 +20,10 @@ import os
 import weakref
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QFileSystemWatcher, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QToolButton, QWidget,
+    QInputDialog, QLineEdit, QMessageBox, QPushButton,
 )
 
 from foliant.api import (
@@ -74,48 +74,32 @@ BAR_ASK = "ask"            # file cambiato, preferenza «chiedi»
 BAR_MISSING = "missing"    # file eliminato o spostato
 
 
-class ReloadBar(QWidget):
-    """Barra informativa non modale in cima alla vista."""
+class _Action:
+    def __init__(self, slot):
+        self._slot = slot
 
-    def __init__(self, kind: str, text: str, buttons: list[tuple[str, object, bool]], on_close, parent=None):
-        super().__init__(parent)
+    def click(self) -> None:
+        self._slot()
+
+
+class _Text:
+    def __init__(self, text: str):
+        self._text = text
+
+    def text(self) -> str:
+        return self._text
+
+
+class ReloadBar:
+    """Avviso di ricarica, mostrato con la barra di avviso del nucleo (`ctx.show_banner`)."""
+
+    BANNER_ID = "viewer.reload"
+
+    def __init__(self, kind: str, text: str, buttons: list[tuple[str, object, bool]]):
         self.kind = kind
-        self.setObjectName("viewerReloadBar")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 6, 6, 6)
-        lay.setSpacing(6)
-        self.icon_label = QLabel()
-        lay.addWidget(self.icon_label)
-        self.label = QLabel(text)
-        self.label.setWordWrap(True)
-        lay.addWidget(self.label, 1)
-        self.buttons: dict[str, QPushButton] = {}
-        for label, slot, primary in buttons:
-            b = QPushButton(label)
-            if primary:
-                b.setProperty("primary", True)
-            b.clicked.connect(lambda _c=False, s=slot: s())
-            lay.addWidget(b)
-            self.buttons[label] = b
-        close = QToolButton()
-        bind_icon(close, "x")
-        close.setToolTip(_("Chiudi l'avviso"))
-        close.setAutoRaise(True)
-        close.clicked.connect(lambda _c=False: on_close())
-        lay.addWidget(close)
-        self.close_button = close
-        self.restyle()
-
-    def restyle(self) -> None:
-        bg = theme.hex_color("accent_soft")
-        self.setStyleSheet(
-            f"QWidget#viewerReloadBar {{ background: {bg};"
-            f" border-bottom: 1px solid {theme.hex_color('border')}; }}"
-            f" QWidget#viewerReloadBar QLabel {{ background: transparent; color: {theme.hex_color('text')}; }}")
-        name = "triangle-alert" if self.kind == BAR_MISSING else ("circle-alert" if self.kind == BAR_CHANGED
-                                                                  else "refresh-cw")
-        self.icon_label.setPixmap(icon(name).pixmap(18, 18))
+        self.label = _Text(text)
+        self.actions = buttons
+        self.buttons = {label: _Action(slot) for label, slot, _primary in buttons}
 
 
 class _Watch:
@@ -144,7 +128,6 @@ class ReloadController(QObject):
         self.debounce_ms = debounce_ms
         self.reload_count = 0
         self.watches: dict[DocumentView, _Watch] = {}
-        self._bar_heights: "weakref.WeakKeyDictionary[DocumentView, int]" = weakref.WeakKeyDictionary()
         self._reloading = False
 
         self.watcher = QFileSystemWatcher(self)
@@ -170,7 +153,6 @@ class ReloadController(QObject):
         self.notice.hide()
         ctx.window.statusBar().addPermanentWidget(self.notice)
         ctx.currentViewChanged.connect(lambda *_a: self._update_notice())
-        theme.on_change(self._restyle)
         for view in ctx.views():
             self._on_opened(view)
         self._update_action()
@@ -401,9 +383,8 @@ class ReloadController(QObject):
             new_index = tabs.indexOf(new_view)
             if old_index >= 0 and new_index >= 0 and new_index != old_index:
                 tabs.tabBar().moveTab(new_index, old_index)
-            # chiusura della vecchia vista senza richiesta di salvataggio
-            view.document._saved_state = view.document._state
-            window.close_view(view, ask=False)   # ricarica: non è una chiusura dell'utente (niente controlli)
+            # chiusura della vecchia vista: ricarica, non è una chiusura dell'utente (niente domande)
+            self.ctx.close_view(view, discard=True)
             # la scheda attiva resta quella di prima
             tabs.setCurrentWidget(new_view if previous is view or previous is None else previous)
         finally:
@@ -445,9 +426,9 @@ class ReloadController(QObject):
         if kind == BAR_CHANGED:
             text = _("Il file «{name}» è stato modificato da un'altra applicazione, ma qui ci sono modifiche "
                      "non salvate.").format(name=name)
-            buttons = [(_("Ricarica e perdi le modifiche"), lambda v=view: self.reload_view(v), False),
-                       (_("Ignora"), lambda v=view: self.ignore(v), False),
-                       (_("Salva con nome…"), lambda v=view: self.save_as(v), True)]
+            buttons = [(_("Salva con nome…"), lambda v=view: self.save_as(v), True),
+                       (_("Ricarica e perdi le modifiche"), lambda v=view: self.reload_view(v), False),
+                       (_("Ignora"), lambda v=view: self.ignore(v), False)]
         elif kind == BAR_ASK:
             text = _("Il file «{name}» è stato modificato da un'altra applicazione.").format(name=name)
             buttons = [(_("Ricarica"), lambda v=view: self.reload_view(v), True),
@@ -456,23 +437,20 @@ class ReloadController(QObject):
             text = _("Il file «{name}» è stato eliminato o spostato.").format(name=name)
             buttons = [(_("Salva"), lambda v=view: self.save(v), True)]
         on_close = (lambda v=view: self.ignore(v)) if kind != BAR_MISSING else (lambda v=view: self._remove_bar(v))
-        bar = ReloadBar(kind, text, buttons, on_close, view)
-        w.bar = bar
-        view.installEventFilter(self)
-        bar.show()
-        bar.raise_()
-        self._layout(view)
+        w.bar = ReloadBar(kind, text, buttons)
+        self.ctx.show_banner(view, ReloadBar.BANNER_ID, text, buttons,
+                             level="info" if kind == BAR_ASK else "warning", priority=20, on_close=on_close)
         self._update_notice()
 
     def _remove_bar(self, view: DocumentView) -> None:
         w = self.watches.get(view)
-        bar = w.bar if w is not None else None
-        if bar is None:
+        if w is None or w.bar is None:
             return
         w.bar = None
-        bar.hide()
-        bar.deleteLater()
-        self._layout(view)
+        try:
+            self.ctx.hide_banner(view, ReloadBar.BANNER_ID)
+        except RuntimeError:
+            pass
         self._update_notice()
 
     def _update_notice(self) -> None:
@@ -507,33 +485,6 @@ class ReloadController(QObject):
     def bar(self, view: DocumentView) -> ReloadBar | None:
         w = self.watches.get(view)
         return w.bar if w is not None else None
-
-    def _layout(self, view: DocumentView) -> None:
-        """Posiziona la barra sotto eventuali altre barre (margine superiore già impostato)."""
-        try:
-            mine = self._bar_heights.get(view, 0)
-            base = max(0, view.viewportMargins().top() - mine)
-        except RuntimeError:
-            return
-        w = self.watches.get(view)
-        bar = w.bar if w is not None else None
-        h = bar.sizeHint().height() if bar is not None else 0
-        if bar is not None:
-            bar.setGeometry(0, base, view.width(), h)
-            bar.raise_()
-        self._bar_heights[view] = h
-        m = view.viewportMargins()
-        view.setViewportMargins(m.left(), base + h, m.right(), m.bottom())
-
-    def _restyle(self) -> None:
-        for w in self.watches.values():
-            if w.bar is not None:
-                w.bar.restyle()
-
-    def eventFilter(self, obj, ev) -> bool:
-        if ev.type() == QEvent.Type.Resize and isinstance(obj, DocumentView) and obj in self.watches:
-            QTimer.singleShot(0, lambda v=obj: self._layout(v) if v in self.watches else None)
-        return False
 
     def ignore(self, view: DocumentView) -> None:
         """Mantiene il documento aperto così com'è fino al prossimo cambiamento del file."""

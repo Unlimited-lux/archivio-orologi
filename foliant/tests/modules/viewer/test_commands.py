@@ -71,7 +71,7 @@ def test_conflict_warns_with_existing_name(viewer_window, monkeypatch):
     act = _act(ctl, "Ruota vista")
     assert not ctl.assign(act, "Ctrl+K", ask=True)
     assert asked and "Ricerca dei comandi" not in asked[0] and "Cerca un comando" in asked[0]
-    assert act.shortcut().toString() == "Ctrl+R"
+    assert act.shortcut() == QKeySequence("Ctrl+Shift++")
 
 
 def test_export_import_and_defaults(viewer_window):
@@ -81,7 +81,7 @@ def test_export_import_and_defaults(viewer_window):
     text = ctl.export_text()
     assert "Ruota vista\tCtrl+Alt+R" in text
     ctl.restore_defaults()
-    assert act.shortcut().toString() == "Ctrl+R"
+    assert act.shortcut() == QKeySequence("Ctrl+Shift++")
     assert ctl.import_text(text) > 0
     assert act.shortcut().toString() == "Ctrl+Alt+R"
     ctl.restore_defaults()

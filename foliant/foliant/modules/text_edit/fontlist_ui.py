@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.engine import ENGINE_LOCK
-from ...core.errors import FoliantError
+from ...core.errors import FoliantError, OperationCancelled
 from ...i18n import _
 from . import fontlist, fonts
 
@@ -102,6 +102,8 @@ class FontsDialog(QDialog):
         try:
             with view.document.change(label) as pdf:
                 summary = fn(pdf)
+        except OperationCancelled:
+            return
         except FoliantError as e:
             self.ctx.error(_("Font del documento"), str(e))
             return
