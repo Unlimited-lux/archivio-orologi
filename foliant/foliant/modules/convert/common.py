@@ -273,3 +273,18 @@ ProgressFn = Callable[[float, str], None]
 __all__ = ["ConversionError", "RangeError", "parse_page_range", "unique_path", "resolve_target",
            "expand_name_template", "OutputFiles", "open_source", "check", "OperationCancelled",
            "ENGINE_LOCK"]
+
+
+def context_of(widget):
+    """Contesto del nucleo del widget (o di un suo genitore), oppure None.
+
+    Riservatezza: i dialoghi del modulo scelgono file e cartelle solo con i metodi del
+    contesto (ask_open_paths, ask_save_path, ask_directory), che non lasciano cronologie
+    dei file nel profilo; mai con QFileDialog direttamente."""
+    w = widget
+    while w is not None:
+        ctx = getattr(w, "ctx", None)
+        if ctx is not None and hasattr(ctx, "ask_open_paths"):
+            return ctx
+        w = w.parentWidget() if hasattr(w, "parentWidget") else None
+    return None

@@ -557,10 +557,12 @@ class ScannerDialog(QDialog):
 
     def _export_preset(self) -> None:
         import json
-        from PySide6.QtWidgets import QFileDialog
+
+        from .common import context_of
         data = self.preset.currentData()
         name = data[1]["name"] if data else _("Impostazioni personalizzate")
-        path, _f = QFileDialog.getSaveFileName(self, _("Esporta preset"), name + ".json", "JSON (*.json)")
+        ctx = context_of(self)   # dialogo del nucleo: nessuna cronologia dei file
+        path = ctx.ask_save_path(_("Esporta preset"), name + ".json", "JSON (*.json)", ".json") if ctx else None
         if not path:
             return
         try:
@@ -572,8 +574,13 @@ class ScannerDialog(QDialog):
 
     def _import_preset(self) -> None:
         import json
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
-        path, _f = QFileDialog.getOpenFileName(self, _("Importa preset"), "", "JSON (*.json)")
+
+        from PySide6.QtWidgets import QMessageBox
+
+        from .common import context_of
+        ctx = context_of(self)
+        paths = ctx.ask_open_paths(_("Importa preset"), "JSON (*.json)", multiple=False) if ctx else []
+        path = paths[0] if paths else None
         if not path:
             return
         try:

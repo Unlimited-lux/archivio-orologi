@@ -137,9 +137,10 @@ class ConvertController:
         """Salva una copia completamente riscritta (struttura valida) senza toccare l'originale."""
         doc = view.document
         stem = Path(doc.display_name).stem
-        folder = str(doc.path.parent) if doc.path else self.window.last_directory()
-        path = self.ctx.ask_save_path(_("Salva copia riparata"), os.path.join(folder, stem + _("_riparato") + ".pdf"),
-                                      "PDF (*.pdf)")
+        suggested = stem + _("_riparato") + ".pdf"   # senza cartella: la sceglie il dialogo del nucleo
+        if doc.path:
+            suggested = os.path.join(str(doc.path.parent), suggested)
+        path = self.ctx.ask_save_path(_("Salva copia riparata"), suggested, "PDF (*.pdf)")
         if not path:
             return None
         if doc.path is not None and os.path.abspath(path) == os.path.abspath(doc.path):
@@ -983,8 +984,10 @@ class ConvertController:
                 self.ctx.error(title, str(e))
                 return None
         stem = Path(name).stem
-        folder = str(Path(path).parent) if path else self.window.last_directory()
-        save = self.ctx.ask_save_path(title, os.path.join(folder, stem + suffix + ".pdf"), "PDF (*.pdf)")
+        suggested = stem + suffix + ".pdf"   # senza cartella: la sceglie il dialogo del nucleo
+        if path:
+            suggested = os.path.join(str(Path(path).parent), suggested)
+        save = self.ctx.ask_save_path(title, suggested, "PDF (*.pdf)")
         if not save:
             return None
         if path and os.path.abspath(save) == os.path.abspath(path):

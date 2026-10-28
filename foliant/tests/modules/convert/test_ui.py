@@ -828,9 +828,10 @@ def test_batch_password_second_pass_keeps_unique_names(window, ctrl, tmp_path, m
 def test_scanner_dialog_presets_save_export_import(window, settings, tmp_path, monkeypatch):
     """CNV-24: preset predefiniti, salvati, esportati e importati."""
     from PIL import Image
-    from PySide6.QtWidgets import QFileDialog, QInputDialog
+    from PySide6.QtWidgets import QInputDialog
 
     from foliant.modules.convert.create_dialogs import ScannerDialog
+    asked = []
     dlg = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings,
                         preview=lambda dev, s: Image.new("RGB", (80, 110), "white"))
     i = dlg.preset.findText("Documenti in bianco e nero (fatture, contratti)")
@@ -844,13 +845,15 @@ def test_scanner_dialog_presets_save_export_import(window, settings, tmp_path, m
     dlg.save_preset.click()
     assert dlg.preset.currentText() == "Fatture fornitori" and dlg.delete_preset.isEnabled()
     out = tmp_path / "preset.json"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    # riservatezza: dialoghi del nucleo (senza cronologia dei file), mai QFileDialog
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: asked.append(a) or str(out))
     dlg.export_preset.click()
+    assert asked and asked[0][1] == "Fatture fornitori.json"
     dlg.delete_preset.click()
     assert dlg.preset.findText("Fatture fornitori") < 0
     # nuova finestra: il preset importato torna disponibile con i suoi valori
     dlg2 = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings)
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(out), ""))
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [str(out)])
     dlg2.import_preset.click()
     assert dlg2.preset.currentText() == "Fatture fornitori"
     assert dlg2.dpi.currentData() == 400 and dlg2.mode.currentData() == "bw"
@@ -862,7 +865,7 @@ def test_scanner_dialog_presets_save_export_import(window, settings, tmp_path, m
     bad.write_text("non json")
     warned = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(a[2]))
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(bad), ""))
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [str(bad)])
     n = dlg3.preset.count()
     dlg3.import_preset.click()
     assert warned and dlg3.preset.count() == n
@@ -1136,3 +1139,31 @@ def test_batch_dialog_empty_placeholder_and_drop(window, sample_pdf, tmp_path):
                     Qt.KeyboardModifier.NoModifier)
     dlg.list.dropEvent(ev)
     assert dlg.files() == [sample_pdf] and dlg.ok_button.isEnabled()
+
+
+def test_export_dialog_browse_uses_core_dialog(window, tmp_path, monkeypatch):
+    """«Sfoglia…» della destinazione: dialogo del nucleo, nessuna cartella ricordata da Qt."""
+    from foliant.modules.convert.export_dialog import ExportDialog
+    asked = []
+    monkeypatch.setattr(window.ctx, "ask_directory", lambda *a, **k: asked.append(a) or str(tmp_path / "scelta"))
+    dlg = ExportDialog(window, page_count=3, name="x", folder=str(tmp_path))
+    dlg._browse()
+    assert asked and dlg.folder_edit.text() == str(tmp_path / "scelta")
+    dlg.close()
+
+
+def test_convert_keeps_no_paths_in_settings(window, settings, tmp_path):
+    """Le preferenze di Converti salvate non contengono la cartella né il nome del documento."""
+    from foliant.modules.convert.export_dialog import ExportDialog
+    folder = tmp_path / "Pratiche riservate"
+    folder.mkdir()
+    dlg = ExportDialog(window, page_count=3, name="perizia-rossi", folder=str(folder), fmt="png",
+                       settings=settings)
+    dlg.save_preset("Mio")
+    fmt, path, options = dlg.values()
+    assert "perizia-rossi" in path                      # il percorso serve solo per questa esportazione
+    dlg._save_settings(fmt, options)
+    settings.sync()
+    dump = open(settings.fileName(), "rb").read()
+    assert b"perizia-rossi" not in dump and b"Pratiche riservate" not in dump
+    dlg.close()
