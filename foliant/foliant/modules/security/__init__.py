@@ -48,7 +48,7 @@ def register(ctx: Context) -> None:
         "apply": act(_("Applica redazioni"), "check-check", lambda: c.apply_redactions(None),
                      requires_document=False),
         "inspect": act(_("Esamina documento"), "scan-eye", c.inspect),
-        "sanitize": act(_("Sanifica"), "spray-can", c.sanitize),
+        "sanitize": act(_("Rimuovi dati nascosti"), "spray-can", c.sanitize),
         "metadata": act(_("Metadati"), "file-pen", c.edit_metadata),
         "flatten": act(_("Appiattisci"), "layers", c.flatten),
     }

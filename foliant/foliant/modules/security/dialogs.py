@@ -692,7 +692,7 @@ class SanitizeDialog(QDialog):
     def __init__(self, counts: dict[str, str], parent=None):
         super().__init__(parent)
         from . import sanitize as S
-        self.setWindowTitle(_("Sanifica documento"))
+        self.setWindowTitle(_("Rimuovi dati nascosti"))
         lay = QVBoxLayout(self)
         lay.addWidget(_note(_("Rimuove le informazioni nascoste e i contenuti attivi scelti senza cambiare "
                               "l'aspetto delle pagine.")))
@@ -712,7 +712,7 @@ class SanitizeDialog(QDialog):
         row.addWidget(self.form_mode, 1)
         lay.addLayout(row)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Sanifica"))
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Rimuovi"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)

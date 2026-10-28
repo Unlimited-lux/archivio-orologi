@@ -77,7 +77,7 @@ def test_mode_and_actions(window, sec):
     assert "proteggi" in window.modes
     texts = [a.text() for a in window.modes["proteggi"].toolbar.actions() if a.text()]
     for t in ("Password e permessi", "Rimuovi protezione", "Proprietà di sicurezza", "Segna area",
-              "Trova e segna", "Trova dati personali", "Segna pagine", "Applica redazioni", "Sanifica",
+              "Trova e segna", "Trova dati personali", "Segna pagine", "Applica redazioni", "Rimuovi dati nascosti",
               "Appiattisci"):
         assert t in texts
     assert not sec.actions["apply"].isEnabled()

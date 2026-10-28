@@ -664,15 +664,15 @@ class SecurityController:
         if not any(options.get(k) for k in S.SANITIZE_KEYS):
             return False
         try:
-            with doc.change(_("Sanifica documento")) as pdf:
+            with doc.change(_("Rimuovi dati nascosti")) as pdf:
                 result = S.sanitize(pdf, options)
         except Exception as e:
-            self.ctx.error(_("Sanificazione non riuscita"),
+            self.ctx.error(_("Rimozione dei dati nascosti non riuscita"),
                            _("Nessuna modifica è stata fatta.\n\n{e}").format(e=e))
             return False
         labels = S.sanitize_labels()
         done = ", ".join(labels[k].split(" (")[0].lower() for k in result.done if k in labels)
-        self.ctx.status(_("Documento sanificato: {d}").format(d=done or _("nulla da rimuovere")))
+        self.ctx.status(_("Dati nascosti rimossi: {d}").format(d=done or _("nulla da rimuovere")))
         self.refresh_document_state(self.view())
         return True
 

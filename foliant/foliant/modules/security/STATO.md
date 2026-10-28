@@ -26,7 +26,7 @@ Test in `tests/modules/security/`: `test_protection.py` (P), `test_redaction.py`
 | SEC-19 Anteprima e revisione | P0 | parziale | U `test_panel_group_and_remove`, `test_apply_selected_only`, `test_preview_overlay`, `test_unapplied_marks_banner_on_reopen`, `test_export_import_marks`; R `test_remove_mark_keeps_content`, `test_xfdf_roundtrip` | Pannello per pagina con conteggio, origine ed estratto, vai al segno, rimuovi (anche Canc), «Anteprima risultato», applica tutti/selezionati con conferma, XFDF. L'avviso arriva *dopo* il salvataggio con segni non applicati (CORE_REQUESTS §4). |
 | SEC-20 Applicazione con rimozione definitiva | P0 | fatto | R `test_apply_removes_text_and_saves`, `test_image_pixels_removed`, `test_image_fully_covered_removed`, `test_vector_graphics_removed`, `test_annotations_and_links_under_mark_removed`, `test_widget_under_mark_removed`, `test_invisible_ocr_text_found_and_removed`, `test_thumbnail_removed_on_apply`, `test_undo_apply`; U `test_apply_offers_save_redacted`, `test_apply_cancel_keeps_everything` | Testo, pixel delle immagini (o immagini intere), grafica, annotazioni, campi e collegamenti; miniature rimosse; annullabile fino al salvataggio; errore ⇒ nessuna modifica; proposta «_redatto.pdf». Struttura logica e /ActualText non aggiornati. |
 | SEC-21 Ispezione del documento | P1 | fatto | S `test_scan_active`, `test_launch_and_submit_detected`, `test_inspect_extra`, `test_ocr_layer_classified`, `test_previous_revisions`; U `test_inspect_flow` | Metadati, script, azioni, file incorporati, livelli nascosti, commenti, campi, testo nascosto, livello OCR, annotazioni nascoste, miniature, segnalibri, firme, revisioni precedenti. Non apre le revisioni in sola lettura; EXIF non analizzato. |
-| SEC-22 Sanificazione | P1 | fatto | S `test_sanitize_defaults`, `test_sanitize_render_identical`, `test_hidden_layer_removed`, `test_strip_marked_content_nested`, `test_form_data_reset_and_remove`, `test_sanitize_keeps_pdfa_identification`; U `test_sanitize_flow` | Rendering identico, identificazione PDF/A conservata. Mancano EXIF nei JPEG e rimozione delle firme. |
+| SEC-22 Sanificazione («Rimuovi dati nascosti») | P1 | fatto | S `test_sanitize_defaults`, `test_sanitize_render_identical`, `test_hidden_layer_removed`, `test_strip_marked_content_nested`, `test_form_data_reset_and_remove`, `test_sanitize_keeps_pdfa_identification`; U `test_sanitize_flow` | Rendering identico, identificazione PDF/A conservata. Mancano EXIF nei JPEG e rimozione delle firme. |
 | SEC-23 Metadati | P1 | fatto | S `test_metadata_xmp_sync`; U `test_metadata_flow`, `test_metadata_read_only_when_restricted` | Info e XMP allineati (dc:title, dc:creator per «;», dc:subject, date con fuso). Mancano le proprietà personalizzate. |
 | SEC-24 Appiattimento | P1 | parziale | S `test_flatten`; U `test_flatten_flow` | Commenti e campi fusi, annotazioni nascoste eliminate. Livelli e ritaglio non appiattiti. |
 | SEC-25 PDF/A, PDF/E, PDF/X | P1 | non fatto | — | Area del modulo Converti. |
@@ -37,11 +37,13 @@ Test in `tests/modules/security/`: `test_protection.py` (P), `test_redaction.py`
 | SEC-30 Riservatezza dei dati locali | P1 | non fatto | — | Del nucleo (CORE_REQUESTS §7). |
 | SEC-31 Spazio protetto | P2 | non fatto | — | |
 | SEC-32 Blocco dell'applicazione | P2 | non fatto | — | |
-| SEC-33 Cifratura lato client | P2 | non fatto | — | |
-| SEC-34 Trasmissione dati sicura | P0 | fatto (per il modulo) | U fixture `no_network` (tutti i test d'interfaccia falliscono se si apre una connessione) | Il modulo non apre connessioni di rete; i collegamenti web si aprono solo dopo conferma. |
+| SEC-33 Cifratura lato client | — | fuori ambito | — | Dichiarata fuori ambito dall'orchestratore (nessun account). |
+| SEC-34 Trasmissione dati sicura | — | fuori ambito | U fixture `no_network` (tutti i test d'interfaccia falliscono se si apre una connessione) | Il modulo non apre connessioni di rete; i collegamenti web si aprono solo dopo conferma. |
 
 Traduzioni inglesi complete: I `test_all_strings_translated`, `test_placeholders_preserved`.
 
 Verifica visiva: catture offscreen nei temi chiaro e scuro (barra d'avviso, segni,
 anteprima risultato, dialoghi Proteggi/Trova/Impostazioni), usate per correggere
 la barra strumenti (le voci secondarie mostrano solo l'icona), la barra d'avviso e il pannello.
+
+Aggiornamenti dell'orchestratore applicati: etichetta «Rimuovi dati nascosti» al posto di «Sanifica»; SEC-33 e SEC-34 fuori ambito (il modulo comunque non apre connessioni di rete, verificato dalla fixture `no_network`); nessuna scorciatoia globale registrata (solo Ctrl+Maiusc+R per «Segna testo», non in UX-18).
