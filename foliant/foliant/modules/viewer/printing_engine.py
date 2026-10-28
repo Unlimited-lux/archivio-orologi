@@ -190,14 +190,33 @@ def print_layer_states(pdf: pymupdf.Document) -> dict[int, bool]:
     return result
 
 
+def not_printed(pdf: pymupdf.Document, index: int, annotations: bool) -> list[int]:
+    """Annotazioni della pagina che non vanno su carta (VIS-43): quelle senza il flag /Print e,
+    senza «annotazioni e commenti», tutte tranne i campi modulo, i cui valori sono contenuto
+    del documento (ENGINE_LOCK richiesto)."""
+    hide = []
+    for xref, kind, _id in pdf[index].annot_xrefs():
+        try:
+            k, value = pdf.xref_get_key(xref, "F")
+            flags = int(value) if k == "int" else 0
+        except Exception:
+            flags = 0
+        if not flags & pymupdf.PDF_ANNOT_IS_PRINT or (not annotations and kind != pymupdf.PDF_ANNOT_WIDGET):
+            hide.append(xref)
+    return hide
+
+
 def render_page(pdf: pymupdf.Document, index: int, dpi: int, annotations: bool) -> QImage:
     """Immagine della pagina (con /Rotate del documento, mai la rotazione della vista)."""
-    from foliant.api import page_pixmap
+    from foliant.api import annotations_hidden, page_pixmap
     with ENGINE_LOCK:
         zoom = dpi / 72.0
-        # senza il segnaposto dei campi firma vuoti: non esiste nel file e non va su carta
-        pix = page_pixmap(pdf, index, hide_unsigned_signatures=True,
-                          matrix=pymupdf.Matrix(zoom, zoom), alpha=False, annots=annotations)
+        # la resa a schermo ignora /Print: le annotazioni da non stampare si nascondono per la
+        # durata della resa (sulla copia di stampa); i campi modulo restano anche senza commenti
+        with annotations_hidden(pdf, not_printed(pdf, index, annotations)):
+            # senza il segnaposto dei campi firma vuoti: non esiste nel file e non va su carta
+            pix = page_pixmap(pdf, index, hide_unsigned_signatures=True,
+                              matrix=pymupdf.Matrix(zoom, zoom), alpha=False, annots=True)
         return QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
 
 

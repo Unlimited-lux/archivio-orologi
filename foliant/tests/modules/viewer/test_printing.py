@@ -201,6 +201,52 @@ def test_print_with_or_without_annotations(viewer_window, annotated_pdf, tmp_pat
     assert _is_red(rgb) if with_annots else _is_white(rgb)
 
 
+def test_annotation_without_print_flag_is_not_printed(viewer_window, tmp_path, monkeypatch):
+    """VIS-43: un'annotazione senza il flag /Print non va su carta, anche con «annotazioni»."""
+    path = tmp_path / "noprint.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    annot = page.add_rect_annot(RED_RECT)
+    annot.set_colors(stroke=(1, 0, 0), fill=(1, 0, 0))
+    annot.set_flags(0)                                  # visibile a schermo, non stampabile
+    annot.update()
+    doc.save(path)
+    viewer_window.open_path(str(path))
+    ctl = part(viewer_window, "printing")
+    out = tmp_path / "out.pdf"
+    _drive(monkeypatch, ctl, PrintOptions(pages=[0], annotations=True), _printer(out))
+    assert ctl.print_current() == 1
+    center = (RED_RECT.x0 + RED_RECT.width / 2, RED_RECT.y0 + RED_RECT.height / 2)
+    assert _is_white(_pixel(out, 0, center))
+
+
+def test_form_values_printed_without_annotations(viewer_window, tmp_path, monkeypatch):
+    """VIS-43: senza «annotazioni e commenti» si tolgono i commenti, non i valori dei campi."""
+    path = tmp_path / "modulo.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    widget = pymupdf.Widget()
+    widget.field_name, widget.field_type = "prezzo", pymupdf.PDF_WIDGET_TYPE_TEXT
+    widget.rect, widget.text_fontsize = pymupdf.Rect(100, 100, 400, 140), 24
+    widget.field_value = "EUR 7250 MATRICOLA"
+    page.add_widget(widget)
+    note = page.add_rect_annot(RED_RECT)
+    note.set_colors(stroke=(1, 0, 0), fill=(1, 0, 0))
+    note.update()
+    doc.save(path)
+    viewer_window.open_path(str(path))
+    ctl = part(viewer_window, "printing")
+    out = tmp_path / "out.pdf"
+    _drive(monkeypatch, ctl, PrintOptions(pages=[0], annotations=False), _printer(out))
+    assert ctl.print_current() == 1
+    result = pymupdf.open(str(out))
+    pix = result[0].get_pixmap(clip=pymupdf.Rect(100, 100, 400, 140))
+    dark = sum(1 for i in range(0, len(pix.samples), pix.n) if pix.samples[i] < 100)
+    assert dark > 50                                    # il valore del campo è stampato
+    center = (RED_RECT.x0 + RED_RECT.width / 2, RED_RECT.y0 + RED_RECT.height / 2)
+    assert _is_white(_pixel(out, 0, center))            # il commento no
+
+
 def test_permission_denied_disables_action(viewer_window, tmp_path, monkeypatch):
     path = _protected(tmp_path, "nostampa.pdf", pymupdf.PDF_PERM_ACCESSIBILITY)
     viewer_window.open_path(path)
