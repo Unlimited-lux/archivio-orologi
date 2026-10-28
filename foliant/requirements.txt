@@ -13,3 +13,7 @@ anthropic>=0.40
 pytest>=8
 pytest-qt>=4.4
 pytest-timeout>=2.3
+# facoltativi ma consigliati: controllo ortografico, foto HEIC dei telefoni, file Office protetti
+pyspellchecker>=0.8
+pillow-heif>=0.16
+msoffcrypto-tool>=5.4

@@ -387,16 +387,32 @@ class Document:
         if keep and "encryption" not in options:   # protezione invariata e ancora presente: riusa la cifratura originale
             opts.update(options)
             opts["encryption"] = pymupdf.PDF_ENCRYPT_KEEP
-            with self.lock:
-                return self._pdf.tobytes(**opts)
+            return self._write(opts)
         opts.update(self.save_options)
         opts.update(options)
         if opts.get("encryption", pymupdf.PDF_ENCRYPT_NONE) in (pymupdf.PDF_ENCRYPT_NONE, pymupdf.PDF_ENCRYPT_KEEP):
             opts["encryption"] = pymupdf.PDF_ENCRYPT_NONE
             for key in ("user_pw", "owner_pw", "permissions"):
                 opts.pop(key, None)
+        return self._write(opts)
+
+    def _write(self, opts: dict) -> bytes:
+        """Serializza senza toccare il documento aperto.
+
+        Con garbage ≥ 2 MuPDF compatta e RINUMERA gli oggetti del documento che scrive: gli xref
+        tenuti da moduli e strumenti (selezioni, collegamenti, immagini) diventerebbero sbagliati
+        dopo ogni salvataggio. La compattazione si fa quindi su una copia.
+        """
         with self.lock:
-            return self._pdf.tobytes(**opts)
+            if opts.get("garbage", 0) < 2:
+                return self._pdf.tobytes(**opts)
+            copy = pymupdf.open("pdf", self._snapshot())
+        try:
+            if copy.needs_pass and self.password is not None:
+                copy.authenticate(self.password)
+            return copy.tobytes(**opts)
+        finally:
+            copy.close()
 
     def save(self, path: str | os.PathLike | None = None, **options) -> None:
         """Salva (in modo atomico). Senza percorso usa quello corrente."""
