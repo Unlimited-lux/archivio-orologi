@@ -325,4 +325,8 @@ EN: dict[str, str] = {
         'The document is certified by {who} (signature field “{field}”) and does not allow changes.',
     'Il documento è certificato da {who} e non consente modifiche.':
         'The document is certified by {who} and does not allow changes.',
+    "Scegli l'icona": 'Choose the icon',
+    'Immagini e PDF': 'Images and PDF',
+    'Disposizione del pulsante non valida.': 'Invalid button layout.',
+    "Pagina inesistente nel PDF dell'icona.": 'The page does not exist in the icon PDF.',
 }

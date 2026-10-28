@@ -217,6 +217,7 @@ class FormsModule(QObject):
                 self.panel = FieldPropertiesPanel(self.apply_properties, set_default=self.set_kind_defaults)
             except TypeError:
                 self.panel = FieldPropertiesPanel(self.apply_properties)
+            self.panel.choose_icon_file = self._choose_icon_file
             self.ctx.add_properties_panel("moduli", self.panel)
         try:
             from .fields_panel import FieldsPanel
@@ -225,6 +226,12 @@ class FormsModule(QObject):
         if FieldsPanel is not None:
             self.fields_panel = FieldsPanel(self)
             self.ctx.add_sidebar_panel("moduli-campi", _("Campi"), "text-cursor-input", self.fields_panel, 60)
+
+    def _choose_icon_file(self) -> str | None:
+        paths = self.ctx.ask_open_paths(
+            _("Scegli l'icona"), _("Immagini e PDF") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.pdf)",
+            multiple=False)
+        return paths[0] if paths else None
 
     # ================================================================ viste
     def _current_view(self):

@@ -565,3 +565,37 @@ def test_system_fonts_listed(qtbot):
     from PySide6.QtGui import QFontDatabase
     if QFontDatabase.families():
         assert len([i for i in items if i]) > 3
+
+
+def test_button_icons_layout_and_rollover_applied(qtbot, tmp_path):
+    """FRM-18: disposizione, didascalia al passaggio e icone per stato dalla scheda Pulsante."""
+    from PIL import Image
+
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    img = tmp_path / "logo.png"
+    Image.new("RGB", (120, 80), (180, 20, 20)).save(img)
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 250, 100), "garanzia", caption="Garanzia")
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        panel.set_fields([E.field_info(pdf, p, x) for p, x in keys], ["garanzia"])
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.choose_icon_file = lambda: str(img)
+    panel.set_fields(E.list_fields(pdf), ["garanzia"])
+    assert panel.caption_down_edit.placeholderText() == "uguale alla didascalia"
+    panel.icon_rows["normal"][1].click()
+    assert E.field_info(pdf, 0, b).icons == ("normal",)
+    assert panel.icon_rows["normal"][0].text() == "impostata" and panel.icon_rows["down"][0].text() == "nessuna"
+    panel.layout_combo.setCurrentIndex(panel.layout_combo.findData("icon_left"))
+    assert E.field_info(pdf, 0, b).layout == "icon_left"
+    panel.caption_rollover_edit.setText("Apri")
+    panel.caption_rollover_edit.editingFinished.emit()
+    assert E.field_info(pdf, 0, b).caption_rollover == "Apri"
+    panel.icon_rows["normal"][2].click()
+    assert E.field_info(pdf, 0, b).icons == ()

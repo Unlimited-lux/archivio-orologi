@@ -238,6 +238,9 @@ class FieldInfo:
     rotation: int = 0            # rotazione del contenuto (/MK /R)
     caption: str = ""            # didascalia dei pulsanti
     caption_down: str = ""       # didascalia durante la pressione (/MK /AC)
+    caption_rollover: str = ""   # didascalia al passaggio del puntatore (/MK /RC)
+    layout: str = "text"         # disposizione di icona e didascalia (BUTTON_LAYOUTS)
+    icons: tuple = ()            # stati con un'icona: "normal", "rollover", "down"
     action: dict = field(default_factory=dict)  # azione al clic dei pulsanti
     image: bool = False          # campo immagine
     lock: dict = field(default_factory=dict)  # campi firma: {"action": "All|Include|Exclude", "fields": [...]}
@@ -424,8 +427,11 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
     if kind == BUTTON:
         info.caption = _value_of(*pdf.xref_get_key(w.xref, "MK/CA")) or ""
         info.caption_down = _value_of(*pdf.xref_get_key(w.xref, "MK/AC")) or ""
-        info.image = pdf.xref_get_key(w.xref, "MK/TP") == ("int", "1")
         info.action = button_action(pdf, w.xref)
+        info.image = is_image_field(pdf, w.xref)
+        info.caption_rollover = _value_of(*pdf.xref_get_key(w.xref, "MK/RC")) or ""
+        info.layout = button_layout(pdf, w.xref)
+        info.icons = tuple(button_icons(pdf, w.xref))
     if kind == SIGNATURE:
         info.lock = _read_lock(pdf, w.xref)
     if kind in (CHECKBOX, RADIO):
@@ -1311,6 +1317,240 @@ def _button_down_appearance(pdf: pymupdf.Document, page: int, xref: int) -> None
         pdf.xref_set_key(xref, "AP/D", down_ref)
 
 
+# ---------------------------------------------------------------- pulsanti: aspetti per stato (FRM-18)
+# Disposizione di icona e didascalia (/MK /TP 0-6).
+BUTTON_LAYOUTS = ("text", "icon", "icon_above", "icon_below", "icon_left", "icon_right", "overlay")
+# Icone per stato: normale, passaggio del puntatore, pressione (/MK /I, /RI, /IX).
+ICON_KEYS = {"normal": "I", "rollover": "RI", "down": "IX"}
+_STD_FONTS = {"Helv": "helv", "TiRo": "tiro", "Cour": "cour"}
+
+
+def button_layout(pdf: pymupdf.Document, xref: int) -> str:
+    t, v = pdf.xref_get_key(xref, "MK/TP")
+    try:
+        n = int(v) if t == "int" else 0
+    except ValueError:
+        n = 0
+    return BUTTON_LAYOUTS[n] if 0 <= n < len(BUTTON_LAYOUTS) else "text"
+
+
+def button_icons(pdf: pymupdf.Document, xref: int) -> dict[str, int]:
+    """Icone presenti per stato: {"normal": xref, ...}."""
+    out = {}
+    for state, key in ICON_KEYS.items():
+        t, v = pdf.xref_get_key(xref, f"MK/{key}")
+        if t == "xref":
+            out[state] = int(v.split()[0])
+    return out
+
+
+def icon_xobject(pdf: pymupdf.Document, source: str | bytes, size: tuple[float, float] | None = None,
+                 dpi: int = 200, page: int = 0) -> int:
+    """Form XObject per un'icona da un'immagine (percorso o byte) o da una pagina di un PDF.
+    Le immagini sono ridotte alla risoluzione utile per `size` (punti), così il file non cresce."""
+    import io
+    data = source if isinstance(source, bytes) else open(source, "rb").read()
+    if data[:5] == b"%PDF-":
+        src = pymupdf.open("pdf", data)
+        try:
+            if not 0 <= page < src.page_count:
+                raise FormError(_("Pagina inesistente nel PDF dell'icona."))
+            r = src[page].rect
+            tmp = pdf.new_page(width=r.width, height=r.height)
+            form = tmp.show_pdf_page(tmp.rect, src, page)
+        finally:
+            src.close()
+        pdf.delete_page(tmp.number)
+        return form
+    from PIL import Image, ImageOps
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        img = ImageOps.exif_transpose(img)
+    except Exception as e:
+        raise FormError(_("Impossibile leggere l'immagine: {e}").format(e=e)) from e
+    alpha = img.mode in ("RGBA", "LA", "P") and ("transparency" in img.info or img.mode in ("RGBA", "LA"))
+    img = img.convert("RGBA" if alpha else "RGB")
+    if size:
+        img.thumbnail((max(1, int(size[0] / 72 * dpi)), max(1, int(size[1] / 72 * dpi))), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "PNG" if alpha else "JPEG", **({"optimize": True} if alpha else {"quality": 88}))
+    w, h = img.width * 72 / dpi, img.height * 72 / dpi
+    tmp = pdf.new_page(width=max(w, 1), height=max(h, 1))
+    tmp.insert_image(pymupdf.Rect(0, 0, w, h), stream=buf.getvalue())
+    img_xref = tmp.get_images(full=True)[0][0]
+    pdf.delete_page(tmp.number)
+    form = pdf.get_new_xref()
+    pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]"
+                            f"/Resources<</XObject<</Img {img_xref} 0 R>>>>>>")
+    pdf.update_stream(form, f"q {_n(w)} 0 0 {_n(h)} 0 0 cm /Img Do Q".encode())
+    return form
+
+
+def _xobject_box(pdf: pymupdf.Document, x: int) -> pymupdf.Rect:
+    """Ingombro di un Form XObject nel suo spazio (BBox trasformato da /Matrix)."""
+    try:
+        r = pymupdf.Rect(ps.parse(pdf.xref_get_key(x, "BBox")[1]))
+    except Exception:
+        return pymupdf.Rect(0, 0, 1, 1)
+    t, v = pdf.xref_get_key(x, "Matrix")
+    if t == "array":
+        try:
+            r = r * pymupdf.Matrix(*[float(n) for n in ps.parse(v)])
+        except Exception:
+            pass
+    return r.normalize()
+
+
+def _fit_icon(pdf: pymupdf.Document, xref: int, icon: int, box: pymupdf.Rect) -> str:
+    """Operatori che disegnano l'icona nel riquadro secondo /MK /IF (quando scalare, proporzioni, posizione)."""
+    src = _xobject_box(pdf, icon)
+    if src.width <= 0 or src.height <= 0 or box.width <= 0 or box.height <= 0:
+        return ""
+    t, v = pdf.xref_get_key(xref, "MK/IF")
+    fit = ps.parse(v) if t == "dict" else {}
+    when = str(fit.get("SW", "A"))
+    sx, sy = box.width / src.width, box.height / src.height
+    if str(fit.get("S", "P")) != "A":
+        sx = sy = min(sx, sy)
+    bigger, smaller = src.width > box.width or src.height > box.height, src.width < box.width and src.height < box.height
+    if when == "N" or (when == "B" and not bigger) or (when == "S" and not smaller):
+        sx = sy = 1.0
+    pos = fit.get("A") or [0.5, 0.5]
+    try:
+        ax, ay = float(pos[0]), float(pos[1])
+    except Exception:
+        ax = ay = 0.5
+    iw, ih = src.width * sx, src.height * sy
+    ox = box.x0 + (box.width - iw) * ax - src.x0 * sx
+    oy = box.y0 + (box.height - ih) * ay - src.y0 * sy
+    return (f"q {_n(box.x0)} {_n(box.y0)} {_n(box.width)} {_n(box.height)} re W n "
+            f"{_n(sx)} 0 0 {_n(sy)} {_n(ox)} {_n(oy)} cm /Ic Do Q")
+
+
+def _pdf_text(text: str) -> str:
+    raw = text.encode("cp1252", "replace").decode("latin-1")
+    return "(" + raw.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") + ")"
+
+
+def _button_stream(pdf: pymupdf.Document, info: "FieldInfo", xref: int, caption: str, icon: int | None,
+                   layout: str, pressed: bool) -> int:
+    """Form XObject con l'aspetto del pulsante in uno stato (sfondo, bordo, icona, didascalia)."""
+    rot = info.rotation % 360
+    r = pymupdf.Rect(info.rect)
+    w, h = (r.height, r.width) if rot in (90, 270) else (r.width, r.height)
+    ops = []
+    if info.fill_color:
+        c = info.fill_color
+        if pressed:   # pressione: sfondo un po' più scuro
+            c = tuple(max(0.0, x - 0.15) for x in c)
+        ops.append(" ".join(_n(x) for x in c[:3]) + f" rg 0 0 {_n(w)} {_n(h)} re f")
+    bw = info.border_width if info.border_color else 0
+    if bw:
+        dash = "[3 2] 0 d " if info.border_style == "dashed" else ""
+        bc = " ".join(_n(x) for x in info.border_color[:3])
+        if info.border_style == "underline":
+            ops.append(f"{bc} RG {_n(bw)} w 0 {_n(bw / 2)} m {_n(w)} {_n(bw / 2)} l S")
+        else:
+            ops.append(f"{bc} RG {_n(bw)} w {dash}{_n(bw / 2)} {_n(bw / 2)} {_n(w - bw)} {_n(h - bw)} re S")
+    pad = bw + 2
+    inner = pymupdf.Rect(pad, pad, w - pad, h - pad)
+    if pressed:   # effetto pressione: contenuto spostato di un punto
+        inner = pymupdf.Rect(inner.x0 + 1, inner.y0 - 1, inner.x1 + 1, inner.y1 - 1)
+    res_font = FONTS.get(info.font, "Helv") if FONTS.get(info.font) in _STD_FONTS else "Helv"
+    _ensure_font_resource(pdf, res_font)
+    if layout == "text" or icon is None:
+        layout = "text" if layout not in ("text", "overlay") or icon is None else layout
+    text = caption if layout != "icon" else ""
+    size = info.fontsize or 0
+    if text and not size:
+        size = max(4.0, min(12.0, inner.height * 0.7 if layout in ("text", "overlay") else inner.height * 0.35))
+    measure = _STD_FONTS[res_font]
+    tw = pymupdf.get_text_length(text, fontname=measure, fontsize=size) if text else 0
+    line = size * 1.15 if text else 0
+    icon_box = text_box = inner
+    if layout == "icon_above":
+        icon_box = pymupdf.Rect(inner.x0, inner.y0 + line, inner.x1, inner.y1)
+        text_box = pymupdf.Rect(inner.x0, inner.y0, inner.x1, inner.y0 + line)
+    elif layout == "icon_below":
+        icon_box = pymupdf.Rect(inner.x0, inner.y0, inner.x1, inner.y1 - line)
+        text_box = pymupdf.Rect(inner.x0, inner.y1 - line, inner.x1, inner.y1)
+    elif layout in ("icon_left", "icon_right"):
+        side = min(inner.height, inner.width / 2)
+        if layout == "icon_left":
+            icon_box = pymupdf.Rect(inner.x0, inner.y0, inner.x0 + side, inner.y1)
+            text_box = pymupdf.Rect(inner.x0 + side + 2, inner.y0, inner.x1, inner.y1)
+        else:
+            icon_box = pymupdf.Rect(inner.x1 - side, inner.y0, inner.x1, inner.y1)
+            text_box = pymupdf.Rect(inner.x0, inner.y0, inner.x1 - side - 2, inner.y1)
+    resources = f"/Font<</{res_font} {pdf.xref_get_key(pdf.pdf_catalog(), f'AcroForm/DR/Font/{res_font}')[1]}>>"
+    if icon is not None and layout != "text":
+        ops.append(_fit_icon(pdf, xref, icon, icon_box))
+        resources += f"/XObject<</Ic {icon} 0 R>>"
+    if text:
+        while tw > text_box.width and size > 4:   # didascalia ridotta finché entra
+            size -= 0.5
+            tw = pymupdf.get_text_length(text, fontname=measure, fontsize=size)
+        tx = text_box.x0 + max(0.0, (text_box.width - tw) / 2)
+        ty = text_box.y0 + (text_box.height - size * 0.7) / 2
+        col = " ".join(_n(x) for x in (list(info.text_color or (0, 0, 0)) + [0, 0, 0])[:3])
+        ops.append(f"q {_n(text_box.x0)} {_n(text_box.y0)} {_n(text_box.width)} {_n(text_box.height)} re W n "
+                   f"BT {col} rg /{res_font} {_n(size)} Tf {_n(tx)} {_n(ty)} Td {_pdf_text(text)} Tj ET Q")
+    matrix = {90: f"0 1 -1 0 {_n(h)} 0", 180: f"-1 0 0 -1 {_n(w)} {_n(h)}", 270: f"0 -1 1 0 0 {_n(w)}"}.get(rot)
+    form = pdf.get_new_xref()
+    pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]"
+                            + (f"/Matrix[{matrix}]" if matrix else "") + f"/Resources<<{resources}>>>>")
+    pdf.update_stream(form, ("\n".join(o for o in ops if o) + "\n").encode("latin-1"))   # testo in WinAnsi
+    return form
+
+
+def needs_state_appearances(pdf: pymupdf.Document, xref: int) -> bool:
+    """Il pulsante ha icone, una didascalia al passaggio o una disposizione diversa dal solo testo."""
+    return (button_layout(pdf, xref) != "text" or bool(button_icons(pdf, xref))
+            or bool(_value_of(*pdf.xref_get_key(xref, "MK/RC"))))
+
+
+def button_appearances(pdf: pymupdf.Document, page: int, xref: int) -> None:
+    """Aspetti del pulsante per stato: /N normale, /R passaggio del puntatore, /D pressione.
+    Con sole didascalie normali e di pressione resta la generazione del motore."""
+    if is_image_field(pdf, xref):
+        return
+    if not needs_state_appearances(pdf, xref):
+        _button_down_appearance(pdf, page, xref)
+        return
+    info = field_info(pdf, page, xref)
+    layout = button_layout(pdf, xref)
+    icons = button_icons(pdf, xref)
+    normal = _value_of(*pdf.xref_get_key(xref, "MK/CA")) or ""
+    roll = _value_of(*pdf.xref_get_key(xref, "MK/RC")) or ""
+    down = _value_of(*pdf.xref_get_key(xref, "MK/AC")) or ""
+    ap = {"N": _button_stream(pdf, info, xref, normal, icons.get("normal"), layout, False)}
+    if roll or "rollover" in icons:
+        ap["R"] = _button_stream(pdf, info, xref, roll or normal, icons.get("rollover", icons.get("normal")),
+                                 layout, False)
+    ap["D"] = _button_stream(pdf, info, xref, down or normal, icons.get("down", icons.get("normal")), layout, True)
+    pdf.xref_set_key(xref, "AP", "<<" + "".join(f"/{k} {v} 0 R" for k, v in ap.items()) + ">>")
+    pdf.xref_set_key(xref, "H", "/P")   # pressione: si mostra /D
+
+
+def set_button_icon(pdf: pymupdf.Document, page: int, xref: int, state: str, source: str | bytes | None,
+                    pdf_page: int = 0) -> None:
+    """Imposta (o toglie, con None) l'icona di uno stato e rigenera gli aspetti."""
+    key = ICON_KEYS[state]
+    if source is None:
+        pdf.xref_set_key(xref, f"MK/{key}", "null")
+    else:
+        info = field_info(pdf, page, xref)
+        form = icon_xobject(pdf, source, (info.rect.width, info.rect.height), page=pdf_page)
+        pdf.xref_set_key(xref, f"MK/{key}", f"{form} 0 R")
+        pdf.xref_set_key(xref, "FoliantButton", "true")   # pulsante con icona, non campo immagine
+        if button_layout(pdf, xref) == "text":
+            pdf.xref_set_key(xref, "MK/TP", "2" if info.caption else "1")
+        if pdf.xref_get_key(xref, "MK/IF")[0] == "null":
+            pdf.xref_set_key(xref, "MK/IF", "<</SW/A/S/P/A[0.5 0.5]>>")
+    button_appearances(pdf, page, xref)
+
+
 def blank_signature_appearance(pdf: pymupdf.Document, page: int, xref: int) -> None:
     """Aspetto di un campo firma non firmato: solo sfondo e bordo del campo, nessun contenuto
     (l'indicatore «firma qui» è disegnato dall'interfaccia, non nel file)."""
@@ -1874,6 +2114,32 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
     if "caption_down" in props and kind == BUTTON:
         down = str(props["caption_down"] or "")
         pdf.xref_set_key(xref, "MK/AC", ps.encode_string(down) if down else "null")
+    if "caption_rollover" in props and kind == BUTTON:
+        roll = str(props["caption_rollover"] or "")
+        pdf.xref_set_key(xref, "MK/RC", ps.encode_string(roll) if roll else "null")
+    if "layout" in props and kind == BUTTON:
+        layout = props["layout"] or "text"
+        if layout not in BUTTON_LAYOUTS:
+            raise FormError(_("Disposizione del pulsante non valida."))
+        pdf.xref_set_key(xref, "MK/TP", str(BUTTON_LAYOUTS.index(layout)) if layout != "text" else "null")
+        if layout != "text":
+            pdf.xref_set_key(xref, "FoliantButton", "true")
+    for state, key in ICON_KEYS.items():
+        if f"icon_{state}" in props and kind == BUTTON:
+            src = props[f"icon_{state}"]
+            if src is None or src == "":
+                pdf.xref_set_key(xref, f"MK/{key}", "null")
+            elif isinstance(src, int):   # icona già nel documento (copia di un campo)
+                pdf.xref_set_key(xref, f"MK/{key}", f"{src} 0 R")
+                pdf.xref_set_key(xref, "FoliantButton", "true")
+            else:
+                form = icon_xobject(pdf, src, (info.rect.width, info.rect.height))
+                pdf.xref_set_key(xref, f"MK/{key}", f"{form} 0 R")
+                pdf.xref_set_key(xref, "FoliantButton", "true")
+                if button_layout(pdf, xref) == "text" and "layout" not in props:
+                    pdf.xref_set_key(xref, "MK/TP", "2" if info.caption else "1")
+                if pdf.xref_get_key(xref, "MK/IF")[0] == "null":
+                    pdf.xref_set_key(xref, "MK/IF", "<</SW/A/S/P/A[0.5 0.5]>>")
     if "default" in props:
         _set_default(pdf, fx, kind, props["default"], info)
     if "export" in props and kind in (CHECKBOX, RADIO) and props["export"]:
@@ -1889,9 +2155,18 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         if r.width < 4 or r.height < 4:
             raise FormError(_("Il campo è troppo piccolo."))
         _set_rect(pdf, page, xref, r)
-    if kind == BUTTON and not info.image and pdf.xref_get_key(xref, "MK/TP") != ("int", "1"):
-        _button_down_appearance(pdf, page, xref)
-    if kind == SIGNATURE:
+    if kind == BUTTON:
+        if is_image_field(pdf, xref):
+            # l'icona del campo immagine è già l'aspetto completo: la rigenerazione la perderebbe
+            t, v = pdf.xref_get_key(xref, "MK/I")
+            if t == "xref":
+                pdf.xref_set_key(xref, "AP", f"<</N {v}>>")
+            else:
+                _regen_field(pdf, fx, page, xref)
+        else:
+            _regen_field(pdf, fx, page, xref)
+            button_appearances(pdf, page, xref)
+    elif kind == SIGNATURE:
         if not is_signed(pdf, xref):
             blank_signature_appearance(pdf, page, xref)
     elif kind in (CHECKBOX, RADIO):
@@ -2080,6 +2355,9 @@ def duplicate_field(pdf: pymupdf.Document, page: int, xref: int, dx: float = 0, 
     name = f.name if f.kind == RADIO else unique_name(pdf, f.name)
     if f.kind == RADIO:
         props.pop("export", None)
+    if f.kind == BUTTON:   # le icone si condividono: stesso XObject
+        for state in f.icons:
+            props[f"icon_{state}"] = int(pdf.xref_get_key(xref, f"MK/{ICON_KEYS[state]}")[1].split()[0])
     return create_field(pdf, page if target_page is None else target_page, f.kind, r, name, **props)
 
 
@@ -2098,6 +2376,11 @@ def properties_of(f: FieldInfo) -> dict:
         props.update(options=list(f.options), multiselect=f.multiselect, editable=f.editable)
     if f.kind in (CHECKBOX, RADIO):
         props["export"] = f.export
+    if f.kind == BUTTON and not f.image:
+        props.update(caption=f.caption, caption_down=f.caption_down, caption_rollover=f.caption_rollover,
+                     layout=f.layout)
+        if f.action:
+            props["action"] = dict(f.action)
     return props
 
 
@@ -2503,7 +2786,16 @@ def mark_image_field(pdf: pymupdf.Document, page: int, xref: int) -> None:
 
 
 def is_image_field(pdf: pymupdf.Document, xref: int) -> bool:
-    return (_inherited(pdf, xref, "FT")[1] == "/Btn" and pdf.xref_get_key(xref, "MK/TP") == ("int", "1"))
+    """Campo immagine: pulsante che mostra solo l'icona e si compila scegliendo l'immagine.
+    Non lo è un pulsante con icone per stato o con un'azione vera (FRM-18), né uno a cui
+    Foliant ha dato un'icona come pulsante (/FoliantButton)."""
+    if _inherited(pdf, xref, "FT")[1] != "/Btn" or pdf.xref_get_key(xref, "MK/TP") != ("int", "1"):
+        return False
+    if pdf.xref_get_key(xref, "FoliantButton")[0] != "null":
+        return False
+    if pdf.xref_get_key(xref, "MK/RI")[0] != "null" or pdf.xref_get_key(xref, "MK/IX")[0] != "null":
+        return False
+    return button_action(pdf, xref).get("type") in (None, "javascript")
 
 
 def set_button_image(pdf: pymupdf.Document, page: int, xref: int, image: str | bytes, dpi: int = 200) -> None:

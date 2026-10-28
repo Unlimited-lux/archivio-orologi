@@ -18,7 +18,7 @@ import re
 from PySide6.QtCore import QSize, QStringListModel, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFormLayout, QFrame,
+    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QRadioButton,
     QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout,
     QWidget,
@@ -31,6 +31,25 @@ from . import formats as fm
 from . import formula as FX
 
 TRANSLATIONS: dict[str, str] = {
+    "Al passaggio del puntatore": "On mouse over",
+    "Solo testo": "Text only",
+    "Solo icona": "Icon only",
+    "Icona sopra il testo": "Icon above text",
+    "Icona sotto il testo": "Icon below text",
+    "Icona a sinistra del testo": "Icon left of text",
+    "Icona a destra del testo": "Icon right of text",
+    "Testo sopra l'icona": "Text over icon",
+    "Disposizione": "Layout",
+    "Icona": "Icon",
+    "Icona al passaggio": "Mouse-over icon",
+    "Icona alla pressione": "Pressed icon",
+    "Scegli…": "Choose…",
+    "Immagine o pagina PDF da usare come icona": "Image or PDF page to use as the icon",
+    "Rimuovi l'icona": "Remove the icon",
+    "Scegli l'icona": "Choose the icon",
+    "Immagini e PDF": "Images and PDF",
+    "impostata": "set",
+    "nessuna": "none",
     # intestazione e generale
     "Seleziona uno o più campi": "Select one or more fields",
     "{n} campi selezionati": "{n} fields selected",
@@ -1306,6 +1325,34 @@ class FieldPropertiesPanel(QWidget):
         self.caption_down_edit = self._line(lambda t: self._apply({"caption_down": t}))
         self.caption_down_edit.setPlaceholderText(_("uguale alla didascalia"))
         form.addRow(_("Alla pressione"), self.caption_down_edit)
+        self.caption_rollover_edit = self._line(lambda t: self._apply({"caption_rollover": t}))
+        form.addRow(_("Al passaggio del puntatore"), self.caption_rollover_edit)
+        self.layout_combo = self._combo(
+            [(_("Solo testo"), "text"), (_("Solo icona"), "icon"), (_("Icona sopra il testo"), "icon_above"),
+             (_("Icona sotto il testo"), "icon_below"), (_("Icona a sinistra del testo"), "icon_left"),
+             (_("Icona a destra del testo"), "icon_right"), (_("Testo sopra l'icona"), "overlay")],
+            lambda v: self._apply({"layout": v}))
+        form.addRow(_("Disposizione"), self.layout_combo)
+        self.icon_rows: dict[str, tuple[QLabel, QToolButton, QToolButton]] = {}
+        for state, label in (("normal", _("Icona")), ("rollover", _("Icona al passaggio")),
+                             ("down", _("Icona alla pressione"))):
+            row = QWidget()
+            lay = QHBoxLayout(row)
+            lay.setContentsMargins(0, 0, 0, 0)
+            status = QLabel()
+            choose = QToolButton()
+            choose.setText(_("Scegli…"))
+            choose.setToolTip(_("Immagine o pagina PDF da usare come icona"))
+            choose.clicked.connect(lambda _c=False, st=state: self._choose_icon(st))
+            remove = QToolButton()
+            bind_icon(remove, "x")
+            remove.setToolTip(_("Rimuovi l'icona"))
+            remove.clicked.connect(lambda _c=False, st=state: self._apply({f"icon_{st}": None}))
+            lay.addWidget(status, 1)
+            lay.addWidget(choose)
+            lay.addWidget(remove)
+            form.addRow(label, row)
+            self.icon_rows[state] = (status, choose, remove)
         self.image_note = self._note(_("Campo immagine: in compilazione un clic permette di scegliere l'immagine."))
         form.addRow(self.image_note)
         self.action_combo = self._combo(
@@ -1332,6 +1379,19 @@ class FieldPropertiesPanel(QWidget):
         self.action_error = self._error_label()
         form.addRow(self.action_error)
         self._button_form = form
+
+    # scelta del file dell'icona: il modulo la sostituisce con la finestra del nucleo
+    choose_icon_file: Callable[[], str | None] | None = None
+
+    def _choose_icon(self, state: str) -> None:
+        if self.choose_icon_file is not None:
+            path = self.choose_icon_file()
+        else:
+            path, _f = QFileDialog.getOpenFileName(
+                self, _("Scegli l'icona"), "",
+                _("Immagini e PDF") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.pdf)")
+        if path:
+            self._apply({f"icon_{state}": path})
 
     def _update_action_ui(self) -> None:
         t = self.action_combo.currentData() if self.action_combo.currentIndex() >= 0 else "?"
@@ -1384,10 +1444,25 @@ class FieldPropertiesPanel(QWidget):
         image = any(f.image for f in self._fields)
         form.setRowVisible(self.caption_edit, not image)
         form.setRowVisible(self.caption_down_edit, not image)
+        form.setRowVisible(self.caption_rollover_edit, not image)
+        form.setRowVisible(self.layout_combo, not image)
+        for status, _c, _r in self.icon_rows.values():
+            form.setRowVisible(status.parentWidget(), not image)
         form.setRowVisible(self.image_note, image)
         if not image:
             self._load_line(self.caption_edit, "caption")
             self._load_line(self.caption_down_edit, "caption_down")
+            if not self.caption_down_edit.placeholderText():
+                self.caption_down_edit.setPlaceholderText(_("uguale alla didascalia"))
+            self._load_line(self.caption_rollover_edit, "caption_rollover")
+            if not self.caption_rollover_edit.placeholderText():
+                self.caption_rollover_edit.setPlaceholderText(_("uguale alla didascalia"))
+            layout, mixed = self._common("layout")
+            self._load_combo(self.layout_combo, layout, mixed)
+            for state, (status, _choose, remove) in self.icon_rows.items():
+                have = [state in f.icons for f in self._fields]
+                status.setText(_("misto") if len(set(have)) > 1 else (_("impostata") if have[0] else _("nessuna")))
+                remove.setEnabled(any(have))
         self._show_error(self.action_error, None)
         action, mixed = self._common("action")
         action = dict(action or {})
