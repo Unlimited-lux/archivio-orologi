@@ -489,3 +489,26 @@ def test_field_constraints_enforced(pdf_bytes, id_a, id_b):
         digital.sign_pdf(data, id_a[2], digital.SignOptions(field_name="Cliente", reason="Accetto"))
     out = digital.sign_pdf(data, id_b[2], digital.SignOptions(field_name="Cliente", reason="Accetto"))
     assert out.startswith(data)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 270])
+def test_visible_appearance_in_box_on_rotated_cropped_page(id_a, rotation):
+    doc = pymupdf.open()
+    page = doc.new_page(width=600, height=800)
+    page.set_cropbox(pymupdf.Rect(60, 90, 540, 730))
+    page.set_rotation(rotation)
+    vis = pymupdf.Rect(100, 120, 330, 200)                       # riquadro nella vista
+    unrot = vis * page.derotation_matrix
+    unrot.normalize()
+    data = doc.tobytes()
+    out = d.sign_pdf(data, id_a[2], d.SignOptions(rect=tuple(unrot), reason="Prova",
+                                                  appearance={"layout": "testo"}))
+    r = pymupdf.open(stream=out)[0]
+    pix = r.get_pixmap(dpi=72, annots=True)
+    arr = __import__("numpy").frombuffer(pix.samples, __import__("numpy").uint8).reshape(pix.height, pix.width, pix.n)
+    ys, xs = __import__("numpy").nonzero(arr[..., 0] < 160)
+    ink = pymupdf.Rect(xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)
+    assert (ink & vis).get_area() / ink.get_area() > 0.97, (ink, vis)
+    st = d.signature_fields(out)[0]
+    got = pymupdf.Rect(st.rect)
+    assert abs(got.x0 - unrot.x0) < 1 and abs(got.y0 - unrot.y0) < 1

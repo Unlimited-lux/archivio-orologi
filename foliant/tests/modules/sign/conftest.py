@@ -15,7 +15,7 @@ PASSWORD = "Prova-Firma-2026!"
 @pytest.fixture(autouse=True)
 def _foliant_data_dir(tmp_path, monkeypatch):
     """Ogni test usa una cartella dati isolata."""
-    monkeypatch.setenv("FOLIANT_DATA_DIR", str(tmp_path / "dati"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dati"))   # letta da QStandardPaths
 
 
 @pytest.fixture(scope="session")

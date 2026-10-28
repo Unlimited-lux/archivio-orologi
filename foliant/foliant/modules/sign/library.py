@@ -45,18 +45,8 @@ class LibraryLocked(LibraryError):
 
 
 def data_dir() -> Path:
-    env = os.environ.get("FOLIANT_DATA_DIR")
-    if env:
-        base = Path(env)
-    else:
-        xdg = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-        base = Path(xdg) / "foliant"
-    base.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(base, 0o700)
-    except OSError:
-        pass
-    return base
+    from .store import data_dir as _data_dir
+    return _data_dir()
 
 
 def _atomic_write(path: Path, data: bytes) -> None:

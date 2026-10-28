@@ -693,8 +693,35 @@ def make_appearance(pdf: pymupdf.Document, item: SignatureItem, width: float, he
     return xref
 
 
+def _inherited_box(page: pymupdf.Page, key: str) -> list[float] | None:
+    doc = page.parent
+    xref = page.xref
+    for _i in range(64):
+        kind, val = doc.xref_get_key(xref, key)
+        if kind == "array":
+            return [float(v) for v in val.strip("[]").split()]
+        kind, parent = doc.xref_get_key(xref, "Parent")
+        if kind != "xref":
+            return None
+        xref = int(parent.split()[0])
+    return None
+
+
+def page_to_pdf_matrix(page: pymupdf.Page) -> pymupdf.Matrix:
+    """Coordinate non ruotate del motore (origine in alto a sinistra del CropBox)
+    → spazio utente PDF. Calcolata da /CropBox e /MediaBox perché la matrice del
+    motore è errata sulle pagine ruotate con CropBox spostato."""
+    media = _inherited_box(page, "MediaBox") or [0, 0, 612, 792]
+    crop = _inherited_box(page, "CropBox") or media
+    mx0, my0, mx1, my1 = min(media[0], media[2]), min(media[1], media[3]), max(media[0], media[2]), \
+        max(media[1], media[3])
+    cx0 = max(min(crop[0], crop[2]), mx0)
+    cy1 = min(max(crop[1], crop[3]), my1)
+    return pymupdf.Matrix(1, 0, 0, -1, cx0, cy1)
+
+
 def _pdf_rect(page: pymupdf.Page, rect: pymupdf.Rect) -> pymupdf.Rect:
-    r = pymupdf.Rect(rect) * ~page.transformation_matrix
+    r = pymupdf.Rect(rect) * page_to_pdf_matrix(page)
     r.normalize()
     return r
 
@@ -805,7 +832,7 @@ def placed_signatures(pdf: pymupdf.Document, page_index: int) -> list[PlacedSign
                 continue
             rect_s = pdf.xref_get_key(x, "Rect")[1].strip("[]").split()
             pr = pymupdf.Rect(*[float(v) for v in rect_s])
-            r = pr * page.transformation_matrix
+            r = pr * ~page_to_pdf_matrix(page)
             r.normalize()
             nm_raw = _pdf_string(pdf, x, "NM")
             ap = pdf.xref_get_key(x, "AP/N")

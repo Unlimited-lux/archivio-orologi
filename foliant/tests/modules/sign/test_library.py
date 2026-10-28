@@ -14,8 +14,8 @@ from foliant.modules.sign.library import LibraryError, LibraryLocked, SignatureL
 
 @pytest.fixture
 def lib_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("FOLIANT_DATA_DIR", str(tmp_path / "dati"))
-    return tmp_path / "dati" / "signatures"
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dati"))
+    return tmp_path / "dati" / "foliant" / "signatures"
 
 
 def _drawn(kind="firma"):

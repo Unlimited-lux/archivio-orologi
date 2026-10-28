@@ -27,14 +27,13 @@ def _cert(cn: str) -> x509.Certificate:
             .not_valid_after(now + timedelta(days=30)).sign(key, hashes.SHA256()))
 
 
-def test_data_dir_from_env(tmp_path):
+def test_data_dir_private(tmp_path):
     p = store.data_dir()
-    assert p == tmp_path / "dati"
+    assert p == tmp_path / "dati" / "foliant"
     assert p.is_dir() and (p.stat().st_mode & 0o777) == 0o700
 
 
-def test_data_dir_xdg(tmp_path, monkeypatch):
-    monkeypatch.delenv("FOLIANT_DATA_DIR")
+def test_data_dir_follows_standard_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     assert store.data_dir() == tmp_path / "xdg" / "foliant"
 

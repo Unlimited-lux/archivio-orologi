@@ -373,3 +373,51 @@ def test_clamp_with_offset_cropbox():
     assert g.clamp_rect(pdf[0], pymupdf.Rect(10, 10, 60, 40)) == pymupdf.Rect(10, 10, 60, 40)
     r = g.clamp_rect(pdf[0], pymupdf.Rect(380, 10, 440, 40))
     assert r.x1 <= 400.01
+
+
+def _ink_bbox(page, dpi=72):
+    """Riquadro (coordinate della vista, punti) dei pixel scuri della pagina resa."""
+    pix = page.get_pixmap(dpi=dpi, annots=True)
+    arr = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
+    ys, xs = np.nonzero(arr[..., 0] < 128)
+    f = 72 / dpi
+    return pymupdf.Rect(xs.min() * f, ys.min() * f, (xs.max() + 1) * f, (ys.max() + 1) * f)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("embed", [False, True])
+def test_signature_lands_in_box_on_rotated_cropped_page(rotation, embed):
+    """Rilettura: su pagina ruotata e con CropBox spostato la firma (annotazione o
+    incorporata) finisce nel riquadro scelto nella vista."""
+    item = _drawn_item()
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=600, height=800)
+    page.set_cropbox(pymupdf.Rect(60, 90, 540, 730))
+    page.set_rotation(rotation)
+    vis = pymupdf.Rect(120, 150, 120 + 160, 150 + 160 / item.aspect)
+    xref = g.insert_signature(pdf, 0, g.unrotated_rect(pdf[0], vis), item)
+    if embed:
+        g.embed_signature(pdf, 0, xref)
+    doc = pymupdf.open("pdf", pdf.tobytes(garbage=3))
+    if embed:
+        assert not list(doc[0].annots())
+    ink = _ink_bbox(doc[0])
+    assert vis.contains(ink) or (ink & vis).get_area() / ink.get_area() > 0.98
+    assert ink.width > vis.width * 0.8 and ink.height > vis.height * 0.6
+
+
+@pytest.mark.parametrize("rotation", [0, 90])
+def test_signature_in_box_with_mediabox_offset(rotation):
+    item = _drawn_item()
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=600, height=800)
+    pdf.xref_set_key(page.xref, "MediaBox", "[10 20 610 820]")
+    pdf.xref_set_key(page.xref, "CropBox", "[60 90 540 730]")
+    pdf[0].set_rotation(rotation)
+    vis = pymupdf.Rect(100, 120, 260, 120 + 160 / item.aspect)
+    g.insert_signature(pdf, 0, g.unrotated_rect(pdf[0], vis), item)
+    doc = pymupdf.open("pdf", pdf.tobytes(garbage=3))
+    ink = _ink_bbox(doc[0])
+    assert (ink & vis).get_area() / ink.get_area() > 0.98, (ink, vis)
+    sig = g.placed_signatures(doc, 0)[0]
+    assert abs(sig.rect.x0 - g.unrotated_rect(doc[0], vis).x0) < 1

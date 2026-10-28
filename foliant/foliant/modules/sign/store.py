@@ -26,12 +26,10 @@ class StoreError(SignError):
 
 
 def data_dir() -> Path:
-    env = os.environ.get("FOLIANT_DATA_DIR")
-    if env:
-        base = Path(env)
-    else:
-        xdg = os.environ.get("XDG_DATA_HOME")
-        base = (Path(xdg) if xdg else Path.home() / ".local" / "share") / "foliant"
+    """Cartella dati dell'utente per Foliant (es. ~/.local/share/foliant), privata (0700)."""
+    from PySide6.QtCore import QStandardPaths
+    loc = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericDataLocation)
+    base = (Path(loc) if loc else Path.home() / ".local" / "share") / "foliant"
     _ensure_dir(base)
     return base
 
