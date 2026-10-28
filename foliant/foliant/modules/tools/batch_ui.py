@@ -168,6 +168,7 @@ class BatchWidget(QWidget):
         self.items: list[be.QueueItem] = []
         self.steps: list[be.Step] = []
         self.report: be.JobReport | None = None
+        self.csv_semicolon = False
         self.input_roots: list[str] = []
         self.last_ignored: list[tuple[str, str]] = []
         self.setAcceptDrops(True)
@@ -183,6 +184,9 @@ class BatchWidget(QWidget):
         self.act_run = bar.addAction(_("Avvia"))
         bind_icon(self.act_run, "play")
         self.act_run.triggered.connect(lambda: self.run())
+        self.act_history = bar.addAction(_("Cronologia"))
+        bind_icon(self.act_history, "history")
+        self.act_history.triggered.connect(self._history_menu)
         bar.addSeparator()
         act_close = bar.addAction(_("Chiudi"))
         bind_icon(act_close, "x")
@@ -435,9 +439,62 @@ class BatchWidget(QWidget):
         self._settings_changed()
 
     # ================================================================ coda
+    def _base_dir(self) -> str:
+        return os.path.dirname(self.ctx.settings().fileName()) or os.path.expanduser("~/.config/foliant")
+
     def sequences_dir(self) -> str:
-        base = os.path.dirname(self.ctx.settings().fileName()) or os.path.expanduser("~/.config/foliant")
-        return os.path.join(base, "foliant-sequenze")
+        return os.path.join(self._base_dir(), "foliant-sequenze")
+
+    def history_dir(self) -> str:
+        return os.path.join(self._base_dir(), "foliant-rapporti")
+
+    def journal_path(self) -> str:
+        return os.path.join(self._base_dir(), "foliant-lavoro-in-corso.json")
+
+    def check_interrupted(self) -> bool:
+        """Propone di riprendere un lavoro interrotto (chiusura anomala)."""
+        found = be.interrupted_job(self.journal_path())
+        if found is None:
+            return False
+        pending, settings = found
+        if not self.ctx.confirm(_("Lavoro interrotto"), _("Un'elaborazione in blocco è stata interrotta. "
+                                                            "Riprendere con i {n} file non completati?").format(
+                n=len(pending))):
+            be.discard_journal(self.journal_path())
+            return False
+        self.items = []
+        self.add_paths([p for p in pending if os.path.exists(p)])
+        self.steps = list(settings.steps)
+        self._refresh_steps(0)
+        self.dest_path.setText(settings.destination)
+        self.pattern.setText(settings.pattern)
+        self.counter_start.setValue(settings.counter_start)
+        self.conflict.setCurrentIndex(max(0, self.conflict.findData(settings.conflict)))
+        {"folder": self.dest_folder, "same": self.dest_same, "subfolder": self.dest_sub}.get(
+            settings.destination_mode, self.dest_folder).setChecked(True)
+        be.discard_journal(self.journal_path())
+        return True
+
+    def _history_menu(self) -> None:
+        menu = QMenu(self)
+        files = be.list_history(self.history_dir())
+        if not files:
+            menu.addAction(_("Nessun lavoro precedente")).setEnabled(False)
+        for path in files:
+            name = os.path.basename(path)[7:-5]
+            label = f"{name[6:8]}/{name[4:6]}/{name[0:4]} {name[9:11]}:{name[11:13]}:{name[13:15]}"
+            menu.addAction(label, lambda p=path: self.show_history(p))
+        menu.exec(self.mapToGlobal(self.rect().topLeft()))
+
+    def show_history(self, path: str) -> bool:
+        try:
+            self.report = be.load_report(path)
+        except Exception as e:
+            self.ctx.error(_("Rapporto non leggibile"), str(e))
+            return False
+        self._fill_report()
+        self.report_box.show()
+        return True
 
     def add_paths(self, paths: list[str]) -> tuple[int, list[tuple[str, str]]]:
         """Aggiunge file e cartelle; restituisce (aggiunti, ignorati)."""
@@ -737,11 +794,23 @@ class BatchWidget(QWidget):
             except OSError as e:
                 self.ctx.error(_("Impossibile avviare"), _("Impossibile creare la cartella: {e}").format(e=e.strerror))
                 return None
+        control = be.JobControl()
+        panel = JobControlPanel(control, self)
+        panel.show()
         try:
-            report = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, list(self.items), settings)
+            report = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, list(self.items), settings,
+                                       None, None, control, self.journal_path())
         except Exception as e:   # il motore non dovrebbe sollevare: sicurezza in più
             self.ctx.error(_("Elaborazione non riuscita"), str(e))
             return None
+        finally:
+            control.resume()
+            panel.close()
+            panel.deleteLater()
+        try:
+            be.save_history(self.history_dir(), report)
+        except Exception:
+            pass
         self.report = report
         self.last_settings = settings
         self._fill_report()
@@ -803,12 +872,14 @@ class BatchWidget(QWidget):
     def export_report(self, path: str) -> bool:
         if self.report is None:
             return False
-        if path.lower().endswith(".json"):
-            data = self.report.to_json()
-        else:
-            data = self.report.to_csv(";" if path.lower().endswith(".tsv") else ",")
         try:
-            atomic_write(path, data.encode("utf-8"))
+            if path.lower().endswith(".json"):
+                data = self.report.to_json().encode("utf-8")
+            elif path.lower().endswith(".pdf"):
+                data = be.report_pdf(self.report)
+            else:
+                data = self.report.to_csv(";" if self.csv_semicolon else ",").encode("utf-8")
+            atomic_write(path, data)
         except Exception as e:
             self.ctx.error(_("Rapporto non esportato"), str(e))
             return False
@@ -819,7 +890,7 @@ class BatchWidget(QWidget):
         if self.report is None:
             return
         name = f"rapporto_{self.report.started:%Y-%m-%d_%H-%M-%S}.csv"
-        path = self.ctx.ask_save_path(_("Esporta rapporto"), name, "CSV (*.csv);;JSON (*.json)", ".csv")
+        path = self.ctx.ask_save_path(_("Esporta rapporto"), name, "CSV (*.csv);;JSON (*.json);;PDF (*.pdf)", ".csv")
         if path:
             self.export_report(path)
 
@@ -831,6 +902,38 @@ class BatchWidget(QWidget):
             target = os.path.dirname(outputs[0]) if outputs else ""
         if target and os.path.isdir(target):
             QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+
+
+class JobControlPanel(QWidget):
+    """Piccola finestra con Pausa/Riprendi e «Annulla file» durante il lavoro
+    (la finestra di avanzamento di run_task offre l'annullamento dell'intero lavoro)."""
+
+    def __init__(self, control: be.JobControl, parent=None):
+        super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
+        self.control = control
+        self.setWindowTitle(_("Elaborazione in blocco"))
+        self.pause_button = QPushButton(_("Pausa"))
+        bind_icon(self.pause_button, "pause")
+        self.pause_button.clicked.connect(self.toggle_pause)
+        skip = QPushButton(_("Annulla file"))
+        bind_icon(skip, "skip-forward")
+        skip.clicked.connect(control.skip_current)
+        lay = QHBoxLayout(self)
+        lay.addWidget(self.pause_button)
+        lay.addWidget(skip)
+        if parent is not None:
+            g = parent.window().geometry()
+            self.move(g.right() - 320, g.top() + 80)
+
+    def toggle_pause(self) -> None:
+        if self.control.paused:
+            self.control.resume()
+            self.pause_button.setText(_("Pausa"))
+            bind_icon(self.pause_button, "pause")
+        else:
+            self.control.pause()
+            self.pause_button.setText(_("Riprendi"))
+            bind_icon(self.pause_button, "play")
 
 
 def _analyze_all(progress, paths: list[str]) -> list[be.QueueItem]:

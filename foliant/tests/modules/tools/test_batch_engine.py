@@ -693,3 +693,110 @@ def test_create_step_must_be_first(tmp_path):
     settings = be.JobSettings(steps=[be.Step("compress"), be.Step("create_pdf")], destination=str(tmp_path))
     errors, _w = be.validate_settings(items, settings)
     assert any("primo passo" in e for e in errors)
+
+
+# ----------------------------------------------------------------- BAT-04 / BAT-05 (pausa, giornale, cronologia)
+def _queue(tmp_path, n=4):
+    src = tmp_path / "src"
+    src.mkdir(exist_ok=True)
+    return [be.analyze_file(build_pdf(src / f"f{i}.pdf", [["Pagina di prova", f"file {i}"]])) for i in range(n)]
+
+
+def test_pause_and_resume_give_same_results(tmp_path):
+    import threading
+    import time as _t
+    items = _queue(tmp_path)
+    started = datetime(2026, 10, 28, 9, 0, 0)
+    ref = be.JobSettings(steps=[be.Step("watermark", {"text": "COPIA"})], destination=str(tmp_path / "ref"))
+    be.run_job(None, items, ref, started=started)
+    control = be.JobControl()
+    control.pause()
+    out = tmp_path / "pausa"
+    settings = be.JobSettings(steps=[be.Step("watermark", {"text": "COPIA"})], destination=str(out))
+    box = {}
+    th = threading.Thread(target=lambda: box.setdefault("r", be.run_job(None, items, settings, started=started,
+                                                                        control=control)))
+    th.start()
+    _t.sleep(0.4)
+    assert not out.exists() or not os.listdir(out)
+    control.resume()
+    th.join(20)
+    assert box["r"].counts()["ok"] == 4
+    for name in os.listdir(tmp_path / "ref"):
+        # stesso contenuto (l'identificatore /ID del file è generato a ogni salvataggio)
+        ra, rb = pymupdf.open(str(tmp_path / "ref" / name)), pymupdf.open(str(out / name))
+        assert ra.page_count == rb.page_count
+        assert [p.get_text() for p in ra] == [p.get_text() for p in rb]
+        assert [p.read_contents() for p in ra] == [p.read_contents() for p in rb]
+
+
+def test_skip_current_file_only(tmp_path):
+    items = _queue(tmp_path, 3)
+    control = be.JobControl()
+
+    class P:
+        n = 0
+
+        def update(self, f=None, t=None):
+            self.n += 1
+            if self.n == 2:            # durante il secondo file
+                control.skip_current()
+
+        def check(self):
+            pass
+    out = tmp_path / "out"
+    report = be.run_job(P(), items, be.JobSettings(steps=[be.Step("compress")], destination=str(out)),
+                        control=control)
+    assert [r.status for r in report.results] == ["ok", "cancelled", "ok"]
+    assert not report.cancelled
+    assert len(os.listdir(out)) == 2
+
+
+def test_journal_offers_resume_of_unfinished_files(tmp_path):
+    items = _queue(tmp_path, 5)
+    journal = str(tmp_path / "giornale.json")
+    settings = be.JobSettings(steps=[be.Step("protect", {"user_password": "segreta", "owner_password": "capo"})],
+                              destination=str(tmp_path / "out"))
+
+    class Crash:
+        n = 0
+
+        def update(self, f=None, t=None):
+            self.n += 1
+            if self.n == 4:
+                raise KeyboardInterrupt   # arresto improvviso a metà lavoro
+
+        def check(self):
+            pass
+    try:
+        be.run_job(Crash(), items, settings, journal=journal)
+    except KeyboardInterrupt:
+        pass
+    text = open(journal, encoding="utf-8").read()
+    assert "segreta" not in text and "capo" not in text
+    pending, restored = be.interrupted_job(journal)
+    assert [os.path.basename(p) for p in pending] == ["f3.pdf", "f4.pdf"] or len(pending) == 2
+    assert [s.action for s in restored.steps] == ["protect"]
+    for f in os.listdir(tmp_path / "out"):
+        assert pymupdf.open(str(tmp_path / "out" / f)).needs_pass   # nessun file corrotto
+    report = be.run_job(None, [be.analyze_file(p) for p in pending], settings, journal=journal)
+    assert report.counts()["ok"] == 2
+    assert not os.path.exists(journal)
+    assert be.interrupted_job(journal) is None
+
+
+def test_history_keeps_last_20_and_pdf_report(tmp_path):
+    items = _queue(tmp_path, 2)
+    report = be.run_job(None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "o")))
+    hist = tmp_path / "storia"
+    for k in range(23):
+        report.started = datetime(2026, 1, 1, 0, 0, k)
+        be.save_history(str(hist), report)
+    files = be.list_history(str(hist))
+    assert len(files) == 20
+    back = be.load_report(files[0])
+    assert [r.status for r in back.results] == [r.status for r in report.results]
+    data = be.report_pdf(report)
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    text = doc[0].get_text()
+    assert "Rapporto dell'elaborazione in blocco" in text and "f0.pdf" in text

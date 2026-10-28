@@ -176,3 +176,49 @@ def test_batch_screenshot(window, batch, folder, tmp_path, theme_name):
     batch.add_step("bates", {"prefix": "VND-"})
     assert window.grab().save(str(tmp_path / f"batch_{theme_name}.png"))
     theme.apply(QApplication.instance(), "light")
+
+
+def test_pdf_report_and_history(batch, folder, tmp_path):
+    batch.add_paths([str(folder / "alfa.pdf")])
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "out"))
+    batch.run(confirm=False)
+    pdf = tmp_path / "rapporto.pdf"
+    assert batch.export_report(str(pdf))
+    assert "alfa.pdf" in pymupdf.open(str(pdf))[0].get_text()
+    files = be.list_history(batch.history_dir())
+    assert len(files) == 1
+    batch.report = None
+    assert batch.show_history(files[0])
+    assert batch.report_table.rowCount() == 1
+
+
+def test_interrupted_job_resumed_on_open(window, folder, tmp_path, monkeypatch):
+    module = window.ctx.tools_module
+    from PySide6.QtCore import QSettings
+    base = os.path.dirname(window.ctx.settings().fileName())
+    journal = os.path.join(base, "foliant-lavoro-in-corso.json")
+    items = [be.analyze_file(str(folder / n)) for n in ("alfa.pdf", "doc2.pdf", "doc10.pdf")]
+    settings = be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "out"))
+    report = be.JobReport([be.FileResult(it.path, status=s) for it, s in zip(items, ("ok", "not_processed",
+                                                                                     "cancelled"))],
+                          settings.steps, __import__("datetime").datetime.now())
+    be.write_journal(journal, report, items, settings, finished=False)
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: True)
+    module.batch = None
+    w = module.show_batch()
+    assert sorted(it.name for it in w.items) == ["doc10.pdf", "doc2.pdf"]
+    assert [s.action for s in w.steps] == ["compress"]
+    assert w.dest_path.text() == str(tmp_path / "out")
+    assert not os.path.exists(journal)
+    del QSettings
+
+
+def test_control_panel_pause_toggle(batch):
+    control = be.JobControl()
+    panel = bu.JobControlPanel(control, batch)
+    panel.toggle_pause()
+    assert control.paused and panel.pause_button.text() == "Riprendi"
+    panel.toggle_pause()
+    assert not control.paused
+    panel.close()

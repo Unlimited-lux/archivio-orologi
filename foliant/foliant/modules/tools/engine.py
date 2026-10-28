@@ -1127,16 +1127,57 @@ def _supports_join() -> bool:
 # =============================================================================
 # Esecuzione del lavoro (BAT-04)
 # =============================================================================
+class SkipFile(Exception):
+    """«Annulla file»: scarta il file corrente e passa al successivo."""
+
+
+class JobControl:
+    """Pausa/ripresa e annullamento del solo file corrente (BAT-04).
+
+    I comandi arrivano dal thread dell'interfaccia; il lavoro li osserva nei
+    punti sicuri (tra un file e l'altro e a ogni pagina)."""
+
+    def __init__(self) -> None:
+        import threading
+        self._paused = threading.Event()
+        self._skip = threading.Event()
+
+    @property
+    def paused(self) -> bool:
+        return self._paused.is_set()
+
+    def pause(self) -> None:
+        self._paused.set()
+
+    def resume(self) -> None:
+        self._paused.clear()
+
+    def skip_current(self) -> None:
+        self._skip.set()
+
+    def checkpoint(self, progress=None) -> None:
+        while self._paused.is_set():
+            if progress is not None and getattr(progress, "cancelled", False):
+                break
+            time.sleep(0.05)
+        if self._skip.is_set():
+            self._skip.clear()
+            raise SkipFile()
+
+
 class _Ctx:
     """Stato per un file in elaborazione."""
 
-    def __init__(self, progress, index: int, total_files: int):
+    def __init__(self, progress, index: int, total_files: int, control: JobControl | None = None):
         self.progress = progress
         self.index = index
         self.total_files = total_files
+        self.control = control
         self.warnings: list[str] = []
 
     def check(self) -> None:
+        if self.control is not None:
+            self.control.checkpoint(self.progress)
         if self.progress is not None:
             self.progress.check() if hasattr(self.progress, "check") else self.progress.update()
 
@@ -1479,8 +1520,12 @@ def _write_output(path: str, data: bytes) -> None:
 
 
 def run_job(progress, items: list[QueueItem], settings: JobSettings, started: datetime | None = None,
-            printer: str | None = None) -> JobReport:
-    """Esegue il lavoro; non solleva per gli errori dei singoli file né per l'annullamento."""
+            printer: str | None = None, control: JobControl | None = None,
+            journal: str | None = None) -> JobReport:
+    """Esegue il lavoro; non solleva per gli errori dei singoli file né per l'annullamento.
+
+    `control` permette pausa e «annulla file»; `journal` è il percorso del giornale
+    persistente, aggiornato dopo ogni file (ripresa dopo un'interruzione)."""
     started = started or datetime.now()
     items = list(items)   # coda congelata
     report = JobReport([FileResult(it.path) for it in items], list(settings.steps), started,
@@ -1518,15 +1563,18 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
     stop = False
 
     def update(frac: float, text: str) -> None:
+        if control is not None:
+            control.checkpoint(progress)
         if progress is not None:
             progress.update(frac, text)
 
+    write_journal(journal, report, items, settings, finished=False)
     for i, item in enumerate(items):
         res = report.results[i]
         if stop:
             break
         t0 = time.monotonic()
-        ctx = _Ctx(progress, i, len(items))
+        ctx = _Ctx(progress, i, len(items), control)
         try:
             update(i / n, _("File {i} di {n}: {name}").format(i=i + 1, n=len(items), name=item.name))
             try:
@@ -1601,6 +1649,9 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
             if ctx.warnings and res.status == "ok":
                 res.status = "warning"
                 res.message = "; ".join(ctx.warnings)
+        except SkipFile:
+            res.status, res.code = "cancelled", "USR-02"
+            res.message = _("File annullato dall'utente.")
         except OperationCancelled:
             res.status = "cancelled"
             res.message = _("Annullato dall'utente.")
@@ -1615,6 +1666,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
             if settings.error_policy == "stop":
                 stop = True
         res.duration_ms = int((time.monotonic() - t0) * 1000)
+        write_journal(journal, report, items, settings, finished=False)
 
     if merge_index is not None and not report.cancelled:
         _finish_merge(report, items, merged_parts, steps[merge_index], post_steps, settings, started, plan,
@@ -1625,7 +1677,125 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
         except OperationCancelled:
             pass
     report.finished = datetime.now()
+    write_journal(journal, report, items, settings, finished=True)
     return report
+
+
+# =============================================================================
+# Giornale persistente e cronologia dei rapporti (BAT-04, BAT-05)
+# =============================================================================
+def write_journal(path: str | None, report: JobReport, items: list[QueueItem], settings: JobSettings,
+                  finished: bool) -> None:
+    """Giornale del lavoro (senza segreti). Alla fine del lavoro viene rimosso."""
+    if not path:
+        return
+    if finished:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return
+    data = {"format": "foliant-batch-journal", "version": 1, "started": report.started.isoformat(),
+            "settings": settings.to_dict(),
+            "files": [{"path": it.path, "status": r.status} for it, r in zip(items, report.results)]}
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        atomic_write(path, json.dumps(data, ensure_ascii=False).encode("utf-8"))
+    except Exception:
+        pass   # il giornale non deve mai far fallire il lavoro
+
+
+def interrupted_job(path: str) -> tuple[list[str], JobSettings] | None:
+    """Lavoro interrotto (es. chiusura anomala): file non completati e impostazioni."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if data.get("format") != "foliant-batch-journal":
+        return None
+    pending = [f["path"] for f in data.get("files", []) if f.get("status") not in ("ok", "warning", "skipped")]
+    if not pending:
+        return None
+    st = dict(data.get("settings") or {})
+    steps = [Step.from_dict(x) for x in st.pop("steps", [])]
+    fields = JobSettings.__dataclass_fields__
+    settings = JobSettings(steps=steps, **{k: v for k, v in st.items() if k in fields and k != "steps"})
+    return pending, settings
+
+
+def discard_journal(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+HISTORY_LIMIT = 20
+
+
+def save_history(directory: str, report: JobReport) -> str:
+    """Conserva il rapporto tra gli ultimi 20 consultabili."""
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, f"lavoro_{report.started:%Y%m%d_%H%M%S_%f}.json")
+    atomic_write(path, report.to_json().encode("utf-8"))
+    files = sorted(f for f in os.listdir(directory) if f.startswith("lavoro_") and f.endswith(".json"))
+    for old in files[:-HISTORY_LIMIT]:
+        try:
+            os.unlink(os.path.join(directory, old))
+        except OSError:
+            pass
+    return path
+
+
+def list_history(directory: str) -> list[str]:
+    if not os.path.isdir(directory):
+        return []
+    files = sorted((f for f in os.listdir(directory) if f.startswith("lavoro_") and f.endswith(".json")),
+                   reverse=True)
+    return [os.path.join(directory, f) for f in files]
+
+
+def load_report(path: str) -> JobReport:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    job = data.get("lavoro", {})
+    results = [FileResult(input=x.get("file_ingresso", ""), outputs=list(x.get("file_uscita") or []),
+                          status=x.get("esito", "not_processed"), code=x.get("codice", ""),
+                          message=x.get("messaggio", ""), pages=x.get("pagine", 0),
+                          bytes_in=x.get("byte_ingresso", 0), bytes_out=x.get("byte_uscita", 0),
+                          duration_ms=x.get("durata_ms", 0)) for x in data.get("file", [])]
+    started = datetime.fromisoformat(job["inizio"]) if job.get("inizio") else datetime.now()
+    finished = datetime.fromisoformat(job["fine"]) if job.get("fine") else None
+    steps = [Step.from_dict(s) for s in job.get("passi", [])]
+    return JobReport(results, steps, started, finished, bool(job.get("annullato")), job.get("impostazioni") or {})
+
+
+def report_pdf(report: JobReport) -> bytes:
+    """Rapporto del lavoro in PDF per l'archiviazione."""
+    from .report import _Writer
+    with ENGINE_LOCK:
+        doc = pymupdf.open()
+        try:
+            w = _Writer(doc)
+            w.line(_("Rapporto dell'elaborazione in blocco"), size=16, gap=10)
+            w.line(_("Inizio: {d}").format(d=report.started.strftime("%d/%m/%Y %H:%M:%S")), size=9)
+            if report.finished:
+                w.line(_("Fine: {d}").format(d=report.finished.strftime("%d/%m/%Y %H:%M:%S")), size=9)
+            w.line(_("Operazioni: {o}").format(o=", ".join(action_label(s.action) for s in report.steps)), size=9)
+            w.line(report.summary(), size=10, gap=10)
+            for r in report.results:
+                w.line(f"{r.status_label} · {os.path.basename(r.input)}", size=9.5, gap=2)
+                detail = " ".join(x for x in (r.code, r.message) if x)
+                outs = ", ".join(os.path.basename(o) for o in r.outputs)
+                if outs:
+                    w.line("→ " + outs, size=8, indent=12, gap=2, color=(0.3, 0.3, 0.3))
+                if detail:
+                    w.line(detail, size=8, indent=12, gap=2, color=(0.5, 0.2, 0.1))
+                w.space(3)
+            return doc.tobytes(garbage=3, deflate=True)
+        finally:
+            doc.close()
 
 
 def _finish_merge(report: JobReport, items, parts, step: Step, post_steps, settings, started, plan,
