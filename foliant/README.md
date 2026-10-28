@@ -53,6 +53,29 @@ Ctrl+? mostra tutte le scorciatoie, Ctrl+, apre le preferenze (tema, lingua, nom
 
 I problemi noti e lo stato delle funzioni sono in `docs/avanzamento.md`.
 
+### Riservatezza
+
+Foliant non tiene traccia dei file che apri: tra un avvio e l'altro non conserva su disco nomi,
+percorsi o cartelle dei documenti aperti, modificati o salvati (niente «file recenti», niente
+documenti fissati, niente ultima cartella). Durante la sessione ricorda in memoria l'ultima
+cartella dei dialoghi e le guide dei righelli; chiudendo l'app si perdono. Restano solo le
+preferenze generali (tema, lingua, unità…) e i file che salvi tu dove scegli.
+
+- I dialoghi di file sono quelli di Qt, non quelli del desktop (GTK/KDE/portale), che
+  registrerebbero i file scelti nella cronologia del sistema (`~/.local/share/recently-used.xbel`).
+  Qt scrive le cartelle visitate in `~/.config/QtProject.conf` (gruppo `FileDialog`, chiavi
+  `history`, `lastVisited`, `shortcuts`): Foliant le rimette com'erano appena il dialogo si
+  chiude, e di nuovo all'uscita (`foliant/ui/privacy.py`).
+- Al primo avvio di questa versione Foliant cancella da sé i dati delle versioni precedenti:
+  recenti, documenti fissati, ultima cartella, guide per documento, la cronologia `history` e
+  `lastVisited` di `QtProject.conf` (condivisa con le altre applicazioni Qt), le proprie voci in
+  `recently-used.xbel` e nei documenti recenti di KDE. Le versioni precedenti, con il dialogo
+  GTK, potevano registrare i file scelti come applicazione «python»: quelle voci non si
+  distinguono da quelle di altri programmi e vanno tolte dal sistema (es. «Cancella cronologia»
+  nelle impostazioni di riservatezza del desktop).
+- Nei messaggi di errore sul terminale (che possono finire nel giornale di sistema) non compaiono
+  nomi né percorsi di file.
+
 ## Sviluppo
 
 ```bash
@@ -166,6 +189,14 @@ def ruota(ctx, gradi):
    `register(ctx)` viene chiamata di nuovo con il suo `Context`. Lo stato del modulo va tenuto
    nel controller legato a quel `ctx`, non in variabili globali del modulo, che l'ultima
    finestra aperta sovrascriverebbe.
+11. **Riservatezza**: nessun nome, percorso o cartella dei file aperti, modificati, convertiti o
+   salvati deve restare su disco tra un avvio e l'altro, né in chiaro né come impronta (hash) del
+   percorso o del contenuto: niente recenti, sessioni da ripristinare, ultime cartelle in
+   `QSettings`, stato per documento (pagina, zoom, livelli, ricerche…), cronologie, indici,
+   cache o registri con nomi di file, nemmeno nei messaggi di `logging`. Ammessi: preferenze
+   generali senza percorsi, file che l'utente salva esplicitamente dove sceglie, stato in
+   memoria durante la sessione. Chi aveva dati del genere li cancella all'avvio (una volta sola,
+   solo chiavi e file propri). Verifica: `tests/test_no_file_traces.py`.
 
 ### Scorciatoie da tastiera
 
@@ -242,11 +273,9 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `set_selected_pages_provider(fn)` / `selected_pages(view=None)` → `list[int]` | pagine selezionate (miniature): il provider `fn(view)` restituisce gli indici; senza provider o selezione, `[pagina corrente]` |
 | `add_preferences_page(titolo, factory, order=100)` / `show_preferences(pagina=None)` | pagina di un modulo nelle Preferenze: `factory(parent) -> QWidget`, creata a ogni apertura; `widget.apply()` (se c'è) chiamato con «Salva» |
 | `author_name()` | nome dell'autore per commenti, note e firme (preferenza «Nome autore», altrimenti l'utente di sistema): da usare al posto di chiavi proprie |
-| `recent_files()`, `replace_recent(vecchio, nuovo)`, `remove_recent(p)` | elenco dei recenti: file rinominato/spostato (stessa posizione) o da togliere. La Home mostra anche i file che non esistono più, attenuati con «File non trovato»: il clic propone Individua… o Rimuovi dall'elenco invece di aprire |
-| `pin_recent(p, True/False)`, `is_pinned(p)`, `pinned_recent()`, `clear_recent(ask=True)` → bool | documenti fissati in cima ai recenti (salvati nelle impostazioni, mai tolti dal limite dei recenti; seguono `replace_recent`, `remove_recent` li sblocca); `clear_recent` è «Svuota elenco»: toglie i non fissati dopo la conferma (UX-13), False se l'utente annulla |
-| `add_recent_menu_provider(fn)` | voci nel menu del tasto destro su un recente della Home: `fn(percorso, menu)`, tra quelle del nucleo (in testa Apri, o Individua… se il file non c'è più, e Fissa/Sblocca; in fondo Rimuovi dall'elenco e Svuota elenco). Un modulo che mostra ancora un proprio menu (`customContextMenuRequested` sull'elenco `window.home.recent`, come `viewer/files.py`) lo riceve completato con le voci del nucleo che mancano, se il `QMenu` ha come genitore l'elenco |
+| `recent_files()`, `replace_recent()`, `remove_recent()`, `pin_recent()`, `is_pinned()`, `pinned_recent()`, `clear_recent()`, `add_recent_menu_provider()` | **inerti**, restano solo per compatibilità: Foliant non conserva i file aperti (vedi «Riservatezza»), quindi non salvano nulla, gli elenchi sono vuoti, `is_pinned` è False e `clear_recent` restituisce True senza domande. La Home non ha l'elenco dei recenti (`window.home.recent` è vuoto e nascosto) e il menu ☰ non ha «Apri recenti». I moduli non devono più chiamarle |
 | `add_change_guard(fn)` / `remove_change_guard(fn)` | guardia su tutti i documenti aperti e futuri: `fn(document, etichetta, kind) -> bool`, False annulla la modifica (vedi sotto) |
-| `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
+| `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi; i dialoghi di file partono dall'ultima cartella usata **in questa sessione** (`window.last_directory()`, solo in memoria, condivisa dalle finestre; all'avvio la cartella personale) |
 | segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `documentAccessChanged`, `modeChanged`, `fullscreenChanged(bool)` | eventi; `documentAccessChanged(view)`: accesso o permessi cambiati (`unlock`) o documento bloccato/sbloccato (`set_locked`): ricalcolare i comandi che dipendono da `allows()`/`locked`; su `documentClosed(view)` il modulo azzera i propri riferimenti alla vista e al documento, così vengono raccolti e la memoria torna al sistema (NFR-06: dopo la distruzione della scheda il nucleo chiama `malloc_trim` su Linux/glibc) |
 
 Ogni scheda è un contenitore (`window.tabs.page(view)`: barre di avviso sopra la vista), ma
@@ -293,7 +322,7 @@ un proprio `customContextMenuRequested` sulla barra delle schede: le voci vanno 
 | `refresh_rendering()` | ridisegna le pagine senza modifiche al documento (la resa precedente resta visibile finché arriva la nuova) |
 | `set_rulers_visible(bool)` / `rulers_visible`, `set_ruler_unit(u)` / `ruler_unit` (+ `rulerUnitChanged`) | righelli di questa vista (di solito si usa `ctx.set_rulers_visible`); zero nell'angolo superiore sinistro della pagina come si vede (CropBox, /Rotate e rotazione della vista) sotto il puntatore o corrente: `ruler_page()`, `ruler_position(pos_viewport)` → (x, y) nell'unità |
 | `guides()` → `list[(orientamento, posizione_pt, pagina \| None)]` | guide (VIS-39, OBJ-23): `GUIDE_HORIZONTAL` (y costante) o `GUIDE_VERTICAL` (x costante) nelle coordinate della **pagina visualizzata** (punti dall'angolo superiore sinistro della CropBox con /Rotate applicato, senza la rotazione della vista: restano attaccate al contenuto); pagina `None` = tutte le pagine |
-| `add_guide(orientamento, posizione_pt, pagina=None)` / `remove_guide(orientamento, posizione_pt, pagina=None)` → bool / `set_guides(lista)` / `clear_guides()` | modifica delle guide (orientamento anche `"h"`/`"v"` o, come nel modulo oggetti, `"y"`/`"x"`); segnale `guidesChanged`. La finestra le salva per documento nelle impostazioni (non nel file) e le ripristina alla riapertura |
+| `add_guide(orientamento, posizione_pt, pagina=None)` / `remove_guide(orientamento, posizione_pt, pagina=None)` → bool / `set_guides(lista)` / `clear_guides()` | modifica delle guide (orientamento anche `"h"`/`"v"` o, come nel modulo oggetti, `"y"`/`"x"`); segnale `guidesChanged`. La finestra le ricorda per documento solo in memoria: riaprendo il file nella stessa sessione si ritrovano, chiusa l'applicazione si perdono (mai nelle impostazioni né nel file) |
 | `guides_on_page(i)` → `[(orientamento, posizione_pt)]` / `page_guide_lines(i)` → `{"x": [...], "y": [...]}` | guide valide per la pagina; `page_guide_lines` le dà in coordinate pagina (non ruotata, come `get_text`/`get_drawings`) per l'aggancio: su una pagina con /Rotate 90 una guida verticale diventa una `y` |
 | `display_transform(i)`, `display_size(i)` | coordinate della pagina visualizzata → viewport (`page_transform(i)` = `placement.page_to_display_matrix` seguita da questa) |
 | `set_guides_visible(bool)` / `guides_visible`, `set_guides_locked(bool)` / `guides_locked` | guide disegnate o no; bloccate. Con i righelli visibili si trascinano dal righello (Ctrl al rilascio = su tutte le pagine), si spostano prendendole sulla pagina e si eliminano trascinandole fuori dalla pagina; il menu del righello cambia unità, blocca o rimuove tutte le guide |
