@@ -246,6 +246,37 @@ class FontChoice:
         return bytes(self.font.buffer)
 
 
+def is_pdfa(pdf: pymupdf.Document) -> bool:
+    """True se il documento dichiara la conformità PDF/A nei metadati XMP."""
+    try:
+        xmp = pdf.get_xml_metadata() or ""
+    except Exception:
+        return False
+    return "pdfaid:part" in xmp
+
+
+@dataclass(eq=False)
+class ResourceChoice(FontChoice):
+    """La risorsa font originale del PDF: il testo nuovo la riusa con la sua codifica (nessun font aggiunto)."""
+
+    resource: object = None   # fontfix.ResourceEncoding
+
+    def covers(self, ch: str) -> bool:
+        return self.resource.covers(ch)
+
+    @property
+    def has_space(self) -> bool:
+        return self.resource.covers(" ")
+
+    def text_length(self, text: str, size: float) -> float:
+        return self.resource.text_length(text, size)
+
+    def data(self) -> bytes:
+        if self.buffer is None:
+            raise ValueError("programma del font non disponibile")
+        return self.buffer
+
+
 @dataclass
 class Substitution:
     original: str
@@ -264,6 +295,7 @@ class FontResolver:
         self._base14: dict[str, FontChoice] = {}
         self._embedded_info: dict[int, tuple] = {}
         self.forbidden: set[str] = set()
+        self.pdfa = is_pdfa(pdf)      # PDF/A: solo font incorporati (TXT-20)
 
     # ------------------------------------------------------------ costruttori
     def _from_file(self, path: str, kind: str, name: str | None = None, sim_bold: bool = False,
@@ -333,6 +365,13 @@ class FontResolver:
             # i caratteri mancanti useranno un sostituto (TXT-10)
             return ch is not None and (not visible or any(ch.covers(c) for c in visible))
 
+        # prima scelta: la risorsa font originale della pagina, senza aggiungere font al file (bug_10)
+        rkey = ("res", xref)
+        if rkey not in self._originals:
+            self._originals[rkey] = self._resource(xref)
+        resource = self._originals[rkey]
+        if usable(resource):
+            return resource
         choice = self._originals[xref]
         if usable(choice) and (not visible or all(choice.covers(c) for c in visible)):
             return choice
@@ -344,6 +383,17 @@ class FontResolver:
             if not usable(choice) or sum(repaired.covers(c) for c in visible) > sum(choice.covers(c) for c in visible):
                 return repaired
         return choice if usable(choice) else None
+
+    def _resource(self, xref: int) -> "FontChoice | None":
+        from .fontfix import resource_encoding
+        enc = resource_encoding(self.pdf, xref)
+        if enc is None:
+            return None
+        base = self._originals.get(xref)
+        font = base.font if base is not None else pymupdf.Font("helv")
+        name = strip_subset(self.font_info(xref)[2])
+        return ResourceChoice("FTo%d" % xref, font, KIND_ORIGINAL, name,
+                              buffer=base.buffer if base is not None else None, resource=enc)
 
     def _repaired(self, xref: int) -> FontChoice | None:
         from .fontfix import repaired_font
@@ -392,7 +442,7 @@ class FontResolver:
             if choice is not None and bool(choice.font.is_bold) == style.bold and \
                     bool(choice.font.is_italic) == style.italic:
                 return choice
-        alias = self._base14_alias(style)
+        alias = None if self.pdfa else self._base14_alias(style)
         if alias and not (style.font_xref and self.is_embedded(style.font_xref)):
             return self._base14_choice(alias)
         sf = find_system_font(style.font, style.bold, style.italic)
@@ -430,6 +480,10 @@ class FontResolver:
         choice = self._variant_from_families(families, style.bold, style.italic, KIND_SUBSTITUTE)
         if choice is not None:
             return choice
+        if self.pdfa:
+            last = self._variant_from_families(_LAST_RESORT, False, False, KIND_SUBSTITUTE)
+            if last is not None:
+                return last
         return self._base14_choice("tiro" if style.serif else "cour" if style.mono else "helv")
 
     def fallbacks(self, style: Style) -> list[FontChoice]:

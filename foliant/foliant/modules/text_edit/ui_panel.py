@@ -200,6 +200,12 @@ class TextPropertiesPanel(QWidget):
         return b
 
     def _apply_theme(self) -> None:
+        try:
+            self._restyle()
+        except RuntimeError:
+            pass   # pannello di una finestra già chiusa
+
+    def _restyle(self) -> None:
         self.warning.setStyleSheet(
             f"QFrame#fontWarning {{ background: {theme.hex_color('surface_alt')}; "
             f"border: 1px solid {theme.hex_color('warning')}; border-radius: 6px; }}")

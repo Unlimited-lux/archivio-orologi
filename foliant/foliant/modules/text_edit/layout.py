@@ -224,6 +224,11 @@ class Composer:
         if base_size is None:
             sizes = [r.style.size for p in paragraphs for r in p if r.text.strip()]
             base_size = sizes[0] if sizes else 12.0
+        from .bidi import paragraph_is_rtl, shape_arabic, visual_order
+        rtl_flags = [paragraph_is_rtl("".join(r.text for r in p)) for p in paragraphs]
+        # paragrafi da destra a sinistra: forme contestuali dell'arabo prima di misurare
+        paragraphs = [[Run(shape_arabic(r.text), r.style) for r in p] if rtl else p
+                      for p, rtl in zip(paragraphs, rtl_flags)]
         self.prepare(paragraphs)
         para_atoms = [self._atoms(p) for p in paragraphs]
         margin = 0.0
@@ -252,7 +257,7 @@ class Composer:
         out: list[PlacedLine] = []
         baseline = first_baseline
         first = True
-        for atoms in para_atoms:
+        for atoms, rtl in zip(para_atoms, rtl_flags):
             broken = self._break(atoms, width - indent, width)
             for li, (line_atoms, hyph) in enumerate(broken):
                 last_line = li == len(broken) - 1
@@ -273,6 +278,11 @@ class Composer:
                 extra = avail - natural
                 spaces = [a for a in line_atoms if a.space]
                 space_extra = 0.0
+                if extra < 0 and spaces and not self.slack:
+                    # riga entrata per la tolleranza di arrotondamento: si stringono gli spazi per restare
+                    # esattamente nel riquadro
+                    space_extra = extra / len(spaces)
+                    extra = 0.0
                 if align == ALIGN_RIGHT:
                     x = x0 + line_indent + extra
                 elif align == ALIGN_CENTER:
@@ -287,6 +297,8 @@ class Composer:
                         segs.append((t, s, a.space))
                 if hyph_seg:
                     segs.append((hyph_seg[0], hyph_seg[1], False))
+                if rtl:
+                    segs = visual_order(segs)       # glifi in ordine visivo; l'estrazione resta logica
                 for t, s, is_space in segs:
                     if is_space:
                         w = self.width(t, s) + space_extra
