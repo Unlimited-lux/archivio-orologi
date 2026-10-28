@@ -152,8 +152,10 @@ def _redact_xrefs(page: pymupdf.Page) -> list[int]:
 def marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[Mark]:
     """Segni di redazione presenti (anche quelli creati da altri programmi)."""
     out: list[Mark] = []
-    for i, page in iter_pages(pdf, pages):
-        for xref in _redact_xrefs(page):
+    index = RedactIndex().pages(pdf)       # niente caricamento delle pagine senza segni
+    wanted = sorted(index) if pages is None else [i for i in pages if i in index]
+    for i, page in iter_pages(pdf, wanted):
+        for xref in index[i]:
             annot = page.load_annot(xref)
             if annot is None:
                 continue
@@ -164,7 +166,7 @@ def marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[Mar
 
 
 def has_marks(pdf: pymupdf.Document) -> bool:
-    return any(_redact_xrefs(page) for _i, page in iter_pages(pdf))
+    return RedactIndex().any(pdf)
 
 
 _RX_REF = re.compile(r"(\d+)\s+0\s+R")
