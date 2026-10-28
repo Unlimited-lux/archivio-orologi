@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from .. import APP_NAME, __version__
 from ..core.document import ACCESS, CONTENT, LOCK, Document
-from ..core.errors import DocumentError, PasswordRequired, WrongPassword
+from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import theme
 from .banners import Banner, BannerBar, DocumentTabs
@@ -1004,6 +1004,8 @@ class MainWindow(QMainWindow):
                 return False
         try:
             doc.save(path)
+        except DocumentWriteError as e:         # disco pieno, cartella non scrivibile…: il documento resta modificato
+            return self._write_failed(e, _("Salva con nome…"), lambda: self.save_view(view, save_as=True))
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
             return False
@@ -1029,10 +1031,27 @@ class MainWindow(QMainWindow):
         try:
             view.document.save_copy(path)
             self.statusBar().showMessage(_("Copia salvata: {p}").format(p=path), 4000)
+        except DocumentWriteError as e:
+            return self._write_failed(e, _("Scegli un'altra posizione…"), lambda: self.save_copy(view))
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
             return False
         return True
+
+    def _write_failed(self, error: DocumentWriteError, other_label: str, other: Callable[[], bool]) -> bool:
+        """Scrittura non riuscita (NFR-08, NFR-15): il messaggio dice causa e azione e propone
+        un'altra posizione. Restituisce l'esito di `other` se l'utente la sceglie."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Salvataggio non riuscito"))
+        box.setText(str(error))
+        retry = box.addButton(other_label, QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Chiudi"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(retry)
+        box.exec()
+        if box.clickedButton() is retry:
+            return other()
+        return False
 
     def undo(self) -> None:
         view = self.current_view()

@@ -390,6 +390,65 @@ def test_save_warns_when_file_changed_on_disk(window, sample_pdf, monkeypatch):
     view.document._saved_state = view.document._state
 
 
+def test_save_failure_offers_save_as(window, sample_pdf, tmp_path, monkeypatch):
+    """NFR-08/2, NFR-15/3: disco pieno durante Ctrl+S → messaggio con causa, azione e i pulsanti
+    «Salva con nome…» e «Chiudi»; il documento resta modificato e «Salva con nome…» salva altrove."""
+    import errno
+    import os
+    import tempfile
+    view = window.open_path(sample_pdf)
+    doc = view.document
+    with doc.change("Ruota") as pdf:
+        pdf[0].set_rotation(90)
+    original = open(sample_pdf, "rb").read()
+    failing = {"fsync": True, "mkstemp": False}
+    real_fsync, real_mkstemp = os.fsync, tempfile.mkstemp
+
+    def fsync(fd):
+        if failing["fsync"]:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        return real_fsync(fd)
+
+    def mkstemp(*a, **k):
+        if failing["mkstemp"]:
+            raise OSError(errno.EACCES, os.strerror(errno.EACCES))
+        return real_mkstemp(*a, **k)
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
+    boxes = []
+
+    def answer(label):
+        def fake_exec(box):
+            boxes.append((box.windowTitle(), box.text(), [b.text() for b in box.buttons()]))
+            failing.update(fsync=False, mkstemp=False)            # l'altra posizione è scrivibile
+            next(b for b in box.buttons() if b.text() == label).click()
+            return 0
+        return fake_exec
+    monkeypatch.setattr(QMessageBox, "exec", answer("Chiudi"))
+    assert not window.save_view(view)
+    title, text, buttons = boxes[0]
+    assert title == "Salvataggio non riuscito" and buttons == ["Salva con nome…", "Chiudi"]
+    assert "«esempio.pdf»" in text and "spazio su disco insufficiente" in text and "Libera spazio" in text
+    assert doc.is_modified and open(sample_pdf, "rb").read() == original
+    assert sorted(os.listdir(tmp_path)) == ["esempio.pdf"]          # nessun file temporaneo
+
+    failing["mkstemp"] = True                                       # cartella in sola lettura
+    other = str(tmp_path / "altrove.pdf")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: other)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Salva con nome…"))
+    assert window.save_view(view)
+    assert "non è scrivibile" in boxes[1][1]
+    assert str(doc.path) == other and not doc.is_modified
+    assert pymupdf.open(other)[0].rotation == 90 and open(sample_pdf, "rb").read() == original
+
+    failing["fsync"] = True                                         # «Salva una copia»: altra posizione
+    copy = str(tmp_path / "copia.pdf")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: copy)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Scegli un'altra posizione…"))
+    assert window.save_copy(view)
+    assert boxes[2][2] == ["Scegli un'altra posizione…", "Chiudi"] and os.path.exists(copy)
+
+
 def test_shortcuts_dialog_lists_all_modes_in_italian(window):
     from foliant.ui.dialogs import ShortcutsDialog, collect_shortcuts
     m = window.ctx.add_mode("prova_sc", "Prova scorciatoie", "star", 996)

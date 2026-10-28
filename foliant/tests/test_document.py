@@ -1,3 +1,4 @@
+import errno
 import os
 import re
 
@@ -152,6 +153,34 @@ def test_listeners_and_replace(sample_pdf, tmp_path):
 def test_atomic_write_error(tmp_path):
     with pytest.raises(DocumentError):
         atomic_write(tmp_path / "non" / "esiste" / "x.pdf", b"x")
+
+
+@pytest.mark.parametrize("where, code, reason", [
+    ("fsync", errno.ENOSPC, "spazio su disco insufficiente"),
+    ("mkstemp", errno.EACCES, "non è scrivibile"),
+    ("replace", errno.EBUSY, "in uso da un altro programma"),
+])
+def test_atomic_write_error_is_recognizable_and_explained(sample_pdf, monkeypatch, where, code, reason):
+    """NFR-08/2, NFR-15/3: errore riconoscibile (errno, file), causa tradotta e azione suggerita;
+    l'originale resta intatto e nella cartella non resta alcun file temporaneo."""
+    import tempfile
+
+    from foliant.core.errors import DocumentWriteError
+    folder = os.path.dirname(sample_pdf)
+    before = open(sample_pdf, "rb").read()
+
+    def fail(*a, **k):
+        raise OSError(code, os.strerror(code))
+    target = {"fsync": (os, "fsync"), "mkstemp": (tempfile, "mkstemp"), "replace": (os, "replace")}[where]
+    with monkeypatch.context() as m, pytest.raises(DocumentWriteError) as info:
+        m.setattr(*target, fail)
+        atomic_write(sample_pdf, b"%PDF-1.7 nuovo")
+    e = info.value
+    assert e.errno == code and os.path.basename(e.filename) == "esempio.pdf"
+    assert "«esempio.pdf»" in str(e) and reason in str(e) and "un'altra posizione" in str(e)
+    assert os.strerror(code) not in str(e)                          # niente causa di sistema in inglese
+    assert open(sample_pdf, "rb").read() == before
+    assert sorted(os.listdir(folder)) == ["esempio.pdf"]
 
 
 def test_save_options_encryption(sample_pdf, tmp_path):

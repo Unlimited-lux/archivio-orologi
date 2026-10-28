@@ -19,6 +19,7 @@ Regole per chi modifica un documento:
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import secrets
@@ -35,7 +36,7 @@ import pymupdf
 from ..i18n import _
 from . import security
 from .engine import ENGINE_LOCK
-from .errors import DocumentError, OperationCancelled, PasswordRequired, WrongPassword
+from .errors import DocumentError, DocumentWriteError, OperationCancelled, PasswordRequired, WrongPassword
 from .incremental import IncrementalSaveError, incremental_update, signed_fields
 from .security import ACCESS_NONE, ACCESS_OWNER, ACCESS_USER, ALL_PERMISSIONS
 
@@ -116,16 +117,45 @@ _OWN_WRITES: dict[str, tuple | None] = {}
 _OWN_WRITES: dict[str, tuple | None] = {}
 
 
+def write_error(target: str | os.PathLike, error: OSError) -> DocumentWriteError:
+    """Errore di scrittura con il nome del file, la causa in parole semplici e l'azione possibile."""
+    target = Path(target)
+    code = error.errno
+    if code in (errno.ENOSPC, errno.EDQUOT):
+        reason, action = _("spazio su disco insufficiente"), _("Libera spazio o salva in un'altra posizione.")
+    elif code in (errno.EACCES, errno.EPERM, errno.EROFS):
+        reason = _("la cartella «{folder}» non è scrivibile").format(folder=target.parent)
+        action = _("Salva in un'altra posizione.")
+    elif code in (errno.EBUSY, errno.ETXTBSY):
+        reason = _("il file è in uso da un altro programma")
+        action = _("Chiudi l'altro programma e riprova, oppure salva in un'altra posizione.")
+    elif code == errno.ENOENT:
+        reason = _("la cartella «{folder}» non esiste più").format(folder=target.parent)
+        action = _("Salva in un'altra posizione.")
+    elif code == errno.EFBIG:
+        reason, action = _("il file è troppo grande per questo disco"), _("Salva in un'altra posizione.")
+    else:
+        reason = _("errore di scrittura sul disco ({error})").format(error=error.strerror or error)
+        action = _("Riprova o salva in un'altra posizione.")
+    message = _("Impossibile salvare «{name}»: {reason}. {action}").format(name=target.name, reason=reason,
+                                                                       action=action)
+    return DocumentWriteError(message, code, str(target))
+
+
 def atomic_write(target: str | os.PathLike, data: bytes) -> None:
-    """Scrive `data` in `target` senza mai lasciare un file a metà."""
+    """Scrive `data` in `target` senza mai lasciare un file a metà.
+
+    Se la scrittura non riesce solleva `DocumentWriteError` (l'originale resta intatto e
+    nessun file temporaneo rimane nella cartella)."""
     target = Path(os.path.realpath(target))          # salva nel file vero, non sul collegamento
     directory = target.parent
     if target.exists() and (not os.access(target, os.W_OK) or not (target.stat().st_mode & 0o222)):
-        raise DocumentError(_("«{name}» è in sola lettura: salvalo con un altro nome.").format(name=target.name))
+        raise DocumentWriteError(_("«{name}» è in sola lettura: salvalo con un altro nome.").format(name=target.name),
+                                 errno.EACCES, str(target))
     try:
         fd, tmp = tempfile.mkstemp(prefix=".foliant-", suffix=".tmp", dir=directory)
     except OSError as e:
-        raise DocumentError(_("Impossibile scrivere nella cartella «{folder}»: {error}.").format(folder=directory, error=e.strerror)) from e
+        raise write_error(target, e) from e
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -147,7 +177,7 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
         except OSError:
             pass
         if isinstance(e, OSError):
-            raise DocumentError(_("Salvataggio non riuscito: {error}.").format(error=e.strerror)) from e
+            raise write_error(target, e) from e
         raise
 
 

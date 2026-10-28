@@ -118,3 +118,17 @@ def test_each_module_keeps_its_own_translations(english):
     core = run("foliant.ui.prova", 'r = _("Annulla")')
     assert core["r"] == "Undo"                      # il nucleo non viene sovrascritto dai moduli
     assert run("foliant.modules.prova_a.x", 'r = _("Annulla")')["r"] == "Cancel-A"
+
+
+def test_english_catalog_has_no_duplicate_keys():
+    """Una chiave ripetuta nel dizionario EN del nucleo sovrascrive in silenzio la prima voce."""
+    import ast
+    from collections import Counter
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parent.parent / "foliant" / "ui" / "i18n_en.py"
+    dicts = [n for n in ast.walk(ast.parse(source.read_text(encoding="utf-8"))) if isinstance(n, ast.Dict)]
+    assert dicts
+    for d in dicts:
+        keys = [ast.literal_eval(k) for k in d.keys if k is not None]
+        assert not [k for k, n in Counter(keys).items() if n > 1]
