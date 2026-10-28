@@ -537,3 +537,31 @@ def test_button_caption_down_applied(qtbot):
     panel.caption_down_edit.editingFinished.emit()
     assert {"caption_down": "Invio…"} in calls
     assert E.field_info(pdf, 0, b).caption_down == "Invio…"
+
+
+def test_export_name_applied(qtbot):
+    import pymupdf
+
+    from foliant.modules.forms import engine as E
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 150, 72), "cognome")
+    calls = []
+    panel = FieldPropertiesPanel(lambda keys, props, label: calls.append(props) or True)
+    qtbot.addWidget(panel)
+    panel.set_fields(E.list_fields(pdf), ["cognome"])
+    panel.export_name_edit.setText("surname")
+    panel.export_name_edit.editingFinished.emit()
+    assert {"export_name": "surname"} in calls
+
+
+def test_system_fonts_listed(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    panel = FieldPropertiesPanel(lambda *a: True)
+    qtbot.addWidget(panel)
+    items = [panel.font_combo.itemData(i) for i in range(panel.font_combo.count())]
+    assert items[:3] == ["Helvetica", "Times", "Courier"]
+    from PySide6.QtGui import QFontDatabase
+    if QFontDatabase.families():
+        assert len([i for i in items if i]) > 3

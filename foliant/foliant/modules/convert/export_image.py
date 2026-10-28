@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, page_pixmap
 
 from .common import ConversionError, check, expand_name_template
 
@@ -23,7 +23,8 @@ def render_page(page: pymupdf.Page, dpi: int, *, color: str = "color", alpha: bo
     from PIL import Image
 
     gray = color in ("gray", "bw", "bw-dither")
-    pix = page.get_pixmap(dpi=dpi, alpha=alpha and not gray, annots=annotations,
+    pix = page_pixmap(page.parent, page.number, hide_unsigned_signatures=True, dpi=dpi,
+                      alpha=alpha and not gray, annots=annotations,
                           colorspace=pymupdf.csGRAY if gray else pymupdf.csRGB)
     mode = {1: "L", 3: "RGB", 4: "RGBA"}[pix.n]
     img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)

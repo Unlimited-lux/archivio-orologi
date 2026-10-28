@@ -498,4 +498,5 @@ EN: dict[str, str] = {
     "Stato": "Status",
     "Da applicare": "To be applied",
     "RC4, chiave a 40 bit": "RC4, 40-bit key",
+    "Immagini con metadati (EXIF, posizione GPS…): {n}": "Images with metadata (EXIF, GPS location…): {n}",
 }

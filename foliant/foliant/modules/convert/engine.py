@@ -55,6 +55,7 @@ FORMATS: dict[str, tuple[str, str, str]] = {
     "pdfa-3b": (".pdf", "PDF/A-3b", "pdfa"),
     "pdfa-2u": (".pdf", "PDF/A-2u", "pdfa"),
     "pdfa-3u": (".pdf", "PDF/A-3u", "pdfa"),
+    "pdfx-3": (".pdf", "PDF/X-3", "pdfa"),
 }
 ALIASES = {"jpg": "jpeg", "tif": "tiff", "htm": "html", "pdfa": "pdfa-2b", "pdf/a": "pdfa-2b", "word": "docx",
            "excel": "xlsx", "powerpoint": "pptx", "text": "txt", "long_image": "long-image", "longimage": "long-image"}
@@ -74,7 +75,7 @@ def default_output_path(input_path: str | os.PathLike, fmt: str, folder: str | N
     fmt = normalize_format(fmt)
     src = Path(input_path)
     ext = FORMATS[fmt][0]
-    stem = src.stem + ("_pdfa" if fmt.startswith("pdfa") else "")
+    stem = src.stem + ("_pdfa" if fmt.startswith("pdfa") else "_pdfx" if fmt.startswith("pdfx") else "")
     return str(Path(folder or src.parent) / (stem + ext))
 
 
@@ -245,7 +246,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
         output_path += ext
     check(progress, 0.0, _("Apertura del documento…"))
     with ENGINE_LOCK:
-        src = open_source(source, options.get("password"), need_extract=not fmt.startswith("pdfa"))
+        src = open_source(source, options.get("password"), need_extract=not fmt.startswith(("pdfa", "pdfx")))
         work = None
         try:
             pages = options.get("pages")
@@ -263,7 +264,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
             if not options.get("language"):
                 options = dict(options)
                 options["language"] = _lang_to_tesseract(src)
-            if fmt.startswith("pdfa"):
+            if fmt.startswith(("pdfa", "pdfx")):
                 work = None
                 src_bytes = src.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE) if page_list == list(range(src.page_count)) else None
                 if src_bytes is None:
@@ -338,6 +339,16 @@ def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool
                 if not report.get("compliant", False):
                     data = pdfa.strip_pdfa_identification(data)
                     job.warn(_("Il file è stato salvato come PDF ordinario, senza dichiarazione PDF/A."))
+                tmp = out.new(output_path)
+                Path(tmp).write_bytes(data)
+            elif fmt.startswith("pdfx"):
+                from . import pdfx
+                data, report = pdfx.convert_to_pdfx(src_bytes, "3", progress=progress)
+                job.result.details["pdfx"] = report
+                if not report.get("compliant", False):
+                    errors = "; ".join(report.get("errors", [])[:5])
+                    raise ConversionError(_("Conformità PDF/X non raggiunta: {e}").format(e=errors or "?"))
+                job.result.warnings.extend(w for w in report.get("fixes", []) if "CMYK" in w)
                 tmp = out.new(output_path)
                 Path(tmp).write_bytes(data)
             elif fmt in ("png", "jpeg", "tiff", "bmp", "gif"):

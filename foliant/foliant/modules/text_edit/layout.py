@@ -83,13 +83,25 @@ class Composer:
     def __init__(self, resolver: FontResolver):
         self.resolver = resolver
         self._split_cache: dict = {}
+        self._primary: dict = {}       # stile -> font principale (scelto sul testo di tutto il blocco)
+        self.slack = 0.0               # tolleranza aggiuntiva di riga (blocchi di una sola riga)
+
+    def prepare(self, paragraphs: list[list[Run]]) -> None:
+        """Sceglie un font principale per stile in base a tutto il testo che lo usa."""
+        samples: dict = {}
+        for p in paragraphs:
+            for r in p:
+                samples[r.style] = samples.get(r.style, "") + r.text
+        for st, text in samples.items():
+            if st not in self._primary:
+                self._primary[st] = self.resolver.primary(st, sample=text)
 
     def pieces(self, text: str, style: Style) -> list[tuple[str, FontChoice, float]]:
         key = (text, style)
         hit = self._split_cache.get(key)
         if hit is None:
             hit = []
-            for part, choice in self.resolver.split(text, style):
+            for part, choice in self.resolver.split(text, style, self._primary.get(style)):
                 w = choice.text_length(part, style.size) + style.char_spacing * len(part)
                 hit.append((part, choice, w))
             self._split_cache[key] = hit
@@ -166,7 +178,7 @@ class Composer:
         while queue:
             a = queue.pop(0)
             lim = first_limit if not lines else limit
-            lim += max(0.3, 0.004 * lim)   # arrotondamenti delle larghezze nel PDF
+            lim += max(0.3, 0.004 * lim) + self.slack   # arrotondamenti delle larghezze nel PDF
             if a.space:
                 if cur:
                     cur.append(a)
@@ -212,6 +224,7 @@ class Composer:
         if base_size is None:
             sizes = [r.style.size for p in paragraphs for r in p if r.text.strip()]
             base_size = sizes[0] if sizes else 12.0
+        self.prepare(paragraphs)
         para_atoms = [self._atoms(p) for p in paragraphs]
         margin = 0.0
         if auto_width:

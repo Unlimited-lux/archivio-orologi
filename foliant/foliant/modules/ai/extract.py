@@ -798,3 +798,43 @@ def embedded_einvoices(pdf) -> list[dict]:
                         "imponibile": net, "imposta": tax, "totale": float(total) if total else
                         (net or 0) + (tax or 0), "valuta": text(body, gen + "Divisa") or "EUR"})
     return out
+
+
+# ================================================================== più file (AI-29)
+FILE_COLUMN = "file"
+
+
+def merge_results(named: list[tuple[str, ExtractResult]]) -> ExtractResult:
+    """Unisce i risultati di più file aggiungendo a ogni record il file d'origine.
+
+    Il nome del file è solo locale (griglia ed esportazioni): non viene mai inviato al fornitore.
+    """
+    if not named:
+        raise NoData()
+    kind = named[0][1].kind
+    columns: list[str] = [FILE_COLUMN]
+    records: list[dict] = []
+    checks: list[str] = []
+    for name, res in named:
+        for c in res.columns:
+            if c not in columns:
+                columns.append(c)
+        for rec in res.records:
+            merged = {FILE_COLUMN: Cell(name, None, True)}
+            merged.update(rec)
+            records.append(merged)
+        checks.extend(f"{name}: {c}" for c in res.checks)
+    out = ExtractResult(kind, records, columns, checks, "", named[0][1].model, [],
+                        ", ".join(n for n, _r in named), sum(r.requests for _n, r in named))
+    return out
+
+
+def to_csv_summary(result: ExtractResult, sep: str = ",") -> str:
+    """Tabella riepilogativa: una riga per record (fattura), senza le righe di dettaglio."""
+    cols = [c for c in result.columns if not any(isinstance(r.get(c), list) for r in result.records)]
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=sep, quotechar='"', quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
+    w.writerow(cols)
+    for rec in result.records:
+        w.writerow([format_value(rec[c].value) if isinstance(rec.get(c), Cell) else "" for c in cols])
+    return buf.getvalue()

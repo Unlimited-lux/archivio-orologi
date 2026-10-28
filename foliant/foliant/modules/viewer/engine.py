@@ -735,3 +735,41 @@ def outline_from_regex(pdf: pymupdf.Document, pattern: str, case_sensitive: bool
                 out.append(Bookmark(level, text, i, {"kind": pymupdf.LINK_GOTO, "page": i,
                                                      "to": pymupdf.Point(0, max(0.0, line["bbox"][1] - 10))}))
     return out
+
+
+def insert_toc_pages(pdf: pymupdf.Document, items: list[Bookmark], title: str = "Sommario",
+                     fontsize: float = 11.0) -> int:
+    """Inserisce in testa pagine di sommario con una riga per segnalibro (rientrata per
+    livello), il numero di pagina e un collegamento alla destinazione. I numeri tengono
+    conto delle pagine inserite. Restituisce il numero di pagine inserite (dentro change())."""
+    entries = [b for b in items if 0 <= b.page < pdf.page_count]
+    if not entries:
+        return 0
+    ref = pdf[0].rect
+    width, height = (ref.width, ref.height) if ref.width > 0 else (595.0, 842.0)
+    margin, line_h = 56.0, fontsize * 1.8
+    first_y = margin + 40
+    per_first = int((height - margin - first_y) // line_h)
+    per_other = int((height - 2 * margin) // line_h)
+    n_pages = 1 if len(entries) <= per_first else 1 + -(-(len(entries) - per_first) // max(1, per_other))
+    for i in range(n_pages):
+        pdf.new_page(pno=i, width=width, height=height)
+    page = pdf[0]
+    page.insert_text((margin, margin + 16), title, fontsize=fontsize * 1.8, fontname="helv")
+    p_index, y = 0, first_y
+    for b in entries:
+        if y + line_h > height - margin:
+            p_index += 1
+            page = pdf[p_index]
+            y = margin
+        target = b.page + n_pages
+        label = str(target + 1)
+        indent = margin + 18 * (b.level - 1)
+        text = b.title if len(b.title) <= 90 else b.title[:87] + "…"
+        page.insert_text((indent, y + fontsize), text, fontsize=fontsize, fontname="helv")
+        tw = pymupdf.get_text_length(label, fontname="helv", fontsize=fontsize)
+        page.insert_text((width - margin - tw, y + fontsize), label, fontsize=fontsize, fontname="helv")
+        page.insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(indent, y, width - margin, y + line_h),
+                          "page": target, "to": pymupdf.Point(0, 0)})
+        y += line_h
+    return n_pages

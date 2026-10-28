@@ -21,6 +21,7 @@ import weakref
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QFileSystemWatcher, QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QToolButton, QWidget,
 )
@@ -37,6 +38,8 @@ log = logging.getLogger("foliant.modules.viewer.reload")
 KEY_MODE = "viewer/reload_mode"
 
 TRANSLATIONS = {
+    "File modificato da un'altra applicazione": "File changed by another application",
+    "File eliminato o spostato": "File deleted or moved",
     "File": "File",
     "Ripristina": "Revert",
     "Scarta le modifiche e riapri l'ultima versione salvata":
@@ -158,6 +161,15 @@ class ReloadController(QObject):
         ctx.documentOpened.connect(self._on_opened)
         ctx.documentClosed.connect(self._on_closed)
         ctx.currentViewChanged.connect(lambda *_a: self._update_action())
+        # avviso persistente nella barra di stato e icona nella scheda: visibili anche quando
+        # un'altra modalità copre la vista (es. Pagine)
+        self.notice = QPushButton(ctx.window)
+        self.notice.setFlat(True)
+        self.notice.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.notice.clicked.connect(self._reveal)
+        self.notice.hide()
+        ctx.window.statusBar().addPermanentWidget(self.notice)
+        ctx.currentViewChanged.connect(lambda *_a: self._update_notice())
         theme.on_change(self._restyle)
         for view in ctx.views():
             self._on_opened(view)
@@ -450,6 +462,7 @@ class ReloadController(QObject):
         bar.show()
         bar.raise_()
         self._layout(view)
+        self._update_notice()
 
     def _remove_bar(self, view: DocumentView) -> None:
         w = self.watches.get(view)
@@ -460,6 +473,36 @@ class ReloadController(QObject):
         bar.hide()
         bar.deleteLater()
         self._layout(view)
+        self._update_notice()
+
+    def _update_notice(self) -> None:
+        """Avviso nella barra di stato e icona sulle schede con un conflitto sul file."""
+        try:
+            tabs = self.ctx.window.tabs
+            for view, w in list(self.watches.items()):
+                i = tabs.indexOf(view)
+                if i < 0:
+                    continue
+                pending = w.bar is not None and w.bar.kind in (BAR_CHANGED, BAR_MISSING)
+                tabs.setTabIcon(i, icon("triangle-alert", theme.hex_color("warning")) if pending else QIcon())
+            view = self.ctx.current_view()
+            w = self.watches.get(view) if view is not None else None
+            if w is not None and w.bar is not None and w.bar.kind in (BAR_CHANGED, BAR_MISSING):
+                text = (_("File modificato da un'altra applicazione") if w.bar.kind == BAR_CHANGED
+                        else _("File eliminato o spostato"))
+                self.notice.setText("⚠ " + text)
+                self.notice.setToolTip(w.bar.label.text())
+                self.notice.setStyleSheet(f"QPushButton {{ color: {theme.hex_color('warning')}; border: none; }}")
+                self.notice.show()
+            else:
+                self.notice.hide()
+        except RuntimeError:
+            pass   # finestra già distrutta
+
+    def _reveal(self) -> None:
+        """Torna alla vista del documento per mostrare la barra con le scelte."""
+        self.ctx.set_central_widget(None)
+        self.ctx.set_mode("leggi")
 
     def bar(self, view: DocumentView) -> ReloadBar | None:
         w = self.watches.get(view)

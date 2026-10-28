@@ -91,7 +91,10 @@ def plan(pdf: pymupdf.Document, options: ExtractOptions) -> list[ImageJob]:
     for pi in pages:
         if not 0 <= pi < pdf.page_count:
             continue
-        parsed = parse_page(pdf, pdf[pi])
+        try:
+            parsed = parse_page(pdf, pdf[pi])
+        except Exception:
+            continue   # pagina danneggiata
         n = 0
         for obj in parsed.objects:
             if obj.kind != IMAGE:

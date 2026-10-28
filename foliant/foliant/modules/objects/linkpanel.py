@@ -153,12 +153,15 @@ class LinkCheckPanel(QWidget):
         """Verifica locale (nessun accesso alla rete)."""
         doc = getattr(self.view, "document", None) if self.view is not None else None
         pdf = getattr(doc, "pdf", None)
-        if pdf is None:
-            self.rows = []
-        else:
-            with ENGINE_LOCK:
-                self.rows = LC.check_document(pdf, self._doc_path())
-        self._fill()
+        self.rows = []
+        try:
+            if pdf is not None:
+                with ENGINE_LOCK:
+                    self.rows = LC.check_document(pdf, self._doc_path())
+        except Exception:
+            self.rows = []   # documento danneggiato: mai mostrare i collegamenti di un altro documento
+        finally:
+            self._fill()
 
     def _visible_rows(self) -> list[LC.LinkRow]:
         if self.filter.currentData() == "problems":
