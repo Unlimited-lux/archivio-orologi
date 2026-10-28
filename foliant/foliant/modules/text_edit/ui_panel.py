@@ -119,6 +119,23 @@ class TextPropertiesPanel(QWidget):
         self.spacing.setSuffix(" ×")
         self.spacing.editingFinished.connect(self._spacing_chosen)
         grid.addWidget(self.spacing, row, 1)
+        row += 1
+        grid.addWidget(QLabel(_("Rientro 1ª riga")), row, 0)
+        self.indent = QDoubleSpinBox()
+        self.indent.setRange(0.0, 300.0)
+        self.indent.setDecimals(1)
+        self.indent.setSuffix(" pt")
+        self.indent.editingFinished.connect(self._indent_chosen)
+        grid.addWidget(self.indent, row, 1)
+        row += 1
+        grid.addWidget(QLabel(_("Spazio dopo")), row, 0)
+        self.space_after = QDoubleSpinBox()
+        self.space_after.setRange(0.0, 300.0)
+        self.space_after.setDecimals(1)
+        self.space_after.setSuffix(" pt")
+        self.space_after.setToolTip(_("Spazio dopo ogni paragrafo del blocco"))
+        self.space_after.editingFinished.connect(self._space_after_chosen)
+        grid.addWidget(self.space_after, row, 1)
         lay.addLayout(grid)
 
         # avviso font sostitutivo (TXT-10)
@@ -287,6 +304,10 @@ class TextPropertiesPanel(QWidget):
                 btn.setChecked(True)
         with QSignalBlocker(self.spacing):
             self.spacing.setValue(max(0.5, min(5.0, leading / size if size else 1.2)))
+        with QSignalBlocker(self.indent):
+            self.indent.setValue(obj.indent if kind == "editor" else obj[1].indent if kind == "block" else 0.0)
+        with QSignalBlocker(self.space_after):
+            self.space_after.setValue(obj.space_after if kind == "editor" else 0.0)
         sel_block = obj[1] if kind == "block" else None
         self.convert_btn.setVisible(bool(sel_block is not None and sel_block.invisible))
         self.ocr_box.setVisible(True)
@@ -355,6 +376,26 @@ class TextPropertiesPanel(QWidget):
             obj.set_leading(new)
         elif kind == "block":
             self.ctrl.reformat_selected(self.view, leading=new)
+        self.refresh()
+
+    def _indent_chosen(self) -> None:
+        value = round(self.indent.value(), 1)
+        kind, obj = self._target()
+        if kind == "editor":
+            if abs(obj.indent - value) >= 0.05:
+                obj.set_indent(value)
+        elif kind == "block":
+            if abs(obj[1].indent - value) >= 0.05:
+                self.ctrl.reformat_selected(self.view, indent=value)
+        self.refresh()
+
+    def _space_after_chosen(self) -> None:
+        value = round(self.space_after.value(), 1)
+        kind, obj = self._target()
+        if kind == "editor":
+            obj.set_space_after(value)
+        elif kind == "block" and value > 0:
+            self.ctrl.reformat_selected(self.view, space_after=value)
         self.refresh()
 
     # ------------------------------------------------------------ sostituzioni

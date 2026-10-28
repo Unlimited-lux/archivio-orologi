@@ -534,6 +534,7 @@ class TextEditController(QObject):
         editor, info = entry
         paragraphs = editor.paragraphs()
         align, leading = editor.align, editor.leading
+        indent, space_after = editor.indent, editor.space_after
         editor.detach()
         self.editorChanged.emit(None)
         doc = view.document
@@ -564,11 +565,13 @@ class TextEditController(QObject):
                 pdf, page, block, text))
         else:
             if (not info.get("replace_all") and _same_paragraphs(paragraphs, block.paragraphs)
-                    and align == block.align and abs(leading - block.leading) < 0.01):
+                    and align == block.align and abs(leading - block.leading) < 0.01
+                    and abs(indent - block.indent) < 0.01 and space_after < 0.01):
                 result = None
             else:
                 result = self._apply(view, _("Modifica testo"), lambda pdf: engine.replace_block(
-                    pdf, page, block, paragraphs, align=align, leading=leading))
+                    pdf, page, block, paragraphs, align=align, leading=leading, indent=indent,
+                    space_after=space_after))
         if select_after:
             nb = self._refind(view, page, result.bbox if result is not None and result.changed else block.bbox)
             if nb is not None:
@@ -624,7 +627,8 @@ class TextEditController(QObject):
             tool.select(view, page, self._refind(view, page, result.bbox))
         return result
 
-    def reformat_selected(self, view, align: str | None = None, leading: float | None = None):
+    def reformat_selected(self, view, align: str | None = None, leading: float | None = None,
+                          indent: float | None = None, space_after: float = 0.0):
         tool = self.edit_tool(view)
         if tool.selected is None:
             return None
@@ -633,7 +637,8 @@ class TextEditController(QObject):
             return None
         self._last_page = page
         result = self._apply(view, _("Formatta paragrafo"), lambda pdf: engine.replace_block(
-            pdf, page, block, block.paragraphs, align=align, leading=leading, keep_unchanged=False))
+            pdf, page, block, block.paragraphs, align=align, leading=leading, indent=indent,
+            space_after=space_after, keep_unchanged=False))
         if result is not None:
             tool.select(view, page, self._refind(view, page, result.bbox))
         return result

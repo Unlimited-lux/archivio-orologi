@@ -517,3 +517,30 @@ def test_page_tree_cycle_does_not_break_edit_mode(window, tmp_path, quiet, qtbot
     ctrl.frame(view.page_count - 1, view)
     window.ctx.set_mode("modifica")
     assert window.ctx.current_mode() == "modifica"
+
+
+def test_panel_indent_and_space_after(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-05: rientro della prima riga e spazio dopo dal pannello."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "Lorem")
+    x0 = block.x0
+    view.tool.select(view, 0, block)
+    ctrl.panel.indent.setValue(20)
+    ctrl.panel._indent_chosen()
+    nb = block_with(ctrl, view, "Lorem")
+    assert abs(nb.lines[0].bbox.x0 - (x0 + 20)) <= 0.6 and abs(nb.lines[1].bbox.x0 - x0) <= 0.6
+    # nell'editor: due paragrafi con 12 pt di spazio dopo
+    block = block_with(ctrl, view, "contratto")
+    ed = ctrl.open_editor(view, 0, block)
+    ed.moveCursor(QTextCursor.MoveOperation.End)
+    ed.insertPlainText("\nSecondo paragrafo")
+    ctrl.panel.space_after.setValue(12)
+    ctrl.panel._space_after_chosen()
+    ctrl.commit_editor(view)
+    from foliant.modules.text_edit import analysis
+    with view.document.lock:
+        lines = [b for b in analysis.analyze_page(view.document.pdf[0], 0, "line")
+                 if "contratto" in b.text or "Secondo" in b.text]
+    gap = lines[1].first_baseline - lines[0].first_baseline
+    assert abs(gap - (block.leading + 12)) <= 0.2

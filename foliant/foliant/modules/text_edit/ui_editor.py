@@ -101,6 +101,8 @@ class InlineEditor(QTextEdit):
         self._scale = view.zoom * PX_PER_PT
         self.align = spec.align
         self.leading = spec.leading
+        self.indent = spec.indent
+        self.space_after = 0.0
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setAcceptRichText(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -178,9 +180,9 @@ class InlineEditor(QTextEdit):
         bf = QTextBlockFormat()
         bf.setAlignment(_QT_ALIGN.get(self.align, Qt.AlignmentFlag.AlignLeft))
         bf.setLineHeight(self.leading * self.scale, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
-        bf.setTextIndent(self.spec.indent * self.scale if first else 0.0)
+        bf.setTextIndent(self.indent * self.scale)
         bf.setTopMargin(0)
-        bf.setBottomMargin(0)
+        bf.setBottomMargin(self.space_after * self.scale)
         return bf
 
     def _load(self, paragraphs: list[list[Run]]) -> None:
@@ -331,6 +333,14 @@ class InlineEditor(QTextEdit):
 
     def set_alignment(self, align: str) -> None:
         self.align = align
+        self._reformat_blocks()
+
+    def set_indent(self, indent: float) -> None:
+        self.indent = max(0.0, indent)
+        self._reformat_blocks()
+
+    def set_space_after(self, space: float) -> None:
+        self.space_after = max(0.0, space)
         self._reformat_blocks()
 
     def set_leading(self, leading: float) -> None:
