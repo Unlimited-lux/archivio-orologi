@@ -49,6 +49,9 @@ class SignatureTool(Tool):
         self.selected: tuple[int, int] | None = None     # (pagina, xref)
         self._drag: dict | None = None
         self._pixmap_cache: dict = {}
+        self._guides_cache: dict = {}
+        self.active_guides: list[tuple[str, float]] = []
+        self.snap = True
 
     # ------------------------------------------------------------ stato
     def set_pending(self, item: g.SignatureItem | None) -> None:
@@ -133,6 +136,7 @@ class SignatureTool(Tool):
         if self._drag is not None and ev.point is not None:
             self._drag["now"] = view.clamp_to_page(self._drag["page"], ev.pos)
             self._drag["shift"] = bool(ev.modifiers & Qt.KeyboardModifier.ShiftModifier)
+            self._drag["nosnap"] = bool(ev.modifiers & Qt.KeyboardModifier.AltModifier)
             return True
         if self.pending is not None:
             return True
@@ -145,17 +149,33 @@ class SignatureTool(Tool):
             view.viewport().setCursor(cur)
         return False
 
+    def guides(self, view, page: int):
+        key = (page, view.document.version)
+        if key not in self._guides_cache:
+            with ENGINE_LOCK:
+                self._guides_cache = {key: g.page_guides(view.document.pdf[page])}
+        return self._guides_cache[key]
+
+    def _snapped(self, view, page: int, rect: pymupdf.Rect) -> pymupdf.Rect:
+        self.active_guides = []
+        if not self.snap or (self._drag or {}).get("nosnap"):
+            return rect
+        xs, ys, lines = self.guides(view, page)
+        r, self.active_guides = g.snap_rect(rect, xs, ys, lines, 6.0 / _pixels_per_point(view, page))
+        return r
+
     def _drag_rect(self, view) -> pymupdf.Rect | None:
         d = self._drag
         if d is None:
             return None
         start, now = d["start"], d["now"]
         if d["kind"] == "place":
-            return self.placement_rect(view, d["page"], start, now)
+            r = self.placement_rect(view, d["page"], start, now)
+            return self._snapped(view, d["page"], r)
         r = pymupdf.Rect(d["rect"])
         dx, dy = now.x - start.x, now.y - start.y
         if d["kind"] == "move":
-            return r + (dx, dy, dx, dy)
+            return self._snapped(view, d["page"], r + (dx, dy, dx, dy))
         h = d["handle"]
         fixed = pymupdf.Point(r.x1 if "l" in h else r.x0, r.y1 if "t" in h else r.y0)
         moving = pymupdf.Point((r.x0 if "l" in h else r.x1) + dx, (r.y0 if "t" in h else r.y1) + dy)
@@ -174,6 +194,7 @@ class SignatureTool(Tool):
             return False
         rect = self._drag_rect(view)
         self._drag = None
+        self.active_guides = []
         if d["kind"] == "place":
             item = self.pending
             xref = self.c.place(view, d["page"], rect, item)
@@ -240,6 +261,19 @@ class SignatureTool(Tool):
         painter.drawPixmap(QRectF(-vw / 2, -vh / 2, vw, vh), pm, QRectF(pm.rect()))
         painter.restore()
 
+    def _paint_guides(self, view, painter: QPainter, page: int) -> None:
+        if not self.active_guides:
+            return
+        ppp = _pixels_per_point(view, page)
+        with ENGINE_LOCK:
+            crop = pymupdf.Rect(view.document.pdf[page].cropbox)
+        painter.setPen(QPen(theme.color("secondary"), 1 / ppp, Qt.PenStyle.DashDotLine))
+        for axis, v in self.active_guides:
+            if axis == "x":
+                painter.drawLine(QPointF(v, crop.y0), QPointF(v, crop.y1))
+            else:
+                painter.drawLine(QPointF(crop.x0, v), QPointF(crop.x1, v))
+
     def paint(self, view, painter: QPainter, page: int) -> None:
         accent = theme.color("accent")
         ppp = _pixels_per_point(view, page)
@@ -252,6 +286,7 @@ class SignatureTool(Tool):
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(_qrect(r))
+                self._paint_guides(view, painter, page)
             return
         if self.pending is not None and self.hover is not None and self.hover[0] == page:
             r = self.placement_rect(view, page, self.hover[1])

@@ -315,3 +315,38 @@ def test_rotate_signature_90_steps():
         g.rotate_signature(pdf, 0, xref, 90)
     sig = g.find_signature(pdf, 0, xref)
     assert sig.rect.width == pytest.approx(150, abs=0.5)
+
+
+def test_magnetic_guides_snap_to_signature_line_and_margin():
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.draw_line((300, 700), (520, 700))          # linea di firma
+    page.insert_text((72, 650), "Firma: ______________", fontsize=12)
+    xs, ys, lines = g.page_guides(pdf[0])
+    assert any(abs(y - 700) < 1 for y, _a, _b in lines)
+    r, active = g.snap_rect(pymupdf.Rect(320, 650, 470, 703), xs, ys, lines, tol=6)
+    assert ("y", 700) in [(a, round(v)) for a, v in active]
+    assert r.y1 > 700 > r.y0 and r.height == pytest.approx(53)
+    r2, active2 = g.snap_rect(pymupdf.Rect(40, 300, 140, 340), xs, ys, lines, tol=6)
+    assert r2.x0 == pytest.approx(36) and ("x", 36) in active2
+    r3, active3 = g.snap_rect(pymupdf.Rect(200, 300, 300, 340), xs, ys, lines, tol=6)
+    assert r3 == pymupdf.Rect(200, 300, 300, 340) and not active3
+
+
+def test_adaptive_threshold_on_shadowed_photo():
+    rng = np.random.default_rng(3)
+    h, w = 160, 480
+    xx = np.linspace(0, 1, w)[None, :]
+    bg = 250 - 110 * xx + rng.integers(-6, 7, (h, w))      # ombra da destra
+    img = np.repeat(bg, 1, axis=0).astype(float)
+    stroke = np.zeros((h, w), bool)
+    for x in range(30, 450):
+        y = int(80 + 35 * math.sin(x / 30))
+        stroke[y - 3:y + 3, x] = True
+    img[stroke] = 20 + rng.integers(0, 10, stroke.sum())
+    buf = io.BytesIO()
+    Image.fromarray(np.dstack([img] * 3).clip(0, 255).astype(np.uint8), "RGB").save(buf, "PNG")
+    pil = g.load_image(buf.getvalue())
+    alpha = np.asarray(g.remove_background(pil, crop=False))[..., 3]
+    assert (alpha[~stroke] == 0).mean() >= 0.97
+    assert (alpha[stroke] >= 200).mean() >= 0.9

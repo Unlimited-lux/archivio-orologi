@@ -455,8 +455,15 @@ def remove_background(img, threshold: int | None = None, *, ink_color: str | Non
     else:
         t = auto_threshold(img) if threshold is None else int(threshold)
         lum = rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
-        lo = t * 0.7
-        ramp = np.clip((t - lum) / max(t - lo, 1.0), 0.0, 1.0)
+        if threshold is None and background_is_uneven(lum, t):
+            # sfondo non uniforme (foto con ombre): soglia locale rispetto allo sfondo vicino
+            local = _local_mean(lum, max(15, min(lum.shape) // 8))
+            t_map = local * (t / max(float(np.median(lum[lum > t])) if (lum > t).any() else 255.0, 1.0))
+            lo_map = t_map * 0.7
+            ramp = np.clip((t_map - lum) / np.maximum(t_map - lo_map, 1.0), 0.0, 1.0)
+        else:
+            lo = t * 0.7
+            ramp = np.clip((t - lum) / max(t - lo, 1.0), 0.0, 1.0)
         new_alpha = ramp * 255.0 * (alpha / 255.0)
     if ink_color:
         c = ink_color.lstrip("#")
@@ -472,6 +479,33 @@ def remove_background(img, threshold: int | None = None, *, ink_color: str | Non
     y0, y1 = max(0, ys.min() - pad), min(out.shape[0], ys.max() + 1 + pad)
     x0, x1 = max(0, xs.min() - pad), min(out.shape[1], xs.max() + 1 + pad)
     return Image.fromarray(out[y0:y1, x0:x1], "RGBA")
+
+
+def _local_mean(arr, radius: int):
+    """Media su finestra quadrata (immagine integrale), stessa forma dell'ingresso."""
+    import numpy as np
+    pad = np.pad(arr, radius + 1, mode="edge").astype(np.float64)
+    ii = pad.cumsum(0).cumsum(1)
+    k = 2 * radius + 1
+    h, w = arr.shape
+    s = ii[k:k + h, k:k + w] - ii[0:h, k:k + w] - ii[k:k + h, 0:w] + ii[0:h, 0:w]
+    return s / (k * k)
+
+
+def background_is_uneven(lum, threshold: float) -> bool:
+    """True se lo sfondo (pixel chiari) varia molto fra le zone dell'immagine."""
+    import numpy as np
+    h, w = lum.shape
+    if h < 8 or w < 8:
+        return False
+    means = []
+    for i in range(4):
+        for j in range(4):
+            block = lum[i * h // 4:(i + 1) * h // 4, j * w // 4:(j + 1) * w // 4]
+            bg = block[block > threshold * 0.8]
+            if bg.size:
+                means.append(float(np.percentile(bg, 75)))
+    return len(means) >= 4 and (max(means) - min(means)) > 40
 
 
 def png_bytes(img) -> bytes:
@@ -926,6 +960,74 @@ def embed_signature(pdf: pymupdf.Document, page_index: int, xref: int) -> None:
     tail = new_stream(b"\nQ\n" + content + b"\n")
     pdf.xref_set_key(page.xref, "Contents", f"[{head} 0 R {original} {tail} 0 R]")
     delete_signature(pdf, page_index, xref)
+
+
+# ============================================================ guide magnetiche
+SNAP_MARGIN = 36.0   # margine tipico (mezzo pollice) usato come guida verticale/orizzontale
+
+
+def page_guides(page: pymupdf.Page) -> tuple[list[float], list[float], list[tuple[float, float, float]]]:
+    """Guide della pagina in coordinate non ruotate: (x, y, linee orizzontali (y, x0, x1)).
+
+    x/y: bordi del CropBox a distanza SNAP_MARGIN; linee: tratti orizzontali
+    lunghi almeno 40 pt (tipiche linee di firma), anche fatte di trattini «____».
+    """
+    crop = pymupdf.Rect(page.cropbox)
+    xs = [crop.x0 + SNAP_MARGIN, crop.x1 - SNAP_MARGIN]
+    ys = [crop.y0 + SNAP_MARGIN, crop.y1 - SNAP_MARGIN]
+    lines: list[tuple[float, float, float]] = []
+    try:
+        for d in page.get_drawings():
+            for it in d.get("items", []):
+                if it[0] == "l":
+                    p1, p2 = it[1], it[2]
+                    if abs(p1.y - p2.y) < 1 and abs(p2.x - p1.x) >= 40:
+                        lines.append((p1.y, min(p1.x, p2.x), max(p1.x, p2.x)))
+                elif it[0] == "re":
+                    r = it[1]
+                    if r.height < 2 and r.width >= 40:
+                        lines.append((r.y1, r.x0, r.x1))
+        for b in page.get_text("words"):
+            if set(b[4]) <= {"_"} and b[2] - b[0] >= 40:
+                lines.append((b[3] - 1, b[0], b[2]))
+    except Exception:
+        pass
+    return xs, ys, lines
+
+
+def snap_rect(rect: pymupdf.Rect, xs: list[float], ys: list[float], lines, tol: float,
+              ) -> tuple[pymupdf.Rect, list[tuple[str, float]]]:
+    """Avvicina il riquadro alle guide entro `tol` punti, senza cambiarne le
+    dimensioni. Restituisce (riquadro, guide attive [("x"|"y", valore)])."""
+    r = pymupdf.Rect(rect)
+    active: list[tuple[str, float]] = []
+    best_dx, gx = None, None
+    for x in xs:
+        for edge in (r.x0, r.x1):
+            d = x - edge
+            if abs(d) <= tol and (best_dx is None or abs(d) < abs(best_dx)):
+                best_dx, gx = d, x
+    best_dy, gy = None, None
+    for y in ys:
+        for edge in (r.y0, r.y1):
+            d = y - edge
+            if abs(d) <= tol and (best_dy is None or abs(d) < abs(best_dy)):
+                best_dy, gy = d, y
+    # la base della firma si appoggia alle linee orizzontali che le stanno sotto
+    for y, x0, x1 in lines:
+        if x1 < r.x0 or x0 > r.x1:
+            continue
+        target = y - r.height * 0.15     # leggera sovrapposizione, come una firma vera
+        d = target - r.y0
+        if abs(r.y1 - y) <= tol * 2 and (best_dy is None or abs(d) < abs(best_dy)):
+            best_dy, gy = d, y
+    if best_dx is not None:
+        r = r + (best_dx, 0, best_dx, 0)
+        active.append(("x", gx))
+    if best_dy is not None:
+        r = r + (0, best_dy, 0, best_dy)
+        active.append(("y", gy))
+    return r, active
 
 
 # ======================================================== ripetizione su più pagine
