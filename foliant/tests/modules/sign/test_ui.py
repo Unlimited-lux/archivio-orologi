@@ -1391,3 +1391,38 @@ def test_ids_dialog_empty_lists_and_selection_buttons(window, qtbot, id_a):
     assert all(b.isEnabled() for b in dlg._needs_selection[dlg.ids])
     dlg.ids.clearSelection()
     assert all(not b.isEnabled() for b in dlg._needs_selection[dlg.ids])
+
+
+def _profile_traces(needle: str) -> list[str]:
+    """File del profilo isolato (dati, configurazione, stato) il cui nome o contenuto contiene `needle`."""
+    found = []
+    for var in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME"):
+        root = os.environ.get(var)
+        if not root:
+            continue
+        for base, _dirs, names in os.walk(root):
+            for n in names:
+                f = os.path.join(base, n)
+                try:
+                    if needle in f or needle.encode() in Path(f).read_bytes():
+                        found.append(f)
+                except OSError:
+                    pass
+    return found
+
+
+def test_no_document_names_in_profile(window, monkeypatch, tmp_path, id_a):
+    """Riservatezza: firmare e verificare un documento non lascia nel profilo né nelle impostazioni
+    del modulo il nome o la cartella del documento (restano solo ID digitali e certificati)."""
+    from tests.conftest import make_pdf
+    folder = tmp_path / "zq7k-cartella"
+    folder.mkdir()
+    src = make_pdf(folder / "zq7k-contratto.pdf")
+    store.TrustStore().add(id_a[1])
+    view = _sign_file(window, monkeypatch, src, folder / "zq7k-contratto_firmato.pdf", id_a)
+    assert [s.status for s in _ctl(window).state(view).statuses] == ["valida"]
+    s = window.ctx.settings()
+    s.sync()
+    assert all("zq7k" not in str(s.value(k)) for k in s.allKeys() if k.startswith("sign"))
+    assert _profile_traces("trusted")          # controllo: la ricerca vede davvero il profilo isolato
+    assert _profile_traces("zq7k") == []
