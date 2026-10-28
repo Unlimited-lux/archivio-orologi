@@ -35,6 +35,7 @@ PARTS = (
     "articles",       # thread di articoli
     "integrity",      # file danneggiati e funzioni non supportate
     "appearance",     # temi di lettura
+    "measure",        # coordinate, griglia, riquadri di pagina
 )
 
 
