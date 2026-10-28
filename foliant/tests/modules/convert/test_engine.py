@@ -1277,3 +1277,16 @@ def test_total_line_right_below_table_is_kept(tmp_path):
         text = open(out, encoding="utf-8", errors="replace").read()
         assert "22.386,50" in text, fmt
         assert text.count("Revisione") == 1, fmt
+
+
+def test_parse_cell_swiss_francs():
+    """Collaudo A2: importi in franchi svizzeri con codice ISO, «Fr.» e apostrofo delle migliaia."""
+    from foliant.modules.convert.export_office import detect_decimal, parse_cell
+    cells = ["CHF 7,250.00", "7'250.00", "Fr. 7'250.00", "7,250.00 CHF", "SFr. 7’250.00"]
+    dec = detect_decimal(cells)
+    assert dec == "."
+    for c in cells:
+        assert parse_cell(c, dec)[0] == 7250.0, c
+    assert parse_cell("CHF 950", ".")[0] == 950
+    assert parse_cell("€ 1.234,50", ",")[0] == 1234.5 and parse_cell("1.234,50 EUR", ",")[0] == 1234.5
+    assert parse_cell("ABC", ".")[0] == "ABC" and parse_cell("REF 00123", ".")[0] == "REF 00123"

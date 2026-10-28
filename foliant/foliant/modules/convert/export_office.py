@@ -406,12 +406,16 @@ def detect_decimal(cells: list[str]) -> str:
     """Separatore decimale prevalente nelle celle: «,» (italiano) o «.»."""
     comma = dot = 0
     for c in cells:
-        c = c.strip()
-        if re.search(r"\d\.\d{3},\d", c) or re.fullmatch(r"[-+(]?[€$£]?\s?\d+,\d{1,2}\)?%?", c):
+        c = _CURRENCY.sub("", c.strip()).strip()
+        if re.search(r"\d\.\d{3},\d", c) or re.fullmatch(r"[-+(]?\d+,\d{1,2}\)?%?", c):
             comma += 1
-        elif re.search(r"\d,\d{3}\.\d", c) or re.fullmatch(r"[-+(]?[€$£]?\s?\d+\.\d{1,2}\)?%?", c):
-            dot += 1
+        elif re.search(r"\d[,'’]\d{3}\.\d", c) or re.fullmatch(r"[-+(]?\d+\.\d{1,2}\)?%?", c):
+            dot += 1      # anche lo stile svizzero 7'250.00
     return "." if dot > comma else ","
+
+
+# simboli e codici di valuta prima o dopo l'importo: €, $, £, codici ISO (CHF, EUR…), Fr./SFr.
+_CURRENCY = re.compile(r"^(?:[€$£]|[A-Z]{3}|S?Fr\.)\s?|\s?(?:[€$£]|[A-Z]{3}|S?Fr\.)$")
 
 
 def parse_cell(text: str, decimal: str = ","):
@@ -438,13 +442,15 @@ def parse_cell(text: str, decimal: str = ","):
     percent = s.endswith("%")
     if percent:
         s = s[:-1].strip()
-    s = re.sub(r"^[€$£]\s?|\s?[€$£]$|\s?(EUR|USD)$", "", s).strip()
+    s = _CURRENCY.sub("", s).strip()
     if s.startswith(("-", "+")):
         neg = neg or s[0] == "-"
         s = s[1:].strip()
     if not s or not s[0].isdigit():
         return raw, None
     thousands = "." if decimal == "," else ","
+    if decimal == "." and re.fullmatch(r"\d{1,3}(['’]\d{3})+(\.\d+)?", s):
+        s = s.replace("'", ",").replace("’", ",")     # migliaia con l'apostrofo (Svizzera)
     if re.fullmatch(r"0\d+", s):
         return raw, None        # codice con zeri iniziali (CAP, articoli)
     pat = rf"\d{{1,3}}(\{thousands}\d{{3}})+(\{decimal}\d+)?|\d+(\{decimal}\d+)?"
