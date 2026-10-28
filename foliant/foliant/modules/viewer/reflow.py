@@ -16,6 +16,8 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QV
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, theme
 
+from .engine import page_blocks
+
 TRANSLATIONS = {
     "Riflusso": "Reflow",
     "Mostra il testo in una colonna adattata alla finestra": "Show the text in a column fitted to the window",
@@ -41,10 +43,10 @@ def extract_blocks(pdf: pymupdf.Document) -> list[Block]:
     sizes: Counter = Counter()
     for i in range(pdf.page_count):
         try:
-            data = pdf[i].get_text("dict", sort=True)
+            blocks = page_blocks(pdf[i])
         except Exception:
             continue
-        for b in data.get("blocks", []):
+        for b in blocks:
             if b.get("type", 0) != 0:
                 continue
             lines = []
