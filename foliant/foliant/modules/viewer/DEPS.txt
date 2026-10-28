@@ -1,1 +1,2 @@
 # Nessuna nuova dipendenza pip: il modulo usa PySide6 (incluso QtPrintSupport) e PyMuPDF del nucleo.
+# Facoltativo per la lettura ad alta voce (pacchetti di sistema): speech-dispatcher (spd-say) oppure espeak-ng.

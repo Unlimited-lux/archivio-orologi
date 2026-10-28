@@ -63,3 +63,17 @@ la soluzione locale si può togliere.
 
 15. **Scorciatoie personalizzate** (VIS-52): l'identificativo di un comando è il suo testo;
     servirebbe un id stabile per ogni `QAction` (es. `ctx.action(..., id="view.rotate")`).
+
+16. **File rinominati o spostati** (VIS-03): un modo pubblico per far seguire a una scheda il
+    nuovo percorso (`ctx.document_moved(vecchio, nuovo)`, con un segnale per chi indicizza per
+    percorso, es. le posizioni memorizzate). Oggi `files.py` imposta `doc.path` e chiama
+    `window._update_tab_title(view)`.
+
+17. **Recenti** (VIS-02/03): API pubblica per sostituire/rimuovere una voce; la Home dovrebbe
+    ricevere anche i file non disponibili con un indicatore (oggi `_refresh_recent` li scarta,
+    quindi non si possono marcare «non disponibile» con Rimuovi/Individua) e offrire un menu
+    contestuale estendibile sull'elenco dei recenti (oggi `files.py` lo imposta su
+    `window.home.recent`).
+
+18. **`close_view(view, discard=True)`** per chiudere senza la richiesta di salvataggio
+    (dopo lo spostamento nel cestino o il ripristino): oggi si imposta `doc._saved_state`.
