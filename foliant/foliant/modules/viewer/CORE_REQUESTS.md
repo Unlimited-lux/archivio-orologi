@@ -12,7 +12,7 @@ pagina e `ctx.refresh_state`), 5 (`ctx.toggle_sidebar_panel`), 6 (`ctx.activate_
 **Ancora aperte:** 1 (segnale di salto), 8 (area per barre di modulo: la ricerca usa ancora
 una barra nell'area inferiore), 14 (registrazione del generatore di
 miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomina:
-`window._update_tab_title`), 17 (recenti non disponibili nella Home).
+`window._update_tab_title`).
 
 1. **Segnale di salto nella vista** (`DocumentView.aboutToJump(page)` o simile).
    Oggi `navigation.py` avvolge `go_to_page`, `next_page` e `previous_page` di ogni vista
@@ -83,11 +83,9 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     percorso, es. le posizioni memorizzate). Oggi `files.py` imposta `doc.path` e chiama
     `window._update_tab_title(view)`.
 
-17. **Recenti** (VIS-02/03): API pubblica per sostituire/rimuovere una voce; la Home dovrebbe
-    ricevere anche i file non disponibili con un indicatore (oggi `_refresh_recent` li scarta,
-    quindi non si possono marcare «non disponibile» con Rimuovi/Individua) e offrire un menu
-    contestuale estendibile sull'elenco dei recenti (oggi `files.py` lo imposta su
-    `window.home.recent`).
+17. **Recenti** (VIS-02/03) — *soddisfatta e adottata*: `ctx.replace_recent`/`remove_recent`,
+    voci «non disponibile» con Individua/Rimuovi, `ctx.pin_recent`/`is_pinned` e
+    `ctx.add_recent_menu_provider`; `files.py` non imposta più un menu proprio sulla Home.
 
 18. **`close_view(view, discard=True)`** per chiudere senza la richiesta di salvataggio
     (dopo lo spostamento nel cestino o il ripristino): oggi si imposta `doc._saved_state`.
