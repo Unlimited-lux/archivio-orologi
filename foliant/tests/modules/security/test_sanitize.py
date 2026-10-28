@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pymupdf
 
 from foliant.api import Document
@@ -228,3 +230,80 @@ def test_exif_removed_render_identical(tmp_path):
 
 def test_strip_jpeg_metadata_rejects_non_jpeg():
     assert S.strip_jpeg_metadata(b"not a jpeg") == b"not a jpeg"
+
+
+def _xmp_tree(xmp: str):
+    import xml.etree.ElementTree as ET
+    body = xmp[xmp.index("<x:xmpmeta"):xmp.index("</x:xmpmeta>") + len("</x:xmpmeta>")]
+    return ET.fromstring(body)
+
+
+def test_custom_properties_info_and_xmp(sample_pdf, tmp_path):
+    """Dato «Pratica» = «2026/118», quando si salva, allora /Info ha la chiave /Pratica
+    e l'XMP la stessa proprietà; togliendola sparisce da entrambi."""
+    doc = Document.open(sample_pdf)
+    with doc.change("Metadati") as pdf:
+        S.write_metadata(pdf, {"title": "Perizia", "custom": {"Pratica": "2026/118", "Cliente": "Città – Rossi"}})
+    out = tmp_path / "custom.pdf"
+    doc.save(out)
+    pdf = pymupdf.open(out)
+    info = int(pdf.xref_get_key(-1, "Info")[1].split()[0])
+    assert pdf.xref_get_key(info, "Pratica") == ("string", "2026/118")
+    assert S.read_custom(pdf) == {"Pratica": "2026/118", "Cliente": "Città – Rossi"}
+    root = _xmp_tree(pdf.get_xml_metadata())
+    ns = "{http://ns.adobe.com/pdfx/1.3/}"
+    assert root.find(f".//{ns}Pratica").text == "2026/118"
+    assert "pdfaExtension:schemas" not in pdf.get_xml_metadata()
+    # una modifica dei soli campi standard conserva le proprietà
+    with doc.change("Titolo") as p:
+        S.write_metadata(p, {"title": "Perizia 2"})
+        assert S.read_custom(p) == {"Pratica": "2026/118", "Cliente": "Città – Rossi"}
+    with doc.change("Rimuovi") as p:
+        S.write_metadata(p, {"custom": {"Cliente": "Città – Rossi"}})
+        assert S.read_custom(p) == {"Cliente": "Città – Rossi"}
+        assert "Pratica" not in p.get_xml_metadata()
+    # la sanificazione dei metadati toglie anche le proprietà personalizzate
+    with doc.change("Sanifica") as p:
+        S.sanitize(p, {"metadata": True})
+        assert S.read_custom(p) == {}
+    doc.close()
+
+
+def test_custom_property_pdfa_extension_schema(sample_pdf, tmp_path):
+    doc = Document.open(sample_pdf)
+    with doc.change("PDF/A") as pdf:
+        pdf.set_xml_metadata(S.minimal_xmp({}, ("2", "B")))
+    with doc.change("Metadati") as pdf:
+        S.write_metadata(pdf, {"custom": {"Pratica": "2026/118"}})
+    out = tmp_path / "pdfa.pdf"
+    doc.save(out)
+    root = _xmp_tree(pymupdf.open(out).get_xml_metadata())
+    ext = "{http://www.aiim.org/pdfa/ns/extension/}"
+    sch = "{http://www.aiim.org/pdfa/ns/schema#}"
+    prop = "{http://www.aiim.org/pdfa/ns/property#}"
+    schema = root.find(f".//{ext}schemas")
+    assert schema.find(f".//{sch}namespaceURI").text == "http://ns.adobe.com/pdfx/1.3/"
+    assert schema.find(f".//{sch}prefix").text == "pdfx"
+    assert [e.text for e in schema.iter(f"{prop}name")] == ["Pratica"]
+    assert root.find(".//{http://www.aiim.org/pdfa/ns/id/}part").text == "2"
+    doc.close()
+
+
+def test_custom_property_names():
+    assert S.check_property_name("Pratica") == ""
+    assert S.check_property_name("Codice_cliente") == ""
+    assert S.check_property_name("Numero pratica")
+    assert S.check_property_name("1abc")
+    assert S.check_property_name("Title")
+
+
+def test_mod_date_has_timezone(sample_pdf):
+    doc = Document.open(sample_pdf)
+    with doc.change("Metadati") as pdf:
+        S.write_metadata(pdf, {"title": "X"})
+        mod = pdf.metadata["modDate"]
+        xmp = pdf.get_xml_metadata()
+    assert re.fullmatch(r"D:\d{14}[+-]\d{2}'\d{2}'", mod)
+    iso = S.pdf_date_to_iso(mod)
+    assert re.search(r"[+-]\d{2}:\d{2}$", iso) and f"<xmp:ModifyDate>{iso}</xmp:ModifyDate>" in xmp
+    doc.close()

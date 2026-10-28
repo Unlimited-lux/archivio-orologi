@@ -56,10 +56,16 @@ def register(ctx: Context) -> None:
         "flatten": act(_("Appiattisci"), "layers", c.flatten),
     }
     from PySide6.QtGui import QAction
-    for key in ("remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages", "text",
-                "highlights"):
+    from PySide6.QtWidgets import QMenu
+    # Policy di protezione (SEC-12): nel menu Proteggi un sottomenu con una voce per policy
+    c.actions["policies"] = act(_("Policy di protezione"), "shield-plus", c.manage_policies,
+                                requires_document=False)
+    c.policy_menu = QMenu(ctx.window)
+    c.policy_menu.aboutToShow.connect(lambda: c.fill_policy_menu(c.policy_menu))
+    for key in ("policies", "remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages",
+                "text", "highlights"):
         c.actions[key].setPriority(QAction.Priority.LowPriority)   # solo icona nella barra
-    groups = [("protect", "remove", "properties"),
+    groups = [("protect", "policies", "remove", "properties"),
               ("area", "text", "find", "patterns", "pages", "highlights", "style", "panel", "apply"),
               ("inspect", "sanitize", "metadata", "flatten")]
     for n, group in enumerate(groups):
@@ -69,8 +75,22 @@ def register(ctx: Context) -> None:
             mode.add_action(c.actions[key])
     for key in ("protect", "remove", "sanitize", "metadata"):
         ctx.add_menu_action(c.actions[key], _("Proteggi"))
+    menu_policy = ctx.action(_("Policy di protezione"), "shield-plus", c.manage_policies, requires_document=False)
+    menu_policy.setMenu(c.policy_menu)
+    ctx.add_menu_action(menu_policy, _("Proteggi"))
     revoke = ctx.action(_("Revoca documenti attendibili"), "shield-x", c.revoke_trust, requires_document=False)
     ctx.add_menu_action(revoke, _("Proteggi"))
+    # Blocco dell'applicazione (SEC-32)
+    from .applock import AppLock, LockPreferences
+    c.applock = AppLock(lambda: c.settings(), ctx.window)
+    lock_now = ctx.action(_("Blocca Foliant"), "lock-keyhole", c.lock_app, requires_document=False)
+    c.actions["lock"] = lock_now
+    ctx.add_menu_action(lock_now, _("Proteggi"))
+    lock_settings = ctx.action(_("Blocco dell'applicazione…"), "shield", c.lock_settings, requires_document=False)
+    c.actions["lock_settings"] = lock_settings
+    ctx.add_menu_action(lock_settings, _("Proteggi"))
+    # la pagina «Sicurezza e riservatezza» delle Preferenze attende CORE_REQUESTS §10
+    c.lock_preferences = LockPreferences
 
     ctx.add_properties_panel(PANEL_ID, c.panel)
     mode.entered.connect(lambda: ctx.show_properties(PANEL_ID) if ctx.current_view() else None)
@@ -114,6 +134,7 @@ def register(ctx: Context) -> None:
     ctx.add_guard("save", c.save_guard)        # SEC-19: segni non applicati prima di salvare
     ctx.add_guard("save_as", c.save_guard)
     ctx.add_guard("print", c.save_guard)       # anche prima di stampare (moduli che usano run_guards)
+    c.applock.start()                          # blocco all'avvio, prima dei file passati da riga di comando
     _update_actions(c, None)
 
 

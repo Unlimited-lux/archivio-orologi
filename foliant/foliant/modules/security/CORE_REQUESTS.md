@@ -46,3 +46,25 @@ di memoria e tempo.
 PyMuPDF non permette di scrivere `/EncryptMetadata false`. Servirebbe un
 post-processo del file salvato (riscrittura del dizionario /Encrypt e di /Perms
 per R6) nel nucleo di salvataggio o una versione del motore che lo supporti.
+
+## 9. Azioni dell'elaborazione in blocco (SEC-12, BAT-*)
+
+SEC-12 chiede che le policy di protezione compaiano «tra le azioni dell'elaborazione
+in blocco». L'elaborazione in blocco attuale (`modules/convert/batch.py`) fa solo
+conversioni e non accetta azioni di altri moduli. Proposta: `ctx.add_batch_action(id,
+label, run(path, out, options), options_widget=None)`, dove `run` lavora su un file
+alla volta in un thread di lavoro. Per ora il modulo security offre un proprio comando,
+«Policy di protezione › Applica a più file…» (`SecurityController.apply_policy_to_files`).
+Con il registro basterebbe iscrivere `policies.protect_file`.
+
+## 10. Pagina «Sicurezza e riservatezza» delle Preferenze (SEC-32, UX-17)
+
+La specifica colloca le impostazioni del blocco in Preferenze › Sicurezza e
+riservatezza. Il modulo ha già la pagina (`applock.LockPreferences`, con `apply()`),
+ma `tests/test_window_services.py::test_preferences_pages_and_author_name` si aspetta
+che le pagine siano esattamente quelle aggiunte dal test: con una pagina in più del
+modulo, il test fallisce. Proposta: nel test confrontare solo le pagine aggiunte
+(per esempio `[...][-2:]`) oppure creare la finestra senza moduli. Dopo la modifica, in
+`security/__init__.py` basta
+`ctx.add_preferences_page(_("Sicurezza e riservatezza"), lambda parent=None: LockPreferences(c.applock, parent))`.
+Per ora la stessa pagina si apre da Proteggi › Blocco dell'applicazione….
