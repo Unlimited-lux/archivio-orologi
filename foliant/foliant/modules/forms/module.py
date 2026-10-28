@@ -354,12 +354,18 @@ class FormsModule(QObject):
     def _refresh_panels(self) -> None:
         view = self.ctx.current_view()
         if self.panel is not None:
-            names = []
+            names: list[str] = []
+            radios: dict[str, list[str]] = {}
             if view is not None:
                 st = self.filler(view).state
                 st.refresh()
                 names = list(dict.fromkeys(f.name for f in st.fields))
-            self.panel.set_fields(self.selected_fields(view) if view else [], names)
+                for f in st.fields:
+                    if f.kind == E.RADIO and f.export:
+                        radios.setdefault(f.name, [])
+                        if f.export not in radios[f.name]:
+                            radios[f.name].append(f.export)
+            self.panel.set_fields(self.selected_fields(view) if view else [], names, radio_exports=radios)
         if self.fields_panel is not None:
             self.fields_panel.refresh()
 

@@ -1,0 +1,277 @@
+"""Modifica modulo: creazione con gli strumenti, selezione, spostamento, disposizione, proprietà."""
+
+from __future__ import annotations
+
+import pymupdf
+import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import QApplication
+
+from foliant.modules import forms
+from foliant.modules.forms import engine as E
+from foliant.modules.forms.design import FieldCreateTool, FieldSelectTool
+
+from .test_fill import click_field, filler_of, open_form, values
+
+
+@pytest.fixture
+def blank_view(window, tmp_path):
+    pdf = pymupdf.open()
+    for _ in range(3):
+        pdf.new_page()
+    path = tmp_path / "vuoto.pdf"
+    pdf.save(str(path))
+    return open_form(window, path)
+
+
+def module():
+    return forms.instance()
+
+
+def to_view(view, page, x, y):
+    r = view.page_to_view(page, pymupdf.Rect(x, y, x + 1, y + 1))
+    return r.topLeft().toPoint()
+
+
+def drag(qtbot, view, page, p0, p1):
+    vp = view.viewport()
+    a, b = to_view(view, page, *p0), to_view(view, page, *p1)
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=a)
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtCore import QEvent, QPointF
+    ev = QMouseEvent(QEvent.Type.MouseMove, QPointF(b), vp.mapToGlobal(QPointF(b)), Qt.MouseButton.NoButton,
+                     Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(vp, ev)
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, pos=b)
+    QApplication.processEvents()
+
+
+def fields(view):
+    with view.document.lock:
+        return E.list_fields(view.document.pdf)
+
+
+def test_enter_mode_disables_filling(qtbot, window, form_pdf):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    assert isinstance(view.tool, FieldSelectTool)
+    click_field(qtbot, view, "nome")
+    assert filler_of(view).editor is None
+    assert module().selection
+    window.ctx.set_mode("leggi")
+    assert not filler_of(view).design
+
+
+def test_create_text_by_drag_and_undo(qtbot, window, blank_view):
+    view = blank_view
+    window.ctx.set_mode("moduli")
+    module().start_create(E.TEXT)
+    assert isinstance(view.tool, FieldCreateTool)
+    drag(qtbot, view, 0, (100, 100), (300, 125))
+    fs = fields(view)
+    assert len(fs) == 1 and fs[0].name == "Testo1" and fs[0].kind == E.TEXT
+    assert abs(fs[0].rect.x0 - 100) < 2 and abs(fs[0].rect.x1 - 300) < 2
+    assert module().selection == [(0, fs[0].xref)]
+    assert isinstance(view.tool, FieldSelectTool)  # uso singolo
+    view.document.undo()
+    assert fields(view) == []
+    with view.document.lock:
+        assert view.document.pdf.xref_get_key(view.document.pdf.pdf_catalog(), "AcroForm")[0] == "null"
+
+
+def test_click_creates_default_size(qtbot, window, blank_view):
+    view = blank_view
+    window.ctx.set_mode("moduli")
+    module().start_create(E.CHECKBOX)
+    vp = view.viewport()
+    qtbot.mouseClick(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, 100, 100))
+    fs = fields(view)
+    assert fs[0].kind == E.CHECKBOX and abs(fs[0].rect.width - 14) < 1
+
+
+@pytest.mark.parametrize("kind,ft,flag", [
+    (E.TEXT, "/Tx", 0), (E.CHECKBOX, "/Btn", 0), (E.RADIO, "/Btn", E.FF_RADIO), (E.COMBO, "/Ch", 1 << 17),
+    (E.LIST, "/Ch", 0), (E.BUTTON, "/Btn", E.FF_PUSHBUTTON), ("image", "/Btn", E.FF_PUSHBUTTON),
+    ("date", "/Tx", 0), (E.SIGNATURE, "/Sig", 0),
+])
+def test_nine_tools(window, blank_view, kind, ft, flag):
+    view = blank_view
+    window.ctx.set_mode("moduli")
+    x = module().create_field(view, 0, kind, pymupdf.Rect(50, 50, 200, 90))
+    with view.document.lock:
+        pdf = view.document.pdf
+        fx = E._field_xref(pdf, x)
+        assert pdf.xref_get_key(fx, "FT")[1] == ft
+        ff = int(pdf.xref_get_key(fx, "Ff")[1]) if pdf.xref_get_key(fx, "Ff")[0] == "int" else 0
+        if flag:
+            assert ff & flag
+        if kind == "image":
+            assert E.is_image_field(pdf, x)
+        if kind == "date":
+            assert E.field_info(pdf, 0, x).fmt.type == "date"
+
+
+def test_radio_sticky_same_group(window, blank_view):
+    view = blank_view
+    window.ctx.set_mode("moduli")
+    m = module()
+    for i in range(3):
+        m.create_field(view, 0, E.RADIO, pymupdf.Rect(50 + 30 * i, 50, 64 + 30 * i, 64), sticky=i > 0)
+    fs = fields(view)
+    assert len({f.field_xref for f in fs}) == 1 and len(fs) == 3
+
+
+def test_select_move_and_single_undo(qtbot, window, form_pdf):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    before = {f.name: pymupdf.Rect(f.rect) for f in fields(view) if f.name in ("nome", "cognome")}
+    m = module()
+    nome = [f for f in fields(view) if f.name == "nome"][0]
+    cogn = [f for f in fields(view) if f.name == "cognome"][0]
+    m.set_selection([(0, nome.xref), (0, cogn.xref)])
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
+    after = {f.name: f.rect for f in fields(view) if f.name in before}
+    assert all(abs(after[n].x0 - before[n].x0 - 10) < 0.01 for n in before)
+    view.document.undo()
+    after = {f.name: f.rect for f in fields(view) if f.name in before}
+    assert all(abs(after[n].x0 - before[n].x0) < 0.01 for n in before)
+
+
+def test_drag_moves_field(qtbot, window, form_pdf):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    nome = [f for f in fields(view) if f.name == "nome"][0]
+    c = ((nome.rect.x0 + nome.rect.x1) / 2, (nome.rect.y0 + nome.rect.y1) / 2)
+    drag(qtbot, view, 0, c, (c[0] + 40, c[1] + 300))
+    moved = [f for f in fields(view) if f.name == "nome"][0]
+    assert abs(moved.rect.x0 - nome.rect.x0 - 40) < 2 and abs(moved.rect.y0 - nome.rect.y0 - 300) < 2
+
+
+def test_align_distribute_same_size(window, blank_view):
+    view = blank_view
+    window.ctx.set_mode("moduli")
+    m = module()
+    xs = [m.create_field(view, 0, E.TEXT, pymupdf.Rect(x0, y, x0 + 100, y + 20))
+          for x0, y in ((50, 50), (60, 100), (72, 300))]
+    m.set_selection([(0, x) for x in xs])
+    m.arrange("left")
+    assert all(abs(f.rect.x0 - 50) < 0.01 for f in fields(view))
+    m.arrange("dist_v")
+    fs = sorted(fields(view), key=lambda f: f.rect.y0)
+    gaps = [fs[i + 1].rect.y0 - fs[i].rect.y1 for i in range(2)]
+    assert abs(gaps[0] - gaps[1]) < 0.01
+    assert abs(fs[0].rect.y0 - 50) < 0.01 and abs(fs[2].rect.y1 - 320) < 0.01
+
+
+def test_duplicate_ctrl_d_and_delete(qtbot, window, form_pdf):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    nome = [f for f in fields(view) if f.name == "nome"][0]
+    m.set_selection([(0, nome.xref)])
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
+    fs = fields(view)
+    copy = [f for f in fs if f.name not in ("nome", "cognome", "privacy", "scelta", "paese", "colori")]
+    assert len(copy) == 1 and copy[0].name.startswith("nome")
+    assert abs(copy[0].rect.x0 - nome.rect.x0 - 10) < 0.01
+    assert m.selection == [(copy[0].page, copy[0].xref)]
+    qtbot.keyClick(view, Qt.Key.Key_Delete)
+    assert len(fields(view)) == len(fs) - 1
+
+
+def test_copy_to_pages_shared_and_independent(window, tmp_path):
+    pdf = pymupdf.open()
+    for _ in range(10):
+        pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "Nome")
+    pdf.save(str(tmp_path / "p.pdf"))
+    view = open_form(window, tmp_path / "p.pdf")
+    window.ctx.set_mode("moduli")
+    m = module()
+    x = fields(view)[0].xref
+    m.set_selection([(0, x)])
+    m.copy_to_pages(list(range(10)), shared=True)
+    fs = fields(view)
+    assert len(fs) == 10 and {f.name for f in fs} == {"Nome"}
+    with view.document.lock:
+        E.set_value(view.document.pdf, 4, fs[4].xref, "x")
+        assert all(f.value == "x" for f in E.list_fields(view.document.pdf))
+    view.document.undo()
+    m.set_selection([(0, x)])
+    m.copy_to_pages([1, 3, 5, 7, 9], shared=False)
+    names = {f.name for f in fields(view)}
+    assert len(names) == 6
+
+
+def test_properties_panel_apply_and_rename_merge(window, tmp_path, no_modal_boxes):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "A")
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 200, 120), "B")
+    pdf.save(str(tmp_path / "r.pdf"))
+    view = open_form(window, tmp_path / "r.pdf")
+    window.ctx.set_mode("moduli")
+    m = module()
+    a, b = fields(view)
+    assert m.apply_properties([(0, a.xref), (0, b.xref)], {"required": True}, "x")
+    assert all(f.required for f in fields(view))
+    assert m.apply_properties([(0, b.xref)], {"name": "A"}, "Rinomina")
+    assert any(c[0] == "question" for c in no_modal_boxes)
+    assert E.form_values(view.document.pdf) == {"A": ""}
+
+
+def test_calc_cycle_rejected(window, tmp_path, no_modal_boxes):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "A")
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 200, 120), "B", calc=E.Calculation("SUM", ["A"]))
+    pdf.save(str(tmp_path / "c.pdf"))
+    view = open_form(window, tmp_path / "c.pdf")
+    a = fields(view)[0]
+    assert not module().apply_properties([(0, a.xref)], {"calc": E.Calculation("SUM", ["B"])}, "x")
+    assert any("A → B → A" in c[2] for c in no_modal_boxes)
+
+
+def test_tab_order_selection(window, tmp_path):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    xs = [E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50 + 40 * i, 200, 70 + 40 * i), n)
+          for i, n in enumerate("ABC")]
+    pdf.save(str(tmp_path / "t.pdf"))
+    view = open_form(window, tmp_path / "t.pdf")
+    window.ctx.set_mode("moduli")
+    m = module()
+    fs = fields(view)
+    m.set_selection([(0, fs[2].xref), (0, fs[0].xref), (0, fs[1].xref)])
+    m.tab_order("selection")
+    out = tmp_path / "t2.pdf"
+    view.document.save(out)
+    again = pymupdf.open(str(out))
+    assert [f.name for f in E.navigation_order(again, 0)] == ["C", "A", "B"]
+
+
+def test_preview_fill_and_back(qtbot, window, form_pdf):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    m.toggle_preview(True)
+    click_field(qtbot, view, "nome")
+    f = filler_of(view)
+    assert f.editor is not None
+    qtbot.keyClicks(f.editor, "Prova")
+    m.toggle_preview(False)
+    assert values(view)["nome"] == "Prova"
+    assert filler_of(view).design
+
+
+def test_design_screenshot(qtbot, window, form_pdf, tmp_path):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    nome = [f for f in fields(view) if f.name == "nome"][0]
+    m.set_selection([(0, nome.xref)])
+    view.flush_rendering()
+    QApplication.processEvents()
+    assert not window.grab().isNull()

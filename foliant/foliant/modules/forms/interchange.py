@@ -192,7 +192,8 @@ def export_xfdf(values: dict[str, Any], pdf_name: str = "") -> bytes:
 
     add(fields, _tree(values))
     ET.indent(root)
-    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8")
+    body = ET.tostring(root, encoding="utf-8").replace(b"\r", b"&#13;")  # CR conservato come riferimento
+    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + body
 
 
 def _xfdf_values(el, value) -> None:
