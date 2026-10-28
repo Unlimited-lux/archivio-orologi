@@ -14,7 +14,10 @@ from ...core.errors import FoliantError
 from ...i18n import _
 from ...ui import theme
 from . import engine
-from .analysis import REASON_UNDECODABLE, analyze_page, frame_matrix, page_has_images, unframe_matrix
+from .analysis import (
+    REASON_UNDECODABLE, GroupingError, analyze_page, apply_grouping, frame_matrix, line_key, merge_blocks,
+    page_has_images, unframe_matrix,
+)
 from .fonts import FontResolver
 from .model import ALIGN_LEFT, GRANULARITY_PARAGRAPH, Run, Style, TextBlock, merge_runs
 from .ui_editor import EditorSpec, InlineEditor
@@ -61,6 +64,9 @@ class TextEditController(QObject):
         self._editors: dict[int, tuple[InlineEditor, dict]] = {}
         self._overflow: dict[int, list[tuple[int, pymupdf.Rect]]] = {}
         self._signed_ok: set[int] = set()
+        # raggruppamento scelto dall'utente (TXT-09): (id documento, pagina) -> (unioni, divisioni)
+        self._grouping: dict[tuple, tuple[list, set]] = {}
+        self._grouping_version = 0
         self.clipboard: dict | None = None
         self.last_substitutions: list = []
         self.last_change: tuple | None = None   # (vista, pagina, bbox) dell'ultima modifica
@@ -109,7 +115,7 @@ class TextEditController(QObject):
 
     def blocks(self, view, page: int, compute: bool = True) -> list[TextBlock]:
         doc = view.document
-        key = (id(doc), doc.version, page, self.granularity)
+        key = (id(doc), doc.version, page, self.granularity, self._grouping_version)
         hit = self._cache.get(key)
         if hit is None and compute:
             if doc.closed or page >= doc.page_count:
@@ -119,6 +125,9 @@ class TextEditController(QObject):
                     hit = analyze_page(doc.pdf[page], page, self.granularity)
                 except Exception:
                     hit = []
+            grouping = self._grouping.get((id(doc), page))
+            if grouping and hit:
+                hit = apply_grouping(hit, page, grouping[0], grouping[1])
             if len(self._cache) > 200:
                 self._cache.clear()
             self._cache[key] = hit
@@ -149,6 +158,7 @@ class TextEditController(QObject):
             self.ctx.status(_("Il documento è cambiato: la modifica in corso è stata annullata."))
         tool = self._tools.get(id(view))
         if tool is not None:
+            tool[0].multi = []
             sel = tool[0].selected
             if sel is not None:
                 nb = self._refind(view, sel[0], sel[1].bbox)
@@ -598,3 +608,128 @@ class TextEditController(QObject):
                 painter.drawText(QPointF(0, 0), text)
                 painter.restore()
         painter.restore()
+
+    # ------------------------------------------------------------ selezione multipla
+    def selected_blocks(self, view) -> list[tuple[int, TextBlock]]:
+        tool = self.edit_tool(view)
+        items = list(tool.multi)
+        if tool.selected is not None and all(b is not tool.selected[1] for _p, b in items):
+            items.insert(0, tool.selected)
+        return items
+
+    def _multi_apply(self, view, label: str, fn, reselect: bool = True):
+        items = self.selected_blocks(view)
+        if not items or not self.ensure_editable(view):
+            return None
+        page = items[0][0]
+        blocks = [b for p, b in items if p == page]
+        result = self._apply(view, label, lambda pdf: fn(pdf, page, blocks) or engine.EditResult(changed=True))
+        tool = self.edit_tool(view)
+        bboxes = [pymupdf.Rect(b.bbox) for b in blocks]
+        tool.multi = []
+        tool.selected = None
+        if result is not None and reselect:
+            found = []
+            for b in self.blocks(view, page):
+                if any((pymupdf.Rect(b.bbox) & r).get_area() > 0 for r in bboxes):
+                    found.append((page, b))
+            tool.multi = found
+        self.selection_changed(view, tool.selected)
+        view.viewport().update()
+        return result
+
+    def delete_selected(self, view):
+        return self._multi_apply(view, _("Elimina blocchi di testo"),
+                                 lambda pdf, page, blocks: [engine.delete_block(pdf, page, b) for b in blocks] and None,
+                                 reselect=False)
+
+    def move_selected(self, view, dx: float, dy: float):
+        items = self.selected_blocks(view)
+        if len(items) <= 1:
+            if items:
+                return self.move_block(view, items[0][0], items[0][1], dx, dy)
+            return None
+        tool = self.edit_tool(view)
+        result = self._multi_apply(view, _("Sposta blocchi di testo"), lambda pdf, page, blocks: [
+            engine.move_block(pdf, page, b, dx, dy) for b in blocks] and None, reselect=False)
+        if result is not None:
+            page = items[0][0]
+            moved = [pymupdf.Rect(b.bbox.x0 + dx, b.bbox.y0 + dy, b.bbox.x1 + dx, b.bbox.y1 + dy) for _p, b in items]
+            tool.multi = [(page, nb) for r in moved if (nb := self._refind(view, page, r)) is not None]
+            view.viewport().update()
+        return result
+
+    def align_selected(self, view, mode: str, to_page: bool = False):
+        items = self.selected_blocks(view)
+        if not items or (len(items) < 2 and not to_page):
+            return None
+        reference = None
+        if to_page:
+            with ENGINE_LOCK:
+                reference = engine.visible_area(view.document.pdf[items[0][0]])
+        return self._multi_apply(view, _("Allinea blocchi"), lambda pdf, page, blocks: engine.align_blocks(
+            pdf, page, blocks, mode, reference) and None)
+
+    def distribute_selected(self, view, axis: str):
+        if len(self.selected_blocks(view)) < 3:
+            return None
+        return self._multi_apply(view, _("Distribuisci blocchi"),
+                                 lambda pdf, page, blocks: engine.distribute_blocks(pdf, page, blocks, axis))
+
+    def rotate_selected(self, view, degrees: float):
+        return self._multi_apply(view, _("Ruota blocco di testo"), lambda pdf, page, blocks: [
+            engine.rotate_block(pdf, page, b, degrees) for b in blocks] and None)
+
+    def restack_selected(self, view, front: bool):
+        return self._multi_apply(view, _("Porta in primo piano") if front else _("Porta sullo sfondo"),
+                                 lambda pdf, page, blocks: [engine.restack_block(pdf, page, b, front)
+                                                            for b in blocks] and None)
+
+    # ------------------------------------------------------------ unione e divisione (TXT-09)
+    def merge_selected(self, view, separator: str = "space") -> TextBlock | None:
+        items = self.selected_blocks(view)
+        if len(items) < 2:
+            return None
+        if len({p for p, _b in items}) != 1:
+            self.ctx.error(_("Unisci blocchi"), _("Si possono unire solo blocchi della stessa pagina."))
+            return None
+        page = items[0][0]
+        blocks = [b for _p, b in items]
+        try:
+            merged = merge_blocks(blocks, separator)
+        except GroupingError:
+            self.ctx.error(_("Unisci blocchi"), _("I blocchi hanno orientamento o tipo diverso: non possono "
+                                                  "essere uniti."))
+            return None
+        key = (id(view.document), page)
+        merges, splits = self._grouping.setdefault(key, ([], set()))
+        group = tuple(line_key(page, ln) for ln in merged.lines)
+        splits.difference_update(group)
+        merges.append((group, separator))
+        self._grouping_version += 1
+        tool = self.edit_tool(view)
+        tool.multi = []
+        nb = self._refind(view, page, merged.bbox)
+        tool.select(view, page, nb)
+        view.viewport().update()
+        return nb
+
+    def split_block_at(self, view, page: int, block: TextBlock, line_index: int) -> bool:
+        if line_index <= 0 or line_index >= len(block.lines):
+            return False
+        key = (id(view.document), page)
+        merges, splits = self._grouping.setdefault(key, ([], set()))
+        lk = line_key(page, block.lines[line_index])
+        merges[:] = [(g, sep) for g, sep in merges if lk not in g]
+        splits.add(lk)
+        self._grouping_version += 1
+        self.edit_tool(view).select(view, page, None)
+        view.viewport().update()
+        return True
+
+    def redetect(self, view, page: int) -> None:
+        """«Rileva di nuovo»: torna al raggruppamento automatico (il testo non cambia)."""
+        self._grouping.pop((id(view.document), page), None)
+        self._grouping_version += 1
+        self.edit_tool(view).select(view, page, None)
+        view.viewport().update()

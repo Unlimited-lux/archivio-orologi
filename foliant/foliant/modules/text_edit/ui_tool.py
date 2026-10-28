@@ -44,7 +44,9 @@ class EditTextTool(Tool):
         self.ctrl = controller
         self.hover: tuple[int, TextBlock] | None = None
         self.selected: tuple[int, TextBlock] | None = None
+        self.multi: list[tuple[int, TextBlock]] = []      # selezione multipla (TXT-07/08/09)
         self.drag: _Drag | None = None
+        self.band: tuple[int, pymupdf.Point, pymupdf.Point] | None = None
 
     # ------------------------------------------------------------ ciclo di vita
     def activate(self, view) -> None:
@@ -55,6 +57,8 @@ class EditTextTool(Tool):
     def deactivate(self, view) -> None:
         self.ctrl.commit_editor(view)
         self.selected = None
+        self.multi = []
+        self.band = None
         self.hover = None
         self.drag = None
         self.ctrl.selection_changed(view, None)
@@ -91,6 +95,7 @@ class EditTextTool(Tool):
 
     def select(self, view, page: int, block: TextBlock | None) -> None:
         self.selected = (page, block) if block is not None else None
+        self.multi = []
         self.ctrl.selection_changed(view, self.selected)
         view.viewport().update()
 
@@ -105,6 +110,24 @@ class EditTextTool(Tool):
             self.select(view, 0, None)
             return True
         page, fpt, block = hit
+        if ev.modifiers & Qt.KeyboardModifier.ShiftModifier:
+            # Maiusc+clic: aggiunge o toglie il blocco dalla selezione multipla
+            if block is not None and block.editable:
+                items = self.ctrl.selected_blocks(view)
+                if any(b is block for _p, b in items):
+                    items = [(p, b) for p, b in items if b is not block]
+                else:
+                    items.append((page, block))
+                self.selected = None
+                self.multi = items
+                self.ctrl.selection_changed(view, None)
+                view.viewport().update()
+            else:
+                self.band = (page, fpt, fpt)
+            return True
+        if len(self.multi) > 1 and block is not None and any(b is block for _p, b in self.multi):
+            self.drag = _Drag("move-multi", page, block, fpt, fpt, page)
+            return True
         # maniglie e trascinamento del blocco selezionato
         if self.selected is not None and self.selected[0] == page:
             handle = self._handle_at(view, fpt)
@@ -119,6 +142,7 @@ class EditTextTool(Tool):
         if block is None:
             self.select(view, page, None)
             self.ctrl.check_page_has_text(view, page)
+            self.band = (page, fpt, fpt)       # rettangolo di selezione
             return True
         if not block.editable:
             self.select(view, page, None)
@@ -133,6 +157,11 @@ class EditTextTool(Tool):
         return True
 
     def move(self, view, ev):
+        if self.band is not None:
+            if ev.page == self.band[0]:
+                self.band = (self.band[0], self.band[1], ev.point * self.ctrl.frame(ev.page))
+                view.viewport().update()
+            return True
         if self.drag is not None:
             if ev.page is not None:
                 if self.drag.kind == "move" and ev.page != self.drag.page:
@@ -177,6 +206,20 @@ class EditTextTool(Tool):
     def release(self, view, ev):
         if ev.button != Qt.MouseButton.LeftButton:
             return False
+        band, self.band = self.band, None
+        if band is not None:
+            r = pymupdf.Rect(band[1], band[2])
+            r.normalize()
+            if r.width > 2 and r.height > 2:
+                items = [(band[0], b) for b in self.ctrl.blocks(view, band[0])
+                         if b.editable and r.intersects(b.bbox)]
+                self.selected = None
+                self.multi = items
+                if len(items) == 1:
+                    self.selected, self.multi = items[0], []
+                self.ctrl.selection_changed(view, self.selected)
+            view.viewport().update()
+            return True
         drag, self.drag = self.drag, None
         if drag is None:
             return True
@@ -186,6 +229,10 @@ class EditTextTool(Tool):
             drag.current = ev.point * self.ctrl.frame(drag.target_page)
         dx = drag.current.x - drag.start.x
         dy = drag.current.y - drag.start.y
+        if drag.kind == "move-multi":
+            if abs(dx) + abs(dy) >= 0.5 and drag.target_page == drag.page:
+                self.ctrl.move_selected(view, dx, dy)
+            return True
         if drag.kind == "move":
             if drag.target_page != drag.page:
                 self.ctrl.move_block(view, drag.page, drag.block, dx, dy, target_page=drag.target_page)
@@ -206,6 +253,21 @@ class EditTextTool(Tool):
 
     # ------------------------------------------------------------ tastiera
     def key(self, view, event) -> bool:
+        if len(self.multi) > 1:
+            key = event.key()
+            step = 10.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0
+            moves = {Qt.Key.Key_Left: (-step, 0), Qt.Key.Key_Right: (step, 0), Qt.Key.Key_Up: (0, -step),
+                     Qt.Key.Key_Down: (0, step)}
+            if key in moves:
+                self.ctrl.move_selected(view, *moves[key])
+                return True
+            if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self.ctrl.delete_selected(view)
+                return True
+            if key == Qt.Key.Key_Escape:
+                self.select(view, 0, None)
+                return True
+            return False
         if self.selected is None:
             if event.key() == Qt.Key.Key_Escape and self.ctrl.editor_for(view) is None:
                 return False
@@ -302,7 +364,30 @@ class EditTextTool(Tool):
             for cx in (b.bbox.x0, b.bbox.x1):
                 c = pymupdf.Point(cx, (b.bbox.y0 + b.bbox.y1) / 2) * self.ctrl.unframe(page)
                 painter.drawRect(QRectF(c.x - hs / 2, c.y - hs / 2, hs, hs))
+        for p_index, b in self.multi:
+            if p_index == page:
+                painter.setPen(QPen(accent, 1.5 / z))
+                fill = QColor(accent)
+                fill.setAlpha(24)
+                painter.setBrush(fill)
+                painter.drawRect(frame_rect_to_page(self.ctrl, page, b.bbox))
+        if self.band is not None and self.band[0] == page:
+            r = pymupdf.Rect(self.band[1], self.band[2])
+            r.normalize()
+            painter.setPen(QPen(accent, 1.0 / z, Qt.PenStyle.DashLine))
+            fill = QColor(accent)
+            fill.setAlpha(20)
+            painter.setBrush(fill)
+            painter.drawRect(frame_rect_to_page(self.ctrl, page, r))
         d = self.drag
+        if d is not None and d.kind == "move-multi" and d.target_page == page:
+            dx, dy = d.current.x - d.start.x, d.current.y - d.start.y
+            painter.setPen(QPen(accent, 1.2 / z, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for _p, b in self.multi:
+                r = pymupdf.Rect(b.bbox.x0 + dx, b.bbox.y0 + dy, b.bbox.x1 + dx, b.bbox.y1 + dy)
+                painter.drawRect(frame_rect_to_page(self.ctrl, page, r))
+            d = None
         if d is not None and d.target_page == page:
             r = pymupdf.Rect(d.block.bbox)
             dx, dy = d.current.x - d.start.x, d.current.y - d.start.y

@@ -15,6 +15,9 @@ from .translations import EN
 
 ORDER = 30
 
+ALIGN_LABELS = (("left", "A sinistra"), ("hcenter", "Al centro"), ("right", "A destra"), ("top", "In alto"),
+                ("vcenter", "Al centro verticale"), ("bottom", "In basso"))
+
 _controller = None
 
 
@@ -116,14 +119,48 @@ def register(ctx: Context) -> None:
         from .analysis import block_at
         fpt = pe.point * ctrl.frame(pe.page, view)
         block = block_at(ctrl.blocks(view, pe.page), fpt)
+        selected = ctrl.selected_blocks(view)
+        if len(selected) >= 2:
+            menu.addAction(_("Unisci blocchi (con uno spazio)"), lambda: ctrl.merge_selected(view, "space"))
+            menu.addAction(_("Unisci blocchi (nuovo paragrafo)"), lambda: ctrl.merge_selected(view, "paragraph"))
+            sub = menu.addMenu(_("Allinea"))
+            for mode_id, label in ALIGN_LABELS:
+                sub.addAction(_(label), lambda m=mode_id: ctrl.align_selected(view, m))
+            dist = menu.addMenu(_("Distribuisci"))
+            dist.addAction(_("In orizzontale"), lambda: ctrl.distribute_selected(view, "h"))
+            dist.addAction(_("In verticale"), lambda: ctrl.distribute_selected(view, "v"))
+            menu.addAction(_("Elimina blocchi"), lambda: ctrl.delete_selected(view))
+            menu.addSeparator()
         if block is None or not block.editable:
             if ctrl._clipboard_block() is not None:
                 menu.addAction(_("Incolla blocco di testo"), lambda: ctrl.paste_block(view))
+            menu.addAction(_("Rileva di nuovo i blocchi"), lambda: ctrl.redetect(view, pe.page))
             return
         menu.addAction(_("Modifica testo"), lambda: ctrl.open_editor(view, pe.page, block))
         menu.addAction(_("Copia blocco"), lambda: ctrl.copy_block(view, pe.page, block))
         menu.addAction(_("Duplica blocco"), lambda: ctrl.duplicate_block(view, pe.page, block))
         menu.addAction(_("Elimina blocco"), lambda: ctrl.delete_block(view, pe.page, block))
+        line_index = next((i for i, ln in enumerate(block.lines) if ln.bbox.y0 <= fpt.y <= ln.bbox.y1), -1)
+        if line_index > 0:
+            menu.addAction(_("Dividi il blocco da questa riga"),
+                           lambda: ctrl.split_block_at(view, pe.page, block, line_index))
+        menu.addAction(_("Rileva di nuovo i blocchi"), lambda: ctrl.redetect(view, pe.page))
+        arrange = menu.addMenu(_("Disponi"))
+
+        def single(fn):
+            def run():
+                tool.select(view, pe.page, block)
+                fn()
+            return run
+
+        arrange.addAction(_("Ruota…"), single(lambda: ask_rotation(ctx, ctrl, view)))
+        arrange.addAction(_("Ruota di 90° a sinistra"), single(lambda: ctrl.rotate_selected(view, 90)))
+        arrange.addAction(_("Ruota di 90° a destra"), single(lambda: ctrl.rotate_selected(view, -90)))
+        arrange.addAction(_("Porta in primo piano"), single(lambda: ctrl.restack_selected(view, True)))
+        arrange.addAction(_("Porta sullo sfondo"), single(lambda: ctrl.restack_selected(view, False)))
+        page_align = arrange.addMenu(_("Allinea alla pagina"))
+        for mode_id, label in ALIGN_LABELS:
+            page_align.addAction(_(label), single(lambda m=mode_id: ctrl.align_selected(view, m, to_page=True)))
         if block.invisible:
             menu.addAction(_("Converti in testo modificabile"), lambda: ctrl.convert_ocr_block(view, pe.page, block))
 
@@ -164,3 +201,11 @@ def open_fonts_dialog(ctx: Context):
     ctx._text_fonts_dialog = dlg
     dlg.show()
     return dlg
+
+
+def ask_rotation(ctx: Context, ctrl, view) -> None:
+    from PySide6.QtWidgets import QInputDialog
+    value, ok = QInputDialog.getDouble(ctx.window, _("Ruota blocco"), _("Angolo (gradi, antiorario):"), 15.0,
+                                       -360.0, 360.0, 1)
+    if ok and value:
+        ctrl.rotate_selected(view, value)

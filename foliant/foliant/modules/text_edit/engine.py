@@ -20,7 +20,7 @@ import pymupdf
 
 from ...core.errors import FoliantError
 from ...i18n import _
-from .analysis import analyze_page, frame_matrix, unframe_matrix
+from .analysis import analyze_page, extract_lines, frame_matrix, unframe_matrix
 from .fonts import FontResolver, Substitution, UncoveredCharacter
 from .layout import Composer, LayoutResult, Piece, PlacedLine
 from .model import (
@@ -67,10 +67,48 @@ def _band(line: Line) -> pymupdf.Rect:
     return pymupdf.Rect(r.x0 + 0.3, r.y0 + 0.3, r.x1 - 0.3, r.y1 - 0.3)
 
 
+def _lkey(line: Line) -> tuple:
+    return (round(line.baseline, 1), round(line.bbox.x0, 1), line.text)
+
+
 def remove_lines(page: pymupdf.Page, lines: list[Line]) -> None:
-    """Rimuove i glifi delle righe indicate, senza toccare immagini, grafica e annotazioni."""
+    """Rimuove i glifi delle righe indicate, senza toccare immagini, grafica, annotazioni e altro testo.
+
+    La redazione toglie ogni glifo che tocca l'area: le righe di altri blocchi sovrapposte
+    vengono ripristinate subito dopo, nella stessa posizione."""
     if not lines:
         return
+    targets = {_lkey(ln) for ln in lines}
+    before = extract_lines(page)
+    _redact_lines(page, lines)
+    after = extract_lines(page)
+    after_keys = {_lkey(ln) for ln, _inv in after}
+    before_keys = {_lkey(ln) for ln, _inv in before}
+    lost = [(ln, inv) for ln, inv in before if _lkey(ln) not in targets and _lkey(ln) not in after_keys]
+    if not lost:
+        return
+    # resti delle righe danneggiate (glifi non toccati): via anche loro, poi riscrittura completa
+    remains = [ln for ln, _inv in after if _lkey(ln) not in before_keys and any(
+        abs(ln.baseline - l2.baseline) < 0.5 and ln.bbox.intersects(l2.bbox) for l2, _i in lost)]
+    if remains:
+        _redact_lines(page, remains)
+    resolver = FontResolver(page.parent)
+    composer = Composer(resolver)
+    writer = _Writer(page)
+    for ln, inv in lost:
+        for w in ln.words:
+            x = w.x
+            try:
+                pieces = composer.pieces(w.text, w.style)
+            except UncoveredCharacter:
+                continue
+            for part, choice, width in pieces:
+                piece = Piece(x, part, w.style, choice, width)
+                writer.write_piece(piece, ln.baseline, render_mode=3 if inv else 0)
+                x += width
+
+
+def _redact_lines(page: pymupdf.Page, lines: list[Line]) -> None:
     unframe = unframe_matrix(page)
     # le redazioni già presenti (segnate dall'utente) non devono essere applicate ora
     pending = []
@@ -116,8 +154,9 @@ def _same_link(a: dict, b: dict) -> bool:
 class _Writer:
     """Scrive righe composte nella pagina."""
 
-    def __init__(self, page: pymupdf.Page):
+    def __init__(self, page: pymupdf.Page, overlay: bool = True):
         self.page = page
+        self.overlay = overlay
         self.rot = page.rotation
         self.unframe = unframe_matrix(page)
         self.frame = frame_matrix(page)
@@ -184,7 +223,7 @@ class _Writer:
                 rel = pymupdf.Point(x - anchor.x, y - anchor.y) * m
                 pt = pymupdf.Point(anchor.x + rel.x, anchor.y + rel.y)
             kwargs = dict(fontsize=st.size, fontname=fontname, color=st.color, render_mode=mode,
-                          border_width=border, rotate=self.rot)
+                          border_width=border, rotate=self.rot, overlay=self.overlay)
             if mode == 2:
                 kwargs["fill"] = st.color
             if not identity:
@@ -200,7 +239,8 @@ class _Writer:
                 if angle:
                     p0 = anchor + (p0 - anchor) * pymupdf.Matrix(angle)
                     p1 = anchor + (p1 - anchor) * pymupdf.Matrix(angle)
-                self.page.draw_line(p0 * self.unframe, p1 * self.unframe, color=st.color, width=width)
+                self.page.draw_line(p0 * self.unframe, p1 * self.unframe, color=st.color, width=width,
+                                   overlay=self.overlay)
 
 
 # ====================================================================== confronto righe
@@ -603,5 +643,118 @@ def convert_invisible_block(pdf: pymupdf.Document, page_index: int, block: TextB
         lay = composer.layout([[Run(text, style)]], x0=line.origin.x, first_baseline=line.baseline, width=1e6,
                               align=ALIGN_LEFT, leading=block.leading)
         for pl in lay.lines:
+            writer.write_line(pl)
+    return EditResult(bbox=block.bbox, changed=True)
+
+
+# ====================================================================== disposizione (TXT-08)
+ALIGN_MODES = ("left", "hcenter", "right", "top", "vcenter", "bottom")
+
+
+def align_blocks(pdf: pymupdf.Document, page_index: int, blocks: list[TextBlock], mode: str,
+                 reference: pymupdf.Rect | None = None) -> list[pymupdf.Rect]:
+    """Allinea i riquadri dei blocchi rispetto alla selezione (o a `reference`, es. la pagina)."""
+    if mode not in ALIGN_MODES:
+        raise ValueError(mode)
+    ref = pymupdf.Rect(reference) if reference is not None else None
+    if ref is None:
+        ref = pymupdf.Rect(blocks[0].bbox)
+        for b in blocks[1:]:
+            ref |= b.bbox
+    out = []
+    # dal basso verso l'alto: la rimozione di un blocco non tocca gli altri
+    for b in blocks:
+        r = b.bbox
+        dx = dy = 0.0
+        if mode == "left":
+            dx = ref.x0 - r.x0
+        elif mode == "right":
+            dx = ref.x1 - r.x1
+        elif mode == "hcenter":
+            dx = (ref.x0 + ref.x1) / 2 - (r.x0 + r.x1) / 2
+        elif mode == "top":
+            dy = ref.y0 - r.y0
+        elif mode == "bottom":
+            dy = ref.y1 - r.y1
+        else:
+            dy = (ref.y0 + ref.y1) / 2 - (r.y0 + r.y1) / 2
+        if abs(dx) < 0.01 and abs(dy) < 0.01:
+            out.append(pymupdf.Rect(r))
+            continue
+        res = move_block(pdf, page_index, b, dx, dy)
+        out.append(res.bbox)
+    return out
+
+
+def distribute_blocks(pdf: pymupdf.Document, page_index: int, blocks: list[TextBlock], axis: str = "h") -> None:
+    """Distribuisce i blocchi con spazi uguali tra i riquadri (orizzontale "h" o verticale "v")."""
+    if len(blocks) < 3:
+        return
+    key = (lambda b: b.bbox.x0) if axis == "h" else (lambda b: b.bbox.y0)
+    ordered = sorted(blocks, key=key)
+    if axis == "h":
+        total = sum(b.bbox.width for b in ordered)
+        span = ordered[-1].bbox.x1 - ordered[0].bbox.x0
+    else:
+        total = sum(b.bbox.height for b in ordered)
+        span = ordered[-1].bbox.y1 - ordered[0].bbox.y0
+    gap = (span - total) / (len(ordered) - 1)
+    pos = (ordered[0].bbox.x1 if axis == "h" else ordered[0].bbox.y1) + gap
+    for b in ordered[1:-1]:
+        if axis == "h":
+            d = pos - b.bbox.x0
+            if abs(d) > 0.01:
+                move_block(pdf, page_index, b, d, 0)
+            pos += b.bbox.width + gap
+        else:
+            d = pos - b.bbox.y0
+            if abs(d) > 0.01:
+                move_block(pdf, page_index, b, 0, d)
+            pos += b.bbox.height + gap
+
+
+def rotate_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, degrees: float) -> EditResult:
+    """Ruota il blocco attorno all'origine della prima riga; angolo antiorario in gradi (TXT-08)."""
+    page = pdf[page_index]
+    resolver = FontResolver(pdf)
+    composer = Composer(resolver)
+    origin = pymupdf.Point(block.lines[0].origin)
+    current = math.degrees(math.atan2(block.lines[0].dir[1], block.lines[0].dir[0])) if block.rotated else 0.0
+    # nelle coordinate della pagina (y verso il basso) un angolo antiorario è negativo
+    angle = current - degrees
+    try:
+        if block.rotated:
+            flat = composer.layout([merge_runs(block.lines[0].runs)], x0=origin.x, first_baseline=origin.y,
+                                   width=1e6, align=ALIGN_LEFT, leading=block.leading).lines
+        else:
+            flat = []
+            for ln in block.lines:
+                flat.extend(composer.layout([merge_runs(ln.runs)], x0=ln.origin.x, first_baseline=ln.baseline,
+                                            width=1e6, align=ALIGN_LEFT, leading=block.leading).lines)
+    except UncoveredCharacter as e:
+        raise TextEditError(_("Il carattere «{c}» non è disponibile in nessun font installato.").format(c=e.char))
+    remove_lines(page, block.lines)
+    writer = _Writer(page)
+    for pl in flat:
+        if abs(angle) < 1e-6:
+            writer.write_line(pl)
+        else:
+            writer.write_line(pl, angle=angle, origin=origin)
+    return EditResult(bbox=block.bbox, changed=True)
+
+
+def restack_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, front: bool = True) -> EditResult:
+    """Porta il blocco in primo piano (scritto dopo il resto del contenuto) o sullo sfondo (prima)."""
+    page = pdf[page_index]
+    resolver = FontResolver(pdf)
+    composer = Composer(resolver)
+    lines = _original_placed_lines(block, 0.0, 0.0, resolver, composer)
+    remove_lines(page, block.lines)
+    writer = _Writer(page, overlay=front)
+    for pl in lines:
+        if block.invisible:
+            for p in pl.pieces:
+                writer.write_piece(p, pl.baseline, render_mode=3)
+        else:
             writer.write_line(pl)
     return EditResult(bbox=block.bbox, changed=True)

@@ -397,3 +397,88 @@ def page_has_images(page: pymupdf.Page) -> bool:
         return bool(page.get_images(full=False))
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------- unione e divisione (TXT-09)
+SEPARATOR_SPACE = "space"
+SEPARATOR_PARAGRAPH = "paragraph"
+
+
+class GroupingError(ValueError):
+    pass
+
+
+def line_key(page_index: int, line: Line) -> tuple:
+    return (page_index, round(line.baseline, 1), round(line.bbox.x0, 1), line.text[:12])
+
+
+def merge_blocks(blocks: list[TextBlock], separator: str = SEPARATOR_SPACE) -> TextBlock:
+    """Unisce blocchi della stessa pagina in uno (ordine di lettura); l'aspetto della pagina non cambia."""
+    if len(blocks) < 2:
+        raise GroupingError("Servono almeno due blocchi.")
+    if len({b.page for b in blocks}) != 1:
+        raise GroupingError("I blocchi devono essere sulla stessa pagina.")
+    if any(b.rotated for b in blocks) or len({b.invisible for b in blocks}) != 1:
+        raise GroupingError("I blocchi hanno orientamento o tipo diverso.")
+    ordered = sorted(blocks, key=lambda b: (round(b.bbox.y0, 1), b.bbox.x0))
+    first = ordered[0]
+    paragraphs = [list(p) for p in first.paragraphs]
+    for b in ordered[1:]:
+        if separator == SEPARATOR_PARAGRAPH or not paragraphs:
+            paragraphs.extend(list(p) for p in b.paragraphs)
+        else:
+            last = paragraphs[-1]
+            style = last[-1].style if last else b.style
+            paragraphs[-1] = merge_runs(last + [Run(" ", style)] + list(b.paragraphs[0]))
+            paragraphs.extend(list(p) for p in b.paragraphs[1:])
+    lines = [ln for b in ordered for ln in b.lines]
+    x0 = min(b.x0 for b in ordered)
+    x1 = max(max(b.x1, b.bbox.x1) for b in ordered)
+    return TextBlock(page=first.page, index=first.index, lines=lines, paragraphs=paragraphs, align=first.align,
+                     leading=first.leading, width=x1 - x0, auto_width=False, indent=first.indent,
+                     invisible=first.invisible, decodable=all(b.decodable for b in ordered),
+                     reason=next((b.reason for b in ordered if b.reason), ""))
+
+
+def split_block(block: TextBlock, line_index: int) -> tuple[TextBlock, TextBlock] | None:
+    """Divide il blocco prima della riga `line_index` (nessun effetto all'inizio o alla fine)."""
+    if line_index <= 0 or line_index >= len(block.lines):
+        return None
+    a = build_block(block.page, block.index, block.lines[:line_index], block.invisible)
+    b = build_block(block.page, block.index + 1, block.lines[line_index:], block.invisible)
+    for part in (a, b):
+        part.leading = block.leading if len(part.lines) == 1 else part.leading
+        if len(part.lines) == 1 and block.align != ALIGN_LEFT:
+            part.align = block.align
+    return a, b
+
+
+def apply_grouping(blocks: list[TextBlock], page_index: int, merges: list[tuple], splits: set) -> list[TextBlock]:
+    """Applica al riconoscimento automatico le unioni e divisioni scelte dall'utente."""
+    out = list(blocks)
+    for key in splits:
+        for i, b in enumerate(out):
+            keys = [line_key(page_index, ln) for ln in b.lines]
+            if key in keys:
+                parts = split_block(b, keys.index(key))
+                if parts:
+                    out[i:i + 1] = list(parts)
+                break
+    for group, separator in merges:
+        members = []
+        for b in out:
+            keys = {line_key(page_index, ln) for ln in b.lines}
+            if keys & set(group):
+                members.append(b)
+        covered = {line_key(page_index, ln) for b in members for ln in b.lines}
+        if len(members) >= 2 and set(group) <= covered:
+            try:
+                merged = merge_blocks(members, separator)
+            except GroupingError:
+                continue
+            pos = min(out.index(m) for m in members)
+            out = [b for b in out if b not in members]
+            out.insert(pos, merged)
+    for i, b in enumerate(out):
+        b.index = i
+    return out
