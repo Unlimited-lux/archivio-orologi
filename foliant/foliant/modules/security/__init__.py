@@ -54,6 +54,9 @@ def register(ctx: Context) -> None:
         "sanitize": act(_("Rimuovi dati nascosti"), "spray-can", c.sanitize),
         "metadata": act(_("Metadati"), "file-pen", c.edit_metadata),
         "flatten": act(_("Appiattisci"), "layers", c.flatten),
+        "envelope": act(_("Cifra solo gli allegati"), "file-lock", c.save_envelope),
+        "new_envelope": act(_("Crea busta di sicurezza"), "mail-plus", lambda: c.create_envelope(),
+                            requires_document=False),
     }
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QMenu
@@ -73,7 +76,7 @@ def register(ctx: Context) -> None:
             mode.add_separator()
         for key in group:
             mode.add_action(c.actions[key])
-    for key in ("protect", "remove", "sanitize", "metadata"):
+    for key in ("protect", "remove", "envelope", "new_envelope", "sanitize", "metadata"):
         ctx.add_menu_action(c.actions[key], _("Proteggi"))
     menu_policy = ctx.action(_("Policy di protezione"), "shield-plus", c.manage_policies, requires_document=False)
     menu_policy.setMenu(c.policy_menu)
@@ -161,6 +164,12 @@ def _update_actions(c: SecurityController, view) -> None:
     apply.setToolTip(_("Applica redazioni") if apply.isEnabled()
                      else _("Nessuna area contrassegnata per la redazione"))
     c.actions["remove"].setEnabled(doc is not None and doc.is_protected)
+    has_files = False
+    if doc is not None and not doc.closed:
+        from .envelope import has_attachments
+        with ENGINE_LOCK:
+            has_files = has_attachments(doc.pdf)
+    c.actions["envelope"].setEnabled(has_files)   # senza allegati resta solo «Crea busta di sicurezza»
 
 
 def _context_menu(c: SecurityController, view, ev, menu) -> None:
