@@ -483,11 +483,16 @@ class InsertBlankDialog(BaseDialog):
         for sb in (self.width, self.height):
             sb.setRange(0.1, 20000)
             sb.setDecimals(1)
-        self.width.setValue(210)
-        self.height.setValue(297)
         self.unit = QComboBox()
         for u in UNITS:
             self.unit.addItem(u, u)
+        from .prefs import user_paper, user_unit
+        unit = user_unit()
+        self.unit.setCurrentIndex(max(0, self.unit.findData(unit)))
+        pw, ph = E.PAPER_SIZES.get(user_paper(), E.PAPER_SIZES["A4"])
+        f = UNITS.get(unit, E.MM)
+        self.width.setValue(round(pw / f, 1))
+        self.height.setValue(round(ph / f, 1))
         form.addRow(_("Larghezza:"), self.width)
         form.addRow(_("Altezza:"), self.height)
         form.addRow(_("Unità:"), self.unit)

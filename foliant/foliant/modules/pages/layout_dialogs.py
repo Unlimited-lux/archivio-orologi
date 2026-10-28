@@ -226,7 +226,9 @@ def _spin(value=0.0, lo=0.0, hi=10000.0, decimals=1, suffix="", step=1.0) -> QDo
     return s
 
 
-def _paper_combo(default: str = "A4", custom: bool = True) -> QComboBox:
+def _paper_combo(default: str | None = None, custom: bool = True) -> QComboBox:
+    from .prefs import user_paper
+    default = default or user_paper()
     c = QComboBox()
     for name in PAPER_SIZES:
         c.addItem(name, name)
@@ -1035,7 +1037,7 @@ class BoxesDialog(_LayoutDialog):
         trim = QWidget()
         tf = QGridLayout(trim)
         tf.setContentsMargins(18, 0, 0, 0)
-        self.paper = _paper_combo("A4")
+        self.paper = _paper_combo()
         self.trim_w = _spin(210, 3, 5000, 1, "mm")
         self.trim_h = _spin(297, 3, 5000, 1, "mm")
         self.bleed = _spin(3, 0, 100, 1, "mm")
@@ -1214,7 +1216,7 @@ class ResizeDialog(_LayoutDialog):
     def build(self) -> None:
         box = QGroupBox(pgettext("pagina", "Formato"))
         f = QFormLayout(box)
-        self.paper = _paper_combo("A4")
+        self.paper = _paper_combo()
         self.width_mm = _spin(210, 3, 5080, 1, "mm")
         self.height_mm = _spin(297, 3, 5080, 1, "mm")
         self.orientation = QComboBox()
@@ -1591,7 +1593,7 @@ class NupDialog(_LayoutDialog):
         grid_row.addWidget(self.rows)
         f.addRow(_("Pagine per foglio"), self.preset)
         f.addRow(_("Colonne") + " × " + _("Righe"), grid_row)
-        self.sheet = _paper_combo("A4", custom=False)
+        self.sheet = _paper_combo(custom=False)
         self.orientation = QComboBox()
         for key, text in ((None, _("Automatico (come la pagina)")), (False, _("Verticale")), (True, _("Orizzontale"))):
             self.orientation.addItem(text, key)
@@ -1770,7 +1772,7 @@ class BookletDialog(_LayoutDialog):
     def build(self) -> None:
         box = QGroupBox(_("Opuscolo"))
         f = QFormLayout(box)
-        self.sheet = _paper_combo("A4", custom=False)
+        self.sheet = _paper_combo(custom=False)
         self.binding = QComboBox()
         self.binding.addItem(_("A sinistra"), "left")
         self.binding.addItem(_("A destra"), "right")

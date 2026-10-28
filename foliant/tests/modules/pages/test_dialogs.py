@@ -439,3 +439,20 @@ def test_merge_custom_metadata(window, accept, tmp_path):
     with E.ENGINE_LOCK:
         meta = window.current_view().document.pdf.metadata
     assert meta["title"] == "Dossier cliente" and meta["author"] == "Verdi" and meta["subject"] == "Rolex"
+
+
+def test_dialog_defaults_follow_paper_and_unit_preferences(window, ten_pdf, monkeypatch):
+    """NFR-26: formato carta e unità predefiniti dalla preferenza dell'utente (Letter, pollici)."""
+    from foliant.modules.pages import layout_dialogs as L
+    view = window.open_path(ten_pdf)
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "Letter")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "in")
+    blank = D.InsertBlankDialog(window, view.document, [0])
+    assert blank.unit.currentData() == "in"
+    assert abs(blank.width.value() - 8.5) < 0.05 and abs(blank.height.value() - 11) < 0.05
+    assert L.NupDialog(window, view.document, [0]).sheet.currentData() == "Letter"
+    assert L.ResizeDialog(window, view.document, [0]).paper.currentData() == "Letter"
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "A4")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "mm")
+    blank = D.InsertBlankDialog(window, view.document, [0])
+    assert blank.unit.currentData() == "mm" and abs(blank.width.value() - 210) < 0.2
