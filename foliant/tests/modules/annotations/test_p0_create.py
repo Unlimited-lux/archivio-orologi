@@ -320,23 +320,43 @@ def test_ann16_click_creates_default_width_box(comments, monkeypatch):
     assert infos[0].rect.width >= 150
 
 
-def test_ann16_rotated_page_text_horizontal(comments, tmp_path, monkeypatch):
-    """ANN-16: su una pagina con /Rotate 90 il testo della casella appare orizzontale nella vista."""
+def _red_bbox(pix):
+    pts = [(x, y) for y in range(pix.height) for x in range(pix.width)
+           if pix.pixel(x, y)[0] > 150 and pix.pixel(x, y)[1] < 90 and pix.pixel(x, y)[2] < 90]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return max(xs) - min(xs), max(ys) - min(ys)
+
+
+@pytest.mark.parametrize("rot", [90, 180, 270])
+def test_ann16_rotated_page_text_horizontal(comments, tmp_path, rot):
+    """ANN-16: su una pagina con /Rotate il testo della casella appare orizzontale e dritto nella vista."""
     window, view, module = comments
     with view.document.change("ruota") as pdf:
-        pdf[1].set_rotation(90)
-    xref = module.ctrl.apply("t", engine.create_freetext, 1, (100, 100, 300, 160), "Orizzontale",
-                             engine.Style(fontsize=14, width=0), "A")
+        pdf[1].set_rotation(rot)
+    # riquadro largo nella vista: in coordinate non ruotate è alto se la pagina è a 90/270
+    r = (100, 100, 160, 400) if rot in (90, 270) else (100, 100, 400, 160)
+    module.ctrl.apply("t", engine.create_freetext, 1, r, "Orizzontale", engine.Style(fontsize=20, width=0,
+                      text_color=(1, 0, 0)), "A")
     doc = saved(window, view, tmp_path)
-    page = doc[1]
-    # nella vista (pagina ruotata) la riga di testo è più larga che alta
-    blocks = [b for b in page.get_text("dict")["blocks"] if b.get("lines")]
-    assert xref
-    lines = [ln for b in blocks for ln in b["lines"] if "Orizzontale" in "".join(s["text"] for s in ln["spans"])]
-    if not lines:   # il testo dell'aspetto non è estratto dal motore: si verifica il rendering
-        pytest.skip("testo dell'aspetto non estraibile")
-    assert lines[0]["dir"] == (1.0, 0.0)
+    pix = doc[1].get_pixmap(matrix=pymupdf.Matrix(1, 1))   # resa come nella vista (rotazione inclusa)
+    w, h = _red_bbox(pix)
+    assert w > 2 * h, (w, h)
+    # dritto: la parte alta del testo (maiuscola «O») è a sinistra
+    text = doc[1].get_text("text")
+    assert "Orizzontale" in text
 
+
+@pytest.mark.parametrize("rot", [90, 180])
+def test_ann24_stamp_upright_on_rotated_page(comments, tmp_path, rot):
+    """ANN-24/01: il timbro su pagina ruotata appare orizzontale nella vista."""
+    window, view, module = comments
+    with view.document.change("ruota") as pdf:
+        pdf[1].set_rotation(rot)
+    module.ctrl.apply("s", engine.create_stamp, 1, (300, 400), engine.StampSpec("Approvato", name="Approved"),
+                      engine.Style(), "A")
+    doc = saved(window, view, tmp_path)
+    w, h = _red_bbox(doc[1].get_pixmap())
+    assert w > 2 * h, (w, h)
 
 def test_ann16_rich_text_in_textbox(comments, tmp_path):
     """ANN-16: grassetto e corsivo nella casella finiscono in /RC, /Contents resta testo semplice."""

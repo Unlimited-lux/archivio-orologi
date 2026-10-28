@@ -644,9 +644,13 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
     text = (annot.info or {}).get("content", "")
     try:
         text.encode("cp1252")
-        custom = page.rotation == 0
+        custom = True
     except UnicodeEncodeError:
         custom = False
+    rot = page.rotation % 360
+    cl0 = _array(pdf, xref, "CL")
+    if rot and cl0 and _intent(pdf, xref) == "FreeTextCallout":
+        custom = False      # richiamo su pagina ruotata: aspetto del motore
     if not custom:
         _dirty_update(annot)
         return
@@ -660,6 +664,14 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
     align = int(q[1]) if q[0] == "int" else 0
     rect = pymupdf.Rect(annot.rect)
     inner = _freetext_inner(page, annot)
+    real_rect = None
+    if rot:
+        # pagina ruotata: si disegna nell'orientamento della vista e si ruota l'aspetto (/Matrix)
+        raw = _array(pdf, xref, "Rect")
+        real_rect = from_pdf_rect(page, raw) if raw and len(raw) == 4 else rect
+        w_, h_ = (real_rect.height, real_rect.width) if rot in (90, 270) else (real_rect.width, real_rect.height)
+        rect = pymupdf.Rect(0, 0, w_, h_)
+        inner = pymupdf.Rect(rect)
     cl = _array(pdf, xref, "CL")
     pts = []
     if cl and _intent(pdf, xref) == "FreeTextCallout":
@@ -704,7 +716,7 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
             text.replace("\n", "").strip():
         runs = []          # /RC discordante da /Contents: si usa /Contents
     lines = _wrap(text, avail, size) if not runs else _wrap_runs(runs, avail, size)
-    if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts:
+    if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts and not rot:
         need = 2 * pad + size * 1.2 * len(lines) + size * 0.2
         if need > inner.height + 0.5:
             # adattamento automatico: si allunga la casella verso il basso e si ridisegna
@@ -750,6 +762,11 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
                           f"/ExtGState<</GS0<</Type/ExtGState/CA {opacity:.3f}/ca {opacity:.3f}>>>>>>>>")
     pdf.update_stream(ap, "\n".join(ops).encode("latin-1"))
     pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+    if real_rect is not None:
+        a = math.radians(rot)
+        c, s_ = round(math.cos(a)), round(math.sin(a))
+        pdf.xref_set_key(ap, "Matrix", f"[{c} {s_} {-s_} {c} 0 0]")
+        pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, real_rect)))
 
 
 def create_typewriter(pdf: pymupdf.Document, page_no: int, point, text: str, style: Style,
@@ -1282,7 +1299,14 @@ def _stamp_in_rect(pdf, page, rect, spec: StampSpec, opacity: float, author: str
     pdf.xref_set_key(xref, "C", "[{:.3f} {:.3f} {:.3f}]".format(*_rgb(spec.color)))
     pdf.xref_set_key(xref, STAMP_KEY, "<</T{}/S{}>>".format(_pdf_string(spec.text), _pdf_string(spec.subtitle)))
     _write_stamp_ap(pdf, page.load_annot(xref), spec, max(0.05, min(1.0, opacity)))
+    _upright(pdf, page, xref)
     return xref
+
+
+def _upright(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
+    """Su una pagina ruotata il timbro si raddrizza nella vista (rotazione inversa dell'aspetto)."""
+    if page.rotation % 360:
+        rotate_annot(pdf, page.number, xref, page.rotation % 360)
 
 
 def stamp_spec_of(pdf: pymupdf.Document, xref: int) -> StampSpec | None:
@@ -1380,6 +1404,7 @@ def create_sticker(pdf: pymupdf.Document, page_no: int, point, name: str, style:
     pdf.xref_set_key(xref, STICKER_KEY, "/" + name)
     _sticker_ap(pdf, xref, name, max(0.0, min(1.0, style.opacity)))
     pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, rect)))
+    _upright(pdf, page, xref)
     return xref
 
 
@@ -1412,6 +1437,7 @@ def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes,
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
     xref = _finish(annot, author, name or "Timbro immagine", kind=STAMP)
     pdf.xref_set_key(xref, "IT", "/StampImage")
+    _upright(pdf, page, xref)
     return xref
 
 
