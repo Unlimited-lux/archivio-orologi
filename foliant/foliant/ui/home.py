@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import unicodedata
 from pathlib import Path
 from typing import Callable
 
@@ -11,7 +12,7 @@ from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
-    QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..i18n import _, format_date
@@ -30,6 +31,11 @@ def order_recent(paths: list[str], pinned: list[str]) -> list[str]:
     return top + [p for p in paths if p not in top]
 
 
+def _fold(text: str) -> str:
+    """Testo per il confronto del filtro: stessa forma Unicode (NFC) e senza maiuscole."""
+    return unicodedata.normalize("NFC", text).casefold()
+
+
 class RecentList(QListWidget):
     """Elenco dei recenti. Il clic destro su una voce emette `menuRequested(percorso, posizione)`.
 
@@ -45,7 +51,8 @@ class RecentList(QListWidget):
 
     def _item_for(self, ev: QContextMenuEvent, from_viewport: bool) -> QListWidgetItem | None:
         if ev.reason() == QContextMenuEvent.Reason.Keyboard or not from_viewport:
-            return self.currentItem()
+            item = self.currentItem()
+            return None if item is None or item.isHidden() else item     # nascosta dal filtro
         return self.itemAt(ev.pos())
 
     def _with_menu_path(self, ev, from_viewport: bool, handler) -> bool:
@@ -82,7 +89,8 @@ class RecentList(QListWidget):
         menu = ev.child()
         if isinstance(menu, QMenu) and not menu.property("foliantRecentMenu"):
             menu.setProperty("foliantRecentMenu", True)
-            self.menu_extender(self._menu_path, menu)
+            path, self._menu_path = self._menu_path, None    # solo il primo: non i sottomenu
+            self.menu_extender(path, menu)
 
 
 class HomeScreen(QScrollArea):
@@ -174,7 +182,7 @@ class HomeScreen(QScrollArea):
         self.recent.setIconSize(QSize(20, 20))
         self.recent.setMinimumHeight(220)
         self.recent.itemActivated.connect(self._activate)
-        self.recent.itemClicked.connect(self._activate)
+        self.recent.itemClicked.connect(self._click)
         self.recent.menuRequested.connect(self.menuRequested)
         lay.addWidget(self.recent, 1)
         self.no_match = QLabel(_("Nessun documento corrisponde al filtro."))
@@ -229,13 +237,21 @@ class HomeScreen(QScrollArea):
 
     def _apply_filter(self, *_args) -> None:
         """Nasconde i recenti il cui nome non contiene il testo del filtro (a ogni carattere)."""
-        text = self.filter_edit.text().strip().casefold()
+        text = _fold(self.filter_edit.text().strip())
         shown = 0
+        first: QListWidgetItem | None = None
         for row in range(self.recent.count()):
             item = self.recent.item(row)
-            hidden = bool(text) and text not in Path(item.data(PATH_ROLE)).name.casefold()
+            hidden = bool(text) and text not in _fold(Path(item.data(PATH_ROLE)).name)
             item.setHidden(hidden)
             shown += not hidden
+            first = first or (None if hidden else item)
+        current = self.recent.currentItem()
+        if current is not None and current.isHidden():     # Invio e tasto Menu solo sulle voci visibili
+            if first is not None:
+                self.recent.setCurrentItem(first)
+            else:
+                self.recent.setCurrentRow(-1)
         self.no_match.setVisible(bool(self._paths) and shown == 0)
 
     def visible_recent(self) -> list[str]:
@@ -243,9 +259,15 @@ class HomeScreen(QScrollArea):
         return [self.recent.item(r).data(PATH_ROLE) for r in range(self.recent.count())
                 if not self.recent.item(r).isHidden()]
 
+    def _click(self, item: QListWidgetItem) -> None:
+        # col clic singolo della piattaforma Qt emette già itemActivated: non attivare due volte
+        if not self.recent.style().styleHint(QStyle.StyleHint.SH_ItemView_ActivateItemOnSingleClick,
+                                             None, self.recent):
+            self._activate(item)
+
     def _activate(self, item: QListWidgetItem) -> None:
         path = item.data(PATH_ROLE)
-        if not path:
+        if not path or item.isHidden():         # Invio su una voce corrente nascosta dal filtro
             return
         if os.path.exists(path):
             self.pathRequested.emit(path)
