@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
-from ..core.document import CONTENT, Document
+from ..core.document import ACCESS, CONTENT, LOCK, Document
 from ..core.errors import DocumentError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import theme
@@ -60,6 +60,8 @@ OPEN_FILTER = "Documenti (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.we
 
 
 class MainWindow(QMainWindow):
+    _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
+
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
         self.settings = settings or QSettings()
@@ -727,6 +729,7 @@ class MainWindow(QMainWindow):
         view.statusMessage.connect(lambda m: self.statusBar().showMessage(m, 6000))
         view.contentChanged.connect(lambda v=view: self.ctx.documentChanged.emit(v))
         view._bridge.changed.connect(lambda _k, v=view: self._update_tab_title(v))
+        view._bridge.changed.connect(lambda k, v=view: self._on_document_event(v, k))
         self.set_central_override(None)
         index = self.tabs.addTab(view, document.display_name)
         self.tabs.setTabToolTip(index, str(document.path or document.display_name))
@@ -737,6 +740,10 @@ class MainWindow(QMainWindow):
         if document.read_only:
             self.statusBar().showMessage(_("«{name}» è in sola lettura: puoi modificarlo e salvarlo con «Salva con nome».")
                                          .format(name=document.display_name), 15000)
+        if document.repaired:
+            self.statusBar().showMessage(_("Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto."), 15000)
+        if document.locked_reason:
+            self.statusBar().showMessage(_("Sola lettura: {reason}").format(reason=document.locked_reason), 15000)
         view.setFocus()
         return view
 
@@ -785,7 +792,7 @@ class MainWindow(QMainWindow):
             return True
         self.commit_pending_edits(view)
         doc = view.document
-        if doc.is_modified and ask:
+        if doc.is_modified and ask and not self._exit_confirmed:
             self.tabs.setCurrentWidget(view)
             choice = self._ask_unsaved([doc])
             if choice == "save":
@@ -933,10 +940,22 @@ class MainWindow(QMainWindow):
         if doc.closed:
             return
         self.tabs.setTabText(index, ("• " if doc.is_modified else "") + doc.display_name
-                             + (" " + _("(sola lettura)") if doc.read_only else ""))
+                             + (" " + _("(sola lettura)") if doc.read_only or doc.locked_reason else ""))
         self.tabs.setTabToolTip(index, str(doc.path or doc.display_name))
         if view is self.current_view():
             self._update_state()
+
+    def _on_document_event(self, view: DocumentView, kind: str) -> None:
+        """Avvisi nella barra di stato per sola lettura logica e accesso completo."""
+        doc = view.document
+        if doc.closed or view is not self.current_view():
+            return
+        if kind == LOCK and doc.locked_reason:
+            self.statusBar().showMessage(_("Sola lettura: {reason}").format(reason=doc.locked_reason), 8000)
+        elif kind == LOCK:
+            self.statusBar().showMessage(_("Il documento è di nuovo modificabile."), 5000)
+        elif kind == ACCESS and doc.access == "owner":
+            self.statusBar().showMessage(_("Accesso completo: tutte le azioni sono consentite."), 6000)
 
     def _update_state(self) -> None:
         view = self.current_view()
@@ -952,7 +971,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(APP_NAME)
             return
         doc = view.document
-        ro = " " + _("(sola lettura)") if doc.read_only else ""
+        ro = " " + _("(sola lettura)") if doc.read_only or doc.locked_reason else ""
         self.setWindowTitle(f"{'• ' if doc.is_modified else ''}{doc.display_name}{ro} — {APP_NAME}")
         self.act_undo.setEnabled(doc.can_undo)
         self.act_redo.setEnabled(doc.can_redo)

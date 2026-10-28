@@ -66,7 +66,9 @@ Icone: set open source con licenza ISC (`foliant/resources/icons/LICENSE-lucide.
 ```
 foliant/
   core/        nucleo senza interfaccia
-    document.py   Document: apertura, modifiche annullabili, salvataggio atomico, protezione
+    document.py   Document: apertura, modifiche annullabili, guardie, salvataggio atomico, protezione
+    incremental.py salvataggio incrementale dei documenti firmati (byte originali + modifiche in coda)
+    security.py   accesso (utente/proprietario), permessi effettivi /P e /Perms, descrizione della cifratura
     engine.py     ENGINE_LOCK: unico lock per ogni accesso al motore PDF
     errors.py     errori con messaggi per l'utente
   ui/          interfaccia Qt
@@ -114,6 +116,9 @@ def ruota(ctx, gradi):
 1. **Ogni modifica** del documento dentro `with document.change(_("Etichetta")) as pdf:`.
    È un passo di annulla/ripeti; se il blocco solleva un'eccezione il documento torna
    com'era. Non toccare mai il file su disco: il salvataggio è dell'utente.
+   Indicare il tipo di modifica (`kind="annotation"`, `"form"`, `"pages"`, `"metadata"`;
+   predefinito `"content"`): le guardie (es. documento firmato) decidono in base a quello e
+   possono annullare la modifica con `OperationCancelled`, come un documento bloccato.
 2. **Ogni accesso al motore PDF** (`pymupdf`) tenendo `ENGINE_LOCK` (`change()` lo tiene già).
    Nel thread dell'interfaccia, per letture brevi: `with ENGINE_LOCK: ...`.
 3. **Operazioni lunghe** (OCR, conversione, batch…) con `ctx.run_task(titolo, funzione, ...)`:
@@ -191,8 +196,30 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `add_link_handler(fn, priority=0)` | apertura dei collegamenti: `fn(view, link) -> bool` (True = gestito); priorità più alta = interrogato prima |
 | `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)` |
 | `run_task(titolo, fn, *args)` | lavoro lungo con avanzamento |
+| `add_change_guard(fn)` / `remove_change_guard(fn)` | guardia su tutti i documenti aperti e futuri: `fn(document, etichetta, kind) -> bool`, False annulla la modifica (vedi sotto) |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
 | segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `modeChanged` | eventi |
+
+### API del documento (`foliant/core/document.py`)
+
+| Membro | Uso |
+|---|---|
+| `change(etichetta, kind="content")` | blocco di modifica annullabile; `kind` ∈ `CHANGE_KINDS` (`"content"`, `"annotation"`, `"form"`, `"pages"`, `"metadata"`) classifica la modifica per le guardie |
+| `add_change_guard(fn)` / `remove_change_guard(fn)` | `fn(document, etichetta, kind)` chiamata prima di `change()` (fuori dal lock, solo per il blocco esterno): False → `OperationCancelled`, niente modificato; può anche sollevare `OperationCancelled("motivo")` |
+| `set_locked(motivo)` / `locked_reason` / `locked` | sola lettura logica (SIG-17): `change()` solleva `OperationCancelled(motivo)`, annulla/ripeti disattivati; `set_locked(None)` sblocca; notifica `LOCK` |
+| `access`, `permissions`, `allows(perm)` | `"none"` (non cifrato), `"user"`, `"owner"`; bit `/P` effettivi (con l'AND di `/Perms` per R6; -1 = tutto consentito); `allows(pymupdf.PDF_PERM_PRINT)` |
+| `encryption_info` | `{}` o `method` («AES-256», «AES-128», «RC4-128», «RC4-40»), `engine`, `V`, `R`, `length`, `encrypt_metadata`, `P`, `cfm`, `description`, `perms_tampered` |
+| `unlock(password) -> bool` | accesso da proprietario con la password dei permessi, anche dopo modifiche (annulla/ripeti e `save_options` aggiornati: protezione identica al salvataggio); notifica `ACCESS` |
+| `repaired` | il motore ha ricostruito la xref all'apertura (CNV-32: barra «file riparato») |
+| `original_bytes`, `has_signatures` | byte del file all'apertura o dopo l'ultimo salvataggio; campi `/FT /Sig` con `/V` |
+| `save(path=None, incremental=None)`, `save_copy(path)`, `save_bytes(path=None)` | un documento firmato si salva **sempre** in modo incrementale (`original_bytes` + modifiche in coda), anche con «Salva con nome»; cambio di protezione, file riparato, `replace_with()` con un PDF che non prosegue il file (rinumerato; fino all'annullamento) o `incremental=False` = riscrittura completa; `incremental=True` lo forza (`IncrementalSaveError` se impossibile) |
+| `save_strategy` | facoltativa: `fn(document, path)` che restituisce i byte da scrivere, oppure None per il comportamento del nucleo |
+| `to_bytes(**opzioni)` | file completo compattato, senza flussi di oggetti (i byte restano cercabili); i file salvati li usano |
+| notifiche `CONTENT`, `SAVED`, `CLOSED`, `ACCESS`, `LOCK` | `document.add_listener(fn(document, tipo))`; chi scrive il file da sé notifica `SAVED` (aggiorna anche il controllo «modificato da un altro programma») |
+
+`save_options["encrypt_metadata"] = False` (SEC-06, «cifra tutto tranne i metadati») è accettata ma
+**ignorata**: PyMuPDF/MuPDF non sanno scrivere `/EncryptMetadata false` e cifrano comunque il flusso
+`/Metadata` (`ENCRYPT_METADATA_SUPPORTED = False`).
 
 `DocumentView` offre: `current_page`, `go_to_page(i)`, `page_count`, `words(i)`,
 `text_selection` (+ `selectionChanged`), `set_search_hits(dict, current)`, `overlays`,

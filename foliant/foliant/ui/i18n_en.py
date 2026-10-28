@@ -132,6 +132,26 @@ EN = {
     "Clic destro sulla pagina per i comandi contestuali.": "Right-click on the page for contextual commands.",
     "Nelle preferenze (Ctrl+virgola) scegli tema, lingua e nome dell'autore.":
         "In the preferences (Ctrl+comma) choose theme, language and author name.",
+    # documento: accesso, sola lettura, file riparato, salvataggio incrementale
+    "Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto.":
+        "The file was damaged and has been repaired. Saving it will rewrite it.",
+    "Sola lettura: {reason}": "Read-only: {reason}",
+    "Il documento è di nuovo modificabile.": "The document can be edited again.",
+    "Accesso completo: tutte le azioni sono consentite.": "Full access: all actions are allowed.",
+    "Il documento è in sola lettura.": "The document is read-only.",
+    "Operazione annullata: {label}.": "Operation cancelled: {label}.",
+    "Il salvataggio incrementale non è possibile per questo documento.":
+        "An incremental save is not possible for this document.",
+    "Il cambio di protezione richiede la riscrittura completa del file.":
+        "Changing the protection requires rewriting the whole file.",
+    "Un flusso del documento non è leggibile.": "A stream of the document cannot be read.",
+    "Il file originale non è leggibile.": "The original file cannot be read.",
+    "Il file originale è protetto da una password diversa.": "The original file is protected by a different password.",
+    "Il file originale è danneggiato: un salvataggio incrementale non garantirebbe le firme esistenti.":
+        "The original file is damaged: an incremental save would not preserve the existing signatures.",
+    "Salvataggio incrementale non riuscito: {e}": "Incremental save failed: {e}",
+    "Il salvataggio incrementale non ha conservato i byte originali.":
+        "The incremental save did not preserve the original bytes.",
 }
 
 add_translations("en", EN)
