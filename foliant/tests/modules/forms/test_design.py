@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from foliant.modules import forms
 from foliant.modules.forms import engine as E
+from foliant.modules.forms import pdfsyntax as ps
 from foliant.modules.forms.design import FieldCreateTool, FieldSelectTool
 
 from .test_fill import click_field, filler_of, open_form, values
@@ -489,3 +490,31 @@ def test_copy_paste_between_documents_renames(qtbot, window, form_pdf, tmp_path)
     assert names == ["nome", "nome_2"]
     pasted = [f for f in fields(view2) if f.name == "nome_2"][0]
     assert pasted.required and abs(pasted.rect.x0 - nome.rect.x0) < 0.01
+
+
+@pytest.mark.parametrize("rotation", [0, 90])
+def test_signature_field_blank_appearance(window, tmp_path, rotation):
+    """Regressione: niente segnaposto «SIGN» nel file; solo bordo/sfondo; indicatore solo a schermo."""
+    pdf = pymupdf.open()
+    pg = pdf.new_page()
+    pg.set_cropbox(pymupdf.Rect(10, 10, 585, 832))
+    pg.set_rotation(rotation)
+    pdf.save(str(tmp_path / "s.pdf"))
+    view = open_form(window, tmp_path / "s.pdf")
+    window.ctx.set_mode("moduli")
+    x = module().create_field(view, 0, E.SIGNATURE, pymupdf.Rect(100, 100, 250, 140))
+    with view.document.lock:
+        doc = view.document.pdf
+        ap = int(doc.xref_get_key(x, "AP/N")[1].split()[0])
+        stream = doc.xref_stream(ap)
+        assert b"SIGN" not in stream and b"Tj" not in stream and b"Do" not in stream
+        assert doc.xref_get_key(ap, "Resources") == ("dict", "<<>>")
+        bbox = ps.parse(doc.xref_get_key(ap, "BBox")[1])
+        assert sorted(bbox[2:]) == [40, 150]  # dimensioni del riquadro
+    out = tmp_path / "s2.pdf"
+    view.document.save(out)
+    again = pymupdf.open(str(out))
+    f = E.list_fields(again)[0]
+    assert f.kind == E.SIGNATURE and f.value == ""
+    ap = int(again.xref_get_key(f.xref, "AP/N")[1].split()[0])
+    assert b"Tj" not in again.xref_stream(ap) and b"Do" not in again.xref_stream(ap)

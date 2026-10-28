@@ -30,3 +30,9 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
    incrementale (il file originale come prefisso). Il nucleo salva sempre un file completo.
    *Proposta:* opzione `Document.save(incremental=True)` usata automaticamente se il documento
    contiene firme.
+
+6. **Campi firma non firmati nella resa.** MuPDF disegna un proprio segnaposto («SIGN») per i
+   widget firma non firmati anche quando /AP /N è vuoto, quindi la stampa fatta da Foliant lo
+   mostra. Il file salvato contiene invece un aspetto vuoto (`engine.blank_signature_appearance`),
+   corretto per gli altri lettori. *Proposta:* nella stampa e nell'esportazione in immagine
+   disattivare la sintesi locale degli aspetti dei widget firma.

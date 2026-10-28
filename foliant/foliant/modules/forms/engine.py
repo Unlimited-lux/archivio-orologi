@@ -483,6 +483,8 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
             info.default = raw_dv if isinstance(raw_dv, str) else ""
     elif kind == BUTTON:
         info.value = w.button_caption or ""
+    elif kind == SIGNATURE:
+        info.value = "firmato" if _inherited(pdf, w.xref, "V")[0] != "null" else ""
     return info
 
 
@@ -1239,7 +1241,56 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
         update_properties(pdf, page, xref, **rest)
     elif kind in (TEXT, COMBO, LIST):
         regenerate(pdf, page, xref)
+    elif kind == SIGNATURE:
+        blank_signature_appearance(pdf, page, xref)
     return xref
+
+
+def blank_signature_appearance(pdf: pymupdf.Document, page: int, xref: int) -> None:
+    """Aspetto di un campo firma non firmato: solo sfondo e bordo del campo, nessun contenuto
+    (l'indicatore «firma qui» è disegnato dall'interfaccia, non nel file)."""
+    t, v = pdf.xref_get_key(xref, "Rect")
+    try:
+        r = pymupdf.Rect(ps.parse(v)).normalize()
+    except Exception:
+        return
+    rot = 0
+    if pdf.xref_get_key(xref, "MK/R")[0] == "int":
+        try:
+            rot = int(pdf.xref_get_key(xref, "MK/R")[1]) % 360
+        except ValueError:
+            rot = 0
+    w, h = (r.height, r.width) if rot in (90, 270) else (r.width, r.height)
+    ops = []
+
+    def color(key):
+        tt, vv = pdf.xref_get_key(xref, f"MK/{key}")
+        if tt != "array":
+            return None
+        try:
+            c = [float(x) for x in ps.parse(vv)]
+        except Exception:
+            return None
+        return c if len(c) in (1, 3, 4) else None
+
+    bg, bc = color("BG"), color("BC")
+    op_fill = {1: "g", 3: "rg", 4: "k"}
+    op_line = {1: "G", 3: "RG", 4: "K"}
+    if bg:
+        ops.append(" ".join(_n(x) for x in bg) + f" {op_fill[len(bg)]} 0 0 {_n(w)} {_n(h)} re f")
+    bw = 0.0
+    if pdf.xref_get_key(xref, "BS/W")[0] in ("int", "real"):
+        bw = float(pdf.xref_get_key(xref, "BS/W")[1])
+    if bc and bw > 0:
+        dash = "[3 2] 0 d " if pdf.xref_get_key(xref, "BS/S")[1] == "/D" else ""
+        ops.append(" ".join(_n(x) for x in bc) + f" {op_line[len(bc)]} {_n(bw)} w {dash}"
+                   f"{_n(bw / 2)} {_n(bw / 2)} {_n(w - bw)} {_n(h - bw)} re S")
+    matrix = {90: f"0 1 -1 0 {_n(h)} 0", 180: f"-1 0 0 -1 {_n(w)} {_n(h)}", 270: f"0 -1 1 0 0 {_n(w)}"}.get(rot)
+    form = pdf.get_new_xref()
+    pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]"
+                            + (f"/Matrix[{matrix}]" if matrix else "") + "/Resources<<>>>>")
+    pdf.update_stream(form, ("\n".join(ops) + "\n").encode())
+    pdf.xref_set_key(xref, "AP", f"<</N {form} 0 R>>")
 
 
 DATE_KIND = "date"
@@ -1695,7 +1746,10 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         if r.width < 4 or r.height < 4:
             raise FormError(_("Il campo è troppo piccolo."))
         _set_rect(pdf, page, xref, r)
-    if kind in (CHECKBOX, RADIO):
+    if kind == SIGNATURE:
+        if not is_signed(pdf, xref):
+            blank_signature_appearance(pdf, page, xref)
+    elif kind in (CHECKBOX, RADIO):
         state = _value_of(*pdf.xref_get_key(xref, "AS"))
         regenerate(pdf, page, xref)
         if state is not None:  # la rigenerazione non deve cambiare lo stato
