@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
@@ -15,10 +15,52 @@ from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, _, add_tr
 from . import content, engine, history, translate_pdf
 from .chunking import IndexCache
 from .config import ProfileStore, SendLog
-from .dialogs import InfoTextDialog, SendLogDialog, SettingsDialog, SettingsPage, language_combo
+from .dialogs import InfoTextDialog, PreviewDialog, SendLogDialog, SettingsDialog, SettingsPage, language_combo
 from .engine import Gateway
 from .panel import AIPanel
 from .translations import EN
+
+
+class RequestGate(QObject):
+    """Anteprima della richiesta reale prima dell'invio, anche dai thread di lavoro.
+
+    Il dialogo si apre sempre nel thread dell'interfaccia (il thread di lavoro attende la risposta).
+    «Invia tutte» vale per le richieste successive della stessa operazione (es. i blocchi di un
+    documento lungo o le fatture di un elenco).
+    """
+
+    _ask = Signal(object)
+
+    def __init__(self, parent_widget, ask):
+        super().__init__()
+        self.parent_widget, self.ask = parent_widget, ask
+        self.send_all = False
+        self.host = self.model = ""
+        self.moveToThread(QApplication.instance().thread())
+        self._ask.connect(self._run, Qt.ConnectionType.BlockingQueuedConnection)
+
+    def _run(self, box: list) -> None:
+        request, function = box[0], box[1]
+        summary = _("Verrà inviato a {h} · {m}: {c} caratteri").format(
+            h=box[2], m=box[3], c=f"{request.text_size():,}".replace(",", "."))
+        if request.image_count():
+            summary += " · " + _("{n} immagini").format(n=request.image_count())
+        text = _("Istruzioni dell'app:") + "\n" + request.system + "\n\n" + "\n\n".join(
+            m.content for m in request.messages)
+        box.append(self.ask(self.parent_widget, summary, text))
+
+    def __call__(self, request, function: str) -> bool:
+        if self.send_all:
+            return True
+        box = [request, function, self.host, self.model]
+        if QThread.currentThread() is self.thread():
+            self._run(box)
+        else:
+            self._ask.emit(box)
+        choice = box[-1] if len(box) > 4 else "cancel"
+        if choice == "all":
+            self.send_all = True
+        return choice in ("send", "all")
 
 
 class Services:
@@ -36,11 +78,26 @@ class Services:
         self._history = None
         self.embedder = None      # funzione vettori simulabile nei test
 
-    def gateway(self) -> Gateway:
-        """Da chiamare nel thread dell'interfaccia: il profilo viene fissato qui."""
+    def gateway(self, *, confirm: bool = True) -> Gateway:
+        """Da chiamare nel thread dell'interfaccia: il profilo viene fissato qui.
+
+        Con «Chiedi conferma prima di ogni invio» ogni richiesta mostra prima la sua anteprima integrale
+        (`confirm=False` per chi ha già mostrato l'anteprima del proprio ambito, come il pannello).
+        """
         gw = Gateway(self.store, self.log, provider_factory=self.provider_factory)
         gw.fixed_profile = self.store.active()
+        if confirm and self.store.option("confirm_each", False):
+            gate = RequestGate(self.ctx.window, self.preview_request)
+            if gw.fixed_profile is not None:
+                gate.host, gate.model = gw.fixed_profile.host, gw.fixed_profile.model
+            gw.before_send = gate
         return gw
+
+    def preview_request(self, parent, summary: str, text: str) -> str:
+        """«send», «all» (tutte le richieste di questa operazione) o «cancel». Sostituibile nei test."""
+        dlg = PreviewDialog(summary, text, parent, send_all=True)
+        code = dlg.exec()
+        return dlg.choice if code == QDialog.DialogCode.Accepted else "cancel"
 
     def history(self) -> history.HistoryStore:
         enabled = self.store.option("history_enabled", True)
@@ -335,7 +392,12 @@ class Controller:
             self.ctx.error(_("Traduci in un nuovo PDF"), _("Scegli un file diverso dall'originale."))
             return None
         pages = options["pages"] if options["pages"] is not None else list(range(doc.page_count))
-        textless = content.textless_pages(doc.pdf, pages)
+        texts = None
+        if self.services.panel is not None:      # lettura una sola volta, con avanzamento sui documenti lunghi
+            texts = self.services.panel._read_pages(doc, pages, content.content_fingerprint(doc.pdf))
+            if texts is None:
+                return None
+        textless = content.textless_pages(doc.pdf, pages, texts)
         if textless:
             self.ctx.info(_("Traduci in un nuovo PDF"),
                           _("Le pagine {p} non hanno testo: rimarranno non tradotte. Usa prima l'OCR per "
@@ -396,10 +458,6 @@ class Controller:
     def _run(self, title, fn):
         """Esegue `fn(job)` con avanzamento; None se annullato o in errore (già segnalato)."""
         panel = self.services.panel
-        if self.services.store.option("confirm_each", False) and panel is not None and not panel.ask_preview(
-                _("Verrà inviato: ") + title, _("Contenuto richiesto dall'operazione «{t}», secondo l'ambito "
-                                                "scelto.").format(t=title.rstrip("…"))):
-            return None
         gateway = self.services.gateway()
         language = panel._answer_language() if panel is not None else "it"
         try:
@@ -612,6 +670,7 @@ class Controller:
 
         def work(progress):
             # in background (`run_task(modal=False)`): un file alla volta, i nomi dei file non vengono inviati
+            from .providers import GLOBAL_KINDS, AIError
             named, problems = [], []
             for n, path in enumerate(paths):
                 name = os.path.basename(path)
@@ -634,9 +693,17 @@ class Controller:
                     named.append((name, res))
                 except OperationCancelled:
                     raise
+                except AIError as e:
+                    if e.kind in GLOBAL_KINDS:
+                        # chiave, rete, quota…: gli altri file fallirebbero allo stesso modo
+                        if not named:
+                            raise
+                        problems.append(_("Elaborazione interrotta a «{f}»: {m} I file seguenti non sono stati "
+                                          "elaborati.").format(f=name, m=e.user_message()))
+                        break
+                    problems.append(f"{name}: " + e.user_message())
                 except Exception as e:  # noqa: BLE001 - un file non leggibile non ferma gli altri
-                    from .providers import AIError
-                    problems.append(f"{name}: " + (e.user_message() if isinstance(e, AIError) else str(e)))
+                    problems.append(f"{name}: {e}")
                 finally:
                     doc.close()
             return named, problems
@@ -654,8 +721,10 @@ class Controller:
                 dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=result.source)
                 self.last_dialog = dlg
                 self.exec_dialog(dlg)
-            self.ctx.notify(_("Dati estratti da {n} fatture su {t}.").format(n=len(named), t=len(paths)),
-                            [(_("Mostra"), show)], 0)
+            text = _("Dati estratti da {n} fatture su {t}.").format(n=len(named), t=len(paths))
+            if problems:
+                text += " " + _("Problemi: {n} (nei controlli della tabella).").format(n=len(problems))
+            self.ctx.notify(text, [(_("Mostra"), show)], 0)
 
         def failed(e):
             if isinstance(e, OperationCancelled):

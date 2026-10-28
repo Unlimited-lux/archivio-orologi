@@ -293,3 +293,191 @@ def test_product_sheet_long_catalog_declares_truncation(window, services, tmp_pa
     dlg = services.controller.open_product_sheet()
     dlg.generate()
     assert any(w.startswith("Parziale") and "pagina" in w for w in dlg.sheet.warnings), dlg.sheet.warnings
+
+
+# ------------------------------------------------------------------ documenti lunghi (200 pagine)
+def _long_pdf(tmp_path, pages=200, name="manuale-200.pdf"):
+    doc = pymupdf.open()
+    for i in range(pages):
+        doc.new_page().insert_textbox(
+            pymupdf.Rect(50, 60, 545, 780),
+            f"Pagina {i + 1}. Manutenzione del calibro automatico, revisione numero {i + 1}. "
+            + "Il cronografo ha una riserva di carica di settanta ore e va revisionato ogni cinque anni. " * 30,
+            fontsize=9)
+    path = tmp_path / name
+    doc.save(str(path))
+    return str(path)
+
+
+def test_long_document_summary_chunked_with_progress(qtbot, window, services, tmp_path, monkeypatch):
+    from .test_panel import wait_done
+    make_active_profile(services.store, context_window=32000, max_output=2000)
+    view = window.open_path(_long_pdf(tmp_path))
+    panel = services.panel
+    reads = []
+    real_run_task = window.ctx.run_task
+    monkeypatch.setattr(window.ctx, "run_task", lambda title, fn, *a, **k: reads.append(title) or real_run_task(
+        title, fn, *a, **k))
+    panel.ask_confirm = lambda t, m: True                    # stima delle richieste (AI-14)
+    services.fake.default = "Sintesi parziale [p. 1]."
+    steps = []
+    panel.set_function("summary")
+    panel.set_scope("document")
+    t0 = time.monotonic()
+    worker = panel.send()
+    assert worker is not None
+    worker.progress.connect(lambda f, t: steps.append(t))
+    wait_done(qtbot, panel, timeout=60000)
+    elapsed = time.monotonic() - t0
+    assert elapsed < 30, f"riassunto di 200 pagine in {elapsed:.1f} s"
+    assert reads == ["Lettura del documento…"]            # prima lettura con avanzamento e Annulla
+    assert len(services.fake.requests) > 5                  # a blocchi
+    assert panel.conversation().messages[-1].status == "complete"
+    # seconda richiesta: testo già nell'indice, nessuna nuova lettura né attesa
+    reads.clear()
+    t0 = time.monotonic()
+    panel.set_function("chat")
+    panel.send("Ogni quanto va revisionato?")
+    wait_done(qtbot, panel, timeout=60000)
+    assert reads == [] and time.monotonic() - t0 < 5
+    assert view.page_count == 200
+
+
+def test_long_document_cancel_reading_and_summary(qtbot, window, services, tmp_path, monkeypatch):
+    from foliant.api import OperationCancelled
+
+    from .test_panel import wait_done
+    make_active_profile(services.store, context_window=32000, max_output=2000)
+    window.open_path(_long_pdf(tmp_path))
+    panel = services.panel
+    panel.ask_confirm = lambda t, m: True
+    panel.set_function("summary")
+    panel.set_scope("document")
+    # Annulla durante la lettura: niente inviato
+    monkeypatch.setattr(window.ctx, "run_task", lambda *a, **k: (_ for _ in ()).throw(OperationCancelled()))
+    assert panel.send() is None
+    assert services.fake.requests == [] and "nessun dato" in panel.status.text()
+    monkeypatch.undo()
+    # Interrompi durante il riassunto: si ferma senza inviare gli altri blocchi
+    services.fake.default = {"chunks": ["Parte ", "del ", "riassunto."], "delay": 0.15}
+    panel.send()
+    qtbot.waitUntil(lambda: len(services.fake.requests) >= 1, timeout=10000)
+    panel.stop()
+    wait_done(qtbot, panel, timeout=10000)
+    sent = len(services.fake.requests)
+    assert sent <= 2 and panel.conversation().messages[-1].status == "interrupted"
+
+
+# ------------------------------------------------------------------ traduzione
+def test_translate_long_watch_manual_to_english(window, services, tmp_path, monkeypatch):
+    from foliant.modules.ai import translate_pdf
+    path = _long_pdf(tmp_path, 200)
+    before = open(path, "rb").read()
+    window.open_path(path)
+    services.fake.default = lambda req: json.dumps(
+        [b.replace("Pagina", "Page").replace("Manutenzione", "Service")
+         for b in json.loads(req.messages[-1].content)])
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: notes.append(text))
+    services.controller.exec_report = lambda dlg: False
+    out = tmp_path / "manual-en.pdf"
+    t0 = time.monotonic()
+    task = services.controller.translate_pdf(dict(target="en", pages=None, mode=translate_pdf.MODE_LAYOUT,
+                                                  glossary=[], min_size=6.0), str(out))
+    assert task.wait(120000) and task.error is None, task.error
+    elapsed = time.monotonic() - t0
+    assert elapsed < 90, f"traduzione di 200 pagine in {elapsed:.1f} s"
+    res = pymupdf.open(str(out))
+    assert res.page_count == 200 and "Page 200" in res[199].get_text()
+    assert not services.controller.last_translation["report"].failed_pages
+    assert open(path, "rb").read() == before and "manual-en.pdf" in notes[-1]
+    assert "manuale-200" not in services.fake.all_text()
+
+
+# ------------------------------------------------------------------ privacy: consenso e anteprima
+def test_no_data_sent_without_consent_from_tools(window, services, tmp_path):
+    p = make_active_profile(services.store)
+    p.consent = False
+    services.store.save(p)
+    window.open_path(_watch_listing(tmp_path))
+    asked = []
+    services.panel.ask_consent = lambda profile: asked.append(profile.name) or False
+    for open_tool in (services.controller.open_product_sheet, services.controller.open_contracts,
+                      services.controller.open_writer, services.controller.extract_data):
+        assert open_tool() is None
+    assert len(asked) == 4 and services.fake.requests == []
+    assert services.controller.extract_invoice_files(make_invoices(tmp_path, 2)[0]) is None
+    assert services.fake.requests == []
+
+
+def test_confirm_each_previews_real_request_from_tools(qtbot, window, services, tmp_path, monkeypatch):
+    services.store.set_option("confirm_each", True)
+    paths, _exp = make_invoices(tmp_path, 4)
+    services.fake.default = invoice_reply
+    seen = []
+    answers = iter(["send", "cancel"])
+    services.preview_request = lambda parent, summary, text: seen.append((summary, text)) or next(answers)
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: notes.append(text))
+    task = services.controller.extract_invoice_files(paths)
+    assert task.wait()
+    # anteprima integrale della richiesta reale: istruzioni dell'app + testo della fattura
+    assert "INVOICE No." in seen[0][1] or "FATTURA n." in seen[0][1]
+    assert "Istruzioni dell'app" in seen[0][1] and "caratteri" in seen[0][0]
+    assert len(services.fake.requests) == 1                 # la seconda richiesta è stata annullata
+    assert "annullata" in notes[-1]
+    # «Invia tutte»: una sola conferma per tutta l'operazione
+    seen.clear()
+    services.fake.requests.clear()
+    services.preview_request = lambda parent, summary, text: seen.append(summary) or "all"
+    task = services.controller.extract_invoice_files(paths)
+    assert task.wait() and task.error is None
+    assert len(seen) == 1 and len(services.fake.requests) == 4
+
+
+def test_confirm_each_preview_runs_in_gui_thread_from_worker(qtbot, window, services):
+    """Con le attività davvero in background l'anteprima si apre nel thread dell'interfaccia."""
+    import threading
+
+    from PySide6.QtCore import QThread
+
+    from foliant.modules.ai.providers import ChatRequest, Message
+    services.store.set_option("confirm_each", True)
+    gw = services.gateway()
+    where = []
+    services.preview_request = lambda parent, summary, text: where.append(QThread.currentThread()) or "send"
+    gw.before_send.ask = services.preview_request
+    out = []
+    th = threading.Thread(target=lambda: out.append(gw.send(ChatRequest("s", [Message("user", "ciao")], 10),
+                                                            function="test")))
+    th.start()
+    qtbot.waitUntil(lambda: not th.is_alive(), timeout=5000)
+    assert out and where == [window.thread()]
+
+
+# ------------------------------------------------------------------ errori
+def test_invoice_batch_stops_on_invalid_key_and_network_loss(window, services, tmp_path, monkeypatch):
+    from foliant.modules.ai.providers import AUTH, NETWORK, AIError
+    paths, _exp = make_invoices(tmp_path, 6)
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: notes.append(
+        (text, list(actions))))
+    # chiave non valida: una sola richiesta, messaggio chiaro, nessuna tabella
+    services.fake.default = AIError(AUTH, "HTTP 401")
+    task = services.controller.extract_invoice_files(paths)
+    assert task.wait()
+    assert len(services.fake.requests) == 1
+    assert "chiave" in notes[-1][0].lower() and not notes[-1][1]
+    # rete persa dopo 3 fatture: si conservano i risultati ottenuti, il resto è segnalato
+    services.fake.requests.clear()
+    services.fake.default = lambda req: invoice_reply(req) if len(services.fake.requests) <= 3 else \
+        AIError(NETWORK, "connection refused")
+    monkeypatch.setattr("foliant.modules.ai.engine.MAX_WAIT", 0.01)
+    task = services.controller.extract_invoice_files(paths)
+    assert task.wait(60000)
+    text, actions = notes[-1]
+    assert "3 fatture su 6" in text and "Problemi: 1" in text
+    actions[0][1]()
+    result = services.controller.last_dialog.result
+    assert len(result.records) == 3 and any("interrotta" in c and "rete" in c.lower() for c in result.checks), \
+        result.checks

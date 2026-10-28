@@ -73,8 +73,9 @@ class ConsentDialog(QDialog):
 class PreviewDialog(QDialog):
     """Anteprima integrale di ciò che verrà inviato, con «Invia»."""
 
-    def __init__(self, summary: str, text: str, parent=None, *, confirm: bool = True):
+    def __init__(self, summary: str, text: str, parent=None, *, confirm: bool = True, send_all: bool = False):
         super().__init__(parent)
+        self.choice = "cancel"
         self.setWindowTitle(_("Verrà inviato"))
         self.resize(640, 520)
         lay = QVBoxLayout(self)
@@ -86,7 +87,11 @@ class PreviewDialog(QDialog):
         lay.addWidget(edit, 1)
         box = QDialogButtonBox()
         if confirm:
-            box.addButton(_("Invia"), QDialogButtonBox.ButtonRole.AcceptRole)
+            send = box.addButton(_("Invia"), QDialogButtonBox.ButtonRole.AcceptRole)
+            send.clicked.connect(lambda: setattr(self, "choice", "send"))
+            if send_all:   # operazioni a più richieste (blocchi, più file): conferma una volta sola
+                every = box.addButton(_("Invia tutte (questa operazione)"), QDialogButtonBox.ButtonRole.AcceptRole)
+                every.clicked.connect(lambda: setattr(self, "choice", "all"))
             box.addButton(QDialogButtonBox.StandardButton.Cancel)
         else:
             box.addButton(QDialogButtonBox.StandardButton.Close)

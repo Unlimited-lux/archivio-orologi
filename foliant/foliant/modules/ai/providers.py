@@ -39,6 +39,8 @@ INTERRUPTED = "interrupted"
 SERVER = "server"
 BAD_REQUEST = "bad_request"
 LIMIT = "limit"           # limite di utilizzo locale (trattato come quota)
+# errori che non dipendono dal singolo documento: in un'elaborazione di più file conviene fermarsi
+GLOBAL_KINDS = (NETWORK, CERT, TIMEOUT, AUTH, MODEL, RATE, QUOTA, SERVER, LIMIT)
 
 TRANSIENT = {RATE, SERVER, TIMEOUT}
 
