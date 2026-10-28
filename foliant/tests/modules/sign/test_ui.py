@@ -370,6 +370,7 @@ def test_screenshot(window, monkeypatch, sample_pdf, tmp_path, id_a, dark):
     c = _ctl(window)
     c.start_placement(view, item)
     view.tool.hover = (0, pymupdf.Point(400, 300))
+    QApplication.processEvents()
     view.flush_rendering()
     shot = tmp_path / f"firma-{'scuro' if dark else 'chiaro'}.png"
     assert window.grab().save(str(shot))
@@ -933,3 +934,22 @@ def test_sign_password_protected_document(window, monkeypatch, tmp_path, id_a):
     assert st and st[0].status == "valida", st and st[0].reasons
     new_view = window.current_view()
     assert [s.status for s in c.state(new_view).statuses] == ["valida"]
+
+
+@pytest.mark.parametrize("width", [243, 320, 600])
+def test_panel_buttons_never_below_minimum_size(window, qtbot, monkeypatch, sample_pdf, tmp_path, id_a, width):
+    """NFR-24: nessun pulsante del pannello Firme è stretto sotto il suo minimumSizeHint."""
+    from foliant.modules.sign.panel import SignaturesPanel
+    _sign_file(window, monkeypatch, sample_pdf, tmp_path / "pn.pdf", id_a)
+    panel = SignaturesPanel(_ctl(window))
+    qtbot.addWidget(panel)
+    panel.set_view(window.current_view())
+    panel.resize(width, 800)
+    panel.show()
+    QApplication.processEvents()
+    buttons = [b for b in panel.top_buttons.buttons + panel.action_buttons.buttons if b.isVisible()]
+    assert len(buttons) >= 5
+    for b in buttons:
+        assert b.width() >= b.minimumSizeHint().width(), (b.text(), b.width(), b.minimumSizeHint().width())
+    if width >= 600:
+        assert panel.action_buttons._columns == 2
