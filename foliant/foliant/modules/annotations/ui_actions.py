@@ -296,7 +296,17 @@ def choose_image_stamp(ctrl: "Controller") -> tuple[bytes, str] | None:
     except Exception:
         ctrl.ctx.error(_("Timbro da immagine"), _("Il file non è un'immagine leggibile."))
         return None
-    return data, os.path.splitext(os.path.basename(path))[0]
+    return data, generic_stamp_name(ctrl, _("Immagine"))
+
+
+def generic_stamp_name(ctrl: "Controller", base: str) -> str:
+    """Nome numerato per la libreria dei timbri («Immagine 3»): mai il nome del file scelto, che
+    resterebbe nella configurazione (riservatezza)."""
+    names = {d["name"] for d in ctrl.custom_stamps()}
+    n = 1
+    while f"{base} {n}" in names:
+        n += 1
+    return f"{base} {n}"
 
 
 def export_measures(ctrl: "Controller", sep: str | None = None) -> str | None:

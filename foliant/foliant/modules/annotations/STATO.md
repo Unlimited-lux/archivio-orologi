@@ -9,6 +9,10 @@ proprietà a destra, elenco commenti a sinistra), `dialogs.py` (finestre, sostit
 Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (P0 dall'interfaccia),
 `test_p1_ui.py` (P1 dall'interfaccia), `test_engine_p1.py` (motore), `test_i18n.py` (traduzioni).
 
+**Riservatezza**: il modulo non conserva nel profilo nomi o percorsi dei file aperti o scelti. Nella
+configurazione restano solo preferenze e la libreria personale (stili, preferiti, autore, timbri e modelli);
+un timbro da immagine entra in libreria come «Immagine N», mai con il nome del file scelto.
+
 | ID | Priorità | Stato | Test | Note |
 |---|---|---|---|---|
 | ANN-01 | P0 | fatto | test_ann01_every_type_saved_with_ap_nm_and_m, test_ann01_unhandled_annotation_untouched, test_ann01_private_key_kept_after_color_change, test_pdfa2b_shape_and_reply, test_pdfa1_opacity_forced_with_warning, test_tagged_note_in_structure | /NM UUID, /M, /AP /N per ogni tipo; tipi sconosciuti e chiavi private conservati; permesso «commenti» rispettato. Commento su PDF firmato: firma ancora valida (salvataggio incrementale del nucleo, test_comment_keeps_signature_valid). PDF/A dichiarato: flag Print, niente Hidden/Invisible/NoView, /AP con la sola /N (risposte e stati con aspetto vuoto), opacità 1 per PDF/A-1 con avviso. Documento taggato: elemento /Annot con /Alt nella struttura logica, /StructParent, /Tabs /S; elementi tolti quando la nota è eliminata (engine.conform). |

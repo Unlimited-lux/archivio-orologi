@@ -34,7 +34,7 @@ class ViewState:
     order: list[int] = field(default_factory=list)
     version: int = -1
     dismissed: bool = False             # «Non ora»: per questa sessione
-    never: bool = False                 # «Non chiedere più per questo documento»
+    never: bool = False                 # «Non chiedere più in questa sessione»
     bar: "ProposalBar | None" = None
     timer: QTimer | None = None
     placed: dict[int, list] = field(default_factory=dict)   # pagina → [(Rect, Word)] dopo l'OCR
@@ -90,7 +90,7 @@ class ProposalBar:
         self.text = text
         self.actions = [(_("Esegui OCR"), self.run, True), (_("Dettagli"), lambda: c.show_details(v), False),
                         (_("Non ora"), lambda: c.dismiss(v), False),
-                        (_("Non chiedere più per questo documento"), lambda: c.never_ask(v), False)]
+                        (_("Non chiedere più in questa sessione"), lambda: c.never_ask(v), False)]
         self._show(10)
 
     def show_page(self, page: int, others: int, ocr_layer: bool = False) -> None:
@@ -484,6 +484,27 @@ def _recognize_copy(data: bytes, opts: engine.OcrOptions, pages: list[int], prog
             pdf.close()
 
 
+# chiavi delle versioni precedenti con stato per documento o percorsi dei file (riservatezza)
+LEGACY_KEYS = ("ocr/never_ask", "ocr/batch_pending")
+
+
+def forget_legacy_settings(settings) -> None:
+    """Cancella le chiavi delle versioni precedenti: impronte dei documenti per «Non chiedere più»
+    e percorsi dei file di un lotto interrotto. Idempotente (le chiavi non vengono più scritte)."""
+    if settings is None:
+        return
+    try:
+        removed = False
+        for key in LEGACY_KEYS:
+            if settings.contains(key):
+                settings.remove(key)
+                removed = True
+        if removed:
+            settings.sync()
+    except Exception:
+        pass
+
+
 class OcrController(QObject):
     def __init__(self, ctx: Context):
         super().__init__(ctx)
@@ -494,6 +515,10 @@ class OcrController(QObject):
         self.highlight = True
         self.area_tool = AreaOcrTool(self.ocr_area)
         self.review_panel: ReviewPanel | None = None
+        # riservatezza: niente stato per documento né percorsi su disco, solo in memoria per la sessione
+        self._never_ask: set[str] = set()
+        self._pending_batch: dict | None = None
+        forget_legacy_settings(self.settings())
         ctx.documentOpened.connect(self.on_opened)
         ctx.documentClosed.connect(self.on_closed)
         ctx.documentChanged.connect(self.on_changed)
@@ -534,19 +559,11 @@ class OcrController(QObject):
         return "sha1:" + h.hexdigest()
 
     def never_asked(self, view) -> bool:
-        keys = self.settings().value("ocr/never_ask", []) or []
-        if isinstance(keys, str):
-            keys = [keys]
-        return self.document_key(view) in keys
+        """«Non chiedere più» vale solo per la sessione: la chiave resta in memoria, mai su disco."""
+        return self.document_key(view) in self._never_ask
 
     def never_ask(self, view) -> None:
-        keys = self.settings().value("ocr/never_ask", []) or []
-        if isinstance(keys, str):
-            keys = [keys]
-        key = self.document_key(view)
-        if key not in keys:
-            keys = list(keys) + [key]
-            self.settings().setValue("ocr/never_ask", keys[-500:])
+        self._never_ask.add(self.document_key(view))
         self.state(view).never = True
         self.dismiss(view)
 
@@ -1431,22 +1448,16 @@ class OcrController(QObject):
                        skip_searchable=dlg.cb_skip.isChecked(), zones=dlg.selected_zones())
 
     def _save_batch_state(self, state: dict | None) -> None:
-        """Stato del lotto nella configurazione utente: permette di riprenderlo dopo un'interruzione."""
-        import json
+        """Stato del lotto solo in memoria: «Riprendi lotto» vale nella stessa sessione, i percorsi
+        dei file non restano mai nella configurazione."""
         if state is None or not state.get("files"):
-            self.settings().remove("ocr/batch_pending")
+            self._pending_batch = None
         else:
-            self.settings().setValue("ocr/batch_pending", json.dumps(state))
-        self.settings().sync()
+            self._pending_batch = dict(state, files=list(state["files"]))
 
     def pending_batch(self) -> dict | None:
-        import json
-        raw = self.settings().value("ocr/batch_pending", "")
-        try:
-            state = json.loads(raw) if raw else None
-        except (TypeError, ValueError):
-            return None
-        return state if isinstance(state, dict) and state.get("files") else None
+        state = self._pending_batch
+        return dict(state) if state and state.get("files") else None
 
     def resume_batch(self) -> list:
         from . import layout

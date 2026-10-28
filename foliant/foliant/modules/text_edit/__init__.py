@@ -35,6 +35,7 @@ def register(ctx: Context) -> None:
         except Exception:
             pass
     from . import fontlist, fonts
+    fontlist.forget_subset_prefixes()      # riservatezza: niente prefissi di sottoinsieme dei documenti
     fonts.set_user_mappings(fontlist.load_mappings())
     ctrl = TextEditController(ctx)
     ctx.text_edit = ctrl  # accesso per i test e per altri moduli

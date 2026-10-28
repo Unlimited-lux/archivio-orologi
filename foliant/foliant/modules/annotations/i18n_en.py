@@ -150,7 +150,7 @@ EN: dict[str, str] = {
     "Ultimi 7 giorni": "Last 7 days", "Ultimi 30 giorni": "Last 30 days",
     "Applica il filtro alla pagina": "Apply the filter to the page", "Da pagina PDF…": "From PDF page…",
     "Istantanea di un'area": "Snapshot of an area", "Timbro da pagina PDF": "Stamp from PDF page",
-    "Pagina (1–{n}):": "Page (1–{n}):", "Istantanea": "Snapshot",
+    "Pagina (1–{n}):": "Page (1–{n}):", "Istantanea": "Snapshot", "Immagine": "Image",
     "Timbro «{n}» aggiunto alla libreria.": "Stamp “{n}” added to the library.", "Pagina inesistente.": "No such page.", "Il documento di origine è stato chiuso.": "The source document was closed.", "Si possono ruotare timbri, rettangoli, ellissi e caselle di testo.":
         "Only stamps, rectangles, ellipses and text boxes can be rotated.", "Esporta libreria timbri": "Export stamp library",
     "Importa libreria timbri": "Import stamp library", "Esporta libreria timbri…": "Export stamp library…",

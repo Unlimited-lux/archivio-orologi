@@ -528,18 +528,24 @@ def test_ann25_counter_never_decrements(comments):
 
 
 def test_ann26_custom_stamp_library(comments, tmp_path, monkeypatch):
-    """ANN-26: timbro da PNG con trasparenza salvato in libreria e disponibile dopo il riavvio."""
+    """ANN-26: timbro da PNG con trasparenza salvato in libreria e disponibile dopo il riavvio,
+    con un nome generico numerato: il nome del file scelto non resta nella configurazione."""
     window, view, module = comments
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20), 1)
     pix.clear_with(0)
-    png = tmp_path / "logo.png"
+    png = tmp_path / "zq7k-logo-riservato.png"
     png.write_bytes(pix.tobytes("png"))
     monkeypatch.setattr(dialogs, "ask_open_file", lambda *a, **k: str(png))
     module._image_stamp()
     click(view, 0, 300, 300)
-    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["logo"]
+    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["Immagine 1"]
     from foliant.modules.annotations.controller import Controller
-    assert [d["name"] for d in Controller(window.ctx).custom_stamps()] == ["logo"]
+    assert [d["name"] for d in Controller(window.ctx).custom_stamps()] == ["Immagine 1"]
+    module._image_stamp()
+    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["Immagine 1", "Immagine 2"]
+    s = window.ctx.settings()
+    s.sync()
+    assert all("zq7k" not in str(s.value(k)) for k in s.allKeys())
     doc = saved(window, view, tmp_path)
     st, = annots(doc, 0, "Stamp")
     assert key_of(doc, st.xref, "IT")[1] == "/StampImage"

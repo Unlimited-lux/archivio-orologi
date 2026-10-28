@@ -131,17 +131,48 @@ def mappings_path() -> Path:
     return Path(base) / "foliant" / "corrispondenze_font.json"
 
 
+def _clean_mapping(mapping: dict) -> dict[str, str]:
+    """Solo nomi di famiglia: senza il prefisso del sottoinsieme («ABCDEF+Calibri» -> «Calibri»), che
+    viene dal documento e lo renderebbe riconoscibile (riservatezza)."""
+    out: dict[str, str] = {}
+    for k, v in (mapping or {}).items():
+        k, v = strip_subset(str(k)).strip(), strip_subset(str(v)).strip()
+        if k and v:
+            out[k] = v
+    return out
+
+
 def load_mappings(path: Path | None = None) -> dict[str, str]:
     path = path or mappings_path()
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+        return _clean_mapping(data) if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
 def save_mappings(mapping: dict[str, str], path: Path | None = None) -> None:
     path = Path(path or mappings_path())
+    mapping = _clean_mapping(mapping)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
     fonts.set_user_mappings(mapping)
+
+
+def forget_subset_prefixes(path: Path | None = None) -> bool:
+    """Pulizia dei dati delle versioni precedenti: riscrive le corrispondenze salvate con il prefisso
+    del sottoinsieme preso dai documenti. True se il file è stato riscritto."""
+    path = Path(path or mappings_path())
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    if not any(_SUBSET.match(str(k)) or _SUBSET.match(str(v)) for k, v in data.items()):
+        return False
+    try:
+        save_mappings(data, path)
+    except OSError:
+        return False
+    return True

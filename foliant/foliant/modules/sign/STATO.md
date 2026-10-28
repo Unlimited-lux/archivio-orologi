@@ -9,6 +9,12 @@ Sezione della specifica: **9. Firma** (SIG-01…SIG-25). Modalità `firma` (ordi
 
 Test in `tests/modules/sign/`; i nomi dei test qui sotto omettono il prefisso `test_`.
 
+**Riservatezza**: il modulo non conserva su disco nomi o percorsi dei documenti firmati o verificati (lo
+stato della verifica è in memoria). Nel profilo restano solo configurazioni scelte esplicitamente
+dall'utente: ID digitali registrati (`ids.json`, percorso del file .p12/.pfx), certificati attendibili,
+server di marca temporale, aspetti, libreria delle firme e cartella di sincronizzazione. Test:
+ui `no_document_names_in_profile`.
+
 ## Tabella
 
 | ID | Pr. | Stato | Test | Note |

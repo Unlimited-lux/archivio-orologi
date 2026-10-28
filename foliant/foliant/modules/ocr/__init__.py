@@ -26,6 +26,7 @@ def register(ctx: "Context") -> None:
     add_translations("en", EN)
     from . import engine
     from .ui import OcrController, ReviewPanel
+    engine.cleanup_leftovers()      # copie temporanee dei documenti lasciate da un arresto anomalo
 
     global controller
     ctrl = OcrController(ctx)
@@ -97,8 +98,8 @@ def register(ctx: "Context") -> None:
                            tooltip=_("Rende ogni pagina un'immagine, senza testo estraibile"))
     ctrl.actions["image_only"] = act_image
     act_resume = ctx.action(_("Riprendi lotto"), "rotate-ccw", ctrl.resume_batch, requires_document=False,
-                            tooltip=_("Elabora i file rimasti di un OCR in blocco interrotto"))
-    act_resume.setEnabled(ctrl.pending_batch() is not None)
+                            tooltip=_("Elabora i file rimasti di un OCR in blocco interrotto in questa sessione"))
+    act_resume.setEnabled(ctrl.pending_batch() is not None)   # lotto solo in memoria: all'avvio è vuoto
     ctrl.actions["resume"] = act_resume
     for a in (menu_run, act_remove, act_image, act_batch, act_resume, act_langs, act_detect):
         ctx.add_menu_action(a, _("OCR"))

@@ -256,8 +256,44 @@ def test_external_edit_roundtrip(ui, tmp_path, monkeypatch):
     with O.ENGINE_LOCK:
         assert view.document.pdf[0].get_pixmap(dpi=40).samples == before
     d = sess.dir
+    assert os.path.basename(d).startswith(f"foliant-img-{os.getpid()}-") and d in XT._LIVE_DIRS
     ui.c.stop_external()
+    assert not os.path.exists(d) and d not in XT._LIVE_DIRS
+
+
+def test_external_edit_temp_removed_at_exit(ui, tmp_path, monkeypatch):
+    """Riservatezza: se l'app esce con una modifica esterna aperta, l'immagine temporanea sparisce."""
+    import os
+    from foliant.modules.objects import external as XT
+    monkeypatch.setattr(XT, "launch", lambda p: True)
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 250, 170)]))
+    ui.c.set_selection(view, 0, [0])
+    sess = ui.c.edit_external(view)
+    d = sess.dir
+    XT.remove_live_dirs()           # quello che fa atexit
     assert not os.path.exists(d)
+    ui.c.stop_external()
+
+
+def test_external_edit_leftovers_cleaned(tmp_path):
+    """Le cartelle temporanee lasciate da un arresto anomalo si cancellano all'avvio; non quelle di un
+    processo vivo, quelle recenti senza PID delle versioni precedenti, né altri file."""
+    import os
+    import time
+    from foliant.modules.objects import external as XT
+    dead = tmp_path / "foliant-img-999999999-abc"
+    alive = tmp_path / f"foliant-img-{os.getpid()}-abc"
+    legacy_old = tmp_path / "foliant-img-vecchia"
+    legacy_new = tmp_path / "foliant-img-nuova"
+    for d in (dead, alive, legacy_old, legacy_new):
+        d.mkdir()
+        (d / "immagine_p1.png").write_bytes(b"x")
+    past = time.time() - 3600
+    os.utime(legacy_old, (past, past))
+    (tmp_path / "foliant-img-file").write_bytes(b"x")
+    assert XT.cleanup_leftovers(str(tmp_path)) == 2
+    assert not dead.exists() and not legacy_old.exists()
+    assert alive.exists() and legacy_new.exists() and (tmp_path / "foliant-img-file").exists()
 
 
 def test_link_on_image_moves_with_it(ui, tmp_path):

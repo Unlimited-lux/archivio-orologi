@@ -7,6 +7,11 @@ Test in `tests/modules/text_edit/` (circa 145 test, offscreen). File principali:
 `fontlist.py` (font del documento); interfaccia in `controller.py`, `ui_tool.py`, `ui_editor.py`, `ui_panel.py`,
 `find_dialog.py`, `spell_ui.py`, `fontlist_ui.py`.
 
+**Riservatezza**: il modulo non conserva su disco nomi o percorsi dei documenti. Restano solo preferenze
+(granularità, testo OCR), il dizionario personale delle parole e le corrispondenze dei font
+(`corrispondenze_font.json`) con i soli nomi di famiglia: il prefisso del sottoinsieme preso dal documento
+(«ABCDEF+Calibri») viene tolto al salvataggio e, per le voci delle versioni precedenti, all'avvio.
+
 | ID | Stato | Test | Note |
 |---|---|---|---|
 | TXT-01 Riconoscimento blocchi | fatto | `test_engine.py::test_paragraph_and_line_granularity`, `test_two_columns_never_mixed`, `test_scanned_page_has_no_blocks`, `test_undecodable_block_marked`; `test_ui.py::test_mode_activates_text_tool`, `test_enter_and_leave_without_changes`, `test_granularity_line`, `test_scanned_page_suggests_ocr` | Paragrafo/Riga ricordato; contorni al passaggio, blocchi non modificabili tratteggiati con motivo; ~11 ms per pagina. Livelli OCG nascosti non esclusi. |

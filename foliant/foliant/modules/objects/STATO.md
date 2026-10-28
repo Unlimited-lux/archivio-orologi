@@ -6,6 +6,10 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 `adv` = test_obj_advanced.py, `ext` = test_obj_extract.py, `cap` = test_obj_capture.py,
 `img` = test_obj_imaging.py, `chk` = test_obj_linkcheck.py, `geo` = test_obj_geometry.py.
 
+**Riservatezza**: «Modifica con…» usa una cartella temporanea privata `foliant-img-<PID>-*` senza nome del
+documento, cancellata alla fine della modifica, alla chiusura del documento e (rete di sicurezza) all'uscita;
+quelle lasciate da un arresto anomalo si cancellano all'avvio del modulo. Test: ui2 external_edit_*.
+
 | ID | Pr. | Stato | Test | Note |
 |---|---|---|---|---|
 | OBJ-01 Modalità modifica oggetti | P0 | fatto | ui: test_mode_and_tool_registered, test_hover_outlines_object; test_permission_denied_blocks_changes, test_background_parse, test_parser_fuzz_never_crashes; eng/cnt; adv: test_text_blocks_are_objects_with_their_box, test_move_delete_and_copy_text_block, test_flip_excludes_text_blocks, test_invisible_ocr_text_is_hidden_object; ui2: test_pdfa_warning_once_and_xfa_blocked | Immagini, tracciati, sfumature, oggetti composti e blocchi di testo (selezione, spostamento, allineamento, ordine, copia/incolla, eliminazione; il testo invisibile OCR è raggiungibile con Alt+clic). Contorno per tipo, analisi in background (20.000 tracciati < 1 s), permesso di modifica, avviso PDF/A una volta per documento, moduli XFA dinamici non modificabili. Documenti firmati: `kind` a `Document.change` e guardia SIG-21 del modulo Firma. |
