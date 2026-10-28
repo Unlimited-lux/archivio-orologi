@@ -573,10 +573,15 @@ def apply_exclusions(tokens: list[Token], pages: list[int], heights: dict, optio
     return out
 
 
-def excluded_boxes(tokens_all: list[Token], kept: list[Token], page: int) -> list[tuple]:
-    """Riquadri del testo escluso su una pagina (per scartare anche le differenze visive)."""
+def excluded_boxes(tokens_all: list[Token], kept: list[Token]) -> dict[int, list[tuple]]:
+    """Riquadri del testo escluso, per pagina (per scartare anche le differenze visive)."""
     kept_ids = {id(t) for t in kept}
-    return [r[1:] for t in tokens_all if id(t) not in kept_ids for r in t.rects if r[0] == page]
+    out: dict[int, list[tuple]] = {}
+    for t in tokens_all:
+        if id(t) not in kept_ids:
+            for r in t.rects:
+                out.setdefault(r[0], []).append(r[1:])
+    return out
 
 
 def _center_in(r: tuple, areas: list[tuple]) -> bool:
@@ -1027,6 +1032,8 @@ def compare_visual_pages(doc_a, pa: int, doc_b, pb: int, options: CompareOptions
     with ENGINE_LOCK:
         ra, rb = doc_a[pa].cropbox, doc_b[pb].cropbox
     size_differs = abs(ra.width - rb.width) > 1 or abs(ra.height - rb.height) > 1
+    if img_a.shape == img_b.shape and np.array_equal(img_a, img_b):   # caso più comune: pagina invariata
+        return VisualPageResult([], [], [], (0.0, 0.0), False, size_differs)
     max_shift = int(MAX_SHIFT_MM * MM * scale)
     mask = diff_mask(img_a, img_b, sens["tolerance"])
     dx = dy = 0
@@ -1201,21 +1208,18 @@ def _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, re
         raw_a, raw_b = ta, tb
         ta = apply_exclusions(ta, info_a.pages, heights_a, options)
         tb = apply_exclusions(tb, info_b.pages, heights_b, options)
-        result.excluded_a = {}
-        result.excluded_b = {}
-        for p in info_a.pages:
-            result.excluded_a[p] = excluded_boxes(raw_a, ta, p)
-        for p in info_b.pages:
-            result.excluded_b[p] = excluded_boxes(raw_b, tb, p)
+        result.excluded_a = excluded_boxes(raw_a, ta)
+        result.excluded_b = excluded_boxes(raw_b, tb)
         ta = _apply_key(ta, options)
         tb = _apply_key(tb, options)
         progress.update(0.3, _("Confronto del testo…"))
-        moved = detect_moved_pages(ta, tb) if options.match_pages_by_content else []
+        ops_all = diff_opcodes(ta, tb, progress)
+        moved = detect_moved_pages(ta, tb, ops_all) if options.match_pages_by_content else []
         moved_a = {p for p, _q in moved}
         moved_b = {q for _p, q in moved}
         main_a = [t for t in ta if t.page not in moved_a]
         main_b = [t for t in tb if t.page not in moved_b]
-        segments = [(main_a, main_b, diff_opcodes(main_a, main_b, progress))]
+        segments = [(main_a, main_b, diff_opcodes(main_a, main_b, progress) if moved else ops_all)]
         for pa, pb in moved:
             sa = [t for t in ta if t.page == pa]
             sb = [t for t in tb if t.page == pb]
@@ -1354,35 +1358,60 @@ def visual_pair_differences(doc_a, pa: int, doc_b, pb: int, options: CompareOpti
 # =============================================================================
 # Differenze di struttura (CMP-09)
 # =============================================================================
-def detect_moved_pages(ta: list[Token], tb: list[Token], threshold: float = 0.8) -> list[tuple[int, int]]:
-    """Pagine con lo stesso contenuto in una posizione diversa (riordinate)."""
+def detect_moved_pages(ta: list[Token], tb: list[Token], ops=None, threshold: float = 0.8) -> list[tuple[int, int]]:
+    """Pagine con lo stesso contenuto in una posizione diversa (riordinate).
+
+    Si considerano solo le pagine il cui testo è rimasto quasi tutto senza
+    corrispondenza nell'allineamento in ordine (`ops`): così il costo resta basso
+    anche su documenti lunghi."""
     from collections import Counter
+    if ops is None:
+        ops = diff_opcodes(ta, tb)
+    matched_a = [False] * len(ta)
+    matched_b = [False] * len(tb)
+    for tag, a0, a1, b0, b1 in ops:
+        if tag == "equal":
+            for k in range(a1 - a0):
+                matched_a[a0 + k] = True
+                matched_b[b0 + k] = True
+
+    def candidates(tokens, matched):
+        total: Counter = Counter()
+        free: Counter = Counter()
+        for t, m in zip(tokens, matched):
+            total[t.page] += 1
+            if not m:
+                free[t.page] += 1
+        return {p for p, n in total.items() if n >= 5 and free[p] >= threshold * n}
+
+    cand_a = candidates(ta, matched_a)
+    cand_b = candidates(tb, matched_b)
+    if not cand_a or not cand_b:
+        return []
     bags_a: dict[int, Counter] = {}
     bags_b: dict[int, Counter] = {}
     for t in ta:
-        bags_a.setdefault(t.page, Counter())[t.key] += 1
+        if t.page in cand_a:
+            bags_a.setdefault(t.page, Counter())[t.key] += 1
     for t in tb:
-        bags_b.setdefault(t.page, Counter())[t.key] += 1
-    best: dict[int, tuple[float, int]] = {}
+        if t.page in cand_b:
+            bags_b.setdefault(t.page, Counter())[t.key] += 1
+    scored = []
     for pa, ca in bags_a.items():
         na = sum(ca.values())
-        if na < 5:
-            continue
         for pb, cb in bags_b.items():
-            nb = sum(cb.values())
-            common = sum((ca & cb).values())
-            sim = common / max(na, nb)
-            if sim >= threshold and (pa not in best or sim > best[pa][0]):
-                best[pa] = (sim, pb)
-    used: dict[int, tuple[float, int]] = {}
-    for pa, (sim, pb) in best.items():
-        if pb not in used or sim > used[pb][0]:
-            used[pb] = (sim, pa)
-    cands = sorted((pa, pb) for pb, (_sim, pa) in used.items())
-    if len(cands) < 2:
-        return []
-    keep = set(_lis_nondecreasing([(float(a), float(b)) for a, b in cands]))
-    return [(a, b) for a, b in cands if (float(a), float(b)) not in keep]
+            sim = sum((ca & cb).values()) / max(na, sum(cb.values()))
+            if sim >= threshold:
+                scored.append((sim, pa, pb))
+    moved = []
+    used_a: set[int] = set()
+    used_b: set[int] = set()
+    for sim, pa, pb in sorted(scored, reverse=True):
+        if pa not in used_a and pb not in used_b:
+            used_a.add(pa)
+            used_b.add(pb)
+            moved.append((pa, pb))
+    return sorted(moved)
 
 
 def _close(r1, r2, tol: float = MM) -> bool:

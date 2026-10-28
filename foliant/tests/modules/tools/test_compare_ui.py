@@ -371,3 +371,28 @@ def test_text_and_revision_actions(window, pdf_builder):
     assert rd.isVisible()
     rd.close()
     del view
+
+
+def test_twenty_thousand_differences_list(qtbot):
+    import time
+    opts = ce.CompareOptions()
+    info = ce.SideInfo("a", None, "0" * 64, "", 400, list(range(400)))
+    diffs = [ce.Difference(ce.ADDED if i % 2 else ce.DELETED, text_a=f"parola {i}", text_b=f"parola {i}",
+                           rects_a=[(i // 50, 72, 100 + (i % 50) * 14, 200, 110 + (i % 50) * 14)],
+                           rects_b=[(i // 50, 72, 100 + (i % 50) * 14, 200, 110 + (i % 50) * 14)], id=i + 1)
+             for i in range(20000)]
+    result = ce.CompareResult(info, info, opts, diffs)
+    panel = cu.DiffPanel()
+    qtbot.addWidget(panel)
+    panel.resize(320, 700)
+    panel.show()
+    t = time.monotonic()
+    panel.set_result(result)
+    assert time.monotonic() - t < 1.0
+    assert panel.model.rowCount() == 20000
+    t = time.monotonic()
+    panel.list.scrollToBottom()
+    panel.list.repaint()
+    panel.filters[ce.DELETED].setChecked(False)
+    assert time.monotonic() - t < 1.0
+    assert panel.counter.text() == "Visibili 10000 di 20000"
