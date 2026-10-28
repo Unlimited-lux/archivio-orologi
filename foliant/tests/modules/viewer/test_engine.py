@@ -264,3 +264,76 @@ def test_reading_order_columns_and_wide_blocks():
               {"bbox": (50, 40, 540, 70), "n": "T"}, {"bbox": (50, 450, 540, 480), "n": "W"},
               {"bbox": (320, 500, 540, 520), "n": "R2"}, {"bbox": (50, 500, 280, 560), "n": "L2"}]
     assert [b["n"] for b in E.reading_order(blocks)] == ["T", "L1", "R1", "W", "L2", "R2"]
+
+
+# ------------------------------------------------- segnalibri dalla struttura (VIS-17)
+def _tagged_pdf(headings, rolemap=None, alt=None):
+    """PDF taggato costruito a mano: `headings` = per pagina, elenco di (ruolo, testo); ogni
+    titolo è un contenuto marcato con MCID e un elemento della struttura con /Pg."""
+    doc = pymupdf.open()
+    for _ in headings:
+        doc.new_page()
+    font_page = doc[0]
+    font_page.insert_text((10, 10), " ", fontname="helv")
+    font_res = doc.xref_get_key(font_page.xref, "Resources")
+    root = doc.get_new_xref()
+    doc.update_object(root, "<<>>")
+    elems = []
+    for pi, items in enumerate(headings):
+        page = doc[pi]
+        if pi:
+            doc.xref_set_key(page.xref, "Resources", font_res[1] if font_res[0] == "xref" else font_res[1])
+        stream = "BT /helv 14 Tf\n"
+        y = 780
+        for mcid, (tag, text) in enumerate(items):
+            stream += f"/{tag} <</MCID {mcid}>> BDC 1 0 0 1 72 {y} Tm ({text}) Tj EMC\n"
+            y -= 30
+            x = doc.get_new_xref()
+            extra = f" /Alt ({alt[text]})" if alt and text in alt else ""
+            doc.update_object(x, f"<< /Type /StructElem /S /{tag} /P {root} 0 R /Pg {page.xref} 0 R /K {mcid}{extra} >>")
+            elems.append(x)
+        stream += "ET\n"
+        cx = doc.get_new_xref()
+        doc.update_object(cx, "<<>>")
+        doc.update_stream(cx, stream.encode())
+        old = doc.xref_get_key(page.xref, "Contents")
+        doc.xref_set_key(page.xref, "Contents", f"[{old[1]} {cx} 0 R]" if old[0] == "xref" else f"{cx} 0 R")
+        doc.xref_set_key(page.xref, "StructParents", str(pi))
+    rm = (" /RoleMap << " + " ".join(f"/{a} /{b}" for a, b in rolemap.items()) + " >>") if rolemap else ""
+    doc.update_object(root, "<< /Type /StructTreeRoot /K [" + " ".join(f"{x} 0 R" for x in elems) + f"]{rm} >>")
+    doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
+    doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<< /Marked true >>")
+    return pymupdf.open("pdf", doc.tobytes())
+
+
+def test_outline_from_structure_5_h1_12_h2():
+    """Dato un PDF taggato con 5 H1 e 12 H2, l'albero ha 5 voci di primo livello e 12 di
+    secondo con destinazioni sulle pagine corrette."""
+    pages = []
+    n2 = 0
+    for c in range(5):
+        items = [("H1", f"Capitolo {c + 1}")]
+        for _s in range(3 if c < 2 else 2):
+            n2 += 1
+            items.append(("H2", f"Sezione {n2}"))
+        items.append(("P", "testo normale"))
+        pages.append(items)
+    assert n2 == 12
+    pdf = _tagged_pdf(pages)
+    items = E.outline_from_structure(pdf)
+    assert [b.level for b in items].count(1) == 5 and [b.level for b in items].count(2) == 12
+    assert [(b.title, b.page) for b in items if b.level == 1] == [(f"Capitolo {c + 1}", c) for c in range(5)]
+    assert items[1].title == "Sezione 1" and items[1].page == 0
+    assert all(b.dest["page"] == b.page for b in items)
+    assert "testo normale" not in [b.title for b in items]
+    assert E.is_valid_structure(items)
+
+
+def test_outline_from_structure_rolemap_alt_and_untagged():
+    pdf = _tagged_pdf([[("Titolo1", "Primo"), ("Sottotitolo", "Secondo")]],
+                      rolemap={"Titolo1": "H1", "Sottotitolo": "H2"}, alt={"Primo": "Primo capitolo"})
+    items = E.outline_from_structure(pdf)
+    assert [(b.level, b.title) for b in items] == [(1, "Primo capitolo"), (2, "Secondo")]
+    plain = pymupdf.open()
+    plain.new_page().insert_text((72, 100), "senza struttura")
+    assert E.outline_from_structure(plain) == []

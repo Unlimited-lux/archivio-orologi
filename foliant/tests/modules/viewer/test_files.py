@@ -308,5 +308,52 @@ def test_menu_section_and_home_context_menu(fwin, ctl, sample_pdf):
     assert "File" in texts
     menu = ctl.path_menu(sample_pdf)
     labels = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert labels[:4] == ["Rinomina…", "Duplica", "Sposta in…", "Sposta nel cestino"]
-    assert "Rimuovi dall'elenco" in labels
+    assert labels[:2] == ["Apri", "Fissa"]                      # voci del nucleo in testa
+    assert labels[2:6] == ["Rinomina…", "Duplica", "Sposta in…", "Sposta nel cestino"]
+    assert labels[-2:] == ["Rimuovi dall'elenco", "Svuota elenco"]
+    assert labels.count("Rimuovi dall'elenco") == 1
+
+
+def test_pin_and_unpin_recent_from_menu(fwin, ctl, sample_pdf):
+    """VIS-02: «Fissa» porta il documento in cima ai recenti della Home, «Sblocca» lo toglie."""
+    fwin.open_path(sample_pdf)
+    for v in list(fwin.views()):
+        fwin.close_view(v)
+    menu = ctl.path_menu(sample_pdf)
+    [pin] = [a for a in menu.actions() if a.text() == "Fissa"]
+    pin.trigger()
+    assert fwin.ctx.is_pinned(sample_pdf) and fwin.ctx.pinned_recent() == [sample_pdf]
+    menu = ctl.path_menu(sample_pdf)
+    [unpin] = [a for a in menu.actions() if a.text() == "Sblocca"]
+    unpin.trigger()
+    assert not fwin.ctx.is_pinned(sample_pdf)
+
+
+def test_missing_recent_menu_offers_locate_and_remove(fwin, ctl, tmp_path):
+    """Recente il cui file non esiste più: il menu offre Individua / Rimuovi, nessuna operazione
+    sul file."""
+    gone = str(tmp_path / "sparito.pdf")
+    menu = ctl.path_menu(gone)
+    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert labels[0] == "Individua…" and "Rimuovi dall'elenco" in labels
+    assert "Rinomina…" not in labels and "Sposta nel cestino" not in labels
+
+
+def test_missing_recent_marked_and_click_offers_remove(fwin, tmp_path, monkeypatch):
+    """VIS-02: un recente il cui file non esiste più è marcato non disponibile; il clic offre
+    Rimuovi / Individua senza errori («Rimuovi» lo toglie dall'elenco)."""
+    from foliant.ui.home import MISSING_ROLE, PATH_ROLE
+    path = tmp_path / "sparira.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(str(path))
+    view = fwin.open_path(str(path))
+    fwin.close_view(view)
+    os.remove(path)
+    fwin.show_home()
+    lst = fwin.home.recent
+    [item] = [lst.item(r) for r in range(lst.count()) if lst.item(r).data(PATH_ROLE) == str(path)]
+    assert item.data(MISSING_ROLE)
+    monkeypatch.setattr(fwin, "ask_missing_recent", lambda p: "remove")
+    fwin.home._activate(item)
+    assert str(path) not in fwin.recent_files()

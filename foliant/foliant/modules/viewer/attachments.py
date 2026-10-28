@@ -13,6 +13,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import pymupdf
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -34,6 +35,8 @@ ROLE_SORT = Qt.ItemDataRole.UserRole + 1
 COL_NAME, COL_DESC, COL_SIZE, COL_PAGE, COL_CREATED, COL_MODIFIED = range(6)
 
 EN = {
+    "Il documento non consente modifiche: allegati in sola lettura.":
+        "The document does not allow changes: attachments are read-only.",
     "Allegati": "Attachments",
     "Apri": "Open",
     "Salva come…": "Save as…",
@@ -178,6 +181,7 @@ class AttachmentsPanel(QWidget):
         self._dirty = False          # elenco da rileggere alla prossima visualizzazione
         self._pending = False        # aggiornamento già programmato (raggruppa le modifiche)
         ctx.documentChanged.connect(self._on_document_changed)
+        ctx.documentAccessChanged.connect(lambda v: self._update_buttons() if v is self.view else None)
         ctx.documentOpened.connect(self._on_document_opened)
         app = QApplication.instance()
         if app is not None:
@@ -307,13 +311,22 @@ class AttachmentsPanel(QWidget):
                 self.tree.setCurrentItem(row)
                 return
 
+    def can_modify(self) -> bool:
+        """Aggiungere ed eliminare allegati modifica il documento: serve il permesso (VIS-06)."""
+        return self._doc is not None and self._doc.allows(pymupdf.PDF_PERM_MODIFY)
+
     def _update_buttons(self) -> None:
         has_doc = self._doc is not None
         sel = bool(self.tree.selectedItems())
-        self.btn_add.setEnabled(has_doc)
+        editable = self.can_modify()
+        self.btn_add.setEnabled(editable)
         self.btn_save_all.setEnabled(bool(self._items))
-        for b in (self.btn_open, self.btn_save, self.btn_delete):
+        for b in (self.btn_open, self.btn_save):
             b.setEnabled(sel)
+        self.btn_delete.setEnabled(sel and editable)
+        reason = _("Il documento non consente modifiche: allegati in sola lettura.")
+        for b, text in ((self.btn_add, _("Aggiungi…")), (self.btn_delete, _("Elimina"))):
+            b.setToolTip(text if editable or not has_doc else f"{text}\n{reason}")
 
     def _context_menu(self, pos) -> None:
         row = self.tree.itemAt(pos)
@@ -335,12 +348,15 @@ class AttachmentsPanel(QWidget):
         if self._items:
             a = menu.addAction(_("Salva tutti…"), self.save_all)
             bind_icon(a, "save-all")
+        editable = self.can_modify()
         if self._doc is not None:
             a = menu.addAction(_("Aggiungi…"), self.add_files)
             bind_icon(a, "file-plus")
+            a.setEnabled(editable)
         if att is not None:
             a = menu.addAction(_("Elimina"), lambda: self.delete_item(att))
             bind_icon(a, "trash-2")
+            a.setEnabled(editable)
 
     def _double_clicked(self, row: QTreeWidgetItem, _col: int) -> None:
         att = row.data(COL_NAME, ROLE_ITEM)
@@ -512,7 +528,7 @@ class AttachmentsPanel(QWidget):
 
     def add_files(self, paths: list[str] | None = None) -> list[str]:
         """Incorpora i file scelti come allegati del documento (un passo annullabile)."""
-        if self._doc is None:
+        if not self.can_modify():
             return []
         if paths is None:
             paths = self.ask_open_paths()
@@ -539,7 +555,7 @@ class AttachmentsPanel(QWidget):
         return keys
 
     def delete_item(self, att: Attachment, confirm: bool = True) -> bool:
-        if self._doc is None:
+        if not self.can_modify():
             return False
         if confirm and not self.confirm(_("Elimina allegato"), _(
                 "Eliminare l'allegato «{name}»? Puoi annullare con Annulla.").format(name=att.filename)):
