@@ -270,8 +270,11 @@ def _subset_font(data: bytes, chars: set[str]) -> bytes:
     try:
         import io
 
+        import logging
+
         from fontTools import subset
         from fontTools.ttLib import TTFont
+        logging.getLogger("fontTools").setLevel(logging.ERROR)
         font = TTFont(io.BytesIO(data), fontNumber=0)
         opts = subset.Options()
         opts.notdef_outline = True

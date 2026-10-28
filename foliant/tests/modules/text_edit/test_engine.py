@@ -786,3 +786,39 @@ def test_new_font_embedded_as_subset(tmp_path):
     d.save(out)
     assert out.stat().st_size < 60_000          # DejaVu Sans intero supera 700 KB
     assert "Totale — € 9.800,00" in pymupdf.open(str(out))[0].get_text()
+
+
+def test_table_rows_not_merged_with_paragraph(tmp_path):
+    """Fattura: modificare il paragrafo giustificato sotto la tabella non sposta le righe della tabella."""
+    from foliant.modules.text_edit.model import Style as _Style
+    doc, page = new_doc_with_font(SANS)
+    rows = [("Revisione e lucidatura", "1", "€ 350,00"), ("Cinturino in pelle con garanzia", "1", "€ 9.500,00"),
+            ("Spedizione assicurata", "1", "€ 100,00")]
+    y = 100
+    f = pymupdf.Font(fontfile=SANS)
+    for desc, qty, price in rows:
+        page.insert_text((58, y), desc, fontname="F1", fontsize=10)
+        page.insert_text((300, y), qty, fontname="F1", fontsize=10)
+        page.insert_text((540 - f.text_length(price, fontsize=10), y), price, fontname="F1", fontsize=10)
+        y += 16
+    path = save(doc, tmp_path / "fattura0.pdf")
+    d = Document.open(path)
+    text = ("Totale documento: € 9.950,00 — pagamento a trenta giorni data fattura mediante bonifico "
+            "bancario sul conto indicato in calce, salvo diversi accordi scritti tra le parti. La merce viaggia "
+            "assicurata a cura del venditore e la garanzia decorre dalla data di consegna indicata.")
+    with d.change("Paragrafo") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(58, y + 2), [[Run(text, _Style(font="Liberation Sans", size=10))]],
+                        width=482, align="justify")
+    with d.lock:
+        before = {w[4]: w[:4] for w in d.pdf[0].get_text("words") if w[1] < y}
+        blocks = blocks_of(d.pdf)
+    para = [b for b in blocks if "Totale" in b.text][0]
+    assert not any("Revisione" in ln.text for ln in para.lines)
+    assert para.align == "justify", [(ln.text, ln.bbox.x0, ln.bbox.x1, [(w.text, round(w.x,1), round(w.x1,1)) for w in ln.words][:5]) for ln in para.lines]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, para, replace_text(para, "9.950,00", "9.960,00"))
+    with d.lock:
+        after = {w[4]: w[:4] for w in d.pdf[0].get_text("words") if w[1] < y}
+        assert "9.960,00" in d.pdf[0].get_text()
+    for word, r in before.items():
+        assert word in after and abs(after[word][0] - r[0]) < 0.2 and abs(after[word][1] - r[1]) < 0.2

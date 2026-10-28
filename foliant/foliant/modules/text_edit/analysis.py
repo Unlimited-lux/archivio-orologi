@@ -198,6 +198,25 @@ def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
     horiz = [x for x in lines if _horizontal(x[0])]
     others = [x for x in lines if not _horizontal(x[0])]
     horiz.sort(key=lambda x: (round(x[0].baseline, 1), x[0].bbox.x0))
+    # inizi (e fine) di segmento ripetuti su più linee di base: colonne di una tabella, da non unire
+    starts: dict[float, set] = {}
+    ends: dict[float, set] = {}
+    for line, _inv in horiz:
+        starts.setdefault(round(line.bbox.x0), set()).add(round(line.baseline, 1))
+        ends.setdefault(round(line.bbox.x1), set()).add(round(line.baseline, 1))
+
+    def column(line: Line) -> bool:
+        b = round(line.baseline, 1)
+        # solo gli inizi: le fini coincidono anche nel testo giustificato (margine destro)
+        for table in (starts,):
+            edge = round(line.bbox.x0)
+            rows = set()
+            for k in (edge - 1, edge, edge + 1):
+                rows |= table.get(k, set())
+            if len(rows - {b}) >= 1:
+                return True
+        return False
+
     merged: list[tuple[Line, bool]] = []
     for line, inv in horiz:
         if merged:
@@ -205,7 +224,7 @@ def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
             size = max(prev.size, line.size)
             gap = line.bbox.x0 - prev.bbox.x1
             if (pinv == inv and abs(prev.baseline - line.baseline) < 0.3 and -0.5 <= gap <= 1.2 * size
-                    and 0.8 <= line.size / prev.size <= 1.25):
+                    and 0.8 <= line.size / prev.size <= 1.25 and not column(line)):
                 runs = merge_runs(prev.runs + [Run(" ", prev.runs[-1].style)] + line.runs)
                 merged[-1] = (Line(bbox=prev.bbox | line.bbox, origin=prev.origin, runs=runs, dir=prev.dir,
                                    words=prev.words + line.words), inv)
@@ -258,10 +277,24 @@ def _compatible(prev: Line, line: Line, group: list[Line]) -> float | None:
 def group_lines(lines: list[Line]) -> list[list[Line]]:
     """Raggruppa righe orizzontali in paragrafi."""
     ordered = sorted(lines, key=lambda ln: (round(ln.baseline, 1), ln.bbox.x0))
+    # righe con altro testo vicino sulla stessa linea di base (celle di tabella): non si uniscono
+    # a righe senza vicini (paragrafi)
+    def has_neighbor(line: Line) -> bool:
+        for other in ordered:
+            if other is line or abs(other.baseline - line.baseline) > 0.5:
+                continue
+            gap = max(other.bbox.x0 - line.bbox.x1, line.bbox.x0 - other.bbox.x1)
+            if 0 < gap < 6 * line.size:
+                return True
+        return False
+
+    neighbors = {id(ln): has_neighbor(ln) for ln in ordered}
     groups: list[list[Line]] = []
     for line in ordered:
         best, best_d = None, None
         for g in groups:
+            if neighbors[id(g[-1])] != neighbors[id(line)]:
+                continue
             d = _compatible(g[-1], line, g)
             if d is not None and (best_d is None or d < best_d):
                 # nessun'altra riga già assegnata deve trovarsi tra le due
@@ -297,6 +330,14 @@ def _detect_alignment(lines: list[Line]) -> tuple[str, float, float, float]:
     centers = [(a + b) / 2 for a, b in zip(lefts, rights)]
     if left_eq and len(lines) >= 3 and _spread(rights[:-1]) <= tol and rights[-1] <= max(rights[:-1]) + tol:
         return ALIGN_JUSTIFY, x0, max(rights[:-1]) - x0, indent
+    if left_eq and len(lines) == 2 and rights[1] < rights[0] - tol:
+        # due righe: giustificato se la prima ha spazi tra le parole molto più larghi della seconda
+        def mean_gap(ln: Line) -> float:
+            gaps = [b.x - a.x1 for a, b in zip(ln.words, ln.words[1:])]
+            return sum(gaps) / len(gaps) if gaps else 0.0
+        g0, g1 = mean_gap(lines[0]), mean_gap(lines[1])
+        if g1 > 0 and g0 > g1 * 1.25 and g0 - g1 > 0.05 * size:
+            return ALIGN_JUSTIFY, x0, rights[0] - x0, indent
     if left_eq and (indent or _spread(lefts) <= tol):
         return ALIGN_LEFT, x0, x1 - x0, indent
     if _spread(centers) <= tol:
