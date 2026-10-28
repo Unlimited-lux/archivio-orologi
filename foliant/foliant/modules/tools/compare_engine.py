@@ -83,6 +83,12 @@ class CompareOptions:
     include_annotations: bool = True
     size_tolerance: float = 0.1
     color_tolerance: int = 24
+    # esclusioni (CMP-08)
+    ignore_headers_footers: bool = False
+    band_top_mm: float = 0.0        # 0 = rilevamento automatico del testo ripetuto
+    band_bottom_mm: float = 0.0
+    ignore_page_numbers: bool = False
+    exclusions: list = field(default_factory=list)   # [pagina o -1, x0, y0, x1, y1] in punti
 
     def criteria(self) -> list[str]:
         """Descrizione leggibile dei criteri applicati."""
@@ -104,10 +110,21 @@ class CompareOptions:
                 s=sens.get(self.sensitivity, self.sensitivity), t=s["tolerance"], p=s["cell_pixels"]))
             out.append(_("Risoluzione: {d} dpi").format(d=self.dpi))
             out.append(_("Allineamento automatico") if self.auto_align else _("Allineamento automatico disattivato"))
+            if not self.include_annotations:
+                out.append(_("Ignora annotazioni"))
+        if self.ignore_headers_footers:
+            out.append(_("Ignora intestazioni e piè di pagina"))
+        if self.ignore_page_numbers:
+            out.append(_("Ignora numeri di pagina"))
+        if self.exclusions:
+            out.append(_("Aree escluse: {n}").format(n=len(self.exclusions)))
         return out
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def excluded_areas(self, page: int) -> list[tuple]:
+        return [tuple(e[1:5]) for e in self.exclusions if int(e[0]) in (-1, page)]
 
     @classmethod
     def from_dict(cls, data: dict) -> "CompareOptions":
@@ -211,6 +228,8 @@ class CompareResult:
     visual_only_pages: list[int] = field(default_factory=list)   # pagine di A confrontate solo visivamente
     shifts: dict = field(default_factory=dict)                   # (pa, pb) -> (dx, dy) in punti
     identical_files: bool = False
+    excluded_a: dict = field(default_factory=dict)               # pagina -> riquadri di testo escluso
+    excluded_b: dict = field(default_factory=dict)
 
     def counts(self, differences: list[Difference] | None = None) -> dict[str, int]:
         out = {k: 0 for k in KINDS}
@@ -446,6 +465,91 @@ def _apply_key(tokens: list[Token], options: CompareOptions) -> list[Token]:
         t.key = key
         out.append(t)
     return out
+
+
+# =============================================================================
+# Esclusioni (CMP-08)
+# =============================================================================
+_PAGE_NUMBER = re.compile(r"^[-–—(\[]?\s*(pagina|pag\.?|page|p\.)?\s*#+(\s*(di|of|/|su)\s*#+)?\s*[-–—)\]]?$",
+                          re.IGNORECASE)
+
+
+def _line_groups(tokens: list[Token]) -> dict[int, list[Token]]:
+    lines: dict[int, list[Token]] = {}
+    for t in tokens:
+        lines.setdefault(t.line, []).append(t)
+    return lines
+
+
+def excluded_lines(tokens: list[Token], pages: list[int], heights: dict, options: CompareOptions) -> set[int]:
+    """Righe da escludere: intestazioni/piè ripetuti, numeri di pagina, fasce."""
+    out: set[int] = set()
+    if not (options.ignore_headers_footers or options.ignore_page_numbers):
+        return out
+    lines = _line_groups(tokens)
+    info = {}
+    for ln, toks in lines.items():
+        page = toks[0].page
+        h = heights.get(page, 842.0)
+        y0 = min(r[2] for t in toks for r in t.rects)
+        y1 = max(r[4] for t in toks for r in t.rects)
+        text = re.sub(r"\d+", "#", " ".join(t.text for t in toks)).strip()
+        in_band = y1 <= 0.15 * h or y0 >= 0.85 * h
+        info[ln] = (page, y0, y1, text, in_band, h)
+        if options.ignore_page_numbers and in_band and _PAGE_NUMBER.match(text):
+            out.add(ln)
+        if options.ignore_headers_footers:
+            top = options.band_top_mm * MM
+            bottom = options.band_bottom_mm * MM
+            if (top and y1 <= top) or (bottom and y0 >= h - bottom):
+                out.add(ln)
+    if options.ignore_headers_footers and len(pages) >= 2:
+        groups: dict[tuple, set[int]] = {}
+        for ln, (page, y0, _y1, text, in_band, _h) in info.items():
+            if in_band:
+                groups.setdefault((text, round(y0 / 6)), set()).add(page)
+        n_all = len(pages)
+        n_even = len([p for p in pages if p % 2 == 0])
+        n_odd = n_all - n_even
+        repeated = set()
+        for key, pg in groups.items():
+            even = len([p for p in pg if p % 2 == 0])
+            odd = len(pg) - even
+            if len(pg) >= 2 and (len(pg) * 2 >= n_all or (n_even >= 2 and even * 2 >= n_even and even >= 2)
+                                 or (n_odd >= 2 and odd * 2 >= n_odd and odd >= 2)):
+                repeated.add(key)
+        for ln, (page, y0, _y1, text, in_band, _h) in info.items():
+            if in_band and (text, round(y0 / 6)) in repeated:
+                out.add(ln)
+    return out
+
+
+def _inside(r: tuple, area: tuple) -> bool:
+    return r[0] >= area[0] - 0.5 and r[1] >= area[1] - 0.5 and r[2] <= area[2] + 0.5 and r[3] <= area[3] + 0.5
+
+
+def apply_exclusions(tokens: list[Token], pages: list[int], heights: dict, options: CompareOptions) -> list[Token]:
+    drop = excluded_lines(tokens, pages, heights, options)
+    out = []
+    for t in tokens:
+        if t.line in drop:
+            continue
+        areas = options.excluded_areas(t.page)
+        if areas and all(any(_inside(r[1:], a) for a in areas) for r in t.rects):
+            continue
+        out.append(t)
+    return out
+
+
+def excluded_boxes(tokens_all: list[Token], kept: list[Token], page: int) -> list[tuple]:
+    """Riquadri del testo escluso su una pagina (per scartare anche le differenze visive)."""
+    kept_ids = {id(t) for t in kept}
+    return [r[1:] for t in tokens_all if id(t) not in kept_ids for r in t.rects if r[0] == page]
+
+
+def _center_in(r: tuple, areas: list[tuple]) -> bool:
+    cx, cy = (r[0] + r[2]) / 2, (r[1] + r[3]) / 2
+    return any(a[0] <= cx <= a[2] and a[1] <= cy <= a[3] for a in areas)
 
 
 # =============================================================================
@@ -1033,6 +1137,15 @@ def _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, re
             result.warnings.append(_("Testo non decodificabile a pagina {n} di A.").format(n=p + 1))
         for p in bad_b:
             result.warnings.append(_("Testo non decodificabile a pagina {n} di B.").format(n=p + 1))
+        raw_a, raw_b = ta, tb
+        ta = apply_exclusions(ta, info_a.pages, heights_a, options)
+        tb = apply_exclusions(tb, info_b.pages, heights_b, options)
+        result.excluded_a = {}
+        result.excluded_b = {}
+        for p in info_a.pages:
+            result.excluded_a[p] = excluded_boxes(raw_a, ta, p)
+        for p in info_b.pages:
+            result.excluded_b[p] = excluded_boxes(raw_b, tb, p)
         ta = _apply_key(ta, options)
         tb = _apply_key(tb, options)
         progress.update(0.3, _("Confronto del testo…"))
@@ -1125,7 +1238,11 @@ def visual_pair_differences(doc_a, pa: int, doc_b, pb: int, options: CompareOpti
         msg = _("Pagine disallineate: pagina {a} di A e pagina {b} di B.").format(a=pa + 1, b=pb + 1)
         if msg not in result.warnings:
             result.warnings.append(msg)
+    skip_a = options.excluded_areas(pa) + [tuple(x) for x in result.excluded_a.get(pa, [])]
+    skip_b = options.excluded_areas(pb) + [tuple(x) for x in result.excluded_b.get(pb, [])]
     for r_a, r_b, area in zip(vr.regions_a, vr.regions_b, vr.areas):
+        if (skip_a and _center_in(r_a, skip_a)) or (skip_b and _center_in(r_b, skip_b)):
+            continue
         out.append(Difference(VISUAL, subtype="region", rects_a=[(pa, *r_a)], rects_b=[(pb, *r_b)], area=area,
                               detail=_("area variata {p}%").format(p=f"{area:.2f}".replace(".", ","))))
     return out

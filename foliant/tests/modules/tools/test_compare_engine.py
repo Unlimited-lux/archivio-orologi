@@ -379,3 +379,44 @@ def test_session_roundtrip_keeps_offsets(pdf_builder):
     back = json.loads(json.dumps(data))
     assert ce.parse_offsets(back) == {(0, 0): (3 * MM, 0.0)}
     assert ce.CompareOptions.from_dict(back["options"]) == r.options
+
+
+# ----------------------------------------------------------------- CMP-08
+def _footer(date):
+    def extra(page, i):
+        page.insert_text((72, 810), f"Stampato il {date}", fontsize=9)
+        page.insert_text((500, 810), f"Pagina {i + 1}", fontsize=9)
+    return extra
+
+
+def test_ignore_headers_footers(pdf_builder):
+    pages = [page_lines(1), page_lines(2), page_lines(3), page_lines(4)]
+    a = pdf_builder(pages, extra=_footer("27/10/2026"))
+    b = pdf_builder(pages, extra=_footer("28/10/2026"))
+    assert run(a, b).differences
+    assert run(a, b, ignore_headers_footers=True).differences == []
+
+
+def test_ignore_page_numbers(pdf_builder):
+    def num(offset):
+        return lambda page, i: page.insert_text((290, 820), f"- {i + 1 + offset} -", fontsize=9)
+    pages = [page_lines(1), page_lines(2)]
+    a = pdf_builder(pages, extra=num(0))
+    b = pdf_builder(pages, extra=num(4))
+    assert run(a, b, mode=ce.MODE_TEXT).differences
+    assert run(a, b, mode=ce.MODE_TEXT, ignore_page_numbers=True).differences == []
+
+
+def test_exclusion_area_on_all_pages(pdf_builder):
+    def stamp(date):
+        def extra(page, i):
+            page.insert_text((420, 760), f"Rev. {date}", fontsize=10)
+            page.draw_rect(pymupdf.Rect(410, 740, 560, 780), color=(0, 0, 0), width=1 if date == "A" else 2.5)
+        return extra
+    pages = [page_lines(1), page_lines(2)]
+    a = pdf_builder(pages, extra=stamp("A"))
+    b = pdf_builder(pages, extra=stamp("B"))
+    assert run(a, b, dpi=72).differences
+    r = run(a, b, dpi=72, exclusions=[[-1, 400, 730, 570, 790]])
+    assert r.differences == []
+    assert any("Aree escluse" in c for c in r.options.criteria())
