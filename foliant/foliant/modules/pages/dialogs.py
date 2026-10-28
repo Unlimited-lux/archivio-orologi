@@ -156,6 +156,7 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Fattura n\\. (\\d+)": "Invoice no\\. (\\d+)",
     "Il documento ha una sola pagina: non c'è nulla da dividere.": "The document has only one page: there is nothing to split.",
     "Cerca il testo solo nel quarto superiore della pagina": "Search the text only in the top quarter of the page",
     "OK": "OK",
@@ -807,7 +808,7 @@ class SplitDialog(BaseDialog):
         add("size", _("Per dimensione massima (MB)"), self.size_mb)
         add("blank", _("Alle pagine vuote (scartate)"))
         self.pattern = QLineEdit()
-        self.pattern.setPlaceholderText(r"Fattura n\. (\d+)")
+        self.pattern.setPlaceholderText(_("Fattura n\\. (\\d+)"))
         add("text", _("Alle pagine che contengono il testo (espressione regolare)"), self.pattern)
         self.rbs["bookmarks"].setEnabled(self.has_toc)
         self.rbs["every"].setChecked(True)
