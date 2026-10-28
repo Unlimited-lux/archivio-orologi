@@ -18,7 +18,7 @@ from foliant.i18n import _
 from .digital import CertInfo, SignError, cert_info_from_der
 
 __all__ = ["data_dir", "IDRegistry", "IDEntry", "TrustStore", "TrustedCert", "TSAConfig", "TSAServer",
-           "StoreError", "SCOPES"]
+           "StoreError", "SCOPES", "AppearanceProfile", "AppearanceProfiles"]
 
 
 class StoreError(SignError):
@@ -438,7 +438,86 @@ class TSAConfig:
         return next((s for s in self.list() if s.default), None)
 
 
+# --------------------------------------------------------------------------- #
+# Profili di aspetto della firma digitale (SIG-09)
+# --------------------------------------------------------------------------- #
+
+LAYOUTS = ("grafica_testo", "testo", "nome_grande", "grafica")
+SHOW_ITEMS = ("nome", "data", "motivo", "luogo", "dn", "etichette")
+
+
+@dataclass
+class AppearanceProfile:
+    name: str
+    layout: str = "grafica_testo"
+    show: list = None
+    graphic: str | None = None     # id dell'elemento della libreria firme
+    font_size: float = 10.0
+    default: bool = False
+
+    def __post_init__(self):
+        if self.show is None:
+            self.show = ["nome", "data", "motivo", "luogo", "etichette"]
+        if self.layout not in LAYOUTS:
+            self.layout = "grafica_testo"
+        self.show = [x for x in self.show if x in SHOW_ITEMS]
+
+    def appearance(self, image_png: bytes | None = None) -> dict:
+        d = {"layout": self.layout, "show": list(self.show), "font_size": self.font_size}
+        if image_png and self.layout in ("grafica", "grafica_testo"):
+            d["image_png"] = image_png
+        return d
+
+
+class AppearanceProfiles:
+    """Profili di aspetto salvati con nome in JSON nella cartella dati."""
+
+    _FIELDS = ("name", "layout", "show", "graphic", "font_size", "default")
+
+    def __init__(self, path: Path | None = None):
+        self.path = Path(path) if path else _sign_dir() / "appearances.json"
+
+    def list(self) -> list[AppearanceProfile]:
+        raw = _read_json(self.path, {"profiles": []})
+        items = raw.get("profiles", []) if isinstance(raw, dict) else []
+        out = []
+        for it in items:
+            if isinstance(it, dict) and it.get("name"):
+                out.append(AppearanceProfile(**{k: it[k] for k in self._FIELDS if k in it}))
+        return out
+
+    def _save(self, profiles: list[AppearanceProfile]) -> None:
+        _write_json(self.path, {"version": 1, "profiles": [
+            {k: getattr(p, k) for k in self._FIELDS} for p in profiles]})
+
+    def save(self, profile: AppearanceProfile) -> AppearanceProfile:
+        if not profile.name.strip():
+            raise StoreError(_("Il nome dell'aspetto non può essere vuoto"))
+        profiles = [p for p in self.list() if p.name != profile.name]
+        if profile.default or not any(p.default for p in profiles):
+            for p in profiles:
+                p.default = False
+            profile.default = True
+        profiles.append(profile)
+        self._save(profiles)
+        return profile
+
+    def remove(self, name: str) -> bool:
+        profiles = self.list()
+        keep = [p for p in profiles if p.name != name]
+        if len(keep) == len(profiles):
+            return False
+        if keep and not any(p.default for p in keep):
+            keep[0].default = True
+        self._save(keep)
+        return True
+
+    def default(self) -> AppearanceProfile | None:
+        return next((p for p in self.list() if p.default), None)
+
+
 TRANSLATIONS_EN = {
+    "Il nome dell'aspetto non può essere vuoto": "The appearance name cannot be empty",
     "Impossibile creare la cartella {path}": "Cannot create folder {path}",
     "Impossibile scrivere il file {path}": "Cannot write file {path}",
     "Impossibile leggere il file {path}": "Cannot read file {path}",

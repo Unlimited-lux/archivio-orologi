@@ -63,6 +63,9 @@ class DigitalSignDialog(QDialog):
         row.addWidget(self.id_combo, 1)
         self.browse = QPushButton(_("Sfoglia…"))
         row.addWidget(self.browse)
+        self.create_id = QPushButton(_("Crea…"))
+        self.create_id.setToolTip(_("Crea un ID digitale autofirmato"))
+        row.addWidget(self.create_id)
         form.addRow(_("ID digitale:"), row)
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
@@ -85,6 +88,8 @@ class DigitalSignDialog(QDialog):
         form.addRow(_("Luogo:"), self.location)
         self.contact = QLineEdit(str(controller.ctx.settings().value("sign/contact", "") or ""))
         form.addRow(_("Contatto:"), self.contact)
+        self.profile_combo = QComboBox()
+        self.profile_combo.addItem(_("Personalizzato"), None)
         self.layout_combo = QComboBox()
         for key, label in [("grafica_testo", _("Firma grafica e testo")), ("testo", _("Solo testo")),
                            ("nome_grande", _("Nome grande e dettagli")), ("grafica", _("Solo firma grafica"))]:
@@ -98,12 +103,35 @@ class DigitalSignDialog(QDialog):
                     self.graphic_combo.addItem(e.name, e.id)
                     if e.default:
                         self.graphic_combo.setCurrentIndex(self.graphic_combo.count() - 1)
+        self.show_checks: dict[str, QCheckBox] = {}
+        show_row = QHBoxLayout()
+        for key, label in [("nome", _("Nome")), ("data", _("Data")), ("motivo", _("Motivo")),
+                           ("luogo", _("Luogo")), ("dn", _("Nome distinto")), ("etichette", _("Etichette"))]:
+            cb = QCheckBox(label)
+            cb.setChecked(key != "dn")
+            self.show_checks[key] = cb
+            show_row.addWidget(cb)
+        self.save_profile = QPushButton(_("Salva come aspetto…"))
+        for p in store.AppearanceProfiles().list():
+            missing = p.graphic and self.graphic_combo.findData(p.graphic) < 0
+            self.profile_combo.addItem(p.name + (_(" (da completare)") if missing else ""), p)
+            if p.default:
+                self.profile_combo.setCurrentIndex(self.profile_combo.count() - 1)
+        self.profile_combo.currentIndexChanged.connect(lambda _i: self._apply_profile())
+        self.save_profile.clicked.connect(self._save_profile)
+        self._apply_profile()
         if visible:
-            form.addRow(_("Aspetto:"), self.layout_combo)
+            prow = QHBoxLayout()
+            prow.addWidget(self.profile_combo, 1)
+            prow.addWidget(self.save_profile)
+            form.addRow(_("Profilo aspetto:"), prow)
+            form.addRow(_("Disposizione:"), self.layout_combo)
             form.addRow(_("Firma grafica:"), self.graphic_combo)
+            form.addRow(_("Mostra:"), show_row)
         else:
-            self.layout_combo.hide()
-            self.graphic_combo.hide()
+            for w in (self.profile_combo, self.save_profile, self.layout_combo, self.graphic_combo,
+                      *self.show_checks.values()):
+                w.hide()
         self.tsa = QComboBox()
         self.tsa.addItem(_("Nessuna marca temporale"), None)
         cfg = store.TSAConfig()
@@ -142,6 +170,7 @@ class DigitalSignDialog(QDialog):
         self._paths: dict[int, str] = {}
         self._reload_ids()
         self.browse.clicked.connect(self._browse)
+        self.create_id.clicked.connect(self._create_id)
         self.password.editingFinished.connect(self._preview)
 
     def _reload_ids(self, select_path: str | None = None) -> None:
@@ -153,9 +182,16 @@ class DigitalSignDialog(QDialog):
                 self.id_combo.model().item(self.id_combo.count() - 1).setEnabled(False)
             if (select_path and e.path == select_path) or (not select_path and e.default and not e.missing):
                 self.id_combo.setCurrentIndex(self.id_combo.count() - 1)
+        if self.id_combo.count() == 0 and not select_path:
+            self.id_combo.setPlaceholderText(_("Nessun ID digitale: usa «Sfoglia…» o «Crea…»"))
         if select_path and self.id_combo.findData(select_path) < 0:
             self.id_combo.addItem(Path(select_path).name, select_path)
             self.id_combo.setCurrentIndex(self.id_combo.count() - 1)
+
+    def _create_id(self) -> None:
+        dlg = SelfSignedDialog(self, self.c)
+        if dlg.exec() and dlg.created_path:
+            self._reload_ids(dlg.created_path)
 
     def _browse(self) -> None:
         path, _f = QFileDialog.getOpenFileName(self, _("Scegli l'ID digitale"), "", _(P12_FILTER))
@@ -220,8 +256,7 @@ class DigitalSignDialog(QDialog):
                 return
         appearance = None
         if self.visible:
-            appearance = {"layout": self.layout_combo.currentData(),
-                          "show": ["nome", "data", "motivo", "luogo", "etichette"]}
+            appearance = self.current_profile().appearance()
             eid = self.graphic_combo.currentData()
             if eid and appearance["layout"] in ("grafica", "grafica_testo"):
                 png = self._graphic_png(eid)
@@ -240,6 +275,38 @@ class DigitalSignDialog(QDialog):
         s.setValue("sign/location", self.location.text().strip())
         s.setValue("sign/contact", self.contact.text().strip())
         self.accept()
+
+    def current_profile(self, name: str = ""):
+        return self.store.AppearanceProfile(
+            name=name, layout=self.layout_combo.currentData(),
+            show=[k for k, cb in self.show_checks.items() if cb.isChecked()],
+            graphic=self.graphic_combo.currentData())
+
+    def _apply_profile(self) -> None:
+        p = self.profile_combo.currentData()
+        if p is None:
+            return
+        i = self.layout_combo.findData(p.layout)
+        if i >= 0:
+            self.layout_combo.setCurrentIndex(i)
+        j = self.graphic_combo.findData(p.graphic)
+        self.graphic_combo.setCurrentIndex(max(0, j))
+        for k, cb in self.show_checks.items():
+            cb.setChecked(k in p.show)
+
+    def _save_profile(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, _("Salva aspetto"), _("Nome dell'aspetto:"))
+        if not ok or not name.strip():
+            return
+        prof = self.current_profile(name.strip())
+        try:
+            self.store.AppearanceProfiles().save(prof)
+        except self.store.StoreError as e:
+            self.error.setText(str(e))
+            return
+        self.profile_combo.addItem(prof.name, prof)
+        self.profile_combo.setCurrentIndex(self.profile_combo.count() - 1)
 
     def _graphic_png(self, entry_id: str) -> bytes | None:
         """PNG della firma grafica (tracciati resi in immagine) per l'aspetto."""
@@ -713,14 +780,20 @@ TRANSLATIONS_EN = {
     "Motivo:": "Reason:", "Luogo:": "Location:", "Contatto:": "Contact:",
     "Firma grafica e testo": "Graphic signature and text", "Solo testo": "Text only",
     "Nome grande e dettagli": "Large name and details", "Solo firma grafica": "Graphic signature only",
-    "Nessuna": "None", "Aspetto:": "Appearance:", "Firma grafica:": "Graphic signature:",
+    "Nessuna": "None", "Aspetto:": "Appearance:", "Personalizzato": "Custom", "Nome": "Name", "Data": "Date",
+    "Motivo": "Reason", "Luogo": "Location", "Nome distinto": "Distinguished name", "Etichette": "Labels",
+    "Salva come aspetto…": "Save as appearance…", " (da completare)": " (to be completed)",
+    "Profilo aspetto:": "Appearance profile:", "Disposizione:": "Layout:", "Mostra:": "Show:",
+    "Salva aspetto": "Save appearance", "Nome dell'aspetto:": "Appearance name:", "Firma grafica:": "Graphic signature:",
     "Nessuna marca temporale": "No timestamp",
     "Il campo richiede una marca temporale da questo server.": "The field requires a timestamp from this server.",
     "Marca temporale:": "Timestamp:", "Modifiche consentite:": "Allowed changes:",
     "Firma comunque con un certificato scaduto (solo per prove: la firma risulterà non valida)":
         "Sign anyway with an expired certificate (testing only: the signature will be invalid)",
     "Certifica e salva…": "Certify and save…", "Firma e salva…": "Sign and save…", "Annulla": "Cancel",
-    " (file non trovato)": " (file not found)", "Scegli l'ID digitale": "Choose the digital ID",
+    " (file non trovato)": " (file not found)", "Crea…": "Create…",
+    "Crea un ID digitale autofirmato": "Create a self-signed digital ID",
+    "Nessun ID digitale: usa «Sfoglia…» o «Crea…»": "No digital ID: use “Browse…” or “Create…”", "Scegli l'ID digitale": "Choose the digital ID",
     "Scegli un ID digitale (file .p12 o .pfx).": "Choose a digital ID (.p12 or .pfx file).",
     "Titolare: {s}\nEmittente: {iss}\nValido dal {a} al {b}\nUsi della chiave: {ku}":
         "Holder: {s}\nIssuer: {iss}\nValid from {a} to {b}\nKey usage: {ku}",

@@ -450,3 +450,33 @@ def test_certified_no_changes_blocks_graphic(window, monkeypatch, sample_pdf, tm
     monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(m))
     c.start_digital_sign(False)
     assert errors and "nessuna modifica" in errors[0]
+
+
+def test_appearance_profiles(window, qtbot, monkeypatch, sample_pdf, id_a):
+    """SIG-09: profilo salvato con nome, riapplicato; grafica mancante → «da completare»."""
+    from PySide6.QtWidgets import QInputDialog
+
+    from foliant.modules.sign.ui_digital import DigitalSignDialog
+    window.open_path(sample_pdf)
+    dlg = DigitalSignDialog(window, _ctl(window))
+    qtbot.addWidget(dlg)
+    dlg.layout_combo.setCurrentIndex(dlg.layout_combo.findData("nome_grande"))
+    dlg.show_checks["luogo"].setChecked(False)
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Contratti", True))
+    dlg._save_profile()
+    profiles = store.AppearanceProfiles().list()
+    assert [p.name for p in profiles] == ["Contratti"] and profiles[0].default
+    assert profiles[0].layout == "nome_grande" and "luogo" not in profiles[0].show
+    store.AppearanceProfiles().save(store.AppearanceProfile("Logo", graphic="non-esiste"))
+    dlg2 = DigitalSignDialog(window, _ctl(window))
+    qtbot.addWidget(dlg2)
+    texts = [dlg2.profile_combo.itemText(i) for i in range(dlg2.profile_combo.count())]
+    assert any("da completare" in t for t in texts)
+    dlg2.profile_combo.setCurrentIndex(texts.index("Contratti"))
+    assert dlg2.layout_combo.currentData() == "nome_grande"
+    assert not dlg2.show_checks["luogo"].isChecked()
+    dlg2._reload_ids(str(id_a[0]))
+    dlg2.password.setText(PASSWORD)
+    dlg2._accept()
+    assert dlg2.options.appearance["layout"] == "nome_grande"
+    assert "luogo" not in dlg2.options.appearance["show"]
