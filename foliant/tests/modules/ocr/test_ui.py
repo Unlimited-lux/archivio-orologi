@@ -63,7 +63,7 @@ def test_proposta_pagine_3_e_7(window, qtbot, ten_pages, monkeypatch):
     wait_analysis(qtbot, view)
     bar = ctl.state(view).bar
     assert ctl.state(view).detected == [2, 6]
-    assert "(2)" in bar.label.text()
+    assert "(2)" in bar.text
     seen = {}
 
     def fake_exec(dlg):
@@ -71,9 +71,9 @@ def test_proposta_pagine_3_e_7(window, qtbot, ten_pages, monkeypatch):
         seen["text"] = dlg.pages.currentText()
         return QDialog.DialogCode.Rejected
     monkeypatch.setattr(dialogs.OcrDialog, "exec", fake_exec)
-    bar.btn_run.click()
+    bar.trigger("Esegui OCR")
     assert seen["pages"] == [2, 6] and "3, 7" in seen["text"]
-    bar.btn_later.click()
+    bar.trigger("Non ora")
     assert not bar.isVisible()
 
 
@@ -100,7 +100,7 @@ def test_rilevamento_disattivato_e_non_chiedere_piu(window, qtbot, scan_two):
     ctl.actions["detect"].setChecked(True)
     ctl.start_analysis(view)
     qtbot.waitUntil(lambda: ctl.state(view).bar is not None and ctl.state(view).bar.isVisible(), timeout=3000)
-    ctl.state(view).bar.btn_never.click()
+    ctl.state(view).bar.trigger("Non chiedere più per questo documento")
     view.document._saved_state = view.document._state
     window.close_view(view)
     view = window.open_path(scan_two)
@@ -120,7 +120,7 @@ def test_proposta_al_clic_su_pagina_immagine(window, qtbot, scan_two):
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=r.center().toPoint())
     bar = ctl.state(view).bar
     assert bar.isVisible() and bar.page == 0
-    assert "modificabile" in bar.btn_run.text()
+    assert bar.actions[0][0] == "Rendi modificabile questa pagina"
 
 
 def test_ocr_modificabile_annulla_e_file_intatto(window, qtbot, scan_two):
@@ -641,7 +641,7 @@ def test_proposta_su_livello_ocr_con_strumento_modifica(window, qtbot, scan_two,
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=view.page_rect(0).center().toPoint())
     bar = ctl.state(view).bar
     assert bar is not None and bar.isVisible() and bar.page == 0
-    assert "invisibile" in bar.label.text()
+    assert "invisibile" in bar.text
     view.set_tool(None)
 
 
@@ -725,21 +725,51 @@ def test_ocr_in_background_documento_consultabile(window, qtbot, scan_two):
     assert view.document.page_text(0).strip() == "" and view.document.page_text(1).strip() == ""
 
 
-def test_ocr_in_background_documento_modificato_nel_frattempo(window, qtbot, scan_two, monkeypatch):
+def test_ocr_in_background_documento_bloccato(window, qtbot, scan_two, monkeypatch):
+    """Durante l'OCR in background il documento è bloccato (consultabile, non modificabile);
+    alla fine si sblocca e il risultato si applica senza conferme."""
+    from foliant.api import OperationCancelled
     view = window.open_path(scan_two)
     ctl = ocr_controller()
     asked = []
     monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or True)
     ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
-    with view.document.change("ruota") as pdf:          # modifica mentre l'OCR lavora
+    assert view.document.locked and "Riconoscimento" in view.document.locked_reason
+    with pytest.raises(OperationCancelled):
+        with view.document.change("ruota") as pdf:
+            pdf[1].set_rotation(90)
+    _wait_job(qtbot, ctl, view)
+    assert not view.document.locked and not asked
+    assert "compravendita" in view.document.page_text(0) and view.document.page_text(1).strip()
+
+
+def test_ocr_in_background_sblocco_su_errore_e_annullamento(window, qtbot, scan_two, monkeypatch):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    errors = []
+    monkeypatch.setattr(ctl.ctx, "error", lambda t, m: errors.append(m))
+
+    def boom(*a, **k):
+        raise RuntimeError("guasto")
+    monkeypatch.setattr(engine, "recognize_document", boom)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    _wait_job(qtbot, ctl, view)
+    assert errors and not view.document.locked
+
+
+def test_ocr_in_background_documento_modificato_senza_blocco(window, qtbot, scan_two, monkeypatch):
+    """Ripiego senza blocco (nucleo che non lo offre): solo le pagine non cambiate ricevono il testo."""
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    asked = []
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or True)
+    monkeypatch.setattr(type(view.document), "set_locked", lambda self, reason: None)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    with view.document.change("ruota") as pdf:
         pdf[1].set_rotation(90)
     _wait_job(qtbot, ctl, view)
     assert asked and "2" in asked[0]
-    assert "compravendita" in view.document.page_text(0)
-    assert view.document.page_text(1).strip() == ""      # pagina cambiata: non toccata
-    from foliant.api import ENGINE_LOCK
-    with ENGINE_LOCK:
-        assert view.document.pdf[1].rotation == 90
+    assert "compravendita" in view.document.page_text(0) and view.document.page_text(1).strip() == ""
 
 
 def test_ocr_in_background_annullato_o_chiuso(window, qtbot, scan_two, monkeypatch):
@@ -922,3 +952,22 @@ def test_ocr_in_background_pausa_e_ripresa(window, qtbot, tmp_path):
     assert ctl.toggle_pause(view) is False
     _wait_job(qtbot, ctl, view)
     assert all(view.document.page_text(i).strip() for i in range(4))
+
+
+def test_intervallo_pagine_selezionate(window, tmp_path, monkeypatch):
+    """OCR-04: l'intervallo «Pagine selezionate» viene dalla selezione delle miniature (ctx.selected_pages)."""
+    imgs = [scan_image(lines=[f"Pagina {n}"], dpi=72) for n in range(5)]
+    view = window.open_path(image_pdf(tmp_path / "c.pdf", imgs, dpi=72))
+    ctl = ocr_controller()
+    monkeypatch.setattr(ctl.ctx, "selected_pages", lambda v=None: [1, 3, 4])
+    seen = {}
+
+    def fake_exec(dlg):
+        i = dlg.pages.findData("selected")
+        seen["label"] = dlg.pages.itemText(i)
+        dlg.pages.setCurrentIndex(i)
+        seen["pages"] = dlg.selected_pages()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(dialogs.OcrDialog, "exec", fake_exec)
+    ctl.open_dialog(view)
+    assert seen["pages"] == [1, 3, 4] and "2, 4-5" in seen["label"]
