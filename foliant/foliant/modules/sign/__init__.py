@@ -121,6 +121,8 @@ def register(ctx: Context) -> None:
     c.panel = panel
     ctx.add_sidebar_panel("firme", _("Firme"), "file-badge", panel, order=90)
     ctx.add_view_menu_provider(c.menu_provider)
+    # per il modulo Moduli: clic su un campo firma vuoto → procedura di firma con quel campo
+    ctx.request_signature = c.request_signature
     if hasattr(ctx, "add_preferences_page"):
         from .ui_digital import SignPreferences
         ctx.add_preferences_page(_("Firma"), lambda parent: SignPreferences(parent, c), 90)
