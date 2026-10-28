@@ -370,6 +370,7 @@ class FieldMenuButton(QToolButton):
         for token, desc in fields.MENU:
             if token in ("{n}", "{segnalibro}", "{intervallo}", "{bates}"):
                 continue  # campi dei nomi di file, non delle pagine
+            token = fields.display_code(token)
             act = menu.addAction(f"{_(desc)}  {token}")
             act.triggered.connect(lambda _c=False, t=token: self.insert(t))
         self.setMenu(menu)

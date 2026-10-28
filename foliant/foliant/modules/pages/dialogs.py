@@ -71,7 +71,8 @@ TRANSLATIONS = {
     "Un file per pagina": "One file per page",
     "Un file per intervallo (separati da ;)": "One file per range (separated by ;)",
     "Nome dei file:": "File names:",
-    "Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}": "Placeholders: {nome}, {pagina}, {n}, {inizio}, {fine}",
+    "Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}": "Placeholders: {name}, {page}, {n}, {start}, {end}",
+    "{nome}_p{pagina}": "{name}_p{page}",
     "Elimina le pagine dal documento dopo l'estrazione": "Delete the pages from the document after extracting",
     "Apri il risultato": "Open the result",
     "Estrazione in corso…": "Extracting…",
@@ -91,7 +92,7 @@ TRANSLATIONS = {
     "Alle pagine che contengono il testo (espressione regolare)": "At pages containing the text (regular expression)",
     "Raccogli le pagine escluse in un file aggiuntivo": "Collect the excluded pages in an extra file",
     "Sovrascrivi i file esistenti": "Overwrite existing files",
-    "Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}": "Placeholders: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}",
+    "Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}": "Placeholders: {name}, {n}, {start}, {end}, {bookmark}, {match1}",
     "Si otterranno {k} file: {sizes}": "{k} files will be produced: {sizes}",
     "Divisione in corso…": "Splitting…",
     "Calcolo della divisione…": "Computing the split…",
@@ -170,7 +171,7 @@ TRANSLATIONS = {
     "Inserisci campo": "Insert field",
     "Esempio: {f}": "Example: {f}",
     "Capitolo": "Chapter",
-    "{nome}_parte{n}": "{nome}_part{n}",
+    "{nome}_parte{n}": "{name}_part{n}",
     "Fattura n\\. (\\d+)": "Invoice no\\. (\\d+)",
     "Il documento ha una sola pagina: non c'è nulla da dividere.": "The document has only one page: there is nothing to split.",
     "Cerca il testo solo nel quarto superiore della pagina": "Search the text only in the top quarter of the page",
@@ -341,6 +342,7 @@ class TemplateField(QWidget):
         self.button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self.button)
         for code, label in F.MENU:
+            code = F.display_code(code)
             act = menu.addAction(f"{_(label)}  {code}")
             act.triggered.connect(lambda _c=False, code=code: self.insert(code))
         self.button.setMenu(menu)
@@ -741,7 +743,7 @@ class ExtractDialog(BaseDialog):
             rb.toggled.connect(self._update)
         self.layout_.addWidget(box)
         form = QFormLayout()
-        self.template_field = TemplateField("{nome}_p{pagina}", Path(document.display_name).stem)
+        self.template_field = TemplateField(_("{nome}_p{pagina}"), Path(document.display_name).stem)
         self.template = self.template_field.edit
         self.template.setToolTip(_("Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}"))
         self.template_field.changed.connect(lambda: self._update())
@@ -846,6 +848,9 @@ def pdf_count(document: Document) -> int:
 # =========================================================================
 # PAG-20…23 — dividi
 # =========================================================================
+
+from . import fields as F  # noqa: E402
+
 
 class SplitDialog(BaseDialog):
     METHODS = ("every", "ranges", "parts", "bookmarks", "size", "blank", "text")
@@ -1031,8 +1036,8 @@ class SplitDialog(BaseDialog):
             self.set_error(None if self.pattern.text() else _("Indica almeno un intervallo."))
             return
         part = _("{nome}_parte{n}")
-        defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
-        if self.template.text() in (part, "{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
+        defaults = {"bookmarks": F.display_code("{segnalibro}"), "text": F.display_code("{nome}_{match1}")}
+        if self.template.text() in (part, "{nome}_parte{n}", *defaults.values(), "{segnalibro}", "{nome}_{match1}"):
             self.template.setText(defaults.get(m, part))
         if self.template_field.error():
             self.preview.setText("")

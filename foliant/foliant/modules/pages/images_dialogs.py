@@ -112,7 +112,8 @@ TRANSLATIONS = {
     "Sfoglia…": "Browse…",
     "Scegli la cartella di destinazione": "Choose the destination folder",
     "Modello del nome": "Name template",
-    "Segnaposto: {nome} nome del documento, {pagina} numero di pagina.": "Placeholders: {nome} document name, {pagina} page number.",
+    "Segnaposto: {nome} nome del documento, {pagina} numero di pagina.": "Placeholders: {name} document name, {page} page number.",
+    "{nome}_p{pagina}": "{name}_p{page}",
     "Esporta": "Export",
     "Esportazione immagini…": "Exporting images…",
     "Risoluzione troppo alta": "Resolution too high",
@@ -721,7 +722,7 @@ class ExportImagesDialog(QDialog):
         folder_row.addWidget(self.folder_edit, 1)
         folder_row.addWidget(self.browse_btn)
         form.addRow(_("Cartella"), folder_row)
-        self.template_edit = QLineEdit("{nome}_p{pagina}")
+        self.template_edit = QLineEdit(_("{nome}_p{pagina}"))
         form.addRow(_("Modello del nome"), self.template_edit)
         form.addRow("", _muted_label(_("Segnaposto: {nome} nome del documento, {pagina} numero di pagina.")))
         _uniform_fields(form)
