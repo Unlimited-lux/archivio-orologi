@@ -679,3 +679,35 @@ def test_damaged_library_item_reports_error(window, monkeypatch, sample_pdf):
     c.use_library_item(e.id)
     assert errors and "danneggiato" in errors[0]
     assert c.tool_for(view).pending is None
+
+
+def test_undo_redo_after_incremental_save(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """Annulla/ripeti dopo un salvataggio incrementale: ogni salvataggio conserva i byte
+    firmati come prefisso e la firma resta valida."""
+    store.TrustStore().add(id_a[1])
+    target = tmp_path / "ur.pdf"
+    view = _sign_file(window, monkeypatch, sample_pdf, target, id_a)
+    signed = target.read_bytes()
+    c = _ctl(window)
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "proceed")
+    doc = view.document
+    with doc.change("Nota") as pdf:
+        pdf[0].add_text_annot((300, 300), "Prima nota")
+    QApplication.processEvents()
+    assert window.save_view(view)
+    first = target.read_bytes()
+    assert doc.undo() and doc.is_modified
+    assert window.save_view(view)
+    second = target.read_bytes()
+    assert second.startswith(first) and first.startswith(signed)
+    assert digital.verify_pdf(second, trusted=[id_a[1]])[0].status == "valida"
+    import pymupdf as _p
+    assert len(list(_p.open(stream=second)[0].annots())) == 0
+    assert doc.redo()
+    assert window.save_view(view)
+    third = target.read_bytes()
+    assert third.startswith(second)
+    assert len(list(_p.open(stream=third)[0].annots())) == 1
+    st = digital.verify_pdf(third, trusted=[id_a[1]])
+    assert st[0].status == "valida", st[0].reasons + st[0].modification_details
+    assert c.state(view).statuses[0].status == "valida"

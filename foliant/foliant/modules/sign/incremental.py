@@ -100,7 +100,45 @@ def diff(orig: pymupdf.Document, current: pymupdf.Document) -> list[Change]:
             out.append(Change(x, cur, cur_stream, True, old))
         else:
             out.append(Change(x, cur, cur_stream, False))
+    # Una pagina che torna a riferire annotazioni già presenti in una revisione
+    # precedente (es. ripeti dopo un salvataggio) deve riscriverle: altrimenti i
+    # validatori vedono riferimenti «non giustificati» nella nuova revisione.
+    changed = {c.xref for c in out}
+    extra: list[int] = []
+    for c in list(out):
+        if not c.existed or not re.search(r"/Type\s*/Page\b", c.obj):
+            continue
+        added = _annot_refs(current, c.xref) - _annot_refs(orig, c.xref)
+        for a in sorted(added):
+            for ref in (a, *_popup_ref(current, a)):
+                if ref not in changed and ref not in skip and ref < current.xref_length():
+                    changed.add(ref)
+                    extra.append(ref)
+    for x in extra:
+        obj = _obj(current, x)
+        if obj and obj.strip() != "null":
+            out.append(Change(x, obj, _stream(current, x), x < n_orig, _obj(orig, x) if x < n_orig else None))
     return out
+
+
+def _annot_refs(pdf: pymupdf.Document, page_xref: int) -> set[int]:
+    try:
+        kind, val = pdf.xref_get_key(page_xref, "Annots")
+        if kind == "xref":
+            val = pdf.xref_object(int(val.split()[0]), compressed=True)
+        elif kind != "array":
+            return set()
+        return {int(m) for m in re.findall(r"(\d+)\s+0\s+R", val)}
+    except Exception:
+        return set()
+
+
+def _popup_ref(pdf: pymupdf.Document, xref: int) -> tuple[int, ...]:
+    try:
+        kind, val = pdf.xref_get_key(xref, "Popup")
+        return (int(val.split()[0]),) if kind == "xref" else ()
+    except Exception:
+        return ()
 
 
 def _trailer_key(pdf: pymupdf.Document, key: str) -> str:
