@@ -54,3 +54,12 @@ la soluzione locale si può togliere.
 
 13. **Zoom**: la specifica chiede limiti 1%–6400% e Ctrl+0 = adatta pagina, Ctrl+1 =
     dimensione reale; il nucleo usa 10%–800% e scorciatoie diverse.
+
+14. **Generatore di miniature per il file manager** (VIS-53): `packaging/install.sh` dovrebbe
+    installare un eseguibile `foliant-thumbnailer` che lancia
+    `python -m foliant.modules.viewer.thumbnailer "$@"` e il file
+    `~/.local/share/thumbnailers/foliant.thumbnailer` con il contenuto di
+    `thumbnailer.THUMBNAILER_ENTRY`.
+
+15. **Scorciatoie personalizzate** (VIS-52): l'identificativo di un comando è il suo testo;
+    servirebbe un id stabile per ogni `QAction` (es. `ctx.action(..., id="view.rotate")`).
