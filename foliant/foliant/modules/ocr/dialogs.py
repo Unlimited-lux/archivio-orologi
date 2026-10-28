@@ -123,7 +123,7 @@ class OcrDialog(QDialog):
     def __init__(self, parent, *, page_count: int, current_page: int, detected: list[int],
                  settings=None, mode: str = engine.SEARCHABLE, pages_text: str | None = None,
                  allow_text_mode: bool = True, infos: dict | None = None, page_image_cb=None,
-                 selected: list[int] | None = None):
+                 selected: list[int] | None = None, existing: str | None = None):
         super().__init__(parent)
         self.selected = sorted(set(selected or []))
         self.infos = infos or {}
@@ -194,8 +194,8 @@ class OcrDialog(QDialog):
         self.existing = QComboBox(self)
         self.existing.addItem(_("Salta le pagine che hanno già testo"), engine.SKIP)
         self.existing.addItem(_("Sostituisci il livello OCR esistente"), engine.REPLACE)
-        self.existing.addItem(_("Riconosci anche quelle (la pagina diventa un'immagine)"), engine.FORCE)
-        self.existing.setCurrentIndex(max(0, self.existing.findData(get("existing", engine.SKIP))))
+        self.existing.addItem(_("Forza OCR: riconosci anche quelle (la pagina diventa un'immagine)"), engine.FORCE)
+        self.existing.setCurrentIndex(max(0, self.existing.findData(existing or get("existing", engine.SKIP))))
         form.addRow(_("Pagine con testo:"), self.existing)
 
         self.dpi = QComboBox(self)

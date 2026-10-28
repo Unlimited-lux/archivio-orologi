@@ -460,7 +460,7 @@ def test_annulla_mantieni_pagine_completate(window, tmp_path, monkeypatch):
     ctl = ocr_controller()
     real = engine.recognize_document
 
-    def interrupted(pdf, opts, pages=None, progress=None):
+    def interrupted(pdf, opts, pages=None, progress=None, **kw):
         full = real(pdf, opts, [0], None)
         raise engine.OcrInterrupted(full)
     monkeypatch.setattr(engine, "recognize_document", interrupted)
@@ -971,3 +971,39 @@ def test_intervallo_pagine_selezionate(window, tmp_path, monkeypatch):
     monkeypatch.setattr(dialogs.OcrDialog, "exec", fake_exec)
     ctl.open_dialog(view)
     assert seen["pages"] == [1, 3, 4] and "2, 4-5" in seen["label"]
+
+
+def test_testo_non_estraibile_banner_e_forza(window, qtbot, tmp_path, monkeypatch):
+    """bug_09: il banner conta le pagine non estraibili, il dialogo preseleziona «Forza OCR» e
+    l'avvio chiede la conferma elencando quelle pagine."""
+    from .conftest import unextractable_pdf
+    view = window.open_path(unextractable_pdf(tmp_path / "u.pdf"))
+    ctl = ocr_controller()
+    wait_analysis(qtbot, view)
+    bar = ctl.state(view).bar
+    assert bar.isVisible() and "non estraibile" in bar.text and "scannerizzat" not in bar.text
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["existing"] = dlg.existing.currentData()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(dialogs.OcrDialog, "exec", fake_exec)
+    bar.trigger("Esegui OCR")
+    assert seen["existing"] == engine.FORCE
+    asked = []
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or False)
+    assert ctl.run(view, engine.OcrOptions(languages=["ita"], existing_text=engine.FORCE), [0], preview=False) is None
+    assert asked and "(1)" in asked[0] and not view.document.is_modified
+
+
+def test_messaggio_pagine_vuote_distinto(window, tmp_path, monkeypatch):
+    doc = pymupdf.open()
+    doc.new_page()
+    path = tmp_path / "vuota.pdf"
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    ctl = ocr_controller()
+    infos = []
+    monkeypatch.setattr(ctl.ctx, "info", lambda t, m: infos.append(m))
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    assert infos and "vuote" in infos[0] and "Forza OCR" not in infos[0]
