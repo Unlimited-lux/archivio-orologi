@@ -349,6 +349,26 @@ def _style_lines(lines: list[Line], color_img: np.ndarray | None, gray: np.ndarr
                 ln.family = top
 
 
+def separate_words(lines: list[Line], gray: np.ndarray) -> None:
+    """Tesseract allarga i riquadri delle parole brevi («i», «e») fin sopra la parola precedente:
+    il riquadro si riduce al primo inchiostro dopo la colonna vuota che separa le due parole.
+    Senza, nel testo invisibile le parole si sovrappongono e i lettori le uniscono («coprei»)."""
+    h, w = gray.shape[:2]
+    for ln in lines:
+        for prev, word in zip(ln.words, ln.words[1:]):
+            px1 = int(prev.bbox[2])
+            x0, y0, x1, y1 = (int(v) for v in word.bbox)
+            if x0 >= px1 or px1 >= x1:
+                continue
+            band = gray[max(0, y0):min(h, y1), max(0, px1):min(w, x1)]
+            if band.size == 0:
+                continue
+            ink = (band < 128).any(axis=0)
+            cols = np.nonzero(ink)[0]
+            if cols.size:
+                word.bbox = (float(px1 + cols[0]), word.bbox[1], word.bbox[2], word.bbox[3])
+
+
 def _reading_score(gray: np.ndarray, languages: list[str], dpi: float, cancelled) -> float:
     lines = recognize(gray, languages, dpi=int(round(dpi)), psm=3, cancelled=cancelled, timeout=60)
     return sum(w.conf * len(w.text) for ln in lines for w in ln.words if w.conf > 50 and len(w.text) > 1)
@@ -415,6 +435,7 @@ def recognize_array(img: np.ndarray, languages: list[str], dpi: float, popts: Pr
     if cancelled is not None and cancelled():
         raise OcrCancelled()
     lines = recognize(prep.gray, languages, dpi=int(round(dpi)), psm=psm, cancelled=cancelled, timeout=timeout)
+    separate_words(lines, prep.gray)
     color = None
     if keep_color:
         color = warp(img if img.ndim == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2RGB), prep.affine, prep.size)
@@ -987,6 +1008,9 @@ def _font_size_for_line(ln: Line, zoom: float, font: pymupdf.Font) -> float:
     return max(2.0, (h / zoom) / max(0.8, asc + desc) * 1.08)
 
 
+STRAIGHT_WORDS_DEG = 3.0   # sotto questa inclinazione il testo invisibile si scrive diritto
+
+
 def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: float) -> int:
     """Livello di testo invisibile: una parola per oggetto di testo, con corpo della riga,
     scala orizzontale (Tz) che fa coincidere la larghezza con la parola nell'immagine e
@@ -1032,8 +1056,15 @@ def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: f
                 continue
             # spazio esplicito dopo la parola (tranne l'ultima della riga): copia e ricerca
             # restituiscono parole separate anche quando sono molto vicine
+            # (scritto a parte e largo al più metà dello spazio vero: scalato con la parola invadeva la
+            # successiva e poppler le univa, «copre i» → «coprei»)
             space = font.has_glyph(32) if word is not ln.words[-1] else 0
-            items.append((p0, p1, length, natural, fs, gids + ([space] if space else [])))
+            space_tz = 0.0
+            if space:
+                nxt = ln.words[ln.words.index(word) + 1]
+                gap = max(0.0, (nxt.bbox[0] - x1) / zoom)
+                space_tz = 100.0 * min(1.0, 0.5 * gap / max(0.01, font.text_length(" ", fontsize=fs)))
+            items.append((p0, p1, length, natural, fs, gids, space, space_tz))
     if not items:
         return 0
     before = set(page.get_contents())
@@ -1046,14 +1077,25 @@ def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: f
     fname = m.group(1).decode()
     inv = placement.page_to_pdf_matrix(page)     # coordinate standard (y in basso) → spazio PDF
     out = ["q", "BT", "3 Tr"]
-    for p0, p1, length, natural, fs, gids in items:
+    for p0, p1, length, natural, fs, gids, space, space_tz in items:
         o = p0 * inv
         e = p1 * inv
         ux, uy = (e.x - o.x) / length, (e.y - o.y) / length
+        # inclinazione lieve: parola diritta (allineata all'asse più vicino) centrata sulla sua base
+        # media, come hocrtransform. Poppler (Evince, Okular, pdftotext) spezza e riordina le parole
+        # appena ruotate; la differenza di posizione è sotto il punto.
+        angle = math.atan2(uy, ux)
+        axis = round(angle / (math.pi / 2)) * (math.pi / 2)
+        if abs(angle - axis) < math.radians(STRAIGHT_WORDS_DEG):
+            mx, my = (o.x + e.x) / 2, (o.y + e.y) / 2
+            ux, uy = round(math.cos(axis)), round(math.sin(axis))
+            o = pymupdf.Point(mx - ux * length / 2, my - uy * length / 2)
         tz = 100.0 * length / natural
         hexs = "".join(f"{g:04x}" for g in gids)
         out.append(f"/{fname} {fs:g} Tf {tz:.2f} Tz {ux:.5f} {uy:.5f} {-uy:.5f} {ux:.5f} {o.x:.3f} {o.y:.3f} Tm "
                    f"<{hexs}> Tj")
+        if space:
+            out.append(f"{max(space_tz, 1.0):.2f} Tz <{space:04x}> Tj")
     out += ["ET", "Q"]
     doc.update_stream(new[0], ("\n".join(out) + "\n").encode())
     for x in new[1:]:
