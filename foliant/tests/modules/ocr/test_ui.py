@@ -1053,3 +1053,27 @@ def test_anteprima_preelaborazione(window, tmp_path, monkeypatch):
     assert "inclinazione corretta: -4.0°" in shown["info"] or "inclinazione corretta: -3.9°" in shown["info"] \
         or "inclinazione corretta: -4.1°" in shown["info"], shown["info"]
     assert shown["images"] == [460, 460]
+
+
+def test_due_finestre_chiusa_la_seconda_la_prima_funziona(window, qtbot, scan_two):
+    """Ctrl+N: ogni finestra ha il proprio controller; chiudere la seconda non lascia nella prima
+    riferimenti a widget distrutti («already deleted»)."""
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.modules import ocr
+    first = window.ctx.ocr
+    second_win = window.new_window()
+    second = second_win.ctx.ocr
+    assert second is not first and second.review_panel is not first.review_panel
+    second_win.close()
+    second_win.deleteLater()
+    qtbot.waitUntil(lambda: second not in ocr._live, timeout=3000)
+    QApplication.processEvents()
+    assert ocr.controller is first
+    view = window.open_path(scan_two)
+    first.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    first.actions["review"].setChecked(True)
+    window.tabs.setCurrentWidget(view)
+    first.review_panel.set_view(view)
+    first.review_panel.refresh()
+    first.actions["review"].setChecked(False)
