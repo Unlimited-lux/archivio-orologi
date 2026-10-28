@@ -166,3 +166,15 @@ def test_cyclic_page_tree_does_not_break_painting(viewer_window, tmp_path, qtbot
     assert panel.image(0) is not None and 0 not in panel.failed   # le altre pagine restano visibili
     panel.set_view(None)
     view.dispose()
+
+
+def test_selected_pages_provider(viewer_window, long_pdf):
+    from PySide6.QtCore import QItemSelectionModel
+    view, panel = _open(viewer_window, long_pdf)
+    view.go_to_page(4)
+    assert viewer_window.ctx.selected_pages(view) == [4]
+    sel = panel.list.selectionModel()
+    sel.clearSelection()
+    for row in (2, 5, 7):
+        sel.select(panel.model.index(row), QItemSelectionModel.SelectionFlag.Select)
+    assert viewer_window.ctx.selected_pages(view) == [2, 5, 7]

@@ -519,6 +519,17 @@ class ThumbnailsController:
         self.act_toggle = ctx.action(_("Mostra/nascondi miniature"), "gallery-vertical-end", self.toggle,
                                      shortcut="F4")
         ctx.add_menu_action(self.act_toggle, _("Vista"))
+        if hasattr(ctx, "set_selected_pages_provider"):
+            ctx.set_selected_pages_provider(self.selected_pages)
+
+    def selected_pages(self, view) -> list[int]:
+        """Pagine selezionate nel pannello (per Converti, Pagine…); altrimenti la pagina corrente."""
+        panel = self.panel
+        if view is not None and panel.view is view:
+            pages = panel.selected_pages()
+            if pages:
+                return pages
+        return [view.current_page] if view is not None else []
 
     def toggle(self) -> None:
         w = self.ctx.window
