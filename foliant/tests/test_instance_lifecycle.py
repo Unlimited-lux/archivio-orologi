@@ -1,5 +1,6 @@
-"""Ciclo di vita delle finestre: file aperti da fuori mentre una finestra si chiude, memoria
-restituita alla chiusura di una finestra con dei documenti (NFR-06, NFR-31)."""
+"""Istanza singola e ciclo di vita delle finestre: richieste arrivate durante l'avvio, file aperti
+da fuori mentre una finestra si chiude, memoria restituita alla chiusura di una finestra con dei
+documenti (NFR-06, NFR-31)."""
 from __future__ import annotations
 
 
@@ -13,6 +14,51 @@ def _close_all_windows():
             w.close_view(view, ask=False)
         w.close()
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_server_handles_requests_as_soon_as_it_listens(qtbot, settings, monkeypatch):
+    """Una richiesta di un secondo avvio arrivata subito dopo listen(), mentre main() apre ancora
+    i suoi file (domanda della password, avviso di errore: cicli di eventi annidati), non va persa."""
+    import os
+    import uuid
+
+    from PySide6.QtWidgets import QApplication
+
+    from foliant import app as fapp
+    from foliant.ui import instance
+
+    class Stop(Exception):
+        pass
+
+    class App(QApplication):            # l'applicazione dei test, senza crearne un'altra
+        def __new__(cls, argv):
+            return QApplication.instance()
+    for static in ("setApplicationName", "setOrganizationName", "setDesktopFileName"):
+        monkeypatch.setattr(App, static, staticmethod(lambda *a: None))
+    monkeypatch.setattr(fapp, "QApplication", App)
+    monkeypatch.setattr(fapp, "QSettings", lambda: settings)
+    monkeypatch.setattr(fapp, "set_language", lambda *a: None)
+    monkeypatch.setattr(fapp, "install_qt_translations", lambda *a: None)
+    name = f"foliant-test-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(instance, "instance_name", lambda: name)
+    handled = []
+    monkeypatch.setattr(instance, "open_request", lambda request, *a: handled.append(request))
+    servers = []
+
+    def listen(self):                   # appena in ascolto arriva un secondo avvio
+        servers.append(self)
+        self.requestReceived.emit({"files": [["b.pdf", None]], "new_window": False, "command": None})
+        raise Stop
+    monkeypatch.setattr(instance.InstanceServer, "listen", listen)
+    try:
+        try:
+            fapp.main(["foliant"])
+        except Stop:
+            pass
+        assert handled == [{"files": [["b.pdf", None]], "new_window": False, "command": None}]
+    finally:
+        for server in servers:
+            server.deleteLater()
 
 
 def test_files_from_outside_do_not_go_to_a_closing_window(qtbot, settings, sample_pdf, monkeypatch):
