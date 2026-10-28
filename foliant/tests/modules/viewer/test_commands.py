@@ -26,9 +26,9 @@ def test_match_score():
 def test_search_and_run_first_result(viewer_window, sample_pdf):
     view = viewer_window.open_path(sample_pdf)
     ctl = _ctl(viewer_window)
-    found = ctl.search("ruota")
+    found = ctl.search("ruota vista")
     assert found and found[0].text().startswith("Ruota vista")
-    ctl.run("ruota")
+    ctl.run("ruota vista")
     assert view.view_rotation == 90
 
 
