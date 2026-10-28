@@ -328,17 +328,58 @@ class BlankDialog(QDialog):
 
 
 
-class ScannerDialog(QDialog):
-    """Impostazioni di acquisizione (CNV-24): dispositivo, sorgente, risoluzione, colore, opzioni."""
+# preset predefiniti (CNV-24): pensati per l'archivio di un negozio (documenti, identità, garanzie)
+def builtin_scan_presets() -> list[dict]:
+    return [
+        {"name": _("Documenti in bianco e nero (fatture, contratti)"), "source": "adf", "dpi": 300, "mode": "bw",
+         "straighten": True, "crop": True, "ocr": True, "remove_blank": True},
+        {"name": _("Documento d'identità a colori"), "source": "flatbed", "dpi": 300, "mode": "color",
+         "quality": 90, "id_card": True, "straighten": False, "crop": False},
+        {"name": _("Certificati e garanzie a colori"), "source": "flatbed", "dpi": 300, "mode": "color",
+         "quality": 90, "straighten": True, "crop": True, "ocr": True},
+        {"name": _("Bozza veloce in grigio"), "source": "adf", "dpi": 150, "mode": "gray", "quality": 70},
+    ]
 
-    def __init__(self, parent, devices: list[tuple[str, str]], *, has_document: bool = False, refresh=None):
+
+PRESET_KEYS = ("source", "dpi", "mode", "paper", "brightness", "contrast", "quality", "straighten", "crop", "ocr",
+               "remove_blank", "manual_duplex", "id_card")
+
+
+class ScannerDialog(QDialog):
+    """Impostazioni di acquisizione (CNV-24): preset, dispositivo, sorgente, risoluzione, colore,
+    anteprima e post-elaborazione."""
+
+    def __init__(self, parent, devices: list[tuple[str, str]], *, has_document: bool = False, refresh=None,
+                 settings=None, preview=None):
         super().__init__(parent)
         from PySide6.QtWidgets import QCheckBox
         self.setWindowTitle(_("Crea PDF da scanner"))
         self.setMinimumWidth(460)
         self._refresh = refresh
-        lay = QVBoxLayout(self)
+        self._settings = settings
+        self._preview = preview
+        outer = QHBoxLayout(self)
+        lay = QVBoxLayout()
+        outer.addLayout(lay, 1)
+        preset_row = QHBoxLayout()
+        self.preset = QComboBox()
+        self.preset.setMinimumContentsLength(18)
+        preset_row.addWidget(self.preset, 1)
+        self.save_preset = QPushButton(_("Salva…"))
+        self.delete_preset = QPushButton(_("Elimina"))
+        self.export_preset = QPushButton(_("Esporta…"))
+        self.import_preset = QPushButton(_("Importa…"))
+        for b, ic in ((self.save_preset, "save"), (self.delete_preset, "trash-2"), (self.export_preset, "upload"),
+                      (self.import_preset, "download")):
+            bind_icon(b, ic)
+            b.setAutoDefault(False)
+            preset_row.addWidget(b)
+        self.save_preset.clicked.connect(self._save_preset)
+        self.delete_preset.clicked.connect(self._delete_preset)
+        self.export_preset.clicked.connect(self._export_preset)
+        self.import_preset.clicked.connect(self._import_preset)
         form = QFormLayout()
+        form.addRow(_("Preset"), preset_row)
         dev_row = QHBoxLayout()
         self.device = QComboBox()
         dev_row.addWidget(self.device, 1)
@@ -355,6 +396,9 @@ class ScannerDialog(QDialog):
         form.addRow(_("Risoluzione"), self.dpi)
         self.mode = _combo([(_("Colore"), "color"), (_("Scala di grigi"), "gray"), (_("Bianco e nero"), "bw")])
         form.addRow(_("Colore"), self.mode)
+        from .scanner import PAPER_MM
+        self.paper = _combo([(_("Automatico"), "")] + [(k, k) for k in PAPER_MM])
+        form.addRow(_("Formato carta"), self.paper)
         self.brightness = QSpinBox()
         self.contrast = QSpinBox()
         for s in (self.brightness, self.contrast):
@@ -382,26 +426,173 @@ class ScannerDialog(QDialog):
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.ok_button.setText(_("Acquisisci"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        self.preview_button = buttons.addButton(_("Anteprima"), QDialogButtonBox.ButtonRole.ActionRole)
+        bind_icon(self.preview_button, "eye")
+        self.preview_button.setVisible(preview is not None)
+        self.preview_button.clicked.connect(self._show_preview)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
+        self.preview_label = QLabel()
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setMinimumSize(220, 300)
+        self.preview_label.setVisible(False)
+        outer.addWidget(self.preview_label)
         self.set_devices(devices)
+        self._fill_presets()
+        self.preset.activated.connect(lambda _i: self._apply_current())
 
+    # ---------------------------------------------------------------- preset
+    def _user_presets(self) -> list[dict]:
+        import json
+        if self._settings is None:
+            return []
+        try:
+            data = json.loads(self._settings.value("convert/scan_presets", "[]") or "[]")
+            return [p for p in data if isinstance(p, dict) and p.get("name")]
+        except (ValueError, TypeError):
+            return []
+
+    def _store_user_presets(self, presets: list[dict]) -> None:
+        import json
+        if self._settings is not None:
+            self._settings.setValue("convert/scan_presets", json.dumps(presets, ensure_ascii=False))
+
+    def _fill_presets(self, select: str | None = None) -> None:
+        self.preset.blockSignals(True)
+        self.preset.clear()
+        self.preset.addItem(_("Impostazioni personalizzate"), None)
+        for p in builtin_scan_presets():
+            self.preset.addItem(p["name"], ("builtin", p))
+        for p in self._user_presets():
+            self.preset.addItem(p["name"], ("user", p))
+        if select:
+            i = self.preset.findText(select)
+            self.preset.setCurrentIndex(max(0, i))
+        self.preset.blockSignals(False)
+        self._update_preset_buttons()
+
+    def _update_preset_buttons(self) -> None:
+        data = self.preset.currentData()
+        self.delete_preset.setEnabled(bool(data) and data[0] == "user")
+
+    def _apply_current(self) -> None:
+        data = self.preset.currentData()
+        if data:
+            self.apply_preset(data[1])
+        self._update_preset_buttons()
+
+    def preset_values(self) -> dict:
+        return {"source": self.source.currentData(), "dpi": self.dpi.currentData(), "mode": self.mode.currentData(),
+                "paper": self.paper.currentData(), "brightness": self.brightness.value(),
+                "contrast": self.contrast.value(), "quality": self.quality.value(),
+                "straighten": self.straighten.isChecked(), "crop": self.crop.isChecked(),
+                "ocr": self.ocr.isChecked(), "remove_blank": self.remove_blank.isChecked(),
+                "manual_duplex": self.manual_duplex.isChecked(), "id_card": self.id_card.isChecked()}
+
+    def apply_preset(self, preset: dict) -> None:
+        defaults = {"source": "flatbed", "dpi": 300, "mode": "color", "paper": "", "brightness": 0, "contrast": 0,
+                    "quality": 85, "straighten": False, "crop": False, "ocr": False, "remove_blank": False,
+                    "manual_duplex": False, "id_card": False}
+        values = {**defaults, **{k: v for k, v in preset.items() if k in PRESET_KEYS}}
+        for box, key in ((self.source, "source"), (self.dpi, "dpi"), (self.mode, "mode"), (self.paper, "paper")):
+            i = box.findData(values[key])
+            if i >= 0:
+                box.setCurrentIndex(i)
+        for spin, key in ((self.brightness, "brightness"), (self.contrast, "contrast"), (self.quality, "quality")):
+            try:
+                spin.setValue(int(values[key]))
+            except (TypeError, ValueError):
+                pass
+        for cb, key in ((self.straighten, "straighten"), (self.crop, "crop"), (self.ocr, "ocr"),
+                        (self.remove_blank, "remove_blank"), (self.manual_duplex, "manual_duplex"),
+                        (self.id_card, "id_card")):
+            cb.setChecked(bool(values[key]))
+
+    def _save_preset(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        current = self.preset.currentData()
+        name, ok = QInputDialog.getText(self, _("Salva preset"), _("Nome del preset:"),
+                                        text=current[1]["name"] if current and current[0] == "user" else "")
+        name = name.strip()
+        if not ok or not name:
+            return
+        presets = [p for p in self._user_presets() if p["name"] != name]
+        presets.append({"name": name, **self.preset_values()})
+        self._store_user_presets(presets)
+        self._fill_presets(select=name)
+
+    def _delete_preset(self) -> None:
+        data = self.preset.currentData()
+        if not data or data[0] != "user":
+            return
+        self._store_user_presets([p for p in self._user_presets() if p["name"] != data[1]["name"]])
+        self._fill_presets()
+
+    def _export_preset(self) -> None:
+        import json
+        from PySide6.QtWidgets import QFileDialog
+        data = self.preset.currentData()
+        name = data[1]["name"] if data else _("Impostazioni personalizzate")
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta preset"), name + ".json", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(json.dumps({"foliant_scan_preset": 1, "name": name, **self.preset_values()},
+                                             ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, _("Esporta preset"), _("Impossibile scrivere il file: {e}").format(e=e.strerror or e))
+
+    def _import_preset(self) -> None:
+        import json
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa preset"), "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not str(data.get("name", "")).strip():
+                raise ValueError
+        except (OSError, ValueError, UnicodeDecodeError):
+            QMessageBox.warning(self, _("Importa preset"), _("Il file non contiene un preset di acquisizione valido."))
+            return
+        preset = {"name": str(data["name"]).strip(), **{k: data[k] for k in PRESET_KEYS if k in data}}
+        presets = [p for p in self._user_presets() if p["name"] != preset["name"]] + [preset]
+        self._store_user_presets(presets)
+        self._fill_presets(select=preset["name"])
+        self.apply_preset(preset)
+
+    # ---------------------------------------------------------------- dispositivo
     def set_devices(self, devices) -> None:
         self.device.clear()
         for dev, label in devices:
             self.device.addItem(label or dev, dev)
         self.ok_button.setEnabled(bool(devices))
+        if hasattr(self, "preview_button"):
+            self.preview_button.setEnabled(bool(devices))
 
     def _reload(self) -> None:
         if self._refresh is not None:
             self.set_devices(self._refresh())
 
+    def _show_preview(self) -> None:
+        if self._preview is None:
+            return
+        img = self._preview(self.device.currentData(), self.settings())
+        if img is None:
+            return
+        from PIL.ImageQt import ImageQt
+        pix = QPixmap.fromImage(ImageQt(img.convert("RGB")))
+        self.preview_label.setPixmap(pix.scaled(QSize(220, 300), Qt.AspectRatioMode.KeepAspectRatio,
+                                                Qt.TransformationMode.SmoothTransformation))
+        self.preview_label.setVisible(True)
+
     def settings(self):
         from .scanner import ScanSettings
         return ScanSettings(source=self.source.currentData(), dpi=self.dpi.currentData(), mode=self.mode.currentData(),
                             brightness=self.brightness.value(), contrast=self.contrast.value(),
-                            jpeg_quality=self.quality.value())
+                            paper=self.paper.currentData() or None, jpeg_quality=self.quality.value())
 
 
 class CornerEditor(QLabel):

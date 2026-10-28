@@ -505,7 +505,12 @@ class ConvertController:
                 "pacchetto «sane-utils» sia installato e che il tuo utente abbia i permessi sul dispositivo."))
             return None
         view = self.ctx.current_view()
-        dlg = ScannerDialog(self.window, devices, has_document=view is not None, refresh=backend.list_devices)
+        def show_preview(device, settings):
+            ok_p, img = self._run(_("Anteprima…"), scanner.preview, backend, device, settings)
+            return img if ok_p else None
+
+        dlg = ScannerDialog(self.window, devices, has_document=view is not None, refresh=backend.list_devices,
+                            settings=self.ctx.settings(), preview=show_preview)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         settings = dlg.settings()

@@ -833,3 +833,12 @@ EN.update({"Documento di copertina": "Cover document", "Portfolio PDF": "PDF por
            "Il portfolio non contiene «{n}».": "The portfolio does not contain “{n}”.",
            "«{n}» non è un PDF: si possono convertire solo i PDF del portfolio.":
                "“{n}” is not a PDF: only the PDFs in the portfolio can be converted."})
+
+# CNV-24: preset e anteprima dello scanner
+EN.update({"Impostazioni personalizzate": "Custom settings", "Anteprima non riuscita: {e}": "Preview failed: {e}",
+           "Documento d'identità a colori": "Identity document in color",
+           "Il file non contiene un preset di acquisizione valido.": "The file does not contain a valid scan preset.",
+           "Esporta…": "Export…", "Importa…": "Import…", "Esporta preset": "Export preset",
+           "Importa preset": "Import preset", "Certificati e garanzie a colori": "Certificates and warranties in color",
+           "Documenti in bianco e nero (fatture, contratti)": "Black and white documents (invoices, contracts)",
+           "Bozza veloce in grigio": "Quick draft in grayscale", "Formato carta": "Paper size"})

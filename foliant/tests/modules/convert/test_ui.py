@@ -820,3 +820,50 @@ def test_batch_password_second_pass_keeps_unique_names(window, ctrl, tmp_path, m
     contents = {os.path.basename(p): open(p, encoding="utf-8").read() for p in outputs}
     assert "DOCUMENTO A" in contents["doc.txt"] and "DOCUMENTO B" in contents["doc (2).txt"]
     assert sorted(os.listdir(out)) == ["doc (2).txt", "doc.txt"]
+
+
+def test_scanner_dialog_presets_save_export_import(window, settings, tmp_path, monkeypatch):
+    """CNV-24: preset predefiniti, salvati, esportati e importati."""
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+    from foliant.modules.convert.create_dialogs import ScannerDialog
+    dlg = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings,
+                        preview=lambda dev, s: Image.new("RGB", (80, 110), "white"))
+    i = dlg.preset.findText("Documenti in bianco e nero (fatture, contratti)")
+    assert i > 0
+    dlg.preset.setCurrentIndex(i)
+    dlg.preset.activated.emit(i)
+    assert dlg.mode.currentData() == "bw" and dlg.ocr.isChecked() and dlg.source.currentData() == "adf"
+    assert not dlg.delete_preset.isEnabled()
+    dlg.dpi.setCurrentIndex(dlg.dpi.findData(400))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Fatture fornitori", True))
+    dlg.save_preset.click()
+    assert dlg.preset.currentText() == "Fatture fornitori" and dlg.delete_preset.isEnabled()
+    out = tmp_path / "preset.json"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    dlg.export_preset.click()
+    dlg.delete_preset.click()
+    assert dlg.preset.findText("Fatture fornitori") < 0
+    # nuova finestra: il preset importato torna disponibile con i suoi valori
+    dlg2 = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(out), ""))
+    dlg2.import_preset.click()
+    assert dlg2.preset.currentText() == "Fatture fornitori"
+    assert dlg2.dpi.currentData() == 400 and dlg2.mode.currentData() == "bw"
+    assert dlg2.settings().dpi == 400
+    dlg3 = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings)
+    assert dlg3.preset.findText("Fatture fornitori") > 0
+    # file non valido: avviso, nessun preset nuovo
+    bad = tmp_path / "rotto.json"
+    bad.write_text("non json")
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(a[2]))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(bad), ""))
+    n = dlg3.preset.count()
+    dlg3.import_preset.click()
+    assert warned and dlg3.preset.count() == n
+    # anteprima
+    assert dlg.preview_button.isVisible() or not dlg.isVisible()
+    dlg.preview_button.click()
+    assert dlg.preview_label.pixmap() is not None and not dlg.preview_label.pixmap().isNull()

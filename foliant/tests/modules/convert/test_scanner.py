@@ -109,3 +109,53 @@ def test_acquire_straightens_and_crops():
     res = acquire(FakeScanner([framed]), "sim:0", ScanSettings(dpi=100, mode="gray"), straighten=True, crop=True)
     out = res.pages[0]
     assert out.width <= page.width and abs(estimate_skew(out)) <= 0.4
+
+
+def test_large_acquisition_spills_to_disk():
+    """Acquisizioni molto grandi: oltre il budget di memoria le pagine passano su disco e il PDF
+    si crea lo stesso; la cartella temporanea sparisce con le pagine."""
+    import gc
+    import os
+
+    from foliant.modules.convert.scanner import StoredPage
+    pages = [_page(150, f"P{k}") for k in range(4)]
+    res = acquire(FakeScanner(pages), "sim:0", ScanSettings(source="adf", dpi=150, mode="gray"),
+                  memory_budget=int(8.27 * 150 * 11.69 * 150 * 1.5))
+    assert not isinstance(res.pages[0], StoredPage)
+    stored = [p for p in res.pages if isinstance(p, StoredPage)]
+    assert len(stored) == 3 and all(os.path.exists(p.path) for p in stored)
+    folder = os.path.dirname(stored[0].path)
+    data = pages_to_pdf(res.pages, ScanSettings(dpi=150, mode="gray"))
+    doc = pymupdf.open(stream=data)
+    assert doc.page_count == 4
+    assert abs(doc[3].rect.width - 595) < 2
+    del res, stored, pages
+    gc.collect()
+    assert not os.path.exists(folder)
+
+
+def test_preview_low_resolution():
+    from foliant.modules.convert.scanner import preview
+    seen = {}
+
+    class Rec(FakeScanner):
+        def scan(self, device, settings, progress=None):
+            seen["dpi"], seen["source"] = settings.dpi, settings.source
+            yield _page(settings.dpi, "anteprima")
+
+    settings = ScanSettings(source="adf", dpi=600, mode="bw")
+    img = preview(Rec([]), "sim:0", settings)
+    assert seen == {"dpi": 75, "source": "flatbed"} and img.mode == "1"
+    assert settings.dpi == 600     # le impostazioni scelte non cambiano
+
+
+def test_sane_paper_size_arguments(tmp_path):
+    from foliant.modules.convert.scanner import SaneBackend
+    log = tmp_path / "args.txt"
+    prog = tmp_path / "scanimage"
+    prog.write_text(f"#!/bin/sh\necho \"$@\" > {log}\nexit 1\n")
+    prog.chmod(0o755)
+    with pytest.raises(ScannerError):
+        list(SaneBackend(str(prog)).scan("dev", ScanSettings(paper="A4")))
+    args = log.read_text().split()
+    assert args[args.index("-x") + 1] == "210" and args[args.index("-y") + 1] == "297"
