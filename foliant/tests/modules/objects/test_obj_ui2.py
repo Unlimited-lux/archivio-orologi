@@ -482,7 +482,7 @@ def test_user_guides_snap_and_persist(ui, tmp_path):
     # le guide si ritrovano riaprendo lo stesso file (preferenze locali, non nel PDF)
     view._objects_guides = None
     assert ui.c.guides(view)["x"] == [100.0]
-    assert not view.document.is_modified   # le guide non modificano il PDF
+    assert view.document.undo_label == "Sposta oggetti"   # aggiungere guide non crea passi nel PDF
     ui.c.clear_guides(view)
     view._objects_guides = None
     assert ui.c.guides(view)["x"] == []
