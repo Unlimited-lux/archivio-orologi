@@ -790,7 +790,7 @@ EN: dict[str, str] = {
     "PDF/A-3b": "PDF/A-3b",
     "File in parallelo": "Files in parallel",
     "File elaborati contemporaneamente (unione, stampa e conversione restano sequenziali)": "Files processed at the same time (merge, print and conversion stay sequential)",
-    "Pagina {pagina} di {totale}": "Page {pagina} of {totale}",
+    "Pagina {pagina} di {totale}": "Page {page} of {total}",
     "RISERVATO": "CONFIDENTIAL",
     "Unione": "Merged",
     "appiattito": "flattened",
@@ -854,4 +854,6 @@ EN: dict[str, str] = {
     "Nessun file da riprendere.": "No files to resume.",
     "Rimette in coda solo i file non completati per l'annullamento e riavvia il lavoro con le stesse impostazioni": "Queues only the files left unfinished by the cancellation and restarts the job with the same settings",
     "Riprendi i non elaborati": "Resume unprocessed files",
+    "{nome}": "{name}",
+    "elaborati": "processed",
 }
