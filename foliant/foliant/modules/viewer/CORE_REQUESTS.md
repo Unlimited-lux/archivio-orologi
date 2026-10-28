@@ -117,3 +117,15 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     - **`/ActualText`**, **artefatti** esclusi (opzione) e **testo bidirezionale**: dipendono
       dall'estrazione; con PyMuPDF `get_text(..., flags=TEXT_ACCURATE_BBOXES)` e
       `page.get_texttrace()` si possono riconoscere i contenuti marcati.
+
+21. **Schede e finestre** (VIS-30, P0): mancano nel nucleo il trascinamento di una scheda fuori
+    dalla barra (nuova finestra con il documento nella stessa posizione) o su un'altra finestra,
+    i gruppi di schede (nome, colore, comprimibili, salvati nella sessione), la preferenza
+    «apri in una nuova finestra» e la «Nuova vista del documento» (seconda scheda sullo stesso
+    `Document` in memoria: oggi `_close_view_now` chiude il documento con la scheda, quindi due
+    viste dovrebbero contare i riferimenti prima di `doc.close()`). Il viewer è pronto ad
+    aggiungere le voci al menu della scheda (`ctx.add_tab_menu_provider`) quando il nucleo
+    offrirà, per esempio, `ctx.move_view_to_new_window(view)` e `ctx.open_second_view(view)`.
+    Gli altri criteri (sessione con 3 schede, Ctrl+Maiusc+T con pagina e zoom, un solo dialogo
+    per più documenti modificati, 50 schede con cambio entro 200 ms) sono verificati in
+    `tests/modules/viewer/test_session.py`.
