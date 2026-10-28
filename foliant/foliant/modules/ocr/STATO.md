@@ -29,8 +29,7 @@ Test: `tests/modules/ocr/` (engine, criteri, ui, languages, textexport).
 | OCR-20 Integrazione | P1 | parziale | — | API per gli altri moduli, `ctx.ocr`, proposta al clic in Modifica/Selezione |
 
 Note finali:
-- Dopo un riavvio della sessione l'ultimo push è avvenuto oltre la scadenza: contiene solo l'etichetta «Esegui OCR»
-  (originalità) e questi documenti. Il nucleo aggiornato (placement, rete di sicurezza dei test) NON è ancora
-  stato incorporato in questo branch: va unito e verificato in integrazione (vedi CORE_REQUESTS.md).
+- Nucleo aggiornato unito (07:50 UTC); suite completa verde, nessuna scorciatoia registrata dal modulo.
+- Pagine con /Rotate e CropBox spostato: verificate con `test_criteri.py::test_rilettura_pagine_ruotate_e_ritagliate`.
 - Verifica visiva fatta con catture offscreen (temi chiaro e scuro) di barra di proposta, impostazioni,
   anteprima/revisione, pannello parole incerte e confronto scansione/risultato modificabile.

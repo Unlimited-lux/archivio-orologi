@@ -6,8 +6,8 @@
 2. **Attività in background non modali** (OCR-13, UX-12): `run_task` è modale per la finestra; per l'OCR di
    documenti lunghi servirebbe un'esecuzione in background che lasci consultabile il documento, con pausa.
 3. **Evidenziazione nel pannello miniature** (OCR-01 «Dettagli»): un'API per marcare pagine con un'icona/colore.
-4. **Inserimento corretto su pagine ruotate/ritagliate**: il modulo usa ancora TextWriter/insert_image con
-   le proprie conversioni (verificate su /Rotate 90/180/270 con CropBox = MediaBox). Dopo l'unione del
-   nucleo va migrato a `foliant.core.placement` e testato su CropBox spostato.
-5. Dopo l'unione del nucleo, la fixture autouse `_no_modal_boxes` in `tests/modules/ocr/conftest.py` può
+4. **Inserimento su pagine ruotate/ritagliate**: verificato con test di rilettura (/Rotate 90/180/270, CropBox spostato,
+   ricercabile e modificabile: `test_rilettura_pagine_ruotate_e_ritagliate`). La migrazione a
+   `foliant.core.placement` resta facoltativa.
+5. Nucleo unito: la fixture autouse `_no_modal_boxes` in `tests/modules/ocr/conftest.py` può
    essere rimossa (rete di sicurezza in `tests/conftest.py`).

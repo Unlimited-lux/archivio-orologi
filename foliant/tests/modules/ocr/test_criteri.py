@@ -360,3 +360,24 @@ def test_due_colonne_ordine_di_lettura(tmp_path):
     lines = [ln for ln in text.splitlines() if ln.strip()]
     assert all("sinistra" not in ln or "destra" not in ln for ln in lines)       # niente righe miste
     assert text.index("terza riga sinistra") < text.index("Colonna destra")
+
+
+@pytest.mark.parametrize("crop", [False, True])
+@pytest.mark.parametrize("rot", [90, 180, 270])
+def test_rilettura_pagine_ruotate_e_ritagliate(tmp_path, rot, crop):
+    """Le parole del livello ricercabile cadono sulle parole della scansione anche con /Rotate e CropBox."""
+    from foliant.modules.ocr.preprocess import PreprocessOptions
+    src = pymupdf.open(image_pdf(tmp_path / "s.pdf", [scan_image(lines=FRASI[:2], dpi=150)], dpi=150))
+    d = pymupdf.open()
+    d.insert_pdf(src)
+    if crop:
+        d[0].set_cropbox(pymupdf.Rect(30, 40, 580, 800))
+    d[0].set_rotation(rot)
+    for mode in ("searchable", "editable"):
+        with pymupdf.open(stream=engine.ocr_pdf_bytes(d.tobytes(), ["ita"], mode)) as out:
+            q = out[0]
+            r = q.search_for("compravendita")[0]
+            area = (r * q.rotation_matrix) + (-60, -60, 60, 60)
+            seen = engine.ocr_page_text(q, clip=area, languages=["ita"],
+                                        preprocess=PreprocessOptions(auto_rotate=True))
+            assert "compravendita" in seen.replace("\n", " "), (mode, seen)
