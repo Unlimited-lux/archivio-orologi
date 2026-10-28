@@ -440,6 +440,22 @@ def _decrypt_with(pdf_reader, password: str | None):
     raise ValueError("password") from last
 
 
+def _check_sign_permission(auth) -> None:
+    """Con accesso da utente (non proprietario) servono i permessi di compilazione dei
+    moduli / firma: bit 6 (annotazioni e moduli) o bit 9 (solo compilazione dei moduli)."""
+    status = getattr(getattr(auth, "status", None), "name", "")
+    if status == "OWNER":
+        return
+    flags = getattr(auth, "permission_flags", None)
+    if flags is None:
+        return
+    from pyhanko.pdf_utils.crypt.permissions import StandardPermissions as P
+    if not (flags & P.ALLOW_ANNOTS_FORM_FILLING or flags & P.ALLOW_FORM_FILLING):
+        raise SigningNotAllowed(_(
+            "I permessi del documento non consentono di firmarlo né di compilarne i moduli. Riaprilo con la "
+            "password del proprietario per firmarlo"))
+
+
 def _open_writer(data: bytes, password: str | None):
     """IncrementalPdfFileWriter che mantiene la cifratura dell'originale. PyMuPDF scrive
     /Encrypt come dizionario diretto nel trailer: pyHanko lo vuole indiretto."""
@@ -452,7 +468,8 @@ def _open_writer(data: bytes, password: str | None):
         except ValueError as exc:
             raise SigningNotAllowed(_("Il documento è cifrato con una password: aprilo con la password per "
                                       "firmarlo")) from exc
-        writer.encrypt(pw)
+        auth = writer.encrypt(pw)
+        _check_sign_permission(auth)
         if writer._encrypt is not None and not isinstance(writer._encrypt, generic.IndirectObject):
             writer._encrypt = writer.add_object(writer._encrypt)
     return writer
@@ -1893,6 +1910,9 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "I permessi del documento non consentono di firmarlo né di compilarne i moduli. Riaprilo con la password del "
+    "proprietario per firmarlo": "The document permissions do not allow signing it or filling its forms. Reopen it "
+                                  "with the owner password to sign it",
     "Certificato scaduto il {date}, prima dell'ora attestata dalla marca temporale ({ts})":
         "Certificate expired on {date}, before the time attested by the timestamp ({ts})",
     "Certificato non ancora valido all'ora attestata dalla marca temporale ({ts})":
