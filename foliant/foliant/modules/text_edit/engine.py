@@ -161,7 +161,9 @@ class _Writer:
         if hscale != 1.0:
             m = pymupdf.Matrix(hscale, 0, 0, 1, 0, 0) * m
         if piece.choice.simulate_italic:
-            m = pymupdf.Matrix(1, 0, -ITALIC_SLANT, 1, 0, 0) * m
+            m = pymupdf.Matrix(1, 0, ITALIC_SLANT, 1, 0, 0) * m
+        # `morph` del motore usa l'orientamento matematico (y verso l'alto): rotazione con segno opposto
+        mm = m * pymupdf.Matrix(-angle) if angle else m
         if angle:
             m = m * pymupdf.Matrix(angle)
         identity = (m.a, m.b, m.c, m.d) == (1, 0, 0, 1)
@@ -186,7 +188,7 @@ class _Writer:
             if mode == 2:
                 kwargs["fill"] = st.color
             if not identity:
-                kwargs["morph"] = self._morph(pt, m)
+                kwargs["morph"] = self._morph(pt, mm)
             self.page.insert_text(pt * self.unframe, text, **kwargs)
         if (st.underline or st.strike) and render_mode != 3:
             width = max(0.4, st.size * 0.06)

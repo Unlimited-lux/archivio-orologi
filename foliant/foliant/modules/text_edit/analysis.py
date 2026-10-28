@@ -92,41 +92,72 @@ def _is_undecodable(text: str) -> bool:
 
 
 def _make_line(raw_line: dict, xrefs: dict[str, int], frame: pymupdf.Matrix) -> tuple[Line, bool] | None:
-    runs: list[Run] = []
-    chars: list[tuple[str, pymupdf.Point, pymupdf.Rect, Style]] = []
+    # tuple semplici per carattere (c, ox, oy, x0, y0, x1, y1, stile): l'analisi resta veloce
+    fa, fb, fc, fd, fe, ff = frame.a, frame.b, frame.c, frame.d, frame.e, frame.f
+    identity = (fa, fb, fc, fd, fe, ff) == (1, 0, 0, 1, 0, 0)
+    chars: list[tuple] = []
     alphas: list[int] = []
+    style_cache: dict[tuple, Style] = {}
     for span in raw_line.get("spans", []):
-        style = _style_from_span(span, xrefs)
-        text = "".join(ch["c"] for ch in span.get("chars", []))
-        if not text:
+        span_chars = span.get("chars", [])
+        if not span_chars:
             continue
-        if text.strip():
+        key = (span.get("font"), span.get("size"), span.get("color"), span.get("flags"))
+        style = style_cache.get(key)
+        if style is None:
+            style = style_cache[key] = _style_from_span(span, xrefs)
+        visible_text = False
+        for ch in span_chars:
+            c = ch["c"]
+            ox, oy = ch["origin"]
+            x0, y0, x1, y1 = ch["bbox"]
+            if not identity:
+                ox, oy = ox * fa + oy * fc + fe, ox * fb + oy * fd + ff
+                ax, ay = x0 * fa + y0 * fc + fe, x0 * fb + y0 * fd + ff
+                bx, by = x1 * fa + y1 * fc + fe, x1 * fb + y1 * fd + ff
+                x0, x1 = min(ax, bx), max(ax, bx)
+                y0, y1 = min(ay, by), max(ay, by)
+            chars.append((c, ox, oy, x0, y0, x1, y1, style))
+            if not visible_text and c.strip():
+                visible_text = True
+        if visible_text:
             alphas.append(span.get("alpha", 255))
-        runs.append(Run(text, style))
-        for ch in span.get("chars", []):
-            chars.append((ch["c"], pymupdf.Point(ch["origin"]) * frame, pymupdf.Rect(ch["bbox"]) * frame, style))
     # elimina spazi iniziali e finali
-    while chars and not chars[0][0].strip():
-        chars.pop(0)
-    while chars and not chars[-1][0].strip():
-        chars.pop()
+    start, end = 0, len(chars)
+    while start < end and not chars[start][0].strip():
+        start += 1
+    while end > start and not chars[end - 1][0].strip():
+        end -= 1
+    chars = chars[start:end]
     if not chars:
         return None
-    runs = merge_runs([Run(c[0], c[3]) for c in chars])
+    runs: list[Run] = []
+    for c in chars:
+        if runs and runs[-1].style is c[7]:
+            runs[-1].text += c[0]
+        else:
+            runs.append(Run(c[0], c[7]))
+    runs = merge_runs(runs)
     words: list[Word] = []
-    current: list = []
-    for c in chars + [(" ", None, None, None)]:
+    first = None
+    last = None
+    buf: list[str] = []
+    for c in chars:
         if c[0].strip():
-            current.append(c)
-        elif current:
-            words.append(Word("".join(x[0] for x in current), current[0][1].x, current[-1][2].x1, current[0][3]))
-            current = []
-    bbox = pymupdf.Rect(chars[0][2])
-    for c in chars[1:]:
-        bbox |= c[2]
+            if first is None:
+                first = c
+            buf.append(c[0])
+            last = c
+        elif first is not None:
+            words.append(Word("".join(buf), first[1], last[5], first[7]))
+            first, buf = None, []
+    if first is not None:
+        words.append(Word("".join(buf), first[1], last[5], first[7]))
+    bbox = pymupdf.Rect(min(c[3] for c in chars), min(c[4] for c in chars),
+                        max(c[5] for c in chars), max(c[6] for c in chars))
     dx, dy = raw_line.get("dir", (1.0, 0.0))
-    fdir = (dx * frame.a + dy * frame.c, dx * frame.b + dy * frame.d)
-    line = Line(bbox=bbox, origin=pymupdf.Point(chars[0][1]), runs=runs, dir=fdir, words=words)
+    fdir = (dx * fa + dy * fc, dx * fb + dy * fd)
+    line = Line(bbox=bbox, origin=pymupdf.Point(chars[0][1], chars[0][2]), runs=runs, dir=fdir, words=words)
     invisible = bool(alphas) and all(a == 0 for a in alphas)
     return line, invisible
 
