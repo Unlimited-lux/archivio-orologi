@@ -594,13 +594,37 @@ def _center_in(r: tuple, areas: list[tuple]) -> bool:
 # =============================================================================
 # Differenze di testo
 # =============================================================================
+def _same_row(t: Token, top: float, bottom: float, page: int) -> bool:
+    """La parola sta sulla stessa riga visiva (celle di una tabella, colonne di un listino)."""
+    r = t.rects[0]
+    if r[0] != page:
+        return False
+    overlap = min(bottom, r[4]) - max(top, r[2])
+    return overlap > 0.5 * min(bottom - top, r[4] - r[2])
+
+
 def _lines(tokens: list[Token]) -> list[tuple[str, int, int]]:
+    """Righe visive: parole consecutive sulla stessa riga della pagina, anche se il PDF le
+    scrive come pezzi separati (ogni cella di una tabella è spesso una «riga» a sé)."""
     out: list[tuple[str, int, int]] = []
     start = 0
-    for i in range(1, len(tokens) + 1):
-        if i == len(tokens) or tokens[i].line != tokens[start].line:
+    top = bottom = 0.0
+    for i in range(len(tokens) + 1):
+        if i < len(tokens):
+            t = tokens[i]
+            r = t.rects[0]
+            if i == 0:
+                top, bottom = r[2], r[4]
+                continue
+            prev = tokens[i - 1]
+            if t.line == prev.line or _same_row(t, top, bottom, prev.rects[-1][0]):
+                top, bottom = min(top, r[2]), max(bottom, r[4])
+                continue
+        if i > start:
             out.append((" ".join(t.key for t in tokens[start:i]), start, i))
+        if i < len(tokens):
             start = i
+            top, bottom = tokens[i].rects[0][2], tokens[i].rects[0][4]
     return out
 
 
@@ -1049,6 +1073,17 @@ def compare_visual_pages(doc_a, pa: int, doc_b, pb: int, options: CompareOptions
                 mask, dx, dy = shifted, sdx, sdy
             elif better:
                 misaligned = True
+    if text_mask_a is not None and text_mask_b is not None:
+        # il testo è confrontato parola per parola: qui conta solo ciò che non è testo
+        # (righe spostate da un inserimento non devono diventare «regioni variate»)
+        mask = mask.copy()
+        h, w = mask.shape[:2]
+        for boxes, ox, oy in ((text_mask_a, 0, 0), (text_mask_b, dx, dy)):
+            for b in boxes:
+                x0, y0 = max(0, int(b[0] * scale) + ox), max(0, int(b[1] * scale) + oy)
+                x1, y1 = min(w, int(b[2] * scale + 1) + ox), min(h, int(b[3] * scale + 1) + oy)
+                if x1 > x0 and y1 > y0:
+                    mask[y0:y1, x0:x1] = False
     regions = regions_from_mask(mask, sens["cell_pixels"], sens["min_cells"])
     page_area = max(1.0, mask.shape[0] * mask.shape[1])
     regions_a, regions_b, areas = [], [], []

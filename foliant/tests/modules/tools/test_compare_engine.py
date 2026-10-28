@@ -651,3 +651,30 @@ def test_scan_preset_marks_uncertain_differences(tmp_path):
     mods = [d for d in doubtful.differences if d.kind == ce.MODIFIED]
     assert mods and all(d.uncertain for d in mods)
     assert any("bassa affidabilità: 100" in w for w in doubtful.warnings)
+
+
+def _price_list(rows):
+    doc = pymupdf.open()
+    p = doc.new_page()
+    y = 100
+    for r in rows:
+        for x, t in zip((50, 160, 330, 480, 520), r + ("EUR",)):
+            p.insert_text((x, y), t, fontsize=10)   # ogni cella è un testo a sé, come nei listini esportati
+        y += 18
+    return doc.tobytes()
+
+
+def test_price_list_rows_are_separate_changes():
+    """Listino: prezzo cambiato seguito da una riga nuova, riga tolta; nessuna falsa regione visiva."""
+    rows = [("Rolex", "Submariner", "126610LN", "12.500"), ("Rolex", "GMT-Master II", "126710BLRO", "18.900"),
+            ("Omega", "Speedmaster", "310.30.42", "6.400"), ("Tudor", "Black Bay 58", "M79030N", "3.600"),
+            ("Cartier", "Santos", "WSSA0018", "7.150")]
+    new = list(rows)
+    new[1] = ("Rolex", "GMT-Master II", "126710BLRO", "19.400")
+    new.insert(2, ("Rolex", "Daytona", "126500LN", "29.800"))
+    del new[4]
+    r = ce.run_compare(None, ce.SideInput(_price_list(rows), "A"), ce.SideInput(_price_list(new), "B"),
+                       ce.CompareOptions(dpi=72))
+    got = [(d.kind, d.text_a, d.text_b) for d in r.differences]
+    assert got == [(ce.MODIFIED, "18.900", "19.400"), (ce.ADDED, "", "Rolex Daytona 126500LN 29.800 EUR"),
+                   (ce.DELETED, "Tudor Black Bay 58 M79030N 3.600 EUR", "")]
