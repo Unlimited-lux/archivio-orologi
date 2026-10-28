@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
-from ..core.document import ACCESS, CONTENT, LOCK, Document
+from ..core.document import ACCESS, CONTENT, LOCK, Document, write_error
 from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import theme
@@ -972,12 +972,35 @@ class MainWindow(QMainWindow):
             self.show_home()
         self._on_current_changed()
 
-    def save_view(self, view: DocumentView | None, save_as: bool = False) -> bool:
+    def save_view(self, view: DocumentView | None, save_as: bool = False, recreate: bool = False) -> bool:
+        """Salva il documento (con `save_as` chiede dove). Se il file è stato eliminato o spostato
+        dopo l'apertura chiede se ricrearlo lì o salvarlo altrove (NFR-12/4); `recreate=True`
+        lo ricrea senza chiedere (l'utente l'ha già scelto, es. dalla barra di avviso)."""
         if view is None:
             return False
         self.commit_pending_edits(view)
         doc = view.document
         path = None
+        missing = doc.path is not None and not os.path.exists(doc.path)
+        if missing and not (save_as or recreate):
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle(_("File eliminato o spostato"))
+            box.setText(_("«{name}» è stato eliminato o spostato dopo l'apertura.").format(name=doc.display_name))
+            box.setInformativeText(_("Puoi ricrearlo nella posizione originale o salvarlo in un'altra posizione."))
+            here = box.addButton(_("Ricrea nella posizione originale"), QMessageBox.ButtonRole.AcceptRole)
+            other = box.addButton(_("Salva con nome…"), QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(other)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is other:
+                save_as = True
+            elif clicked is here:
+                recreate = True
+            else:
+                return False
+        recreate = missing and recreate and not save_as
         if not (save_as or doc.needs_save_as) and doc.disk_changed():
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
@@ -994,7 +1017,7 @@ class MainWindow(QMainWindow):
                 save_as = True
             elif clicked is not overwrite:
                 return False
-        as_new = save_as or doc.needs_save_as
+        as_new = save_as or (doc.needs_save_as and not recreate)
         info = {"path": None if as_new or doc.path is None else str(doc.path), "copy": False}
         if not self.ctx.run_guards("save_as" if as_new else "save", view, info):
             return False
@@ -1003,6 +1026,11 @@ class MainWindow(QMainWindow):
             if not path:
                 return False
         try:
+            if recreate:
+                try:
+                    doc.path.parent.mkdir(parents=True, exist_ok=True)   # anche la cartella era sparita
+                except OSError as e:
+                    raise write_error(doc.path, e) from e
             doc.save(path)
         except DocumentWriteError as e:         # disco pieno, cartella non scrivibile…: il documento resta modificato
             return self._write_failed(e, _("Salva con nome…"), lambda: self.save_view(view, save_as=True))

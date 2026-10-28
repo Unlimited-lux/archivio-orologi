@@ -153,6 +153,11 @@ EN = {
     "errore di scrittura sul disco ({error})": "disk write error ({error})",
     "Riprova o salva in un'altra posizione.": "Try again or save to a different location.",
     "Scegli un'altra posizione…": "Choose another location…",
+    "File eliminato o spostato": "File deleted or moved",
+    "«{name}» è stato eliminato o spostato dopo l'apertura.": "“{name}” was deleted or moved after it was opened.",
+    "Puoi ricrearlo nella posizione originale o salvarlo in un'altra posizione.":
+        "You can recreate it in its original location or save it somewhere else.",
+    "Ricrea nella posizione originale": "Recreate in original location",
     "Il file è protetto con un sistema di sicurezza non supportato ({handler}).": "The file is protected with an unsupported security handler ({handler}).",
     "Il file non è un PDF valido oppure è danneggiato.": "The file is not a valid PDF or it is damaged.",
     "Impossibile convertire il file in PDF.": "Cannot convert the file to PDF.",

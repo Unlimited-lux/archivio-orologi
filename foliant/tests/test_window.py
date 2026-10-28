@@ -449,6 +449,53 @@ def test_save_failure_offers_save_as(window, sample_pdf, tmp_path, monkeypatch):
     assert boxes[2][2] == ["Scegli un'altra posizione…", "Chiudi"] and os.path.exists(copy)
 
 
+def test_save_of_deleted_or_moved_file_asks_where(window, sample_pdf, tmp_path, monkeypatch):
+    """NFR-12/4: salvando un file eliminato o spostato dopo l'apertura Foliant lo segnala e
+    propone di ricrearlo nella posizione originale o di sceglierne un'altra; `recreate=True`
+    (barra di avviso) lo ricrea senza chiedere, anche se manca la cartella."""
+    import os
+    view = window.open_path(sample_pdf)
+    doc = view.document
+
+    def modify_and_remove():
+        with doc.change("Ruota") as pdf:
+            pdf[0].set_rotation((pdf[0].rotation + 90) % 360)
+        if os.path.exists(sample_pdf):
+            os.remove(sample_pdf)
+    boxes = []
+
+    def answer(label):
+        def fake_exec(box):
+            boxes.append((box.text(), [b.text() for b in box.buttons()]))
+            next(b for b in box.buttons() if b.text() == label).click()
+            return 0
+        return fake_exec
+    modify_and_remove()
+    monkeypatch.setattr(QMessageBox, "exec", answer("Annulla"))
+    assert not window.save_view(view)
+    text, buttons = boxes[0]
+    assert "«esempio.pdf» è stato eliminato o spostato dopo l'apertura" in text
+    assert buttons == ["Ricrea nella posizione originale", "Salva con nome…", "Annulla"]
+    assert not os.path.exists(sample_pdf) and doc.is_modified
+
+    monkeypatch.setattr(QMessageBox, "exec", answer("Ricrea nella posizione originale"))
+    assert window.save_view(view)
+    assert os.path.exists(sample_pdf) and not doc.is_modified and len(boxes) == 2
+
+    modify_and_remove()
+    other = str(tmp_path / "archiviato.pdf")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: other)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Salva con nome…"))
+    assert window.save_view(view)
+    assert str(doc.path) == other and not os.path.exists(sample_pdf) and len(boxes) == 3
+
+    moved = tmp_path / "sub" / "spostato.pdf"
+    doc.path = moved                                                  # la cartella non esiste più
+    modify_and_remove()
+    assert window.save_view(view, recreate=True)                      # nessuna domanda
+    assert len(boxes) == 3 and moved.exists() and not doc.is_modified
+
+
 def test_shortcuts_dialog_lists_all_modes_in_italian(window):
     from foliant.ui.dialogs import ShortcutsDialog, collect_shortcuts
     m = window.ctx.add_mode("prova_sc", "Prova scorciatoie", "star", 996)
