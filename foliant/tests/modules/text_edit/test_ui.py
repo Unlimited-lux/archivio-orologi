@@ -267,31 +267,52 @@ def test_permission_denied(window, tmp_path, quiet, qtbot):
     assert not view.document.is_modified
 
 
-def test_signed_document_warns_before_editing(window, tmp_path, quiet, qtbot):
-    path = tmp_path / "firmato.pdf"
+def _signed_pdf(tmp_path) -> str:
+    """PDF con una vera firma digitale (ID di prova creato al volo)."""
+    from foliant.modules.sign import digital
     doc = pymupdf.open()
-    page = doc.new_page()
-    page.insert_text((72, 100), "Documento firmato", fontsize=14)
-    acro = doc.get_new_xref()
-    doc.update_object(acro, "<< /Fields [] /SigFlags 3 >>")
-    doc.xref_set_key(doc.pdf_catalog(), "AcroForm", f"{acro} 0 R")
-    doc.save(str(path))
+    doc.new_page().insert_text((72, 100), "Documento firmato 2024", fontsize=14)
+    data = doc.tobytes()
     doc.close()
-    quiet["answer"] = False
-    view = open_in_edit_mode(window, str(path))
+    old = digital.PKCS12_KDF_ROUNDS
+    digital.PKCS12_KDF_ROUNDS = 2048
+    try:
+        digital.create_self_signed(tmp_path / "id.p12", "Prova-Firma-2026!", common_name="Mario Rossi")
+    finally:
+        digital.PKCS12_KDF_ROUNDS = old
+    did = digital.load_pkcs12(tmp_path / "id.p12", "Prova-Firma-2026!")
+    signed = digital.sign_pdf(data, did, digital.SignOptions(reason="Approvo"))
+    path = tmp_path / "firmato.pdf"
+    path.write_bytes(signed)
+    return str(path)
+
+
+def test_signed_document_single_warning(window, tmp_path, quiet, qtbot, monkeypatch):
+    """Documento firmato: un solo avviso (quello del modulo Firma); con «Annulla» il documento resta invariato."""
+    from PySide6.QtWidgets import QApplication
+    sign = getattr(window.ctx, "sign_controller", None)
+    if sign is None:
+        pytest.skip("modulo Firma non caricato")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dati"))
+    path = _signed_pdf(tmp_path)
+    asked = []
+    monkeypatch.setattr(sign, "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")
+    view = open_in_edit_mode(window, path)
+    QApplication.processEvents()
     ctrl = ctrl_of(window)
-    # l'avviso compare entrando in Modifica, prima di qualsiasi modifica
-    assert quiet["confirms"] and "firme digitali" in quiet["confirms"][0][1]
-    assert not isinstance(view.tool, EditTextTool)
-    quiet["answer"] = True
-    window.ctx.set_mode("leggi")
-    window.ctx.set_mode("modifica")
     assert isinstance(view.tool, EditTextTool)
     block = block_with(ctrl, view, "firmato")
     c = block.bbox
     click(qtbot, view, 0, (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
-    assert ctrl.editor_for(view) is not None
-    assert not view.document.is_modified
+    ed = ctrl.editor_for(view)
+    assert ed is not None
+    ed.selectAll()
+    ed.insertPlainText("Documento firmato 2026")
+    ctrl.commit_editor(view)
+    QApplication.processEvents()
+    assert quiet["confirms"] == [] and quiet["errors"] == []     # nessuna conferma di text_edit
+    assert len(asked) == 1                                        # un solo avviso: quello del modulo Firma
+    assert not view.document.is_modified and "2024" in view.document.page_text(0)
 
 
 def test_piece_info_preserved(window, tmp_path, quiet, qtbot):
