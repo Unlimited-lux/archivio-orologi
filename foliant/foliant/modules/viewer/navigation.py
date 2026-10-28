@@ -228,11 +228,13 @@ class NavigationController(QObject):
         rotate = getattr(w, "act_rotate_view", None)
         self.act_rotate_ccw = self.ctx.action(_("Ruota vista in senso antiorario"), "rotate-ccw",
                                               lambda: self._rotate_view(-90))
+        from foliant.ui.dialogs import key_text   # scorciatoia scritta nella lingua dell'interfaccia
         if rotate is not None:
             rotate.setShortcut(QKeySequence("Ctrl+Shift++"))
-            rotate.setToolTip(_("Ruota vista in senso orario") + " (Ctrl+Maiusc++)")
+            rotate.setToolTip(f"{_('Ruota vista in senso orario')} ({key_text(rotate.shortcut())})")
         self.act_rotate_ccw.setShortcut(QKeySequence("Ctrl+Shift+-"))
-        self.act_rotate_ccw.setToolTip(_("Ruota vista in senso antiorario") + " (Ctrl+Maiusc+-)")
+        self.act_rotate_ccw.setToolTip(
+            f"{_('Ruota vista in senso antiorario')} ({key_text(self.act_rotate_ccw.shortcut())})")
         w.addAction(self.act_rotate_ccw)
         self.ctx.add_menu_action(self.act_rotate_ccw, _("Vista"))
         if mode is not None:
