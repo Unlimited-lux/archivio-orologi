@@ -1,3 +1,4 @@
 from foliant.app import main
 
-raise SystemExit(main())
+if __name__ == "__main__":     # un processo figlio (multiprocessing «spawn») non riavvia l'interfaccia
+    raise SystemExit(main())
