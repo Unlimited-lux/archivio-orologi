@@ -177,3 +177,29 @@ def test_english_placeholder_aliases(pages_window, tmp_path):
     finally:
         i18n.set_language("it")
     assert D.ExtractDialog(window, view.document, [0]).template.text() == "{nome}_p{pagina}"
+
+
+def test_stamp_dates_follow_language(pages_window):
+    """Date dei timbri senza formato esplicito: quelle della lingua (format_date del nucleo)."""
+    import datetime as dt
+    from foliant.modules.pages import fields as F
+    from foliant.modules.pages import stamp
+    from foliant.modules.pages import stamp_dialogs as S
+    window, view = pages_window
+    when = dt.datetime(2026, 10, 28, 14, 30)
+    assert F.render_template("{data}", {}, now=when) == "28/10/2026"
+    assert F.render_template("{ora}", {}, now=when) == "14:30"
+    i18n.set_language("en")
+    try:
+        assert F.render_template("{date}", {}, now=when) == "10/28/2026"
+        assert F.render_template("{time}", {}, now=when) == "2:30 PM"
+        dlg = S.HeaderFooterDialog(window, view.document, [0])
+        assert dlg.date_format.currentText() == "As the language"
+        assert dlg._date_format_value() is None
+    finally:
+        i18n.set_language("it")
+    with view.document.change("hf") as pdf:
+        stamp.add_header_footer(pdf, [0], footer_left="{data}")
+        text = pdf[0].get_text()
+    today = dt.date.today()
+    assert f"{today.day:02d}/{today.month:02d}/{today.year}" in text
