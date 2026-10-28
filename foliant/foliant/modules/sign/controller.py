@@ -220,6 +220,12 @@ class SignController(QObject):
                      kind="content")
         self.tool_for(view).selected = None
 
+    def rotate_free(self, view, page: int, xref: int) -> None:
+        val, ok = QInputDialog.getInt(self.ctx.window, _("Ruota firma"),
+                                      _("Gradi in senso orario (negativi: antiorario):"), 15, -180, 180)
+        if ok and val:
+            self._change(view, _("Ruota firma"), lambda pdf: g.rotate_signature(pdf, page, xref, val))
+
     def set_opacity(self, view, page: int, xref: int) -> None:
         val, ok = QInputDialog.getInt(self.ctx.window, _("Opacità"), _("Opacità della firma (%):"), 100, 5, 100)
         if ok:
@@ -277,6 +283,7 @@ class SignController(QObject):
         menu.addAction(_("Elimina"), lambda: self.delete(view, p, x))
         menu.addAction(_("Ruota di 90°"), lambda: self._change(
             view, _("Ruota firma"), lambda pdf: g.rotate_signature(pdf, p, x, 90)))
+        menu.addAction(_("Ruota…"), lambda: self.rotate_free(view, p, x))
         menu.addAction(_("Opacità…"), lambda: self.set_opacity(view, p, x))
         menu.addAction(_("Ripeti su più pagine…"), lambda: self.repeat(view, p, x))
         with ENGINE_LOCK:
@@ -882,7 +889,8 @@ TRANSLATIONS_EN = {
     "Ripeti firma su più pagine": "Repeat signature on several pages",
     "Firma ripetuta su {n} pagine.": "Signature repeated on {n} pages.",
     "Ridotta per entrare nelle pagine: {p}.": "Shrunk to fit on pages: {p}.",
-    "Ruota di 90°": "Rotate 90°", "Ruota firma": "Rotate signature",
+    "Ruota di 90°": "Rotate 90°", "Ruota…": "Rotate…",
+    "Gradi in senso orario (negativi: antiorario):": "Degrees clockwise (negative: counter-clockwise):", "Ruota firma": "Rotate signature",
     "Duplica": "Duplicate", "Elimina": "Delete", "Opacità…": "Opacity…",
     "Ripeti su più pagine…": "Repeat on several pages…", "Incorpora nella pagina": "Embed in page",
     "Documento firmato: modificare il contenuto invaliderà le firme.":

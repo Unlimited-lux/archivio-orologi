@@ -421,3 +421,21 @@ def test_signature_in_box_with_mediabox_offset(rotation):
     assert (ink & vis).get_area() / ink.get_area() > 0.98, (ink, vis)
     sig = g.placed_signatures(doc, 0)[0]
     assert abs(sig.rect.x0 - g.unrotated_rect(doc[0], vis).x0) < 1
+
+
+def test_free_rotation_keeps_scale_and_center():
+    item = _drawn_item()
+    pdf = pymupdf.open()
+    pdf.new_page()
+    xref = g.insert_signature(pdf, 0, pymupdf.Rect(100, 100, 250, 150), item)
+    r = g.rotate_signature(pdf, 0, xref, 30)
+    c30, s30 = math.cos(math.radians(30)), math.sin(math.radians(30))
+    assert r.width == pytest.approx(150 * c30 + 50 * s30, abs=0.5)
+    assert ((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2) == pytest.approx((175, 125), abs=0.01)
+    r2 = g.rotate_signature(pdf, 0, xref, -30)
+    assert (r2.width, r2.height) == pytest.approx((150, 50), abs=0.5)
+    g.rotate_signature(pdf, 0, xref, 45)
+    doc = pymupdf.open("pdf", pdf.tobytes(garbage=3))
+    ink = _ink_bbox(doc[0])
+    sig = g.placed_signatures(doc, 0)[0]
+    assert sig.rect.contains(ink) or (ink & sig.rect).get_area() / ink.get_area() > 0.97

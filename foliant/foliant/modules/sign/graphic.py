@@ -613,9 +613,13 @@ def art_content(art: VectorArt, width: float, height: float, color: str) -> byte
     return "\n".join(out).encode("latin-1")
 
 
-def _rotation_matrix(rotation: int, w: float, h: float) -> str:
-    """/Matrix che raddrizza l'aspetto rispetto alla vista per /Rotate."""
+def _rotation_matrix(rotation: float, w: float, h: float) -> str:
+    """/Matrix che raddrizza l'aspetto rispetto alla vista per /Rotate (o ruota di un angolo libero)."""
     rot = rotation % 360
+    if abs(rot - round(rot)) > 1e-6 or round(rot) % 90:
+        c, sn = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+        return f"[{_f(c)} {_f(sn)} {_f(-sn)} {_f(c)} 0 0]"
+    rot = int(round(rot)) % 360
     if rot == 90:
         return f"[0 1 -1 0 {_f(h)} 0]"
     if rot == 180:
@@ -937,22 +941,36 @@ def _add_xobject_resource(pdf: pymupdf.Document, page_xref: int, name: str, xobj
         pdf.xref_set_key(holder, f"{prefix}XObject/{name}", f"{xobj_xref} 0 R")
 
 
-def rotate_signature(pdf: pymupdf.Document, page_index: int, xref: int, degrees: int = 90) -> pymupdf.Rect:
-    """Ruota la firma di 90° in senso orario rispetto alla vista (attorno al centro)."""
+def _bbox_size_at(w: float, h: float, angle: float) -> tuple[float, float]:
+    c, sn = abs(math.cos(math.radians(angle))), abs(math.sin(math.radians(angle)))
+    return w * c + h * sn, w * sn + h * c
+
+
+def rotate_signature(pdf: pymupdf.Document, page_index: int, xref: int, degrees: float = 90) -> pymupdf.Rect:
+    """Ruota la firma di `degrees` gradi in senso orario rispetto alla vista, attorno
+    al centro: passi di 90° o rotazione libera. Il riquadro diventa l'ingombro
+    della firma ruotata, con la stessa scala."""
     sig = find_signature(pdf, page_index, xref)
     if sig is None or sig.ap_xref is None:
         raise GraphicSignatureError(_("Firma non trovata."))
     mat_s = pdf.xref_get_key(sig.ap_xref, "Matrix")
     m = [float(v) for v in mat_s[1].strip("[]").split()] if mat_s[0] == "array" else [1, 0, 0, 1, 0, 0]
-    current = int(round(math.degrees(math.atan2(m[1], m[0])))) % 360
+    current = math.degrees(math.atan2(m[1], m[0])) % 360
     new = (current - degrees) % 360
+    if abs(new - round(new)) < 1e-6:
+        new = round(new) % 360
+    bbox = [float(v) for v in pdf.xref_get_key(sig.ap_xref, "BBox")[1].strip("[]").split()]
+    bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    cur_w, cur_h = _bbox_size_at(bw, bh, current)
+    scale = sig.rect.width / cur_w if cur_w else 1.0
     # copia dell'aspetto: le copie ripetute condividono lo stesso Form XObject
     ap = _rotated_copy_of_appearance(pdf, sig.ap_xref, current, new)
     pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+    nw, nh = _bbox_size_at(bw, bh, new)
+    nw, nh = nw * scale, nh * scale
     r = sig.rect
     cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
-    w, h = r.height, r.width
-    return set_signature_rect(pdf, page_index, xref, pymupdf.Rect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2))
+    return set_signature_rect(pdf, page_index, xref, pymupdf.Rect(cx - nw / 2, cy - nh / 2, cx + nw / 2, cy + nh / 2))
 
 
 def embed_signature(pdf: pymupdf.Document, page_index: int, xref: int) -> None:
