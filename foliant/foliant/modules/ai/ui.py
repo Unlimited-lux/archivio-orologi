@@ -150,6 +150,38 @@ class Services:
             SettingsDialog(self.store, parent or self.ctx.window).exec()
         self.refresh()
 
+    def pick_graphic(self, kind: str = "stamp", parent=None) -> bytes | None:
+        """API pubblica per gli altri moduli: «Genera con IA…» un timbro, un adesivo, una filigrana o uno sfondo.
+
+        Gestisce profilo, chiave, informativa (consenso) e limite di utilizzo come il pannello; apre la
+        finestra di generazione e restituisce il PNG scelto dall'utente, oppure None (annullato, assistente
+        non configurato o informativa non accettata: in questi casi nessun dato viene inviato).
+        `kind`: "stamp", "sticker", "watermark" o "background".
+        """
+        from .graphics_view import GenerateGraphicDialog
+        if not self.store.enabled():
+            return None
+        if self.panel is not None:
+            profile = self.panel._ensure_ready()          # chiave, informativa, limite (con le sue finestre)
+        else:
+            profile = self.store.active()
+            if profile is not None and not profile.consent:
+                profile = None
+        if profile is None:
+            return None
+
+        def run(title, fn):
+            try:
+                return self.ctx.run_task(title, lambda progress: fn(progress=progress))
+            except OperationCancelled:
+                return None
+
+        dlg = GenerateGraphicDialog(profile, lambda: self.store.provider_for(profile), run,
+                                    parent or self.ctx.window, kind=kind)
+        self.controller.exec_dialog(dlg)
+        png = getattr(dlg, "chosen_png", None)
+        return bytes(png) if png else None
+
     def show_log(self, parent=None) -> None:
         SendLogDialog(self.log, parent or self.ctx.window,
                       ask_save=lambda: self.ctx.ask_save_path(_("Esporta registro"), "registro-invii.json",
