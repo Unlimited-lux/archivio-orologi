@@ -1153,6 +1153,25 @@ class OcrController(QObject):
             (_("Converti in testo modificabile"), lambda: self.apply_area(view, res, engine.EDITABLE)),
         ])
 
+    def menu_provider(self, view, pe, menu) -> None:
+        """Menu contestuale: «Riconosci testo nell'immagine» sopra un'immagine (OCR-11)."""
+        if pe.page is None or pe.point is None:
+            return
+        with try_engine() as ok:
+            if not ok:
+                return
+            try:
+                infos = view.document.pdf[pe.page].get_image_info()
+            except Exception:
+                return
+        boxes = [pymupdf.Rect(i["bbox"]) for i in infos if pymupdf.Rect(i["bbox"]).contains(pe.point)]
+        if not boxes:
+            return
+        box = min(boxes, key=lambda r: abs(r))
+        menu.addSeparator()
+        act = menu.addAction(icon("scan-text"), _("Riconosci testo nell'immagine"))
+        act.triggered.connect(lambda _c=False, v=view, p=pe.page, b=box: self.ocr_area(v, p, b, force=True))
+
     def apply_area(self, view, res: engine.PageResult, mode: str) -> None:
         family = str(self.settings().value("ocr/font", "auto"))
         try:

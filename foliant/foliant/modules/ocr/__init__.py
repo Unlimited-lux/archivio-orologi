@@ -81,6 +81,7 @@ def register(ctx: Context) -> None:
     for a in (menu_run, act_remove, act_image, act_batch, act_langs, act_detect):
         ctx.add_menu_action(a, _("OCR"))
 
+    ctx.add_view_menu_provider(controller.menu_provider)
     controller.review_panel = ReviewPanel(controller)
     ctx.add_properties_panel("ocr-review", controller.review_panel)
     ctx.add_home_action(_("OCR di un PDF scannerizzato"), "scan-text", _home_ocr(ctx, controller),

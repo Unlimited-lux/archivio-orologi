@@ -753,3 +753,40 @@ def test_ocr_in_background_annullato_o_chiuso(window, qtbot, scan_two, monkeypat
     ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
     window.close_view(view)                              # chiusura durante il lavoro: nessun errore
     qtbot.waitUntil(lambda: not ctl.jobs, timeout=120000)
+
+
+def test_menu_contestuale_riconosci_testo_nell_immagine(window, tmp_path, monkeypatch):
+    """OCR-11: su un PDF nativo con una schermata, il menu dell'immagine riconosce e aggiunge il testo
+    ricercabile solo lì; un Annulla ripristina."""
+    from PySide6.QtWidgets import QMenu
+    from foliant.api import PageEvent
+    import cv2
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 60), "Documento digitale con una schermata", fontsize=12)
+    img = scan_image(lines=FRASI[:2], dpi=200, size=(595, 120), top=40)
+    ok, buf = cv2.imencode(".png", img)
+    page.insert_image(pymupdf.Rect(40, 100, 555, 220), stream=buf.tobytes())
+    path = tmp_path / "nativo.pdf"
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    ctl = ocr_controller()
+    menu = QMenu()
+    pe = PageEvent(page=0, point=pymupdf.Point(200, 150), pos=QPointF(0, 0), button=Qt.MouseButton.RightButton,
+                   buttons=Qt.MouseButton.RightButton, modifiers=Qt.KeyboardModifier.NoModifier)
+    ctl.menu_provider(view, pe, menu)
+    acts = [a for a in menu.actions() if "immagine" in a.text()]
+    assert acts
+    def fake_exec(dlg):
+        dlg.action_buttons["Aggiungi come testo ricercabile"].click()
+        return 0
+    monkeypatch.setattr(dialogs.TextDialog, "exec", fake_exec)
+    acts[0].trigger()
+    text = view.document.page_text(0)
+    assert "compravendita" in text and text.count("Documento digitale") == 1
+    view.document.undo()
+    assert "compravendita" not in view.document.page_text(0)
+    menu2 = QMenu()
+    pe.point = pymupdf.Point(300, 400)
+    ctl.menu_provider(view, pe, menu2)
+    assert not menu2.actions()

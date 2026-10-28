@@ -340,4 +340,5 @@ EN = {
     "Durante il riconoscimento sono state aggiunte o tolte pagine: il testo riconosciuto non può essere collocato con sicurezza. Esegui di nuovo l'OCR.": 'Pages were added or removed during recognition: the recognized text cannot be placed safely. Run OCR again.',
     'Documento modificato': 'Document modified',
     'Durante il riconoscimento sono cambiate le pagine {p}. Applicare il testo riconosciuto solo alle altre pagine?': 'Pages {p} changed during recognition. Apply the recognized text only to the other pages?',
+    "Riconosci testo nell'immagine": 'Recognize text in the image',
 }
