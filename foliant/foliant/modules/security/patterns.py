@@ -292,6 +292,8 @@ class Match:
     text: str
     rects: list[pymupdf.Rect] = field(default_factory=list)
     pattern: str = ""
+    pattern_label: str = ""
+    context: str = ""
 
     @property
     def bounds(self) -> pymupdf.Rect:
@@ -374,7 +376,11 @@ def find_in_page(page: pymupdf.Page, pattern: Pattern, page_index: int = 0,
     for start, end in spans:
         rects = pt.rects(start, end)
         if rects:
-            out.append(Match(page_index, pt.text[start:end], rects, pattern.id))
+            before = pt.text[max(0, start - 30):start].replace("\n", " ")
+            after = pt.text[end:end + 30].replace("\n", " ")
+            found = pt.text[start:end].replace("\n", " ")
+            context = f"…{before}«{found}»{after}…"
+            out.append(Match(page_index, pt.text[start:end], rects, pattern.id, pattern.label, context))
     return out
 
 

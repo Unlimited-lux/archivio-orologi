@@ -31,6 +31,7 @@ class ScanReport:
     comments: int = 0
     form_fields: int = 0
     has_metadata: bool = False
+    items: list[tuple[str, str, str]] = field(default_factory=list)   # (tipo, posizione, dettaglio)
 
     @property
     def risky(self) -> bool:
@@ -66,6 +67,7 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000) -> ScanReport:
     uris: set[str] = set()
     if not pdf.is_pdf:
         return rep
+    locations = _locations(pdf)
     n = min(pdf.xref_length(), max_objects)
     for xref in range(1, n):
         try:
@@ -75,14 +77,19 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000) -> ScanReport:
         if not obj or obj == "null":
             continue
         if "/S" in obj or "/JS" in obj:
+            where = locations.get(xref, _("Documento"))
             if _RX_JS.search(obj):
                 rep.javascript += 1
+                rep.items.append(("javascript", where, _js_code(pdf, xref)))
             if _RX_LAUNCH.search(obj):
                 rep.launch += 1
+                rep.items.append(("launch", where, _target(obj)))
             if _RX_GOTOR.search(obj):
                 rep.remote_files += 1
+                rep.items.append(("remote", where, _target(obj)))
             if _RX_SUBMIT.search(obj):
                 rep.submit_forms += 1
+                rep.items.append(("submit", where, _target(obj)))
             if _RX_URI.search(obj):
                 uri = _uri_of(obj)
                 if uri:
@@ -99,6 +106,7 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000) -> ScanReport:
                 rep.comments += 1
         rep.form_fields += sum(1 for _w in page.widgets())
     rep.external_links = sorted(uris)
+    rep.items.extend(("uri", "", u) for u in rep.external_links)
     try:
         rep.embedded_files += pdf.embfile_count()
     except Exception:
@@ -108,6 +116,63 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000) -> ScanReport:
     rep.has_metadata = any(v for k, v in meta.items() if k not in ("format", "encryption")) or bool(
         _xml_metadata(pdf))
     return rep
+
+
+def _locations(pdf: pymupdf.Document) -> dict[int, str]:
+    """Dove si trova un oggetto azione: apertura del documento o pagina."""
+    loc: dict[int, str] = {}
+
+    def ref(xref: int, key: str) -> int | None:
+        try:
+            kind, val = pdf.xref_get_key(xref, key)
+        except Exception:
+            return None
+        if kind == "xref":
+            return int(val.split()[0])
+        return None
+
+    cat = pdf.pdf_catalog()
+    x = ref(cat, "OpenAction")
+    if x:
+        loc[x] = _("Apertura del documento")
+    for i in range(pdf.page_count):
+        label = _("Pagina {n}").format(n=i + 1)
+        page = pdf[i]
+        loc.setdefault(page.xref, label)
+        for key in ("AA/O", "AA/C"):
+            x = ref(page.xref, key)
+            if x:
+                loc.setdefault(x, label)
+        for annot_xref in [a[0] for a in page.annot_xrefs()]:
+            loc.setdefault(annot_xref, label)
+            for key in ("A", "AA/U", "AA/D", "AA/K", "AA/F", "AA/V", "AA/C", "AA/E", "AA/X"):
+                x = ref(annot_xref, key)
+                if x:
+                    loc.setdefault(x, label)
+    return loc
+
+
+def _js_code(pdf: pymupdf.Document, xref: int) -> str:
+    try:
+        kind, val = pdf.xref_get_key(xref, "JS")
+        if kind == "string":
+            code = val
+        elif kind == "xref":
+            code = pdf.xref_stream(int(val.split()[0])).decode("latin-1", "replace")
+        else:
+            code = ""
+    except Exception:
+        code = ""
+    code = " ".join(code.split())
+    return code[:400] + ("…" if len(code) > 400 else "")
+
+
+def _target(obj: str) -> str:
+    m = re.search(r"/(?:F|URL)\s*\(((?:\\.|[^\\)])*)\)", obj)
+    if m:
+        return m.group(1)
+    m = re.search(r"/(?:F|URL)\s*<<.*?/F\s*\(((?:\\.|[^\\)])*)\)", obj)
+    return m.group(1) if m else ""
 
 
 def _xml_metadata(pdf: pymupdf.Document) -> str:
@@ -419,7 +484,17 @@ def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
             pdf.del_xml_metadata()
         except Exception:
             pass
-    if o["form_data"]:
+    if o["form_data"] and options.get("remove_fields"):
+        for page in pdf:
+            for xref in [w.xref for w in page.widgets()]:
+                for w in page.widgets():
+                    if w.xref == xref:
+                        page.delete_widget(w)
+                        break
+        cat = pdf.pdf_catalog()
+        if pdf.xref_get_key(cat, "AcroForm")[0] != "null":
+            pdf.xref_set_key(cat, "AcroForm", "null")
+    elif o["form_data"]:
         for page in pdf:
             for w in page.widgets():
                 if w.field_type in (pymupdf.PDF_WIDGET_TYPE_TEXT, pymupdf.PDF_WIDGET_TYPE_COMBOBOX,
@@ -487,3 +562,84 @@ def format_pdf_date(value: str) -> str:
     if h:
         s += f" {h}:{mi or '00'}"
     return s
+
+
+# ------------------------------------------------------------- ispezione
+
+
+def inspect_extra(pdf: pymupdf.Document, max_pages: int = 2000) -> dict:
+    """Dettagli per l'ispezione (SEC-21) oltre a quelli di `scan()`."""
+    out: dict = {"metadata": [], "layers": [], "fields": [], "hidden_text": 0, "hidden_where": [],
+                 "ocr_text": 0, "hidden_annots": 0, "thumbnails": 0, "bookmarks": 0, "signatures": 0}
+    meta = pdf.metadata or {}
+    labels = metadata_labels()
+    for k in METADATA_KEYS:
+        if meta.get(k):
+            out["metadata"].append(f"{labels[k]}: {meta[k]}")
+    if _xml_metadata(pdf):
+        out["metadata"].append(_("Metadati XMP presenti"))
+    try:
+        ocgs = pdf.get_ocgs() or {}
+        out["layers"] = [info.get("name", "?") for xref, info in ocgs.items() if not info.get("on", True)]
+    except Exception:
+        pass
+    try:
+        out["bookmarks"] = len(pdf.get_toc())
+    except Exception:
+        pass
+    for i, page in enumerate(pdf):
+        if i >= max_pages:
+            break
+        try:
+            kind, _v = pdf.xref_get_key(page.xref, "Thumb")
+            if kind != "null":
+                out["thumbnails"] += 1
+        except Exception:
+            pass
+        for a in page.annots():
+            if a.flags & (pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_NO_VIEW):
+                out["hidden_annots"] += 1
+        for w in page.widgets():
+            if w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE:
+                out["signatures"] += 1
+            if w.field_value not in (None, "", False, "Off"):
+                out["fields"].append(f"{w.field_name}: {w.field_value}"[:120])
+        try:
+            traces = page.get_texttrace()
+        except Exception:
+            traces = []
+        invisible = [t for t in traces if t.get("type") == 3 or t.get("opacity", 1) == 0]
+        if invisible:
+            if _covered_by_image(page):
+                out["ocr_text"] += 1
+            else:
+                out["hidden_text"] += len(invisible)
+                out["hidden_where"].append(_("Pagina {n}: {k} frammenti").format(n=i + 1, k=len(invisible)))
+    return out
+
+
+def _covered_by_image(page: pymupdf.Page) -> bool:
+    area = abs(page.rect)
+    if not area:
+        return False
+    for info in page.get_image_info():
+        r = pymupdf.Rect(info.get("bbox", (0, 0, 0, 0)))
+        if abs(r & page.rect) > 0.8 * area:
+            return True
+    return False
+
+
+# ------------------------------------------------------------ appiattimento
+
+
+def flatten(pdf: pymupdf.Document, annots: bool = True, widgets: bool = True) -> None:
+    """Fonde commenti e campi nel contenuto delle pagine; quelli nascosti vengono eliminati."""
+    for page in pdf:
+        hidden = [a.xref for a in page.annots()
+                  if a.flags & (pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_NO_VIEW)
+                  or a.type[0] == pymupdf.PDF_ANNOT_REDACT]
+        for xref in hidden:
+            annot = page.load_annot(xref)
+            if annot is not None and annot.type[0] != pymupdf.PDF_ANNOT_REDACT:
+                page.delete_annot(annot)
+    pdf.bake(annots=annots, widgets=widgets)

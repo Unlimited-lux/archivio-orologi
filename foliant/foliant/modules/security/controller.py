@@ -1,0 +1,975 @@
+"""Controller del modulo Proteggi: azioni, flussi e collegamento con l'interfaccia.
+
+Le finestre di dialogo passano da funzioni `ask_*`/`confirm_*` di questo modulo,
+così i test le sostituiscono con monkeypatch.
+"""
+
+from __future__ import annotations
+
+import json
+import weakref
+from pathlib import Path
+
+import pymupdf
+from PySide6.QtWidgets import QDialog, QMessageBox
+
+from foliant.api import CONTENT, ENGINE_LOCK, SAVED, Context, DocumentError, _
+
+from . import dialogs as D
+from . import patterns as PT
+from . import protection as P
+from . import redaction as R
+from . import sanitize as S
+from .widgets import Banner, Notice, PreviewOverlay, RedactAreaTool, RedactionPanel
+
+PANEL_ID = "security-redactions"
+CODES_KEY = "security/overlay_codes"
+STYLE_KEY = "security/style"
+DEFAULT_CODES = ["OMISSIS", "[omissis]", "Art. 9 GDPR – dato sanitario", "Dato personale", "Pagina omessa"]
+
+
+# ------------------------------------------------- dialoghi (sostituibili)
+
+
+def ask_protection(parent, document) -> D.ProtectDialog | None:
+    i = P.info(document)
+    dlg = D.ProtectDialog(P.settings_from_document(document), already_protected=i.protected,
+                          has_open_password=i.has_open_password, parent=parent)
+    return dlg if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_password(parent, title: str, text: str) -> str | None:
+    return D.ask_password(parent, title, text)
+
+
+def confirm(parent, title: str, text: str, action: str) -> bool:
+    """Conferma per operazioni irreversibili: pulsante distruttivo, fuoco su Annulla."""
+    box = QMessageBox(QMessageBox.Icon.Warning, title, text, parent=parent)
+    ok = box.addButton(action, QMessageBox.ButtonRole.DestructiveRole)
+    cancel = box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel)
+    box.setEscapeButton(cancel)
+    box.exec()
+    return box.clickedButton() is ok
+
+
+def run_dialog(dialog) -> bool:
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+def show_report(dialog) -> bool:
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+class SecurityController:
+    def __init__(self, ctx: Context):
+        self.ctx = ctx
+        self.style = R.MarkStyle()
+        self.apply_options = R.ApplyOptions()
+        self.preview = PreviewOverlay()
+        self.banners: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+        self.pending_outside: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # doc → [termini]
+        self.scans: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+        self.panel = RedactionPanel(self)
+        self._load_style()
+
+    # ------------------------------------------------------------ utilità
+    @property
+    def parent(self):
+        return self.ctx.window
+
+    def view(self):
+        return self.ctx.current_view()
+
+    def document(self):
+        v = self.view()
+        return v.document if v is not None else None
+
+    def settings(self):
+        try:
+            return self.ctx.settings()
+        except Exception:
+            return None
+
+    def _load_style(self) -> None:
+        s = self.settings()
+        if s is None:
+            return
+        raw = s.value(STYLE_KEY, "")
+        if not raw:
+            return
+        try:
+            d = json.loads(raw)
+            self.style = R.MarkStyle(fill=tuple(d.get("fill", (0, 0, 0))), overlay_text=d.get("text", ""),
+                                     text_color=tuple(d.get("text_color", (1, 1, 1))),
+                                     font_size=float(d.get("size", 0)), repeat_text=bool(d.get("repeat")))
+            self.apply_options = R.ApplyOptions(images=d.get("images", R.IMAGES_PIXELS),
+                                                graphics=d.get("graphics", R.GRAPHICS_COVERED))
+        except (ValueError, TypeError):
+            pass
+
+    def _save_style(self) -> None:
+        s = self.settings()
+        if s is None:
+            return
+        st, op = self.style, self.apply_options
+        s.setValue(STYLE_KEY, json.dumps({"fill": list(st.fill), "text": st.overlay_text,
+                                          "text_color": list(st.text_color), "size": st.font_size,
+                                          "repeat": st.repeat_text, "images": op.images,
+                                          "graphics": op.graphics}))
+
+    def codes(self) -> list[str]:
+        s = self.settings()
+        raw = s.value(CODES_KEY, "") if s is not None else ""
+        try:
+            codes = json.loads(raw) if raw else list(DEFAULT_CODES)
+        except ValueError:
+            codes = list(DEFAULT_CODES)
+        return [str(c) for c in codes if str(c).strip()]
+
+    def set_codes(self, codes: list[str]) -> None:
+        s = self.settings()
+        if s is not None:
+            s.setValue(CODES_KEY, json.dumps([c for c in codes if c.strip()], ensure_ascii=False))
+
+    def export_codes(self, path: str) -> None:
+        Path(path).write_text(json.dumps({"codici": self.codes()}, ensure_ascii=False, indent=2), "utf-8")
+
+    def import_codes(self, path: str) -> list[str]:
+        try:
+            data = json.loads(Path(path).read_text("utf-8"))
+            codes = data.get("codici", data) if isinstance(data, dict) else data
+            if not isinstance(codes, list):
+                raise ValueError
+        except (OSError, ValueError) as e:
+            raise DocumentError(_("Il file non contiene un insieme di codici valido.")) from e
+        self.set_codes([str(c) for c in codes])
+        return self.codes()
+
+    def require_modify(self, document) -> bool:
+        """Permesso di modifica (SEC-02): con accesso limitato chiede la password dei permessi."""
+        if "modify" in P.allowed_now(document):
+            return True
+        return self.unlock(document)
+
+    def unlock(self, document=None) -> bool:
+        document = document or self.document()
+        if document is None:
+            return False
+        if P.owner_known(document):
+            return True
+        pw = ask_password(self.parent, _("Sblocca"),
+                          _("Il documento ha permessi limitati. Inserisci la password dei permessi:"))
+        if pw is None:
+            return False
+        if not P.unlock(document, pw):
+            self.ctx.error(_("Password non corretta"), _("La password dei permessi non è corretta."))
+            return False
+        self.ctx.status(_("Accesso completo"))
+        self.refresh_document_state(self.view())
+        return True
+
+    # ------------------------------------------------------------ protezione
+    def protect(self) -> bool:
+        doc = self.document()
+        if doc is None:
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        dlg = ask_protection(self.parent, doc)
+        if dlg is None:
+            return False
+        settings = dlg.settings()
+        current = doc.save_options
+        if dlg.keep_open_password:
+            settings.open_password = current.get("user_pw", "")
+        if dlg.keep_permissions_password:
+            settings.permissions_password = current.get("owner_pw", "")
+        try:
+            P.apply_protection(doc, settings)
+        except P.ProtectionError as e:
+            self.ctx.error(_("Protezione non applicata"), str(e))
+            return False
+        self.ctx.status(_("Protezione impostata: verrà applicata al salvataggio."))
+        self.refresh_document_state(self.view())
+        return True
+
+    def remove_protection(self) -> bool:
+        doc = self.document()
+        if doc is None:
+            return False
+        if not doc.is_protected:
+            self.ctx.info(_("Rimuovi protezione"), _("Il documento non è protetto."))
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        text = _("Il file salvato sarà leggibile da chiunque, senza password né restrizioni.")
+        if self._has_signatures(doc):
+            text += "\n\n" + _("Il documento contiene firme digitali: dopo il salvataggio risulteranno non valide.")
+        if not confirm(self.parent, _("Rimuovere la protezione?"), text, _("Rimuovi protezione")):
+            return False
+        P.remove_protection(doc)
+        self.ctx.status(_("Protezione rimossa: salva il documento per renderla effettiva."))
+        self.refresh_document_state(self.view())
+        return True
+
+    def security_properties(self) -> None:
+        doc = self.document()
+        if doc is None:
+            return
+        rows = security_rows(doc)
+        dlg = D.ReportDialog(_("Proprietà di sicurezza"), "", rows, self.parent,
+                             action=_("Modifica protezione…") if doc.is_protected else _("Proteggi…"))
+        weak = any(_("Protezione debole") in head for head, _d in rows)
+        if show_report(dlg):
+            if weak and doc.is_protected and P.info(doc).method != P.AES256:
+                pass
+            self.protect()
+
+    @staticmethod
+    def _has_signatures(doc) -> bool:
+        with ENGINE_LOCK:
+            try:
+                for page in doc.pdf:
+                    for w in page.widgets():
+                        if w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and w.is_signed:
+                            return True
+            except Exception:
+                return False
+        return False
+
+    # ------------------------------------------------------------ redazione
+    def area_tool(self) -> RedactAreaTool:
+        return RedactAreaTool(self.add_area_mark, self.move_mark)
+
+    def activate_area_tool(self) -> None:
+        doc = self.document()
+        if doc is None or not self.require_modify(doc):
+            return
+        self.ctx.set_tool(self.area_tool())
+        self.ctx.show_properties(PANEL_ID)
+
+    def add_area_mark(self, page: int, rect: pymupdf.Rect) -> None:
+        doc = self.document()
+        if doc is None:
+            return
+        try:
+            with doc.change(_("Segna area per redazione")) as pdf:
+                if R.add_mark(pdf, page, rect, self.style, "area") is None:
+                    raise _Nothing()
+        except _Nothing:
+            return
+        self.ctx.status(_("Area segnata: verrà oscurata quando applichi le redazioni."))
+
+    def move_mark(self, page: int, xref: int, rect: pymupdf.Rect) -> None:
+        doc = self.document()
+        if doc is None:
+            return
+        try:
+            self._move_mark(doc, page, xref, rect)
+        except _Nothing:
+            pass
+
+    def _move_mark(self, doc, page: int, xref: int, rect: pymupdf.Rect) -> None:
+        with doc.change(_("Sposta segno di redazione")) as pdf:
+            p = pdf[page]
+            box = R.page_box(p)
+            rect = pymupdf.Rect(rect)
+            # resta dentro la pagina
+            dx = max(0, box.x0 - rect.x0) - max(0, rect.x1 - box.x1)
+            dy = max(0, box.y0 - rect.y0) - max(0, rect.y1 - box.y1)
+            rect += (dx, dy, dx, dy)
+            annot = p.load_annot(xref)
+            if annot is None:
+                raise _Nothing()
+            annot.set_rect(rect)
+            annot.set_info(content=R.covered_text(p, rect))
+            annot.update()
+
+    def mark_selection(self) -> int:
+        view = self.view()
+        if view is None:
+            return 0
+        sel = view.text_selection
+        if sel is None or not sel.rects:
+            self.ctx.info(_("Segna testo"), _("Seleziona prima il testo da oscurare."))
+            return 0
+        if not self.require_modify(view.document):
+            return 0
+        rects = merge_line_rects([PT._tight(pymupdf.Rect(r)) for r in sel.rects])
+        with view.document.change(_("Segna testo per redazione")) as pdf:
+            n = R.add_marks(pdf, ((sel.page, r, None) for r in rects), self.style, "selezione")
+        view.clear_text_selection()
+        self.ctx.show_properties(PANEL_ID)
+        return n
+
+    def mark_matches(self, document, matches: list[PT.Match], source: str) -> int:
+        if not matches:
+            return 0
+        with document.change(_("Segna per redazione")) as pdf:
+            n = R.add_marks(pdf, ((m.page, r, m.text) for m in matches if m.page >= 0 for r in m.rects),
+                            self.style, source)
+        return n
+
+    def search(self, document, options: dict) -> tuple[list[PT.Match], list[str]]:
+        """Esegue la ricerca (termini o schemi). Solleva ValueError per input non validi."""
+        count = document.page_count
+        pages = D.parse_pages(options.get("pages", ""), count)
+        pats: list[PT.Pattern] = []
+        if "terms" in options:
+            terms = options["terms"]
+            if not terms:
+                raise ValueError(_("Scrivi la parola o la frase da cercare."))
+            for t in terms:
+                pats.append(PT.term_pattern(t, case_sensitive=options.get("case_sensitive", False),
+                                            whole_word=options.get("whole_word", False),
+                                            ignore_accents=options.get("ignore_accents", False)))
+        else:
+            for pid in options.get("patterns", []):
+                p = PT.pattern_by_id(pid)
+                if p is not None:
+                    pats.append(p)
+            if options.get("custom"):
+                pats.append(PT.custom_pattern(options["custom"]))
+            if not pats:
+                raise ValueError(_("Scegli almeno uno schema."))
+
+        def work(progress):
+            with ENGINE_LOCK:
+                found = PT.find(document.pdf, pats, pages, progress.update)
+                empty = [i for i in pages if not document.pdf[i].get_text("text").strip()]
+                outside = (outside_matches(document.pdf, pats) if options.get("outside") else [])
+            return found, empty, outside
+
+        found, empty, outside = self.ctx.run_task(_("Ricerca in corso…"), work)
+        notices = []
+        if empty:
+            notices.append(_("{n} pagine senza testo (scansioni): esegui l'OCR per includerle.").format(n=len(empty)))
+        return found + outside, notices
+
+    def find_and_mark(self, mode: str = "terms") -> int:
+        view = self.view()
+        if view is None or not self.require_modify(view.document):
+            return 0
+        doc = view.document
+        items = [(p.id, p.label, p.id in ("email", "phone", "iban", "cf", "date")) for p in PT.builtin_patterns()]
+        dlg = D.FindDialog(mode, lambda o: self.search(doc, o), items, self.parent)
+        if mode == "terms" and view.selected_text():
+            dlg.terms.setPlainText(view.selected_text())
+        if not run_dialog(dlg):
+            return 0
+        chosen = dlg.selected()
+        n = self.mark_matches(doc, [m for m in chosen if m.page >= 0],
+                              "ricerca" if mode == "terms" else "schema")
+        outside = [m for m in chosen if m.page < 0]
+        if outside:
+            self.pending_outside.setdefault(doc, []).extend(outside)
+        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n + len(outside)))
+        self.ctx.show_properties(PANEL_ID)
+        return n
+
+    def mark_pages(self) -> int:
+        view = self.view()
+        if view is None or not self.require_modify(view.document):
+            return 0
+        dlg = D.PagesDialog(_("Segna pagine per redazione"), view.page_count, view.current_page, self.parent,
+                            with_overlay=True, overlay=self.style.overlay_text)
+        if not run_dialog(dlg):
+            return 0
+        pages = dlg.pages()
+        if len(pages) == view.page_count and not confirm(
+                self.parent, _("Oscurare tutte le pagine?"),
+                _("Hai scelto tutte le {n} pagine: dopo l'applicazione non resterà alcun contenuto.").format(
+                    n=len(pages)), _("Segna tutte")):
+            return 0
+        style = R.MarkStyle(**{**self.style.__dict__})
+        style.overlay_text = dlg.overlay.text().strip() if dlg.overlay is not None else style.overlay_text
+        with view.document.change(_("Segna pagine per redazione")) as pdf:
+            n = R.mark_whole_pages(pdf, pages, style)
+        self.ctx.show_properties(PANEL_ID)
+        return n
+
+    def repeat_mark(self, page: int, xref: int) -> int:
+        """«Ripeti su più pagine…» per un segno d'area."""
+        view = self.view()
+        if view is None:
+            return 0
+        dlg = D.PagesDialog(_("Ripeti su più pagine"), view.page_count, page, self.parent)
+        dlg.radios["all"].setChecked(True)
+        if not run_dialog(dlg):
+            return 0
+        return self.repeat_mark_on(view.document, page, xref, dlg.pages())
+
+    def repeat_mark_on(self, document, page: int, xref: int, pages: list[int]) -> int:
+        try:
+            return self._repeat_mark_on(document, page, xref, pages)
+        except _Nothing:
+            return 0
+
+    def _repeat_mark_on(self, document, page: int, xref: int, pages: list[int]) -> int:
+        with document.change(_("Ripeti segno su più pagine")) as pdf:
+            annot = pdf[page].load_annot(xref)
+            if annot is None:
+                raise _Nothing()
+            rect = pymupdf.Rect(annot.rect)
+            n = 0
+            for i in pages:
+                if i == page:
+                    continue
+                if R.add_mark(pdf, i, rect, self.style, "area") is not None:
+                    n += 1
+        return n
+
+    def remove_marks(self, marks: list[R.Mark]) -> int:
+        doc = self.document()
+        if doc is None or not marks:
+            return 0
+        with doc.change(_("Rimuovi segni di redazione")) as pdf:
+            n = sum(1 for m in marks if R.remove_mark(pdf, m.page, m.xref))
+        return n
+
+    def redaction_settings(self) -> bool:
+        dlg = D.StyleDialog(self.style, self.apply_options, self.codes(), self.parent)
+        if not run_dialog(dlg):
+            return False
+        self.style, self.apply_options = dlg.values()
+        text = self.style.overlay_text
+        if text and text not in self.codes():
+            self.set_codes(self.codes() + [text])
+        self._save_style()
+        return True
+
+    def set_preview(self, on: bool) -> None:
+        self.preview.enabled = bool(on)
+        if self.panel.preview_button.isChecked() != bool(on):
+            self.panel.preview_button.setChecked(bool(on))
+        for v in self.ctx.views():
+            v.viewport().update()
+
+    def apply_redactions(self, marks: list[R.Mark] | None = None) -> bool:
+        view = self.view()
+        if view is None:
+            return False
+        doc = view.document
+        with ENGINE_LOCK:
+            all_marks = R.marks(doc.pdf)
+        targets = all_marks if marks is None else marks
+        outside = self.pending_outside.get(doc, []) if marks is None else []
+        if not targets and not outside:
+            self.ctx.info(_("Applica redazioni"), _("Nessuna area contrassegnata per la redazione"))
+            return False
+        if not self.require_modify(doc):
+            return False
+        pages = sorted({m.page for m in targets})
+        title = _("Applicare {n} redazioni?").format(n=len(targets) + len(outside))
+        text = _("Il contenuto sotto {n} aree su {p} pagine verrà rimosso definitivamente (testo, immagini, "
+                 "grafica, commenti e campi). Puoi annullare fino al salvataggio; dopo non sarà più "
+                 "recuperabile.").format(n=len(targets), p=len(pages))
+        if outside:
+            text += "\n\n" + _("Verranno cancellate anche {n} occorrenze fuori dalle pagine (metadati, segnalibri, "
+                               "commenti, campi, allegati).").format(n=len(outside))
+        if self._has_signatures(doc):
+            text += "\n\n" + _("Le firme digitali del documento risulteranno non valide.")
+        if not confirm(self.parent, title, text, _("Applica")):
+            return False
+        keep = {(m.page, m.xref) for m in all_marks} - {(m.page, m.xref) for m in targets}
+        try:
+            with doc.change(_("Applica redazioni")) as pdf:
+                # i segni non scelti vengono messi da parte e ricreati dopo
+                saved = _detach_marks(pdf, keep)
+                report = R.apply(pdf, self.apply_options, pages)
+                _reattach_marks(pdf, saved)
+                if outside:
+                    redact_outside(pdf, outside, self.style.overlay_text or "[omissis]")
+        except Exception as e:
+            self.ctx.error(_("Redazione non applicata"),
+                           _("Si è verificato un errore: nessuna modifica è stata fatta.\n\n{e}").format(e=e))
+            return False
+        if outside:
+            self.pending_outside.pop(doc, None)
+        self.ctx.status(_("Redazioni applicate: {n} aree su {p} pagine").format(n=report.marks, p=report.pages))
+        self.offer_save_redacted(view)
+        return True
+
+    def offer_save_redacted(self, view) -> None:
+        doc = view.document
+        stem = Path(doc.display_name).stem
+        if not self.ctx.confirm(_("Salvare il documento redatto?"),
+                                _("Salva ora una copia con nome «{n}_redatto.pdf»: l'originale resta intatto.")
+                                .format(n=stem)):
+            return
+        path = self.ctx.ask_save_path(_("Salva documento redatto"), f"{stem}_redatto.pdf")
+        if not path:
+            return
+        try:
+            doc.save(path)
+        except DocumentError as e:
+            self.ctx.error(_("Salvataggio non riuscito"), str(e))
+
+    # ------------------------------------------------- ispezione e pulizia
+    def inspect(self) -> S.ScanReport | None:
+        doc = self.document()
+        if doc is None:
+            return None
+
+        def work(progress):
+            progress.update(0.1, _("Analisi del documento"))
+            with ENGINE_LOCK:
+                return S.scan(doc.pdf), S.inspect_extra(doc.pdf)
+
+        rep, extra = self.ctx.run_task(_("Esame del documento…"), work)
+        rows = inspection_rows(rep, extra)
+        intro = (_("Nessuna informazione nascosta rilevata.") if not rows
+                 else _("Il documento contiene queste informazioni nascoste o contenuti attivi:"))
+        dlg = D.ReportDialog(_("Esamina documento"), intro, rows, self.parent,
+                             action=_("Rimuovi…") if rows else None)
+        if show_report(dlg):
+            self.sanitize()
+        return rep
+
+    def sanitize(self) -> bool:
+        doc = self.document()
+        if doc is None or not self.require_modify(doc):
+            return False
+        with ENGINE_LOCK:
+            rep = S.scan(doc.pdf)
+            extra = S.inspect_extra(doc.pdf)
+        counts = {
+            "metadata": _("(presenti)") if rep.has_metadata else "",
+            "javascript": f"({rep.javascript + rep.launch + rep.submit_forms})" if rep.javascript or rep.launch
+            or rep.submit_forms else "",
+            "embedded_files": f"({rep.embedded_files})" if rep.embedded_files else "",
+            "hidden_layers": f"({rep.hidden_layers})" if rep.hidden_layers else "",
+            "comments": f"({rep.comments})" if rep.comments else "",
+            "form_data": f"({rep.form_fields})" if rep.form_fields else "",
+            "hidden_text": f"({extra['hidden_text']})" if extra.get("hidden_text") else "",
+            "links": f"({len(rep.external_links)})" if rep.external_links else "",
+        }
+        dlg = D.SanitizeDialog(counts, self.parent)
+        if not run_dialog(dlg):
+            return False
+        options = dlg.options()
+        if not any(options.get(k) for k in S.SANITIZE_KEYS):
+            return False
+        try:
+            with doc.change(_("Sanifica documento")) as pdf:
+                result = S.sanitize(pdf, options)
+        except Exception as e:
+            self.ctx.error(_("Sanificazione non riuscita"),
+                           _("Nessuna modifica è stata fatta.\n\n{e}").format(e=e))
+            return False
+        labels = S.sanitize_labels()
+        done = ", ".join(labels[k].split(" (")[0].lower() for k in result.done if k in labels)
+        self.ctx.status(_("Documento sanificato: {d}").format(d=done or _("nulla da rimuovere")))
+        self.refresh_document_state(self.view())
+        return True
+
+    def edit_metadata(self) -> bool:
+        doc = self.document()
+        if doc is None:
+            return False
+        with ENGINE_LOCK:
+            values = S.read_metadata(doc.pdf)
+            version = (doc.pdf.metadata or {}).get("format", "")
+        read_only = "modify" not in P.allowed_now(doc)
+        info = [(_("Applicazione di origine"), values.get("creator", "")),
+                (_("Produttore PDF"), values.get("producer", "")),
+                (_("Creato il"), S.format_pdf_date(values.get("creationDate", ""))),
+                (_("Modificato il"), S.format_pdf_date(values.get("modDate", ""))),
+                (_("Versione"), version), (_("Pagine"), str(doc.page_count))]
+        dlg = D.MetadataDialog(values, info, read_only, self.parent)
+        if not run_dialog(dlg) or read_only:
+            return False
+        new = dlg.values()
+        if all(new[k] == values.get(k, "") for k in new):
+            return False
+        with doc.change(_("Modifica metadati")) as pdf:
+            S.write_metadata(pdf, new)
+        self.ctx.status(_("Metadati aggiornati"))
+        return True
+
+    def flatten(self) -> bool:
+        doc = self.document()
+        if doc is None or not self.require_modify(doc):
+            return False
+        if not confirm(self.parent, _("Appiattire commenti e moduli?"),
+                       _("Commenti e campi compilati diventeranno parte fissa delle pagine e non saranno più "
+                         "modificabili. Le annotazioni nascoste vengono eliminate."), _("Appiattisci")):
+            return False
+        with doc.change(_("Appiattisci")) as pdf:
+            S.flatten(pdf)
+        self.ctx.status(_("Documento appiattito"))
+        return True
+
+    # ----------------------------------------------------- stato e avvisi
+    def on_document_opened(self, view) -> None:
+        doc = view.document
+        P.remember_open_state(doc)
+        P.track(doc)
+        if self.preview not in view.overlays:
+            view.overlays.append(self.preview)
+        if view not in self.banners:
+            self.banners[view] = Banner(view)
+        doc.add_listener(self._listener_for(view))
+        try:
+            with ENGINE_LOCK:
+                rep = S.scan(doc.pdf)
+        except Exception:
+            rep = S.ScanReport()
+        self.scans[doc] = rep
+        self.show_open_notices(view, rep)
+        self.refresh_document_state(view)
+
+    def _listener_for(self, view):
+        ref = weakref.ref(view)
+
+        def listener(doc, kind):
+            v = ref()
+            if v is None:
+                return
+            if kind == SAVED:
+                self._after_save(v)
+            elif kind == CONTENT:
+                self.refresh_document_state(v)
+        return listener
+
+    def _after_save(self, view) -> None:
+        with ENGINE_LOCK:
+            n = len(R.marks(view.document.pdf))
+        if n:
+            self.banner(view).set_notice(Notice(
+                "unapplied-saved", 0,
+                _("Il file salvato contiene {n} segni di redazione non applicati: il contenuto sotto i segni "
+                  "non è stato rimosso.").format(n=n),
+                [(_("Applica ora"), lambda: self.apply_redactions(None))], "danger"))
+
+    def banner(self, view) -> Banner:
+        b = self.banners.get(view)
+        if b is None:
+            b = self.banners[view] = Banner(view)
+        return b
+
+    def show_open_notices(self, view, rep: S.ScanReport) -> None:
+        doc = view.document
+        banner = self.banner(view)
+        if rep.risky and not self.is_trusted(doc):
+            parts = []
+            if rep.javascript:
+                parts.append(_("script ({n})").format(n=rep.javascript))
+            if rep.launch:
+                parts.append(_("avvio di programmi ({n})").format(n=rep.launch))
+            if rep.submit_forms:
+                parts.append(_("invio di moduli ({n})").format(n=rep.submit_forms))
+            if rep.external_links:
+                parts.append(_("collegamenti esterni ({n})").format(n=len(rep.external_links)))
+            if rep.remote_files:
+                parts.append(_("collegamenti ad altri file ({n})").format(n=rep.remote_files))
+            if rep.embedded_files:
+                parts.append(_("file incorporati ({n})").format(n=rep.embedded_files))
+            text = _("Questo documento contiene {what}.").format(what=", ".join(parts))
+            if rep.javascript:
+                text += " " + _("Gli script sono disattivati.")
+            banner.set_notice(Notice("active", 0, text, [
+                (_("Dettagli"), lambda: self.show_active_details(view)),
+                (_("Considera attendibile"), lambda: self.trust_document(view)),
+            ]))
+        with ENGINE_LOCK:
+            n = len(R.marks(doc.pdf))
+        if n:
+            banner.set_notice(Notice("unapplied", 1,
+                                     _("Il documento contiene {n} segni di redazione non applicati.").format(n=n),
+                                     [(_("Rivedi"), lambda: self.show_panel())]))
+
+    def show_active_details(self, view) -> None:
+        rep = self.scans.get(view.document) or S.ScanReport()
+        rows = active_rows(rep)
+        dlg = D.ReportDialog(_("Contenuti attivi"),
+                             _("Foliant non esegue script né avvia programmi indicati dai documenti; i collegamenti "
+                               "esterni chiedono sempre conferma."), rows, self.parent)
+        show_report(dlg)
+
+    def show_panel(self) -> None:
+        self.ctx.set_mode("proteggi")
+        self.ctx.show_properties(PANEL_ID)
+
+    def refresh_document_state(self, view) -> None:
+        if view is None:
+            return
+        doc = view.document
+        banner = self.banners.get(view)
+        if banner is not None:
+            if not P.owner_known(doc):
+                banner.set_notice(Notice("restricted", 0, _("Documento con restrizioni: alcune operazioni non "
+                                                            "sono consentite."),
+                                         [(_("Sblocca…"), lambda: self.unlock(view.document))]))
+            else:
+                banner.remove_notice("restricted")
+        if view is self.view():
+            self.update_status(view)
+        for cb in list(getattr(self, "state_callbacks", [])):
+            cb(view)
+
+    def update_status(self, view) -> None:
+        cb = getattr(self, "status_callback", None)
+        if cb is not None:
+            cb(view)
+
+    # ---------------------------------------------------------- attendibili
+    TRUST_KEY = "security/trusted"
+
+    def _trusted(self) -> dict:
+        s = self.settings()
+        raw = s.value(self.TRUST_KEY, "") if s is not None else ""
+        try:
+            return json.loads(raw) if raw else {}
+        except ValueError:
+            return {}
+
+    def is_trusted(self, doc) -> bool:
+        if doc.path is None:
+            return False
+        trusted = self._trusted()
+        real = str(Path(doc.path).resolve())
+        digest = _file_hash(real)
+        if trusted.get("files", {}).get(real) == digest and digest:
+            return True
+        return any(real.startswith(folder.rstrip("/") + "/") for folder in trusted.get("folders", []))
+
+    def trust_document(self, view, folder: bool = False) -> None:
+        doc = view.document
+        if doc.path is None:
+            self.ctx.info(_("Considera attendibile"), _("Salva prima il documento."))
+            return
+        trusted = self._trusted()
+        real = str(Path(doc.path).resolve())
+        if folder:
+            trusted.setdefault("folders", []).append(str(Path(real).parent))
+        else:
+            trusted.setdefault("files", {})[real] = _file_hash(real)
+        s = self.settings()
+        if s is not None:
+            s.setValue(self.TRUST_KEY, json.dumps(trusted))
+        self.banner(view).remove_notice("active")
+        self.ctx.status(_("Documento considerato attendibile"))
+
+    def revoke_trust(self) -> None:
+        s = self.settings()
+        if s is not None:
+            s.setValue(self.TRUST_KEY, "")
+
+
+class _Nothing(Exception):
+    """Interrompe un blocco di modifica senza effetti (nessun passo di annullamento)."""
+
+
+def _file_hash(path: str) -> str:
+    import hashlib
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return ""
+
+
+def merge_line_rects(rects: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
+    """Unisce i riquadri delle parole della stessa riga in un solo rettangolo."""
+    lines: list[pymupdf.Rect] = []
+    for r in sorted(rects, key=lambda r: (round(r.y0), r.x0)):
+        for i, line in enumerate(lines):
+            overlap = min(line.y1, r.y1) - max(line.y0, r.y0)
+            if overlap > 0.5 * min(line.height, r.height):
+                lines[i] = line | r
+                break
+        else:
+            lines.append(pymupdf.Rect(r))
+    return lines
+
+
+def _detach_marks(pdf: pymupdf.Document, keep: set[tuple[int, int]]) -> list[tuple[int, pymupdf.Rect, dict]]:
+    saved = []
+    for page, xref in keep:
+        annot = pdf[page].load_annot(xref)
+        if annot is None:
+            continue
+        info = dict(annot.info or {})
+        colors = annot.colors or {}
+        overlay = ""
+        try:
+            kind, val = pdf.xref_get_key(xref, "OverlayText")
+            overlay = val if kind == "string" else ""
+        except Exception:
+            pass
+        saved.append((page, pymupdf.Rect(annot.rect), {"info": info, "fill": colors.get("fill") or (0, 0, 0),
+                                                         "overlay": overlay}))
+        pdf[page].delete_annot(annot)
+    return saved
+
+
+def _reattach_marks(pdf: pymupdf.Document, saved) -> None:
+    for page, rect, data in saved:
+        style = R.MarkStyle(fill=tuple(data["fill"]), overlay_text=data["overlay"])
+        R.add_mark(pdf, page, rect, style, data["info"].get("subject", "area"), data["info"].get("content", ""))
+
+
+# ----------------------------------------------- occorrenze fuori pagina
+
+
+def outside_matches(pdf: pymupdf.Document, pats: list[PT.Pattern]) -> list[PT.Match]:
+    """Occorrenze in metadati, segnalibri, commenti, campi e nomi degli allegati."""
+    out: list[PT.Match] = []
+
+    def check(where: str, text: str, key: str) -> None:
+        if not text:
+            return
+        for p in pats:
+            hay = PT.fold_accents(text) if p.fold else text
+            for m in p.compiled().finditer(hay):
+                if m.end() > m.start():
+                    out.append(PT.Match(-1, m.group(0), [], key, _("Fuori dalle pagine"),
+                                        f"{where}: {text[:80]}"))
+                    return
+
+    meta = pdf.metadata or {}
+    for k in ("title", "author", "subject", "keywords", "creator", "producer"):
+        check(_("Metadati ({k})").format(k=k), meta.get(k) or "", f"meta:{k}")
+    for n, item in enumerate(pdf.get_toc(simple=False)):
+        check(_("Segnalibro"), item[1], f"toc:{n}")
+    for i, page in enumerate(pdf):
+        for a in page.annots():
+            if a.type[0] == pymupdf.PDF_ANNOT_REDACT:
+                continue
+            check(_("Commento a pagina {n}").format(n=i + 1), (a.info or {}).get("content", ""), f"annot:{i}:{a.xref}")
+        for w in page.widgets():
+            check(_("Campo «{f}»").format(f=w.field_name), str(w.field_value or ""), f"field:{i}:{w.xref}")
+    try:
+        for name in pdf.embfile_names():
+            info = pdf.embfile_info(name)
+            check(_("Allegato"), f"{name} {info.get('filename', '')} {info.get('desc', '')}", f"emb:{name}")
+    except Exception:
+        pass
+    return out
+
+
+def redact_outside(pdf: pymupdf.Document, matches: list[PT.Match], replacement: str) -> None:
+    for m in matches:
+        kind, _s, rest = m.pattern.partition(":")
+        if kind == "meta":
+            meta = dict(pdf.metadata or {})
+            meta[rest] = (meta.get(rest) or "").replace(m.text, "")
+            pdf.set_metadata({k: v for k, v in meta.items() if k not in ("format", "encryption")})
+            try:
+                pdf.del_xml_metadata()
+            except Exception:
+                pass
+        elif kind == "toc":
+            toc = pdf.get_toc(simple=False)
+            n = int(rest)
+            if n < len(toc):
+                toc[n][1] = toc[n][1].replace(m.text, replacement)
+                pdf.set_toc(toc)
+        elif kind == "annot":
+            page, xref = (int(x) for x in rest.split(":"))
+            annot = pdf[page].load_annot(xref)
+            if annot is not None:
+                annot.set_info(content=(annot.info.get("content", "")).replace(m.text, replacement))
+                annot.update()
+        elif kind == "field":
+            page, xref = (int(x) for x in rest.split(":"))
+            for w in pdf[page].widgets():
+                if w.xref == xref:
+                    w.field_value = ""
+                    w.update()
+        elif kind == "emb":
+            try:
+                pdf.embfile_upd(rest, filename=replacement, desc="")
+            except Exception:
+                pass
+
+
+# -------------------------------------------------------------- rapporti
+
+
+def security_rows(doc) -> list[tuple[str, list[str]]]:
+    """Righe della finestra «Proprietà di sicurezza» (SEC-03)."""
+    i = P.info(doc)
+    desc = P.open_description(doc)
+    rows: list[tuple[str, list[str]]] = []
+    if not i.protected and not doc.original_protection:
+        rows.append((_("Nessuna protezione"), [_("Tutti i permessi sono consentiti.")]))
+    else:
+        algo = desc or ""
+        method = {P.AES256: _("AES 256 bit"), P.AES128: _("AES 128 bit"), P.RC4: _("RC4 128 bit")}
+        details = []
+        if desc:
+            details.append(_("All'apertura: {d}").format(d=desc))
+        details.append(_("Al salvataggio: {d}").format(d=P.describe(doc)))
+        head = _("Protezione con password")
+        if i.method:
+            head += " — " + method[i.method]
+        rows.append((head, details))
+        weak = ("RC4" in algo.upper()) or (" R5" in algo.upper()) or i.method == P.RC4
+        if weak:
+            rows.append((_("Protezione debole"),
+                         [_("L'algoritmo RC4 o AES-256 revisione 5 non è più considerato sicuro: aggiorna ad "
+                            "AES-256.")]))
+    rows.append((_("Accesso: completo") if P.owner_known(doc) else _("Accesso: limitato"), []))
+    perms = int(doc.save_options.get("permissions", -1)) if i.protected else -1
+    if not P.owner_known(doc):
+        perms = int(doc.original_protection.get("permissions", -1))
+    labels = P.permission_labels()
+    lines = []
+    if not perms & pymupdf.PDF_PERM_PRINT:
+        lines.append(_("Stampa: non consentita"))
+    elif not perms & pymupdf.PDF_PERM_PRINT_HQ:
+        lines.append(_("Stampa: bassa risoluzione"))
+    else:
+        lines.append(_("Stampa: consentita"))
+    short = {"modify": _("Modifica"), "copy": _("Copia"), "annotate": _("Commenti"), "form": _("Compilazione"),
+             "accessibility": _("Accessibilità"), "assemble": _("Assemblaggio")}
+    for key, bit in P.PERM_BITS.items():
+        state = _("consentita") if perms & bit else _("non consentita")
+        lines.append(f"{short[key]}: {state}")
+    del labels
+    rows.append((_("Permessi"), lines))
+    return rows
+
+
+def active_rows(rep: S.ScanReport) -> list[tuple[str, list[str]]]:
+    names = {"javascript": _("Script"), "launch": _("Avvio di programmi o file"), "remote": _("Altri file"),
+             "submit": _("Invio di moduli"), "uri": _("Collegamenti esterni")}
+    rows: dict[str, list[str]] = {}
+    for kind, where, detail in rep.items:
+        line = f"{where}: {detail}" if where else detail
+        rows.setdefault(names.get(kind, kind), []).append(line)
+    if rep.embedded_files:
+        rows.setdefault(_("File incorporati"), []).append(str(rep.embedded_files))
+    return [(f"{k} ({len(v)})", v) for k, v in rows.items()]
+
+
+def inspection_rows(rep: S.ScanReport, extra: dict) -> list[tuple[str, list[str]]]:
+    rows: list[tuple[str, list[str]]] = []
+    if extra.get("metadata"):
+        rows.append((_("Metadati"), extra["metadata"]))
+    rows.extend(active_rows(rep))
+    if rep.hidden_layers:
+        rows.append((_("Livelli nascosti: {n}").format(n=rep.hidden_layers), extra.get("layers", [])))
+    if rep.comments:
+        rows.append((_("Commenti: {n}").format(n=rep.comments), []))
+    if rep.form_fields:
+        rows.append((_("Campi modulo: {n}").format(n=rep.form_fields), extra.get("fields", [])))
+    if extra.get("hidden_text"):
+        rows.append((_("Testo nascosto: {n} frammenti").format(n=extra["hidden_text"]), extra.get("hidden_where", [])))
+    if extra.get("ocr_text"):
+        rows.append((_("Livello OCR: {n} pagine").format(n=extra["ocr_text"]), []))
+    if extra.get("hidden_annots"):
+        rows.append((_("Annotazioni nascoste: {n}").format(n=extra["hidden_annots"]), []))
+    if extra.get("thumbnails"):
+        rows.append((_("Miniature incorporate: {n}").format(n=extra["thumbnails"]), []))
+    if extra.get("bookmarks"):
+        rows.append((_("Segnalibri: {n}").format(n=extra["bookmarks"]), []))
+    if extra.get("signatures"):
+        rows.append((_("Firme digitali: {n}").format(n=extra["signatures"]), []))
+    return rows
