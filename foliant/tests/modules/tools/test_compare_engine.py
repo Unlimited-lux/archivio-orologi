@@ -678,3 +678,38 @@ def test_price_list_rows_are_separate_changes():
     got = [(d.kind, d.text_a, d.text_b) for d in r.differences]
     assert got == [(ce.MODIFIED, "18.900", "19.400"), (ce.ADDED, "", "Rolex Daytona 126500LN 29.800 EUR"),
                    (ce.DELETED, "Tudor Black Bay 58 M79030N 3.600 EUR", "")]
+
+
+def _long_price_list(rows, per_page=40):
+    doc = pymupdf.open()
+    for k, r in enumerate(rows):
+        if k % per_page == 0:
+            p = doc.new_page()
+            p.insert_text((50, 50), "Listino aprile", fontsize=12)
+            p.insert_text((280, 820), f"Pagina {k // per_page + 1}", fontsize=8)
+            y = 90
+        for x, t in zip((50, 160, 330, 480, 520), r + ("EUR",)):
+            p.insert_text((x, y), t, fontsize=10)
+        y += 17
+    return doc.tobytes()
+
+
+def test_multi_page_price_list_table_rows_are_not_headers():
+    """Le prime/ultime righe della tabella stanno nella fascia alta/bassa di ogni pagina con la
+    stessa forma: non vanno scambiate per intestazioni ripetute (né la colonna «EUR»)."""
+    rows = [(f"Marca{i % 9}", f"Modello {i}", f"REF{i:05d}", f"{1000 + i * 37}") for i in range(120)]
+    new = list(rows)
+    new[10] = new[10][:3] + ("9999",)
+    new.insert(30, ("Rolex", "Daytona", "126500LN", "29800"))
+    new[80] = new[80][:3] + ("1111",)
+    opts = ce.CompareOptions(dpi=72, ignore_page_numbers=True, ignore_headers_footers=True)
+    r = ce.run_compare(None, ce.SideInput(_long_price_list(rows), "A"), ce.SideInput(_long_price_list(new), "B"),
+                       opts)
+    got = [(d.kind, d.text_a, d.text_b) for d in r.differences if d.kind != ce.PAGE]
+    assert got == [(ce.MODIFIED, "1370", "9999"), (ce.ADDED, "", "Rolex Daytona 126500LN 29800 EUR"),
+                   (ce.MODIFIED, "3923", "1111")]
+
+
+def test_header_numbers_following_the_page_are_still_excluded():
+    assert ce._numbers_like_header([(0, [123, 1]), (1, [123, 2]), (2, [123, 3])])
+    assert not ce._numbers_like_header([(0, [0, 0]), (1, [40, 40]), (2, [80, 80])])

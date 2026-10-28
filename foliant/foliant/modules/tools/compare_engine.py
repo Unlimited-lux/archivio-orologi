@@ -522,16 +522,20 @@ def excluded_lines(tokens: list[Token], pages: list[int], heights: dict, options
         return out
     lines = _line_groups(tokens)
     info = {}
+    numbers: dict[int, list[int]] = {}
+    candidates: set[int] = set()   # numeri di pagina e righe ripetute, da confermare
     for ln, toks in lines.items():
         page = toks[0].page
         h = heights.get(page, 842.0)
         y0 = min(r[2] for t in toks for r in t.rects)
         y1 = max(r[4] for t in toks for r in t.rects)
-        text = re.sub(r"\d+", "#", " ".join(t.text for t in toks)).strip()
+        raw = " ".join(t.text for t in toks)
+        text = re.sub(r"\d+", "#", raw).strip()
         in_band = y1 <= 0.15 * h or y0 >= 0.85 * h
         info[ln] = (page, y0, y1, text, in_band, h)
+        numbers[ln] = [int(n) for n in re.findall(r"\d+", raw)[:12]]
         if options.ignore_page_numbers and in_band and _PAGE_NUMBER.match(text):
-            out.add(ln)
+            candidates.add(ln)
         if options.ignore_headers_footers:
             top = options.band_top_mm * MM
             bottom = options.band_bottom_mm * MM
@@ -539,9 +543,11 @@ def excluded_lines(tokens: list[Token], pages: list[int], heights: dict, options
                 out.add(ln)
     if options.ignore_headers_footers and len(pages) >= 2:
         groups: dict[tuple, set[int]] = {}
+        members: dict[tuple, list[int]] = {}
         for ln, (page, y0, _y1, text, in_band, _h) in info.items():
             if in_band:
                 groups.setdefault((text, round(y0 / 6)), set()).add(page)
+                members.setdefault((text, round(y0 / 6)), []).append(ln)
         n_all = len(pages)
         n_even = len([p for p in pages if p % 2 == 0])
         n_odd = n_all - n_even
@@ -549,13 +555,38 @@ def excluded_lines(tokens: list[Token], pages: list[int], heights: dict, options
         for key, pg in groups.items():
             even = len([p for p in pg if p % 2 == 0])
             odd = len(pg) - even
+            if not _numbers_like_header([(info[ln][0], numbers[ln]) for ln in members[key]]):
+                continue   # es. le prime righe di una tabella: stessa forma, numeri diversi
             if len(pg) >= 2 and (len(pg) * 2 >= n_all or (n_even >= 2 and even * 2 >= n_even and even >= 2)
                                  or (n_odd >= 2 and odd * 2 >= n_odd and odd >= 2)):
                 repeated.add(key)
-        for ln, (page, y0, _y1, text, in_band, _h) in info.items():
-            if in_band and (text, round(y0 / 6)) in repeated:
-                out.add(ln)
+        candidates |= {ln for ln, (page, y0, _y1, text, in_band, _h) in info.items()
+                       if in_band and (text, round(y0 / 6)) in repeated}
+    by_page: dict[int, list[int]] = {}
+    for ln, v in info.items():
+        by_page.setdefault(v[0], []).append(ln)
+    for ln in candidates:
+        # una cella ripetuta («EUR») o un numero («2369») in una riga che per il resto
+        # è contenuto (la riga di una tabella) non è un'intestazione né un numero di pagina
+        page, y0, y1 = info[ln][:3]
+        if not any(o not in candidates and o not in out
+                   and min(y1, info[o][2]) - max(y0, info[o][1]) > 0.5 * min(y1 - y0, info[o][2] - info[o][1])
+                   for o in by_page[page]):
+            out.add(ln)
     return out
+
+
+def _numbers_like_header(rows: list[tuple[int, list[int]]]) -> bool:
+    """Intestazioni e piè ripetuti: i numeri restano uguali o seguono la pagina
+    («Pagina 3 di 10», «Fattura 123 – 3»); le righe di una tabella no."""
+    if len({len(n) for _p, n in rows}) > 1:
+        return False
+    for k in range(len(rows[0][1]) if rows else 0):
+        values = {n[k] for _p, n in rows}
+        offsets = {n[k] - p for p, n in rows}
+        if len(values) > 1 and len(offsets) > 1:
+            return False
+    return True
 
 
 def _inside(r: tuple, area: tuple) -> bool:
