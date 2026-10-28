@@ -243,21 +243,23 @@ def object_size(obj: PageObject) -> tuple[float, float]:
 
 # ================================================================ opacità
 def _find_or_add_extgstate(pdf: pymupdf.Document, page: pymupdf.Page, alpha: float) -> str:
-    a = fmt_num(round(alpha, 4))
-    want = f"/CA {a}", f"/ca {a}"
+    alpha = round(alpha, 4)
     existing = resource_names(pdf, page, "ExtGState")
     for name, val in existing.items():
         text = val
-        if val.endswith(" R"):
+        if val.strip().endswith(" R"):
             try:
                 text = pdf.xref_object(int(val.split()[0]), compressed=True)
             except Exception:
                 continue
-        norm = re.sub(r"\s+", " ", text.replace("/", " /")).strip()
-        keys = set(re.findall(r"/(\w+)", norm))
-        if keys <= {"Type", "ExtGState", "CA", "ca"} and all(re.search(re.escape(w) + r"(?![\d.])", norm.replace("/ ", "/")) for w in (f"/CA {a}", f"/ca {a}")):
+        keys = set(re.findall(r"/([A-Za-z]+)", text))
+        if not keys <= {"Type", "ExtGState", "CA", "ca"}:
+            continue
+        vals = {k: float(v) for k, v in re.findall(r"/(CA|ca)\s*([-+]?(?:\d+\.?\d*|\.\d+))", text)}
+        if abs(vals.get("CA", -1) - alpha) < 1e-4 and abs(vals.get("ca", -1) - alpha) < 1e-4:
             return name
     xref = pdf.get_new_xref()
+    a = fmt_num(alpha)
     pdf.update_object(xref, f"<</Type/ExtGState/CA {a}/ca {a}>>")
     name = unique_name(existing.keys(), "FoGS")
     set_resource(pdf, page, "ExtGState", name, f"{xref} 0 R")
@@ -331,6 +333,28 @@ def _resources_shared(pdf: pymupdf.Document, page: pymupdf.Page) -> bool:
         if t == "xref" and v == val:
             return True
     return False
+
+
+def _drop_resource_names(pdf: pymupdf.Document, page: pymupdf.Page, category: str, names) -> None:
+    """Toglie nomi aggiunti dal motore e non usati dal contenuto."""
+    if not names:
+        return
+    used = parse_page(pdf, page).names_used.get(category, set())
+    holder, key = resources_value(pdf, page)
+    typ, val = pdf.xref_get_key(holder, key)
+    if typ == "xref":
+        rx, cat_path = int(val.split()[0]), category
+    else:
+        rx, cat_path = holder, f"{key}/{category}"
+    t, v = pdf.xref_get_key(rx, cat_path)
+    for name in names:
+        if name in used:
+            continue
+        k = fmt_name(name).decode()[1:]
+        if t == "xref":
+            pdf.xref_set_key(int(v.split()[0]), k, "null")
+        elif t == "dict":
+            pdf.xref_set_key(rx, f"{cat_path}/{k}", "null")
 
 
 def prune_resources(pdf: pymupdf.Document, page_index: int, category: str, names) -> None:
@@ -602,7 +626,9 @@ def insert_images(pdf: pymupdf.Document, page_index: int, images: list[bytes], c
         center = pymupdf.Point(page.cropbox.width / 2, page.cropbox.height / 2)
     units = []
     for k, (data, orient) in enumerate(prepared):
-        w, h, _pw, _ph = natural_size(data if orient == 1 else _reoriented_probe(data, orient))
+        w, h, _pw, _ph = natural_size(data)
+        if orient in (5, 6, 7, 8):
+            w, h = h, w
         if rect is not None and k == 0:
             r = pymupdf.Rect(rect) * page.rotation_matrix
             r.normalize()
@@ -764,10 +790,14 @@ def replace_image(pdf, page_index: int, index: int, data: bytes, mode: str = FIT
     if orient in (5, 6, 7, 8):
         pw, ph = ph, pw
     if all_occurrences and o.xref:
+        before = set(resource_names(pdf, page, "XObject"))
         try:
             page.replace_image(o.xref, stream=data)
         except Exception as e:
             raise ObjectError("Impossibile sostituire l'immagine.") from e
+        page = pdf[page_index]
+        added = [n for n in resource_names(pdf, page, "XObject") if n not in before]
+        _drop_resource_names(pdf, page, "XObject", added)
         return [o.index]
     name, _x = add_image_resource(pdf, page, data)
     ow, oh = object_size(o)
@@ -795,7 +825,21 @@ def replace_image(pdf, page_index: int, index: int, data: bytes, mode: str = FIT
         a = pymupdf.Point(0, 0) * inv
         b = pymupdf.Point(1, 1) * inv
         clip = (min(a.x, b.x), min(a.y, b.y), abs(b.x - a.x), abs(b.y - a.y))
-    if mode != FILL and o.wrapper is not None and o.wrapper.clip_unit:
+    old_clip = o.wrapper.clip_unit if o.wrapper is not None else None
+    if old_clip:
+        inv = ~sub
+        x, y, cw, ch = old_clip
+        a = pymupdf.Point(x, y) * inv
+        b = pymupdf.Point(x + cw, y + ch) * inv
+        oc = (min(a.x, b.x), min(a.y, b.y), abs(b.x - a.x), abs(b.y - a.y))
+        if mode == FILL and isinstance(clip, tuple):
+            x0, y0 = max(clip[0], oc[0]), max(clip[1], oc[1])
+            x1 = min(clip[0] + clip[2], oc[0] + oc[2])
+            y1 = min(clip[1] + clip[3], oc[1] + oc[3])
+            clip = (x0, y0, max(0.0, x1 - x0), max(0.0, y1 - y0))
+        else:
+            clip = oc
+    elif mode != FILL:
         clip = None
     new_ctm = _orientation_matrix(orient) * sub * o.ctm
     body = fmt_name(name) + b" Do"

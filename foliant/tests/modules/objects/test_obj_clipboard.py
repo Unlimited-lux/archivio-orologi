@@ -242,11 +242,6 @@ def test_move_object_to_other_page_and_undo():
     assert doc.pdf.page_count == 7
 
 
-@pytest.mark.xfail(reason="OBJ-32: make_payload salva con deflate=True e ricomprime gli stream immagine non "
-                          "compressi; clipboard._fingerprint confronta i dati grezzi (xref_stream_raw), quindi "
-                          "incollando nello stesso documento d'origine l'immagine non viene riconosciuta e i dati "
-                          "vengono duplicati (2 image XObject invece di 1)",
-                   strict=False)
 def test_replicate_logo_on_all_pages_data_once():
     pdf = new_pdf(20)
     add_image(pdf, 0, (20, 20, 80, 50), png_bytes(30, 15, RED))

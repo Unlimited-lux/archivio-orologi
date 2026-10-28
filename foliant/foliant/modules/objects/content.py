@@ -163,20 +163,35 @@ def _read_array(data: bytes, pos: int) -> tuple[list, int]:
     return out, i
 
 
+class Ref(tuple):
+    """Riferimento indiretto «n g R»."""
+
+
+def _fold_refs(vals: list) -> list:
+    out: list = []
+    for v in vals:
+        if v == "R" and len(out) >= 2 and type(out[-1]) is int and type(out[-2]) is int:
+            g = out.pop()
+            n = out.pop()
+            out.append(Ref((n, g)))
+        else:
+            out.append(v)
+    return out
+
+
 def _read_dict(data: bytes, pos: int) -> tuple[dict, int]:
-    out: dict = {}
-    key = None
+    vals: list = []
     i = pos
     n = len(data)
     while i < n:
         val, i, kind = _read_value(data, i)
         if kind == "dclose" or kind is None:
-            return out, i
-        if key is None:
-            key = str(val)
-        else:
-            out[key] = val
-            key = None
+            break
+        vals.append(val)
+    vals = _fold_refs(vals)
+    out: dict = {}
+    for k in range(0, len(vals) - 1, 2):
+        out[str(vals[k])] = vals[k + 1]
     return out, i
 
 
@@ -265,7 +280,8 @@ def tokenize_ops(data: bytes) -> list[Op]:
 
 # -------------------------------------------------------------- formattazione
 def fmt_num(v: float) -> str:
-    if abs(v - round(v)) < 1e-9:
+    # i calcoli del motore sono in precisione singola: si eliminano i residui
+    if abs(v - round(v)) < 2e-4 * max(1.0, min(abs(v), 1000.0) / 100.0):
         return str(int(round(v)))
     s = f"{v:.6f}".rstrip("0").rstrip(".")
     return "0" if s in ("-0", "") else s

@@ -118,10 +118,6 @@ def test_strip_jpeg_metadata_keeps_jfif():
     assert engine.strip_jpeg_metadata(b"not a jpeg") == (b"not a jpeg", 1)
 
 
-@pytest.mark.xfail(reason="OBJ-04: insert_images calcola la dimensione naturale sui dati JPEG già privati "
-                          "dell'EXIF (orientamento perso), quindi non scambia larghezza e altezza: con "
-                          "orientamento 6 l'immagine risulta deformata in un riquadro 96×48 invece di 48×96",
-                   strict=False)
 def test_insert_jpeg_exif_orientation_6_appears_upright():
     # immagine memorizzata 96×48: metà sinistra rossa, destra blu; orientamento 6 = ruota 90° orario
     im = Image.new("RGB", (96, 48), (0, 0, 255))
@@ -394,10 +390,6 @@ def test_rotate_four_times_identity(blank):
     assert all(abs(a - b) < 1e-3 for a, b in zip(m0, m1))
 
 
-@pytest.mark.xfail(reason="precisione: pymupdf.Matrix moltiplica in float32, quindi 4 rotazioni di 90° lasciano "
-                          "errori ~6e-5 pt nella matrice (es. f = 641.999939 invece di 642) che fmt_num scrive "
-                          "nel content stream; gli errori si accumulano a ogni trasformazione",
-                   strict=False)
 def test_rotate_four_times_exact_identity(blank):
     add_image(blank, 0, (100, 100, 300, 200))
     m0 = engine.objects(blank, 0).objects[0].ctm
@@ -484,9 +476,6 @@ def test_opacity_half_renders_gray_and_extgstate(blank):
     assert engine.objects(re_, 0).objects[0].opacity == pytest.approx(0.5)
 
 
-@pytest.mark.xfail(reason="_find_or_add_extgstate cerca il testo '/ca 0.3' ma PyMuPDF serializza '/ca .3': "
-                          "l'ExtGState esistente non viene mai riusato e ogni modifica d'opacità ne crea uno nuovo",
-                   strict=False)
 def test_opacity_reuses_extgstate(blank):
     add_image(blank, 0, (0, 0, 50, 50))
     add_image(blank, 0, (100, 0, 150, 50))
@@ -808,10 +797,6 @@ def test_replace_stretch(blank):
     assert approx_rect(o.rect, (100, 100, 300, 200), 1e-3)
 
 
-@pytest.mark.xfail(reason="OBJ-14 (si conserva il ritaglio): replace_image in modalità Adatta/Deforma toglie il "
-                          "ritaglio esistente e usa il riquadro intero non ritagliato, quindi l'immagine nuova "
-                          "esce dall'area visibile precedente (200×200 invece di 100×200)",
-                   strict=False)
 def test_replace_cropped_image_keeps_visible_box(blank):
     add_image(blank, 0, (100, 100, 300, 300), png_bytes(40, 40, RED))
     engine.set_crop(blank, 0, 0, (0, 0, 0.5, 1))
@@ -842,10 +827,6 @@ def test_replace_all_occurrences_across_pages():
         assert _dominant(pixel(saved, i, 150, 150)) == "blue"
 
 
-@pytest.mark.xfail(reason="OBJ-14: replace_image(all_occurrences=True) usa Page.replace_image di PyMuPDF, che lascia "
-                          "nelle risorse della pagina corrente una voce XObject in più (fzImg1) verso una seconda "
-                          "copia della nuova immagine: dopo il salvataggio completo il file ne contiene 2",
-                   strict=False)
 def test_replace_all_occurrences_single_xobject():
     pdf = new_pdf(10)
     xref = add_image(pdf, 0, (100, 100, 200, 200), png_bytes(20, 20, RED))
@@ -1060,9 +1041,6 @@ def test_undo_after_save_marks_modified(tmp_path):
     assert engine.objects(doc.pdf, 0).objects[0].rect.x0 == pytest.approx(103)
 
 
-@pytest.mark.xfail(reason="content._dict_keys/_read_dict non riconosce i riferimenti indiretti 'n 0 R': con un "
-                          "dizionario di categoria diretto, resource_names restituisce chiavi spurie come '0' → 'null'",
-                   strict=False)
 def test_resource_names_no_spurious_keys(blank):
     add_image(blank, 0, (0, 0, 50, 50))
     names = content.resource_names(blank, blank[0], "XObject")

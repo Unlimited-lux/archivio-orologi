@@ -100,7 +100,7 @@ def make_payload(pdf: pymupdf.Document, page_index: int, indices) -> Payload:
     out.xref_set_key(op.xref, "Resources", "<<" + "".join(entries) + ">>")
     out.xref_set_key(op.xref, "Annots", "null")
     write_content(out, op, snippet)
-    data = out.tobytes(garbage=3, deflate=True)
+    data = out.tobytes(garbage=3, deflate=False)
     out.close()
     rect = union_rect(objs)
     text = ""
