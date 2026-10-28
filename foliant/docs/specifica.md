@@ -709,7 +709,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### Formato degli ID
 
-- Forma `PREFISSO-NN`: prefisso in maiuscolo, trattino, numero progressivo a due cifre (tre oltre il 99, es. `NFR-100`).
+- Forma `PREFISSO-NN`: prefisso in maiuscolo, trattino, numero progressivo a due cifre (tre oltre il 99, es. `PAG-100`).
 - Prefissi delle sezioni generali: `NFR` (requisiti non funzionali, 0.4) e `UX` (interfaccia comune, 0.5); gli obiettivi di 0.1 sono `O1`…`O7`.
 - Ogni sezione d'area usa un proprio prefisso di 2–4 lettere, dichiarato all'inizio della sezione e unico nella specifica (es. `PAG` per Pagine).
 - Gli ID non si riusano: un requisito eliminato resta nell'elenco come «Ritirato», con il motivo; se un requisito viene diviso, la prima parte conserva l'ID originale.
