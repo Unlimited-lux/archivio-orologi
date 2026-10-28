@@ -5,6 +5,14 @@ griglia sostituisce la vista documento (`ctx.set_central_widget`), all'uscita, a
 documento o senza documenti torna la vista normale. Ogni modifica passa da `document.change()` (un
 solo passo di annulla/ripeti); la griglia si aggiorna su `ctx.documentChanged`.
 
+**Riservatezza (regola del committente):** nessun percorso o nome di file conservato tra un avvio e
+l'altro. I record dei timbri dentro il PDF non contengono i percorsi di immagini, PDF sorgente e logo
+(solo `has_image`/`has_source_pdf`/`has_logo`: alla modifica il file va scelto di nuovo); i modelli di
+intestazione incorporano il logo (base64, max 1 MB) invece del percorso; i file si scelgono solo con i
+dialoghi del contesto. All'avvio `privacy.py` cancella le cartelle temporanee `foliant-pagine-*` rimaste
+da un arresto anomalo (con PID: solo di processi terminati) e toglie (se lo trova) il percorso del
+logo dai modelli salvati dalle versioni precedenti (test_privacy, test_stamp_dialogs).
+
 ## File
 | File | Contenuto |
 |---|---|

@@ -6,6 +6,12 @@ Modalità `converti` (ordine 70), azioni nella Home («Crea PDF da file», «Imm
 `scanner.py`, `photo.py`, `batch.py`; finestre in `*_dialog(s).py`; comandi in `actions.py`.
 Test: `tests/modules/convert/` (pytest + pytest-qt, offscreen; oltre 180 test). Allineato alla specifica v2 (nomi e priorità; rimandi: CNV-16→AI-27, CNV-17→BAT-06, CNV-28→BAT-07, CNV-33→SEC-24). Dipendenze in `DEPS.txt`.
 
+**Riservatezza (regola del committente):** il modulo non conserva cartelle, percorsi o nomi dei file
+convertiti: si salvano solo preferenze generali (formato, opzioni, preset, impostazioni dello scanner);
+file e cartelle si scelgono con i dialoghi del contesto (`common.context_of`, mai `QFileDialog`), che
+non lasciano cronologie nel profilo; LibreOffice lavora con un profilo temporaneo su una copia dal nome
+neutro (test_ui: `test_export_dialog_browse_uses_core_dialog`, `test_convert_keeps_no_paths_in_settings`).
+
 Legenda: **fatto** = criteri di accettazione automatizzabili verificati dai test; **parziale** = funzione
 utilizzabile, alcuni punti della specifica mancanti (vedi note).
 

@@ -1684,11 +1684,16 @@ def default_page_size() -> str:
 
 
 def _office_command(src: str, outdir: str) -> list[str] | None:
-    """Comando di conversione dei documenti Office (sostituibile nei test)."""
+    """Comando di conversione dei documenti Office (sostituibile nei test).
+
+    Riservatezza: profilo di LibreOffice temporaneo accanto a `outdir` (niente elenco dei
+    documenti recenti nel profilo dell'utente); il chiamante passa una copia con nome neutro."""
     exe = shutil.which("soffice") or shutil.which("libreoffice")
     if not exe:
         return None
-    return [exe, "--headless", "--convert-to", "pdf", "--outdir", outdir, src]
+    profile = Path(os.path.dirname(os.path.abspath(outdir)), "profile").resolve().as_uri()
+    return [exe, f"-env:UserInstallation={profile}", "--headless", "--nolockcheck", "--norestore",
+            "--convert-to", "pdf", "--outdir", outdir, src]
 
 
 def image_to_pdf(path: str, page_size: str | None = None, fit: str = "fit", margin_mm: float = 0.0,
@@ -1760,14 +1765,21 @@ def to_pdf_bytes(path: str, params: dict, warnings: list | None = None) -> bytes
         return data
     if low.endswith(OFFICE_EXTENSIONS):
         with tempfile.TemporaryDirectory(prefix="foliant-office-") as tmp:
-            cmd = _office_command(path, tmp)
+            # copia con nome neutro: LibreOffice non vede né il nome né la cartella dell'originale
+            safe = os.path.join(tmp, "in", "documento" + Path(path).suffix.lower())
+            outdir = os.path.join(tmp, "out")
+            os.makedirs(os.path.dirname(safe))
+            os.makedirs(outdir)
+            cmd = _office_command(safe, outdir)
             if cmd is None:
                 raise BatchError("DEP-02", _("Motore di conversione dei documenti non disponibile (LibreOffice)."))
             try:
-                subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+                shutil.copyfile(path, safe)
+                subprocess.run(cmd, check=True, capture_output=True, timeout=300, cwd=tmp,
+                               stdin=subprocess.DEVNULL)
             except Exception as e:
                 raise BatchError("FMT-03", _("Documento non convertibile (forse protetto da password).")) from e
-            out = os.path.join(tmp, Path(path).stem + ".pdf")
+            out = os.path.join(outdir, "documento.pdf")
             if not os.path.exists(out):
                 raise BatchError("FMT-03", _("Documento non convertibile (forse protetto da password)."))
             with open(out, "rb") as f:
@@ -2143,12 +2155,11 @@ def _compute_pdf(item: QueueItem, ctx: "_Ctx", steps, pre_steps, candidates, pla
 
 
 def run_job(progress, items: list[QueueItem], settings: JobSettings, started: datetime | None = None,
-            printer: str | None = None, control: JobControl | None = None,
-            journal: str | None = None) -> JobReport:
+            printer: str | None = None, control: JobControl | None = None) -> JobReport:
     """Esegue il lavoro; non solleva per gli errori dei singoli file né per l'annullamento.
 
-    `control` permette pausa e «annulla file»; `journal` è il percorso del giornale
-    persistente, aggiornato dopo ogni file (ripresa dopo un'interruzione)."""
+    `control` permette pausa e «annulla file». Riservatezza: nessun giornale su disco;
+    lo stato dei file è solo nel rapporto in memoria («Riprendi i non elaborati»)."""
     started = started or datetime.now()
     items = list(items)   # coda congelata
     report = JobReport([FileResult(it.path) for it in items], list(settings.steps), started,
@@ -2191,7 +2202,6 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
         if progress is not None:
             progress.update(frac, text)
 
-    write_journal(journal, report, items, settings, finished=False)
     futures = ctxs = pool = None
     parallel_ok = (settings.workers > 1 and merge_index is None and len(items) > 1
                    and all(ACTIONS.get(s.action) and ACTIONS[s.action].kind in ("pdf", "create") for s in pre_steps))
@@ -2314,7 +2324,6 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
             if settings.error_policy == "stop":
                 stop = True
         res.duration_ms = int((time.monotonic() - t0) * 1000)
-        write_journal(journal, report, items, settings, finished=False)
     if pool is not None:   # file non ancora iniziati (annullamento o «fermati al primo errore»)
         for f in futures:
             f.cancel()
@@ -2331,98 +2340,13 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
         except OperationCancelled:
             pass
     report.finished = datetime.now()
-    write_journal(journal, report, items, settings, finished=True)
     return report
 
 
 # =============================================================================
-# Giornale persistente e cronologia dei rapporti (BAT-04, BAT-05)
+# Cronologia dei rapporti (BAT-05): solo in memoria, nell'interfaccia
 # =============================================================================
-def write_journal(path: str | None, report: JobReport, items: list[QueueItem], settings: JobSettings,
-                  finished: bool) -> None:
-    """Giornale del lavoro (senza segreti). Alla fine del lavoro viene rimosso."""
-    if not path:
-        return
-    if finished:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-        return
-    data = {"format": "foliant-batch-journal", "version": 1, "started": report.started.isoformat(),
-            "settings": settings.to_dict(),
-            "files": [{"path": it.path, "status": r.status} for it, r in zip(items, report.results)]}
-    try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        atomic_write(path, json.dumps(data, ensure_ascii=False).encode("utf-8"))
-    except Exception:
-        pass   # il giornale non deve mai far fallire il lavoro
-
-
-def interrupted_job(path: str) -> tuple[list[str], JobSettings] | None:
-    """Lavoro interrotto (es. chiusura anomala): file non completati e impostazioni."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if data.get("format") != "foliant-batch-journal":
-        return None
-    pending = [f["path"] for f in data.get("files", []) if f.get("status") not in ("ok", "warning", "skipped")]
-    if not pending:
-        return None
-    st = dict(data.get("settings") or {})
-    steps = [Step.from_dict(x) for x in st.pop("steps", [])]
-    fields = JobSettings.__dataclass_fields__
-    settings = JobSettings(steps=steps, **{k: v for k, v in st.items() if k in fields and k != "steps"})
-    return pending, settings
-
-
-def discard_journal(path: str) -> None:
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
-
-
-HISTORY_LIMIT = 20
-
-
-def save_history(directory: str, report: JobReport) -> str:
-    """Conserva il rapporto tra gli ultimi 20 consultabili."""
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, f"lavoro_{report.started:%Y%m%d_%H%M%S_%f}.json")
-    atomic_write(path, report.to_json().encode("utf-8"))
-    files = sorted(f for f in os.listdir(directory) if f.startswith("lavoro_") and f.endswith(".json"))
-    for old in files[:-HISTORY_LIMIT]:
-        try:
-            os.unlink(os.path.join(directory, old))
-        except OSError:
-            pass
-    return path
-
-
-def list_history(directory: str) -> list[str]:
-    if not os.path.isdir(directory):
-        return []
-    files = sorted((f for f in os.listdir(directory) if f.startswith("lavoro_") and f.endswith(".json")),
-                   reverse=True)
-    return [os.path.join(directory, f) for f in files]
-
-
-def load_report(path: str) -> JobReport:
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    job = data.get("lavoro", {})
-    results = [FileResult(input=x.get("file_ingresso", ""), outputs=list(x.get("file_uscita") or []),
-                          status=x.get("esito", "not_processed"), code=x.get("codice", ""),
-                          message=x.get("messaggio", ""), pages=x.get("pagine", 0),
-                          bytes_in=x.get("byte_ingresso", 0), bytes_out=x.get("byte_uscita", 0),
-                          duration_ms=x.get("durata_ms", 0)) for x in data.get("file", [])]
-    started = datetime.fromisoformat(job["inizio"]) if job.get("inizio") else datetime.now()
-    finished = datetime.fromisoformat(job["fine"]) if job.get("fine") else None
-    steps = [Step.from_dict(s) for s in job.get("passi", [])]
-    return JobReport(results, steps, started, finished, bool(job.get("annullato")), job.get("impostazioni") or {})
+HISTORY_LIMIT = 20   # lavori della sessione consultabili dal menu «Cronologia»
 
 
 def report_pdf(report: JobReport) -> bytes:
@@ -3070,16 +2994,41 @@ def _sequence_filename(name: str) -> str:
 SEQUENCE_VERSION = 1
 
 
-OUTPUT_KEYS = ("destination_mode", "destination", "subfolder", "keep_structure", "pattern", "counter_start",
+# Riservatezza: la cartella di destinazione non si salva nelle sequenze (è un percorso);
+# il resto dell'uscita (modo, sottocartella relativa, nomi, conflitti, errori) sì.
+OUTPUT_KEYS = ("destination_mode", "subfolder", "keep_structure", "pattern", "counter_start",
                "conflict", "error_policy")
 
 
 def output_of(settings: JobSettings) -> dict:
-    """Uscita del lavoro da salvare nella sequenza (senza segreti)."""
+    """Uscita del lavoro da salvare nella sequenza (senza segreti né percorsi)."""
     return {k: getattr(settings, k) for k in OUTPUT_KEYS}
 
 
+def path_keys(action: str) -> set[str]:
+    """Parametri dell'azione che contengono percorsi di file (CSV, PDF di sfondo, ecc.)."""
+    spec = ACTIONS.get(action)
+    return {p.key for p in spec.params if p.type == "path"} if spec else set()
+
+
+def without_paths(steps: list[Step]) -> tuple[list[Step], bool]:
+    """Copia dei passi senza percorsi di file: i parametri di tipo «path» si svuotano e, se
+    erano compilati, diventano «chiedi all'avvio». Restituisce (passi, qualcosa è stato tolto)."""
+    out, removed = [], False
+    for s in steps:
+        params, ask = dict(s.params or {}), list(s.ask or [])
+        for k in path_keys(s.action):
+            if params.get(k):
+                params[k] = ""
+                removed = True
+                if k not in ask:
+                    ask.append(k)
+        out.append(Step(s.action, params, ask, s.enabled))
+    return out, removed
+
+
 def sequence_data(name: str, steps: list[Step], description: str = "", output: dict | None = None) -> dict:
+    steps, _removed = without_paths(steps)
     data = {"format": "foliant-sequence", "version": SEQUENCE_VERSION, "name": name, "description": description,
             "created": datetime.now().isoformat(timespec="seconds"), "steps": [s.to_dict() for s in steps]}
     if output:
@@ -3137,6 +3086,9 @@ def import_sequence(path: str, directory: str) -> tuple[str, list[str]]:
                 s.params[k] = ""
                 if _("Le password contenute nel file sono state ignorate.") not in warnings:
                     warnings.append(_("Le password contenute nel file sono state ignorate."))
+    steps, removed = without_paths(steps)
+    if removed:
+        warnings.append(_("I file indicati nella sequenza non sono stati importati: verranno chiesti all'avvio."))
     return save_sequence(directory, name, steps, str(data.get("description", "")),
                          data.get("output") if isinstance(data.get("output"), dict) else None), warnings
 
@@ -3173,6 +3125,41 @@ def delete_sequence(path: str) -> None:
         os.unlink(path)
     except FileNotFoundError:
         pass
+
+
+def scrub_sequence_file(path: str) -> bool:
+    """Toglie da una sequenza salvata (versioni precedenti) la cartella di destinazione e i
+    percorsi dei file nei parametri. Restituisce True se il file è stato riscritto."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict) or data.get("format", "foliant-sequence") != "foliant-sequence" \
+            or not isinstance(data.get("steps"), list):
+        return False
+    changed = False
+    out = data.get("output")
+    if isinstance(out, dict) and "destination" in out:
+        out.pop("destination")
+        changed = True
+    for st in data["steps"]:
+        if not isinstance(st, dict) or not isinstance(st.get("params"), dict):
+            continue
+        for k in path_keys(str(st.get("action", ""))):
+            if st["params"].get(k):
+                st["params"][k] = ""
+                ask = st.get("ask") if isinstance(st.get("ask"), list) else []
+                if k not in ask:
+                    ask.append(k)
+                st["ask"] = ask
+                changed = True
+    if changed:
+        try:
+            atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+        except OSError:
+            return False
+    return changed
 
 
 __all__ = [n for n in dir() if not n.startswith("_") and n not in ("annotations",)] + [

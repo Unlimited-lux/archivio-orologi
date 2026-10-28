@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from .conftest import fast_theme
 import pymupdf
 import pytest
@@ -441,7 +443,14 @@ def test_header_footer_first_page_even_logo_and_templates(opened, qtbot, tmp_pat
         assert "Via Roma 1" in pdf[2].get_text() and "Pari" in pdf[1].get_text()
         assert "Pari" not in pdf[2].get_text()
     # il modello è nelle impostazioni dell'applicazione e si applica a un altro documento
-    assert "Carta Verdi" in window.ctx.settings().value(sd.TEMPLATES_KEY)
+    raw = window.ctx.settings().value(sd.TEMPLATES_KEY)
+    assert "Carta Verdi" in raw
+    # riservatezza: il logo è incorporato nel modello, senza percorso del file
+    assert str(tmp_path) not in raw and "logo.png" not in raw and '"logo_data"' in raw
+    with ENGINE_LOCK:   # e nemmeno nel record del timbro dentro il PDF
+        recs = stamp.list_stamps(view.document.pdf, stamp.HEADERFOOTER)
+    assert recs and recs[0]["params"]["logo"] is None and recs[0]["params"]["has_logo"]
+    assert str(tmp_path) not in json.dumps(recs)
     d = pymupdf.open()
     for _i in range(3):
         d.new_page(width=595, height=842).insert_text((72, 100), "Altro documento", fontsize=14)
@@ -450,7 +459,7 @@ def test_header_footer_first_page_even_logo_and_templates(opened, qtbot, tmp_pat
     dlg3 = sd.HeaderFooterDialog(window, other.document, [], ctx=window.ctx)
     qtbot.addWidget(dlg3)
     assert dlg3.load_template("Carta Verdi")
-    assert dlg3.logo.path() == str(logo) and dlg3.underline.isChecked()
+    assert dlg3.logo.path() == "" and dlg3.logo.data() == logo.read_bytes() and dlg3.underline.isChecked()
     dlg3.scope.set_mode("all")
     dlg3.apply()
     with ENGINE_LOCK:
@@ -490,3 +499,36 @@ def test_header_footer_preview_page_navigation(opened, qtbot):
     assert opts["field_values"]["pagina"] == 3 and opts["field_values"]["totale"] == 3
     dlg.refresh_preview()
     assert "3" in dlg.preview_caption.text()
+
+
+def test_old_templates_lose_logo_path_once(window, tmp_path):
+    """Pulizia all'avvio: i modelli delle versioni precedenti perdono il percorso del logo."""
+    from foliant.modules.pages import privacy
+    settings = window.ctx.settings()
+    secret = str(tmp_path / "Riservato" / "logo-studio-rossi.png")
+    settings.setValue(sd.TEMPLATES_KEY, json.dumps({"Carta": {"logo": secret, "margin": 20, "underline": True}}))
+    assert privacy.cleanup_legacy(settings)
+    data = json.loads(settings.value(sd.TEMPLATES_KEY))
+    assert data == {"Carta": {"logo": None, "margin": 20, "underline": True}}
+    assert not privacy.cleanup_legacy(settings)        # niente più da togliere: nessuna scrittura
+    settings.setValue(sd.TEMPLATES_KEY, "non è json")
+    assert privacy.cleanup_legacy(settings)
+    assert not settings.contains(sd.TEMPLATES_KEY)
+
+
+def test_image_pickers_use_core_dialog(window, qtbot, tmp_path, monkeypatch):
+    """Senza contesto esplicito i selettori di file usano comunque il dialogo del nucleo."""
+    img = tmp_path / "timbro.png"
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 10, 10), 0)
+    pix.save(str(img))
+    asked = []
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: asked.append(a) or [str(img)])
+    chooser = sd.ImageChooser(None, window)
+    qtbot.addWidget(chooser)
+    chooser.button.click()
+    assert asked and chooser.path() == str(img)
+    pdf_chooser = sd.PdfPageChooser(None, window)
+    qtbot.addWidget(pdf_chooser)
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [letterhead_file(tmp_path)])
+    pdf_chooser.button.click()
+    assert pdf_chooser.pages == 2

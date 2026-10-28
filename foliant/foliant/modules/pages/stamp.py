@@ -872,8 +872,9 @@ def add_watermark(pdf: pymupdf.Document, pages: Iterable[int] | None = None, *, 
         spacing = max(0.0, float(spacing))
     except (TypeError, ValueError):
         raise PageOpError(_("Spaziatura non valida.")) from None
-    params = {"text": text if has_text else None, "image": image if isinstance(image, str) else None,
-              "source_pdf": source_pdf if isinstance(source_pdf, str) else None, "source_page": source_page,
+    # riservatezza: nel record del timbro nessun percorso di file (solo se c'era un'immagine o un PDF)
+    params = {"text": text if has_text else None, "image": None, "source_pdf": None,
+              "has_image": image is not None, "has_source_pdf": source_pdf is not None, "source_page": source_page,
               "font_size": font_size, "color": list(color) if color is not None else None, "opacity": opacity,
               "rotation": rotation, "position": pos, "offset": list(off), "scale": scale, "behind": behind,
               "font": font, "margin": margin, "fit": fit, "tile": tile, "spacing": spacing,
@@ -961,8 +962,8 @@ def add_background(pdf: pymupdf.Document, pages: Iterable[int] | None = None, *,
         raise PageOpError(_("La percentuale deve essere tra 1 e 1000."))
     src = _Source(image=image, pdf=source_pdf, page=source_page) if (image is not None or source_pdf is not None) \
         else None
-    params = {"color": list(rgb) if rgb else None, "image": image if isinstance(image, str) else None,
-              "source_pdf": source_pdf if isinstance(source_pdf, str) else None, "source_page": source_page,
+    params = {"color": list(rgb) if rgb else None, "image": None, "source_pdf": None,   # niente percorsi
+              "has_image": image is not None, "has_source_pdf": source_pdf is not None, "source_page": source_page,
               "first_rest": first_rest, "opacity": opacity, "scale": scale, "percent": percent, "position": pos,
               "rotation": rotation, "visibility": visibility}
 
@@ -1180,7 +1181,7 @@ def add_header_footer(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
         raise PageOpError(_("L'altezza del logo deve essere tra 2 e 500 punti."))
     params = {"variants": variants, "margin": margin, "font_size": size, "color": list(rgb), "font": font,
               "date_format": date_format, "opacity": opacity, "underline": underline,
-              "logo": logo if isinstance(logo, str) else None, "logo_position": logo_pos,
+              "logo": None, "has_logo": logo is not None, "logo_position": logo_pos,   # niente percorsi
               "logo_height": logo_height, "visibility": visibility}
     values = _Values(pdf, filename, date, field_values)
     src = _Source(image=logo) if logo is not None else None
@@ -1273,7 +1274,7 @@ def stamp_params(pdf: pymupdf.Document, kind: str) -> dict | None:
 def kwargs_from_params(kind: str, params: dict | None) -> dict:
     """Argomenti per la funzione `add_*` del tipo a partire dai parametri salvati
     (per «Modifica» e per i modelli): l'inverso di quanto registrato nel timbro."""
-    p = dict(params or {})
+    p = {k: v for k, v in dict(params or {}).items() if not k.startswith("has_")}
     if kind == HEADERFOOTER:
         variants = p.pop("variants", None) or {}
         default = variants.get("default") or {}

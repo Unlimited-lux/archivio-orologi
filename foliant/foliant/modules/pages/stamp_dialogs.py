@@ -9,6 +9,7 @@ view, selected)` sono i punti d'ingresso per azioni e menu.
 
 from __future__ import annotations
 
+import base64
 import datetime as _dt
 import json
 import os
@@ -27,7 +28,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -301,14 +301,38 @@ def _spin(lo: int, hi: int, value: int, suffix: str = "") -> QSpinBox:
     return s
 
 
+def _context_of(widget: QWidget | None, ctx=None):
+    """Contesto del nucleo: quello passato, quello di un genitore o della finestra principale.
+
+    Riservatezza: i file si scelgono solo con i dialoghi del contesto (senza cronologia dei
+    file nel profilo), mai con QFileDialog direttamente."""
+    if ctx is not None:
+        return ctx
+    w = widget
+    while w is not None:
+        found = getattr(w, "ctx", None)
+        if found is not None and hasattr(found, "ask_open_paths"):
+            return found
+        w = w.parentWidget()
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    for top in (app.topLevelWidgets() if app is not None else []):
+        found = getattr(top, "ctx", None)
+        if found is not None and hasattr(found, "ask_open_paths"):
+            return found
+    return None
+
+
 class ImageChooser(QWidget):
-    """Campo percorso immagine con pulsante «Scegli…»."""
+    """Campo immagine con pulsante «Scegli…»: un file scelto dall'utente oppure i byte
+    di un'immagine (es. il logo incorporato in un modello, senza percorso)."""
 
     changed = Signal()
 
     def __init__(self, ctx: Context | None = None, parent: QWidget | None = None):
         super().__init__(parent)
         self.ctx = ctx
+        self._data: bytes | None = None
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(_("Nessuna immagine scelta"))
         self.edit.setReadOnly(True)
@@ -320,20 +344,37 @@ class ImageChooser(QWidget):
         self.button.clicked.connect(self._pick)
 
     def _pick(self) -> None:
-        if self.ctx is not None:
-            paths = self.ctx.ask_open_paths(_("Scegli immagine"), _image_filter(), multiple=False)
-        else:
-            path, _f = QFileDialog.getOpenFileName(self, _("Scegli immagine"), "", _image_filter())
-            paths = [path] if path else []
+        ctx = _context_of(self, self.ctx)
+        if ctx is None:
+            return
+        paths = ctx.ask_open_paths(_("Scegli immagine"), _image_filter(), multiple=False)
         if paths:
             self.set_path(paths[0])
 
     def path(self) -> str:
-        return self.edit.text()
+        """Percorso del file scelto ("" se nessuno o se l'immagine è data come byte)."""
+        return "" if self._data is not None else self.edit.text()
+
+    def data(self) -> bytes | None:
+        return self._data
+
+    def value(self):
+        """Immagine per il motore: byte, percorso oppure None."""
+        return self._data if self._data is not None else (self.edit.text() or None)
 
     def set_path(self, path: str) -> None:
+        self._data = None
         self.edit.setText(path)
         self.edit.setToolTip(path)
+        self.changed.emit()
+
+    def set_data(self, data: bytes | None, label: str = "") -> None:
+        if not data:
+            self.set_path("")
+            return
+        self._data = bytes(data)
+        self.edit.setText(label or _("Immagine del modello"))
+        self.edit.setToolTip("")
         self.changed.emit()
 
 
@@ -442,11 +483,10 @@ class PdfPageChooser(QWidget):
         self.page.valueChanged.connect(lambda *_a: self.changed.emit())
 
     def _pick(self) -> None:
-        if self.ctx is not None:
-            paths = self.ctx.ask_open_paths(_("Scegli PDF"), "PDF (*.pdf)", multiple=False)
-        else:
-            path, _f = QFileDialog.getOpenFileName(self, _("Scegli PDF"), "", "PDF (*.pdf)")
-            paths = [path] if path else []
+        ctx = _context_of(self, self.ctx)
+        if ctx is None:
+            return
+        paths = ctx.ask_open_paths(_("Scegli PDF"), "PDF (*.pdf)", multiple=False)
         if paths:
             self.set_path(paths[0])
 
@@ -886,12 +926,15 @@ class WatermarkDialog(StampDialog):
         if p.get("text"):
             self.kind_text.setChecked(True)
             self.text.setText(p["text"])
-        elif p.get("source_pdf"):
+        elif p.get("source_pdf") or p.get("has_source_pdf"):
+            # i timbri recenti non registrano il percorso del PDF: va scelto di nuovo
             self.kind_pdf.setChecked(True)
-            self.source_pdf.set_path(p["source_pdf"], int(p.get("source_page") or 0))
-        elif p.get("image"):
+            if p.get("source_pdf"):
+                self.source_pdf.set_path(p["source_pdf"], int(p.get("source_page") or 0))
+        elif p.get("image") or p.get("has_image"):
             self.kind_image.setChecked(True)
-            self.image.set_path(p["image"])
+            if p.get("image"):
+                self.image.set_path(p["image"])
         if p.get("font"):
             self.font.setCurrentIndex(max(0, self.font.findData(p["font"])))
         if p.get("font_size"):
@@ -1014,13 +1057,19 @@ def _describe_stamp(s: dict) -> str:
     if s["kind"] == stamp.WATERMARK:
         if p.get("text"):
             what = f"«{p['text']}»"
-        elif p.get("source_pdf") or p.get("image"):
+        elif p.get("source_pdf") or p.get("image"):   # timbri di versioni precedenti
             what = os.path.basename(p.get("source_pdf") or p.get("image"))
+        elif p.get("has_source_pdf"):
+            what = _("PDF")
         else:
             what = _("immagine")
     elif s["kind"] == stamp.BACKGROUND:
         if p.get("source_pdf") or p.get("image"):
             what = os.path.basename(p.get("source_pdf") or p.get("image"))
+        elif p.get("has_source_pdf"):
+            what = _("carta intestata (PDF)")
+        elif p.get("has_image"):
+            what = _("immagine")
         elif p.get("color"):
             c = QColor.fromRgbF(*p["color"][:3])
             what = c.name().upper()
@@ -1690,10 +1739,30 @@ class HeaderFooterDialog(StampDialog):
             "margin": self.margin.value() * MM, "font": self.font.currentData(),
             "font_size": self.font_size.value(), "color": list(self.color.color()),
             "date_format": self._date_format_value(), "opacity": self.opacity.value(),
-            "underline": self.underline.isChecked(), "logo": self.logo.path() or None,
+            "underline": self.underline.isChecked(), "logo": self.logo.value(),
             "logo_position": self.logo_position.currentData(), "logo_height": self.logo_height.value() * MM,
             "visibility": self.visibility.value(),
         }
+
+    LOGO_LIMIT = 1024 * 1024   # byte del logo incorporato in un modello
+
+    def template_params(self) -> dict:
+        """Parametri del modello da salvare nelle impostazioni: il logo è incorporato (PNG/JPEG
+        in base64, al massimo 1 MB), mai come percorso del file (riservatezza)."""
+        p = self.style_params()
+        logo = p.pop("logo", None)
+        p["logo"] = None
+        data = logo if isinstance(logo, (bytes, bytearray)) else None
+        if isinstance(logo, str) and logo:
+            try:
+                if os.path.getsize(logo) <= self.LOGO_LIMIT:
+                    with open(logo, "rb") as fh:
+                        data = fh.read()
+            except OSError:
+                data = None
+        if data and len(data) <= self.LOGO_LIMIT:
+            p["logo_data"] = base64.b64encode(bytes(data)).decode("ascii")
+        return p
 
     def load_params(self, p: dict) -> None:
         variants = p.get("variants") or {}
@@ -1717,7 +1786,17 @@ class HeaderFooterDialog(StampDialog):
         if p.get("opacity"):
             self.opacity.set_value(p["opacity"])
         self.underline.setChecked(bool(p.get("underline")))
-        self.logo.set_path(p.get("logo") or "")
+        if p.get("logo_data"):     # modello: immagine incorporata, senza percorso
+            try:
+                self.logo.set_data(base64.b64decode(p["logo_data"]), _("Logo del modello"))
+            except (TypeError, ValueError):
+                self.logo.set_path("")
+        else:
+            self.logo.set_path(p.get("logo") if isinstance(p.get("logo"), str) else "")
+            # timbro recente con logo: il percorso non è registrato, il logo va scelto di nuovo
+            self.logo.edit.setPlaceholderText(_("Logo presente: sceglilo di nuovo per mantenerlo")
+                                              if p.get("has_logo") and not p.get("logo")
+                                              else _("Nessuna immagine scelta"))
         if p.get("logo_position"):
             self.logo_position.setCurrentIndex(max(0, self.logo_position.findData(p["logo_position"])))
         if p.get("logo_height"):
@@ -1762,7 +1841,7 @@ class HeaderFooterDialog(StampDialog):
         if not name:
             return
         data = self._templates()
-        data[name] = self.style_params()
+        data[name] = self.template_params()
         self._store_templates(data)
         self._fill_templates(name)
 
@@ -1822,7 +1901,7 @@ class HeaderFooterDialog(StampDialog):
         if not hasattr(self, "visibility"):
             return None
         texts = self._all_texts()
-        if not any(t.strip() for t in texts) and not self.logo.path():
+        if not any(t.strip() for t in texts) and not self.logo.value():
             return _("Scrivi almeno un testo di intestazione o piè di pagina.")
         err = _template_error(*texts)
         if err:
@@ -2097,6 +2176,11 @@ def open_page_labels_dialog(ctx: Context, view: DocumentView, selected: list[int
 
 TRANSLATIONS: dict[str, str] = {
     "Come la lingua": "As the language",
+    "PDF": "PDF",
+    "carta intestata (PDF)": "letterhead (PDF)",
+    "Immagine del modello": "Template image",
+    "Logo del modello": "Template logo",
+    "Logo presente: sceglilo di nuovo per mantenerlo": "Logo present: choose it again to keep it",
     '(nessuno)': '(none)',
     'A schermo e in stampa': 'On screen and in print',
     'Adatta alla pagina': 'Fit to page',

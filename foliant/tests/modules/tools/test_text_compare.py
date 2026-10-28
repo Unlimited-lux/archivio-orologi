@@ -88,3 +88,16 @@ def test_dialog_compare_and_exports(window, tmp_path, sample_pdf):
     window.ctx.error = lambda t, m: errors.append(m)
     assert not dlg.side_a.load_path(str(bad)) and errors
     dlg.close()
+
+
+def test_open_file_uses_core_dialog(window, tmp_path, monkeypatch):
+    """«Apri file» passa dal dialogo del nucleo (senza cronologia), non da QFileDialog."""
+    src = tmp_path / "appunti-riservati.txt"
+    src.write_text("uno\ndue\n", encoding="utf-8")
+    asked = []
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: asked.append((a, k)) or [str(src)])
+    dlg = tc.TextCompareDialog(window.ctx, window)
+    dlg.side_a.choose_file()
+    assert asked and asked[0][1].get("multiple") is False
+    assert "uno" in dlg.side_a.edit.toPlainText()
+    dlg.close()

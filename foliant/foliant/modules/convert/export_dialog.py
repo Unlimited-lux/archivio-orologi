@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -436,7 +436,9 @@ class ExportDialog(QDialog):
         self._reload_presets()
 
     def _browse(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, _("Scegli cartella"), self.folder_edit.text())
+        from .common import context_of
+        ctx = context_of(self)
+        path = ctx.ask_directory(_("Scegli cartella")) if ctx is not None else None
         if path:
             self.folder_edit.setText(path)
 
