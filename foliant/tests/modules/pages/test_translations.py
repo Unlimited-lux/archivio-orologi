@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import ast
 import importlib
 
 import foliant.modules.pages as pkg
@@ -23,7 +24,7 @@ def test_all_literal_strings_translated():
     for path in Path(pkg.__file__).parent.glob("*.py"):
         src = path.read_text(encoding="utf-8")
         strings = set(re.findall(r'_\(\s*"((?:[^"\\]|\\.)*)"\s*\)', src))
-        miss = sorted(s for s in strings if s.replace("\\n", "\n") not in ALL and s not in ALL)
+        miss = sorted(s for s in strings if ast.literal_eval('"' + s + '"') not in ALL)
         if miss:
             missing[path.name] = miss
     assert not missing, missing
