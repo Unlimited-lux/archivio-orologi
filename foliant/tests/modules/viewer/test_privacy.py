@@ -142,7 +142,45 @@ def test_run_once_removes_legacy_settings_and_indexes(settings, tmp_path):
         assert not settings.contains(key)
     assert settings.value("viewer/units") == "mm"
     assert not idx.exists()
-    assert privacy.run_once(settings, env) is False      # una volta sola
+    assert privacy.run_once(settings, env) is False      # nulla da togliere: non fa nulla
+    assert not settings.contains(privacy.CLEANUP_FLAG)   # nessun marcatore
+
+
+def test_run_once_removes_old_marker_and_grouped_keys(settings):
+    """Il marcatore delle versioni precedenti e le chiavi salvate come gruppo vengono tolti."""
+    settings.setValue(privacy.CLEANUP_FLAG, 1)
+    settings.setValue(f"viewer/positions/{TOKEN}", 3)
+    assert privacy.run_once(settings, {}) is True
+    assert not settings.contains(privacy.CLEANUP_FLAG)
+    assert [k for k in settings.allKeys() if k.startswith("viewer/positions")] == []
+
+
+def test_cleanup_writes_nothing_on_a_fresh_profile(tmp_path):
+    """Profilo nuovo: la pulizia non crea il file delle impostazioni né altre cartelle."""
+    from PySide6.QtCore import QSettings
+    ini = tmp_path / "conf" / "foliant.ini"
+    fresh = QSettings(str(ini), QSettings.Format.IniFormat)
+    env = {"XDG_DATA_HOME": str(tmp_path / "dati"), "FOLIANT_RECOVERY_DIR": str(tmp_path / "rec")}
+    assert privacy.run_once(fresh, env) is False
+    privacy.startup_cleanup(fresh, env)
+    fresh.sync()
+    assert fresh.allKeys() == []
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+
+
+def test_window_on_fresh_profile_writes_no_cleanup_marker(qtbot, tmp_path, monkeypatch):
+    """All'avvio della finestra con un profilo nuovo il viewer non scrive il file delle impostazioni."""
+    from PySide6.QtCore import QSettings
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+        monkeypatch.setenv(var, str(tmp_path / "profilo" / var.lower()))
+    ini = tmp_path / "conf" / "foliant.ini"
+    fresh = QSettings(str(ini), QSettings.Format.IniFormat)
+    win = _new_window(qtbot, fresh)
+    QApplication.processEvents()
+    assert not fresh.contains(privacy.CLEANUP_FLAG)
+    # il viewer non scrive nulla all'avvio (eventuali chiavi del nucleo non sono di quest'area)
+    assert [k for k in fresh.allKeys() if k.startswith("viewer/")] == []
+    win.close()
 
 
 def _dead_pid() -> int:

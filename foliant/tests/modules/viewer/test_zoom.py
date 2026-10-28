@@ -99,14 +99,25 @@ def test_zoom_list_values(viewer_window):
     assert {10, 25, 50, 75, 100, 125, 150, 200, 400, 800, 1600, 3200, 6400} <= values
 
 
-def test_zoom_remembered_per_document(viewer_window, tmp_path):
-    """Lo zoom è ricordato per documento (VIS-02)."""
+def test_zoom_not_remembered_per_document(viewer_window, tmp_path, settings):
+    """Riservatezza (VIS-02 tolto): lo zoom non è ricordato per documento. Alla riapertura il
+    documento usa lo zoom predefinito e nel profilo non resta alcuna chiave legata al file."""
     path = _a4(tmp_path)
     view = viewer_window.open_path(path)
-    view.set_zoom(1.5)
+    default = view.zoom
+    view.set_zoom(default * 1.7)
+    assert view.zoom == pytest.approx(default * 1.7)
     viewer_window.close_view(view)
     view = viewer_window.open_path(path)
-    assert view.zoom == pytest.approx(1.5)
+    QApplication.processEvents()
+    assert view.zoom != pytest.approx(default * 1.7, rel=0.05)
+    assert view.zoom == pytest.approx(default, rel=0.02)   # adatta: la barra di scorrimento può variare
+    settings.sync()
+    for key in settings.allKeys():
+        value = str(settings.value(key))
+        assert "a4.pdf" not in key and "a4.pdf" not in value, key
+        assert str(tmp_path) not in value, key
+        assert "positions" not in key, key
 
 
 def _ctl(window):

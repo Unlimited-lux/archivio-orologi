@@ -68,8 +68,9 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
   cronologia delle ricerche (solo in memoria), indici full-text su disco (solo in memoria), nome o
   percorso nelle copie di recupero (si ripristinano come «Documento recuperato», da salvare con
   «Salva con nome»; cancellate anche su `aboutToQuit`). `privacy.py` cancella all'avvio i dati
-  delle versioni precedenti (chiavi QSettings e indici una volta sola, segnale
-  `viewer/privacy_cleanup`; ogni volta metadati di recupero e cartelle temporanee
+  delle versioni precedenti (chiavi QSettings, indici e vecchio segnale `viewer/privacy_cleanup`
+  solo se esistono: pulizia idempotente senza marcatori, su un profilo nuovo non scrive né
+  sincronizza le impostazioni; ogni volta metadati di recupero e cartelle temporanee
   `foliant-share-*`/`foliant-allegato-*` abbandonate: subito se il processo che le ha create è
   terminato, dopo 6 ore quelle delle versioni precedenti senza pid). Verificato da
   `test_privacy.py::test_no_traces_after_a_full_session` (profilo isolato, ricerca del nome del file).

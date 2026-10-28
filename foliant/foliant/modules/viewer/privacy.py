@@ -10,11 +10,13 @@ aperti, né cronologie o indici che li contengano. Le versioni precedenti del vi
 - nome e percorso del documento nei metadati delle copie di recupero;
 - la voce `foliant.thumbnailer` per il file manager (mai installata da Foliant stesso).
 
-Le chiavi e gli indici si cancellano una volta sola (segnale `viewer/privacy_cleanup`, un
-booleano senza percorsi). Ogni avvio, invece, si ripuliscono i metadati di recupero e le
-cartelle temporanee abbandonate dopo un crash (`foliant-share-*`, `foliant-allegato-*`),
-che contengono il nome del documento. La pulizia è silenziosa, tocca solo chiavi e file noti
-di Foliant e non solleva mai eccezioni.
+La pulizia è idempotente e non scrive marcatori: a ogni avvio controlla se le chiavi e i
+file delle versioni precedenti esistono e cancella solo quelli (su un profilo nuovo o già
+pulito non scrive nulla e non sincronizza le impostazioni). Il vecchio marcatore
+`viewer/privacy_cleanup`, se presente, viene tolto anch'esso. Ogni avvio si ripuliscono
+inoltre i metadati di recupero e le cartelle temporanee abbandonate dopo un crash
+(`foliant-share-*`, `foliant-allegato-*`), che contengono il nome del documento. La pulizia
+è silenziosa, tocca solo chiavi e file noti di Foliant e non solleva mai eccezioni.
 """
 
 from __future__ import annotations
@@ -28,8 +30,8 @@ from pathlib import Path
 
 log = logging.getLogger("foliant.modules.viewer")
 
+# marcatore scritto dalle versioni precedenti della pulizia: ora si cancella e non si scrive più
 CLEANUP_FLAG = "viewer/privacy_cleanup"
-CLEANUP_VERSION = 1
 
 LEGACY_KEYS = (
     "viewer/positions",
@@ -38,6 +40,7 @@ LEGACY_KEYS = (
     "viewer/search_history",
     "viewer/no_history",
     "viewer/restore_position",
+    CLEANUP_FLAG,
 )
 
 TEMP_PREFIXES = ("foliant-share-", "foliant-allegato-")
@@ -47,10 +50,15 @@ TEMP_MAX_AGE = 6 * 3600      # cartelle senza pid più recenti: forse di un'altr
 def remove_legacy_settings(settings) -> list[str]:
     """Toglie da QSettings le chiavi delle versioni precedenti; restituisce quelle trovate."""
     found = []
+    try:
+        existing = settings.allKeys()
+    except Exception:  # noqa: BLE001
+        existing = []
     for key in LEGACY_KEYS:
-        if settings.contains(key):
+        # la chiave stessa o un gruppo con quel nome (es. `viewer/positions/<...>`)
+        if settings.contains(key) or any(k.startswith(key + "/") for k in existing):
             found.append(key)
-        settings.remove(key)
+            settings.remove(key)
     return found
 
 
@@ -131,29 +139,25 @@ def sanitize_recovery(env=None) -> int:
 
 
 def run_once(settings, env=None) -> bool:
-    """Pulizia una tantum dei dati delle versioni precedenti; True se è stata eseguita ora."""
-    try:
-        done = int(settings.value(CLEANUP_FLAG, 0) or 0)
-    except (TypeError, ValueError):
-        done = 0
-    if done >= CLEANUP_VERSION:
-        return False
+    """Cancella i dati delle versioni precedenti, se ci sono; True se ha tolto qualcosa.
+
+    Idempotente e senza marcatori: se non trova nulla non scrive nelle impostazioni e non le
+    sincronizza (un profilo nuovo resta senza file delle impostazioni)."""
     from . import fulltext
-    remove_legacy_settings(settings)
-    fulltext.remove_legacy_indexes(env)
-    remove_legacy_thumbnailer(env)
-    settings.setValue(CLEANUP_FLAG, CLEANUP_VERSION)
-    try:
-        settings.sync()
-    except Exception:  # noqa: BLE001
-        pass
-    return True
+    removed_keys = remove_legacy_settings(settings)
+    removed_files = fulltext.remove_legacy_indexes(env) + remove_legacy_thumbnailer(env)
+    if removed_keys:
+        try:
+            settings.sync()
+        except Exception:  # noqa: BLE001
+            pass
+    return bool(removed_keys or removed_files)
 
 
 def startup_cleanup(settings, env=None) -> None:
-    """Pulizia all'avvio: una tantum per le chiavi e gli indici, ogni volta per i resti di un crash."""
+    """Pulizia all'avvio: dati delle versioni precedenti (se ci sono) e resti di un crash."""
     for step in (lambda: run_once(settings, env), lambda: sanitize_recovery(env), remove_orphan_temp_dirs):
         try:
             step()
         except Exception:  # noqa: BLE001 - la pulizia non deve mai impedire l'avvio
-            log.warning("viewer: pulizia di riservatezza non riuscita")   # senza dettagli: niente percorsi
+            log.warning("viewer: privacy cleanup step failed")   # senza dettagli: niente percorsi
