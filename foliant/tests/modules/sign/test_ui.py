@@ -960,3 +960,18 @@ def test_panel_buttons_never_below_minimum_size(window, qtbot, monkeypatch, samp
         assert b.width() >= b.minimumSizeHint().width(), (b.text(), b.width(), b.minimumSizeHint().width())
     if width >= 600:
         assert panel.action_buttons._columns == 2
+
+
+def test_certified_no_changes_and_signed_version_are_read_only(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """SIG-17: documento certificato «nessuna modifica» e versione firmata aperti in sola lettura."""
+    from foliant.api import OperationCancelled
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "ro.pdf", id_a, certify=True, level=1)
+    doc = view.document
+    assert doc.locked and "nessuna modifica" in doc.locked_reason
+    with pytest.raises(OperationCancelled):
+        with doc.change("Nota", kind="annotation") as pdf:
+            pdf[0].add_text_annot((10, 10), "x")
+    assert not doc.is_modified
+    c = _ctl(window)
+    sv = c.open_signed_version(view, c.state(view).statuses[0])
+    assert sv.document.locked and "sola lettura" in sv.document.locked_reason

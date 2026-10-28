@@ -417,11 +417,25 @@ class SignController(QObject):
         st.fields = result.get("fields", [])
         st.certification = result.get("certification")
         st.signed = bool(st.statuses) or st.signed_hint
+        self._apply_certification_lock(doc, st)
         for view in self.ctx.views():
             if view.document is doc:
                 self.stateChanged.emit(view)
                 if st.signed and not doc.is_modified:
                     self.ctx.status(_("Documento firmato: modificare il contenuto invaliderà le firme."), 10000)
+
+    def _apply_certification_lock(self, doc, st: VerifyState) -> None:
+        """SIG-17/SIG-21: un documento certificato «nessuna modifica» è in sola lettura."""
+        if not hasattr(doc, "set_locked"):
+            return
+        reason = _("Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza "
+                   "firme.")
+        current = getattr(doc, "locked_reason", None)
+        if st.certification == 1:
+            if current is None:          # non sostituire un altro motivo (es. versione firmata)
+                doc.set_locked(reason)
+        elif current == reason:
+            doc.set_locked(None)
 
     def empty_fields(self, view) -> list:
         return [f for f in self.state(view).fields if not f.signed]
@@ -814,6 +828,8 @@ class SignController(QObject):
         except Exception as e:
             self.ctx.error(_("Versione firmata"), str(e))
             return
+        if hasattr(doc, "set_locked"):
+            doc.set_locked(_("Versione firmata da {who}: sola lettura.").format(who=status.signer or status.field_name))
         new_view = self.ctx.open_document(doc)
         self.state(doc).warned = False
         return new_view
@@ -919,6 +935,9 @@ TRANSLATIONS_EN = {
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
     "Operazione non riuscita: {e}": "Operation failed: {e}",
+    "Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza firme.":
+        "Document certified “no changes”: to change it, work on a copy without signatures.",
+    "Versione firmata da {who}: sola lettura.": "Version signed by {who}: read-only.",
     "Firme mancanti": "Missing signatures",
     "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con «{action}»?":
         "The document has required signature fields not yet signed:\n\n{names}\n\nProceed with “{action}” anyway?",
