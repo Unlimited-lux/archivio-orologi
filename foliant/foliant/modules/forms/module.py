@@ -6,7 +6,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 import pymupdf
-from PySide6.QtCore import QObject, QUrl
+from PySide6.QtCore import QEvent, QObject, Qt, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import QMenu, QToolButton
 
@@ -67,11 +67,12 @@ class FormsModule(QObject):
         create_menu = QMenu(_("Nuovo campo"), ctx.window)
         for kind in CREATE_KINDS:
             create_menu.addAction(self.create_actions[kind])
-        for kind in (E.TEXT, E.CHECKBOX, E.RADIO, E.COMBO):
+        for kind in (E.TEXT, E.CHECKBOX, E.RADIO, E.COMBO, E.LIST, "date"):
             mode.add_action(self.create_actions[kind])
             btn = mode.toolbar.widgetForAction(self.create_actions[kind])
             if isinstance(btn, QToolButton):
-                btn.setToolButtonStyle(btn.toolButtonStyle())
+                btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+                btn.installEventFilter(self)
         more = QToolButton(mode.toolbar)
         more.setText(_("Altri campi"))
         more.setToolTip(_("Altri tipi di campo"))
@@ -128,11 +129,6 @@ class FormsModule(QObject):
         tb.setMenu(tab_menu)
         tb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         tb.setToolButtonStyle(mode.toolbar.toolButtonStyle())
-        more_menu = QMenu(_("Altro"), ctx.window)
-        more_menu.addAction(self.act_duplicate)
-        more_menu.addAction(self.act_copy_pages)
-        more_menu.addAction(self.act_delete)
-        more_menu.addSeparator()
         mode.add_widget(tb)
         mode.add_separator()
         self.act_preview = ctx.action(_("Anteprima compilazione"), "eye", self.toggle_preview, checkable=True)
@@ -158,8 +154,17 @@ class FormsModule(QObject):
         db.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         db.setToolButtonStyle(mode.toolbar.toolButtonStyle())
         mode.add_widget(db)
-        mode.add_action(self.act_delete)
-        mode.add_action(self.act_duplicate)
+        edit_menu = QMenu(_("Campo"), ctx.window)
+        for a in (self.act_duplicate, self.act_copy_pages, self.act_delete):
+            edit_menu.addAction(a)
+        eb = QToolButton(mode.toolbar)
+        eb.setText(_("Campo"))
+        eb.setToolTip(_("Duplica, copia su più pagine, elimina"))
+        bind_icon(eb, "copy-plus")
+        eb.setMenu(edit_menu)
+        eb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        eb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        mode.add_widget(eb)
         for a in (self.act_import, self.act_export, self.act_reset, self.act_flatten):
             ctx.add_menu_action(a, _("Moduli"))
         mode.entered.connect(self.enter_design)
@@ -172,6 +177,15 @@ class FormsModule(QObject):
         self._install_panels()
         for view in ctx.views():
             self._attach(view)
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() == QEvent.Type.MouseButtonDblClick and isinstance(obj, QToolButton):
+            for kind, act in self.create_actions.items():
+                if obj.defaultAction() is act:
+                    self.start_create(kind, sticky=True)
+                    self.ctx.status(_("Strumento bloccato: crea più campi, Esc per terminare."))
+                    return True
+        return False
 
     def _install_panels(self) -> None:
         try:

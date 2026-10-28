@@ -1116,7 +1116,7 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
     w.field_name = name
     w.rect = rect
     w.text_font = FONTS.get(props.get("font", "Helvetica"), "Helv")
-    w.text_fontsize = float(props.get("fontsize", 0 if kind in (TEXT, COMBO, LIST) else 0))
+    w.text_fontsize = float(props.get("fontsize", 10 if kind in (TEXT, COMBO, LIST) else 0))
     w.border_color = props.get("border_color", (0.45, 0.5, 0.58))
     w.border_width = float(props.get("border_width", 1))
     w.fill_color = props.get("fill_color", (1, 1, 1) if kind != BUTTON else (0.9, 0.9, 0.9))

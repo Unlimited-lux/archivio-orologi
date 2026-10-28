@@ -254,6 +254,8 @@ class FormBar(QFrame):
         lay.addWidget(self.icon)
         self.label = QLabel(self)
         self.label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.label.setWordWrap(True)
+        self.label.setMinimumWidth(160)
         lay.addWidget(self.label, 1)
         self.buttons: dict[str, QToolButton] = {}
         for key, text, icon_name, slot in (
@@ -267,7 +269,8 @@ class FormBar(QFrame):
             b.setText(text)
             b.setToolTip(text)
             b.setAutoRaise(True)
-            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon if key in ("highlight", "design")
+                                 else Qt.ToolButtonStyle.ToolButtonIconOnly)
             bind_icon(b, icon_name)
             b.clicked.connect(lambda _c=False, s=slot: s())
             lay.addWidget(b)
@@ -281,7 +284,21 @@ class FormBar(QFrame):
         lay.addWidget(self.close_button)
         self.apply_theme()
 
+    def changeEvent(self, ev):
+        if ev.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
+            self.apply_theme()
+        super().changeEvent(ev)
+
     def apply_theme(self) -> None:
+        if getattr(self, "_styling", False):
+            return
+        self._styling = True
+        try:
+            self._apply_theme()
+        finally:
+            self._styling = False
+
+    def _apply_theme(self) -> None:
         self.setStyleSheet(
             f"QFrame#formsBar {{ background: {theme.hex_color('accent_soft')}; "
             f"border-bottom: 1px solid {theme.hex_color('border')}; }}"
@@ -325,7 +342,6 @@ class FormFiller(QObject):
         view.horizontalScrollBar().valueChanged.connect(self.reposition)
         view.layoutChanged.connect(self.reposition)
         view.contentChanged.connect(self._on_content_changed)
-        theme.on_change(self._on_theme)
         self.state.refresh(force=True)
         self.update_bar()
 
