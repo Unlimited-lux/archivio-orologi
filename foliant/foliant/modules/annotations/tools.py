@@ -658,8 +658,15 @@ class TextBoxTool(_DragTool):
         res = dialogs.edit_comment(view, _("Casella di testo"), self.ctrl.author(), "")
         if res is None or not res[0].strip():
             return
-        self.created(view, page, self.ctrl.apply(_("Aggiungi casella di testo"), engine.create_freetext, page, r,
-                                                 res[0], st, self.ctrl.author()))
+        text, rich = res
+
+        def run(pdf):
+            xref = engine.create_freetext(pdf, page, r, text, st, self.ctrl.author())
+            if rich:
+                engine.set_contents(pdf, page, xref, text, rich)
+            return xref
+
+        self.created(view, page, self.ctrl.apply(_("Aggiungi casella di testo"), run))
 
     def paint(self, view, painter, page):
         if self._start and self._start[0] == page and self._end is not None:

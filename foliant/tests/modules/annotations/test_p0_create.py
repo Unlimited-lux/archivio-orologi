@@ -336,3 +336,21 @@ def test_ann16_rotated_page_text_horizontal(comments, tmp_path, monkeypatch):
     if not lines:   # il testo dell'aspetto non è estratto dal motore: si verifica il rendering
         pytest.skip("testo dell'aspetto non estraibile")
     assert lines[0]["dir"] == (1.0, 0.0)
+
+
+def test_ann16_rich_text_in_textbox(comments, tmp_path):
+    """ANN-16: grassetto e corsivo nella casella finiscono in /RC, /Contents resta testo semplice."""
+    window, view, module = comments
+    text = "una parola grassetto e corsivo"
+    rc = ('<?xml version="1.0"?><body><p>una parola <span style="font-weight:bold">grassetto</span> e '
+          '<span style="font-style:italic">corsivo</span></p></body>')
+    xref = module.ctrl.apply("t", engine.create_freetext, 0, (100, 400, 400, 460), text,
+                             engine.Style(fontsize=12, width=1, color=(1, 0, 0)), "A")
+    module.ctrl.apply("c", engine.set_contents, 0, xref, text, rc)
+    module.ctrl.move(5, 5, [(0, xref)])
+    doc = saved(window, view, tmp_path)
+    ft, = annots(doc, 0, "FreeText")
+    stored = engine.get_rich_text(doc, ft.xref)
+    assert "bold" in stored and "italic" in stored
+    assert ft.info["content"] == text
+    assert "grassetto" in doc[0].get_text()

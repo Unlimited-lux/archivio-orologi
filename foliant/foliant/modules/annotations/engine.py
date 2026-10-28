@@ -543,11 +543,103 @@ def _wrap(text: str, width: float, size: float) -> list[str]:
     return lines
 
 
+def _wrap_runs(paras: list, width: float, size: float) -> list[list]:
+    """A capo automatico per paragrafi formattati: righe come elenchi di tratti."""
+    lines: list[list] = []
+    for para in paras:
+        words: list[tuple] = []          # (parola, stile..., spazio_dopo)
+        for t, bb, ii, uu, cc in para:
+            parts = re.split(r"(\s+)", t)
+            for part in parts:
+                if not part:
+                    continue
+                if part.isspace():
+                    if words:
+                        words[-1] = words[-1][:5] + (True,)
+                    continue
+                words.append((part, bb, ii, uu, cc, False))
+        cur: list = []
+        cur_w = 0.0
+        for wtxt, bb, ii, uu, cc, sp in words:
+            code = _FT_FONTS[(bb, ii)][1]
+            ww = pymupdf.get_text_length(wtxt, fontname=code, fontsize=size)
+            sw = pymupdf.get_text_length(" ", fontname=code, fontsize=size)
+            if cur and cur_w + ww > width:
+                lines.append(cur)
+                cur, cur_w = [], 0.0
+            cur.append((wtxt + (" " if sp else ""), bb, ii, uu, cc))
+            cur_w += ww + (sw if sp else 0)
+        lines.append(cur)
+    return lines
+
+
 def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     """Aspetto vettoriale di caselle di testo e richiami: riempimento, bordo (colore proprio),
     testo a capo con allineamento, linea di richiamo con punta. Per testi fuori dalla codifica
     dei caratteri standard o pagine ruotate si usa l'aspetto generato dal motore."""
     page = pdf[page_no]
+    rc = pdf.xref_get_key(xref, "RC")
+    try:
+        _refresh_freetext(pdf, page, page_no, xref)
+    finally:
+        if rc[0] == "string" and pdf.xref_get_key(xref, "RC")[0] != "string":
+            pdf.xref_set_key(xref, "RC", pymupdf.get_pdf_str(rc[1]))
+
+
+# Caratteri standard per stile: (grassetto, corsivo) -> (nome risorsa, codice per le misure)
+_FT_FONTS = {(False, False): ("Helv", "helv", "Helvetica"), (True, False): ("HeBo", "hebo", "Helvetica-Bold"),
+             (False, True): ("HeIt", "heit", "Helvetica-Oblique"), (True, True): ("HeBI", "hebi", "Helvetica-BoldOblique")}
+
+
+def rich_runs(xhtml: str) -> list[list[tuple[str, bool, bool, bool, tuple | None]]]:
+    """Paragrafi di /RC come elenchi di tratti (testo, grassetto, corsivo, sottolineato, colore)."""
+    from html.parser import HTMLParser
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.paras: list[list] = []
+            self.stack: list[dict] = [{}]
+
+        def handle_starttag(self, tag, attrs):
+            st = dict(self.stack[-1])
+            a = dict(attrs)
+            css = a.get("style", "") or ""
+            if tag in ("b", "strong") or re.search(r"font-weight\s*:\s*(bold|[6-9]00)", css):
+                st["b"] = True
+            if tag in ("i", "em") or re.search(r"font-style\s*:\s*italic", css):
+                st["i"] = True
+            if tag == "u" or "underline" in css:
+                st["u"] = True
+            m = re.search(r"color\s*:\s*#([0-9a-fA-F]{6})", css)
+            if m:
+                st["c"] = hex_to_color(m.group(1))
+            if tag == "p" or not self.paras:
+                self.paras.append([])
+            if tag == "br":
+                self.paras.append([])
+            self.stack.append(st)
+
+        def handle_endtag(self, tag):
+            if len(self.stack) > 1:
+                self.stack.pop()
+
+        def handle_data(self, data):
+            if not self.paras:
+                self.paras.append([])
+            st = self.stack[-1]
+            if data:
+                self.paras[-1].append((data, bool(st.get("b")), bool(st.get("i")), bool(st.get("u")), st.get("c")))
+
+    p = P()
+    try:
+        p.feed(xhtml)
+    except Exception:
+        return []
+    return [para for para in p.paras]
+
+
+def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, xref: int) -> None:
     annot = get_annot(page, xref)
     text = (annot.info or {}).get("content", "")
     try:
@@ -606,35 +698,55 @@ def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
                    f"{wing[0][0]:.2f} {wing[0][1]:.2f} m {tx:.2f} {ty:.2f} l {wing[1][0]:.2f} {wing[1][1]:.2f} l S")
     pad = 2 + bw
     avail = max(10.0, inner.width - 2 * pad)
-    lines = _wrap(text, avail, size)
+    rich = get_rich_text(pdf, xref)
+    runs = rich_runs(rich) if rich else []
+    if runs and "".join(t for para in runs for t, *_r in para).replace("\n", "").strip() != \
+            text.replace("\n", "").strip():
+        runs = []          # /RC discordante da /Contents: si usa /Contents
+    lines = _wrap(text, avail, size) if not runs else _wrap_runs(runs, avail, size)
     if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts:
         need = 2 * pad + size * 1.2 * len(lines) + size * 0.2
         if need > inner.height + 0.5:
             # adattamento automatico: si allunga la casella verso il basso e si ridisegna
             grown = pymupdf.Rect(rect.x0, rect.y0, rect.x1, rect.y1 + (need - inner.height))
             pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, grown)))
-            return refresh_freetext(pdf, page_no, xref)
+            return _refresh_freetext(pdf, page, page_no, xref)
     r, g, b = _rgb(tcolor)
     lead = size * 1.2
     y = y1 - pad - size * 0.9
     ops.append(f"BT /Helv {size:.2f} Tf {r:.3f} {g:.3f} {b:.3f} rg")
+    underlines = []
     for line in lines:
         if y < y0 + pad - size * 0.3:
             break
-        w = pymupdf.get_text_length(line, fontname="helv", fontsize=size)
+        segs = line if isinstance(line, list) else [(line, False, False, False, None)]
+        w = sum(pymupdf.get_text_length(t, fontname=_FT_FONTS[(bb, ii)][1], fontsize=size) for t, bb, ii, _u, _c in segs)
         x = x0 + pad
         if align == 1:
             x = x0 + (inner.width - w) / 2
         elif align == 2:
             x = x1 - pad - w
-        ops.append(f"1 0 0 1 {x:.2f} {y:.2f} Tm {_pdf_string(line)} Tj")
+        for t, bb, ii, uu, cc in segs:
+            res, code, _base = _FT_FONTS[(bb, ii)]
+            cr, cg, cb = _rgb(cc) if cc else (r, g, b)
+            ops.append(f"/{res} {size:.2f} Tf {cr:.3f} {cg:.3f} {cb:.3f} rg 1 0 0 1 {x:.2f} {y:.2f} Tm "
+                       f"{_pdf_string(t)} Tj")
+            tw = pymupdf.get_text_length(t, fontname=code, fontsize=size)
+            if uu:
+                underlines.append((x, y - size * 0.12, tw, (cr, cg, cb)))
+            x += tw
         y -= lead
     ops.append("ET")
-    font = pdf.get_new_xref()
-    pdf.update_object(font, "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>")
+    for ux, uy, uw, (cr, cg, cb) in underlines:
+        ops.append(f"{cr:.3f} {cg:.3f} {cb:.3f} RG {max(0.5, size / 16):.2f} w {ux:.2f} {uy:.2f} m {ux + uw:.2f} {uy:.2f} l S")
+    fonts = []
+    for (res, _code, base) in _FT_FONTS.values():
+        fx = pdf.get_new_xref()
+        pdf.update_object(fx, f"<</Type/Font/Subtype/Type1/BaseFont/{base}/Encoding/WinAnsiEncoding>>")
+        fonts.append(f"/{res} {fx} 0 R")
     ap = pdf.get_new_xref()
     pdf.update_object(ap, f"<</Type/XObject/Subtype/Form/BBox[0 0 {rect.width:.2f} {H:.2f}]/Matrix[1 0 0 1 0 0]"
-                          f"/Resources<</Font<</Helv {font} 0 R>>"
+                          f"/Resources<</Font<<{''.join(fonts)}>>"
                           f"/ExtGState<</GS0<</Type/ExtGState/CA {opacity:.3f}/ca {opacity:.3f}>>>>>>>>")
     pdf.update_stream(ap, "\n".join(ops).encode("latin-1"))
     pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
@@ -1721,7 +1833,8 @@ def set_contents(pdf: pymupdf.Document, page_no: int, xref: int, text: str, rich
     annot.set_info(content=text, modDate=pdf_now())
     if annot.type[0] == pymupdf.PDF_ANNOT_FREE_TEXT:
         mupdf.pdf_set_annot_contents(annot.this, text)
-        _dirty_update(annot)
+        pdf.xref_set_key(xref, "RC", pymupdf.get_pdf_str(rich) if rich else "null")
+        _dirty_update(get_annot(page, xref))
         refresh_freetext(pdf, page_no, xref)
     else:
         annot.update()
