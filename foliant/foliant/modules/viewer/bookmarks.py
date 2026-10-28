@@ -95,9 +95,7 @@ TRANSLATIONS = {
 def _can_modify(view: DocumentView) -> bool:
     """Permesso di modifica effettivo (anche dopo una modifica, quando la copia
     interna non è più cifrata)."""
-    from .properties_engine import document_security
-    with ENGINE_LOCK:
-        return bool(document_security(view.document).permissions & pymupdf.PDF_PERM_MODIFY)
+    return view.document.allows(pymupdf.PDF_PERM_MODIFY)
 
 
 class BookmarkTree(QTreeWidget):
