@@ -735,7 +735,7 @@ class BatchWidget(QWidget):
         if not self.steps or errors:
             self.ctx.error(_("Sequenza non salvata"), "\n".join(errors) or _("La sequenza è vuota."))
             return None
-        path = be.save_sequence(self.sequences_dir(), name, self.steps)
+        path = be.save_sequence(self.sequences_dir(), name, self.steps, output=be.output_of(self.settings()))
         self.refresh_sequences()
         self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(path)))
         self.ctx.status(_("Sequenza «{n}» salvata.").format(n=name))
@@ -758,7 +758,26 @@ class BatchWidget(QWidget):
             return False
         self.steps = steps
         self._refresh_steps(0)
+        output = be.sequence_output(path)
+        if output:
+            self.apply_output(output)
         return True
+
+    def apply_output(self, out: dict) -> None:
+        """Riapplica l'uscita salvata nella sequenza (destinazione, nomi, conflitti, errori)."""
+        {"folder": self.dest_folder, "same": self.dest_same, "subfolder": self.dest_sub}.get(
+            out.get("destination_mode", "folder"), self.dest_folder).setChecked(True)
+        if out.get("destination") is not None:
+            self.dest_path.setText(str(out["destination"]))
+        if out.get("subfolder"):
+            self.subfolder.setText(str(out["subfolder"]))
+        self.keep_structure.setChecked(bool(out.get("keep_structure", False)))
+        if out.get("pattern"):
+            self.pattern.setText(str(out["pattern"]))
+        if out.get("counter_start") is not None:
+            self.counter_start.setValue(int(out["counter_start"]))
+        self.conflict.setCurrentIndex(max(0, self.conflict.findData(out.get("conflict", "rename"))))
+        self.error_policy.setCurrentIndex(max(0, self.error_policy.findData(out.get("error_policy", "continue"))))
 
     def load_selected_sequence(self) -> None:
         path = self.sequence_combo.currentData()
@@ -771,7 +790,7 @@ class BatchWidget(QWidget):
             return None
         name, steps = be.load_sequence(path)
         copy_name = _("{n} (copia)").format(n=name)
-        new = be.save_sequence(self.sequences_dir(), copy_name, steps)
+        new = be.save_sequence(self.sequences_dir(), copy_name, steps, output=be.sequence_output(path))
         self.refresh_sequences()
         self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(new)))
         return new
@@ -800,7 +819,7 @@ class BatchWidget(QWidget):
             return False
         name = self.sequence_combo.currentText() or os.path.splitext(os.path.basename(path))[0]
         try:
-            be.export_sequence(path, name, self.steps)
+            be.export_sequence(path, name, self.steps, output=be.output_of(self.settings()))
         except Exception as e:
             self.ctx.error(_("Sequenza non esportata"), str(e))
             return False

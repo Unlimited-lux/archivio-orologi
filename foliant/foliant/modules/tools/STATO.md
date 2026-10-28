@@ -64,11 +64,11 @@ Test: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/modules/too
 | BAT-13 | P1 | fatto | be: `test_background_letterhead` | |
 | BAT-14 | P1 | fatto | be: `test_page_numbers_per_file_and_continuous`, `test_header_mirror_and_skip_first` | |
 | BAT-15 | P1 | fatto | be: `test_bates_continuous_and_names`, `test_bates_insufficient_digits`, `test_bates_index_and_series`; bu: `test_bates_series_and_index_from_ui` | Indice CSV, «continua la serie» (serie salvate nella configurazione) e riquadro bianco dietro il numero per le scansioni (be: `test_bates_white_box_on_scan`). Manca la scelta del font. |
-| BAT-16 | P1 | parziale | be: `test_watermark_marked_and_removable`, `test_remove_marks_nothing_found` | Rimuove solo gli elementi aggiunti da Foliant (marcati). |
+| BAT-16 | P1 | parziale | be: `test_watermark_marked_and_removable`, `test_remove_marks_nothing_found` | Rimuove gli elementi aggiunti da Foliant, sia dalle operazioni in blocco sia dal modulo Pagine (marcatura comune). |
 | BAT-17 | P1 | fatto | be: `test_merge_order_and_bookmarks`, `test_merge_with_damaged_file_produces_nothing`, `test_merge_one_file_per_folder`, `test_merge_omit_failed_file` | Un unico file, un file per cartella, ogni N ingressi; politica interrompi/ometti; segnalibri originali annidati sotto quello del file e titoli distinti per file omonimi (be: `test_merge_keeps_original_bookmarks_nested`, `test_merge_bookmarks_disambiguate_same_names`). |
 | BAT-18 | P1 | fatto | be: `test_insert_pages` | |
 | BAT-19 | P1 | fatto | be: `test_print_jobs_in_order`, `test_print_forbidden` | Stampa con il comando `lp` (CUPS). |
-| BAT-20 | P1 | fatto | be: `test_sequences_roundtrip_without_secrets`, `test_step_failure_reports_step`; bu: `test_sequences_saved_without_passwords`, `test_ask_at_launch_once_for_all_files`, `test_disabled_step_is_skipped`, `test_export_import_duplicate_sequence`, `test_convert_then_watermark_blocked` | Parametri «chiedi all'avvio» (le password vuote sempre), passi disattivabili, importa/esporta/duplica, schema versionato. Manca il passo «Salva una copia intermedia» e l'uscita salvata nella sequenza. |
+| BAT-20 | P1 | fatto | be: `test_sequences_roundtrip_without_secrets`, `test_step_failure_reports_step`; bu: `test_sequences_saved_without_passwords`, `test_ask_at_launch_once_for_all_files`, `test_disabled_step_is_skipped`, `test_export_import_duplicate_sequence`, `test_convert_then_watermark_blocked` | Parametri «chiedi all'avvio» (le password vuote sempre), passi disattivabili, importa/esporta/duplica, schema versionato. L'uscita (destinazione, nomi, conflitti, errori) è salvata nella sequenza (bu: `test_sequence_keeps_output_settings`). Manca il passo «Salva una copia intermedia». |
 | BAT-21 | P2 | fatto | wt: tutti | Scansione periodica (2 s) con attesa di fine copia, «originali»/«errori», registro cumulativo esportabile. Le password non sono conservate: le azioni che le richiedono non sono ammesse. |
 | BAT-22 | P2 | fatto | cli: tutti | `python -m foliant.modules.tools.cli`; codici di uscita 0–4; password solo da stdin o file. Un sottocomando `foliant batch` richiede una modifica al nucleo (CORE_REQUESTS.md). |
 | BAT-23 | P2 | parziale | bx: tutti | Ruota, elimina (anche pagine bianche), estrai, dividi, appiattisci, sanifica, metadati Info+XMP, vista iniziale, redazione per testo o schema, ottimizza per il web, esporta immagini. Mancano PDF/A con verifica e dati dei moduli. |
@@ -88,3 +88,9 @@ BAT-19, `patch` solo per un test di CMP-13.
 - Filigrana, Bates e intestazioni/piè verificati su pagine ruotate (0/90/180/270°) e con CropBox
   spostato (be: `test_marks_on_rotated_and_cropped_pages`); non usano ancora `foliant.api.placement`.
 - Nessuna scorciatoia globale registrata dal modulo (Alt+↓/↑ solo dentro la vista di confronto).
+- Filigrane, sfondi a colore, intestazioni/piè, numeri di pagina e Bates in blocco usano la marcatura
+  comune `/FolStamp_<tipo>_<n>` di `foliant/modules/pages/stamp.py` (PAG-36): si sostituiscono e si
+  rimuovono a vicenda con le operazioni del modulo Pagine; la vecchia marcatura /Artifact resta
+  riconosciuta in rimozione (be: `test_watermark_shares_marking_with_pages_module`,
+  `test_legacy_marks_still_removed`, `test_header_and_numbers_share_marking_and_dont_replace_each_other`).
+  Restano con la marcatura propria la carta intestata PDF e i Bates con riquadro bianco.

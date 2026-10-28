@@ -314,3 +314,23 @@ def test_convert_then_watermark_blocked(batch, folder, tmp_path, monkeypatch):
     batch.add_step("watermark")
     batch.dest_path.setText(str(tmp_path / "out"))
     assert batch.run(confirm=False) is None and errors
+
+
+def test_sequence_keeps_output_settings(batch, tmp_path):
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "fatture"))
+    batch.pattern.setText("{nome}_{contatore:3}")
+    batch.conflict.setCurrentIndex(batch.conflict.findData("skip"))
+    batch.error_policy.setCurrentIndex(batch.error_policy.findData("stop"))
+    path = batch.save_sequence("Fatture")
+    batch.dest_path.setText("")
+    batch.pattern.setText("{nome}")
+    batch.conflict.setCurrentIndex(0)
+    batch.error_policy.setCurrentIndex(0)
+    assert batch.load_sequence(path)
+    assert batch.dest_path.text() == str(tmp_path / "fatture")
+    assert batch.pattern.text() == "{nome}_{contatore:3}"
+    assert batch.conflict.currentData() == "skip" and batch.error_policy.currentData() == "stop"
+    exported = tmp_path / "f.foliantseq"
+    assert batch.export_sequence(str(exported))
+    assert be.sequence_output(str(exported))["pattern"] == "{nome}_{contatore:3}"

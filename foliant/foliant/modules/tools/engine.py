@@ -2560,22 +2560,47 @@ def _sequence_filename(name: str) -> str:
 SEQUENCE_VERSION = 1
 
 
-def sequence_data(name: str, steps: list[Step], description: str = "") -> dict:
-    return {"format": "foliant-sequence", "version": SEQUENCE_VERSION, "name": name, "description": description,
+OUTPUT_KEYS = ("destination_mode", "destination", "subfolder", "keep_structure", "pattern", "counter_start",
+               "conflict", "error_policy")
+
+
+def output_of(settings: JobSettings) -> dict:
+    """Uscita del lavoro da salvare nella sequenza (senza segreti)."""
+    return {k: getattr(settings, k) for k in OUTPUT_KEYS}
+
+
+def sequence_data(name: str, steps: list[Step], description: str = "", output: dict | None = None) -> dict:
+    data = {"format": "foliant-sequence", "version": SEQUENCE_VERSION, "name": name, "description": description,
             "created": datetime.now().isoformat(timespec="seconds"), "steps": [s.to_dict() for s in steps]}
+    if output:
+        data["output"] = {k: v for k, v in output.items() if k in OUTPUT_KEYS}
+    return data
 
 
-def save_sequence(directory: str, name: str, steps: list[Step], description: str = "") -> str:
+def save_sequence(directory: str, name: str, steps: list[Step], description: str = "",
+                  output: dict | None = None) -> str:
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, _sequence_filename(name))
-    atomic_write(path, json.dumps(sequence_data(name, steps, description), ensure_ascii=False,
+    atomic_write(path, json.dumps(sequence_data(name, steps, description, output), ensure_ascii=False,
                                   indent=2).encode("utf-8"))
     return path
 
 
-def export_sequence(path: str, name: str, steps: list[Step], description: str = "") -> None:
-    atomic_write(path, json.dumps(sequence_data(name, steps, description), ensure_ascii=False,
+def export_sequence(path: str, name: str, steps: list[Step], description: str = "",
+                    output: dict | None = None) -> None:
+    atomic_write(path, json.dumps(sequence_data(name, steps, description, output), ensure_ascii=False,
                                   indent=2).encode("utf-8"))
+
+
+def sequence_output(path: str) -> dict | None:
+    """Uscita salvata nella sequenza, se presente."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    out = data.get("output") if isinstance(data, dict) else None
+    return {k: v for k, v in out.items() if k in OUTPUT_KEYS} if isinstance(out, dict) else None
 
 
 def import_sequence(path: str, directory: str) -> tuple[str, list[str]]:
@@ -2602,7 +2627,8 @@ def import_sequence(path: str, directory: str) -> tuple[str, list[str]]:
                 s.params[k] = ""
                 if _("Le password contenute nel file sono state ignorate.") not in warnings:
                     warnings.append(_("Le password contenute nel file sono state ignorate."))
-    return save_sequence(directory, name, steps, str(data.get("description", ""))), warnings
+    return save_sequence(directory, name, steps, str(data.get("description", "")),
+                         data.get("output") if isinstance(data.get("output"), dict) else None), warnings
 
 
 def load_sequence(path: str) -> tuple[str, list[Step]]:
