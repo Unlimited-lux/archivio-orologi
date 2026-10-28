@@ -336,6 +336,24 @@ def test_operations_dialog_lists_and_cancels(qtbot, window, ready, fake, sample_
     assert panel.conversation().messages[-1].status == "interrupted"
 
 
+def test_close_guard_asks_with_running_operation(qtbot, window, ready, fake, sample_pdf, monkeypatch):
+    window.open_path(sample_pdf)
+    view = window.ctx.current_view()
+    fake.responses = [{"chunks": ["a", "b", "c", "d", "e"], "delay": 0.3}]
+    panel = ready.panel
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(m) or False)
+    assert window.ctx.run_guards("quit", None, {"views": [view]}) is True   # nulla in corso: nessuna domanda
+    assert not asked
+    panel.send("x")
+    assert window.ctx.close_view(view) is False          # l'utente rinuncia: la scheda resta aperta
+    assert asked and "ancora lavorando" in asked[0]
+    assert ready.running(view.document)
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: True)
+    assert window.ctx.close_view(view) is True
+    qtbot.waitUntil(lambda: not ready.running(), timeout=5000)
+
+
 def test_shortcut_opens_assistant_mode(window, sample_pdf):
     window.open_path(sample_pdf)
     act = next(a for a in window.findChildren(__import__("PySide6.QtGui", fromlist=["QAction"]).QAction)

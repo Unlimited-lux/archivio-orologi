@@ -1358,6 +1358,29 @@ def register(ctx, *, provider_factory=None) -> Services:
 
     ctx.currentViewChanged.connect(on_view)
     ctx.documentClosed.connect(on_closed)
+
+    def close_guard(view, info) -> bool:
+        # AI-17: conferma prima di chiudere una scheda (o uscire) con operazioni dell'assistente in corso
+        if info.get("event") == "quit":
+            running = services.running()
+        else:
+            running = services.running(view.document) if view is not None else []
+        if not running:
+            return True
+        names = ", ".join(sorted({w.function or _("risposta") for w in running}))
+        question = (_("L'assistente sta ancora lavorando ({f}). Uscire e annullare le operazioni?")
+                    if info.get("event") == "quit" else
+                    _("L'assistente sta ancora lavorando su questo documento ({f}). "
+                      "Chiudere e annullare le operazioni?"))
+        if not ctx.confirm(_("Operazioni in corso"), question.format(f=names)):
+            return False
+        for w in running:
+            w.cancel()
+        return True
+
+    ctx.add_guard("close_document", close_guard)
+    ctx.add_guard("quit", close_guard)
+    services.close_guard = close_guard
     ctx.documentChanged.connect(panel.on_document_changed)
     services.refresh()
     return services

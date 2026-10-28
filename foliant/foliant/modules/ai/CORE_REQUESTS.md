@@ -1,13 +1,7 @@
 # Richieste al nucleo — modulo `ai`
 
-1. **Conferma alla chiusura con operazioni in corso (AI-17).** Serve un aggancio
-   prima della chiusura di una scheda o della finestra, ad esempio un segnale
-   `ctx.aboutToClose(view) -> bool` o un elenco di «guardiani» interrogati da
-   `MainWindow.close_view()` / `closeEvent()`, per chiedere conferma quando ci sono
-   risposte IA o traduzioni in corso.
-   *Soluzione locale:* su `documentClosed` le operazioni del documento vengono
-   annullate (nessun file parziale, nessuna modifica); l'elenco «Operazioni in
-   corso» permette di annullarle prima.
+1. **Conferma alla chiusura con operazioni in corso (AI-17).** *Risolta* (base 3d69387):
+   guardiani `close_document` e `quit` registrati con `ctx.add_guard`.
 
 2. **Preferenza «nome autore» (UX, Preferenze › Documenti).** Le note inserite
    dall'assistente usano come autore il nome configurato. Il modulo legge
