@@ -52,7 +52,13 @@ LOCK = "lock"         # documento bloccato o sbloccato in sola lettura logica (`
 # Tipi di modifica per `change(etichetta, kind=...)`: le guardie li usano per
 # distinguere le modifiche consentite in un documento firmato (commenti, moduli)
 # da quelle che invalidano le firme. Altri valori sono ammessi.
-CHANGE_KINDS = ("content", "annotation", "form", "pages", "metadata")
+CHANGE_KINDS = ("content", "annotation", "form", "pages", "metadata", "redaction")
+
+# Modifiche che tolgono contenuto in modo definitivo (redazione, rimozione di dati nascosti):
+# il salvataggio successivo riscrive l'intero file anche se il documento è firmato, perché un
+# aggiornamento incrementale lascerebbe il contenuto tolto nella revisione precedente, ancora
+# leggibile (NFR-09). Annullando la modifica torna possibile il salvataggio incrementale.
+FULL_REWRITE_KINDS = ("redaction",)
 
 # SEC-06 «Cifra tutto tranne i metadati»: il motore (PyMuPDF 1.2x / MuPDF) non ha
 # un'opzione per scrivere /EncryptMetadata false e, anche mantenendo un dizionario
@@ -641,6 +647,8 @@ class Document:
                     yield self._pdf
                 finally:
                     self._depth -= 1
+                if kind in FULL_REWRITE_KINDS:
+                    self._aligned = False
                 return
             if self.locked_reason is not None:     # bloccato nel frattempo da un altro thread
                 raise OperationCancelled(self.locked_reason)
@@ -661,6 +669,8 @@ class Document:
                 raise
             self._depth = 0
             self._change_thread = None
+            if kind in FULL_REWRITE_KINDS:
+                self._aligned = False       # niente salvataggio incrementale finché non si annulla
             self._push(self._undo, _Snapshot(label, before, previous_state, before_opts, before_aligned))
             self._redo.clear()
             self._state = self._next_state
@@ -779,6 +789,19 @@ class Document:
             return copy.tobytes(**opts)
         finally:
             copy.close()
+
+    def require_full_rewrite(self) -> None:
+        """Il prossimo salvataggio riscrive l'intero file, anche se firmato (come le modifiche
+        di tipo «redaction»). Va chiamata dentro `change()`: annullando quel passo la richiesta
+        decade."""
+        self._aligned = False
+
+    @property
+    def saves_incrementally(self) -> bool:
+        """True se `save()` aggiungerà un aggiornamento incrementale ai byte del file (documento
+        firmato, nessuna riscrittura richiesta): le firme esistenti restano valide. False se il
+        file verrà riscritto per intero (in un documento firmato le firme diventano non valide)."""
+        return self._wants_incremental(None, {})
 
     def _wants_incremental(self, incremental: bool | None, options: dict) -> bool:
         """Salvataggio incrementale: obbligatorio (automatico) per i documenti firmati.

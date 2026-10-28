@@ -229,7 +229,8 @@ un proprio `customContextMenuRequested` sulla barra delle schede: le voci vanno 
 
 | Membro | Uso |
 |---|---|
-| `change(etichetta, kind="content")` | blocco di modifica annullabile; `kind` ∈ `CHANGE_KINDS` (`"content"`, `"annotation"`, `"form"`, `"pages"`, `"metadata"`) classifica la modifica per le guardie |
+| `change(etichetta, kind="content")` | blocco di modifica annullabile; `kind` ∈ `CHANGE_KINDS` (`"content"`, `"annotation"`, `"form"`, `"pages"`, `"metadata"`, `"redaction"`) classifica la modifica per le guardie; `"redaction"` (redazione, rimozione di dati nascosti) impone la riscrittura completa al salvataggio |
+| `require_full_rewrite()` / `saves_incrementally` | dentro `change()`: il prossimo salvataggio riscrive tutto il file anche se firmato (annullando il passo la richiesta decade); `saves_incrementally` dice se `save()` aggiungerà un aggiornamento incrementale (firme valide) o riscriverà il file (firme non valide), per avvisare prima di salvare |
 | `add_change_guard(fn)` / `remove_change_guard(fn)` | `fn(document, etichetta, kind)` chiamata prima di `change()` (fuori dal lock, solo per il blocco esterno): False → `OperationCancelled`, niente modificato; può anche sollevare `OperationCancelled("motivo")` |
 | `set_locked(motivo)` / `locked_reason` / `locked` | sola lettura logica (SIG-17): `change()` solleva `OperationCancelled(motivo)`, annulla/ripeti disattivati; `set_locked(None)` sblocca; notifica `LOCK` |
 | `access`, `permissions`, `allows(perm)` | `"none"` (non cifrato), `"user"`, `"owner"`; bit `/P` effettivi (con l'AND di `/Perms` per R6; -1 = tutto consentito); `allows(pymupdf.PDF_PERM_PRINT)` |
@@ -237,7 +238,7 @@ un proprio `customContextMenuRequested` sulla barra delle schede: le voci vanno 
 | `unlock(password) -> bool` | accesso da proprietario con la password dei permessi, anche dopo modifiche (annulla/ripeti e `save_options` aggiornati: protezione identica al salvataggio); notifica `ACCESS` |
 | `repaired` | il motore ha ricostruito la xref all'apertura (CNV-32: barra «file riparato») |
 | `original_bytes`, `has_signatures` | byte del file all'apertura o dopo l'ultimo salvataggio; campi `/FT /Sig` con `/V` |
-| `save(path=None, incremental=None)`, `save_copy(path)`, `save_bytes(path=None)` | un documento firmato si salva **sempre** in modo incrementale (`original_bytes` + modifiche in coda), anche con «Salva con nome»; cambio di protezione, file riparato, `replace_with()` con un PDF che non prosegue il file (rinumerato; fino all'annullamento) o `incremental=False` = riscrittura completa; `incremental=True` lo forza (`IncrementalSaveError` se impossibile) |
+| `save(path=None, incremental=None)`, `save_copy(path)`, `save_bytes(path=None)` | un documento firmato si salva **sempre** in modo incrementale (`original_bytes` + modifiche in coda), anche con «Salva con nome»; cambio di protezione, redazione (`kind="redaction"`), file riparato, `replace_with()` con un PDF che non prosegue il file (rinumerato; fino all'annullamento) o `incremental=False` = riscrittura completa; `incremental=True` lo forza (`IncrementalSaveError` se impossibile) |
 | `save_strategy` | facoltativa: `fn(document, path)` che restituisce i byte da scrivere, oppure None per il comportamento del nucleo |
 | `to_bytes(**opzioni)` | file completo compattato, senza flussi di oggetti (i byte restano cercabili); i file salvati li usano |
 | notifiche `CONTENT`, `SAVED`, `CLOSED`, `ACCESS`, `LOCK` | `document.add_listener(fn(document, tipo))`; chi scrive il file da sé notifica `SAVED` (aggiorna anche il controllo «modificato da un altro programma») |
