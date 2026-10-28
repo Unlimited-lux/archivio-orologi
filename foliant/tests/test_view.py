@@ -52,6 +52,8 @@ def test_coordinate_mapping_matches_rendering(qtbot, tmp_path, rotation, crop):
         page.set_rotation(rotation)
 
     path = make_pdf(tmp_path / "r.pdf", pages=1, extra=extra)
+    with pymupdf.open(path) as d:            # coordinate come le riporta il motore dopo ritaglio/rotazione
+        target = d[0].get_drawings()[0]["rect"]
     v = DocumentView(Document.open(path))
     qtbot.addWidget(v)
     v.resize(800, 900)

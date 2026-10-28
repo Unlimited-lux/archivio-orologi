@@ -132,10 +132,7 @@ class HomeScreen(QScrollArea):
             btn.setIconSize(QSize(26, 26))
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             btn.setMinimumSize(QSize(150, 86))
-            btn.setStyleSheet(
-                f"QToolButton {{ border: 1px solid {theme.hex_color('border')}; border-radius: 10px;"
-                f" background: {theme.hex_color('surface')}; }}"
-                f"QToolButton:hover {{ border-color: {theme.hex_color('accent')}; }}")
+            btn.setProperty("homeAction", True)          # stile nel foglio globale (segue il tema)
             btn.clicked.connect(lambda _c=False, f=cb: f())
             self.actions_grid.addWidget(btn, n // 4, n % 4)
         self.actions_label.setVisible(bool(self._actions))
