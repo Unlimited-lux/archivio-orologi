@@ -453,3 +453,34 @@ def find(pdf: pymupdf.Document, patterns: list[Pattern], pages: Iterable[int] | 
         for p in patterns:
             out.extend(find_in_page(page, p, i, pt))
     return out
+
+
+# ------------------------------------------------- selezione per caratteri
+
+
+def nearest_char(pt: PageText, point: pymupdf.Point) -> int | None:
+    """Indice del carattere più vicino al punto (preferendo la stessa riga)."""
+    best, best_d = None, None
+    for i, box in enumerate(pt.boxes):
+        if box is None:
+            continue
+        if box.contains(point):
+            return i
+        dx = max(box.x0 - point.x, 0, point.x - box.x1)
+        dy = max(box.y0 - point.y, 0, point.y - box.y1)
+        d = dx * dx + dy * dy * 9
+        if best_d is None or d < best_d:
+            best, best_d = i, d
+    return best
+
+
+def char_range_rects(pt: PageText, start: int | None, end: int | None) -> tuple[list[pymupdf.Rect], str]:
+    """Riquadri (uno per riga) e testo dei caratteri da `start` a `end` compresi
+    (None = dall'inizio / fino alla fine della pagina)."""
+    if not pt.boxes:
+        return [], ""
+    lo = 0 if start is None else start
+    hi = len(pt.boxes) - 1 if end is None else end
+    if lo > hi:
+        lo, hi = hi, lo
+    return pt.rects(lo, hi + 1), " ".join(pt.text[lo:hi + 1].split())

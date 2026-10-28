@@ -134,7 +134,22 @@ class RedactionPanel(QWidget):
             except Exception:
                 self.marks = []
         pages: dict[int, QTreeWidgetItem] = {}
+        groups: dict[str, QTreeWidgetItem] = {}
         for n, m in enumerate(self.marks):
+            if m.group:
+                # segni creati insieme su più pagine: un'unica voce
+                parent = groups.get(m.group)
+                if parent is None:
+                    pages_of = sorted({x.page + 1 for x in self.marks if x.group == m.group})
+                    span = (f"{pages_of[0]}–{pages_of[-1]}" if len(pages_of) > 1 else str(pages_of[0]))
+                    parent = QTreeWidgetItem(self.tree, [_("Testo su più pagine ({p})").format(p=span),
+                                                         source_label(m.source), _("Da applicare")])
+                    parent.setData(0, Qt.ItemDataRole.UserRole, "g:" + m.group)
+                    parent.setExpanded(False)
+                    groups[m.group] = parent
+                child = QTreeWidgetItem(parent, [_("Pagina {n}").format(n=m.page + 1) + ": " + (m.text or ""), "", ""])
+                child.setData(0, Qt.ItemDataRole.UserRole, n)
+                continue
             parent = pages.get(m.page)
             if parent is None:
                 parent = QTreeWidgetItem(self.tree, [_("Pagina {n}").format(n=m.page + 1), "", ""])
@@ -147,6 +162,7 @@ class RedactionPanel(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, n)
         for page, parent in pages.items():
             parent.setText(1, str(parent.childCount()))
+        self.groups = groups
         self.count.setText(str(len(self.marks)))
         has = bool(self.marks)
         self.empty.setVisible(not has)
@@ -163,6 +179,10 @@ class RedactionPanel(QWidget):
             idx = item.data(0, Qt.ItemDataRole.UserRole)
             if idx is None:
                 continue
+            if isinstance(idx, str):       # gruppo su più pagine: tutti i suoi segni
+                group = idx[2:]
+                out.extend(m for m in self.marks if m.group == group and m not in out)
+                continue
             if idx < 0:   # pagina: tutti i suoi segni
                 page = -1 - idx
                 out.extend(m for m in self.marks if m.page == page and m not in out)
@@ -173,6 +193,11 @@ class RedactionPanel(QWidget):
     def _go(self, item: QTreeWidgetItem, _col: int = 0) -> None:
         idx = item.data(0, Qt.ItemDataRole.UserRole)
         if self.view is None or idx is None:
+            return
+        if isinstance(idx, str):
+            first = next((m for m in self.marks if m.group == idx[2:]), None)
+            if first is not None:
+                self.view.ensure_visible(first.page, first.rect)
             return
         if idx < 0:
             self.view.go_to_page(-1 - idx)
@@ -300,6 +325,68 @@ def _resized(rect: pymupdf.Rect, corner: str | None, dx: float, dy: float) -> py
     else:
         r.y1 += dy
     return r.normalize()
+
+
+class TextMarkTool(Tool):
+    """«Segna testo»: il trascinamento sul testo crea subito il segno, carattere per carattere,
+    anche a metà parola e su più pagine (SEC-14)."""
+
+    id = "security-redact-text"
+    cursor = Qt.CursorShape.IBeamCursor
+
+    def __init__(self, controller):
+        self.controller = controller
+        self._start: tuple[int, pymupdf.Point] | None = None
+        self._end: tuple[int, pymupdf.Point] | None = None
+        self._preview: dict[int, list[pymupdf.Rect]] = {}
+
+    def press(self, view, ev):
+        if ev.button != Qt.MouseButton.LeftButton or ev.page is None:
+            return False
+        self._start = self._end = (ev.page, ev.point)
+        self._preview = {}
+        return True
+
+    def move(self, view, ev):
+        if self._start is None:
+            return False
+        hit = view.view_to_page(ev.pos, clamp=True)
+        if hit is None:
+            return True
+        self._end = (hit[0], hit[1])
+        ranges = self.controller.text_range(view.document, self._start, self._end)
+        self._preview = {p: rects for p, (rects, _t) in ranges.items()}
+        view.viewport().update()
+        return True
+
+    def release(self, view, ev):
+        if self._start is None or ev.button != Qt.MouseButton.LeftButton:
+            return False
+        start, end = self._start, self._end or self._start
+        self._start = self._end = None
+        self._preview = {}
+        view.viewport().update()
+        moved = start[0] != end[0] or abs(start[1].x - end[1].x) + abs(start[1].y - end[1].y) >= 2
+        if moved:
+            self.controller.mark_text_range(view.document, start, end)
+        return True
+
+    def key(self, view, event):
+        if event.key() == Qt.Key.Key_Escape and self._start is not None:
+            self._start = None
+            self._preview = {}
+            view.viewport().update()
+            return True
+        return False
+
+    def paint(self, view, painter: QPainter, page: int) -> None:
+        rects = self._preview.get(page)
+        if not rects:
+            return
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(220, 38, 38, 70))
+        for r in rects:
+            painter.drawRect(QRectF(r.x0, r.y0, r.width, r.height))
 
 
 # ------------------------------------------------------------ anteprima

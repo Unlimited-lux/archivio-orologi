@@ -22,7 +22,7 @@ from . import patterns as PT
 from . import protection as P
 from . import redaction as R
 from . import sanitize as S
-from .widgets import Notice, NoticeBoard, PreviewOverlay, RedactAreaTool, RedactionPanel
+from .widgets import Notice, NoticeBoard, PreviewOverlay, RedactAreaTool, RedactionPanel, TextMarkTool
 
 PANEL_ID = "security-redactions"
 CODES_KEY = "security/overlay_codes"
@@ -436,7 +436,8 @@ class SecurityController:
             return 0
         sel = view.text_selection
         if sel is None or not sel.rects:
-            self.ctx.info(_("Segna testo"), _("Seleziona prima il testo da oscurare."))
+            # nessuna selezione: strumento «Segna testo» (ogni trascinamento crea il segno)
+            self.activate_text_tool()
             return 0
         if not self.require_modify(view.document):
             return 0
@@ -447,6 +448,78 @@ class SecurityController:
             n = R.add_marks(pdf, ((sel.page, r, None) for r in rects), self.style, "selezione")
         view.clear_text_selection()
         self.ctx.show_properties(PANEL_ID)
+        return n
+
+    def text_tool(self) -> TextMarkTool:
+        return TextMarkTool(self)
+
+    def activate_text_tool(self) -> None:
+        doc = self.document()
+        if doc is None or not self.require_modify(doc):
+            return
+        self.ctx.set_tool(self.text_tool())
+        self.ctx.show_properties(PANEL_ID)
+        self.ctx.status(_("Trascina sul testo da oscurare: il segno copre solo i caratteri scelti."))
+
+    def text_range(self, document, start: tuple[int, pymupdf.Point], end: tuple[int, pymupdf.Point]):
+        """Riquadri per pagina dei caratteri tra due punti, anche su più pagine (SEC-14)."""
+        (p0, pt0), (p1, pt1) = sorted([start, end], key=lambda t: (t[0], t[1].y, t[1].x))
+        out: dict[int, tuple[list[pymupdf.Rect], str]] = {}
+        with ENGINE_LOCK:
+            pdf = document.pdf
+            for page in range(p0, p1 + 1):
+                try:
+                    text = PT.page_text(pdf[page])
+                except Exception:
+                    continue
+                a = PT.nearest_char(text, pt0) if page == p0 else None
+                b = PT.nearest_char(text, pt1) if page == p1 else None
+                if page == p0 and a is None:
+                    continue
+                if p0 == p1 and a is not None and b is not None and a > b:
+                    a, b = b, a
+                rects, covered = PT.char_range_rects(text, a, b)
+                if rects:
+                    out[page] = (rects, covered)
+        return out
+
+    def mark_text_range(self, document, start: tuple[int, pymupdf.Point], end: tuple[int, pymupdf.Point]) -> int:
+        ranges = self.text_range(document, start, end)
+        if not ranges:
+            return 0
+        import secrets
+        source = "selezione" if len(ranges) == 1 else f"selezione|{secrets.token_hex(4)}"
+        n = 0
+        with self._change(document, _("Segna testo per redazione")) as pdf:
+            for page, (rects, covered) in ranges.items():
+                for r in rects:
+                    if R.add_mark(pdf, page, r, self.style, source, covered) is not None:
+                        n += 1
+        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n))
+        return n
+
+    def convert_highlights(self, document=None, xrefs: set[int] | None = None) -> int:
+        """«Converti in segni di redazione»: evidenziazioni (tutte o quelle indicate) → segni."""
+        document = document or self.document()
+        if document is None or not self.require_modify(document):
+            return 0
+        n = 0
+        with self._change(document, _("Converti evidenziazioni in segni")) as pdf:
+            for i, page in R.iter_pages(pdf):
+                todo = [x for x, kind, _id in page.annot_xrefs()
+                        if kind == pymupdf.PDF_ANNOT_HIGHLIGHT and (xrefs is None or x in xrefs)]
+                for x in todo:
+                    annot = page.load_annot(x)
+                    if annot is None:
+                        continue
+                    verts = annot.vertices or []
+                    quads = [pymupdf.Quad(verts[k:k + 4]) for k in range(0, len(verts) - 3, 4)]
+                    rects = [q.rect for q in quads] or [pymupdf.Rect(annot.rect)]
+                    page.delete_annot(annot)
+                    for r in rects:
+                        if R.add_mark(pdf, i, r, self.style, "selezione") is not None:
+                            n += 1
+        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n))
         return n
 
     def mark_matches(self, document, matches: list[PT.Match], source: str) -> int:

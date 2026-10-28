@@ -512,4 +512,9 @@ EN: dict[str, str] = {
     'Art. 9 GDPR – dato sanitario': 'Art. 9 GDPR – health data',
     'Dato personale': 'Personal data',
     'Pagina omessa': 'Page omitted',
+    'Converti evidenziazioni in segni': 'Convert highlights to marks',
+    'Converti in segni di redazione': 'Convert to redaction marks',
+    'Converti evidenziazioni in segni di redazione': 'Convert highlights to redaction marks',
+    'Trascina sul testo da oscurare: il segno copre solo i caratteri scelti.': 'Drag over the text to redact: the mark covers only the chosen characters.',
+    'Testo su più pagine ({p})': 'Text across pages ({p})',
 }

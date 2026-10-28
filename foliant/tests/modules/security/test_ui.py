@@ -1008,3 +1008,97 @@ def test_listener_cost_on_large_document(window, sec, tmp_path):
     assert not sec.has_marks(doc)
     doc.redo()
     assert sec.has_marks(doc)
+
+
+# ------------------------------------------------- SEC-14 «Segna testo»
+
+
+def _two_line_pdf(tmp_path):
+    path = tmp_path / "righe.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((72, 100), "Mario Rossi,", fontsize=12)
+    page.insert_text((72, 120), "nato a Roma", fontsize=12)
+    src.save(str(path))
+    return str(path)
+
+
+def _char_center(doc, page, word, k=0):
+    with doc.lock:
+        hits = doc.pdf[page].search_for(word)
+    r = hits[0]
+    return pymupdf.Point(r.x0 + 1 + k, (r.y0 + r.y1) / 2), r
+
+
+def test_text_tool_two_lines(window, sec, tmp_path, monkeypatch, accept_all):
+    view = window.open_path(_two_line_pdf(tmp_path))
+    doc = view.document
+    start, _r = _char_center(doc, 0, "Rossi")
+    _p, nato = _char_center(doc, 0, "nato")
+    end = pymupdf.Point(nato.x1 - 1, (nato.y0 + nato.y1) / 2)
+    sec.activate_text_tool()
+    tool = view.tool
+    assert tool.id == "security-redact-text"
+    tool.press(view, _ev(0, start.x, start.y))
+    tool._end = (0, end)
+    tool.release(view, _ev(0, end.x, end.y))
+    assert sec.has_marks(doc)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert sec.apply_redactions(None)
+    text = doc.page_text(0)
+    assert "Mario" in text and "a Roma" in text and "Rossi" not in text and "nato" not in text
+
+
+def test_text_tool_partial_word(window, sec, tmp_path, monkeypatch, accept_all):
+    view = window.open_path(_two_line_pdf(tmp_path))
+    doc = view.document
+    with doc.lock:
+        chars = [c for b in doc.pdf[0].get_text("rawdict")["blocks"] for line in b["lines"]
+                 for sp in line["spans"] for c in sp["chars"]]
+    boxes = {i: pymupdf.Rect(c["bbox"]) for i, c in enumerate(chars)}
+    word = "".join(c["c"] for c in chars)
+    i = word.index("Rossi")
+    a = boxes[i].tl + (boxes[i].br - boxes[i].tl) * 0.5          # «R»
+    b = boxes[i + 2].tl + (boxes[i + 2].br - boxes[i + 2].tl) * 0.5   # prima «s»
+    assert sec.mark_text_range(doc, (0, a), (0, b)) == 1
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert sec.apply_redactions(None)
+    text = doc.page_text(0)
+    assert "Ros" not in text and "si," in text and "Mario" in text
+
+
+def test_text_tool_across_pages_single_group(window, sec, tmp_path):
+    from tests.conftest import make_pdf
+    view = window.open_path(make_pdf(tmp_path / "cinque.pdf", pages=5))
+    doc = view.document
+    a, _r = _char_center(doc, 2, "Orologeria")
+    _b, r4 = _char_center(doc, 3, "Pagina 4")
+    n = sec.mark_text_range(doc, (2, a), (3, pymupdf.Point(r4.x1 - 1, (r4.y0 + r4.y1) / 2)))
+    assert n >= 2
+    sec.show_panel()
+    sec.panel.refresh()
+    groups = sec.panel.groups
+    assert len(groups) == 1
+    item = next(iter(groups.values()))
+    assert "3–4" in item.text(0)
+    pages = {m.page for m in sec.panel.marks if m.group}
+    assert pages == {2, 3}
+    # eliminabile in un solo passo
+    sec.panel.tree.clearSelection()
+    item.setSelected(True)
+    sec.panel._remove()
+    assert not sec.has_marks(doc)
+
+
+def test_convert_highlights_to_marks(window, sec, sample_pdf, monkeypatch, accept_all):
+    view = window.open_path(sample_pdf)
+    doc = view.document
+    with doc.change("Evidenzia", kind="annotation") as pdf:
+        page = pdf[0]
+        page.add_highlight_annot(page.search_for("Orologeria")[0])
+    assert sec.convert_highlights(doc) == 1
+    with doc.lock:
+        assert [a[1] for a in doc.pdf[0].annot_xrefs()] == [pymupdf.PDF_ANNOT_REDACT]
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert sec.apply_redactions(None)
+    assert "Orologeria" not in doc.page_text(0) and "Pagina 1" in doc.page_text(0)
