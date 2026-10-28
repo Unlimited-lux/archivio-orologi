@@ -52,8 +52,8 @@ TRANSLATIONS = {
     "Indirizzo da aprire:": "Address to open:",
     "Grassetto": "Bold",
     "Corsivo": "Italic",
-    "Colore…": "Colour…",
-    "Colore predefinito": "Default colour",
+    "Colore…": "Color…",
+    "Colore predefinito": "Default color",
     "Evidenzia il segnalibro corrente": "Highlight current bookmark",
     "Il documento non consente modifiche: segnalibri in sola lettura.":
         "The document does not allow changes: bookmarks are read-only.",

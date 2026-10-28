@@ -30,6 +30,7 @@ from foliant.api import (
     SAVED, Context, Document, DocumentError, DocumentView, PasswordRequired, WrongPassword, _,
     add_translations, bind_icon, icon, theme,
 )
+from foliant.i18n import pgettext
 
 from . import reload_engine as E
 
@@ -41,7 +42,7 @@ TRANSLATIONS = {
     "File modificato da un'altra applicazione": "File changed by another application",
     "File eliminato o spostato": "File deleted or moved",
     "File": "File",
-    "Ripristina": "Revert",
+    "file su disco\x04Ripristina": "Revert",
     "Scarta le modifiche e riapri l'ultima versione salvata":
         "Discard changes and reopen the last saved version",
     "Ripristina il documento": "Revert document",
@@ -137,7 +138,7 @@ class ReloadController(QObject):
         self.poll.timeout.connect(self._poll)
         self.set_poll_interval(poll_ms)
 
-        self.act_revert = ctx.action(_("Ripristina"), "rotate-ccw", self.revert,
+        self.act_revert = ctx.action(pgettext("file su disco", "Ripristina"), "rotate-ccw", self.revert,
                                      tooltip=_("Scarta le modifiche e riapri l'ultima versione salvata"))
         ctx.add_menu_action(self.act_revert, _("File"))
         self._build_mode_menu()

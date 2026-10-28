@@ -263,3 +263,35 @@ def test_no_italian_text_outside_translation():
                     if isinstance(c, ast.Constant) and isinstance(c.value, str) and ITALIAN.search(c.value):
                         found.append(f"{name}:{n.lineno} {fn} {c.value!r}")
     assert not found, "testi italiani senza _():\n" + "\n".join(found)
+
+
+def test_no_key_registered_twice_with_different_values(qtbot, tmp_path, monkeypatch):
+    """Il viewer ha un solo catalogo: una chiave registrata da due file con traduzioni diverse
+    darebbe l'una o l'altra a seconda dell'ordine. Dove il senso cambia si usa pgettext."""
+    import inspect
+
+    import foliant.api as api
+    from foliant.ui.main_window import MainWindow
+    registered: dict[tuple[str, str], dict[str, list[str]]] = {}
+    real = i18n.add_translations
+
+    def spy(lang, mapping):
+        caller = inspect.stack()[1].frame.f_globals.get("__name__", "")
+        if caller.startswith("foliant.modules.viewer"):
+            for key, value in mapping.items():
+                registered.setdefault((lang, key), {}).setdefault(value, []).append(caller.rsplit(".", 1)[-1])
+        return real(lang, mapping)
+    monkeypatch.setattr(i18n, "add_translations", spy)
+    monkeypatch.setattr(api, "add_translations", spy)
+    import sys
+    for name, mod in list(sys.modules.items()):
+        if name.startswith("foliant.modules.viewer") and getattr(mod, "add_translations", None) is real:
+            monkeypatch.setattr(mod, "add_translations", spy)
+    win = MainWindow(QSettings(str(tmp_path / "s.ini"), QSettings.Format.IniFormat))
+    qtbot.addWidget(win)
+    assert len(registered) > 400, "registrazioni non intercettate"
+    clashes = {k[1]: v for k, v in registered.items() if len(v) > 1}
+    assert not clashes, "\n".join(f"{k!r}: {v}" for k, v in clashes.items())
+    british = {k[1]: list(v) for k, v in registered.items()
+               if any(re.search(r"colour|behaviour|centre|favourite|licence|organis", t, re.I) for t in v)}
+    assert not british, f"inglese britannico: {british}"
