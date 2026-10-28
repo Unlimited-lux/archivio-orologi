@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 import time
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -361,6 +362,45 @@ def test_fulltext_index_create_search_update_delete(viewer_window, tmp_path):
     assert ctl.update_index().removed == 1
     assert ctl.delete_index(confirm=False)
     assert "Archivio_pratiche" not in fulltext.list_indexes()
+
+
+def test_fulltext_index_only_in_memory(viewer_window, tmp_path):
+    """Riservatezza: l'indice vive solo in memoria; nel profilo non resta alcun file con
+    percorsi o testi, e il pannello lo dice."""
+    from foliant.modules.viewer import fulltext
+    data_home = Path(os.environ["XDG_DATA_HOME"])
+    folder = _archive(tmp_path / "zq7k-cartella")
+    ctl = _ctl(viewer_window)
+    ctl.open()
+    ctl.create_index(str(folder), "zq7k-indice")
+    try:
+        assert "zq7k-indice" in fulltext.list_indexes()
+        assert ctl.search("Rossi", mode=eng.PHRASE) == 1
+        p = ctl.ensure_panel()
+        assert p.index_note.isVisibleTo(p) and "Foliant" in p.index_note.text()
+        assert not (data_home / "foliant" / "indici").exists()
+        found = [str(f) for f in data_home.rglob("*") if "zq7k" in f.name] if data_home.exists() else []
+        assert found == []
+    finally:
+        fulltext.clear_indexes()
+    assert fulltext.list_indexes() == []
+
+
+def test_legacy_index_files_removed(tmp_path):
+    from foliant.modules.viewer import fulltext
+    env = {"XDG_DATA_HOME": str(tmp_path / "dati")}
+    d = fulltext.legacy_index_dir(env)
+    d.mkdir(parents=True)
+    for name in ("vecchio.sqlite", "vecchio.sqlite-journal", "altro.sqlite-wal", "altro.sqlite-shm"):
+        (d / name).write_bytes(b"x")
+    (d / "non-mio.txt").write_text("resta")
+    sibling = d.parent / "ai"
+    sibling.mkdir()
+    assert fulltext.remove_legacy_indexes(env) == 4
+    assert [p.name for p in d.iterdir()] == ["non-mio.txt"] and sibling.is_dir()
+    (d / "non-mio.txt").unlink()
+    fulltext.remove_legacy_indexes(env)
+    assert not d.exists() and sibling.is_dir()                # cartella vuota tolta, le altre restano
 
 
 def test_fulltext_modes_and_regex():

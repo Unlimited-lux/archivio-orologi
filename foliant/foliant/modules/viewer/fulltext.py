@@ -1,11 +1,13 @@
 """Indici full-text (VIS-25): ricerche immediate su grandi archivi di PDF.
 
-Un indice è un database SQLite (FTS5, accenti ignorati) nel profilo utente, con il testo di ogni
-pagina dei PDF di una cartella. «Aggiorna» rilegge solo i file cambiati (data e dimensione) e
-toglie quelli eliminati. La ricerca usa FTS5 per trovare in fretta le pagine candidate e poi la
-stessa verifica esatta della ricerca avanzata (modalità e opzioni) sul testo salvato. I PDF
-cifrati non si indicizzano: compaiono tra i file saltati. Logica pura, senza widget: le
-funzioni lunghe ricevono `progress` (come i lavori di `run_task`)."""
+Un indice è un database SQLite (FTS5, accenti ignorati) tenuto in memoria, solo per questa
+sessione: nulla viene scritto nel profilo utente e alla chiusura di Foliant gli indici spariscono
+(regola di riservatezza: niente percorsi né testi dei documenti su disco tra un avvio e l'altro).
+Contiene il testo di ogni pagina dei PDF di una cartella. «Aggiorna» rilegge solo i file cambiati
+(data e dimensione) e toglie quelli eliminati. La ricerca usa FTS5 per trovare in fretta le pagine
+candidate e poi la stessa verifica esatta della ricerca avanzata (modalità e opzioni) sul testo
+salvato. I PDF cifrati non si indicizzano: compaiono tra i file saltati. Logica pura, senza widget:
+le funzioni lunghe ricevono `progress` (come i lavori di `run_task`, anche su altri thread)."""
 
 from __future__ import annotations
 
@@ -13,7 +15,9 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,12 +28,12 @@ from .engine import extract_page_text
 
 SCHEMA_VERSION = 1
 
+# Registro degli indici della sessione: nome -> (connessione in memoria, lock).
+# I lavori girano in `run_task` (anche su un altro thread): ogni accesso passa dal lock.
+_REGISTRY: dict[str, tuple[sqlite3.Connection, threading.RLock]] = {}
+_REGISTRY_LOCK = threading.Lock()
 
-def index_dir(env=None) -> Path:
-    """Cartella degli indici: $XDG_DATA_HOME/foliant/indici (o ~/.local/share/...)."""
-    env = os.environ if env is None else env
-    base = env.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    return Path(base) / "foliant" / "indici"
+_LEGACY_SUFFIXES = (".sqlite", ".sqlite-journal", ".sqlite-wal", ".sqlite-shm")
 
 
 def safe_name(name: str) -> str:
@@ -37,8 +41,52 @@ def safe_name(name: str) -> str:
 
 
 def list_indexes() -> list[str]:
-    d = index_dir()
-    return sorted(p.stem for p in d.glob("*.sqlite")) if d.is_dir() else []
+    """Indici creati in questa sessione."""
+    with _REGISTRY_LOCK:
+        return sorted(_REGISTRY)
+
+
+def clear_indexes() -> None:
+    """Chiude e dimentica tutti gli indici della sessione."""
+    with _REGISTRY_LOCK:
+        entries = list(_REGISTRY.values())
+        _REGISTRY.clear()
+    for db, lock in entries:
+        with lock:
+            db.close()
+
+
+def legacy_index_dir(env=None) -> Path:
+    """Cartella in cui le versioni precedenti salvavano gli indici (solo per cancellarli)."""
+    env = os.environ if env is None else env
+    base = env.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return Path(base) / "foliant" / "indici"
+
+
+def remove_legacy_indexes(env=None) -> int:
+    """Cancella gli indici su disco delle versioni precedenti (solo i file SQLite di Foliant).
+
+    Tocca soltanto `<dati>/foliant/indici/*.sqlite[-journal|-wal|-shm]` e poi la cartella
+    `indici` se è rimasta vuota. Restituisce il numero di file rimossi; non solleva mai."""
+    d = legacy_index_dir(env)
+    removed = 0
+    try:
+        if not d.is_dir() or d.is_symlink():
+            return 0
+        for p in d.iterdir():
+            if p.is_file() and not p.is_symlink() and p.name.endswith(_LEGACY_SUFFIXES):
+                try:
+                    p.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+        try:
+            d.rmdir()        # solo se vuota
+        except OSError:
+            pass
+    except OSError:
+        pass
+    return removed
 
 
 @dataclass
@@ -53,39 +101,57 @@ class IndexStats:
 class FullTextIndex:
     def __init__(self, name: str):
         self.name = safe_name(name)
-        self.path = index_dir() / f"{self.name}.sqlite"
 
-    # ------------------------------------------------------------ database
-    def _connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(str(self.path))
-        db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-        db.execute("CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY, path TEXT UNIQUE, mtime REAL, "
-                   "size INTEGER, pages INTEGER)")
-        db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS pages USING fts5(file_id UNINDEXED, page UNINDEXED, text, "
-                   "tokenize='unicode61 remove_diacritics 2')")
-        return db
+    # ------------------------------------------------------------ database (in memoria)
+    def _entry(self, create: bool) -> tuple[sqlite3.Connection, threading.RLock] | None:
+        with _REGISTRY_LOCK:
+            entry = _REGISTRY.get(self.name)
+            if entry is None and create:
+                db = sqlite3.connect(":memory:", check_same_thread=False)
+                db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+                db.execute("CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT UNIQUE, mtime REAL, "
+                           "size INTEGER, pages INTEGER)")
+                db.execute("CREATE VIRTUAL TABLE pages USING fts5(file_id UNINDEXED, page UNINDEXED, text, "
+                           "tokenize='unicode61 remove_diacritics 2')")
+                db.commit()
+                entry = _REGISTRY[self.name] = (db, threading.RLock())
+            return entry
+
+    @contextmanager
+    def _connect(self, create: bool = True):
+        """Connessione dell'indice (creata alla prima volta), in una transazione e sotto lock."""
+        entry = self._entry(create)
+        if entry is None:
+            raise LookupError(self.name)
+        db, lock = entry
+        with lock, db:
+            yield db
 
     @property
     def exists(self) -> bool:
-        return self.path.exists()
+        with _REGISTRY_LOCK:
+            return self.name in _REGISTRY
 
     def settings(self) -> dict:
         if not self.exists:
             return {}
-        with self._connect() as db:
+        with self._connect(create=False) as db:
             row = db.execute("SELECT value FROM meta WHERE key='settings'").fetchone()
         return json.loads(row[0]) if row else {}
 
     def files(self) -> list[str]:
         if not self.exists:
             return []
-        with self._connect() as db:
+        with self._connect(create=False) as db:
             return [r[0] for r in db.execute("SELECT path FROM files ORDER BY path")]
 
     def delete(self) -> None:
-        if self.path.exists():
-            self.path.unlink()
+        with _REGISTRY_LOCK:
+            entry = _REGISTRY.pop(self.name, None)
+        if entry is not None:
+            db, lock = entry
+            with lock:
+                db.close()
 
     # ------------------------------------------------------------ costruzione
     def build(self, progress, folder: str, recursive: bool = True) -> IndexStats:
@@ -105,7 +171,9 @@ class FullTextIndex:
         if not folder:
             return stats
         paths = eng.list_pdfs(folder, bool(s.get("recursive", True)))
-        with self._connect() as db:
+        if not self.exists:
+            return stats
+        with self._connect(create=False) as db:
             known = {p: (fid, mtime, size) for fid, p, mtime, size in
                      db.execute("SELECT id, path, mtime, size FROM files")}
             for gone in set(known) - set(paths):
@@ -156,7 +224,7 @@ class FullTextIndex:
             return hits, summary
         guard = eng.make_guard(opts, page_timeout)
         try:
-            with self._connect() as db:
+            with self._connect(create=False) as db:
                 files = {fid: (p, mtime, size) for fid, p, mtime, size in
                          db.execute("SELECT id, path, mtime, size FROM files")}
                 summary.files = len(files)

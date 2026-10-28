@@ -556,7 +556,7 @@ class AttachmentsPanel(QWidget):
                 "contenuti dannosi: aprilo solo se ti fidi della sua origine.\n\nContinuare?").format(name=name)):
             return None
         try:
-            folder = tempfile.mkdtemp(prefix="foliant-allegato-")   # 0700: solo l'utente
+            folder = tempfile.mkdtemp(prefix=f"foliant-allegato-{os.getpid()}-")   # 0700: solo l'utente
             os.chmod(folder, 0o700)
             self._temp_dirs().append(folder)
             target = Path(folder) / name

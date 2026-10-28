@@ -3,8 +3,13 @@
 Ogni documento modificato ha nella cartella di recupero due file:
 
 - `<id>.pdf`: i dati del documento (con la stessa protezione del file originale);
-- `<id>.json`: percorso originale, nome visualizzato, data/ora, pagina corrente,
-  pid del processo che l'ha scritta e versione del formato.
+- `<id>.json`: data/ora, pagina corrente, pid del processo che l'ha scritta e
+  versione del formato.
+
+Riservatezza: nei metadati non ci sono né il nome né il percorso del file
+originale; al ripristino la copia si apre come «Documento recuperato» da salvare
+con «Salva con nome». `sanitize_legacy` toglie nome e percorso dai metadati
+scritti dalle versioni precedenti.
 
 Una voce è "orfana" (cioè proponibile per il ripristino) quando il processo che
 l'ha scritta non è più in esecuzione. Nessuna funzione qui tocca l'interfaccia.
@@ -22,11 +27,14 @@ from typing import Callable, Mapping
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, atomic_write
+from foliant.api import ENGINE_LOCK, _, atomic_write
 
 FORMAT_VERSION = 1
 DIR_MODE = 0o700
 FILE_MODE = 0o600
+# campi che le versioni precedenti scrivevano nei metadati (nome e percorso del file)
+LEGACY_PRIVATE_FIELDS = ("original_path", "display_name")
+TEMP_MAX_AGE = 3600          # temporanei di atomic_write più vecchi di così: abbandonati
 
 
 def recovery_dir(env: Mapping[str, str] | None = None) -> Path:
@@ -75,12 +83,10 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def make_meta(*, original_path: str | None, display_name: str, page: int,
-              pid: int | None = None, timestamp: float | None = None) -> dict:
+def make_meta(*, page: int, pid: int | None = None, timestamp: float | None = None) -> dict:
+    """Metadati di una copia: niente nome né percorso del documento (riservatezza)."""
     return {
         "format": FORMAT_VERSION,
-        "original_path": original_path or "",
-        "display_name": display_name,
         "timestamp": time.time() if timestamp is None else timestamp,
         "page": int(page),
         "pid": os.getpid() if pid is None else int(pid),
@@ -130,9 +136,63 @@ def read_meta(path: Path) -> dict | None:
         meta["timestamp"] = float(meta.get("timestamp", 0) or 0)
     except (TypeError, ValueError):
         return None
-    meta.setdefault("original_path", "")
-    meta.setdefault("display_name", "")
+    for key in LEGACY_PRIVATE_FIELDS:      # campi delle versioni precedenti: ignorati
+        meta.pop(key, None)
     return meta
+
+
+def sanitize_legacy(directory: Path, alive: Callable[[int], bool] = pid_alive,
+                    now: float | None = None) -> int:
+    """Toglie nome e percorso del documento dai metadati scritti dalle versioni precedenti.
+
+    - ogni `<id>.json` che contiene `original_path` o `display_name` viene riscritto
+      (atomico, 0600) solo con formato, pid, data/ora e pagina: la copia resta recuperabile;
+    - i `.json` senza `.pdf` di processi non più in esecuzione vengono eliminati;
+    - i temporanei di `atomic_write` (`.foliant-*.tmp`) abbandonati da più di un'ora vengono eliminati.
+    Non tocca altri file. Restituisce il numero di file riscritti o eliminati; non solleva mai."""
+    changed = 0
+    try:
+        if not directory.is_dir():
+            return 0
+        now = time.time() if now is None else now
+        for path in list(directory.iterdir()):
+            try:
+                if not path.is_file() or path.is_symlink():
+                    continue
+                name = path.name
+                if name.startswith(".foliant-") and name.endswith(".tmp"):
+                    if now - path.stat().st_mtime > TEMP_MAX_AGE:
+                        path.unlink()
+                        changed += 1
+                    continue
+                if name.startswith(".") or path.suffix != ".json":
+                    continue
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError, UnicodeDecodeError):
+                    raw = None
+                has_pdf = (directory / f"{path.stem}.pdf").exists()
+                if not has_pdf:
+                    pid = raw.get("pid", 0) if isinstance(raw, dict) else 0
+                    if not alive(pid):
+                        path.unlink()
+                        changed += 1
+                    continue
+                if not isinstance(raw, dict):
+                    if any(k.encode() in path.read_bytes() for k in LEGACY_PRIVATE_FIELDS):
+                        path.unlink()      # illeggibile ma con nome/percorso: il PDF resta proponibile
+                        changed += 1
+                    continue
+                if not any(k in raw for k in LEGACY_PRIVATE_FIELDS):
+                    continue
+                clean = {k: v for k, v in raw.items() if k not in LEGACY_PRIVATE_FIELDS}
+                _write_private(path, json.dumps(clean, ensure_ascii=False, indent=1).encode("utf-8"))
+                changed += 1
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return changed
 
 
 def pdf_is_valid(path: Path) -> bool:
@@ -168,16 +228,13 @@ class RecoveryEntry:
 
     @property
     def original_path(self) -> str:
-        return (self.meta or {}).get("original_path") or ""
+        """Sempre vuoto: le copie non conservano il percorso del documento (riservatezza)."""
+        return ""
 
     @property
     def display_name(self) -> str:
-        name = (self.meta or {}).get("display_name") or ""
-        if name:
-            return name
-        if self.original_path:
-            return Path(self.original_path).name
-        return "Senza titolo.pdf"
+        """Sempre «Documento recuperato»: le copie non conservano il nome del documento."""
+        return _("Documento recuperato")
 
     @property
     def timestamp(self) -> float:

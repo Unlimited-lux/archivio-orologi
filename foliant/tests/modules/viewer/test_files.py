@@ -85,17 +85,14 @@ def test_replace_in_list_keeps_position():
 
 
 # ------------------------------------------------- criteri di accettazione
-def test_rename_open_tab_follows_title_recents_and_save(fwin, ctl, sample_pdf, tmp_path):
+def test_rename_open_tab_follows_title_and_save(fwin, ctl, sample_pdf, tmp_path):
     view = fwin.open_path(sample_pdf)
-    assert sample_pdf in fwin.recent_files()
     new = ctl.rename_path(sample_pdf, "rinominato")
     expected = str(tmp_path / "rinominato.pdf")
     assert new == expected
     assert os.path.exists(expected) and not os.path.exists(sample_pdf)
     assert _tab_text(fwin, view) == "rinominato.pdf"
     assert str(view.document.path) == expected
-    recents = fwin.recent_files()
-    assert expected in recents and sample_pdf not in recents
     # Il Salva successivo scrive sul nuovo percorso.
     _modify(view)
     assert fwin.save_view(view)
@@ -147,13 +144,12 @@ def test_rename_permission_error_keeps_file(fwin, ctl, sample_pdf, tmp_path, mon
     assert open(sample_pdf, "rb").read() == before and not (tmp_path / "altro.pdf").exists()
 
 
-def test_trash_moves_file_to_system_trash_and_forgets_recent(fwin, ctl, sample_pdf, tmp_path, monkeypatch):
+def test_trash_moves_file_to_system_trash_and_closes_tab(fwin, ctl, sample_pdf, tmp_path, monkeypatch):
     data = tmp_path / "data"
     data.mkdir()
     monkeypatch.setenv("XDG_DATA_HOME", str(data))
     content = open(sample_pdf, "rb").read()
     view = fwin.open_path(sample_pdf)
-    assert sample_pdf in fwin.recent_files()
     asked = []
     monkeypatch.setattr(ctl, "ask_trash", lambda paths: asked.append(paths) or True)
     guarded = []                              # file già nel cestino: la scheda si chiude senza controlli
@@ -167,7 +163,6 @@ def test_trash_moves_file_to_system_trash_and_forgets_recent(fwin, ctl, sample_p
     assert not os.path.exists(sample_pdf)
     trashed = data / "Trash" / "files" / os.path.basename(sample_pdf)
     assert trashed.read_bytes() == content
-    assert sample_pdf not in fwin.recent_files()
     assert view not in fwin.views()
 
 
@@ -176,7 +171,7 @@ def test_trash_cancelled_keeps_everything(fwin, ctl, sample_pdf, monkeypatch):
     monkeypatch.setattr(ctl, "ask_trash", lambda paths: False)
     monkeypatch.setattr(ctl, "move_to_trash", lambda p: pytest.fail("non deve spostare"))
     assert ctl.trash_paths([sample_pdf]) == []
-    assert os.path.exists(sample_pdf) and sample_pdf in fwin.recent_files()
+    assert os.path.exists(sample_pdf) and len(fwin.views()) == 1
 
 
 def test_trash_unavailable_asks_permanent_delete(fwin, ctl, sample_pdf, monkeypatch):
@@ -266,7 +261,6 @@ def test_move_to_folder_tab_follows(fwin, ctl, sample_pdf, tmp_path):
     assert moved == [target] and os.path.exists(target) and not os.path.exists(sample_pdf)
     assert str(view.document.path) == target
     assert fwin.tabs.tabToolTip(fwin.tabs.indexOf(view)) == target
-    assert target in fwin.recent_files()
 
 
 def test_move_unsaved_warns(fwin, ctl, sample_pdf, tmp_path, monkeypatch):
@@ -302,58 +296,29 @@ def test_reveal_and_copy_path(fwin, ctl, sample_pdf, monkeypatch):
     assert QApplication.clipboard().text() == sample_pdf
 
 
-def test_menu_section_and_home_context_menu(fwin, ctl, sample_pdf):
+def test_menu_section(fwin, ctl, sample_pdf):
     fwin.main_menu.aboutToShow.emit()
     texts = [a.text() for a in fwin.main_menu.actions()]
     assert "File" in texts
-    menu = ctl.path_menu(sample_pdf)
-    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert labels[:2] == ["Apri", "Fissa"]                      # voci del nucleo in testa
-    assert labels[2:6] == ["Rinomina…", "Duplica", "Sposta in…", "Sposta nel cestino"]
-    assert labels[-2:] == ["Rimuovi dall'elenco", "Svuota elenco"]
-    assert labels.count("Rimuovi dall'elenco") == 1
 
 
-def test_pin_and_unpin_recent_from_menu(fwin, ctl, sample_pdf):
-    """VIS-02: «Fissa» porta il documento in cima ai recenti della Home, «Sblocca» lo toglie."""
+def test_files_does_not_use_recent_list(fwin, ctl, sample_pdf, tmp_path, monkeypatch):
+    """Riservatezza: il modulo non alimenta né consulta l'elenco dei recenti (nemmeno dopo
+    rinomina, spostamento o cestino) e non aggiunge voci al menu dei recenti della Home."""
+    calls = []
+    for name in ("recent_files", "replace_recent", "remove_recent", "add_recent", "pin_recent",
+                 "add_recent_menu_provider"):
+        if hasattr(fwin.ctx, name):
+            monkeypatch.setattr(fwin.ctx, name, lambda *a, _n=name, **k: calls.append(_n) or [])
+    from foliant.modules.viewer import files
+    files.install(fwin.ctx)                     # nessun fornitore del menu dei recenti
     fwin.open_path(sample_pdf)
-    for v in list(fwin.views()):
-        fwin.close_view(v)
-    menu = ctl.path_menu(sample_pdf)
-    [pin] = [a for a in menu.actions() if a.text() == "Fissa"]
-    pin.trigger()
-    assert fwin.ctx.is_pinned(sample_pdf) and fwin.ctx.pinned_recent() == [sample_pdf]
-    menu = ctl.path_menu(sample_pdf)
-    [unpin] = [a for a in menu.actions() if a.text() == "Sblocca"]
-    unpin.trigger()
-    assert not fwin.ctx.is_pinned(sample_pdf)
-
-
-def test_missing_recent_menu_offers_locate_and_remove(fwin, ctl, tmp_path):
-    """Recente il cui file non esiste più: il menu offre Individua / Rimuovi, nessuna operazione
-    sul file."""
-    gone = str(tmp_path / "sparito.pdf")
-    menu = ctl.path_menu(gone)
-    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert labels[0] == "Individua…" and "Rimuovi dall'elenco" in labels
-    assert "Rinomina…" not in labels and "Sposta nel cestino" not in labels
-
-
-def test_missing_recent_marked_and_click_offers_remove(fwin, tmp_path, monkeypatch):
-    """VIS-02: un recente il cui file non esiste più è marcato non disponibile; il clic offre
-    Rimuovi / Individua senza errori («Rimuovi» lo toglie dall'elenco)."""
-    from foliant.ui.home import MISSING_ROLE, PATH_ROLE
-    path = tmp_path / "sparira.pdf"
-    doc = pymupdf.open()
-    doc.new_page()
-    doc.save(str(path))
-    view = fwin.open_path(str(path))
-    fwin.close_view(view)
-    os.remove(path)
-    fwin.show_home()
-    lst = fwin.home.recent
-    [item] = [lst.item(r) for r in range(lst.count()) if lst.item(r).data(PATH_ROLE) == str(path)]
-    assert item.data(MISSING_ROLE)
-    monkeypatch.setattr(fwin, "ask_missing_recent", lambda p: "remove")
-    fwin.home._activate(item)
-    assert str(path) not in fwin.recent_files()
+    renamed = ctl.rename_path(sample_pdf, "zq7k-rinominato")
+    dest = tmp_path / "altrove"
+    dest.mkdir()
+    [moved] = ctl.move_paths([renamed], str(dest))
+    monkeypatch.setattr(ctl, "ask_trash", lambda paths: True)
+    monkeypatch.setattr(ctl, "move_to_trash", lambda p: True)
+    ctl.trash_paths([moved])
+    assert calls == []
+    assert not hasattr(ctl, "fill_recent_menu")

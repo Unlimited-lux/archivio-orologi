@@ -76,8 +76,6 @@ def test_password_never_written_anywhere(viewer_window, tmp_path, monkeypatch):
         pdf[0].insert_text((72, 300), "nota", fontsize=12)
     assert parts["recovery"].autosave_now() == 1      # copia di recupero del documento modificato
     assert any(Path(os.environ["FOLIANT_RECOVERY_DIR"]).rglob("*.pdf"))
-    parts["session"].remember(view)                   # posizione per file
-    parts["session"].save_session()
     viewer_window.settings.sync()
     view.document._saved_state = view.document._state
     viewer_window.close_view(view)

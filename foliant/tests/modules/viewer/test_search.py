@@ -94,6 +94,10 @@ def test_enter_and_escape_in_field(viewer_window, tmp_path, qtbot):
     assert not ctl.bar.isVisible()
     assert view.search_hits == {}
     assert "uno" in ctl.history()
+    # cronologia solo in memoria (riservatezza): nulla nelle impostazioni
+    viewer_window.settings.sync()
+    assert not viewer_window.settings.contains("viewer/search_history")
+    assert not any("uno" in str(viewer_window.settings.value(k)) for k in viewer_window.settings.allKeys())
 
 
 def test_prefill_with_selection(viewer_window, tmp_path):

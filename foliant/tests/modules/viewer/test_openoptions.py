@@ -53,7 +53,6 @@ def test_saved_options_apply_when_reopened(viewer_window, tmp_path):
     riaperto con «rispetta le impostazioni del documento» si apre a pagina 3 adattato in
     larghezza con i segnalibri visibili."""
     path = _pdf(tmp_path / "manuale.pdf")
-    viewer_window.settings.setValue("viewer/restore_position", False)
     view = viewer_window.open_path(path)
     ctl = _ctl(viewer_window)
     assert ctl.apply(view, E.OpenOptions(page=2, fit=FIT_WIDTH, panel="bookmarks"))

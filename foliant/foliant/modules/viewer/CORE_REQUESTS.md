@@ -70,11 +70,11 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     calibrazione dei dpi. «Adatta all'altezza» e «Adatta al contenuto» li aggiunge il viewer
     (`zoomfit.py`); se il nucleo li offrirà come modalità di adattamento, `zoomfit` si toglie.
 
-14. **Generatore di miniature per il file manager** (VIS-53): `packaging/install.sh` dovrebbe
-    installare un eseguibile `foliant-thumbnailer` che lancia
-    `python -m foliant.modules.viewer.thumbnailer "$@"` e il file
-    `~/.local/share/thumbnailers/foliant.thumbnailer` con il contenuto di
-    `thumbnailer.THUMBNAILER_ENTRY`.
+14. **Generatore di miniature per il file manager** (VIS-53) — *richiesta ritirata* per la regola
+    di riservatezza: registrato, il generatore riempirebbe `~/.cache/thumbnails` di immagini
+    nominate con l'impronta del percorso di ogni documento. Il nucleo NON deve installare
+    `foliant.thumbnailer`; il viewer toglie quella voce se una versione precedente l'aveva messa
+    (`privacy.remove_legacy_thumbnailer`).
 
 15. **Scorciatoie personalizzate** (VIS-52): l'identificativo di un comando è il suo testo;
     servirebbe un id stabile per ogni `QAction` (es. `ctx.action(..., id="view.rotate")`).
@@ -84,9 +84,9 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     percorso, es. le posizioni memorizzate). Oggi `files.py` imposta `doc.path` e chiama
     `window._update_tab_title(view)`.
 
-17. **Recenti** (VIS-02/03) — *soddisfatta e adottata*: `ctx.replace_recent`/`remove_recent`,
-    voci «non disponibile» con Individua/Rimuovi, `ctx.pin_recent`/`is_pinned` e
-    `ctx.add_recent_menu_provider`; `files.py` non imposta più un menu proprio sulla Home.
+17. **Recenti** (VIS-02/03) — *ritirata* per la regola di riservatezza: Foliant non tiene più
+    l'elenco dei file recenti né quelli fissati. Il viewer non chiama più `ctx.replace_recent`,
+    `ctx.remove_recent`, `ctx.recent_files` né `ctx.add_recent_menu_provider`.
 
 18. **`close_view(view, discard=True)`** per chiudere senza la richiesta di salvataggio
     (dopo lo spostamento nel cestino o il ripristino): oggi si imposta `doc._saved_state`.
@@ -144,7 +144,7 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     «Ripristina predefiniti» che non tocca le altre sezioni. Sono parti della finestra del
     nucleo: oggi `_mode_button_style()` decide le etichette dalla larghezza a ogni
     ridimensionamento, quindi un modulo non può imporle. Le preferenze di visualizzazione del
-    viewer (vista, zoom, pannello iniziale, ultima posizione, impostazioni del documento,
+    viewer (vista, zoom, pannello iniziale, impostazioni del documento,
     esporta/importa) sono già nel file delle impostazioni e si esportano con il resto.
 
 24. **Servizi tra moduli** (VIS-26): Trova e sostituisci / Trova ed elimina sono del modulo
@@ -162,3 +162,8 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     `/DisplayDocTitle` è vero e il titolo non è vuoto, altrimenti `display_name`) usato da scheda
     e finestra, lasciando `display_name` per i nomi di file. Il viewer scrive già l'opzione nel
     documento («Opzioni di apertura…»).
+
+26. **Riservatezza — ultima cartella dei dialoghi**: tutti i dialoghi del viewer passano per
+    `ctx.ask_directory`/`ask_open_paths`/`ask_save_path`; l'ultima cartella usata va tenuta solo
+    in memoria (niente `lastDirectory` in QSettings, niente cronologia di `QFileDialog` in
+    `~/.config/QtProject.conf`). Correzione da fare nel nucleo; il viewer ne beneficia da solo.

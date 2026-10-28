@@ -1,12 +1,16 @@
 """Preferenze di visualizzazione (VIS-51, parte): layout e zoom predefiniti,
-pannello iniziale, rispetto delle impostazioni del documento, ripristino
-dell'ultima posizione, unità di misura; esportazione e importazione delle
-impostazioni; ripristino dei valori predefiniti."""
+pannello iniziale, rispetto delle impostazioni del documento, unità di misura;
+esportazione e importazione delle impostazioni; ripristino dei valori predefiniti.
+
+Riservatezza: si esportano e importano solo preferenze generali; le chiavi che
+contenevano (o potrebbero contenere) nomi, percorsi o cronologie dei documenti
+vengono sempre scartate, così un file .ini non può reintrodurle."""
 
 from __future__ import annotations
 
 import configparser
 import io
+import re
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QPushButton, QVBoxLayout,
@@ -28,8 +32,6 @@ TRANSLATIONS = {
     "Miniature": "Thumbnails",
     "Segnalibri": "Bookmarks",
     "Rispetta le impostazioni del documento": "Respect the document's settings",
-    "Riapri i documenti all'ultima posizione": "Reopen documents at the last position",
-    "Non registrare la cronologia dei documenti": "Do not record document history",
     "Esporta impostazioni…": "Export settings…",
     "Importa impostazioni…": "Import settings…",
     "Ripristina predefiniti": "Restore defaults",
@@ -61,9 +63,31 @@ OLD_LAYOUT = "viewer/default_layout"
 OLD_ZOOM = "viewer/default_zoom"
 PANELS = (("", "Nessuno"), ("thumbnails", "Miniature"), ("bookmarks", "Segnalibri"))
 EXPORT_VERSION = 1
-# chiavi che non si esportano: dati personali o legati alla macchina
-PRIVATE_PREFIXES = ("recent", "lastDirectory", "window/", "viewer/positions", "viewer/session", "viewer/search_history",
-                    "viewer/closed")
+# chiavi che non si esportano né importano: dati personali o legati alla macchina, e tutte le
+# chiavi che nelle versioni precedenti contenevano nomi, percorsi o cronologie dei documenti
+PRIVATE_PREFIXES = ("recent", "Recent", "pinned", "Pinned", "lastDirectory", "window/", "session/",
+                    "viewer/positions", "viewer/session", "viewer/restore_session", "viewer/search_history",
+                    "viewer/no_history", "viewer/restore_position", "viewer/closed", "viewer/privacy_cleanup")
+# parti del nome di una chiave che indicano percorsi o cronologie (in qualsiasi modulo)
+PRIVATE_KEY_PARTS = ("recent", "pinned", "last_dir", "lastdir", "last_folder", "lastfolder", "folder",
+                     "history", "session", "positions", "last_path", "lastpath", "last_file", "lastfile")
+# valori che sembrano percorsi di file o cartelle
+_PATH_VALUE = re.compile(r"^(?:/|~[/\\]|file:|[A-Za-z]:[\\/]|\\\\)")
+
+
+def is_private_key(key: str) -> bool:
+    """Chiave da non esportare né importare (percorsi, cronologie, dati della macchina)."""
+    if key.startswith(PRIVATE_PREFIXES):
+        return True
+    low = key.lower()
+    return any(part in low for part in PRIVATE_KEY_PARTS)
+
+
+def is_private_value(value) -> bool:
+    """Valore che sembra un percorso (o un elenco che ne contiene)."""
+    if isinstance(value, (list, tuple)):
+        return any(is_private_value(v) for v in value)
+    return isinstance(value, str) and bool(_PATH_VALUE.match(value.strip()))
 
 
 def _bool(v, default=False) -> bool:
@@ -160,10 +184,7 @@ class PrefsController:
         form.addRow(_("Pannello all'apertura"), self.panel_box)
         layout.addLayout(form)
         self.respect = QCheckBox(_("Rispetta le impostazioni del documento"))
-        self.restore = QCheckBox(_("Riapri i documenti all'ultima posizione"))
-        self.no_history = QCheckBox(_("Non registrare la cronologia dei documenti"))
-        for w in (self.respect, self.restore, self.no_history):
-            layout.addWidget(w)
+        layout.addWidget(self.respect)
         row = QHBoxLayout()
         for text, slot in ((_("Esporta impostazioni…"), self.export_dialog),
                            (_("Importa impostazioni…"), self.import_dialog),
@@ -187,8 +208,6 @@ class PrefsController:
         self._select(self.zoom_box, zoom_key(self.value(KEY_ZOOM, FIT_WIDTH)) or FIT_WIDTH)
         self._select(self.panel_box, self.value("viewer/default_panel", ""))
         self.respect.setChecked(not _bool(self.value("viewer/ignore_document_view"), False))
-        self.restore.setChecked(_bool(self.value("viewer/restore_position"), True))
-        self.no_history.setChecked(_bool(self.value("viewer/no_history"), False))
 
     def save(self) -> None:
         s = self.ctx.settings()
@@ -196,8 +215,6 @@ class PrefsController:
         s.setValue(KEY_ZOOM, self.zoom_box.currentData())
         s.setValue("viewer/default_panel", self.panel_box.currentData())
         s.setValue("viewer/ignore_document_view", not self.respect.isChecked())
-        s.setValue("viewer/restore_position", self.restore.isChecked())
-        s.setValue("viewer/no_history", self.no_history.isChecked())
 
     # ------------------------------------------------------- esporta/importa
     def export_text(self) -> str:
@@ -207,9 +224,11 @@ class PrefsController:
         cp["foliant"] = {"version": str(EXPORT_VERSION)}
         cp["settings"] = {}
         for key in sorted(s.allKeys()):
-            if key.startswith(PRIVATE_PREFIXES):
+            if is_private_key(key):
                 continue
             value = s.value(key)
+            if is_private_value(value):
+                continue
             if isinstance(value, (list, tuple)):
                 value = "\n".join(str(v) for v in value)
                 key = key + "[]"
@@ -238,7 +257,7 @@ class PrefsController:
         for key, value in cp["settings"].items():
             if key.endswith("[]"):
                 key, value = key[:-2], [v for v in value.split("\n") if v]
-            if key.startswith(PRIVATE_PREFIXES):
+            if is_private_key(key) or is_private_value(value):
                 continue
             s.setValue(key, value)
             n += 1
@@ -271,7 +290,7 @@ class PrefsController:
     def restore_defaults(self) -> None:
         s = self.ctx.settings()
         for key in s.allKeys():
-            if key.startswith("viewer/") and not key.startswith(PRIVATE_PREFIXES):
+            if key.startswith("viewer/") and not is_private_key(key):
                 s.remove(key)
         s.remove(KEY_MODE)
         s.remove(KEY_ZOOM)

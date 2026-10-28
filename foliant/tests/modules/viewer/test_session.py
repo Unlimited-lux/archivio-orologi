@@ -1,15 +1,16 @@
-"""Test di posizione per file (VIS-02), vista iniziale (VIS-05), schede e sessione (VIS-30)."""
+"""Test di vista iniziale (VIS-05) e schede (VIS-30), e della regola di riservatezza:
+nessuna posizione per file e nessuna sessione salvate su disco."""
 
 from __future__ import annotations
 
+import json
+
 import pymupdf
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
 from foliant.api import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE
 from foliant.modules.viewer import session_engine as engine
-from foliant.modules.viewer.session_engine import ViewState
 from foliant.ui.main_window import MainWindow
 
 from .conftest import part
@@ -59,24 +60,6 @@ def test_parse_dest_variants():
     assert engine.parse_dest("garbage") == (None, None, None)
 
 
-def test_positions_limit_and_roundtrip():
-    positions = {}
-    for i in range(engine.MAX_POSITIONS + 20):
-        positions = engine.remember_position(positions, f"/f{i}.pdf", ViewState(i, 1.0, None, None), now=i)
-    assert len(positions) == engine.MAX_POSITIONS
-    assert "/f0.pdf" not in positions and f"/f{engine.MAX_POSITIONS + 19}.pdf" in positions
-    loaded = engine.load_positions(engine.dump_positions(positions))
-    assert ViewState.from_dict(loaded["/f30.pdf"]).page == 30
-    assert engine.load_positions("{non json") == {}
-
-
-def test_session_roundtrip_and_corrupt():
-    raw = engine.dump_session([("/a.pdf", ViewState(4, None, FIT_WIDTH, VIEW_CONTINUOUS))], 0)
-    tabs, current = engine.load_session(raw)
-    assert tabs[0][0] == "/a.pdf" and tabs[0][1].page == 4 and tabs[0][1].fit == FIT_WIDTH
-    assert engine.load_session("[[[") == ([], 0)
-
-
 def test_read_initial_view_from_catalog(tmp_path):
     path = _make(tmp_path, "cat.pdf", pages=10, catalog={"PageLayout": "/TwoPageRight", "PageMode": "/UseThumbs"},
                  open_action=lambda x: f"[{x[3]} 0 R /XYZ 0 0 2]")
@@ -98,49 +81,106 @@ def test_open_action_goto_dictionary_and_javascript(tmp_path):
     doc.close()
 
 
-# ====================================================================== VIS-02 posizione per file
-def test_reopen_restores_page_37_and_zoom_150(viewer_window, tmp_path, qtbot):
-    path = _make(tmp_path, "lungo.pdf", pages=60)
+# ====================================================================== riservatezza
+LEGACY_KEYS = ("viewer/positions", "viewer/session", "viewer/restore_session", "viewer/no_history",
+               "viewer/restore_position", "viewer/search_history")
+
+
+def _viewer_values(settings) -> str:
+    """Tutte le chiavi e i valori del viewer, come testo (per cercarvi nomi di file)."""
+    settings.sync()
+    out = []
+    for key in settings.allKeys():
+        if key.startswith("viewer/"):
+            out.append(f"{key}={settings.value(key)!r}")
+    return "\n".join(out)
+
+
+def test_reopen_does_not_remember_position(viewer_window, tmp_path, qtbot):
+    """Riservatezza: alla riapertura il documento parte dalla vista predefinita, e nelle
+    impostazioni non resta né la posizione né il nome del file."""
+    path = _make(tmp_path, "zq7k-lungo.pdf", pages=60)
     view = viewer_window.open_path(path)
     view.set_zoom(1.5)
     view.go_to_page(36)
-    assert view.current_page == 36
     viewer_window.close_view(view)
     view = viewer_window.open_path(path)
-    assert view.current_page == 36
-    qtbot.wait(100)   # impaginazione definitiva della scheda
-    assert view.current_page == 36
-    assert view.zoom == pytest.approx(1.5)
-    assert view.fit_mode is None
-    assert viewer_window.page_spin.text() == "37"
-    raw = viewer_window.settings.value("viewer/positions")
-    assert "password" not in raw
-
-
-def test_fit_mode_and_layout_are_remembered(viewer_window, tmp_path):
-    path = _make(tmp_path, "fit.pdf", pages=12)
-    view = viewer_window.open_path(path)
-    view.set_view_mode(VIEW_FACING)
-    view.set_fit(FIT_PAGE)
-    view.go_to_page(6)
-    viewer_window.close_view(view)
-    view = viewer_window.open_path(path)
-    assert view.view_mode == VIEW_FACING
-    assert view.fit_mode == FIT_PAGE
-    assert view.current_page in (6, 7)
-
-
-def test_no_history_preference_records_nothing(viewer_window, tmp_path):
-    ctl = _session(viewer_window)
-    ctl.set_pref("viewer/no_history", True)
-    paths = [_make(tmp_path, f"f{i}.pdf", pages=20) for i in range(3)]
-    for p in paths:
-        view = viewer_window.open_path(p)
-        view.go_to_page(9)
-        viewer_window.close_view(view)
-    assert not viewer_window.settings.value("viewer/positions")
-    view = viewer_window.open_path(paths[0])
+    qtbot.wait(50)
     assert view.current_page == 0
+    assert viewer_window.settings.value("viewer/positions") is None
+    assert "zq7k" not in _viewer_values(viewer_window.settings)
+
+
+def test_document_view_applies_on_every_open(viewer_window, tmp_path):
+    path = _make(tmp_path, "rem.pdf", pages=12, open_action=lambda x: f"[{x[4]} 0 R /FitH 792]")
+    view = viewer_window.open_path(path)
+    view.go_to_page(9)
+    viewer_window.close_view(view)
+    assert viewer_window.open_path(path).current_page == 4
+
+
+def test_no_history_actions_and_preferences(viewer_window):
+    viewer_window._rebuild_menu()
+    names = []
+
+    def walk(menu):
+        for a in menu.actions():
+            names.append(a.text())
+            if a.menu():
+                walk(a.menu())
+    walk(viewer_window.main_menu)
+    for text in ("Ripristina la sessione all'avvio", "Non registrare la cronologia"):
+        assert text not in names
+    ctl = _session(viewer_window)
+    for name in ("save_session", "restore_session", "remember", "positions", "act_restore_session"):
+        assert not hasattr(ctl, name)
+
+
+def test_legacy_keys_removed_at_startup(qtbot, settings, tmp_path):
+    """Chi aggiorna da una versione precedente: posizioni, sessione e cronologie salvate
+    vengono cancellate al primo avvio (una volta sola, senza riaprire nulla)."""
+    old = _make(tmp_path, "zq7k-vecchio.pdf", pages=3)
+    settings.setValue("viewer/positions", json.dumps({old: {"page": 2, "zoom": 1.0, "t": 1}}))
+    settings.setValue("viewer/session", json.dumps({"tabs": [{"path": old, "page": 1}], "current": 0}))
+    settings.setValue("viewer/restore_session", True)
+    settings.setValue("viewer/no_history", False)
+    settings.setValue("viewer/restore_position", True)
+    settings.setValue("viewer/search_history", ["zq7k"])
+    settings.setValue("viewer/reading_theme", "sepia")         # preferenza generale: resta
+    win = _new_window(qtbot, settings)
+    try:
+        QApplication.processEvents()
+        qtbot.wait(50)
+        assert win.views() == []                                # la sessione non viene ripristinata
+        for key in LEGACY_KEYS:
+            assert not settings.contains(key), key
+        assert settings.value("viewer/reading_theme") == "sepia"
+        assert int(settings.value("viewer/privacy_cleanup")) >= 1
+        assert "zq7k" not in _viewer_values(settings)
+        # una volta sola: una chiave rimessa da fuori non viene più cercata
+        settings.setValue("viewer/no_history", True)
+        from foliant.modules.viewer import privacy
+        assert privacy.run_once(settings) is False
+    finally:
+        _cleanup(win)
+
+
+def test_closing_window_saves_no_session(viewer_window, tmp_path, qtbot, settings):
+    views = _three_tabs(viewer_window, tmp_path, prefix="zq7k-scheda")
+    assert len(views) == 3
+    viewer_window.close()
+    assert viewer_window.views() == []
+    for key in LEGACY_KEYS:
+        assert not settings.contains(key), key
+    assert "zq7k" not in _viewer_values(settings)
+    win = _new_window(qtbot, settings)
+    try:
+        QApplication.processEvents()
+        qtbot.wait(50)
+        assert win.views() == []
+        assert _session(win).closed_tabs == []                 # la pila delle chiusure è solo in memoria
+    finally:
+        _cleanup(win)
 
 
 # ====================================================================== VIS-05 vista iniziale
@@ -217,14 +257,6 @@ def test_ignore_document_view_preference(viewer_window, tmp_path):
     assert view.view_mode == VIEW_CONTINUOUS
 
 
-def test_remembered_position_wins_over_document_view(viewer_window, tmp_path):
-    path = _make(tmp_path, "rem.pdf", pages=12, open_action=lambda x: f"[{x[4]} 0 R /FitH 792]")
-    view = viewer_window.open_path(path)
-    view.go_to_page(9)
-    viewer_window.close_view(view)
-    assert viewer_window.open_path(path).current_page == 9
-
-
 # ====================================================================== VIS-30 schede
 def _three_tabs(window, tmp_path, pages=(5, 10, 15), prefix="tab"):
     views = []
@@ -258,8 +290,8 @@ def test_ctrl_shift_t_reopens_with_same_page_and_zoom(viewer_window, tmp_path, q
     views[1].set_zoom(2.0)
     views[1].go_to_page(11)
     viewer_window.close_view(views[1])
-    # posizione memorizzata cancellata: il ripristino viene dalla pila delle chiusure
-    viewer_window.settings.remove("viewer/positions")
+    # il ripristino viene dalla pila delle chiusure, solo in memoria
+    assert not viewer_window.settings.contains("viewer/positions")
     assert len(viewer_window.views()) == 2
     _session(viewer_window).act_reopen.trigger()   # Ctrl+Maiusc+T è del nucleo
     view = viewer_window.current_view()
@@ -319,60 +351,8 @@ def test_menu_contains_tab_actions(viewer_window):
                 walk(a.menu())
     walk(viewer_window.main_menu)
     for text in ("Riapri scheda chiusa", "Chiudi le altre schede", "Chiudi le schede a destra",
-                 "Chiudi tutte le schede", "Ripristina la sessione all'avvio", "Non registrare la cronologia"):
+                 "Chiudi tutte le schede", "Ignora le impostazioni di apertura dei documenti"):
         assert text in names
-
-
-# ====================================================================== VIS-30 sessione
-def test_session_restored_in_new_window(viewer_window, tmp_path, qtbot, settings):
-    ctl = _session(viewer_window)
-    ctl.act_restore_session.setChecked(True)
-    assert settings.value("viewer/restore_session") in (True, "true")
-    views = _three_tabs(viewer_window, tmp_path)
-    paths = [str(v.document.path) for v in views]
-    settings.remove("viewer/positions")   # il ripristino deve venire dalla sessione
-    viewer_window.close()
-    assert viewer_window.views() == []
-
-    win = _new_window(qtbot, settings)
-    try:
-        qtbot.waitUntil(lambda: len(win.views()) == 3, timeout=3000)
-        assert [str(v.document.path) for v in win.views()] == paths
-        qtbot.wait(100)
-        assert [v.current_page for v in win.views()] == [4, 9, 14]
-        assert win.current_view() is win.views()[2]
-    finally:
-        _cleanup(win)
-
-
-def test_session_skips_missing_files_and_off_by_default(viewer_window, tmp_path, qtbot, settings):
-    ctl = _session(viewer_window)
-    views = _three_tabs(viewer_window, tmp_path)
-    ctl.save_session()   # preferenza disattiva → nessuna sessione salvata
-    assert not settings.value("viewer/session")
-    ctl.set_pref("viewer/restore_session", True)
-    ctl.save_session()
-    (tmp_path / "tab1.pdf").unlink()
-    _cleanup(viewer_window)
-    opened = ctl.restore_session()
-    assert [v.document.path.name for v in opened] == ["tab0.pdf", "tab2.pdf"]
-    assert "tab1.pdf" in viewer_window.statusBar().currentMessage()
-    assert views
-
-
-def test_session_not_restored_if_documents_already_open(viewer_window, tmp_path, qtbot, settings):
-    settings.setValue("viewer/restore_session", True)
-    settings.setValue("viewer/session", engine.dump_session(
-        [(_make(tmp_path, "s.pdf", pages=3), ViewState(1, None, FIT_WIDTH, VIEW_CONTINUOUS))], 0))
-    win = MainWindow(settings)
-    qtbot.addWidget(win)
-    win.show()
-    other = win.open_path(_make(tmp_path, "cmd.pdf", pages=2))   # come da riga di comando
-    try:
-        QApplication.processEvents()
-        assert win.views() == [other]
-    finally:
-        _cleanup(win)
 
 
 def test_switching_among_50_tabs_shows_page_quickly(viewer_window, tmp_path, qtbot):
