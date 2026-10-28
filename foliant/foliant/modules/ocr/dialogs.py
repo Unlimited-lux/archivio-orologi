@@ -122,9 +122,11 @@ class OcrDialog(QDialog):
 
     def __init__(self, parent, *, page_count: int, current_page: int, detected: list[int],
                  settings=None, mode: str = engine.SEARCHABLE, pages_text: str | None = None,
-                 allow_text_mode: bool = True, infos: dict | None = None):
+                 allow_text_mode: bool = True, infos: dict | None = None, page_image_cb=None):
         super().__init__(parent)
         self.infos = infos or {}
+        self.zones: list = []
+        self._page_image_cb = page_image_cb
         self.setWindowTitle(_("Riconoscimento del testo (OCR)"))
         self.setObjectName("ocrDialog")
         self.page_count = page_count
@@ -211,6 +213,18 @@ class OcrDialog(QDialog):
         self.destination.addItem(_("Nuovo documento (l'originale resta invariato)"), "new")
         self.destination.setCurrentIndex(max(0, self.destination.findData(get("destination", "current"))))
         form.addRow(_("Destinazione:"), self.destination)
+        zrow = QHBoxLayout()
+        self.zones_label = QLabel(self)
+        self.btn_zones = QPushButton(icon("layout-dashboard"), _("Zone…"), self)
+        self.btn_zones.setEnabled(page_image_cb is not None)
+        self.cb_tables = QCheckBox(_("Riconosci le tabelle con bordi"), self)
+        self.cb_tables.setChecked(str(get("auto_tables", "true")).lower() in ("true", "1"))
+        zrow.addWidget(self.zones_label, 1)
+        zrow.addWidget(self.cb_tables)
+        zrow.addWidget(self.btn_zones)
+        form.addRow(_("Layout:"), zrow)
+        self.btn_zones.clicked.connect(self.edit_zones)
+        self._update_zones_label()
         lay.addLayout(form)
 
         # --- pre-elaborazione
@@ -286,6 +300,20 @@ class OcrDialog(QDialog):
         self.destination.setEnabled(not text)
         self.validate()
 
+    def _update_zones_label(self) -> None:
+        n = len(self.zones)
+        self.zones_label.setText(_("Automatico") if not n else _("{n} zone manuali").format(n=n))
+
+    def edit_zones(self) -> None:
+        if self._page_image_cb is None:
+            return
+        image, gray = self._page_image_cb()
+        dlg = ZoneEditor(self, image, self.zones, self.settings, gray)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.zones = dlg.ordered()
+            self._update_zones_label()
+            self.validate()
+
     def validate(self) -> bool:
         """Controllo immediato: errore accanto ai campi e «Avvia» disattivato se non valido."""
         if not hasattr(self, "ok_button"):
@@ -298,6 +326,11 @@ class OcrDialog(QDialog):
             error = str(e)
         if not error and not self.languages.selected():
             error = _("Scegli almeno una lingua.")
+        if not error:
+            missing = languages.missing_languages([c for z in self.zones for c in z.languages])
+            if missing:
+                error = _("Lingue delle zone non installate: {l}.").format(
+                    l=", ".join(languages.language_name(c) for c in missing))
         self.error.setText(error)
         self.ok_button.setEnabled(not error)
         self.range_edit.setStyleSheet(f"border: 1px solid {theme.hex_color('danger')};"
@@ -338,6 +371,7 @@ class OcrDialog(QDialog):
         return {"format": "foliant-ocr-profile", "version": 1, "mode": o.mode, "languages": o.languages,
                 "dpi": self.dpi.currentData(), "existing_text": o.existing_text, "font": o.font,
                 "preprocess": o.preprocess.as_dict(), "apply_to_page": o.apply_to_page, "keep_original": o.keep_original, "clean_page": o.clean_page,
+                "zones": [z.to_dict() for z in o.zones], "auto_tables": o.auto_tables,
                 "destination": self.destination.currentData(), "preview": self.cb_preview.isChecked()}
 
     def load_profile(self, data: dict) -> None:
@@ -362,6 +396,10 @@ class OcrDialog(QDialog):
         self.cb_apply_page.setChecked(bool(data.get("apply_to_page", False)))
         self.cb_keep.setChecked(bool(data.get("keep_original", False)))
         self.cb_clean_page.setChecked(bool(data.get("clean_page", False)))
+        from . import layout
+        self.zones = [layout.Zone.from_dict(z) for z in data.get("zones", [])]
+        self.cb_tables.setChecked(bool(data.get("auto_tables", True)))
+        self._update_zones_label()
         self.cb_preview.setChecked(bool(data.get("preview", True)))
         self.validate()
 
@@ -414,6 +452,7 @@ class OcrDialog(QDialog):
             apply_to_page=self.cb_apply_page.isChecked() and self.mode() == engine.SEARCHABLE,
             keep_original=self.cb_keep.isChecked() and self.mode() == engine.EDITABLE,
             clean_page=self.cb_clean_page.isChecked() and self.mode() == engine.SEARCHABLE,
+            zones=list(self.zones), auto_tables=self.cb_tables.isChecked(),
             preprocess=PreprocessOptions(deskew=self.cb_deskew.isChecked(), auto_rotate=self.cb_rotate.isChecked(),
                                          denoise=self.cb_denoise.isChecked(),
                                          contrast=self.cb_contrast.isChecked()),
@@ -438,6 +477,7 @@ class OcrDialog(QDialog):
             s.setValue("ocr/destination", self.destination.currentData())
             s.setValue("ocr/apply_to_page", "true" if self.cb_apply_page.isChecked() else "false")
             s.setValue("ocr/keep_original", "true" if self.cb_keep.isChecked() else "false")
+            s.setValue("ocr/auto_tables", "true" if self.cb_tables.isChecked() else "false")
             s.setValue("ocr/clean_page", "true" if self.cb_clean_page.isChecked() else "false")
             s.setValue("ocr/keep_review", "true" if self.cb_keep_review.isChecked() else "false")
             s.setValue("ocr/font", o.font)
@@ -949,6 +989,11 @@ class ReviewDialog(QDialog):
 class BatchDialog(QDialog):
     """Più file in una volta: modalità, lingue e cartella di destinazione."""
 
+    def selected_zones(self) -> list:
+        from . import layout
+        name = self.zone_model.currentData()
+        return [layout.Zone.from_dict(d) for d in zone_models(self._settings).get(name, [])] if name else []
+
     def __init__(self, parent, settings=None, ask_files=None, ask_dir=None):
         super().__init__(parent)
         self.setWindowTitle(_("OCR in blocco"))
@@ -956,6 +1001,7 @@ class BatchDialog(QDialog):
         self.resize(640, 560)
         self._ask_files = ask_files
         self._ask_dir = ask_dir
+        self._settings = settings
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel(_("File PDF da riconoscere:")))
         self.files = QListWidget(self)
@@ -992,6 +1038,11 @@ class BatchDialog(QDialog):
         form.addRow(_("Destinazione:"), drow)
         self.suffix = QLineEdit("_ocr", self)
         form.addRow(_("Suffisso del nome:"), self.suffix)
+        self.zone_model = QComboBox(self)
+        self.zone_model.addItem(_("Nessuno (layout automatico)"), "")
+        for name in sorted(zone_models(settings)):
+            self.zone_model.addItem(name, name)
+        form.addRow(_("Modello di zone:"), self.zone_model)
         self.format = QComboBox(self)
         self.format.addItem(_("PDF"), "pdf")
         self.format.addItem(_("Testo (TXT)"), "txt")
@@ -1108,3 +1159,318 @@ class ReportDialog(QDialog):
         path = self._save_path_cb(_("Esporta rapporto"), "rapporto-ocr.csv", _("CSV (*.csv)"), ".csv")
         if path:
             atomic_write(path, batch.report_csv(self.items).encode("utf-8"))
+
+
+# ============================================================ zone manuali (OCR-10)
+ZONE_LABELS = {"text": "Testo", "table": "Tabella", "image": "Immagine", "ignore": "Da ignorare"}
+
+
+def zone_label(kind: str) -> str:
+    return _(ZONE_LABELS.get(kind, kind))
+
+
+def zone_colors() -> dict:
+    return {"text": theme.color("accent"), "table": theme.color("secondary"), "image": theme.color("success"),
+            "ignore": theme.color("danger")}
+
+
+class ZoneCanvas(QWidget):
+    """Immagine della pagina su cui si tracciano le zone (coordinate in frazioni della pagina)."""
+
+    zoneDrawn = Signal(tuple)
+    zoneClicked = Signal(int)
+
+    def __init__(self, image: QImage, parent=None):
+        super().__init__(parent)
+        self.image = image
+        self.zones: list = []
+        self.current = -1
+        self._start = None
+        self._end = None
+        self.setFixedSize(image.size())
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def _frac(self, pos) -> tuple[float, float]:
+        return (min(1.0, max(0.0, pos.x() / self.width())), min(1.0, max(0.0, pos.y() / self.height())))
+
+    def mousePressEvent(self, e) -> None:
+        fx, fy = self._frac(e.position())
+        for i, z in enumerate(self.zones):
+            x0, y0, x1, y1 = z.rect
+            if x0 <= fx <= x1 and y0 <= fy <= y1 and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self.zoneClicked.emit(i)
+                return
+        self._start = self._end = (fx, fy)
+
+    def mouseMoveEvent(self, e) -> None:
+        if self._start is not None:
+            self._end = self._frac(e.position())
+            self.update()
+
+    def mouseReleaseEvent(self, e) -> None:
+        if self._start is None:
+            return
+        self._end = self._frac(e.position())
+        (a, b), (c, d) = self._start, self._end
+        self._start = self._end = None
+        rect = (min(a, c), min(b, d), max(a, c), max(b, d))
+        if rect[2] - rect[0] > 0.01 and rect[3] - rect[1] > 0.005:
+            self.zoneDrawn.emit(rect)
+        else:
+            for i, z in enumerate(self.zones):
+                x0, y0, x1, y1 = z.rect
+                if x0 <= a <= x1 and y0 <= b <= y1:
+                    self.zoneClicked.emit(i)
+                    break
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.drawImage(0, 0, self.image)
+        w, h = self.width(), self.height()
+        colors = zone_colors()
+        ordered = sorted(range(len(self.zones)), key=lambda i: self.zones[i].order)
+        for n, i in enumerate(ordered):
+            z = self.zones[i]
+            c = QColor(colors.get(z.kind, theme.color("accent")))
+            fill = QColor(c)
+            fill.setAlpha(40)
+            p.setPen(QPen(c, 3 if i == self.current else 1.5))
+            p.setBrush(QBrush(fill))
+            r = QRectF(z.rect[0] * w, z.rect[1] * h, (z.rect[2] - z.rect[0]) * w, (z.rect[3] - z.rect[1]) * h)
+            p.drawRect(r)
+            label = f"{n + 1} · {zone_label(z.kind)}"
+            fm = p.fontMetrics()
+            tag = QRectF(r.left(), max(0.0, r.top() - fm.height() - 2), fm.horizontalAdvance(label) + 8,
+                         fm.height() + 2)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(c))
+            p.drawRect(tag)
+            p.setPen(QPen(theme.color("accent_text")))
+            p.drawText(tag, Qt.AlignmentFlag.AlignCenter, label)
+        if self._start is not None and self._end is not None:
+            (a, b), (c2, d) = self._start, self._end
+            pen = QPen(theme.color("accent"), 1.5)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(QRectF(min(a, c2) * w, min(b, d) * h, abs(c2 - a) * w, abs(d - b) * h))
+        p.end()
+
+
+class ZoneEditor(QDialog):
+    """Zone manuali: traccia rettangoli sulla pagina, scegli tipo, lingua e ordine; salva come modello."""
+
+    def __init__(self, parent, page_image: QImage, zones: list | None = None, settings=None,
+                 detect_gray=None):
+        from . import layout
+        super().__init__(parent)
+        self.setWindowTitle(_("Zone di riconoscimento"))
+        self.setObjectName("ocrZoneEditor")
+        self.resize(980, 760)
+        self.settings = settings
+        self._detect_gray = detect_gray
+        self.zones = [layout.Zone(tuple(z.rect), z.kind, list(z.languages), z.order) for z in (zones or [])]
+        lay = QHBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.canvas = ZoneCanvas(page_image)
+        scroll.setWidget(self.canvas)
+        lay.addWidget(scroll, 1)
+        side = QVBoxLayout()
+        hint = QLabel(_("Trascina sulla pagina per aggiungere una zona del tipo scelto. Le zone si applicano a "
+                        "tutte le pagine dell'intervallo, nell'ordine dell'elenco."))
+        hint.setWordWrap(True)
+        side.addWidget(hint)
+        self.kind = QComboBox(self)
+        for k in layout.ZONE_KINDS:
+            self.kind.addItem(zone_label(k), k)
+        form = QFormLayout()
+        form.addRow(_("Nuova zona:"), self.kind)
+        side.addLayout(form)
+        self.list = QListWidget(self)
+        side.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        self.btn_up = QPushButton(icon("arrow-up"), "", self)
+        self.btn_down = QPushButton(icon("arrow-down"), "", self)
+        self.btn_del = QPushButton(icon("trash-2"), _("Elimina"), self)
+        for b in (self.btn_up, self.btn_down, self.btn_del):
+            row.addWidget(b)
+        side.addLayout(row)
+        zf = QFormLayout()
+        self.zone_kind = QComboBox(self)
+        for k in layout.ZONE_KINDS:
+            self.zone_kind.addItem(zone_label(k), k)
+        self.zone_lang = QComboBox(self)
+        self.zone_lang.addItem(_("Lingue del documento"), "")
+        for c in languages.available_languages():
+            self.zone_lang.addItem(languages.language_name(c), c)
+        zf.addRow(_("Tipo:"), self.zone_kind)
+        zf.addRow(_("Lingua:"), self.zone_lang)
+        side.addLayout(zf)
+        self.btn_detect = QPushButton(icon("table"), _("Rileva tabelle"), self)
+        side.addWidget(self.btn_detect)
+        models = QHBoxLayout()
+        self.models = QComboBox(self)
+        self.btn_load = QPushButton(_("Carica"), self)
+        self.btn_save = QPushButton(_("Salva come modello…"), self)
+        models.addWidget(self.models, 1)
+        models.addWidget(self.btn_load)
+        side.addLayout(models)
+        side.addWidget(self.btn_save)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Usa queste zone"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        side.addWidget(buttons)
+        lay.addLayout(side)
+        self.canvas.zoneDrawn.connect(self.add_zone)
+        self.canvas.zoneClicked.connect(self.list.setCurrentRow)
+        self.list.currentRowChanged.connect(self._select)
+        self.btn_up.clicked.connect(lambda: self._move(-1))
+        self.btn_down.clicked.connect(lambda: self._move(1))
+        self.btn_del.clicked.connect(self.delete_current)
+        self.zone_kind.currentIndexChanged.connect(self._edit_current)
+        self.zone_lang.currentIndexChanged.connect(self._edit_current)
+        self.btn_detect.clicked.connect(self.detect_tables)
+        self.btn_save.clicked.connect(self._save_model_dialog)
+        self.btn_load.clicked.connect(lambda: self.load_model(self.models.currentText()))
+        self._refresh_models()
+        self._renumber()
+        self._refresh()
+
+    # ------------------------------------------------------------ elenco
+    def _renumber(self) -> None:
+        for n, z in enumerate(sorted(self.zones, key=lambda z: z.order)):
+            z.order = n
+
+    def ordered(self) -> list:
+        return sorted(self.zones, key=lambda z: z.order)
+
+    def _refresh(self, select: int | None = None) -> None:
+        self.list.blockSignals(True)
+        self.list.clear()
+        for n, z in enumerate(self.ordered()):
+            lang = ", ".join(languages.language_name(c) for c in z.languages) or _("lingue del documento")
+            self.list.addItem(f"{n + 1}. {zone_label(z.kind)} — {lang}")
+        self.list.blockSignals(False)
+        self.canvas.zones = self.zones
+        if select is not None and 0 <= select < self.list.count():
+            self.list.setCurrentRow(select)
+        self.canvas.update()
+
+    def add_zone(self, rect: tuple) -> None:
+        from . import layout
+        self.zones.append(layout.Zone(rect, self.kind.currentData(), [], len(self.zones)))
+        self._refresh(select=len(self.zones) - 1)
+
+    def _current_zone(self):
+        row = self.list.currentRow()
+        ordered = self.ordered()
+        return ordered[row] if 0 <= row < len(ordered) else None
+
+    def _select(self, row: int) -> None:
+        z = self._current_zone()
+        self.canvas.current = self.zones.index(z) if z is not None else -1
+        if z is not None:
+            self.zone_kind.blockSignals(True)
+            self.zone_lang.blockSignals(True)
+            self.zone_kind.setCurrentIndex(max(0, self.zone_kind.findData(z.kind)))
+            self.zone_lang.setCurrentIndex(max(0, self.zone_lang.findData(z.languages[0] if z.languages else "")))
+            self.zone_kind.blockSignals(False)
+            self.zone_lang.blockSignals(False)
+        self.canvas.update()
+
+    def _edit_current(self, *_a) -> None:
+        z = self._current_zone()
+        if z is None:
+            return
+        z.kind = self.zone_kind.currentData()
+        lang = self.zone_lang.currentData()
+        z.languages = [lang] if lang else []
+        self._refresh(select=self.list.currentRow())
+
+    def _move(self, delta: int) -> None:
+        row = self.list.currentRow()
+        ordered = self.ordered()
+        new = row + delta
+        if not (0 <= row < len(ordered) and 0 <= new < len(ordered)):
+            return
+        ordered[row].order, ordered[new].order = ordered[new].order, ordered[row].order
+        self._refresh(select=new)
+
+    def delete_current(self) -> None:
+        z = self._current_zone()
+        if z is None:
+            return
+        self.zones.remove(z)
+        self._renumber()
+        self._refresh(select=min(self.list.currentRow(), len(self.zones) - 1))
+
+    def detect_tables(self) -> None:
+        """Aggiunge una zona «tabella» per ogni tabella con bordi trovata sulla pagina."""
+        from . import layout
+        if self._detect_gray is None:
+            return
+        gray = self._detect_gray
+        h, w = gray.shape[:2]
+        for t in layout.detect_tables(gray):
+            x0, y0, x1, y1 = t.bbox
+            self.zones.append(layout.Zone((x0 / w, y0 / h, x1 / w, y1 / h), layout.TABLE, [], len(self.zones)))
+        self._refresh(select=len(self.zones) - 1)
+
+    # ------------------------------------------------------------ modelli
+    def saved_models(self) -> dict:
+        import json
+        if self.settings is None:
+            return {}
+        try:
+            data = json.loads(self.settings.value("ocr/zone_models", "") or "{}")
+        except (TypeError, ValueError):
+            data = {}
+        return data if isinstance(data, dict) else {}
+
+    def _refresh_models(self) -> None:
+        self.models.clear()
+        self.models.addItems(sorted(self.saved_models()))
+        has = self.models.count() > 0
+        self.models.setEnabled(has)
+        self.btn_load.setEnabled(has)
+
+    def save_model(self, name: str) -> None:
+        import json
+        name = name.strip()
+        if not name or self.settings is None:
+            return
+        models = self.saved_models()
+        models[name] = [z.to_dict() for z in self.ordered()]
+        self.settings.setValue("ocr/zone_models", json.dumps(models, ensure_ascii=False))
+        self._refresh_models()
+
+    def load_model(self, name: str) -> None:
+        from . import layout
+        data = self.saved_models().get(name)
+        if not data:
+            return
+        self.zones = [layout.Zone.from_dict(d) for d in data]
+        self._renumber()
+        self._refresh(select=0)
+
+    def _save_model_dialog(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, _("Salva modello di zone"), _("Nome del modello:"))
+        if ok:
+            self.save_model(name)
+
+
+def zone_models(settings) -> dict:
+    """Modelli di zone salvati: {nome: [zona come dizionario]}."""
+    import json
+    if settings is None:
+        return {}
+    try:
+        data = json.loads(settings.value("ocr/zone_models", "") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}

@@ -844,3 +844,65 @@ def test_dati_di_revisione_nel_file(window, scan_two, tmp_path, monkeypatch, kee
     view2 = window.open_path(str(out))
     after = sorted((w.text, round(r.x0)) for r, w in ctl.state(view2).placed.get(0, []) if w.low)
     assert after == (before if keep else [])
+
+
+def test_editor_zone(window, qtbot, settings, tmp_path):
+    """OCR-10: zone tracciate con il mouse, tipo, lingua, ordine, tabelle rilevate, modelli."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QImage
+    from foliant.modules.ocr import layout
+    from .test_layout import _page, _table
+    import cv2
+    img = _page(_table, dpi=100)
+    qimg = QImage(img.data, img.shape[1], img.shape[0], img.strides[0], QImage.Format.Format_RGB888).copy()
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    ed = dialogs.ZoneEditor(window, qimg, [], settings, gray)
+    ed.show()
+    qtbot.waitExposed(ed)
+    c = ed.canvas
+    ed.kind.setCurrentIndex(ed.kind.findData(layout.IGNORE))
+    qtbot.mousePress(c, Qt.MouseButton.LeftButton, pos=QPoint(20, 20))
+    qtbot.mouseMove(c, QPoint(200, 80))
+    qtbot.mouseRelease(c, Qt.MouseButton.LeftButton, pos=QPoint(200, 80))
+    assert len(ed.zones) == 1 and ed.zones[0].kind == layout.IGNORE
+    assert abs(ed.zones[0].rect[2] - 200 / c.width()) < 0.01
+    ed.zone_kind.setCurrentIndex(ed.zone_kind.findData(layout.TEXT))
+    ed.zone_lang.setCurrentIndex(ed.zone_lang.findData("eng"))
+    assert ed.zones[0].kind == layout.TEXT and ed.zones[0].languages == ["eng"]
+    ed.detect_tables()
+    assert len(ed.zones) == 2 and ed.ordered()[1].kind == layout.TABLE
+    ed.list.setCurrentRow(1)
+    ed.btn_up.click()
+    assert ed.ordered()[0].kind == layout.TABLE
+    ed.save_model("fattura")
+    ed.list.setCurrentRow(0)
+    ed.delete_current()
+    assert len(ed.zones) == 1
+    ed.load_model("fattura")
+    assert [z.kind for z in ed.ordered()] == [layout.TABLE, layout.TEXT]
+    assert "fattura" in dialogs.zone_models(settings)
+    c.grab().save(str(tmp_path / "zone.png"))
+    ed.close()
+
+
+def test_dialogo_ocr_con_zone_e_profilo(window, settings, monkeypatch, scan_two):
+    from foliant.modules.ocr import layout
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    z = layout.Zone((0.1, 0.1, 0.5, 0.2), layout.IGNORE)
+
+    def fake_exec(ed):
+        ed.zones = [z]
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(dialogs.ZoneEditor, "exec", fake_exec)
+    dlg = dialogs.OcrDialog(window, page_count=2, current_page=0, detected=[], settings=settings,
+                            page_image_cb=lambda: ctl._page_image(view))
+    dlg.edit_zones()
+    assert "1 zone" in dlg.zones_label.text() and dlg.options().zones == [z]
+    prof = dlg.profile()
+    other = dialogs.OcrDialog(window, page_count=2, current_page=0, detected=[], settings=None)
+    other.load_profile(prof)
+    assert other.options().zones[0].kind == layout.IGNORE and other.profile() == prof
+    prof["zones"] = [{"rect": [0, 0, 1, 1], "kind": "text", "languages": ["deu"]}]
+    other.load_profile(prof)
+    assert not other.ok_button.isEnabled() and "tedesco" in other.error.text()

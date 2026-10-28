@@ -761,7 +761,7 @@ class OcrController(QObject):
         dlg = OcrDialog(self.ctx.window, page_count=view.page_count, current_page=view.current_page,
                         detected=detected, settings=self.settings(),
                         mode=mode or str(self.settings().value("ocr/mode", engine.SEARCHABLE)), pages_text=text,
-                        infos=dict(st.infos))
+                        infos=dict(st.infos), page_image_cb=lambda v=view: self._page_image(v))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.settings().setValue("ocr/mode", dlg.mode())
@@ -813,6 +813,19 @@ class OcrController(QObject):
         except BaseException as e:  # gestita come nell'esecuzione in background
             return self._complete(view, opts, None, e, data, preview, new_document)
         return self._complete(view, opts, result, None, data, preview, new_document)
+
+    def _page_image(self, view):
+        """Immagine della pagina corrente per l'editor delle zone (QImage) e in grigi per il rilevamento."""
+        import numpy as np
+        from PySide6.QtGui import QImage
+        with ENGINE_LOCK:
+            page = view.document.pdf[view.current_page]
+            zoom = min(2.0, 640.0 / max(1.0, page.rect.width))
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False, annots=False)
+            image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
+            gpix = page.get_pixmap(dpi=150, colorspace=pymupdf.csGRAY, alpha=False, annots=False)
+            gray = np.frombuffer(gpix.samples, np.uint8).reshape(gpix.height, gpix.stride)[:, :gpix.width].copy()
+        return image, gray
 
     def run_background(self, view, opts: engine.OcrOptions, pages: list[int], preview: bool = True,
                        new_document: bool = False) -> "OcrJob | None":
@@ -1332,7 +1345,7 @@ class OcrController(QObject):
             return
         self.run_batch(dlg.paths(), dlg.mode.currentData(), dlg.languages.selected(), dlg.out_dir.text().strip(),
                        dlg.suffix.text(), fmt=dlg.format.currentData(), overwrite=dlg.cb_overwrite.isChecked(),
-                       skip_searchable=dlg.cb_skip.isChecked())
+                       skip_searchable=dlg.cb_skip.isChecked(), zones=dlg.selected_zones())
 
     def _save_batch_state(self, state: dict | None) -> None:
         """Stato del lotto nella configurazione utente: permette di riprenderlo dopo un'interruzione."""
@@ -1353,6 +1366,7 @@ class OcrController(QObject):
         return state if isinstance(state, dict) and state.get("files") else None
 
     def resume_batch(self) -> list:
+        from . import layout
         state = self.pending_batch()
         if state is None:
             self.ctx.info(_("Riprendi lotto"), _("Non c'è un lotto interrotto da riprendere."))
@@ -1360,11 +1374,14 @@ class OcrController(QObject):
         files = [f for f in state["files"] if os.path.exists(f)]
         return self.run_batch(files, state["mode"], state["languages"], state.get("out_dir", ""),
                               state.get("suffix", "_ocr"), state.get("fmt", "pdf"), state.get("overwrite", False),
-                              state.get("skip_searchable", True))
+                              state.get("skip_searchable", True),
+                              [layout.Zone.from_dict(z) for z in state.get("zones", [])])
 
     def run_batch(self, paths: list[str], mode: str, langs: list[str], out_dir: str = "", suffix: str = "_ocr",
-                  fmt: str = "pdf", overwrite: bool = False, skip_searchable: bool = True) -> list:
+                  fmt: str = "pdf", overwrite: bool = False, skip_searchable: bool = True,
+                  zones: list | None = None) -> list:
         from . import batch
+        zones = list(zones or [])
         files = batch.collect(paths, exclude_dir=out_dir or None)
         missing = languages.missing_languages(langs)
         if missing:
@@ -1373,7 +1390,8 @@ class OcrController(QObject):
                 return []
         items = [batch.BatchItem(p) for p in files]
         state = {"mode": mode, "languages": list(langs), "out_dir": out_dir, "suffix": suffix, "fmt": fmt,
-                 "overwrite": overwrite, "skip_searchable": skip_searchable, "files": [it.path for it in items]}
+                 "overwrite": overwrite, "skip_searchable": skip_searchable, "files": [it.path for it in items],
+                 "zones": [z.to_dict() for z in zones]}
         self._save_batch_state(state)
 
         def work(progress):
@@ -1389,7 +1407,7 @@ class OcrController(QObject):
                     def update(self, f=None, t=None):
                         progress.update((k + (f or 0)) / n, _("File {k} di {n}: {f}").format(k=k + 1, n=n, f=name))
                 Sub().update(0)
-                opts = engine.OcrOptions(languages=list(langs), mode=mode)
+                opts = engine.OcrOptions(languages=list(langs), mode=mode, zones=list(zones))
                 batch.process_file(item, opts, out_dir, suffix, fmt, overwrite, True, skip_searchable, Sub())
                 state["files"] = [it.path for it in items[k + 1:]]
                 self._save_batch_state(state)
