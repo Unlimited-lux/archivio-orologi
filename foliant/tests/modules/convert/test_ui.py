@@ -1136,3 +1136,18 @@ def test_batch_dialog_empty_placeholder_and_drop(window, sample_pdf, tmp_path):
                     Qt.KeyboardModifier.NoModifier)
     dlg.list.dropEvent(ev)
     assert dlg.files() == [sample_pdf] and dlg.ok_button.isEnabled()
+
+
+def test_export_settings_do_not_keep_document_title(window, settings, tmp_path):
+    """Riservatezza: titolo e autore EPUB del singolo documento non restano nelle impostazioni."""
+    dlg = ExportDialog(window, page_count=2, name="contratto_rossi", folder=str(tmp_path), fmt="epub",
+                       settings=settings)
+    dlg.panels["epub"].fields["title"].setText("Contratto Rossi")
+    dlg.panels["epub"].fields["author"].setText("Mario Rossi")
+    dlg.folder_edit.setText(str(tmp_path))
+    assert dlg.validate()
+    dlg.accept()
+    dlg.save_preset("Libri")
+    settings.sync()
+    dump = " ".join(str(settings.value(k)) for k in settings.allKeys())
+    assert "Rossi" not in dump
