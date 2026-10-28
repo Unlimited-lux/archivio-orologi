@@ -4,6 +4,7 @@ Categorie:
 - ``text``          testo estraibile (PDF nativo digitale)
 - ``ocr_layer``     testo invisibile già sovrapposto a una scansione
 - ``image_only``    contenuto visibile di sole immagini e < 10 caratteri estraibili
+- ``photo``         immagine a tutta pagina senza righe di testo (foto di un orologio): nessuna proposta
 - ``mixed``         testo estraibile più un'immagine estesa che contiene righe di testo
 - ``unextractable`` testo presente ma senza mappatura Unicode affidabile
 - ``empty``         pagina vuota
@@ -26,6 +27,7 @@ IMAGE_ONLY = "image_only"
 MIXED = "mixed"
 UNEXTRACTABLE = "unextractable"
 EMPTY = "empty"
+PHOTO = "photo"
 
 NEEDS_OCR = (IMAGE_ONLY, MIXED, UNEXTRACTABLE)
 
@@ -44,6 +46,7 @@ def category_label(cat: str) -> str:
         MIXED: _("mista (testo e immagini con testo)"),
         UNEXTRACTABLE: _("testo non estraibile"),
         EMPTY: _("vuota"),
+        PHOTO: _("immagine senza testo"),
     }.get(cat, cat)
 
 
@@ -71,7 +74,10 @@ def _bad_char(c: int) -> bool:
     return c == 0xFFFD or 0xE000 <= c <= 0xF8FF or (c < 0x20 and c not in (9, 10, 13))
 
 
-def classify_page(page: pymupdf.Page, check_mixed: bool = True) -> PageInfo:
+def classify_page(page: pymupdf.Page, check_mixed: bool = True, check_photo: bool = False) -> PageInfo:
+    """Classifica la pagina. Con `check_photo` una pagina di sole immagini senza caratteri è
+    ``photo`` invece di ``image_only`` (costa una resa della pagina: 30-100 ms; l'interfaccia
+    del modulo lo fa in un thread, vedi `has_characters`)."""
     index = page.number
     area = abs(page.rect) or 1.0
     visible = invisible = bad = 0
@@ -123,6 +129,8 @@ def classify_page(page: pymupdf.Page, check_mixed: bool = True) -> PageInfo:
     elif visible < MIN_CHARS:
         if coverage >= IMAGE_ONLY_COVERAGE:
             info.category = IMAGE_ONLY
+            if check_photo and not visible and not any(_has_characters(page, r) for r in big_images or all_images):
+                info.category = PHOTO
         elif coverage > 0 and check_mixed and _images_have_text(page, all_images, rects):
             info.category = IMAGE_ONLY
         else:
@@ -153,6 +161,65 @@ def _images_have_text(page: pymupdf.Page, regions: list[pymupdf.Rect], text_rect
         if text_lines_present(gray):
             return True
     return False
+
+
+def page_gray(page: pymupdf.Page, region: pymupdf.Rect | None = None, dpi: int = 100) -> np.ndarray | None:
+    """Pagina (o regione) resa in grigi per `has_characters` (va chiamata tenendo ENGINE_LOCK)."""
+    try:
+        pix = page.get_pixmap(clip=region or page.rect, dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False)
+    except Exception:
+        return None
+    return np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.stride)[:, :pix.width].copy()
+
+
+def _has_characters(page: pymupdf.Page, region: pymupdf.Rect) -> bool:
+    gray = page_gray(page, region)
+    return True if gray is None else has_characters(gray)
+
+
+def has_characters(gray: np.ndarray, min_chars: int = 12) -> bool:
+    """Vero se nell'immagine ci sono caratteri: macchie di dimensione da lettera (o parole fuse),
+    in fila con vicine di altezza simile, in orizzontale o in verticale. Distingue la foto di un
+    documento (anche piccolo, buio o ruotato) dalla foto di un oggetto, dove bordi, indici e
+    riflessi non formano file di lettere. Non tocca il motore PDF: si può chiamare da un thread."""
+    import cv2
+    if min(gray.shape) < 16:
+        return False
+    # foto buie o sbiadite: si stira il contrasto prima della soglia locale
+    # (percentili estremi: su una pagina con due righe il testo è meno dell'1% dei pixel)
+    lo, hi = np.percentile(gray, (0.05, 99.95))
+    gray = np.clip((gray.astype(np.float32) - lo) * 255.0 / max(1.0, hi - lo), 0, 255).astype(np.uint8)
+    for polarity in (cv2.THRESH_BINARY_INV, cv2.THRESH_BINARY):      # testo scuro o chiaro
+        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, polarity, 31, 12)
+        n, _l, stats, _c = cv2.connectedComponentsWithStats(bw, 8)
+        st = stats[1:]
+        for horizontal in (True, False):                              # righe orizzontali o verticali
+            x, y, w, h = (st[:, 0], st[:, 1], st[:, 2], st[:, 3]) if horizontal else \
+                (st[:, 1], st[:, 0], st[:, 3], st[:, 2])
+            # lettere o parole intere (le lettere vicine si fondono a bassa risoluzione)
+            keep = (h >= 5) & (h <= 60) & (w >= 1) & (w <= 10 * h) & (st[:, 4] >= 0.15 * w * h)
+            if int(keep.sum()) < min_chars:
+                continue
+            if _in_rows(x[keep], y[keep], w[keep], h[keep]) >= min_chars:
+                return True
+    return False
+
+
+def _in_rows(x, y, w, h) -> int:
+    """Quante macchie hanno, a destra e a breve distanza, una vicina della stessa riga e altezza."""
+    order = np.argsort(x)
+    x, y, w, h = x[order], y[order], w[order], h[order]
+    cy = y + h / 2.0
+    count = 0
+    for k in range(len(x)):
+        end = x[k] + w[k] + 1.5 * h[k]
+        for j in range(k + 1, len(x)):
+            if x[j] > end:
+                break
+            if abs(cy[j] - cy[k]) < 0.35 * h[k] and 0.6 < h[j] / h[k] < 1.6:
+                count += 1
+                break
+    return count
 
 
 def classify_document(pdf: pymupdf.Document, pages: list[int] | None = None) -> list[PageInfo]:

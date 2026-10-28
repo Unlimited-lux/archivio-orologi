@@ -557,3 +557,30 @@ def test_resa_in_processo_separato_senza_lock(tmp_path):
         th.join()
     assert len(res.recognized) == 2 and "compravendita" in res.pages[1].text
     assert max(waits) < 0.06, max(waits)
+
+
+@pytest.mark.parametrize("skew", [0.0, 1.2])
+def test_ricercabile_leggibile_da_poppler(tmp_path, skew):
+    """D4: con un'inclinazione lieve il testo invisibile si scrive diritto parola per parola, così
+    poppler (Evince, Okular, pdftotext) non spezza né riordina le parole; spazi tra parole emessi."""
+    import shutil
+    import subprocess
+    if not shutil.which("pdftotext"):
+        pytest.skip("pdftotext non disponibile")
+    righe = ["Orologio: Rolex Datejust 41 referenza 126334 in acciaio,",
+             "la garanzia copre i difetti di fabbricazione per due anni."]
+    data = open(image_pdf(tmp_path / "s.pdf", [scan_image(lines=righe, skew=skew)], dpi=300), "rb").read()
+    out = engine.ocr_pdf_bytes(data, ["ita"], "searchable")
+    (tmp_path / "o.pdf").write_bytes(out)
+    text = subprocess.run(["pdftotext", "-layout", str(tmp_path / "o.pdf"), "-"], capture_output=True,
+                          text=True, check=True).stdout
+    words = text.split()
+    assert "referenza" in words and "126334" in words, text
+    assert "copre" in words and "i" in words, text
+    with pymupdf.open(stream=out) as d:
+        hits = d[0].search_for("referenza")
+        assert len(hits) == 1
+        if skew == 0:
+            expected, _l = scan_words(lines=righe)
+            box = next(e[:4] for e in expected if e[4] == "referenza")
+            assert iou(hits[0], box) > 0.5

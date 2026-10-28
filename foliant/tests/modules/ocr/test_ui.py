@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 import pymupdf
 import pytest
@@ -1206,3 +1207,48 @@ def test_pannello_parole_incerte_pulsanti_non_tagliati(window, qtbot, scan_two, 
         window.ctx.ocr.actions["review"].setChecked(False)
         if old is not None:
             i18n.set_language(old)
+
+
+def test_analisi_all_apertura_limitata_e_a_passi_brevi(window, qtbot, tmp_path, monkeypatch):
+    """NFR-07: aprendo un PDF di 500 pagine la classificazione nel thread dell'interfaccia si ferma
+    alle prime pagine, a passi brevi; il resto si analizza solo su richiesta (dialogo, clic)."""
+    doc = pymupdf.open()
+    for k in range(500):
+        doc.new_page().insert_text((72, 72), f"Pagina {k + 1} di un catalogo di orologi")
+    path = tmp_path / "lungo.pdf"
+    doc.save(path)
+    doc.close()
+    ctl = ocr_controller()
+    steps = []
+    original = ctl._analysis_step
+
+    def timed(view):
+        t0 = time.perf_counter()
+        original(view)
+        steps.append(time.perf_counter() - t0)
+    monkeypatch.setattr(ctl, "_analysis_step", timed)
+    view = window.open_path(str(path))
+    qtbot.waitUntil(lambda: not ctl.state(view).order, timeout=5000)
+    st = ctl.state(view)
+    assert len(st.infos) <= ui.ANALYSIS_PAGES and st.deferred
+    assert steps and max(steps) < 0.02, max(steps)
+    assert ctl.page_info(view, 400).category == detect.TEXT        # su richiesta
+    ctl.complete_analysis(view)
+    assert len(st.infos) == 500 and st.complete
+
+
+def test_foto_senza_testo_nessuna_proposta(window, qtbot, tmp_path):
+    """La foto di un orologio (pagina di sola immagine senza caratteri) non fa proporre l'OCR; il
+    controllo avviene in un thread, la scansione di un documento resta proposta."""
+    from .test_detect_photo import watch_photo
+    ctl = ocr_controller()
+    photo = window.open_path(image_pdf(str(tmp_path / "foto.pdf"), [watch_photo()], dpi=150))
+    wait_analysis(qtbot, photo)
+    qtbot.waitUntil(lambda: ctl.state(photo).photo_job is None and bool(ctl.state(photo).photo_checked), timeout=5000)
+    st = ctl.state(photo)
+    assert st.infos[0].category == detect.IMAGE_ONLY and 0 in st.photos
+    assert st.detected == []
+    assert st.bar is None or not st.bar.isVisible()
+    scan = window.open_path(image_pdf(str(tmp_path / "scan.pdf"), [scan_image()], dpi=300))
+    qtbot.waitUntil(lambda: ctl.state(scan).bar is not None and ctl.state(scan).bar.isVisible(), timeout=5000)
+    assert ctl.state(scan).detected == [0]

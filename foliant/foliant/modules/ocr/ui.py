@@ -24,7 +24,8 @@ from . import detect, engine, languages
 from .dialogs import BatchDialog, LanguagesDialog, OcrDialog, ReportDialog, ReviewDialog, TextDialog
 from .tess import OcrError
 
-ANALYSIS_BUDGET_MS = 25      # tempo massimo di analisi per passo nel thread dell'interfaccia
+ANALYSIS_BUDGET_MS = 10      # tempo massimo di analisi per passo nel thread dell'interfaccia
+ANALYSIS_PAGES = 20          # pagine analizzate all'apertura per decidere se proporre l'OCR
 
 
 # =================================================================== stato per vista
@@ -32,6 +33,7 @@ ANALYSIS_BUDGET_MS = 25      # tempo massimo di analisi per passo nel thread del
 class ViewState:
     infos: dict[int, detect.PageInfo] = field(default_factory=dict)
     order: list[int] = field(default_factory=list)
+    deferred: list[int] = field(default_factory=list)   # oltre ANALYSIS_PAGES: analizzate su richiesta
     version: int = -1
     dismissed: bool = False             # «Non ora»: per questa sessione
     never: bool = False                 # «Non chiedere più in questa sessione»
@@ -39,14 +41,17 @@ class ViewState:
     timer: QTimer | None = None
     placed: dict[int, list] = field(default_factory=dict)   # pagina → [(Rect, Word)] dopo l'OCR
     started: float = 0.0
+    photos: set = field(default_factory=set)        # pagine di sole immagini senza testo (foto)
+    photo_checked: set = field(default_factory=set)
+    photo_job: "object | None" = None               # controllo delle foto in corso (thread)
 
     @property
     def detected(self) -> list[int]:
-        return sorted(i for i, inf in self.infos.items() if inf.needs_ocr)
+        return sorted(i for i, inf in self.infos.items() if inf.needs_ocr and i not in self.photos)
 
     @property
     def complete(self) -> bool:
-        return not self.order
+        return not self.order and not self.deferred
 
 
 # =================================================================== barra proposta
@@ -606,6 +611,8 @@ class OcrController(QObject):
             job.bar = None                 # distrutta insieme alla vista
             self._unlock(job)
         st = self.states.pop(view, None)
+        if st is not None and st.photo_job is not None:
+            st.photo_job["stop"] = True
         if st is not None and st.timer is not None:
             st.timer.stop()
         try:
@@ -632,13 +639,22 @@ class OcrController(QObject):
     def start_analysis(self, view, quiet: bool = False) -> None:
         st = self.state(view)
         st.infos.clear()
+        st.photos.clear()
+        st.photo_checked.clear()
+        if st.photo_job is not None:
+            st.photo_job["stop"] = True
+            st.photo_job = None
         visible = []
         try:
             visible = view.visible_pages()
         except Exception:
             pass
         rest = [i for i in range(view.page_count) if i not in visible]
-        st.order = list(visible) + rest
+        # all'apertura bastano le prime pagine per decidere se proporre l'OCR: un PDF di 500 pagine
+        # non tiene occupato il thread dell'interfaccia mentre si scorre o si cerca (NFR-07)
+        order = list(visible) + rest
+        st.order = order[:ANALYSIS_PAGES]
+        st.deferred = order[ANALYSIS_PAGES:]
         st.version = view.document.version
         st.started = time.monotonic()
         if quiet and st.bar is not None and st.bar.page is None:
@@ -676,10 +692,94 @@ class OcrController(QObject):
                     pass
         if not st.order:
             st.timer.stop()
+            self._check_photos(view)
         self._update_bar(view)
+
+    def complete_analysis(self, view) -> None:
+        """Completa l'analisi di tutte le pagine (azione dell'utente: impostazioni, dettagli)."""
+        st = self.state(view)
+        if st.complete:
+            return
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            for i in st.order + st.deferred:
+                if i < pdf.page_count and i not in st.infos:
+                    try:
+                        st.infos[i] = detect.classify_page(pdf[i])
+                    except Exception:
+                        pass
+            st.order.clear()
+            st.deferred.clear()
+
+    def page_info(self, view, index: int):
+        """Classificazione di una pagina, calcolata al momento se l'analisi non ci è ancora arrivata."""
+        st = self.state(view)
+        inf = st.infos.get(index)
+        if inf is None and 0 <= index < view.page_count:
+            with try_engine() as ok:
+                if ok:
+                    try:
+                        page = view.document.pdf[index]
+                        inf = st.infos[index] = detect.classify_page(page)
+                    except Exception:
+                        inf = None
+        return inf
+
+    def _check_photos(self, view) -> None:
+        """Pagine di sole immagini: in un thread si guarda se contengono caratteri. Le foto senza
+        testo (un orologio, una scatola) non fanno proporre l'OCR. La resa della pagina tiene
+        ENGINE_LOCK per poche decine di ms; l'analisi dell'immagine avviene senza blocco."""
+        st = self.state(view)
+        todo = [i for i, inf in sorted(st.infos.items())
+                if inf.category == detect.IMAGE_ONLY and i not in st.photo_checked]
+        if not todo or st.photo_job is not None:
+            return
+        import threading
+        doc = view.document
+        version = doc.version
+        job = {"done": False, "photos": set(), "checked": set(), "stop": False}
+
+        def work():
+            try:
+                for i in todo:
+                    if job["stop"]:
+                        break
+                    with ENGINE_LOCK:
+                        if doc.closed or doc.version != version or i >= doc.pdf.page_count:
+                            break
+                        gray = detect.page_gray(doc.pdf[i])
+                    if gray is not None and not detect.has_characters(gray):
+                        job["photos"].add(i)
+                    job["checked"].add(i)
+            except Exception:
+                pass
+            job["done"] = True
+        st.photo_job = job
+        timer = QTimer(self)
+        timer.setInterval(30)
+
+        def poll(v=weakref.ref(view)):
+            if not job["done"]:
+                return
+            timer.stop()
+            timer.deleteLater()
+            view_ = v()
+            cur = self.states.get(view_) if view_ is not None else None
+            if cur is not st or st.photo_job is not job:
+                return
+            st.photo_job = None
+            if view_.document.version == version:
+                st.photos |= job["photos"]
+                st.photo_checked |= job["checked"]
+            self._update_bar(view_)
+        timer.timeout.connect(poll)
+        threading.Thread(target=work, name="ocr-photo-check", daemon=True).start()
+        timer.start()
 
     def _update_bar(self, view) -> None:
         st = self.state(view)
+        if st.photo_job is not None:
+            return          # la proposta aspetta il controllo delle foto
         found = st.detected
         if not found or st.dismissed or not self.detection_enabled():
             if st.bar is not None and st.bar.page is None and not found:
@@ -710,6 +810,7 @@ class OcrController(QObject):
             st.bar.hide()
 
     def show_details(self, view) -> None:
+        self.complete_analysis(view)
         st = self.state(view)
         dlg = QDialog(self.ctx.window)
         dlg.setWindowTitle(_("Pagine da riconoscere"))
@@ -758,9 +859,10 @@ class OcrController(QObject):
                     editing = self.ctx.current_mode() == "modifica" or "edit" in tool_id or "modif" in tool_id
                     if tool_id == "select-text" or editing:
                         hit = view.view_to_page(ev.position())
-                        inf = st.infos.get(hit[0]) if hit is not None else None
+                        inf = self.page_info(view, hit[0]) if hit is not None else None
                         if inf is not None:
-                            image_only = inf.category == detect.IMAGE_ONLY and not view.words(hit[0])
+                            image_only = (inf.category == detect.IMAGE_ONLY and hit[0] not in st.photos
+                                          and not view.words(hit[0]))
                             # testo solo invisibile (livello OCR): non si modifica, si propone di convertirlo
                             layer = inf.category == detect.OCR_LAYER and editing
                             if image_only or layer:
@@ -779,14 +881,7 @@ class OcrController(QObject):
         if view is None:
             return
         st = self.state(view)
-        if not st.complete:
-            # completa l'analisi per proporre le pagine senza testo
-            with ENGINE_LOCK:
-                pdf = view.document.pdf
-                for i in list(st.order):
-                    if i < pdf.page_count:
-                        st.infos[i] = detect.classify_page(pdf[i])
-                st.order.clear()
+        self.complete_analysis(view)
         detected = st.detected
         text = engine.format_pages(pages) if pages and pages != detected else None
         dlg = OcrDialog(self.ctx.window, page_count=view.page_count, current_page=view.current_page,

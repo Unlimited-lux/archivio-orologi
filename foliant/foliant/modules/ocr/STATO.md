@@ -84,3 +84,22 @@ Miglioramenti:
    Foto in verticale: se l'OSD sulla foto intera è incerto, si riprova sul documento ritagliato in
    prospettiva; le proposte poco sicure si accettano solo se la pagina ruotata si legge meglio.
 7. Firme e timbri a colori sopra il testo: l'inchiostro colorato diventa carta, il nero sotto resta.
+
+## Voci aperte dopo la consegna del 28/10 (chiuse sul ramo del modulo, una per commit)
+
+- Ctrl+N: un controller per finestra; chiusa la seconda, la prima non usa widget distrutti
+  (`test_ui.py::test_due_finestre_chiusa_la_seconda_la_prima_funziona`).
+- C10: pulsanti di «Parole incerte» su due righe, non tagliati a 260 px in italiano e inglese
+  (`test_pannello_parole_incerte_pulsanti_non_tagliati`).
+- D4: sotto 3° d'inclinazione il testo invisibile è scritto diritto parola per parola; spazio tra
+  parole separato; riquadri gonfiati delle parole brevi ristretti. pdftotext legge «referenza» e
+  «copre i» (`test_criteri.py::test_ricercabile_leggibile_da_poppler`). Con 1,2° poppler può ancora
+  andare a capo a metà di una riga lunga (le parole restano intere e ricercabili).
+- NFR-07: all'apertura si classificano solo le prime 20 pagine, a passi da 10 ms; le altre su
+  richiesta (dialogo, dettagli, clic) (`test_analisi_all_apertura_limitata_e_a_passi_brevi`).
+- Foto senza testo: nuova categoria `photo` («immagine senza testo») con `classify_page(...,
+  check_photo=True)` e `has_characters` (file di lettere, anche ruotate o in foto buie). Nel modulo
+  il controllo gira in un thread e la proposta aspetta il risultato; il motore e l'OCR in blocco
+  continuano a riconoscere queste pagine se l'utente lo chiede. Da fare fuori dal modulo:
+  `text_edit/controller.py:323` può passare `check_photo=True` per non proporre l'OCR al clic su
+  una foto (costa una resa della pagina, 30-100 ms, solo al clic).
