@@ -153,6 +153,27 @@ def test_search_refreshes_after_modification(viewer_window, tmp_path):
     assert len(ctl.hits) == 1
 
 
+def test_many_changes_restart_search_once(viewer_window, tmp_path, monkeypatch):
+    """Prestazioni: più modifiche nello stesso giro di eventi → una sola nuova ricerca."""
+    from PySide6.QtWidgets import QApplication
+    view = viewer_window.open_path(_pdf(tmp_path, [["Rolex"], ["Rolex"]]))
+    ctl = _ctl(viewer_window)
+    ctl.search("rolex")
+    ctl.finish()
+    calls = []
+    real = ctl.restart
+    monkeypatch.setattr(ctl, "restart", lambda: calls.append(1) or real())
+    for i in range(3):
+        with view.document.change("Testo") as pdf:
+            pdf[0].insert_text((72, 300 + 10 * i), "x")
+    assert calls == []
+    QApplication.processEvents()
+    assert len(calls) == 1
+    ctl.finish()
+    assert len(ctl.hits) == 2
+    view.document._saved_state = view.document._state
+
+
 def test_incremental_search_keeps_ui_responsive(viewer_window, tmp_path, qtbot):
     path = tmp_path / "grande.pdf"
     doc = pymupdf.open()
