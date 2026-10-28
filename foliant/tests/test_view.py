@@ -164,3 +164,15 @@ def test_crop_larger_than_mediabox_mapping(qtbot, tmp_path):
                 dark += 1
     assert dark > 10, (r, dark)
     assert v.word_at(0, v.view_to_page(centre)[1])[4] == "ALFA"
+
+
+def test_fit_width_has_no_horizontal_scroll(qtbot, sample_pdf):
+    from foliant.ui.document_view import FIT_WIDTH
+    v = DocumentView(Document.open(sample_pdf))
+    qtbot.addWidget(v)
+    for w in (640, 777, 858, 1001, 1333):
+        v.resize(w, 700)
+        v.show()
+        qtbot.waitExposed(v)
+        v.set_fit(FIT_WIDTH)
+        assert v.horizontalScrollBar().maximum() == 0, w

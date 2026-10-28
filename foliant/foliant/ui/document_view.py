@@ -286,7 +286,8 @@ class DocumentView(QAbstractScrollArea):
         self._content = QSizeF(content_w, total_h)
         vw, vh = self.viewport().width(), self.viewport().height()
         hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
-        hbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(content_w - vw)))))
+        # tolleranza di 1 px: con «adatta larghezza» gli arrotondamenti non devono creare una barra inutile
+        hbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(content_w - vw - 1.0)))))
         hbar.setPageStep(vw)
         hbar.setSingleStep(24)
         vbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(total_h - vh)))))
