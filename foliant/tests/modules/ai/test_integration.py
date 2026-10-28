@@ -458,3 +458,29 @@ def test_generic_template_pages_placeholder(qtbot, window, ready, fake, text_pdf
     ready.panel.run_template(t, {"parte": "il venditore"}, "pages", "2-4")
     wait_done(qtbot, ready.panel)
     assert "Elenca le scadenze in pagine 2–4 per il venditore" in fake.requests[0].system
+
+
+def test_math_steps_numbered_with_result(qtbot, window, ready, fake):
+    from foliant.modules.ai.ui import GeneralChatDialog
+    dlg = GeneralChatDialog(window.ctx, ready, window)
+    fake.responses = ["- Scrivo l'equazione\n- Sottraggo 3\n- Divido per 2\n- Controllo\nRisultato: x = 4"]
+    task = next(t for t in tasks_library.BUILTIN if t.id == "math")
+    dlg.panel.run_template(task, {}, "none")
+    wait_done(qtbot, dlg.panel)
+    text = dlg.panel.conversation().messages[-1].text
+    assert [line.split(".")[0] for line in text.splitlines()[:4]] == ["1", "2", "3", "4"]
+    assert "**Risultato:** x = 4" in text
+    assert "Risultato:" in fake.requests[0].system
+
+
+def test_technical_summary_marks_unverified_numbers(qtbot, window, ready, fake, text_pdf):
+    texts = ["Introduzione"] * 6 + ["Coppia di serraggio 25 Nm per le viti"]
+    window.open_path(text_pdf(7, texts=texts))
+    fake.responses = ["| Parametro | Valore |\n|---|---|\n| Coppia | 25 Nm [p. 7] |\n| Pressione | 40 bar |"]
+    task = next(t for t in tasks_library.BUILTIN if t.id == "techdoc")
+    ready.panel.run_template(task, {}, "document")
+    wait_done(qtbot, ready.panel)
+    text = ready.panel.conversation().messages[-1].text
+    assert "25 Nm [p. 7]" in text and "25 Nm (non verificato)" not in text
+    assert "40 bar (non verificato)" in text
+    assert ready.panel.conversation().messages[-1].refs[0]["page"] == 6

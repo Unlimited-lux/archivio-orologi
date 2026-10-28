@@ -1017,4 +1017,9 @@ EN: dict[str, str] = {
     'Estrazione da {f}…': 'Extracting from {f}…',
     'Nessun dato trovato.': 'No data found.',
     'Fatture da più file': 'Invoices from several files',
+    'Risultato': 'Result',
+    'Tutti i passaggi numerati e il risultato finale evidenziato.': 'All steps numbered and the final result highlighted.',
+    'Spiegazione passo per passo, non il solo risultato.': 'Step-by-step explanation, not just the result.',
+    'Problemi di matematica': 'Math problems',
+    'Aiuto per i compiti': 'Homework help',
 }
