@@ -248,7 +248,14 @@ def recognize(gray: np.ndarray, languages: list[str], dpi: int = 300, psm: int =
             msg = out.strip().splitlines()[-1] if out.strip() else ""
             raise OcrError(_("Il riconoscimento non è riuscito: {m}").format(m=msg or code))
         with open(path, encoding="utf-8", errors="replace") as f:
-            return split_columns(drop_noise(parse_hocr(f.read())))
+            lines = drop_noise(parse_hocr(f.read()))
+            # più canali (tabelle): si ripete finché non ci sono più righe da dividere
+            for _i in range(8):
+                before = len(lines)
+                lines = split_columns(lines)
+                if len(lines) == before:
+                    break
+            return lines
 
 
 def drop_noise(lines: list[Line], min_conf: float = 70.0) -> list[Line]:
