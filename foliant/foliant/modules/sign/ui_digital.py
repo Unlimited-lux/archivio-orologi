@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from foliant import i18n
 from foliant.api import _, theme
 
 from . import graphic as g
@@ -113,10 +114,11 @@ class DigitalSignDialog(QDialog):
             show_row.addWidget(cb)
         self.date_combo = QComboBox()
         for key in digital.DATE_FORMATS:
-            self.date_combo.addItem(key, key)
+            self.date_combo.addItem(_(key), key)
         self.lang_combo = QComboBox()
         self.lang_combo.addItem("Italiano", "it")
         self.lang_combo.addItem("English", "en")
+        self.lang_combo.setCurrentIndex(max(0, self.lang_combo.findData(i18n.language())))
         self.preview = AppearancePreview(self)
         self.save_profile = QPushButton(_("Salva come aspetto…"))
         for p in store.AppearanceProfiles().list():
@@ -525,7 +527,7 @@ class FieldDialog(QDialog):
             self.digest.addItem(alg.upper().replace("SHA", "SHA-"), [alg])
         form.addRow(_("Algoritmo di hash richiesto:"), self.digest)
         self.pages = QLineEdit()
-        self.pages.setPlaceholderText(_("solo questa pagina; es. «tutte» o «1-3,7»"))
+        self.pages.setPlaceholderText(_("solo questa pagina; es. «tutte», «pari» o «1-3,7»"))
         form.addRow(_("Duplica sulle pagine:"), self.pages)
         self.lock_action = QComboBox()
         for key, label in [(None, _("Nessun campo")), ("All", _("Tutti i campi")),
@@ -1146,7 +1148,9 @@ TRANSLATIONS_EN = {
     "motivi separati da punto e virgola (facoltativo)": "reasons separated by semicolons (optional)",
     "Motivi ammessi:": "Allowed reasons:", "Algoritmo di hash richiesto:": "Required hash algorithm:", "Nessuno (firma di approvazione)": "None (approval signature)",
     "Certificazione richiesta:": "Required certification:", "Duplica sulle pagine:": "Duplicate on pages:",
-    "solo questa pagina; es. «tutte» o «1-3,7»": "this page only; e.g. “tutte” or “1-3,7”", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
+    "solo questa pagina; es. «tutte», «pari» o «1-3,7»": "this page only; e.g. “all”, “even” or “1-3,7”",
+    "gg/mm/aaaa hh:mm:ss": "dd/mm/yyyy hh:mm:ss", "gg/mm/aaaa hh:mm": "dd/mm/yyyy hh:mm",
+    "aaaa-mm-gg hh:mm:ss": "yyyy-mm-dd hh:mm:ss", "gg/mm/aaaa": "dd/mm/yyyy", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
     "Emittente ammesso:": "Allowed issuer:", "Certificato dell'emittente ammesso": "Certificate of the allowed issuer",
     "Certificato non leggibile.": "Unreadable certificate.",
     "Questi campi del modulo non potranno più essere modificati senza invalidare la firma.":

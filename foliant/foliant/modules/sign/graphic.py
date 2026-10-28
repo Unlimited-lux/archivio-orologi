@@ -1118,7 +1118,7 @@ def parse_page_range(text: str, count: int, current: int | None = None) -> list[
         return [i for i in range(count) if (i + 1) % 2 == 0]
     if t in ("dispari", "odd"):
         return [i for i in range(count) if (i + 1) % 2 == 1]
-    if t in ("tutte tranne la corrente", "altre"):
+    if t in ("tutte tranne la corrente", "altre", "all but current", "others"):
         return [i for i in range(count) if i != current]
     pages: set[int] = set()
     for part in t.replace(";", ",").split(","):
