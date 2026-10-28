@@ -1303,6 +1303,34 @@ class OcrController(QObject):
                        dlg.suffix.text(), fmt=dlg.format.currentData(), overwrite=dlg.cb_overwrite.isChecked(),
                        skip_searchable=dlg.cb_skip.isChecked())
 
+    def _save_batch_state(self, state: dict | None) -> None:
+        """Stato del lotto nella configurazione utente: permette di riprenderlo dopo un'interruzione."""
+        import json
+        if state is None or not state.get("files"):
+            self.settings().remove("ocr/batch_pending")
+        else:
+            self.settings().setValue("ocr/batch_pending", json.dumps(state))
+        self.settings().sync()
+
+    def pending_batch(self) -> dict | None:
+        import json
+        raw = self.settings().value("ocr/batch_pending", "")
+        try:
+            state = json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            return None
+        return state if isinstance(state, dict) and state.get("files") else None
+
+    def resume_batch(self) -> list:
+        state = self.pending_batch()
+        if state is None:
+            self.ctx.info(_("Riprendi lotto"), _("Non c'è un lotto interrotto da riprendere."))
+            return []
+        files = [f for f in state["files"] if os.path.exists(f)]
+        return self.run_batch(files, state["mode"], state["languages"], state.get("out_dir", ""),
+                              state.get("suffix", "_ocr"), state.get("fmt", "pdf"), state.get("overwrite", False),
+                              state.get("skip_searchable", True))
+
     def run_batch(self, paths: list[str], mode: str, langs: list[str], out_dir: str = "", suffix: str = "_ocr",
                   fmt: str = "pdf", overwrite: bool = False, skip_searchable: bool = True) -> list:
         from . import batch
@@ -1313,6 +1341,9 @@ class OcrController(QObject):
             if not langs:
                 return []
         items = [batch.BatchItem(p) for p in files]
+        state = {"mode": mode, "languages": list(langs), "out_dir": out_dir, "suffix": suffix, "fmt": fmt,
+                 "overwrite": overwrite, "skip_searchable": skip_searchable, "files": [it.path for it in items]}
+        self._save_batch_state(state)
 
         def work(progress):
             n = len(items)
@@ -1329,12 +1360,18 @@ class OcrController(QObject):
                 Sub().update(0)
                 opts = engine.OcrOptions(languages=list(langs), mode=mode)
                 batch.process_file(item, opts, out_dir, suffix, fmt, overwrite, True, skip_searchable, Sub())
+                state["files"] = [it.path for it in items[k + 1:]]
+                self._save_batch_state(state)
             progress.update(1.0)
             return items
         try:
             self.ctx.run_task(_("OCR in blocco…"), work)
+            self._save_batch_state(None)
         except OperationCancelled:
-            self.ctx.status(_("OCR in blocco annullato: i file completati restano, nessun file parziale."))
+            self.ctx.status(_("OCR in blocco interrotto: i file completati restano, nessun file parziale. "
+                              "«Riprendi lotto» elabora i file rimasti."))
+        if "resume" in getattr(self, "actions", {}):
+            self.actions["resume"].setEnabled(self.pending_batch() is not None)
         done = [it for it in items if it.status]
         self._report = ReportDialog(self.ctx.window, _("OCR in blocco: risultato"), done,
                                     save_path_cb=self.ctx.ask_save_path)

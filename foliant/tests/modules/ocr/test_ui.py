@@ -790,3 +790,34 @@ def test_menu_contestuale_riconosci_testo_nell_immagine(window, tmp_path, monkey
     pe.point = pymupdf.Point(300, 400)
     ctl.menu_provider(view, pe, menu2)
     assert not menu2.actions()
+
+
+def test_riprendi_lotto_interrotto(window, tmp_path, monkeypatch):
+    """OCR-15: un lotto interrotto si riprende elaborando solo i file non completati."""
+    from foliant.api import OperationCancelled
+    from foliant.modules.ocr import batch
+    ctl = ocr_controller()
+    monkeypatch.setattr(dialogs.ReportDialog, "open", lambda d: None)
+    src = tmp_path / "lotto"
+    src.mkdir()
+    for n in range(3):
+        image_pdf(src / f"s{n}.pdf", [scan_image(lines=[f"Documento numero {n} del lotto"], dpi=120)], dpi=120)
+    real = batch.process_file
+    calls = []
+
+    def interrupt(item, *a, **k):
+        calls.append(os.path.basename(item.path))
+        if len(calls) == 2:
+            raise OperationCancelled()
+        return real(item, *a, **k)
+    monkeypatch.setattr(batch, "process_file", interrupt)
+    ctl.run_batch([str(src)], engine.SEARCHABLE, ["ita"])
+    assert (src / "s0_ocr.pdf").exists() and not (src / "s1_ocr.pdf").exists()
+    pending = ctl.pending_batch()
+    assert pending and [os.path.basename(f) for f in pending["files"]] == ["s1.pdf", "s2.pdf"]
+    assert ctl.actions["resume"].isEnabled()
+    monkeypatch.setattr(batch, "process_file", real)
+    items = ctl.resume_batch()
+    assert [os.path.basename(i.path) for i in items] == ["s1.pdf", "s2.pdf"]
+    assert (src / "s1_ocr.pdf").exists() and (src / "s2_ocr.pdf").exists() and not (src / "s0_ocr (2).pdf").exists()
+    assert ctl.pending_batch() is None and not ctl.actions["resume"].isEnabled()

@@ -341,4 +341,8 @@ EN = {
     'Documento modificato': 'Document modified',
     'Durante il riconoscimento sono cambiate le pagine {p}. Applicare il testo riconosciuto solo alle altre pagine?': 'Pages {p} changed during recognition. Apply the recognized text only to the other pages?',
     "Riconosci testo nell'immagine": 'Recognize text in the image',
+    'Riprendi lotto': 'Resume batch',
+    "Non c'è un lotto interrotto da riprendere.": 'There is no interrupted batch to resume.',
+    'OCR in blocco interrotto: i file completati restano, nessun file parziale. «Riprendi lotto» elabora i file rimasti.': 'Batch OCR interrupted: completed files are kept, no partial files. "Resume batch" processes the remaining files.',
+    'Elabora i file rimasti di un OCR in blocco interrotto': 'Process the remaining files of an interrupted batch OCR',
 }
