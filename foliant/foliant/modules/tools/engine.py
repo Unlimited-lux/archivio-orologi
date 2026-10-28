@@ -1216,6 +1216,10 @@ def merge_pdfs(parts: list[tuple[str, bytes]], bookmarks: bool = True, blank_aft
                         out.insert_pdf(src)
                     if bookmarks:
                         toc.append([1, title, start + 1])
+                        # segnalibri originali del file, annidati sotto il suo
+                        for level, sub, pno, *_rest in src.get_toc(simple=True):
+                            if 1 <= pno <= src.page_count:
+                                toc.append([level + 1, sub, start + pno])
                     if blank_after_odd and src.page_count % 2 == 1:
                         ref = out[out.page_count - 1].rect
                         out.new_page(width=ref.width, height=ref.height)

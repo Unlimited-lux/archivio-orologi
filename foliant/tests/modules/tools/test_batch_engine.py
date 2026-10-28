@@ -949,3 +949,17 @@ def test_bates_white_box_on_scan(tmp_path, rot):
     a = np.frombuffer(pix.samples, np.uint8)
     assert (a > 240).mean() > 0.5        # sfondo bianco attorno alle cifre
     assert last == 1
+
+
+def test_merge_keeps_original_bookmarks_nested(tmp_path):
+    a = pymupdf.open()
+    for i in range(3):
+        a.new_page().insert_text((72, 100), f"articolo {i + 1}", fontsize=12)
+    a.set_toc([[1, "Premesse", 1], [1, "Clausole", 2], [2, "Pagamento", 3]])
+    a.save(str(tmp_path / "contratto.pdf"))
+    build_pdf(tmp_path / "allegato.pdf", [["allegato"]])
+    items = [be.analyze_file(str(tmp_path / n)) for n in ("contratto.pdf", "allegato.pdf")]
+    be.run_job(None, items, be.JobSettings(steps=[be.Step("merge")], destination=str(tmp_path / "out")))
+    toc = pymupdf.open(str(tmp_path / "out" / "Unione.pdf")).get_toc()
+    assert toc == [[1, "contratto", 1], [2, "Premesse", 1], [2, "Clausole", 2], [3, "Pagamento", 3],
+                   [1, "allegato", 4]]
