@@ -733,3 +733,27 @@ EN.update({
         "The OCR module did not return a document: using basic recognition.",
     "OCR non riuscito ({e}): uso il riconoscimento di base.": "OCR failed ({e}): using basic recognition.",
 })
+
+EN.update({"Pagine scansionate: il layout «Testo scorrevole» ricostruisce meglio paragrafi e tabelle.":
+           "Scanned pages: the “Reflowable text” layout rebuilds paragraphs and tables better."})
+
+# Portfolio (CNV-34)
+EN.update({
+    "Crea portfolio": "Create portfolio",
+    "Crea portfolio…": "Create portfolio…",
+    "Creazione del portfolio…": "Creating the portfolio…",
+    "Data di modifica": "Modified",
+    "Descrizione": "Description",
+    "Inserimento dei file…": "Adding the files…",
+    "Lettura di «{n}»": "Reading “{n}”",
+    "Nessun file da inserire nel portfolio.": "No files to add to the portfolio.",
+    "Nessuno dei file scelti è leggibile.": "None of the chosen files can be read.",
+    "Nome": "Name",
+    "Portfolio": "Portfolio",
+    "Questo PDF è un portfolio: contiene i file seguenti come allegati.": "This PDF is a portfolio: it contains the following files as attachments.",
+    "Scegli i file del portfolio": "Choose the portfolio files",
+    "Titolo del portfolio:": "Portfolio title:",
+    "«{n}» non leggibile, escluso ({e}).": "“{n}” cannot be read, skipped ({e}).",
+    "«{n}» supera 100 MB: il portfolio sarà molto grande.": "“{n}” exceeds 100 MB: the portfolio will be very large.",
+    "«{n}» è protetto: per aprirlo servirà la sua password.": "“{n}” is protected: its password will be needed to open it.",
+})
