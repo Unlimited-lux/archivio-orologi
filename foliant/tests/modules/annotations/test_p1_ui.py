@@ -985,3 +985,38 @@ def test_ann07_paste_into_other_document(comments, tmp_path):
     assert "VENDUTO" in doc[1].get_text()
     st, = annots(doc, 1, "Stamp")
     assert key_of(doc, st.xref, "P")[1] == f"{doc[1].xref} 0 R"
+
+
+def test_ann26_stamp_from_pdf_page_is_vector(comments, tmp_path, monkeypatch):
+    """ANN-26: timbro creato da una pagina PDF vettoriale: aspetto con tracciati, nessuna immagine."""
+    window, view, module = comments
+    src = pymupdf.open()
+    sp = src.new_page(width=200, height=100)
+    sp.draw_rect((10, 10, 190, 90), color=(0, 0, 1), width=4)
+    sp.insert_text((30, 60), "LOGO", fontsize=30, color=(1, 0, 0))
+    src.new_page()
+    src.save(str(tmp_path / "logo.pdf"))
+    monkeypatch.setattr(dialogs, "ask_open_file", lambda *a, **k: str(tmp_path / "logo.pdf"))
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "1")
+    module._page_stamp()
+    click(view, 0, 300, 400)
+    module.ctrl.move(10, 0)
+    doc = saved(window, view, tmp_path)
+    st, = annots(doc, 0, "Stamp")
+    ap = int(key_of(doc, st.xref, "AP/N")[1].split()[0])
+    stream = doc.xref_stream(ap)
+    assert b" re" in stream or b" l" in stream
+    assert b"Do" not in stream                 # nessuna immagine raster
+    assert "LOGO" in doc[0].get_text()
+
+
+def test_ann26_snapshot_area(comments, tmp_path):
+    """ANN-26: istantanea di un'area → timbro in libreria con /IT /StampSnapshot."""
+    window, view, module = comments
+    module.activate("snapshot")
+    drag(view, 0, (70, 85), (200, 105))
+    assert any(d["name"].startswith("Istantanea") for d in module.ctrl.custom_stamps())
+    click(view, 0, 300, 600)
+    doc = saved(window, view, tmp_path)
+    st, = annots(doc, 0, "Stamp")
+    assert key_of(doc, st.xref, "IT")[1] == "/StampSnapshot"

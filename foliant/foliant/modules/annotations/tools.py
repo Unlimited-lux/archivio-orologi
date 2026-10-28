@@ -1056,12 +1056,25 @@ class StampTool(AnnotTool):
         if ev.button != Qt.MouseButton.LeftButton or ev.page is None:
             return False
         page, point = ev.page, ev.point
-        if getattr(self, "sticker", None):
+        if getattr(self, "page_source", None):
+            data, src_page, name = self.page_source
+
+            def run(pdf):
+                src = pymupdf.open(stream=data, filetype="pdf")
+                try:
+                    return engine.create_page_stamp(pdf, page, point, src, src_page, self.style(), self.ctrl.author(),
+                                                    name=name)
+                finally:
+                    src.close()
+
+            xref = self.ctrl.apply(_("Aggiungi timbro"), run)
+        elif getattr(self, "sticker", None):
             xref = self.ctrl.apply(_("Aggiungi adesivo"), engine.create_sticker, page, point, self.sticker,
                                    self.style(), self.ctrl.author())
         elif self.image is not None:
             xref = self.ctrl.apply(_("Aggiungi timbro"), engine.create_image_stamp, page, point, self.image,
-                                   self.style(), self.ctrl.author(), 160.0, self.name)
+                                   self.style(), self.ctrl.author(), 160.0, self.name,
+                                   "StampSnapshot" if getattr(self, "snapshot", False) else "StampImage")
         else:
             spec = self.spec or engine.StampSpec(_("Approvato"), name="Approved")
             if self.template:
@@ -1211,3 +1224,33 @@ class CalibrateTool(_DragTool):
         if self._start and self._start[0] == page and self._end is not None:
             painter.setPen(_cosmetic(theme.color("accent"), 2, dashed=True))
             painter.drawLine(QPointF(self._start[1].x, self._start[1].y), QPointF(self._end.x, self._end.y))
+
+
+class SnapshotTool(_DragTool):
+    """Istantanea di un'area del documento come nuovo timbro della libreria (ANN-26)."""
+
+    kind = "snapshot"
+
+    def __init__(self, ctrl, on_done=None):
+        super().__init__(ctrl)
+        self.on_done = on_done
+
+    def finish(self, view, page, a, b, mods):
+        r = pymupdf.Rect(a, b).normalize()
+        if r.width < 4 or r.height < 4:
+            return
+        with ENGINE_LOCK:
+            pix = view.document.pdf[page].get_pixmap(clip=r, matrix=pymupdf.Matrix(3, 3), annots=True)
+            png = pix.tobytes("png")
+        n = len([d for d in self.ctrl.custom_stamps() if d["name"].startswith(_("Istantanea"))]) + 1
+        name = f"{_('Istantanea')} {n}"
+        self.ctrl.add_custom_stamp(name, png)
+        self.ctrl.ctx.status(_("Timbro «{n}» aggiunto alla libreria.").format(n=name))
+        if self.on_done:
+            self.on_done(png, name)
+
+    def paint(self, view, painter, page):
+        if self._start and self._start[0] == page and self._end is not None:
+            painter.setPen(_cosmetic(theme.color("accent"), 1.5, dashed=True))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(_qrect(pymupdf.Rect(self._start[1], self._end).normalize()))

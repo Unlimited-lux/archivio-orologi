@@ -1496,8 +1496,59 @@ def refresh_sticker(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
         _apply_rotation(pdf, page, xref)
 
 
+PAGE_STAMP_KEY = "FoliantPageStamp"
+
+
+def create_page_stamp(pdf: pymupdf.Document, page_no: int, point, src: pymupdf.Document, src_page: int,
+                      style: Style, author: str | None = None, max_side: float = 200.0, name: str = "") -> int:
+    """Timbro con l'aspetto vettoriale di una pagina di un altro PDF (contenuto e risorse innestati)."""
+    if src.needs_pass:
+        raise AnnotationError("Il PDF di origine è protetto da password.")
+    if not 0 <= src_page < src.page_count:
+        raise AnnotationError("Pagina inesistente.")
+    sp = src[src_page]
+    box = sp.cropbox if not sp.cropbox.is_empty else sp.mediabox
+    w, h = box.width, box.height
+    k = max_side / max(w, h)
+    p = pymupdf.Point(point)
+    rect = pymupdf.Rect(p.x - w * k / 2, p.y - h * k / 2, p.x + w * k / 2, p.y + h * k / 2)
+    page = pdf[page_no]
+    with unrotated(page):
+        annot = page.add_stamp_annot(rect, 0)
+    xref = _finish(annot, author, name or "Timbro da pagina", kind=STAMP)
+    # risorse della pagina sorgente (anche ereditate) innestate nel documento
+    src_obj = mupdf.pdf_load_object(pymupdf._as_pdf_document(src), sp.xref)
+    res = mupdf.pdf_dict_get_inheritable(src_obj, mupdf.pdf_new_name("Resources"))
+    dst_doc = pymupdf._as_pdf_document(pdf)
+    res_num = 0
+    if res.m_internal:
+        grafted = mupdf.pdf_graft_object(dst_doc, res)
+        res_num = mupdf.pdf_to_num(mupdf.pdf_add_object(dst_doc, grafted)) if not mupdf.pdf_is_indirect(grafted) \
+            else mupdf.pdf_to_num(grafted)
+    content = b"\n".join(src.xref_stream(x) or b"" for x in sp.get_contents())
+    mb = sp.mediabox
+    cb = box if box else mb
+    ap = pdf.get_new_xref()
+    resources = f"/Resources {res_num} 0 R" if res_num else ""
+    # /BBox nelle coordinate della pagina sorgente (area visibile): contenuto vettoriale, nessuna immagine
+    x0, y0 = cb.x0 + mb.x0, mb.y1 - cb.y1
+    pdf.update_object(ap, f"<</Type/XObject/Subtype/Form/BBox[{x0:.3f} {y0:.3f} {x0 + w:.3f} {y0 + h:.3f}]"
+                          f"/Matrix[1 0 0 1 0 0]{resources}>>")
+    pdf.update_stream(ap, content)
+    pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+    pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, rect)))
+    pdf.xref_set_key(xref, "Name", "/FoliantPagina")
+    pdf.xref_set_key(xref, PAGE_STAMP_KEY, "true")
+    annot = get_annot(page, xref)
+    annot.set_opacity(max(0.0, min(1.0, style.opacity)))
+    pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+    _upright(pdf, page, xref)
+    return xref
+
+
 def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes, style: Style,
-                       author: str | None = None, max_side: float = 160.0, name: str = "") -> int:
+                       author: str | None = None, max_side: float = 160.0, name: str = "",
+                       intent: str = "StampImage") -> int:
     page = pdf[page_no]
     try:
         pix = pymupdf.Pixmap(image)
@@ -1513,7 +1564,7 @@ def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes,
         annot = page.add_stamp_annot(rect, image)
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
     xref = _finish(annot, author, name or "Timbro immagine", kind=STAMP)
-    pdf.xref_set_key(xref, "IT", "/StampImage")
+    pdf.xref_set_key(xref, "IT", "/" + intent)
     _upright(pdf, page, xref)
     return xref
 
@@ -2105,7 +2156,11 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         else:
             _set_rect_exact(annot, new_rect)
         touch(annot)
+        keep_ap = pdf.xref_get_key(xref, "AP") if pdf.xref_get_key(xref, PAGE_STAMP_KEY)[0] != "null" else None
         _dirty_update(annot)
+        if keep_ap is not None:      # timbro da pagina PDF: aspetto vettoriale proprio, solo riposizionato
+            pdf.xref_set_key(xref, "AP", keep_ap[1])
+            pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, new_rect)))
         if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
             refresh_stamp(pdf, page_no, xref)
         elif t == pymupdf.PDF_ANNOT_STAMP and pdf.xref_get_key(xref, STICKER_KEY)[0] == "name":
