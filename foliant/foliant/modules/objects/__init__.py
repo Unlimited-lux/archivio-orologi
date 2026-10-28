@@ -44,6 +44,8 @@ def _forget_ctx(key: int) -> None:
 def register(ctx: Context) -> None:
     global _state
     add_translations("en", EN)
+    from . import external
+    external.cleanup_leftovers()    # immagini temporanee di «Modifica con…» lasciate da un arresto anomalo
     c = ObjectsController(ctx)
     st: dict = {}
     _by_ctx[id(ctx)] = st

@@ -9,8 +9,10 @@ del documento, e i file temporanei vengono cancellati.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
+import time
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -19,6 +21,67 @@ from foliant.api import ENGINE_LOCK, _
 
 from . import engine as E
 from .content import IMAGE
+
+
+TEMP_PREFIX = "foliant-img-"
+_LIVE_DIRS: set[str] = set()     # cartelle temporanee ancora in uso da questo processo
+_atexit_registered = False
+
+
+def _track_dir(path: str) -> None:
+    global _atexit_registered
+    _LIVE_DIRS.add(path)
+    if not _atexit_registered:
+        import atexit
+        atexit.register(remove_live_dirs)
+        _atexit_registered = True
+
+
+def remove_live_dirs() -> None:
+    """Rete di sicurezza all'uscita: cancella le immagini temporanee delle modifiche esterne ancora aperte."""
+    for d in list(_LIVE_DIRS):
+        shutil.rmtree(d, ignore_errors=True)
+    _LIVE_DIRS.clear()
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def cleanup_leftovers(directory: str | None = None, min_age: float = 300.0) -> int:
+    """Cancella le cartelle `foliant-img-*` dell'utente lasciate da un arresto anomalo.
+
+    Si salta la cartella di un processo Foliant ancora vivo (il PID è nel nome) e, per i nomi senza
+    PID delle versioni precedenti, quelle modificate di recente."""
+    import glob
+    import stat
+    directory = directory or tempfile.gettempdir()
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    removed = 0
+    for path in glob.glob(os.path.join(glob.escape(directory), TEMP_PREFIX + "*")):
+        try:
+            st = os.lstat(path)
+            if not stat.S_ISDIR(st.st_mode) or (uid is not None and st.st_uid != uid):
+                continue
+            m = re.match(re.escape(TEMP_PREFIX) + r"(\d+)-", os.path.basename(path))
+            if m:
+                if _pid_alive(int(m.group(1))):
+                    continue
+            elif time.time() - st.st_mtime < min_age:
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def launch(path: str) -> bool:
@@ -33,8 +96,9 @@ class ExternalEdit(QObject):
         self.view = view
         self.page = page
         self.index = index
-        self.dir = tempfile.mkdtemp(prefix="foliant-img-")
+        self.dir = tempfile.mkdtemp(prefix=f"{TEMP_PREFIX}{os.getpid()}-")
         os.chmod(self.dir, 0o700)
+        _track_dir(self.dir)
         self.path = ""
         self.watcher = QFileSystemWatcher(self)
         self.timer = QTimer(self)
@@ -109,3 +173,4 @@ class ExternalEdit(QObject):
         for p in self.watcher.files() + self.watcher.directories():
             self.watcher.removePath(p)
         shutil.rmtree(self.dir, ignore_errors=True)
+        _LIVE_DIRS.discard(self.dir)
