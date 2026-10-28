@@ -13,7 +13,7 @@ import io
 import json
 from dataclasses import dataclass, field
 
-from foliant.api import FoliantError, _
+from foliant.api import FoliantError, _, format_number
 
 from . import chunking, engine, prompts
 from .providers import GLOBAL_KINDS, AIError, ChatRequest, Message
@@ -190,15 +190,17 @@ def to_pdf(rows: list[RankRow], criteria: list[Criterion]) -> bytes:
         _("Classifica"), [_("Posizione"), _("Documento")] + [f"{c.nome} (×{c.peso})" for c in criteria] +
         [_("Totale")],
         [[r.posizione or "—", f"{r.etichetta} · {r.titolo}"] +
-         [f"{r.scores[c.nome].punteggio:g}" if c.nome in r.scores else "" for c in criteria] +
-         [f"{r.totale:.2f}" if r.totale is not None else _("escluso: {m}").format(m=r.motivo)] for r in rows])
+         [format_number(r.scores[c.nome].punteggio) if c.nome in r.scores else "" for c in criteria] +
+         [format_number(r.totale, 2) if r.totale is not None else _("escluso: {m}").format(m=r.motivo)]
+         for r in rows])
     reasons = []
     for r in rows:
         for c in criteria:
             ev = r.scores.get(c.nome)
             if ev and ev.motivazione:
                 pages = ", ".join(str(p + 1) for p in ev.pagine)
-                reasons.append([f"{r.etichetta} · {r.titolo}", c.nome, f"{ev.punteggio:g}", ev.motivazione, pages])
+                reasons.append([f"{r.etichetta} · {r.titolo}", c.nome, format_number(ev.punteggio), ev.motivazione,
+                                pages])
     why = report_pdf.Table(_("Motivazioni"), [_("Documento"), _("Criterio"), _("Punteggio"), _("Motivazione"),
                                               _("Pagine")], reasons)
     return report_pdf.render(_("Confronto e classifica"), [crit, table, why], [_(HUMAN_DECISION)],

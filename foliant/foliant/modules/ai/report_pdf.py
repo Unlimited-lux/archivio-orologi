@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, format_date
 
 CSS = """
 body { font-family: sans-serif; font-size: 9pt; color: #222; }
@@ -43,7 +43,7 @@ def _esc(value) -> str:
 
 
 def build_html(title: str, tables: list[Table], notes: list[str] = ()) -> str:
-    date = _dt.datetime.now().strftime("%d/%m/%Y %H:%M")
+    date = format_date(_dt.datetime.now(), time=True)       # formato della lingua dell'interfaccia
     parts = [f"<h1>{_esc(title)}</h1>",
              f"<p class='meta'>{_esc(_('Creato con l’Assistente IA di Foliant il {d}').format(d=date))}</p>"]
     for t in tables:
