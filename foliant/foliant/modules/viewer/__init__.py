@@ -2,6 +2,8 @@
 
 Ogni sotto-funzione vive in un file proprio con una funzione `install(ctx)`.
 Un errore in una sotto-funzione non impedisce il caricamento delle altre.
+Riservatezza: nessun nome, percorso o cronologia dei documenti resta su disco tra un
+avvio e l'altro; all'avvio `privacy.startup_cleanup` cancella i dati delle versioni precedenti.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ PARTS = (
     "reading",        # modalità lettura, schermo intero, scorrimento automatico
     "tools",          # zoom area, istantanea
     "zoomfit",        # adatta all'altezza e al contenuto
-    "session",        # posizione per file, vista iniziale, schede, sessione
+    "session",        # vista iniziale, schede
     "openoptions",    # opzioni di apertura scritte nel documento
     "xmp",            # metadati avanzati (XMP, modelli)
     "recovery",       # salvataggio automatico e recupero dopo crash
@@ -52,6 +54,11 @@ PARTS = (
 
 def register(ctx: Context) -> None:
     ctx.viewer_parts = {}
+    try:
+        from . import privacy
+        privacy.startup_cleanup(ctx.settings())
+    except Exception:
+        log.warning("viewer: pulizia di riservatezza non eseguita")
     # Per lo sviluppo: FOLIANT_VIEWER_PARTS="thumbnails,bookmarks" carica solo quelle parti.
     only = {p.strip() for p in os.environ.get("FOLIANT_VIEWER_PARTS", "").split(",") if p.strip()}
     for name in PARTS:

@@ -1,9 +1,10 @@
 """Gestione dei file locali (VIS-03): rinomina, duplica, sposta, cestino, mostra
-nella cartella, copia percorso; le schede aperte e i recenti seguono il file.
+nella cartella, copia percorso; le schede aperte seguono il file.
 
 Comandi nel menu principale (sezione «File») sul documento corrente e su file
-scelti, e menu contestuale sui documenti recenti della Home.
-I dialoghi passano per metodi `ask_*` sostituibili nei test.
+scelti. I dialoghi passano per metodi `ask_*` sostituibili nei test.
+Riservatezza: il modulo non usa l'elenco dei file recenti (né lo alimenta) e
+non conserva nomi o percorsi dei file tra un avvio e l'altro.
 """
 
 from __future__ import annotations
@@ -13,9 +14,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QFile, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices
-from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
 
-from foliant.api import Context, _, add_translations, bind_icon
+from foliant.api import Context, _, add_translations
 
 from . import files_engine as F
 
@@ -32,7 +33,6 @@ TRANSLATIONS = {
     "Duplica file…": "Duplicate files…",
     "Sposta file in…": "Move files to…",
     "Sposta file nel cestino…": "Move files to trash…",
-    "Rimuovi dall'elenco": "Remove from list",
     "Rinomina": "Rename",
     "Nuovo nome per «{n}»:": "New name for “{n}”:",
     "Sposta": "Move",
@@ -122,9 +122,6 @@ class FilesController:
         ctx.documentChanged.connect(lambda *_a: self.update_actions())
         w.main_menu.aboutToShow.connect(self.update_actions)
         self.update_actions()
-        # Voci del viewer nel menu contestuale dei recenti della Home (VIS-02/03): il nucleo vi
-        # mette Apri/Individua, Fissa/Sblocca, Rimuovi dall'elenco e Svuota elenco.
-        ctx.add_recent_menu_provider(self.fill_recent_menu)
 
     # ================================================================ stato
     def current_path(self) -> str | None:
@@ -220,27 +217,24 @@ class FilesController:
     def open_folder_url(self, url: QUrl) -> bool:
         return QDesktopServices.openUrl(url)
 
-    # ======================================================== schede e recenti
+    # ======================================================== schede aperte
     def _unsaved_ok(self, path: str, losing: bool) -> bool:
         if any(v.document.is_modified for v in self.views_for(path)):
             return self.ask_unsaved(path, losing)
         return True
 
     def _follow(self, old: str, new: str) -> None:
-        """Le schede aperte e i recenti seguono il file da `old` a `new`."""
+        """Le schede aperte seguono il file da `old` a `new`."""
         w = self.ctx.window
         for view in self.views_for(old):
             view.document.path = Path(new)
             w._update_tab_title(view)
-        if old in self.ctx.recent_files():
-            self.ctx.replace_recent(old, new)
         self.update_actions()
 
     def _forget(self, path: str) -> None:
         for view in self.views_for(path):
             # modifiche già scartate dall'utente; file eliminato o spostato: niente domande
             self.ctx.close_view(view, discard=True)
-        self.ctx.remove_recent(path)
         self.update_actions()
 
     def _move_with_conflicts(self, src: str, dst: str) -> str | None:
@@ -399,33 +393,6 @@ class FilesController:
 
     def trash_dialog(self) -> list[str]:
         return self.trash_paths(self.ask_paths(_("Scegli i file da spostare nel cestino")))
-
-    # ======================================================= Home: recenti
-    def path_menu(self, path: str, parent=None) -> QMenu:
-        """Menu completo di un recente della Home: voci del nucleo e operazioni sul file."""
-        return self.ctx.window.recent_menu(path)
-
-    def fill_recent_menu(self, path: str, menu: QMenu) -> None:
-        """Operazioni sul file nel menu di un recente (fornitore del nucleo)."""
-        if not os.path.exists(path):
-            return                          # file mancante: il nucleo offre Individua / Rimuovi
-        entries = (
-            (_("Rinomina…"), "pencil", lambda: self.rename_path(path)),
-            (_("Duplica"), "copy", lambda: self.duplicate_paths([path])),
-            (_("Sposta in…"), "folder-input", lambda: self.move_paths([path])),
-            (_("Sposta nel cestino"), "trash-2", lambda: self.trash_paths([path])),
-            None,
-            (_("Mostra nella cartella"), "folder-open", lambda: self.reveal_path(path)),
-            (_("Copia percorso"), "clipboard-copy", lambda: self.copy_path(path)),
-        )
-        for entry in entries:
-            if entry is None:
-                menu.addSeparator()
-                continue
-            text, icon_name, slot = entry
-            act = menu.addAction(text)
-            bind_icon(act, icon_name)
-            act.triggered.connect(lambda _c=False, s=slot: s())
 
 
 def install(ctx: Context) -> FilesController:

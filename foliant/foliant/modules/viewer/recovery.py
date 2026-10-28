@@ -5,18 +5,22 @@
   cartella di recupero (vedi `recovery_engine.recovery_dir`). Il file originale
   non viene mai toccato.
 - Quando il documento viene salvato o chiuso la sua copia viene eliminata:
-  all'uscita regolare non resta nulla.
+  all'uscita regolare non resta nulla (anche `aboutToQuit` elimina le copie
+  rimaste di questo processo).
 - All'avvio, le copie lasciate da un processo terminato vengono proposte con
   una finestra non bloccante: Ripristina / Scarta / Più tardi.
+- Riservatezza: le copie non conservano né il nome né il percorso del file
+  originale; il documento ripristinato si chiama «Documento recuperato» e va
+  salvato con «Salva con nome». I metadati delle versioni precedenti vengono
+  ripuliti all'avvio (`recovery_engine.sanitize_legacy`).
 """
 
 from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
     QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
@@ -72,21 +76,19 @@ class RecoveryDialog(QDialog):
         layout.addLayout(head)
 
         self.tree = QTreeWidget(self)
-        self.tree.setHeaderLabels([_("Documento"), _("Percorso originale"), _("Ora")])
+        self.tree.setHeaderLabels([_("Documento"), _("Ora")])
         self.tree.setRootIsDecorated(False)
         self.tree.setAlternatingRowColors(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         header = self.tree.header()
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         for entry in self.entries:
             when = time.strftime("%d/%m/%Y %H:%M", time.localtime(entry.timestamp)) if entry.timestamp else ""
-            item = QTreeWidgetItem([entry.display_name, entry.original_path or _("(mai salvato)"), when])
+            item = QTreeWidgetItem([entry.display_name, when])
             item.setIcon(0, icon("file-clock"))
-            item.setToolTip(1, entry.original_path)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(0, Qt.CheckState.Checked)
             item.setData(0, Qt.ItemDataRole.UserRole, entry.id)
@@ -154,6 +156,9 @@ class RecoveryController(QObject):
         self._written.connect(self._on_written, Qt.ConnectionType.QueuedConnection)
         ctx.documentOpened.connect(self._on_opened)
         ctx.documentClosed.connect(self._on_closed)
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.remove_own_entries)
         try:
             seconds = int(ctx.settings().value("viewer/autosave_seconds", DEFAULT_INTERVAL))
         except (TypeError, ValueError):
@@ -204,6 +209,14 @@ class RecoveryController(QObject):
             if listener is not None:
                 doc.remove_listener(listener)
 
+    def remove_own_entries(self) -> None:
+        """Chiusura regolare dell'app: nessuna copia di questo processo resta su disco."""
+        self.timer.stop()
+        for entry_id in list(self._ids.values()):
+            engine.remove_entry(self.directory, entry_id)
+        self._ids.clear()
+        self._saved_version.clear()
+
     def entry_id(self, doc: Document) -> str | None:
         return self._ids.get(doc)
 
@@ -212,8 +225,8 @@ class RecoveryController(QObject):
                 and self._saved_version.get(doc) != doc.version)
 
     def _meta(self, doc: Document, view) -> dict:
-        return engine.make_meta(original_path=str(doc.path) if doc.path else "",
-                                display_name=doc.display_name, page=view.current_page)
+        # solo la pagina: né nome né percorso del documento (riservatezza)
+        return engine.make_meta(page=view.current_page)
 
     # ------------------------------------------------------------------ salvataggio
     def autosave_now(self) -> int:
@@ -278,6 +291,7 @@ class RecoveryController(QObject):
 
     # ------------------------------------------------------------------ recupero
     def orphans(self) -> list[engine.RecoveryEntry]:
+        engine.sanitize_legacy(self.directory, self.pid_alive)   # metadati delle versioni precedenti
         return engine.orphan_entries(self.directory, self.pid_alive)
 
     def check_for_orphans(self) -> RecoveryDialog | None:
@@ -344,12 +358,10 @@ class RecoveryController(QObject):
                 continue
             if doc is None:
                 continue  # password non inserita: la copia resta per dopo
-            original = entry.original_path
-            if original and Path(original).parent.is_dir():
-                doc.path = Path(original)
+            # Nessun percorso: il documento recuperato si salva con «Salva con nome».
             # La copia resta finché il documento non è al sicuro (salvato o chiuso).
             self._ids[doc] = entry.id
-            meta = engine.make_meta(original_path=original, display_name=entry.display_name, page=entry.page)
+            meta = engine.make_meta(page=entry.page)
             try:
                 engine.write_entry(self.directory, entry.id, None, meta)   # rivendicata da questo processo
             except Exception:  # noqa: BLE001
@@ -383,9 +395,8 @@ def install(ctx: Context) -> RecoveryController:
             "Recovery copies of documents with unsaved changes were found. "
             "Choose which ones to restore: the original files have not been changed.",
         "Documento": "Document",
-        "Percorso originale": "Original path",
         "Ora": "Time",
-        "(mai salvato)": "(never saved)",
+        "Documento recuperato": "Recovered document",
         "Ripristina": "Restore",
         "Scarta": "Discard",
         "Più tardi": "Later",

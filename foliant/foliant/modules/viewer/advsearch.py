@@ -36,6 +36,7 @@ TRANSLATIONS = {
     "Elimina l'indice": "Delete the index",
     "Crea un indice da una cartella per cercare in modo immediato.":
         "Create an index from a folder for instant searches.",
+    "Gli indici restano solo finché Foliant è aperto.": "Indexes are kept only while Foliant is open.",
     "Ricerca nell'indice…": "Searching the index…",
     "Creazione dell'indice…": "Creating the index…",
     "Aggiornamento dell'indice…": "Updating the index…",
@@ -199,6 +200,11 @@ class AdvancedSearchPanel(QDialog):
             setattr(self, attr, b)
             ib.addWidget(b)
         form.addRow("", self.index_box)
+        # riservatezza: gli indici non vengono mai salvati su disco
+        self.index_note = QLabel(_("Gli indici restano solo finché Foliant è aperto."), self)
+        self.index_note.setProperty("muted", True)
+        self.index_note.setWordWrap(True)
+        form.addRow("", self.index_note)
         self.mode = QComboBox(self)
         self.mode.addItem(_("Frase esatta"), eng.PHRASE)
         self.mode.addItem(_("Tutte le parole (stessa pagina)"), eng.ALL_WORDS)
@@ -267,6 +273,7 @@ class AdvancedSearchPanel(QDialog):
     def _scope_changed(self, *_a) -> None:
         self.folder_box.setVisible(self.scope.currentData() == SCOPE_FOLDER)
         self.index_box.setVisible(self.scope.currentData() == SCOPE_INDEX)
+        self.index_note.setVisible(self.scope.currentData() == SCOPE_INDEX)
         if self.scope.currentData() == SCOPE_INDEX:
             self.controller.refresh_indexes()
 
@@ -506,7 +513,8 @@ class AdvancedSearchController(QObject):
             if scope == SCOPE_INDEX:
                 index = self.current_index()
                 if index is None:
-                    self._set_summary(_("Crea un indice da una cartella per cercare in modo immediato."))
+                    self._set_summary(_("Crea un indice da una cartella per cercare in modo immediato.") + "\n"
+                                      + _("Gli indici restano solo finché Foliant è aperto."))
                     return
                 hits, summary = self.ctx.run_task(_("Ricerca nell'indice…"), index.search, opts,
                                                   page_timeout=self.page_timeout)

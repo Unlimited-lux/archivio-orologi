@@ -70,7 +70,7 @@ class ShareController:
 
     def private_copy(self, view: DocumentView) -> str:
         """Copia con le modifiche in una cartella temporanea privata, col nome originale."""
-        d = tempfile.mkdtemp(prefix="foliant-share-")
+        d = tempfile.mkdtemp(prefix=f"foliant-share-{os.getpid()}-")
         os.chmod(d, 0o700)
         self._temp_dirs.append(d)
         target = Path(d) / view.document.display_name

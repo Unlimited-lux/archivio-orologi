@@ -1,16 +1,16 @@
-"""Posizione per file (VIS-02), vista iniziale (VIS-05), schede e sessione (VIS-30).
+"""Vista iniziale (VIS-05) e schede (VIS-30).
 
-- Alla chiusura di un documento con percorso si memorizzano pagina, zoom (o
-  modalità adatta) e layout; alla riapertura vengono ripristinati. Con la
-  preferenza «Non registrare la cronologia» non si memorizza nulla.
-- Senza posizione memorizzata si applica la vista iniziale chiesta dal
-  documento (`/OpenAction`, `/PageLayout`, `/PageMode`), salvo la preferenza
-  «Ignora la vista iniziale dei documenti». `/FullScreen` non viene applicato
-  da solo: si propone un pulsante nella barra di stato.
+- Regola di riservatezza: Foliant non conserva su disco, tra un avvio e l'altro,
+  nomi, percorsi o stato dei documenti aperti. Niente posizione per file,
+  niente ripristino della sessione: ogni documento si apre con i valori
+  predefiniti dell'utente e la vista iniziale chiesta dal documento.
+- Vista iniziale chiesta dal documento (`/OpenAction`, `/PageLayout`,
+  `/PageMode`), salvo la preferenza «Ignora le impostazioni di apertura dei
+  documenti». `/FullScreen` non viene applicato da solo: si propone un
+  pulsante nella barra di stato.
 - Schede: Ctrl+Tab / Ctrl+Maiusc+Tab, Alt+1…9, Riapri scheda chiusa
-  (Ctrl+Maiusc+T), Chiudi le altre / a destra / tutte, menu contestuale.
-- Sessione: con «Ripristina la sessione all'avvio» le schede (percorso, pagina,
-  zoom) vengono salvate alla chiusura della finestra e riaperte all'avvio.
+  (Ctrl+Maiusc+T, elenco solo in memoria finché l'app è aperta), Chiudi le
+  altre / a destra / tutte, menu contestuale.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
-from PySide6.QtGui import QAction, QGuiApplication, QKeySequence
+from PySide6.QtCore import QEvent, QObject, QTimer
+from PySide6.QtGui import QAction, QGuiApplication
 from PySide6.QtWidgets import QMenu, QPushButton
 
 from foliant.api import Context, DocumentView, _, add_translations, bind_icon
@@ -27,10 +27,6 @@ from foliant.api import Context, DocumentView, _, add_translations, bind_icon
 from . import session_engine as engine
 from .session_engine import ViewState
 
-KEY_POSITIONS = "viewer/positions"
-KEY_SESSION = "viewer/session"
-KEY_NO_HISTORY = "viewer/no_history"
-KEY_RESTORE_SESSION = "viewer/restore_session"
 KEY_IGNORE_DOC_VIEW = "viewer/ignore_document_view"
 
 
@@ -88,22 +84,18 @@ class SessionController(QObject):
 
         self.pref_actions: dict[str, QAction] = {}
         for key, text in (
-            (KEY_RESTORE_SESSION, _("Ripristina la sessione all'avvio")),
-            (KEY_NO_HISTORY, _("Non registrare la cronologia")),
             (KEY_IGNORE_DOC_VIEW, _("Ignora le impostazioni di apertura dei documenti")),
         ):
             act = ctx.action(text, None, None, checkable=True, requires_document=False)
             act.setChecked(self.pref(key))
             act.toggled.connect(lambda on, k=key: self.settings().setValue(k, bool(on)))
             self.pref_actions[key] = act
-        self.act_restore_session = self.pref_actions[KEY_RESTORE_SESSION]
 
         section = _("Schede")
         for act in (self.act_next_tab, self.act_prev_tab, self.act_reopen, self.act_close_others,
-                    self.act_close_right, self.act_close_all, self.act_restore_session):
+                    self.act_close_right, self.act_close_all):
             ctx.add_menu_action(act, section)
-        for key in (KEY_NO_HISTORY, KEY_IGNORE_DOC_VIEW):
-            ctx.add_menu_action(self.pref_actions[key], _("Apertura dei documenti"))
+        ctx.add_menu_action(self.pref_actions[KEY_IGNORE_DOC_VIEW], _("Apertura dei documenti"))
         self.window.main_menu.aboutToShow.connect(self._update_actions)
 
     def _update_actions(self) -> None:
@@ -214,7 +206,7 @@ class SessionController(QObject):
         """Menu completo della scheda (nucleo + moduli), per i test."""
         return self.window.tab_menu(index)
 
-    # ================================================================ posizione e vista iniziale
+    # ================================================================ stato della vista e vista iniziale
     def apply_state(self, view: DocumentView, state: ViewState) -> None:
         if state.mode:
             view.set_view_mode(state.mode)
@@ -230,31 +222,12 @@ class SessionController(QObject):
         if view is self.ctx.current_view():
             self.ctx.refresh_state()
 
-    def positions(self) -> dict[str, dict]:
-        return engine.load_positions(self.settings().value(KEY_POSITIONS, ""))
-
-    def remembered(self, path: str) -> ViewState | None:
-        entry = self.positions().get(path)
-        return ViewState.from_dict(entry) if entry else None
-
-    def remember(self, view: DocumentView) -> None:
-        doc = view.document
-        if doc.path is None or self.pref(KEY_NO_HISTORY):
-            return
-        positions = engine.remember_position(self.positions(), self._key(doc.path), engine.view_state(view))
-        self.settings().setValue(KEY_POSITIONS, engine.dump_positions(positions))
-
     @staticmethod
     def _key(path) -> str:
         return os.path.abspath(str(path))
 
     def _on_opened(self, view: DocumentView) -> None:
-        doc = view.document
-        if doc.path is not None and self.pref("viewer/restore_position", True):
-            state = self.remembered(self._key(doc.path))
-            if state is not None:
-                self.apply_state(view, state)
-                return
+        # nessuna posizione ricordata per file (riservatezza): valori predefiniti e vista del documento
         prefs = getattr(self.ctx, "viewer_parts", {}).get("prefs")
         if prefs is not None:
             prefs.apply_defaults(view)   # valori predefiniti dell'utente (VIS-51)
@@ -286,7 +259,7 @@ class SessionController(QObject):
         doc = view.document
         if doc.path is None:
             return
-        self.remember(view)
+        # solo in memoria, per «Riapri scheda chiusa»: nulla su disco
         if not self._closing_window:
             self.closed_tabs.append((self._key(doc.path), engine.view_state(view), self.tabs.indexOf(view)))
             del self.closed_tabs[:-engine.MAX_CLOSED]
@@ -320,62 +293,16 @@ class SessionController(QObject):
         if act is not None and not self.window.isFullScreen():
             act.trigger()
 
-    # ================================================================ sessione
+    # ================================================================ chiusura della finestra
     def eventFilter(self, obj, event) -> bool:
+        # durante la chiusura della finestra le schede non finiscono tra quelle da riaprire
         if obj is self.window and event.type() == QEvent.Type.Close:
-            try:
-                self.save_session()
-            except Exception:  # noqa: BLE001 - la chiusura non deve mai fallire per questo
-                pass
             self._closing_window = True
             QTimer.singleShot(0, self, self._reset_closing)
         return False
 
     def _reset_closing(self) -> None:
         self._closing_window = False
-
-    def save_session(self) -> None:
-        """Salva l'elenco ordinato delle schede con percorso (prima della chiusura dei documenti)."""
-        if not self.pref(KEY_RESTORE_SESSION):
-            self.settings().remove(KEY_SESSION)
-            return
-        tabs: list[tuple[str, ViewState]] = []
-        current = 0
-        current_view = self.ctx.current_view()
-        for view in self._tab_views():
-            if view.document.path is None:
-                continue
-            if view is current_view:
-                current = len(tabs)
-            tabs.append((self._key(view.document.path), engine.view_state(view)))
-        self.settings().setValue(KEY_SESSION, engine.dump_session(tabs, current))
-
-    def restore_session(self) -> list[DocumentView]:
-        tabs, current = engine.load_session(self.settings().value(KEY_SESSION, ""))
-        opened: list[DocumentView] = []
-        missing: list[str] = []
-        current_view = None
-        for i, (path, state) in enumerate(tabs):
-            if not os.path.isfile(path):
-                missing.append(Path(path).name)
-                continue
-            view = self.ctx.open_path(path)
-            if view is None:
-                continue
-            self.apply_state(view, state)
-            opened.append(view)
-            if i == current:
-                current_view = view
-        if current_view is not None:
-            self.activate_tab(self.tabs.indexOf(current_view))
-        if missing:
-            self.ctx.status(_("File della sessione non più disponibili: {names}").format(names=", ".join(missing)),
-                            10000)
-        return opened
-
-    def _startup(self) -> None:
-        if self.pref(KEY_RESTORE_SESSION) and not self.ctx.views():
-            self.restore_session()
 
 
 def install(ctx: Context) -> SessionController:
@@ -388,8 +315,6 @@ def install(ctx: Context) -> SessionController:
         "Chiudi le schede a destra": "Close tabs to the right",
         "Chiudi tutte le schede": "Close all tabs",
         "Copia percorso": "Copy path",
-        "Ripristina la sessione all'avvio": "Restore session at startup",
-        "Non registrare la cronologia": "Do not record history",
         "Ignora le impostazioni di apertura dei documenti": "Ignore documents' opening settings",
         "Schede": "Tabs",
         "Apertura dei documenti": "Opening documents",
@@ -397,8 +322,5 @@ def install(ctx: Context) -> SessionController:
         "Nessuna scheda chiusa da riaprire.": "No closed tab to reopen.",
         "Schermo intero": "Full screen",
         "Il documento chiede di essere mostrato a schermo intero.": "The document asks to be shown full screen.",
-        "File della sessione non più disponibili: {names}": "Session files no longer available: {names}",
     })
-    controller = SessionController(ctx)
-    QTimer.singleShot(0, controller, controller._startup)
-    return controller
+    return SessionController(ctx)

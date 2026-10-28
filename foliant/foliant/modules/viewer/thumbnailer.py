@@ -7,6 +7,12 @@ Gira in un processo separato, senza interfaccia: non esegue script né azioni,
 non produce immagini dei PDF cifrati e si interrompe dopo un limite di tempo
 e di memoria. Codici di uscita: 0 ok, 2 file cifrato, 3 file non valido,
 4 tempo scaduto, 1 altri errori.
+
+Riservatezza: Foliant NON registra questo generatore presso il file manager, perché
+la cache delle miniature (~/.cache/thumbnails) conserverebbe un'impronta del percorso
+di ogni documento con un'immagine del suo contenuto. Il programma resta disponibile
+solo per chi lo installa a mano; `privacy.remove_legacy_thumbnailer` toglie la voce
+`foliant.thumbnailer` se una versione precedente l'aveva installata.
 """
 
 from __future__ import annotations

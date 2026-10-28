@@ -351,6 +351,8 @@ class SearchController(QObject):
         self._texts: dict[int, PageText] = {}
         self._texts_version = -1
         self._labels: list[str] | None = None
+        # cronologia delle ricerche solo in memoria (riservatezza: mai su disco)
+        self._history: list[str] = []
         self._pending_select = True
         self._restart_pending = False
         self._timer = QTimer(self)
@@ -720,15 +722,13 @@ class SearchController(QObject):
 
     # --------------------------------------------------------------- cronologia
     def history(self) -> list[str]:
-        value = self.ctx.settings().value("viewer/search_history", []) or []
-        if isinstance(value, str):
-            value = [value]
-        return [v for v in value if isinstance(v, str)]
+        """Ultime ricerche di questa sessione (solo in memoria, sparisce alla chiusura)."""
+        return list(self._history)
 
     def _remember(self, text: str) -> None:
-        items = [t for t in self.history() if t != text]
+        items = [t for t in self._history if t != text]
         items.insert(0, text)
-        self.ctx.settings().setValue("viewer/search_history", items[:MAX_HISTORY])
+        self._history = items[:MAX_HISTORY]
         self._refresh_completer()
 
     def _refresh_completer(self) -> None:

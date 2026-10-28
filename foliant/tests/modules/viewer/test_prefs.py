@@ -11,9 +11,8 @@ def _ctl(w):
     return w.ctx.viewer_parts["prefs"]
 
 
-def test_default_fit_width_without_restore(viewer_window, long_pdf):
-    s = viewer_window.settings
-    s.setValue("viewer/restore_position", False)
+def test_default_fit_width_on_reopen(viewer_window, long_pdf):
+    """Nessuna posizione ricordata per file: alla riapertura valgono i valori predefiniti."""
     view = viewer_window.open_path(long_pdf)
     view.go_to_page(10)
     viewer_window.close_view(view)
@@ -80,6 +79,10 @@ def test_export_import_settings(viewer_window, tmp_path):
     s.setValue("viewer/reading_theme", "paper")
     s.setValue("viewer/shortcuts", ["Ruota vista\tCtrl+Alt+R"])
     s.setValue("recent", ["/privato/a.pdf"])
+    s.setValue("viewer/positions", '{"/privato/b.pdf": {"page": 3}}')
+    s.setValue("viewer/search_history", ["privato"])
+    s.setValue("tools/last_dir", "/privato/cartella")
+    s.setValue("altro/ultimo", "/privato/c.pdf")             # valore che sembra un percorso
     text = ctl.export_text()
     assert "privato" not in text
     other = QSettings(str(tmp_path / "altro.ini"), QSettings.Format.IniFormat)
@@ -98,6 +101,52 @@ def test_export_import_settings(viewer_window, tmp_path):
     assert other.value("view/mode") == VIEW_FACING          # vecchia chiave migrata su quella del nucleo
     assert other.value("viewer/reading_theme") == "paper"
     assert other.value("viewer/shortcuts") == ["Ruota vista\tCtrl+Alt+R"]
+
+
+def test_import_ignores_paths_and_histories(viewer_window, tmp_path):
+    """Riservatezza: un .ini (anche di altre versioni) non può reintrodurre percorsi o cronologie."""
+    text = """[foliant]
+version = 1
+
+[settings]
+viewer/reading_theme = sepia
+viewer/positions = {"/privato/a.pdf": {"page": 3}}
+viewer/session = {"tabs": [{"path": "/privato/a.pdf"}]}
+viewer/restore_session = true
+viewer/no_history = false
+viewer/restore_position = true
+viewer/search_history[] = privato
+recentFiles[] = /privato/a.pdf
+pinnedFiles[] = /privato/a.pdf
+lastDirectory = /privato
+tools/last_dir = /privato
+viewer/qualcosa = /privato/b.pdf
+"""
+    other = QSettings(str(tmp_path / "importa.ini"), QSettings.Format.IniFormat)
+
+    class Fake:
+        def settings(self):
+            return other
+        viewer_parts = {}
+
+    from foliant.modules.viewer.prefs import PrefsController
+    ctl2 = PrefsController.__new__(PrefsController)
+    ctl2.ctx = Fake()
+    assert ctl2.import_text(text) == 1
+    assert other.allKeys() == ["viewer/reading_theme"]
+
+
+def test_no_history_checkboxes_in_dialog(viewer_window):
+    ctl = _ctl(viewer_window)
+    d = ctl.open_dialog()
+    from PySide6.QtWidgets import QCheckBox
+    texts = [c.text() for c in d.findChildren(QCheckBox)]
+    assert "Riapri i documenti all'ultima posizione" not in texts
+    assert "Non registrare la cronologia dei documenti" not in texts
+    ctl.save()
+    d.hide()
+    for key in ("viewer/restore_position", "viewer/no_history"):
+        assert not viewer_window.settings.contains(key)
 
 
 def test_invalid_import_and_restore_defaults(viewer_window):

@@ -1,4 +1,4 @@
-"""Test del salvataggio automatico e del recupero dopo crash."""
+"""Test del salvataggio automatico e del recupero dopo crash (copie senza nome né percorso)."""
 
 from __future__ import annotations
 
@@ -57,10 +57,18 @@ def _files(directory: Path) -> list[str]:
     return sorted(p.name for p in directory.glob("*") if not p.name.startswith(".")) if directory.exists() else []
 
 
-def _crash_entry(directory: Path, doc: Document, original: str, page: int = 1, pid: int | None = None) -> str:
+def _crash_entry(directory: Path, doc: Document, page: int = 1, pid: int | None = None) -> str:
     entry_id = engine.new_entry_id()
-    meta = engine.make_meta(original_path=original, display_name=Path(original).name, page=page,
-                            pid=_dead_pid() if pid is None else pid)
+    meta = engine.make_meta(page=page, pid=_dead_pid() if pid is None else pid)
+    engine.write_entry(directory, entry_id, doc.to_bytes(), meta)
+    return entry_id
+
+
+def _legacy_entry(directory: Path, doc: Document, original: str, page: int = 1, pid: int | None = None) -> str:
+    """Copia scritta da una versione precedente: metadati con nome e percorso del file."""
+    entry_id = engine.new_entry_id()
+    meta = engine.make_meta(page=page, pid=_dead_pid() if pid is None else pid)
+    meta.update(original_path=original, display_name=Path(original).name)
     engine.write_entry(directory, entry_id, doc.to_bytes(), meta)
     return entry_id
 
@@ -96,15 +104,14 @@ def test_pid_alive():
 def test_orphans_filtering_and_corrupt_json(tmp_path, sample_pdf):
     d = tmp_path / "rec"
     doc = Document.open(sample_pdf)
-    dead = _crash_entry(d, doc, sample_pdf)
-    live = _crash_entry(d, doc, sample_pdf, pid=12345)
-    corrupt_ok = _crash_entry(d, doc, sample_pdf)
+    dead = _crash_entry(d, doc)
+    live = _crash_entry(d, doc, pid=12345)
+    corrupt_ok = _crash_entry(d, doc)
     (d / f"{corrupt_ok}.json").write_text("{non è json")
-    corrupt_bad = _crash_entry(d, doc, sample_pdf)
+    corrupt_bad = _crash_entry(d, doc)
     (d / f"{corrupt_bad}.json").write_text("garbage")
     (d / f"{corrupt_bad}.pdf").write_bytes(b"not a pdf")
-    (d / "solo.json").write_text(json.dumps(engine.make_meta(original_path="", display_name="x", page=0,
-                                                             pid=_dead_pid())))
+    (d / "solo.json").write_text(json.dumps(engine.make_meta(page=0, pid=_dead_pid())))
     doc.close()
     found = engine.orphan_entries(d, alive=lambda pid: pid == 12345)
     ids = {e.id for e in found}
@@ -113,7 +120,7 @@ def test_orphans_filtering_and_corrupt_json(tmp_path, sample_pdf):
     assert not (d / "solo.json").exists()
     assert (d / f"{live}.pdf").exists()                    # di un'altra istanza: intatta
     corrupt = next(e for e in found if e.id == corrupt_ok)
-    assert corrupt.display_name == "Senza titolo.pdf" and corrupt.page == 0
+    assert corrupt.display_name == "Documento recuperato" and corrupt.page == 0
 
 
 # ====================================================================== salvataggio automatico
@@ -127,9 +134,11 @@ def test_autosave_writes_modified_document(viewer_window, sample_pdf):
     entry_id = rec.entry_id(view.document)
     assert _files(d) == sorted([f"{entry_id}.json", f"{entry_id}.pdf"])
     assert "MODIFICA DI PROVA" in _text((d / f"{entry_id}.pdf").read_bytes())
-    meta = json.loads((d / f"{entry_id}.json").read_text())
-    assert meta["original_path"] == sample_pdf
-    assert meta["display_name"] == "esempio.pdf"
+    raw = (d / f"{entry_id}.json").read_text()
+    meta = json.loads(raw)
+    # riservatezza: né nome né percorso del documento nei metadati
+    assert "original_path" not in meta and "display_name" not in meta
+    assert "esempio" not in raw and os.path.dirname(sample_pdf) not in raw
     assert meta["page"] == 2 and meta["pid"] == os.getpid() and meta["format"] == engine.FORMAT_VERSION
     assert stat.S_IMODE(d.stat().st_mode) == 0o700
     assert stat.S_IMODE((d / f"{entry_id}.pdf").stat().st_mode) == 0o600
@@ -231,7 +240,7 @@ def _crash_with_modified_copy(tmp_path, sample_pdf, page=1):
     d = Path(os.environ["FOLIANT_RECOVERY_DIR"])
     doc = Document.open(sample_pdf)
     _edit(doc)
-    entry_id = _crash_entry(d, doc, sample_pdf, page=page)
+    entry_id = _crash_entry(d, doc, page=page)
     doc.close()
     return d, entry_id
 
@@ -247,23 +256,28 @@ def test_crash_recovery_restore(qtbot, settings, sample_pdf, tmp_path):
         dialog = rec.dialog
         assert not dialog.isModal()
         assert dialog.tree.topLevelItemCount() == 1
+        assert dialog.tree.columnCount() == 2
         item = dialog.tree.topLevelItem(0)
-        assert item.text(0) == "esempio.pdf" and item.text(1) == sample_pdf and item.text(2)
+        assert item.text(0) == "Documento recuperato" and item.text(1)
+        assert "esempio" not in item.toolTip(0) + item.toolTip(1)
         qtbot.mouseClick(dialog.restore_button, Qt.MouseButton.LeftButton)
         assert not dialog.isVisible()
         view = win.current_view()
         doc = view.document
-        assert str(doc.path) == sample_pdf
+        assert doc.path is None and doc.display_name == "Documento recuperato"   # «Salva con nome»
         assert doc.is_modified
         assert "MODIFICA DI PROVA" in doc.page_text(0)
         assert view.current_page == 2
         # Il file originale non è stato toccato; la copia resta finché non è al sicuro.
         assert Path(sample_pdf).read_bytes() == original
         assert (d / f"{entry_id}.pdf").exists()
-        assert json.loads((d / f"{entry_id}.json").read_text())["pid"] == os.getpid()
+        raw = (d / f"{entry_id}.json").read_text()
+        assert json.loads(raw)["pid"] == os.getpid() and "esempio" not in raw
         assert rec.entry_id(doc) == entry_id
+        target = str(tmp_path / "salvato-altrove.pdf")
+        win.ctx.ask_save_path = lambda *a, **k: target
         assert win.save_view(view)
-        assert "MODIFICA DI PROVA" in Document.open(sample_pdf).page_text(0)
+        assert "MODIFICA DI PROVA" in Document.open(target).page_text(0)
         assert _files(d) == []
     finally:
         _cleanup(win)
@@ -313,7 +327,7 @@ def test_live_pid_entry_ignored(qtbot, settings, sample_pdf, tmp_path):
     try:
         doc = Document.open(sample_pdf)
         _edit(doc)
-        _crash_entry(d, doc, sample_pdf, pid=proc.pid)
+        _crash_entry(d, doc, pid=proc.pid)
         doc.close()
         win = _new_window(qtbot, settings)
         qtbot.wait(50)
@@ -346,7 +360,7 @@ def test_restore_encrypted_copy_asks_password(viewer_window, encrypted_pdf, monk
     d = Path(os.environ["FOLIANT_RECOVERY_DIR"])
     doc = Document.open(encrypted_pdf, "segreta")
     _edit(doc)
-    _crash_entry(d, doc, encrypted_pdf)
+    _crash_entry(d, doc)
     doc.close()
     asked = []
     monkeypatch.setattr(rec, "ask_password", lambda name, retry=False: asked.append(retry) or "segreta")
@@ -357,16 +371,58 @@ def test_restore_encrypted_copy_asks_password(viewer_window, encrypted_pdf, monk
     assert "MODIFICA DI PROVA" in views[0].document.page_text(0)
 
 
-def test_restore_missing_folder_leaves_path_empty(viewer_window, sample_pdf, tmp_path):
+def test_legacy_metadata_sanitized_and_restored_without_path(viewer_window, sample_pdf, tmp_path):
+    """Copie delle versioni precedenti: all'avvio nome e percorso spariscono dai metadati, la
+    copia resta recuperabile come «Documento recuperato» (senza percorso)."""
     rec = _rec(viewer_window)
     d = Path(os.environ["FOLIANT_RECOVERY_DIR"])
     doc = Document.open(sample_pdf)
     _edit(doc)
-    _crash_entry(d, doc, str(tmp_path / "sparita" / "doc.pdf"))
+    entry_id = _legacy_entry(d, doc, str(tmp_path / "zq7k-cartella" / "zq7k-riservato.pdf"), page=2)
     doc.close()
+    (d / ".foliant-abbandonato.tmp").write_text("zq7k")
+    os.utime(d / ".foliant-abbandonato.tmp", (1, 1))
+    assert "zq7k" in (d / f"{entry_id}.json").read_text()
+    assert engine.sanitize_legacy(d) == 2
+    raw = (d / f"{entry_id}.json").read_text()
+    meta = json.loads(raw)
+    assert "zq7k" not in raw and meta["page"] == 2 and meta["format"] == engine.FORMAT_VERSION
+    assert stat.S_IMODE((d / f"{entry_id}.json").stat().st_mode) == 0o600
+    assert not (d / ".foliant-abbandonato.tmp").exists()
+    assert engine.sanitize_legacy(d) == 0                       # già pulito: nulla da fare
     views = rec.restore_entries(rec.orphans())
     assert views[0].document.path is None
-    assert views[0].document.display_name == "doc.pdf"
+    assert views[0].document.display_name == "Documento recuperato"
+    assert views[0].current_page == 2
+
+
+def test_legacy_metadata_sanitized_at_startup(qtbot, settings, sample_pdf, tmp_path):
+    d = Path(os.environ["FOLIANT_RECOVERY_DIR"])
+    doc = Document.open(sample_pdf)
+    _edit(doc)
+    entry_id = _legacy_entry(d, doc, sample_pdf)
+    doc.close()
+    win = _new_window(qtbot, settings)
+    try:
+        assert "esempio" not in (d / f"{entry_id}.json").read_text()
+        rec = _rec(win)
+        qtbot.waitUntil(lambda: rec.notification is not None, timeout=3000)
+        assert [e.display_name for e in rec.pending] == ["Documento recuperato"]
+    finally:
+        _cleanup(win)
+
+
+def test_about_to_quit_removes_own_copies(viewer_window, sample_pdf):
+    """Chiusura regolare dell'app (aboutToQuit): nessuna copia di questo processo resta."""
+    rec = _rec(viewer_window)
+    d = Path(os.environ["FOLIANT_RECOVERY_DIR"])
+    view = viewer_window.open_path(sample_pdf)
+    _edit(view.document)
+    assert rec.autosave_now() == 1
+    assert _files(d)
+    rec.remove_own_entries()
+    assert _files(d) == []
+    assert rec.entry_id(view.document) is None
 
 
 def test_crash_recovery_notification_restore_all(qtbot, settings, sample_pdf, tmp_path):

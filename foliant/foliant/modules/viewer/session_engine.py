@@ -1,21 +1,19 @@
-"""Logica pura di posizione per file (VIS-02), vista iniziale (VIS-05) e sessione (VIS-30).
+"""Logica pura dello stato di una vista (per «Riapri scheda chiusa») e vista iniziale (VIS-05).
 
-Nessuna dipendenza dall'interfaccia: le posizioni sono dizionari semplici
-serializzati in JSON, la vista iniziale si legge dal catalogo del PDF.
+Nessuna dipendenza dall'interfaccia: la vista iniziale si legge dal catalogo del PDF.
+Riservatezza: qui non c'è nulla che salvi posizioni o sessioni su disco; lo stato delle
+schede chiuse vive solo in memoria finché Foliant è aperto.
 """
 
 from __future__ import annotations
 
-import json
 import re
-import time
 from dataclasses import dataclass
 
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE
 
-MAX_POSITIONS = 200
 MAX_CLOSED = 30
 
 PAGE_LAYOUTS = {
@@ -72,61 +70,6 @@ class ViewState:
 def view_state(view) -> ViewState:
     """Stato corrente di una DocumentView (qualunque oggetto con gli stessi attributi)."""
     return ViewState(view.current_page, None if view.fit_mode else float(view.zoom), view.fit_mode, view.view_mode)
-
-
-# ====================================================================== posizioni per file
-def load_positions(raw) -> dict[str, dict]:
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
-    except ValueError:
-        return {}
-    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, dict)} if isinstance(data, dict) else {}
-
-
-def remember_position(positions: dict[str, dict], path: str, state: ViewState,
-                      now: float | None = None, limit: int = MAX_POSITIONS) -> dict[str, dict]:
-    """Memorizza la posizione di `path` (le voci più vecchie oltre `limit` vengono rimosse)."""
-    entry = state.to_dict()
-    entry["t"] = time.time() if now is None else now
-    positions = dict(positions)
-    positions[path] = entry
-    if len(positions) > limit:
-        ordered = sorted(positions.items(), key=lambda kv: kv[1].get("t", 0), reverse=True)
-        positions = dict(ordered[:limit])
-    return positions
-
-
-def dump_positions(positions: dict[str, dict]) -> str:
-    return json.dumps(positions, ensure_ascii=False)
-
-
-# ====================================================================== sessione
-def dump_session(tabs: list[tuple[str, ViewState]], current: int) -> str:
-    return json.dumps({"tabs": [dict(path=p, **s.to_dict()) for p, s in tabs], "current": current},
-                      ensure_ascii=False)
-
-
-def load_session(raw) -> tuple[list[tuple[str, ViewState]], int]:
-    if not raw:
-        return [], 0
-    try:
-        data = json.loads(raw)
-    except (TypeError, ValueError):
-        return [], 0
-    if not isinstance(data, dict):
-        return [], 0
-    tabs = []
-    for item in data.get("tabs", []) or []:
-        state = ViewState.from_dict(item)
-        if state is not None and isinstance(item.get("path"), str) and item["path"]:
-            tabs.append((item["path"], state))
-    try:
-        current = int(data.get("current", 0))
-    except (TypeError, ValueError):
-        current = 0
-    return tabs, current
 
 
 # ====================================================================== vista iniziale
