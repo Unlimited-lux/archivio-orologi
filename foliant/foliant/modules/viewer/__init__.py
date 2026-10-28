@@ -33,6 +33,7 @@ PARTS = (
     "recovery",       # salvataggio automatico e recupero dopo crash
     "archives",       # archivi ZIP
     "articles",       # thread di articoli
+    "integrity",      # file danneggiati e funzioni non supportate
 )
 
 
