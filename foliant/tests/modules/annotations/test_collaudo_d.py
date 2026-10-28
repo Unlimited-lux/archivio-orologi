@@ -43,12 +43,12 @@ def test_roundtrip_border_rich_text_and_rect(fmt):
         assert "<b>da rivedere</b>" in rc, rc
 
 
-def _import_time(n):
+def _import_time(n, pages=10):
     d = pymupdf.open()
-    for _ in range(10):
+    for _ in range(pages):
         d.new_page()
     for i in range(n):
-        p = i % 10
+        p = i % pages
         x = engine.create_note(d, p, (50 + (i % 25) * 20, 50 + (i // 25) % 40 * 18), f"n{i}", engine.Style(), "A")
         if i % 10 == 0:
             engine.add_reply(d, p, x, "ok", "B")
@@ -64,6 +64,9 @@ def _import_time(n):
 
 
 def test_import_1000_comments_fast():
-    """Prima 1000 commenti = 12,8 s (find_annot e aspetto rigenerato per ogni elemento); ora circa 4,5 s.
-    Resta la parte di PyMuPDF (add_*_annot rilegge gli id delle annotazioni della pagina)."""
-    assert _import_time(1000) < 10
+    """Collaudo D: 1000 commenti = 12,8 s e 3000 = 99,7 s (crescita quadratica). Ora circa 1,7 s e
+    5 s su questa macchina: /NM senza scansione della pagina, nessuna ricerca per elemento, una sola
+    pagina caricata alla volta (MuPDF rallenta ogni creazione in proporzione alle annotazioni delle
+    pagine aperte)."""
+    assert _import_time(1000) < 6
+    assert _import_time(3000, pages=30) < 20

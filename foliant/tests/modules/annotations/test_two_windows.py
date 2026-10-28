@@ -43,3 +43,19 @@ def test_second_window_closed_first_still_works(comments, settings, text_pdf, qt
     mine = ["".join(traceback.format_exception(*e)) for e in errors]
     mine = [t for t in mine if "/modules/annotations/" in t]      # eccezioni di altri moduli: non qui
     assert not mine, "".join(mine)
+
+
+def test_view_closed_right_after_save(comments, tmp_path, monkeypatch):
+    """Il riallineamento dopo il salvataggio (QTimer.singleShot) non tocca una vista già distrutta."""
+    import sys
+    import traceback
+    window, view, module = comments
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *a: errors.append(a))
+    module.ctrl.apply("n", engine.create_note, 0, (100, 100), "x", engine.Style(), "A")
+    view.document.save(str(tmp_path / "salvato.pdf"))     # accoda _after_save
+    window.close_view(view)
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)   # vista distrutta prima del timer
+    QApplication.processEvents()
+    mine = ["".join(traceback.format_exception(*e)) for e in errors]
+    assert not [t for t in mine if "/modules/annotations/" in t], "".join(mine)
