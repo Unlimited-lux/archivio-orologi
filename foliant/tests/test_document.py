@@ -696,3 +696,42 @@ def test_encrypted_document_incremental_keeps_encryption(tmp_path):
     assert path.read_bytes().startswith(original)
     r = pymupdf.open(path)
     assert r.metadata["encryption"] and "Pagina cifrata" in r[0].get_text() and len(list(r[0].annots())) == 1
+
+
+def test_signed_document_redaction_rewrites_the_whole_file(tmp_path, test_signer):
+    """Redazione su un PDF firmato: il testo tolto non deve restare nella revisione firmata
+    (NFR-09); annullando la redazione si torna al salvataggio incrementale."""
+    path = _signed_pdf(tmp_path, test_signer, False)
+    signed = path.read_bytes()
+    doc = Document.open(path)
+    assert doc.saves_incrementally
+    with doc.change("Applica redazioni", kind="redaction") as pdf:
+        page = pdf[1]
+        page.add_redact_annot(page.search_for("Pagina 2")[0])
+        page.apply_redactions()
+    assert not doc.saves_incrementally
+    out = doc.save_bytes()
+    assert not out.startswith(signed)
+    r = pymupdf.open("pdf", out)
+    assert "Pagina 2" not in r[1].get_text() and "Pagina 1" in r[0].get_text()
+    raw = b"".join(r.xref_stream(x) or b"" for x in range(1, r.xref_length()) if r.xref_is_stream(x))
+    assert b"Pagina 2" not in raw and b"Pagina 2" not in out
+    copy = tmp_path / "redatto.pdf"
+    doc.save_copy(copy)
+    assert not copy.read_bytes().startswith(signed)
+    doc.undo()
+    assert doc.saves_incrementally
+    with doc.change("Nota", kind="annotation") as pdf:
+        pdf[0].add_text_annot((50, 50), "ok")
+    assert doc.save_bytes().startswith(signed)
+    # anche come passo annidato o con la richiesta esplicita
+    with doc.change("Rimuovi dati nascosti"):
+        with doc.change("Redazione interna", kind="redaction"):
+            pass
+    assert not doc.saves_incrementally
+    doc.undo()
+    with doc.change("Pulizia"):
+        doc.require_full_rewrite()
+    assert not doc.saves_incrementally
+    doc.undo()
+    assert doc.saves_incrementally

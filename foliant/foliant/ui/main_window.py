@@ -30,6 +30,7 @@ from .notify import NotificationArea
 from .tasks import BackgroundTask, TaskManager, TaskStatusWidget
 
 MAX_RECENT = 15
+READ_ONLY_BANNER = "nucleo.sola_lettura"     # avviso dei file senza permesso di scrittura
 
 
 class PageField(QLineEdit):
@@ -871,8 +872,11 @@ class MainWindow(QMainWindow):
         self.apply_default_tool(views=[view])      # documento aperto in una modalità con strumento proprio
         self._on_current_changed()
         if document.read_only:
-            self.statusBar().showMessage(_("«{name}» è in sola lettura: puoi modificarlo e salvarlo con «Salva con nome».")
-                                         .format(name=document.display_name), 15000)
+            self.ctx.show_banner(view, READ_ONLY_BANNER,
+                                 _("«{name}» è in sola lettura: puoi modificarlo e salvarlo con «Salva con nome».")
+                                 .format(name=document.display_name),
+                                 [(_("Salva con nome…"), lambda v=view: self.save_view(v, save_as=True))],
+                                 level="info", priority=5)
         if document.repaired:
             self.statusBar().showMessage(_("Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto."), 15000)
         if document.locked_reason:
@@ -1088,8 +1092,11 @@ class MainWindow(QMainWindow):
         doc = view.document
         if doc.closed:
             return
+        read_only = doc.read_only
         self.tabs.setTabText(index, ("• " if doc.is_modified else "") + doc.display_name
-                             + (" " + _("(sola lettura)") if doc.read_only or doc.locked_reason else ""))
+                             + (" " + _("(sola lettura)") if read_only or doc.locked_reason else ""))
+        if not read_only:                   # dopo «Salva con nome» in una posizione scrivibile
+            self.ctx.hide_banner(view, READ_ONLY_BANNER)
         self.tabs.setTabToolTip(index, str(doc.path or doc.display_name))
         if view is self.current_view():
             self._update_state()
