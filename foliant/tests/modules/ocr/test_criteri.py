@@ -319,3 +319,44 @@ def test_parole_degradate_segnalate(tmp_path):
         flagged += any(w.low or w.text != t for w in hit) and any(w.low for w in hit)
     assert flagged >= 4, (flagged, [(w.text, w.conf) for w in low])
     assert len(low) <= 0.1 * len(res.words) + 1
+
+
+def _acc(img, **kw):
+    lines, _p, _c = engine.recognize_array(img, ["ita"], 300, preprocess.PreprocessOptions(**kw))
+    return engine.char_accuracy(engine.PageResult(index=0, lines=lines).text, EXPECTED)
+
+
+def test_pulizia_rumore_e_contrasto():
+    """OCR-09: rumore 5% e testo grigio su carta ingiallita (contrasto 25%)."""
+    import numpy as np
+    noisy = scan_image(dpi=300, noise=0.05)
+    auto, none = _acc(noisy), _acc(noisy, denoise=False, contrast=False)
+    assert auto >= 0.98 or (auto >= 0.95 and auto - none >= 0.05), (auto, none)
+    img = scan_image(dpi=300).astype(np.float32) / 255
+    paper = np.array([240, 225, 170], np.float32) / 255
+    ink = paper * 0.75
+    low = ((ink + (paper - ink) * img) * 255).astype(np.uint8)
+    assert _acc(low) >= 0.95
+    clean = scan_image(dpi=300)
+    assert abs(_acc(clean) - _acc(clean, denoise=False, contrast=False)) <= 0.005
+
+
+def test_due_colonne_ordine_di_lettura(tmp_path):
+    left = ["Colonna sinistra prima riga del testo", "seconda riga a sinistra con parole",
+            "terza riga sinistra e ultima"]
+    right = ["Colonna destra prima riga del testo", "seconda riga a destra con parole",
+             "terza riga destra e ultima"]
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for i, (a, b) in enumerate(zip(left, right)):
+        page.insert_text((50, 100 + i * 20), a, fontsize=11)
+        page.insert_text((320, 100 + i * 20), b, fontsize=11)
+    pix = page.get_pixmap(dpi=300)
+    import numpy as np
+    img = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w, 3).copy()
+    data = open(image_pdf(tmp_path / "col.pdf", [img]), "rb").read()
+    with pymupdf.open(stream=data) as pdf:
+        text = engine.recognize_document(pdf, engine.OcrOptions(languages=["ita"])).pages[0].text
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    assert all("sinistra" not in ln or "destra" not in ln for ln in lines)       # niente righe miste
+    assert text.index("terza riga sinistra") < text.index("Colonna destra")

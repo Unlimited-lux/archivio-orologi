@@ -248,7 +248,7 @@ def recognize(gray: np.ndarray, languages: list[str], dpi: int = 300, psm: int =
             msg = out.strip().splitlines()[-1] if out.strip() else ""
             raise OcrError(_("Il riconoscimento non è riuscito: {m}").format(m=msg or code))
         with open(path, encoding="utf-8", errors="replace") as f:
-            return drop_noise(parse_hocr(f.read()))
+            return split_columns(drop_noise(parse_hocr(f.read())))
 
 
 def drop_noise(lines: list[Line], min_conf: float = 70.0) -> list[Line]:
@@ -270,3 +270,63 @@ def version() -> str | None:
         return (out.stdout or out.stderr).splitlines()[0].strip()
     except Exception:
         return None
+
+
+def _gaps(ln: Line, min_gap: float) -> list[tuple[float, float]]:
+    out = []
+    for a, b in zip(ln.words, ln.words[1:]):
+        if b.bbox[0] - a.bbox[2] >= min_gap:
+            out.append((a.bbox[2], b.bbox[0]))
+    return out
+
+
+def _split_line(ln: Line, x: float, col: int) -> Line:
+    words = [w for w in ln.words if ((w.bbox[0] + w.bbox[2]) / 2 < x) == (col == 0)]
+    x0 = min(w.bbox[0] for w in words)
+    bbox = (x0, ln.bbox[1], max(w.bbox[2] for w in words), ln.bbox[3])
+    offset = ln.baseline_y(x0) - ln.bbox[3]
+    return Line(bbox=bbox, words=words, baseline=(ln.baseline[0], offset), x_size=ln.x_size,
+                x_ascenders=ln.x_ascenders, x_descenders=ln.x_descenders, block=ln.block * 100 + col + 1,
+                par=ln.par * 100 + col + 1)
+
+
+def split_columns(lines: list[Line]) -> list[Line]:
+    """Separa le righe che il motore ha unito attraverso due colonne.
+
+    Un «canale» è uno spazio tra parole molto più largo della riga che si ripete
+    alla stessa ascissa in almeno due righe consecutive: le righe vengono divise lì
+    e il testo della colonna sinistra precede quello della destra."""
+    if len(lines) < 2:
+        return lines
+    out: list[Line] = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        h = ln.x_size or (ln.bbox[3] - ln.bbox[1])
+        gaps = _gaps(ln, 2.5 * h)
+        region: list[Line] = []
+        gutter = None
+        for g in gaps:
+            run = [ln]
+            lo, hi = g
+            j = i + 1
+            while j < len(lines):
+                nxt = lines[j]
+                hn = nxt.x_size or (nxt.bbox[3] - nxt.bbox[1])
+                match = [(a, b) for a, b in _gaps(nxt, 2.5 * hn) if a < hi and b > lo]
+                if not match:
+                    break
+                lo, hi = max(lo, match[0][0]), min(hi, match[0][1])
+                run.append(nxt)
+                j += 1
+            if len(run) >= 2 and hi > lo:
+                region, gutter = run, (lo + hi) / 2
+                break
+        if not region:
+            out.append(ln)
+            i += 1
+            continue
+        out.extend(_split_line(r, gutter, 0) for r in region)
+        out.extend(_split_line(r, gutter, 1) for r in region)
+        i += len(region)
+    return out
