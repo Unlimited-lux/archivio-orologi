@@ -50,6 +50,7 @@ class ConvertController:
     def __init__(self, ctx):
         self.ctx = ctx
         self.last_result = None
+        self.last_batch = None
         self.scanner_backend = None   # None = SANE (scanimage); i test usano un dispositivo simulato
 
     # ============================================================ utilità
@@ -70,6 +71,22 @@ class ConvertController:
         except Exception as e:   # mai chiudere l'applicazione per un errore del modulo
             self.ctx.error(title.rstrip("…. "), _("Errore imprevisto: {e}").format(e=e))
         return False, None
+
+    def _report_error(self, title: str, e: BaseException) -> None:
+        if isinstance(e, OperationCancelled):
+            self.ctx.status(_("Operazione annullata."))
+        elif isinstance(e, FoliantError):
+            self.ctx.error(title.rstrip("…. "), str(e))
+        elif isinstance(e, MemoryError):
+            self.ctx.error(title.rstrip("…. "), _("Memoria insufficiente per completare l'operazione."))
+        else:
+            self.ctx.error(title.rstrip("…. "), _("Errore imprevisto: {e}").format(e=e))
+
+    def _run_background(self, title: str, on_done, fn, *args, **kwargs):
+        """Lavoro lungo NON modale: la finestra resta usabile (avanzamento e Annulla nella barra di
+        stato); `on_done(risultato)` viene chiamato nel thread dell'interfaccia. Restituisce il task."""
+        return self.ctx.run_task(title, lambda progress: fn(*args, progress=progress, **kwargs), modal=False,
+                                 on_done=on_done, on_error=lambda e: self._report_error(title, e))
 
     def _ask_password(self, name: str) -> str | None:
         pw, ok = QInputDialog.getText(self.window, _("Documento protetto"),
@@ -212,16 +229,13 @@ class ConvertController:
                 options["ocr"] = "auto"
         if fmt.startswith("pdfa") and not self._confirm_pdfa(source, fmt, password):
             return None
-        ok, result = self._run(_("Conversione in corso…"), run_conversion, source, out_path, fmt, **options)
-        if not ok:
-            return None
-        if fmt.startswith("pdfa"):
-            report = result.details.get("pdfa", {})
-            if not report.get("compliant", True):
-                pass
-        self.last_result = result
-        self.show_result(result)
-        return result
+        def finished(result):
+            self.last_result = result
+            self.show_result(result)
+
+        task = self._run_background(_("Conversione in corso…"), finished, run_conversion, source, out_path, fmt,
+                                    **options)
+        return task.result if task.done and task.error is None else None
 
     def _confirm_pdfa(self, source, fmt: str, password: str | None) -> bool:
         """CNV-14: analisi preliminare con l'elenco dei problemi e delle correzioni."""
@@ -1053,10 +1067,15 @@ class ConvertController:
             return None
         from .batch import batch_convert
         files, fmt, out_dir, keep, root, options = dlg.values()
-        ok, items = self._run(_("Conversione in blocco…"), batch_convert, files, fmt, out_dir=out_dir,
-                              keep_structure=keep, root=root, **options)
-        if not ok:
-            return None
+        task = self._run_background(_("Conversione in blocco…"),
+                                    lambda items: self._batch_finished(items, fmt, out_dir, keep, root, options),
+                                    batch_convert, files, fmt, out_dir=out_dir, keep_structure=keep, root=root,
+                                    **options)
+        return self.last_batch if task.done and task.error is None else None
+
+    def _batch_finished(self, items, fmt, out_dir, keep, root, options):
+        from .batch import batch_convert
+        from .batch_dialog import show_batch_report
         # file protetti: password chiesta alla fine, senza bloccare gli altri (Annulla = salta)
         locked = [it for it in items if it.status == "saltato" and it.message == _("Protetto da password")]
         passwords = {}
@@ -1071,6 +1090,7 @@ class ConvertController:
             if ok:
                 by_path = {r.path: r for r in retried}
                 items = [by_path.get(it.path, it) for it in items]
+        self.last_batch = items
         show_batch_report(self, items)
         return items
 

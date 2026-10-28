@@ -732,3 +732,21 @@ def test_repaired_document_banner_and_copy(window, ctrl, sample_pdf, tmp_path, m
     assert fixed.page_count == 3 and not getattr(fixed, "is_repaired", False)
     assert "riparato" not in window.ctx.banners(view)
     assert open(bad, "rb").read() == bytes(data)
+
+
+def test_export_runs_non_modal(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
+    """Le conversioni lunghe non bloccano la finestra: run_task con modal=False e on_done."""
+    window.open_path(sample_pdf)
+    seen = {}
+    original = window.ctx.run_task
+
+    def spy(title, fn, *args, **kwargs):
+        if kwargs.get("modal") is False:
+            seen["modal"] = False
+            seen["on_done"] = kwargs.get("on_done") is not None
+        return original(title, fn, *args, **kwargs)
+    monkeypatch.setattr(window.ctx, "run_task", spy)
+    _accept_export(monkeypatch, tmp_path, "txt")
+    result = ctrl.export()
+    assert seen == {"modal": False, "on_done": True}
+    assert result is not None and os.path.exists(result.paths[0])
