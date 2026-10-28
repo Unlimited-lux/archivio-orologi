@@ -246,6 +246,28 @@ class FontChoice:
         return bytes(self.font.buffer)
 
 
+@dataclass(eq=False)
+class ResourceChoice(FontChoice):
+    """La risorsa font originale del PDF: il testo nuovo la riusa con la sua codifica (nessun font aggiunto)."""
+
+    resource: object = None   # fontfix.ResourceEncoding
+
+    def covers(self, ch: str) -> bool:
+        return self.resource.covers(ch)
+
+    @property
+    def has_space(self) -> bool:
+        return self.resource.covers(" ")
+
+    def text_length(self, text: str, size: float) -> float:
+        return self.resource.text_length(text, size)
+
+    def data(self) -> bytes:
+        if self.buffer is None:
+            raise ValueError("programma del font non disponibile")
+        return self.buffer
+
+
 @dataclass
 class Substitution:
     original: str
@@ -333,6 +355,13 @@ class FontResolver:
             # i caratteri mancanti useranno un sostituto (TXT-10)
             return ch is not None and (not visible or any(ch.covers(c) for c in visible))
 
+        # prima scelta: la risorsa font originale della pagina, senza aggiungere font al file (bug_10)
+        rkey = ("res", xref)
+        if rkey not in self._originals:
+            self._originals[rkey] = self._resource(xref)
+        resource = self._originals[rkey]
+        if usable(resource):
+            return resource
         choice = self._originals[xref]
         if usable(choice) and (not visible or all(choice.covers(c) for c in visible)):
             return choice
@@ -344,6 +373,17 @@ class FontResolver:
             if not usable(choice) or sum(repaired.covers(c) for c in visible) > sum(choice.covers(c) for c in visible):
                 return repaired
         return choice if usable(choice) else None
+
+    def _resource(self, xref: int) -> "FontChoice | None":
+        from .fontfix import resource_encoding
+        enc = resource_encoding(self.pdf, xref)
+        if enc is None:
+            return None
+        base = self._originals.get(xref)
+        font = base.font if base is not None else pymupdf.Font("helv")
+        name = strip_subset(self.font_info(xref)[2])
+        return ResourceChoice("FTo%d" % xref, font, KIND_ORIGINAL, name,
+                              buffer=base.buffer if base is not None else None, resource=enc)
 
     def _repaired(self, xref: int) -> FontChoice | None:
         from .fontfix import repaired_font

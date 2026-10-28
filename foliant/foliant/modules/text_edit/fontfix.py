@@ -138,3 +138,142 @@ def repaired_font(pdf: pymupdf.Document, xref: int) -> tuple[bytes, set[str]] | 
         return out.getvalue(), {chr(u) for u in uni2name}
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------- riuso della risorsa font originale
+class ResourceEncoding:
+    """Come scrivere testo nuovo con la risorsa font originale del PDF: Unicode -> codice e larghezze."""
+
+    def __init__(self, xref: int, codes: dict[str, bytes], widths: dict[bytes, float], two_byte: bool):
+        self.xref = xref
+        self.codes = codes          # carattere -> codice nel flusso di contenuto
+        self.widths = widths        # codice -> larghezza in millesimi di em
+        self.two_byte = two_byte
+
+    def covers(self, ch: str) -> bool:
+        return ch in self.codes
+
+    def encode(self, text: str) -> bytes:
+        return b"".join(self.codes[c] for c in text)
+
+    def text_length(self, text: str, size: float) -> float:
+        return sum(self.widths.get(self.codes[c], 0.0) for c in text) * size / 1000.0
+
+
+def _parse_w_array(text: str) -> dict[int, float]:
+    """Array /W dei font composti: `c [w1 w2 …]` oppure `c_first c_last w`."""
+    out: dict[int, float] = {}
+    tokens = re.findall(r"\[|\]|-?\d+(?:\.\d+)?", text or "")
+    i = 0
+    while i < len(tokens):
+        if tokens[i] in "[]":
+            i += 1
+            continue
+        first = int(float(tokens[i]))
+        if i + 1 < len(tokens) and tokens[i + 1] == "[":
+            j = i + 2
+            k = 0
+            while j < len(tokens) and tokens[j] != "]":
+                out[first + k] = float(tokens[j])
+                k += 1
+                j += 1
+            i = j + 1
+        elif i + 2 < len(tokens):
+            last, w = int(float(tokens[i + 1])), float(tokens[i + 2])
+            for c in range(first, min(last, first + 65535) + 1):
+                out[c] = w
+            i += 3
+        else:
+            break
+    return out
+
+
+def resource_encoding(pdf: pymupdf.Document, xref: int) -> ResourceEncoding | None:
+    """Codifica della risorsa font `xref` per scrivere testo nuovo senza aggiungere font.
+
+    Solo i caratteri di cui la risorsa ha davvero il glifo (larghezza non nulla nel sottoinsieme)."""
+    try:
+        subtype = pdf.xref_get_key(xref, "Subtype")[1]
+        tu = pdf.xref_get_key(xref, "ToUnicode")
+        if tu[0] != "xref":
+            return None
+        mapping = parse_tounicode(pdf.xref_stream(int(tu[1].split()[0])) or b"")
+        if not mapping:
+            return None
+        codes: dict[str, bytes] = {}
+        widths: dict[bytes, float] = {}
+        if subtype == "/Type0":
+            if pdf.xref_get_key(xref, "Encoding")[1] != "/Identity-H":
+                return None
+            desc = pdf.xref_get_key(xref, "DescendantFonts")
+            m = re.search(r"(\d+)\s+0\s+R", desc[1] or "")
+            if not m:
+                return None
+            descendant = int(m.group(1))
+            kind, wval = pdf.xref_get_key(descendant, "W")
+            if kind == "xref":
+                wval = pdf.xref_object(int(wval.split()[0]))
+            w = _parse_w_array(wval if kind != "null" else "")
+            dw_kind, dw = pdf.xref_get_key(descendant, "DW")
+            default_w = float(dw) if dw_kind not in ("null",) and dw else 1000.0
+            # glifi realmente presenti nel programma del font (i sottoinsiemi svuotano gli altri)
+            present = _present_glyphs(pdf, xref, descendant)
+            for cid, text in mapping.items():
+                if len(text) != 1 or text in codes:
+                    continue
+                if present is not None and cid not in present and not text.isspace():
+                    continue
+                code = cid.to_bytes(2, "big")
+                codes[text] = code
+                widths[code] = w.get(cid, default_w)
+            return ResourceEncoding(xref, codes, widths, True) if codes else None
+        if subtype not in ("/TrueType", "/Type1", "/MMType1"):
+            return None
+        first = int(pdf.xref_get_key(xref, "FirstChar")[1] or 0)
+        kind, wval = pdf.xref_get_key(xref, "Widths")
+        if kind == "xref":
+            wval = pdf.xref_object(int(wval.split()[0]))
+        values = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?", wval or "")]
+        for code, text in mapping.items():
+            if len(text) != 1 or code > 255 or text in codes:
+                continue
+            k = code - first
+            width = values[k] if 0 <= k < len(values) else 0.0
+            if width <= 0 and not text.isspace():
+                continue   # nessun glifo per questo codice nel sottoinsieme
+            b = bytes([code])
+            codes[text] = b
+            widths[b] = width
+        return ResourceEncoding(xref, codes, widths, False) if codes else None
+    except Exception:
+        return None
+
+
+def _present_glyphs(pdf: pymupdf.Document, xref: int, descendant: int) -> set[int] | None:
+    """CID con un glifo non vuoto (None se non determinabile)."""
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        return None
+    try:
+        _name, ext, _typ, buf = pdf.extract_font(xref)
+        if ext != "ttf" or not buf:
+            return None
+        font = TTFont(io.BytesIO(buf))
+        if "glyf" not in font:
+            return None
+        order = font.getGlyphOrder()
+        glyf = font["glyf"]
+        cid2gid = _cid_to_gid(pdf, descendant)
+        out = set()
+        limit = len(order)
+        cids = range(limit) if cid2gid is None else cid2gid.keys()
+        for cid in cids:
+            gid = cid if cid2gid is None else cid2gid[cid]
+            if 0 < gid < limit:
+                g = glyf[order[gid]]
+                if g.isComposite() or getattr(g, "numberOfContours", 0) > 0:
+                    out.add(cid)
+        return out
+    except Exception:
+        return None

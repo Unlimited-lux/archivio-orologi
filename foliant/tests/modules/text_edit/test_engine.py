@@ -79,7 +79,10 @@ def test_replace_year_keeps_style_and_position(subset_pdf, tmp_path):
     out = reopen(doc, tmp_path)
     text = out[0].get_text()
     assert "scade nel 2027 o 2026" in text and "2024" not in text
-    after = span_with(out[0], "2027")
+    # le cifre presenti nel sottoinsieme riusano la risorsa originale, la «7» mancante un font installato
+    after = span_with(out[0], "contratto")
+    new_span = [sp for sp in spans(out[0]) if "7" in sp["text"]][0]
+    assert abs(new_span["size"] - before["size"]) <= 0.05 and new_span["color"] == before["color"]
     assert abs(after["size"] - before["size"]) <= 0.05
     assert after["color"] == before["color"]
     assert abs(after["origin"][0] - before["origin"][0]) <= 0.5
@@ -533,8 +536,9 @@ def test_subset_missing_glyph_uses_same_installed_font(subset_pdf, tmp_path):
     # Liberation Sans è installato: stesso font, nessun avviso
     assert res.substitutions == []
     out = reopen(d, tmp_path)
-    s = span_with(out[0], "Quadro")
-    assert analysis.normalize_font_name(s["font"]).startswith("liberationsans")
+    assert "Quadro" in out[0].get_text()
+    for s in spans(out[0]):
+        assert analysis.normalize_font_name(s["font"]).startswith("liberationsans")
 
 
 def test_font_not_installed_gets_substitute_and_warning(tmp_path):
@@ -843,3 +847,57 @@ def test_shared_form_xobject_only_this_page(tmp_path):
     for i in (0, 2, 3):
         assert "2024" in out[i].get_text()
         assert pixels(out[i], dpi=50) == before[i]
+
+
+def _font_count(path) -> int:
+    d = pymupdf.open(str(path))
+    return len({f[0] for i in range(d.page_count) for f in d[i].get_fonts(full=True)})
+
+
+def test_edit_reuses_original_font_resource_pymupdf(tmp_path):
+    """bug_10: con il font originale che contiene i glifi, nessun font nuovo nel file."""
+    doc, page = new_doc_with_font(SANS)
+    page.insert_text((72, 100), "Il contratto scade nel 2024", fontname="F1", fontsize=12)
+    path = save(doc, tmp_path / "orig.pdf")
+    d = Document.open(path)
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "2024", "2042"))
+    out = tmp_path / "out.pdf"
+    d.save(out)
+    assert _font_count(out) == _font_count(path)
+    assert out.stat().st_size - pymupdf.open(path).tobytes(garbage=3, deflate=True).__len__() < 2000
+    re_ = pymupdf.open(str(out))
+    assert "scade nel 2042" in re_[0].get_text()
+    s = span_with(re_[0], "2042")
+    assert s is not None and analysis.normalize_font_name(s["font"]).startswith("liberationsans")
+
+
+def test_edit_reuses_original_font_resource_libreoffice(tmp_path):
+    """bug_10: fattura LibreOffice (Carlito in sottoinsieme): sostituire un prezzo non aggiunge font."""
+    import shutil
+    import subprocess
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        pytest.skip("LibreOffice non disponibile")
+    src = tmp_path / "fattura.html"
+    src.write_text("<html><body style='font-family:Carlito; font-size:11pt'><p>Totale: € 9.950,00</p>"
+                   "<p>Pagamento a trenta giorni.</p></body></html>", encoding="utf-8")
+    subprocess.run([soffice, "--headless", f"-env:UserInstallation=file://{tmp_path}/lo", "--convert-to",
+                    "pdf:writer_pdf_Export", "--outdir", str(tmp_path), str(src)], capture_output=True, timeout=180)
+    path = tmp_path / "fattura.pdf"
+    if not path.exists():
+        pytest.skip("conversione LibreOffice non riuscita")
+    from foliant.modules.text_edit import search
+    d = Document.open(str(path))
+    before = len(d.to_bytes())
+    s = search.replace_all(d, "9.950,00", "9.590,00", search.SearchOptions(case_sensitive=True))
+    assert s.replaced == 1
+    out = tmp_path / "out.pdf"
+    d.save(out)
+    assert _font_count(out) == _font_count(path)
+    assert out.stat().st_size - before < 2000
+    re_ = pymupdf.open(str(out))
+    assert "9.590,00" in re_[0].get_text()
+    assert span_with(re_[0], "9.590,00")["font"].startswith("Carlito")
