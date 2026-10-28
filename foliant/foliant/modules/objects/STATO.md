@@ -48,7 +48,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-38 Modificare collegamenti | P0 | fatto | ui: test_link_tool_select_move_delete_undo; lnk (JavaScript intatto, QuadPoints traslati) | |
 | OBJ-39 Eliminare collegamenti | P0 | fatto | ui: test_delete_links_dialog; lnk | |
 | OBJ-40 URL automatici | P1 | fatto | ui: test_detect_urls_flow_single_undo; lnk | Collegamenti al volo in lettura: del visualizzatore. |
-| OBJ-41 Attivazione e sicurezza | P0 | parziale | ui: test_ctrl_click_follows_link_in_object_tool; ui2: test_decide_rules, test_launch_link_blocked | Negli strumenti di modifica il clic seleziona, Ctrl+clic segue con la conferma unica del nucleo (`follow_link`, VIS-19). `linkopen.py` (siti consentiti, testo diverso dal dominio) resta come logica testata. |
+| OBJ-41 Attivazione e sicurezza | P0 | fatto | ui: test_ctrl_click_follows_link_in_object_tool; ui2: test_ctrl_click_uri_goes_through_core_confirmation, test_hover_link_shows_destination_tooltip | Negli strumenti di modifica il clic seleziona e Ctrl+clic segue il collegamento con la conferma unica del nucleo (VIS-19) e del modulo Sicurezza (SEC-27: domini consentiti, testo diverso dalla destinazione, blocco di /Launch); al passaggio del mouse il suggerimento mostra la destinazione. Indietro/Avanti: nucleo. |
 | OBJ-42 Verifica collegamenti | P2 | fatto | chk | Pannello laterale «Collegamenti». |
 | OBJ-43 Annulla/ripeti | P0 | fatto | ui: test_five_operations_undo_redo; eng | Gestito dal nucleo (`Document.change`). |
 
