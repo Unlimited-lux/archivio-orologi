@@ -554,3 +554,14 @@ def test_export_name_applied(qtbot):
     panel.export_name_edit.setText("surname")
     panel.export_name_edit.editingFinished.emit()
     assert {"export_name": "surname"} in calls
+
+
+def test_system_fonts_listed(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    panel = FieldPropertiesPanel(lambda *a: True)
+    qtbot.addWidget(panel)
+    items = [panel.font_combo.itemData(i) for i in range(panel.font_combo.count())]
+    assert items[:3] == ["Helvetica", "Times", "Courier"]
+    from PySide6.QtGui import QFontDatabase
+    if QFontDatabase.families():
+        assert len([i for i in items if i]) > 3

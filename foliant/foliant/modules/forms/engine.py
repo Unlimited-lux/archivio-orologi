@@ -430,6 +430,9 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         ca = _value_of(*pdf.xref_get_key(w.xref, "MK/CA"))
         info.check_style = next((k for k, c in CHECK_STYLES.items() if c == ca), "check" if kind == CHECKBOX else "circle")
     info.font = _FONT_NAMES.get(w.text_font or "Helv", w.text_font or "Helvetica")
+    sys_font = _value_of(*pdf.xref_get_key(w.xref, "FoliantFont"))
+    if sys_font:
+        info.font = sys_font
     info.fontsize = float(w.text_fontsize or 0)
     info.text_color = _color(w.text_color) or (0, 0, 0)
     info.fill_color = _color(w.fill_color)
@@ -726,7 +729,8 @@ def _regen_field(pdf: pymupdf.Document, fx: int, page: int, xref: int) -> None:
                 da = re.sub(r"[\d.]+\s+[\d.]+\s+[\d.]+\s+rg|[\d.]+\s+g\b", "", saved_da[1])
                 pdf.xref_set_key(fx, "DA", ps.encode_string("1 0 0 rg " + da.strip()))
     shown = formatted if formatted is not None else (saved_v[1] if saved_v[0] == "string" else "")
-    embed = bool(shown) and needs_embedded_font(shown) and _inherited(pdf, xref, "FT")[1] == "/Tx"
+    custom_font = pdf.xref_get_key(xref, "FoliantFont")[0] != "null"
+    embed = bool(shown) and (needs_embedded_font(shown) or custom_font) and _inherited(pdf, xref, "FT")[1] == "/Tx"
     try:
         for k in kids:
             pi = page if k == xref else _page_index_of(pdf, k, page)
@@ -1729,8 +1733,20 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         pdf.xref_set_key(fx, "TM", ps.encode_string(tm) if tm else "null")
     if "tooltip" in props:
         pdf.xref_set_key(fx, "TU", ps.encode_string(props["tooltip"]) if props["tooltip"] else "null")
+    if "font" in props:
+        if props["font"] in FONTS:
+            if pdf.xref_get_key(xref, "FoliantFont")[0] != "null":
+                pdf.xref_set_key(xref, "FoliantFont", "null")
+        else:
+            if kind != TEXT:
+                raise FormError(_("I caratteri di sistema sono disponibili solo per i campi di testo."))
+            if not system_font_file(str(props["font"])):
+                raise FormError(_("Il carattere «{f}» non è installato.").format(f=props["font"]))
+            # l'aspetto userà il carattere incorporato; /DA resta su un carattere standard di ripiego
+            pdf.xref_set_key(xref, "FoliantFont", ps.encode_string(str(props["font"])))
+            props = {**props, "font": "Helvetica"}
     if any(k in props for k in ("font", "fontsize", "text_color")):
-        font = props.get("font", info.font)
+        font = props.get("font", info.font if info.font in FONTS else "Helvetica")
         size = max(0.0, float(props.get("fontsize", info.fontsize) or 0))
         color = props.get("text_color") or info.text_color or (0, 0, 0)
         pdf.xref_set_key(fx, "DA", ps.encode_string(_da(font, size, color)))
@@ -2691,6 +2707,41 @@ def needs_embedded_font(text: str) -> bool:
 
 
 _FALLBACK_FONT = None
+_SYSTEM_FONT_CACHE: dict[str, str | None] = {}
+
+
+def system_font_file(family: str) -> str | None:
+    """File del carattere di sistema con questo nome (fontconfig); None se non installato."""
+    if family in _SYSTEM_FONT_CACHE:
+        return _SYSTEM_FONT_CACHE[family]
+    import shutil
+    import subprocess
+    path = None
+    if shutil.which("fc-match"):
+        try:
+            out = subprocess.run(["fc-match", "-f", "%{family}\t%{file}", family], capture_output=True,
+                                 text=True, timeout=5).stdout
+            found, _tab, file = out.partition("\t")
+            names = [n.strip().lower() for n in found.split(",")]
+            if family.strip().lower() in names and file.lower().endswith((".ttf", ".otf", ".ttc")):
+                path = file
+        except (OSError, subprocess.SubprocessError):
+            path = None
+    _SYSTEM_FONT_CACHE[family] = path
+    return path
+
+
+def _field_font(pdf: pymupdf.Document, xref: int) -> pymupdf.Font:
+    """Carattere da incorporare per il campo: quello di sistema scelto o il carattere di ripiego."""
+    family = _value_of(*pdf.xref_get_key(xref, "FoliantFont"))
+    if family:
+        path = system_font_file(family)
+        if path:
+            try:
+                return pymupdf.Font(fontfile=path)
+            except Exception:
+                pass
+    return _fallback_font()
 
 
 def _fallback_font() -> pymupdf.Font:
@@ -2706,7 +2757,9 @@ def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) 
     saper mostrare con i caratteri standard (FRM-09)."""
     info = field_info(pdf, page, xref)
     w, h = info.rect.width, info.rect.height
-    font = _fallback_font()
+    font = _field_font(pdf, xref)
+    if any(not font.has_glyph(ord(c)) for c in text if c not in "\r\n\t"):
+        font = _fallback_font()  # il carattere scelto non copre il testo
     tmp = pymupdf.open()
     try:
         tp = tmp.new_page(width=w, height=h)

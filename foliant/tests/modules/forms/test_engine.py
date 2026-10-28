@@ -606,3 +606,23 @@ def test_button_distinct_down_caption():
     d = int(again.xref_get_key(f.xref, "AP/D")[1].split()[0])
     assert n != d and again.xref_stream(n) != again.xref_stream(d)
     assert b"Invia" in again.xref_stream(n)
+
+
+def test_system_font_embedded(tmp_path):
+    if not E.system_font_file("DejaVu Serif"):
+        pytest.skip("carattere DejaVu Serif non installato")
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 300, 72), "t")
+    E.update_properties(pdf, 0, x, font="DejaVu Serif", fontsize=12)
+    E.set_value(pdf, 0, x, "Serif incorporato")
+    again = reopen(pdf)
+    f = E.list_fields(again)[0]
+    assert f.font == "DejaVu Serif" and f.value == "Serif incorporato"
+    assert "Serif incorporato" in again[0].get_text()
+    fonts = [again.xref_object(i, compressed=True) for i in range(1, again.xref_length())]
+    assert any("DejaVu#20Serif" in o for o in fonts) and any("/FontFile" in o for o in fonts)
+    with pytest.raises(E.FormError):
+        E.update_properties(pdf, 0, x, font="Carattere Inesistente XYZ")
+    E.update_properties(pdf, 0, x, font="Times")
+    assert E.field_info(pdf, 0, x).font == "Times"

@@ -440,6 +440,20 @@ class FieldPropertiesPanel(QWidget):
         cb.setTristate(False)
         handler(st == Qt.CheckState.Checked)
 
+    @staticmethod
+    def _add_system_fonts(cb: QComboBox) -> None:
+        """Caratteri di sistema dopo i tre standard (incorporati come sottoinsieme nei campi di testo)."""
+        try:
+            from PySide6.QtGui import QFontDatabase
+            families = [f for f in QFontDatabase.families() if not f.startswith(".")]
+        except Exception:
+            families = []
+        if families:
+            cb.insertSeparator(cb.count())
+            for fam in sorted(set(families), key=str.casefold):
+                if fam not in E.FONTS:
+                    cb.addItem(fam, fam)
+
     def _combo(self, items: list[tuple[str, Any]], handler: Callable[[Any], None]) -> QComboBox:
         cb = QComboBox()
         for label, data in items:
@@ -543,6 +557,8 @@ class FieldPropertiesPanel(QWidget):
     def _build_appearance(self) -> None:
         form = self._page("appearance", _("Aspetto"))
         self.font_combo = self._combo([(n, n) for n in E.FONTS], lambda v: self._apply({"font": v}))
+        self.font_combo.setMaxVisibleItems(20)
+        self._add_system_fonts(self.font_combo)
         form.addRow(_("Carattere"), self.font_combo)
         self.size_spin = self._spin(0, 96, lambda v: self._apply({"fontsize": float(v)}), _("Automatica"))
         form.addRow(_("Dimensione"), self.size_spin)
