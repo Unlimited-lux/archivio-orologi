@@ -1737,6 +1737,20 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
     st.intact = bool(status.intact)
     st.crypto_ok = bool(status.intact and status.valid)
     st.trusted = bool(status.trusted)
+    # SIG-16: con la verifica online «rigida» pyHanko non distingue la revoca non verificabile
+    # (responder irraggiungibile) da una catena non attendibile; si riprova senza revoca
+    revocation_unknown = False
+    if online and not st.trusted and not getattr(status, "revoked", False) and st.crypto_ok:
+        try:
+            soft = ValidationContext(trust_roots=list(roots), allow_fetching=False, revocation_mode="soft-fail")
+            if is_doc_ts:
+                retry = validate_pdf_timestamp(emb, validation_context=soft)
+            else:
+                retry = validate_pdf_signature(emb, signer_validation_context=soft, key_usage_settings=ku,
+                                               diff_policy=_diff_policy())
+            revocation_unknown = bool(retry.trusted)
+        except Exception:  # noqa: BLE001
+            revocation_unknown = False
     st.md_algorithm = getattr(emb, "md_algorithm", "") or ""
     reasons: list[str] = []
     # tempo
@@ -1844,7 +1858,7 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
         indic = getattr(status, "trust_problem_indic", None)
         indic_name = getattr(indic, "name", "") or ""
         now = datetime.now(timezone.utc)
-        if "REVOC" in indic_name or "TRY_LATER" in indic_name:
+        if revocation_unknown or "REVOC" in indic_name or "TRY_LATER" in indic_name:
             reasons.append(_("Stato di revoca non verificabile"))
         elif st.signer_cert and (now > st.signer_cert.not_after or "EXPIRED" in indic_name
                                  or "OUT_OF_BOUNDS" in indic_name):
