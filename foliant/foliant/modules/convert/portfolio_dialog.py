@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
-from foliant.api import _, bind_icon
+from foliant.api import _, bind_icon, format_number
 
 COL_NAME, COL_FOLDER, COL_DESC, COL_CUSTOM = range(4)
 
@@ -181,7 +181,7 @@ class EditPortfolioDialog(QDialog):
         lay.addWidget(self.table, 1)
         for name, size, desc in files:
             shown = name[name.index(">") + 1:] if name.startswith("<") and ">" in name else name
-            self._row(shown, f"{size:,}".replace(",", ".") + " B", desc, folder=file_folders.get(name, ""),
+            self._row(shown, format_number(size) + " B", desc, folder=file_folders.get(name, ""),
                       ref=("old", name))
         form = QFormLayout()
         self.folder = QComboBox()
