@@ -1,6 +1,6 @@
 # Richieste al nucleo — modulo Pagine
 
-1. **Menu contestuale della vista e test del nucleo.** `tests/test_window.py::test_view_menu_provider`
+1. *(Risolta nel nucleo, commit 8a0d3dd: il provider è ora registrato.)* **Menu contestuale della vista e test del nucleo.** `tests/test_window.py::test_view_menu_provider`
    verifica che il menu contenga *solo* la voce del provider di prova: qualunque modulo che
    registri un provider lo fa fallire. Il modulo Pagine ha un provider pronto
    (`PagesController.view_menu`: ruota, duplica, elimina, «Organizza pagine») ma **non lo registra**.

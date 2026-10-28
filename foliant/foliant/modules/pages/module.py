@@ -648,6 +648,7 @@ def register(ctx) -> PagesController:
     ctx.currentViewChanged.connect(c.on_view_changed)
     ctx.documentChanged.connect(c.on_document_changed)
     ctx.documentClosed.connect(c.on_document_closed)
+    ctx.add_view_menu_provider(c.view_menu)
     from .actions import build_actions
     build_actions(ctx, c, mode)
     return c

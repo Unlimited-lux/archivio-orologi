@@ -453,3 +453,17 @@ def test_certified_document_blocking_confirm(pages_window, monkeypatch):
     assert asked == ["Documento certificato"]
     with E.ENGINE_LOCK:
         assert view.document.pdf[0].rotation == 0
+
+
+def test_view_menu_provider_registered(pages_window):
+    window, view = pages_window
+    c = ctrl(window)
+    assert c.view_menu in window.view_menu_providers
+    from PySide6.QtWidgets import QMenu
+    from foliant.ui.tools import PageEvent
+    menu = QMenu()
+    ev = PageEvent(1, None, QPoint(0, 0), Qt.MouseButton.RightButton, Qt.MouseButton.RightButton,
+                   Qt.KeyboardModifier.NoModifier)
+    c.view_menu(view, ev, menu)
+    sub = menu.actions()[0].menu()
+    assert [a.text() for a in sub.actions()][:2] == ["Ruota a destra", "Ruota a sinistra"]
