@@ -29,7 +29,10 @@ def test_open_save_close(window, sample_pdf, monkeypatch):
     assert pymupdf.open(sample_pdf)[0].rotation == 180
     assert window.close_view(view)
     assert window.current_view() is None
-    assert sample_pdf in window.recent_files()
+    # riservatezza: nessun elenco dei recenti né ultima cartella nelle impostazioni
+    assert window.recent_files() == []
+    keys = window.settings.allKeys()
+    assert not [k for k in keys if k.startswith(("recent", "lastDirectory", "view/guides"))]
 
 
 def test_close_modified_asks(window, sample_pdf, monkeypatch):

@@ -1,6 +1,6 @@
 """Servizi della finestra per i moduli: avvisi del documento, avvisi temporanei, controlli prima
 delle operazioni, attività non modali, schede e pannelli, preferenze, pagine selezionate,
-menu contestuali, recenti e strumento predefinito delle modalità."""
+menu contestuali, recenti (inerti) e strumento predefinito delle modalità."""
 
 from __future__ import annotations
 
@@ -594,21 +594,25 @@ def test_view_menu_providers_see_the_text_selection(window, sample_pdf, monkeypa
     assert seen == [(0, " ".join(w[4] for w in words))]
 
 
-# ====================================================================== recenti
-def test_replace_and_remove_recent(window, tmp_path):
+# ====================================================================== recenti (inerti)
+def test_recent_api_is_inert(window, sample_pdf, tmp_path):
+    """Riservatezza: le API dei recenti restano chiamabili dai moduli ma non salvano nulla."""
     ctx = window.ctx
-    a, b, c = (str(tmp_path / n) for n in ("a.pdf", "b.pdf", "c.pdf"))
-    window._add_recent(a)
-    window._add_recent(b)
-    assert ctx.recent_files() == [b, a]
-    ctx.replace_recent(a, c)                                         # rinominato: stessa posizione
-    assert ctx.recent_files() == [b, c]
-    ctx.replace_recent(b, c)                                         # niente doppioni
-    assert ctx.recent_files() == [c]
-    ctx.replace_recent(str(tmp_path / "x.pdf"), a)                   # assente: in cima
-    assert ctx.recent_files() == [a, c]
-    ctx.remove_recent(c)
-    assert ctx.recent_files() == [a]
+    window.open_path(sample_pdf)
+    a, b = (str(tmp_path / n) for n in ("a.pdf", "b.pdf"))
+    ctx.replace_recent(a, b)
+    ctx.remove_recent(b)
+    ctx.pin_recent(a)
+    ctx.pin_recent(a, False)
+    ctx.add_recent_menu_provider(lambda path, menu: menu.addAction("x"))
+    assert ctx.recent_files() == [] and ctx.pinned_recent() == [] and not ctx.is_pinned(a)
+    assert ctx.clear_recent() is True and ctx.clear_recent(ask=False) is True     # senza domande
+    assert window.recent_menu_providers == []
+    menu = window.recent_menu(a)
+    window.extend_recent_menu(a, menu)
+    assert menu.actions() == []
+    menu.deleteLater()
+    assert not [k for k in window.settings.allKeys() if k.startswith(("recent", "lastDirectory", "view/guides"))]
 
 
 # ====================================================================== strumento predefinito

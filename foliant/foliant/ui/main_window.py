@@ -27,12 +27,11 @@ from . import privacy, theme
 from .banners import Banner, BannerBar, DocumentTabs
 from .context import PDF_FILTER, Context, Mode, ToolBar
 from .document_view import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView
-from .home import HomeScreen, order_recent
+from .home import HomeScreen
 from .icons import app_icon, bind_icon
 from .notify import NotificationArea
 from .tasks import BackgroundTask, TaskManager, TaskStatusWidget
 
-MAX_RECENT = 15
 READ_ONLY_BANNER = "nucleo.sola_lettura"     # avviso dei file senza permesso di scrittura
 # Comandi con nome della riga di comando e delle azioni del file .desktop (NFR-32): se nessun modulo
 # li registra con ctx.add_command, si usa l'azione rapida della Home con questo titolo.
@@ -73,6 +72,11 @@ OPEN_FILTER = "Documenti (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.we
 # Finestre aperte dell'applicazione («Nuova finestra», istanza singola), dalla meno alla più
 # recentemente attiva: l'elenco le tiene vive finché non vengono chiuse (WA_DeleteOnClose).
 _windows: list["MainWindow"] = []
+
+# Riservatezza (vedi ui/privacy.py): l'ultima cartella dei dialoghi e le guide dei documenti si
+# ricordano solo in memoria, per la sessione e per tutte le finestre; mai nelle impostazioni.
+_session_directory: str | None = None
+_session_guides: dict[str, list] = {}
 
 
 def app_windows() -> list["MainWindow"]:
@@ -166,7 +170,7 @@ class MainWindow(QMainWindow):
         self._connected_view: DocumentView | None = None
         self.view_menu_providers: list = []
         self.tab_menu_providers: list = []           # ctx.add_tab_menu_provider: fn(view, menu)
-        self.recent_menu_providers: list = []        # ctx.add_recent_menu_provider: fn(path, menu)
+        self.recent_menu_providers: list = []        # compatibilità: i recenti non esistono più
         self.selected_pages_provider: Callable | None = None   # ctx.set_selected_pages_provider
         self._preference_pages: list[tuple[int, int, str, Callable]] = []   # (ordine, n, titolo, factory)
         self._preference_seq = itertools.count()
@@ -190,7 +194,6 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, lambda: self.statusBar().showMessage(
                     _("Alcuni moduli non sono stati caricati: {m}").format(m=", ".join(failed)), 10000))
         self.set_mode("leggi")
-        self._refresh_recent()
         self._update_state()
         geometry = self.settings.value("window/geometry")
         if geometry is not None:
@@ -256,9 +259,6 @@ class MainWindow(QMainWindow):
         self.home.openRequested.connect(self.open_dialog)
         self.home.newRequested.connect(self.new_document)
         self.home.pathRequested.connect(self.open_path)
-        self.home.missingRequested.connect(self.missing_recent)
-        self.home.menuRequested.connect(self._on_recent_menu)
-        self.home.recent.menu_extender = self.extend_recent_menu
         self.docs_stack.addWidget(self.home)
         # ogni scheda: barre di avviso (UX-14) sopra la vista; widget(i)/indexOf lavorano con le viste
         self.tabs = DocumentTabs(self.docs_stack)
@@ -647,15 +647,6 @@ class MainWindow(QMainWindow):
         m.clear()
         for act in (self.act_new_window, self.act_new, self.act_open):
             m.addAction(act)
-        recent = m.addMenu(_("Apri recenti"))
-        paths = order_recent(self.recent_files(), self.pinned_recent())
-        for p in paths:
-            act = recent.addAction(Path(p).name)
-            act.setToolTip(p)
-            act.triggered.connect(lambda _c=False, p=p: self.open_recent(p))
-        if not paths:
-            empty = recent.addAction(_("Nessun file recente"))
-            empty.setEnabled(False)
         m.addSeparator()
         for act in (self.act_save, self.act_save_as, self.act_save_copy, self.act_close, self.act_reopen):
             m.addAction(act)
@@ -862,7 +853,6 @@ class MainWindow(QMainWindow):
             fn(view)
 
     def show_home(self) -> None:
-        self._refresh_recent()
         self.set_central_override(None)
         self.docs_stack.setCurrentWidget(self.home)
         self._on_current_changed()
@@ -957,14 +947,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, _("Password errata"), _("La password non è corretta. Riprova."))
             except DocumentError as e:
                 QMessageBox.warning(self, _("Impossibile aprire il file"), f"{Path(path).name}\n\n{e}")
-                self._forget_unreadable(path)
                 return None
             except Exception as e:          # errore imprevisto del motore: un file non ferma gli altri
-                logging.getLogger(__name__).exception("apertura di %s", path)
+                # nel registro né il percorso né il messaggio (può contenere il nome del file):
+                # lo stderr può finire nel giornale di sistema, che resta su disco
+                logging.getLogger(__name__).error("apertura non riuscita (%s)", type(e).__name__)
                 QMessageBox.warning(self, _("Impossibile aprire il file"),
                                     f"{Path(path).name}\n\n" + _("Il file non è un PDF valido oppure è danneggiato.")
                                     + f"\n({type(e).__name__})")
-                self._forget_unreadable(path)
                 return None
             password, ok = QInputDialog.getText(
                 self, _("Documento protetto"),
@@ -972,8 +962,6 @@ class MainWindow(QMainWindow):
                 QLineEdit.EchoMode.Password)
             if not ok:
                 return None
-        if doc.path is not None:
-            self._add_recent(str(doc.path))
         self.remember_directory(path)
         return self.add_document(doc)
 
@@ -994,7 +982,8 @@ class MainWindow(QMainWindow):
         try:
             fn()
         except Exception as e:          # un modulo difettoso non chiude l'applicazione
-            logging.getLogger(__name__).exception("comando %s", name)
+            # senza il messaggio dell'errore, che può contenere nomi di file (vedi open_path)
+            logging.getLogger(__name__).error("comando %s non riuscito (%s)", name, type(e).__name__)
             self.statusBar().showMessage(_("Errore imprevisto: {e}").format(e=e), 8000)
         return True
 
@@ -1120,7 +1109,8 @@ class MainWindow(QMainWindow):
         doc = view.document
         self.ctx.documentClosed.emit(view)
         if doc.path is not None:
-            self._closed_paths.append(str(doc.path))
+            self._closed_paths.append(str(doc.path))        # «Riapri scheda chiusa»: solo in memoria
+        self._store_guides(view)
         index = self.tabs.indexOf(view)
         page = self.tabs.page(view)
         view.dispose()
@@ -1206,8 +1196,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), _("Errore imprevisto: {e}").format(e=e))
             return False
-        if doc.path is not None:
-            self._add_recent(str(doc.path))
         self.statusBar().showMessage(_("Salvato: {name}").format(name=doc.display_name), 4000)
         self._update_state()
         return True
@@ -1449,250 +1437,80 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _guides_key(view: DocumentView) -> str | None:
-        """Chiave delle guide del documento nelle impostazioni (per percorso; non nel file)."""
+        """Chiave delle guide del documento nella memoria della sessione (mai su disco)."""
         path = view.document.path
-        if not path:
-            return None
-        import hashlib
-        return "view/guides/" + hashlib.sha1(os.path.abspath(str(path)).encode("utf-8")).hexdigest()
+        return os.path.realpath(str(path)) if path else None
 
     def _load_guides(self, view: DocumentView) -> None:
+        """Guide del documento se è già stato aperto in questa sessione (solo in memoria)."""
         key = self._guides_key(view)
-        if key is None:
-            return
-        import json
-        try:
-            data = json.loads(str(self.settings.value(key, "") or "[]"))
-            view.set_guides([(g[0], g[1], g[2] if len(g) > 2 else None) for g in data])
-        except (ValueError, TypeError, IndexError, KeyError):
-            pass                         # guide salvate illeggibili: si riparte senza
+        if key is not None and _session_guides.get(key):
+            view.set_guides(_session_guides[key])
 
     def _store_guides(self, view: DocumentView) -> None:
         key = self._guides_key(view)
         if key is None:
             return
-        guides = view.guides()
+        try:
+            guides = view.guides()
+        except RuntimeError:                     # vista già distrutta
+            return
         if guides:
-            import json
-            self.settings.setValue(key, json.dumps([list(g) for g in guides]))
+            _session_guides[key] = list(guides)
         else:
-            self.settings.remove(key)
+            _session_guides.pop(key, None)
 
-    # ================================================================== recenti e cartelle
+    # ================================================================== recenti (inerti) e cartelle
+    # Foliant non conserva l'elenco dei file aperti (ui/privacy.py): i metodi restano per i moduli
+    # che li chiamano ancora, ma non salvano nulla e restituiscono elenchi vuoti.
     def recent_files(self) -> list[str]:
-        value = self.settings.value("recent", []) or []
-        if isinstance(value, str):
-            value = [value]
-        return [p for p in value if isinstance(p, str)]
+        """Sempre vuoto: Foliant non conserva i file aperti."""
+        return []
 
     def pinned_recent(self) -> list[str]:
-        """Documenti fissati in cima ai recenti, nell'ordine in cui sono stati fissati."""
-        value = self.settings.value("recentPinned", []) or []
-        if isinstance(value, str):
-            value = [value]
-        return [p for p in value if isinstance(p, str)]
+        """Sempre vuoto: non esistono documenti fissati."""
+        return []
 
     def is_pinned(self, path: str) -> bool:
-        return str(path) in self.pinned_recent()
-
-    def _set_pinned(self, items: list[str]) -> None:
-        seen: set[str] = set()
-        self.settings.setValue("recentPinned", [p for p in items if not (p in seen or seen.add(p))])
-
-    def _store_recent(self, items: list[str]) -> None:
-        """Salva i recenti: al massimo MAX_RECENT non fissati, i fissati restano sempre."""
-        pinned = set(self.pinned_recent())
-        kept, others = [], 0
-        for p in items:
-            if p in pinned or others < MAX_RECENT:
-                kept.append(p)
-                others += p not in pinned
-        self.settings.setValue("recent", kept)
+        return False
 
     def pin_recent(self, path: str, pinned: bool = True) -> None:
-        """Fissa (o sblocca) un documento in cima ai recenti (API pubblica: `ctx.pin_recent`).
-        Un file fissato che non era tra i recenti viene aggiunto."""
-        path = str(path)
-        items = [p for p in self.pinned_recent() if p != path]
-        self._set_pinned(items + [path] if pinned else items)
-        if pinned and path not in self.recent_files():
-            self._store_recent([path] + self.recent_files())
-        self._refresh_recent()
+        """Non fa nulla (compatibilità)."""
 
     def clear_recent(self, ask: bool = True) -> bool:
-        """«Svuota elenco»: toglie dai recenti tutti i documenti non fissati, dopo la conferma
-        (UX-13) se `ask`. I file sul disco non vengono toccati."""
-        if ask and not self.ask_clear_recent():
-            return False
-        pinned = set(self.pinned_recent())
-        self.settings.setValue("recent", [p for p in self.recent_files() if p in pinned])
-        self._refresh_recent()
+        """Non c'è nulla da svuotare: restituisce True senza domande (compatibilità)."""
         return True
 
-    def ask_clear_recent(self) -> bool:
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle(_("Svuotare l'elenco dei recenti?"))
-        box.setText(_("Svuotare l'elenco dei documenti recenti?"))
-        info = _("I file sul disco non vengono toccati.")
-        if any(p in self.recent_files() for p in self.pinned_recent()):
-            info = _("I documenti fissati restano nell'elenco.") + " " + info
-        box.setInformativeText(info)
-        clear = box.addButton(_("Svuota elenco"), QMessageBox.ButtonRole.DestructiveRole)
-        cancel = box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(cancel)                 # UX-13: fuoco iniziale su Annulla
-        box.setEscapeButton(cancel)
-        box.exec()
-        return box.clickedButton() is clear
+    def remove_recent(self, path: str) -> None:
+        """Non fa nulla (compatibilità)."""
+
+    def replace_recent(self, old_path: str, new_path: str) -> None:
+        """Non fa nulla (compatibilità)."""
 
     def open_recent(self, path: str) -> DocumentView | None:
-        """Apre un recente; se il file non c'è più propone Individua o Rimuovi dall'elenco."""
-        if os.path.exists(path):
-            return self.open_path(path)
-        return self.missing_recent(path)
-
-    def missing_recent(self, path: str) -> DocumentView | None:
-        choice = self.ask_missing_recent(path)
-        if choice == "remove":
-            self.remove_recent(path)
-        elif choice == "locate":
-            return self.locate_recent(path)
-        return None
-
-    def ask_missing_recent(self, path: str) -> str | None:
-        """Scelta per un recente il cui file non esiste più: "locate", "remove" o None."""
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle(_("File non trovato"))
-        box.setText(_("«{name}» non si trova più in «{folder}»: potrebbe essere stato spostato, "
-                      "rinominato o eliminato.").format(name=Path(path).name, folder=Path(path).parent))
-        locate = box.addButton(_("Individua…"), QMessageBox.ButtonRole.ActionRole)
-        remove = box.addButton(_("Rimuovi dall'elenco"), QMessageBox.ButtonRole.DestructiveRole)
-        cancel = box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(locate)
-        box.setEscapeButton(cancel)
-        box.exec()
-        clicked = box.clickedButton()
-        return "locate" if clicked is locate else "remove" if clicked is remove else None
-
-    def locate_recent(self, path: str) -> DocumentView | None:
-        """Chiede dove si trova ora il file di un recente mancante: la voce (anche fissata) lo
-        segue nella stessa posizione e il file si apre."""
-        found = self.ctx.ask_open_paths(_("Individua «{name}»").format(name=Path(path).name),
-                                        OPEN_FILTER, multiple=False)
-        if not found:
-            return None
-        self.replace_recent(path, found[0])
-        return self.open_path(found[0])
+        """Compatibilità: apre `path` se esiste."""
+        return self.open_path(path) if os.path.exists(path) else None
 
     def recent_menu(self, path: str) -> QMenu:
-        """Menu contestuale di un recente della Home (voci del nucleo e dei moduli)."""
+        """Compatibilità: un menu vuoto (la Home non mostra più i recenti)."""
         menu = QMenu(self)
         menu.setObjectName("coreRecentMenu")
-        self.extend_recent_menu(path, menu)
         return menu
 
     def extend_recent_menu(self, path: str, menu: QMenu) -> None:
-        """Aggiunge a `menu` le voci del recente `path`: in testa Apri (Individua… se il file non
-        c'è più) e Fissa/Sblocca, poi le voci di `add_recent_menu_provider`, in fondo Rimuovi
-        dall'elenco e Svuota elenco. Le voci già presenti (stesso testo) non si ripetono: così
-        il nucleo completa anche il menu che un modulo mostra da sé."""
-        present = {a.text().replace("&", "") for a in menu.actions()}
-        first = menu.actions()[0] if menu.actions() else None
-        pinned = self.is_pinned(path)
-        head = [(_("Apri"), "folder-open", lambda: self.open_path(path)) if os.path.exists(path) else
-                (_("Individua…"), "file-search", lambda: self.locate_recent(path)),
-                (pgettext("recenti", "Sblocca"), "pin-off", lambda: self.pin_recent(path, False)) if pinned else
-                (pgettext("recenti", "Fissa"), "pin", lambda: self.pin_recent(path, True))]
-        added = False
-        for text, icon_name, slot in head:
-            if text in present:
-                continue
-            act = QAction(text, menu)
-            bind_icon(act, icon_name)
-            act.triggered.connect(lambda _c=False, s=slot: s())
-            menu.insertAction(first, act)
-            added = True
-        if added and first is not None:
-            menu.insertSeparator(first)
-        if self.recent_menu_providers:
-            menu.addSeparator()
-        for provider in list(self.recent_menu_providers):
-            try:
-                provider(path, menu)
-            except Exception as e:
-                self.statusBar().showMessage(_("Errore nel menu del recente: {e}").format(e=e), 8000)
-        tail = [(text, icon_name, slot) for text, icon_name, slot in (
-            (_("Rimuovi dall'elenco"), "x", lambda: self.remove_recent(path)),
-            (_("Svuota elenco"), "list-x", lambda: self.clear_recent())) if text not in present]
-        if tail and menu.actions() and not menu.actions()[-1].isSeparator():
-            menu.addSeparator()
-        for text, icon_name, slot in tail:
-            act = menu.addAction(text)
-            bind_icon(act, icon_name)
-            act.triggered.connect(lambda _c=False, s=slot: s())
-
-    def _on_recent_menu(self, path: str, global_pos) -> None:
-        menu = self.recent_menu(path)
-        self.exec_recent_menu(menu, global_pos)
-        menu.deleteLater()
-
-    def exec_recent_menu(self, menu: QMenu, global_pos) -> None:
-        """Mostra il menu del recente (separato per poterlo simulare nei test)."""
-        menu.exec(global_pos)
-
-    def _add_recent(self, path: str) -> None:
-        items = [p for p in self.recent_files() if p != path]
-        items.insert(0, path)
-        self._store_recent(items)
-        self._refresh_recent()
-
-    def _forget_recent(self, path: str) -> None:
-        self.settings.setValue("recent", [p for p in self.recent_files() if p != path])
-        if path in self.pinned_recent():
-            self._set_pinned([p for p in self.pinned_recent() if p != path])
-        self._refresh_recent()
-
-    def _forget_unreadable(self, path: str) -> None:
-        # un fissato resta: l'errore può essere passeggero (rete, permessi, file in riscrittura)
-        if path not in self.pinned_recent():
-            self._forget_recent(path)
-
-    def remove_recent(self, path: str) -> None:
-        """Toglie `path` dai recenti (API pubblica: `ctx.remove_recent`)."""
-        self._forget_recent(path)
-
-    def replace_recent(self, old_path: str, new_path: str) -> None:
-        """Sostituisce `old_path` con `new_path` nella stessa posizione (file rinominato o
-        spostato); se `old_path` non c'era, `new_path` va in cima."""
-        pinned = self.pinned_recent()
-        if old_path in pinned:                                               # resta fissato
-            self._set_pinned([new_path if p == old_path else p for p in pinned])
-        items = self.recent_files()
-        if old_path in items:
-            items = [new_path if p == old_path else p for p in items]
-            seen: set[str] = set()
-            items = [p for p in items if not (p in seen or seen.add(p))]    # niente doppioni
-        else:
-            items = [new_path] + [p for p in items if p != new_path]
-        self._store_recent(items)
-        self._refresh_recent()
-
-    def _refresh_recent(self) -> None:
-        # anche i file che non esistono più: la Home li mostra attenuati («File non trovato»);
-        # le impostazioni sono condivise, quindi si aggiorna la Home di tutte le finestre
-        paths, pinned = self.recent_files(), self.pinned_recent()
-        for window in {self, *app_windows()}:
-            window.home.set_recent(paths, pinned)
+        """Non aggiunge nulla (compatibilità)."""
 
     def last_directory(self) -> str:
-        d = self.settings.value("lastDirectory", "")
+        """Cartella iniziale dei dialoghi: l'ultima usata in questa sessione (solo in memoria,
+        condivisa dalle finestre), altrimenti la cartella personale."""
+        d = _session_directory
         return d if d and os.path.isdir(d) else str(Path.home())
 
     def remember_directory(self, path: str) -> None:
+        global _session_directory
         d = path if os.path.isdir(path) else os.path.dirname(path)
         if d:
-            self.settings.setValue("lastDirectory", d)
+            _session_directory = d
 
     # ================================================================== impostazioni
     def set_theme(self, key: str) -> None:

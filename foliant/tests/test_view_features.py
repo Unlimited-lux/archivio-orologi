@@ -426,6 +426,8 @@ def test_rulers_action_context_and_guides_per_document(window, sample_pdf):
     assert not ctx.rulers_visible()
     view = window.open_path(sample_pdf)
     assert view.guides() == [(GUIDE_HORIZONTAL, 72.5, 0), (GUIDE_VERTICAL, 30.0, None)]
+    # ritrovate dalla memoria della sessione: mai nelle impostazioni (riservatezza)
+    assert not [k for k in window.settings.allKeys() if "guides" in k and k.startswith("view")]
     assert not view.rulers_visible and view.ruler_unit == "pt"
     view.clear_guides()
     window.close_view(view)

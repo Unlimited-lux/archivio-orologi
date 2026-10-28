@@ -480,6 +480,7 @@ class Context(QObject):
         return QMessageBox.question(self._w, title, message) == QMessageBox.StandardButton.Yes
 
     def ask_open_paths(self, title: str = "", file_filter: str = PDF_FILTER, multiple: bool = True) -> list[str]:
+        """Dialogo «Apri». Parte dall'ultima cartella della sessione, ricordata solo in memoria."""
         start = self._w.last_directory()
         if multiple:
             paths, _f = QFileDialog.getOpenFileNames(self._w, title or _("Apri"), start, file_filter)
@@ -547,37 +548,33 @@ class Context(QObject):
         from .dialogs import author_name
         return author_name(self._w.settings)
 
-    # ------------------------------------------------------------------ recenti
+    # ------------------------------------------------------------------ recenti (inerti)
+    # Riservatezza (ui/privacy.py): Foliant non conserva nomi né percorsi dei file aperti o
+    # salvati. Queste funzioni restano chiamabili per compatibilità, ma non salvano nulla.
     def recent_files(self) -> list[str]:
-        return self._w.recent_files()
+        """Sempre vuoto: Foliant non conserva i file aperti."""
+        return []
 
     def replace_recent(self, old_path: str, new_path: str) -> None:
-        """Sostituisce una voce dei recenti nella stessa posizione (file rinominato o spostato)."""
-        self._w.replace_recent(str(old_path), str(new_path))
+        """Non fa nulla (compatibilità)."""
 
     def remove_recent(self, path: str) -> None:
-        """Toglie un file dall'elenco dei recenti."""
-        self._w.remove_recent(str(path))
+        """Non fa nulla (compatibilità)."""
 
     def pin_recent(self, path: str, pinned: bool = True) -> None:
-        """Fissa (True) o sblocca (False) un documento in cima ai recenti della Home."""
-        self._w.pin_recent(str(path), pinned)
+        """Non fa nulla: non esistono documenti fissati (compatibilità)."""
 
     def is_pinned(self, path: str) -> bool:
-        return self._w.is_pinned(str(path))
+        """Sempre False (compatibilità)."""
+        return False
 
     def pinned_recent(self) -> list[str]:
-        """Documenti fissati, nell'ordine in cui compaiono in cima ai recenti."""
-        return self._w.pinned_recent()
+        """Sempre vuoto (compatibilità)."""
+        return []
 
     def clear_recent(self, ask: bool = True) -> bool:
-        """«Svuota elenco»: toglie i recenti non fissati (con `ask`, dopo la conferma UX-13).
-        Restituisce False se l'utente annulla."""
-        return self._w.clear_recent(ask)
+        """Non c'è nulla da svuotare: True, senza domande (compatibilità)."""
+        return True
 
     def add_recent_menu_provider(self, provider: Callable[[str, Any], Any]) -> None:
-        """Voci del menu contestuale di un recente della Home: `provider(percorso, menu)`
-        aggiunge azioni a `menu` (QMenu), tra quelle del nucleo (Apri, Fissa/Sblocca) e
-        Rimuovi dall'elenco / Svuota elenco."""
-        if provider not in self._w.recent_menu_providers:
-            self._w.recent_menu_providers.append(provider)
+        """Non registra nulla: la Home non ha più l'elenco dei recenti (compatibilità)."""
