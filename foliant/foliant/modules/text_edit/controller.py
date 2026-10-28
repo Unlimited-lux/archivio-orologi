@@ -314,7 +314,16 @@ class TextEditController(QObject):
             return
         try:
             with ENGINE_LOCK:
-                images = page_has_images(view.document.pdf[page])
+                pg = view.document.pdf[page]
+                images = page_has_images(pg)
+                if images:
+                    # con il modulo OCR: proposta solo per le pagine che riconoscerebbe davvero
+                    try:
+                        from ..ocr import detect
+                        category = detect.classify_page(pg).category
+                        images = category in (detect.IMAGE_ONLY, detect.MIXED, detect.OCR_LAYER)
+                    except ImportError:
+                        pass
         except Exception:
             self.ctx.status(_("Pagina non leggibile: il file è danneggiato in questo punto."), 10000)
             return
