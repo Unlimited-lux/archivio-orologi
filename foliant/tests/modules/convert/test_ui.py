@@ -184,6 +184,9 @@ def test_images_dialog_sort_and_options(window, tmp_path):
 
 
 def test_create_blank_and_close_asks(window, ctrl, monkeypatch, messages):
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "A4")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "mm")
+
     def fake_exec(d):
         d.pages.setValue(3)
         d.paper_box.setCurrentIndex(d.paper_box.findData("grid"))
@@ -968,3 +971,37 @@ def test_batch_fifty_files_two_damaged_one_encrypted(tmp_path, encrypted_pdf):
     report = report_csv(items)
     assert "rotto1.pdf" in report and "rotto2.pdf" in report and "cifrato.pdf" in report
     assert by["rotto2.pdf"].message in report
+
+
+def test_local_paper_size_and_unit(window, ctrl, tmp_path, monkeypatch, messages):
+    """NFR-26: con formato carta Letter e pollici i nuovi documenti e i dialoghi li propongono."""
+    from PIL import Image
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "Letter")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "in")
+    seen = {}
+
+    def blank_exec(d):
+        seen["unit"], seen["w"], seen["step"] = d.unit.currentData(), d.w.value(), d.step.suffix()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(BlankDialog, "exec", blank_exec)
+    view = ctrl.create_blank()
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert (round(d[0].rect.width), round(d[0].rect.height)) == (612, 792)
+    assert seen == {"unit": "in", "w": 8.5, "step": " in"}
+    img = tmp_path / "foto.png"
+    Image.new("RGB", (300, 200), "white").save(img)
+
+    def images_exec(d):
+        seen["size"], seen["margin"] = d.size_box.currentData(), d.margin.suffix()
+        seen["margin_pt"] = d.options()["margin_pt"]
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ImagesDialog, "exec", images_exec)
+    view = ctrl.create_from_images([str(img)])
+    assert seen["size"] == "Letter" and seen["margin"] == " in" and abs(seen["margin_pt"] - 28.8) < 0.01
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert (round(d[0].rect.width), round(d[0].rect.height)) in ((612, 792), (792, 612))
+    txt = tmp_path / "note.txt"
+    txt.write_text("Ricevuta di consegna", encoding="utf-8")
+    view = ctrl.create_from_files([str(txt)])[0]
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert (round(d[0].rect.width), round(d[0].rect.height)) == (612, 792)

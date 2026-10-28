@@ -22,7 +22,7 @@ def _s(text: str) -> str:
 def create_portfolio(entries: list[dict], *, title: str = "Portfolio", view: str = "list",
                      columns: list[tuple[str, str, str]] | None = None, sort: tuple[str, bool] | None = None,
                      initial: str | int | None = None, cover_pdf: str | None = None,
-                     progress=None) -> tuple[bytes, list[str]]:
+                     page_size: str = "A4", progress=None) -> tuple[bytes, list[str]]:
     """Crea il portfolio e restituisce (byte, avvisi).
 
     `entries`: [{"path", "folder" (facoltativa), "name", "description", "values": {chiave: valore}}].
@@ -63,7 +63,7 @@ def create_portfolio(entries: list[dict], *, title: str = "Portfolio", view: str
                 warnings.append(_("Copertina «{n}» non utilizzabile: generata automaticamente.").format(
                     n=Path(cover_pdf).name))
         if doc.page_count == 0:
-            _cover(doc, title, files)
+            _cover(doc, title, files, page_size)
         used: set[str] = set()
         names: list[str] = []
         specs: list[tuple[str, int]] = []
@@ -138,9 +138,10 @@ def _folders(doc: pymupdf.Document, folders: list[str], folder_id: dict) -> int:
     return root
 
 
-def _cover(doc: pymupdf.Document, title: str, files) -> None:
-    """Copertina leggibile anche dai lettori senza supporto ai portfolio."""
-    page = doc.new_page()
+def _cover(doc: pymupdf.Document, title: str, files, page_size: str = "A4") -> None:
+    """Copertina leggibile anche dai lettori senza supporto ai portfolio (formato carta locale)."""
+    w, h = (612.0, 792.0) if page_size == "Letter" else (595.28, 841.89)
+    page = doc.new_page(width=w, height=h)
     y = 72.0
     page.insert_text((56, y), title, fontsize=20, fontname="helv")
     y += 34
@@ -149,7 +150,7 @@ def _cover(doc: pymupdf.Document, title: str, files) -> None:
     y += 26
     for e, data in files:
         if y > page.rect.height - 60:
-            page = doc.new_page()
+            page = doc.new_page(width=w, height=h)
             y = 72.0
         folder = (e.get("folder") or "").strip()
         name = (e.get("name") or Path(e["path"]).name)

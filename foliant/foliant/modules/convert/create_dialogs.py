@@ -36,8 +36,9 @@ class ImagesDialog(QDialog):
     ROLE_PATH = Qt.ItemDataRole.UserRole
     ROLE_ROT = Qt.ItemDataRole.UserRole + 1
 
-    def __init__(self, parent, paths: list[str], ask_more=None):
+    def __init__(self, parent, paths: list[str], ask_more=None, *, paper: str = "A4", unit: str = "mm"):
         super().__init__(parent)
+        self.margin_unit = "in" if unit == "in" else "mm"
         self.setWindowTitle(_("Crea PDF da immagini"))
         self.resize(760, 560)
         self._ask_more = ask_more
@@ -74,7 +75,7 @@ class ImagesDialog(QDialog):
 
         opts = QGroupBox(_("Pagine"))
         form = QFormLayout(opts)
-        self.size_box = _combo([(_("Come l'immagine"), None)] + [(s, s) for s in STANDARD_SIZES], "A4")
+        self.size_box = _combo([(_("Come l'immagine"), None)] + [(s, s) for s in STANDARD_SIZES], paper)
         form.addRow(_("Formato pagina"), self.size_box)
         self.orient_box = _combo([(_("Automatico"), "auto"), (_("Verticale"), "portrait"),
                                   (_("Orizzontale"), "landscape")])
@@ -83,9 +84,16 @@ class ImagesDialog(QDialog):
                                (_("Dimensione reale centrata"), "actual")])
         form.addRow(_("Adattamento"), self.fit_box)
         self.margin = QDoubleSpinBox()
-        self.margin.setRange(0, 100)
-        self.margin.setValue(10)
-        self.margin.setSuffix(" mm")
+        if self.margin_unit == "in":      # NFR-26: unità di misura locale
+            self.margin.setDecimals(2)
+            self.margin.setRange(0, 4)
+            self.margin.setSingleStep(0.1)
+            self.margin.setValue(0.4)
+            self.margin.setSuffix(" in")
+        else:
+            self.margin.setRange(0, 100)
+            self.margin.setValue(10)
+            self.margin.setSuffix(" mm")
         form.addRow(_("Margini"), self.margin)
         self.quality_box = _combo([(_("Originale (nessuna ricompressione)"), "original"),
                                    (_("Ricompressa"), "recompress")])
@@ -196,7 +204,8 @@ class ImagesDialog(QDialog):
             "orientation": self.orient_box.currentData(),
             "fit": self.fit_box.currentData(),
             # «Come l'immagine»: pagina della dimensione esatta dell'immagine, senza margini
-            "margin_pt": 0.0 if self.size_box.currentData() is None else self.margin.value() * 72 / 25.4,
+            "margin_pt": 0.0 if self.size_box.currentData() is None else
+            self.margin.value() * (72 if self.margin_unit == "in" else 72 / 25.4),
             "quality": self.quality_box.currentData(),
             "max_ppi": self.ppi.value() if self.quality_box.currentData() != "original" else None,
             "rotations": rotations or None,
@@ -206,16 +215,17 @@ class ImagesDialog(QDialog):
 class BlankDialog(QDialog):
     """Nuovo PDF vuoto: formato, orientamento, pagine, colore di fondo e stile carta."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, *, paper: str = "A4", unit: str = "mm"):
         super().__init__(parent)
         self.setWindowTitle(_("Nuovo PDF vuoto"))
+        inches = unit == "in"
         self.setMinimumWidth(420)
         self.background = QColor(255, 255, 255)
         self.line_color = QColor(191, 204, 217)
         lay = QVBoxLayout(self)
         form = QFormLayout()
         self.size_box = _combo([(s, s) for s in ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "B4", "B5", "Letter",
-                                                 "Legal", "Tabloid"]] + [(_("Personalizzato"), "custom")], "A4")
+                                                 "Legal", "Tabloid"]] + [(_("Personalizzato"), "custom")], paper)
         form.addRow(_("Formato"), self.size_box)
         custom = QHBoxLayout()
         self.w = QDoubleSpinBox()
@@ -223,9 +233,16 @@ class BlankDialog(QDialog):
         for s in (self.w, self.h):
             s.setRange(0.1, 100000)
             s.setDecimals(1)
-        self.w.setValue(210)
-        self.h.setValue(297)
-        self.unit = _combo([("mm", "mm"), (_("pollici"), "in"), (_("punti"), "pt")])
+        # dimensioni personalizzate proposte nel formato e nell'unità locali (NFR-26)
+        if inches:
+            for spin in (self.w, self.h):
+                spin.setDecimals(2)
+            self.w.setValue(8.5 if paper == "Letter" else 8.27)
+            self.h.setValue(11.0 if paper == "Letter" else 11.69)
+        else:
+            self.w.setValue(215.9 if paper == "Letter" else 210)
+            self.h.setValue(279.4 if paper == "Letter" else 297)
+        self.unit = _combo([("mm", "mm"), (_("pollici"), "in"), (_("punti"), "pt")], "in" if inches else "mm")
         custom.addWidget(self.w)
         custom.addWidget(QLabel("×"))
         custom.addWidget(self.h)
@@ -245,9 +262,17 @@ class BlankDialog(QDialog):
                                  (_("A punti"), "dots")])
         form.addRow(_("Stile carta"), self.paper_box)
         self.step = QDoubleSpinBox()
-        self.step.setRange(1, 100)
-        self.step.setValue(5)
-        self.step.setSuffix(" mm")
+        self.step_inches = inches
+        if inches:
+            self.step.setDecimals(2)
+            self.step.setRange(0.05, 4)
+            self.step.setSingleStep(0.05)
+            self.step.setValue(0.25)
+            self.step.setSuffix(" in")
+        else:
+            self.step.setRange(1, 100)
+            self.step.setValue(5)
+            self.step.setSuffix(" mm")
         form.addRow(_("Passo"), self.step)
         self.line_button = QPushButton()
         self.line_button.setAutoDefault(False)
@@ -307,7 +332,8 @@ class BlankDialog(QDialog):
         lc = self.line_color
         return {"size": size, "orientation": self.orient_box.currentData(), "pages": self.pages.value(),
                 "background": (bg.redF(), bg.greenF(), bg.blueF()), "paper": self.paper_box.currentData(),
-                "step_mm": self.step.value(), "line_color": (lc.redF(), lc.greenF(), lc.blueF())}
+                "step_mm": self.step.value() * (25.4 if self.step_inches else 1),
+                "line_color": (lc.redF(), lc.greenF(), lc.blueF())}
 
     def accept(self) -> None:
         from .common import ConversionError
@@ -666,7 +692,7 @@ class CornerEditor(QLabel):
 class PhotosDialog(QDialog):
     """Foto di documenti: angoli rilevati e regolabili, filtro e formato (CNV-26)."""
 
-    def __init__(self, parent, paths: list[str]):
+    def __init__(self, parent, paths: list[str], *, paper: str = "A4"):
         super().__init__(parent)
         from .photo import detect_corners, load_image
         self.setWindowTitle(_("Crea PDF da foto di documenti"))
@@ -690,7 +716,7 @@ class PhotosDialog(QDialog):
                               (_("Scala di grigi"), "gray"), (_("Bianco e nero"), "bw"), (_("Lavagna"), "whiteboard")])
         form.addRow(_("Filtro"), self.filter)
         self.size = _combo([("A4", "A4"), ("Letter", "Letter"), (_("Biglietto da visita"), "card"),
-                            (_("Documento d'identità"), "id"), (_("Come rilevato"), None)])
+                            (_("Documento d'identità"), "id"), (_("Come rilevato"), None)], paper)
         form.addRow(_("Formato"), self.size)
         left.addLayout(form)
         hint = QLabel(_("Trascina gli angoli per correggere il bordo del foglio. Fotocamera non disponibile: "

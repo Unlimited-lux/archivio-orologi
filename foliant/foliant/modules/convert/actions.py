@@ -363,7 +363,7 @@ class ConvertController:
             password = None
             while True:
                 try:
-                    extra = dict(office, **({"password": password} if password else {}))
+                    extra = dict(office, paper=self.ctx.paper_size(), **({"password": password} if password else {}))
                     data, warnings = self.ctx.run_task(
                         _("Creazione del PDF…"), lambda progress, path=path, extra=extra: create.file_to_pdf(
                             path, progress=progress, **extra))
@@ -431,7 +431,7 @@ class ConvertController:
             paths = ask()
             if not paths:
                 return None
-        dlg = ImagesDialog(self.window, paths, ask_more=ask)
+        dlg = ImagesDialog(self.window, paths, ask_more=ask, paper=self.ctx.paper_size(), unit=self.ctx.measure_unit())
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         files = dlg.paths()
@@ -455,11 +455,13 @@ class ConvertController:
         if not ok or not url.strip():
             return None
         url = url.strip()
+        paper = self.ctx.paper_size()
 
         def work(progress):
             if os.path.exists(url):
                 html = Path(url).read_text(encoding="utf-8", errors="replace")
-                return create.html_to_pdf(html, base_dir=str(Path(url).parent), progress=progress), Path(url).stem
+                return (create.html_to_pdf(html, base_dir=str(Path(url).parent), progress=progress, page_size=paper),
+                        Path(url).stem)
             if "://" not in url:
                 full = "https://" + url
             else:
@@ -467,7 +469,7 @@ class ConvertController:
             html, final = create.url_to_html(full)
             progress.update(0.5, _("Impaginazione…"))
             stem = Path(final.rstrip("/").split("/")[-1] or "pagina").stem or "pagina"
-            return create.html_to_pdf(html, progress=progress), stem
+            return create.html_to_pdf(html, progress=progress, page_size=paper), stem
 
         ok, res = self._run(_("Caricamento della pagina…"), work)
         if not ok:
@@ -518,7 +520,7 @@ class ConvertController:
                           _("Gli appunti sono vuoti o contengono un formato non supportato. Copia un'immagine, "
                             "del testo o dei file e riprova."))
             return None
-        ok, data = self._run(_("Creazione del PDF…"), create.clipboard_to_pdf, **snap)
+        ok, data = self._run(_("Creazione del PDF…"), create.clipboard_to_pdf, page_size=self.ctx.paper_size(), **snap)
         if not ok or not data:
             return None
         return self.open_created(data, _("Appunti") + ".pdf")
@@ -631,7 +633,7 @@ class ConvertController:
                                             _("Immagini ({ext})").format(ext=IMAGE_FILTER_EXT + " *.heic"))
         if not paths:
             return None
-        dlg = PhotosDialog(self.window, paths)
+        dlg = PhotosDialog(self.window, paths, paper=self.ctx.paper_size())
         if not dlg.items:
             self.ctx.error(_("Crea PDF da foto"), _("Nessuna delle foto selezionate è leggibile."))
             return None
@@ -702,7 +704,8 @@ class ConvertController:
             return None
         entries, opts = dlg.values()
         ok, res = self._run(_("Creazione del portfolio…"),
-                            lambda progress: create_portfolio(entries, progress=progress, **opts))
+                            lambda progress: create_portfolio(entries, progress=progress,
+                                                              **{"page_size": self.ctx.paper_size(), **opts}))
         if not ok:
             return None
         data, warnings = res
@@ -759,7 +762,7 @@ class ConvertController:
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""
         from . import create
         from .create_dialogs import BlankDialog
-        dlg = BlankDialog(self.window)
+        dlg = BlankDialog(self.window, paper=self.ctx.paper_size(), unit=self.ctx.measure_unit())
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         ok, data = self._run(_("Creazione del documento…"), lambda progress, **kw: create.blank_pdf(**kw),
@@ -1222,7 +1225,8 @@ class ConvertController:
             if not out_dir:
                 return None
         ok, report = self._run(_("Creazione dei PDF…"), lambda progress: create.batch_create(
-            paths, mode="single" if single else "separate", output_dir=out_dir, progress=progress))
+            paths, mode="single" if single else "separate", output_dir=out_dir, progress=progress,
+            paper=self.ctx.paper_size()))
         if not ok:
             return None
         if single and report.get("data"):

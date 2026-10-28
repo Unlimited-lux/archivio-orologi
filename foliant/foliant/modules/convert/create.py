@@ -1874,6 +1874,9 @@ def file_to_pdf(path, progress=None, **opts) -> tuple[bytes, list[str]]:
                 "rotations", "all_frames", "gif_all_frames")
         data, warnings = images_to_pdf([path], progress=progress, **{k: v for k, v in opts.items() if k in keys})
         return data, warnings
+    # «paper»: formato carta locale (A4 o Letter) per i documenti che non ne hanno uno proprio
+    if opts.get("paper") and "page_size" not in opts and ext not in IMAGE_EXTENSIONS:
+        opts = dict(opts, page_size=opts["paper"])
     if ext in CSV_EXTENSIONS:
         keys = ("delimiter", "page_size", "orientation")
         return csv_to_pdf(path, progress=progress, **{k: v for k, v in opts.items() if k in keys}), warnings
@@ -2009,7 +2012,7 @@ def batch_create(paths, *, mode: str = "separate", output_dir=None, output_path=
 
 # ======================================================================= appunti
 def clipboard_to_pdf(*, pdf_bytes: bytes | None = None, image_bytes: bytes | None = None, html: str | None = None,
-                     text: str | None = None, file_paths=None, progress=None) -> bytes:
+                     text: str | None = None, file_paths=None, progress=None, page_size: str = "A4") -> bytes:
     """Crea un PDF dall'istantanea degli appunti.
 
     Priorità: file copiati / pagine PDF > immagine > testo formattato (HTML) > testo semplice.
@@ -2018,9 +2021,9 @@ def clipboard_to_pdf(*, pdf_bytes: bytes | None = None, image_bytes: bytes | Non
     if file_paths:
         paths = [str(p) for p in file_paths if os.path.isfile(str(p))]
         if len(paths) == 1:
-            return file_to_pdf(paths[0], progress=progress)[0]
+            return file_to_pdf(paths[0], progress=progress, paper=page_size)[0]
         if paths:
-            return batch_create(paths, mode="single", progress=progress)["pdf"]
+            return batch_create(paths, mode="single", progress=progress, paper=page_size)["pdf"]
     if pdf_bytes:
         with ENGINE_LOCK:
             try:
@@ -2046,9 +2049,9 @@ def clipboard_to_pdf(*, pdf_bytes: bytes | None = None, image_bytes: bytes | Non
     if html and html.strip():
         frag = re.search(r"<!--StartFragment-->(.*)<!--EndFragment-->", html, re.S)
         body = frag.group(1) if frag else html
-        return html_to_pdf(body, progress=progress)
+        return html_to_pdf(body, progress=progress, page_size=page_size)
     if text and text.strip():
-        return text_to_pdf(text, monospace=False, header_footer=False, progress=progress)
+        return text_to_pdf(text, monospace=False, header_footer=False, progress=progress, page_size=page_size)
     raise ConversionError(_("Gli appunti non contengono dati utilizzabili per creare un PDF."))
 
 

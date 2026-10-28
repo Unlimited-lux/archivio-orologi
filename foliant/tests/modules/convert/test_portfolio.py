@@ -169,3 +169,9 @@ def test_export_ui_asks_portfolio_member(window, four_files, tmp_path, monkeypat
     assert "scheda.docx" not in asked[0]
     assert seen["pages"] == 2
     assert result.paths == [str(tmp_path / "out" / "fattura.txt")]
+
+
+def test_portfolio_cover_follows_paper_size(four_files):
+    data, _w = create_portfolio(four_files, title="Pratica", page_size="Letter")
+    doc = pymupdf.open(stream=data)
+    assert (round(doc[0].rect.width), round(doc[0].rect.height)) == (612, 792)
