@@ -1070,3 +1070,33 @@ def test_redaction_on_signed_document_warns_before_full_rewrite(window, monkeypa
     assert window.save_view(view) is False
     assert target.read_bytes() == signed and copy.exists()
     assert b"Orologeria" not in pymupdf.open(str(copy))[0].get_text().encode()
+
+
+def test_fill_parent_kids_field_in_window_keeps_signature_valid(window, monkeypatch, tmp_path, id_a):
+    """Compilazione dall'interfaccia (motore dei moduli) di un campo padre + widget figlio su un
+    documento firmato, poi Salva: la firma resta valida con «compilazione di campi modulo»."""
+    from foliant.modules.forms import engine as fe
+    doc0 = pymupdf.open()
+    page = doc0.new_page()
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = "acquirente"
+    w.rect = pymupdf.Rect(100, 100, 300, 120)
+    page.add_widget(w)
+    signed = digital.sign_pdf(doc0.tobytes(), id_a[2], digital.SignOptions(rect=(100, 300, 300, 360)))
+    p = tmp_path / "modulo-firmato.pdf"
+    p.write_bytes(signed)
+    store.TrustStore().add(id_a[1])
+    view = window.open_path(str(p))
+    asked = []
+    monkeypatch.setattr(_ctl(window), "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")
+    with view.document.lock:
+        xref = next(view.document.pdf[0].widgets()).xref
+    with view.document.change("Compila campo", kind="form") as pdf:
+        fe.set_value(pdf, 0, xref, "Luigi Bianchi")
+    assert asked == []
+    assert window.save_view(view)
+    out = p.read_bytes()
+    assert out.startswith(signed)
+    st = digital.verify_pdf(out, trusted=[id_a[1]])[0]
+    assert st.status == "valida" and "compilazione di campi modulo" in st.modifications

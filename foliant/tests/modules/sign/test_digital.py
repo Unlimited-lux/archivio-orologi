@@ -652,3 +652,42 @@ def test_encrypted_permissions_checked_before_signing(id_a, perms, password, all
             d.sign_pdf(data, id_a[2], opts)
         with pytest.raises(d.SigningNotAllowed, match="proprietario"):
             d.add_signature_field(data, "Campo", 0, (10, 10, 100, 40), password=password)
+
+
+def _kids_field_pdf() -> bytes:
+    """PDF con campo di testo a struttura padre + widget figlio (come add_widget di PyMuPDF)."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = "acquirente"
+    w.rect = pymupdf.Rect(100, 100, 300, 120)
+    page.add_widget(w)
+    return doc.tobytes()
+
+
+def _fill_and_save(signed: bytes) -> bytes:
+    from foliant.api import Document
+    doc = Document.from_bytes(signed, modified=False)
+    with doc.change("Compila", kind="form") as pdf:
+        page = pdf[0]
+        wd = next(page.widgets())
+        wd.field_value = "Luigi Bianchi"
+        wd.update()
+    return doc.save_bytes()
+
+
+@pytest.mark.parametrize("certify,level,expected", [
+    (False, 2, "valida"), (True, 2, "valida"), (True, 3, "valida"), (True, 1, "non valida")])
+def test_fill_parent_kids_field_after_signature(id_a, certify, level, expected):
+    """Compilazione di un campo padre + widget figlio dopo la firma: consentita
+    (approvazione, certificazione P=2/3), non consentita con P=1."""
+    data = _kids_field_pdf()
+    signed = d.sign_pdf(data, id_a[2], d.SignOptions(rect=(100, 300, 300, 360), certify=certify,
+                                                       docmdp_level=level))
+    out = _fill_and_save(signed)
+    assert out.startswith(signed)
+    st = d.verify_pdf(out, trusted=[id_a[1]])[0]
+    assert st.status == expected, (st.reasons, st.modifications)
+    if expected == "valida":
+        assert "compilazione di campi modulo" in st.modifications
