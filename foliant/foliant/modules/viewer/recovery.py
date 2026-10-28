@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.api import (
-    CLOSED, SAVED, Context, Document, DocumentError, PasswordRequired, WrongPassword, _, add_translations, icon,
+    CLOSED, SAVED, Context, Document, DocumentError, PasswordRequired, WrongPassword, _, add_translations,
+    format_date, icon,
     theme,
 )
 
@@ -83,7 +84,7 @@ class RecoveryDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         for entry in self.entries:
-            when = time.strftime("%d/%m/%Y %H:%M", time.localtime(entry.timestamp)) if entry.timestamp else ""
+            when = format_date(entry.timestamp, time=True) if entry.timestamp else ""
             item = QTreeWidgetItem([entry.display_name, entry.original_path or _("(mai salvato)"), when])
             item.setIcon(0, icon("file-clock"))
             item.setToolTip(1, entry.original_path)

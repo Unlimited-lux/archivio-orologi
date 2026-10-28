@@ -16,6 +16,8 @@ from datetime import datetime
 
 import pymupdf
 
+from foliant.api import format_number
+
 DOCUMENT = "document"
 PAGE = "page"
 
@@ -361,10 +363,10 @@ def format_size(size: int) -> str:
     if size is None or size < 0:
         return "—"
     if size < 1024:
-        return f"{size} B"
+        return f"{format_number(size)} B"
     value = float(size)
     for unit in ("KB", "MB", "GB"):
         value /= 1024
         if value < 1024 or unit == "GB":
-            return f"{value:.1f} {unit}".replace(".", ",")
+            return f"{format_number(value, 1)} {unit}"
     return f"{size} B"

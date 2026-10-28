@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _, language
+from foliant.api import ENGINE_LOCK, _, format_date, format_number, language
 
 # ------------------------------------------------------------------ permessi
 ALL_PERMISSIONS = -1
@@ -127,7 +127,7 @@ def format_pdf_date(value: str | None) -> str:
     dt = parse_pdf_date(value)
     if dt is None:
         return (value or "").strip()
-    text = dt.strftime("%Y-%m-%d %H:%M:%S" if language() == "en" else "%d/%m/%Y %H:%M:%S")
+    text = format_date(dt, time=True, seconds=True)
     if dt.tzinfo is not None:
         off = dt.utcoffset() or timedelta(0)
         if off == timedelta(0):
@@ -142,15 +142,13 @@ def format_pdf_date(value: str | None) -> str:
 
 # ------------------------------------------------------------ dimensioni
 def format_size(num_bytes: int) -> str:
-    sep = "." if language() == "en" else ","
     if num_bytes < 1024:
-        return _("{n} byte").format(n=num_bytes)
+        return _("{n} byte").format(n=format_number(num_bytes))
     if num_bytes < 1024 * 1024:
-        text, unit = f"{num_bytes / 1024:.1f}", "KB"
+        text, unit = format_number(num_bytes / 1024, 1), "KB"
     else:
-        text, unit = f"{num_bytes / (1024 * 1024):.2f}", "MB"
-    thousands = f"{num_bytes:,}".replace(",", "." if sep == "," else ",")
-    return f"{text.replace('.', sep)} {unit} ({_('{n} byte').format(n=thousands)})"
+        text, unit = format_number(num_bytes / (1024 * 1024), 2), "MB"
+    return f"{text} {unit} ({_('{n} byte').format(n=format_number(num_bytes))})"
 
 
 # formati noti in millimetri (lato corto, lato lungo)
@@ -173,9 +171,8 @@ def paper_name(width_pt: float, height_pt: float, tolerance_mm: float = 1.5) -> 
 
 
 def describe_page_size(width_pt: float, height_pt: float) -> str:
-    sep = "." if language() == "en" else ","
-    mm = f"{width_pt * MM_PER_PT:.1f} × {height_pt * MM_PER_PT:.1f} mm".replace(".", sep)
-    pt = f"{width_pt:.2f} × {height_pt:.2f} pt".replace(".", sep)
+    mm = f"{format_number(width_pt * MM_PER_PT, 1)} × {format_number(height_pt * MM_PER_PT, 1)} mm"
+    pt = f"{format_number(width_pt, 2)} × {format_number(height_pt, 2)} pt"
     text = f"{mm} ({pt})"
     name = paper_name(width_pt, height_pt)
     if name:
@@ -361,14 +358,14 @@ def content_rows(info: DocumentInfo) -> list[tuple[str, str]]:
         (_("Autore"), info.author or none),
         (_("Oggetto"), info.subject or none),
         (_("Parole chiave"), info.keywords or none),
-        (_("Pagine"), str(info.page_count)),
+        (_("Pagine"), format_number(info.page_count)),
         (_("Formato della pagina {n}").format(n=info.current_page + 1), info.page_size),
         (_("Struttura logica per l'accessibilità"), _("presente") if info.tagged else _("assente")),
-        (_("Segnalibri"), str(info.bookmarks)),
-        (_("Allegati"), str(info.attachments)),
-        (_("Livelli"), str(info.layers)),
-        (_("Campi modulo"), str(info.form_fields) if info.form_fields else _("Nessuno")),
-        (_("Oggetti PDF"), str(info.objects)),
+        (_("Segnalibri"), format_number(info.bookmarks)),
+        (_("Allegati"), format_number(info.attachments)),
+        (_("Livelli"), format_number(info.layers)),
+        (_("Campi modulo"), format_number(info.form_fields) if info.form_fields else _("Nessuno")),
+        (_("Oggetti PDF"), format_number(info.objects)),
     ]
 
 
@@ -396,12 +393,12 @@ def security_rows(info: DocumentInfo) -> list[tuple[str, str]]:
 
 def advanced_rows(info: DocumentInfo) -> list[tuple[str, str]]:
     return [
-        (_("Oggetti PDF"), str(info.objects)),
-        (_("Allegati"), str(info.attachments)),
-        (_("Livelli"), str(info.layers)),
-        (_("Campi modulo"), str(info.form_fields) if info.form_fields else _("Nessuno")),
-        (_("Segnalibri"), str(info.bookmarks)),
-        (_("Font"), str(len(info.fonts))),
+        (_("Oggetti PDF"), format_number(info.objects)),
+        (_("Allegati"), format_number(info.attachments)),
+        (_("Livelli"), format_number(info.layers)),
+        (_("Campi modulo"), format_number(info.form_fields) if info.form_fields else _("Nessuno")),
+        (_("Segnalibri"), format_number(info.bookmarks)),
+        (_("Font"), format_number(len(info.fonts))),
     ]
 
 

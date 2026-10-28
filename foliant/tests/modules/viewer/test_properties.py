@@ -79,6 +79,44 @@ def test_format_size():
     assert format_size(512) == "512 byte"
     assert format_size(2048).startswith("2,0 KB")
     assert format_size(3 * 1024 * 1024).startswith("3,00 MB")
+    assert format_size(1434) == "1,4 KB (1.434 byte)"
+
+
+def test_dates_and_numbers_follow_language(viewer_window):
+    """Collaudo: in inglese date, separatori e decimali erano quelli italiani."""
+    from datetime import datetime
+
+    from foliant.i18n import set_language
+    from foliant.modules.viewer import attachments_engine
+    from foliant.modules.viewer.attachments import _fmt_date
+    from foliant.modules.viewer.properties_engine import DocumentInfo, advanced_rows
+    from foliant.modules.viewer.speech import _speed_label
+    info = DocumentInfo(objects=12345, bookmarks=1)
+    when = datetime(2024, 3, 15, 14, 5)
+    try:
+        set_language("en")
+        assert format_pdf_date("D:20240315143000Z") == "03/15/2024 2:30:00 PM UTC"
+        assert format_size(1434) == "1.4 KB (1,434 bytes)"
+        assert attachments_engine.format_size(1434) == "1.4 KB"
+        assert _fmt_date(when) == "03/15/2024 2:05 PM"
+        assert dict(advanced_rows(info))["PDF objects"] == "12,345"
+        assert _speed_label(1.5) == "1.5×"
+        assert "209.9 × 297.0 mm" in describe_page_size(595, 842)
+        set_language("it")
+        assert format_pdf_date("D:20240315143000Z") == "15/03/2024 14:30:00 UTC"
+        assert attachments_engine.format_size(1434) == "1,4 KB"
+        assert _fmt_date(when) == "15/03/2024 14:05"
+        assert dict(advanced_rows(info))["Oggetti PDF"] == "12.345"
+        assert _speed_label(1.5) == "1,5×"
+    finally:
+        set_language("it")
+
+
+def test_zoom_labels_in_preferences():
+    from foliant.modules.viewer import openoptions, prefs
+    for zooms in (prefs.ZOOMS, openoptions.ZOOMS):
+        labels = [label for _key, label in zooms]
+        assert "Adatta alla larghezza" in labels and "Adatta alla pagina" in labels
 
 
 def test_font_entry_embedding_states():
@@ -234,7 +272,7 @@ def test_english_translation(viewer_window, meta_pdf):
     set_language("en")
     try:
         info = part(viewer_window, "properties").collect(viewer_window.current_view())
-        assert info.created == "2024-03-15 10:30:00 UTC+01:00"
+        assert info.created == "03/15/2024 10:30:00 AM UTC+01:00"
         dlg = PropertiesDialog(info, "x", viewer_window)
         assert dlg.tabs.tabText(2) == "Security"
         assert "Printing: Allowed" in dlg.text()

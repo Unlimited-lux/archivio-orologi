@@ -28,8 +28,8 @@ TRANSLATIONS = {
     "Layout": "Layout",
     "Pannello": "Panel",
     "Predefinito del lettore": "Reader default",
-    "Adatta larghezza": "Fit width",
-    "Adatta pagina": "Fit page",
+    "Adatta alla larghezza": "Fit width",
+    "Adatta alla pagina": "Fit page",
     "Scorrimento continuo": "Continuous scrolling",
     "Pagina singola": "Single page",
     "Due pagine": "Two pages",
@@ -77,7 +77,7 @@ TRANSLATIONS = {
     "mostrando il titolo del documento": "showing the document title",
 }
 
-ZOOMS = (("", "Predefinito del lettore"), (FIT_WIDTH, "Adatta larghezza"), (FIT_PAGE, "Adatta pagina"),
+ZOOMS = (("", "Predefinito del lettore"), (FIT_WIDTH, "Adatta alla larghezza"), (FIT_PAGE, "Adatta alla pagina"),
          ("0.5", "50%"), ("0.75", "75%"), ("1", "100%"), ("1.25", "125%"), ("1.5", "150%"), ("2", "200%"),
          ("4", "400%"))
 LAYOUTS = (("", "Predefinito del lettore"), (VIEW_SINGLE, "Pagina singola"), (VIEW_CONTINUOUS, "Scorrimento continuo"),
