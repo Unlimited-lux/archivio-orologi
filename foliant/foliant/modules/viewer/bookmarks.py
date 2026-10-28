@@ -190,6 +190,7 @@ class BookmarksPanel(QWidget):
         self.tools_button = QToolButton(self)
         bind_icon(self.tools_button, "ellipsis")
         self.tools_button.setToolTip(_("Strumenti dei segnalibri"))
+        self.tools_button.setAccessibleName(_("Strumenti dei segnalibri"))
         self.tools_button.setAutoRaise(True)
         self.tools_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.tools_button.setIconSize(QSize(18, 18))

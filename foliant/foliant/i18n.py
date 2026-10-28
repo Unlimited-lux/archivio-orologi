@@ -102,3 +102,38 @@ def _(text: str) -> str:
         return text
     found = _lookup(text, _owner(2))
     return text if found is None else found
+
+
+# ------------------------------------------------------------- date e numeri (NFR-26)
+def format_date(value, time: bool = False, seconds: bool = False) -> str:
+    """Data (e ora) nel formato della lingua: «28/10/2026 14:30» in italiano,
+    «10/28/2026 2:30 PM» in inglese (USA). `value`: datetime, date o timestamp."""
+    import datetime as _dt
+    if isinstance(value, (int, float)):
+        value = _dt.datetime.fromtimestamp(value)
+    if _language == "en":
+        text = f"{value.month:02d}/{value.day:02d}/{value.year:04d}"
+        if time and isinstance(value, _dt.datetime):
+            hour = value.hour % 12 or 12
+            clock = f"{hour}:{value.minute:02d}" + (f":{value.second:02d}" if seconds else "")
+            text += f" {clock} {'AM' if value.hour < 12 else 'PM'}"
+        return text
+    text = f"{value.day:02d}/{value.month:02d}/{value.year:04d}"
+    if time and isinstance(value, _dt.datetime):
+        text += f" {value.hour:02d}:{value.minute:02d}" + (f":{value.second:02d}" if seconds else "")
+    return text
+
+
+def format_number(value, decimals: int | None = None) -> str:
+    """Numero con separatori della lingua: «1.234,5» in italiano, «1,234.5» in inglese.
+    Senza `decimals` gli interi restano interi e i decimali senza zeri finali."""
+    if decimals is None:
+        if float(value).is_integer():
+            text = f"{int(value):,}"
+        else:
+            text = f"{value:,.6f}".rstrip("0").rstrip(".")
+    else:
+        text = f"{value:,.{decimals}f}"
+    if _language == "en":
+        return text
+    return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")

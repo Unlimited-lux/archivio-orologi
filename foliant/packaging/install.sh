@@ -10,6 +10,7 @@ PREFIX="${HOME}/.local/share/foliant"
 BIN_DIR="${HOME}/.local/bin"
 APPS_DIR="${HOME}/.local/share/applications"
 ICON_DIR="${HOME}/.local/share/icons/hicolor/scalable/apps"
+SYMBOLIC_DIR="${HOME}/.local/share/icons/hicolor/symbolic/apps"
 DEFAULT_PDF=0
 USE_APT=1
 for arg in "$@"; do
@@ -39,9 +40,11 @@ python3 -m venv "$PREFIX/venv"
 "$PREFIX/venv/bin/pip" install "$APP_DIR"
 
 echo "==> Comando, icona e voce nel menu delle applicazioni"
-mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR"
+mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR" "$SYMBOLIC_DIR"
 ln -sf "$PREFIX/venv/bin/foliant" "$BIN_DIR/foliant"
 install -m 644 "$APP_DIR/foliant/resources/foliant.svg" "$ICON_DIR/foliant.svg"
+# variante simbolica monocromatica: il desktop la colora con il colore del tema (NFR-32)
+install -m 644 "$APP_DIR/foliant/resources/foliant-symbolic.svg" "$SYMBOLIC_DIR/foliant-symbolic.svg"
 sed "s|@EXEC@|$PREFIX/venv/bin/foliant|" "$APP_DIR/packaging/foliant.desktop" > "$APPS_DIR/foliant.desktop"
 chmod 644 "$APPS_DIR/foliant.desktop"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" || true

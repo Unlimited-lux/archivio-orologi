@@ -115,6 +115,7 @@ class FullscreenBar(QFrame):
             b = QToolButton(self)
             bind_icon(b, icon_name)
             b.setToolTip(tip)
+            b.setAccessibleName(tip.split(" (")[0])      # senza la scorciatoia
             b.setAutoRaise(True)
             b.setMouseTracking(True)
             b.clicked.connect(slot)

@@ -239,6 +239,11 @@ def _date_ok(s: str) -> bool:
     return True
 
 
+def _iddoc_ok(s: str) -> bool:
+    # esclude le sigle di valuta/paese seguite da importi e i codici IBAN spezzati
+    return not s[:2] in ("IT", "EU", "EUR") or len(s) == 9 and s[-2:].isalpha()
+
+
 def _ip_ok(s: str) -> bool:
     return all(0 <= int(p) <= 255 for p in s.split("."))
 
@@ -294,6 +299,11 @@ def builtin_patterns() -> list[Pattern]:
         Pattern("url", _("Indirizzi web"), r"\b(?:https?://|www\.)[^\s<>\"']+[^\s<>\"'.,;:)]",
                 re.IGNORECASE, example="https://esempio.it"),
         Pattern("ip", _("Indirizzi IP"), r"\b(?:\d{1,3}\.){3}\d{1,3}\b", check=_ip_ok, example="192.168.1.10"),
+        # carta d'identità elettronica (CA12345XY), cartacea e passaporto (AX1234567),
+        # patente (MI1234567A, U1…): solo maiuscole, come stampati sui documenti
+        Pattern("iddoc", _("Numeri di documenti d'identità"),
+                r"\b(?:[A-Z]{2}\d{5}[A-Z]{2}|[A-Z]{2}\d{7}[A-Z]?|U1[A-Z0-9]{7}[A-Z])\b",
+                check=_iddoc_ok, example="CA12345XY"),
     ]
 
 
@@ -453,3 +463,34 @@ def find(pdf: pymupdf.Document, patterns: list[Pattern], pages: Iterable[int] | 
         for p in patterns:
             out.extend(find_in_page(page, p, i, pt))
     return out
+
+
+# ------------------------------------------------- selezione per caratteri
+
+
+def nearest_char(pt: PageText, point: pymupdf.Point) -> int | None:
+    """Indice del carattere più vicino al punto (preferendo la stessa riga)."""
+    best, best_d = None, None
+    for i, box in enumerate(pt.boxes):
+        if box is None:
+            continue
+        if box.contains(point):
+            return i
+        dx = max(box.x0 - point.x, 0, point.x - box.x1)
+        dy = max(box.y0 - point.y, 0, point.y - box.y1)
+        d = dx * dx + dy * dy * 9
+        if best_d is None or d < best_d:
+            best, best_d = i, d
+    return best
+
+
+def char_range_rects(pt: PageText, start: int | None, end: int | None) -> tuple[list[pymupdf.Rect], str]:
+    """Riquadri (uno per riga) e testo dei caratteri da `start` a `end` compresi
+    (None = dall'inizio / fino alla fine della pagina)."""
+    if not pt.boxes:
+        return [], ""
+    lo = 0 if start is None else start
+    hi = len(pt.boxes) - 1 if end is None else end
+    if lo > hi:
+        lo, hi = hi, lo
+    return pt.rects(lo, hi + 1), " ".join(pt.text[lo:hi + 1].split())

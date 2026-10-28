@@ -341,11 +341,13 @@ class GState:
     stroke_alpha: float = 1.0
     clip: pymupdf.Rect | None = None             # riquadro del ritaglio (spazio pagina)
     line_width: float = 1.0
+    # tracciati di ritaglio attivi: (byte del tracciato con W n, CTM, riquadro pagina, profondità q, indice op del q)
+    clips: list = field(default_factory=list)
 
     def copy(self) -> "GState":
         return GState(pymupdf.Matrix(self.ctm), dict(self.ops), list(self.gs), self.fill_alpha,
                       self.stroke_alpha, pymupdf.Rect(self.clip) if self.clip is not None else None,
-                      self.line_width)
+                      self.line_width, list(self.clips))
 
     def state_bytes(self) -> bytes:
         parts = list(self.gs)
@@ -737,6 +739,9 @@ def parse_page(doc: pymupdf.Document, page: pymupdf.Page, data: bytes | None = N
             if clip_pending and pts:
                 r = pymupdf.Rect(bbox)
                 st.clip = r if st.clip is None else (st.clip & r)
+                if path_start is not None:
+                    st.clips.append((data[path_start:op.end], pymupdf.Matrix(st.ctm), pymupdf.Rect(r),
+                                     len(stack), stack[-1][1] if stack else -1))
             if name != "n" and not clip_pending and path_start is not None and pts and not in_text:
                 r = pymupdf.Rect(bbox)
                 if name in ("S", "s", "B", "B*", "b", "b*"):
