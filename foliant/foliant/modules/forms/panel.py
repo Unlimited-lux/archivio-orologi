@@ -18,7 +18,7 @@ import re
 from PySide6.QtCore import QSize, QStringListModel, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFileDialog, QFormLayout, QFrame,
+    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFormLayout, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QRadioButton,
     QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QStackedWidget, QToolButton, QVBoxLayout,
     QWidget,
@@ -1504,12 +1504,8 @@ class FieldPropertiesPanel(QWidget):
     choose_icon_file: Callable[[], str | None] | None = None
 
     def _choose_icon(self, state: str) -> None:
-        if self.choose_icon_file is not None:
-            path = self.choose_icon_file()
-        else:
-            path, _f = QFileDialog.getOpenFileName(
-                self, _("Scegli l'icona"), "",
-                _("Immagini e PDF") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.pdf)")
+        # la scelta del file passa sempre per la finestra del nucleo: nessuna cronologia di cartelle
+        path = self.choose_icon_file() if self.choose_icon_file is not None else None
         if path:
             self._apply({f"icon_{state}": path})
 

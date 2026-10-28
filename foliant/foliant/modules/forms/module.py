@@ -1380,7 +1380,9 @@ class FormsModule(QObject):
         address = unquote(urlsplit(url).path)
         ext = {"xfdf": "xfdf", "pdf": "pdf", "html": "txt"}.get(fmt, "fdf")
         stem = Path(view.document.display_name).stem or "modulo"
-        path = Path(tempfile.mkdtemp(prefix="foliant-invio-")) / f"{stem}_{_('dati')}.{ext}"
+        folder = tempfile.mkdtemp(prefix="foliant-invio-")
+        _forget_on_exit(folder)   # riservatezza: nessun file con nomi o dati resta dopo la chiusura
+        path = Path(folder) / f"{stem}_{_('dati')}.{ext}"
         path.write_bytes(data)
         if not self.ctx.confirm(_("Invia modulo"), _(
                 "Aprire il programma di posta per inviare a {a} il file «{f}» con i dati del modulo?").format(
@@ -1437,6 +1439,28 @@ class FormsModule(QObject):
             if f.kind in E.FILLABLE and not f.readonly:
                 menu.addAction(icon("rotate-ccw"), _("Reimposta campo"), lambda: self.reset([f.name], view))
             menu.addAction(icon("square-pen"), _("Modifica modulo"), lambda: self.ctx.set_mode("moduli"))
+
+
+_TEMP_DIRS: list[str] = []
+
+
+def _forget_on_exit(folder: str) -> None:
+    """La cartella provvisoria dell'allegato serve al programma di posta finché Foliant è aperto;
+    alla chiusura viene cancellata, così non restano nomi di documenti né dati dei moduli."""
+    if not _TEMP_DIRS:
+        import atexit
+        atexit.register(remove_temp_files)
+        from PySide6.QtCore import QCoreApplication
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(remove_temp_files)
+    _TEMP_DIRS.append(folder)
+
+
+def remove_temp_files() -> None:
+    import shutil
+    while _TEMP_DIRS:
+        shutil.rmtree(_TEMP_DIRS.pop(), ignore_errors=True)
 
 
 def report_text(report: dict) -> str:
