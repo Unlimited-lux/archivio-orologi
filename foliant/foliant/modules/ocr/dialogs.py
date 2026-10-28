@@ -18,7 +18,6 @@ from foliant.api import ENGINE_LOCK, _, icon, theme
 
 from . import engine, languages
 from .preprocess import PreprocessOptions
-from .translations import cancel_text
 
 DPI_CHOICES = (150, 200, 300, 400, 600)
 
@@ -281,7 +280,7 @@ class OcrDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.ok_button.setText(_("Avvia OCR"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(cancel_text())
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         bottom.addWidget(buttons)
@@ -864,7 +863,7 @@ class ReviewDialog(QDialog):
         lay.addWidget(split, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Applica"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(cancel_text())
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
@@ -1069,7 +1068,7 @@ class BatchDialog(QDialog):
         lay.addWidget(self.error)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Avvia"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(cancel_text())
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
@@ -1331,7 +1330,7 @@ class ZoneEditor(QDialog):
         side.addWidget(self.btn_save)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Usa queste zone"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(cancel_text())
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         side.addWidget(buttons)
