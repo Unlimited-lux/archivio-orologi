@@ -1126,3 +1126,84 @@ def test_field_policy_filters_ids(window, qtbot, tmp_path, id_a, policy_id):
     enabled = [dlg.id_combo.itemText(i) for i in range(dlg.id_combo.count()) if model.item(i).isEnabled()]
     assert enabled == ["Giulia Verdi"]
     assert POLICY_OID in dlg.cert_info.text()
+
+
+def test_no_compatible_id_offers_import_or_graphic_only(window, qtbot, monkeypatch, tmp_path, id_a, id_b):
+    """SIG-20: nessun ID conforme ai vincoli → requisiti spiegati, firma e «Crea…» disattivati,
+    «Solo firma grafica» inserisce la firma della libreria dentro il campo, che resta da firmare."""
+    from foliant.modules.sign import ui_digital
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "vincolo.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Cliente", 0, (300, 600, 500, 680), allowed_issuers=[id_b[1]],
+                                           tooltip="Firma del cliente")
+    path = tmp_path / "vincolo2.pdf"
+    path.write_bytes(data)
+    store.IDRegistry().add(id_a[0], id_a[1])
+    view = window.open_path(str(path))
+    c = _ctl(window)
+    field = digital.signature_fields(data)[0]
+    dlg = ui_digital.DigitalSignDialog(window, c, field=field)
+    qtbot.addWidget(dlg)
+    assert dlg.no_compatible and not dlg.ok.isEnabled() and not dlg.create_id.isEnabled()
+    assert "requisiti" in dlg.error.text() and dlg.graphic_btn is not None
+    dlg._reload_ids(str(id_b[0]))           # «Sfoglia…» con un ID adatto riattiva la firma
+    assert dlg.ok.isEnabled()
+    lib = c.library(interactive=False)
+    lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (90, 15, 1), (150, 0, 1)]]))),
+            "Mario")
+    infos = []
+    monkeypatch.setattr(window.ctx, "info", lambda title, text: infos.append(text))
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", lambda d: (d._graphic_only(), False)[1])
+    assert not c.digital_sign(view, field=field)
+    with view.document.lock:
+        [placed] = g.placed_signatures(view.document.pdf, 0)
+        r = pymupdf.Rect(placed.rect)
+    box = pymupdf.Rect(field.rect)
+    assert box.contains(r) and (abs(r.width - box.width) < 1 or abs(r.height - box.height) < 1)
+    assert infos and "Firma del cliente" in infos[0]
+    assert [f.name for f in c.empty_fields(view)] == ["Cliente"]
+
+
+def test_after_signing_field_goes_to_next(window, monkeypatch, tmp_path, id_a):
+    """SIG-20 punto 4: firmato un campo, la vista passa al campo successivo da firmare."""
+    from foliant.modules.sign import ui_digital
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "due.pdf", pages=2)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Venditore", 0, (60, 600, 260, 680))
+    data, _n = digital.add_signature_field(data, "Acquirente", 1, (300, 600, 500, 680), tooltip="Acquirente")
+    path = tmp_path / "due2.pdf"
+    path.write_bytes(data)
+    view = window.open_path(str(path))
+    c = _ctl(window)
+    field = [f for f in digital.signature_fields(data) if f.name == "Venditore"][0]
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(reason="Vendita")
+        return True
+    went = []
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(tmp_path / "due_firmato.pdf"))
+    monkeypatch.setattr(type(c), "go_to_field", lambda self, v, page, rect: went.append(page))
+    assert c.digital_sign(view, field=field)
+    assert went == [1]
+
+
+def test_banner_explains_missing_sign_permission(window, tmp_path):
+    """SIG-20: documento cifrato senza permesso di firma → spiegazione al posto di «Firma ora»."""
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "base.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Cliente", 0, (300, 600, 500, 680))
+    doc = pymupdf.open(stream=data)
+    out = tmp_path / "cifrato.pdf"
+    doc.save(str(out), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="proprietario", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(out))
+    c = _ctl(window)
+    calls = []
+    real = window.ctx.show_banner
+    window.ctx.show_banner = lambda v, bid, text, actions=(), **k: (calls.append((text, [a[0] for a in actions])),
+                                                                   real(v, bid, text, actions, **k))
+    c.update_banner(view)
+    text, actions = calls[-1]
+    assert "password del proprietario" in text and "Firma ora" not in actions

@@ -54,6 +54,7 @@ class DigitalSignDialog(QDialog):
         self.field = field
         self.digital_id = None
         self.options = None
+        self.graphic_only = False     # SIG-20: l'utente ha scelto «Solo firma grafica»
         self._failures = 0
         self.setWindowTitle(_("Certifica il documento") if certify else _("Firma digitale"))
         self.resize(560, 0)
@@ -190,6 +191,12 @@ class DigitalSignDialog(QDialog):
         box = QDialogButtonBox()
         self.ok = box.addButton(_("Certifica e salva…") if certify else _("Firma e salva…"),
                                 QDialogButtonBox.ButtonRole.AcceptRole)
+        self.graphic_btn = None
+        if field is not None:
+            self.graphic_btn = box.addButton(_("Solo firma grafica…"), QDialogButtonBox.ButtonRole.ActionRole)
+            self.graphic_btn.setToolTip(_("Inserisce una firma grafica sopra il campo: non è una firma digitale e "
+                                          "il campo resta da firmare."))
+            self.graphic_btn.clicked.connect(self._graphic_only)
         box.addButton(_("Annulla"), QDialogButtonBox.ButtonRole.RejectRole)
         box.accepted.connect(self._accept)
         box.rejected.connect(self.reject)
@@ -225,6 +232,22 @@ class DigitalSignDialog(QDialog):
             text = _("Questo campo accetta solo certificati con una di queste policy: {oids}").format(
                 oids=", ".join(policies))
             self.cert_info.setText((self.cert_info.text() + "\n" if allowed else "") + text)
+        restricted = bool(allowed or policies)
+        # i vincoli su emittente o policy non possono essere soddisfatti da un ID autofirmato
+        self.create_id.setEnabled(not restricted)
+        if restricted:
+            self.create_id.setToolTip(_("Il campo richiede un certificato di un emittente o di una policy precisa: "
+                                        "un ID autofirmato non è accettato."))
+        model = self.id_combo.model()
+        usable = bool(select_path) or any(model.item(i).isEnabled() for i in range(self.id_combo.count()))
+        self.no_compatible = self.field is not None and restricted and not usable
+        if self.no_compatible:
+            self.error.setText(_("Nessuno dei tuoi ID digitali soddisfa i requisiti del campo. Importa un ID "
+                                 "adatto con «Sfoglia…» oppure inserisci solo una firma grafica."))
+            self.id_combo.setCurrentIndex(-1)
+        elif select_path:
+            self.error.setText("")
+        self.ok.setEnabled(not self.no_compatible)
         if self.id_combo.count() == 0 and not select_path:
             self.id_combo.setPlaceholderText(_("Nessun ID digitale: usa «Sfoglia…» o «Crea…»"))
         if select_path and self.id_combo.findData(select_path) < 0:
@@ -240,6 +263,10 @@ class DigitalSignDialog(QDialog):
         issuer = getattr(entry_or_info, "issuer_dn", None) or getattr(entry_or_info, "issuer", "")
         fp = getattr(entry_or_info, "fingerprint", None) or getattr(entry_or_info, "sha256", "")
         return issuer in names or getattr(entry_or_info, "issuer", "") in names or fp in fps
+
+    def _graphic_only(self) -> None:
+        self.graphic_only = True
+        self.reject()
 
     def _policy_allowed(self, entry_or_info) -> bool:
         wanted = getattr(self.field, "allowed_policies", None)
@@ -1123,6 +1150,15 @@ class RepeatDialog(QDialog):
 
 
 TRANSLATIONS_EN = {
+    "Solo firma grafica…": "Graphic signature only…",
+    "Inserisce una firma grafica sopra il campo: non è una firma digitale e il campo resta da firmare.":
+        "Places a graphic signature over the field: it is not a digital signature and the field stays unsigned.",
+    "Il campo richiede un certificato di un emittente o di una policy precisa: un ID autofirmato non è accettato.":
+        "The field requires a certificate from a specific issuer or policy: a self-signed ID is not accepted.",
+    "Nessuno dei tuoi ID digitali soddisfa i requisiti del campo. Importa un ID adatto con «Sfoglia…» oppure "
+    "inserisci solo una firma grafica.":
+        "None of your digital IDs meets the field's requirements. Import a suitable ID with “Browse…” or "
+        "place a graphic signature only.",
     "Password del certificato client {f}:": "Password of client certificate {f}:",
     "Il server richiede un certificato client?": "Does the server require a client certificate?",
     "Certificato client": "Client certificate", "Certificato con chiave (*.p12 *.pfx *.pem)":

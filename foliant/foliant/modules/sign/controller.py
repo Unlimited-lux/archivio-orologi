@@ -473,6 +473,12 @@ class SignController(QObject):
             actions.append((_("Dettagli"), lambda: self.ctx.show_sidebar_panel("firme")))
         if st.certification == 1:
             actions.append((_("Lavora su una copia senza firme"), lambda v=view: self.open_unsigned_copy(v)))
+        doc = view.document
+        if empties and not any(doc.allows(p) for p in (pymupdf.PDF_PERM_FORM, pymupdf.PDF_PERM_ANNOTATE)):
+            # SIG-20: documento cifrato senza permesso di firma → spiegazione al posto dell'invito
+            actions = [a for a in actions if a[0] not in (_("Firma ora"), _("Campo successivo"))]
+            text += " · " + _("I permessi del documento non consentono di firmarlo: serve la password del "
+                              "proprietario.")
         level = "error" if bad else ("warning" if empties else "info")
         self.ctx.show_banner(view, self.BANNER_ID, text, actions, level=level, priority=30)
 
@@ -699,6 +705,8 @@ class SignController(QObject):
         dlg = DigitalSignDialog(self.ctx.window, self, certify=certify, visible=not invisible and
                                 (rect is not None or (field is not None and not field.invisible)), field=field)
         if not dlg.exec():
+            if dlg.graphic_only and field is not None:
+                self.graphic_on_field(view, field)
             return False
         digital_id, options = dlg.digital_id, dlg.options
         options.password = doc.password
@@ -735,7 +743,9 @@ class SignController(QObject):
         except DocumentError as e:
             self.ctx.error(_("Firma digitale"), str(e))
             return False
-        self._reopen(view, target)
+        new_view = self._reopen(view, target)
+        if field is not None and new_view is not None:
+            self._go_to_next_unsigned(new_view, signed)
         skew = self.clock_skew_warning(signed) if options.timestamp_url or options.timestamper else None
         if skew:
             self.ctx.error(_("Marca temporale"), skew)
@@ -834,6 +844,51 @@ class SignController(QObject):
         new_view = self.ctx.open_path(target)
         if new_view is not None:
             self.verify(new_view, force=True)
+        return new_view
+
+    def _go_to_next_unsigned(self, view, data: bytes) -> None:
+        """SIG-20: dopo la firma di un campo si passa al successivo ancora da firmare."""
+        from . import digital
+        try:
+            rest = [f for f in digital.signature_fields(data, view.document.password)
+                    if not f.signed and not f.hidden and f.page is not None]
+        except Exception:  # noqa: BLE001
+            return
+        if rest:
+            self.go_to_field(view, rest[0].page, rest[0].rect)
+            self.ctx.status(_("Prossimo campo da firmare: «{name}»").format(name=rest[0].tooltip or rest[0].name),
+                            8000)
+
+    def graphic_on_field(self, view, field) -> int | None:
+        """SIG-20: firma grafica sopra un campo firma (nessun ID compatibile). Usa la firma predefinita
+        della libreria o ne fa creare una; il campo resta da firmare digitalmente."""
+        if field.page is None or not field.rect or not self._annotations_allowed(view):
+            return None
+        item = None
+        lib = self.library()
+        entry = lib.default("firma") if lib is not None else None
+        if entry is not None:
+            try:
+                item = lib.load_item(entry.id)
+            except Exception:  # noqa: BLE001
+                item = None
+        if item is None:
+            from .ui_create import CreateSignatureDialog
+            dlg = CreateSignatureDialog(self.ctx.window, kind="firma", default_name=self.default_name())
+            if not dlg.exec() or dlg.item is None:
+                return None
+            item = dlg.item
+        box = pymupdf.Rect(field.rect)
+        w, h = box.width, box.width / max(item.aspect, 0.01)
+        if h > box.height:
+            w, h = box.height * item.aspect, box.height
+        cx, cy = (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2
+        xref = self.place(view, field.page, pymupdf.Rect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), item)
+        if xref is not None:
+            self.ctx.info(_("Firma grafica"), _(
+                "La firma grafica è stata inserita sopra il campo «{name}». Non è una firma digitale: il campo "
+                "resta da firmare.").format(name=field.tooltip or field.name))
+        return xref
 
     # ============================================================ campi firma
     def start_add_field(self) -> None:
@@ -976,6 +1031,13 @@ class SignController(QObject):
 
 
 TRANSLATIONS_EN = {
+    "Firma grafica": "Graphic signature",
+    "Prossimo campo da firmare: «{name}»": "Next field to sign: “{name}”",
+    "La firma grafica è stata inserita sopra il campo «{name}». Non è una firma digitale: il campo resta da "
+    "firmare.": "The graphic signature was placed over the field “{name}”. It is not a digital signature: the "
+                "field still has to be signed.",
+    "I permessi del documento non consentono di firmarlo: serve la password del proprietario.":
+        "The document permissions do not allow signing it: the owner password is required.",
     "Libreria firme": "Signature library",
     "Libreria protetta": "Protected library",
     "Inserisci la password della libreria delle firme:": "Enter the signature library password:",
