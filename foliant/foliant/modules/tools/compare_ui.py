@@ -36,11 +36,16 @@ def kind_color(kind: str) -> QColor:
         ce.MODIFIED: theme.color("warning"),
         ce.FORMAT: theme.color("secondary"),
         ce.VISUAL: theme.color("accent"),
+        ce.PAGE: theme.color("text_muted"),
+        ce.IMAGE: theme.color("accent_hover"),
+        ce.ANNOTATION: theme.color("text"),
+        ce.FIELD: theme.color("accent").darker(140) if not theme.is_dark() else theme.color("accent").lighter(140),
     }[kind]
 
 
 KIND_ICONS = {ce.ADDED: "circle-plus", ce.DELETED: "circle-minus", ce.MODIFIED: "replace",
-              ce.FORMAT: "type", ce.VISUAL: "scan-eye"}
+              ce.FORMAT: "type", ce.VISUAL: "scan-eye", ce.PAGE: "files", ce.IMAGE: "image",
+              ce.ANNOTATION: "message-square", ce.FIELD: "text-cursor-input"}
 
 
 # =============================================================================

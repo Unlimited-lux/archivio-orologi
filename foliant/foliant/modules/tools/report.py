@@ -16,7 +16,8 @@ import pymupdf
 from foliant.api import ENGINE_LOCK, _
 
 from .compare_engine import (
-    ADDED, DELETED, FORMAT, KINDS, MODIFIED, VISUAL, CompareResult, Difference, kind_label, open_side,
+    ADDED, ANNOTATION, DELETED, FIELD, FORMAT, IMAGE, KINDS, MODIFIED, PAGE, VISUAL, CompareResult, Difference,
+    kind_label, open_side,
 )
 
 CONTENT_SUMMARY = "summary"
@@ -31,6 +32,10 @@ COLORS = {
     MODIFIED: (0.90, 0.50, 0.05),
     FORMAT: (0.50, 0.25, 0.70),
     VISUAL: (0.10, 0.40, 0.85),
+    PAGE: (0.40, 0.40, 0.45),
+    IMAGE: (0.05, 0.45, 0.45),
+    ANNOTATION: (0.20, 0.20, 0.25),
+    FIELD: (0.30, 0.30, 0.65),
 }
 _FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",

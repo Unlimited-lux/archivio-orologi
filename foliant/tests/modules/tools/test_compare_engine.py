@@ -420,3 +420,100 @@ def test_exclusion_area_on_all_pages(pdf_builder):
     r = run(a, b, dpi=72, exclusions=[[-1, 400, 730, 570, 790]])
     assert r.differences == []
     assert any("Aree escluse" in c for c in r.options.criteria())
+
+
+# ----------------------------------------------------------------- CMP-09
+def test_moved_page_reported_once_without_text_differences(tmp_path, pdf_builder):
+    pages = [page_lines(i) for i in range(1, 9)]
+    a = pdf_builder(pages)
+    order = [0, 6, 1, 2, 3, 4, 5, 7]          # pagina 7 spostata in posizione 2
+    b = pdf_builder([pages[i] for i in order])
+    r = run(a, b, mode=ce.MODE_TEXT)
+    assert [(d.kind, d.subtype) for d in r.differences] == [(ce.PAGE, "moved")]
+    d = r.differences[0]
+    assert d.pages("a") == [6] and d.pages("b") == [1]
+
+
+def test_swapped_pages_matched_by_content(pdf_builder):
+    pages = [page_lines(i) for i in range(1, 6)]
+    a = pdf_builder(pages)
+    b = pdf_builder([pages[0], pages[1], pages[3], pages[2], pages[4]])
+    r = run(a, b, mode=ce.MODE_TEXT)
+    assert not [d for d in r.differences if d.kind in (ce.ADDED, ce.DELETED, ce.MODIFIED)]
+    assert any(d.kind == ce.PAGE and d.subtype == "moved" for d in r.differences)
+
+
+def _logo(color):
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 40), False)
+    pix.set_rect(pix.irect, color)
+    return pix.tobytes("png")
+
+
+def test_image_replaced(pdf_builder):
+    def page(color):
+        def draw(p):
+            p.insert_text((72, 90), "Carta intestata della ditta", fontsize=12)
+            p.insert_image(pymupdf.Rect(400, 50, 500, 150), stream=_logo(color))
+        return draw
+    a = pdf_builder([page((200, 0, 0))])
+    b = pdf_builder([page((0, 0, 200))])
+    r = run(a, b, dpi=72)
+    images = [d for d in r.differences if d.kind == ce.IMAGE]
+    assert [d.subtype for d in images] == ["replaced"]
+    assert images[0].rects_a and images[0].rects_b
+    assert not [d for d in r.differences if d.kind == ce.VISUAL]
+
+
+def test_annotations_added_and_modified(tmp_path):
+    def make(name, second_text, extra):
+        doc = pymupdf.open()
+        for i in range(2):
+            doc.new_page().insert_text((72, 90), f"Pagina {i + 1} della perizia", fontsize=12)
+        a1 = doc[1].add_text_annot((100, 200), "Verificare il seriale")
+        a1.set_info(title="Mario")
+        a1.update()
+        a2 = doc[1].add_text_annot((300, 400), second_text)
+        a2.update()
+        if extra:
+            doc[1].add_text_annot((100, 600), "Nuovo commento").update()
+        path = tmp_path / name
+        doc.save(str(path))
+        return str(path)
+    a = make("a.pdf", "Cassa in acciaio", False)
+    b = make("b.pdf", "Cassa in oro", True)
+    r = run(a, b, mode=ce.MODE_TEXT)
+    ann = [d for d in r.differences if d.kind == ce.ANNOTATION]
+    assert sorted(d.subtype for d in ann) == ["added", "modified"]
+    mod = next(d for d in ann if d.subtype == "modified")
+    assert mod.text_a == "Cassa in acciaio" and mod.text_b == "Cassa in oro"
+    assert all(d.pages("b") == [1] for d in ann)
+
+
+def test_form_field_value(tmp_path):
+    def make(name, value):
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_text((72, 90), "Modulo di acquisto", fontsize=12)
+        w = pymupdf.Widget()
+        w.field_name = "importo"
+        w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+        w.rect = pymupdf.Rect(72, 120, 250, 140)
+        w.field_value = value
+        page.add_widget(w)
+        path = tmp_path / name
+        doc.save(str(path))
+        return str(path)
+    r = run(make("a.pdf", "100"), make("b.pdf", "150"), mode=ce.MODE_TEXT)
+    fields = [d for d in r.differences if d.kind == ce.FIELD]
+    assert len(fields) == 1
+    assert fields[0].text_a == "100" and fields[0].text_b == "150" and "importo" in fields[0].detail
+
+
+def test_rotation_only(tmp_path, pdf_builder):
+    a = pdf_builder([page_lines(1)])
+    doc = pymupdf.open(a)
+    doc[0].set_rotation(90)
+    b = tmp_path / "ruotato.pdf"
+    doc.save(str(b))
+    r = run(a, b, dpi=72)
+    assert [(d.kind, d.subtype) for d in r.differences] == [(ce.PAGE, "rotation")]

@@ -32,7 +32,11 @@ DELETED = "deleted"
 MODIFIED = "modified"
 FORMAT = "format"
 VISUAL = "visual"
-KINDS = (ADDED, DELETED, MODIFIED, FORMAT, VISUAL)
+PAGE = "page"
+IMAGE = "image"
+ANNOTATION = "annotation"
+FIELD = "field"
+KINDS = (ADDED, DELETED, MODIFIED, FORMAT, VISUAL, PAGE, IMAGE, ANNOTATION, FIELD)
 
 MODE_AUTO = "auto"
 MODE_TEXT = "text"
@@ -63,6 +67,10 @@ def kind_label(kind: str, plural: bool = False) -> str:
         MODIFIED: (_("Modifica"), _("modifiche")),
         FORMAT: (_("Formattazione"), _("formattazione")),
         VISUAL: (_("Visiva"), _("visive")),
+        PAGE: (_("Pagina"), _("pagine")),
+        IMAGE: (_("Immagine"), _("immagini")),
+        ANNOTATION: (_("Annotazione"), _("annotazioni")),
+        FIELD: (_("Campo modulo"), _("campi modulo")),
     }
     return labels[kind][1 if plural else 0]
 
@@ -89,6 +97,8 @@ class CompareOptions:
     band_bottom_mm: float = 0.0
     ignore_page_numbers: bool = False
     exclusions: list = field(default_factory=list)   # [pagina o -1, x0, y0, x1, y1] in punti
+    compare_structure: bool = True  # pagine spostate/ruotate, immagini, annotazioni, campi (CMP-09)
+    match_pages_by_content: bool = True   # abbina anche pagine riordinate (pagine spostate)
 
     def criteria(self) -> list[str]:
         """Descrizione leggibile dei criteri applicati."""
@@ -832,16 +842,22 @@ def build_anchors(pairs, a: list[Token], b: list[Token], ops, heights_a: dict, h
 # =============================================================================
 # Confronto visivo
 # =============================================================================
-def render_page(doc: pymupdf.Document, pno: int, dpi: int, annots: bool = True) -> tuple[np.ndarray, float]:
-    """Pagina come array RGB (H, W, 3). Restituisce anche la scala px/pt effettiva."""
+def render_page(doc: pymupdf.Document, pno: int, dpi: int, annots: bool = True,
+                unrotated: bool = False) -> tuple[np.ndarray, float]:
+    """Pagina come array RGB (H, W, 3). Restituisce anche la scala px/pt effettiva.
+
+    Con `unrotated` la pagina è resa senza /Rotate: i pixel corrispondono alle
+    coordinate della pagina non ruotata (quelle delle differenze)."""
     with ENGINE_LOCK:
         page = doc[pno]
         scale = dpi / 72.0
         pixels = page.rect.width * scale * page.rect.height * scale
         if pixels > MAX_PIXELS:
             scale *= (MAX_PIXELS / pixels) ** 0.5
-        pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False, annots=annots,
-                              colorspace=pymupdf.csRGB)
+        mat = pymupdf.Matrix(scale, scale)
+        if unrotated and page.rotation:
+            mat = mat.prerotate(-page.rotation)
+        pix = page.get_pixmap(matrix=mat, alpha=False, annots=annots, colorspace=pymupdf.csRGB)
         arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.stride)[:, : pix.width * 3]
         return arr.reshape(pix.height, pix.width, 3).copy(), scale
 
@@ -979,16 +995,15 @@ def compare_visual_pages(doc_a, pa: int, doc_b, pb: int, options: CompareOptions
                          text_mask_a: list[tuple] | None = None, text_mask_b: list[tuple] | None = None
                          ) -> VisualPageResult:
     sens = SENSITIVITY.get(options.sensitivity, SENSITIVITY["medium"])
-    img_a, sa = render_page(doc_a, pa, options.dpi, options.include_annotations)
-    img_b, sb = render_page(doc_b, pb, options.dpi, options.include_annotations)
+    img_a, sa = render_page(doc_a, pa, options.dpi, options.include_annotations, unrotated=True)
+    img_b, sb = render_page(doc_b, pb, options.dpi, options.include_annotations, unrotated=True)
     scale = min(sa, sb)
     if abs(sa - sb) > 1e-6:   # riduzione per pagine enormi: stessa scala per entrambe
-        img_a, sa = render_page(doc_a, pa, int(scale * 72), options.include_annotations)
-        img_b, sb = render_page(doc_b, pb, int(scale * 72), options.include_annotations)
+        img_a, sa = render_page(doc_a, pa, int(scale * 72), options.include_annotations, unrotated=True)
+        img_b, sb = render_page(doc_b, pb, int(scale * 72), options.include_annotations, unrotated=True)
         scale = sa
     with ENGINE_LOCK:
-        ra, rb = doc_a[pa].rect, doc_b[pb].rect
-        rot_a, rot_b = doc_a[pa].derotation_matrix, doc_b[pb].derotation_matrix
+        ra, rb = doc_a[pa].cropbox, doc_b[pb].cropbox
     size_differs = abs(ra.width - rb.width) > 1 or abs(ra.height - rb.height) > 1
     max_shift = int(MAX_SHIFT_MM * MM * scale)
     mask = diff_mask(img_a, img_b, sens["tolerance"])
@@ -1012,8 +1027,8 @@ def compare_visual_pages(doc_a, pa: int, doc_b, pb: int, options: CompareOptions
         if text_mask_a is not None and text_mask_b is not None:
             if _mostly_covered(ax, text_mask_a) or _mostly_covered(bx, text_mask_b):
                 continue
-        regions_a.append(_to_unrotated(ax, rot_a))
-        regions_b.append(_to_unrotated(bx, rot_b))
+        regions_a.append(ax)
+        regions_b.append(bx)
         areas.append(100.0 * (x1 - x0) * (y1 - y0) / page_area)
     return VisualPageResult(regions_a, regions_b, areas, (dx / scale, dy / scale), misaligned, size_differs)
 
@@ -1036,17 +1051,8 @@ def _mostly_covered(r: tuple, boxes: list[tuple]) -> bool:
 
 
 def _rotated_boxes(doc, pno: int, tokens: list[Token]) -> list[tuple]:
-    """Riquadri delle parole nelle coordinate del rendering (pagina ruotata)."""
-    with ENGINE_LOCK:
-        m = doc[pno].rotation_matrix
-    out = []
-    for t in tokens:
-        for r in t.rects:
-            if r[0] == pno:
-                rr = pymupdf.Rect(r[1] - 2, r[2] - 2, r[3] + 2, r[4] + 2) * m
-                rr.normalize()
-                out.append((rr.x0, rr.y0, rr.x1, rr.y1))
-    return out
+    """Riquadri delle parole (con un piccolo margine) nelle coordinate del rendering."""
+    return [(r[1] - 2, r[2] - 2, r[3] + 2, r[4] + 2) for t in tokens for r in t.rects if r[0] == pno]
 
 
 # =============================================================================
@@ -1149,29 +1155,57 @@ def _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, re
         ta = _apply_key(ta, options)
         tb = _apply_key(tb, options)
         progress.update(0.3, _("Confronto del testo…"))
-        ops = diff_opcodes(ta, tb, progress)
-        result.differences.extend(text_differences(ta, tb, ops, options))
-        if options.compare_format:
-            result.differences.extend(format_differences(ta, tb, ops, options, progress))
-        matched = sum(op[2] - op[1] for op in ops if op[0] == "equal")
-        total = len(ta) + len(tb)
+        moved = detect_moved_pages(ta, tb) if options.match_pages_by_content else []
+        moved_a = {p for p, _q in moved}
+        moved_b = {q for _p, q in moved}
+        main_a = [t for t in ta if t.page not in moved_a]
+        main_b = [t for t in tb if t.page not in moved_b]
+        segments = [(main_a, main_b, diff_opcodes(main_a, main_b, progress))]
+        for pa, pb in moved:
+            sa = [t for t in ta if t.page == pa]
+            sb = [t for t in tb if t.page == pb]
+            segments.append((sa, sb, diff_opcodes(sa, sb, progress)))
+        matched = 0
+        weights: dict[tuple[int, int], int] = {}
+        for sa, sb, sops in segments:
+            result.differences.extend(text_differences(sa, sb, sops, options))
+            if options.compare_format:
+                result.differences.extend(format_differences(sa, sb, sops, options, progress))
+            for tag, a0, a1, b0, b1 in sops:
+                if tag == "equal":
+                    matched += a1 - a0
+                    if sa is main_a:
+                        for k in range(a1 - a0):
+                            key = (sa[a0 + k].page, sb[b0 + k].page)
+                            weights[key] = weights.get(key, 0) + 1
+        ta, tb, ops = main_a, main_b, segments[0][2]
+        total = len(ta) + len(tb) + sum(len(x[0]) + len(x[1]) for x in segments[1:])
         if total and 2 * matched / total < 0.2:
             result.warnings.append(_("I documenti sembrano non correlati: oltre l'80% delle parole è diverso."))
-        weights: dict[tuple[int, int], int] = {}
-        for tag, a0, a1, b0, b1 in ops:
-            if tag == "equal":
-                for k in range(a1 - a0):
-                    key = (ta[a0 + k].page, tb[b0 + k].page)
-                    weights[key] = weights.get(key, 0) + 1
-        result.pairs = pair_pages(info_a.pages, info_b.pages, weights)
+        for pa, pb in moved:
+            with ENGINE_LOCK:
+                ra, rb = doc_a[pa].rect, doc_b[pb].rect
+            result.differences.append(Difference(
+                PAGE, subtype="moved", rects_a=[(pa, 0, 0, ra.width, ra.height)],
+                rects_b=[(pb, 0, 0, rb.width, rb.height)],
+                detail=_("pagina spostata: {a} → {b}").format(a=pa + 1, b=pb + 1)))
+        all_tokens_a = main_a + [t for x in segments[1:] for t in x[0]]
+        all_tokens_b = main_b + [t for x in segments[1:] for t in x[1]]
+        pages_a = [p for p in info_a.pages if p not in moved_a]
+        pages_b = [p for p in info_b.pages if p not in moved_b]
+        result.pairs = sorted(pair_pages(pages_a, pages_b, weights) + list(moved))
     else:
         result.pairs = list(zip(info_a.pages, info_b.pages))
     progress.update(0.4)
 
     paired_a = {p for p, _q in result.pairs}
     paired_b = {q for _p, q in result.pairs}
-    text_pages_a = {t.page for t in ta}
-    text_pages_b = {t.page for t in tb}
+    if use_text:
+        ta_all, tb_all = all_tokens_a, all_tokens_b
+    else:
+        ta_all, tb_all = ta, tb
+    text_pages_a = {t.page for t in ta_all}
+    text_pages_b = {t.page for t in tb_all}
     # pagine presenti solo da un lato (e senza testo, altrimenti già coperte dal testo)
     for pb in info_b.pages:
         if pb not in paired_b and pb not in text_pages_b:
@@ -1196,11 +1230,22 @@ def _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, re
                 DELETED, subtype="page", text_a=_("Pagina {n} presente solo in A").format(n=pa + 1),
                 rects_a=[(pa, 0, 0, r.width, r.height)], point_b=(pb, 0, y, hb.width, y + 1.5)))
 
-    if use_visual:
-        n = max(1, len(result.pairs))
-        for k, (pa, pb) in enumerate(result.pairs):
-            progress.update(0.4 + 0.58 * k / n, _("Confronto visivo: pagina {i} di {n}").format(i=k + 1, n=n))
-            result.differences.extend(visual_pair_differences(doc_a, pa, doc_b, pb, options, ta, tb, result))
+    if options.compare_structure:
+        progress.update(0.4, _("Confronto della struttura…"))
+        result.differences.extend(field_differences(doc_a, info_a.pages, doc_b, info_b.pages))
+    n = max(1, len(result.pairs))
+    for k, (pa, pb) in enumerate(result.pairs):
+        progress.update(0.4 + 0.58 * k / n, _("Confronto delle pagine: {i} di {n}").format(i=k + 1, n=n))
+        skip: list[tuple] = []
+        if options.compare_structure:
+            struct = structure_pair_differences(doc_a, pa, doc_b, pb, options)
+            result.differences.extend(struct)
+            skip = [loc[1:] for d in struct if d.kind in (IMAGE, ANNOTATION) for loc in d.rects_b if loc[0] == pb]
+            skip_a = [loc[1:] for d in struct if d.kind in (IMAGE, ANNOTATION) for loc in d.rects_a if loc[0] == pa]
+            skip = (skip_a, skip)
+        if use_visual:
+            result.differences.extend(visual_pair_differences(doc_a, pa, doc_b, pb, options, ta_all, tb_all,
+                                                              result, skip or None))
     if use_text:
         for pa in info_a.pages:
             if pa in empty_a:
@@ -1216,7 +1261,7 @@ def _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, re
 
 
 def visual_pair_differences(doc_a, pa: int, doc_b, pb: int, options: CompareOptions, ta: list[Token],
-                            tb: list[Token], result: CompareResult) -> list[Difference]:
+                            tb: list[Token], result: CompareResult, skip=None) -> list[Difference]:
     """Differenze visive di una coppia di pagine (anche per il ricalcolo)."""
     pt_a = [t for t in ta if t.page == pa]
     pt_b = [t for t in tb if t.page == pb]
@@ -1240,11 +1285,249 @@ def visual_pair_differences(doc_a, pa: int, doc_b, pb: int, options: CompareOpti
             result.warnings.append(msg)
     skip_a = options.excluded_areas(pa) + [tuple(x) for x in result.excluded_a.get(pa, [])]
     skip_b = options.excluded_areas(pb) + [tuple(x) for x in result.excluded_b.get(pb, [])]
+    if skip:
+        skip_a += [tuple(x) for x in skip[0]]
+        skip_b += [tuple(x) for x in skip[1]]
     for r_a, r_b, area in zip(vr.regions_a, vr.regions_b, vr.areas):
         if (skip_a and _center_in(r_a, skip_a)) or (skip_b and _center_in(r_b, skip_b)):
             continue
         out.append(Difference(VISUAL, subtype="region", rects_a=[(pa, *r_a)], rects_b=[(pb, *r_b)], area=area,
                               detail=_("area variata {p}%").format(p=f"{area:.2f}".replace(".", ","))))
+    return out
+
+
+# =============================================================================
+# Differenze di struttura (CMP-09)
+# =============================================================================
+def detect_moved_pages(ta: list[Token], tb: list[Token], threshold: float = 0.8) -> list[tuple[int, int]]:
+    """Pagine con lo stesso contenuto in una posizione diversa (riordinate)."""
+    from collections import Counter
+    bags_a: dict[int, Counter] = {}
+    bags_b: dict[int, Counter] = {}
+    for t in ta:
+        bags_a.setdefault(t.page, Counter())[t.key] += 1
+    for t in tb:
+        bags_b.setdefault(t.page, Counter())[t.key] += 1
+    best: dict[int, tuple[float, int]] = {}
+    for pa, ca in bags_a.items():
+        na = sum(ca.values())
+        if na < 5:
+            continue
+        for pb, cb in bags_b.items():
+            nb = sum(cb.values())
+            common = sum((ca & cb).values())
+            sim = common / max(na, nb)
+            if sim >= threshold and (pa not in best or sim > best[pa][0]):
+                best[pa] = (sim, pb)
+    used: dict[int, tuple[float, int]] = {}
+    for pa, (sim, pb) in best.items():
+        if pb not in used or sim > used[pb][0]:
+            used[pb] = (sim, pa)
+    cands = sorted((pa, pb) for pb, (_sim, pa) in used.items())
+    if len(cands) < 2:
+        return []
+    keep = set(_lis_nondecreasing([(float(a), float(b)) for a, b in cands]))
+    return [(a, b) for a, b in cands if (float(a), float(b)) not in keep]
+
+
+def _close(r1, r2, tol: float = MM) -> bool:
+    return all(abs(a - b) <= tol for a, b in zip(r1, r2))
+
+
+def _iou(r1, r2) -> float:
+    w = min(r1[2], r2[2]) - max(r1[0], r2[0])
+    h = min(r1[3], r2[3]) - max(r1[1], r2[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    inter = w * h
+    a1 = (r1[2] - r1[0]) * (r1[3] - r1[1])
+    a2 = (r2[2] - r2[0]) * (r2[3] - r2[1])
+    return inter / max(1e-6, a1 + a2 - inter)
+
+
+def _images(doc, pno: int) -> list[dict]:
+    with ENGINE_LOCK:
+        try:
+            infos = doc[pno].get_image_info(hashes=True)
+        except Exception:
+            return []
+    out = []
+    for info in infos:
+        bbox = tuple(info.get("bbox", (0, 0, 0, 0)))
+        if bbox[2] - bbox[0] < 1 or bbox[3] - bbox[1] < 1:
+            continue
+        out.append({"bbox": bbox, "digest": info.get("digest") or b""})
+    return out
+
+
+def _clip_similar(doc_a, pa, ra, doc_b, pb, rb) -> bool:
+    """Le due aree hanno lo stesso aspetto (es. immagine solo ricompressa)?"""
+    try:
+        with ENGINE_LOCK:
+            pa_ = doc_a[pa].get_pixmap(dpi=60, clip=pymupdf.Rect(ra), alpha=False, colorspace=pymupdf.csRGB)
+            pb_ = doc_b[pb].get_pixmap(dpi=60, clip=pymupdf.Rect(rb), alpha=False, colorspace=pymupdf.csRGB)
+        ia = np.frombuffer(pa_.samples, np.uint8).reshape(pa_.height, pa_.stride)[:, : pa_.width * 3]
+        ib = np.frombuffer(pb_.samples, np.uint8).reshape(pb_.height, pb_.stride)[:, : pb_.width * 3]
+        ia = ia.reshape(pa_.height, pa_.width, 3)
+        ib = ib.reshape(pb_.height, pb_.width, 3)
+        s = SENSITIVITY["medium"]
+        return not regions_from_mask(diff_mask(ia, ib, s["tolerance"]), s["cell_pixels"], s["min_cells"])
+    except Exception:
+        return False
+
+
+def image_differences(doc_a, pa: int, doc_b, pb: int, options: CompareOptions | None = None) -> list[Difference]:
+    ia, ib = _images(doc_a, pa), _images(doc_b, pb)
+    with ENGINE_LOCK:
+        page_area = max(1.0, abs(doc_a[pa].rect))
+    align = options.auto_align if options is not None else True
+    out: list[Difference] = []
+    used_b: set[int] = set()
+    rest_a = []
+    for x in ia:
+        same = [j for j, y in enumerate(ib) if j not in used_b and y["digest"] == x["digest"] and x["digest"]]
+        if same:
+            j = min(same, key=lambda j: sum(abs(u - v) for u, v in zip(ib[j]["bbox"], x["bbox"])))
+            used_b.add(j)
+            if not _close(x["bbox"], ib[j]["bbox"]):
+                ra, rb = x["bbox"], ib[j]["bbox"]
+                resized = abs((ra[2] - ra[0]) - (rb[2] - rb[0])) > MM or abs((ra[3] - ra[1]) - (rb[3] - rb[1])) > MM
+                scan = (ra[2] - ra[0]) * (ra[3] - ra[1]) >= 0.8 * page_area
+                if scan and align and not resized and _close(ra, rb, MAX_SHIFT_MM * MM):
+                    continue   # scansione traslata: compensata dall'allineamento automatico
+                out.append(Difference(IMAGE, subtype="resized" if resized else "moved", rects_a=[(pa, *ra)],
+                                      rects_b=[(pb, *rb)],
+                                      detail=_("immagine ridimensionata") if resized else _("immagine spostata")))
+            continue
+        rest_a.append(x)
+    rest_b = [y for j, y in enumerate(ib) if j not in used_b]
+    for x in rest_a:
+        match = max(rest_b, key=lambda y: _iou(x["bbox"], y["bbox"]), default=None)
+        if match is not None and _iou(x["bbox"], match["bbox"]) >= 0.6:
+            rest_b.remove(match)
+            if _clip_similar(doc_a, pa, x["bbox"], doc_b, pb, match["bbox"]):
+                continue
+            out.append(Difference(IMAGE, subtype="replaced", rects_a=[(pa, *x["bbox"])],
+                                  rects_b=[(pb, *match["bbox"])], detail=_("immagine sostituita")))
+        else:
+            out.append(Difference(IMAGE, subtype="deleted", rects_a=[(pa, *x["bbox"])],
+                                  point_b=(pb, *x["bbox"]), detail=_("immagine eliminata")))
+    for y in rest_b:
+        out.append(Difference(IMAGE, subtype="added", rects_b=[(pb, *y["bbox"])], point_a=(pa, *y["bbox"]),
+                              detail=_("immagine aggiunta")))
+    return out
+
+
+_SKIP_ANNOTS = {"Widget", "Link", "Popup"}
+
+
+def _annotations(doc, pno: int) -> list[dict]:
+    out = []
+    with ENGINE_LOCK:
+        page = doc[pno]
+        for an in page.annots() or []:
+            kind = an.type[1]
+            if kind in _SKIP_ANNOTS:
+                continue
+            info = an.info or {}
+            r = an.rect
+            out.append({"type": kind, "rect": (r.x0, r.y0, r.x1, r.y1), "content": info.get("content", ""),
+                        "author": info.get("title", ""), "id": info.get("id", "")})
+    return out
+
+
+def annotation_differences(doc_a, pa: int, doc_b, pb: int) -> list[Difference]:
+    la, lb = _annotations(doc_a, pa), _annotations(doc_b, pb)
+    out: list[Difference] = []
+    used: set[int] = set()
+
+    def center(r):
+        return ((r[0] + r[2]) / 2, (r[1] + r[3]) / 2)
+
+    for x in la:
+        cands = [j for j, y in enumerate(lb) if j not in used and y["type"] == x["type"]]
+        match = None
+        if x["id"]:
+            match = next((j for j in cands if lb[j]["id"] == x["id"]), None)
+        if match is None:
+            near = [j for j in cands if not (x["id"] and lb[j]["id"])
+                    and abs(center(lb[j]["rect"])[0] - center(x["rect"])[0]) <= 3 * MM
+                    and abs(center(lb[j]["rect"])[1] - center(x["rect"])[1]) <= 3 * MM]
+            if near:
+                match = min(near, key=lambda j: sum(abs(u - v) for u, v in zip(lb[j]["rect"], x["rect"])))
+        if match is None:
+            out.append(Difference(ANNOTATION, subtype="deleted", text_a=x["content"], rects_a=[(pa, *x["rect"])],
+                                  point_b=(pb, *x["rect"]),
+                                  detail=_("annotazione eliminata ({t})").format(t=x["type"])))
+            continue
+        used.add(match)
+        y = lb[match]
+        details = []
+        if x["content"] != y["content"]:
+            details.append(_("contenuto modificato"))
+        if x["author"] != y["author"]:
+            details.append(_("autore {a} → {b}").format(a=x["author"] or "–", b=y["author"] or "–"))
+        if not _close(x["rect"], y["rect"]):
+            details.append(_("spostata"))
+        if details:
+            out.append(Difference(ANNOTATION, subtype="modified", text_a=x["content"], text_b=y["content"],
+                                  rects_a=[(pa, *x["rect"])], rects_b=[(pb, *y["rect"])],
+                                  detail=_("annotazione modificata ({t}): {d}").format(t=x["type"],
+                                                                                      d=", ".join(details))))
+    for j, y in enumerate(lb):
+        if j not in used:
+            out.append(Difference(ANNOTATION, subtype="added", text_b=y["content"], rects_b=[(pb, *y["rect"])],
+                                  point_a=(pa, *y["rect"]),
+                                  detail=_("annotazione aggiunta ({t})").format(t=y["type"])))
+    return out
+
+
+def structure_pair_differences(doc_a, pa: int, doc_b, pb: int, options: CompareOptions) -> list[Difference]:
+    out: list[Difference] = []
+    with ENGINE_LOCK:
+        rot_a, rot_b = doc_a[pa].rotation, doc_b[pb].rotation
+        ra, rb = doc_a[pa].rect, doc_b[pb].rect
+    if rot_a != rot_b:
+        out.append(Difference(PAGE, subtype="rotation", rects_a=[(pa, 0, 0, ra.width, ra.height)],
+                              rects_b=[(pb, 0, 0, rb.width, rb.height)],
+                              detail=_("rotazione pagina {a}° → {b}°").format(a=rot_a, b=rot_b)))
+    out.extend(image_differences(doc_a, pa, doc_b, pb, options))
+    if options.include_annotations:
+        out.extend(annotation_differences(doc_a, pa, doc_b, pb))
+    return out
+
+
+def _fields(doc, pages: list[int]) -> dict[str, tuple]:
+    out: dict[str, tuple] = {}
+    with ENGINE_LOCK:
+        if not doc.is_form_pdf:
+            return out
+        for pno in pages:
+            for w in doc[pno].widgets() or []:
+                name = w.field_name or ""
+                if name and name not in out:
+                    r = w.rect
+                    out[name] = (pno, (r.x0, r.y0, r.x1, r.y1), "" if w.field_value is None else str(w.field_value))
+    return out
+
+
+def field_differences(doc_a, pages_a: list[int], doc_b, pages_b: list[int]) -> list[Difference]:
+    fa, fb = _fields(doc_a, pages_a), _fields(doc_b, pages_b)
+    out: list[Difference] = []
+    for name, (pa, ra, va) in fa.items():
+        if name not in fb:
+            out.append(Difference(FIELD, subtype="deleted", text_a=va, rects_a=[(pa, *ra)],
+                                  detail=_("campo «{n}» eliminato").format(n=name)))
+            continue
+        pb, rb, vb = fb[name]
+        if va != vb:
+            out.append(Difference(FIELD, subtype="value", text_a=va, text_b=vb, rects_a=[(pa, *ra)],
+                                  rects_b=[(pb, *rb)],
+                                  detail=_("campo «{n}»: {a} → {b}").format(n=name, a=va or "–", b=vb or "–")))
+    for name, (pb, rb, vb) in fb.items():
+        if name not in fa:
+            out.append(Difference(FIELD, subtype="added", text_b=vb, rects_b=[(pb, *rb)],
+                                  detail=_("campo «{n}» aggiunto").format(n=name)))
     return out
 
 
