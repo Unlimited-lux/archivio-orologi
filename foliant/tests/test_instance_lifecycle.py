@@ -1,4 +1,5 @@
-"""Ciclo di vita delle finestre: file aperti da fuori mentre una finestra si chiude (NFR-31)."""
+"""Ciclo di vita delle finestre: file aperti da fuori mentre una finestra si chiude, memoria
+restituita alla chiusura di una finestra con dei documenti (NFR-06, NFR-31)."""
 from __future__ import annotations
 
 
@@ -38,3 +39,21 @@ def test_files_from_outside_do_not_go_to_a_closing_window(qtbot, settings, sampl
         _close_all_windows()
     assert app_windows() == []
 
+
+def test_closing_a_window_with_documents_returns_memory(qtbot, settings, sample_pdf, monkeypatch):
+    """NFR-06: chiudendo una finestra con dei documenti le schede muoiono con lei, ma la memoria
+    liberata torna comunque al sistema (il rilascio non è legato alla finestra)."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.ui import main_window
+    calls = []
+    monkeypatch.setattr(main_window, "release_memory", lambda: calls.append(1) or True)
+    win = main_window.register_window(main_window.MainWindow(settings, load_modules=False))
+    win.show()
+    win.open_path(sample_pdf)
+    assert win.close()
+    for _ in range(2):
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qtbot.wait(20)
+    assert calls == [1]

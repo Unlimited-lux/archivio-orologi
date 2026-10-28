@@ -111,6 +111,23 @@ def open_window(settings: QSettings, near: "MainWindow | None" = None) -> "MainW
     return window
 
 
+_memory_timer: QTimer | None = None
+
+
+def schedule_memory_release(*_args) -> None:
+    """Dopo la chiusura di una o più schede: un solo `release_memory()` al prossimo giro del ciclo
+    degli eventi. Il timer è dell'applicazione, non della finestra: chiusa una finestra con dei
+    documenti, le sue schede vengono distrutte con lei e il rilascio deve avvenire lo stesso."""
+    global _memory_timer
+    import shiboken6
+    if _memory_timer is None or not shiboken6.isValid(_memory_timer):
+        _memory_timer = QTimer(QApplication.instance())
+        _memory_timer.setSingleShot(True)
+        _memory_timer.setInterval(0)
+        _memory_timer.timeout.connect(lambda: release_memory())
+    _memory_timer.start()
+
+
 def release_memory() -> bool:
     """Restituisce al sistema la memoria già liberata (NFR-06). Con glibc i blocchi delle
     immagini di pagina di una scheda chiusa restano all'allocatore e la memoria residente
@@ -128,7 +145,6 @@ def release_memory() -> bool:
 
 class MainWindow(QMainWindow):
     _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
-    _memory_timer: QTimer | None = None
     _closed = False             # chiusura confermata (closeEvent accettato)
     _closing = False            # closeEvent in corso (domande aperte): non riceve file da fuori
 
@@ -1112,20 +1128,11 @@ class MainWindow(QMainWindow):
             page.release()
             page.deleteLater()                  # contenitore con le barre di avviso
         # distrutte davvero vista e contenitore, la memoria liberata torna al sistema (NFR-06)
-        (page if page is not None else view).destroyed.connect(self._schedule_memory_release)
+        # (funzione del modulo: chiudendo la finestra le schede muoiono con lei, ma il rilascio resta)
+        (page if page is not None else view).destroyed.connect(schedule_memory_release)
         if self.tabs.count() == 0:
             self.show_home()
         self._on_current_changed()
-
-    def _schedule_memory_release(self, *_args) -> None:
-        """Dopo la chiusura di una o più schede: un solo `release_memory()` al prossimo giro
-        del ciclo degli eventi."""
-        if self._memory_timer is None:
-            self._memory_timer = QTimer(self)
-            self._memory_timer.setSingleShot(True)
-            self._memory_timer.setInterval(0)
-            self._memory_timer.timeout.connect(lambda: release_memory())
-        self._memory_timer.start()
 
     def save_view(self, view: DocumentView | None, save_as: bool = False, recreate: bool = False) -> bool:
         """Salva il documento (con `save_as` chiede dove). Se il file è stato eliminato o spostato
