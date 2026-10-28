@@ -61,6 +61,7 @@ FF_FILE_SELECT = 1 << 20
 FF_NO_SPELL = 1 << 22
 FF_DO_NOT_SCROLL = 1 << 23
 FF_IN_UNISON = 1 << 25
+FF_RICH_TEXT = 1 << 25  # stesso bit di RadiosInUnison: vale per i campi di testo
 AF_HIDDEN, AF_PRINT, AF_NOVIEW, AF_LOCKED = 2, 4, 32, 128
 
 # Stili del segno di caselle e opzioni: carattere del font simbolico standard (ZapfDingbats).
@@ -250,6 +251,7 @@ class FieldInfo:
     border_style: str = "S"     # S pieno · D tratteggiato · B rilievo · I incassato · U sottolineato
     align: int = ALIGN_LEFT
     tooltip: str = ""
+    export_name: str = ""       # nome per l'esportazione (/TM), facoltativo
     default: Any = None
     fmt: Format = field(default_factory=Format)
     calc: Calculation | None = None
@@ -429,12 +431,16 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         ca = _value_of(*pdf.xref_get_key(w.xref, "MK/CA"))
         info.check_style = next((k for k, c in CHECK_STYLES.items() if c == ca), "check" if kind == CHECKBOX else "circle")
     info.font = _FONT_NAMES.get(w.text_font or "Helv", w.text_font or "Helvetica")
+    sys_font = _value_of(*pdf.xref_get_key(w.xref, "FoliantFont"))
+    if sys_font:
+        info.font = sys_font
     info.fontsize = float(w.text_fontsize or 0)
     info.text_color = _color(w.text_color) or (0, 0, 0)
     info.fill_color = _color(w.fill_color)
     info.border_color = _color(w.border_color)
     info.border_width = float(w.border_width or 0)
     info.border_style = (w.border_style or "S")[:1].upper()
+    info.export_name = _value_of(*_inherited(pdf, w.xref, "TM")) or ""
     info.tooltip = w.field_label or ""
     if info.tooltip == "Unnamed":
         info.tooltip = ""
@@ -452,11 +458,12 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.password = bool(flags & pymupdf.PDF_TX_FIELD_IS_PASSWORD)
         info.comb = bool(flags & pymupdf.PDF_TX_FIELD_IS_COMB)
         info.maxlen = int(w.text_maxlen or 0)
-        info.fmt = Format.from_script(_action_script(pdf, w.xref, "F") or w.script_format)
-        c_js = _action_script(pdf, w.xref, "C") or w.script_calc
-        info.calc = Calculation.from_script(c_js)
-        info.formula = FX.from_script(c_js) if info.calc is None else None
-        info.validation = Validation.from_script(_action_script(pdf, w.xref, "V"))
+        if _has_actions(pdf, w.xref, fx):
+            info.fmt = Format.from_script(_action_script(pdf, w.xref, "F") or w.script_format)
+            c_js = _action_script(pdf, w.xref, "C") or w.script_calc
+            info.calc = Calculation.from_script(c_js)
+            info.formula = FX.from_script(c_js) if info.calc is None else None
+            info.validation = Validation.from_script(_action_script(pdf, w.xref, "V"))
     elif kind in (CHECKBOX, RADIO):
         info.export = _on_state(w)
         state = _value_of(*pdf.xref_get_key(w.xref, "AS"))
@@ -502,6 +509,17 @@ def _action_script(pdf: pymupdf.Document, xref: int, trigger: str) -> str | None
             except Exception:
                 return None
     return None
+
+
+def fields_named(pdf: pymupdf.Document, names: set[str], pages: Iterable[int]) -> list[FieldInfo]:
+    """Campi con questi nomi nelle pagine indicate (rilettura mirata dopo una modifica)."""
+    out = []
+    for i in pages:
+        pg = pdf[i]
+        for w in pg.widgets():
+            if w.field_name in names:
+                out.append(_info(pdf, i, w))
+    return out
 
 
 def list_fields(pdf: pymupdf.Document, page: int | None = None) -> list[FieldInfo]:
@@ -562,6 +580,9 @@ def set_value(pdf: pymupdf.Document, page: int, xref: int, value: Any) -> None:
         if flags & pymupdf.PDF_TX_FIELD_IS_PASSWORD:
             text = ""
         pdf.xref_set_key(fx, "V", ps.encode_string(text) if text else "null")
+        if flags & FF_RICH_TEXT or _inherited(pdf, w.xref, "RV")[0] != "null":
+            # testo formattato: il valore formattato segue quello semplice (stile del campo)
+            pdf.xref_set_key(fx, "RV", ps.encode_string(rich_value(text)) if text else "null")
         _regen_field(pdf, fx, page, w.xref)
     elif kind == CHECKBOX:
         on = _on_state(w)
@@ -671,6 +692,16 @@ def radio_siblings(pdf: pymupdf.Document, page: int, xref: int) -> list[tuple[in
     return [(f.page, f.xref) for f in list_fields(pdf) if f.kind == RADIO and f.field_xref == fx]
 
 
+def rich_value(text: str) -> str:
+    """Valore formattato (/RV, XHTML) equivalente al testo semplice: un paragrafo per riga."""
+    from xml.sax.saxutils import escape
+    lines = text.replace("\r\n", "\r").replace("\n", "\r").split("\r")
+    body = "".join(f"<p>{escape(line)}</p>" for line in lines)
+    return ('<?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/" xfa:APIVersion="Acroform:2.7.0.0" '
+            f'xfa:spec="2.1">{body}</body>')
+
+
 def regenerate(pdf: pymupdf.Document, page: int, xref: int) -> None:
     """Rigenera l'aspetto del widget dalle chiavi del campo (valore, font, colori…)."""
     w = find_widget(pdf, page, xref)
@@ -724,7 +755,8 @@ def _regen_field(pdf: pymupdf.Document, fx: int, page: int, xref: int) -> None:
                 da = re.sub(r"[\d.]+\s+[\d.]+\s+[\d.]+\s+rg|[\d.]+\s+g\b", "", saved_da[1])
                 pdf.xref_set_key(fx, "DA", ps.encode_string("1 0 0 rg " + da.strip()))
     shown = formatted if formatted is not None else (saved_v[1] if saved_v[0] == "string" else "")
-    embed = bool(shown) and needs_embedded_font(shown) and _inherited(pdf, xref, "FT")[1] == "/Tx"
+    custom_font = pdf.xref_get_key(xref, "FoliantFont")[0] != "null"
+    embed = bool(shown) and (needs_embedded_font(shown) or custom_font) and _inherited(pdf, xref, "FT")[1] == "/Tx"
     try:
         for k in kids:
             pi = page if k == xref else _page_index_of(pdf, k, page)
@@ -1233,6 +1265,7 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
         pdf.xref_set_key(xref, "AS", "/Off")
     if pg.rotation:
         pdf.xref_set_key(xref, "MK/R", str(pg.rotation))
+    tag_widget(pdf, page, xref)
     if full_name:
         fx = _field_xref(pdf, xref)
         if fx == xref:
@@ -1465,11 +1498,18 @@ def prepare_for_edit(pdf: pymupdf.Document) -> None:
         regenerate_all(pdf)
 
 
-def custom_scripts(pdf: pymupdf.Document) -> list[tuple[str, str]]:
+def _has_actions(pdf: pymupdf.Document, xref: int, fx: int) -> bool:
+    """True se widget o campo hanno azioni aggiuntive (/AA): evita letture inutili."""
+    return pdf.xref_get_key(xref, "AA")[0] != "null" or (fx != xref and pdf.xref_get_key(fx, "AA")[0] != "null")
+
+
+def custom_scripts(pdf: pymupdf.Document, fields: list[FieldInfo] | None = None) -> list[tuple[str, str]]:
     """(nome del campo, evento) delle azioni personalizzate che Foliant non esegue."""
     out = []
     names = {"K": _("battitura"), "F": _("formato"), "V": _("validazione"), "C": _("calcolo")}
-    for f in list_fields(pdf):
+    for f in (list_fields(pdf) if fields is None else fields):
+        if not _has_actions(pdf, f.xref, f.field_xref):
+            continue
         for trig, label in names.items():
             js = _action_script(pdf, f.xref, trig)
             if not js:
@@ -1722,10 +1762,25 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         pdf.xref_set_key(xref, "MK/CA", ps.encode_string(ch))
     if flags != old_flags:
         pdf.xref_set_key(fx, "Ff", str(flags))
+    if "export_name" in props:
+        tm = str(props["export_name"] or "").strip()
+        pdf.xref_set_key(fx, "TM", ps.encode_string(tm) if tm else "null")
     if "tooltip" in props:
         pdf.xref_set_key(fx, "TU", ps.encode_string(props["tooltip"]) if props["tooltip"] else "null")
+    if "font" in props:
+        if props["font"] in FONTS:
+            if pdf.xref_get_key(xref, "FoliantFont")[0] != "null":
+                pdf.xref_set_key(xref, "FoliantFont", "null")
+        else:
+            if kind != TEXT:
+                raise FormError(_("I caratteri di sistema sono disponibili solo per i campi di testo."))
+            if not system_font_file(str(props["font"])):
+                raise FormError(_("Il carattere «{f}» non è installato.").format(f=props["font"]))
+            # l'aspetto userà il carattere incorporato; /DA resta su un carattere standard di ripiego
+            pdf.xref_set_key(xref, "FoliantFont", ps.encode_string(str(props["font"])))
+            props = {**props, "font": "Helvetica"}
     if any(k in props for k in ("font", "fontsize", "text_color")):
-        font = props.get("font", info.font)
+        font = props.get("font", info.font if info.font in FONTS else "Helvetica")
         size = max(0.0, float(props.get("fontsize", info.fontsize) or 0))
         color = props.get("text_color") or info.text_color or (0, 0, 0)
         pdf.xref_set_key(fx, "DA", ps.encode_string(_da(font, size, color)))
@@ -1937,6 +1992,7 @@ def merge_into(pdf: pymupdf.Document, page: int, xref: int, target_name: str) ->
 
 
 def delete_field(pdf: pymupdf.Document, page: int, xref: int) -> None:
+    untag_widget(pdf, xref)
     w = find_widget(pdf, page, xref)
     fx = _field_xref(pdf, xref)
     pdf[page].delete_widget(w)
@@ -2247,6 +2303,15 @@ def _xfa_map(pdf: pymupdf.Document) -> tuple[dict[str, str], dict[str, FieldInfo
             paths[f.name] = path
             fields[f.name] = f
     return paths, fields
+
+
+def xfa_unmapped(pdf: pymupdf.Document) -> list[str]:
+    """Campi compilabili di un modulo XML statico senza un nodo dati corrispondente."""
+    if not xfa_data(pdf):
+        return []
+    paths, _fields = _xfa_map(pdf)
+    names = list(dict.fromkeys(f.name for f in list_fields(pdf) if f.kind in FILLABLE))
+    return [n for n in names if n not in paths]
 
 
 def sync_xfa_from_fields(pdf: pymupdf.Document) -> int:
@@ -2686,6 +2751,41 @@ def needs_embedded_font(text: str) -> bool:
 
 
 _FALLBACK_FONT = None
+_SYSTEM_FONT_CACHE: dict[str, str | None] = {}
+
+
+def system_font_file(family: str) -> str | None:
+    """File del carattere di sistema con questo nome (fontconfig); None se non installato."""
+    if family in _SYSTEM_FONT_CACHE:
+        return _SYSTEM_FONT_CACHE[family]
+    import shutil
+    import subprocess
+    path = None
+    if shutil.which("fc-match"):
+        try:
+            out = subprocess.run(["fc-match", "-f", "%{family}\t%{file}", family], capture_output=True,
+                                 text=True, timeout=5).stdout
+            found, _tab, file = out.partition("\t")
+            names = [n.strip().lower() for n in found.split(",")]
+            if family.strip().lower() in names and file.lower().endswith((".ttf", ".otf", ".ttc")):
+                path = file
+        except (OSError, subprocess.SubprocessError):
+            path = None
+    _SYSTEM_FONT_CACHE[family] = path
+    return path
+
+
+def _field_font(pdf: pymupdf.Document, xref: int) -> pymupdf.Font:
+    """Carattere da incorporare per il campo: quello di sistema scelto o il carattere di ripiego."""
+    family = _value_of(*pdf.xref_get_key(xref, "FoliantFont"))
+    if family:
+        path = system_font_file(family)
+        if path:
+            try:
+                return pymupdf.Font(fontfile=path)
+            except Exception:
+                pass
+    return _fallback_font()
 
 
 def _fallback_font() -> pymupdf.Font:
@@ -2701,7 +2801,9 @@ def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) 
     saper mostrare con i caratteri standard (FRM-09)."""
     info = field_info(pdf, page, xref)
     w, h = info.rect.width, info.rect.height
-    font = _fallback_font()
+    font = _field_font(pdf, xref)
+    if any(not font.has_glyph(ord(c)) for c in text if c not in "\r\n\t"):
+        font = _fallback_font()  # il carattere scelto non copre il testo
     tmp = pymupdf.open()
     try:
         tp = tmp.new_page(width=w, height=h)
@@ -2760,3 +2862,103 @@ def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) 
     pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]/Resources{res}>>")
     pdf.update_stream(form, b"/Tx BMC\n" + stream + b"\nEMC\n")
     pdf.xref_set_key(xref, "AP", f"<</N {form} 0 R>>")
+
+
+# ====================================================================== struttura logica
+def _struct_root(pdf: pymupdf.Document) -> int | None:
+    t, v = pdf.xref_get_key(pdf.pdf_catalog(), "StructTreeRoot")
+    return int(v.split()[0]) if t == "xref" else None
+
+
+def _parent_tree_nums(pdf: pymupdf.Document, root: int) -> tuple[int | None, list] | None:
+    """(xref dell'albero dei genitori, voci /Nums) se l'albero è piatto; None se assente o annidato."""
+    t, v = pdf.xref_get_key(root, "ParentTree")
+    if t != "xref":
+        return None
+    pt = int(v.split()[0])
+    if pdf.xref_get_key(pt, "Kids")[0] != "null":
+        return None  # albero numerico annidato: non lo modifichiamo
+    t, v = pdf.xref_get_key(pt, "Nums")
+    try:
+        nums = ps.parse(v) if t == "array" else []
+    except ps.PdfSyntaxError:
+        return None
+    return pt, nums
+
+
+def tag_widget(pdf: pymupdf.Document, page: int, xref: int) -> int | None:
+    """Nei documenti con struttura logica collega il widget a un nuovo elemento /Form
+    (OBJR + /StructParent + albero dei genitori). Restituisce lo xref dell'elemento."""
+    root = _struct_root(pdf)
+    if root is None or pdf.xref_get_key(xref, "StructParent")[0] != "null":
+        return None
+    tree = _parent_tree_nums(pdf, root)
+    if tree is None:
+        return None
+    pt, nums = tree
+    t, v = pdf.xref_get_key(root, "ParentTreeNextKey")
+    keys = [n for n in nums[0::2] if isinstance(n, int)]
+    key = max([int(v) if t == "int" else 0] + [k + 1 for k in keys])
+    # genitore: il primo elemento sotto la radice (di solito «Document»), altrimenti la radice
+    t, v = pdf.xref_get_key(root, "K")
+    parent = root
+    if t == "xref" and pdf.xref_get_key(int(v.split()[0]), "Type")[1] in ("/StructElem", "null"):
+        parent = int(v.split()[0])
+    elif t == "array":
+        try:
+            first = next((r for r in ps.parse(v) if isinstance(r, ps.Ref)), None)
+        except ps.PdfSyntaxError:
+            first = None
+        if first is not None:
+            parent = first[0]
+    pxref = pdf.page_xref(page)
+    elem = pdf.get_new_xref()
+    pdf.update_object(elem, f"<</Type/StructElem/S/Form/P {parent} 0 R/Pg {pxref} 0 R"
+                            f"/K<</Type/OBJR/Obj {xref} 0 R/Pg {pxref} 0 R>>>>")
+    t, v = pdf.xref_get_key(parent, "K")
+    if t == "array":
+        kids = v[:-1] + f" {elem} 0 R]"
+    elif t == "null":
+        kids = f"[{elem} 0 R]"
+    else:
+        kids = f"[{v} {elem} 0 R]"
+    pdf.xref_set_key(parent, "K", kids)
+    pdf.xref_set_key(xref, "StructParent", str(key))
+    pdf.xref_set_key(pt, "Nums", ps.serialize(list(nums) + [key, ps.Ref(elem)]))
+    pdf.xref_set_key(root, "ParentTreeNextKey", str(key + 1))
+    return elem
+
+
+def untag_widget(pdf: pymupdf.Document, xref: int) -> None:
+    """Toglie l'elemento /Form del widget (prima di eliminarlo)."""
+    root = _struct_root(pdf)
+    t, v = pdf.xref_get_key(xref, "StructParent")
+    if root is None or t != "int":
+        return
+    tree = _parent_tree_nums(pdf, root)
+    if tree is None:
+        return
+    pt, nums = tree
+    key = int(v)
+    elem = None
+    for i in range(0, len(nums) - 1, 2):
+        if nums[i] == key and isinstance(nums[i + 1], ps.Ref):
+            elem = nums[i + 1][0]
+            del nums[i:i + 2]
+            break
+    if elem is None:
+        return
+    pdf.xref_set_key(pt, "Nums", ps.serialize(nums))
+    tp, vp = pdf.xref_get_key(elem, "P")
+    if tp == "xref":
+        parent = int(vp.split()[0])
+        tk, vk = pdf.xref_get_key(parent, "K")
+        if tk == "array":
+            try:
+                kids = [k for k in ps.parse(vk) if not (isinstance(k, ps.Ref) and k[0] == elem)]
+                pdf.xref_set_key(parent, "K", ps.serialize(kids))
+            except ps.PdfSyntaxError:
+                pass
+        elif tk == "xref" and int(vk.split()[0]) == elem:
+            pdf.xref_set_key(parent, "K", "[]")
+    pdf.xref_set_key(elem, "K", "null")

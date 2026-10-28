@@ -476,3 +476,51 @@ def test_do_not_scroll_rejects_overflow(qtbot, window, tmp_path):
     click_field(qtbot, view, "libero")
     qtbot.keyClicks(f.editor, long_text)
     assert f.editor.text() == long_text  # senza divieto il testo scorre
+
+
+def test_value_committed_before_save(qtbot, window, form_pdf, tmp_path):
+    view = open_form(window, form_pdf)
+    click_field(qtbot, view, "cognome")
+    f = filler_of(view)
+    qtbot.keyClicks(f.editor, "NonConfermato")
+    window.save_view(view)
+    again = pymupdf.open(form_pdf)
+    assert E.form_values(again)["cognome"] == "NonConfermato"
+
+
+def _big_form(path, pages=50, per_page=100):
+    """Modulo con molti campi scritto direttamente (molto più rapido di add_widget)."""
+    pdf = pymupdf.open()
+    fields = []
+    for p in range(pages):
+        pdf.new_page()
+        annots = []
+        for i in range(per_page):
+            x = pdf.get_new_xref()
+            x0, y0 = 20 + (i % 5) * 110, 20 + (i // 5) * 38
+            pdf.update_object(x, f"<</Type/Annot/Subtype/Widget/FT/Tx/T(c{p}_{i})/Rect[{x0} {800 - y0} {x0 + 100} {820 - y0}]"
+                                 f"/F 4/DA(0 g /Helv 10 Tf)/P {pdf.page_xref(p)} 0 R" + ("/Ff 2" if i == 0 else "") + ">>")
+            annots.append(f"{x} 0 R")
+            fields.append(f"{x} 0 R")
+        pdf.xref_set_key(pdf.page_xref(p), "Annots", "[" + " ".join(annots) + "]")
+    pdf.xref_set_key(pdf.pdf_catalog(), "AcroForm", "<</Fields[" + " ".join(fields) + "]/DA(0 g /Helv 0 Tf)>>")
+    pdf.save(str(path))
+
+
+def test_large_form_bar_fast_and_commit_fast(qtbot, window, tmp_path):
+    import time
+    path = tmp_path / "grande.pdf"
+    _big_form(path)
+    view = window.ctx.open_path(str(path))
+    f = filler_of(view)
+    # barra subito, analisi completa rimandata a dopo l'apertura (non la blocca)
+    assert f.bar.isVisible() and f.state.version < 0 and "Analisi" in f.text_of_bar()
+    QApplication.processEvents()
+    assert f.state.fields and "5000 campi" in f.text_of_bar() and "50 obbligatori" in f.text_of_bar()
+    info = [x for x in f.state.fields if x.name == "c3_7"][0]
+    f.activate(info)
+    f.editor.setText("veloce")
+    t = time.time()
+    f.commit_active()
+    assert time.time() - t < 1.5
+    assert [x for x in f.state.fields if x.name == "c3_7"][0].value == "veloce"

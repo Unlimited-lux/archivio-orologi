@@ -606,3 +606,72 @@ def test_button_distinct_down_caption():
     d = int(again.xref_get_key(f.xref, "AP/D")[1].split()[0])
     assert n != d and again.xref_stream(n) != again.xref_stream(d)
     assert b"Invia" in again.xref_stream(n)
+
+
+def test_system_font_embedded(tmp_path):
+    if not E.system_font_file("DejaVu Serif"):
+        pytest.skip("carattere DejaVu Serif non installato")
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 300, 72), "t")
+    E.update_properties(pdf, 0, x, font="DejaVu Serif", fontsize=12)
+    E.set_value(pdf, 0, x, "Serif incorporato")
+    again = reopen(pdf)
+    f = E.list_fields(again)[0]
+    assert f.font == "DejaVu Serif" and f.value == "Serif incorporato"
+    assert "Serif incorporato" in again[0].get_text()
+    fonts = [again.xref_object(i, compressed=True) for i in range(1, again.xref_length())]
+    assert any("DejaVu#20Serif" in o for o in fonts) and any("/FontFile" in o for o in fonts)
+    with pytest.raises(E.FormError):
+        E.update_properties(pdf, 0, x, font="Carattere Inesistente XYZ")
+    E.update_properties(pdf, 0, x, font="Times")
+    assert E.field_info(pdf, 0, x).font == "Times"
+
+
+def test_tagged_document_form_element(tmp_path):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    cat = pdf.pdf_catalog()
+    root, docel, pt = pdf.get_new_xref(), pdf.get_new_xref(), pdf.get_new_xref()
+    pdf.update_object(pt, "<</Nums[]>>")
+    pdf.update_object(docel, f"<</Type/StructElem/S/Document/P {root} 0 R/K[]>>")
+    pdf.update_object(root, f"<</Type/StructTreeRoot/K {docel} 0 R/ParentTree {pt} 0 R/ParentTreeNextKey 0>>")
+    pdf.xref_set_key(cat, "StructTreeRoot", f"{root} 0 R")
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "nome")
+    assert pdf.xref_get_key(x, "StructParent") == ("int", "0")
+    kids = pdf.xref_get_key(docel, "K")[1]
+    elem = int(kids.strip("[]").split()[0])
+    assert pdf.xref_get_key(elem, "S") == ("name", "/Form")
+    assert pdf.xref_get_key(elem, "K/Obj") == ("xref", f"{x} 0 R")
+    assert pdf.xref_get_key(pt, "Nums")[1].replace(" ", "") == f"[0{elem}0R]"
+    y = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 90, 200, 110), "cognome")
+    assert pdf.xref_get_key(y, "StructParent") == ("int", "1")
+    E.delete_field(pdf, 0, x)
+    assert str(elem) not in pdf.xref_get_key(docel, "K")[1]
+    again = reopen(pdf)
+    assert [f.name for f in E.list_fields(again)] == ["cognome"]
+    # documento senza struttura: nessun collegamento
+    plain = pymupdf.open()
+    plain.new_page()
+    z = E.create_field(plain, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "a")
+    assert plain.xref_get_key(z, "StructParent")[0] == "null"
+
+
+def test_rich_text_value_kept_coherent():
+    import xml.etree.ElementTree as ET
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 300, 120), "nota", multiline=True)
+    fx = E._field_xref(pdf, x)
+    flags = int(pdf.xref_get_key(fx, "Ff")[1])
+    pdf.xref_set_key(fx, "Ff", str(flags | E.FF_RICH_TEXT))
+    pdf.xref_set_key(fx, "RV", "(<body><p><b>vecchio</b></p></body>)")
+    E.set_value(pdf, 0, x, "Riga <1> & co\rRiga 2")
+    rv = pdf.xref_get_key(fx, "RV")[1]
+    root = ET.fromstring(rv)
+    texts = [p.text for p in root.iter("{http://www.w3.org/1999/xhtml}p")]
+    assert texts == ["Riga <1> & co", "Riga 2"]
+    assert E.field_info(pdf, 0, x).value == "Riga <1> & co\rRiga 2"
+    plain = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 150, 300, 170), "semplice")
+    E.set_value(pdf, 0, plain, "x")
+    assert pdf.xref_get_key(E._field_xref(pdf, plain), "RV")[0] == "null"
