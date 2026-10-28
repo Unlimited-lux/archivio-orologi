@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import itertools
 import os
 from collections import OrderedDict
 from pathlib import Path
+from typing import Callable
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTabWidget, QToolBar, QToolButton,
+    QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QToolBar, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -19,10 +21,13 @@ from ..core.document import ACCESS, CONTENT, LOCK, Document
 from ..core.errors import DocumentError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import theme
+from .banners import Banner, BannerBar, DocumentTabs
 from .context import PDF_FILTER, Context, Mode
 from .document_view import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView
 from .home import HomeScreen
 from .icons import app_icon, bind_icon
+from .notify import NotificationArea
+from .tasks import BackgroundTask, TaskManager, TaskStatusWidget
 
 MAX_RECENT = 15
 
@@ -75,6 +80,10 @@ class MainWindow(QMainWindow):
         self._props: dict[str, QWidget] = {}
         self._connected_view: DocumentView | None = None
         self.view_menu_providers: list = []
+        self.tab_menu_providers: list = []           # ctx.add_tab_menu_provider: fn(view, menu)
+        self.selected_pages_provider: Callable | None = None   # ctx.set_selected_pages_provider
+        self._preference_pages: list[tuple[int, int, str, Callable]] = []   # (ordine, n, titolo, factory)
+        self._preference_seq = itertools.count()
         # Scorciatoie valide solo in una modalità: (azione, scorciatoie, id modalità)
         self._mode_shortcuts: list[tuple[QAction, list, str]] = []
         self.module_results: list[tuple[str, Exception | None]] = []
@@ -85,6 +94,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_core_actions()
         self._build_read_mode()
+        self._build_services()
         if load_modules:
             from ..modules import load_modules as _load
             self.module_results = _load(self.ctx)
@@ -160,12 +170,14 @@ class MainWindow(QMainWindow):
         self.home.newRequested.connect(self.new_document)
         self.home.pathRequested.connect(self.open_path)
         self.docs_stack.addWidget(self.home)
-        self.tabs = QTabWidget(self.docs_stack)
+        # ogni scheda: barre di avviso (UX-14) sopra la vista; widget(i)/indexOf lavorano con le viste
+        self.tabs = DocumentTabs(self.docs_stack)
         self.tabs.setDocumentMode(True)
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
         self.tabs.tabCloseRequested.connect(lambda i: self.close_view(self.tabs.widget(i)))
         self.tabs.currentChanged.connect(self._on_current_changed)
+        self.tabs.tabBar().menuRequested.connect(self._on_tab_menu)
         self.docs_stack.addWidget(self.tabs)
 
         self.properties = QStackedWidget(self.splitter)
@@ -221,7 +233,7 @@ class MainWindow(QMainWindow):
         self.act_save_as = a(_("Salva con nome…"), "save-all",
                              lambda: self.save_view(self.current_view(), save_as=True),
                              "Ctrl+Shift+S", requires_document=True)
-        self.act_save_copy = a(_("Salva una copia…"), "copy", self.save_copy, requires_document=True)
+        self.act_save_copy = a(_("Salva una copia…"), "copy", lambda: self.save_copy(), requires_document=True)
         self.act_close = a(_("Chiudi documento"), "x", lambda: self.close_view(self.current_view()),
                            QKeySequence.StandardKey.Close, requires_document=True)
         self.act_quit = a(_("Esci"), "log-out", self.close, QKeySequence.StandardKey.Quit)
@@ -272,7 +284,7 @@ class MainWindow(QMainWindow):
             self.view_mode_actions[mode] = act
         self.view_mode_actions[VIEW_CONTINUOUS].setChecked(True)
 
-        self.act_preferences = a(_("Preferenze…"), "settings", self.show_preferences, "Ctrl+,")
+        self.act_preferences = a(_("Preferenze…"), "settings", lambda: self.show_preferences(), "Ctrl+,")
         self.act_shortcuts = a(_("Scorciatoie da tastiera"), "keyboard", self.show_shortcuts, "Ctrl+?")
         self.act_help = a(_("Guida rapida"), "circle-help", self.show_help, "F1")
         self.act_reopen = a(_("Riapri scheda chiusa"), "history", self.reopen_closed, "Ctrl+Shift+T")
@@ -305,6 +317,26 @@ class MainWindow(QMainWindow):
             btn.setDefaultAction(act)
             btn.setAutoRaise(True)
             sb.addPermanentWidget(btn)
+
+    def _build_services(self) -> None:
+        """Servizi della finestra per i moduli: attività non modali e avvisi chiusi nella barra
+        di stato, avvisi temporanei in basso (ctx.notify)."""
+        sb = self.statusBar()
+        self.banner_button = QToolButton(self)
+        self.banner_button.setAutoRaise(True)
+        bind_icon(self.banner_button, "bell")
+        self.banner_button.setToolTip(_("Avvisi chiusi del documento"))
+        self.banner_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.banner_menu = QMenu(self.banner_button)
+        self.banner_menu.aboutToShow.connect(self.fill_banner_menu)
+        self.banner_button.setMenu(self.banner_menu)
+        self.banner_button.hide()
+        sb.insertPermanentWidget(0, self.banner_button)
+        self.task_manager = TaskManager(self, report=lambda text: self.ctx.notify(text),
+                                        status=lambda text: self.statusBar().showMessage(text, 5000))
+        self.task_status = TaskStatusWidget(self.task_manager, self)
+        sb.insertPermanentWidget(0, self.task_status)
+        self.notifications = NotificationArea(self.centralWidget())
 
     def _shortcut(self, seq: str, slot) -> QAction:
         act = QAction(self)
@@ -412,9 +444,20 @@ class MainWindow(QMainWindow):
                 self.open_path(path)
                 return
 
-    def show_preferences(self) -> None:
+    def add_preferences_page(self, title: str, factory: Callable, order: int = 100) -> None:
+        """Pagina di un modulo nelle Preferenze; lo stesso titolo sostituisce la pagina precedente."""
+        self._preference_pages = [p for p in self._preference_pages if p[2] != title]
+        self._preference_pages.append((order, next(self._preference_seq), title, factory))
+        self._preference_pages.sort(key=lambda p: (p[0], p[1]))
+
+    def preference_pages(self) -> list[tuple[str, Callable]]:
+        return [(title, factory) for _o, _n, title, factory in self._preference_pages]
+
+    def show_preferences(self, page: str | None = None) -> None:
         from .dialogs import PreferencesDialog
-        dlg = PreferencesDialog(self.settings, self)
+        dlg = PreferencesDialog(self.settings, self, pages=self.preference_pages())
+        if page:
+            dlg.show_page(page)
         if dlg.exec():
             old_lang = self.settings.value("language", "")
             dlg.apply()
@@ -536,7 +579,7 @@ class MainWindow(QMainWindow):
         button.setIconSize(QSize(18, 18))
         bind_icon(button, icon_name, kind="mode")
         button.clicked.connect(lambda _c=False, m=mode_id: self.set_mode(m))
-        mode = Mode(mode_id, title, icon_name, order, toolbar, button)
+        mode = Mode(mode_id, title, icon_name, order, toolbar, button, window=self)
         self.modes[mode_id] = mode
         ordered = sorted(self.modes.values(), key=lambda m: (m.order, m.title))
         self._mode_layout.insertWidget(ordered.index(mode), button)
@@ -565,8 +608,26 @@ class MainWindow(QMainWindow):
                     v.set_tool(None)
             self.act_select.setChecked(True)
             self.properties.hide()      # il pannello della modalità precedente non resta aperto
+        self.apply_default_tool(mode)   # prima di `entered`: i moduli vedono già lo strumento scelto
         mode.entered.emit()
         self.ctx.modeChanged.emit(mode_id)
+
+    def apply_default_tool(self, mode: Mode | None = None, views: list[DocumentView] | None = None) -> None:
+        """Attiva lo strumento predefinito della modalità attiva (`mode.set_default_tool`) sulle
+        viste che hanno «Seleziona testo»: uno strumento scelto dall'utente resta."""
+        mode = mode if mode is not None else self.modes.get(self.current_mode_id or "")
+        if mode is None or mode.default_tool is None or mode.id != self.current_mode_id:
+            return
+        for view in (views if views is not None else self.views()):
+            if view.document.closed or view.tool is not view._default_tool:
+                continue
+            try:
+                tool = mode.make_default_tool(view)
+            except Exception as e:      # un modulo difettoso non blocca il cambio di modalità
+                self.statusBar().showMessage(_("Errore nello strumento della modalità: {e}").format(e=e), 8000)
+                return
+            if tool is not None:
+                view.set_tool(tool)
 
     # ================================================================== pannelli
     def add_sidebar_panel(self, panel_id: str, title: str, icon_name: str, widget: QWidget, order: int = 100) -> None:
@@ -601,6 +662,14 @@ class MainWindow(QMainWindow):
         self.show_sidebar_panel(panel_id)
 
     _sidebar_open = True
+
+    def toggle_sidebar_panel(self, panel_id: str) -> None:
+        """Mostra il pannello `panel_id` o lo nasconde se è già quello visibile (es. F4 miniature)."""
+        if panel_id in self._sidebar:
+            if not self.sidebar.isVisible():
+                self.show_sidebar_panel(panel_id)
+            else:
+                self._toggle_sidebar_panel(panel_id)
 
     def show_sidebar_panel(self, panel_id: str) -> None:
         if panel_id not in self._sidebar:
@@ -670,6 +739,56 @@ class MainWindow(QMainWindow):
         self.docs_stack.setCurrentWidget(self.home)
         self._on_current_changed()
 
+    def activate_view(self, view: DocumentView | None) -> bool:
+        """Porta in primo piano la scheda di `view` (anche dalla Home o da un widget centrale)."""
+        if view is None or self.tabs.indexOf(view) < 0:
+            return False
+        self._show_tabs()
+        if self.tabs.currentWidget() is not view:
+            self.tabs.setCurrentWidget(view)        # currentChanged aggiorna lo stato
+        view.setFocus()
+        return True
+
+    # ================================================================== avvisi del documento
+    def _banner_bar(self, view: DocumentView | None) -> BannerBar | None:
+        page = self.tabs.page(view)
+        if page is None or view.document.closed:      # scheda chiusa (anche in attesa di eliminazione)
+            return None
+        return page.banners
+
+    def show_banner(self, view: DocumentView | None, banner_id: str, text: str, actions=(), level: str = "info",
+                    priority: int = 0, closable: bool = True, on_close: Callable | None = None) -> Banner | None:
+        bar = self._banner_bar(view)
+        if bar is None:
+            return None
+        return bar.show_banner(banner_id, text, actions, level, priority, closable, on_close)
+
+    def hide_banner(self, view: DocumentView | None, banner_id: str) -> bool:
+        bar = self._banner_bar(view)
+        return bar.hide_banner(banner_id) if bar is not None else False
+
+    def banner_ids(self, view: DocumentView | None) -> list[str]:
+        bar = self._banner_bar(view)
+        return [b.id for b in bar.active()] if bar is not None else []
+
+    def _update_banner_button(self) -> None:
+        """Gli avvisi chiusi restano come icona nella barra di stato (UX-14)."""
+        bar = self._banner_bar(self.current_view())
+        closed = bar.dismissed() if bar is not None else []
+        self.banner_button.setVisible(bool(closed))
+        if closed:
+            self.banner_button.setToolTip(_("Avvisi chiusi del documento") + "\n"
+                                          + "\n".join("• " + b.text for b in closed))
+
+    def fill_banner_menu(self) -> None:
+        """Menu dell'icona: un clic mostra di nuovo l'avviso chiuso."""
+        self.banner_menu.clear()
+        bar = self._banner_bar(self.current_view())
+        for b in (bar.dismissed() if bar is not None else []):
+            text = b.text if len(b.text) <= 90 else b.text[:89] + "…"
+            act = self.banner_menu.addAction(text)
+            act.triggered.connect(lambda _c=False, bar=bar, i=b.id: bar.restore(i))
+
     def new_document(self) -> DocumentView:
         return self.add_document(Document.new())
 
@@ -733,9 +852,13 @@ class MainWindow(QMainWindow):
         self.set_central_override(None)
         index = self.tabs.addTab(view, document.display_name)
         self.tabs.setTabToolTip(index, str(document.path or document.display_name))
+        page = self.tabs.page(view)
+        if page is not None:
+            page.banners.changed.connect(self._update_banner_button)
         self.docs_stack.setCurrentWidget(self.tabs)
         self.tabs.setCurrentIndex(index)
         self.ctx.documentOpened.emit(view)
+        self.apply_default_tool(views=[view])      # documento aperto in una modalità con strumento proprio
         self._on_current_changed()
         if document.read_only:
             self.statusBar().showMessage(_("«{name}» è in sola lettura: puoi modificarlo e salvarlo con «Salva con nome».")
@@ -788,10 +911,14 @@ class MainWindow(QMainWindow):
         return "save" if clicked is save else "discard" if clicked is discard else None
 
     def close_view(self, view: DocumentView | None, ask: bool = True) -> bool:
+        """Chiude la scheda. Con `ask` (chiusura dell'utente) interroga i controlli
+        `close_document` dei moduli e chiede se salvare le modifiche; senza, chiude subito."""
         if view is None:
             return True
         self.commit_pending_edits(view)
         doc = view.document
+        if ask and not self.ctx.run_guards("close_document", view, {"modified": doc.is_modified}):
+            return False
         if doc.is_modified and ask and not self._exit_confirmed:
             self.tabs.setCurrentWidget(view)
             choice = self._ask_unsaved([doc])
@@ -810,11 +937,14 @@ class MainWindow(QMainWindow):
         if doc.path is not None:
             self._closed_paths.append(str(doc.path))
         index = self.tabs.indexOf(view)
+        page = self.tabs.page(view)
         view.dispose()
         doc.close()
         if index >= 0:
             self.tabs.removeTab(index)
         view.deleteLater()
+        if page is not None:
+            page.deleteLater()                  # contenitore con le barre di avviso
         if self.tabs.count() == 0:
             self.show_home()
         self._on_current_changed()
@@ -841,7 +971,11 @@ class MainWindow(QMainWindow):
                 save_as = True
             elif clicked is not overwrite:
                 return False
-        if save_as or doc.needs_save_as:
+        as_new = save_as or doc.needs_save_as
+        info = {"path": None if as_new or doc.path is None else str(doc.path), "copy": False}
+        if not self.ctx.run_guards("save_as" if as_new else "save", view, info):
+            return False
+        if as_new:
             path = self.ctx.ask_save_path(_("Salva con nome"), doc.display_name, PDF_FILTER)
             if not path:
                 return False
@@ -859,19 +993,23 @@ class MainWindow(QMainWindow):
         self._update_state()
         return True
 
-    def save_copy(self) -> None:
-        view = self.current_view()
+    def save_copy(self, view: DocumentView | None = None) -> bool:
+        view = view if view is not None else self.current_view()
         if view is None:
-            return
+            return False
         self.commit_pending_edits(view)
+        if not self.ctx.run_guards("save_as", view, {"path": None, "copy": True}):
+            return False
         path = self.ctx.ask_save_path(_("Salva una copia"), view.document.display_name, PDF_FILTER)
         if not path:
-            return
+            return False
         try:
             view.document.save_copy(path)
             self.statusBar().showMessage(_("Copia salvata: {p}").format(p=path), 4000)
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
+            return False
+        return True
 
     def undo(self) -> None:
         view = self.current_view()
@@ -923,6 +1061,7 @@ class MainWindow(QMainWindow):
             self.sidebar.hide()
             self.properties.hide()
         self._update_state()                     # prima del segnale: i moduli hanno l'ultima parola
+        self._update_banner_button()
         self.ctx.currentViewChanged.emit(view)
 
     def _on_tool_changed(self, tool) -> None:
@@ -957,6 +1096,10 @@ class MainWindow(QMainWindow):
         elif kind == ACCESS and doc.access == "owner":
             self.statusBar().showMessage(_("Accesso completo: tutte le azioni sono consentite."), 6000)
 
+    def refresh_state(self) -> None:
+        """Ricalcola titolo, azioni e barra di stato (API pubblica: `ctx.refresh_state()`)."""
+        self._update_state()
+
     def _update_state(self) -> None:
         view = self.current_view()
         has = view is not None
@@ -987,6 +1130,12 @@ class MainWindow(QMainWindow):
             return
         self.page_spin.set_page(view.current_page + 1, view.page_count)
         self.page_total.setText(f"/ {view.page_count}")
+        # VIS-12: niente «precedente» sulla prima pagina né «successiva» sull'ultima
+        at_first = view.current_page <= 0
+        at_last = view.current_page >= view.page_count - 1
+        for act, enabled in ((self.act_first, not at_first), (self.act_prev, not at_first),
+                             (self.act_next, not at_last), (self.act_last, not at_last)):
+            act.setEnabled(enabled)
 
     def _update_zoom_box(self, *_a) -> None:
         view = self.current_view()
@@ -1043,6 +1192,23 @@ class MainWindow(QMainWindow):
         self.settings.setValue("recent", [p for p in self.recent_files() if p != path])
         self._refresh_recent()
 
+    def remove_recent(self, path: str) -> None:
+        """Toglie `path` dai recenti (API pubblica: `ctx.remove_recent`)."""
+        self._forget_recent(path)
+
+    def replace_recent(self, old_path: str, new_path: str) -> None:
+        """Sostituisce `old_path` con `new_path` nella stessa posizione (file rinominato o
+        spostato); se `old_path` non c'era, `new_path` va in cima."""
+        items = self.recent_files()
+        if old_path in items:
+            items = [new_path if p == old_path else p for p in items]
+            seen: set[str] = set()
+            items = [p for p in items if not (p in seen or seen.add(p))]    # niente doppioni
+        else:
+            items = [new_path] + [p for p in items if p != new_path]
+        self.settings.setValue("recent", items[:MAX_RECENT])
+        self._refresh_recent()
+
     def _refresh_recent(self) -> None:
         self.home.set_recent([p for p in self.recent_files() if os.path.exists(p)])
 
@@ -1073,7 +1239,71 @@ class MainWindow(QMainWindow):
             f"<h3>{APP_NAME} {__version__}</h3>"
             + _("<p>Editor PDF per Linux.</p><p>Icone: set open source con licenza ISC.</p>"))
 
+    # ================================================================== menu della scheda
+    def tab_menu(self, index: int) -> QMenu | None:
+        """Menu contestuale della scheda `index`: voci del nucleo e dei moduli (add_tab_menu_provider)."""
+        view = self.tabs.widget(index) if 0 <= index < self.tabs.count() else None
+        if not isinstance(view, DocumentView):
+            return None
+        menu = QMenu(self)
+        menu.setObjectName("coreTabMenu")
+        close = menu.addAction(_("Chiudi scheda"))
+        bind_icon(close, "x")
+        close.triggered.connect(lambda _c=False, v=view: self.close_view(v))
+        if self.tab_menu_providers:
+            menu.addSeparator()
+        for provider in list(self.tab_menu_providers):
+            try:
+                provider(view, menu)
+            except Exception as e:
+                self.statusBar().showMessage(_("Errore nel menu della scheda: {e}").format(e=e), 8000)
+        return menu
+
+    def _on_tab_menu(self, index: int, global_pos) -> None:
+        menu = self.tab_menu(index)
+        if menu is not None:
+            self.exec_tab_menu(menu, global_pos)
+            menu.deleteLater()
+
+    def exec_tab_menu(self, menu: QMenu, global_pos) -> None:
+        """Mostra il menu della scheda (separato per poterlo simulare nei test)."""
+        menu.exec(global_pos)
+
     # ================================================================== eventi finestra
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            full = self.isFullScreen()
+            if full != self._was_fullscreen:
+                self._was_fullscreen = full
+                act = getattr(self, "act_fullscreen", None)
+                if act is not None:
+                    act.setChecked(full)
+                self.ctx.fullscreenChanged.emit(full)
+
+    _was_fullscreen = False
+
+    def background_tasks(self) -> list[BackgroundTask]:
+        return self.task_manager.running()
+
+    def _confirm_stop_tasks(self, tasks: list[BackgroundTask]) -> bool:
+        """UX-12: con attività in corso l'uscita chiede se interromperle o attendere.
+
+        Solo la domanda: le attività si interrompono in `closeEvent` quando l'uscita è
+        confermata anche dai controlli `quit` e dalla domanda sulle modifiche non salvate."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Attività in corso"))
+        box.setText(_("Ci sono attività in corso:") + "\n\n" + "\n".join("• " + t.title for t in tasks))
+        box.setInformativeText(_("Puoi interromperle e uscire, oppure attendere che finiscano."))
+        stop = box.addButton(_("Interrompi ed esci"), QMessageBox.ButtonRole.DestructiveRole)
+        wait = box.addButton(_("Attendi"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(wait)
+        box.exec()
+        return box.clickedButton() is stop
+
+    STOP_TASKS_TIMEOUT_MS = 5000      # attesa massima all'uscita per le attività interrotte
+
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
             event.acceptProposedAction()
@@ -1097,9 +1327,16 @@ class MainWindow(QMainWindow):
                 m.button.setToolButtonStyle(style)
 
     def closeEvent(self, event) -> None:
+        running = self.task_manager.running()
+        if running and not self._confirm_stop_tasks(running):
+            event.ignore()
+            return
         views = list(self.views())
         for view in views:
             self.commit_pending_edits(view)
+        if not self.ctx.run_guards("quit", None, {"views": views}):
+            event.ignore()
+            return
         modified = [v for v in views if v.document.is_modified]
         if modified:
             # una sola domanda; nessuna scheda si chiude finché l'uscita non è confermata
@@ -1112,6 +1349,11 @@ class MainWindow(QMainWindow):
                     if not self.save_view(view):
                         event.ignore()
                         return
+        if self.task_manager.running():
+            # uscita confermata: solo ora si interrompono le attività, e si aspetta che smettano
+            # di usare i documenti prima di chiuderli (con un limite, per non bloccare l'uscita)
+            self.task_manager.cancel_all()
+            self.task_manager.wait_all(self.STOP_TASKS_TIMEOUT_MS)
         for view in views:
             self._close_view_now(view)
         self.settings.setValue("window/geometry", self.saveGeometry())

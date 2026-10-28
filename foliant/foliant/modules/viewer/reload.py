@@ -403,7 +403,7 @@ class ReloadController(QObject):
                 tabs.tabBar().moveTab(new_index, old_index)
             # chiusura della vecchia vista senza richiesta di salvataggio
             view.document._saved_state = view.document._state
-            window.close_view(view)
+            window.close_view(view, ask=False)   # ricarica: non è una chiusura dell'utente (niente controlli)
             # la scheda attiva resta quella di prima
             tabs.setCurrentWidget(new_view if previous is view or previous is None else previous)
         finally:

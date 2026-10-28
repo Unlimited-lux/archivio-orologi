@@ -184,21 +184,39 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 |---|---|
 | `current_view()`, `current_document()`, `views()` | vista/documento attivi |
 | `open_path(p)`, `open_document(doc)` | aprire file o mostrare un documento creato dal modulo |
+| `activate_view(view)` → bool | porta in primo piano la scheda, anche se è visibile la Home o un widget centrale |
+| `close_view(view, discard=False)` → bool | chiude la scheda come Ctrl+W (controlli `close_document` e domanda di salvataggio); `discard=True` chiude subito scartando le modifiche e senza controlli: da usare per le chiusure decise dal modulo (ricarica, file eliminato o spostato) |
+| `refresh_state()` | ricalcola titolo, azioni (annulla/ripeti, Prima/Precedente/Successiva/Ultima) e barra di stato |
 | `add_mode(id, titolo, icona, order)` → `Mode` | modalità con barra contestuale (`mode.add_action`, `add_widget`, `add_separator`, segnali `entered`/`left`) |
+| `mode.set_default_tool(tool_o_factory)` | strumento attivato dal nucleo entrando nella modalità e sui documenti aperti mentre è attiva: un `Tool` o `factory(view) -> Tool \| None`; solo sulle viste con «Seleziona testo», prima di `entered`; vince l'ultima chiamata. Es. `ctx.mode("modifica").set_default_tool(lambda v: EditTextTool(c))` |
 | `mode("leggi")` | aggiungere azioni a una modalità esistente |
 | `action(testo, icona, slot, shortcut=, checkable=, requires_document=)` | crea un'azione (disattivata senza documento) |
 | `add_menu_action(azione, sezione)` | voce nel menu principale ☰ |
 | `add_home_action(titolo, icona, callback, descrizione, order)` | azione rapida nella Home |
-| `add_sidebar_panel(id, titolo, icona, widget, order)` / `show_sidebar_panel(id)` | pannello sinistro (`widget.set_view(view)` chiamato a ogni cambio documento) |
+| `add_sidebar_panel(id, titolo, icona, widget, order)` / `show_sidebar_panel(id)` / `toggle_sidebar_panel(id)` | pannello sinistro (`widget.set_view(view)` chiamato a ogni cambio documento); `toggle` lo nasconde se è già quello visibile |
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |
 | `set_central_widget(w)` / `central_widget()` | mostra un widget del modulo al posto della vista documento (None = ripristina) |
 | `add_link_handler(fn, priority=0)` | apertura dei collegamenti: `fn(view, link) -> bool` (True = gestito); priorità più alta = interrogato prima |
-| `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)` |
-| `run_task(titolo, fn, *args)` | lavoro lungo con avanzamento |
+| `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)`; la selezione di testo è `view.text_selection` (pagina, rettangoli, parole) e `view.selected_text()` (il clic destro non la cancella) |
+| `add_tab_menu_provider(fn)` | voci nel menu del tasto destro su una scheda: `fn(view, menu)`. Es. `ctx.add_tab_menu_provider(lambda v, m: m.addAction(_("Confronta con…"), lambda: confronta(v)))` |
+| `show_banner(view, id, testo, actions=[(etichetta, fn)], level="info", priority=0, closable=True, on_close=None)` / `hide_banner(view, id)` / `banners(view)` | barra di avviso sopra le pagine della scheda (UX-14): `level` = `"info"`, `"warning"` o `"error"`; un avviso alla volta (priorità più alta, poi livello) con «N altri avvisi» per scorrerli; lo stesso `id` aggiorna l'avviso; chiuso con × non ricompare finché il documento è aperto (resta nell'icona della barra di stato) o finché il modulo non chiama `hide_banner`. Es. `ctx.show_banner(view, "ocr", _("Documento senza testo"), [(_("Esegui OCR"), avvia)], level="warning", priority=20)` |
+| `notify(testo, actions=[(etichetta, fn)], duration_ms=None)` | avviso non bloccante in basso (6 s, 10 s con azioni, 0 = finché non si chiude) al posto delle finestre modali informative. Es. `ctx.notify(_("3 pagine eliminate"), [(_("Annulla"), doc.undo)])` |
+| `add_guard(evento, fn)` / `remove_guard(evento, fn)` / `run_guards(evento, view, info=None)` → bool | controlli prima di un'operazione: `fn(view, info) -> bool` (False annulla; può chiedere conferma o modificare il documento). Eventi (`GUARD_EVENTS`): `"save"` (Salva), `"save_as"` (Salva con nome e Salva una copia, `info["copy"]`), `"print"` (il modulo che stampa chiama `run_guards("print", view)`), `"close_document"` (chiusura di una scheda da parte dell'utente), `"quit"` (una volta, `view=None`, `info["views"]`). Es. `ctx.add_guard("save", lambda v, info: conferma_redazioni(v))` |
+| `run_task(titolo, fn, *args, modal=True, on_done=None, on_error=None)` | lavoro lungo con avanzamento. Predefinito: finestra modale, restituisce il risultato. `modal=False`: la finestra resta usabile (avanzamento, Annulla e altre attività nella barra di stato), restituisce subito un `BackgroundTask` (`cancel()`, `done`, `result`, `error`, `wait()`) e alla fine chiama `on_done(risultato)` o `on_error(eccezione)` nel thread dell'interfaccia (senza `on_error` l'errore diventa un avviso). Con `FOLIANT_SYNC_TASKS=1` tutto avviene subito. `background_tasks()` elenca quelle in corso |
+| `set_selected_pages_provider(fn)` / `selected_pages(view=None)` → `list[int]` | pagine selezionate (miniature): il provider `fn(view)` restituisce gli indici; senza provider o selezione, `[pagina corrente]` |
+| `add_preferences_page(titolo, factory, order=100)` / `show_preferences(pagina=None)` | pagina di un modulo nelle Preferenze: `factory(parent) -> QWidget`, creata a ogni apertura; `widget.apply()` (se c'è) chiamato con «Salva» |
+| `author_name()` | nome dell'autore per commenti, note e firme (preferenza «Nome autore», altrimenti l'utente di sistema): da usare al posto di chiavi proprie |
+| `recent_files()`, `replace_recent(vecchio, nuovo)`, `remove_recent(p)` | elenco dei recenti: file rinominato/spostato (stessa posizione) o da togliere |
 | `add_change_guard(fn)` / `remove_change_guard(fn)` | guardia su tutti i documenti aperti e futuri: `fn(document, etichetta, kind) -> bool`, False annulla la modifica (vedi sotto) |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
-| segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `modeChanged` | eventi |
+| segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `modeChanged`, `fullscreenChanged(bool)` | eventi |
+
+Ogni scheda è un contenitore (`window.tabs.page(view)`: barre di avviso sopra la vista), ma
+`window.tabs.widget(i)`, `currentWidget()`, `indexOf(view)` e `setCurrentWidget(view)` lavorano
+sempre con la `DocumentView`. Il menu della scheda del nucleo compare solo se nessun modulo imposta
+un proprio `customContextMenuRequested` sulla barra delle schede: le voci vanno aggiunte con
+`add_tab_menu_provider`.
 
 ### API del documento (`foliant/core/document.py`)
 

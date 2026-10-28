@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import getpass
+import inspect
+from typing import Callable
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHeaderView, QLabel, QLineEdit, QTableWidget,
-    QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
+    QStackedWidget, QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from ..i18n import _, language
+from ..i18n import _, language, pgettext
 
 
 def author_name(settings: QSettings) -> str:
@@ -25,12 +27,40 @@ def author_name(settings: QSettings) -> str:
         return _("Utente")
 
 
+def _make_page(factory: Callable, parent: QWidget) -> QWidget:
+    """Crea la pagina di un modulo: `factory(parent)` oppure `factory()`."""
+    try:
+        params = inspect.signature(factory).parameters.values()
+        takes_parent = any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
+    except (TypeError, ValueError):
+        takes_parent = True
+    try:
+        widget = factory(parent) if takes_parent else factory()
+        if not isinstance(widget, QWidget):
+            raise TypeError(type(widget).__name__)
+    except Exception as e:          # una pagina difettosa non impedisce di aprire le preferenze
+        widget = QLabel(_("Impossibile mostrare questa pagina: {e}").format(e=e), parent)
+        widget.setWordWrap(True)
+        return widget
+    if isinstance(widget, QDialog):
+        widget.setWindowFlags(Qt.WindowType.Widget)      # incorporata come pagina
+    return widget
+
+
 class PreferencesDialog(QDialog):
-    def __init__(self, settings: QSettings, parent: QWidget | None = None):
+    """Preferenze: pagina «Generale» del nucleo e pagine dei moduli (`ctx.add_preferences_page`).
+
+    Con «Salva» il nucleo applica le proprie impostazioni e chiama `apply()` sulle pagine dei
+    moduli che lo definiscono; le pagine che salvano subito non hanno bisogno di altro.
+    """
+
+    def __init__(self, settings: QSettings, parent: QWidget | None = None,
+                 pages: list[tuple[str, Callable]] | None = None):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle(_("Preferenze"))
         self.setMinimumWidth(460)
+        self.module_pages: list[QWidget] = []
         form = QFormLayout()
         self.theme = QComboBox(self)
         for key, label in (("system", _("Come il sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))):
@@ -59,13 +89,52 @@ class PreferencesDialog(QDialog):
         note.setProperty("muted", True)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Salva"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(pgettext("pulsante", "Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        general = QWidget(self)
+        general_lay = QVBoxLayout(general)
+        general_lay.setContentsMargins(0, 0, 0, 0)
+        general_lay.addLayout(form)
+        general_lay.addWidget(note)
+        general_lay.addStretch(1)
         lay = QVBoxLayout(self)
-        lay.addLayout(form)
-        lay.addWidget(note)
+        self.sections: QListWidget | None = None
+        self.stack: QStackedWidget | None = None
+        if pages:
+            # sezioni a sinistra (Generale + moduli), pagina scelta a destra
+            self.setMinimumWidth(760)
+            self.sections = QListWidget(self)
+            self.sections.setFixedWidth(180)
+            self.stack = QStackedWidget(self)
+            self.sections.addItem(_("Generale"))
+            self.stack.addWidget(general)
+            for title, factory in pages:
+                widget = _make_page(factory, self)
+                if isinstance(widget, QDialog):
+                    widget.finished.connect(lambda _r: self.reject())   # i suoi pulsanti chiudono le preferenze
+                self.module_pages.append(widget)
+                self.sections.addItem(title)
+                self.stack.addWidget(widget)
+            self.sections.currentRowChanged.connect(self.stack.setCurrentIndex)
+            self.sections.setCurrentRow(0)
+            body = QHBoxLayout()
+            body.addWidget(self.sections)
+            body.addWidget(self.stack, 1)
+            lay.addLayout(body, 1)
+        else:
+            lay.addWidget(general)
         lay.addWidget(buttons)
+
+    def show_page(self, title: str) -> bool:
+        """Mostra la sezione con questo titolo (es. «Assistente IA»)."""
+        if self.sections is None:
+            return False
+        for row in range(self.sections.count()):
+            if self.sections.item(row).text() == title:
+                self.sections.setCurrentRow(row)
+                return True
+        return False
 
     def apply(self) -> None:
         s = self.settings
@@ -74,6 +143,13 @@ class PreferencesDialog(QDialog):
         s.setValue("author", self.author.text().strip())
         s.setValue("view/mode", self.view_mode.currentData())
         s.setValue("view/zoom", self.zoom.currentData())
+        for widget in self.module_pages:
+            apply = getattr(widget, "apply", None)
+            if callable(apply):
+                try:
+                    apply()
+                except Exception:       # una pagina difettosa non blocca le altre impostazioni
+                    pass
 
 
 # Nomi dei tasti come sulla tastiera italiana (UX-18).

@@ -156,8 +156,14 @@ def test_trash_moves_file_to_system_trash_and_forgets_recent(fwin, ctl, sample_p
     assert sample_pdf in fwin.recent_files()
     asked = []
     monkeypatch.setattr(ctl, "ask_trash", lambda paths: asked.append(paths) or True)
-    done = ctl.trash_paths([sample_pdf])
-    assert done == [sample_pdf] and asked
+    guarded = []                              # file già nel cestino: la scheda si chiude senza controlli
+    guard = lambda v, info: guarded.append(v) or False
+    fwin.ctx.add_guard("close_document", guard)
+    try:
+        done = ctl.trash_paths([sample_pdf])
+    finally:
+        fwin.ctx.remove_guard("close_document", guard)
+    assert done == [sample_pdf] and asked and guarded == []
     assert not os.path.exists(sample_pdf)
     trashed = data / "Trash" / "files" / os.path.basename(sample_pdf)
     assert trashed.read_bytes() == content

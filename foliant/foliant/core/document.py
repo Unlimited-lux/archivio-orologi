@@ -106,6 +106,10 @@ class OpenState:
 _OWN_WRITES: dict[str, tuple | None] = {}
 
 
+# Impronta (mtime, dimensione) dell'ultima scrittura fatta da Foliant per ogni file.
+_OWN_WRITES: dict[str, tuple | None] = {}
+
+
 def atomic_write(target: str | os.PathLike, data: bytes) -> None:
     """Scrive `data` in `target` senza mai lasciare un file a metà."""
     target = Path(os.path.realpath(target))          # salva nel file vero, non sul collegamento
