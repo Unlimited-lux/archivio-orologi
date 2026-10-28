@@ -455,3 +455,24 @@ def test_owner_password_unlocks(qtbot, window, tmp_path, no_modal_boxes):
     assert values(view)["nome"] == "Ok"
     f.state.refresh(force=True)
     assert not f.state.blocked  # resta sbloccato dopo la modifica
+
+
+def test_do_not_scroll_rejects_overflow(qtbot, window, tmp_path):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 110, 70), "corto", do_not_scroll=True)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 90, 110, 110), "libero")
+    pdf.save(str(tmp_path / "ds.pdf"))
+    view = open_form(window, tmp_path / "ds.pdf")
+    long_text = "Testo decisamente troppo lungo per il riquadro"
+    click_field(qtbot, view, "corto")
+    f = filler_of(view)
+    qtbot.keyClicks(f.editor, long_text)
+    typed = f.editor.text()
+    from PySide6.QtGui import QFontMetricsF
+    assert 0 < len(typed) < len(long_text) and typed.startswith("Testo")
+    assert QFontMetricsF(f.editor.font()).horizontalAdvance(typed) <= f.editor.width()  # tutto visibile
+    f.commit_active()
+    click_field(qtbot, view, "libero")
+    qtbot.keyClicks(f.editor, long_text)
+    assert f.editor.text() == long_text  # senza divieto il testo scorre

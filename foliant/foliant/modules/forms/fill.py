@@ -122,15 +122,16 @@ class _TabMixin:
 class _FormatValidator(QValidator):
     """Filtro di battitura del formato del campo (es. solo cifre nei numeri)."""
 
-    def __init__(self, fmt: fm.Format, parent=None):
+    def __init__(self, fmt: fm.Format, parent=None, fits=None):
         super().__init__(parent)
         self.fmt = fmt
+        self.fits = fits  # divieto di scorrimento: funzione che dice se il testo entra nel campo
 
     def validate(self, text, pos):
         filtered = fm.filter_input(self.fmt, text)
-        if filtered == text:
-            return QValidator.State.Acceptable, text, pos
-        return QValidator.State.Invalid, text, pos
+        if filtered != text or (self.fits is not None and not self.fits(text)):
+            return QValidator.State.Invalid, text, pos
+        return QValidator.State.Acceptable, text, pos
 
     def fixup(self, text):
         return fm.filter_input(self.fmt, text)
@@ -661,8 +662,15 @@ class FormFiller(QObject):
                 ed.setMaxLength(f.maxlen)
             if f.password:
                 ed.setEchoMode(QLineEdit.EchoMode.Password)
-            if f.fmt.type != fm.NONE:
-                ed.setValidator(_FormatValidator(f.fmt, ed))
+            fits = None
+            if f.do_not_scroll and not f.comb:
+                # FRM-02: con il divieto di scorrimento si rifiutano i caratteri che non entrano
+                def fits(text, ed=ed):
+                    from PySide6.QtGui import QFontMetricsF
+                    shown = "•" * len(text) if ed.echoMode() == QLineEdit.EchoMode.Password else text
+                    return QFontMetricsF(ed.font()).horizontalAdvance(shown) <= max(4.0, ed.width() - 6)
+            if f.fmt.type != fm.NONE or fits is not None:
+                ed.setValidator(_FormatValidator(f.fmt, ed, fits))
             ed.setAlignment({E.ALIGN_CENTER: Qt.AlignmentFlag.AlignHCenter,
                              E.ALIGN_RIGHT: Qt.AlignmentFlag.AlignRight}.get(f.align, Qt.AlignmentFlag.AlignLeft)
                             | Qt.AlignmentFlag.AlignVCenter)
