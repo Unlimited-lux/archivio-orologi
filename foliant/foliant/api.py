@@ -5,7 +5,10 @@
 
 from .core import placement
 from .core.render import page_pixmap
-from .core.document import CLOSED, CONTENT, SAVED, Document, atomic_write
+from .core.document import (
+    ACCESS, CHANGE_KINDS, CLOSED, CONTENT, ENCRYPT_METADATA_SUPPORTED, LOCK, SAVED, Document, atomic_write,
+)
+from .core.incremental import IncrementalSaveError
 from .core.engine import ENGINE_LOCK, try_engine
 from .core.errors import DocumentError, FoliantError, OperationCancelled, PasswordRequired, WrongPassword
 from .i18n import _, add_translations, language
@@ -23,7 +26,8 @@ from .ui.tools import (
 
 __all__ = [
     "page_pixmap",
-    "placement", "CLOSED", "CONTENT", "SAVED", "Document", "atomic_write", "ENGINE_LOCK", "try_engine",
+    "placement", "CLOSED", "CONTENT", "SAVED", "ACCESS", "LOCK", "CHANGE_KINDS", "ENCRYPT_METADATA_SUPPORTED",
+    "Document", "atomic_write", "IncrementalSaveError", "ENGINE_LOCK", "try_engine",
     "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
     "_", "add_translations", "language", "theme", "PDF_FILTER", "Context", "Mode",
     "FIT_PAGE", "FIT_WIDTH", "VIEW_CONTINUOUS", "VIEW_COVER", "VIEW_FACING", "VIEW_SINGLE", "DocumentView",

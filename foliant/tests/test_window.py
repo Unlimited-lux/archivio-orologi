@@ -380,3 +380,66 @@ def test_shortcuts_dialog_lists_all_modes_in_italian(window):
     assert sd.table.columnCount() == 3
     sd.filter.setText("prova scorciatoie")
     assert sd.table.rowCount() >= 1
+
+
+def test_context_change_guard_applies_to_open_and_new_documents(window, sample_pdf, tmp_path):
+    import pytest
+
+    from foliant.api import OperationCancelled
+    from tests.conftest import make_pdf
+    first = window.open_path(sample_pdf)
+    seen = []
+
+    def guard(document, label, kind):
+        seen.append((document.display_name, label, kind))
+        return kind == "annotation"
+    window.ctx.add_change_guard(guard)
+    window.ctx.add_change_guard(guard)                  # registrarla due volte non ha effetto
+    with pytest.raises(OperationCancelled):
+        with first.document.change("Testo", kind="content"):
+            pass
+    second = window.open_path(make_pdf(tmp_path / "altro.pdf"))
+    with second.document.change("Nota", kind="annotation") as pdf:
+        pdf[0].add_text_annot((100, 100), "ok")
+    assert seen == [("esempio.pdf", "Testo", "content"), ("altro.pdf", "Nota", "annotation")]
+    window.ctx.remove_change_guard(guard)
+    with first.document.change("Testo"):
+        pass
+    assert len(seen) == 2
+    for v in (first, second):
+        v.document._saved_state = v.document._state          # niente domanda alla chiusura
+
+
+def test_locked_document_is_read_only_in_window(window, sample_pdf):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Ruota") as pdf:
+        pdf[0].set_rotation(90)
+    assert window.act_undo.isEnabled()
+    view.document.set_locked("Versione firmata")
+    assert "(sola lettura)" in window.windowTitle()
+    assert "(sola lettura)" in window.tabs.tabText(window.tabs.indexOf(view))
+    assert not window.act_undo.isEnabled()
+    assert "Versione firmata" in window.statusBar().currentMessage()
+    view.document.set_locked(None)
+    assert window.act_undo.isEnabled() and "(sola lettura)" not in window.windowTitle()
+    view.document._saved_state = view.document._state
+
+
+def test_unlock_and_repaired_messages(window, tmp_path):
+    path = tmp_path / "riservato.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "Riservato")
+    d.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="notaio",
+           permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(path))
+    assert view.document.access == "user" and not view.document.can_copy
+    assert view.document.unlock("notaio")
+    assert "Accesso completo" in window.statusBar().currentMessage()
+    assert view.document.can_copy
+    plain = tmp_path / "semplice.pdf"
+    d2 = pymupdf.open()
+    d2.new_page().insert_text((72, 100), "Testo")
+    plain.write_bytes(d2.tobytes().replace(b"startxref", b"startxrXf"))
+    view2 = window.open_path(str(plain))
+    assert view2.document.repaired
+    assert "riparato" in window.statusBar().currentMessage()

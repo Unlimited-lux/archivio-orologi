@@ -79,6 +79,8 @@ class Context(QObject):
         super().__init__(window)
         self._w = window
         self.pending_edit_hooks: list = []     # vedi add_pending_edit_hook
+        self._change_guards: list = []         # vedi add_change_guard
+        self.documentOpened.connect(self._attach_change_guards)   # collegato prima dei moduli: le guardie valgono subito
 
     # ---------------------------------------------------------------- finestra
     @property
@@ -93,6 +95,26 @@ class Context(QObject):
         """`hook(view)` conferma un editor in loco aperto: il nucleo lo chiama prima di salvare o chiudere."""
         if hook not in self.pending_edit_hooks:
             self.pending_edit_hooks.append(hook)
+
+    def add_change_guard(self, guard: Callable[[Document, str, str], Any]) -> None:
+        """`guard(document, etichetta, kind) -> bool` interrogata prima di ogni modifica di ogni
+        documento aperto (ora e in futuro). False annulla la modifica (`change()` solleva
+        OperationCancelled); vedi `Document.add_change_guard`."""
+        if guard in self._change_guards:
+            return
+        self._change_guards.append(guard)
+        for view in self.views():
+            view.document.add_change_guard(guard)
+
+    def remove_change_guard(self, guard: Callable[[Document, str, str], Any]) -> None:
+        if guard in self._change_guards:
+            self._change_guards.remove(guard)
+        for view in self.views():
+            view.document.remove_change_guard(guard)
+
+    def _attach_change_guards(self, view: "DocumentView") -> None:
+        for guard in self._change_guards:
+            view.document.add_change_guard(guard)
 
     def current_view(self) -> "DocumentView | None":
         try:
