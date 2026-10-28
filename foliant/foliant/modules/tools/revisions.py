@@ -190,19 +190,18 @@ class RevisionsDialog(QDialog):
         ra = next((r for r in self.revisions if r.number == na), None)
         rb = next((r for r in self.revisions if r.number == nb), None)
         if ra is None or rb is None or ra is rb:
-            self.ctx.info(_("Revisioni"), _("Scegli due revisioni diverse."))
+            self.ctx.notify(_("Scegli due revisioni diverse."))
             return None
         sa, ia = self._source(ra)
         sb, ib = self._source(rb)
         controller = self.ctx.tools_module.compare
         widget = controller.run(ia, ib, sa, sb, ce.CompareOptions.from_dict(controller.last_options.to_dict()))
-        if widget is not None:
-            self.accept()
+        self.accept()   # il confronto prosegue senza bloccare la finestra
         return widget
 
     def compare_signed(self):
         signed = signed_revision(self.data)
         if signed is None:
-            self.ctx.info(_("Revisioni"), _("Il documento non contiene una versione firmata."))
+            self.ctx.notify(_("Il documento non contiene una versione firmata."))
             return None
         return self.compare(signed.number, self.revisions[-1].number)

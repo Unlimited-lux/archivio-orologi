@@ -290,7 +290,7 @@ def test_export_import_duplicate_sequence(batch, tmp_path, monkeypatch):
     tampered = tmp_path / "manomessa.foliantseq"
     tampered.write_text(json.dumps(data), encoding="utf-8")
     infos = []
-    monkeypatch.setattr(batch.ctx, "info", lambda t, m: infos.append(m))
+    monkeypatch.setattr(batch.ctx, "notify", lambda m, *a, **k: infos.append(m))
     batch.steps = []
     assert batch.import_sequence(str(tampered))
     assert [s.action for s in batch.steps] == ["ocr", "compress", "protect"]
@@ -362,3 +362,29 @@ def test_conflict_ask_each_time(batch, folder, tmp_path, monkeypatch):
     assert len(asked) == 1 and (out / "alfa (1).pdf").exists()
     monkeypatch.setattr(bu, "ask_conflict", lambda parent, target: None)
     assert batch.run(confirm=False) is None
+
+
+def test_batch_runs_without_blocking_window(batch, folder, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    monkeypatch.delenv("FOLIANT_SYNC_TASKS", raising=False)
+    batch.add_paths([str(folder)])
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "out"))
+    assert batch.run(confirm=False) is None
+    task = batch.task
+    assert task is not None and not batch.act_run.isEnabled()
+    assert QApplication.activeModalWidget() is None
+    assert task.wait(60000)
+    QApplication.processEvents()
+    assert batch.report is not None and batch.report.counts()["ok"] == 5
+    assert batch.act_run.isEnabled() and batch.task is None
+
+
+def test_parallel_setting_used(batch, folder, tmp_path):
+    batch.workers.setValue(min(3, batch.workers.maximum()))
+    assert batch.settings().workers == batch.workers.value()
+    batch.add_paths([str(folder)])
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "out"))
+    report = batch.run(confirm=False)
+    assert all(r.status in ("ok", "warning") for r in report.results) and len(os.listdir(tmp_path / "out")) == 5
