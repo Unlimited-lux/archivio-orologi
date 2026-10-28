@@ -1,0 +1,2 @@
+pyspellchecker>=0.8
+fonttools>=4.40   # facoltativo: riuso dei font incorporati come sottoinsieme senza cmap

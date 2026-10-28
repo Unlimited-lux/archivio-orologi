@@ -63,7 +63,14 @@ def _family_key(name: str) -> str:
 
 
 def lookup_xref(xrefs: dict[str, int], name: str) -> int:
-    return xrefs.get(normalize_font_name(name)) or xrefs.get("~" + _family_key(name), 0)
+    key = normalize_font_name(name)
+    hit = xrefs.get(key) or xrefs.get("~" + _family_key(name), 0)
+    if not hit and len(key) >= 8:
+        # il motore tronca i nomi lunghi: confronto sul prefisso
+        for k, xref in xrefs.items():
+            if not k.startswith("~") and k.startswith(key):
+                return xref
+    return hit
 
 
 def _style_from_span(span: dict, xrefs: dict[str, int]) -> Style:

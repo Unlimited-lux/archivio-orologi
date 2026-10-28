@@ -336,6 +336,17 @@ class TextEditController(QObject):
         except Exception:
             return QColor(255, 255, 255), QColor(0, 0, 0)
 
+    def _attach_spellcheck(self, view, editor) -> None:
+        try:
+            from .spell import choose_language, shared_service
+            from .spell_ui import attach_spellcheck
+            svc = shared_service()
+            with ENGINE_LOCK:
+                lang = choose_language(svc, view.document.pdf)
+            attach_spellcheck(editor, svc, lang, status=self.ctx.status)
+        except Exception:
+            pass   # controllo ortografico non disponibile: la modifica funziona comunque
+
     def open_editor(self, view, page: int, block: TextBlock, click_pos: QPointF | None = None,
                     replace_all: bool = False) -> InlineEditor | None:
         if not self.ensure_editable(view):
@@ -359,6 +370,7 @@ class TextEditController(QObject):
             resolver = FontResolver(view.document.pdf)
         editor = InlineEditor(view, spec, resolver, self._to_view(view), bg)
         editor.escapePressed.connect(lambda v=view: self.commit_editor(v, select_after=True))
+        self._attach_spellcheck(view, editor)
         info = {"page": page, "block": block, "version": view.document.version, "replace_all": replace_all}
         self._editors[id(view)] = (editor, info)
         editor.show()
@@ -388,6 +400,7 @@ class TextEditController(QObject):
                                                               top_left.y + style.size * 1.3))
         editor = InlineEditor(view, spec, resolver, self._to_view(view), bg)
         editor.escapePressed.connect(lambda v=view: self.commit_editor(v))
+        self._attach_spellcheck(view, editor)
         info = {"page": page, "block": None, "version": view.document.version, "top_left": top_left,
                 "width": width}
         self._editors[id(view)] = (editor, info)

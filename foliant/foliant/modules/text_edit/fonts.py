@@ -328,12 +328,37 @@ class FontResolver:
             except Exception:
                 choice = None
             self._originals[xref] = choice
+        visible = [c for c in sample if not c.isspace()]
+
+        def usable(ch: FontChoice | None) -> bool:
+            # il programma è utilizzabile se la sua mappa copre almeno parte del testo:
+            # i caratteri mancanti useranno un sostituto (TXT-10)
+            return ch is not None and (not visible or any(ch.covers(c) for c in visible))
+
         choice = self._originals[xref]
-        if choice is not None and sample and not all(choice.covers(c) for c in sample if not c.isspace()):
-            # la mappa dei caratteri del programma non corrisponde al testo: inutilizzabile
-            self._originals[xref] = None
+        if usable(choice) and (not visible or all(choice.covers(c) for c in visible)):
+            return choice
+        key = -xref
+        if key not in self._originals:
+            self._originals[key] = self._repaired(xref)
+        repaired = self._originals[key]
+        if usable(repaired):
+            if not usable(choice) or sum(repaired.covers(c) for c in visible) > sum(choice.covers(c) for c in visible):
+                return repaired
+        return choice if usable(choice) else None
+
+    def _repaired(self, xref: int) -> FontChoice | None:
+        from .fontfix import repaired_font
+        fixed = repaired_font(self.pdf, xref)
+        if fixed is None:
             return None
-        return choice
+        data, _chars = fixed
+        try:
+            font = pymupdf.Font(fontbuffer=data)
+        except Exception:
+            return None
+        name = strip_subset(self.font_info(xref)[2])
+        return FontChoice("FTr%d" % xref, font, KIND_ORIGINAL, name, buffer=data)
 
     # ------------------------------------------------------------ scelta
     def _variant_from_families(self, families: list[str], bold: bool, italic: bool,
@@ -361,8 +386,9 @@ class FontResolver:
         orig_name = ""
         if style.font_xref:
             orig_name = strip_subset(self.font_info(style.font_xref)[2])
+        fa, fb = family_of(orig_name), family_of(style.font)
         same_original = bool(style.font_xref) and (
-            not orig_name or family_of(orig_name) == family_of(style.font))
+            not orig_name or fa == fb or (min(len(fa), len(fb)) >= 8 and (fa.startswith(fb) or fb.startswith(fa))))
         if same_original and self.is_embedded(style.font_xref):
             choice = self.original(style.font_xref, sample)
             if choice is not None and bool(choice.font.is_bold) == style.bold and \

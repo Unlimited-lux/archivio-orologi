@@ -555,8 +555,12 @@ def test_font_not_installed_gets_substitute_and_warning(tmp_path):
     # nessun carattere senza glifo nel file salvato
     for s in spans(out[0]):
         assert "�" not in s["text"]
-    if res.substitutions:
-        assert res.substitutions[0].original and res.substitutions[0].substitute
+    # mancano nel sottoinsieme solo Q, u, n, t: il resto usa ancora il font originale ricostruito
+    assert len(res.substitutions) == 1
+    sub = res.substitutions[0]
+    assert sub.chars == 4 and sorted(set(sub.text)) == sorted("Qunt")
+    assert sub.original.startswith("Droid Sans Fallback") and sub.substitute
+    assert any("Droid" in s["font"] for s in spans(out[0]))
 
 
 def test_uncovered_character_rejected(paragraphs_pdf):

@@ -31,11 +31,12 @@ def register(ctx: Context) -> None:
     from .ui_panel import TextPropertiesPanel
 
     add_translations("en", EN)
-    try:
-        from .find_dialog import TRANSLATIONS as FIND_EN
-        add_translations("en", FIND_EN)
-    except Exception:
-        pass
+    for name in ("find_dialog", "spell"):
+        try:
+            mod = __import__(f"{__name__}.{name}", fromlist=["TRANSLATIONS"])
+            add_translations("en", mod.TRANSLATIONS)
+        except Exception:
+            pass
     from . import fontlist, fonts
     fonts.set_user_mappings(fontlist.load_mappings())
     ctrl = TextEditController(ctx)
@@ -71,10 +72,34 @@ def register(ctx: Context) -> None:
     mode.add_action(act_edit)
     mode.add_action(act_add)
     act_fonts = ctx.action(_("Font del documento"), "type-outline", lambda: open_fonts_dialog(ctx))
+    def open_spell_dialog() -> None:
+        view = ctx.current_view()
+        if view is None:
+            return
+        ctrl.commit_editor(view)
+        try:
+            from .spell import shared_service
+            from .spell_ui import SpellCheckDialog
+        except Exception as e:   # dipendenza facoltativa mancante
+            ctx.error(_("Controllo ortografico"), str(e))
+            return
+        dlg = getattr(ctx, "_spell_dialog", None)
+        if dlg is None:
+            dlg = ctx._spell_dialog = SpellCheckDialog(ctx, shared_service(), ctx.window)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.recheck()
+
+    act_spell = ctx.action(_("Controlla ortografia del documento"), "spell-check", open_spell_dialog,
+                           shortcut="F7")
     mode.add_action(act_find)
+    mode.add_action(act_spell)
     mode.add_action(act_fonts)
+    ctx.add_menu_action(act_spell, _("Modifica"))
     mode.add_separator()
-    ctrl.actions = {"edit": act_edit, "add": act_add, "find": act_find, "fonts": act_fonts}
+    ctrl.actions = {"edit": act_edit, "add": act_add, "find": act_find, "fonts": act_fonts,
+                    "spell": act_spell}
     ctx.add_menu_action(act_find, _("Modifica"))
 
     def sync_actions(*_a) -> None:
