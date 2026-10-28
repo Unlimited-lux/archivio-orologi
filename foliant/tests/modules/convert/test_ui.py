@@ -478,3 +478,15 @@ def test_photos_dialog_manual_corners(window, ctrl, tmp_path, monkeypatch, messa
     monkeypatch.setattr(PhotosDialog, "exec", fake_exec)
     view = ctrl.create_from_photos([str(path)])
     assert view is not None and view.document.page_count == 1
+
+
+def test_remove_conformance_ui(window, ctrl, sample_pdf, tmp_path, messages):
+    if __import__("shutil").which("gs") is None:
+        pytest.skip("Ghostscript non installato")
+    from foliant.modules.convert.engine import convert_pdf
+    out = convert_pdf(sample_pdf, tmp_path / "a.pdf", "pdfa-2b")[0]
+    view = window.open_path(out)
+    assert ctrl.remove_conformance() is True
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert "pdfaid" not in (d.get_xml_metadata() or "")
+    assert view.document.undo()

@@ -760,6 +760,27 @@ class ConvertController:
             self.ctx.info(_("Appiattisci"), "\n".join(report["warnings"]))
         return report
 
+    def remove_conformance(self):
+        """CNV-15: toglie la dichiarazione PDF/A dai metadati XMP, contenuto invariato (annullabile)."""
+        from . import pdfa
+        view = self.ctx.current_view()
+        if view is None:
+            return None
+        doc = view.document
+        with ENGINE_LOCK:
+            xmp = doc.pdf.get_xml_metadata() or ""
+        if "pdfaid" not in xmp:
+            self.ctx.info(_("Rimuovi dichiarazione di conformità"),
+                          _("Il documento non contiene una dichiarazione di conformità PDF/A."))
+            return False
+        data = self._document_bytes(doc)
+        ok, out = self._run(_("Rimozione della dichiarazione…"), lambda progress: pdfa.strip_pdfa_identification(data))
+        if not ok:
+            return None
+        doc.replace_with(out, _("Rimuovi dichiarazione di conformità"))
+        self.ctx.status(_("Dichiarazione PDF/A rimossa."), 6000)
+        return True
+
     def repair(self):
         """CNV-32: ripara uno o più PDF danneggiati salvando una copia «_riparato»."""
         from . import optimize

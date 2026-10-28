@@ -27,7 +27,7 @@ from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _
 
 from .common import ConversionError, OutputFiles, check
 
-PDFA_LEVELS = ("1b", "2b", "3b")
+PDFA_LEVELS = ("1b", "2b", "3b", "2u", "3u")
 
 FORBIDDEN_ACTIONS = ("Launch", "Sound", "Movie", "ResetForm", "ImportData", "JavaScript", "Hide",
                      "SetOCGState", "Rendition", "Trans", "GoTo3DView")
@@ -39,7 +39,7 @@ _REF_RE = re.compile(r"(\d+)\s+0\s+R")
 def _level(level: str) -> tuple[int, str]:
     lv = (level or "").lower().replace("pdf/a-", "").replace("pdfa", "").strip("- ")
     if lv not in PDFA_LEVELS:
-        raise ConversionError(_("Livello PDF/A non supportato: «{l}». Scegli tra 1b, 2b e 3b.").format(l=level))
+        raise ConversionError(_("Livello PDF/A non supportato: «{l}». Scegli tra 1b, 2b, 3b, 2u e 3u.").format(l=level))
     return int(lv[0]), lv[1].upper()
 
 
@@ -310,6 +310,8 @@ def verify_pdfa(data: bytes, level: str) -> list[str]:
         if p != str(part) or c != conf:
             errors.append(_("I metadati XMP non dichiarano PDF/A-{l} (trovato: {f}).").format(
                 l=f"{part}{conf.lower()}", f=f"{p or '-'}{(c or '-').lower()}"))
+    if conf == "U":
+        errors.extend(_unicode_problems(data))
     if part == 1:
         if f["transparency"]:
             errors.append(_("Trasparenze non ammesse in PDF/A-1."))
@@ -324,6 +326,38 @@ def verify_pdfa(data: bytes, level: str) -> list[str]:
         if f["version"] and f["version"] > "1.4":
             errors.append(_("La versione PDF {v} non è ammessa in PDF/A-1 (massimo 1.4).").format(v=f["version"]))
     return errors
+
+
+_SIMPLE_ENCODINGS = ("WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding", "PDFDocEncoding")
+
+
+def _unicode_problems(data: bytes) -> list[str]:
+    """Livello «u»: ogni font deve avere una mappatura Unicode (/ToUnicode o codifica standard)."""
+    problems: list[str] = []
+    with ENGINE_LOCK:
+        pdf = pymupdf.open(stream=bytes(data), filetype="pdf")
+        try:
+            seen: set[int] = set()
+            missing: list[str] = []
+            bad_chars = 0
+            for page in pdf:
+                for font in page.get_fonts(full=True):
+                    xref, ftype, basefont, enc = font[0], font[2], font[3], font[5]
+                    if xref in seen or ftype == "Type3":
+                        continue
+                    seen.add(xref)
+                    has_map = _key(pdf, xref, "ToUnicode")[0] != "null"
+                    simple = ftype in ("Type1", "TrueType", "MMType1") and enc in _SIMPLE_ENCODINGS
+                    if not has_map and not simple:
+                        missing.append(basefont.split("+")[-1])
+                bad_chars += page.get_text("text").count("\ufffd")
+        finally:
+            pdf.close()
+    if missing:
+        problems.append(_("Font senza mappatura Unicode: {f}.").format(f=", ".join(missing[:10])))
+    if bad_chars:
+        problems.append(_("{n} caratteri senza corrispondenza Unicode.").format(n=bad_chars))
+    return problems
 
 
 # ------------------------------------------------------------------ preparazione

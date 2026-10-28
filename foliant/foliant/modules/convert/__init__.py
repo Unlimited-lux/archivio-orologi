@@ -83,12 +83,14 @@ def register(ctx) -> None:
                               requires_document=False)
     act_flatten = ctx.action(_("Appiattisci…"), "layers", lambda: c.flatten(),
                              tooltip=_("Rendi fissi annotazioni, campi, livelli e ritaglio"))
+    act_unpdfa = ctx.action(_("Rimuovi dichiarazione PDF/A"), "archive-x", lambda: c.remove_conformance())
     act_repair = ctx.action(_("Ripara PDF…"), "wrench", lambda: c.repair(), requires_document=False)
     act_batch = ctx.action(_("Converti più file…"), "folder-output", lambda: c.batch_convert(),
                            requires_document=False)
     mode.add_action(act_compress)
     more_menu = QMenu(ctx.window)
-    for a in (act_advanced, act_flatten, act_compress_many, act_repair, act_batch, act_batch_create):
+    for a in (act_advanced, act_flatten, act_unpdfa, act_compress_many, act_repair, act_batch,
+              act_batch_create):
         more_menu.addAction(a)
     more_btn = QToolButton()
     more_btn.setText(_("Altri strumenti"))

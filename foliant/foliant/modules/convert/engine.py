@@ -53,6 +53,8 @@ FORMATS: dict[str, tuple[str, str, str]] = {
     "pdfa-1b": (".pdf", "PDF/A-1b", "pdfa"),
     "pdfa-2b": (".pdf", "PDF/A-2b", "pdfa"),
     "pdfa-3b": (".pdf", "PDF/A-3b", "pdfa"),
+    "pdfa-2u": (".pdf", "PDF/A-2u", "pdfa"),
+    "pdfa-3u": (".pdf", "PDF/A-3u", "pdfa"),
 }
 ALIASES = {"jpg": "jpeg", "tif": "tiff", "htm": "html", "pdfa": "pdfa-2b", "pdf/a": "pdfa-2b", "word": "docx",
            "excel": "xlsx", "powerpoint": "pptx", "text": "txt", "long_image": "long-image", "longimage": "long-image"}

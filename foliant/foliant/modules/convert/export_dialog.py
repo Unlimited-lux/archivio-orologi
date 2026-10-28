@@ -19,7 +19,7 @@ from .engine import FORMATS
 
 # ordine e gruppi del menu dei formati
 FORMAT_ORDER = ["docx", "xlsx", "pptx", "csv", "png", "jpeg", "tiff", "bmp", "gif", "long-image",
-                "txt", "rtf", "html", "xml", "epub", "pdfa-1b", "pdfa-2b", "pdfa-3b"]
+                "txt", "rtf", "html", "xml", "epub", "pdfa-1b", "pdfa-2b", "pdfa-3b", "pdfa-2u", "pdfa-3u"]
 LAYOUT_FORMATS = {"docx", "html", "rtf", "epub"}
 OCR_FORMATS = {"docx", "xlsx", "csv", "pptx", "txt", "rtf", "html", "xml", "epub"}
 

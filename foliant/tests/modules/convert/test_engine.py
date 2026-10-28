@@ -684,3 +684,12 @@ def test_ocr_language_from_catalog(tmp_path):
     assert _lang_to_tesseract(doc) == "ita+eng"
     doc.xref_set_key(doc.pdf_catalog(), "Lang", "(de-DE)")
     assert _lang_to_tesseract(doc) == "deu+eng"
+
+
+@pytest.mark.skipif(__import__("shutil").which("gs") is None, reason="Ghostscript non installato")
+def test_pdfa_2u(sample_pdf, tmp_path):
+    from foliant.modules.convert import pdfa
+    result = run_conversion(sample_pdf, tmp_path / "u.pdf", "pdfa-2u")
+    data = open(result.paths[0], "rb").read()
+    assert pdfa.verify_pdfa(data, "2u") == []
+    assert "<pdfaid:conformance>U</pdfaid:conformance>" in pymupdf.open(stream=data).get_xml_metadata()

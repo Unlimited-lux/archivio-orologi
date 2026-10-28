@@ -666,3 +666,17 @@ EN.update({
     "Scegli le foto dei documenti": "Choose the document photos",
     "Trascina gli angoli per correggere il bordo del foglio. Fotocamera non disponibile: importa le foto scattate con il telefono.": "Drag the corners to correct the sheet edge. No camera available: import photos taken with your phone.",
 })
+
+# CNV-15
+EN.update({
+    "Dichiarazione PDF/A rimossa.": "PDF/A declaration removed.",
+    "Font senza mappatura Unicode: {f}.": "Fonts without Unicode mapping: {f}.",
+    "Il documento non contiene una dichiarazione di conformità PDF/A.": "The document does not contain a PDF/A conformance declaration.",
+    "Livello PDF/A non supportato: «{l}». Scegli tra 1b, 2b, 3b, 2u e 3u.": "Unsupported PDF/A level: “{l}”. Choose 1b, 2b, 3b, 2u or 3u.",
+    "Rimozione della dichiarazione…": "Removing the declaration…",
+    "Rimuovi dichiarazione PDF/A": "Remove PDF/A declaration",
+    "Rimuovi dichiarazione di conformità": "Remove conformance declaration",
+    "{n} caratteri senza corrispondenza Unicode.": "{n} characters without a Unicode mapping.",
+    "PDF/A-2u": "PDF/A-2u",
+    "PDF/A-3u": "PDF/A-3u",
+})
