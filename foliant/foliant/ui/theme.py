@@ -31,7 +31,7 @@ LIGHT: dict[str, str | tuple] = {
     "page_shadow": (0, 0, 0, 38),
     "danger": "#C2453A",
     "success": "#2E7D4F",
-    "warning": "#B7791F",
+    "warning": "#8A5A00",            # ≥ 4,5:1 su window e surface (NFR-23)
     "selection": (15, 124, 120, 70),
 }
 
@@ -236,7 +236,7 @@ QToolBar {{ spacing: 2px; }}
 QToolButton {{ border: 1px solid transparent; border-radius: 6px; padding: 4px 6px; color: {h('text')}; }}
 QToolButton:hover {{ background: {h('surface_alt')}; }}
 QToolButton:pressed {{ background: {h('border')}; }}
-QToolButton:checked {{ background: {h('accent_soft')}; color: {h('accent')}; }}
+QToolButton:checked {{ background: {h('accent_soft')}; color: {h('accent_hover')}; }}
 QToolButton[modeButton="true"] {{ padding: 5px 10px; font-weight: 500; }}
 QToolButton[modeButton="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; }}
 QToolButton::menu-indicator {{ image: none; }}

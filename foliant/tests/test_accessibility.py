@@ -38,3 +38,50 @@ def test_toolbar_buttons_are_reachable_with_tab(window, sample_pdf, qtbot):
     assert not missing, missing
     # i pulsanti della barra in alto abilitati (Apri; Salva/Annulla/Ripeti sono disattivati)
     assert header_buttons[0] in reached
+
+
+# ------------------------------------------------------------------ contrasto (NFR-23, WCAG 2.x)
+def _luminance(value) -> float:
+    from PySide6.QtGui import QColor
+    c = QColor(value) if isinstance(value, str) else value
+
+    def channel(v: float) -> float:
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF())
+
+
+def contrast(a, b) -> float:
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+# testo / sfondo su cui il nucleo e i moduli lo scrivono (≥ 4,5:1)
+TEXT_PAIRS = [(fg, bg) for fg in ("text", "text_muted", "accent", "danger", "success", "warning")
+              for bg in ("window", "surface")] + [
+    ("text", "surface_alt"), ("text_muted", "surface_alt"),     # passaggio del mouse, menu
+    ("text", "accent_soft"),                                    # elementi selezionati negli elenchi
+    ("accent_text", "accent"), ("accent_text", "accent_hover"),  # modalità attiva, pulsanti principali
+]
+
+
+def _themes():
+    from foliant.ui import theme
+    return (("chiaro", theme.LIGHT), ("scuro", theme.DARK))
+
+
+def test_token_text_contrast():
+    low = [(name, fg, bg, round(contrast(t[fg], t[bg]), 2)) for name, t in _themes()
+           for fg, bg in TEXT_PAIRS if contrast(t[fg], t[bg]) < 4.5]
+    assert not low, low
+
+
+def test_checked_tool_button_text_contrast():
+    """Il testo di un QToolButton attivo (es. «Seleziona testo») resta leggibile sul suo fondo."""
+    import re
+
+    from foliant.ui import theme
+    for name, t in _themes():
+        rule = re.search(r"^QToolButton:checked \{ background: (#\w+); color: (#\w+); \}",
+                         theme.stylesheet(t), re.M)
+        assert rule, name
+        assert contrast(rule.group(2), rule.group(1)) >= 4.5, (name, rule.groups())
