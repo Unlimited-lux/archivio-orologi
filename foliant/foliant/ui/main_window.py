@@ -793,6 +793,12 @@ class MainWindow(QMainWindow):
                     return False
             elif choice != "discard":
                 return False
+        self._close_view_now(view)
+        return True
+
+    def _close_view_now(self, view: DocumentView) -> None:
+        """Chiude la scheda senza domande (le decisioni sono già state prese)."""
+        doc = view.document
         self.ctx.documentClosed.emit(view)
         if doc.path is not None:
             self._closed_paths.append(str(doc.path))
@@ -805,7 +811,6 @@ class MainWindow(QMainWindow):
         if self.tabs.count() == 0:
             self.show_home()
         self._on_current_changed()
-        return True
 
     def save_view(self, view: DocumentView | None, save_as: bool = False) -> bool:
         if view is None:
@@ -1089,7 +1094,7 @@ class MainWindow(QMainWindow):
                         event.ignore()
                         return
         for view in views:
-            self.close_view(view, ask=False)
+            self._close_view_now(view)
         self.settings.setValue("window/geometry", self.saveGeometry())
         if getattr(self, "_splitter_ready", False):
             self.settings.setValue("window/splitter", self.splitter.saveState())
