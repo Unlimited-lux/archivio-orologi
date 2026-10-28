@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME, __version__
 from ..core.document import CONTENT, Document
 from ..core.errors import DocumentError, PasswordRequired, WrongPassword
-from ..i18n import _, set_language
+from ..i18n import _, pgettext, set_language
 from . import theme
 from .context import PDF_FILTER, Context, Mode
 from .document_view import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView
@@ -333,15 +333,20 @@ class MainWindow(QMainWindow):
             self.page_spin.setFocus()
             self.page_spin.selectAll()
 
+    def _show_tabs(self) -> None:
+        if self.docs_stack.currentWidget() is not self.tabs:
+            self.docs_stack.setCurrentWidget(self.tabs)
+            self._on_current_changed()        # stato (azioni, titolo, barre) della scheda mostrata
+
     def _cycle_tab(self, step: int) -> None:
         n = self.tabs.count()
         if n:
-            self.docs_stack.setCurrentWidget(self.tabs)
+            self._show_tabs()
             self.tabs.setCurrentIndex((self.tabs.currentIndex() + step) % n)
 
     def _go_tab(self, index: int) -> None:
         if 0 <= index < self.tabs.count():
-            self.docs_stack.setCurrentWidget(self.tabs)
+            self._show_tabs()
             self.tabs.setCurrentIndex(index)
 
     def _mode_by_index(self, index: int) -> None:
@@ -501,6 +506,8 @@ class MainWindow(QMainWindow):
         mode = self.modes.get(mode_id)
         if mode is None:
             return
+        if self.docs_stack.currentWidget() is self.home and self.tabs.count():
+            self._show_tabs()                                  # dalla Home si torna ai documenti aperti
         previous = self.modes.get(self.current_mode_id) if self.current_mode_id else None
         if previous is mode:
             mode.button.setChecked(True)
@@ -511,9 +518,10 @@ class MainWindow(QMainWindow):
         self.current_mode_id = mode_id
         mode.button.setChecked(True)
         self.context_stack.setCurrentWidget(mode.toolbar)
-        view = self.current_view()
-        if view is not None and view.tool is not view._default_tool and previous is not None:
-            view.set_tool(None)
+        if previous is not None:
+            for v in self.views():
+                if v.tool is not v._default_tool:
+                    v.set_tool(None)
             self.act_select.setChecked(True)
         mode.entered.emit()
         self.ctx.modeChanged.emit(mode_id)
@@ -626,8 +634,8 @@ class MainWindow(QMainWindow):
     def open_path(self, path: str, password: str | None = None) -> DocumentView | None:
         path = os.path.abspath(os.path.expanduser(str(path)))
         for view in self.views():
-            if view.document.path is not None and os.path.abspath(view.document.path) == path:
-                self.docs_stack.setCurrentWidget(self.tabs)
+            if view.document.path is not None and os.path.realpath(view.document.path) == os.path.realpath(path):
+                self._show_tabs()
                 self.tabs.setCurrentWidget(view)
                 return view
         attempts = 0
@@ -697,7 +705,7 @@ class MainWindow(QMainWindow):
             box.setInformativeText(_("Se non salvi, le modifiche andranno perse."))
             save = box.addButton(_("Salva"), QMessageBox.ButtonRole.AcceptRole)
             discard = box.addButton(_("Non salvare"), QMessageBox.ButtonRole.DestructiveRole)
-            box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+            box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
             box.setDefaultButton(save)
             box.exec()
             clicked = box.clickedButton()
@@ -789,12 +797,15 @@ class MainWindow(QMainWindow):
         if view is not None and self._connected_view is not view:
             view.toolChanged.connect(self._on_tool_changed)
         self._connected_view = view
-        for _pid, (_t, _i, widget, _o, _a) in self._sidebar.items():
+        if view is not None:
+            self._on_tool_changed(view.tool)
+        panels = [w for (_t, _i, w, _o, _a) in self._sidebar.values()] + list(self._props.values())
+        for widget in panels:
             if hasattr(widget, "set_view"):
-                widget.set_view(view)
-        for widget in self._props.values():
-            if hasattr(widget, "set_view"):
-                widget.set_view(view)
+                try:
+                    widget.set_view(view)
+                except Exception as e:
+                    self.statusBar().showMessage(_("Errore in un pannello: {e}").format(e=e), 8000)
         if view is not None and self._sidebar:
             self.sidebar.show()
         elif view is None:

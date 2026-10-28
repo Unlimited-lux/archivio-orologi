@@ -142,12 +142,15 @@ _ICONS = Path(__file__).resolve().parent.parent / "resources" / "icons"
 
 def _asset(name: str, color: str) -> str:
     """Icona colorata scritta su disco (i fogli di stile Qt richiedono un file)."""
-    folder = Path(tempfile.gettempdir()) / f"foliant-theme-{os.getuid()}"
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "foliant" / "theme"
     target = folder / f"{name}-{color.lstrip('#')}.svg"
-    if not target.exists():
-        svg = (_ICONS / f"{name}.svg").read_text(encoding="utf-8").replace("currentColor", color)
-        target.write_text(svg, encoding="utf-8")
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            svg = (_ICONS / f"{name}.svg").read_text(encoding="utf-8").replace("currentColor", color)
+            target.write_text(svg, encoding="utf-8")
+    except OSError:
+        return (_ICONS / f"{name}.svg").as_posix()   # icona non colorata, ma l'app parte
     return target.as_posix()
 
 
@@ -180,6 +183,8 @@ QToolButton:checked {{ background: {h('accent_soft')}; color: {h('accent')}; }}
 QToolButton[modeButton="true"] {{ padding: 5px 10px; font-weight: 500; }}
 QToolButton[modeButton="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; }}
 QToolButton::menu-indicator {{ image: none; }}
+QToolButton[homeAction="true"] {{ border: 1px solid {h('border')}; border-radius: 10px; background: {h('surface')}; }}
+QToolButton[homeAction="true"]:hover {{ border-color: {h('accent')}; }}
 QPushButton {{ background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px;
     padding: 6px 14px; color: {h('text')}; }}
 QPushButton:hover {{ background: {h('surface_alt')}; }}

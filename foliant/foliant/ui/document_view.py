@@ -73,8 +73,7 @@ def _extra_rotation(w: float, h: float, deg: int) -> tuple[pymupdf.Matrix, float
 
 
 def page_geometry(page: pymupdf.Page, view_rotation: int = 0) -> PageGeometry:
-    cb = page.cropbox
-    m = pymupdf.Matrix(1, 0, 0, 1, -cb.x0, -cb.y0) * page.rotation_matrix
+    m = page.rotation_matrix   # coordinate del motore: già relative all'angolo del cropbox
     w, h = page.rect.width, page.rect.height
     extra, w2, h2 = _extra_rotation(w, h, view_rotation % 360)
     return PageGeometry(w2, h2, m * extra)
@@ -112,6 +111,7 @@ class DocumentView(QAbstractScrollArea):
         self._cache_bytes = 0
         self._stale: dict[int, QImage] = {}
         self._queue: list[int] = []
+        self._failed: set[tuple] = set()
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render_step)
@@ -189,7 +189,13 @@ class DocumentView(QAbstractScrollArea):
     def _reload_geometry(self) -> None:
         with ENGINE_LOCK:
             pdf = self.document.pdf
-            self._geoms = [page_geometry(pdf[i], self._view_rotation) for i in range(pdf.page_count)]
+            geoms = []
+            for i in range(pdf.page_count):
+                try:
+                    geoms.append(page_geometry(pdf[i], self._view_rotation))
+                except Exception:      # pagina illeggibile: segnaposto, il resto resta consultabile
+                    geoms.append(PageGeometry(595.0, 842.0, pymupdf.Matrix(1, 0, 0, 1, 0, 0)))
+            self._geoms = geoms
         if self._current >= len(self._geoms):
             self._current = max(0, len(self._geoms) - 1)
         self._relayout()
@@ -274,10 +280,10 @@ class DocumentView(QAbstractScrollArea):
         self._content = QSizeF(content_w, total_h)
         vw, vh = self.viewport().width(), self.viewport().height()
         hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
-        hbar.setRange(0, max(0, int(math.ceil(content_w - vw))))
+        hbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(content_w - vw)))))
         hbar.setPageStep(vw)
         hbar.setSingleStep(24)
-        vbar.setRange(0, max(0, int(math.ceil(total_h - vh))))
+        vbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(total_h - vh)))))
         vbar.setPageStep(vh)
         vbar.setSingleStep(36)
         self.layoutChanged.emit()
@@ -348,6 +354,7 @@ class DocumentView(QAbstractScrollArea):
         if self._view_mode == VIEW_SINGLE and index != self._current:
             self._current = index
             self._relayout()
+            self.currentPageChanged.emit(index)
         r = self._rects[index]
         y = r.top() - self.MARGIN / 2
         if point is not None:
@@ -471,13 +478,14 @@ class DocumentView(QAbstractScrollArea):
         self.contentChanged.emit()
 
     def _invalidate_render(self, keep_stale: bool = False) -> None:
+        self._failed.clear()
         self._cache.clear()
         self._cache_bytes = 0
         if not keep_stale:
             self._stale.clear()
         else:
-            n = len(self._geoms)
-            self._stale = {k: v for k, v in self._stale.items() if k < n}
+            keep = set(self.visible_pages(prefetch=self.viewport().height()))
+            self._stale = {k: v for k, v in self._stale.items() if k in keep}
         self.viewport().update()
 
     def words(self, index: int) -> list[tuple]:
@@ -531,7 +539,8 @@ class DocumentView(QAbstractScrollArea):
         ver = self.document.version
         vis = self.visible_pages()
         extra = [i for i in self.visible_pages(prefetch=self.viewport().height()) if i not in vis]
-        self._queue = [i for i in vis + extra if (i, key, self._view_rotation, ver) not in self._cache]
+        self._queue = [i for i in vis + extra if (i, key, self._view_rotation, ver) not in self._cache
+                       and (i, key, self._view_rotation, ver) not in self._failed]
         if self._queue and not self._render_timer.isActive():
             self._render_timer.start(0)
 
@@ -549,6 +558,7 @@ class DocumentView(QAbstractScrollArea):
                 self._cache_put(key, img)
                 self._stale[index] = img
         except Exception as e:  # una pagina danneggiata non deve bloccare la vista
+            self._failed.add(key)
             self.status(f"Errore nel disegno di una pagina: {e}")
         finally:
             ENGINE_LOCK.release()
@@ -587,15 +597,19 @@ class DocumentView(QAbstractScrollArea):
         self._cache[key] = img
         self._cache_bytes += img.sizeInBytes()
         while self._cache_bytes > self.CACHE_LIMIT and len(self._cache) > 1:
-            _k, old = self._cache.popitem(last=False)
+            k, old = self._cache.popitem(last=False)
             self._cache_bytes -= old.sizeInBytes()
+            if self._stale.get(k[0]) is old:
+                del self._stale[k[0]]
 
     def render_page_image(self, index: int, zoom: float = 1.0) -> QImage:
         """Immagine della pagina (per miniature, anteprime, stampa)."""
         with ENGINE_LOCK:
             page = self.document.pdf[index]
             pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False, annots=True)
-            return QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
+            img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
+            del pix, page                   # distrutti tenendo il lock
+        return img
 
     def paintEvent(self, event) -> None:
         p = QPainter(self.viewport())
@@ -603,6 +617,14 @@ class DocumentView(QAbstractScrollArea):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         key = self._scale_key()
         ver = self.document.version
+        missing = False
+        shadow = theme.color("page_shadow")
+        try:
+            self._paint_pages(p, key, ver)
+        finally:
+            p.end()
+
+    def _paint_pages(self, p, key, ver) -> None:
         missing = False
         shadow = theme.color("page_shadow")
         for i in self.visible_pages():
@@ -622,7 +644,6 @@ class DocumentView(QAbstractScrollArea):
             p.setWorldTransform(self.page_transform(i))
             self._paint_overlays(p, i)
             p.restore()
-        p.end()
         if missing and not self._render_timer.isActive():
             self._schedule_visible()
 
@@ -655,6 +676,8 @@ class DocumentView(QAbstractScrollArea):
         p.save()
         try:
             self.tool.paint(self, p, index)
+        except Exception as e:
+            self.status(f"Errore nello strumento attivo: {e}")
         finally:
             p.restore()
 
