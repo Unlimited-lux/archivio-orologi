@@ -602,3 +602,24 @@ def test_field_constraints_filter_ids_and_reasons(window, qtbot, tmp_path, id_a,
     assert dlg.digital_id is None and "non accetta" in dlg.error.text()
     out = digital.sign_pdf(data, id_b[2], digital.SignOptions(field_name="Cliente", reason="Accetto"))
     assert digital.verify_pdf(out, trusted=[id_b[1]])[0].status == "valida"
+
+
+def test_keyboard_placement_and_arrows(window, qtbot, sample_pdf):
+    """NFR-21: Invio posiziona la firma in attesa, le frecce la spostano, Canc la elimina."""
+    view = window.open_path(sample_pdf)
+    c = _ctl(window)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (60, 12, 1), (100, 0, 1)]])))
+    c.start_placement(view, item)
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_Return)
+    with view.document.lock:
+        sigs = g.placed_signatures(view.document.pdf, view.current_page)
+    assert len(sigs) == 1
+    r0 = sigs[0].rect
+    qtbot.keyClick(view, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
+    with view.document.lock:
+        r1 = g.placed_signatures(view.document.pdf, view.current_page)[0].rect
+    assert r1.x0 == pytest.approx(r0.x0 + 10, abs=0.01)
+    qtbot.keyClick(view, Qt.Key.Key_Delete)
+    with view.document.lock:
+        assert g.placed_signatures(view.document.pdf, view.current_page) == []

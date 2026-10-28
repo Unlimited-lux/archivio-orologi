@@ -209,8 +209,35 @@ class SignatureTool(Tool):
                             _("Sposta firma") if d["kind"] == "move" else _("Ridimensiona firma"))
         return True
 
+    def place_with_keyboard(self, view) -> int | None:
+        """Alternativa da tastiera al clic: posiziona la firma in attesa al centro
+        della parte visibile della pagina corrente (poi si sposta con le frecce)."""
+        if self.pending is None:
+            return None
+        page = view.current_page
+        vp = view.viewport().rect()
+        hit = view.view_to_page(QPointF(vp.center()), clamp=True)
+        if hit is not None and hit[0] == page:
+            center = hit[1]
+        else:
+            with ENGINE_LOCK:
+                crop = pymupdf.Rect(view.document.pdf[page].cropbox)   # coordinate non ruotate
+            center = pymupdf.Point((crop.x0 + crop.x1) / 2, (crop.y0 + crop.y1) / 2)
+        item = self.pending
+        rect = self.placement_rect(view, page, center)
+        xref = self.c.place(view, page, rect, item)
+        if xref:
+            self.pending = None
+            self.selected = (page, xref)
+            self.c.selection_changed(view, self)
+        return xref
+
     def key(self, view, event) -> bool:
         k = event.key()
+        if k in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.pending is not None:
+            self.place_with_keyboard(view)
+            view.viewport().update()
+            return True
         if k == Qt.Key.Key_Escape:
             if self.pending is not None:
                 self.pending = None
