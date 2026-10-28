@@ -11,6 +11,7 @@ Tutte le funzioni che toccano il motore vanno chiamate tenendo ENGINE_LOCK.
 from __future__ import annotations
 
 import collections
+import re
 import shutil
 import unicodedata
 from dataclasses import dataclass, field
@@ -511,3 +512,27 @@ def layout_text(page: pymupdf.Page, textpage=None) -> str:
             prev = w
         out.append(line.rstrip())
     return "\n".join(out)
+
+
+def repeated_furniture(pages: list[PageContent]) -> set[int]:
+    """Paragrafi ripetuti in testa o a piè di pagina (con i numeri resi generici)."""
+    if len(pages) < 2:
+        return set()
+    counts: dict[str, int] = {}
+    where: dict[str, list] = {}
+    for pc in pages:
+        seen = set()
+        for it in pc.items:
+            if not isinstance(it, Para):
+                continue
+            top, bottom = it.bbox[1], it.bbox[3]
+            if top > pc.height * 0.12 and bottom < pc.height * 0.88:
+                continue
+            key = re.sub(r"\d+", "#", it.text.strip().lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            counts[key] = counts.get(key, 0) + 1
+            where.setdefault(key, []).append(it)
+    limit = max(2, int(len(pages) * 0.5))
+    return {id(it) for key, n in counts.items() if n >= limit for it in where[key]}

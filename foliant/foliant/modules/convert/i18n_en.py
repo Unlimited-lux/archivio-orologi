@@ -685,3 +685,5 @@ EN.update({
     "Analisi del documento…": "Analyzing the document…",
     "Modello del nome dei file non valido: «{t}».": "Invalid file name template: “{t}”.",
 })
+
+EN.update({"Un commento non è stato convertito.": "A comment could not be converted."})

@@ -159,12 +159,20 @@ def write_docx_flow(work: pymupdf.Document, path: str, job) -> None:
         margin = Pt(min(56.7, w * 0.08))
         section.left_margin = section.right_margin = section.top_margin = section.bottom_margin = margin
     usable = section.page_width - section.left_margin - section.right_margin
+    skip: set[int] = set()
+    if job.options.get("header_footer", True) and len(pages) > 1:
+        from .extract import repeated_furniture
+        skip = repeated_furniture(pages)
+        _furniture_to_sections(document, pages, skip)
     bid = 0
     n = len(pages)
     for pi, pc in enumerate(pages):
         check(job.progress, 0.8 + 0.18 * pi / max(1, n), _("Scrittura del documento…"))
         first = True
+        placed: list[tuple[tuple, object]] = []
         for it in pc.items:
+            if id(it) in skip:
+                continue
             if isinstance(it, Para):
                 if it.kind.startswith("h"):
                     p = document.add_heading(level=int(it.kind[1]))
@@ -197,13 +205,81 @@ def write_docx_flow(work: pymupdf.Document, path: str, job) -> None:
                     continue
             else:
                 continue
+            if p is not None:
+                placed.append((it.bbox, p))
             if first and p is not None:
                 bid += 1
                 _add_bookmark(p, f"page_{pc.index + 1}", bid)
                 first = False
+        if job.options.get("comments", True):
+            _add_comments(document, work, pi, placed, job)
     if not any(pc.items for pc in pages):
         document.add_paragraph("")
     document.save(path)
+
+
+def _add_field(paragraph, instr: str, placeholder: str = "1") -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), instr)
+    run = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = placeholder
+    run.append(t)
+    fld.append(run)
+    paragraph._p.append(fld)
+
+
+def _furniture_to_sections(document, pages, skip: set[int]) -> None:
+    """Intestazioni e piè di pagina ripetuti nelle aree di intestazione/piè (numeri come campi)."""
+    section = document.sections[0]
+    done = {"header": False, "footer": False}
+    for pc in pages:
+        for it in pc.items:
+            if id(it) not in skip or not isinstance(it, Para):
+                continue
+            where = "header" if it.bbox[1] < pc.height / 2 else "footer"
+            if done[where]:
+                continue
+            done[where] = True
+            area = section.header if where == "header" else section.footer
+            par = area.paragraphs[0]
+            parts = re.split(r"(\d+)", it.text)
+            numbers = 0
+            for part in parts:
+                if part.isdigit():
+                    _add_field(par, "PAGE" if numbers == 0 else "NUMPAGES", part)
+                    numbers += 1
+                elif part:
+                    par.add_run(part)
+
+
+def _add_comments(document, work, pi: int, placed: list, job) -> None:
+    """Commenti del PDF come commenti del documento, ancorati al paragrafo più vicino."""
+    with ENGINE_LOCK:
+        page = work[pi]
+        m = page.rotation_matrix
+        notes = [(pymupdf.Rect(a.rect) * m, a.info.get("content", "").strip(), a.info.get("title", "").strip())
+                 for a in page.annots() if a.info.get("content", "").strip()]
+    if not notes:
+        return
+    for rect, text, author in notes:
+        target = None
+        best = None
+        for bbox, par in placed:
+            r = pymupdf.Rect(bbox)
+            dist = 0 if r.intersects(rect) else min(abs(r.y0 - rect.y1), abs(rect.y0 - r.y1))
+            if best is None or dist < best:
+                best, target = dist, par
+        if target is None:
+            target = document.add_paragraph()
+        runs = target.runs or [target.add_run("")]
+        try:
+            document.add_comment(runs, text=text, author=author or "PDF",
+                                 initials=(author or "PDF")[:2].upper())
+        except Exception:
+            job.warn(_("Un commento non è stato convertito."))
 
 
 def write_docx_faithful(work: pymupdf.Document, path: str, job) -> None:

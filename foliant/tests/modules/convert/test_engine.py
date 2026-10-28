@@ -816,3 +816,25 @@ def test_txt_follows_structure_tree(tmp_path):
     assert text.index("Paragrafo in basso") < text.index("Paragrafo in alto")
     geo = open(convert_pdf(path, tmp_path / "g.txt", "txt", use_structure=False)[0], encoding="utf-8").read()
     assert geo.index("Paragrafo in alto") < geo.index("Paragrafo in basso")
+
+
+def test_docx_comments_and_header_footer(tmp_path):
+    import docx
+    doc = pymupdf.open()
+    for i in range(4):
+        p = doc.new_page(width=595, height=842)
+        p.insert_text((72, 40), "Orologeria Verdi - Catalogo", fontsize=9)
+        p.insert_text((72, 300), f"Contenuto della pagina {i + 1}", fontsize=12)
+        p.insert_text((260, 815), f"Pagina {i + 1} di 4", fontsize=9)
+    doc[1].add_text_annot((80, 290), "Verificare il prezzo").set_info(title="Anna")
+    path = _save(doc, tmp_path / "hf.pdf")
+    out = convert_pdf(path, tmp_path / "hf.docx", "docx")[0]
+    d = docx.Document(out)
+    body = "\n".join(p.text for p in d.paragraphs)
+    assert "Catalogo" not in body and "di 4" not in body and "Contenuto della pagina 3" in body
+    assert "Catalogo" in d.sections[0].header.paragraphs[0].text
+    with zipfile.ZipFile(out) as z:
+        footer = "".join(z.read(n).decode() for n in z.namelist() if n.startswith("word/footer"))
+        comments = z.read("word/comments.xml").decode()
+    assert 'w:instr="PAGE"' in footer and 'w:instr="NUMPAGES"' in footer
+    assert "Verificare il prezzo" in comments and 'w:author="Anna"' in comments
