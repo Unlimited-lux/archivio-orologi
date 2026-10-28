@@ -12,7 +12,8 @@ pagina e `ctx.refresh_state`), 5 (`ctx.toggle_sidebar_panel`), 6 (`ctx.activate_
 **Ancora aperte:** 1 (segnale di salto), 8 (area per barre di modulo: la ricerca usa ancora
 una barra nell'area inferiore), 14 (registrazione del generatore di
 miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomina:
-`window._update_tab_title`).
+`window._update_tab_title`), 19 (testi di VIS-06), 20 (selezione e copia, VIS-28),
+21 (schede e finestre, VIS-30). Soddisfatte dopo: 13 (zoom), 17 (recenti).
 
 1. **Segnale di salto nella vista** (`DocumentView.aboutToJump(page)` o simile).
    Oggi `navigation.py` avvolge `go_to_page`, `next_page` e `previous_page` di ogni vista
