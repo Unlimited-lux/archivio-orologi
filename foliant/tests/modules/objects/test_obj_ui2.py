@@ -511,17 +511,21 @@ def test_user_guides_snap_and_persist(ui, tmp_path):
     assert ui.c.guides(view, 0)["x"] == []
 
 
-def test_old_guides_migrated_to_core(ui, tmp_path):
+def test_old_per_document_guides_purged(ui, tmp_path):
+    """Riservatezza: nessuna chiave derivata dal percorso dei documenti resta nelle impostazioni."""
     import hashlib
     import json
     import os
     path = make_doc(tmp_path / "old.pdf", images=[])
     key = "objects/guides/" + hashlib.sha1(os.path.abspath(path).encode()).hexdigest()
-    ui.ctx.settings().setValue(key, json.dumps({"x": [72.0], "y": [144.0]}))
+    st = ui.ctx.settings()
+    st.setValue(key, json.dumps({"x": [72.0], "y": [144.0]}))
+    ui.c.purge_old_guides()
     view = ui.open(path)
-    lines = view.page_guide_lines(0)
-    assert 72.0 in [round(v, 3) for v in lines["x"]] and 144.0 in [round(v, 3) for v in lines["y"]]
-    assert not ui.ctx.settings().value(key, "")
+    assert not st.value(key, "")
+    assert not [k for k in st.allKeys() if k.startswith("objects/guides")]
+    assert all("/" not in k.split("objects/", 1)[-1] for k in st.allKeys() if k.startswith("objects/"))
+    del view
 
 
 def test_link_from_multiline_multipage_selection(ui, tmp_path, monkeypatch):
