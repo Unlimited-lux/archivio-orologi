@@ -219,18 +219,39 @@ def test_index_cache_reused_until_change(tmp_path, text_pdf):
     fp = content.content_fingerprint(doc.pdf)
     engine.build_scope(doc.pdf, DOCUMENT, cache=cache, fingerprint=fp)
     assert cache.builds == 1
-    cache2 = IndexCache()  # riapertura: indice dal disco
-    doc2 = Document.open(path)
+    doc2 = Document.open(path)            # stesso contenuto nella stessa sessione: indice in memoria
     fp2 = content.content_fingerprint(doc2.pdf)
     assert fp2 == fp
-    engine.build_scope(doc2.pdf, DOCUMENT, cache=cache2, fingerprint=fp2)
-    assert cache2.builds == 0
+    engine.build_scope(doc2.pdf, DOCUMENT, cache=cache, fingerprint=fp2)
+    assert cache.builds == 1
     with doc2.change("modifica") as pdf:
         pdf[0].insert_text((72, 700), "nuovo testo", fontsize=11)
     fp3 = content.content_fingerprint(doc2.pdf)
     assert fp3 != fp
-    engine.build_scope(doc2.pdf, DOCUMENT, cache=cache2, fingerprint=fp3)
+    engine.build_scope(doc2.pdf, DOCUMENT, cache=cache, fingerprint=fp3)
+    assert cache.builds == 2
+
+
+def test_index_cache_only_in_memory(tmp_path, text_pdf):
+    from foliant.modules.ai.chunking import DocumentIndex, IndexCache
+    from foliant.modules.ai.config import data_dir
+    path = text_pdf(2)
+    doc = Document.open(path)
+    fp = content.content_fingerprint(doc.pdf)
+    cache = IndexCache(directory=tmp_path / "ignorata", persist=True)
+    engine.build_scope(doc.pdf, DOCUMENT, cache=cache, fingerprint=fp)
+    assert cache.get(fp) is not None
+    cache2 = IndexCache()                 # «riavvio»: nessun indice dal disco
+    engine.build_scope(doc.pdf, DOCUMENT, cache=cache2, fingerprint=fp)
     assert cache2.builds == 1
+    assert not (data_dir() / "cache").exists() and not (tmp_path / "ignorata").exists()
+    # dimensione massima: i documenti meno recenti escono dalla memoria
+    small = IndexCache()
+    for i in range(small.MAX_FILES + 5):
+        small.put(DocumentIndex(f"fp{i}"))
+    assert small.get("fp0") is None and small.get(f"fp{small.MAX_FILES + 4}") is not None
+    small.clear()
+    assert small.get(f"fp{small.MAX_FILES + 4}") is None
 
 
 def test_excluded_pages_marked_partial(job, fake_provider, text_pdf):
@@ -383,6 +404,13 @@ def test_local_usage_limit(store, fake_provider):
         engine.chat(engine.Job(gw), Conversation(), Scope(), "due")
     assert ei.value.kind == LIMIT
     assert len(fake_provider.requests) == 1
+    # «riavvio»: il registro è vuoto ma il limite resta (contatori senza dati sui documenti)
+    log2 = SendLog()
+    assert log2.entries() == []
+    gw2 = engine.Gateway(store, log2, provider_factory=lambda p: fake_provider, sleep=lambda s: None)
+    with pytest.raises(AIError) as ei:
+        engine.chat(engine.Job(gw2), Conversation(), Scope(), "tre")
+    assert ei.value.kind == LIMIT and len(fake_provider.requests) == 1
 
 
 def test_send_log_has_no_content(job, gateway, fake_provider, text_pdf):
@@ -392,8 +420,26 @@ def test_send_log_has_no_content(job, gateway, fake_provider, text_pdf):
     entries = gateway.log.entries()
     assert entries[-1]["function"] == "summary" and entries[-1]["pages"] == [1, 2]
     assert entries[-1]["chars"] > 0 and entries[-1]["outcome"] == "ok"
-    raw = gateway.log.path.read_text()
-    assert "Contenuto unico" not in raw
+    assert "document" not in entries[-1]
+    assert "Contenuto unico" not in json.dumps(entries)
+
+
+def test_send_log_kept_in_memory_without_document_traces(job, gateway, fake_provider, text_pdf):
+    from foliant.modules.ai.config import SendLog, data_dir
+    path = text_pdf(2, name="zq7k-fattura-rossi.pdf")
+    pdf = open_pdf(path)
+    fp = content.content_fingerprint(pdf)
+    scope = engine.build_scope(pdf, PAGES, pages=[0], fingerprint=fp)
+    engine.summarize(job, scope, SummaryOptions())
+    assert len(gateway.log.entries()) == 1
+    assert SendLog().entries() == []                      # nuova sessione: registro vuoto
+    assert not (data_dir() / "registro-invii.jsonl").exists()
+    for f in data_dir().rglob("*"):
+        if f.is_file():
+            raw = f.read_text(errors="ignore")
+            assert fp[:16] not in raw and "zq7k" not in raw and "Contenuto unico" not in raw, f
+    gateway.log.clear()
+    assert gateway.log.entries() == []
 
 
 def test_consent_required(store, fake_provider):

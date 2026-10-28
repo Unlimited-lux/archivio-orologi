@@ -12,6 +12,7 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -26,7 +27,13 @@ ACTIVE_KEY = "ai/active_profile"
 
 
 def data_dir() -> Path:
-    """Cartella dati dell'assistente (cronologia, registro, cache)."""
+    """Cartella dati dell'assistente.
+
+    Contiene solo dati senza riferimenti ai documenti: libreria bibliografica, attività
+    personalizzate, libreria grafica e contatori del limite di utilizzo. Cronologia delle
+    conversazioni, registro degli invii, raccolte e indici dei documenti restano in memoria
+    per la sessione (regola di riservatezza: nessun nome, percorso o impronta di documento su disco).
+    """
     env = os.environ.get("FOLIANT_AI_DIR")
     if env:
         return Path(env)
@@ -350,73 +357,186 @@ class ProfileStore:
 
 # ---------------------------------------------------------------- registro
 class SendLog:
-    """Registro locale degli invii: nessun contenuto, solo metadati (AI-02)."""
+    """Registro degli invii della sessione: nessun contenuto, solo metadati (AI-02).
 
-    def __init__(self, path: Path | None = None):
-        self._path = path
+    Le voci restano in memoria e spariscono alla chiusura di Foliant: nessun riferimento ai
+    documenti (né nome, né percorso, né impronta) viene scritto su disco. Per il limite di
+    utilizzo giornaliero/mensile si conservano solo contatori aggregati per profilo
+    (`contatori-uso.json` nella cartella dati), senza alcun dato sui documenti.
+    `path` è accettato per compatibilità e ignorato.
+    """
+
+    COUNTERS_FILE = "contatori-uso.json"
+
+    def __init__(self, path: Path | None = None, *, counters_path: Path | None = None):
+        self._entries: list[dict] = []
+        self._counters_path = counters_path
+        self._counters: dict | None = None
+        self._lock = threading.Lock()
 
     @property
-    def path(self) -> Path:
-        return self._path or data_dir() / "registro-invii.jsonl"
+    def counters_path(self) -> Path:
+        return self._counters_path or data_dir() / self.COUNTERS_FILE
+
+    def _load_counters(self) -> dict:
+        if self._counters is None:
+            try:
+                data = json.loads(self.counters_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            self._counters = data if isinstance(data, dict) else {}
+        return self._counters
+
+    def _count(self, profile_id: str, now: _dt.datetime) -> None:
+        counters = self._load_counters()
+        day, month = now.date().isoformat(), now.strftime("%Y-%m")
+        c = counters.get(profile_id)
+        c = dict(c) if isinstance(c, dict) else {}
+        if c.get("day") != day:
+            c["day"], c["day_count"] = day, 0
+        if c.get("month") != month:
+            c["month"], c["month_count"] = month, 0
+        try:
+            c["day_count"] = int(c.get("day_count") or 0) + 1
+            c["month_count"] = int(c.get("month_count") or 0) + 1
+        except (TypeError, ValueError):
+            c["day_count"] = c["month_count"] = 1
+        counters[profile_id] = c
+        try:
+            write_private(self.counters_path, json.dumps(counters))
+        except OSError:
+            pass            # disco pieno o in sola lettura: il conteggio resta in memoria
 
     def add(self, *, profile: Profile, function: str, pages: list[int] | None, chars: int, images: int,
             outcome: str, fingerprint: str = "", input_tokens: int | None = None,
             output_tokens: int | None = None) -> dict:
+        """Aggiunge una voce. `fingerprint` è accettato per compatibilità e non viene registrato."""
+        now = _dt.datetime.now()
         entry = {
-            "time": _dt.datetime.now().isoformat(timespec="seconds"),
+            "time": now.isoformat(timespec="seconds"),
             "profile": profile.name, "profile_id": profile.id, "domain": profile.host, "model": profile.model,
-            "document": fingerprint[:16], "function": function,
+            "function": function,
             "pages": [p + 1 for p in (pages or [])], "chars": chars, "images": images, "outcome": outcome,
             "input_tokens": input_tokens, "output_tokens": output_tokens,
         }
-        try:
-            ensure_private_dir(self.path.parent)
-            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            with os.fdopen(fd, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError:
-            pass
+        with self._lock:
+            self._entries.append(entry)
+            self._count(profile.id, now)
         return entry
 
     def entries(self) -> list[dict]:
-        try:
-            lines = self.path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return []
-        out = []
-        for line in lines:
-            try:
-                out.append(json.loads(line))
-            except ValueError:
-                continue
-        return out
+        with self._lock:
+            return [dict(e) for e in self._entries]
 
     def clear(self) -> None:
-        try:
-            self.path.unlink()
-        except OSError:
-            pass
+        """Svuota l'elenco della sessione (i contatori del limite di utilizzo restano)."""
+        with self._lock:
+            self._entries.clear()
 
     def export(self, path: str) -> None:
         Path(path).write_text(json.dumps(self.entries(), ensure_ascii=False, indent=2), encoding="utf-8")
 
     def count_since(self, profile_id: str, period: str) -> int:
         now = _dt.datetime.now()
-        n = 0
-        for e in self.entries():
-            if e.get("profile_id") != profile_id:
-                continue
-            try:
-                t = _dt.datetime.fromisoformat(e["time"])
-            except (KeyError, ValueError):
-                continue
-            same = t.date() == now.date() if period == "day" else (t.year, t.month) == (now.year, now.month)
-            if same:
-                n += 1
-        return n
+        with self._lock:
+            c = self._load_counters().get(profile_id)
+        if not isinstance(c, dict):
+            return 0
+        try:
+            if period == "day":
+                return int(c.get("day_count") or 0) if c.get("day") == now.date().isoformat() else 0
+            return int(c.get("month_count") or 0) if c.get("month") == now.strftime("%Y-%m") else 0
+        except (TypeError, ValueError):
+            return 0
 
     def limit_reached(self, profile: Profile) -> bool:
         return bool(profile.usage_limit) and self.count_since(profile.id, profile.usage_period) >= profile.usage_limit
+
+
+# ---------------------------------------------------------------- dati delle versioni precedenti
+PRIVACY_CLEANUP_KEY = "ai/privacy_cleanup_v1"
+# cartelle della cartella dati in cui le versioni precedenti salvavano dati sui documenti
+LEGACY_DIRS = {
+    "cronologia": ("*.json", "*.danneggiato", ".*.tmp"),   # conversazioni con percorso e impronta
+    "cache": ("*.json", ".*.tmp"),                         # testo delle pagine per impronta del documento
+    "raccolte": ("*.json", ".*.tmp"),                      # raccolte con i percorsi dei documenti
+}
+# registro degli invii con l'impronta del documento (e suoi temporanei)
+LEGACY_FILES = ("registro-invii.jsonl", ".registro-invii.jsonl.*.tmp")
+LEGACY_SETTINGS = ("ai/history_encrypt", "ai/retention_days")
+_LEGACY_ENC_PREFIX = "FOLIANT-ENC1\n"
+
+
+def _unlink_quietly(f: Path) -> None:
+    try:
+        if f.is_symlink() or f.is_file():
+            f.unlink()
+    except OSError:
+        pass
+
+
+def purge_legacy_data(settings, *, secrets: SecretStore | None = None) -> bool:
+    """Cancella i dati sui documenti salvati dalle versioni precedenti (una volta sola).
+
+    Solo nomi noti dentro `data_dir()` (mai l'intera cartella, mai file sconosciuti) e le
+    preferenze tolte; silenziosa: gli errori del disco vengono ignorati. Il portachiavi viene
+    toccato solo se la vecchia cronologia era cifrata (per cancellare la chiave `history-key`).
+    Il segno `ai/privacy_cleanup_v1` si scrive solo se c'era qualcosa da cancellare: su un profilo
+    nuovo l'avvio non scrive nulla. Restituisce True se sono stati trovati dati da cancellare.
+    """
+    if settings is not None:
+        done = settings.value(PRIVACY_CLEANUP_KEY, False)
+        if done not in (False, "false", "0", 0, None, ""):
+            return False
+    base = data_dir()
+    found = False
+    encrypted = False
+    for name, patterns in LEGACY_DIRS.items():
+        folder = base / name
+        try:
+            if folder.is_symlink() or not folder.is_dir():
+                continue
+        except OSError:
+            continue
+        found = True
+        for pattern in patterns:
+            try:
+                files = list(folder.glob(pattern))
+            except OSError:
+                continue
+            for f in files:
+                if name == "cronologia" and not encrypted and f.suffix == ".json" and not f.is_symlink():
+                    try:
+                        with open(f, encoding="utf-8", errors="ignore") as fh:
+                            encrypted = fh.read(len(_LEGACY_ENC_PREFIX)) == _LEGACY_ENC_PREFIX
+                    except OSError:
+                        pass
+                _unlink_quietly(f)
+        try:
+            folder.rmdir()          # solo se vuota
+        except OSError:
+            pass
+    for pattern in LEGACY_FILES:
+        try:
+            files = list(base.glob(pattern))
+        except OSError:
+            continue
+        for f in files:
+            found = True
+            _unlink_quietly(f)
+    if settings is not None:
+        for key in LEGACY_SETTINGS:
+            if settings.contains(key):
+                found = True
+                settings.remove(key)
+        if found:
+            settings.setValue(PRIVACY_CLEANUP_KEY, True)
+    if encrypted:
+        try:
+            (secrets or SecretStore()).delete("history-key")
+        except Exception:  # noqa: BLE001 - portachiavi assente o bloccato: niente da fare
+            pass
+    return found
 
 
 def text_fingerprint(*parts: str) -> str:

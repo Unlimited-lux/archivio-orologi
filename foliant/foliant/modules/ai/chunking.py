@@ -195,50 +195,26 @@ class DocumentIndex:
 class IndexCache:
     """Testo delle pagine (con OCR temporaneo) per impronta del contenuto.
 
-    In memoria e su disco (cartella dati, leggibile solo dall'utente), con
-    dimensione massima; si svuota con `clear()`.
+    Solo in memoria per la sessione (regola di riservatezza: nessun indice dei documenti
+    su disco), con un numero massimo di documenti; si svuota con `clear()`.
+    `directory` e `persist` sono accettati per compatibilità e ignorati.
     """
 
-    MAX_FILES = 50
+    MAX_FILES = 50      # documenti tenuti in memoria
 
-    def __init__(self, directory: Path | None = None, persist: bool = True):
+    def __init__(self, directory: Path | None = None, persist: bool = False):
         self._mem: dict[str, DocumentIndex] = {}
-        self._dir = directory
-        self.persist = persist
+        self.persist = False
         self.builds = 0
 
-    @property
-    def directory(self) -> Path:
-        from .config import data_dir
-        return self._dir or data_dir() / "cache"
-
     def get(self, fingerprint: str) -> DocumentIndex | None:
-        if fingerprint in self._mem:
-            return self._mem[fingerprint]
-        if not self.persist:
-            return None
-        path = self.directory / f"{fingerprint[:32]}.json"
-        try:
-            idx = DocumentIndex.from_json(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, KeyError, TypeError):
-            return None
-        if idx.fingerprint != fingerprint:
-            return None
-        self._mem[fingerprint] = idx
-        return idx
+        return self._mem.get(fingerprint)
 
     def put(self, index: DocumentIndex) -> None:
-        self._mem[index.fingerprint] = index
-        if not self.persist:
-            return
-        from .config import write_private
-        try:
-            write_private(self.directory / f"{index.fingerprint[:32]}.json", index.to_json())
-            files = sorted(self.directory.glob("*.json"), key=lambda p: p.stat().st_mtime)
-            for old in files[:-self.MAX_FILES]:
-                old.unlink()
-        except OSError:
-            pass
+        self._mem.pop(index.fingerprint, None)
+        self._mem[index.fingerprint] = index          # il più recente in fondo
+        while len(self._mem) > self.MAX_FILES:
+            self._mem.pop(next(iter(self._mem)))
 
     def update_pages(self, fingerprint: str, pages: list[PageText]) -> None:
         idx = self.get(fingerprint) or DocumentIndex(fingerprint)
@@ -250,8 +226,3 @@ class IndexCache:
 
     def clear(self) -> None:
         self._mem.clear()
-        try:
-            for f in self.directory.glob("*.json"):
-                f.unlink()
-        except OSError:
-            pass
