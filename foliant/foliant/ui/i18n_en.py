@@ -202,6 +202,24 @@ EN = {
     "Formato carta": "Paper size",
     "Unità di misura": "Measurement units",
     "Automatico ({v})": "Automatic ({v})",
+    "Filtra per nome": "Filter by name",
+    "Filtra i documenti recenti per nome": "Filter recent documents by name",
+    "Nessun documento corrisponde al filtro.": "No document matches the filter.",
+    "File non trovato": "File not found",
+    "Fissato": "Pinned",
+    "recenti\x04Fissa": "Pin",
+    "recenti\x04Sblocca": "Unpin",
+    "Individua…": "Locate…",
+    "Individua «{name}»": "Locate “{name}”",
+    "Rimuovi dall'elenco": "Remove from list",
+    "Svuota elenco": "Clear list",
+    "Svuotare l'elenco dei recenti?": "Clear the recent list?",
+    "Svuotare l'elenco dei documenti recenti?": "Clear the list of recent documents?",
+    "I file sul disco non vengono toccati.": "The files on disk are not affected.",
+    "I documenti fissati restano nell'elenco.": "Pinned documents stay in the list.",
+    "«{name}» non si trova più in «{folder}»: potrebbe essere stato spostato, rinominato o eliminato.":
+        "“{name}” is no longer in “{folder}”: it may have been moved, renamed or deleted.",
+    "Errore nel menu del recente: {e}": "Error in the recent file menu: {e}",
 }
 
 add_translations("en", EN)
