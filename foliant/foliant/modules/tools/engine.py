@@ -834,7 +834,7 @@ class JobReport:
         parts = [f"{c[k]} {_(STATUS_LABELS[k]).lower()}" for k in STATUS_LABELS if c.get(k)]
         if self.finished:
             secs = (self.finished - self.started).total_seconds()
-            parts.append(_("durata {s:.1f} s").format(s=secs))
+            parts.append(_("durata {s} s").format(s=f"{secs:.1f}".replace(".", ",")))
         return " · ".join(parts)
 
 

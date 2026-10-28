@@ -439,7 +439,6 @@ EN: dict[str, str] = {
     "danneggiato": "damaged",
     "dimensione pagina {a} → {b} mm": "page size {a} → {b} mm",
     "dimensione {a} → {b} pt": "size {a} → {b} pt",
-    "durata {s:.1f} s": "duration {s:.1f} s",
     "eliminazioni": "deletions",
     "file non leggibile": "file not readable",
     "file non trovato": "file not found",
@@ -758,4 +757,5 @@ EN: dict[str, str] = {
     "Escludere l'area disegnata dal confronto?": "Exclude the drawn area from the comparison?",
     "Escludi un'area": "Exclude an area",
     "Solo questa pagina": "This page only",
+    "durata {s} s": "duration {s} s",
 }

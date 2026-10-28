@@ -577,3 +577,34 @@ def test_transform_image_rotation_and_scale():
     assert (half[5:10, 5:10] < 128).all() and (half[15:20, 15:20] == 255).all()
     rot = ce.transform_image(img, 5.0)
     assert rot.shape == img.shape and (rot != img).any()
+
+
+def test_cancel_within_two_seconds_on_500_pages(tmp_path):
+    import threading
+    import time
+
+    from foliant.ui.tasks import Progress
+    doc = pymupdf.open()
+    for i in range(500):
+        doc.new_page().insert_text((72, 100), f"pagina {i} del registro di vendita", fontsize=12)
+    a = tmp_path / "a.pdf"
+    doc.save(str(a))
+    doc[250].insert_text((72, 300), "riga aggiunta", fontsize=12)
+    b = tmp_path / "b.pdf"
+    doc.save(str(b))
+    progress = Progress()
+    box = {}
+
+    def work():
+        try:
+            box["r"] = ce.run_compare(progress, ce.SideInput(read(a), "a"), ce.SideInput(read(b), "b"),
+                                      ce.CompareOptions(dpi=150))
+        except OperationCancelled:
+            box["cancelled"] = time.monotonic()
+    th = threading.Thread(target=work)
+    th.start()
+    time.sleep(0.6)
+    t0 = time.monotonic()
+    progress.cancel()
+    th.join(10)
+    assert "cancelled" in box and box["cancelled"] - t0 < 2.0
