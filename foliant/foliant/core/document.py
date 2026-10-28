@@ -243,6 +243,12 @@ class Document:
         return self._display_name or "Senza titolo.pdf"
 
     @property
+    def can_copy(self) -> bool:
+        """Il file consente di copiarne il contenuto (permesso di copia, o accesso da proprietario)."""
+        with self.lock:
+            return bool(self._pdf.permissions & pymupdf.PDF_PERM_COPY)
+
+    @property
     def is_modified(self) -> bool:
         return self._state != self._saved_state
 

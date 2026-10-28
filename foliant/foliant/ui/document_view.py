@@ -173,6 +173,18 @@ class DocumentView(QAbstractScrollArea):
     def status(self, message: str) -> None:
         self.statusMessage.emit(message)
 
+    def copy_selection(self) -> bool:
+        """Copia il testo selezionato, se il documento lo consente."""
+        text = self.selected_text()
+        if not text:
+            return False
+        if not self.document.can_copy:
+            from ..i18n import _
+            self.status(_("Il documento non consente la copia del contenuto."))
+            return False
+        copy_text_to_clipboard(text)
+        return True
+
     def dispose(self) -> None:
         """Da chiamare prima di chiudere il documento."""
         self._render_timer.stop()
@@ -772,7 +784,8 @@ class DocumentView(QAbstractScrollArea):
                        modifiers=ev.modifiers(), event=ev)
         menu = QMenu(self)
         if self.selected_text():
-            menu.addAction(_("Copia"), lambda: copy_text_to_clipboard(self.selected_text()))
+            act = menu.addAction(_("Copia"), self.copy_selection)
+            act.setEnabled(self.document.can_copy)
         for provider in list(self.menu_providers):
             try:
                 provider(self, pe, menu)
@@ -813,7 +826,7 @@ class DocumentView(QAbstractScrollArea):
             self.viewport().update()
             return
         if ev.matches(QKeySequence.StandardKey.Copy):
-            copy_text_to_clipboard(self.selected_text())
+            self.copy_selection()
             return
         if ev.matches(QKeySequence.StandardKey.SelectAll):
             self._select_all_on_page()
