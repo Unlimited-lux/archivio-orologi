@@ -23,6 +23,12 @@ from typing import Iterable, Iterator, Sequence
 
 import pymupdf
 
+try:    # testi scritti nei documenti nella lingua dell'interfaccia (NFR-25)
+    from foliant.i18n import _
+except Exception:  # pragma: no cover - motore usato senza l'applicazione
+    def _(text: str) -> str:
+        return text
+
 mupdf = pymupdf.mupdf
 
 # --------------------------------------------------------------------- tipi
@@ -80,6 +86,8 @@ STATE_REJECTED = "Rejected"
 STATE_CANCELLED = "Cancelled"
 STATE_COMPLETED = "Completed"
 REVIEW_STATES = (STATE_NONE, STATE_ACCEPTED, STATE_REJECTED, STATE_CANCELLED, STATE_COMPLETED)
+STATE_TEXTS = {STATE_NONE: "Nessuno", STATE_ACCEPTED: "Accettato", STATE_REJECTED: "Rifiutato",
+               STATE_CANCELLED: "Annullato", STATE_COMPLETED: "Completato"}
 
 DASH_STYLES = {"solid": None, "dashed": [6, 3], "dotted": [1, 2]}
 
@@ -319,7 +327,7 @@ def _finish(annot: pymupdf.Annot, author: str | None, contents: str | None = Non
         info["content"] = contents
     subject = subject if subject is not None else SUBJECTS.get(kind)
     if subject:
-        info["subject"] = subject
+        info["subject"] = _(subject)
     annot.set_info(**info)
     annot.update()
     doc = annot.get_parent().parent
@@ -858,7 +866,7 @@ def create_typewriter(pdf: pymupdf.Document, page_no: int, point, text: str, sty
     pdf.xref_set_key(xref, "IT", "/FreeTextTypeWriter")
     page = pdf[page_no]
     annot = get_annot(page, xref)
-    annot.set_info(subject=SUBJECTS[TYPEWRITER])
+    annot.set_info(subject=_(SUBJECTS[TYPEWRITER]))
     annot.update()
     refresh_freetext(pdf, page_no, xref)
     return xref
@@ -902,7 +910,7 @@ def create_replacement(pdf: pymupdf.Document, page_no: int, quads: Sequence, tex
     annot.set_irt_xref(caret)
     pdf.xref_set_key(strike, "RT", "/Group")
     annot = get_annot(page, caret)
-    annot.set_info(subject=SUBJECTS[REPLACE])
+    annot.set_info(subject=_(SUBJECTS[REPLACE]))
     annot.update()
     return caret
 
@@ -1248,16 +1256,22 @@ def fill_template(template: str, *, author: str = "", when: datetime | None = No
               "{contatore}": f"{counter:03d}" if counter is not None else "{contatore}",
               "{ora}": when.strftime("%H:%M"), "{file}": filename,
               "{pagina}": str(page + 1) if page is not None else ""}
+    if counter is None:         # senza contatore il segnaposto resta, con il nome della lingua del modello
+        values.pop("{contatore}")
     for k, v in values.items():
-        template = template.replace(k, v)
+        template = template.replace(k, v).replace(PLACEHOLDER_EN[k], v)
     return template
 
 
 PLACEHOLDERS = ("{autore}", "{nome}", "{data}", "{ora}", "{file}", "{pagina}", "{contatore}")
+# gli stessi segnaposto con i nomi inglesi (modelli dei timbri dinamici in inglese)
+PLACEHOLDER_EN = {"{autore}": "{author}", "{nome}": "{name}", "{data}": "{date}", "{ora}": "{time}",
+                  "{file}": "{file}", "{pagina}": "{page}", "{contatore}": "{counter}"}
 
 
 def unknown_placeholders(template: str) -> list[str]:
-    return [p for p in re.findall(r"\{[^{}]*\}", template) if p not in PLACEHOLDERS]
+    known = set(PLACEHOLDERS) | set(PLACEHOLDER_EN.values())
+    return [p for p in re.findall(r"\{[^{}]*\}", template) if p not in known]
 
 
 def dynamic_subtitle(template: str, author: str, when: datetime | None = None) -> str:
@@ -1710,7 +1724,7 @@ class AnnotInfo:
     def label(self) -> str:
         if self.kind == REPLACE:
             return SUBJECTS[REPLACE] if self.contents else "Cancellazione"
-        if self.kind == STAMP and self.subject == "Adesivo":
+        if self.kind == STAMP and self.subject in ("Adesivo", _("Adesivo")):
             return "Adesivo"
         if self.kind in (CALLOUT, ARROW, CLOUD, DISTANCE, PERIMETER, AREA, TYPEWRITER):
             return SUBJECTS[self.kind]
@@ -2616,7 +2630,9 @@ def set_status(pdf: pymupdf.Document, page_no: int, xref: int, state: str, autho
     annot.set_flags(pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_PRINT)
     annot.set_irt_xref(xref)
     who = author if author is not None else default_author()
-    new = _finish(annot, who, f"{state} impostato da {who}" if who else state, date=date, subject="")
+    label = _(STATE_TEXTS.get(state, state))
+    text = _("{state} impostato da {who}").format(state=label, who=who) if who else label
+    new = _finish(annot, who, text, date=date, subject="")
     pdf.xref_set_key(new, "State", "/" + _name_token(state))
     pdf.xref_set_key(new, "StateModel", "/" + _name_token(model))
     return new
@@ -3303,29 +3319,32 @@ def export_fdf(pdf: pymupdf.Document, filename: str = "") -> bytes:
 def summary_rows(pdf: pymupdf.Document) -> list[dict]:
     rows = []
     for a in list_annotations(pdf):
-        rows.append({"pagina": a.page + 1, "tipo": a.label, "autore": a.author, "data": format_date(a.modified or a.created),
+        status = _(STATE_TEXTS[a.status]) if a.status in STATE_TEXTS and a.status != STATE_NONE else (
+            "" if a.status == STATE_NONE else a.status)
+        rows.append({"pagina": a.page + 1, "tipo": _(a.label), "autore": a.author,
+                     "data": format_date(a.modified or a.created),
                      "testo": a.contents, "testo_marcato": a.marked_text,
-                     "stato": a.status, "risposte": [(r.author, format_date(r.created), r.contents) for r in a.replies],
+                     "stato": status, "risposte": [(r.author, format_date(r.created), r.contents) for r in a.replies],
                      "colore": color_to_hex(a.color)})
     return rows
 
 
 def summary_text(pdf: pymupdf.Document, title: str = "") -> str:
-    out = [f"Riepilogo commenti — {title}" if title else "Riepilogo commenti", ""]
+    out = [_("Riepilogo commenti — {title}").format(title=title) if title else _("Riepilogo commenti"), ""]
     rows = summary_rows(pdf)
     if not rows:
-        out.append("Nessun commento.")
+        out.append(_("Nessun commento."))
     current = None
     for r in rows:
         if r["pagina"] != current:
             current = r["pagina"]
-            out.append(f"Pagina {current}")
+            out.append(_("Pagina {n}").format(n=current))
         head = f"  • {r['tipo']}"
         if r["autore"]:
             head += f" — {r['autore']}"
         if r["data"]:
             head += f" ({r['data']})"
-        if r["stato"] and r["stato"] != STATE_NONE:
+        if r["stato"]:
             head += f" [{r['stato']}]"
         out.append(head)
         if r["testo_marcato"]:
@@ -3344,7 +3363,8 @@ def measures_csv(pdf: pymupdf.Document, sep: str = ",") -> str:
 
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=sep)
-    w.writerow(["Pagina", "Tipo", "Valore", "Valore formattato", "Unità", "Scala", "Autore", "Data"])
+    w.writerow([_("Pagina"), _("Tipo"), _("Valore"), _("Valore formattato"), _("Unità"), _("Scala"), _("Autore"),
+                _("Data")])
     for a in list_annotations(pdf):
         if a.kind not in MEASURE_KINDS:
             continue
@@ -3356,7 +3376,7 @@ def measures_csv(pdf: pymupdf.Document, sep: str = ",") -> str:
             value = scale.area(polygon_area(pts))
         else:
             value = scale.length(polyline_length(pts))
-        w.writerow([a.page + 1, SUBJECTS[a.kind], f"{value:.4f}", a.contents, scale.unit, scale.text(), a.author,
+        w.writerow([a.page + 1, _(SUBJECTS[a.kind]), f"{value:.4f}", a.contents, scale.unit, scale.text(), a.author,
                     format_date(a.created)])
     return buf.getvalue()
 
@@ -3367,16 +3387,16 @@ def summary_csv(pdf: pymupdf.Document) -> str:
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Pagina", "Tipo", "Autore", "Data", "Stato", "Testo", "Testo marcato", "N.", "Risposta a"])
+    w.writerow([_("Pagina"), _("Tipo"), _("Autore"), _("Data"), _("Stato"), _("Testo"), _("Testo marcato"), _("N."),
+                _("Risposta a")])
     n = 0
     for r in summary_rows(pdf):
         n += 1
         parent = n
-        stato = r["stato"] if r["stato"] != STATE_NONE else ""
-        w.writerow([r["pagina"], r["tipo"], r["autore"], r["data"], stato, r["testo"], r["testo_marcato"], n, ""])
+        w.writerow([r["pagina"], r["tipo"], r["autore"], r["data"], r["stato"], r["testo"], r["testo_marcato"], n, ""])
         for author, date, text in r["risposte"]:
             n += 1
-            w.writerow([r["pagina"], "Risposta", author, date, "", text, "", n, parent])
+            w.writerow([r["pagina"], _("Risposta"), author, date, "", text, "", n, parent])
     return buf.getvalue()
 
 
@@ -3429,12 +3449,13 @@ def summary_pdf(pdf: pymupdf.Document, title: str = "", layout: str = "list") ->
             by_page.setdefault(a.page, []).append(a)
         if not by_page:
             p = out.new_page(width=842, height=595)
-            text_at(p, (40, 60), "Nessun commento.", 12)
+            text_at(p, (40, 60), _("Nessun commento."), 12)
         for page_no in sorted(by_page):
             src = pdf[page_no]
             W, H = 842, 595
             dst = out.new_page(width=W, height=H)
-            text_at(dst, (30, 28), f"{title} — Pagina {page_no + 1}" if title else f"Pagina {page_no + 1}", 11)
+            page_title = _("Pagina {n}").format(n=page_no + 1)
+            text_at(dst, (30, 28), f"{title} — {page_title}" if title else page_title, 11)
             pix = src.get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5), annots=True)
             box = pymupdf.Rect(30, 40, 30 + (H - 70) * src.rect.width / max(src.rect.height, 1), H - 30)
             if box.width > W * 0.55:
@@ -3456,7 +3477,8 @@ def summary_pdf(pdf: pymupdf.Document, title: str = "", layout: str = "list") ->
                 dst.draw_circle((cx, cy), 7, color=(0.8, 0.1, 0.1), fill=(1, 1, 1), width=1)
                 text_at(dst, (cx - (3 if n < 10 else 5.5), cy + 3), str(n), 7, (0.8, 0.1, 0.1))
                 dst.draw_line((cx + 7, cy), (x_list - 4, y - 3), color=(0.8, 0.5, 0.5), width=0.4)
-                head = f"{n}. {a.label} — {a.author or '(autore sconosciuto)'} · {format_date(a.modified or a.created)}"
+                head = (f"{n}. {_(a.label)} — {a.author or _('(autore sconosciuto)')} · "
+                        f"{format_date(a.modified or a.created)}")
                 lines = _wrap_chars(head, 60)
                 if a.marked_text:
                     lines += _wrap_chars(f"«{a.marked_text}»", 60)
@@ -3497,23 +3519,24 @@ def summary_pdf(pdf: pymupdf.Document, title: str = "", layout: str = "list") ->
 def summary_html(pdf: pymupdf.Document, title: str = "") -> str:
     from html import escape
 
-    parts = ["<!doctype html><html lang='it'><head><meta charset='utf-8'>",
-             f"<title>{escape(title or 'Riepilogo commenti')}</title>",
+    heading = title or _("Riepilogo commenti")
+    lang = "en" if _("Riepilogo commenti") != "Riepilogo commenti" else "it"
+    parts = [f"<!doctype html><html lang='{lang}'><head><meta charset='utf-8'>",
+             f"<title>{escape(heading)}</title>",
              "<style>body{font-family:sans-serif;max-width:820px;margin:2em auto;color:#222}"
              "h2{border-bottom:1px solid #ccc}.c{margin:.6em 0;padding:.4em .8em;border-left:4px solid #999}"
              ".m{color:#555;font-size:.9em}.q{font-style:italic}.r{margin-left:1.5em;color:#333}</style></head><body>",
-             f"<h1>{escape(title or 'Riepilogo commenti')}</h1>"]
+             f"<h1>{escape(heading)}</h1>"]
     rows = summary_rows(pdf)
     if not rows:
-        parts.append("<p>Nessun commento.</p>")
+        parts.append(f"<p>{escape(_('Nessun commento.'))}</p>")
     current = None
     for r in rows:
         if r["pagina"] != current:
             current = r["pagina"]
-            parts.append(f"<h2>Pagina {current}</h2>")
+            parts.append(f"<h2>{escape(_('Pagina {n}').format(n=current))}</h2>")
         color = r["colore"] or "#999999"
-        meta = " · ".join(x for x in (r["tipo"], r["autore"], r["data"],
-                                      r["stato"] if r["stato"] != STATE_NONE else "") if x)
+        meta = " · ".join(x for x in (r["tipo"], r["autore"], r["data"], r["stato"]) if x)
         parts.append(f"<div class='c' style='border-color:{color}'><div class='m'>{escape(meta)}</div>")
         if r["testo_marcato"]:
             parts.append(f"<div class='q'>«{escape(r['testo_marcato'])}»</div>")

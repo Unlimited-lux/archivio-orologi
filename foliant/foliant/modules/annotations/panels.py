@@ -692,7 +692,7 @@ class CommentsPanel(QWidget):
             self.empty.setText(_("Nessun commento.\nUsa gli strumenti della modalità Commenta per aggiungerne."))
         filtered = len(shown) != total
         self.count.setText(_("{n} di {t} commenti").format(n=len(shown), t=total) if filtered
-                           else _("{t} commenti").format(t=total))
+                           else _("1 commento") if total == 1 else _("{t} commenti").format(t=total))
         self._update_page_filter()
         self._sync_from_selection()
 

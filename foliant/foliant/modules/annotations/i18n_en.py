@@ -109,10 +109,10 @@ EN: dict[str, str] = {
     "Sperimentale": "Experimental", "Venduto": "Sold", "Dipartimentale": "Departmental",
     "Segretissimo": "Top secret", "Ricevuto": "Received", "Pagato": "Paid", "Verificato": "Verified",
     "Urgente": "Urgent", "Copia": "Copy", "Originale": "Original",
-    "Ricevuto il {data} alle {ora}": "Received on {data} at {ora}",
-    "Approvato da {autore} il {data}": "Approved by {autore} on {data}",
-    "Verificato da {autore} il {data} {ora}": "Verified by {autore} on {data} {ora}",
-    "Pagato il {data}": "Paid on {data}",
+    "Ricevuto il {data} alle {ora}": "Received on {date} at {time}",
+    "Approvato da {autore} il {data}": "Approved by {author} on {date}",
+    "Verificato da {autore} il {data} {ora}": "Verified by {author} on {date} {time}",
+    "Pagato il {data}": "Paid on {date}",
     # errori del motore
     "L'annotazione non esiste più.": "The annotation no longer exists.",
     "Nessun testo selezionato.": "No text selected.", "Forma troppo piccola.": "Shape too small.",
@@ -159,8 +159,8 @@ EN: dict[str, str] = {
     "Timbri importati: {n}": "Stamps imported: {n}", "Nuovo timbro dinamico…": "New dynamic stamp…",
     "Nuovo timbro dinamico": "New dynamic stamp",
     "Testo con segnaposto {autore} {data} {ora} {file} {pagina} {contatore}:":
-        "Text with placeholders {autore} {data} {ora} {file} {pagina} {contatore}:",
-    "Ricevuto da {autore} il {data}": "Received by {autore} on {data}",
+        "Text with placeholders {author} {date} {time} {file} {page} {counter}:",
+    "Ricevuto da {autore} il {data}": "Received by {author} on {date}",
     "Segnaposto sconosciuti, mostrati letteralmente: {p}": "Unknown placeholders, shown literally: {p}", "Spunta": "Checkmark", "Con spunta": "Checked", "Senza spunta": "Unchecked",
     "Pagine…": "Pages…", "Filtra per pagine": "Filter by pages",
     "Pagine (es. 1-3, 7; vuoto = tutte):": "Pages (e.g. 1-3, 7; empty = all):", "Annulla per ripristinarle.": "Undo to restore them.", "tutte le pagine": "all pages", "pagina {n}": "page {n}", "Aggiungi vertice qui": "Add vertex here", "Aggiungi vertice": "Add vertex",
@@ -190,6 +190,13 @@ EN: dict[str, str] = {
     "Esporta misure (CSV)…": "Export measurements (CSV)…", "Esporta misure": "Export measurements",
     "Il documento non contiene misure.": "The document has no measurements.", "misure": "measurements",
     "Personalizzati": "Custom", "Nessun timbro personalizzato": "No custom stamps", "Rimuovi": "Remove",
-    "Protocollo": "Protocol", "Protocollo n. {contatore} del {data}": "Protocol no. {contatore} of {data}", "Sposta vertice": "Move vertex", "Vertice inesistente.": "No such vertex.",
+    "Protocollo": "Protocol", "Protocollo n. {contatore} del {data}": "Protocol no. {counter} of {date}", "Sposta vertice": "Move vertex", "Vertice inesistente.": "No such vertex.",
 }
+EN.update({
+    # testi scritti nei documenti (riepiloghi, misure, stati)
+    "Valore": "Value", "Valore formattato": "Formatted value", "Unità": "Unit", "Scala": "Scale", "Data": "Date",
+    "Testo": "Text", "Testo marcato": "Marked text", "N.": "No.", "Risposta a": "Reply to", "Risposta": "Reply",
+    "Nessun commento.": "No comments.", "1 commento": "1 comment", "{state} impostato da {who}": "{state} set by {who}",
+    "Riepilogo commenti — {title}": "Comment summary — {title}",
+})
 EN.pop("Gomma ", None)
