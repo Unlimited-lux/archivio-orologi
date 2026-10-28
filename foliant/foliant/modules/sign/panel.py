@@ -7,7 +7,7 @@ from xml.sax.saxutils import escape
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QTextBrowser, QVBoxLayout,
+    QFileDialog, QLabel, QListWidget, QListWidgetItem, QPushButton, QTextBrowser, QVBoxLayout,
     QWidget,
 )
 
@@ -87,6 +87,67 @@ def report_xml(statuses) -> str:
     return "\n".join(out)
 
 
+class ButtonFlow(QWidget):
+    """Pulsanti disposti in griglia: due per riga solo se entrambi stanno nella larghezza
+    senza scendere sotto il loro minimumSizeHint (NFR-24), altrimenti uno per riga."""
+
+    def __init__(self, buttons, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QGridLayout
+        self.buttons = list(buttons)
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self._columns = None
+        for b in self.buttons:
+            b.setParent(self)        # senza genitore isHidden() sarebbe vero prima del primo show
+            b.installEventFilter(self)
+        self.relayout()
+
+    def eventFilter(self, obj, ev) -> bool:
+        from PySide6.QtCore import QEvent
+        if ev.type() in (QEvent.Type.Show, QEvent.Type.Hide):
+            self.relayout(force=True)
+        return False
+
+    def _fits_two(self, width: int) -> bool:
+        visible = [b for b in self.buttons if not b.isHidden()]
+        sp = self.grid.horizontalSpacing() if self.grid.horizontalSpacing() >= 0 else 6
+        for a, b in zip(visible[0::2], visible[1::2]):
+            need = max(a.minimumSizeHint().width(), a.sizeHint().width()) + \
+                max(b.minimumSizeHint().width(), b.sizeHint().width()) + sp
+            if need > width:
+                return False
+        return True
+
+    def relayout(self, force: bool = False) -> None:
+        # finché non è visibile la larghezza non è nota: una colonna (mai pulsanti compressi)
+        cols = 2 if self.isVisible() and self._fits_two(max(self.width(), 1)) else 1
+        if cols == self._columns and not force:
+            return
+        self._columns = cols
+        for b in self.buttons:
+            self.grid.removeWidget(b)
+        visible = [b for b in self.buttons if not b.isHidden()]
+        for i, b in enumerate(visible):
+            self.grid.addWidget(b, i // cols, i % cols)
+        for c in range(2):
+            self.grid.setColumnStretch(c, 1 if c < cols else 0)
+        self.updateGeometry()
+
+    def minimumSizeHint(self):
+        from PySide6.QtCore import QSize
+        widths = [max(b.minimumSizeHint().width(), b.sizeHint().width()) for b in self.buttons if not b.isHidden()]
+        return QSize(max(widths or [0]), super().minimumSizeHint().height())
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        self.relayout()
+
+    def showEvent(self, ev) -> None:
+        super().showEvent(ev)
+        self.relayout()
+
+
 class SignaturesPanel(QWidget):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
@@ -99,20 +160,14 @@ class SignaturesPanel(QWidget):
         self.banner.setObjectName("signBanner")
         self.banner.setAccessibleName(_("Stato complessivo delle firme"))
         lay.addWidget(self.banner)
-        row = QHBoxLayout()
         self.btn_sign_now = QPushButton(_("Firma ora"))
         self.btn_next = QPushButton(_("Campo successivo"))
         self.btn_verify = QPushButton(_("Verifica di nuovo"))
         self.btn_online = QPushButton(_("Verifica online"))
         self.btn_online.setToolTip(_("Controlla la revoca dei certificati presso i servizi indicati nei certificati "
                                      "(richiede la rete)"))
-        for b in (self.btn_sign_now, self.btn_next):
-            row.addWidget(b)
-        lay.addLayout(row)
-        row2 = QHBoxLayout()
-        for b in (self.btn_verify, self.btn_online):
-            row2.addWidget(b)
-        lay.addLayout(row2)
+        self.top_buttons = ButtonFlow([self.btn_sign_now, self.btn_next, self.btn_verify, self.btn_online])
+        lay.addWidget(self.top_buttons)
         self.list = QListWidget()
         self.list.setAccessibleName(_("Firme e campi firma"))
         self.list.setWordWrap(True)
@@ -120,23 +175,15 @@ class SignaturesPanel(QWidget):
         self.details = QTextBrowser()
         self.details.setAccessibleName(_("Dettagli della firma"))
         lay.addWidget(self.details, 2)
-        acts = QVBoxLayout()
-        r1 = QHBoxLayout()
         self.btn_goto = QPushButton(_("Vai al campo"))
         self.btn_signed = QPushButton(_("Versione firmata"))
         self.btn_signed.setToolTip(_("Apre il documento come era al momento della firma"))
-        r1.addWidget(self.btn_goto)
-        r1.addWidget(self.btn_signed)
-        r2 = QHBoxLayout()
         self.btn_trust = QPushButton(_("Considera attendibile"))
         self.btn_copy = QPushButton(_("Copia dettagli"))
-        r2.addWidget(self.btn_trust)
-        r2.addWidget(self.btn_copy)
         self.btn_report = QPushButton(_("Esporta rapporto…"))
-        acts.addLayout(r1)
-        acts.addLayout(r2)
-        acts.addWidget(self.btn_report)
-        lay.addLayout(acts)
+        self.action_buttons = ButtonFlow([self.btn_goto, self.btn_signed, self.btn_trust, self.btn_copy,
+                                          self.btn_report])
+        lay.addWidget(self.action_buttons)
         self._next_index = 0
         self.btn_verify.clicked.connect(lambda: self.view and self.c.verify(self.view, force=True))
         self.btn_next.clicked.connect(self.next_field)
