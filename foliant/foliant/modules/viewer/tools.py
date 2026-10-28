@@ -14,6 +14,7 @@ from foliant.api import (
 )
 
 TRANSLATIONS = {
+    "istantanea.png": "snapshot.png",
     "Lente": "Magnifier",
     "Ingrandisce la zona sotto il cursore": "Magnifies the area under the cursor",
     "Zoom area": "Zoom to area",
@@ -427,7 +428,7 @@ class ToolsController:
     def save_image(self, view: DocumentView, page: int, rect: pymupdf.Rect, path: str | None = None,
                    dpi: int | None = None) -> str | None:
         if path is None:
-            path = self.ctx.ask_save_path(_("Salva immagine"), "istantanea.png",
+            path = self.ctx.ask_save_path(_("Salva immagine"), _("istantanea.png"),
                                           "PNG (*.png);;JPEG (*.jpg *.jpeg);;TIFF (*.tif *.tiff)", ".png")
         if not path:
             return None

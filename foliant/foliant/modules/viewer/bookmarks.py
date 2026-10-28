@@ -19,6 +19,7 @@ from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations,
 from . import engine as E
 
 TRANSLATIONS = {
+    "{stem} - segnalibri.txt": "{stem} - bookmarks.txt",
     "Segnalibri": "Bookmarks",
     "Aggiungi segnalibro": "Add bookmark",
     "Rinomina": "Rename",
@@ -720,7 +721,7 @@ def _bookmark_tools(panel_cls):
             return None
         if path is None:
             stem = self.view.document.display_name.rsplit(".", 1)[0]
-            path = self.ctx.ask_save_path(_("Esporta segnalibri"), f"{stem} - segnalibri.txt",
+            path = self.ctx.ask_save_path(_("Esporta segnalibri"), _("{stem} - segnalibri.txt").format(stem=stem),
                                           _("Testo (*.txt)"), ".txt")
         if not path:
             return None

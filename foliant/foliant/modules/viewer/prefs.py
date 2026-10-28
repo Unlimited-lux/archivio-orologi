@@ -18,6 +18,7 @@ from foliant.api import (
 )
 
 TRANSLATIONS = {
+    "foliant-impostazioni.ini": "foliant-settings.ini",
     "Preferenze di visualizzazione…": "View preferences…",
     "Preferenze di visualizzazione": "View preferences",
     "Layout predefinito": "Default layout",
@@ -249,7 +250,7 @@ class PrefsController:
         return n
 
     def export_dialog(self) -> None:
-        path = self.ctx.ask_save_path(_("Esporta impostazioni…"), "foliant-impostazioni.ini",
+        path = self.ctx.ask_save_path(_("Esporta impostazioni…"), _("foliant-impostazioni.ini"),
                                       _("Impostazioni (*.ini)"), ".ini")
         if path:
             atomic_write(path, self.export_text().encode("utf-8"))

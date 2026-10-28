@@ -25,6 +25,7 @@ from .engine import (
 )
 
 TRANSLATIONS = {
+    "risultati.csv": "results.csv",
     "Cerca": "Find",
     "Cerca nel documento": "Find in document",
     "Cerca nel documento…": "Find in document…",
@@ -665,7 +666,7 @@ class SearchController(QObject):
         if not self.hits or self.view is None:
             return None
         if path is None:
-            path = self.ctx.ask_save_path(_("Esporta risultati"), "risultati.csv", "CSV (*.csv)", ".csv")
+            path = self.ctx.ask_save_path(_("Esporta risultati"), _("risultati.csv"), "CSV (*.csv)", ".csv")
         if not path:
             return None
         import csv
