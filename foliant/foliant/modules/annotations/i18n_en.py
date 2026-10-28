@@ -146,6 +146,10 @@ EN: dict[str, str] = {
         "Annotations can only be pasted into the same document.",
     "Le annotazioni erano nascoste: sono di nuovo visibili.": "Annotations were hidden: they are visible again.",
     "Sola lettura": "Read only", "Contenuto bloccato": "Locked contents", "Cancellazione": "Deletion",
-    "Sostituzione": "Replacement",
+    "Sostituzione": "Replacement", "Calibra da un segmento": "Calibrate from a segment",
+    "Esporta misure (CSV)…": "Export measurements (CSV)…", "Esporta misure": "Export measurements",
+    "Il documento non contiene misure.": "The document has no measurements.", "misure": "measurements",
+    "Personalizzati": "Custom", "Nessun timbro personalizzato": "No custom stamps", "Rimuovi": "Remove",
+    "Protocollo": "Protocol", "Protocollo n. {contatore} del {data}": "Protocol no. {contatore} of {data}", "Sposta vertice": "Move vertex", "Vertice inesistente.": "No such vertex.",
 }
 EN.pop("Gomma ", None)

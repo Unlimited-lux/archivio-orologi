@@ -13,7 +13,7 @@ from .controller import Controller
 from .i18n_en import EN
 from .panels import CommentsPanel, PropertiesPanel, build_annotation_menu
 from .tools import (
-    AttachmentTool, CalloutTool, CaretTool, EraserTool, InkTool, NoteTool, PolyTool, ReplaceTool, SelectAnnotTool,
+    AttachmentTool, CalibrateTool, CalloutTool, CaretTool, EraserTool, InkTool, NoteTool, PolyTool, ReplaceTool, SelectAnnotTool,
     ShapeTool, StampTool, TextBoxTool, TextMarkupTool, TypewriterTool, paint_selection,
 )
 
@@ -55,6 +55,7 @@ class AnnotationsModule:
             engine.DISTANCE: ShapeTool(self.ctrl, engine.DISTANCE),
             engine.PERIMETER: PolyTool(self.ctrl, engine.PERIMETER),
             engine.AREA: PolyTool(self.ctrl, engine.AREA),
+            "calibrate": CalibrateTool(self.ctrl),
         }
         self.tools["area-highlight"].area_mode = True
         self.actions: dict[str, QAction] = {}
@@ -113,7 +114,7 @@ class AnnotationsModule:
             ("distance", engine.DISTANCE, _("Distanza"), "ruler"),
             ("perimeter", engine.PERIMETER, _("Perimetro"), "spline"),
             ("area-measure", engine.AREA, _("Area"), "land-plot"),
-        ], extra=lambda m: m.addAction(_("Scala di misura…"), lambda: ui_actions.set_scale(self.ctrl))))
+        ], extra=self._measure_extra))
         mode.add_separator()
         mode.add_widget(self._commands_button())
         mode.entered.connect(self._on_enter)
@@ -171,6 +172,11 @@ class AnnotationsModule:
         button.setDefaultAction(first)
         return button
 
+    def _measure_extra(self, menu: QMenu) -> None:
+        menu.addAction(_("Scala di misura…"), lambda: ui_actions.set_scale(self.ctrl))
+        menu.addAction(_("Calibra da un segmento"), lambda: self.activate("calibrate"))
+        menu.addAction(_("Esporta misure (CSV)…"), lambda: ui_actions.export_measures(self.ctrl))
+
     def _eraser_options(self, menu: QMenu) -> None:
         eraser = self.tools["eraser"]
         whole = menu.addAction(_("Cancella tratti interi"))
@@ -204,6 +210,8 @@ class AnnotationsModule:
         for label, template, color in engine.DYNAMIC_STAMPS:
             dyn.addAction(_(template), lambda _c=False, t=label, tpl=template, c=color:
                           self.use_stamp(engine.StampSpec(_(t), c), template=_(tpl)))
+        self.custom_menu = menu.addMenu(_("Personalizzati"))
+        self.custom_menu.aboutToShow.connect(self._fill_custom_stamps)
         menu.addSeparator()
         menu.addAction(_("Da immagine…"), self._image_stamp)
         button.setMenu(menu)
@@ -269,7 +277,25 @@ class AnnotationsModule:
     def _image_stamp(self) -> None:
         res = ui_actions.choose_image_stamp(self.ctrl)
         if res is not None:
+            self.ctrl.add_custom_stamp(res[1], res[0])   # resta nella libreria «Personalizzati»
             self.use_stamp(None, image=res[0], name=res[1])
+
+    def _fill_custom_stamps(self) -> None:
+        import base64
+        m = self.custom_menu
+        m.clear()
+        stamps = self.ctrl.custom_stamps()
+        if not stamps:
+            a = m.addAction(_("Nessun timbro personalizzato"))
+            a.setEnabled(False)
+            return
+        for d in stamps:
+            data = base64.b64decode(d["png"])
+            m.addAction(d["name"], lambda _c=False, img=data, n=d["name"]: self.use_stamp(None, image=img, name=n))
+        m.addSeparator()
+        rm = m.addMenu(_("Rimuovi"))
+        for d in stamps:
+            rm.addAction(d["name"], lambda _c=False, n=d["name"]: self.ctrl.remove_custom_stamp(n))
 
     def _sync_actions(self, tool) -> None:
         for key, act in self.actions.items():

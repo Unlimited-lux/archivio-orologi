@@ -262,6 +262,27 @@ def choose_image_stamp(ctrl: "Controller") -> tuple[bytes, str] | None:
     return data, os.path.splitext(os.path.basename(path))[0]
 
 
+def export_measures(ctrl: "Controller") -> str | None:
+    view = ctrl.view()
+    if view is None:
+        return None
+    if not any(i.kind in engine.MEASURE_KINDS for i in ctrl.annotations()):
+        ctrl.ctx.info(_("Esporta misure"), _("Il documento non contiene misure."))
+        return None
+    path = ctrl.ctx.ask_save_path(_("Esporta misure"), _stem(ctrl) + " - " + _("misure") + ".csv", "CSV (*.csv)",
+                                  default_suffix=".csv")
+    if not path:
+        return None
+    with ENGINE_LOCK:
+        data = engine.measures_csv(view.document.pdf).encode("utf-8")
+    try:
+        atomic_write(path, data)
+    except Exception as e:
+        ctrl.ctx.error(_("Esporta misure"), str(e))
+        return None
+    return path
+
+
 def set_scale(ctrl: "Controller") -> engine.Scale | None:
     scale = dialogs.ask_scale(ctrl.view(), ctrl.scale)
     if scale is not None:

@@ -23,6 +23,9 @@ if TYPE_CHECKING:
     from .controller import Controller
 
 HANDLE = 6.0   # lato delle maniglie in pixel
+VERTEX_BASE = 100   # maniglie dei vertici: VERTEX_BASE + indice
+VERTEX_KINDS = (engine.LINE, engine.ARROW, engine.POLYGON, engine.POLYLINE, engine.CLOUD, engine.DISTANCE,
+                engine.PERIMETER, engine.AREA)
 
 
 def qcolor(c, alpha: float = 1.0) -> QColor:
@@ -160,6 +163,11 @@ class SelectAnnotTool(SelectTextTool):
         if info is None or info.locked or self.ctrl.is_text_anchored(info):
             return None
         tol = HANDLE / max(view.zoom * 96 / 72, 0.1)
+        for i, v in enumerate(self.ctrl.vertices(page, xref, view=view)):
+            if abs(v.x - ev.point.x) <= tol and abs(v.y - ev.point.y) <= tol:
+                return VERTEX_BASE + i
+        if info.kind in VERTEX_KINDS:
+            return None
         for i, h in enumerate(_handles(info.rect)):
             if abs(h.x - ev.point.x) <= tol and abs(h.y - ev.point.y) <= tol:
                 return i
@@ -264,7 +272,13 @@ class SelectAnnotTool(SelectTextTool):
             drag, self._drag = self._drag, None
             if drag["moved"] and "point" in drag:
                 d = drag["point"] - drag["start"]
-                if drag["handle"] is None:
+                if drag["handle"] is not None and drag["handle"] >= VERTEX_BASE:
+                    page, xref, _r = drag["items"][0]
+                    idx = drag["handle"] - VERTEX_BASE
+                    verts = self.ctrl.vertices(page, xref, view=view)
+                    if idx < len(verts):
+                        self.ctrl.move_vertex(page, xref, idx, verts[idx] + d)
+                elif drag["handle"] is None:
                     self.ctrl.move(d.x, d.y, [(p, x) for p, x, _r in drag["items"]])
                 else:
                     page, xref, rect = drag["items"][0]
@@ -343,6 +357,14 @@ class SelectAnnotTool(SelectTextTool):
             d = self._drag["point"] - self._drag["start"]
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(_cosmetic(accent, 1.5, dashed=True))
+            if self._drag["handle"] is not None and self._drag["handle"] >= VERTEX_BASE:
+                page_, xref_, _r = self._drag["items"][0]
+                verts = self.ctrl.vertices(page_, xref_, view=view)
+                idx = self._drag["handle"] - VERTEX_BASE
+                if idx < len(verts):
+                    verts[idx] = verts[idx] + d
+                    painter.drawPolyline(QPolygonF([QPointF(v.x, v.y) for v in verts]))
+                return
             for _p, _x, rect in self._drag["items"]:
                 if self._drag["handle"] is None:
                     r = rect + (d.x, d.y, d.x, d.y)
@@ -406,8 +428,11 @@ def paint_selection(ctrl: "Controller", view, painter: QPainter, page: int) -> N
             grey = theme.color("text_muted")
             painter.setPen(_cosmetic(grey if info.locked else accent, 1))
             painter.setBrush(theme.color("surface"))
-            for h in _handles(r):
-                painter.drawRect(QRectF(h.x - hs / 2, h.y - hs / 2, hs, hs))
+            for v in ctrl.vertices(p, xref, view=view):
+                painter.drawEllipse(QPointF(v.x, v.y), hs * 0.6, hs * 0.6)
+            if info.kind not in VERTEX_KINDS:
+                for h in _handles(r):
+                    painter.drawRect(QRectF(h.x - hs / 2, h.y - hs / 2, hs, hs))
 
 
 # ======================================================================== markup su testo
@@ -996,7 +1021,9 @@ class StampTool(AnnotTool):
             spec = self.spec or engine.StampSpec(_("Approvato"), name="Approved")
             if self.template:
                 filename = view.document.display_name
-                text = engine.fill_template(self.template, author=self.ctrl.author(), filename=filename, page=page)
+                counter = self.ctrl.next_counter(self.template) if "{contatore}" in self.template else None
+                text = engine.fill_template(self.template, author=self.ctrl.author(), filename=filename, page=page,
+                                            counter=counter)
                 spec = engine.StampSpec(text, spec.color, "", spec.name)
             xref = self.ctrl.apply(_("Aggiungi timbro"), engine.create_stamp, page, point, spec, self.style(),
                                    self.ctrl.author())
@@ -1116,3 +1143,28 @@ class ReplaceTool(TextMarkupTool):
         if xref is not None:
             self.ctrl.select([(sel.page, xref)], view)
         return xref
+
+
+class CalibrateTool(_DragTool):
+    """Calibrazione della scala: segmento di lunghezza nota (ANN-30)."""
+
+    kind = "calibrate"
+
+    def finish(self, view, page, a, b, mods):
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            b = _snap45(a, b)
+        length = abs(b - a)
+        if length < 1:
+            return
+        scale = dialogs.ask_scale(view, self.ctrl.scale, calibrate_points=length)
+        if scale is None:
+            return
+        self.ctrl.scale = scale
+        self.ctrl.page_scales.clear()
+        self.ctrl.ctx.status(_("Scala: {s}").format(s=scale.text()))
+        self.ctrl.ctx.set_tool(SelectAnnotTool.shared(self.ctrl))
+
+    def paint(self, view, painter, page):
+        if self._start and self._start[0] == page and self._end is not None:
+            painter.setPen(_cosmetic(theme.color("accent"), 2, dashed=True))
+            painter.drawLine(QPointF(self._start[1].x, self._start[1].y), QPointF(self._end.x, self._end.y))

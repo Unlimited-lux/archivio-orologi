@@ -127,6 +127,32 @@ class Controller(QObject):
         self.tool_kind = kind
         self.toolKindChanged.emit(kind)
 
+    def next_counter(self, template: str) -> int:
+        """Contatore dei timbri dinamici: persistente, mai decrementato (nemmeno da Annulla)."""
+        import hashlib
+        key = "annotations/counter/" + hashlib.sha1(template.encode()).hexdigest()[:12]
+        value = int(self.ctx.settings().value(key, 0) or 0) + 1
+        self.ctx.settings().setValue(key, value)
+        return value
+
+    def custom_stamps(self) -> list[dict]:
+        raw = self.ctx.settings().value("annotations/custom_stamps", "")
+        try:
+            data = json.loads(str(raw)) if raw else []
+            return [d for d in data if isinstance(d, dict) and d.get("name") and d.get("png")]
+        except Exception:
+            return []
+
+    def add_custom_stamp(self, name: str, image: bytes) -> None:
+        import base64
+        stamps = [d for d in self.custom_stamps() if d["name"] != name]
+        stamps.append({"name": name, "png": base64.b64encode(image).decode("ascii")})
+        self.ctx.settings().setValue("annotations/custom_stamps", json.dumps(stamps))
+
+    def remove_custom_stamp(self, name: str) -> None:
+        stamps = [d for d in self.custom_stamps() if d["name"] != name]
+        self.ctx.settings().setValue("annotations/custom_stamps", json.dumps(stamps))
+
     def scale_for(self, page: int) -> engine.Scale:
         return self.page_scales.get(page, self.scale)
 
@@ -324,6 +350,19 @@ class Controller(QObject):
             return True
 
         return bool(self.apply(_("Ridimensiona annotazione"), run))
+
+    def move_vertex(self, page: int, xref: int, index: int, point) -> bool:
+        info = self.info(page, xref)
+        if info is None:
+            return False
+        if info.locked:
+            self.ctx.status(_("Annotazione bloccata: non si può spostare."))
+            return False
+        return bool(self.apply(_("Sposta vertice"), lambda pdf: engine.set_vertex(pdf, page, xref, index, point)
+                               or True))
+
+    def vertices(self, page: int, xref: int, view=None) -> list:
+        return self.read(engine.vertex_points, page, xref, view=view) or []
 
     def is_text_anchored(self, info: engine.AnnotInfo) -> bool:
         if info.kind not in engine.MARKUP_KINDS:

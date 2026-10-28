@@ -439,3 +439,108 @@ def test_context_menu_on_text_selection(comments):
     [a for a in sub.actions() if a.text() == "Evidenzia"][0].trigger()
     assert module.ctrl.annotations()[0].kind == engine.HIGHLIGHT
 
+
+
+def test_ann20_drag_vertex(comments):
+    """ANN-20: trascinando il secondo vertice di una polilinea cambia solo quella coppia e /Rect."""
+    window, view, module = comments
+    pts = [(100, 400), (200, 420), (300, 400), (400, 450)]
+    xref = module.ctrl.apply("p", engine.create_shape, 0, engine.POLYLINE, pts, engine.Style(width=1), "A")
+    module.activate("select")
+    click(view, 0, 150, 410)
+    assert module.ctrl.selection == [(0, xref)]
+    drag(view, 0, (200, 420), (220, 480))
+    verts = module.ctrl.vertices(0, xref)
+    assert abs(verts[1].x - 220) < 0.6 and abs(verts[1].y - 480) < 0.6
+    for i in (0, 2, 3):
+        assert abs(verts[i].x - pts[i][0]) < 0.1 and abs(verts[i].y - pts[i][1]) < 0.1
+    assert module.ctrl.info(0, xref).rect.y1 >= 480
+
+
+def test_ann17_move_tip_only(comments, monkeypatch):
+    """ANN-17: spostando solo la punta la casella non cambia posizione."""
+    window, view, module = comments
+    xref = module.ctrl.apply("c", engine.create_freetext, 0, (200, 200, 350, 260), "Nota", engine.Style(), "A",
+                             callout=[(100, 100), (150, 230), (200, 230)])
+    with view.document.lock:
+        page = view.document.pdf[0]
+        before = engine._freetext_inner(page, page.load_annot(xref))
+    assert module.ctrl.move_vertex(0, xref, 0, (80, 150))
+    with view.document.lock:
+        page = view.document.pdf[0]
+        after = engine._freetext_inner(page, page.load_annot(xref))
+    assert abs(after.x0 - before.x0) < 0.5 and abs(after.y0 - before.y0) < 0.5
+    tip = module.ctrl.vertices(0, xref)[0]
+    assert abs(tip.x - 80) < 0.5 and abs(tip.y - 150) < 0.5
+
+
+def test_ann31_measure_updates_when_vertex_moves(comments):
+    """ANN-31: spostando un estremo raddoppiandone la lunghezza il valore raddoppia."""
+    window, view, module = comments
+    xref = module.ctrl.apply("m", engine.create_measure, 0, engine.DISTANCE, [(100, 100), (200, 100)],
+                             engine.Style(), engine.Scale.calibrate(100, 1, "m"), "A")
+    assert module.ctrl.info(0, xref).contents == "1,00 m"
+    module.ctrl.move_vertex(0, xref, 1, (300, 100))
+    assert module.ctrl.info(0, xref).contents == "2,00 m"
+
+
+def test_ann25_counter_never_decrements(comments):
+    """ANN-25: contatore 001, 002, 003; dopo Annulla e nuova apposizione 004."""
+    window, view, module = comments
+    tpl = "Protocollo n. {contatore} del {data}"
+    for i, y in enumerate((200, 300, 400)):
+        module.use_stamp(engine.StampSpec("Protocollo"), template=tpl)
+        click(view, 0, 300, y)
+    texts = sorted(i.contents for i in module.ctrl.annotations())
+    assert [t.split()[2] for t in texts] == ["001", "002", "003"]
+    view.document.undo()
+    module.use_stamp(engine.StampSpec("Protocollo"), template=tpl)
+    click(view, 0, 300, 600)
+    texts = sorted(i.contents for i in module.ctrl.annotations())
+    assert [t.split()[2] for t in texts] == ["001", "002", "004"]
+
+
+def test_ann26_custom_stamp_library(comments, tmp_path, monkeypatch):
+    """ANN-26: timbro da PNG con trasparenza salvato in libreria e disponibile dopo il riavvio."""
+    window, view, module = comments
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20), 1)
+    pix.clear_with(0)
+    png = tmp_path / "logo.png"
+    png.write_bytes(pix.tobytes("png"))
+    monkeypatch.setattr(dialogs, "ask_open_file", lambda *a, **k: str(png))
+    module._image_stamp()
+    click(view, 0, 300, 300)
+    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["logo"]
+    from foliant.modules.annotations.controller import Controller
+    assert [d["name"] for d in Controller(window.ctx).custom_stamps()] == ["logo"]
+    doc = saved(window, view, tmp_path)
+    st, = annots(doc, 0, "Stamp")
+    assert key_of(doc, st.xref, "IT")[1] == "/StampImage"
+
+
+def test_ann30_calibrate_tool(comments, monkeypatch):
+    """ANN-30: segmento di 100 pt calibrato come 5 m; una misura di 50 pt vale «2,50 m»."""
+    window, view, module = comments
+    monkeypatch.setattr(dialogs, "ask_scale",
+                        lambda parent, scale, calibrate_points=None: engine.Scale.calibrate(calibrate_points, 5, "m"))
+    module.activate("calibrate")
+    drag(view, 0, (100, 300), (200, 300))
+    module.activate(engine.DISTANCE)
+    drag(view, 0, (100, 400), (150, 400))
+    assert module.ctrl.annotations()[0].contents == "2,50 m"
+
+
+def test_ann33_measures_csv(comments):
+    """ANN-33: CSV con intestazione e una riga per misura."""
+    import csv
+    import io
+    window, view, module = comments
+    sc = engine.Scale.calibrate(100, 1, "m")
+    for kind, pts in ((engine.DISTANCE, [(100, 100), (200, 100)]), (engine.PERIMETER, [(100, 200), (200, 200), (200, 250)]),
+                      (engine.AREA, [(100, 300), (200, 300), (200, 400), (100, 400)])):
+        module.ctrl.apply("m", engine.create_measure, 0, kind, pts, engine.Style(), sc, "A")
+    with view.document.lock:
+        rows = list(csv.reader(io.StringIO(engine.measures_csv(view.document.pdf))))
+    assert rows[0][0] == "Pagina" and len(rows) == 4
+    assert [r[3] for r in rows[1:]] == ["1,00 m", "1,50 m", "1,00 m²"]
+    assert float(rows[2][2]) == 1.5

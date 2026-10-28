@@ -962,13 +962,15 @@ DYNAMIC_STAMPS = [
     ("Approvato", "Approvato da {autore} il {data}", _GREEN),
     ("Verificato", "Verificato da {autore} il {data} {ora}", _GREEN),
     ("Pagato", "Pagato il {data}", _GREEN),
+    ("Protocollo", "Protocollo n. {contatore} del {data}", _BLUE),
 ]
 
 
 def fill_template(template: str, *, author: str = "", when: datetime | None = None, filename: str = "",
-                  page: int | None = None, date_format: str = "%d/%m/%Y") -> str:
+                  page: int | None = None, date_format: str = "%d/%m/%Y", counter: int | None = None) -> str:
     when = when or datetime.now()
     values = {"{autore}": author or "", "{nome}": author or "", "{data}": when.strftime(date_format),
+              "{contatore}": f"{counter:03d}" if counter is not None else "{contatore}",
               "{ora}": when.strftime("%H:%M"), "{file}": filename,
               "{pagina}": str(page + 1) if page is not None else ""}
     for k, v in values.items():
@@ -1215,8 +1217,10 @@ class AnnotInfo:
 
     @property
     def label(self) -> str:
-        if self.kind in (REPLACE, TYPEWRITER):
-            return SUBJECTS[self.kind] if self.contents or self.kind == TYPEWRITER else "Cancellazione"
+        if self.kind == REPLACE:
+            return SUBJECTS[REPLACE] if self.contents else "Cancellazione"
+        if self.kind in (CALLOUT, ARROW, CLOUD, DISTANCE, PERIMETER, AREA, TYPEWRITER):
+            return SUBJECTS[self.kind]
         return TYPE_LABELS.get(self.type, self.type)
 
 
@@ -1692,6 +1696,57 @@ def _set_callout(pdf, page, xref, inner: pymupdf.Rect, pts: Sequence[pymupdf.Poi
     for p in pts:
         flat.extend(to_pdf_point(page, p.x, p.y))
     pdf.xref_set_key(xref, "CL", "[" + " ".join(f"{v:.2f}" for v in flat) + "]")
+
+
+VERTEX_TYPES = (pymupdf.PDF_ANNOT_LINE, pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_ANNOT_POLY_LINE)
+
+
+def vertex_points(pdf: pymupdf.Document, page_no: int, xref: int) -> list[pymupdf.Point]:
+    """Punti modificabili: vertici di linee e poligoni, punta dei richiami."""
+    page = pdf[page_no]
+    annot = find_annot(page, xref)
+    if annot is None:
+        return []
+    if annot.type[0] in VERTEX_TYPES:
+        return [pymupdf.Point(v) for v in annot.vertices or []]
+    if annot.type[0] == pymupdf.PDF_ANNOT_FREE_TEXT and _intent(pdf, xref) == "FreeTextCallout":
+        cl = _array(pdf, xref, "CL")
+        if cl and len(cl) >= 2:
+            return [pymupdf.Point(*from_pdf_point(page, cl[0], cl[1]))]
+    return []
+
+
+def set_vertex(pdf: pymupdf.Document, page_no: int, xref: int, index: int, point) -> None:
+    """Sposta un vertice (o la punta di un richiamo, indice 0) lasciando invariato il resto."""
+    page = pdf[page_no]
+    p = pymupdf.Point(point)
+    with unrotated(page):
+        annot = get_annot(page, xref)
+        if annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
+            raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
+        t = annot.type[0]
+        if t in VERTEX_TYPES:
+            pts = [pymupdf.Point(v) for v in annot.vertices or []]
+            if not 0 <= index < len(pts):
+                raise AnnotationError("Vertice inesistente.")
+            pts[index] = p
+            _set_vertices(annot, pts)
+            touch(annot)
+            _dirty_update(annot)
+        elif t == pymupdf.PDF_ANNOT_FREE_TEXT:
+            cl = _array(pdf, xref, "CL") or []
+            pts = [pymupdf.Point(*from_pdf_point(page, cl[i], cl[i + 1])) for i in range(0, len(cl) - 1, 2)]
+            if not pts:
+                raise AnnotationError("Vertice inesistente.")
+            inner = _freetext_inner(page, annot)
+            pts[0] = p
+            _set_callout(pdf, page, xref, inner, pts)
+            annot = get_annot(page, xref)
+            touch(annot)
+            refresh_freetext(pdf, page_no, xref)
+        else:
+            raise AnnotationError("Vertice inesistente.")
+    update_measure(pdf, page_no, xref)
 
 
 def move_annot(pdf: pymupdf.Document, page_no: int, xref: int, dx: float, dy: float) -> None:
@@ -2476,6 +2531,30 @@ def summary_text(pdf: pymupdf.Document, title: str = "") -> str:
         for author, date, text in r["risposte"]:
             out.append(f"    ↳ {author} ({date}): {text}")
     return "\n".join(out) + "\n"
+
+
+def measures_csv(pdf: pymupdf.Document, sep: str = ",") -> str:
+    """Tutte le misure in CSV: pagina, tipo, valore numerico, valore formattato, unità, scala, autore, data."""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=sep)
+    w.writerow(["Pagina", "Tipo", "Valore", "Valore formattato", "Unità", "Scala", "Autore", "Data"])
+    for a in list_annotations(pdf):
+        if a.kind not in MEASURE_KINDS:
+            continue
+        page = pdf[a.page]
+        annot = find_annot(page, a.xref)
+        scale = scale_of(pdf, a.xref) or Scale()
+        pts = [pymupdf.Point(v) for v in (annot.vertices or [])] if annot else []
+        if a.kind == AREA:
+            value = scale.area(polygon_area(pts))
+        else:
+            value = scale.length(polyline_length(pts))
+        w.writerow([a.page + 1, SUBJECTS[a.kind], f"{value:.4f}", a.contents, scale.unit, scale.text(), a.author,
+                    format_date(a.created)])
+    return buf.getvalue()
 
 
 def summary_csv(pdf: pymupdf.Document) -> str:
