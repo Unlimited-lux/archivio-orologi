@@ -168,7 +168,7 @@ def _build_all(qtbot, settings, tmp_path, id_a, monkeypatch):
     from foliant.modules.sign import graphic as g
     lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]]))), "Mario")
     for dlg in (ui_create.CreateSignatureDialog(win, default_name="Mario Rossi"),
-                ui_library.LibraryDialog(lib, win),
+                ui_library.LibraryDialog(lib, win, controller=c),
                 ui_digital.DigitalSignDialog(win, c),
                 ui_digital.DigitalSignDialog(win, c, certify=True),
                 ui_digital.DigitalSignDialog(win, c, visible=False),
@@ -176,7 +176,8 @@ def _build_all(qtbot, settings, tmp_path, id_a, monkeypatch):
                 ui_digital.SelfSignedDialog(win, c),
                 ui_digital.IDsDialog(win, c),
                 ui_digital.RepeatDialog(win, 10, 0, preview=lambda pages, anchor: []),
-                ui_digital.SignPreferences(win, c)):
+                ui_digital.SignPreferences(win, c),
+                ui_library.SyncDialog(lib, c, win)):
         qtbot.addWidget(dlg)
         widgets.append(dlg)
         if isinstance(dlg, ui_create.CreateSignatureDialog):

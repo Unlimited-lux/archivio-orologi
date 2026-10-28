@@ -368,9 +368,11 @@ class SignatureLibrary:
     def add(self, item: SignatureItem, name: str | None = None) -> LibraryEntry:
         return self.add_raw(item, name, None)
 
-    def add_raw(self, item: SignatureItem, name: str | None, raw: bytes | None) -> LibraryEntry:
+    def add_raw(self, item: SignatureItem, name: str | None, raw: bytes | None, *,
+                entry_id: str | None = None, created: str | None = None) -> LibraryEntry:
         """Aggiunge un elemento; `raw` (se dato) sono i byte già serializzati, così l'impronta
-        SHA-256 resta identica a quella d'origine (importazione)."""
+        SHA-256 resta identica a quella d'origine (importazione). `entry_id` e `created` conservano
+        identità e data di un elemento che arriva da un altro dispositivo (sincronizzazione)."""
         with self._modify():
             self._reload_for_write()
             if len(self.entries(item.kind)) >= MAX_PER_KIND:
@@ -378,13 +380,15 @@ class SignatureLibrary:
             data, ext = self.serialize(item)
             if raw is not None:
                 data = raw
-            eid = uuid.uuid4().hex
+            eid = entry_id or uuid.uuid4().hex
+            if self.entry(eid) is not None:
+                raise LibraryError(_("Elemento già presente nella libreria."))
             default_name = _("Iniziali") if item.kind == "iniziali" else _("Firma")
             n = len(self.entries(item.kind)) + 1
             e = LibraryEntry(
                 id=eid, name=(name or item.name or f"{default_name} {n}").strip()[:80], kind=item.kind,
                 origin=item.origin, color=item.color,
-                created=_dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+                created=created or _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
                 sha256=hashlib.sha256(data).hexdigest(), file=f"{eid}.{ext}" + (".enc" if self._kdf else ""),
                 default=not self.entries(item.kind))
             self._write_file(e, data)
@@ -480,7 +484,7 @@ TRANSLATIONS_EN = {
     "Il file dell'elemento «{name}» non è disponibile.": "The file of item “{name}” is not available.",
     "La libreria contiene già {n} elementi di questo tipo.": "The library already contains {n} items of this type.",
     "Il nome non può essere vuoto.": "The name cannot be empty.",
-    "{name} (copia)": "{name} (copy)",
+    "{name} (copia)": "{name} (copy)", "Elemento già presente nella libreria.": "Item already in the library.",
     "Indica una password per il pacchetto.": "Enter a password for the package.",
     "Impossibile leggere il pacchetto: {e}": "Cannot read the package: {e}",
     "Il file non è un pacchetto di firme di Foliant.": "The file is not a Foliant signature package.",

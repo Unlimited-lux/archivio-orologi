@@ -44,6 +44,7 @@ class _Bridge(QObject):
 class SignController(QObject):
     stateChanged = Signal(object)            # vista
     statusSelected = Signal(object, object)  # vista, SignatureStatus da selezionare nel pannello
+    librarySynced = Signal()                 # SIG-07: la sincronizzazione ha cambiato la libreria
 
     def __init__(self, ctx):
         super().__init__(ctx)
@@ -58,6 +59,17 @@ class SignController(QObject):
         ctx.documentChanged.connect(self._on_changed)
         ctx.add_change_guard(self._change_guard)
         self.panel = None                     # SignaturesPanel, impostato in register()
+        # SIG-07: sincronizzazione periodica della libreria con la cartella scelta
+        from .sync import INTERVAL_S
+        self.sync_status = ""                 # testo per l'utente: «attiva…» o «sospesa…»
+        self._sync_pass: str | None = None    # passphrase della sessione (mai su file)
+        self._sync_timer = QTimer(self)
+        self._sync_timer.setInterval(INTERVAL_S * 1000)
+        self._sync_timer.timeout.connect(lambda: self.sync_library(interactive=False))
+        self._sync_start = QTimer(self)       # timer figlio: non scatta se il controller è già distrutto
+        self._sync_start.setSingleShot(True)
+        self._sync_start.timeout.connect(self._start_sync)
+        self._sync_start.start(3000)
         self.stateChanged.connect(self.update_banner)
         # SIG-20: avviso per le firme obbligatorie mancanti prima di stampa e «Salva con nome»
         if hasattr(ctx, "add_guard"):
@@ -145,7 +157,77 @@ class SignController(QObject):
         if lib is None:
             return
         from .ui_library import LibraryDialog
-        LibraryDialog(lib, self.ctx.window, self.default_name()).exec()
+        LibraryDialog(lib, self.ctx.window, self.default_name(), controller=self).exec()
+
+    # ------------------------------------------------- sincronizzazione (SIG-07)
+    SYNC_KEYRING = "foliant-sign-sync"
+
+    def sync_passphrase(self, folder: str) -> str | None:
+        if self._sync_pass:
+            return self._sync_pass
+        try:
+            import keyring
+            pw = keyring.get_password(self.SYNC_KEYRING, folder)
+        except Exception:  # noqa: BLE001 - portachiavi non disponibile
+            pw = None
+        self._sync_pass = pw
+        return pw
+
+    def remember_sync_passphrase(self, folder: str, passphrase: str) -> bool:
+        """Passphrase in memoria e nel portachiavi del desktop (False se non disponibile: andrà
+        reinserita a ogni avvio). Mai su file."""
+        self._sync_pass = passphrase
+        try:
+            import keyring
+            keyring.set_password(self.SYNC_KEYRING, folder, passphrase)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _start_sync(self) -> None:
+        lib = self.library(interactive=False)
+        from . import sync
+        if lib is not None and not lib.locked and sync.configured_folder(lib):
+            self.sync_library(interactive=False)
+            self._sync_timer.start()
+
+    def sync_library(self, interactive: bool = True):
+        """Un ciclo di sincronizzazione. Con la cartella irraggiungibile la libreria locale continua a
+        funzionare e lo stato diventa «sincronizzazione sospesa»."""
+        from . import sync
+        lib = self.library(interactive=interactive)
+        folder = sync.configured_folder(lib) if lib is not None else None
+        if not folder:
+            self._sync_timer.stop()
+            self.sync_status = ""
+            return None
+        pw = self.sync_passphrase(folder)
+        if not pw:
+            self.sync_status = _("Sincronizzazione sospesa: serve la passphrase della cartella.")
+            return None
+        was_suspended = self.sync_status.startswith(_("Sincronizzazione sospesa"))
+        try:
+            res = sync.sync(lib, pw)
+        except sync.SyncPassphraseError as e:
+            self._sync_pass = None
+            self.sync_status = _("Sincronizzazione sospesa: {e}").format(e=e)
+            return None
+        except (sync.SyncError, LibraryError) as e:
+            self.sync_status = _("Sincronizzazione sospesa: {e}").format(e=e)
+            if not was_suspended:
+                self.ctx.status(self.sync_status, 8000)
+            return None
+        from datetime import datetime
+        self.sync_status = _("Sincronizzazione attiva con {folder} (ultima alle {t}).").format(
+            folder=folder, t=datetime.now().strftime("%H:%M"))
+        if not self._sync_timer.isActive():
+            self._sync_timer.start()
+        if res.changed_local:
+            self.librarySynced.emit()
+        if res.conflicts:
+            self.ctx.status(_("Libreria firme: {n} conflitti, conservate entrambe le versioni.").format(
+                n=res.conflicts), 8000)
+        return res
 
     def start_placement(self, view, item: g.SignatureItem) -> None:
         if not self._annotations_allowed(view):
@@ -1057,6 +1139,12 @@ class SignController(QObject):
 
 
 TRANSLATIONS_EN = {
+    "Sincronizzazione sospesa: serve la passphrase della cartella.":
+        "Sync suspended: the folder passphrase is needed.",
+    "Sincronizzazione sospesa": "Sync suspended", "Sincronizzazione sospesa: {e}": "Sync suspended: {e}",
+    "Sincronizzazione attiva con {folder} (ultima alle {t}).": "Sync active with {folder} (last at {t}).",
+    "Libreria firme: {n} conflitti, conservate entrambe le versioni.":
+        "Signature library: {n} conflicts, both versions kept.",
     "Documento firmato digitalmente: le firme grafiche restano annotazioni.":
         "Digitally signed document: graphic signatures stay as annotations.",
     "Firma grafica": "Graphic signature",

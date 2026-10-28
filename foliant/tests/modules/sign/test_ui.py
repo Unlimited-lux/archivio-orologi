@@ -1304,3 +1304,55 @@ def test_library_export_import_commands(qtbot, monkeypatch, tmp_path):
     answers[:] = [("Pacchetto-2026", True)]
     res = dlg2.import_items()
     assert "Sostituisci i duplicati" in clicks[-1] and res["added"] == 5 and len(dst.entries()) == 10
+
+
+def test_library_sync_dialog_and_periodic_cycle(window, qtbot, monkeypatch, tmp_path):
+    """SIG-07: «Sincronizza con cartella» collega la libreria; il secondo profilo collegato alla stessa
+    cartella riceve le firme nel ciclo successivo (≤ 60 s) senza riavvio; cartella irraggiungibile →
+    «sincronizzazione sospesa» e la libreria locale continua a funzionare."""
+    import keyring
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+    from foliant.modules.sign import sync, ui_library
+    from foliant.modules.sign.library import SignatureLibrary
+    saved = {}
+    monkeypatch.setattr(keyring, "set_password", lambda svc, u, p: saved.__setitem__((svc, u), p))
+    monkeypatch.setattr(keyring, "get_password", lambda svc, u: saved.get((svc, u)))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    folder = tmp_path / "cartella-condivisa"
+    folder.mkdir()
+    c = _ctl(window)
+    lib = c.library(interactive=False)
+    lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (60, 12, 1)]]))), "Firma negozio")
+    answers = [("Passphrase-Negozio", True), ("Passphrase-Negozio", True)]
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: answers.pop(0))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(folder))
+    dlg = ui_library.LibraryDialog(lib, window, controller=c)
+    qtbot.addWidget(dlg)
+    sd = ui_library.SyncDialog(lib, c, dlg)
+    qtbot.addWidget(sd)
+    sd.choose_folder()
+    assert sync.configured_folder(lib) == str(folder.resolve())
+    assert list(saved.values()) == ["Passphrase-Negozio"]
+    assert c._sync_timer.isActive() and c._sync_timer.interval() <= 60_000
+    assert "attiva" in c.sync_status and "attiva" in sd.state.text()
+    # secondo profilo (altro computer) collegato alla stessa cartella
+    other = SignatureLibrary(tmp_path / "portatile")
+    sync.connect(other, folder, "Passphrase-Negozio")
+    assert [e.name for e in other.entries()] == ["Firma negozio"]
+    other.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (80, 5, 1)]]))), "Dal portatile")
+    sync.sync(other, "Passphrase-Negozio")
+    with qtbot.waitSignal(c.librarySynced, timeout=2000):
+        c._sync_timer.timeout.emit()                      # ciclo periodico
+    assert sorted(e.name for e in lib.entries()) == ["Dal portatile", "Firma negozio"]
+    assert "Dal portatile" in [dlg.list.item(i).text().replace("  ★", "") for i in range(dlg.list.count())]
+    # cartella non raggiungibile: sospesa, la libreria locale funziona
+    folder.rename(tmp_path / "staccata")
+    c._sync_timer.timeout.emit()
+    assert c.sync_status.startswith("Sincronizzazione sospesa")
+    lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (30, 9, 1)]]))), "Offline")
+    (tmp_path / "staccata").rename(folder)
+    c._sync_timer.timeout.emit()
+    assert "attiva" in c.sync_status
+    sync.sync(other, "Passphrase-Negozio")
+    assert "Offline" in [e.name for e in other.entries()]

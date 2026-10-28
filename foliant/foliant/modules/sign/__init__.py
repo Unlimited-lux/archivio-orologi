@@ -11,9 +11,9 @@ ORDER = 90
 
 
 def _translations() -> dict:
-    from . import controller, digital, graphic, library, panel, store, tools, ui_create, ui_digital, ui_library
+    from . import controller, digital, graphic, library, panel, store, sync, tools, ui_create, ui_digital, ui_library
     merged: dict = {}
-    for mod in (graphic, library, digital, store, tools, ui_create, ui_library, ui_digital, panel, controller):
+    for mod in (graphic, library, sync, digital, store, tools, ui_create, ui_library, ui_digital, panel, controller):
         merged.update(getattr(mod, "TRANSLATIONS_EN", {}))
     merged.update({
         "Firma": "Sign", "Crea firma": "Create signature", "Crea iniziali": "Create initials",
