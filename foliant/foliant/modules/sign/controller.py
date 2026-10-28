@@ -33,8 +33,6 @@ class VerifyState:
     certification: int | None = None
     warned: bool = False
     source: bytes | None = None     # byte verificati (file su disco se il documento non è modificato)
-    base: bytes | None = None       # byte del file firmato su disco: base del salvataggio incrementale
-    incremental: bool = False       # salvataggio incrementale installato sul documento
     signed_hint: bool = False
     warning_pending: bool = False       # il file contiene /ByteRange (firmato, anche se non ancora verificato)
 
@@ -329,22 +327,20 @@ class SignController(QObject):
             self.verify(view)
 
     def detect_signed(self, view) -> None:
-        """Rilevamento sincrono ed economico delle firme: installa subito il
-        salvataggio incrementale, anche prima (o senza) la verifica completa."""
+        """Rilevamento sincrono delle firme (il nucleo salva già in modo incrementale i
+        documenti firmati, NFR-09) e nuova verifica dopo ogni salvataggio."""
         doc = view.document
         st = self.state(doc)
-        if doc.path is None or doc.is_modified:
-            return
-        try:
-            data = Path(doc.path).read_bytes()
-        except OSError:
-            return
-        if b"/ByteRange" in data:
-            st.base = data
+        if getattr(doc, "has_signatures", False):
             st.signed = True
             st.signed_hint = True
-            if not st.incremental:
-                self._install_incremental_save(doc, st)
+
+        def on_doc_event(d, kind, v=view) -> None:
+            if kind == SAVED and not d.closed:
+                st.signed_hint = bool(getattr(d, "has_signatures", False))
+                self.verify(v, force=True)
+
+        doc.add_listener(on_doc_event)
 
     def _on_closed(self, view) -> None:
         self._states.pop(id(view.document), None)
@@ -371,8 +367,6 @@ class SignController(QObject):
         except Exception as e:  # documento chiuso o illeggibile
             st.error = str(e)
             return
-        if doc.path is not None and not doc.is_modified:
-            st.base = data
         if b"/Sig" not in data and b"/ByteRange" not in data:
             st.version, st.statuses, st.fields, st.signed, st.certification = doc.version, [], [], False, None
             st.source = data
@@ -424,8 +418,6 @@ class SignController(QObject):
         st.fields = result.get("fields", [])
         st.certification = result.get("certification")
         st.signed = bool(st.statuses) or st.signed_hint
-        if st.signed and st.base is not None and not st.incremental:
-            self._install_incremental_save(doc, st)
         for view in self.ctx.views():
             if view.document is doc:
                 self.stateChanged.emit(view)
@@ -450,46 +442,6 @@ class SignController(QObject):
             "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con "
             "«{action}»?").format(names=names, action=action))
 
-    # ============================================ salvataggio incrementale (SIG-21)
-    def _install_incremental_save(self, doc: Document, st: VerifyState) -> None:
-        """Per i documenti firmati «Salva» e «Salva una copia» accodano solo le
-        modifiche al file firmato (vedi CORE_REQUESTS.md, richiesta 1)."""
-        from .incremental import incremental_update
-        original_save, original_copy = doc.save, doc.save_copy
-        controller = self
-
-        def build() -> bytes:
-            try:
-                with doc.lock:
-                    return incremental_update(st.base, doc.pdf, doc.password)
-            except Exception as e:  # mai un'eccezione non gestita verso la finestra
-                raise DocumentError(_("Salvataggio incrementale non riuscito: {e}").format(
-                    e=str(e) or e.__class__.__name__)) from e
-
-        def save(path=None, **options):
-            if doc.is_protected and doc.save_options != doc.original_protection:
-                return original_save(path, **options)   # nuova protezione: riscrittura completa
-            target = Path(path) if path is not None else doc.path
-            if target is None:
-                raise DocumentError(_("Scegli dove salvare il documento."))
-            data = build()
-            atomic_write(target, data)
-            doc.path = target
-            doc._saved_state = doc._state
-            st.base = data
-            doc._notify(SAVED)
-            for v in controller.ctx.views():
-                if v.document is doc:
-                    controller.verify(v, force=True)
-
-        def save_copy(path, **options):
-            atomic_write(Path(path), build())
-
-        doc.save = save
-        doc.save_copy = save_copy
-        doc._foliant_original_save = original_save
-        st.incremental = True
-
     # =========================================================== SIG-21 avvisi
     def allowed_change(self, view, kind: str) -> bool:
         """True se una modifica del tipo indicato non invalida le firme presenti
@@ -497,10 +449,11 @@ class SignController(QObject):
         st = self.state(view)
         if not st.signed:
             return True
+        incremental = bool(getattr(view.document, "has_signatures", False))
         if kind == "annotation":
-            return st.incremental and st.certification in (None, 3)
+            return incremental and st.certification in (None, 3)
         if kind == "form":
-            return st.incremental and st.certification in (None, 2, 3)
+            return incremental and st.certification in (None, 2, 3)
         return False
 
     def confirm_invalidating(self, view, what: str, kind: str = "content") -> bool:
@@ -576,11 +529,12 @@ class SignController(QObject):
     def _content_changed(self, doc, st: VerifyState) -> bool:
         """Le modifiche consentite (annotazioni, moduli) non richiedono l'avviso
         se il salvataggio è incrementale e la certificazione le ammette."""
-        if not st.incremental or st.base is None or st.certification not in (None, 3):
+        base = getattr(doc, "original_bytes", None)
+        if not getattr(doc, "has_signatures", False) or base is None or st.certification not in (None, 3):
             return True
         from .incremental import changes_content
         with doc.lock:
-            return changes_content(st.base, doc.pdf, doc.password)
+            return changes_content(base, doc.pdf, doc.password)
 
     def open_unsigned_copy(self, view):
         from . import digital

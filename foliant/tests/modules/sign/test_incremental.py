@@ -8,7 +8,8 @@ import pytest
 
 from foliant.api import Document
 from foliant.modules.sign import digital
-from foliant.modules.sign.incremental import changes_content, incremental_update
+from foliant.core.incremental import incremental_update
+from foliant.modules.sign.incremental import changes_content
 
 
 def _signed(id_a, objstm: bool, encrypt: bool = False) -> bytes:

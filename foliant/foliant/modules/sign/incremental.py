@@ -1,18 +1,8 @@
-"""Salvataggio incrementale dei documenti firmati (soluzione locale, vedi CORE_REQUESTS.md).
+"""Classificazione delle modifiche a un documento firmato (SIG-17/SIG-21).
 
-Il documento in memoria è aperto dagli stessi byte del file firmato e le
-istantanee di annulla/ripeti conservano la numerazione degli oggetti; quindi
-basta confrontare oggetto per oggetto il documento attuale con il file originale
-e scrivere in coda (aggiornamento incrementale) solo gli oggetti cambiati o nuovi.
-I byte firmati restano un prefisso esatto del file salvato.
-
-Accorgimenti:
-- gli oggetti strutturali dell'originale (xref stream, object stream, oggetti
-  liberi) non vengono mai riscritti: le istantanee li sciolgono e altrimenti
-  verrebbero sovrascritti con `null`;
-- i flussi si confrontano sul contenuto decodificato, ignorando /Length,
-  /Filter e /DecodeParms (le istantanee sono decifrate e non compresse);
-- /Info e /Root del trailer vengono riportati se cambiano.
+Il salvataggio incrementale è del nucleo (`foliant.core.incremental`, NFR-09): qui
+resta solo ciò che il nucleo non fa, cioè stabilire se le modifiche in memoria
+toccano qualcosa oltre ad annotazioni, campi del modulo o dati di firma.
 """
 
 from __future__ import annotations
@@ -20,185 +10,10 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-from dataclasses import dataclass
 
 import pymupdf
 
-from foliant.i18n import _
-
-
-class IncrementalSaveError(Exception):
-    pass
-
-
-_STREAM_KEYS = re.compile(r"/(Length|Filter|DecodeParms)\s*(\d+\s+\d+\s+R|\[[^\]]*\]|<<.*?>>|/\w+|\d+)", re.S)
-
-
-def _obj(pdf: pymupdf.Document, xref: int) -> str | None:
-    try:
-        return pdf.xref_object(xref, compressed=True)
-    except Exception:
-        return None
-
-
-def _stream(pdf: pymupdf.Document, xref: int) -> bytes | None:
-    try:
-        return pdf.xref_stream(xref) if pdf.xref_is_stream(xref) else None
-    except Exception:
-        return None
-
-
-def _norm(obj: str | None, is_stream: bool) -> str | None:
-    if obj is None:
-        return None
-    if is_stream:
-        obj = _STREAM_KEYS.sub("", obj)
-    return re.sub(r"\s+", " ", obj).strip()
-
-
-def _structural(pdf: pymupdf.Document) -> set[int]:
-    """Oggetti dell'originale da non toccare mai: xref stream, object stream, liberi."""
-    skip = set()
-    for x in range(1, pdf.xref_length()):
-        try:
-            if pdf.xref_get_key(x, "Type")[1] in ("/XRef", "/ObjStm"):
-                skip.add(x)
-            elif _obj(pdf, x) in (None, "null"):
-                skip.add(x)
-        except Exception:
-            skip.add(x)
-    return skip
-
-
-@dataclass
-class Change:
-    xref: int
-    obj: str
-    stream: bytes | None
-    existed: bool
-    old: str | None = None
-
-
-def diff(orig: pymupdf.Document, current: pymupdf.Document) -> list[Change]:
-    """Oggetti di `current` nuovi o diversi rispetto a `orig` (stessa numerazione)."""
-    skip = _structural(orig)
-    n_orig = orig.xref_length()
-    out = []
-    for x in range(1, current.xref_length()):
-        if x in skip:
-            continue
-        cur = _obj(current, x)
-        if cur is None or cur.strip() == "null":
-            continue                                   # mai scrivere null sopra un oggetto
-        cur_stream = _stream(current, x)
-        if x < n_orig:
-            old = _obj(orig, x)
-            old_stream = _stream(orig, x)
-            if cur_stream == old_stream and _norm(cur, cur_stream is not None) == \
-                    _norm(old, old_stream is not None):
-                continue
-            out.append(Change(x, cur, cur_stream, True, old))
-        else:
-            out.append(Change(x, cur, cur_stream, False))
-    # Una pagina che torna a riferire annotazioni già presenti in una revisione
-    # precedente (es. ripeti dopo un salvataggio) deve riscriverle: altrimenti i
-    # validatori vedono riferimenti «non giustificati» nella nuova revisione.
-    changed = {c.xref for c in out}
-    extra: list[int] = []
-    for c in list(out):
-        if not c.existed or not re.search(r"/Type\s*/Page\b", c.obj):
-            continue
-        added = _annot_refs(current, c.xref) - _annot_refs(orig, c.xref)
-        for a in sorted(added):
-            for ref in (a, *_popup_ref(current, a)):
-                if ref not in changed and ref not in skip and ref < current.xref_length():
-                    changed.add(ref)
-                    extra.append(ref)
-    for x in extra:
-        obj = _obj(current, x)
-        if obj and obj.strip() != "null":
-            out.append(Change(x, obj, _stream(current, x), x < n_orig, _obj(orig, x) if x < n_orig else None))
-    return out
-
-
-def _annot_refs(pdf: pymupdf.Document, page_xref: int) -> set[int]:
-    try:
-        kind, val = pdf.xref_get_key(page_xref, "Annots")
-        if kind == "xref":
-            val = pdf.xref_object(int(val.split()[0]), compressed=True)
-        elif kind != "array":
-            return set()
-        return {int(m) for m in re.findall(r"(\d+)\s+0\s+R", val)}
-    except Exception:
-        return set()
-
-
-def _popup_ref(pdf: pymupdf.Document, xref: int) -> tuple[int, ...]:
-    try:
-        kind, val = pdf.xref_get_key(xref, "Popup")
-        return (int(val.split()[0]),) if kind == "xref" else ()
-    except Exception:
-        return ()
-
-
-def _trailer_key(pdf: pymupdf.Document, key: str) -> str:
-    try:
-        kind, val = pdf.xref_get_key(-1, key)
-    except Exception:
-        return ""
-    return val if kind == "xref" else ""
-
-
-def _open_original(path: str, password: str | None) -> pymupdf.Document:
-    try:
-        orig = pymupdf.open(path)
-    except Exception as e:
-        raise IncrementalSaveError(_("Il file originale non è leggibile.")) from e
-    if orig.needs_pass and not (password and orig.authenticate(password)):
-        orig.close()
-        raise IncrementalSaveError(_("Il file originale è protetto da password."))
-    return orig
-
-
-def incremental_update(original: bytes, current: pymupdf.Document, password: str | None = None) -> bytes:
-    """Restituisce `original` + un aggiornamento incrementale con le differenze di `current`.
-
-    Va chiamata tenendo ENGINE_LOCK. Solleva IncrementalSaveError se non è possibile.
-    """
-    with tempfile.TemporaryDirectory(prefix="foliant-incr-") as tmp:
-        path = os.path.join(tmp, "documento.pdf")
-        with open(path, "wb") as f:
-            f.write(original)
-        orig = _open_original(path, password)
-        try:
-            if orig.is_repaired:
-                raise IncrementalSaveError(_("Il file originale è danneggiato: un salvataggio incrementale non "
-                                             "garantirebbe le firme esistenti."))
-            changes = diff(orig, current)
-            trailer = {k: _trailer_key(current, k) for k in ("Info", "Root")}
-            trailer_changed = {k: v for k, v in trailer.items() if v and v != _trailer_key(orig, k)}
-            if not changes and not trailer_changed:
-                return original
-            for ch in changes:
-                while orig.xref_length() <= ch.xref:
-                    orig.get_new_xref()
-                orig.update_object(ch.xref, ch.obj)
-                if ch.stream is not None:
-                    orig.update_stream(ch.xref, ch.stream, compress=True)
-            for k, v in trailer_changed.items():
-                orig.xref_set_key(-1, k, v)
-            orig.save(path, incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP)
-        except IncrementalSaveError:
-            raise
-        except Exception as e:
-            raise IncrementalSaveError(str(e) or e.__class__.__name__) from e
-        finally:
-            orig.close()
-        with open(path, "rb") as f:
-            data = f.read()
-    if not data.startswith(original):
-        raise IncrementalSaveError(_("Il salvataggio incrementale non ha conservato i byte firmati."))
-    return data
+from foliant.core.incremental import IncrementalSaveError, _open_original, _trailer_key, diff
 
 
 def _is_allowed_object(old: str | None, new: str) -> bool:
@@ -252,13 +67,3 @@ def changes_content(original: bytes, current: pymupdf.Document, password: str | 
             return True
         finally:
             orig.close()
-
-
-TRANSLATIONS_EN = {
-    "Il file originale non è leggibile.": "The original file cannot be read.",
-    "Il file originale è protetto da password.": "The original file is password protected.",
-    "Il file originale è danneggiato: un salvataggio incrementale non garantirebbe le firme esistenti.":
-        "The original file is damaged: an incremental save would not preserve the existing signatures.",
-    "Il salvataggio incrementale non ha conservato i byte firmati.":
-        "The incremental save did not preserve the signed bytes.",
-}
