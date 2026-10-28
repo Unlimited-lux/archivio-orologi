@@ -9,7 +9,7 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
    `version`/emettere un evento dedicato dopo la rinumerazione.
    *Locale:* il modulo ascolta l'evento `SAVED` e rilegge i campi (`fill.FormFiller._on_document_event`).
 
-2. **Banner di stato del documento (UX-14).** Non c'è un'API per i banner in cima all'area
+2. **[Risolto: il modulo usa `ctx.show_banner`]** **Banner di stato del documento (UX-14).** Non c'è un'API per i banner in cima all'area
    documento. *Locale:* la barra del modulo è un widget figlio della vista posizionato con
    `setViewportMargins`. *Proposta:* `ctx.show_banner(view, id, testo, azioni, priorità)` con un
    banner alla volta e «N altri avvisi».
@@ -21,7 +21,7 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
    le finestre è stata tolta. La barra del modulo segue il tema con `changeEvent`.
    *Proposta:* `deleteLater()` delle finestre chiuse e rimozione dei listener.
 
-4. **Prima del salvataggio.** Manca un aggancio «prima di salvare» (es. `document.add_listener`
+4. **[Risolto: `ctx.add_guard("save"/"save_as")`]** **Prima del salvataggio.** Manca un aggancio «prima di salvare» (es. `document.add_listener`
    con tipo `"before_save"`): servirebbe per scrivere gli aspetti mancanti solo al salvataggio e
    per l'avviso sui campi obbligatori vuoti (FRM-09, FRM-15). *Locale:* aspetti e collegamenti
    vengono riparati all'apertura con un passo annullabile «Ripara il modulo».

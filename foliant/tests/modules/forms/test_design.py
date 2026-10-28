@@ -421,12 +421,17 @@ def test_signed_field_cannot_move(window, tmp_path, no_modal_boxes):
     assert any("firmati" in c[2] for c in no_modal_boxes)
 
 
-def test_save_warns_required_empty(window, form_pdf, tmp_path):
+def test_save_warns_required_empty(window, form_pdf, monkeypatch):
     view = open_form(window, form_pdf)
     module().import_values({"cognome": "x"}, view)
-    view.document.save(tmp_path / "bozza.pdf")
-    assert (tmp_path / "bozza.pdf").exists()
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: notes.append((text, actions)))
+    assert window.save_view(view)  # avviso non bloccante: il salvataggio avviene
+    assert pymupdf.open(form_pdf) and E.form_values(pymupdf.open(form_pdf))["cognome"] == "x"
     assert filler_of(view).last_warning == "nome"
+    assert notes and "nome" in notes[0][0]
+    notes[0][1][0][1]()  # «Vai al campo»
+    assert filler_of(view).active.name == "nome"
 
 
 def _submit_doc(tmp_path, required=False):

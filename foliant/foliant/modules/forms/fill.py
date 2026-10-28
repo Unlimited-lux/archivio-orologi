@@ -270,74 +270,6 @@ class _List(_TabMixin, QListWidget):
         self.owner.editor_focus_out(self)
 
 
-# ====================================================================== barra del modulo
-class FormBar(QFrame):
-    """Barra informativa non modale in cima alla vista."""
-
-    def __init__(self, filler: "FormFiller"):
-        super().__init__(filler.view)
-        self.filler = filler
-        self.setObjectName("formsBar")
-        self.setAutoFillBackground(True)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 4, 6, 4)
-        lay.setSpacing(6)
-        self.icon = QLabel(self)
-        lay.addWidget(self.icon)
-        self.label = QLabel(self)
-        self.label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        self.label.setWordWrap(True)
-        self.label.setMinimumWidth(160)
-        lay.addWidget(self.label, 1)
-        self.buttons: dict[str, QToolButton] = {}
-        for key, text, icon_name, slot in (
-            ("highlight", _("Evidenzia campi"), "highlighter", filler.toggle_highlight),
-            ("next", _("Campo obbligatorio successivo"), "arrow-down-to-line", filler.next_required),
-            ("reset", _("Reimposta"), "rotate-ccw", filler.reset_requested),
-            ("data", _("Importa/Esporta dati"), "arrow-down-up", filler.data_requested),
-            ("design", _("Modifica modulo"), "square-pen", filler.design_requested),
-            ("owner", _("Inserisci password del proprietario"), "key-round", filler.ask_owner_password),
-        ):
-            b = QToolButton(self)
-            b.setText(text)
-            b.setToolTip(text)
-            b.setAutoRaise(True)
-            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon if key in ("highlight", "design")
-                                 else Qt.ToolButtonStyle.ToolButtonIconOnly)
-            bind_icon(b, icon_name)
-            b.clicked.connect(lambda _c=False, s=slot: s())
-            lay.addWidget(b)
-            self.buttons[key] = b
-        self.buttons["highlight"].setCheckable(True)
-        self.close_button = QToolButton(self)
-        self.close_button.setAutoRaise(True)
-        self.close_button.setToolTip(_("Chiudi"))
-        bind_icon(self.close_button, "x")
-        self.close_button.clicked.connect(filler.close_bar)
-        lay.addWidget(self.close_button)
-        self.apply_theme()
-
-    def changeEvent(self, ev):
-        if ev.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
-            self.apply_theme()
-        super().changeEvent(ev)
-
-    def apply_theme(self) -> None:
-        if getattr(self, "_styling", False):
-            return
-        self._styling = True
-        try:
-            self._apply_theme()
-        finally:
-            self._styling = False
-
-    def _apply_theme(self) -> None:
-        self.setStyleSheet(
-            f"QFrame#formsBar {{ background: {theme.hex_color('accent_soft')}; "
-            f"border-bottom: 1px solid {theme.hex_color('border')}; }}"
-            f"QFrame#formsBar QLabel {{ color: {theme.hex_color('text')}; }}")
-
-
 # ====================================================================== controllore
 class FormFiller(QObject):
     """Compilazione dei campi su una vista."""
@@ -366,9 +298,9 @@ class FormFiller(QObject):
         self._error_label: QLabel | None = None
         self._custom_warned = False
         self._pending_patch: set[str] | None = None
-        self.bar = FormBar(self)
-        self.bar.hide()
-        self._bar_height = 0
+        self.banner_text = ""                 # testo dell'avviso del modulo (barra del nucleo, UX-14)
+        self.banner_actions: list[str] = []    # etichette delle azioni dell'avviso
+        self._banner_shown = False
         view.viewport().installEventFilter(self)
         view.installEventFilter(self)
         view.overlays.append(self.paint_overlay)
@@ -386,18 +318,14 @@ class FormFiller(QObject):
             except Exception:
                 quick = False
         if quick:
-            self.bar.label.setText(_("Analisi del modulo…"))
-            for b in self.bar.buttons.values():
-                b.hide()
-            self._set_bar_visible(True)
+            self._show_banner(_("Analisi del modulo…"), [], "info")
         QTimer.singleShot(0, self, self._initial_analysis)  # legato al filler: annullato se la vista sparisce
 
     def _alive(self) -> bool:
         """False se vista o barra sono già state distrutte (callback differiti tardivi)."""
         import shiboken6
         try:
-            return (shiboken6.isValid(self) and shiboken6.isValid(self.view) and shiboken6.isValid(self.bar)
-                    and not self.document.closed)
+            return shiboken6.isValid(self) and shiboken6.isValid(self.view) and not self.document.closed
         except RuntimeError:
             return False
 
@@ -444,12 +372,6 @@ class FormFiller(QObject):
             return False
         return isinstance(self.view.tool, (SelectTextTool, HandTool))
 
-    def _on_theme(self) -> None:
-        try:
-            self.bar.apply_theme()
-            self.view.viewport().update()
-        except RuntimeError:
-            pass
 
     def _on_content_changed(self) -> None:
         if self._pending_patch is not None:
@@ -482,12 +404,6 @@ class FormFiller(QObject):
             else:
                 self.active = again
         self.module.document_saved(self.view)
-        missing = self.state.required_empty(self.passwords)
-        if missing:
-            # FRM-15: avviso non bloccante (si può salvare una bozza)
-            names = ", ".join(dict.fromkeys(f.name for f in missing))
-            self.ctx.status(_("Salvato con campi obbligatori vuoti: {n}").format(n=names), 10000)
-            self.last_warning = names
         self.update_bar()
         self.changed.emit()
 
@@ -506,21 +422,24 @@ class FormFiller(QObject):
 
     # ------------------------------------------------------------------ barra
     def update_bar(self) -> None:
+        """Avviso del modulo nella barra di stato del documento del nucleo (UX-14)."""
         st = self.state
         if st.version < 0:
             return  # analisi iniziale non ancora fatta: resta «Analisi del modulo…»
         st.refresh()
         if not st.has_form or self.bar_closed:
-            self._set_bar_visible(False)
+            self._hide_banner()
             return
-        self.bar.icon.setPixmap(bind_pixmap("triangle-alert" if (st.xfa == "dynamic" or st.blocked) else "text-cursor-input"))
         n = len({f.name for f in st.fields})
         req = len(st.required_empty(self.passwords))
+        level = "info"
         if st.xfa == "dynamic":
             text = _("Modulo XML dinamico: Foliant non può mostrarne il contenuto né compilarlo. "
                      "I dati XML si possono esportare e il file viene salvato senza alterarli.")
+            level = "warning"
         elif st.blocked:
             text = _("Modulo non compilabile: {reason}").format(reason=st.blocked)
+            level = "warning"
         else:
             parts = [tr_count(n, _("{n} campo"), _("{n} campi"))]
             parts.append(tr_count(req, _("{n} obbligatorio da compilare"), _("{n} obbligatori da compilare"))
@@ -533,58 +452,69 @@ class FormFiller(QObject):
             if st.custom:
                 parts.append(_("script personalizzati non eseguiti: calcoli non aggiornati"))
             text = ", ".join(parts)
-        self.bar.label.setText(text)
-        tips = [f"{n}: {ev}" for n, ev in st.custom]
-        if st.xfa_unmapped:
-            tips.append(_("Valori non salvati nei dati XML: {l}").format(l=", ".join(st.xfa_unmapped[:20])))
-        self.bar.label.setToolTip("\n".join(tips))
         fill = st.xfa != "dynamic" and not st.blocked and not self.design
-        self.bar.buttons["highlight"].setVisible(fill)
-        self.bar.buttons["highlight"].setChecked(self.highlight)
-        self.bar.buttons["next"].setVisible(fill)
-        self.bar.buttons["next"].setEnabled(req > 0)
-        self.bar.buttons["reset"].setVisible(fill)
-        self.bar.buttons["design"].setVisible(st.xfa != "dynamic" and not self.design and not st.blocked)
-        self.bar.buttons["owner"].setVisible(bool(st.blocked) and "permessi" in (st.blocked or ""))
-        self.bar.buttons["owner"].setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self._set_bar_visible(True)
+        actions: list[tuple] = []
+        if fill:
+            actions.append((_("Nascondi evidenziazione") if self.highlight else _("Evidenzia campi"),
+                            lambda: self.toggle_highlight()))
+            if req:
+                actions.append((_("Campo obbligatorio successivo"), self.next_required))
+            actions.append((_("Reimposta"), self.reset_requested))
+            actions.append((_("Importa/Esporta dati"), self.data_requested))
+        if st.xfa != "dynamic" and not self.design and not st.blocked:
+            actions.append((_("Modifica modulo"), self.design_requested))
+        if st.blocked and "permessi" in (st.blocked or ""):
+            actions.insert(0, (_("Inserisci password del proprietario"), self.ask_owner_password))
+        self._show_banner(text, actions, level)
 
-    def _set_bar_visible(self, visible: bool) -> None:
-        h = self.bar.sizeHint().height() if visible else 0
-        if visible:
-            self.bar.show()
-        else:
-            self.bar.hide()
-        if h != self._bar_height:
-            self._bar_height = h
-            self.view.setViewportMargins(0, h, 0, 0)
-        self._place_bar()
+    def _show_banner(self, text: str, actions: list[tuple], level: str) -> None:
+        self.banner_text = text
+        self.banner_actions = [a[0] for a in actions]
+        try:
+            banner = self.ctx.show_banner(self.view, "forms", text, actions, level=level,
+                                          priority=30 if level != "info" else 10, on_close=self._on_banner_closed)
+        except (RuntimeError, AttributeError):
+            banner = None
+        self._banner_shown = banner is not None
 
-    def _place_bar(self) -> None:
-        if not self._alive():
-            return
-        if self.bar.isVisible():
-            vp = self.view.viewport().geometry()
-            self.bar.setGeometry(vp.x(), vp.y() - self._bar_height, vp.width(), self._bar_height)
+    def _hide_banner(self) -> None:
+        if self._banner_shown:
+            try:
+                self.ctx.hide_banner(self.view, "forms")
+            except RuntimeError:
+                pass
+        self._banner_shown = False
+        self.banner_text = ""
+        self.banner_actions = []
+
+    def _on_banner_closed(self) -> None:
+        self.bar_closed = True
+        self._banner_shown = False
+
+    def bar_visible(self) -> bool:
+        """True se l'avviso del modulo è tra quelli visibili della scheda."""
+        try:
+            return "forms" in self.ctx.banners(self.view)
+        except RuntimeError:
+            return False
 
     def close_bar(self) -> None:
         self.bar_closed = True
-        self._set_bar_visible(False)
+        self._hide_banner()
 
     def text_of_bar(self) -> str:
-        return self.bar.label.text()
+        return self.banner_text
 
     # ------------------------------------------------------------------ comandi della barra
     def toggle_highlight(self, on: bool | None = None) -> None:
         self.highlight = (not self.highlight) if on is None else bool(on)
         self.ctx.settings().setValue(SETTING_HIGHLIGHT, self.highlight)
-        self.bar.buttons["highlight"].setChecked(self.highlight)
         self.module.highlight_changed(self.highlight)
         self.view.viewport().update()
 
     def set_highlight(self, on: bool) -> None:
         self.highlight = on
-        self.bar.buttons["highlight"].setChecked(on)
+        self.update_bar()
         self.view.viewport().update()
 
     def next_required(self) -> E.FieldInfo | None:
@@ -650,7 +580,6 @@ class FormFiller(QObject):
         t = ev.type()
         if obj is self.view:
             if t == QEvent.Type.Resize:
-                QTimer.singleShot(0, self, self._place_bar)
                 QTimer.singleShot(0, self, self.reposition)
             return False
         if t == QEvent.Type.MouseButtonPress and ev.button() == Qt.MouseButton.LeftButton:
