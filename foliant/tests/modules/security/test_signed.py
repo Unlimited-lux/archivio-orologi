@@ -13,6 +13,16 @@ from tests.test_document import _sign, test_signer  # noqa: F401  (fixture del f
 SECRET = "CONFIDENZIALE-4711"
 
 
+@pytest.fixture(autouse=True)
+def proceed_on_signed(monkeypatch):
+    """Il modulo Firma chiede conferma prima di modificare un PDF firmato: «Procedi comunque»."""
+    try:
+        from foliant.modules.sign import controller as SC
+    except ImportError:
+        return
+    monkeypatch.setattr(SC.SignController, "_ask_invalidation", lambda self, view, what: "proceed")
+
+
 def _signed(tmp_path, signer, name="firmato.pdf"):
     d = pymupdf.open()
     for i in range(2):
@@ -113,11 +123,11 @@ def test_undo_redaction_returns_incremental(window, tmp_path, test_signer, monke
     assert view.document.saves_incrementally
 
 
-@pytest.mark.xfail(reason="il modulo Firma sostituisce doc.save sui PDF firmati e salva sempre in modo "
-                          "incrementale, senza rispettare document.saves_incrementally (sign/controller.py, "
-                          "_install_incremental_save)", strict=False)
 def test_integrated_save_after_redaction_is_full_rewrite(window, tmp_path, test_signer, monkeypatch):  # noqa: F811
+    """«Salva» dall'interfaccia con tutti i moduli: il modulo Firma avvisa che la riscrittura
+    invalida le firme e propone «Salva una copia»; la copia non contiene il testo redatto."""
     from foliant.modules import security
+    from foliant.modules.sign import controller as SC
     sec = security.CONTROLLER
     path = _signed(tmp_path, test_signer)
     signed = path.read_bytes()
@@ -126,6 +136,13 @@ def test_integrated_save_after_redaction_is_full_rewrite(window, tmp_path, test_
     monkeypatch.setattr(C, "confirm", lambda *a: True)
     monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
     assert sec.apply_redactions(None)
-    view.document.save()                     # «Salva» come dall'interfaccia
-    out = path.read_bytes()
-    assert not out.startswith(signed) and not _leaks(out)
+    asked = []
+    monkeypatch.setattr(SC.SignController, "_ask_full_rewrite",
+                        lambda self, v, save_as: asked.append(save_as) or "copy")
+    copy = tmp_path / "copia.pdf"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(copy))
+    window.save_view(view)                   # «Salva» come dall'interfaccia
+    assert asked == [False]
+    assert path.read_bytes() == signed       # il file firmato resta intatto
+    out = copy.read_bytes()
+    assert not out.startswith(signed) and not _leaks(out) and b"/Prev" not in out
