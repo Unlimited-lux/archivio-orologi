@@ -149,8 +149,7 @@ class SelectAnnotTool(SelectTextTool):
         if ev.page is None:
             return None
         tol = 4.0 / max(view.zoom, 0.1)
-        with ENGINE_LOCK:
-            return engine.annot_at(view.document.pdf, ev.page, ev.point, tol)
+        return self.ctrl.hit(view, ev.page, ev.point, tol)
 
     def _handle_at(self, view, ev) -> int | None:
         """Indice della maniglia (0..7) sotto il cursore per una selezione singola."""
@@ -1006,7 +1005,7 @@ class EraserTool(AnnotTool):
 
         with ENGINE_LOCK:
             pg = view.document.pdf[page]
-            has_ink = any(True for _a in pg.annots(types=[pymupdf.PDF_ANNOT_INK]))
+            has_ink = any(True for _a in engine.iter_annots(pg, [pymupdf.PDF_ANNOT_INK]))
         if not has_ink:
             return 0
         try:
