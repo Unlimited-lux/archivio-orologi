@@ -504,7 +504,8 @@ class CommentsPanel(QWidget):
         self.count = QLabel("")
         self.count.setStyleSheet(f"color:{theme.hex_color('text_muted')}")
         lay.addWidget(self.count)
-        self.filters = {"types": set(), "authors": set(), "status": set(), "colors": set(), "replies": set()}
+        self.filters = {"types": set(), "authors": set(), "status": set(), "colors": set(), "replies": set(),
+                        "pages": set(), "marked": set()}
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(50)
@@ -578,6 +579,10 @@ class CommentsPanel(QWidget):
         if f["colors"] and engine.color_to_hex(info.color) not in f["colors"]:
             return False
         if f["replies"] and ("with" if info.replies else "without") not in f["replies"]:
+            return False
+        if f["pages"] and info.page not in f["pages"]:
+            return False
+        if f["marked"] and ("yes" if info.marked else "no") not in f["marked"]:
             return False
         if query:
             hay = " ".join([info.contents, info.marked_text, info.author] + [r.contents for r in info.replies])
@@ -730,12 +735,25 @@ class CommentsPanel(QWidget):
             a.setCheckable(True)
             a.setChecked(key in self.filters["replies"])
             a.toggled.connect(lambda on, k=key: self._toggle_filter("replies", k, on))
+        sub = m.addMenu(_("Spunta"))
+        for key, label in (("yes", "Con spunta"), ("no", "Senza spunta")):
+            a = sub.addAction(_(label))
+            a.setCheckable(True)
+            a.setChecked(key in self.filters["marked"])
+            a.toggled.connect(lambda on, k=key: self._toggle_filter("marked", k, on))
+        m.addAction(_("Pagine…"), self._ask_pages)
         sub = m.addMenu(_("Stato"))
         for st, label in STATE_LABELS.items():
             a = sub.addAction(_(label))
             a.setCheckable(True)
             a.setChecked(st in self.filters["status"])
             a.toggled.connect(lambda on, k=st: self._toggle_filter("status", k, on))
+
+    def _ask_pages(self) -> None:
+        text = dialogs.ask_text(self, _("Filtra per pagine"), _("Pagine (es. 1-3, 7; vuoto = tutte):"), "")
+        if text is None:
+            return
+        self.set_filter("pages", parse_pages(text, self.view.page_count if self.view else 0))
 
     def _toggle_filter(self, group: str, value: str, on: bool) -> None:
         if on:
@@ -840,6 +858,24 @@ class CommentsPanel(QWidget):
         build_annotation_menu(self.ctrl, menu, page, xref)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
         menu.deleteLater()
+
+
+def parse_pages(text: str, count: int) -> set[int]:
+    """«1-3, 7» → {0, 1, 2, 6} (indici); valori fuori dal documento ignorati."""
+    out: set[int] = set()
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                a, b = (int(x) for x in part.split("-", 1))
+                out.update(range(min(a, b) - 1, max(a, b)))
+            else:
+                out.add(int(part) - 1)
+        except ValueError:
+            continue
+    return {p for p in out if 0 <= p < count} if count else out
 
 
 def _ts(value: str) -> float:

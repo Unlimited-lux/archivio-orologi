@@ -888,3 +888,19 @@ def test_ann34_many_annotations_first_screen_fast(window, tmp_path, qtbot):
     assert panel.items()
     qtbot.waitUntil(lambda: len(panel._infos) == 6000, timeout=60000)
     qtbot.waitUntil(lambda: panel.count.text() == "6000 commenti", timeout=60000)
+
+
+def test_ann35_pages_and_marked_filters(comments, monkeypatch):
+    """ANN-35: filtri per intervallo di pagine e per segno di spunta."""
+    window, view, module = comments
+    a, b, c = _populate(module)
+    module.ctrl.set_marked(1, b, True)
+    panel = module.comments
+    panel.reload()
+    monkeypatch.setattr(dialogs, "ask_text", lambda *x, **k: "2-3")
+    panel._ask_pages()
+    assert {tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()} == {(1, b), (2, c)}
+    panel.set_filter("marked", {"yes"})
+    assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(1, b)]
+    from foliant.modules.annotations.panels import parse_pages
+    assert parse_pages("1-3, 7; 99", 10) == {0, 1, 2, 6}
