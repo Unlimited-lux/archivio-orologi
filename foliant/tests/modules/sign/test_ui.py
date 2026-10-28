@@ -366,3 +366,87 @@ def test_screenshot(window, monkeypatch, sample_pdf, tmp_path, id_a, dark):
         Path(dest).mkdir(parents=True, exist_ok=True)
         window.grab().save(str(Path(dest) / shot.name))
     theme.apply(QApplication.instance(), "light")
+
+
+def test_timestamp_unreachable_offers_choices(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """SIG-10: TSA irraggiungibile → scelta; fino alla scelta nessun file; «senza marca» firma."""
+    from foliant.modules.sign import ui_digital
+    view = window.open_path(sample_pdf)
+    c = _ctl(window)
+    target = tmp_path / "ts.pdf"
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(timestamp_url="http://127.0.0.1:9/", timestamp_timeout=2)
+        return True
+
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(target))
+    seen = []
+
+    def choose(message):
+        seen.append(message)
+        assert not target.exists()
+        return "cancel" if len(seen) == 1 else "without"
+
+    monkeypatch.setattr(c, "_ask_timestamp_failure", choose)
+    assert c.digital_sign(view, invisible=True) is False
+    assert not target.exists() and len(seen) == 1
+    assert c.digital_sign(window.current_view(), invisible=True) is True
+    assert target.exists()
+    st = digital.verify_pdf(target.read_bytes())
+    assert st[0].time_source == "dichiarata"
+
+
+def test_invitation_counts_visible_fields_and_cycles(window, tmp_path):
+    """SIG-20: 3 campi vuoti di cui 1 nascosto → «2 firme richieste», «Campo successivo» sui 2 visibili."""
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "campi.pdf", pages=2)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Venditore", 0, (60, 700, 250, 760))
+    data, _n = digital.add_signature_field(data, "Acquirente", 1, (300, 700, 500, 760))
+    data, _n = digital.add_signature_field(data, "Nascosto", 1, (60, 600, 250, 660), hidden=True)
+    path = tmp_path / "campi-vuoti.pdf"
+    path.write_bytes(data)
+    view = window.open_path(str(path))
+    panel = _panel(window)
+    assert "2 firme richieste" in panel.banner.text()
+    assert len(panel.visible_empty_fields()) == 2
+    pages = []
+    for _i in range(3):
+        panel.next_field()
+        pages.append(view.current_page)
+    assert pages == [0, 1, 0]
+    assert not panel.btn_sign_now.isHidden()
+
+
+def test_context_menu_on_signature_selects_panel_entry(window, monkeypatch, sample_pdf, tmp_path, id_a, id_b):
+    from PySide6.QtWidgets import QMenu
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "due.pdf", pages=1)).read_bytes()
+    data = digital.sign_pdf(data, id_a[2], digital.SignOptions(rect=(60, 600, 250, 660)))
+    data = digital.sign_pdf(data, id_b[2], digital.SignOptions(rect=(300, 600, 500, 660)))
+    path = tmp_path / "due-firme.pdf"
+    path.write_bytes(data)
+    view = window.open_path(str(path))
+    c = _ctl(window)
+    menu = QMenu()
+    c.menu_provider(view, _ev(0, 400, 630), menu)
+    acts = [a for a in menu.actions() if "Lucia Bianchi" in a.text()]
+    assert acts
+    acts[0].trigger()
+    cur = _panel(window).current()
+    assert cur[0] == "status" and cur[1].signer == "Lucia Bianchi"
+
+
+def test_certified_no_changes_blocks_graphic(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "cert.pdf", id_a, certify=True, level=1)
+    c = _ctl(window)
+    assert c.state(view).certification == 1
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]])))
+    assert c.place(view, 0, pymupdf.Rect(10, 10, 100, 40), item) is None
+    assert not view.document.is_modified
+    errors = []
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(m))
+    c.start_digital_sign(False)
+    assert errors and "nessuna modifica" in errors[0]

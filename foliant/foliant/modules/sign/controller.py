@@ -41,6 +41,7 @@ class _Bridge(QObject):
 
 class SignController(QObject):
     stateChanged = Signal(object)            # vista
+    statusSelected = Signal(object, object)  # vista, SignatureStatus da selezionare nel pannello
 
     def __init__(self, ctx):
         super().__init__(ctx)
@@ -207,6 +208,13 @@ class SignController(QObject):
     def menu_provider(self, view, ev, menu: QMenu) -> None:
         if ev.page is None or ev.point is None:
             return
+        for s in self.state(view).statuses:
+            if s.page == ev.page and s.rect and not s.invisible and pymupdf.Rect(s.rect).contains(ev.point):
+                menu.addAction(_("Dettagli della firma di {who}").format(who=s.signer or s.field_name),
+                               lambda st=s: self.show_status(view, st))
+        for f in self.empty_fields(view):
+            if f.page == ev.page and f.rect and pymupdf.Rect(f.rect).contains(ev.point):
+                menu.addAction(_("Firma qui"), lambda fld=f: self.digital_sign(view, field=fld))
         with ENGINE_LOCK:
             sigs = g.placed_signatures(view.document.pdf, ev.page)
         hit = next((s for s in reversed(sigs) if s.rect.contains(ev.point)), None)
@@ -221,6 +229,8 @@ class SignController(QObject):
         p, x = ev.page, hit.xref
         menu.addAction(_("Duplica"), lambda: self.duplicate(view, p, x))
         menu.addAction(_("Elimina"), lambda: self.delete(view, p, x))
+        menu.addAction(_("Ruota di 90°"), lambda: self._change(
+            view, _("Ruota firma"), lambda pdf: g.rotate_signature(pdf, p, x, 90)))
         menu.addAction(_("Opacità…"), lambda: self.set_opacity(view, p, x))
         menu.addAction(_("Ripeti su più pagine…"), lambda: self.repeat(view, p, x))
         menu.addAction(_("Incorpora nella pagina"), lambda: self.embed(view, p, x))
@@ -318,6 +328,12 @@ class SignController(QObject):
     def confirm_invalidating(self, view, what: str) -> bool:
         """Prima di una modifica a un documento firmato: Annulla / Copia senza firme / Procedi."""
         st = self.state(view)
+        if st.certification == 1:
+            if self.ctx.confirm(_("Documento certificato"), _(
+                    "Il documento è certificato con livello «nessuna modifica»: «{what}» non è consentito.\n\n"
+                    "Vuoi lavorare su una copia senza firme?").format(what=what)):
+                self.open_unsigned_copy(view)
+            return False
         if not st.signed or st.warned:
             return True
         choice = self._ask_invalidation(view, what)
@@ -597,6 +613,11 @@ class SignController(QObject):
         self.state(doc).warned = False
         return new_view
 
+    def show_status(self, view, status) -> None:
+        """Mostra la voce della firma nel pannello (clic su una firma nella pagina)."""
+        self.ctx.show_sidebar_panel("firme")
+        self.statusSelected.emit(view, status)
+
     def go_to_field(self, view, page: int | None, rect) -> None:
         if page is None:
             return
@@ -628,6 +649,7 @@ TRANSLATIONS_EN = {
     "Ripeti firma su più pagine": "Repeat signature on several pages",
     "Firma ripetuta su {n} pagine.": "Signature repeated on {n} pages.",
     "Ridotta per entrare nelle pagine: {p}.": "Shrunk to fit on pages: {p}.",
+    "Ruota di 90°": "Rotate 90°", "Ruota firma": "Rotate signature",
     "Duplica": "Duplicate", "Elimina": "Delete", "Opacità…": "Opacity…",
     "Ripeti su più pagine…": "Repeat on several pages…", "Incorpora nella pagina": "Embed in page",
     "Documento firmato: modificare il contenuto invaliderà le firme.":
@@ -677,4 +699,9 @@ TRANSLATIONS_EN = {
     "{name} (versione firmata da {who}).pdf": "{name} (version signed by {who}).pdf",
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
+    "Documento certificato": "Certified document",
+    "Il documento è certificato con livello «nessuna modifica»: «{what}» non è consentito.\n\nVuoi lavorare "
+    "su una copia senza firme?": "The document is certified with level “no changes”: “{what}” is not allowed.\n\n"
+                                "Do you want to work on a copy without signatures?",
+    "Dettagli della firma di {who}": "Details of the signature by {who}", "Firma qui": "Sign here",
 }

@@ -298,3 +298,20 @@ def test_permissions_forbid_annotations(tmp_path):
     doc = pymupdf.open(str(path))
     with pytest.raises(g.GraphicSignatureError):
         g.insert_signature(doc, 0, pymupdf.Rect(10, 10, 100, 40), _drawn_item())
+
+
+def test_rotate_signature_90_steps():
+    item = _drawn_item()
+    pdf = pymupdf.open()
+    pdf.new_page()
+    xref = g.insert_signature(pdf, 0, pymupdf.Rect(100, 100, 250, 150), item)
+    r = g.rotate_signature(pdf, 0, xref, 90)
+    assert r.width == pytest.approx(50, abs=0.5) and r.height == pytest.approx(150, abs=0.5)
+    pix = pdf[0].get_pixmap(dpi=72, clip=r)
+    arr = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
+    ink = np.argwhere(arr[..., 0] < 128)
+    assert np.ptp(ink[:, 0]) > np.ptp(ink[:, 1])        # ora il tratto è verticale
+    for _i in range(3):
+        g.rotate_signature(pdf, 0, xref, 90)
+    sig = g.find_signature(pdf, 0, xref)
+    assert sig.rect.width == pytest.approx(150, abs=0.5)

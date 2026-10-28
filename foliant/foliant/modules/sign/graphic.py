@@ -867,6 +867,24 @@ def _add_xobject_resource(pdf: pymupdf.Document, page_xref: int, name: str, xobj
         pdf.xref_set_key(holder, f"{prefix}XObject/{name}", f"{xobj_xref} 0 R")
 
 
+def rotate_signature(pdf: pymupdf.Document, page_index: int, xref: int, degrees: int = 90) -> pymupdf.Rect:
+    """Ruota la firma di 90° in senso orario rispetto alla vista (attorno al centro)."""
+    sig = find_signature(pdf, page_index, xref)
+    if sig is None or sig.ap_xref is None:
+        raise GraphicSignatureError(_("Firma non trovata."))
+    mat_s = pdf.xref_get_key(sig.ap_xref, "Matrix")
+    m = [float(v) for v in mat_s[1].strip("[]").split()] if mat_s[0] == "array" else [1, 0, 0, 1, 0, 0]
+    current = int(round(math.degrees(math.atan2(m[1], m[0])))) % 360
+    new = (current - degrees) % 360
+    # copia dell'aspetto: le copie ripetute condividono lo stesso Form XObject
+    ap = _rotated_copy_of_appearance(pdf, sig.ap_xref, current, new)
+    pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+    r = sig.rect
+    cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+    w, h = r.height, r.width
+    return set_signature_rect(pdf, page_index, xref, pymupdf.Rect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2))
+
+
 def embed_signature(pdf: pymupdf.Document, page_index: int, xref: int) -> None:
     """Incorpora l'aspetto nel contenuto della pagina e rimuove l'annotazione."""
     sig = find_signature(pdf, page_index, xref)

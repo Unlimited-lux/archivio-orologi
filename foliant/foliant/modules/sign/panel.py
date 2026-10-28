@@ -141,6 +141,7 @@ class SignaturesPanel(QWidget):
         self.btn_report.clicked.connect(self.export_report)
         self.list.currentRowChanged.connect(lambda _r: self._show_current())
         controller.stateChanged.connect(self._on_state)
+        controller.statusSelected.connect(self.select_status)
         self.refresh()
 
     # ------------------------------------------------------------------ stato
@@ -209,6 +210,16 @@ class SignaturesPanel(QWidget):
         it.setData(Qt.ItemDataRole.AccessibleTextRole, text.replace("\n", ", "))
         it.setForeground(theme.color(color) if status != "da firmare" else theme.color("text"))
         self.list.addItem(it)
+
+    def select_status(self, view, status) -> None:
+        if view is not self.view:
+            return
+        for i in range(self.list.count()):
+            d = self.list.item(i).data(Qt.ItemDataRole.UserRole)
+            if d and d[0] == "status" and d[1] is status:
+                self.list.setCurrentRow(i)
+                self.list.setFocus()
+                return
 
     def current(self):
         it = self.list.currentItem()
