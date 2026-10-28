@@ -39,3 +39,26 @@ Note finali:
 - Correzioni del collaudo (08:00–08:20 UTC): bug_07, bug_01/02, bug_04, bug_05, bug_08, tabelle e stile.
 - Verifica visiva fatta con catture offscreen (temi chiaro e scuro) di barra di proposta, impostazioni,
   anteprima/revisione, pannello parole incerte e confronto scansione/risultato modificabile.
+
+## Qualità su scansioni realistiche (`tests/modules/ocr/test_quality.py`, generatori in `realistic.py`)
+
+Percentuale di parole attese ritrovate (lingue ita+eng, impostazioni predefinite):
+
+| Documento | Prima | Dopo |
+|---|---|---|
+| Carta d'identità fotografata di sbieco | 1.000 | 1.000 |
+| Fattura con tabella e importi in euro | 1.000 | 1.000 |
+| Garanzia con timbro e firma | 1.000 | 1.000 |
+| Ricevuta 150 dpi in grigi | 1.000 | 1.000 |
+| Carta d'identità fotografata da lontano, luce non uniforme | 0.857 | 1.000 |
+| Passaporto con zona MRZ | 0.179 | 0.964 |
+| Testo piccolo 150 dpi in grigi (JPEG) | 0.681 | 1.000 |
+| Timbro rosso sopra il testo | 0.964 | 0.964 |
+| Scontrino termico sbiadito | 1.000 | 1.000 |
+
+Miglioramenti:
+1. Pre-elaborazione adattiva: normalizzazione dello sfondo solo con illuminazione davvero non uniforme;
+   contrasto stirato tra inchiostro e carta stimati con Otsu (non con i percentili) e solo se basso.
+   Prima le scansioni grigie a 150 dpi uscivano con lettere impastate e Tesseract non trovava righe.
+2. Rotazione OSD verificata leggendo la pagina nei due versi: la zona MRZ («<<<<») faceva proporre 180°
+   e il passaporto veniva capovolto. Le pagine davvero capovolte si raddrizzano ancora.

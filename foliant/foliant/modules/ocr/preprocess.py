@@ -201,14 +201,24 @@ def enhance(gray: np.ndarray, opts: PreprocessOptions) -> np.ndarray:
         # il filtro mediano elimina il rumore «sale e pepe» senza sfumare i bordi
         out = cv2.medianBlur(out, 3)
     if opts.contrast:
-        lo, hi = np.percentile(out, (1, 99))
-        if hi - lo < 160 and hi > lo:
-            out = np.clip((out.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(np.uint8)
-        # fondo ingiallito o non uniforme: normalizza lo sfondo
+        # fondo non uniforme (luce radente, ombre, carta ingiallita a chiazze): si normalizza lo sfondo
         bg = cv2.medianBlur(cv2.resize(out, (max(1, out.shape[1] // 8), max(1, out.shape[0] // 8))), 5)
         bg = cv2.resize(bg, (out.shape[1], out.shape[0]), interpolation=cv2.INTER_LINEAR)
-        if float(np.std(bg)) > 6:
-            out = cv2.divide(out, bg, scale=255)
+        if float(np.std(bg)) > 12:
+            out = cv2.divide(out, np.maximum(bg, 1), scale=255)
+        # contrasto basso (testo sbiadito): inchiostro e carta stimati con Otsu, non con i percentili
+        # (su una pagina con poco testo il 1° percentile è già un grigio del bordo delle lettere)
+        t, _bw = cv2.threshold(out, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        ink = out[out <= t]
+        paper = out[out > t]
+        if ink.size and paper.size:
+            ink_level = float(np.median(ink))
+            paper_level = float(np.median(paper))
+            if paper_level - ink_level < 110:
+                lo = ink_level
+                hi = paper_level
+                scale = 225.0 / max(1.0, hi - lo)
+                out = np.clip((out.astype(np.float32) - lo) * scale + 20, 0, 255).astype(np.uint8)
     return out
 
 
