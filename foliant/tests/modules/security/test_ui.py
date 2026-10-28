@@ -508,7 +508,8 @@ def test_unapplied_marks_banner_on_reopen(window, sec, sample_pdf, tmp_path, mon
     # «Continua con i segni»: il file contiene i segni e il testo è ancora estraibile
     monkeypatch.setattr(C, "ask_unapplied", lambda parent, n: asked.append(n) or "keep")
     assert window.save_view(view, save_as=True)
-    assert asked == [3, 3] and "Pagina 1" in _text(out) and b"/Redact" in out.read_bytes()
+    assert asked == [3, 3] and "Pagina 1" in _text(out)
+    assert len(R.marks(pymupdf.open(out))) == 3
     view.document._saved_state = view.document._state
     window.close_view(view)
     view2 = window.open_path(str(out))
@@ -524,7 +525,7 @@ def test_save_guard_apply_now(window, sec, sample_pdf, tmp_path, monkeypatch):
     monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
     monkeypatch.setattr(C, "ask_unapplied", lambda parent, n: "apply")
     assert window.save_view(view, save_as=True)
-    assert "Pagina 1" not in _text(out) and b"/Redact" not in out.read_bytes()
+    assert "Pagina 1" not in _text(out) and R.marks(pymupdf.open(out)) == []
 
 
 def test_style_dialog_values(qtbot):
