@@ -135,14 +135,14 @@ class PagesController:
         dalla modalità torna il provider precedente (miniature del viewer)."""
         win = self.ctx.window
         current = getattr(win, "selected_pages_provider", None)
-        if current is self._selection_provider:
+        if current == self._selection_provider:
             return
         self._previous_provider = current
         self.ctx.set_selected_pages_provider(self._selection_provider)
 
     def _restore_selection_provider(self) -> None:
         win = self.ctx.window
-        if getattr(win, "selected_pages_provider", None) is self._selection_provider:
+        if getattr(win, "selected_pages_provider", None) == self._selection_provider:
             self.ctx.set_selected_pages_provider(self._previous_provider)
 
     def _selection_provider(self, view):

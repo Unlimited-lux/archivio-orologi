@@ -270,4 +270,4 @@ def test_selected_pages_provider_only_in_pages_mode(pages_window):
     window.set_mode("leggi")
     assert window.selected_pages_provider is c._previous_provider   # torna quello del viewer
     window.set_mode("pagine")
-    assert window.selected_pages_provider is c._selection_provider
+    assert window.selected_pages_provider == c._selection_provider
