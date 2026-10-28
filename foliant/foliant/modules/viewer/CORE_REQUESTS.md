@@ -128,3 +128,12 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     Gli altri criteri (sessione con 3 schede, Ctrl+Maiusc+T con pagina e zoom, un solo dialogo
     per più documenti modificati, 50 schede con cambio entro 200 ms) sono verificati in
     `tests/modules/viewer/test_session.py`.
+
+22. **Aggancio a guide e griglia** (VIS-39, criterio «guida a 50 mm con aggancio attivo: il
+    bordo dell'annotazione spostata entro 5 px si allinea a 50 mm»): le guide sono del nucleo
+    (`DocumentView`, righelli) e la griglia del viewer (`measure.py`), ma manca una funzione
+    comune che le aree Annotazioni e Oggetti possano chiamare mentre l'utente trascina. Proposta:
+    `view.snap(page, point_or_rect, tolerance_px=5) -> point_or_rect` che consideri le guide e
+    i fornitori registrati con `ctx.add_snap_provider(fn(view, page) -> (xs, ys))`; il viewer
+    registrerebbe le linee della griglia quando «Aggancia alla griglia» è attivo, e un
+    interruttore «Aggancio» nel menu Vista.
