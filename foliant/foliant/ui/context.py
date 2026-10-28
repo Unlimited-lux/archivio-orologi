@@ -453,6 +453,19 @@ class Context(QObject):
     def ruler_unit(self) -> str:
         return self._w.ruler_unit()
 
+    # ------------------------------------------------------- formati locali
+    def paper_size(self) -> str:
+        """Formato carta predefinito per i nuovi documenti: "A4" o "Letter" (preferenza
+        «Formato carta», altrimenti dalle impostazioni locali, NFR-26)."""
+        from ..core.locale_defaults import paper_size
+        return paper_size(self._w.settings)
+
+    def measure_unit(self) -> str:
+        """Unità di misura dei dialoghi: "mm" o "in" (preferenza «Unità di misura»,
+        altrimenti dalle impostazioni locali, NFR-26)."""
+        from ..core.locale_defaults import measure_unit
+        return measure_unit(self._w.settings)
+
     # ----------------------------------------------------------------- dialoghi
     def status(self, message: str, timeout_ms: int = 5000) -> None:
         self._w.statusBar().showMessage(message, timeout_ms)
@@ -545,3 +558,26 @@ class Context(QObject):
     def remove_recent(self, path: str) -> None:
         """Toglie un file dall'elenco dei recenti."""
         self._w.remove_recent(str(path))
+
+    def pin_recent(self, path: str, pinned: bool = True) -> None:
+        """Fissa (True) o sblocca (False) un documento in cima ai recenti della Home."""
+        self._w.pin_recent(str(path), pinned)
+
+    def is_pinned(self, path: str) -> bool:
+        return self._w.is_pinned(str(path))
+
+    def pinned_recent(self) -> list[str]:
+        """Documenti fissati, nell'ordine in cui compaiono in cima ai recenti."""
+        return self._w.pinned_recent()
+
+    def clear_recent(self, ask: bool = True) -> bool:
+        """«Svuota elenco»: toglie i recenti non fissati (con `ask`, dopo la conferma UX-13).
+        Restituisce False se l'utente annulla."""
+        return self._w.clear_recent(ask)
+
+    def add_recent_menu_provider(self, provider: Callable[[str, Any], Any]) -> None:
+        """Voci del menu contestuale di un recente della Home: `provider(percorso, menu)`
+        aggiunge azioni a `menu` (QMenu), tra quelle del nucleo (Apri, Fissa/Sblocca) e
+        Rimuovi dall'elenco / Svuota elenco."""
+        if provider not in self._w.recent_menu_providers:
+            self._w.recent_menu_providers.append(provider)
