@@ -1107,16 +1107,106 @@ def remove_marks_detailed(data: bytes, kinds: set[str] | list[str], all_marked: 
             doc.close()
 
 
-def compress_pdf(data: bytes, level: str = "medium") -> bytes:
+def _image_dpis(doc, check=None) -> dict[int, float]:
+    """Risoluzione effettiva di ogni immagine (la più bassa tra i suoi usi).
+
+    Gli usi si leggono senza decodificare le immagini e si abbinano agli xref per
+    dimensione in pixel; a parità di dimensione vale l'uso più grande (risoluzione più bassa)."""
+    import math
+    dpis: dict[int, float] = {}
+    for page in doc:
+        if check is not None:
+            check()
+        by_size: dict[tuple[int, int], list[int]] = {}
+        for info in page.get_images(full=True):
+            by_size.setdefault((info[2], info[3]), []).append(info[0])
+        if not by_size:
+            continue
+        try:
+            uses = page.get_image_info(hashes=False, xrefs=False)
+        except Exception:
+            uses = []
+        for u in uses:
+            t = u.get("transform") or (0, 0, 0, 0, 0, 0)
+            dw, dh = math.hypot(t[0], t[1]), math.hypot(t[2], t[3])
+            if dw < 1 or dh < 1:
+                continue
+            dpi = min(u["width"] / (dw / 72.0), u["height"] / (dh / 72.0))
+            for xref in by_size.get((u["width"], u["height"]), []):
+                dpis[xref] = min(dpis.get(xref, dpi), dpi)
+    return dpis
+
+
+def _resample_image(doc, xref: int, scale: float, quality: int) -> bool:
+    """Ricampiona e ricodifica in JPEG una sola immagine; False se non conviene o non è sicuro.
+
+    Solo immagini a 8 bit in scala di grigi o RGB, senza /Mask, /Decode o maschere a 1 bit:
+    il resto (scansioni in bianco e nero, CMYK, maschere di colore) resta intatto."""
+    from PIL import Image
+    keys = {k: doc.xref_get_key(xref, k) for k in ("Subtype", "ImageMask", "Mask", "Decode", "BitsPerComponent",
+                                                     "Filter", "SMask")}
+    if (keys["Subtype"][1] != "/Image" or keys["ImageMask"][1] == "true" or keys["Mask"][0] != "null"
+            or keys["Decode"][0] != "null" or keys["BitsPerComponent"][1] not in ("8", "null")
+            or any(f in keys["Filter"][1] for f in ("JBIG2", "CCITT", "JPX"))):
+        return False
+    pix = pymupdf.Pixmap(doc, xref)
+    if pix.alpha:
+        pix = pymupdf.Pixmap(pix, 0)
+    if pix.n not in (1, 3):
+        return False
+    w, h = max(1, round(pix.width * scale)), max(1, round(pix.height * scale))
+    mode = "L" if pix.n == 1 else "RGB"
+    img = Image.frombytes(mode, (pix.width, pix.height), pix.samples).resize((w, h), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=quality, optimize=True)
+    jpg = buf.getvalue()
+    smask = None
+    if keys["SMask"][0] == "xref":
+        sx = int(keys["SMask"][1].split()[0])
+        mpix = pymupdf.Pixmap(doc, sx)
+        if mpix.n != 1 or mpix.alpha:
+            return False
+        smask = (sx, Image.frombytes("L", (mpix.width, mpix.height), mpix.samples).resize((w, h), Image.LANCZOS))
+    old_len = len(doc.xref_stream_raw(xref) or b"")
+    if len(jpg) >= old_len:
+        return False
+    doc.update_stream(xref, jpg, compress=False)
+    doc.xref_set_key(xref, "Filter", "/DCTDecode")
+    doc.xref_set_key(xref, "DecodeParms", "null")
+    doc.xref_set_key(xref, "Width", str(w))
+    doc.xref_set_key(xref, "Height", str(h))
+    doc.xref_set_key(xref, "BitsPerComponent", "8")
+    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if pix.n == 1 else "/DeviceRGB")
+    if smask is not None:
+        sx, mimg = smask
+        doc.update_stream(sx, mimg.tobytes(), compress=True)
+        doc.xref_set_key(sx, "DecodeParms", "null")
+        doc.xref_set_key(sx, "Width", str(w))
+        doc.xref_set_key(sx, "Height", str(h))
+        doc.xref_set_key(sx, "BitsPerComponent", "8")
+    return True
+
+
+def compress_pdf(data: bytes, level: str = "medium", check=None) -> bytes:
+    """Riduce le immagini oltre la soglia e pulisce il file.
+
+    Ogni immagine è trattata una sola volta anche se compare su molte pagine, e tra
+    un'immagine e l'altra il lavoro si può annullare (la riscrittura in blocco di MuPDF
+    ricomprimeva l'immagine a ogni uso e non lasciava rispondere l'interfaccia)."""
     targets = {"low": (225, 200, 85), "medium": (180, 150, 75), "high": (110, 96, 55)}
     threshold, target, quality = targets.get(level, targets["medium"])
     with ENGINE_LOCK:
         doc = _open(data)
         try:
-            try:
-                doc.rewrite_images(dpi_threshold=threshold, dpi_target=target, quality=quality)
-            except Exception:
-                pass
+            for xref, dpi in _image_dpis(doc, check).items():
+                if dpi <= threshold:
+                    continue
+                if check is not None:
+                    check()
+                try:
+                    _resample_image(doc, xref, target / dpi, quality)
+                except Exception:
+                    pass   # immagine non gestibile: resta com'è
             try:
                 doc.subset_fonts()
             except Exception:
@@ -1753,7 +1843,7 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
     a = step.action
     name = Path(item.path).stem
     if a == "compress":
-        out = compress_pdf(data, p.get("level", "medium"))
+        out = compress_pdf(data, p.get("level", "medium"), check=ctx.check)
         if len(out) >= len(data):
             # nessun guadagno: si tiene il risultato del passo precedente (mai l'originale:
             # gli altri passi della sequenza, es. la protezione, devono restare applicati)
@@ -2093,7 +2183,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                     if spec.kind in ("pdf",):
                         try:
                             data, protection = _apply_step(step, data, item, ctx, plan[i], protection, csv_passwords)
-                        except (BatchError, OperationCancelled):
+                        except (BatchError, OperationCancelled, SkipFile):
                             raise
                         except Exception as e:
                             raise BatchError("GEN-01", _("Passo {k} ({a}) non riuscito: {e}").format(

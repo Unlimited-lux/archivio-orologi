@@ -216,3 +216,57 @@ def test_form_data_export_and_import(tmp_path):
     rep = be.run_job(None, [be.analyze_file(plain)], be.JobSettings(steps=[be.Step("form_export")],
                                                                    destination=str(tmp_path / "x")))
     assert rep.results[0].status == "skipped"
+
+
+def _image_pdf(pages=1, size=(1600, 2200), alpha=False, shared=True):
+    import numpy as np
+    doc = pymupdf.open()
+    xref = 0
+    for k in range(pages):
+        page = doc.new_page()
+        if shared and xref:
+            page.insert_image(page.rect, xref=xref)
+            continue
+        a = (np.random.default_rng(k).random((size[1], size[0], 4 if alpha else 3)) * 60 + 150).astype("uint8")
+        if alpha:
+            a[:, : size[0] // 2, 3] = 0   # metà sinistra trasparente
+        pix = pymupdf.Pixmap(pymupdf.csRGB, size[0], size[1], a.tobytes(), alpha)
+        xref = page.insert_image(page.rect, pixmap=pix)
+    return doc.tobytes(deflate=True)
+
+
+def test_compress_shared_image_once_and_downsampled():
+    """Un'immagine ripetuta su molte pagine si ricomprime una volta sola (prima: una per pagina)."""
+    data = _image_pdf(pages=60)
+    calls = []
+    out = be.compress_pdf(data, "medium", check=lambda: calls.append(1))
+    doc = pymupdf.open(stream=out)
+    imgs = {x[0]: x for p in doc for x in p.get_images(full=True)}
+    assert len(imgs) == 1 and len(out) < len(data)
+    (img,) = imgs.values()
+    assert img[2] < 1600 and img[8] == "DCTDecode"
+    assert len(calls) >= 60   # punti di annullamento a ogni pagina
+
+
+def test_compress_keeps_transparency():
+    out = be.compress_pdf(_image_pdf(alpha=True, shared=False), "high")
+    doc = pymupdf.open(stream=out)
+    img = doc[0].get_images(full=True)[0]
+    assert img[1] != 0   # la maschera resta
+    pix = doc[0].get_pixmap(dpi=20)
+    left, right = pix.pixel(2, pix.height // 2), pix.pixel(pix.width - 3, pix.height // 2)
+    assert left == (255, 255, 255) and right != (255, 255, 255)
+
+
+def test_compress_can_be_cancelled_between_images():
+    import pytest
+    from foliant.api import OperationCancelled
+    data = _image_pdf(pages=5, shared=False)
+    n = []
+
+    def check():
+        n.append(1)
+        if len(n) > 7:
+            raise OperationCancelled()
+    with pytest.raises(OperationCancelled):
+        be.compress_pdf(data, "medium", check=check)
