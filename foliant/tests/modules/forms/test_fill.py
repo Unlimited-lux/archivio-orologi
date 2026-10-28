@@ -629,3 +629,39 @@ def test_form_banner_uses_core_banner(window, form_pdf):
     assert "Nascondi evidenziazione" in f.banner_actions
     f.close_bar()
     assert "forms" not in window.ctx.banners(view) and not f.bar_visible()
+
+
+def test_watch_purchase_and_trade_in_form(qtbot, window, tmp_path):
+    """Scenario del committente: modulo di acquisto con permuta di un orologio. Importi in euro
+    con lo stile 1.234,56, IVA al 22% con una formula, totale meno il valore della permuta;
+    l'utente digita gli importi come li scrive a mano («12.500»)."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    euro = fm.Format(fm.NUMBER, 2, 2, 0, "€", False)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 40, 300, 60), "modello", required=True)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 70, 300, 90), "matricola", required=True)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 250, 120), "imponibile", fmt=euro)
+    iva = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 130, 250, 150), "iva", fmt=euro, readonly=True)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 160, 250, 180), "permuta", fmt=euro)
+    tot = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 190, 250, 210), "totale", fmt=euro, readonly=True)
+    E.update_properties(pdf, 0, iva, formula="imponibile * 0.22")
+    E.update_properties(pdf, 0, tot, formula="imponibile + iva - permuta")
+    E.create_field(pdf, 0, E.CHECKBOX, pymupdf.Rect(50, 220, 64, 234), "garanzia_inclusa")
+    pdf.save(str(tmp_path / "acquisto.pdf"))
+    view = open_form(window, tmp_path / "acquisto.pdf")
+    f = filler_of(view)
+    for name, typed in (("modello", "Rolex Submariner 124060"), ("matricola", "7X2Q91"),
+                        ("imponibile", "12.500"), ("permuta", "4.200,50")):
+        click_field(qtbot, view, name)
+        qtbot.keyClicks(f.editor, typed)
+        qtbot.keyClick(f.editor, Qt.Key.Key_Tab)
+    click_field(qtbot, view, "garanzia_inclusa")
+    v = values(view)
+    assert v["imponibile"] == "12500" and v["iva"] == "2750" and v["permuta"] == "4200.5"
+    assert v["totale"] == "11049.5" and v["garanzia_inclusa"] not in ("", "Off")
+    assert "nessun campo obbligatorio da compilare" in f.text_of_bar()
+    out = tmp_path / "acquisto_compilato.pdf"
+    view.document.save(out)
+    text = pymupdf.open(str(out))[0].get_text()
+    for shown in ("12.500,00 €", "2.750,00 €", "4.200,50 €", "11.049,50 €", "Rolex Submariner 124060"):
+        assert shown in text, shown
