@@ -62,6 +62,9 @@ class SignController(QObject):
         # SIG-20: avviso per le firme obbligatorie mancanti prima di stampa e «Salva con nome»
         if hasattr(ctx, "add_guard"):
             ctx.add_guard("print", lambda view, info: self._required_guard(view, _("Stampa")))
+            # NFR-09: avviso prima di un salvataggio che riscrive per intero un documento firmato
+            ctx.add_guard("save", lambda view, info: self._full_rewrite_guard(view, False, info))
+            ctx.add_guard("save_as", lambda view, info: self._full_rewrite_guard(view, True, info))
             ctx.add_guard("save_as", lambda view, info: self._required_guard(
                 view, _("Salva una copia") if (info or {}).get("copy") else _("Salva con nome")))
 
@@ -506,6 +509,54 @@ class SignController(QObject):
     def missing_required_signatures(self, view) -> list:
         """Campi firma obbligatori, visibili e non firmati (SIG-20)."""
         return [f for f in self.empty_fields(view) if f.required and not f.hidden]
+
+    def _full_rewrite_guard(self, view, save_as: bool, info) -> bool:
+        """NFR-09/SIG-21: se il salvataggio riscriverà per intero un documento firmato (es. dopo
+        una redazione) le firme non saranno più valide. «Salva» sul file firmato: si propone
+        solo di salvare una copia (l'originale resta intatto) o di annullare. «Salva con nome»
+        / «Salva una copia» scrivono già un altro file: si chiede conferma."""
+        doc = getattr(view, "document", None)
+        if doc is None or not getattr(doc, "has_signatures", False):
+            return True
+        if getattr(doc, "saves_incrementally", True):
+            return True
+        choice = self._ask_full_rewrite(view, save_as)
+        if choice == "copy":
+            if save_as:
+                return True                       # sta già salvando un altro file
+            self._save_unsigned_copy(view)
+        return False
+
+    def _ask_full_rewrite(self, view, save_as: bool) -> str:
+        box = QMessageBox(self.ctx.window)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Documento firmato"))
+        box.setText(_("Questo salvataggio riscrive il file per intero (per esempio dopo una redazione): le "
+                      "firme digitali non saranno più valide."))
+        box.setInformativeText(_("Salva le modifiche in una copia: il file firmato resta intatto.") if not save_as
+                               else _("Il nuovo file non conterrà firme valide; il file firmato resta intatto."))
+        copy = box.addButton(_("Salva una copia"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(copy)
+        box.exec()
+        return "copy" if box.clickedButton() is copy else "cancel"
+
+    def _save_unsigned_copy(self, view) -> bool:
+        doc = view.document
+        stem = Path(doc.display_name).stem
+        path = self.ctx.ask_save_path(_("Salva una copia"), _("{name} (modificato).pdf").format(name=stem))
+        if not path:
+            return False
+        if doc.path is not None and Path(path).resolve() == Path(doc.path).resolve():
+            self.ctx.error(_("Salva una copia"), _("Scegli un file diverso dall'originale firmato."))
+            return False
+        try:
+            doc.save_copy(path)
+        except Exception as e:
+            self.ctx.error(_("Salva una copia"), str(e))
+            return False
+        self.ctx.status(_("Copia salvata: {p}").format(p=path), 6000)
+        return True
 
     def _required_guard(self, view, action: str) -> bool:
         if view is None or id(view.document) not in self._states:
@@ -1018,7 +1069,17 @@ TRANSLATIONS_EN = {
     "Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza firme.":
         "Document certified “no changes”: to change it, work on a copy without signatures.",
     "Versione firmata da {who}: sola lettura.": "Version signed by {who}: read-only.",
-    "Firme mancanti": "Missing signatures", "Stampa": "Print", "Salva una copia": "Save a copy",
+    "Firme mancanti": "Missing signatures",
+    "Questo salvataggio riscrive il file per intero (per esempio dopo una redazione): le firme digitali non "
+    "saranno più valide.": "This save rewrites the whole file (for example after a redaction): the digital "
+                           "signatures will no longer be valid.",
+    "Salva le modifiche in una copia: il file firmato resta intatto.":
+        "Save the changes to a copy: the signed file stays intact.",
+    "Il nuovo file non conterrà firme valide; il file firmato resta intatto.":
+        "The new file will not contain valid signatures; the signed file stays intact.",
+    "{name} (modificato).pdf": "{name} (modified).pdf",
+    "Scegli un file diverso dall'originale firmato.": "Choose a file other than the signed original.",
+    "Copia salvata: {p}": "Copy saved: {p}", "Stampa": "Print", "Salva una copia": "Save a copy",
     "Salva con nome": "Save as",
     "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con «{action}»?":
         "The document has required signature fields not yet signed:\n\n{names}\n\nProceed with “{action}” anyway?",

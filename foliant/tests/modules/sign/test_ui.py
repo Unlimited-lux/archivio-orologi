@@ -1045,3 +1045,28 @@ def test_permissions_from_core_with_owner_unlock(window, monkeypatch, tmp_path, 
     c.start_placement(view, item)
     assert view.document.access == "owner" and c.tool_for(view).pending is item
     assert c.place(view, 0, pymupdf.Rect(10, 10, 100, 40), item)
+
+
+def test_redaction_on_signed_document_warns_before_full_rewrite(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """NFR-09: redazione su PDF firmato → Salva → avviso; Annulla → file su disco invariato;
+    «Salva una copia» → copia scritta, originale firmato intatto."""
+    target = tmp_path / "red.pdf"
+    view = _sign_file(window, monkeypatch, sample_pdf, target, id_a)
+    signed = target.read_bytes()
+    c = _ctl(window)
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "proceed")
+    doc = view.document
+    with doc.change("Redazione", kind="redaction") as pdf:
+        pdf[0].add_redact_annot(pymupdf.Rect(60, 120, 400, 150))
+        pdf[0].apply_redactions()
+    assert doc.has_signatures and not doc.saves_incrementally
+    asked = []
+    monkeypatch.setattr(c, "_ask_full_rewrite", lambda v, save_as: asked.append(save_as) or "cancel")
+    assert window.save_view(view) is False
+    assert asked == [False] and target.read_bytes() == signed and doc.is_modified
+    copy = tmp_path / "red (modificato).pdf"
+    monkeypatch.setattr(c, "_ask_full_rewrite", lambda v, save_as: "copy")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(copy))
+    assert window.save_view(view) is False
+    assert target.read_bytes() == signed and copy.exists()
+    assert b"Orologeria" not in pymupdf.open(str(copy))[0].get_text().encode()
