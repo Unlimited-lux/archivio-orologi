@@ -466,3 +466,23 @@ def test_panel_reference_point_and_skew(ui, tmp_path):
     ui.c.set_selection(view, 0, [0])
     assert abs(abs(float(panel.skew.text().split()[0])) - 20) < 0.5
     panel.set_reference((0.0, 0.0))
+
+
+def test_user_guides_snap_and_persist(ui, tmp_path):
+    path = make_doc(tmp_path / "g.pdf", images=[(300, 400, 350, 450)])
+    view = ui.open(path)
+    ui.c.smart_guides = True
+    ui.c.add_guide(view, "x", 100.0)
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                     vpos(view, 0, 320, 420))
+    drag(view, 0, (320, 420), (121.5, 520))
+    assert abs(objs(view)[0].rect.x0 - 100) < 0.01
+    view.flush_rendering()
+    assert not ui.window.grab().isNull()
+    # le guide si ritrovano riaprendo lo stesso file (preferenze locali, non nel PDF)
+    view._objects_guides = None
+    assert ui.c.guides(view)["x"] == [100.0]
+    assert not view.document.is_modified   # le guide non modificano il PDF
+    ui.c.clear_guides(view)
+    view._objects_guides = None
+    assert ui.c.guides(view)["x"] == []

@@ -30,7 +30,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-20 Ordine di sovrapposizione | P1 | fatto | ui: test_reorder_front_shortcut; eng | |
 | OBJ-21 Allineare | P1 | fatto | ui: test_arrange_actions; eng | Riferimento «Oggetto chiave» solo nel motore. |
 | OBJ-22 Distribuire | P1 | fatto | eng | |
-| OBJ-23 Guide e griglia | P1 | parziale | ui2: test_smart_guides_snap_to_other_object, test_snap_delta_pure, test_grid_snap | Guide intelligenti con Alt per sospendere, griglia con aggancio. Righelli e guide dell'utente non fatti. |
+| OBJ-23 Guide e griglia | P1 | parziale | ui2: test_smart_guides_snap_to_other_object, test_snap_delta_pure, test_grid_snap, test_user_guides_snap_and_persist | Guide intelligenti (Alt sospende), griglia con passo e aggancio, guide dell'utente aggiunte da menu e salvate per documento nelle preferenze. Mancano i righelli (richiedono widget nel nucleo) e il trascinamento delle guide. |
 | OBJ-24 Tracciati vettoriali | P1 | fatto | eng; ui (riquadro, Canc) | «Seleziona simili». |
 | OBJ-25 Stile dei tracciati | P2 | fatto | adv: test_restyle_cmyk_fill_red, test_restyle_width_and_dash_and_no_fill | |
 | OBJ-26 Scomporre / raggruppare | P2 | fatto | adv: test_decompose_form_same_render, test_decompose_transparency_group_needs_confirmation, test_group_move_and_ungroup | Modalità isolamento non fatta. |

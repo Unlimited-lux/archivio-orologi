@@ -398,4 +398,10 @@ EN = {
     "Punto di riferimento {c},{r}": "Reference point {c},{r}",
     "Riferimento:": "Reference:",
     "Inclinazione:": "Skew:",
+    "Guida verticale": "Vertical guide",
+    "Guida orizzontale": "Horizontal guide",
+    "Posizione (mm dal bordo):": "Position (mm from the edge):",
+    "Aggiungi guida verticale…": "Add vertical guide…",
+    "Aggiungi guida orizzontale…": "Add horizontal guide…",
+    "Rimuovi le guide": "Remove guides",
 }
