@@ -325,7 +325,7 @@ class PropertiesPanel(QWidget):
         def run(pdf):
             for page, xref in self.ctrl.selection:
                 p = pdf[page]
-                annot = p.load_annot(xref)
+                annot = engine.find_annot(p, xref)
                 if annot is not None and annot.type[0] in (3, 7):   # Line, PolyLine
                     annot.set_line_ends(a, b)
                     engine.touch(annot)

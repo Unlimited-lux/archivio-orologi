@@ -226,8 +226,16 @@ def unrotated(page: pymupdf.Page) -> Iterator[pymupdf.Page]:
             page.set_rotation(rot)
 
 
+def find_annot(page: pymupdf.Page, xref: int) -> pymupdf.Annot | None:
+    """Annotazione con questo xref nella pagina, oppure None."""
+    try:
+        return page.load_annot(xref)
+    except Exception:
+        return None
+
+
 def get_annot(page: pymupdf.Page, xref: int) -> pymupdf.Annot:
-    annot = page.load_annot(xref)
+    annot = find_annot(page, xref)
     if annot is None:
         raise AnnotationError("L'annotazione non esiste più.")
     return annot
@@ -1408,7 +1416,7 @@ def get_rich_text(pdf: pymupdf.Document, xref: int) -> str:
 
 def _decode_text_string(v: str) -> str:
     v = v.strip()
-    if v.startswith("<") and v.endswith(">"):
+    if v.startswith("<") and v.endswith(">") and re.fullmatch(r"[0-9A-Fa-f\s]*", v[1:-1]):
         raw = bytes.fromhex(v[1:-1])
         if raw.startswith(b"\xfe\xff"):
             return raw[2:].decode("utf-16-be", errors="replace")
@@ -1422,9 +1430,6 @@ def set_contents(pdf: pymupdf.Document, page_no: int, xref: int, text: str, rich
     annot = get_annot(page, xref)
     if annot.flags & FLAG_LOCKED_CONTENTS:
         raise AnnotationError("Il contenuto dell'annotazione è bloccato.")
-    if annot.type[0] != pymupdf.PDF_ANNOT_FREE_TEXT:
-        pdf.xref_set_key(xref, "RC", pymupdf.get_pdf_str(rich) if rich else "null")
-        annot = page.load_annot(xref)
     annot.set_info(content=text, modDate=pdf_now())
     if annot.type[0] == pymupdf.PDF_ANNOT_FREE_TEXT:
         mupdf.pdf_set_annot_contents(annot.this, text)
@@ -1434,6 +1439,8 @@ def set_contents(pdf: pymupdf.Document, page_no: int, xref: int, text: str, rich
         annot.update()
         if annot.type[0] == pymupdf.PDF_ANNOT_STAMP:
             refresh_stamp(pdf, page_no, xref)
+        # /RC dopo l'aggiornamento (che altrimenti lo rimuove)
+        pdf.xref_set_key(xref, "RC", pymupdf.get_pdf_str(rich) if rich else "null")
 
 
 def set_author(pdf: pymupdf.Document, page_no: int, xref: int, author: str) -> None:
@@ -1524,9 +1531,9 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
                 _set_callout(pdf, page, xref, inner2, moved_pts)
                 annot = page.load_annot(xref)
             else:
-                annot.set_rect(new_rect)
+                _set_rect_exact(annot, new_rect)
         else:
-            annot.set_rect(new_rect)
+            _set_rect_exact(annot, new_rect)
         touch(annot)
         _dirty_update(annot)
         if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
@@ -1542,6 +1549,19 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
                 a.update()
             except Exception:
                 pass
+
+
+def _set_rect_exact(annot: pymupdf.Annot, rect: pymupdf.Rect) -> None:
+    """Imposta /Rect compensando il margine che il motore aggiunge al tratto."""
+    annot.set_rect(rect)
+    annot.update()
+    got = annot.rect
+    d = (got.x0 - rect.x0, got.y0 - rect.y0, got.x1 - rect.x1, got.y1 - rect.y1)
+    if any(abs(v) > 0.01 for v in d):
+        fixed = pymupdf.Rect(rect.x0 - d[0], rect.y0 - d[1], rect.x1 - d[2], rect.y1 - d[3])
+        if fixed.width > 1 and fixed.height > 1:
+            annot.set_rect(fixed)
+            annot.update()
 
 
 def _freetext_inner(page: pymupdf.Page, annot: pymupdf.Annot) -> pymupdf.Rect:
@@ -1599,7 +1619,7 @@ def delete_annot(pdf: pymupdf.Document, page_no: int, xref: int, force: bool = F
                 victims.add(a.xref)
                 changed = True
     for x in sorted(victims, reverse=True):
-        a = page.load_annot(x)
+        a = find_annot(page, x)
         if a is not None:
             page.delete_annot(a)
 
@@ -1780,24 +1800,31 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
         count += sum(1 for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES)
     if not count:
         return 0
-    if targets == set(range(pdf.page_count)):
-        _strip_hidden(pdf, targets)
-        pdf.bake(annots=True, widgets=False)
-        return count
-    # pagine scelte: si nascondono temporaneamente le annotazioni delle altre pagine
+    # si nascondono temporaneamente le annotazioni da non appiattire: quelle delle altre
+    # pagine e quelle non stampabili (che restano annotazioni)
     saved: dict[int, tuple[str, str]] = {}
     _strip_hidden(pdf, targets)
     try:
         for i in range(pdf.page_count):
+            page = pdf[i]
+            xref = page.xref
             if i not in targets:
-                xref = pdf[i].xref
                 saved[xref] = pdf.xref_get_key(xref, "Annots")
                 pdf.xref_set_key(xref, "Annots", "null")
+                continue
+            keep = [a.xref for a in page.annots()
+                    if a.type[0] in NON_COMMENT_TYPES or a.flags & pymupdf.PDF_ANNOT_IS_PRINT
+                    or a.type[0] == pymupdf.PDF_ANNOT_POPUP]
+            noprint = [a.xref for a in page.annots() if a.xref not in keep]
+            if noprint:
+                count -= len(noprint)
+                saved[xref] = pdf.xref_get_key(xref, "Annots")
+                _, _k, refs = _annots_array(pdf, page)
+                pdf.xref_set_key(xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in refs if x not in noprint) + "]")
         pdf.bake(annots=True, widgets=False)
     finally:
         for xref, (kind, value) in saved.items():
-            if kind != "null":
-                pdf.xref_set_key(xref, "Annots", value)
+            pdf.xref_set_key(xref, "Annots", value if kind != "null" else "null")
     return count
 
 
@@ -1934,6 +1961,13 @@ def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] 
                     attrs["foliant-stamp"] = spec.text
                     if spec.subtitle:
                         attrs["foliant-stamp-sub"] = spec.subtitle
+                try:   # aspetto incluso perché la grafica non vada persa (immagine PNG in base64)
+                    import base64
+                    pix = a.get_pixmap(matrix=pymupdf.Matrix(3, 3), alpha=True)
+                    children.append("<appearance>" + base64.b64encode(pix.tobytes("png")).decode("ascii")
+                                    + "</appearance>")
+                except Exception:
+                    pass
             elif t == pymupdf.PDF_ANNOT_FREE_TEXT:
                 da = pdf.xref_get_key(a.xref, "DA")[1]
                 if da:
@@ -2071,7 +2105,7 @@ def import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = Fal
         if target is None or target[0] != page_no:
             continue
         page = pdf[page_no]
-        annot = page.load_annot(xref)
+        annot = find_annot(page, xref)
         if annot is not None:
             annot.set_irt_xref(target[1])
     return result
@@ -2155,6 +2189,7 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
                 return None
             xref = create_shape(pdf, page_no, RECT if t == "Square" else ELLIPSE, [rect.tl, rect.br], style, author,
                                 contents)
+            _set_rect_exact(get_annot(page, xref), rect)
         elif t == "Line":
             s = _floats(el.get("start"))
             e = _floats(el.get("end"))
@@ -2195,16 +2230,29 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
         elif t == "Stamp":
             if rect is None:
                 return None
-            text = el.get("foliant-stamp") or el.get("icon") or "Timbro"
-            spec = StampSpec(text, color or DEFAULT_COLORS[STAMP], el.get("foliant-stamp-sub", ""))
-            xref = _stamp_in_rect(pdf, page, rect, spec, opacity, author, date=date)
+            appearance = _el_text(el, "appearance")
+            if not el.get("foliant-stamp") and appearance:
+                import base64
+                try:
+                    png = base64.b64decode(appearance.strip())
+                    with unrotated(page):
+                        annot = page.add_stamp_annot(rect, png)
+                    xref = _finish(annot, author, contents or "Timbro immagine", kind=STAMP, date=date)
+                    pdf.xref_set_key(xref, "IT", "/StampImage")
+                except Exception:
+                    appearance = None
+            if el.get("foliant-stamp") or not appearance:
+                text = el.get("foliant-stamp") or el.get("icon") or "Timbro"
+                spec = StampSpec(text, color or DEFAULT_COLORS[STAMP], el.get("foliant-stamp-sub", ""),
+                                 el.get("icon", ""))
+                xref = _stamp_in_rect(pdf, page, rect, spec, opacity, author, date=date)
             if contents:
                 page.load_annot(xref).set_info(content=contents)
         elif t == "FileAttachment":
             return None  # i dati del file non viaggiano nell'XFDF senza flusso incorporato
         else:
             return None
-    annot = page.load_annot(xref)
+    annot = find_annot(page, xref)
     if annot is None:
         return None
     info = {}
@@ -2297,10 +2345,16 @@ def summary_csv(pdf: pymupdf.Document) -> str:
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Pagina", "Tipo", "Autore", "Data", "Stato", "Testo", "Testo marcato", "Risposte"])
+    w.writerow(["Pagina", "Tipo", "Autore", "Data", "Stato", "Testo", "Testo marcato", "N.", "Risposta a"])
+    n = 0
     for r in summary_rows(pdf):
-        replies = " | ".join(f"{a}: {t}" for a, _d, t in r["risposte"])
-        w.writerow([r["pagina"], r["tipo"], r["autore"], r["data"], r["stato"], r["testo"], r["testo_marcato"], replies])
+        n += 1
+        parent = n
+        stato = r["stato"] if r["stato"] != STATE_NONE else ""
+        w.writerow([r["pagina"], r["tipo"], r["autore"], r["data"], stato, r["testo"], r["testo_marcato"], n, ""])
+        for author, date, text in r["risposte"]:
+            n += 1
+            w.writerow([r["pagina"], "Risposta", author, date, "", text, "", n, parent])
     return buf.getvalue()
 
 

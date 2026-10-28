@@ -191,7 +191,7 @@ class Controller(QObject):
             for page, xref in self.selection:
                 if page < pdf.page_count:
                     p = pdf[page]
-                    if p.load_annot(xref) is not None:
+                    if engine.find_annot(p, xref) is not None:
                         alive.append((page, xref))
         if alive != self.selection:
             self.selection = alive
@@ -254,7 +254,7 @@ class Controller(QObject):
         def run(pdf):
             for page, xref in sorted(items, key=lambda t: -t[1]):
                 p = pdf[page]
-                if p.load_annot(xref) is not None:
+                if engine.find_annot(p, xref) is not None:
                     engine.delete_annot(pdf, page, xref)
             return True
 
@@ -379,9 +379,9 @@ class Controller(QObject):
             if info.kind == engine.FREETEXT and not text.strip():
                 engine.delete_annot(pdf, page, xref, force=True)
                 return True
-            engine.set_contents(pdf, page, xref, text, xhtml)
             if info.kind not in (engine.FREETEXT, engine.CALLOUT):
                 engine.ensure_popup(pdf, page, xref)
+            engine.set_contents(pdf, page, xref, text, xhtml)
             return True
 
         return bool(self.apply(_("Modifica commento"), run, view=view))

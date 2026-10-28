@@ -986,7 +986,7 @@ class StampTool(AnnotTool):
             if self.template:
                 filename = view.document.display_name
                 text = engine.fill_template(self.template, author=self.ctrl.author(), filename=filename, page=page)
-                spec = engine.StampSpec(spec.text, spec.color, text, spec.name)
+                spec = engine.StampSpec(text, spec.color, "", spec.name)
             xref = self.ctrl.apply(_("Aggiungi timbro"), engine.create_stamp, page, point, spec, self.style(),
                                    self.ctrl.author())
         self.created(view, page, xref)
