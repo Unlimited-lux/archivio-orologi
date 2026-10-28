@@ -291,3 +291,31 @@ def test_parallelismo_limitato_dalla_memoria(monkeypatch):
     assert engine.OcrOptions().worker_count() == 1
     monkeypatch.setattr(engine, "available_memory", lambda: 0)
     assert engine.OcrOptions().worker_count() >= 1
+
+
+def test_parole_degradate_segnalate(tmp_path):
+    """5 parole coperte in parte da macchie: almeno 4 sospette, sospette totali ≤ 10% (OCR-12)."""
+    import cv2
+    img = scan_image(dpi=300)
+    words, _b = scan_words()
+    z = 300 / 72
+    targets = ["compravendita", "cinturino", "garantisce", "laboratorio", "bonifico"]
+    rng = __import__("numpy").random.default_rng(7)
+    for t in targets:
+        x0, y0, x1, y1, _w = next(w for w in words if w[4] == t)
+        cx = int((x0 + (x1 - x0) * 0.45) * z)
+        for _ in range(3):
+            dx, dy = rng.integers(-25, 25), rng.integers(-8, 8)
+            cv2.circle(img, (int(cx + dx), int((y0 + y1) / 2 * z + dy)), 13, (0, 0, 0), -1)
+    data = open(image_pdf(tmp_path / "m.pdf", [img]), "rb").read()
+    with pymupdf.open(stream=data) as pdf:
+        res = engine.recognize_document(pdf, engine.OcrOptions(languages=["ita"])).pages[0]
+    low = res.low_confidence_words()
+    flagged = 0
+    for t in targets:
+        tx0, ty0, tx1, ty1, _w = next(w for w in words if w[4] == t)
+        rect = pymupdf.Rect(tx0, ty0, tx1, ty1)
+        hit = [w for w in res.words if res.word_rect_display(w).intersects(rect)]
+        flagged += any(w.low or w.text != t for w in hit) and any(w.low for w in hit)
+    assert flagged >= 4, (flagged, [(w.text, w.conf) for w in low])
+    assert len(low) <= 0.1 * len(res.words) + 1

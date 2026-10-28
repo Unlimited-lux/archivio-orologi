@@ -21,7 +21,7 @@ from foliant.api import (
 )
 
 from . import detect, engine, languages
-from .dialogs import BatchDialog, LanguagesDialog, OcrDialog, ReportDialog, ReviewDialog, TextDialog, output_path
+from .dialogs import BatchDialog, LanguagesDialog, OcrDialog, ReportDialog, ReviewDialog, TextDialog
 from .tess import OcrError
 
 ANALYSIS_BUDGET_MS = 25      # tempo massimo di analisi per passo nel thread dell'interfaccia
@@ -214,10 +214,14 @@ class AreaOcrTool(Tool):
 
 # =================================================================== pannello revisione
 class ReviewPanel(QWidget):
-    """Pannello destro: parole incerte del documento, con correzione nel documento."""
+    """Pannello destro «Parole incerte»: correzione nel documento, una parola dopo l'altra.
+
+    Tastiera: Invio corregge e passa alla successiva, Ctrl+Invio accetta, Ctrl+Maiusc+Invio
+    accetta tutte le parole uguali, Ctrl+D aggiunge al dizionario utente."""
 
     def __init__(self, controller: "OcrController"):
         super().__init__()
+        from PySide6.QtGui import QKeySequence, QShortcut
         self.setObjectName("ocrReviewPanel")
         self.controller = controller
         self.view = None
@@ -230,39 +234,66 @@ class ReviewPanel(QWidget):
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
         lay.addWidget(self.hint)
+        self.crop = QLabel(self)
+        self.crop.setMinimumHeight(48)
+        self.crop.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.crop.setStyleSheet(f"background: {theme.hex_color('surface')}; border: 1px solid "
+                                f"{theme.hex_color('border')}; border-radius: 6px;")
+        lay.addWidget(self.crop)
         self.table = QTableWidget(0, 3, self)
         self.table.setHorizontalHeaderLabels([_("Pag."), _("Parola"), "%"])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         lay.addWidget(self.table, 1)
         row = QHBoxLayout()
         self.edit = QLineEdit(self)
         self.edit.setPlaceholderText(_("Correzione"))
         self.btn_fix = QPushButton(icon("check"), _("Correggi"), self)
-        self.btn_ok = QPushButton(_("È corretta"), self)
+        self.btn_fix.setToolTip(_("Correggi e passa alla successiva (Invio)"))
         row.addWidget(self.edit, 1)
         row.addWidget(self.btn_fix)
         lay.addLayout(row)
-        lay.addWidget(self.btn_ok)
+        row2 = QHBoxLayout()
+        self.btn_ok = QPushButton(_("Accetta"), self)
+        self.btn_ok.setToolTip(_("La parola è corretta (Ctrl+Invio)"))
+        self.btn_all = QPushButton(_("Accetta tutte uguali"), self)
+        self.btn_all.setToolTip(_("Ctrl+Maiusc+Invio"))
+        self.btn_dict = QPushButton(_("Aggiungi al dizionario"), self)
+        self.btn_dict.setToolTip(_("Ctrl+D"))
+        for b in (self.btn_ok, self.btn_all, self.btn_dict):
+            row2.addWidget(b)
+        lay.addLayout(row2)
         self.table.currentCellChanged.connect(lambda r, *_a: self._select(r))
         self.btn_fix.clicked.connect(self._fix)
         self.edit.returnPressed.connect(self._fix)
         self.btn_ok.clicked.connect(self._accept_word)
+        self.btn_all.clicked.connect(self._accept_all)
+        self.btn_dict.clicked.connect(self._add_dictionary)
+        for seq, slot in (("Ctrl+Return", self._accept_word), ("Ctrl+Shift+Return", self._accept_all),
+                          ("Ctrl+D", self._add_dictionary)):
+            sc = QShortcut(QKeySequence(seq), self)
+            sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            sc.activated.connect(slot)
 
     def set_view(self, view) -> None:
         self.view = view
         self.refresh()
 
-    def refresh(self) -> None:
+    def refresh(self, keep_row: int | None = None) -> None:
         self.rows = []
         st = self.controller.states.get(self.view) if self.view is not None else None
+        dictionary = self.controller.user_dictionary()
         if st is not None:
             for page in sorted(st.placed):
                 for rect, w in st.placed[page]:
-                    if w.low:
+                    if w.low and w.text.lower() not in dictionary:
                         self.rows.append((page, rect, w))
+        self.table.blockSignals(True)
         self.table.setRowCount(len(self.rows))
         for i, (page, _r, w) in enumerate(self.rows):
             self.table.setItem(i, 0, QTableWidgetItem(str(page + 1)))
@@ -270,36 +301,92 @@ class ReviewPanel(QWidget):
             c = QTableWidgetItem(f"{w.conf:.0f}")
             c.setForeground(QBrush(theme.color("warning")))
             self.table.setItem(i, 2, c)
-        self.hint.setText(_("Nessuna parola incerta.") if not self.rows else
-                          _("{n} parole con affidabilità bassa, evidenziate sulla pagina.").format(n=len(self.rows)))
+        self.table.blockSignals(False)
+        self.hint.setText(_("Nessuna parola da verificare.") if not self.rows else
+                          _("{n} parole da verificare, evidenziate sulla pagina.").format(n=len(self.rows)))
         enabled = bool(self.rows)
-        self.edit.setEnabled(enabled)
-        self.btn_fix.setEnabled(enabled)
-        self.btn_ok.setEnabled(enabled)
+        for w in (self.edit, self.btn_fix, self.btn_ok, self.btn_all, self.btn_dict):
+            w.setEnabled(enabled)
+        if self.rows:
+            row = min(keep_row if keep_row is not None else 0, len(self.rows) - 1)
+            self.table.setCurrentCell(row, 1)
+            self._select(row)
+        else:
+            self.crop.clear()
+            self.edit.clear()
 
     def _select(self, row: int) -> None:
         if not 0 <= row < len(self.rows) or self.view is None:
             return
         page, rect, w = self.rows[row]
         self.edit.setText(w.text)
+        self.edit.selectAll()
         self.controller.current_word = (self.view, page, rect)
+        self._show_crop(page, rect)
         self.view.ensure_visible(page, rect)
         self.view.viewport().update()
 
-    def _fix(self) -> None:
+    def _show_crop(self, page: int, rect: pymupdf.Rect) -> None:
+        from PySide6.QtGui import QImage, QPixmap
+        with try_engine() as ok:
+            if not ok:
+                return
+            try:
+                pg = self.view.document.pdf[page]
+                clip = pymupdf.Rect(rect.x0 - 6, rect.y0 - 4, rect.x1 + 6, rect.y1 + 4) * pg.rotation_matrix
+                pix = pg.get_pixmap(dpi=200, clip=clip, alpha=False)
+            except Exception:
+                return
+            img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
+        pm = QPixmap.fromImage(img)
+        if pm.width() > 260:
+            pm = pm.scaledToWidth(260, Qt.TransformationMode.SmoothTransformation)
+        self.crop.setPixmap(pm)
+
+    def _current(self):
         row = self.table.currentRow()
-        if not 0 <= row < len(self.rows) or self.view is None:
+        return (row, *self.rows[row]) if 0 <= row < len(self.rows) and self.view is not None else None
+
+    def _fix(self) -> None:
+        cur = self._current()
+        if cur is None:
             return
-        page, rect, w = self.rows[row]
-        self.controller.correct_word(self.view, page, rect, w, self.edit.text())
+        row, page, rect, w = cur
+        if self.edit.text().strip() == w.text:
+            self._accept_word()
+            return
+        if self.controller.correct_word(self.view, page, rect, w, self.edit.text()):
+            self.refresh(keep_row=row)
 
     def _accept_word(self) -> None:
-        row = self.table.currentRow()
-        if 0 <= row < len(self.rows):
-            self.rows[row][2].conf = 100.0
-            self.refresh()
-            if self.view is not None:
-                self.view.viewport().update()
+        cur = self._current()
+        if cur is None:
+            return
+        row, _p, _r, w = cur
+        w.conf = 100.0
+        self.refresh(keep_row=row)
+        self.view.viewport().update()
+
+    def _accept_all(self) -> None:
+        cur = self._current()
+        if cur is None:
+            return
+        row, _p, _r, w = cur
+        same = w.text
+        for _pg, _rc, other in self.rows:
+            if other.text == same:
+                other.conf = 100.0
+        self.refresh(keep_row=row)
+        self.view.viewport().update()
+
+    def _add_dictionary(self) -> None:
+        cur = self._current()
+        if cur is None:
+            return
+        row, _p, _r, w = cur
+        self.controller.add_to_dictionary(w.text)
+        self.refresh(keep_row=row)
+        self.view.viewport().update()
 
 
 # =================================================================== controller
@@ -921,8 +1008,9 @@ class OcrController(QObject):
         fill.setAlpha(45)
         painter.setPen(QPen(warn, 0.8))
         painter.setBrush(QBrush(fill))
+        dictionary = self.user_dictionary()
         for rect, w in st.placed[index]:
-            if w.low:
+            if w.low and w.text.lower() not in dictionary:
                 painter.drawRect(QRectF(rect.x0, rect.y0, rect.width, rect.height))
         cur = self.current_word
         if cur is not None and cur[0] is view and cur[1] == index:
@@ -947,26 +1035,52 @@ class OcrController(QObject):
         view.viewport().update()
         return True
 
+    def user_dictionary(self) -> set[str]:
+        words = self.settings().value("ocr/dictionary", []) or []
+        if isinstance(words, str):
+            words = [words]
+        return {w.lower() for w in words}
+
+    def add_to_dictionary(self, word: str) -> None:
+        word = word.strip()
+        if not word:
+            return
+        words = self.settings().value("ocr/dictionary", []) or []
+        if isinstance(words, str):
+            words = [words]
+        if word.lower() not in {w.lower() for w in words}:
+            self.settings().setValue("ocr/dictionary", list(words) + [word])
+
     # ------------------------------------------------------------- blocco e lingue
     def manage_languages(self) -> None:
         LanguagesDialog(self.ctx.window, run_task=self.ctx.run_task).exec()
 
     def batch(self) -> None:
         dlg = BatchDialog(self.ctx.window, self.settings(),
-                          ask_files=lambda: self.ctx.ask_open_paths(_("PDF da riconoscere")),
-                          ask_dir=lambda: self.ctx.ask_directory(_("Cartella di destinazione")))
+                          ask_files=lambda: self.ctx.ask_open_paths(
+                              _("File da riconoscere"), _("PDF e immagini (*.pdf *.tif *.tiff *.png *.jpg *.jpeg *.bmp)")),
+                          ask_dir=lambda: self.ctx.ask_directory(_("Cartella")))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.run_batch(dlg.paths(), dlg.mode.currentData(), dlg.languages.selected(), dlg.out_dir.text().strip(),
-                       dlg.suffix.text())
+                       dlg.suffix.text(), fmt=dlg.format.currentData(), overwrite=dlg.cb_overwrite.isChecked(),
+                       skip_searchable=dlg.cb_skip.isChecked())
 
-    def run_batch(self, paths: list[str], mode: str, langs: list[str], out_dir: str = "",
-                  suffix: str = "_ocr") -> list[tuple[str, bool, str]]:
+    def run_batch(self, paths: list[str], mode: str, langs: list[str], out_dir: str = "", suffix: str = "_ocr",
+                  fmt: str = "pdf", overwrite: bool = False, skip_searchable: bool = True) -> list:
+        from . import batch
+        files = batch.collect(paths, exclude_dir=out_dir or None)
+        missing = languages.missing_languages(langs)
+        if missing:
+            langs = self._resolve_missing(langs, missing)
+            if not langs:
+                return []
+        items = [batch.BatchItem(p) for p in files]
+
         def work(progress):
-            rows = []
-            n = len(paths)
-            for k, path in enumerate(paths):
-                name = os.path.basename(path)
+            n = len(items)
+            for k, item in enumerate(items):
+                name = os.path.basename(item.path)
 
                 class Sub:
                     @property
@@ -976,24 +1090,16 @@ class OcrController(QObject):
                     def update(self, f=None, t=None):
                         progress.update((k + (f or 0)) / n, _("File {k} di {n}: {f}").format(k=k + 1, n=n, f=name))
                 Sub().update(0)
-                try:
-                    with open(path, "rb") as f:
-                        data = f.read()
-                    out = engine.ocr_pdf_bytes(data, langs, mode, progress=Sub())
-                    dest = output_path(path, out_dir, suffix)
-                    atomic_write(dest, out)
-                    rows.append((name, True, _("Salvato come {d}").format(d=os.path.basename(dest))))
-                except OperationCancelled:
-                    raise
-                except Exception as e:
-                    rows.append((name, False, str(e)))
+                opts = engine.OcrOptions(languages=list(langs), mode=mode)
+                batch.process_file(item, opts, out_dir, suffix, fmt, overwrite, True, skip_searchable, Sub())
             progress.update(1.0)
-            return rows
+            return items
         try:
-            rows = self.ctx.run_task(_("OCR in blocco…"), work)
+            self.ctx.run_task(_("OCR in blocco…"), work)
         except OperationCancelled:
-            self.ctx.status(_("OCR in blocco annullato."))
-            return []
-        self._report = ReportDialog(self.ctx.window, _("OCR in blocco: risultato"), rows)
+            self.ctx.status(_("OCR in blocco annullato: i file completati restano, nessun file parziale."))
+        done = [it for it in items if it.status]
+        self._report = ReportDialog(self.ctx.window, _("OCR in blocco: risultato"), done,
+                                    save_path_cb=self.ctx.ask_save_path)
         self._report.open()
-        return rows
+        return done

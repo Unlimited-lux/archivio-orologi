@@ -23,6 +23,7 @@ import numpy as np
 from foliant.i18n import _
 
 PAGE_TIMEOUT = 120.0   # secondi massimi per pagina
+LOW_CONFIDENCE = 70.0  # sotto questa affidabilità una parola è «sospetta» (OCR-12)
 
 
 class OcrError(Exception):
@@ -42,7 +43,7 @@ class Word:
 
     @property
     def low(self) -> bool:
-        return self.conf < 60
+        return self.conf < LOW_CONFIDENCE
 
 
 @dataclass

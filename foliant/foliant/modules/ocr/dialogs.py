@@ -924,9 +924,12 @@ class BatchDialog(QDialog):
         lay.addWidget(self.files, 1)
         row = QHBoxLayout()
         add = QPushButton(icon("plus"), _("Aggiungi file…"), self)
+        add_dir = QPushButton(icon("folder-plus"), _("Aggiungi cartella…"), self)
         rem = QPushButton(icon("minus"), _("Togli"), self)
         row.addWidget(add)
+        row.addWidget(add_dir)
         row.addWidget(rem)
+        add_dir.clicked.connect(self._add_dir)
         row.addStretch(1)
         lay.addLayout(row)
         form = QFormLayout()
@@ -951,7 +954,16 @@ class BatchDialog(QDialog):
         form.addRow(_("Destinazione:"), drow)
         self.suffix = QLineEdit("_ocr", self)
         form.addRow(_("Suffisso del nome:"), self.suffix)
+        self.format = QComboBox(self)
+        self.format.addItem(_("PDF"), "pdf")
+        self.format.addItem(_("Testo (TXT)"), "txt")
+        form.addRow(_("Formato:"), self.format)
         lay.addLayout(form)
+        self.cb_skip = QCheckBox(_("Salta i file già ricercabili"), self)
+        self.cb_skip.setChecked(True)
+        self.cb_overwrite = QCheckBox(_("Sovrascrivi gli originali (con copia di sicurezza «.bak»)"), self)
+        lay.addWidget(self.cb_skip)
+        lay.addWidget(self.cb_overwrite)
         self.error = QLabel(self)
         self.error.setStyleSheet(f"color: {theme.hex_color('danger')};")
         lay.addWidget(self.error)
@@ -981,6 +993,13 @@ class BatchDialog(QDialog):
         if self._ask_files is not None:
             self.add_paths(self._ask_files())
 
+    def _add_dir(self) -> None:
+        if self._ask_dir is not None:
+            d = self._ask_dir()
+            if d:
+                from . import batch
+                self.add_paths(batch.collect([d]))
+
     def _browse(self) -> None:
         if self._ask_dir is not None:
             d = self._ask_dir()
@@ -998,39 +1017,56 @@ class BatchDialog(QDialog):
         if d and not os.path.isdir(d):
             self.error.setText(_("La cartella di destinazione non esiste."))
             return
+        if self.cb_overwrite.isChecked() and QMessageBox.question(
+                self, _("Sovrascrivi gli originali"),
+                _("I file originali saranno sostituiti dal risultato (resta una copia «.bak»). Continuare?")
+        ) != QMessageBox.StandardButton.Yes:
+            return
         super().accept()
 
 
-def output_path(src: str, out_dir: str, suffix: str) -> str:
-    """Percorso di uscita senza sovrascrivere: aggiunge (2), (3)… se il file esiste."""
-    base = os.path.splitext(os.path.basename(src))[0] + (suffix or "")
-    folder = out_dir or os.path.dirname(os.path.abspath(src))
-    path = os.path.join(folder, base + ".pdf")
-    n = 2
-    while os.path.exists(path):
-        path = os.path.join(folder, f"{base} ({n}).pdf")
-        n += 1
-    return path
-
-
 class ReportDialog(QDialog):
-    def __init__(self, parent, title: str, rows: list[tuple[str, bool, str]]):
+    """Rapporto dell'OCR in blocco, esportabile in CSV."""
+
+    def __init__(self, parent, title: str, items: list, save_path_cb=None):
         super().__init__(parent)
+        from . import batch
         self.setWindowTitle(title)
-        self.resize(640, 400)
+        self.resize(720, 420)
+        self.items = items
+        self._save_path_cb = save_path_cb
         lay = QVBoxLayout(self)
-        table = QTableWidget(len(rows), 2, self)
+        counts = {k: sum(1 for i in items if i.status == k) for k in (batch.OK, batch.SKIPPED, batch.ERROR)}
+        lay.addWidget(QLabel(_("Completati: {o} · saltati: {s} · errori: {e}").format(
+            o=counts[batch.OK], s=counts[batch.SKIPPED], e=counts[batch.ERROR])))
+        self.table = table = QTableWidget(len(items), 2, self)
         table.setHorizontalHeaderLabels([_("File"), _("Esito")])
         table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        for r, (name, ok, msg) in enumerate(rows):
-            a = QTableWidgetItem(icon("circle-check") if ok else icon("circle-x"), name)
-            table.setItem(r, 0, a)
-            table.setItem(r, 1, QTableWidgetItem(msg))
+        icons = {batch.OK: "circle-check", batch.SKIPPED: "circle-minus", batch.ERROR: "circle-x"}
+        for r, it in enumerate(items):
+            table.setItem(r, 0, QTableWidgetItem(icon(icons.get(it.status, "circle-x")), os.path.basename(it.path)))
+            table.setItem(r, 1, QTableWidgetItem(it.message))
         table.resizeColumnToContents(0)
         lay.addWidget(table)
+        row = QHBoxLayout()
+        self.btn_csv = QPushButton(icon("file-spreadsheet"), _("Esporta CSV…"), self)
+        self.btn_csv.clicked.connect(self.export_csv)
+        row.addWidget(self.btn_csv)
+        row.addStretch(1)
         b = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
         b.button(QDialogButtonBox.StandardButton.Close).setText(_("Chiudi"))
         b.rejected.connect(self.reject)
-        lay.addWidget(b)
+        row.addWidget(b)
+        lay.addLayout(row)
+
+    def export_csv(self) -> None:
+        from foliant.core.document import atomic_write
+
+        from . import batch
+        if self._save_path_cb is None:
+            return
+        path = self._save_path_cb(_("Esporta rapporto"), "rapporto-ocr.csv", _("CSV (*.csv)"), ".csv")
+        if path:
+            atomic_write(path, batch.report_csv(self.items).encode("utf-8"))

@@ -279,20 +279,55 @@ def test_annullato_e_errori(window, scan_two, monkeypatch):
     assert errors and "guasto" in errors[0]
 
 
-def test_ocr_in_blocco(window, tmp_path, scan_two, monkeypatch):
+def test_ocr_in_blocco(window, tmp_path, monkeypatch, sample_pdf):
+    """Cartella mista: scansioni, PDF nativo, danneggiato, protetto, TIFF multipagina (OCR-15)."""
+    import shutil
+
+    import cv2
+    from foliant.modules.ocr import batch
     ctl = ocr_controller()
-    bad = tmp_path / "rotto.pdf"
-    bad.write_bytes(b"non un pdf")
+    src = tmp_path / "lotto"
+    src.mkdir()
+    for n in range(2):
+        image_pdf(src / f"scan{n}.pdf", [scan_image(lines=FRASI[:2], dpi=150)], dpi=150)
+    shutil.copy(sample_pdf, src / "nativo.pdf")
+    (src / "rotto.pdf").write_bytes(b"non un pdf")
+    with pymupdf.open(str(src / "scan0.pdf")) as d:
+        d.save(str(src / "protetto.pdf"), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="x", owner_pw="y")
+    img = scan_image(lines=FRASI[:2], dpi=150)
+    ok, buf = cv2.imencode(".png", img)
+    pages = [pymupdf.open(stream=buf.tobytes(), filetype="png") for _ in range(3)]
+    tif = pymupdf.open()
+    for p in pages:
+        tif.insert_pdf(pymupdf.open(stream=p.convert_to_pdf()))
+    pix = [tif[i].get_pixmap(dpi=150) for i in range(3)]
+    from PIL import Image
+    ims = [Image.frombytes("RGB", (p.width, p.height), p.samples) for p in pix]
+    ims[0].save(src / "pagine.tif", save_all=True, append_images=ims[1:])
+    existing = src / "scan0_ocr.pdf"
     monkeypatch.setattr(dialogs.ReportDialog, "open", lambda d: None)
-    outdir = tmp_path / "out"
-    outdir.mkdir()
-    rows = ctl.run_batch([scan_two, str(bad)], engine.SEARCHABLE, ["ita"], str(outdir), "_ocr")
-    assert rows[0][1] and not rows[1][1]
-    out = outdir / "scansione_ocr.pdf"
-    with pymupdf.open(str(out)) as d:
+    items = ctl.run_batch([str(src)], engine.SEARCHABLE, ["ita"])
+    by = {os.path.basename(i.path): i for i in items}
+    assert len(items) == 6
+    assert by["scan0.pdf"].status == batch.OK and by["scan1.pdf"].status == batch.OK
+    assert by["pagine.tif"].status == batch.OK and by["pagine.tif"].pages == 3
+    assert by["nativo.pdf"].status == batch.SKIPPED
+    assert by["rotto.pdf"].status == batch.ERROR and by["protetto.pdf"].status == batch.ERROR
+    with pymupdf.open(str(existing)) as d:
         assert "compravendita" in d[0].get_text()
-    rows = ctl.run_batch([scan_two], engine.SEARCHABLE, ["ita"], str(outdir), "_ocr")
-    assert os.path.exists(outdir / "scansione_ocr (2).pdf")
+    csv_text = batch.report_csv(items)
+    assert len(csv_text.strip().splitlines()) == 7
+    # nome già esistente: suffisso numerico, il file esistente resta identico
+    before = existing.read_bytes()
+    items2 = ctl.run_batch([str(src / "scan0.pdf")], engine.SEARCHABLE, ["ita"])
+    assert items2[0].output.endswith("scan0_ocr (2).pdf") and existing.read_bytes() == before
+    # sovrascrittura con copia di sicurezza byte-identica
+    orig = (src / "scan1.pdf").read_bytes()
+    batch.process_file(batch.BatchItem(str(src / "scan1.pdf")), engine.OcrOptions(languages=["ita"]),
+                       overwrite=True)
+    assert (src / "scan1.bak.pdf").read_bytes() == orig
+    with pymupdf.open(str(src / "scan1.pdf")) as d:
+        assert "compravendita" in d[0].get_text()
 
 
 def test_dialogo_impostazioni(window, settings):
@@ -515,3 +550,35 @@ def test_forza_ocr_chiede_conferma(window, sample_pdf, monkeypatch):
     opts = engine.OcrOptions(languages=["ita"], existing_text=engine.FORCE)
     assert ctl.run(view, opts, [0], preview=False) is None
     assert asked and not view.document.is_modified
+
+
+def test_revisione_da_tastiera(window, scan_two, qtbot):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    words = [w for _r, w in ctl.state(view).placed[0]]
+    target = next(w for w in words if w.text == "contratto")
+    same = [w for w in words if w.text == "in"]
+    target.conf = 10.0
+    for w in same:
+        w.conf = 10.0
+    panel = ctl.review_panel
+    panel.set_view(view)
+    n = len(panel.rows)
+    row = next(i for i, r in enumerate(panel.rows) if r[2] is target)
+    panel.table.setCurrentCell(row, 1)
+    panel.edit.setText("accordo")
+    qtbot.keyClick(panel.edit, Qt.Key.Key_Return)
+    assert "accordo" in view.document.page_text(0)
+    assert len(panel.rows) == n - 1
+    row = next(i for i, r in enumerate(panel.rows) if r[2].text == "in")
+    panel.table.setCurrentCell(row, 1)
+    panel.btn_all.click()
+    assert not any(r[2].text == "in" for r in panel.rows)
+    if panel.rows:
+        w = panel.rows[0][2]
+        panel.table.setCurrentCell(0, 1)
+        panel.btn_dict.click()
+        assert w.text.lower() in ctl.user_dictionary()
+    view.document.undo()
+    assert "contratto" in view.document.page_text(0)

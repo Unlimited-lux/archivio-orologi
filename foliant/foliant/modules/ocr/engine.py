@@ -45,7 +45,7 @@ from .preprocess import (
     PreprocessOptions, apply_point, clean_background, ink_color, invert, prepare, serif_ratio, slant, stroke_width,
     warp,
 )
-from .tess import Line, OcrCancelled, OcrError, Word, detect_orientation, recognize
+from .tess import LOW_CONFIDENCE, Line, OcrCancelled, OcrError, Word, detect_orientation, recognize
 
 SEARCHABLE = "searchable"
 EDITABLE = "editable"
@@ -58,7 +58,6 @@ FORCE = "force"      # pagine con testo: rasterizzate e riconosciute di nuovo
 
 OCR_TAG = "FoliantOCR"   # sequenza marcata che identifica il livello di testo prodotto dall'OCR
 
-LOW_CONFIDENCE = 60.0
 MAX_PIXELS = 70_000_000     # oltre: risoluzione ridotta (pagine enormi)
 
 FONT_FILES = {

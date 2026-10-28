@@ -219,7 +219,7 @@ def test_parole_bassa_affidabilita(corpus):
     with pymupdf.open(stream=corpus["inclinata-200-rumore"]) as pdf:
         res = engine.recognize_document(pdf, engine.OcrOptions(languages=["ita"])).pages[0]
     assert res.mean_confidence > 80
-    assert all(w.conf < 60 for w in res.low_confidence_words())
+    assert all(w.conf < 70 for w in res.low_confidence_words())
     assert res.text.startswith("Il presente contratto")
 
 
