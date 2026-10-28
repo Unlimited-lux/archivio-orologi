@@ -256,6 +256,7 @@ class PageGrid(QListView):
     contextRequested = Signal(object)   # QPoint globale
     zoomStep = Signal(int)
     rotateRequested = Signal(int, int)   # pagina, gradi (pulsanti rapidi)
+    insertRequested = Signal(int)        # pulsante «+» tra due miniature: posizione
 
     RENDER_MARGIN_ROWS = 2
 
@@ -295,6 +296,7 @@ class PageGrid(QListView):
         self._drop_index: int | None = None
         self.drag_payload: Callable[[list[int]], QMimeData | None] | None = None
         self.quick_buttons_enabled = True
+        self._plus: tuple[int, QPoint] | None = None
         self.verticalScrollBar().valueChanged.connect(lambda _v: self.schedule_render())
         self._apply_grid()
 
@@ -483,7 +485,56 @@ class PageGrid(QListView):
                 return idx.row(), deg
         return None
 
+    PLUS_RADIUS = 11
+
+    def plus_points(self) -> list[tuple[int, QPoint]]:
+        """Punti dei pulsanti «+» (posizione di inserimento, centro) tra miniature vicine."""
+        out = []
+        rows = self.visible_rows()
+        delegate = self.itemDelegate()
+        for r in rows:
+            rect = self.visualRect(self._model.index(r))
+            box = delegate.page_box(rect, self._model.infos[r])
+            if r + 1 < self.page_count():
+                nrect = self.visualRect(self._model.index(r + 1))
+                if nrect.top() == rect.top():
+                    nbox = delegate.page_box(nrect, self._model.infos[r + 1])
+                    out.append((r + 1, QPoint(int((box.right() + nbox.left()) / 2), int(box.center().y()))))
+                    continue
+            out.append((r + 1, QPoint(int(rect.right() + 3), int(box.center().y()))))
+        return out
+
+    def plus_at(self, pos: QPoint) -> int | None:
+        for index, pt in self.plus_points():
+            if (pt - pos).manhattanLength() <= self.PLUS_RADIUS + 3:
+                return index
+        return None
+
+    def mouseMoveEvent(self, ev) -> None:
+        pos = ev.position().toPoint()
+        near = None
+        if not ev.buttons():
+            for index, pt in self.plus_points():
+                if (pt - pos).manhattanLength() <= 40:
+                    near = (index, pt)
+                    break
+        if near != self._plus:
+            self._plus = near
+            self.viewport().update()
+        super().mouseMoveEvent(ev)
+
+    def leaveEvent(self, ev) -> None:
+        self._plus = None
+        self.viewport().update()
+        super().leaveEvent(ev)
+
     def mousePressEvent(self, ev) -> None:
+        if ev.button() == Qt.MouseButton.LeftButton and self.quick_buttons_enabled:
+            at = self.plus_at(ev.position().toPoint())
+            if at is not None:
+                ev.accept()
+                self.insertRequested.emit(at)
+                return
         if ev.button() == Qt.MouseButton.LeftButton:
             hit = self.quick_button_at(ev.position().toPoint())
             if hit is not None:
@@ -598,6 +649,18 @@ class PageGrid(QListView):
 
     def paintEvent(self, ev) -> None:
         super().paintEvent(ev)
+        if self._plus is not None and self._drop_index is None:
+            _i, pt = self._plus
+            p = QPainter(self.viewport())
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(theme.color("accent"))
+            r = self.PLUS_RADIUS
+            p.drawEllipse(pt, r, r)
+            p.setPen(QPen(theme.color("accent_text"), 2))
+            p.drawLine(pt.x() - 5, pt.y(), pt.x() + 5, pt.y())
+            p.drawLine(pt.x(), pt.y() - 5, pt.x(), pt.y() + 5)
+            p.end()
         if self._drop_index is None:
             return
         n = self.page_count()

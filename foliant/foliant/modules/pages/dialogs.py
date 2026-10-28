@@ -156,6 +156,9 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Alimentatore automatico (più pagine)": "Automatic feeder (multiple pages)",
+    "Scarta le pagine vuote": "Discard blank pages",
+    "Tutte le pagine acquisite erano vuote.": "All scanned pages were blank.",
     "Applica anche ad altri file…": "Apply to other files too…",
     "Altri file da dividere": "Other files to split",
     "File non divisi:": "Files not split:",
@@ -1347,10 +1350,21 @@ def scan_pages(device: str, dpi: int = 300, mode: str = "Color", batch: bool = F
         return [proc.stdout]
 
 
-def scanned_to_pdf(images: list[bytes], dpi: int) -> pymupdf.Document:
-    """Una pagina per immagine acquisita, dimensionata secondo la risoluzione."""
+def scanned_to_pdf(images: list[bytes], dpi: int, discard_blank: bool = False) -> pymupdf.Document:
+    """Una pagina per immagine acquisita, dimensionata secondo la risoluzione.
+
+    Con `discard_blank` le facciate vuote (es. retri bianchi) vengono scartate."""
     out = pymupdf.open()
     for data in images:
+        if discard_blank:
+            tmp = pymupdf.open()
+            pix = pymupdf.Pixmap(data)
+            pg = tmp.new_page(width=pix.width * 72.0 / dpi, height=pix.height * 72.0 / dpi)
+            pg.insert_image(pg.rect, stream=data)
+            blank = E.page_is_blank(pg, 0.002)
+            tmp.close()
+            if blank:
+                continue
         pix = pymupdf.Pixmap(data)
         w, h = pix.width * 72.0 / dpi, pix.height * 72.0 / dpi
         page = out.new_page(width=w, height=h)
@@ -1376,12 +1390,33 @@ class ScannerDialog(BaseDialog):
             self.color.addItem(text, key)
         form.addRow(_("Colore:"), self.color)
         self.layout_.addLayout(form)
+        self.batch = QCheckBox(_("Alimentatore automatico (più pagine)"))
+        self.discard = QCheckBox(_("Scarta le pagine vuote"))
+        self.layout_.addWidget(self.batch)
+        self.layout_.addWidget(self.discard)
         self.position = PositionBox(self)
         self.layout_.addWidget(self.position)
         self.finish_layout()
 
     def options(self) -> dict:
-        return {"device": self.device.currentData(), "dpi": self.dpi.currentData(), "mode": self.color.currentData()}
+        return {"device": self.device.currentData(), "dpi": self.dpi.currentData(), "mode": self.color.currentData(),
+                "batch": self.batch.isChecked(), "discard": self.discard.isChecked()}
+
+    def load_preset(self, settings) -> None:
+        """Ultime impostazioni usate (preset salvato)."""
+        for combo, key in ((self.device, "device"), (self.dpi, "dpi"), (self.color, "mode")):
+            value = settings.value(f"pages/scan_{key}")
+            if value is not None:
+                i = combo.findData(int(value) if key == "dpi" else value)
+                if i >= 0:
+                    combo.setCurrentIndex(i)
+        self.batch.setChecked(settings.value("pages/scan_batch", False, type=bool))
+        self.discard.setChecked(settings.value("pages/scan_discard", False, type=bool))
+
+    def save_preset(self, settings) -> None:
+        o = self.options()
+        for key in ("device", "dpi", "mode", "batch", "discard"):
+            settings.setValue(f"pages/scan_{key}", o[key])
 
 
 def open_scanner_dialog(ctx, view, selected: list[int]) -> bool:
@@ -1390,17 +1425,23 @@ def open_scanner_dialog(ctx, view, selected: list[int]) -> bool:
         ctx.error(_("Acquisizione da scanner"), _("Nessuno scanner rilevato. Collega un dispositivo e riprova."))
         return False
     dlg = ScannerDialog(ctx.window, devices)
+    dlg.load_preset(ctx.settings())
     if not _exec(dlg):
         return False
+    dlg.save_preset(ctx.settings())
     o = dlg.options()
     try:
         images = ctx.run_task(_("Acquisizione in corso…"),
-                              lambda progress: scan_pages(o["device"], o["dpi"], o["mode"]))
+                              lambda progress: scan_pages(o["device"], o["dpi"], o["mode"], batch=o["batch"]))
     except FoliantError as e:
         ctx.error(_("Acquisizione da scanner"), str(e))
         return False
     at = dlg.position.index(selected, view.page_count)
-    src = scanned_to_pdf(images, o["dpi"])
+    src = scanned_to_pdf(images, o["dpi"], o["discard"])
+    if src.page_count == 0:
+        src.close()
+        ctx.info(_("Acquisizione da scanner"), _("Tutte le pagine acquisite erano vuote."))
+        return False
     try:
         return _apply(ctx, _("Inserisci da scanner"), lambda pdf: E.insert_pdf_pages(pdf, src, at),
                       select=lambda r: r) is not None

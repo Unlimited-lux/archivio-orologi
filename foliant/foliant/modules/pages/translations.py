@@ -130,6 +130,7 @@ EN = {
     "Pagine (es. 1-3, 8-):": "Pages (e.g. 1-3, 8-):",
     "Duplica": "Duplicate",
     "Organizza pagine": "Organize pages",
+    "Inserisci pagina vuota": "Insert blank page",
     # motore
     "Indica almeno una pagina.": "Enter at least one page.",
     "Il documento non ha pagine.": "The document has no pages.",

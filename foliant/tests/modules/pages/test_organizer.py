@@ -385,3 +385,20 @@ def test_quick_rotate_button(pages_window, qtbot):
     qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=pos)
     with E.ENGINE_LOCK:
         assert view.document.pdf[3].rotation == 90
+
+
+def test_plus_button_inserts_blank(pages_window, qtbot):
+    window, view = pages_window
+    grid = ctrl(window).organizer.grid
+    grid.flush_rendering()
+    index, pt = next((i, p) for i, p in grid.plus_points() if i == 2)
+    assert grid.plus_at(pt) == 2
+    qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=pt)
+    assert view.page_count == 11
+    assert texts_at(view, 2) == ""
+    assert grid.selected_pages() == [2]
+
+
+def texts_at(view, i):
+    with E.ENGINE_LOCK:
+        return view.document.pdf[i].get_text().strip()

@@ -61,6 +61,7 @@ class PagesController:
         grid.drag_payload = self.drag_mime
         grid.doubleClicked.connect(self.open_page_in_view)
         grid.rotateRequested.connect(self.rotate_page)
+        grid.insertRequested.connect(self.insert_blank_at)
         grid.selectionCountChanged.connect(lambda _n: self.update_actions())
 
     # ================================================================ stato
@@ -221,6 +222,12 @@ class PagesController:
         sel = self.organizer.selected_pages()
         pages = sel if page in sel else [page]
         self.apply(_("Ruota pagine"), lambda pdf: E.rotate_pages(pdf, pages, degrees), select=lambda r: pages)
+
+    def insert_blank_at(self, at: int) -> None:
+        """Pulsante «+» tra due miniature: una pagina vuota come quella adiacente."""
+        like = max(0, at - 1)
+        self.apply(_("Inserisci pagina vuota"), lambda pdf: E.insert_blank_pages(pdf, at, 1, like=like),
+                   select=lambda r: r)
 
     def delete(self) -> None:
         view = self.view()

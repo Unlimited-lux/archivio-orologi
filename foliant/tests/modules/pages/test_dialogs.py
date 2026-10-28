@@ -277,14 +277,57 @@ def test_scanner_fake_device(pages_window, accept, monkeypatch):
     png = pix.tobytes("png")
     monkeypatch.setattr(D, "list_scanners", lambda: [("test:0", "Scanner di prova")])
     monkeypatch.setattr(D, "scan_pages", lambda dev, dpi, mode, **k: [png, png, png])
+    monkeypatch.setattr(D, "scanned_to_pdf", lambda imgs, dpi, discard=False: _order_pdf(imgs, dpi))
     accept(lambda d: d.position.set_where("start"))
     assert D.open_scanner_dialog(window.ctx, view, [0])
     assert view.page_count == 13
+    assert texts(view)[:3] == ["S1", "S2", "S3"]
     with E.ENGINE_LOCK:
         r = view.document.pdf[0].rect
     assert abs(r.width - 595) <= 2 and abs(r.height - 842) <= 2
     view.document.undo()
     assert view.page_count == 10
+
+
+def _order_pdf(imgs, dpi):
+    out = D.__dict__["_real_scanned_to_pdf"](imgs, dpi)
+    for i in range(out.page_count):
+        out[i].insert_text((72, 72), f"S{i + 1}")
+    return out
+
+
+D._real_scanned_to_pdf = D.scanned_to_pdf
+
+
+def test_scanned_bw_one_bit_and_blank_discard():
+    import io
+    from PIL import Image, ImageDraw
+    blank = Image.new("1", (2480, 3508), 1)
+    full = blank.copy()
+    ImageDraw.Draw(full).rectangle((200, 200, 2000, 1200), fill=0)
+    data = []
+    for im in (full, blank):
+        b = io.BytesIO()
+        im.save(b, "PNG")
+        data.append(b.getvalue())
+    out = D.scanned_to_pdf(data, 300)
+    assert out.page_count == 2
+    r = out[0].rect
+    assert abs(r.width - 595) <= 2 and abs(r.height - 842) <= 2
+    xref = out[0].get_images()[0][0]
+    assert out.xref_get_key(xref, "BitsPerComponent")[1] == "1"
+    assert D.scanned_to_pdf(data, 300, discard_blank=True).page_count == 1
+
+
+def test_scanner_preset_remembered(window):
+    dlg = D.ScannerDialog(window, [("a", "A"), ("b", "B")])
+    dlg.device.setCurrentIndex(1)
+    dlg.dpi.setCurrentIndex(dlg.dpi.findData(600))
+    dlg.discard.setChecked(True)
+    dlg.save_preset(window.ctx.settings())
+    dlg2 = D.ScannerDialog(window, [("a", "A"), ("b", "B")])
+    dlg2.load_preset(window.ctx.settings())
+    assert dlg2.options()["device"] == "b" and dlg2.options()["dpi"] == 600 and dlg2.options()["discard"]
 
 
 def test_dialog_screenshots(window, ten_pdf, tmp_path):
