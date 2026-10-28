@@ -623,12 +623,10 @@ class AnnotationsModule:
         menu.addAction(_("Aggiungi nota qui"), add_note)
 
 
-_module: AnnotationsModule | None = None
-
-
 def register(ctx: Context) -> None:
-    global _module
+    """Un'istanza del modulo per finestra (Ctrl+N apre più finestre nello stesso processo):
+    lo stato resta sul contesto, nessuna variabile globale."""
     add_translations("en", EN)
-    _module = AnnotationsModule(ctx)
-    _module.register()
-    ctx.annotations = _module   # accesso per i test e per altri moduli
+    module = AnnotationsModule(ctx)
+    module.register()
+    ctx.annotations = module    # accesso per i test e per altri moduli

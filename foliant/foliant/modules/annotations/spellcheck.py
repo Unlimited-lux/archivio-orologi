@@ -49,7 +49,14 @@ def use_settings(settings) -> None:
 
 
 def _store():
-    return _settings if _settings is not None else QSettings()
+    # le impostazioni di una finestra chiusa (Ctrl+N) non sono più valide: si usano quelle globali
+    try:
+        import shiboken6
+        if _settings is not None and shiboken6.isValid(_settings):
+            return _settings
+    except Exception:
+        pass
+    return QSettings()
 
 
 def enabled() -> bool:
