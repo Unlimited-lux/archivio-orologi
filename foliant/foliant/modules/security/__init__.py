@@ -36,7 +36,7 @@ def register(ctx: Context) -> None:
 
     c.actions = {
         "protect": act(_("Password e permessi"), "lock", c.protect),
-        "remove": act(_("Rimuovi protezione"), "lock-open", c.remove_protection),
+        "remove": act(_("Rimuovi protezione"), "lock-open", c.remove_protection, requires_document=False),
         "properties": act(_("Proprietà di sicurezza"), "shield-check", c.security_properties),
         "area": act(_("Segna area"), "square-dashed", c.activate_area_tool),
         "text": act(_("Segna testo selezionato"), "text-select", c.mark_selection, shortcut="Ctrl+Shift+R"),
@@ -45,7 +45,8 @@ def register(ctx: Context) -> None:
         "pages": act(_("Segna pagine"), "file-x", c.mark_pages),
         "style": act(_("Impostazioni di redazione"), "palette", c.redaction_settings, requires_document=False),
         "panel": act(_("Elenco redazioni"), "list-checks", c.show_panel),
-        "apply": act(_("Applica redazioni"), "check-check", lambda: c.apply_redactions(None)),
+        "apply": act(_("Applica redazioni"), "check-check", lambda: c.apply_redactions(None),
+                     requires_document=False),
         "inspect": act(_("Esamina documento"), "scan-eye", c.inspect),
         "sanitize": act(_("Sanifica"), "spray-can", c.sanitize),
         "metadata": act(_("Metadati"), "file-pen", c.edit_metadata),

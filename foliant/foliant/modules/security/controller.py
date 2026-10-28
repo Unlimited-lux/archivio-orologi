@@ -408,7 +408,8 @@ class SecurityController:
 
     def _repeat_mark_on(self, document, page: int, xref: int, pages: list[int]) -> int:
         with document.change(_("Ripeti segno su più pagine")) as pdf:
-            annot = pdf[page].load_annot(xref)
+            src = pdf[page]
+            annot = src.load_annot(xref)
             if annot is None:
                 raise _Nothing()
             rect = pymupdf.Rect(annot.rect)
@@ -791,7 +792,8 @@ def merge_line_rects(rects: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
 def _detach_marks(pdf: pymupdf.Document, keep: set[tuple[int, int]]) -> list[tuple[int, pymupdf.Rect, dict]]:
     saved = []
     for page, xref in keep:
-        annot = pdf[page].load_annot(xref)
+        p = pdf[page]
+        annot = p.load_annot(xref)
         if annot is None:
             continue
         info = dict(annot.info or {})
@@ -804,7 +806,7 @@ def _detach_marks(pdf: pymupdf.Document, keep: set[tuple[int, int]]) -> list[tup
             pass
         saved.append((page, pymupdf.Rect(annot.rect), {"info": info, "fill": colors.get("fill") or (0, 0, 0),
                                                          "overlay": overlay}))
-        pdf[page].delete_annot(annot)
+        p.delete_annot(annot)
     return saved
 
 
@@ -872,7 +874,8 @@ def redact_outside(pdf: pymupdf.Document, matches: list[PT.Match], replacement: 
                 pdf.set_toc(toc)
         elif kind == "annot":
             page, xref = (int(x) for x in rest.split(":"))
-            annot = pdf[page].load_annot(xref)
+            p = pdf[page]
+            annot = p.load_annot(xref)
             if annot is not None:
                 annot.set_info(content=(annot.info.get("content", "")).replace(m.text, replacement))
                 annot.update()

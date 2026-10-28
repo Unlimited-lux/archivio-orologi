@@ -122,7 +122,7 @@ class ProtectionSettings:
             raise ProtectionError(_("Imposta una password di apertura oppure limita almeno un permesso."))
         if self.has_restrictions and not self.permissions_password:
             raise ProtectionError(_("Per limitare i permessi serve una password dei permessi."))
-        if self.has_restrictions and self.open_password and self.open_password == self.permissions_password:
+        if self.permissions_password and self.open_password == self.permissions_password:
             raise ProtectionError(_("La password dei permessi deve essere diversa da quella di apertura: "
                                     "altrimenti chi apre il documento avrebbe tutti i permessi."))
         if self.method not in METHODS:
