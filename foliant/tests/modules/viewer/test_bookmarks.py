@@ -316,3 +316,22 @@ def test_read_only_kept_after_document_change(viewer_window, tmp_path):
         pdf[0].add_text_annot((50, 50), "nota")
     panel.reload()
     assert not panel.editable
+
+
+def test_generate_from_regex_with_levels(viewer_window, tmp_path, monkeypatch):
+    path = tmp_path / "numerati.pdf"
+    doc = pymupdf.open()
+    for i in range(3):
+        p = doc.new_page()
+        p.insert_text((72, 80), f"{i + 1} Capitolo {i + 1}", fontsize=14)
+        p.insert_text((72, 120), f"{i + 1}.1 Sezione", fontsize=12)
+        p.insert_text((72, 160), "testo normale senza numero", fontsize=10)
+    doc.save(str(path))
+    view, panel = _open(viewer_window, str(path))
+    assert panel.generate("regex", pattern=r"^(?P<level>\d+(\.\d+)*)\s+\S", replace=True)
+    assert [(b.level, b.title) for b in panel.items][:2] == [(1, "1 Capitolo 1"), (2, "1.1 Sezione")]
+    assert len(panel.items) == 6
+    errors = []
+    monkeypatch.setattr(viewer_window.ctx, "error", lambda t, m: errors.append(m))
+    assert not panel.generate("regex", pattern="(", replace=True)
+    assert errors and "non valida" in errors[0]
