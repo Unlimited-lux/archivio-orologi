@@ -19,7 +19,7 @@ HIDDEN_KEEP = "keep"
 HIDDEN_DELETE = "delete"
 
 _HIDDEN_FLAGS = pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_NO_VIEW
-_STAMP_RE = re.compile(rb"/FolStamp_([a-z]+)_(\d+)(\s+Do)")
+_STAMP_RE = re.compile(rb"/FolStamp_([a-z]+)_([A-Za-z0-9]+)(\s+Do)")
 
 
 @dataclass
@@ -304,9 +304,15 @@ def flatten_stamps(pdf: pymupdf.Document, pages: list[int] | None, rep: FlattenR
             if kind == "null":
                 continue
             for x in _refs(val):
-                oc = pdf.xref_get_key(x, "OC")
-                layer_xrefs.update(_refs(oc[1]))
-                pdf.xref_set_key(x, "OC", "null")
+                # i dati privati con cui «Modifica» ritrova il timbro spariscono
+                pdf.xref_set_key(x, "FoliantStamp", "null")
+                pdf.xref_set_key(x, "PieceInfo", "null")
+                oc = _refs(pdf.xref_get_key(x, "OC")[1])
+                # varianti solo schermo o solo stampa (/Usage): la visibilità resta quella
+                if oc and pdf.xref_get_key(oc[0], "Usage/View")[0] == "null" \
+                        and pdf.xref_get_key(oc[0], "Usage/Print")[0] == "null":
+                    layer_xrefs.update(oc)
+                    pdf.xref_set_key(x, "OC", "null")
             _set_xobject(pdf, page.xref, f"Flat{old[3:]}", val)
             _set_xobject(pdf, page.xref, old, "null")
     still_used: set[int] = set()

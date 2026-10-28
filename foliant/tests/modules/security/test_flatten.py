@@ -250,6 +250,11 @@ def test_foliant_watermark_flattened(tmp_path):
     assert _within_tolerance(before, _render(d[0]))
     assert not any(name.startswith("Foliant") for name in
                    (i.get("name", "") for i in (d.get_ocgs() or {}).values()))
+    saved = pymupdf.open("pdf", d.tobytes(garbage=3, no_new_id=True))
+    # «/Chiave null» equivale a chiave assente (ISO 32000-2 §7.3.9)
+    for x in range(1, saved.xref_length()):
+        assert saved.xref_get_key(x, "FoliantStamp")[0] == "null"
+        assert saved.xref_get_key(x, "OC")[0] == "null"
 
 
 def test_rasterize_pages(tmp_path):
