@@ -316,3 +316,46 @@ def import_styles(ctrl: "Controller", path: str | None = None) -> int:
         return 0
     ctrl.ctx.status(_("Stili importati."))
     return n
+
+
+def export_stamp_library(ctrl: "Controller") -> str | None:
+    import json
+    path = ctrl.ctx.ask_save_path(_("Esporta libreria timbri"), "timbri.json", "JSON (*.json)", default_suffix=".json")
+    if not path:
+        return None
+    data = {"version": 1, "stamps": ctrl.custom_stamps(), "dynamic": ctrl.dynamic_templates()}
+    try:
+        atomic_write(path, json.dumps(data, ensure_ascii=False).encode("utf-8"))
+    except Exception as e:
+        ctrl.ctx.error(_("Esporta libreria timbri"), str(e))
+        return None
+    return path
+
+
+def import_stamp_library(ctrl: "Controller", path: str | None = None) -> int:
+    import base64
+    import json
+    if path is None:
+        paths = ctrl.ctx.ask_open_paths(_("Importa libreria timbri"), "JSON (*.json)", multiple=False)
+        path = paths[0] if paths else None
+    if not path:
+        return 0
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or int(data.get("version", 0)) > 1:
+            raise ValueError(_("versione non supportata"))
+        n = 0
+        for d in data.get("stamps", []):
+            png = base64.b64decode(d["png"])
+            pymupdf.Pixmap(png)              # immagine valida
+            ctrl.add_custom_stamp(str(d["name"]), png)
+            n += 1
+        for d in data.get("dynamic", []):
+            ctrl.add_dynamic_template(str(d["template"]), str(d.get("color", "#2650B3")))
+            n += 1
+    except Exception as e:
+        ctrl.ctx.error(_("Importa libreria timbri"), _("File non valido: la libreria non è cambiata ({e}).").format(e=e))
+        return 0
+    ctrl.ctx.status(_("Timbri importati: {n}").format(n=n))
+    return n

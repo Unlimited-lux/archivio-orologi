@@ -622,6 +622,8 @@ def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     rc = pdf.xref_get_key(xref, "RC")
     try:
         _refresh_freetext(pdf, page, page_no, xref)
+        if not page.rotation % 360:
+            keep_rotation(pdf, page_no, xref)
     finally:
         if rc[0] == "string" and pdf.xref_get_key(xref, "RC")[0] != "string":
             pdf.xref_set_key(xref, "RC", pymupdf.get_pdf_str(rc[1]))
@@ -705,6 +707,13 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
     align = int(q[1]) if q[0] == "int" else 0
     rect = pymupdf.Rect(annot.rect)
     inner = _freetext_inner(page, annot)
+    _ang, base = _rotation(pdf, xref)
+    if base is not None and not rot:
+        # casella ruotata: si disegna alla dimensione originale, la rotazione è nella /Matrix
+        c = _std_rect(pdf, page, xref)
+        cx, cy = (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2
+        rect = pymupdf.Rect(cx - base[0] / 2, cy - base[1] / 2, cx + base[0] / 2, cy + base[1] / 2)
+        inner = pymupdf.Rect(rect)
     real_rect = None
     if rot:
         # pagina ruotata: si disegna nell'orientamento della vista e si ruota l'aspetto (/Matrix)
@@ -757,7 +766,7 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
             text.replace("\n", "").strip():
         runs = []          # /RC discordante da /Contents: si usa /Contents
     lines = _wrap(text, avail, size) if not runs else _wrap_runs(runs, avail, size)
-    if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts and not rot:
+    if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts and not rot and base is None:
         need = 2 * pad + size * 1.2 * len(lines) + size * 0.2
         if need > inner.height + 0.5:
             # adattamento automatico: si allunga la casella verso il basso e si ridisegna
@@ -1095,6 +1104,39 @@ def scale_of(pdf: pymupdf.Document, xref: int) -> Scale | None:
                  _unescape_pdf_string(r[1]) if r[0] == "string" else "", True)
 
 
+def viewport_scale(pdf: pymupdf.Document, page_no: int, point) -> Scale | None:
+    """Scala dell'area di misura /VP della pagina che contiene il punto (ISO 32000-2 §12.9):
+    si usa l'ultima area dell'elenco che contiene il punto."""
+    page = pdf[page_no]
+    k, v = pdf.xref_get_key(page.xref, "VP")
+    if k == "null":
+        return None
+    if k == "xref":
+        v = pdf.xref_object(int(v.split()[0]), compressed=True)
+    # riferimenti indiretti alle singole aree: si sostituiscono con il loro contenuto
+    v = re.sub(r"(\d+)\s+0\s+R", lambda m: pdf.xref_object(int(m.group(1)), compressed=True), v)
+    p = pymupdf.Point(point)
+    found = None
+    for part in v.split("/BBox")[1:]:
+        bm = re.match(r"\s*\[([^\]]*)\]", part)
+        if not bm:
+            continue
+        try:
+            bb = [float(x) for x in bm.group(1).split()]
+        except ValueError:
+            continue
+        if len(bb) != 4 or not from_pdf_rect(page, bb).contains(p):
+            continue
+        xm = re.search(r"/X\s*\[(.*?)\]", part, re.S)
+        src = xm.group(1) if xm else part
+        cm = re.search(r"/C\s+([\d.eE+-]+)", src)
+        um = re.search(r"/U\s*\(([^)]*)\)", src)
+        rm = re.search(r"/R\s*\(([^)]*)\)", part)
+        if cm:
+            found = Scale(um.group(1) if um else "", float(cm.group(1)), rm.group(1) if rm else "", True)
+    return found
+
+
 def update_measure(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     """Ricalcola il valore di una misura dalla sua geometria e dalla sua scala."""
     page = pdf[page_no]
@@ -1188,6 +1230,13 @@ def fill_template(template: str, *, author: str = "", when: datetime | None = No
     for k, v in values.items():
         template = template.replace(k, v)
     return template
+
+
+PLACEHOLDERS = ("{autore}", "{nome}", "{data}", "{ora}", "{file}", "{pagina}", "{contatore}")
+
+
+def unknown_placeholders(template: str) -> list[str]:
+    return [p for p in re.findall(r"\{[^{}]*\}", template) if p not in PLACEHOLDERS]
 
 
 def dynamic_subtitle(template: str, author: str, when: datetime | None = None) -> str:
@@ -1285,12 +1334,24 @@ def _apply_rotation(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> Non
     pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, new)))
 
 
+ROTATABLE = (pymupdf.PDF_ANNOT_STAMP, pymupdf.PDF_ANNOT_SQUARE, pymupdf.PDF_ANNOT_CIRCLE,
+             pymupdf.PDF_ANNOT_FREE_TEXT)
+
+
+def keep_rotation(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
+    """Dopo una rigenerazione dell'aspetto da parte del motore, riapplica la rotazione salvata."""
+    if _rotation(pdf, xref)[1] is not None:
+        _apply_rotation(pdf, pdf[page_no], xref)
+
+
 def rotate_annot(pdf: pymupdf.Document, page_no: int, xref: int, degrees: float) -> None:
     """Ruota timbri (vettoriali e immagine) di `degrees` gradi in senso antiorario (ANN-03)."""
     page = pdf[page_no]
     annot = get_annot(page, xref)
-    if annot.type[0] != pymupdf.PDF_ANNOT_STAMP:
-        raise AnnotationError("Si possono ruotare solo i timbri.")
+    t = annot.type[0]
+    if t not in ROTATABLE or (t == pymupdf.PDF_ANNOT_FREE_TEXT and (
+            page.rotation % 360 or _intent(pdf, xref) == "FreeTextCallout")):
+        raise AnnotationError("Si possono ruotare timbri, rettangoli, ellissi e caselle di testo.")
     if annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
         raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
     angle, size = _rotation(pdf, xref)
@@ -1468,8 +1529,59 @@ def refresh_sticker(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
         _apply_rotation(pdf, page, xref)
 
 
+PAGE_STAMP_KEY = "FoliantPageStamp"
+
+
+def create_page_stamp(pdf: pymupdf.Document, page_no: int, point, src: pymupdf.Document, src_page: int,
+                      style: Style, author: str | None = None, max_side: float = 200.0, name: str = "") -> int:
+    """Timbro con l'aspetto vettoriale di una pagina di un altro PDF (contenuto e risorse innestati)."""
+    if src.needs_pass:
+        raise AnnotationError("Il PDF di origine è protetto da password.")
+    if not 0 <= src_page < src.page_count:
+        raise AnnotationError("Pagina inesistente.")
+    sp = src[src_page]
+    box = sp.cropbox if not sp.cropbox.is_empty else sp.mediabox
+    w, h = box.width, box.height
+    k = max_side / max(w, h)
+    p = pymupdf.Point(point)
+    rect = pymupdf.Rect(p.x - w * k / 2, p.y - h * k / 2, p.x + w * k / 2, p.y + h * k / 2)
+    page = pdf[page_no]
+    with unrotated(page):
+        annot = page.add_stamp_annot(rect, 0)
+    xref = _finish(annot, author, name or "Timbro da pagina", kind=STAMP)
+    # risorse della pagina sorgente (anche ereditate) innestate nel documento
+    src_obj = mupdf.pdf_load_object(pymupdf._as_pdf_document(src), sp.xref)
+    res = mupdf.pdf_dict_get_inheritable(src_obj, mupdf.pdf_new_name("Resources"))
+    dst_doc = pymupdf._as_pdf_document(pdf)
+    res_num = 0
+    if res.m_internal:
+        grafted = mupdf.pdf_graft_object(dst_doc, res)
+        res_num = mupdf.pdf_to_num(mupdf.pdf_add_object(dst_doc, grafted)) if not mupdf.pdf_is_indirect(grafted) \
+            else mupdf.pdf_to_num(grafted)
+    content = b"\n".join(src.xref_stream(x) or b"" for x in sp.get_contents())
+    mb = sp.mediabox
+    cb = box if box else mb
+    ap = pdf.get_new_xref()
+    resources = f"/Resources {res_num} 0 R" if res_num else ""
+    # /BBox nelle coordinate della pagina sorgente (area visibile): contenuto vettoriale, nessuna immagine
+    x0, y0 = cb.x0 + mb.x0, mb.y1 - cb.y1
+    pdf.update_object(ap, f"<</Type/XObject/Subtype/Form/BBox[{x0:.3f} {y0:.3f} {x0 + w:.3f} {y0 + h:.3f}]"
+                          f"/Matrix[1 0 0 1 0 0]{resources}>>")
+    pdf.update_stream(ap, content)
+    pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+    pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, rect)))
+    pdf.xref_set_key(xref, "Name", "/FoliantPagina")
+    pdf.xref_set_key(xref, PAGE_STAMP_KEY, "true")
+    annot = get_annot(page, xref)
+    annot.set_opacity(max(0.0, min(1.0, style.opacity)))
+    pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+    _upright(pdf, page, xref)
+    return xref
+
+
 def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes, style: Style,
-                       author: str | None = None, max_side: float = 160.0, name: str = "") -> int:
+                       author: str | None = None, max_side: float = 160.0, name: str = "",
+                       intent: str = "StampImage") -> int:
     page = pdf[page_no]
     try:
         pix = pymupdf.Pixmap(image)
@@ -1485,7 +1597,7 @@ def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes,
         annot = page.add_stamp_annot(rect, image)
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
     xref = _finish(annot, author, name or "Timbro immagine", kind=STAMP)
-    pdf.xref_set_key(xref, "IT", "/StampImage")
+    pdf.xref_set_key(xref, "IT", "/" + intent)
     _upright(pdf, page, xref)
     return xref
 
@@ -1848,8 +1960,13 @@ def annot_at(pdf: pymupdf.Document, page_no: int, point, tolerance: float = 4.0,
 
 
 # ------------------------------------------------------------------ modifica
-def set_style(pdf: pymupdf.Document, page_no: int, xref: int, *, color=..., fill=..., opacity=None,
-              width=None, dash=None, cloud=None, fontsize=None, text_color=...) -> None:
+def set_style(pdf: pymupdf.Document, page_no: int, xref: int, **props) -> None:
+    _set_style(pdf, page_no, xref, **props)
+    keep_rotation(pdf, page_no, xref)
+
+
+def _set_style(pdf: pymupdf.Document, page_no: int, xref: int, *, color=..., fill=..., opacity=None,
+               width=None, dash=None, cloud=None, fontsize=None, text_color=...) -> None:
     page = pdf[page_no]
     annot = get_annot(page, xref)
     t = annot.type[0]
@@ -2072,7 +2189,11 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         else:
             _set_rect_exact(annot, new_rect)
         touch(annot)
+        keep_ap = pdf.xref_get_key(xref, "AP") if pdf.xref_get_key(xref, PAGE_STAMP_KEY)[0] != "null" else None
         _dirty_update(annot)
+        if keep_ap is not None:      # timbro da pagina PDF: aspetto vettoriale proprio, solo riposizionato
+            pdf.xref_set_key(xref, "AP", keep_ap[1])
+            pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, new_rect)))
         if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
             refresh_stamp(pdf, page_no, xref)
         elif t == pymupdf.PDF_ANNOT_STAMP and pdf.xref_get_key(xref, STICKER_KEY)[0] == "name":
@@ -2301,6 +2422,7 @@ def set_flag(pdf: pymupdf.Document, page_no: int, xref: int, flag: int, on: bool
     annot.set_flags(flags)
     touch(annot)
     annot.update()
+    keep_rotation(pdf, page_no, xref)
 
 
 def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: int, dx: float = 0.0,
@@ -2310,24 +2432,34 @@ def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: i
     Con `keep_identity` conserva /NM, autore e date (taglia+incolla), altrimenti la copia
     riceve un nuovo /NM e l'autore e le date correnti."""
     page = pdf[src_page]
-    get_annot(page, xref)
-    dst = pdf[dst_page]
-    new = pdf.get_new_xref()
-    pdf.update_object(new, pdf.xref_object(xref, compressed=False))
+    subtype = get_annot(page, xref).type[0]
+    dst = page if dst_page == src_page else pdf[dst_page]
+    # annotazione creata dal motore (registrata nella pagina aperta) e poi riempita con il dizionario
+    with unrotated(dst):
+        created = mupdf.pdf_create_annot(dst._pdf_page(), subtype)
+        new = mupdf.pdf_to_num(mupdf.pdf_annot_obj(created))
+    for key in pdf.xref_get_keys(xref):
+        if key in ("P", "Popup", "IRT", "RT", "Parent", "Type", "Subtype"):
+            continue
+        kind, value = pdf.xref_get_key(xref, key)
+        if kind == "null":
+            continue
+        if kind == "string":
+            value = pymupdf.get_pdf_str(value)
+        pdf.xref_set_key(new, key, value)
     for key in ("Popup", "IRT", "RT"):
         pdf.xref_set_key(new, key, "null")
-    pdf.xref_set_key(new, "P", f"{dst.xref} 0 R")
-    kind, value = pdf.xref_get_key(new, "AP/N")
+    kind, value = pdf.xref_get_key(xref, "AP/N")
     if kind == "xref":
         src_ap = int(value.split()[0])
         ap = pdf.get_new_xref()
         pdf.update_object(ap, pdf.xref_object(src_ap, compressed=False))
         pdf.update_stream(ap, pdf.xref_stream(src_ap) or b"")
         pdf.xref_set_key(new, "AP", f"<</N {ap} 0 R>>")
-    holder, key, refs = _annots_array(pdf, dst)
-    _write_annots_array(pdf, holder, key, refs + [new])
-    del page
-    dst = pdf.reload_page(dst)
+    try:   # l'aspetto copiato è già valido: il motore non lo deve rigenerare
+        created.m_internal.needs_new_ap = 0
+    except Exception:
+        pass
     annot = get_annot(dst, new)
     if not keep_identity:
         now = pdf_now()
@@ -2339,6 +2471,73 @@ def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: i
             r = pymupdf.Rect(annot.rect)
         transform_annot(pdf, dst_page, new, r + (dx, dy, dx, dy))
     return new
+
+
+def copy_annot_to(src: pymupdf.Document, src_page: int, xref: int, dst: pymupdf.Document, dst_page: int,
+                  author: str | None = None, keep_identity: bool = False) -> int:
+    """Copia un'annotazione in un altro documento: dizionario, aspetto e risorse (caratteri, immagini,
+    file incorporati) vengono innestati nel documento di destinazione."""
+    sp = src[src_page]
+    subtype = get_annot(sp, xref).type[0]
+    obj = mupdf.pdf_load_object(pymupdf._as_pdf_document(src), xref)
+    copy = mupdf.pdf_copy_dict(obj)
+    for key in ("P", "Popup", "IRT", "RT", "Parent"):
+        mupdf.pdf_dict_dels(copy, key)
+    grafted = mupdf.pdf_graft_object(pymupdf._as_pdf_document(dst), copy)
+    dp = dst[dst_page]
+    with unrotated(dp):
+        created = mupdf.pdf_create_annot(dp._pdf_page(), subtype)
+        target = mupdf.pdf_annot_obj(created)
+        for i in range(mupdf.pdf_dict_len(grafted)):
+            k = mupdf.pdf_dict_get_key(grafted, i)
+            if mupdf.pdf_to_name(k) in ("Type", "Subtype"):
+                continue
+            mupdf.pdf_dict_put(target, k, mupdf.pdf_dict_get_val(grafted, i))
+        try:
+            created.m_internal.needs_new_ap = 0
+        except Exception:
+            pass
+        new = mupdf.pdf_to_num(target)
+    if not keep_identity:
+        now = pdf_now()
+        get_annot(dp, new).set_info(title=author if author is not None else default_author(), creationDate=now,
+                                    modDate=now)
+        dst.xref_set_key(new, "NM", _pdf_string(new_name()))
+    # il riquadro resta nella stessa posizione relativa, ricondotto dentro la pagina di destinazione
+    r = _std_rect(dst, dp, new)
+    box = pymupdf.Rect(0, 0, dp.mediabox.width, dp.mediabox.height)
+    dx = min(0.0, box.x1 - r.x1) + max(0.0, box.x0 - r.x0)
+    dy = min(0.0, box.y1 - r.y1) + max(0.0, box.y0 - r.y0)
+    if dx or dy:
+        transform_annot(dst, dst_page, new, r + (dx, dy, dx, dy))
+    return new
+
+
+def move_thread(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: int, dx: float = 0.0,
+                dy: float = 0.0) -> int:
+    """Sposta un commento con risposte e stati (taglia+incolla): identità conservate, /IRT ricollegati."""
+    page = pdf[src_page]
+    order = [xref]
+    i = 0
+    while i < len(order):          # discendenti in ampiezza (catene cicliche interrotte)
+        parent = order[i]
+        for x, t, _n in page.annot_xrefs():
+            if t not in NON_COMMENT_TYPES and x not in order and _irt_of(pdf, x) == parent:
+                order.append(x)
+        i += 1
+    mapping: dict[int, int] = {}
+    for x in order:
+        parent = _irt_of(pdf, x) if x != xref else 0
+        new = duplicate_annot(pdf, src_page, x, dst_page, dx, dy, keep_identity=True)
+        mapping[x] = new
+        if parent in mapping:
+            dst = pdf[dst_page]
+            get_annot(dst, new).set_irt_xref(mapping[parent])
+            k, v = pdf.xref_get_key(x, "RT")
+            if k == "name":
+                pdf.xref_set_key(new, "RT", v)
+    delete_annot(pdf, src_page, xref, force=True)
+    return mapping[xref]
 
 
 def delete_all(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:

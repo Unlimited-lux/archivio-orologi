@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pymupdf
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QMenu, QToolButton
@@ -13,7 +14,7 @@ from .controller import Controller
 from .i18n_en import EN
 from .panels import CommentsPanel, PropertiesPanel, build_annotation_menu
 from .tools import (
-    AttachmentTool, CalibrateTool, CalloutTool, CaretTool, EraserTool, InkTool, NoteTool, PolyTool, ReplaceTool, SelectAnnotTool,
+    AttachmentTool, CalibrateTool, SnapshotTool, CalloutTool, CaretTool, EraserTool, InkTool, NoteTool, PolyTool, ReplaceTool, SelectAnnotTool,
     ShapeTool, StampTool, TextBoxTool, TextMarkupTool, TypewriterTool, paint_popups, paint_selection,
 )
 
@@ -56,6 +57,7 @@ class AnnotationsModule:
             engine.PERIMETER: PolyTool(self.ctrl, engine.PERIMETER),
             engine.AREA: PolyTool(self.ctrl, engine.AREA),
             "calibrate": CalibrateTool(self.ctrl),
+            "snapshot": SnapshotTool(self.ctrl, on_done=self._snapshot_done),
         }
         self.tools["area-highlight"].area_mode = True
         self.actions: dict[str, QAction] = {}
@@ -207,10 +209,8 @@ class AnnotationsModule:
         for label, name, color in engine.PRESET_STAMPS:
             std.addAction(_(label), lambda _c=False, t=label, n=name, c=color:
                           self.use_stamp(engine.StampSpec(_(t), c, "", n)))
-        dyn = menu.addMenu(_("Dinamici"))
-        for label, template, color in engine.DYNAMIC_STAMPS:
-            dyn.addAction(_(template), lambda _c=False, t=label, tpl=template, c=color:
-                          self.use_stamp(engine.StampSpec(_(t), c), template=_(tpl)))
+        self.dyn_menu = menu.addMenu(_("Dinamici"))
+        self.dyn_menu.aboutToShow.connect(self._fill_dynamic)
         stickers = menu.addMenu(_("Adesivi"))
         for key, (label, _ops) in engine.STICKERS.items():
             stickers.addAction(_(label), lambda _c=False, k=key: self.use_sticker(k))
@@ -218,6 +218,10 @@ class AnnotationsModule:
         self.custom_menu.aboutToShow.connect(self._fill_custom_stamps)
         menu.addSeparator()
         menu.addAction(_("Da immagine…"), self._image_stamp)
+        menu.addAction(_("Da pagina PDF…"), self._page_stamp)
+        menu.addAction(_("Istantanea di un'area"), lambda: self.activate("snapshot"))
+        menu.addAction(_("Esporta libreria timbri…"), lambda: ui_actions.export_stamp_library(self.ctrl))
+        menu.addAction(_("Importa libreria timbri…"), lambda: ui_actions.import_stamp_library(self.ctrl))
         button.setMenu(menu)
         self.stamp_button = button
         self.ctx.window.register_document_action(menu.menuAction())
@@ -279,11 +283,82 @@ class AnnotationsModule:
         tool: StampTool = self.tools[engine.STAMP]
         tool.spec, tool.template, tool.image, tool.name = spec, template, image, name
         tool.sticker = ""
+        tool.page_source = None
+        tool.snapshot = False
         self.activate(engine.STAMP)
+
+    def _fill_dynamic(self) -> None:
+        m = self.dyn_menu
+        m.clear()
+        for label, template, color in engine.DYNAMIC_STAMPS:
+            m.addAction(_(template), lambda _c=False, t=label, tpl=template, c=color:
+                        self.use_stamp(engine.StampSpec(_(t), c), template=_(tpl)))
+        custom = self.ctrl.dynamic_templates()
+        if custom:
+            m.addSeparator()
+            for d in custom:
+                m.addAction(d["template"], lambda _c=False, d=d: self.use_stamp(
+                    engine.StampSpec(d["template"], engine.hex_to_color(d.get("color")) or (0.15, 0.3, 0.7)),
+                    template=d["template"]))
+        m.addSeparator()
+        m.addAction(_("Nuovo timbro dinamico…"), self.new_dynamic_template)
+
+    def new_dynamic_template(self) -> str | None:
+        from . import dialogs
+        text = dialogs.ask_text(self.ctx.window, _("Nuovo timbro dinamico"),
+                                _("Testo con segnaposto {autore} {data} {ora} {file} {pagina} {contatore}:"),
+                                _("Ricevuto da {autore} il {data}"))
+        if not text or not text.strip():
+            return None
+        unknown = engine.unknown_placeholders(text)
+        if unknown:
+            self.ctx.info(_("Nuovo timbro dinamico"),
+                          _("Segnaposto sconosciuti, mostrati letteralmente: {p}").format(p=", ".join(unknown)))
+        self.ctrl.add_dynamic_template(text.strip())
+        return text.strip()
+
+    def _page_stamp(self) -> None:
+        from . import dialogs
+        path = dialogs.ask_open_file(self.ctx.window, _("Timbro da pagina PDF"), "PDF (*.pdf)")
+        if not path:
+            return
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            src = pymupdf.open(stream=data, filetype="pdf")
+            count = src.page_count
+            protected = src.needs_pass
+            src.close()
+        except Exception:
+            self.ctx.error(_("Timbro da pagina PDF"), _("Il file non è un PDF valido oppure è danneggiato."))
+            return
+        if protected:
+            self.ctx.error(_("Timbro da pagina PDF"), _("Il PDF di origine è protetto da password."))
+            return
+        page = 0
+        if count > 1:
+            text = dialogs.ask_text(self.ctx.window, _("Timbro da pagina PDF"),
+                                    _("Pagina (1–{n}):").format(n=count), "1")
+            if text is None:
+                return
+            try:
+                page = max(1, min(count, int(text))) - 1
+            except ValueError:
+                return
+        import os
+        tool: StampTool = self.tools[engine.STAMP]
+        self.use_stamp(None)
+        tool.page_source = (data, page, os.path.splitext(os.path.basename(path))[0])
+        self.activate(engine.STAMP)
+
+    def _snapshot_done(self, png: bytes, name: str) -> None:
+        self.use_stamp(None, image=png, name=name)
+        self.tools[engine.STAMP].snapshot = True
 
     def use_sticker(self, key: str) -> None:
         tool: StampTool = self.tools[engine.STAMP]
         tool.sticker = key
+        tool.page_source = None
         self.activate(engine.STAMP)
 
     def _image_stamp(self) -> None:
@@ -354,6 +429,9 @@ class AnnotationsModule:
             self._overlay = overlay
         if overlay not in view.overlays:
             view.overlays.append(overlay)
+        if getattr(self, "minibar", None) is None:
+            from .minibar import MiniBar
+            self.minibar = MiniBar(self.ctrl)
         if not getattr(view, "_annotations_connected", False):
             view._annotations_connected = True
             view.toolChanged.connect(self._sync_actions)
@@ -374,6 +452,7 @@ class AnnotationsModule:
     def _on_view_changed(self, view) -> None:
         if view is not None:
             self._attach_view(view)
+            self.minibar.attach(view)
             hidden = self.ctrl.annotations_hidden(view)
             self.hide_action.blockSignals(True)
             self.hide_action.setChecked(hidden)

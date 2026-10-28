@@ -52,6 +52,22 @@ def test_ann07_cut_paste_keeps_identity(comments):
     assert (moved.name, moved.author, moved.created) == (info.name, info.author, info.created)
 
 
+def test_ann07_cut_paste_moves_replies(comments):
+    """ANN-07: nota con due risposte tagliata da pagina 2 e incollata a pagina 4: risposte collegate con /IRT."""
+    window, view, module = comments
+    xref = module.ctrl.apply("n", engine.create_note, 1, (300, 300), "nota", engine.Style(), "Mario")
+    module.ctrl.reply(1, xref, "prima")
+    module.ctrl.reply(1, xref, "seconda")
+    module.ctrl.set_status(1, xref, engine.STATE_ACCEPTED)
+    module.ctrl.select([(1, xref)], view)
+    module.ctrl.copy(cut=True)
+    (page, new), = module.ctrl.paste(3)
+    assert module.ctrl.annotations() and all(i.page == 3 for i in module.ctrl.annotations())
+    moved = module.ctrl.info(3, new)
+    assert sorted(r.contents for r in moved.replies) == ["prima", "seconda"]
+    assert moved.status == engine.STATE_ACCEPTED
+
+
 def test_ann07_duplicate_same_page_offset(comments):
     window, view, module = comments
     xref = _rect(module)
@@ -872,3 +888,196 @@ def test_ann34_many_annotations_first_screen_fast(window, tmp_path, qtbot):
     assert panel.items()
     qtbot.waitUntil(lambda: len(panel._infos) == 6000, timeout=60000)
     qtbot.waitUntil(lambda: panel.count.text() == "6000 commenti", timeout=60000)
+
+
+def test_ann35_pages_and_marked_filters(comments, monkeypatch):
+    """ANN-35: filtri per intervallo di pagine e per segno di spunta."""
+    window, view, module = comments
+    a, b, c = _populate(module)
+    module.ctrl.set_marked(1, b, True)
+    panel = module.comments
+    panel.reload()
+    monkeypatch.setattr(dialogs, "ask_text", lambda *x, **k: "2-3")
+    panel._ask_pages()
+    assert {tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()} == {(1, b), (2, c)}
+    panel.set_filter("marked", {"yes"})
+    assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(1, b)]
+    from foliant.modules.annotations.panels import parse_pages
+    assert parse_pages("1-3, 7; 99", 10) == {0, 1, 2, 6}
+
+
+def test_ann25_custom_dynamic_template(comments, monkeypatch):
+    """ANN-25: nuovo modello con segnaposto salvato in libreria e apposto con i valori correnti."""
+    window, view, module = comments
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "Visto da {autore} {sconosciuto}")
+    assert module.new_dynamic_template() == "Visto da {autore} {sconosciuto}"
+    assert any("{sconosciuto}" in m[2] for m in module.messages)
+    module._fill_dynamic()
+    act = [a for a in module.dyn_menu.actions() if a.text() == "Visto da {autore} {sconosciuto}"][0]
+    act.trigger()
+    click(view, 0, 300, 400)
+    assert module.ctrl.annotations()[0].contents == "Visto da Maria Rossi {sconosciuto}"
+
+
+def test_ann26_library_export_import(comments, tmp_path, monkeypatch):
+    """ANN-26: libreria esportata e importata in un'altra installazione con tutti i timbri; file corrotto → invariata."""
+    window, view, module = comments
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 10), 1)
+    module.ctrl.add_custom_stamp("logo", pix.tobytes("png"))
+    module.ctrl.add_dynamic_template("Visto il {data}")
+    out = tmp_path / "timbri.json"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    assert ui_actions.export_stamp_library(module.ctrl) == str(out)
+    s = window.ctx.settings()
+    s.remove("annotations/custom_stamps")
+    s.remove("annotations/dynamic_templates")
+    assert ui_actions.import_stamp_library(module.ctrl, str(out)) == 2
+    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["logo"]
+    bad = tmp_path / "rotto.json"
+    bad.write_text('{"version": 1, "stamps": [{"name": "x", "png": "AAAA"}]}')
+    assert ui_actions.import_stamp_library(module.ctrl, str(bad)) == 0
+    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["logo"]
+
+
+def test_ann03_rotate_shapes_and_textbox(comments, tmp_path):
+    """ANN-03: rettangolo, ellisse e casella di testo ruotati di 30° restano ruotati dopo modifiche e salvataggio."""
+    import math
+    window, view, module = comments
+    r = module.ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(100, 100), (300, 160)],
+                          engine.Style(color=(1, 0, 0), width=2), "A")
+    t = module.ctrl.apply("t", engine.create_freetext, 0, (300, 500, 500, 560), "Ruotata",
+                          engine.Style(fontsize=14, width=1, color=(1, 0, 0)), "A")
+    assert module.ctrl.rotate(30, [(0, r), (0, t)])
+    module.ctrl.set_style([(0, r)], color=(0, 0, 1))          # il motore rigenera l'aspetto
+    module.ctrl.apply("c", engine.set_contents, 0, t, "Ruotata due")
+    module.ctrl.move(10, 0, [(0, r)])
+    doc = saved(window, view, tmp_path)
+    sq, = annots(doc, 0, "Square")
+    ap = int(key_of(doc, sq.xref, "AP/N")[1].split()[0])
+    m = [float(v) for v in key_of(doc, ap, "Matrix")[1].strip("[]").split()]
+    assert abs(m[1] / m[0] - math.tan(math.radians(30))) < 0.01
+    exp_h = 200 * math.sin(math.radians(30)) + 60 * math.cos(math.radians(30))
+    assert abs(sq.rect.height - exp_h) < 3
+    ft, = annots(doc, 0, "FreeText")
+    ap2 = int(key_of(doc, ft.xref, "AP/N")[1].split()[0])
+    assert key_of(doc, ap2, "Matrix")[1] != "[1 0 0 1 0 0]"
+    assert "Ruotata due" in doc[0].get_text()
+
+
+def test_ann07_paste_into_other_document(comments, tmp_path):
+    """ANN-07: timbro personalizzato copiato dal documento A e incollato nel documento B con resa identica."""
+    window, view_a, module = comments
+    xref = module.ctrl.apply("s", engine.create_stamp, 0, (300, 300), engine.StampSpec("Venduto", name="Sold"),
+                             engine.Style(), "A")
+    module.ctrl.select([(0, xref)], view_a)
+    module.ctrl.copy()
+    other = pymupdf.open()
+    other.new_page()
+    other.new_page()
+    other.save(str(tmp_path / "b.pdf"))
+    view_b = window.open_path(str(tmp_path / "b.pdf"))
+    (page, new), = module.ctrl.paste(1)
+    info = module.ctrl.info(1, new, view=view_b)
+    assert info.kind == engine.STAMP and info.name != module.ctrl.info(0, xref, view=view_a).name
+    out = tmp_path / "b_salvato.pdf"
+    view_b.document.save(str(out))
+    doc = pymupdf.open(str(out))
+    assert "VENDUTO" in doc[1].get_text()
+    st, = annots(doc, 1, "Stamp")
+    assert key_of(doc, st.xref, "P")[1] == f"{doc[1].xref} 0 R"
+
+
+def test_ann26_stamp_from_pdf_page_is_vector(comments, tmp_path, monkeypatch):
+    """ANN-26: timbro creato da una pagina PDF vettoriale: aspetto con tracciati, nessuna immagine."""
+    window, view, module = comments
+    src = pymupdf.open()
+    sp = src.new_page(width=200, height=100)
+    sp.draw_rect((10, 10, 190, 90), color=(0, 0, 1), width=4)
+    sp.insert_text((30, 60), "LOGO", fontsize=30, color=(1, 0, 0))
+    src.new_page()
+    src.save(str(tmp_path / "logo.pdf"))
+    monkeypatch.setattr(dialogs, "ask_open_file", lambda *a, **k: str(tmp_path / "logo.pdf"))
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "1")
+    module._page_stamp()
+    click(view, 0, 300, 400)
+    module.ctrl.move(10, 0)
+    doc = saved(window, view, tmp_path)
+    st, = annots(doc, 0, "Stamp")
+    ap = int(key_of(doc, st.xref, "AP/N")[1].split()[0])
+    stream = doc.xref_stream(ap)
+    assert b" re" in stream or b" l" in stream
+    assert b"Do" not in stream                 # nessuna immagine raster
+    assert "LOGO" in doc[0].get_text()
+
+
+def test_ann26_snapshot_area(comments, tmp_path):
+    """ANN-26: istantanea di un'area → timbro in libreria con /IT /StampSnapshot."""
+    window, view, module = comments
+    module.activate("snapshot")
+    drag(view, 0, (70, 85), (200, 105))
+    assert any(d["name"].startswith("Istantanea") for d in module.ctrl.custom_stamps())
+    click(view, 0, 300, 600)
+    doc = saved(window, view, tmp_path)
+    st, = annots(doc, 0, "Stamp")
+    assert key_of(doc, st.xref, "IT")[1] == "/StampSnapshot"
+
+
+def test_ann35_apply_filter_to_page_and_dates(comments, monkeypatch):
+    """ANN-35: «Applica il filtro alla pagina» nasconde in pagina le escluse senza cambiare /F; filtro per data."""
+    window, view, module = comments
+    a = module.ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(100, 400), (200, 500)],
+                          engine.Style(color=(1, 0, 0), width=3), "Anna")
+    import pytest
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(engine, "pdf_now", lambda: "D:20200101100000+00'00'")
+        b = module.ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(300, 400), (400, 500)],
+                              engine.Style(color=(1, 0, 0), width=3), "Luca")
+    panel = module.comments
+    panel.reload()
+    panel.set_filter("days", {"7"})
+    assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(0, a)]
+    flags_before = module.ctrl.info(0, b).flags
+    panel.set_apply_to_page(True)
+    img = view._render_page(0, 1.0)
+
+    def red(x, y):
+        c = img.pixelColor(int(x), int(y))
+        return c.red() > 150 and c.green() < 100
+
+    assert any(red(100 + d, 450) for d in range(-2, 3))
+    assert not any(red(300 + d, 450) for d in range(-2, 3))
+    assert module.ctrl.info(0, b).flags == flags_before
+    panel.set_filter("days", set())
+    img = view._render_page(0, 1.0)
+    assert any(img.pixelColor(300 + d, 450).red() > 150 and img.pixelColor(300 + d, 450).green() < 100
+               for d in range(-2, 3))
+
+
+def test_ann03_minibar(comments, monkeypatch):
+    """ANN-03: mini-barra sopra l'annotazione selezionata con colore, commento ed elimina."""
+    window, view, module = comments
+    xref = _rect(module)
+    module.ctrl.select([(0, xref)], view)
+    bar = module.minibar
+    assert bar.isVisible()
+    r = view.page_to_view(0, module.ctrl.info(0, xref).rect)
+    assert bar.geometry().bottom() <= r.top() or bar.geometry().top() >= r.bottom()
+    bar.color._pick((0, 0, 1))
+    assert module.ctrl.info(0, xref).color == (0, 0, 1)
+    bar._delete()
+    assert module.ctrl.info(0, xref) is None and not bar.isVisible()
+
+
+def test_ann30_document_viewport_scale(comments):
+    """ANN-30: dentro un'area /VP con scala del documento la misura usa quella scala senza calibrare."""
+    window, view, module = comments
+    with view.document.change("vp") as pdf:
+        pdf.xref_set_key(pdf[0].xref, "VP", "[<</Type/Viewport/BBox[100 100 500 500]/Measure<</Type/Measure"
+                                            "/Subtype/RL/R(1 pt = 0,5 m)/X[<</Type/NumberFormat/U(m)/C 0.5/D 100>>]"
+                                            "/D[<</Type/NumberFormat/U(m)/C 0.5/D 100>>]>>>>]")
+    module.activate(engine.DISTANCE)
+    drag(view, 0, (150, 500), (250, 500))           # dentro l'area (y PDF = 342)
+    drag(view, 0, (150, 100), (250, 100))           # fuori: scala predefinita (mm)
+    vals = sorted(i.contents for i in module.ctrl.annotations())
+    assert "50,00 m" in vals
+    assert any(v.endswith(" mm") for v in vals)

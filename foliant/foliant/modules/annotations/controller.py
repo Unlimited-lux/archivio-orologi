@@ -194,6 +194,19 @@ class Controller(QObject):
         self.ctx.settings().setValue(key, value)
         return value
 
+    def dynamic_templates(self) -> list[dict]:
+        raw = self.ctx.settings().value("annotations/dynamic_templates", "")
+        try:
+            data = json.loads(str(raw)) if raw else []
+            return [d for d in data if isinstance(d, dict) and d.get("template")]
+        except Exception:
+            return []
+
+    def add_dynamic_template(self, template: str, color: str = "#2650B3") -> None:
+        items = [d for d in self.dynamic_templates() if d["template"] != template]
+        items.append({"template": template, "color": color})
+        self.ctx.settings().setValue("annotations/dynamic_templates", json.dumps(items))
+
     def custom_stamps(self) -> list[dict]:
         raw = self.ctx.settings().value("annotations/custom_stamps", "")
         try:
@@ -222,8 +235,18 @@ class Controller(QObject):
         where = _("tutte le pagine") if scale.all_pages or page is None else _("pagina {n}").format(n=page + 1)
         self.ctx.status(_("Scala: {s}").format(s=scale.text()) + f" ({where})", 10000)
 
-    def scale_for(self, page: int) -> engine.Scale:
-        return self.page_scales.get(page, self.scale)
+    def scale_for(self, page: int, point=None, view=None) -> engine.Scale:
+        """Scala di misura: calibrazione dell'utente, altrimenti l'area di misura /VP del documento
+        che contiene il punto, altrimenti la scala predefinita."""
+        if page in self.page_scales:
+            return self.page_scales[page]
+        if self.scale.calibrated or point is None:
+            return self.scale
+        try:
+            vp = self.read(engine.viewport_scale, page, point, view=view)
+        except Exception:
+            vp = None
+        return vp or self.scale
 
     # ------------------------------------------------------------------ documento
     def view(self) -> "DocumentView | None":
@@ -273,10 +296,21 @@ class Controller(QObject):
         return self.read(engine.list_annotations, view=view) or []
 
     def info(self, page: int, xref: int, view=None) -> engine.AnnotInfo | None:
-        try:
-            return self.read(engine.annotation, page, xref, view=view)
-        except Exception:
+        """Dati di un'annotazione; in cache finché il documento non cambia (usata a ogni ridisegno)."""
+        view = view or self.view()
+        if view is None:
             return None
+        key = (id(view), view.document.version, getattr(self, "_saves", 0))
+        cache = getattr(self, "_info_cache", None)
+        if cache is None or cache[0] != key:
+            cache = (key, {})
+            self._info_cache = cache
+        if (page, xref) not in cache[1]:
+            try:
+                cache[1][(page, xref)] = self.read(engine.annotation, page, xref, view=view)
+            except Exception:
+                cache[1][(page, xref)] = None
+        return cache[1][(page, xref)]
 
     def _on_document_changed(self, view) -> None:
         if view is not self._sel_view or not self.selection:
@@ -643,10 +677,9 @@ class Controller(QObject):
         view = self.view()
         if not clip or view is None:
             return []
-        if clip["view"] is not view:
-            self.ctx.error(_("Commenti"), _("Le annotazioni si possono incollare solo nello stesso documento."))
-            return []
         target = view.current_page if page is None else page
+        if clip["view"] is not view:
+            return self._paste_other_document(clip, view, target)
         items = [it for it in clip["items"] if self.info(*it, view=view) is not None]
         if not items:
             return []
@@ -655,17 +688,42 @@ class Controller(QObject):
         def run(pdf):
             out = []
             for src_page, xref in items:
-                same = src_page == target and not cut
-                off = 10.0 if same else 0.0
-                new = engine.duplicate_annot(pdf, src_page, xref, target, off, off, self.author(), keep_identity=cut)
+                if cut:
+                    out.append((target, engine.move_thread(pdf, src_page, xref, target)))
+                    continue
+                off = 10.0 if src_page == target else 0.0
+                new = engine.duplicate_annot(pdf, src_page, xref, target, off, off, self.author())
                 out.append((target, new))
-            if cut:
-                for src_page, xref in items:
-                    engine.delete_annot(pdf, src_page, xref)
             return out
 
         res = self.apply(_("Incolla annotazioni"), run, view=view) or []
         if cut and res:
+            self.clipboard = {"view": view, "items": res, "cut": False, "data": None}
+        if res:
+            self.select(res, view)
+        return res
+
+    def _paste_other_document(self, clip: dict, view, target: int) -> list[tuple[int, int]]:
+        src_view = clip["view"]
+        if src_view not in self.ctx.views() or src_view.document.closed:
+            self.ctx.error(_("Commenti"), _("Il documento di origine è stato chiuso."))
+            return []
+        items = [it for it in clip["items"] if self.info(*it, view=src_view) is not None]
+        cut = clip["cut"]
+
+        def run(pdf):
+            with ENGINE_LOCK:
+                src = src_view.document.pdf
+                return [(target, engine.copy_annot_to(src, p, x, pdf, target, self.author(), keep_identity=cut))
+                        for p, x in items]
+
+        res = self.apply(_("Incolla annotazioni"), run, view=view) or []
+        if res and cut:
+            def remove(pdf):
+                for p, x in items:
+                    engine.delete_annot(pdf, p, x, force=True)
+                return True
+            self.apply(_("Taglia annotazioni"), remove, view=src_view)
             self.clipboard = {"view": view, "items": res, "cut": False, "data": None}
         if res:
             self.select(res, view)
