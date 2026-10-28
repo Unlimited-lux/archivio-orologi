@@ -24,7 +24,7 @@ if [ "$USE_APT" -eq 1 ] && command -v apt-get >/dev/null 2>&1; then
   echo "==> Pacchetti di sistema (potrebbe essere richiesta la password di amministratore)"
   sudo apt-get update
   sudo apt-get install -y python3 python3-venv python3-pip \
-    tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng \
+    tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng tesseract-ocr-osd \
     libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libfontconfig1 libdbus-1-3
   if ! command -v soffice >/dev/null 2>&1; then
     echo "    Suggerimento: per creare PDF da documenti Office installa LibreOffice:"
