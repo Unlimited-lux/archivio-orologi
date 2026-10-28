@@ -7,6 +7,8 @@ i comandi in `actions.py`.
 
 from __future__ import annotations
 
+import shiboken6
+from PySide6.QtCore import QObject, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QMenu, QToolButton
 
@@ -16,6 +18,24 @@ from .actions import ConvertController
 from .i18n_en import EN
 
 ORDER = 70
+
+
+class _ClipboardWatcher(QObject):
+    """Abilita «Dagli appunti» solo se gli appunti contengono un formato supportato."""
+
+    def __init__(self, parent, action, controller):
+        super().__init__(parent)
+        self._action = action
+        self._controller = controller
+
+    @Slot()
+    def update(self) -> None:
+        act = self._action
+        if act is None or not shiboken6.isValid(act):
+            return
+        act.setEnabled(self._controller.clipboard_supported())
+        act.setToolTip(_("Crea un PDF dagli appunti") if act.isEnabled()
+                       else _("Copia un'immagine, del testo o dei file per attivare questa voce"))
 
 
 def register(ctx) -> None:
@@ -63,16 +83,13 @@ def register(ctx) -> None:
     create_btn.setToolButtonStyle(mode.toolbar.toolButtonStyle())
     mode.add_widget(create_btn)
 
-    def update_clipboard_action(*_a):
-        act_clipboard.setEnabled(c.clipboard_supported())
-        act_clipboard.setToolTip(_("Crea un PDF dagli appunti") if act_clipboard.isEnabled()
-                                 else _("Copia un'immagine, del testo o dei file per attivare questa voce"))
-
+    watcher = _ClipboardWatcher(ctx.window, act_clipboard, c)
     clipboard = QGuiApplication.clipboard()
     if clipboard is not None:
-        clipboard.dataChanged.connect(update_clipboard_action)
-    create_menu.aboutToShow.connect(update_clipboard_action)
-    update_clipboard_action()
+        # il ricevitore è figlio della finestra: Qt scollega il segnale quando la finestra viene distrutta
+        clipboard.dataChanged.connect(watcher.update)
+    create_menu.aboutToShow.connect(watcher.update)
+    watcher.update()
 
     mode.add_separator()
     act_compress = ctx.action(_("Comprimi"), "shrink", lambda: c.compress(), requires_document=False,

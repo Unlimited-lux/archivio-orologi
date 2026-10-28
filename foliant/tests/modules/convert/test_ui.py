@@ -540,3 +540,30 @@ def test_batch_asks_password_for_locked(window, ctrl, encrypted_pdf, sample_pdf,
     items = ctrl.batch_convert()
     assert [i.status for i in items] == ["completato", "completato"]
     assert (tmp_path / "dest" / "protetto.txt").exists()
+
+
+def test_clipboard_after_windows_destroyed(qtbot, settings):
+    """Il segnale globale degli appunti non deve raggiungere azioni di finestre già distrutte."""
+    import gc
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtWidgets import QApplication
+    from foliant.ui.main_window import MainWindow
+    for _k in range(2):
+        win = MainWindow(settings)
+        win.show()
+        win.close()
+        win.deleteLater()
+        QApplication.processEvents()
+        QApplication.sendPostedEvents(None, 0)
+        del win
+        gc.collect()
+    errors = []
+    import sys
+    old = sys.excepthook
+    sys.excepthook = lambda *a: errors.append(a)
+    try:
+        QGuiApplication.clipboard().setText("x")
+        QApplication.processEvents()
+    finally:
+        sys.excepthook = old
+    assert not errors
