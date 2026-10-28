@@ -1141,54 +1141,67 @@ def _image_dpis(doc, check=None) -> dict[int, float]:
     return dpis
 
 
-def _resample_image(doc, xref: int, scale: float, quality: int) -> bool:
-    """Ricampiona e ricodifica in JPEG una sola immagine; False se non conviene o non è sicuro.
+def _image_samples(doc, xref: int):
+    """(modo, dimensioni, pixel, maschera, lunghezza attuale) di un'immagine ricampionabile, o None.
 
     Solo immagini a 8 bit in scala di grigi o RGB, senza /Mask, /Decode o maschere a 1 bit:
     il resto (scansioni in bianco e nero, CMYK, maschere di colore) resta intatto."""
-    from PIL import Image
     keys = {k: doc.xref_get_key(xref, k) for k in ("Subtype", "ImageMask", "Mask", "Decode", "BitsPerComponent",
                                                      "Filter", "SMask")}
     if (keys["Subtype"][1] != "/Image" or keys["ImageMask"][1] == "true" or keys["Mask"][0] != "null"
             or keys["Decode"][0] != "null" or keys["BitsPerComponent"][1] not in ("8", "null")
             or any(f in keys["Filter"][1] for f in ("JBIG2", "CCITT", "JPX"))):
-        return False
+        return None
     pix = pymupdf.Pixmap(doc, xref)
     if pix.alpha:
         pix = pymupdf.Pixmap(pix, 0)
     if pix.n not in (1, 3):
-        return False
-    w, h = max(1, round(pix.width * scale)), max(1, round(pix.height * scale))
-    mode = "L" if pix.n == 1 else "RGB"
-    img = Image.frombytes(mode, (pix.width, pix.height), pix.samples).resize((w, h), Image.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=quality, optimize=True)
-    jpg = buf.getvalue()
-    smask = None
+        return None
+    mask = None
     if keys["SMask"][0] == "xref":
         sx = int(keys["SMask"][1].split()[0])
         mpix = pymupdf.Pixmap(doc, sx)
         if mpix.n != 1 or mpix.alpha:
-            return False
-        smask = (sx, Image.frombytes("L", (mpix.width, mpix.height), mpix.samples).resize((w, h), Image.LANCZOS))
-    old_len = len(doc.xref_stream_raw(xref) or b"")
+            return None
+        mask = (sx, (mpix.width, mpix.height), mpix.samples)
+    return ("L" if pix.n == 1 else "RGB", (pix.width, pix.height), pix.samples, mask,
+            len(doc.xref_stream_raw(xref) or b""))
+
+
+def _encode_resampled(sample, scale: float, quality: int):
+    """Ricampiona e codifica in JPEG (solo Pillow: gira fuori dal blocco del motore)."""
+    from PIL import Image
+    mode, size, pixels, mask, old_len = sample
+    w, h = max(1, round(size[0] * scale)), max(1, round(size[1] * scale))
+    img = Image.frombytes(mode, size, pixels).resize((w, h), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=quality, optimize=True)
+    jpg = buf.getvalue()
     if len(jpg) >= old_len:
-        return False
+        return None
+    new_mask = None
+    if mask is not None:
+        sx, msize, mpixels = mask
+        new_mask = (sx, Image.frombytes("L", msize, mpixels).resize((w, h), Image.LANCZOS).tobytes())
+    return jpg, (w, h), mode, new_mask
+
+
+def _write_resampled(doc, xref: int, encoded) -> None:
+    jpg, (w, h), mode, mask = encoded
     doc.update_stream(xref, jpg, compress=False)
     doc.xref_set_key(xref, "Filter", "/DCTDecode")
     doc.xref_set_key(xref, "DecodeParms", "null")
     doc.xref_set_key(xref, "Width", str(w))
     doc.xref_set_key(xref, "Height", str(h))
     doc.xref_set_key(xref, "BitsPerComponent", "8")
-    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if pix.n == 1 else "/DeviceRGB")
-    if smask is not None:
-        sx, mimg = smask
-        doc.update_stream(sx, mimg.tobytes(), compress=True)
+    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if mode == "L" else "/DeviceRGB")
+    if mask is not None:
+        sx, mbytes = mask
+        doc.update_stream(sx, mbytes, compress=True)
         doc.xref_set_key(sx, "DecodeParms", "null")
         doc.xref_set_key(sx, "Width", str(w))
         doc.xref_set_key(sx, "Height", str(h))
         doc.xref_set_key(sx, "BitsPerComponent", "8")
-    return True
 
 
 def compress_pdf(data: bytes, level: str = "medium", check=None) -> bytes:
@@ -1196,28 +1209,39 @@ def compress_pdf(data: bytes, level: str = "medium", check=None) -> bytes:
 
     Ogni immagine è trattata una sola volta anche se compare su molte pagine, e tra
     un'immagine e l'altra il lavoro si può annullare (la riscrittura in blocco di MuPDF
-    ricomprimeva l'immagine a ogni uso e non lasciava rispondere l'interfaccia)."""
+    ricomprimeva l'immagine a ogni uso e non lasciava rispondere l'interfaccia).
+    Ricampionamento e JPEG avvengono fuori dal blocco del motore, così più file
+    compressi in parallelo procedono davvero insieme."""
     targets = {"low": (225, 200, 85), "medium": (180, 150, 75), "high": (110, 96, 55)}
     threshold, target, quality = targets.get(level, targets["medium"])
     with ENGINE_LOCK:
         doc = _open(data)
-        try:
-            for xref, dpi in _image_dpis(doc, check).items():
-                if dpi <= threshold:
-                    continue
-                if check is not None:
-                    check()
-                try:
-                    _resample_image(doc, xref, target / dpi, quality)
-                except Exception:
-                    pass   # immagine non gestibile: resta com'è
+    try:
+        with ENGINE_LOCK:
+            dpis = _image_dpis(doc, check)
+        for xref, dpi in dpis.items():
+            if dpi <= threshold:
+                continue
+            if check is not None:
+                check()
+            try:
+                with ENGINE_LOCK:
+                    sample = _image_samples(doc, xref)
+                encoded = _encode_resampled(sample, target / dpi, quality) if sample else None
+                if encoded:
+                    with ENGINE_LOCK:
+                        _write_resampled(doc, xref, encoded)
+            except Exception:
+                pass   # immagine non gestibile: resta com'è
+        with ENGINE_LOCK:
             try:
                 doc.subset_fonts()
             except Exception:
                 pass
             return doc.tobytes(garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True,
                                use_objstms=1, no_new_id=True)
-        finally:
+    finally:
+        with ENGINE_LOCK:
             doc.close()
 
 
