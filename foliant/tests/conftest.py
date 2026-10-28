@@ -14,6 +14,19 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _flush_deferred_deletes():
+    """Distrugge a fine test gli oggetti con deleteLater (finestre e viste chiuse).
+
+    Senza un ciclo di eventi vero si accumulerebbero, e il primo qtbot.wait (o un cambio di
+    tema) di un test successivo li distruggerebbe o ristilizzerebbe tutti insieme."""
+    yield
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is not None:
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_user_dirs(monkeypatch, tmp_path_factory):
     """Ogni test ha cartelle utente proprie (dati, stato, configurazione, recupero): niente
     file lasciati da altri test o da una sessione vera (es. il recupero dopo un arresto
