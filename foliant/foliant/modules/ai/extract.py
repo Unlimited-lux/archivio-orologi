@@ -729,3 +729,72 @@ def to_json(result: ExtractResult, source_name: str = "", *, now: _dt.datetime |
         "record": [rec(r) for r in result.records],
     }
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+# ================================================================== fattura elettronica allegata (AI-29)
+def embedded_einvoices(pdf) -> list[dict]:
+    """Record grezzi delle fatture elettroniche XML (FatturaPA) allegate al PDF, letti in locale.
+
+    Restituisce [] se non ci sono allegati XML di fattura o se non sono leggibili.
+    """
+    import xml.etree.ElementTree as ET
+    from foliant.api import ENGINE_LOCK
+    out: list[dict] = []
+    with ENGINE_LOCK:
+        try:
+            names = list(pdf.embfile_names())
+        except Exception:  # noqa: BLE001
+            return out
+        blobs = []
+        for n in names:
+            if not n.lower().endswith(".xml"):
+                continue
+            try:
+                blobs.append(pdf.embfile_get(n))
+            except Exception:  # noqa: BLE001
+                continue
+    for data in blobs:
+        try:
+            root = ET.fromstring(data)
+        except ET.ParseError:
+            continue
+        if not root.tag.split("}")[-1].startswith("FatturaElettronica"):
+            continue
+
+        def find(node, path):
+            cur = [node]
+            for part in path.split("/"):
+                nxt = []
+                for c in cur:
+                    nxt.extend(ch for ch in c if ch.tag.split("}")[-1] == part)
+                cur = nxt
+            return cur
+
+        def text(node, path):
+            found = find(node, path)
+            return (found[0].text or "").strip() if found else ""
+
+        header = find(root, "FatturaElettronicaHeader")
+        head = header[0] if header else root
+        seller = text(head, "CedentePrestatore/DatiAnagrafici/Anagrafica/Denominazione") or " ".join(
+            filter(None, [text(head, "CedentePrestatore/DatiAnagrafici/Anagrafica/Nome"),
+                          text(head, "CedentePrestatore/DatiAnagrafici/Anagrafica/Cognome")]))
+        piva = text(head, "CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdCodice")
+        buyer = text(head, "CessionarioCommittente/DatiAnagrafici/Anagrafica/Denominazione") or " ".join(
+            filter(None, [text(head, "CessionarioCommittente/DatiAnagrafici/Anagrafica/Nome"),
+                          text(head, "CessionarioCommittente/DatiAnagrafici/Anagrafica/Cognome")]))
+        for body in find(root, "FatturaElettronicaBody"):
+            gen = "DatiGenerali/DatiGeneraliDocumento/"
+            lines = [{"descrizione": text(l, "Descrizione"), "quantita": text(l, "Quantita") or None,
+                      "prezzo_unitario": text(l, "PrezzoUnitario") or None,
+                      "aliquota": text(l, "AliquotaIVA") or None, "importo": text(l, "PrezzoTotale") or None}
+                     for l in find(body, "DatiBeniServizi/DettaglioLinee")]
+            summaries = find(body, "DatiBeniServizi/DatiRiepilogo")
+            net = sum(float(text(s, "ImponibileImporto") or 0) for s in summaries) if summaries else None
+            tax = sum(float(text(s, "Imposta") or 0) for s in summaries) if summaries else None
+            total = text(body, gen + "ImportoTotaleDocumento")
+            out.append({"numero": text(body, gen + "Numero"), "data": text(body, gen + "Data"),
+                        "fornitore": seller, "partita_iva": piva, "cliente": buyer, "righe": lines,
+                        "imponibile": net, "imposta": tax, "totale": float(total) if total else
+                        (net or 0) + (tax or 0), "valuta": text(body, gen + "Divisa") or "EUR"})
+    return out

@@ -543,6 +543,15 @@ class Controller:
         except ValueError as e:
             self.ctx.error(_("Estrai dati"), str(e))
             return None
+        if kind == "invoice":
+            local = extract.embedded_einvoices(doc.pdf)
+            if local:
+                # fattura elettronica allegata: dati letti in locale, nessuna richiesta al fornitore
+                result = extract.build_result("invoice", local, scope)
+                result.model = _("fattura elettronica allegata")
+                dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=doc.display_name)
+                self.exec_dialog(dlg)
+                return dlg
         gateway = self.services.gateway()
         language = panel._answer_language()
         try:

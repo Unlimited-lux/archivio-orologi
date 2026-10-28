@@ -1009,4 +1009,5 @@ EN: dict[str, str] = {
     'Valutazione dei documenti…': 'Evaluating documents…',
     "{r}: la somma delle righe ({s}) è diversa dall'imponibile ({t}): differenza {d}": '{r}: the sum of the lines ({s}) differs from the taxable amount ({t}): difference {d}',
     '{r}: «{v}» non è formalmente valido ({k})': '{r}: “{v}” is not formally valid ({k})',
+    'fattura elettronica allegata': 'attached electronic invoice',
 }
