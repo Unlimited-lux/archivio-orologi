@@ -771,3 +771,35 @@ def test_field_duplicated_on_pages_with_required_certification(window, monkeypat
     assert all(f.certify_level == 2 for f in fields)
     view.document.undo()
     assert not view.document.is_modified
+
+
+def test_repeat_dialog_thumbnails(window, qtbot, tmp_path):
+    """SIG-06: anteprima delle copie sulle miniature."""
+    from foliant.modules.sign.ui_digital import RepeatDialog
+    from tests.conftest import make_pdf
+    view = window.open_path(make_pdf(tmp_path / "anteprima.pdf", pages=12))
+    c = _ctl(window)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    xref = c.place(view, 0, pymupdf.Rect(450, 780, 540, 800), item)
+    with view.document.lock:
+        items = g.repeat_preview(view.document.pdf, 0, xref, [1, 2], "br", color=(255, 0, 0))
+    assert [p for p, _pix, _s in items] == [1, 2]
+    pix = items[0][1]
+    import numpy as np
+    arr = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n)
+    red = np.argwhere((arr[..., 0] == 255) & (arr[..., 1] == 0))
+    assert red.size and red[:, 0].mean() > pix.height * 0.8      # riquadro in basso
+    shown = []
+
+    def preview(pages, anchor):
+        shown.append(list(pages))
+        from PySide6.QtGui import QImage
+        img = QImage(10, 10, QImage.Format.Format_RGB32)
+        return [(p, img, False) for p in pages]
+
+    dlg = RepeatDialog(window, 12, 0, preview)
+    qtbot.addWidget(dlg)
+    assert dlg.thumbs.count() == RepeatDialog.MAX_THUMBS + 1          # 11 pagine: 8 miniature + «… e altre»
+    dlg.r_range.setChecked(True)
+    dlg.range.setText("2-3")
+    assert dlg.thumbs.count() == 2 and shown[-1] == [1, 2]

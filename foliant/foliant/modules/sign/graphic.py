@@ -1173,6 +1173,40 @@ def _visual_page_rect(page: pymupdf.Page) -> pymupdf.Rect:
     return pymupdf.Rect(page.rect)
 
 
+def repeat_preview(pdf: pymupdf.Document, page_index: int, xref: int, pages: list[int], anchor: str = "auto",
+                   width: int = 96, color: tuple[int, int, int] = (0, 0, 0)) -> list[tuple[int, pymupdf.Pixmap, bool]]:
+    """Miniature delle pagine con il riquadro dove verrà ripetuta la firma."""
+    src = find_signature(pdf, page_index, xref)
+    if src is None:
+        return []
+    src_page = pdf[page_index]
+    src_vis_page = _visual_page_rect(src_page)
+    src_vis = pymupdf.Rect(src.rect) * src_page.rotation_matrix
+    src_vis.normalize()
+    if anchor == "auto":
+        anchor = nearest_anchor(src_vis_page, src_vis)
+    out = []
+    for p in pages:
+        if p < 0 or p >= pdf.page_count:
+            continue
+        page = pdf[p]
+        vis_page = _visual_page_rect(page)
+        vis, shrunk = anchored_rect(src_vis_page, src_vis, vis_page, anchor)
+        zoom = width / max(vis_page.width, 1)
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), annots=True)
+        r = pymupdf.IRect(vis * pymupdf.Matrix(zoom, zoom))
+        for x in range(max(0, r.x0), min(pix.width, r.x1)):
+            for y in (r.y0, r.y1 - 1):
+                if 0 <= y < pix.height:
+                    pix.set_pixel(x, y, color)
+        for y in range(max(0, r.y0), min(pix.height, r.y1)):
+            for x in (r.x0, r.x1 - 1):
+                if 0 <= x < pix.width:
+                    pix.set_pixel(x, y, color)
+        out.append((p, pix, shrunk))
+    return out
+
+
 def repeat_signature(pdf: pymupdf.Document, page_index: int, xref: int, pages: list[int],
                      anchor: str = "auto") -> tuple[list[tuple[int, int]], list[int]]:
     """Copia la firma sulle pagine indicate (escluse quella di origine).

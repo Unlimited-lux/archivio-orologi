@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QRadioButton, QSpinBox, QTabWidget,
@@ -915,13 +915,19 @@ def certificate_details(c) -> str:
 
 # ======================================================= ripetizione firma
 class RepeatDialog(QDialog):
-    def __init__(self, parent, page_count: int, current: int):
+    """`preview(pages, anchor)` (facoltativo) restituisce [(pagina, QImage, ridotta)] per le miniature."""
+
+    MAX_THUMBS = 8
+
+    def __init__(self, parent, page_count: int, current: int, preview=None):
         super().__init__(parent)
+        self.preview_fn = preview
         self.page_count = page_count
         self.current = current
         self.pages: list[int] = []
         self.anchor = "auto"
         self.setWindowTitle(_("Ripeti su più pagine"))
+        self.setMinimumWidth(560 if preview is not None else 320)
         lay = QVBoxLayout(self)
         grp = QGroupBox(_("Pagine"))
         gl = QVBoxLayout(grp)
@@ -948,6 +954,18 @@ class RepeatDialog(QDialog):
             self.anchor_combo.addItem(label, key)
         form.addRow(_("Ancoraggio:"), self.anchor_combo)
         lay.addLayout(form)
+        self.thumbs = QListWidget()
+        self.thumbs.setViewMode(QListWidget.ViewMode.IconMode)
+        self.thumbs.setIconSize(QSize(96, 128))
+        self.thumbs.setFixedHeight(170)
+        self.thumbs.setFlow(QListWidget.Flow.LeftToRight)
+        self.thumbs.setWrapping(False)
+        self.thumbs.setAccessibleName(_("Anteprima delle pagine"))
+        if preview is not None:
+            lay.addWidget(self.thumbs)
+        else:
+            self.thumbs.hide()
+        self.anchor_combo.currentIndexChanged.connect(lambda _i: self._update_preview())
         self.error = _error_label()
         lay.addWidget(self.error)
         box = QDialogButtonBox()
@@ -987,7 +1005,24 @@ class RepeatDialog(QDialog):
         self.error.setText("")
         self.apply.setEnabled(True)
         self.pages = pages
+        self._update_preview()
         return True
+
+    def _update_preview(self) -> None:
+        if self.preview_fn is None or not self.pages:
+            return
+        from PySide6.QtGui import QIcon, QPixmap
+        self.thumbs.clear()
+        try:
+            items = self.preview_fn(self.pages[:self.MAX_THUMBS], self.anchor_combo.currentData())
+        except Exception:
+            return
+        for page, img, shrunk in items:
+            label = _("Pag. {n}").format(n=page + 1) + (" " + _("(ridotta)") if shrunk else "")
+            it = QListWidgetItem(QIcon(QPixmap.fromImage(img)), label)
+            self.thumbs.addItem(it)
+        if len(self.pages) > self.MAX_THUMBS:
+            self.thumbs.addItem(QListWidgetItem(_("… e altre {n}").format(n=len(self.pages) - self.MAX_THUMBS)))
 
     def _accept(self) -> None:
         if self._validate():
@@ -1102,4 +1137,6 @@ TRANSLATIONS_EN = {
     "In basso a destra": "Bottom right", "Stessa posizione assoluta": "Same absolute position",
     "Ancoraggio:": "Anchor:", "Applica": "Apply",
     "Nessuna pagina oltre a quella corrente.": "No pages other than the current one.",
+    "Anteprima delle pagine": "Page preview", "Pag. {n}": "P. {n}", "(ridotta)": "(shrunk)",
+    "… e altre {n}": "… and {n} more",
 }

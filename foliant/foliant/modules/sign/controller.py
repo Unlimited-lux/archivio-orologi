@@ -227,7 +227,17 @@ class SignController(QObject):
 
     def repeat(self, view, page: int, xref: int) -> None:
         from .ui_digital import RepeatDialog
-        dlg = RepeatDialog(self.ctx.window, view.page_count, page)
+        def preview(pages, anchor):
+            from PySide6.QtGui import QImage
+
+            from foliant.api import theme
+            accent = theme.color("accent")
+            with ENGINE_LOCK:
+                items = g.repeat_preview(view.document.pdf, page, xref, pages, anchor,
+                                         color=(accent.red(), accent.green(), accent.blue()))
+                return [(p, QImage.fromData(pix.tobytes("png")), shrunk) for p, pix, shrunk in items]
+
+        dlg = RepeatDialog(self.ctx.window, view.page_count, page, preview)
         if not dlg.exec():
             return
         pages, anchor = dlg.pages, dlg.anchor
