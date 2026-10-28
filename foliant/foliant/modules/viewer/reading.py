@@ -287,7 +287,8 @@ class ReadingController(QObject):
         w.statusBar().addPermanentWidget(self.indicator)
 
         # segnali
-        w.installEventFilter(self)
+        w.installEventFilter(self)          # solo per il ridimensionamento della barra minima
+        ctx.fullscreenChanged.connect(self._on_fullscreen_changed)
         ctx.currentViewChanged.connect(self._on_current_view)
         ctx.documentOpened.connect(self._on_document_opened)
         ctx.documentClosed.connect(self._on_document_closed)
@@ -395,6 +396,10 @@ class ReadingController(QObject):
             self.window.toggle_fullscreen()
         self._on_window_state()
 
+    def _on_fullscreen_changed(self, _full: bool) -> None:
+        self._on_window_state()
+        QTimer.singleShot(0, self._on_window_state)
+
     def _on_window_state(self) -> None:
         fs = self.window.isFullScreen()
         if fs == self.fullscreen_active:
@@ -465,22 +470,14 @@ class ReadingController(QObject):
                 self.window.toggle_fullscreen()
                 self._on_window_state()
             return
-        from PySide6.QtWidgets import QMessageBox
-        box = QMessageBox(QMessageBox.Icon.Question, _("Schermo intero"),
-                          _("Il documento chiede di essere mostrato a schermo intero. Procedere?"),
-                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self.window)
-        box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-
-        def done(_result):
-            clicked = box.clickedButton()
-            yes = clicked is not None and box.standardButton(clicked) == QMessageBox.StandardButton.Yes
-            if yes and not self.window.isFullScreen():
+        def enter() -> None:
+            if not self.window.isFullScreen():
                 self.window.toggle_fullscreen()
                 self._on_window_state()
 
-        box.finished.connect(done)
-        self.fullscreen_prompt = box
-        box.open()
+        self.fullscreen_prompt = self.ctx.notify(
+            _("Il documento chiede di essere mostrato a schermo intero."),
+            [(_("Schermo intero"), enter)], duration_ms=0)
 
     # ============================================================ scorrimento automatico
     def set_scroll_mode(self, mode: str) -> None:
@@ -681,10 +678,7 @@ class ReadingController(QObject):
     def eventFilter(self, obj, ev) -> bool:
         et = ev.type()
         if obj is self.window:
-            if et == QEvent.Type.WindowStateChange:
-                QTimer.singleShot(0, self._on_window_state)
-                self._on_window_state()
-            elif et == QEvent.Type.Resize:
+            if et == QEvent.Type.Resize:
                 self.bar.place()
             return False
         if et in (QEvent.Type.MouseMove, QEvent.Type.Enter, QEvent.Type.HoverMove):
@@ -750,6 +744,7 @@ def install(ctx) -> ReadingController:
         "Modalità lettura — Esc per uscire": "Reading mode — Esc to exit",
         "Schermo intero — Esc per uscire": "Full screen — Esc to exit",
         "Schermo intero": "Full screen",
+        "Il documento chiede di essere mostrato a schermo intero.": "The document asks to be shown full screen.",
         "Il documento chiede di essere mostrato a schermo intero. Procedere?":
             "The document asks to be shown in full screen. Continue?",
         "{s:g} s per pagina": "{s:g} s per page",

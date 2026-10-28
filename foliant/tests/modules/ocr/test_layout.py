@@ -98,3 +98,49 @@ def test_modello_di_zone_su_piu_pagine(tmp_path):
         assert res.text.index(f"Totale fattura numero {n}") < res.text.index(f"Cliente numero {n}")
     with pytest.raises(ValueError):
         layout.Zone.from_dict({"rect": [0, 0, 1, 1], "kind": "boh"})
+
+
+def test_ordine_nelle_celle_con_simboli():
+    """Il simbolo «€» resta dove è nell'immagine (prima o dopo il numero), anche se il suo centro
+    verticale differisce da quello delle cifre."""
+    from foliant.modules.ocr.tess import Word
+    num = Word("85,50", (100, 200, 160, 230), 95)
+    eur = Word("€", (170, 196, 182, 226), 90)          # centro più in alto di 4 px
+    assert [w.text for w in layout.reading_order([eur, num])] == ["85,50", "€"]
+    eur2 = Word("€", (40, 205, 52, 235), 90)
+    assert [w.text for w in layout.reading_order([num, eur2])] == ["€", "85,50"]
+    second = Word("riga2", (40, 260, 90, 290), 90)
+    assert [w.text for w in layout.reading_order([second, eur, num])] == ["85,50", "€", "riga2"]
+
+
+@pytest.mark.parametrize("mode", ["editable", "searchable"])
+def test_importi_con_euro_in_tabella(tmp_path, mode):
+    """«85,50 €» e «€ 9.500,00» in una tabella a 300 dpi: ordine del testo e riquadri come nell'immagine."""
+    sans = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    amounts = ["85,50 €", "€ 9.500,00", "1.250,00 €", "€ 45,90", "12,00 €"]
+
+    def draw(page):
+        page.insert_font(fontname="S", fontfile=sans)
+        xs, y0 = [72, 260, 450], 150
+        for r, (a, b) in enumerate([("Articolo", "Prezzo")] + [(f"Voce {i}", v) for i, v in enumerate(amounts)]):
+            page.insert_text((xs[0] + 8, y0 + r * 26 + 18), a, fontname="S", fontsize=12)
+            page.insert_text((xs[1] + 8, y0 + r * 26 + 18), b, fontname="S", fontsize=12)
+        for x in xs:
+            page.draw_line((x, y0), (x, y0 + 26 * (len(amounts) + 1)))
+        for r in range(len(amounts) + 2):
+            page.draw_line((72, y0 + r * 26), (450, y0 + r * 26))
+    ref_doc = pymupdf.open()
+    draw(ref_doc.new_page())
+    ref_words = ref_doc[0].get_text("words")
+    img = _page(draw)
+    out = engine.ocr_pdf_bytes(open(image_pdf(tmp_path / "e.pdf", [img]), "rb").read(), ["ita"], mode)
+    with pymupdf.open(stream=out) as d:
+        text = d[0].get_text()
+        for a in amounts:
+            assert a in text, (a, text)
+        got = d[0].get_text("words")
+    from .conftest import iou
+    for rw in ref_words:
+        if rw[4] == "€":
+            best = max((iou(rw[:4], g[:4]) for g in got if g[4] == "€"), default=0)
+            assert best >= 0.4, rw

@@ -297,3 +297,24 @@ def test_back_returns_to_origin_document_tab(viewer_window, tmp_path, qtbot):
     viewer_window.close_view(view)                    # scheda d'origine chiusa: voce saltata
     viewer_window.tabs.setCurrentWidget(new)
     assert not nav.back()
+
+
+def test_ux18_rotate_view_and_rulers_shortcuts(viewer_window, sample_pdf, qtbot):
+    from PySide6.QtGui import QKeySequence
+    w = viewer_window
+    nav = _nav(w)
+    assert w.act_rotate_view.shortcut() == QKeySequence("Ctrl+Shift++")
+    assert nav.act_rotate_ccw.shortcut() == QKeySequence("Ctrl+Shift+-")
+    assert w.act_rulers.shortcut() == QKeySequence("Ctrl+R")
+    view = w.open_path(sample_pdf)
+    nav.act_rotate_ccw.trigger()
+    assert view.view_rotation == 270
+    w.act_rotate_view.trigger()
+    assert view.view_rotation == 0
+    # in un'altra modalità le combinazioni restano libere (Pagine le usa per ruotare le pagine)
+    other = [m for m in w.modes if m != "leggi"]
+    if other:
+        w.set_mode(other[0])
+        assert nav.act_rotate_ccw.shortcut().isEmpty()
+        w.set_mode("leggi")
+        assert nav.act_rotate_ccw.shortcut() == QKeySequence("Ctrl+Shift+-")

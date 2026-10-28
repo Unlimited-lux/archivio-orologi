@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pymupdf
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QInputDialog, QLabel, QToolTip
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations
@@ -45,6 +46,8 @@ TRANSLATIONS = {
     "File collegato non trovato: {p}": "Linked file not found: {p}",
     "Destinazione non trovata": "Destination not found",
     "Vista": "View",
+    "Ruota vista in senso orario": "Rotate view clockwise",
+    "Ruota vista in senso antiorario": "Rotate view counterclockwise",
     "Rileva URL nel testo": "Detect URLs in text",
     "Rende cliccabili indirizzi web ed e-mail scritti come semplice testo":
         "Makes web and e-mail addresses written as plain text clickable",
@@ -159,6 +162,7 @@ class NavigationController(QObject):
         self.label_box.hide()
         w.statusBar().addPermanentWidget(self.label_box)
         ctx.add_link_handler(self._link_handler, priority=-100)
+        self._assign_ux18_shortcuts()
         ctx.documentOpened.connect(self._attach)
         ctx.currentViewChanged.connect(lambda _v: self._refresh_later())
         ctx.documentChanged.connect(self._on_content)
@@ -214,6 +218,36 @@ class NavigationController(QObject):
         view.installEventFilter(self)
         view.overlays.append(self._paint_focus)
 
+    def _assign_ux18_shortcuts(self) -> None:
+        """UX-18: «Ruota vista» in senso orario/antiorario con Ctrl+Maiusc++ / Ctrl+Maiusc+-
+        (valide solo in Leggi: in Pagine le stesse combinazioni ruotano le pagine) e Ctrl+R
+        per i righelli del nucleo."""
+        w = self.ctx.window
+        mode = self.ctx.mode("leggi")
+        rotate = getattr(w, "act_rotate_view", None)
+        self.act_rotate_ccw = self.ctx.action(_("Ruota vista in senso antiorario"), "rotate-ccw",
+                                              lambda: self._rotate_view(-90))
+        if rotate is not None:
+            rotate.setShortcut(QKeySequence("Ctrl+Shift++"))
+            rotate.setToolTip(_("Ruota vista in senso orario") + " (Ctrl+Maiusc++)")
+        self.act_rotate_ccw.setShortcut(QKeySequence("Ctrl+Shift+-"))
+        self.act_rotate_ccw.setToolTip(_("Ruota vista in senso antiorario") + " (Ctrl+Maiusc+-)")
+        w.addAction(self.act_rotate_ccw)
+        self.ctx.add_menu_action(self.act_rotate_ccw, _("Vista"))
+        if mode is not None:
+            if rotate is not None:
+                mode.scope_shortcuts(rotate, self.act_rotate_ccw)
+            else:
+                mode.scope_shortcuts(self.act_rotate_ccw)
+        rulers = getattr(w, "act_rulers", None)
+        if rulers is not None:
+            rulers.setShortcut(QKeySequence("Ctrl+R"))
+
+    def _rotate_view(self, degrees: int) -> None:
+        view = self.ctx.current_view()
+        if view is not None:
+            view.rotate_view(degrees)
+
     def record_jump(self, view: DocumentView) -> None:
         """Da chiamare prima di un salto fatto senza `go_to_page` (es. zoom su un'area)."""
         self.state(view).history.record(current_position(view))
@@ -253,8 +287,7 @@ class NavigationController(QObject):
             if origin is None:
                 return False
             # cronologia esaurita: si torna alla scheda del documento d'origine (VIS-13)
-            self.ctx.window.docs_stack.setCurrentWidget(self.ctx.window.tabs)
-            self.ctx.window.tabs.setCurrentWidget(origin)
+            self.ctx.activate_view(origin)
             self._refresh()
             return True
         self._restore(view, target)
@@ -336,7 +369,6 @@ class NavigationController(QObject):
 
     def _do_refresh(self) -> None:
         view = self.ctx.current_view()
-        w = self.ctx.window
         if view is None:
             self.act_back.setEnabled(False)
             self.act_forward.setEnabled(False)
@@ -345,16 +377,7 @@ class NavigationController(QObject):
         st = self.state(view)
         self.act_back.setEnabled(st.history.can_back or self._origin(view) is not None)
         self.act_forward.setEnabled(st.history.can_forward)
-        # comandi di pagina coerenti con la posizione (VIS-12)
-        first = view.current_page <= 0
-        last = view.current_page >= view.page_count - 1
-        try:
-            w.act_prev.setEnabled(not first)
-            w.act_first.setEnabled(not first)
-            w.act_next.setEnabled(not last)
-            w.act_last.setEnabled(not last)
-        except AttributeError:
-            pass
+        # Prima/Precedente/Successiva/Ultima: le disattiva il nucleo ai bordi (VIS-12)
         try:
             labels = self.labels(view)
         except Exception:

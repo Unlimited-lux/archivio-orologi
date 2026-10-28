@@ -27,7 +27,7 @@ class ToolsModule:
 
     def show_compare(self):
         if self.compare.widget is None:
-            self.ctx.info(_("Confronto"), _("Nessun confronto aperto. Usa «Confronta documenti»."))
+            self.ctx.notify(_("Nessun confronto aperto. Usa «Confronta documenti»."))
             return
         self.compare.reshow()
 

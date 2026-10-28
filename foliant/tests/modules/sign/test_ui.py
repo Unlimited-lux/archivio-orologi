@@ -247,20 +247,28 @@ def test_expired_certificate_blocked_in_dialog(window, qtbot, sample_pdf, expire
 
 
 def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path, id_a):
-    """SIG-21: una modifica a un documento firmato chiede conferma; «Annulla» la ritira."""
+    """SIG-21: la conferma arriva PRIMA della modifica invalidante; «Annulla» non modifica nulla."""
+    from foliant.api import OperationCancelled
     view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "w.pdf", id_a)
     c = _ctl(window)
     asked = []
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")
-    with view.document.change("Ruota pagina") as pdf:
-        pdf[0].set_rotation(90)
-    QApplication.processEvents()
+    before = view.document.version
+    with pytest.raises(OperationCancelled):
+        with view.document.change("Ruota pagina", kind="pages") as pdf:
+            pdf[0].set_rotation(90)
     assert asked == ["Ruota pagina"]
-    assert not view.document.is_modified
+    assert not view.document.is_modified and view.document.version == before
+    # le modifiche consentite (annotazioni) passano senza domande
+    with view.document.change("Nota", kind="annotation") as pdf:
+        pdf[0].add_text_annot((300, 300), "ok")
+    assert asked == ["Ruota pagina"] and view.document.is_modified
+    view.document.undo()
     # «Lavora su una copia senza firme»
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "copy")
-    with view.document.change("Ruota pagina") as pdf:
-        pdf[0].set_rotation(90)
+    with pytest.raises(OperationCancelled):
+        with view.document.change("Ruota pagina", kind="pages") as pdf:
+            pdf[0].set_rotation(90)
     QApplication.processEvents()
     copy_view = window.current_view()
     assert copy_view is not view and "senza firme" in copy_view.document.display_name
@@ -268,10 +276,9 @@ def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path,
     # «Procedi comunque»: l'avviso non si ripete
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "proceed")
     window.tabs.setCurrentWidget(view)
-    with view.document.change("Ruota pagina") as pdf:
+    with view.document.change("Ruota pagina", kind="pages") as pdf:
         pdf[0].set_rotation(90)
-    QApplication.processEvents()
-    with view.document.change("Ruota pagina") as pdf:
+    with view.document.change("Ruota pagina", kind="pages") as pdf:
         pdf[0].set_rotation(180)
     assert view.document.is_modified and asked.count("Ruota pagina") == 2
 
@@ -508,7 +515,7 @@ def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sam
     c = _ctl(window)
     asked = []
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "proceed")
-    with view.document.change("Nota") as pdf:
+    with view.document.change("Nota", kind="annotation") as pdf:
         pdf[0].add_text_annot((300, 300), "Va bene")
     QApplication.processEvents()
     assert asked == []                                   # modifica consentita: nessun avviso
@@ -519,7 +526,7 @@ def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sam
     assert st.statuses[0].status == "valida"
     assert "consentite" in st.statuses[0].modifications
     # una seconda modifica, al contenuto, chiede conferma
-    with view.document.change("Testo") as pdf:
+    with view.document.change("Testo", kind="content") as pdf:
         pdf[0].insert_text((100, 400), "AGGIUNTO")
     QApplication.processEvents()
     assert asked == ["Testo"]
@@ -662,7 +669,7 @@ def test_save_incremental_even_without_auto_verify(window, monkeypatch, sample_p
     window.settings.setValue("sign/auto_verify", "false")
     try:
         view = window.open_path(str(p))
-        with view.document.change("Nota") as pdf:
+        with view.document.change("Nota", kind="annotation") as pdf:
             pdf[0].add_text_annot((300, 300), "ok")
         QApplication.processEvents()
         assert window.save_view(view)
@@ -696,7 +703,7 @@ def test_undo_redo_after_incremental_save(window, monkeypatch, sample_pdf, tmp_p
     c = _ctl(window)
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "proceed")
     doc = view.document
-    with doc.change("Nota") as pdf:
+    with doc.change("Nota", kind="annotation") as pdf:
         pdf[0].add_text_annot((300, 300), "Prima nota")
     QApplication.processEvents()
     assert window.save_view(view)
@@ -901,6 +908,13 @@ def test_required_unsigned_fields_warning(window, monkeypatch, tmp_path):
     monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(m) or False)
     assert c.confirm_unsigned_required(view, "Invia per e-mail") is False
     assert "Firma del cliente" in asked[0] and "Invia per e-mail" in asked[0]
+    # agganciato alle guardie del nucleo: stampa e Salva con nome
+    assert window.ctx.run_guards("print", view) is False
+    assert "Stampa" in asked[-1]
+    assert window.ctx.run_guards("save_as", view, {"copy": False}) is False
+    assert "Salva con nome" in asked[-1]
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: True)
+    assert window.ctx.run_guards("print", view) is True
 
 
 def test_sign_password_protected_document(window, monkeypatch, tmp_path, id_a):
@@ -953,3 +967,106 @@ def test_panel_buttons_never_below_minimum_size(window, qtbot, monkeypatch, samp
         assert b.width() >= b.minimumSizeHint().width(), (b.text(), b.width(), b.minimumSizeHint().width())
     if width >= 600:
         assert panel.action_buttons._columns == 2
+
+
+def test_certified_no_changes_and_signed_version_are_read_only(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """SIG-17: documento certificato «nessuna modifica» e versione firmata aperti in sola lettura."""
+    from foliant.api import OperationCancelled
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "ro.pdf", id_a, certify=True, level=1)
+    doc = view.document
+    assert doc.locked and "nessuna modifica" in doc.locked_reason
+    with pytest.raises(OperationCancelled):
+        with doc.change("Nota", kind="annotation") as pdf:
+            pdf[0].add_text_annot((10, 10), "x")
+    assert not doc.is_modified
+    c = _ctl(window)
+    sv = c.open_signed_version(view, c.state(view).statuses[0])
+    assert sv.document.locked and "sola lettura" in sv.document.locked_reason
+
+
+def test_document_banner_for_signatures_and_fields(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """SIG-18/SIG-20: barra sopra il documento con lo stato delle firme e i campi da firmare."""
+    from tests.conftest import make_pdf
+    store.TrustStore().add(id_a[1])
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "bn.pdf", id_a)
+    assert "firme" in window.ctx.banners(view)
+    data = Path(make_pdf(tmp_path / "campi.pdf", pages=2)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Venditore", 0, (60, 700, 250, 760))
+    data, _n = digital.add_signature_field(data, "Acquirente", 1, (300, 700, 500, 760))
+    p = tmp_path / "campi-vuoti.pdf"
+    p.write_bytes(data)
+    v2 = window.open_path(str(p))
+    assert "firme" in window.ctx.banners(v2)
+    banner = window.ctx.show_banner(v2, "firme", "x")    # stesso id: restituisce l'avviso aggiornabile
+    assert banner is not None
+    _ctl(window).update_banner(v2)
+    pages = []
+    _ctl(window)._banner_next_field(v2)
+    pages.append(v2.current_page)
+    _ctl(window)._banner_next_field(v2)
+    pages.append(v2.current_page)
+    assert pages == [0, 1]
+    plain = window.open_path(make_pdf(tmp_path / "semplice.pdf"))
+    assert "firme" not in window.ctx.banners(plain)
+
+
+def test_author_name_from_core_preference(window, sample_pdf):
+    """La firma digitata e l'autore delle firme grafiche usano il nome dell'autore del nucleo."""
+    window.settings.setValue("author", "Giulia Verdi")
+    c = _ctl(window)
+    assert c.default_name() == "Giulia Verdi"
+    view = window.open_path(sample_pdf)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]])))
+    xref = c.place(view, 0, pymupdf.Rect(100, 100, 200, 130), item)
+    with view.document.lock:
+        assert view.document.pdf.xref_get_key(xref, "T")[1] == "Giulia Verdi"
+    window.settings.remove("author")
+
+
+def test_permissions_from_core_with_owner_unlock(window, monkeypatch, tmp_path, id_a):
+    """Permessi letti con Document.allows; senza permesso si propone lo sblocco da proprietario (unlock)."""
+    from PySide6.QtWidgets import QInputDialog
+    d0 = pymupdf.open()
+    d0.new_page()
+    p = tmp_path / "solo-stampa.pdf"
+    d0.save(str(p), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="utente", owner_pw="proprietario",
+            permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(p), "utente")
+    c = _ctl(window)
+    assert not view.document.allows(pymupdf.PDF_PERM_ANNOTATE)
+    errors = []
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(m))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("sbagliata", True))
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]])))
+    c.start_placement(view, item)
+    assert errors and view.tool is not c.tool_for(view) or c.tool_for(view).pending is None
+    assert c.digital_sign(view, invisible=True) is False
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("proprietario", True))
+    c.start_placement(view, item)
+    assert view.document.access == "owner" and c.tool_for(view).pending is item
+    assert c.place(view, 0, pymupdf.Rect(10, 10, 100, 40), item)
+
+
+def test_redaction_on_signed_document_warns_before_full_rewrite(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """NFR-09: redazione su PDF firmato → Salva → avviso; Annulla → file su disco invariato;
+    «Salva una copia» → copia scritta, originale firmato intatto."""
+    target = tmp_path / "red.pdf"
+    view = _sign_file(window, monkeypatch, sample_pdf, target, id_a)
+    signed = target.read_bytes()
+    c = _ctl(window)
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "proceed")
+    doc = view.document
+    with doc.change("Redazione", kind="redaction") as pdf:
+        pdf[0].add_redact_annot(pymupdf.Rect(60, 120, 400, 150))
+        pdf[0].apply_redactions()
+    assert doc.has_signatures and not doc.saves_incrementally
+    asked = []
+    monkeypatch.setattr(c, "_ask_full_rewrite", lambda v, save_as: asked.append(save_as) or "cancel")
+    assert window.save_view(view) is False
+    assert asked == [False] and target.read_bytes() == signed and doc.is_modified
+    copy = tmp_path / "red (modificato).pdf"
+    monkeypatch.setattr(c, "_ask_full_rewrite", lambda v, save_as: "copy")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(copy))
+    assert window.save_view(view) is False
+    assert target.read_bytes() == signed and copy.exists()
+    assert b"Orologeria" not in pymupdf.open(str(copy))[0].get_text().encode()

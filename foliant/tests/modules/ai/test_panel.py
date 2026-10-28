@@ -724,7 +724,14 @@ def test_history_export(tmp_path):
 
 
 # ------------------------------------------------------------------ AI-07 integrazione
-def test_translate_pdf_controller(qtbot, window, ready, fake, text_pdf, tmp_path):
+def capture_notify(window, monkeypatch):
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: notes.append(
+        (text, list(actions))))
+    return notes
+
+
+def test_translate_pdf_controller(qtbot, window, ready, fake, text_pdf, tmp_path, monkeypatch):
     from foliant.modules.ai import translate_pdf
     path = text_pdf(3)
     window.open_path(path)
@@ -733,12 +740,18 @@ def test_translate_pdf_controller(qtbot, window, ready, fake, text_pdf, tmp_path
     out = tmp_path / "tradotto.pdf"
     ctl = ready.controller
     ctl.exec_report = lambda dlg: False
-    report = ctl.translate_pdf(dict(target="en", pages=None, mode=translate_pdf.MODE_LAYOUT, glossary=[],
-                                    min_size=6.0), str(out))
-    assert report is not None and not report.failed_pages
+    notes = capture_notify(window, monkeypatch)
+    task = ctl.translate_pdf(dict(target="en", pages=None, mode=translate_pdf.MODE_LAYOUT, glossary=[],
+                                  min_size=6.0), str(out))
+    assert task.wait() and task.error is None          # attività non modale (run_task modal=False)
+    report = ctl.last_translation["report"]
+    assert not report.failed_pages
     res = pymupdf.open(str(out))
     assert res.page_count == 3 and "CONTENUTO UNICO DELLA PAGINA 2" in res[1].get_text()
     assert open(path, "rb").read() == before
+    text, actions = notes[-1]
+    assert "tradotto.pdf" in text and [a[0] for a in actions] == ["Apri", "Rapporto"]
+    actions[0][1]()                                   # «Apri» dall'avviso
     assert window.ctx.current_document().path.name == "tradotto.pdf"
 
 
@@ -754,13 +767,16 @@ def test_translate_pdf_cancel_creates_no_file(qtbot, window, ready, fake, text_p
         return json.dumps([s.upper() for s in json.loads(req.messages[-1].content)])
     fake.default = cancel_on_second
     ready.controller.exec_report = lambda dlg: False
-    assert ready.controller.translate_pdf(dict(target="en", pages=None, mode=translate_pdf.MODE_LAYOUT,
-                                               glossary=[], min_size=6.0), str(out)) is None
+    notes = capture_notify(window, monkeypatch)
+    task = ready.controller.translate_pdf(dict(target="en", pages=None, mode=translate_pdf.MODE_LAYOUT,
+                                               glossary=[], min_size=6.0), str(out))
+    assert task.wait() and isinstance(task.error, OperationCancelled)
+    assert "nessun file creato" in notes[-1][0]
     assert not out.exists()
     assert not [f for f in os.listdir(tmp_path) if f.startswith(".annullato")]
 
 
-def test_translate_pdf_retry_failed_page(qtbot, window, ready, fake, text_pdf, tmp_path):
+def test_translate_pdf_retry_failed_page(qtbot, window, ready, fake, text_pdf, tmp_path, monkeypatch):
     from foliant.modules.ai import translate_pdf
     from foliant.modules.ai.providers import BAD_REQUEST
     window.open_path(text_pdf(3))
@@ -775,13 +791,16 @@ def test_translate_pdf_retry_failed_page(qtbot, window, ready, fake, text_pdf, t
     out = tmp_path / "t.pdf"
     ctl = ready.controller
     ctl.exec_report = lambda dlg: False
-    report = ctl.translate_pdf(dict(target="en", pages=None, mode=translate_pdf.MODE_LAYOUT, glossary=[],
-                                    min_size=6.0), str(out))
-    assert list(report.failed_pages) == [1]
+    notes = capture_notify(window, monkeypatch)
+    ctl.translate_pdf(dict(target="en", pages=None, mode=translate_pdf.MODE_LAYOUT, glossary=[],
+                           min_size=6.0), str(out)).wait()
+    assert list(ctl.last_translation["report"].failed_pages) == [1]
+    text, actions = notes[-1]
+    assert "1 pagine non riuscite" in text and actions[1][0] == "Ritenta"
     state["fail"] = False
     fake.requests.clear()
-    report2 = ctl.retry_failed()
-    assert not report2.failed_pages
+    actions[1][1]().wait()                            # «Ritenta» dall'avviso
+    assert not ctl.last_translation["report"].failed_pages
     assert all("pagina 2" in r.messages[-1].content for r in fake.requests)
     assert "PAGINA 2" in pymupdf.open(str(out))[1].get_text()
 

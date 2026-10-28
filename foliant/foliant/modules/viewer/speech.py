@@ -261,9 +261,7 @@ class SpeechController(QObject):
         if not self.engine_available():
             self._message(_(NO_ENGINE_TEXT))
             return None
-        from foliant.modules.viewer.properties_engine import document_security
-        with ENGINE_LOCK:
-            perms = document_security(view.document).permissions
+        perms = view.document.permissions   # permessi effettivi del nucleo (-1 = tutto consentito)
         if not reading_allowed(perms):
             self._message(_("La lettura ad alta voce non è consentita dai permessi del documento."))
             return None

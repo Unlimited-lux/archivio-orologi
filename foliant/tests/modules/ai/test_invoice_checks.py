@@ -69,7 +69,7 @@ def test_embedded_einvoice_read_locally(window, tmp_path):
     assert fake.requests == []
 
 
-def test_three_invoice_files_csv_with_source(window, tmp_path):
+def test_three_invoice_files_csv_with_source(window, tmp_path, monkeypatch):
     import csv
     import io
     import json
@@ -90,7 +90,14 @@ def test_three_invoice_files_csv_with_source(window, tmp_path):
     fake.default = lambda req: json.dumps({"records": [{"numero": req.messages[-1].content.split("Fattura ")[1][0],
                                                         "totale": "100,00", "_page": 1}]})
     services.controller.exec_dialog = lambda dlg: 0
-    dlg = services.controller.extract_invoice_files(paths)
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify",
+                        lambda text, actions=(), duration_ms=None: notes.append((text, list(actions))))
+    task = services.controller.extract_invoice_files(paths)     # attività non modale
+    assert task.wait() and task.error is None
+    assert "3 fatture su 3" in notes[-1][0]
+    notes[-1][1][0][1]()                                          # «Mostra» dall'avviso
+    dlg = services.controller.last_dialog
     data = list(csv.reader(io.StringIO(extract.to_csv_summary(dlg.result))))
     assert data[0][0] == "file" and len(data) == 4
     assert [r[0] for r in data[1:]] == [f"fattura-cliente-{n + 1}.pdf" for n in range(3)]

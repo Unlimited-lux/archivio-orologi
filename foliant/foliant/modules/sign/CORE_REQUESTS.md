@@ -1,5 +1,16 @@
 # Richieste al nucleo — modulo Firma
 
+> **Stato (base 3d69387):** le richieste 1-6 sono soddisfatte dal nucleo e il modulo le usa:
+> 1. salvataggio incrementale nativo di `Document.save`/`save_copy` (rimossa la soluzione locale);
+> 2. `ctx.add_change_guard` con `change(..., kind=...)`: avviso SIG-21 *prima* della modifica;
+> 3. `ctx.show_banner` per la barra sopra il documento (SIG-18/20/21);
+> 4. `Document.set_locked` per la sola lettura (certificati «nessuna modifica», versione firmata);
+> 5. `ctx.author_name()` per il nome dell'utente;
+> 6. `ctx.add_guard("print"/"save_as")` per le firme obbligatorie mancanti.
+>
+> In più il modulo usa `Document.allows`/`unlock` per i permessi. Resta aperta la **richiesta 7**,
+> sul segnaposto «SIGN» di MuPDF. Il testo qui sotto è la versione originale delle richieste.
+
 ## 1. Salvataggio incrementale per i documenti firmati (SIG-11, SIG-21) — prioritaria
 
 **Problema.** `Document.save()` / `save_copy()` scrivono `to_bytes()` (`tobytes(garbage=3, deflate=True)`),

@@ -153,6 +153,27 @@ def table_from_words(lines: list[Line], box) -> Table | None:
     return Table(cuts, ys)
 
 
+def reading_order(words: list[Word]) -> list[Word]:
+    """Parole in ordine di lettura: righe per sovrapposizione verticale, poi da sinistra a destra.
+
+    (Non per centro arrotondato: simboli come «€» o la punteggiatura hanno un centro diverso
+    dalle cifre accanto e finirebbero in un'altra «riga», fuori posto.)"""
+    rows: list[list[Word]] = []
+    for w in sorted(words, key=lambda w: w.bbox[1]):
+        y0, y1 = w.bbox[1], w.bbox[3]
+        for row in rows:
+            r0 = min(x.bbox[1] for x in row)
+            r1 = max(x.bbox[3] for x in row)
+            overlap = min(y1, r1) - max(y0, r0)
+            if overlap > 0.4 * min(y1 - y0, r1 - r0):
+                row.append(w)
+                break
+        else:
+            rows.append([w])
+    rows.sort(key=lambda row: min(x.bbox[1] for x in row))
+    return [w for row in rows for w in sorted(row, key=lambda w: w.bbox[0])]
+
+
 def fill_table(table: Table, lines: list[Line]) -> list[Line]:
     """Assegna le parole alle celle; restituisce le righe fuori tabella più una riga per cella
     (in ordine riga per riga), e compila `table.cells`."""
@@ -179,7 +200,7 @@ def fill_table(table: Table, lines: list[Line]) -> list[Line]:
     cell_lines: list[Line] = []
     base_block = 10_000 + len(outside)
     for (r, c) in sorted(cells):
-        ws = sorted(cells[(r, c)], key=lambda w: (round(_center(w.bbox)[1] / 10), w.bbox[0]))
+        ws = reading_order(cells[(r, c)])
         table.cells[r][c] = " ".join(w.text for w in ws)
         src = template[(r, c)]
         bbox = (min(w.bbox[0] for w in ws), min(w.bbox[1] for w in ws), max(w.bbox[2] for w in ws),

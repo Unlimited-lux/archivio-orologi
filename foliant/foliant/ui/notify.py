@@ -132,6 +132,7 @@ class NotificationArea(QWidget):
         item.closed.connect(lambda n=item: self._remove(n))
         self._items.append(item)
         self.layout().addWidget(item)
+        item.show()          # subito visibile: _place() deve contarlo nell'altezza della pila
         while len(self._items) > self.MAX_VISIBLE:
             self._items[0].close_notification()        # i più vecchi lasciano il posto
         self._place()
@@ -164,3 +165,8 @@ class NotificationArea(QWidget):
         if obj is self.host and ev.type() == QEvent.Type.Resize and self._items:
             self._place()
         return False
+
+    def event(self, ev) -> bool:
+        if ev.type() == QEvent.Type.LayoutRequest and self._items:
+            self._place()            # un avviso ha cambiato dimensioni: la pila si adegua
+        return super().event(ev)
