@@ -1406,6 +1406,9 @@ def register(ctx, *, provider_factory=None) -> Services:
 
     ctx.currentViewChanged.connect(on_view)
     ctx.documentClosed.connect(on_closed)
+    if hasattr(ctx, "documentAccessChanged"):
+        # «Sblocca…» con la password del proprietario (o blocco/sblocco): i permessi di estrazione cambiano
+        ctx.documentAccessChanged.connect(lambda view: services.refresh())
 
     def close_guard(view, info) -> bool:
         # AI-17: conferma prima di chiudere una scheda (o uscire) con operazioni dell'assistente in corso

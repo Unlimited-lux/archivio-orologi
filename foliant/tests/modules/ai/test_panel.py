@@ -190,6 +190,21 @@ def test_extraction_forbidden_disables_commands(window, ready, fake, tmp_path):
     assert fake.requests == [] and errors
 
 
+def test_unlock_with_owner_password_enables_assistant(window, ready, fake, tmp_path):
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Riservato", fontsize=12)
+    path = tmp_path / "vietato.pdf"
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="prop", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(path))
+    panel = ready.panel
+    panel.set_scope("document")
+    panel.refresh_state()
+    assert not panel.send_btn.isEnabled()
+    assert view.document.unlock("prop")             # il nucleo emette documentAccessChanged
+    assert panel.send_btn.isEnabled() and not panel.blocked_reason()
+
+
 def test_send_line_and_preview_flag_redaction(window, ready, tmp_path):
     doc = pymupdf.open()
     page = doc.new_page()
