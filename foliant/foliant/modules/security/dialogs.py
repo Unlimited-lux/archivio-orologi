@@ -331,6 +331,12 @@ class FindDialog(QDialog):
             self.terms = QPlainTextEdit()
             self.terms.setMaximumHeight(90)
             lay.addWidget(self.terms)
+            imp = QPushButton(_("Importa elenco…"))
+            imp.clicked.connect(self._import_terms)
+            row0 = QHBoxLayout()
+            row0.addStretch(1)
+            row0.addWidget(imp)
+            lay.addLayout(row0)
             opts = QHBoxLayout()
             self.case = QCheckBox(_("Maiuscole/minuscole"))
             self.whole = QCheckBox(_("Parola intera"))
@@ -386,6 +392,22 @@ class FindDialog(QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
+
+    def _import_terms(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa elenco"), "", _("Testo (*.txt);;Tutti i file (*)"))
+        if path:
+            self.load_terms(path)
+
+    def load_terms(self, path: str) -> None:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                terms = [line.strip() for line in f if line.strip()]
+        except OSError as e:
+            self.notice.setText(_("Impossibile leggere il file: {e}").format(e=e.strerror))
+            return
+        current = [t for t in self.terms.toPlainText().splitlines() if t.strip()]
+        self.terms.setPlainText("\n".join(current + [t for t in terms if t not in current]))
 
     def options(self) -> dict:
         o: dict = {"pages": self.pages.text().strip()}
@@ -567,7 +589,9 @@ class ColorButton(QPushButton):
 class StyleDialog(QDialog):
     """Aspetto dei riquadri (riempimento, testo sovrapposto) e opzioni di applicazione."""
 
-    def __init__(self, style, options, codes: list[str], parent=None):
+    def __init__(self, style, options, codes: list[str], parent=None,
+                 import_codes: Callable[[], list[str] | None] | None = None,
+                 export_codes: Callable[[], None] | None = None):
         super().__init__(parent)
         from . import redaction as R
         self.setWindowTitle(_("Impostazioni di redazione"))
@@ -585,6 +609,18 @@ class StyleDialog(QDialog):
         self.text.setCurrentText(style.overlay_text)
         self.text.lineEdit().setPlaceholderText(_("nessuno (es. OMISSIS)"))
         f.addRow(_("Testo sovrapposto:"), self.text)
+        if import_codes or export_codes:
+            row = QHBoxLayout()
+            if import_codes:
+                b = QPushButton(_("Importa codici…"))
+                b.clicked.connect(lambda: self._set_codes(import_codes()))
+                row.addWidget(b)
+            if export_codes:
+                b = QPushButton(_("Esporta codici…"))
+                b.clicked.connect(export_codes)
+                row.addWidget(b)
+            row.addStretch(1)
+            f.addRow("", row)
         self.text_color = ColorButton(style.text_color)
         f.addRow(_("Colore del testo:"), self.text_color)
         self.size = QDoubleSpinBox()
@@ -619,6 +655,16 @@ class StyleDialog(QDialog):
         self.fill.clicked.connect(self._check)
         self.text_color.clicked.connect(self._check)
         self._check()
+
+    def _set_codes(self, codes: list[str] | None) -> None:
+        if not codes:
+            return
+        current = self.text.currentText()
+        self.text.clear()
+        self.text.addItem("")
+        for c in codes:
+            self.text.addItem(c)
+        self.text.setCurrentText(current)
 
     def _check(self) -> None:
         w = []

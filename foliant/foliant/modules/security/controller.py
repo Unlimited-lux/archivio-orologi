@@ -146,6 +146,24 @@ class SecurityController:
         self.set_codes([str(c) for c in codes])
         return self.codes()
 
+    def _import_codes_dialog(self) -> list[str] | None:
+        paths = self.ctx.ask_open_paths(_("Importa codici"), "JSON (*.json)", multiple=False)
+        if not paths:
+            return None
+        try:
+            return self.import_codes(paths[0])
+        except DocumentError as e:
+            self.ctx.error(_("Importazione non riuscita"), str(e))
+            return None
+
+    def _export_codes_dialog(self) -> None:
+        path = self.ctx.ask_save_path(_("Esporta codici"), "codici-redazione.json", "JSON (*.json)", ".json")
+        if path:
+            try:
+                self.export_codes(path)
+            except OSError as e:
+                self.ctx.error(_("Esportazione non riuscita"), str(e))
+
     def require_modify(self, document) -> bool:
         """Permesso di modifica (SEC-02): con accesso limitato chiede la password dei permessi."""
         if "modify" in P.allowed_now(document):
@@ -176,6 +194,16 @@ class SecurityController:
             return False
         if P.needs_owner_password(doc) and not self.unlock(doc):
             return False
+        warnings = []
+        if self._has_signatures(doc):
+            warnings.append(_("Il documento contiene firme digitali: la cifratura riscrive il file e le firme "
+                              "risulteranno non valide."))
+        if _declares_pdfa(doc):
+            warnings.append(_("Il documento dichiara la conformità PDF/A o PDF/X: la cifratura la fa decadere "
+                              "e la dichiarazione verrà rimossa."))
+        if warnings and not confirm(self.parent, _("Proteggere comunque il documento?"), "\n\n".join(warnings),
+                                    _("Continua")):
+            return False
         dlg = ask_protection(self.parent, doc)
         if dlg is None:
             return False
@@ -190,6 +218,9 @@ class SecurityController:
         except P.ProtectionError as e:
             self.ctx.error(_("Protezione non applicata"), str(e))
             return False
+        if _declares_pdfa(doc):
+            with doc.change(_("Rimuovi dichiarazione PDF/A")) as pdf:
+                S.drop_conformance(pdf)
         self.ctx.status(_("Protezione impostata: verrà applicata al salvataggio."))
         self.refresh_document_state(self.view())
         return True
@@ -218,13 +249,44 @@ class SecurityController:
         if doc is None:
             return
         rows = security_rows(doc)
-        dlg = D.ReportDialog(_("Proprietà di sicurezza"), "", rows, self.parent,
-                             action=_("Modifica protezione…") if doc.is_protected else _("Proteggi…"))
-        weak = any(_("Protezione debole") in head for head, _d in rows)
+        weak = any(head == _("Protezione debole") for head, _d in rows)
+        action = (_("Aggiorna ad AES-256") if weak else
+                  _("Modifica protezione…") if doc.is_protected else _("Proteggi…"))
+        dlg = D.ReportDialog(_("Proprietà di sicurezza"), "", rows, self.parent, action=action)
         if show_report(dlg):
-            if weak and doc.is_protected and P.info(doc).method != P.AES256:
-                pass
-            self.protect()
+            if weak:
+                self.upgrade_to_aes256()
+            else:
+                self.protect()
+
+    def upgrade_to_aes256(self) -> bool:
+        """Mantiene password e permessi, cambia l'algoritmo in AES-256 (richiede accesso completo)."""
+        doc = self.document()
+        if doc is None:
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        opts = dict(doc.save_options or doc.original_protection)
+        if not opts or opts.get("encryption") in (None, pymupdf.PDF_ENCRYPT_NONE):
+            return False
+        settings = P.ProtectionSettings(open_password=opts.get("user_pw", ""),
+                                        permissions_password=opts.get("owner_pw", ""),
+                                        method=P.AES256)
+        perms = int(opts.get("permissions", -1))
+        settings.restrict = (perms & P.ALL_BITS) != P.ALL_BITS
+        settings.allowed = {k for k, bit in P.PERM_BITS.items() if perms & bit}
+        settings.print_level = (P.PRINT_NONE if not perms & pymupdf.PDF_PERM_PRINT else
+                                P.PRINT_HIGH if perms & pymupdf.PDF_PERM_PRINT_HQ else P.PRINT_LOW)
+        if settings.permissions_password == settings.open_password:
+            settings.permissions_password = ""
+        try:
+            P.apply_protection(doc, settings)
+        except P.ProtectionError as e:
+            self.ctx.error(_("Protezione non applicata"), str(e))
+            return False
+        self.ctx.status(_("La protezione sarà salvata con AES a 256 bit."))
+        self.refresh_document_state(self.view())
+        return True
 
     @staticmethod
     def _has_signatures(doc) -> bool:
@@ -434,7 +496,8 @@ class SecurityController:
         return n
 
     def redaction_settings(self) -> bool:
-        dlg = D.StyleDialog(self.style, self.apply_options, self.codes(), self.parent)
+        dlg = D.StyleDialog(self.style, self.apply_options, self.codes(), self.parent,
+                            import_codes=self._import_codes_dialog, export_codes=self._export_codes_dialog)
         if not run_dialog(dlg):
             return False
         self.style, self.apply_options = dlg.values()
@@ -520,7 +583,9 @@ class SecurityController:
         def work(progress):
             progress.update(0.1, _("Analisi del documento"))
             with ENGINE_LOCK:
-                return S.scan(doc.pdf), S.inspect_extra(doc.pdf)
+                rep, extra = S.scan(doc.pdf), S.inspect_extra(doc.pdf)
+            extra["revisions"] = S.previous_revisions(doc.path) if doc.path is not None else 0
+            return rep, extra
 
         rep, extra = self.ctx.run_task(_("Esame del documento…"), work)
         rows = inspection_rows(rep, extra)
@@ -767,6 +832,15 @@ class _Nothing(Exception):
     """Interrompe un blocco di modifica senza effetti (nessun passo di annullamento)."""
 
 
+def _declares_pdfa(doc) -> bool:
+    with ENGINE_LOCK:
+        try:
+            xmp = doc.pdf.get_xml_metadata() or ""
+        except Exception:
+            return False
+    return "pdfaid:part" in xmp or "pdfxid:" in xmp or "GTS_PDFXVersion" in xmp
+
+
 def _file_hash(path: str) -> str:
     import hashlib
     try:
@@ -885,10 +959,7 @@ def redact_outside(pdf: pymupdf.Document, matches: list[PT.Match], replacement: 
                 annot.update()
         elif kind == "field":
             page, xref = (int(x) for x in rest.split(":"))
-            for w in pdf[page].widgets():
-                if w.xref == xref:
-                    w.field_value = ""
-                    w.update()
+            S.clear_fields(pdf, pdf[page], {xref})
         elif kind == "emb":
             try:
                 pdf.embfile_upd(rest, filename=replacement, desc="")
@@ -912,12 +983,20 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
         details = []
         if desc:
             details.append(_("All'apertura: {d}").format(d=desc))
+            enc = P.open_encryption_details(doc)
+            if "V" in enc or "R" in enc:
+                details.append(_("Versione {v}, revisione {r}").format(v=enc.get("V", "?"), r=enc.get("R", "?")))
+            if not enc.get("encrypt_metadata", True):
+                details.append(_("Metadati non cifrati"))
+            details.append(_("Password di apertura: {s}").format(
+                s=_("sì") if doc.original_protection.get("user_pw") else _("no")))
         details.append(_("Al salvataggio: {d}").format(d=P.describe(doc)))
         head = _("Protezione con password")
         if i.method:
             head += " — " + method[i.method]
         rows.append((head, details))
-        weak = ("RC4" in algo.upper()) or (" R5" in algo.upper()) or i.method == P.RC4
+        enc = P.open_encryption_details(doc)
+        weak = ("RC4" in algo.upper()) or enc.get("R") == 5 or i.method == P.RC4
         if weak:
             rows.append((_("Protezione debole"),
                          [_("L'algoritmo RC4 o AES-256 revisione 5 non è più considerato sicuro: aggiorna ad "
@@ -977,6 +1056,10 @@ def inspection_rows(rep: S.ScanReport, extra: dict) -> list[tuple[str, list[str]
         rows.append((_("Miniature incorporate: {n}").format(n=extra["thumbnails"]), []))
     if extra.get("bookmarks"):
         rows.append((_("Segnalibri: {n}").format(n=extra["bookmarks"]), []))
+    if extra.get("revisions"):
+        rows.append((_("Revisioni precedenti nel file: {n}").format(n=extra["revisions"]),
+                     [_("Il file contiene versioni precedenti (aggiornamenti incrementali) che possono "
+                        "conservare contenuti cancellati. Un salvataggio completo le elimina.")]))
     if extra.get("signatures"):
         rows.append((_("Firme digitali: {n}").format(n=extra["signatures"]), []))
     return rows

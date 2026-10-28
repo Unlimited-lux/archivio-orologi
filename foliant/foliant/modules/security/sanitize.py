@@ -358,6 +358,8 @@ def remove_hidden_layers(pdf: pymupdf.Document) -> int:
                                    ("SMask", "null"), ("Mask", "null")):
                     pdf.xref_set_key(xref, key, value)
                 removed += 1
+    # i livelli rimasti diventano contenuto normale
+    pdf.xref_set_key(pdf.pdf_catalog(), "OCProperties", "null")
     return removed
 
 
@@ -432,6 +434,7 @@ def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
     """Rimuove i dati scelti. Va chiamata dentro `document.change()`."""
     rep = SanitizeReport()
     o = {k: bool(options.get(k)) for k in SANITIZE_KEYS}
+    original_xmp = _xml_metadata(pdf)
 
     def step(f: float, text: str) -> None:
         if progress is not None:
@@ -478,12 +481,16 @@ def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
                     page.delete_annot(annot)
         rep.done.append("comments")
     if o["metadata"]:
-        # data e programma non devono riapparire: metadati vuoti espliciti
+        # data e programma non devono riapparire: metadati vuoti espliciti; per i
+        # documenti PDF/A resta un pacchetto XMP minimo con l'identificazione
+        pdfa = _pdfa_identification(original_xmp)
         pdf.set_metadata({})
         try:
             pdf.del_xml_metadata()
         except Exception:
             pass
+        if pdfa:
+            pdf.set_xml_metadata(minimal_xmp({}, pdfa))
     if o["form_data"] and options.get("remove_fields"):
         for page in pdf:
             for xref in [w.xref for w in page.widgets()]:
@@ -496,15 +503,7 @@ def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
             pdf.xref_set_key(cat, "AcroForm", "null")
     elif o["form_data"]:
         for page in pdf:
-            for w in page.widgets():
-                if w.field_type in (pymupdf.PDF_WIDGET_TYPE_TEXT, pymupdf.PDF_WIDGET_TYPE_COMBOBOX,
-                                    pymupdf.PDF_WIDGET_TYPE_LISTBOX) and w.field_value:
-                    w.field_value = ""
-                    w.update()
-                elif w.field_type in (pymupdf.PDF_WIDGET_TYPE_CHECKBOX, pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON) \
-                        and w.field_value not in (False, "Off", ""):
-                    w.field_value = False
-                    w.update()
+            clear_fields(pdf, page)
     step(1.0, "")
     return rep
 
@@ -550,6 +549,9 @@ def write_metadata(pdf: pymupdf.Document, values: dict[str, str], *, update_mod_
             pdf.del_xml_metadata()
         except Exception:
             pass
+    else:
+        # XMP allineato al dizionario Info (identificazione PDF/A conservata)
+        pdf.set_xml_metadata(minimal_xmp(new, _pdfa_identification(_xml_metadata(pdf))))
 
 
 def format_pdf_date(value: str) -> str:
@@ -643,3 +645,125 @@ def flatten(pdf: pymupdf.Document, annots: bool = True, widgets: bool = True) ->
             if annot is not None and annot.type[0] != pymupdf.PDF_ANNOT_REDACT:
                 page.delete_annot(annot)
     pdf.bake(annots=annots, widgets=widgets)
+
+
+def previous_revisions(path) -> int:
+    """Numero di aggiornamenti incrementali nel file su disco (revisioni precedenti)."""
+    try:
+        data = open(path, "rb").read()
+    except OSError:
+        return 0
+    return max(0, len(re.findall(rb"%%EOF", data)) - 1)
+
+
+def _pdfa_identification(xmp: str) -> tuple[str, str] | None:
+    m = re.search(r"pdfaid:part[=>\"']+\s*(\d)", xmp)
+    if not m:
+        return None
+    c = re.search(r"pdfaid:conformance[=>\"']+\s*([ABUabu])", xmp)
+    return m.group(1), (c.group(1).upper() if c else "B")
+
+
+def minimal_xmp(values: dict[str, str], pdfa: tuple[str, str] | None = None) -> str:
+    """Pacchetto XMP coerente con il dizionario Info (ISO 16684-1)."""
+    from xml.sax.saxutils import escape as esc
+
+    def bag(items, kind="Bag"):
+        lis = "".join(f"<rdf:li>{esc(i)}</rdf:li>" for i in items)
+        return f"<rdf:{kind}>{lis}</rdf:{kind}>"
+
+    parts = []
+    title = values.get("title", "")
+    if title:
+        parts.append(f'<dc:title><rdf:Alt><rdf:li xml:lang="x-default">{esc(title)}</rdf:li></rdf:Alt></dc:title>')
+    authors = [a.strip() for a in values.get("author", "").split(";") if a.strip()]
+    if authors:
+        parts.append(f"<dc:creator>{bag(authors, 'Seq')}</dc:creator>")
+    if values.get("subject"):
+        parts.append('<dc:description><rdf:Alt><rdf:li xml:lang="x-default">'
+                     f'{esc(values["subject"])}</rdf:li></rdf:Alt></dc:description>')
+    keywords = [k.strip() for k in re.split(r"[;,]", values.get("keywords", "")) if k.strip()]
+    if keywords:
+        parts.append(f"<dc:subject>{bag(keywords)}</dc:subject>")
+        parts.append(f"<pdf:Keywords>{esc(values['keywords'])}</pdf:Keywords>")
+    if values.get("producer"):
+        parts.append(f"<pdf:Producer>{esc(values['producer'])}</pdf:Producer>")
+    if values.get("creator"):
+        parts.append(f"<xmp:CreatorTool>{esc(values['creator'])}</xmp:CreatorTool>")
+    for key, tag in (("creationDate", "xmp:CreateDate"), ("modDate", "xmp:ModifyDate")):
+        iso = pdf_date_to_iso(values.get(key, ""))
+        if iso:
+            parts.append(f"<{tag}>{iso}</{tag}>")
+    if values.get("modDate"):
+        iso = pdf_date_to_iso(values["modDate"])
+        if iso:
+            parts.append(f"<xmp:MetadataDate>{iso}</xmp:MetadataDate>")
+    if pdfa:
+        parts.append(f"<pdfaid:part>{pdfa[0]}</pdfaid:part><pdfaid:conformance>{pdfa[1]}</pdfaid:conformance>")
+    body = "".join(parts)
+    return ('<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:xmp="http://ns.adobe.com/xap/1.0/" '
+            'xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">'
+            f"{body}</rdf:Description></rdf:RDF></x:xmpmeta>"
+            '<?xpacket end="w"?>')
+
+
+def pdf_date_to_iso(value: str) -> str:
+    m = re.match(r"D?:?(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?([Zz+\-])?(\d{2})?'?(\d{2})?", value or "")
+    if not m:
+        return ""
+    y, mo, d, h, mi, sec, sign, th, tm = m.groups()
+    s = f"{y}-{mo}-{d}T{h or '00'}:{mi or '00'}:{sec or '00'}"
+    if sign in ("+", "-"):
+        s += f"{sign}{th or '00'}:{tm or '00'}"
+    elif sign in ("Z", "z"):
+        s += "Z"
+    return s
+
+
+def drop_conformance(pdf: pymupdf.Document) -> None:
+    """Toglie la dichiarazione PDF/A dai metadati XMP (es. prima di cifrare)."""
+    meta = pdf.metadata or {}
+    values = {k: meta.get(k) or "" for k in METADATA_KEYS + ("creationDate", "modDate")}
+    pdf.set_xml_metadata(minimal_xmp(values, None))
+
+
+def clear_fields(pdf: pymupdf.Document, page: pymupdf.Page, xrefs: set[int] | None = None) -> int:
+    """Azzera i valori dei campi (anche nel campo padre) e ne rigenera l'aspetto."""
+    n = 0
+    for w in list(page.widgets()):
+        if xrefs is not None and w.xref not in xrefs:
+            continue
+        if w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE:
+            continue
+        targets = [w.xref]
+        kind, val = pdf.xref_get_key(w.xref, "Parent")
+        if kind == "xref":
+            targets.append(int(val.split()[0]))
+        empty = "/Off" if w.field_type in (pymupdf.PDF_WIDGET_TYPE_CHECKBOX,
+                                           pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON) else "()"
+        changed = False
+        for t in targets:
+            for key in ("V", "DV"):
+                if pdf.xref_get_key(t, key)[0] != "null":
+                    pdf.xref_set_key(t, key, empty)
+                    changed = True
+        if changed:
+            n += 1
+    for w in list(page.widgets()):
+        if xrefs is not None and w.xref not in xrefs:
+            continue
+        if w.field_type in (pymupdf.PDF_WIDGET_TYPE_TEXT, pymupdf.PDF_WIDGET_TYPE_COMBOBOX,
+                            pymupdf.PDF_WIDGET_TYPE_LISTBOX):
+            w.field_value = ""
+        elif w.field_type in (pymupdf.PDF_WIDGET_TYPE_CHECKBOX, pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON):
+            w.field_value = False
+        else:
+            continue
+        try:
+            w.update()
+        except Exception:
+            pass
+    return n

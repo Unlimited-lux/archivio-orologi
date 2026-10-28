@@ -248,6 +248,7 @@ def original_restricted(document: Document) -> bool:
 
 _unlocked: "weakref.WeakSet[Document]" = weakref.WeakSet()
 _open_descriptions: "weakref.WeakKeyDictionary[Document, str]" = weakref.WeakKeyDictionary()
+_encrypt_dicts: "weakref.WeakKeyDictionary[Document, str]" = weakref.WeakKeyDictionary()
 
 
 def remember_open_state(document: Document) -> None:
@@ -256,10 +257,36 @@ def remember_open_state(document: Document) -> None:
         return
     try:
         with ENGINE_LOCK:
-            desc = (document.pdf.metadata or {}).get("encryption") or ""
+            pdf = document.pdf
+            desc = (pdf.metadata or {}).get("encryption") or ""
+            _encrypt_dicts[document] = _encrypt_dict(pdf) if desc else ""
     except Exception:
         desc = ""
     _open_descriptions[document] = desc
+
+
+def _encrypt_dict(pdf: pymupdf.Document) -> str:
+    try:
+        kind, val = pdf.xref_get_key(-1, "Encrypt")
+        if kind == "xref":
+            return pdf.xref_object(int(val.split()[0]), compressed=True)
+        return val if kind == "dict" else ""
+    except Exception:
+        return ""
+
+
+def open_encryption_details(document: Document) -> dict:
+    """Versione (/V), revisione (/R), lunghezza della chiave e cifratura dei metadati all'apertura."""
+    import re
+    raw = _encrypt_dicts.get(document, "")
+    out: dict = {}
+    for key in ("V", "R", "Length"):
+        m = re.search(rf"/{key}\s+(\d+)", raw)
+        if m:
+            out[key] = int(m.group(1))
+    m = re.search(r"/EncryptMetadata\s*(true|false)", raw)
+    out["encrypt_metadata"] = (m.group(1) == "true") if m else True
+    return out
 
 
 def open_description(document: Document) -> str:
@@ -277,6 +304,17 @@ def unlock(document: Document, password: str) -> bool:
         return True
     if verify_owner_password(document, password):
         _unlocked.add(document)
+        # la password dei permessi ora è nota: al salvataggio si mantiene quella vera
+        # invece di quella casuale generata dal nucleo
+        orig_owner = document.original_protection.get("owner_pw")
+        if document.save_options.get("owner_pw") == orig_owner:
+            document.save_options["owner_pw"] = password
+            hist = _histories.get(document)
+            if hist is not None:
+                for opts in hist.by_state.values():
+                    if opts.get("owner_pw") == orig_owner:
+                        opts["owner_pw"] = password
+        document.original_protection["owner_pw"] = password
         return True
     return False
 

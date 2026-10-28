@@ -65,6 +65,8 @@ def register(ctx: Context) -> None:
             mode.add_action(c.actions[key])
     for key in ("protect", "remove", "sanitize", "metadata"):
         ctx.add_menu_action(c.actions[key], _("Proteggi"))
+    revoke = ctx.action(_("Revoca documenti attendibili"), "shield-x", c.revoke_trust, requires_document=False)
+    ctx.add_menu_action(revoke, _("Proteggi"))
 
     ctx.add_properties_panel(PANEL_ID, c.panel)
     mode.entered.connect(lambda: ctx.show_properties(PANEL_ID) if ctx.current_view() else None)

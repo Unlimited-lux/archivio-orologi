@@ -698,3 +698,46 @@ def test_flatten_flow(window, sec, tmp_path, accept_all):
     pdf = pymupdf.open(out)
     assert list(pdf[0].annots()) == []
     assert pdf[0].get_drawings()
+
+
+def test_upgrade_rc4_to_aes256(window, sec, tmp_path, monkeypatch):
+    path = tmp_path / "vecchio.pdf"
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Vecchio", fontsize=12)
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_RC4_128, user_pw="apri", owner_pw="capo",
+             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ)
+    view = window.open_path(str(path), "apri")
+    monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
+    rows = C.security_rows(view.document)
+    assert any(h == "Protezione debole" for h, _l in rows)
+    monkeypatch.setattr(C, "show_report", lambda dlg: dlg.action_button.text() == "Aggiorna ad AES-256")
+    sec.security_properties()
+    view.document.save()
+    pdf = pymupdf.open(path)
+    assert "AES" in (pdf.metadata or {}).get("encryption", "") or pdf.needs_pass
+    assert pdf.authenticate("apri") and not pdf.permissions & pymupdf.PDF_PERM_COPY
+    pdf2 = pymupdf.open(path)
+    assert pdf2.authenticate("capo") & 4
+    assert "256" in pdf2.metadata["encryption"]
+
+
+def test_find_dialog_import_terms(window, sec, sample_pdf, tmp_path, qtbot):
+    view = window.open_path(sample_pdf)
+    lst = tmp_path / "termini.txt"
+    lst.write_text("Orologeria\nVerdi\n\n", encoding="utf-8")
+    dlg = D.FindDialog("terms", lambda o: sec.search(view.document, o))
+    qtbot.addWidget(dlg)
+    dlg.terms.setPlainText("Pagina")
+    dlg.load_terms(str(lst))
+    assert dlg.terms.toPlainText().splitlines() == ["Pagina", "Orologeria", "Verdi"]
+    dlg.run_search()
+    assert len(dlg.matches) == 9 and dlg.ok.isEnabled()
+
+
+def test_protect_warns_on_signatures(window, sec, sample_pdf, monkeypatch):
+    window.open_path(sample_pdf)
+    monkeypatch.setattr(C.SecurityController, "_has_signatures", staticmethod(lambda doc: True))
+    asked = []
+    monkeypatch.setattr(C, "confirm", lambda parent, title, text, action: asked.append(text) or False)
+    assert not sec.protect()
+    assert "firme digitali" in asked[0]
