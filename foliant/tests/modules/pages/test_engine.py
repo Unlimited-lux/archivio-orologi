@@ -600,3 +600,13 @@ def test_extract_prunes_structure_tree():
     out = pymupdf.open(stream=E.extract_pages(doc, [2]))
     live = {out[i].xref for i in range(out.page_count)}
     assert _struct_page_refs(out) <= live
+
+
+def test_split_text_top_area_only():
+    doc = pymupdf.open()
+    for n in range(3):
+        p = doc.new_page()
+        p.insert_text((72, 72), f"Fattura n. {n}")
+        p.insert_text((72, 700), "rif. Fattura n. 99")
+    plan = E.split_document(doc, "separators", pattern=r"Fattura n\. (\d+)", top_fraction=0.25)
+    assert [p.fields["match1"] for p in plan.parts] == ["0", "1", "2"]

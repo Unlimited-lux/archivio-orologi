@@ -1091,7 +1091,7 @@ def page_is_blank(page: pymupdf.Page, tolerance: float = 0.005) -> bool:
 
 
 def plan_separators(pdf: pymupdf.Document, *, blank: bool = True, pattern: str | None = None,
-                    discard: bool = True, tolerance: float = 0.005) -> SplitPlan:
+                    discard: bool = True, tolerance: float = 0.005, top_fraction: float | None = None) -> SplitPlan:
     """Divide sulle pagine vuote o sulle pagine che contengono un testo/espressione (PAG-23)."""
     n = pdf.page_count
     parts: list[SplitPart] = []
@@ -1103,7 +1103,12 @@ def plan_separators(pdf: pymupdf.Document, *, blank: bool = True, pattern: str |
             raise RangeError(_("Espressione regolare non valida: {e}.").format(e=e)) from e
         current: SplitPart | None = None
         for i in range(n):
-            m = rx.search(pdf[i].get_text("text"))
+            page = pdf[i]
+            clip = None
+            if top_fraction:
+                r = page.rect
+                clip = pymupdf.Rect(r.x0, r.y0, r.x1, r.y0 + r.height * top_fraction) * page.derotation_matrix
+            m = rx.search(page.get_text("text", clip=clip))
             if m or current is None:
                 fields = {}
                 if m:
@@ -1184,7 +1189,8 @@ def split_document(pdf: pymupdf.Document, method: str = "every", value=None, **o
         return plan_size(pdf, int(value), options.get("progress"))
     if method == "separators":
         return plan_separators(pdf, blank=options.get("blank", True), pattern=options.get("pattern"),
-                               discard=options.get("discard", True), tolerance=options.get("tolerance", 0.005))
+                               discard=options.get("discard", True), tolerance=options.get("tolerance", 0.005),
+                               top_fraction=options.get("top_fraction"))
     raise PageOpError(_("Metodo di divisione sconosciuto."))
 
 

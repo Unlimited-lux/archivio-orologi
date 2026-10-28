@@ -156,6 +156,8 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Cerca il testo solo nel quarto superiore della pagina": "Search the text only in the top quarter of the page",
+    "OK": "OK",
     "Attuali:": "Current:",
     "Alimentatore automatico (più pagine)": "Automatic feeder (multiple pages)",
     "Scarta le pagine vuote": "Discard blank pages",
@@ -808,6 +810,8 @@ class SplitDialog(BaseDialog):
         self.layout_.addWidget(box)
         self.collect = QCheckBox(_("Raccogli le pagine escluse in un file aggiuntivo"))
         self.layout_.addWidget(self.collect)
+        self.top_only = QCheckBox(_("Cerca il testo solo nel quarto superiore della pagina"))
+        self.layout_.addWidget(self.top_only)
         form = QFormLayout()
         self.template = QLineEdit("{nome}_parte{n}")
         self.template.setToolTip(_("Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}"))
@@ -834,6 +838,7 @@ class SplitDialog(BaseDialog):
         for w in (self.ranges, self.pattern):
             w.textChanged.connect(self._update)
         self.collect.toggled.connect(self._update)
+        self.top_only.toggled.connect(self._update)
         self._update()
 
     def method(self) -> str:
@@ -873,7 +878,8 @@ class SplitDialog(BaseDialog):
             if m == "text":
                 if not self.pattern.text():
                     raise E.RangeError(_("Indica almeno un intervallo."))
-                return E.split_document(pdf, "separators", pattern=self.pattern.text())
+                return E.split_document(pdf, "separators", pattern=self.pattern.text(),
+                                        top_fraction=0.25 if self.top_only.isChecked() else None)
         raise E.PageOpError("")
 
     def _update(self, *_a) -> None:
@@ -881,6 +887,7 @@ class SplitDialog(BaseDialog):
             return   # costruzione in corso
         m = self.method()
         self.collect.setEnabled(m == "ranges")
+        self.top_only.setEnabled(m == "text")
         defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
         if self.template.text() in ("{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
             self.template.setText(defaults.get(m, "{nome}_parte{n}"))
