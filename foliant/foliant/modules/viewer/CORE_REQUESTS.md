@@ -137,3 +137,12 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     i fornitori registrati con `ctx.add_snap_provider(fn(view, page) -> (xs, ys))`; il viewer
     registrerebbe le linee della griglia quando «Aggancia alla griglia» è attivo, e un
     interruttore «Aggancio» nel menu Vista.
+
+23. **Barre e pannelli visibili** (VIS-51, P1): mostrare/nascondere barra di stato, barra
+    contestuale, pannello laterale e proprietà, «Mostra etichette» della barra delle modalità e
+    «Dimensione icone», ricordati al riavvio, con una sezione Preferenze › Aspetto e il suo
+    «Ripristina predefiniti» che non tocca le altre sezioni. Sono parti della finestra del
+    nucleo: oggi `_mode_button_style()` decide le etichette dalla larghezza a ogni
+    ridimensionamento, quindi un modulo non può imporle. Le preferenze di visualizzazione del
+    viewer (vista, zoom, pannello iniziale, ultima posizione, impostazioni del documento,
+    esporta/importa) sono già nel file delle impostazioni e si esportano con il resto.
