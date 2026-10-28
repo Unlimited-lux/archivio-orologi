@@ -69,9 +69,9 @@ Limiti noti: l'OCR tiene il lock del motore per la durata del riconoscimento (il
 Anthropic l'interruzione è immediata solo all'arrivo del frammento successivo (al più il tempo
 di inattività configurato).
 
-## Specifica v2 (commit c8fddf4) — non completata entro la scadenza
+## Specifica v2 (commit c8fddf4)
 
-La specifica v2 è arrivata dopo il completamento delle funzioni sopra. Rispetto a essa:
+La specifica v2 è arrivata dopo il completamento delle funzioni sopra; le parti nuove sono state completate dopo la consegna, su richiesta del committente:
 
 | ID | Stato | Note |
 |---|---|---|
@@ -82,5 +82,3 @@ La specifica v2 è arrivata dopo il completamento delle funzioni sopra. Rispetto
 | AI-31 Comunicazioni ai clienti | fatto | Attività «Comunicazione al cliente» e scrittura assistita (AI-19, con «Crea nuovo PDF»); dati del destinatario mai inventati: segnaposto «[…]» evidenziati e segnalati «da completare» (`test_customer_message_placeholders_highlighted`). «Prepara comunicazione al cliente» dalla revisione del contratto invia le clausole critiche (`test_prepare_customer_communication_from_review`). |
 | AI-32 Confronto e classifica | fatto | `test_ranking.py`: totali 7,50/7,25/6,25 e ordine, obbligatorio a 0 escluso in fondo, CSV una riga per documento, CV senza età/stato civile/foto/origine, senza immagini né nomi di file, avviso sulla decisione umana, clic sul punteggio apre la pagina. «Altri strumenti › Confronta e classifica». Esportazione PDF non implementata (solo CSV). |
 
-I subagenti avviati per queste funzioni si sono interrotti per il limite di utilizzo dell'API
-prima di produrre codice; nessun file parziale è stato aggiunto.
