@@ -1733,3 +1733,158 @@ def open_nup_dialog(ctx, view, selected: list[int]) -> bool:
         return True
 
     return _guard(ctx, _("Impossibile creare le pagine affiancate"), run)
+
+
+# =========================================================================
+# PAG-31 — Opuscolo
+# =========================================================================
+
+TRANSLATIONS.update({
+    "Opuscolo": "Booklet",
+    "opuscolo": "booklet",
+    "Rilegatura": "Binding",
+    "A sinistra": "On the left",
+    "A destra": "On the right",
+    "Fascicolo unico (punto metallico)": "Single section (saddle stitch)",
+    "Segnature di": "Signatures of",
+    "fogli": "sheets",
+    "Pagine vuote aggiunte": "Blank pages added",
+    "In fondo": "At the end",
+    "Prima dell'ultima pagina": "Before the last page",
+    "Margine di rilegatura": "Binding margin",
+    "Compensazione dello scorrimento": "Creep compensation",
+    "Facciate: {n} ({f} fogli fronte/retro), pagine vuote aggiunte: {b}":
+        "Sides: {n} ({f} duplex sheets), blank pages added: {b}",
+    "Con 1–2 pagine l'opuscolo ha poco senso: verranno aggiunte pagine vuote.":
+        "With 1–2 pages a booklet makes little sense: blank pages will be added.",
+    "Impossibile creare l'opuscolo": "Cannot create the booklet",
+    "Facciata 1": "Side 1",
+})
+
+
+class BookletDialog(_LayoutDialog):
+    TITLE = "Opuscolo"
+    ICON = "book-open"
+    OK_TEXT = "Crea"
+
+    def build(self) -> None:
+        box = QGroupBox(_("Opuscolo"))
+        f = QFormLayout(box)
+        self.sheet = _paper_combo("A4", custom=False)
+        self.binding = QComboBox()
+        self.binding.addItem(_("A sinistra"), "left")
+        self.binding.addItem(_("A destra"), "right")
+        self.saddle = QRadioButton(_("Fascicolo unico (punto metallico)"))
+        self.signatures = QRadioButton(_("Segnature di"))
+        self.saddle.setChecked(True)
+        grp = QButtonGroup(self)
+        grp.addButton(self.saddle)
+        grp.addButton(self.signatures)
+        self.sig_sheets = QSpinBox()
+        self.sig_sheets.setRange(1, 64)
+        self.sig_sheets.setValue(4)
+        self.sig_sheets.setSuffix(" " + _("fogli"))
+        sig_row = QHBoxLayout()
+        sig_row.addWidget(self.signatures)
+        sig_row.addWidget(self.sig_sheets)
+        sig_row.addStretch(1)
+        self.blank_pos = QComboBox()
+        self.blank_pos.addItem(_("In fondo"), "end")
+        self.blank_pos.addItem(_("Prima dell'ultima pagina"), "before_last")
+        self.gutter = _spin(0, 0, 50, 1, "mm")
+        self.creep = _spin(0, 0, 10, 1, "mm", 0.1)
+        f.addRow(_("Foglio"), self.sheet)
+        f.addRow(_("Rilegatura"), self.binding)
+        f.addRow(self.saddle)
+        f.addRow(sig_row)
+        f.addRow(_("Pagine vuote aggiunte"), self.blank_pos)
+        f.addRow(_("Margine di rilegatura"), self.gutter)
+        f.addRow(_("Compensazione dello scorrimento"), self.creep)
+        self.form.addWidget(box)
+        self._connect(self.sheet, self.binding, self.saddle, self.signatures, self.sig_sheets, self.blank_pos,
+                      self.gutter, self.creep)
+        self._sides = []
+        self._pages: list[int] = []
+        self._thumbs: dict[int, QImage] = {}
+
+    def options(self) -> dict:
+        return {
+            "pages": self.selected_pages(),
+            "sheet_size": PAPER_SIZES[self.sheet.currentData()],
+            "binding": self.binding.currentData(),
+            "signature_sheets": self.sig_sheets.value() if self.signatures.isChecked() else None,
+            "blank_position": self.blank_pos.currentData(),
+            "gutter": self.gutter.value() * MM,
+            "creep": self.creep.value() * MM,
+        }
+
+    def validate(self) -> str | None:
+        o = self.options()
+        self.sig_sheets.setEnabled(self.signatures.isChecked())
+        self._sides = []
+        pages = o["pages"]
+        if not pages:
+            return None
+        self._pages = pages
+        self._sides = layout.booklet_order(len(pages), o["binding"], o["signature_sheets"], o["blank_position"])
+        n = len(self._sides)
+        text = _("Facciate: {n} ({f} fogli fronte/retro), pagine vuote aggiunte: {b}").format(
+            n=n, f=n // 2, b=(-len(pages)) % 4)
+        if len(pages) <= 2:
+            text += "\n" + _("Con 1–2 pagine l'opuscolo ha poco senso: verranno aggiunte pagine vuote.")
+        self.info.setText(text)
+        return None
+
+    def refresh(self) -> None:
+        super().refresh()
+        self.preview_title.setText(_("Anteprima") + " — " + _("Facciata 1"))
+        lo, hi = sorted(self.options()["sheet_size"])
+        self.preview.image = None
+        self.preview.size_pts = (hi, lo)
+        self.preview.update()
+
+    def _thumb(self, index: int) -> QImage | None:
+        if index not in self._thumbs:
+            self._thumbs[index] = _render(self.document, index, 260)[0]
+        return self._thumbs[index]
+
+    def paint_overlay(self, p: QPainter, s: float) -> None:
+        if not self._sides:
+            return
+        o = self.options()
+        lo, hi = sorted(o["sheet_size"])
+        sw, sh = hi, lo
+        p.fillRect(QRectF(0, 0, sw, sh), QColor("white"))
+        half = (sw - o["gutter"]) / 2
+        for slot, k in enumerate(self._sides[0]):
+            x0 = 0.0 if slot == 0 else sw - half
+            cell = QRectF(x0, 0, half, sh)
+            if k is not None:
+                img = self._thumb(self._pages[k])
+                if img is not None and img.width() and img.height():
+                    sc = min(cell.width() / img.width(), cell.height() / img.height())
+                    w, h = img.width() * sc, img.height() * sc
+                    p.drawImage(QRectF(cell.center().x() - w / 2, cell.center().y() - h / 2, w, h), img)
+        p.setPen(QPen(theme.color("accent"), 1.5 / s, Qt.PenStyle.DashLine))
+        p.drawLine(QPointF(sw / 2, 0), QPointF(sw / 2, sh))
+        self.preview.size_pts = (sw, sh)
+
+
+def open_booklet_dialog(ctx, view, selected: list[int]) -> bool:
+    """PAG-31: crea l'opuscolo imposto e lo apre in una nuova scheda."""
+    if view is None:
+        return False
+    dlg = BookletDialog(_parent(ctx, view), view.document, selected, view.current_page)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return False
+    o = dlg.options()
+
+    def run() -> bool:
+        kw = {k: v for k, v in o.items() if k != "pages"}
+        with ENGINE_LOCK:
+            data = layout.booklet(view.document.pdf, o["pages"], **kw)
+        stem = Path(view.document.display_name).stem
+        ctx.open_document(Document.from_bytes(data, display_name=f"{stem} ({_('opuscolo')}).pdf"))
+        return True
+
+    return _guard(ctx, _("Impossibile creare l'opuscolo"), run)

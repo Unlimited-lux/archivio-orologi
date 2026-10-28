@@ -55,6 +55,7 @@ TRANSLATIONS = {
     "Le celle sono troppo piccole: riduci righe, colonne, margini o spaziatura.":
         "Cells are too small: reduce rows, columns, margins or spacing.",
     "Ordine sconosciuto: {o}.": "Unknown order: {o}.",
+    "Rilegatura sconosciuta: {b}.": "Unknown binding: {b}.",
 }
 
 UNITS = {"pt": 1.0, "mm": MM, "in": INCH}
@@ -1132,6 +1133,110 @@ def nup(pdf: pymupdf.Document, pages: Sequence[int] | None = None, *, cols: int 
                 sheet.show_pdf_page(rect, src, i, keep_proportion=True, rotate=(extra - rots[i]) % 360)
                 if border:
                     sheet.draw_rect(rect, color=(0, 0, 0), width=0.5)
+        data = out.tobytes(garbage=3, deflate=True)
+        out.close()
+        return data
+    finally:
+        src.close()
+
+
+# =========================================================================
+# PAG-31 — opuscolo (booklet)
+# =========================================================================
+
+def booklet_order(n: int, binding: str = "left", signature_sheets: int | None = None,
+                  blank_position: str = "end") -> list[tuple[int | None, int | None]]:
+    """Facciate dell'opuscolo come coppie (sinistra, destra) di indici sorgente (None = vuota).
+
+    Le pagine sono completate con vuote fino a un multiplo di 4 (in fondo o
+    prima dell'ultima). Per ogni fascicolo di m pagine, foglio k = 1…m/4:
+    fronte [m−2k+2, 2k−1], retro [2k, m−2k+1]; rilegatura a destra = coppie
+    specchiate. `signature_sheets` = fogli per segnatura (None = punto metallico).
+    """
+    if n < 1:
+        raise PageOpError(_("Nessuna pagina sorgente."))
+    if binding not in ("left", "right"):
+        raise PageOpError(_("Rilegatura sconosciuta: {b}.").format(b=binding))
+    blanks = (-n) % 4
+    seq: list[int | None] = list(range(n))
+    if blanks:
+        if blank_position == "before_last" and n > 1:
+            seq = seq[:-1] + [None] * blanks + seq[-1:]
+        else:
+            seq = seq + [None] * blanks
+    per = len(seq) if not signature_sheets else max(1, int(signature_sheets)) * 4
+    sides: list[tuple[int | None, int | None]] = []
+    for start in range(0, len(seq), per):
+        chunk = seq[start:start + per]
+        m = len(chunk)
+        for k in range(1, m // 4 + 1):
+            front = (chunk[m - 2 * k + 1], chunk[2 * k - 2])
+            back = (chunk[2 * k - 1], chunk[m - 2 * k])
+            for left, right in (front, back):
+                sides.append((right, left) if binding == "right" else (left, right))
+    return sides
+
+
+def booklet(pdf: pymupdf.Document, pages: Sequence[int] | None = None, *,
+            sheet_size: tuple[float, float] = PAPER_SIZES["A4"], binding: str = "left",
+            signature_sheets: int | None = None, blank_position: str = "end", gutter: float = 0.0,
+            creep: float = 0.0, annotations: str = "flatten") -> bytes:
+    """Nuovo PDF imposto a libretto: due pagine per facciata su fogli orizzontali.
+
+    `gutter`: spazio totale alla piega (pt); `creep`: spostamento massimo verso
+    la piega dei fogli più interni (pt), crescente dal foglio esterno a quello
+    centrale di ogni fascicolo. Pagine di formato diverso sono adattate alla
+    mezza facciata mantenendo le proporzioni.
+    """
+    idx = list(range(pdf.page_count)) if pages is None else list(pages)
+    sides = booklet_order(len(idx), binding, signature_sheets, blank_position)
+    lo, hi = sorted((float(sheet_size[0]), float(sheet_size[1])))
+    check_page_size(lo, hi)
+    sw, sh = hi, lo
+    half = (sw - max(0.0, gutter)) / 2
+    if half < MIN_CELL:
+        raise PageOpError(_("Le celle sono troppo piccole: riduci righe, colonne, margini o spaziatura."))
+    per_sig = (signature_sheets * 4) if signature_sheets else None
+    total = len(sides) * 2
+    src = pymupdf.open("pdf", pdf.tobytes())
+    try:
+        if annotations == "flatten":
+            try:
+                src.bake(annots=True, widgets=True)
+            except Exception:  # noqa: BLE001
+                annotations = "discard"
+        rots = {}
+        for i in sorted(set(idx)):
+            page = src[i]
+            rots[i] = _rot(page)
+            if annotations != "flatten":
+                src.xref_set_key(page.xref, "Annots", "null")
+            if rots[i]:
+                page.set_rotation(0)
+        out = pymupdf.open()
+        for s, (left, right) in enumerate(sides):
+            sheet = out.new_page(width=sw, height=sh)
+            # posizione del foglio nel suo fascicolo (0 = esterno) per il creep
+            pos_pages = s * 2
+            sig_len = per_sig or total
+            sig_start = (pos_pages // sig_len) * sig_len
+            sig_pages = min(sig_len, total - sig_start)
+            sheets_in_sig = max(1, sig_pages // 4)
+            k = ((pos_pages - sig_start) // 4)
+            shift = creep * k / max(1, sheets_in_sig - 1) if creep and sheets_in_sig > 1 else 0.0
+            for slot, k_src in ((0, left), (1, right)):
+                if k_src is None:
+                    continue
+                i = idx[k_src]
+                pw, ph = displayed_crop_size(pdf, i)
+                x0 = 0.0 if slot == 0 else sw - half
+                cell = pymupdf.Rect(x0, 0, x0 + half, sh)
+                sc = _fit(cell, pw, ph)
+                w, h = pw * sc, ph * sc
+                cx = (cell.x0 + cell.x1) / 2 + (shift if slot == 0 else -shift)
+                cy = sh / 2
+                rect = pymupdf.Rect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+                sheet.show_pdf_page(rect, src, i, keep_proportion=True, rotate=(-rots[i]) % 360)
         data = out.tobytes(garbage=3, deflate=True)
         out.close()
         return data
