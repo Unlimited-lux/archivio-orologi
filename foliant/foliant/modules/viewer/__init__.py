@@ -34,6 +34,7 @@ PARTS = (
     "archives",       # archivi ZIP
     "articles",       # thread di articoli
     "integrity",      # file danneggiati e funzioni non supportate
+    "appearance",     # temi di lettura
 )
 
 
