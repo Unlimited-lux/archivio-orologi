@@ -465,7 +465,7 @@ class SignatureLibrary:
 
 TRANSLATIONS_EN = {
     "Impossibile salvare la libreria delle firme: {e}": "Cannot save the signature library: {e}",
-    "File della libreria non riconosciuto.": "Library file not recognised.",
+    "File della libreria non riconosciuto.": "Library file not recognized.",
     "Password errata o libreria danneggiata.": "Wrong password or damaged library.",
     "La libreria delle firme era danneggiata e non è stato possibile recuperarla.":
         "The signature library was damaged and could not be recovered.",
@@ -486,7 +486,7 @@ TRANSLATIONS_EN = {
     "Il file non è un pacchetto di firme di Foliant.": "The file is not a Foliant signature package.",
     "Password errata o pacchetto danneggiato.": "Wrong password or damaged package.",
     "Il pacchetto è di una versione successiva: importati solo i dati riconosciuti.":
-        "The package is from a later version: only the recognised data was imported.",
+        "The package is from a later version: only the recognized data was imported.",
     "Elemento «{n}» danneggiato: non importato.": "Item “{n}” is damaged: not imported.",
     "L'elemento «{name}» è danneggiato e non può essere usato.": "The item “{name}” is damaged and cannot be used.",
 }

@@ -979,7 +979,7 @@ TRANSLATIONS_EN = {
     "Libreria protetta": "Protected library",
     "Inserisci la password della libreria delle firme:": "Enter the signature library password:",
     "Clic: posiziona la firma · trascina: dimensione · Invio: al centro · Esc: annulla":
-        "Click: place the signature · drag: size · Enter: centre · Esc: cancel",
+        "Click: place the signature · drag: size · Enter: center · Esc: cancel",
     "Firma": "Signature",
     "I permessi del documento non consentono di aggiungere annotazioni o firme grafiche. Apri il documento con "
     "la password del proprietario per modificarlo.":

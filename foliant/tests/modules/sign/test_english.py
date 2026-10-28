@@ -242,3 +242,13 @@ def test_page_range_accepts_english_words():
     assert parse_page_range("all", 4) == [0, 1, 2, 3]
     assert parse_page_range("even", 4) == [1, 3]
     assert parse_page_range("all but current", 4, current=1) == [0, 2, 3]
+
+
+def test_catalog_uses_american_english():
+    """Gli altri moduli usano l'inglese americano: «Color», non «Colour»."""
+    from foliant.modules.sign import _translations
+    british = re.compile(r"\b(colour\w*|centre\w*|grey\w*|behaviour\w*|favourite\w*|licence\w*|cancelled|"
+                         r"organis\w*|recognis\w*|customis\w*|initialis\w*|optimis\w*|authoris\w*|"
+                         r"finalis\w*|normalis\w*|synchronis\w*|analys(e|ed|es|ing))\b", re.I)
+    bad = sorted({m.group(0) for v in _translations().values() for m in british.finditer(v)})
+    assert not bad, bad

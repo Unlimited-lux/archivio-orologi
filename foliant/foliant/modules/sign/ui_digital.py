@@ -1098,7 +1098,7 @@ TRANSLATIONS_EN = {
     "Titolare: {s}\nEmittente: {iss}\nValido dal {a} al {b}\nUsi della chiave: {ku}":
         "Holder: {s}\nIssuer: {iss}\nValid from {a} to {b}\nKey usage: {ku}",
     "Certificato autofirmato: gli altri non lo riconosceranno automaticamente.":
-        "Self-signed certificate: others will not recognise it automatically.",
+        "Self-signed certificate: others will not recognize it automatically.",
     "Certificato scaduto": "Expired certificate",
     "La firma risulterà non valida. Procedere solo per prova?": "The signature will be invalid. Proceed for testing only?",
     "Nuovo campo firma": "New signature field", "Firma": "Signature", "Nome:": "Name:",
@@ -1110,9 +1110,9 @@ TRANSLATIONS_EN = {
     "Crea ID digitale autofirmato": "Create self-signed digital ID",
     "Un ID autofirmato va bene per uso interno o per prova: gli altri non lo riconosceranno automaticamente "
     "finché non considerano attendibile il tuo certificato.":
-        "A self-signed ID is fine for internal use or testing: others will not recognise it automatically until "
+        "A self-signed ID is fine for internal use or testing: others will not recognize it automatically until "
         "they trust your certificate.",
-    "Nome e cognome:": "Full name:", "Organizzazione:": "Organisation:", "Unità:": "Unit:", "E-mail:": "E-mail:",
+    "Nome e cognome:": "Full name:", "Organizzazione:": "Organization:", "Unità:": "Unit:", "E-mail:": "E-mail:",
     "Paese (2 lettere):": "Country (2 letters):", "Algoritmo:": "Algorithm:", " anni": " years",
     "Validità:": "Validity:", "Conferma password:": "Confirm password:", "File:": "File:",
     "Crea": "Create", "Salva l'ID digitale": "Save the digital ID", "Il nome è obbligatorio.": "The name is required.",
