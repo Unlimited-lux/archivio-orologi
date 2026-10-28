@@ -1031,6 +1031,29 @@ def snap_rect(rect: pymupdf.Rect, xs: list[float], ys: list[float], lines, tol: 
 
 
 # ======================================================== ripetizione su più pagine
+def group_of(nm: str) -> str:
+    """Identificativo di gruppo: «foliant-sig-xxxx-3» → «foliant-sig-xxxx»."""
+    base, sep, tail = (nm or "").rpartition("-")
+    if sep and tail.isdigit() and base.startswith(ANNOT_PREFIX):
+        return base
+    return nm or ""
+
+
+def group_size(pdf: pymupdf.Document, group: str) -> int:
+    return sum(1 for p in range(pdf.page_count) for s in placed_signatures(pdf, p) if group_of(s.nm) == group)
+
+
+def ungroup(pdf: pymupdf.Document, group: str) -> int:
+    """Scioglie il gruppo: ogni copia riceve un identificativo indipendente."""
+    n = 0
+    for p in range(pdf.page_count):
+        for s in placed_signatures(pdf, p):
+            if group_of(s.nm) == group and s.nm != group:
+                pdf.xref_set_key(s.xref, "NM", pymupdf.get_pdf_str(ANNOT_PREFIX + uuid.uuid4().hex[:12]))
+                n += 1
+    return n
+
+
 def parse_page_range(text: str, count: int, current: int | None = None) -> list[int]:
     """Interpreta un intervallo («1-3,7,10-», «pari», «dispari», «tutte»,
     «tutte tranne la corrente») e restituisce indici 0-based ordinati.

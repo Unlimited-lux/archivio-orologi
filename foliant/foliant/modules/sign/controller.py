@@ -171,6 +171,32 @@ class SignController(QObject):
     def set_rect(self, view, page: int, xref: int, rect, label: str) -> None:
         self._change(view, label, lambda pdf: g.set_signature_rect(pdf, page, xref, rect))
 
+    def delete_group(self, view, page: int, xref: int) -> None:
+        """Elimina tutte le copie create con «Ripeti su più pagine» (stesso gruppo)."""
+        with ENGINE_LOCK:
+            sig = g.find_signature(view.document.pdf, page, xref)
+        if sig is None:
+            return
+        group = g.group_of(sig.nm)
+
+        def fn(pdf):
+            n = 0
+            for p in range(pdf.page_count):
+                for s in g.placed_signatures(pdf, p):
+                    if g.group_of(s.nm) == group:
+                        g.delete_signature(pdf, p, s.xref)
+                        n += 1
+            return n
+
+        self._change(view, _("Elimina gruppo di firme"), fn)
+        self.tool_for(view).selected = None
+
+    def ungroup(self, view, page: int, xref: int) -> None:
+        with ENGINE_LOCK:
+            sig = g.find_signature(view.document.pdf, page, xref)
+        if sig is not None:
+            self._change(view, _("Sciogli gruppo"), lambda pdf: g.ungroup(pdf, g.group_of(sig.nm)))
+
     def delete(self, view, page: int, xref: int) -> None:
         self._change(view, _("Elimina firma"), lambda pdf: g.delete_signature(pdf, page, xref))
 
@@ -236,6 +262,11 @@ class SignController(QObject):
             view, _("Ruota firma"), lambda pdf: g.rotate_signature(pdf, p, x, 90)))
         menu.addAction(_("Opacità…"), lambda: self.set_opacity(view, p, x))
         menu.addAction(_("Ripeti su più pagine…"), lambda: self.repeat(view, p, x))
+        with ENGINE_LOCK:
+            in_group = g.group_size(view.document.pdf, g.group_of(hit.nm)) > 1
+        if in_group:
+            menu.addAction(_("Elimina tutto il gruppo"), lambda: self.delete_group(view, p, x))
+            menu.addAction(_("Sciogli gruppo"), lambda: self.ungroup(view, p, x))
         menu.addAction(_("Incorpora nella pagina"), lambda: self.embed(view, p, x))
 
     # ================================================== verifica e stato firme
@@ -247,8 +278,12 @@ class SignController(QObject):
             self._states[id(doc)] = st
         return st
 
+    def auto_verify(self) -> bool:
+        return str(self.ctx.settings().value("sign/auto_verify", "true")).lower() != "false"
+
     def _on_opened(self, view) -> None:
-        self.verify(view)
+        if self.auto_verify():
+            self.verify(view)
 
     def _on_closed(self, view) -> None:
         self._states.pop(id(view.document), None)
@@ -293,7 +328,9 @@ class SignController(QObject):
             result: dict = {}
             try:
                 trusted = store.TrustStore().certificates()
-                result["statuses"] = digital.verify_pdf(data, trusted=trusted, revocation_mode=self.revocation_mode())
+                mode = self.revocation_mode()
+                result["statuses"] = digital.verify_pdf(data, trusted=trusted, revocation_mode=mode,
+                                                        allow_fetching=mode == "sempre")
                 result["fields"] = digital.signature_fields(data)
                 result["certification"] = digital.certification_level(data)
             except Exception as e:
@@ -611,10 +648,12 @@ class SignController(QObject):
                 data = Path(doc.path).read_bytes()
             else:
                 data = doc.to_bytes()
+            lock_action, lock_fields = dlg.lock_spec()
             new, name = digital.add_signature_field(
                 data, dlg.name.text().strip() or _("Firma"), page, tuple(rect), required=dlg.required.isChecked(),
                 tooltip=dlg.tooltip.text().strip(), timestamp_url=dlg.tsa.text().strip() or None,
-                timestamp_required=dlg.tsa_required.isChecked())
+                timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
+                lock_action=lock_action)
         except digital.SignError as e:
             self.ctx.error(_("Campo firma"), str(e))
             return
@@ -773,5 +812,7 @@ TRANSLATIONS_EN = {
     "Il documento è certificato con livello «nessuna modifica»: «{what}» non è consentito.\n\nVuoi lavorare "
     "su una copia senza firme?": "The document is certified with level “no changes”: “{what}” is not allowed.\n\n"
                                 "Do you want to work on a copy without signatures?",
+    "Elimina gruppo di firme": "Delete signature group", "Sciogli gruppo": "Ungroup",
+    "Elimina tutto il gruppo": "Delete the whole group",
     "Dettagli della firma di {who}": "Details of the signature by {who}", "Firma qui": "Sign here",
 }

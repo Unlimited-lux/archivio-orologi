@@ -153,6 +153,11 @@ class DigitalSignDialog(QDialog):
             form.addRow(_("Modifiche consentite:"), self.level)
         else:
             self.level.hide()
+        self.lock = QLineEdit()
+        self.lock.setPlaceholderText(_("nomi dei campi separati da virgola"))
+        self.lock.setToolTip(_("Questi campi del modulo non potranno più essere modificati senza invalidare la "
+                               "firma."))
+        form.addRow(_("Blocca campi dopo la firma:"), self.lock)
         lay.addLayout(form)
         self.allow_expired = QCheckBox(_("Firma comunque con un certificato scaduto (solo per prove: la firma "
                                          "risulterà non valida)"))
@@ -268,7 +273,8 @@ class DigitalSignDialog(QDialog):
             contact=self.contact.text().strip(), appearance=appearance,
             timestamp_url=tsa[0] if tsa else None, timestamp_timeout=float(tsa[1]) if tsa else 15.0,
             certify=self.certify, docmdp_level=int(self.level.currentData()),
-            allow_expired=self.allow_expired.isChecked())
+            allow_expired=self.allow_expired.isChecked(),
+            lock_fields=[f.strip() for f in self.lock.text().split(",") if f.strip()] or None)
         self.digital_id = did
         self.warnings = warnings
         s = self.c.ctx.settings()
@@ -350,6 +356,14 @@ class FieldDialog(QDialog):
         form.addRow(_("Server marca temporale:"), self.tsa)
         self.tsa_required = QCheckBox(_("Marca temporale obbligatoria"))
         form.addRow("", self.tsa_required)
+        self.lock_action = QComboBox()
+        for key, label in [(None, _("Nessun campo")), ("All", _("Tutti i campi")),
+                           ("Include", _("Solo i campi indicati")), ("Exclude", _("Tutti tranne quelli indicati"))]:
+            self.lock_action.addItem(label, key)
+        form.addRow(_("Dopo la firma blocca:"), self.lock_action)
+        self.lock_fields = QLineEdit()
+        self.lock_fields.setPlaceholderText(_("nomi dei campi separati da virgola"))
+        form.addRow(_("Campi:"), self.lock_fields)
         lay.addLayout(form)
         self.warning = QLabel("")
         self.warning.setWordWrap(True)
@@ -362,7 +376,17 @@ class FieldDialog(QDialog):
         box.rejected.connect(self.reject)
         lay.addWidget(box)
 
+    def lock_spec(self) -> tuple[str, list[str] | None]:
+        action = self.lock_action.currentData()
+        names = [f.strip() for f in self.lock_fields.text().split(",") if f.strip()]
+        if action is None:
+            return "Include", None
+        return action, (names if action != "All" else None)
+
     def _accept(self) -> None:
+        if self.lock_action.currentData() in ("Include", "Exclude") and not self.lock_fields.text().strip():
+            self.error.setText(_("Indica i nomi dei campi da bloccare."))
+            return
         if self.tsa_required.isChecked() and not self.tsa.text().strip().startswith(("http://", "https://")):
             self.error.setText(_("Per rendere obbligatoria la marca temporale indica l'indirizzo del server "
                                  "(http:// o https://)."))
@@ -553,6 +577,22 @@ class IDsDialog(QDialog):
         c3.addStretch(1)
         l3.addLayout(c3)
         tabs.addTab(w3, _("Server marca temporale"))
+        # --- impostazioni di verifica
+        w4 = QWidget()
+        f4 = QFormLayout(w4)
+        settings = controller.ctx.settings()
+        self.auto_verify = QCheckBox(_("Verifica le firme all'apertura dei documenti"))
+        self.auto_verify.setChecked(controller.auto_verify())
+        f4.addRow(self.auto_verify)
+        self.revocation = QComboBox()
+        self.revocation.addItem(_("Mai (solo dati incorporati, nessuna connessione)"), "mai")
+        self.revocation.addItem(_("Sempre (interroga OCSP e CRL indicati nei certificati)"), "sempre")
+        self.revocation.setCurrentIndex(max(0, self.revocation.findData(controller.revocation_mode())))
+        f4.addRow(_("Controllo della revoca online:"), self.revocation)
+        self.auto_verify.toggled.connect(lambda v: settings.setValue("sign/auto_verify", "true" if v else "false"))
+        self.revocation.currentIndexChanged.connect(
+            lambda _i: settings.setValue("sign/revocation", self.revocation.currentData()))
+        tabs.addTab(w4, _("Verifica"))
         self.error = _error_label()
         lay.addWidget(self.error)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -840,7 +880,18 @@ TRANSLATIONS_EN = {
     "Soggetto: {s}\nEmittente: {i}\nNumero di serie: {n}\nValido dal {a} al {b}\nUsi della chiave: {k}\n"
     "SHA-256: {h}\nSHA-1: {h1}": "Subject: {s}\nIssuer: {i}\nSerial number: {n}\nValid from {a} to {b}\n"
                                  "Key usage: {k}\nSHA-256: {h}\nSHA-1: {h1}",
-    "Ripeti su più pagine": "Repeat on several pages", "Pagine": "Pages", "Tutte": "All",
+    "Ripeti su più pagine": "Repeat on several pages",
+    "nomi dei campi separati da virgola": "field names separated by commas",
+    "Questi campi del modulo non potranno più essere modificati senza invalidare la firma.":
+        "These form fields can no longer be changed without invalidating the signature.",
+    "Blocca campi dopo la firma:": "Lock fields after signing:", "Nessun campo": "No fields",
+    "Tutti i campi": "All fields", "Solo i campi indicati": "Only the listed fields",
+    "Tutti tranne quelli indicati": "All except the listed ones", "Dopo la firma blocca:": "After signing lock:",
+    "Campi:": "Fields:", "Indica i nomi dei campi da bloccare.": "Enter the names of the fields to lock.",
+    "Verifica le firme all'apertura dei documenti": "Verify signatures when opening documents",
+    "Mai (solo dati incorporati, nessuna connessione)": "Never (embedded data only, no connection)",
+    "Sempre (interroga OCSP e CRL indicati nei certificati)": "Always (query the OCSP and CRL in the certificates)",
+    "Controllo della revoca online:": "Online revocation check:", "Verifica": "Verification", "Pagine": "Pages", "Tutte": "All",
     "Tutte tranne la corrente": "All except the current one", "Pari": "Even", "Dispari": "Odd",
     "Intervallo:": "Range:", "es. 1-3,7,10-": "e.g. 1-3,7,10-", "Angolo più vicino": "Nearest corner",
     "In alto a sinistra": "Top left", "In alto a destra": "Top right", "In basso a sinistra": "Bottom left",

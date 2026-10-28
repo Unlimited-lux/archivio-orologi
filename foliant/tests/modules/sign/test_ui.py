@@ -520,3 +520,54 @@ def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sam
     copy = tmp_path / "copia.pdf"
     view.document.save_copy(copy)
     assert copy.read_bytes().startswith(signed)
+
+
+def test_delete_group_from_menu(window, tmp_path):
+    from PySide6.QtWidgets import QMenu
+    from tests.conftest import make_pdf
+    view = window.open_path(make_pdf(tmp_path / "quattro.pdf", pages=4))
+    c = _ctl(window)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    xref = c.place(view, 0, pymupdf.Rect(450, 780, 540, 800), item)
+    with view.document.change("Ripeti") as pdf:
+        g.repeat_signature(pdf, 0, xref, [1, 2, 3])
+    menu = QMenu()
+    c.menu_provider(view, _ev(0, 500, 790), menu)
+    act = next(a for a in menu.actions() if a.text() == "Elimina tutto il gruppo")
+    act.trigger()
+    with view.document.lock:
+        assert sum(len(g.placed_signatures(view.document.pdf, p)) for p in range(4)) == 0
+    view.document.undo()
+    with view.document.lock:
+        assert sum(len(g.placed_signatures(view.document.pdf, p)) for p in range(4)) == 4
+
+
+def test_field_dialog_lock_spec(qtbot, window, monkeypatch, sample_pdf):
+    from foliant.modules.sign import ui_digital
+    dlg = ui_digital.FieldDialog(None)
+    qtbot.addWidget(dlg)
+    assert dlg.lock_spec() == ("Include", None)
+    dlg.lock_action.setCurrentIndex(dlg.lock_action.findData("Include"))
+    dlg._accept()
+    assert "campi" in dlg.error.text()
+    dlg.lock_fields.setText("Nome, Data")
+    assert dlg.lock_spec() == ("Include", ["Nome", "Data"])
+    view = window.open_path(sample_pdf)
+
+    def fake_exec(self):
+        self.lock_action.setCurrentIndex(self.lock_action.findData("All"))
+        return True
+
+    monkeypatch.setattr(ui_digital.FieldDialog, "exec", fake_exec)
+    _ctl(window).add_field(view, 0, pymupdf.Rect(100, 600, 300, 660))
+    assert b"/Lock" in view.document.to_bytes(garbage=0, deflate=False)
+
+
+def test_settings_disable_auto_verify(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    data = digital.sign_pdf(Path(sample_pdf).read_bytes(), id_a[2], digital.SignOptions())
+    p = tmp_path / "auto.pdf"
+    p.write_bytes(data)
+    window.settings.setValue("sign/auto_verify", "false")
+    view = window.open_path(str(p))
+    assert _ctl(window).state(view).statuses == []
+    window.settings.setValue("sign/auto_verify", "true")

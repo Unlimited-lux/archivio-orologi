@@ -350,3 +350,17 @@ def test_adaptive_threshold_on_shadowed_photo():
     alpha = np.asarray(g.remove_background(pil, crop=False))[..., 3]
     assert (alpha[~stroke] == 0).mean() >= 0.97
     assert (alpha[stroke] >= 200).mean() >= 0.9
+
+
+def test_group_ids_and_ungroup():
+    item = _drawn_item()
+    pdf = pymupdf.open()
+    for _i in range(4):
+        pdf.new_page()
+    xref = g.insert_signature(pdf, 0, pymupdf.Rect(400, 760, 520, 800), item)
+    created, _s = g.repeat_signature(pdf, 0, xref, [1, 2, 3])
+    nm0 = g.placed_signatures(pdf, 0)[0].nm
+    assert g.group_size(pdf, g.group_of(nm0)) == 4
+    assert g.group_of(g.placed_signatures(pdf, 2)[0].nm) == nm0
+    assert g.ungroup(pdf, nm0) == 3
+    assert g.group_size(pdf, nm0) == 1
