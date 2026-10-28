@@ -328,7 +328,8 @@ class FormFiller(QObject):
         """False se vista o barra sono già state distrutte (callback differiti tardivi)."""
         import shiboken6
         try:
-            return shiboken6.isValid(self) and shiboken6.isValid(self.view) and not self.document.closed
+            return (self.view is not None and shiboken6.isValid(self) and shiboken6.isValid(self.view)
+                    and not self.document.closed)
         except RuntimeError:
             return False
 
@@ -421,6 +422,13 @@ class FormFiller(QObject):
     last_warning: str | None = None
 
     def dispose(self) -> None:
+        """Scheda chiusa: scollega tutto e rilascia vista e documento, così che la memoria
+        si liberi (NFR-06). Il filler è figlio della vista: senza togliere i riferimenti
+        Python alla vista, vista e filler si terrebbero vivi a vicenda."""
+        view = self.view
+        if view is None:
+            return
+        self.blockSignals(True)          # niente «changed» che ricrei un filler per la vista chiusa
         try:
             self.document.remove_listener(self._on_document_event)
         except Exception:
@@ -430,10 +438,30 @@ class FormFiller(QObject):
         except (RuntimeError, TypeError):
             pass
         self.close_editor(commit=False)
+        self._hide_banner()
         try:
-            self.view.overlays.remove(self.paint_overlay)
+            view.overlays.remove(self.paint_overlay)
         except ValueError:
             pass
+        for signal, slot in ((view.verticalScrollBar().valueChanged, self.reposition),
+                             (view.horizontalScrollBar().valueChanged, self.reposition),
+                             (view.layoutChanged, self.reposition),
+                             (view.contentChanged, self._on_content_changed)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        try:
+            view.viewport().removeEventFilter(self)
+            view.removeEventFilter(self)
+        except RuntimeError:
+            pass
+        self.active = None
+        self.state.view = None
+        self.state.fields, self.state.by_page = [], {}
+        self.view = None
+        self.setParent(None)
+        self.deleteLater()
 
     # ------------------------------------------------------------------ barra
     def update_bar(self) -> None:

@@ -55,3 +55,7 @@ l'elenco dei campi e i dialoghi, e segnala i testi inglesi uguali all'italiano o
 italiane (NFR-25). I nuovi campi numero e data propongono i formati della lingua: 1.234,56 e
 gg/mm/aaaa in italiano, 1,234.56 e mm/dd/yyyy in inglese (NFR-26). I formati già presenti nel
 file restano quelli del file.
+
+Memoria (NFR-06): alla chiusura della scheda il filler scollega segnali, filtri di eventi e
+ascoltatori e rilascia vista, stato e documento; le viste chiuse non ricevono più un filler
+(`test_memory.py`: nessun oggetto del modulo resta tra i referenti della vista o del documento).

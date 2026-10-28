@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import weakref
 from typing import TYPE_CHECKING, Any
 
 import pymupdf
@@ -42,6 +43,7 @@ class FormsModule(QObject):
         super().__init__(ctx)
         self.ctx = ctx
         self.fillers: dict[int, FormFiller] = {}
+        self._closed = weakref.WeakSet()   # viste chiuse: nessun nuovo filler (non le tiene vive, NFR-06)
         self.selection: list[tuple[int, int]] = []
         self.design_active = False
         self.preview = False
@@ -225,6 +227,11 @@ class FormsModule(QObject):
             self.ctx.add_sidebar_panel("moduli-campi", _("Campi"), "text-cursor-input", self.fields_panel, 60)
 
     # ================================================================ viste
+    def _current_view(self):
+        """Vista corrente, esclusa quella in chiusura (durante documentClosed è ancora la corrente)."""
+        view = self.ctx.current_view()
+        return None if view is None or view in self._closed else view
+
     def filler(self, view: "DocumentView") -> FormFiller:
         f = self.fillers.get(id(view))
         if f is None or f.view is not view:
@@ -232,7 +239,7 @@ class FormsModule(QObject):
         return f
 
     def _attach(self, view) -> FormFiller | None:
-        if view is None:
+        if view is None or view in self._closed:
             return None
         f = self.fillers.get(id(view))
         if f is not None and f.view is view:
@@ -247,6 +254,8 @@ class FormsModule(QObject):
         return f
 
     def _detach(self, view) -> None:
+        """Scheda chiusa: il filler rilascia vista e documento (NFR-06)."""
+        self._closed.add(view)
         f = self.fillers.pop(id(view), None)
         if f is not None:
             f.dispose()
@@ -262,7 +271,7 @@ class FormsModule(QObject):
         self._refresh_panels()
 
     def _filler_changed(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is not None:
             f = self.fillers.get(id(view))
             if f is not None:
@@ -301,7 +310,7 @@ class FormsModule(QObject):
 
     def document_saved(self, view) -> None:
         """Dopo un salvataggio gli identificativi dei widget possono cambiare: si riseleziona per posizione."""
-        if view is not self.ctx.current_view() or not self.selection:
+        if view is not self._current_view() or not self.selection:
             return
         self.selection = []
         self._refresh_panels()
@@ -321,7 +330,7 @@ class FormsModule(QObject):
         self.design_active = True
         self.preview = False
         self.act_preview.setChecked(False)
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         f = self.filler(view)
@@ -350,7 +359,7 @@ class FormsModule(QObject):
         on = self.act_preview.isChecked() if on is None else on
         self.act_preview.setChecked(on)
         self.preview = on
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         f = self.filler(view)
@@ -378,7 +387,7 @@ class FormsModule(QObject):
         view.viewport().update()
 
     def _sync_tools(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         tool = view.tool
@@ -393,7 +402,7 @@ class FormsModule(QObject):
         self.act_select.setChecked(True)
 
     def start_create(self, kind: str, sticky: bool | None = None) -> FieldCreateTool | None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return None
         if self.ctx.current_mode() != "moduli":
@@ -427,20 +436,20 @@ class FormsModule(QObject):
 
     def toggle_tab_numbers(self, on: bool) -> None:
         self.show_tab_numbers = on
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is not None:
             view.viewport().update()
 
     # ================================================================ selezione e modifiche
     def set_selection(self, keys: list[tuple[int, int]]) -> None:
         self.selection = list(dict.fromkeys(keys))
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is not None:
             view.viewport().update()
         self._refresh_panels()
 
     def selected_fields(self, view=None) -> list[E.FieldInfo]:
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         if view is None:
             return []
         f = self.filler(view)
@@ -455,7 +464,7 @@ class FormsModule(QObject):
         return out
 
     def _refresh_panels(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if self.panel is not None:
             names: list[str] = []
             radios: dict[str, list[str]] = {}
@@ -480,7 +489,7 @@ class FormsModule(QObject):
     def _change(self, label: str, fn, view=None, kind: str = "content") -> Any:
         """Esegue `fn(pdf)` come unico passo annullabile; mostra gli errori all'utente.
         `kind="form"` per le modifiche ai soli valori (compilazione), le altre sono «content»."""
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         if view is None:
             return None
         try:
@@ -503,7 +512,7 @@ class FormsModule(QObject):
         return result
 
     def apply_properties(self, keys: list[tuple[int, int]], props: dict, label: str) -> bool:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None or not keys:
             return False
         if "calc" in props and props["calc"] is not None:
@@ -637,13 +646,13 @@ class FormsModule(QObject):
             return
         changes = [(f.page, f.xref, pymupdf.Rect(f.rect.x0 + dx, f.rect.y0 + dy, f.rect.x1 + dx, f.rect.y1 + dy))
                    for f in sel]
-        self.move_fields(self.ctx.current_view(), changes, _("Sposta campi"))
+        self.move_fields(self._current_view(), changes, _("Sposta campi"))
 
     def delete_selected(self) -> None:
         sel = self.selected_fields()
         if not sel:
             return
-        view = self.ctx.current_view()
+        view = self._current_view()
         signed = self._signed_keys(view, [(f.page, f.xref) for f in sel])
         if signed:
             self.ctx.error(_("Moduli"), _("I campi firma già firmati non si possono eliminare."))
@@ -688,7 +697,7 @@ class FormsModule(QObject):
 
     def paste_fields(self, view=None) -> list[tuple[int, int]]:
         """Incolla i campi copiati nella pagina corrente; i nomi già usati vengono resi univoci."""
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         items = FormsModule.field_clipboard
         if view is None or not items:
             return []
@@ -729,7 +738,7 @@ class FormsModule(QObject):
 
     def copy_to_pages_dialog(self) -> None:
         from .dialogs import ask_copy_pages
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None or not self.selected_fields():
             self.ctx.status(_("Seleziona prima uno o più campi."))
             return
@@ -756,10 +765,10 @@ class FormsModule(QObject):
         else:
             rects = E.align_rects([f.rect for f in sel], how, reference=0)
         changes = [(f.page, f.xref, r) for f, r in zip(sel, rects)]
-        self.move_fields(self.ctx.current_view(), changes, _("Disponi campi"))
+        self.move_fields(self._current_view(), changes, _("Disponi campi"))
 
     def tab_order(self, how: str) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         page = view.current_page
@@ -775,7 +784,7 @@ class FormsModule(QObject):
 
     # ================================================================ comandi sui dati
     def _view_or_status(self):
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return None
         return view
@@ -791,7 +800,7 @@ class FormsModule(QObject):
         return {tm.get(k, k): v for k, v in values.items() if k not in skip}
 
     def export_data(self, path: str, fmt: str | None = None, view=None) -> int:
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         fmt = fmt or X.format_of(path)
         values = self.values_for_export(view)
         with ENGINE_LOCK:
@@ -802,7 +811,7 @@ class FormsModule(QObject):
         return len(values)
 
     def export_data_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         base = os.path.splitext(view.document.display_name)[0]
@@ -818,7 +827,7 @@ class FormsModule(QObject):
 
     def import_values(self, values: dict[str, Any], view=None) -> dict:
         """Applica i valori (un solo passo annullabile). Restituisce il rapporto."""
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         report = {"applied": [], "unknown": [], "rejected": []}
 
         def run(pdf):
@@ -853,7 +862,7 @@ class FormsModule(QObject):
         return report
 
     def import_data(self, path: str, row: int | None = None, view=None) -> dict:
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         with open(path, "rb") as fh:
             data = fh.read()
         fmt = X.format_of(path, data)
@@ -880,7 +889,7 @@ class FormsModule(QObject):
         return ask_csv_row(self.ctx.window, records)
 
     def import_data_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         paths = self.ctx.ask_open_paths(_("Importa dati del modulo"), import_filter(), multiple=False)
@@ -903,7 +912,7 @@ class FormsModule(QObject):
         self.exec_popup(menu, QCursor.pos())
 
     def reset(self, names: list[str] | None = None, view=None) -> int:
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         f = self.filler(view)
         if names is None:
             f.passwords.clear()
@@ -919,7 +928,7 @@ class FormsModule(QObject):
         return self._change(_("Reimposta modulo"), run, view, kind="form") or 0
 
     def reset_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         # UX-13: nessuna conferma, l'operazione si annulla con Annulla. In modifica modulo con
@@ -930,7 +939,7 @@ class FormsModule(QObject):
         self.ctx.status(_("Campi reimpostati: {n} (Annulla per ripristinarli)").format(n=n))
 
     def flatten(self, pages: list[int] | None = None, view=None) -> int:
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         with ENGINE_LOCK:
             signed = [f.name for f in E.list_fields(view.document.pdf) if f.kind == E.SIGNATURE and E.is_signed(view.document.pdf, f.xref)]
         n = self._change(_("Appiattisci modulo"), lambda pdf: E.flatten_pages(pdf, pages), view) or 0
@@ -939,7 +948,7 @@ class FormsModule(QObject):
         return n
 
     def flatten_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         from .dialogs import ask_flatten
@@ -954,7 +963,7 @@ class FormsModule(QObject):
         self.ctx.status(_("Campi ricalcolati: {n}").format(n=len(names)))
 
     def calc_order_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         with ENGINE_LOCK:
@@ -977,7 +986,7 @@ class FormsModule(QObject):
             self._change(_("Ordine di calcolo"), lambda pdf: E.set_calc_order(pdf, new) or True, view)
 
     def check_form(self) -> list[tuple[E.FieldInfo, str]]:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return []
         filler = self.filler(view)
@@ -1003,7 +1012,7 @@ class FormsModule(QObject):
 
     def convert_xfa(self) -> None:
         """FRM-36: crea un NUOVO documento con un modulo standard; l'originale non cambia."""
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         with ENGINE_LOCK:
@@ -1058,7 +1067,7 @@ class FormsModule(QObject):
             self.ctx.status(_("Creato «{n}» con un modulo standard.").format(n=name))
 
     def export_xfa_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         base = os.path.splitext(view.document.display_name)[0]
@@ -1076,13 +1085,13 @@ class FormsModule(QObject):
         self.ctx.status(_("Dati XML esportati."))
 
     def import_xfa(self, path: str, view=None) -> bool:
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         with open(path, "rb") as fh:
             data = fh.read()
         return bool(self._change(_("Importa dati XML"), lambda pdf: E.import_xfa_data(pdf, data) or True, view))
 
     def import_xfa_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         paths = self.ctx.ask_open_paths(_("Importa dati XML"), "XML (*.xml)", multiple=False)
@@ -1116,7 +1125,7 @@ class FormsModule(QObject):
     def fill_series(self, csv_path: str, out_dir: str, pattern: str, view=None) -> dict:
         import tempfile
         from . import batch as B
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
         with open(csv_path, "rb") as fh:
             records = X.csv_records(fh.read())
         data = view.document.to_bytes()
@@ -1130,7 +1139,7 @@ class FormsModule(QObject):
             os.unlink(template)
 
     def series_dialog(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         paths = self.ctx.ask_open_paths(_("Scegli il file CSV con i dati"), "CSV (*.csv)", multiple=False)
@@ -1160,7 +1169,7 @@ class FormsModule(QObject):
 
     # ================================================================ rilevamento
     def detect_fields(self) -> None:
-        view = self.ctx.current_view()
+        view = self._current_view()
         if view is None:
             return
         doc = view.document
@@ -1201,7 +1210,7 @@ class FormsModule(QObject):
             self.ctx.status(_("Campi creati: {n}").format(n=n))
 
     def create_candidates(self, candidates: list, view=None) -> int:
-        view = view or self.ctx.current_view()
+        view = view or self._current_view()
 
         def run(pdf):
             n = 0
