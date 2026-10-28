@@ -314,4 +314,5 @@ EN: dict[str, str] = {
     'Conversione non riuscita: {e}': 'Conversion failed: {e}',
     'Rapporto di conversione': 'Conversion report',
     'Creato «{n}» con un modulo standard.': 'Created “{n}” with a standard form.',
+    'Nascondi evidenziazione': 'Hide highlighting',
 }

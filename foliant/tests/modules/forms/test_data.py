@@ -231,7 +231,7 @@ def test_xfa_detection(window, tmp_path, sample_pdf):
     fs, fd, fn = (forms.instance().filler(v) for v in (vs, vd, vn))
     assert fs.state.xfa == "hybrid" and "XML statico" in fs.text_of_bar()
     assert fd.state.xfa == "dynamic" and "dinamico" in fd.text_of_bar()
-    assert not fn.bar.isVisible()
+    assert not fn.bar_visible()
 
 
 def test_xfa_static_sync_on_fill(window, tmp_path):

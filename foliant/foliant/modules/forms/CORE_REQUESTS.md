@@ -9,7 +9,7 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
    `version`/emettere un evento dedicato dopo la rinumerazione.
    *Locale:* il modulo ascolta l'evento `SAVED` e rilegge i campi (`fill.FormFiller._on_document_event`).
 
-2. **Banner di stato del documento (UX-14).** Non c'è un'API per i banner in cima all'area
+2. **[Risolto: il modulo usa `ctx.show_banner`]** **Banner di stato del documento (UX-14).** Non c'è un'API per i banner in cima all'area
    documento. *Locale:* la barra del modulo è un widget figlio della vista posizionato con
    `setViewportMargins`. *Proposta:* `ctx.show_banner(view, id, testo, azioni, priorità)` con un
    banner alla volta e «N altri avvisi».
