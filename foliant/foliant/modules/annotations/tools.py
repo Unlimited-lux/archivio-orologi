@@ -1023,7 +1023,9 @@ class EraserTool(AnnotTool):
             return 0
         try:
             with view.document.change(_("Gomma"), kind="annotation") as pdf:
-                return run(pdf)
+                n = run(pdf)
+                self.ctrl._conform(pdf)
+                return n
         except OperationCancelled:
             return 0
         except _NothingToDo:
