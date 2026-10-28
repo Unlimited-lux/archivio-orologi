@@ -31,6 +31,7 @@ PARTS = (
     "tools",          # zoom area, istantanea
     "session",        # posizione per file, vista iniziale, schede, sessione
     "recovery",       # salvataggio automatico e recupero dopo crash
+    "archives",       # archivi ZIP
 )
 
 
