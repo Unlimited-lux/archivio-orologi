@@ -34,6 +34,7 @@ class ViewState:
     order: list[int] = field(default_factory=list)
     version: int = -1
     dismissed: bool = False             # «Non ora»: per questa sessione
+    never: bool = False                 # «Non chiedere più per questo documento»
     bar: "ProposalBar | None" = None
     timer: QTimer | None = None
     placed: dict[int, list] = field(default_factory=dict)   # pagina → [(Rect, Word)] dopo l'OCR
@@ -118,10 +119,14 @@ class ProposalBar(QFrame):
         self.btn_never.show()
         self._reveal()
 
-    def show_page(self, page: int, others: int) -> None:
+    def show_page(self, page: int, others: int, ocr_layer: bool = False) -> None:
         self.page = page
-        self.label.setText(_("La pagina {n} è un'immagine: il testo non si può selezionare né modificare. "
-                             "Vuoi renderla modificabile con l'OCR?").format(n=page + 1))
+        if ocr_layer:
+            self.label.setText(_("La pagina {n} ha solo testo invisibile riconosciuto da un OCR: per modificarlo "
+                                 "rendila modificabile.").format(n=page + 1))
+        else:
+            self.label.setText(_("La pagina {n} è un'immagine: il testo non si può selezionare né modificare. "
+                                 "Vuoi renderla modificabile con l'OCR?").format(n=page + 1))
         self.btn_run.setText(_("Rendi modificabile questa pagina"))
         self.btn_all.setVisible(others > 1)
         self.btn_details.hide()
@@ -452,6 +457,7 @@ class OcrController(QObject):
         if key not in keys:
             keys = list(keys) + [key]
             self.settings().setValue("ocr/never_ask", keys[-500:])
+        self.state(view).never = True
         self.dismiss(view)
 
     # ------------------------------------------------------------- stato
@@ -553,7 +559,7 @@ class OcrController(QObject):
         if st.bar is not None and st.bar.isVisible() and st.bar.page is not None:
             return
         if self.never_asked(view):
-            st.dismissed = True
+            st.dismissed = st.never = True
             return
         if st.bar is None:
             st.bar = ProposalBar(view, self)
@@ -617,18 +623,23 @@ class OcrController(QObject):
         if ev.type() == QEvent.Type.MouseButtonPress:
             view = obj.parent()
             st = self.states.get(view)
-            if st is not None and self.detection_enabled() and not st.dismissed:
+            if st is not None and self.detection_enabled() and not st.never:
                 try:
-                    tool_id = getattr(view.tool, "id", "")
-                    editing = self.ctx.current_mode() == "modifica" or "edit" in str(tool_id)
+                    tool_id = str(getattr(view.tool, "id", ""))
+                    editing = self.ctx.current_mode() == "modifica" or "edit" in tool_id or "modif" in tool_id
                     if tool_id == "select-text" or editing:
                         hit = view.view_to_page(ev.position())
-                        if hit is not None:
-                            inf = st.infos.get(hit[0])
-                            if inf is not None and inf.category == detect.IMAGE_ONLY and not view.words(hit[0]):
+                        inf = st.infos.get(hit[0]) if hit is not None else None
+                        if inf is not None:
+                            image_only = inf.category == detect.IMAGE_ONLY and not view.words(hit[0])
+                            # testo solo invisibile (livello OCR): non si modifica, si propone di convertirlo
+                            layer = inf.category == detect.OCR_LAYER and editing
+                            if image_only or layer:
                                 if st.bar is None:
                                     st.bar = ProposalBar(view, self)
-                                st.bar.show_page(hit[0], len(st.detected))
+                                others = len([i for i, x in st.infos.items()
+                                              if x.category in (detect.IMAGE_ONLY, detect.OCR_LAYER)])
+                                st.bar.show_page(hit[0], others, ocr_layer=layer)
                 except Exception:
                     pass
         return False

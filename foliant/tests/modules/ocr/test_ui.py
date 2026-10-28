@@ -622,3 +622,24 @@ def test_profilo_con_lingua_non_installata(window, scan_two, monkeypatch, settin
     monkeypatch.setattr(ctl, "ask_missing", lambda missing: asked.append(missing) or None)
     assert ctl.run(view, dlg.options(), [0], preview=False) is None
     assert asked == [["deu"]] and not view.document.is_modified
+
+
+def test_proposta_su_livello_ocr_con_strumento_modifica(window, qtbot, scan_two, tmp_path):
+    """bug_05: con lo strumento di modifica, una pagina con solo livello OCR propone «Rendi modificabile»."""
+    from foliant.api import Tool
+    out = tmp_path / "ocr.pdf"
+    out.write_bytes(engine.ocr_pdf_bytes(open(scan_two, "rb").read(), ["ita"], "searchable"))
+    view = window.open_path(str(out))
+    ctl = ocr_controller()
+    wait_analysis(qtbot, view)
+    assert ctl.state(view).infos[0].category == detect.OCR_LAYER
+
+    class EditTool(Tool):
+        id = "text-edit"
+    view.set_tool(EditTool())
+    view.flush_rendering()
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=view.page_rect(0).center().toPoint())
+    bar = ctl.state(view).bar
+    assert bar is not None and bar.isVisible() and bar.page == 0
+    assert "invisibile" in bar.label.text()
+    view.set_tool(None)
