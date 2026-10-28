@@ -236,3 +236,19 @@ def test_link_handler_extension(window, sample_pdf):
         assert seen == [("prima", "https://example.org"), ("ultima", "https://example.org")]
     finally:
         tools.LINK_HANDLERS[:] = saved
+
+
+def test_mode_scoped_shortcuts(window, sample_pdf):
+    from PySide6.QtGui import QKeySequence
+    ctx = window.ctx
+    m1 = ctx.add_mode("prova1", "Prova 1", "star", 990)
+    m2 = ctx.add_mode("prova2", "Prova 2", "star", 991)
+    a1 = ctx.action("Duplica pagina", None, lambda: None, shortcut="Ctrl+D", mode="prova1")
+    a2 = ctx.action("Duplica campo", None, lambda: None, shortcut="Ctrl+D")
+    m2.scope_shortcuts(a2)
+    window.set_mode("leggi")
+    assert a1.shortcut().isEmpty() and a2.shortcut().isEmpty()
+    window.set_mode("prova1")
+    assert a1.shortcut() == QKeySequence("Ctrl+D") and a2.shortcut().isEmpty()
+    window.set_mode("prova2")
+    assert a1.shortcut().isEmpty() and a2.shortcut() == QKeySequence("Ctrl+D")

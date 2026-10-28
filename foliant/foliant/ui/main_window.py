@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
         self._props: dict[str, QWidget] = {}
         self._connected_view: DocumentView | None = None
         self.view_menu_providers: list = []
+        # Scorciatoie valide solo in una modalità: (azione, scorciatoie, id modalità)
+        self._mode_shortcuts: list[tuple[QAction, list, str]] = []
         self.module_results: list[tuple[str, Exception | None]] = []
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
@@ -425,6 +427,26 @@ class MainWindow(QMainWindow):
         mode.add_action(self.act_rotate_view)
         mode.add_action(self.act_fullscreen)
 
+    def scope_action_to_mode(self, act: QAction, mode_id: str) -> None:
+        """La scorciatoia di `act` resta attiva solo nella modalità `mode_id`."""
+        for i, (a, seqs, m) in enumerate(self._mode_shortcuts):
+            if a is act:
+                self._mode_shortcuts[i] = (a, seqs, mode_id)
+                break
+        else:
+            self._mode_shortcuts.append((act, list(act.shortcuts()), mode_id))
+        self._apply_mode_shortcuts()
+
+    def _apply_mode_shortcuts(self) -> None:
+        alive = []
+        for act, seqs, mode_id in self._mode_shortcuts:
+            try:
+                act.setShortcuts(seqs if mode_id == self.current_mode_id else [])
+            except RuntimeError:      # azione già distrutta
+                continue
+            alive.append((act, seqs, mode_id))
+        self._mode_shortcuts = alive
+
     def register_document_action(self, act: QAction) -> None:
         self._document_actions.append(act)
         act.setEnabled(self.current_view() is not None)
@@ -516,6 +538,7 @@ class MainWindow(QMainWindow):
             previous.button.setChecked(False)
             previous.left.emit()
         self.current_mode_id = mode_id
+        self._apply_mode_shortcuts()
         mode.button.setChecked(True)
         self.context_stack.setCurrentWidget(mode.toolbar)
         if previous is not None:

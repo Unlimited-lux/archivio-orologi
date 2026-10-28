@@ -45,6 +45,20 @@ class Mode(QObject):
         self.toolbar.addAction(action)
         return action
 
+    def scope_shortcuts(self, *actions: QAction) -> None:
+        """Le scorciatoie di queste azioni valgono solo mentre questa modalità è attiva.
+
+        Così due modalità possono usare lo stesso tasto (es. Ctrl+D per «Duplica pagina» in
+        Pagine e «Duplica campo» in Moduli) senza conflitti.
+        """
+        window = self.parent().window() if self.parent() is not None else None
+        from .main_window import MainWindow  # import locale: evita il ciclo di import
+        win = window if isinstance(window, MainWindow) else None
+        if win is None:
+            return
+        for act in actions:
+            win.scope_action_to_mode(act, self.id)
+
     def add_widget(self, widget: QWidget) -> None:
         self.toolbar.addWidget(widget)
 
@@ -112,8 +126,12 @@ class Context(QObject):
     # ------------------------------------------------------------------ azioni
     def action(self, text: str, icon_name: str | None = None, slot: Callable | None = None, *,
                shortcut: str | QKeySequence | None = None, tooltip: str | None = None,
-               checkable: bool = False, requires_document: bool = True) -> QAction:
-        """Crea un'azione. Con `requires_document` è disattivata se nessun documento è aperto."""
+               checkable: bool = False, requires_document: bool = True, mode: str | None = None) -> QAction:
+        """Crea un'azione. Con `requires_document` è disattivata se nessun documento è aperto.
+
+        Con `mode="pagine"` la scorciatoia vale solo mentre quella modalità è attiva
+        (consigliato per tutte le scorciatoie specifiche di un modulo).
+        """
         act = QAction(text, self._w)
         if icon_name:
             bind_icon(act, icon_name)
@@ -126,6 +144,8 @@ class Context(QObject):
         act.setCheckable(checkable)
         if requires_document:
             self._w.register_document_action(act)
+        if mode is not None:
+            self._w.scope_action_to_mode(act, mode)
         return act
 
     def add_menu_action(self, action: QAction, section: str = "Strumenti") -> None:

@@ -123,6 +123,11 @@ N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctr
 Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R. Spettano ai moduli: Ctrl+P, Ctrl+F,
 Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
 duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
+Le scorciatoie specifiche di un modulo vanno **limitate alla sua modalità**:
+`ctx.action(..., shortcut="Ctrl+D", mode="pagine")` oppure `mode.scope_shortcuts(azione, ...)`.
+Così due modalità possono usare lo stesso tasto senza conflitti. Per i tasti che servono solo
+dentro un widget (es. Canc in un elenco) usa una scorciatoia del widget
+(`Qt.ShortcutContext.WidgetWithChildrenShortcut`) o `keyPressEvent`, non un'azione globale.
 
 ### API del contesto (`foliant/ui/context.py`)
 
