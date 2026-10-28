@@ -873,3 +873,6 @@ EN.update({"Aggiungi le pagine delle note": "Add notes pages", "Commenti come an
            "Presentazioni": "Presentations",
            "Font non installati, sostituiti con equivalenti (l'impaginazione può cambiare): {f}":
                "Fonts not installed, replaced with equivalents (the layout may change): {f}"})
+
+# CNV-17: Esporta come › Più file…
+EN.update({"Più file…": "Multiple files…", "Converti molti PDF in questo formato": "Convert many PDFs to this format"})

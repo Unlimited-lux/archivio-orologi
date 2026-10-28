@@ -203,7 +203,10 @@ def build_options(fmt: str) -> _Options:
 
 
 class ExportDialog(QDialog):
-    """Scelta di formato, pagine, opzioni e destinazione. `values()` → (formato, percorso, opzioni)."""
+    """Scelta di formato, pagine, opzioni e destinazione. `values()` → (formato, percorso, opzioni).
+    `exec()` restituisce `ExportDialog.BATCH` se l'utente sceglie «Più file…»."""
+
+    BATCH = 2
 
     def __init__(self, parent, *, page_count: int, current_page: int = 0, name: str = "documento",
                  folder: str = "", fmt: str = "docx", selected: list[int] | None = None,
@@ -305,6 +308,11 @@ class ExportDialog(QDialog):
         self.ok_button.setText(_("Converti"))
         bind_icon(self.ok_button, "file-output")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        # CNV-17: lo stesso formato applicato a molti file (conversione in blocco)
+        self.more_button = buttons.addButton(_("Più file…"), QDialogButtonBox.ButtonRole.ActionRole)
+        bind_icon(self.more_button, "files")
+        self.more_button.setToolTip(_("Converti molti PDF in questo formato"))
+        self.more_button.clicked.connect(lambda: self.done(self.BATCH))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)

@@ -908,3 +908,63 @@ def test_create_from_office_with_options(window, ctrl, settings, tmp_path, monke
     # annullando le opzioni non si crea nulla
     monkeypatch.setattr(OfficeOptionsDialog, "exec", lambda d: QDialog.DialogCode.Rejected)
     assert ctrl.create_from_files([str(path)]) == []
+
+
+def test_export_more_files_opens_tools_batch(window, ctrl, sample_pdf, monkeypatch, messages):
+    """CNV-17: «Esporta come › Più file…» apre l'elaborazione in blocco (BAT-06) con il formato
+    scelto; i formati che BAT-06 non produce restano nella finestra del modulo."""
+    from foliant.modules.convert.batch_dialog import BatchDialog
+    window.open_path(sample_pdf)
+
+    def pick(fmt):
+        def fake_exec(dlg):
+            dlg.format_box.setCurrentIndex(dlg.format_box.findData(fmt))
+            return ExportDialog.BATCH
+        monkeypatch.setattr(ExportDialog, "exec", fake_exec)
+    if getattr(window.ctx, "tools_module", None) is None:
+        pytest.skip("modulo Strumenti non caricato")
+    pick("xlsx")
+    batch = ctrl.export()
+    converts = [s for s in batch.steps if s.action == "convert"]
+    assert len(converts) == 1 and converts[0].merged_params()["format"] == "xlsx"
+    pick("docx")
+    batch = ctrl.export()
+    converts = [s for s in batch.steps if s.action == "convert"]
+    assert len(converts) == 1 and converts[0].merged_params()["format"] == "docx"
+    seen = {}
+
+    def batch_exec(dlg):
+        seen["fmt"] = dlg.format_box.currentData()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(BatchDialog, "exec", batch_exec)
+    pick("epub")
+    assert ctrl.export() is None and seen["fmt"] == "epub"
+
+
+def test_batch_fifty_files_two_damaged_one_encrypted(tmp_path, encrypted_pdf):
+    """CNV-17: 50 PDF, 2 irreparabili e 1 cifrato saltato → 47 DOCX; il report elenca i 2 errori
+    con la causa e il file saltato; nessun temporaneo nella cartella di uscita."""
+    import docx
+    import shutil
+
+    from tests.conftest import make_pdf
+    from foliant.modules.convert.batch import ERROR, OK, SKIPPED, batch_convert, report_csv
+    src = tmp_path / "in"
+    src.mkdir()
+    files = [make_pdf(src / f"doc{k:02}.pdf", pages=1) for k in range(47)]
+    for name in ("rotto1.pdf", "rotto2.pdf"):
+        (src / name).write_bytes(b"%PDF-1.7\n garbage \x00\xff" * 3)
+        files.append(str(src / name))
+    files.append(shutil.copy(encrypted_pdf, src / "cifrato.pdf"))
+    out = tmp_path / "out"
+    items = batch_convert(files, "docx", out_dir=str(out), workers=1)
+    by = {os.path.basename(i.path): i for i in items}
+    assert sum(1 for i in items if i.status == OK) == 47
+    assert by["rotto1.pdf"].status == ERROR and by["rotto1.pdf"].message
+    assert by["cifrato.pdf"].status == SKIPPED
+    produced = sorted(os.listdir(out))
+    assert len(produced) == 47 and all(p.endswith(".docx") for p in produced)
+    docx.Document(str(out / produced[0]))      # file completi e apribili
+    report = report_csv(items)
+    assert "rotto1.pdf" in report and "rotto2.pdf" in report and "cifrato.pdf" in report
+    assert by["rotto2.pdf"].message in report

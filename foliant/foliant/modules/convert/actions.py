@@ -235,7 +235,10 @@ class ConvertController:
                            fmt=fmt or settings.value("convert/last_format", "docx") or "docx",
                            settings=settings, scanned=scanned,
                            selected=selected)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        code = dlg.exec()
+        if code == ExportDialog.BATCH:
+            return self.batch_convert(dlg.fmt)
+        if code != QDialog.DialogCode.Accepted:
             return None
         fmt, out_path, options = dlg.values()
         if password:
@@ -1130,10 +1133,45 @@ class ConvertController:
             return None
 
     # ============================================================ in blocco
-    def batch_convert(self):
-        """CNV-17: converte molti PDF verso un formato, con report finale."""
+    # formati di questa sezione che l'elaborazione in blocco di Strumenti (BAT-06) sa produrre
+    TOOLS_FORMATS = {"docx": "docx", "xlsx": "xlsx", "pptx": "pptx", "txt": "txt", "html": "html", "png": "png",
+                     "jpeg": "jpg", "pdfa-2b": "pdfa"}
+
+    def open_tools_batch(self, fmt: str):
+        """CNV-17: apre l'elaborazione in blocco di Strumenti (BAT-06) con la conversione nel
+        formato scelto come ultima operazione. None se il modulo o il formato non sono disponibili."""
+        tools = getattr(self.ctx, "tools_module", None)
+        target = self.TOOLS_FORMATS.get(fmt)
+        if tools is None or target is None or not hasattr(tools, "show_batch"):
+            return None
+        try:
+            batch = tools.show_batch()
+            steps = getattr(batch, "steps", [])
+            existing = [i for i, st in enumerate(steps) if st.action == "convert"]
+            if existing:
+                steps[existing[-1]].params["format"] = target
+                if hasattr(batch, "_refresh_steps"):
+                    batch._refresh_steps(existing[-1])
+            else:
+                batch.add_step("convert", {"format": target})
+        except Exception:
+            return None
+        return batch
+
+    def batch_convert(self, fmt: str | None = None):
+        """CNV-17: converte molti PDF verso un formato, con report finale. Da «Esporta come ›
+        Più file…» si apre l'elaborazione in blocco di Strumenti (BAT-06) se c'è e sa produrre il
+        formato; altrimenti (e dal menu, che offre tutti i formati) la finestra del modulo."""
         from .batch_dialog import BatchDialog, show_batch_report
+        if fmt is not None:
+            batch = self.open_tools_batch(fmt)
+            if batch is not None:
+                return batch
         dlg = BatchDialog(self.window, self.ctx)
+        if fmt is not None:
+            i = dlg.format_box.findData(fmt)
+            if i >= 0:
+                dlg.format_box.setCurrentIndex(i)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         from .batch import batch_convert
