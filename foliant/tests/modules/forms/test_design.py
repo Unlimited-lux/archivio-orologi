@@ -641,8 +641,33 @@ def test_submit_by_mail_cancelled(window, tmp_path, monkeypatch):
     mails = []
     monkeypatch.setattr(m, "launch_mail", lambda *a: mails.append(a) or True)
     monkeypatch.setattr(window.ctx, "confirm", lambda *a, **k: False)
+    import tempfile
+    temp = tmp_path / "temporanei"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
     assert not m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test"})
     assert not mails
+    assert list(temp.iterdir()) == []      # riservatezza: annullando non resta nessun file dei dati
+
+
+def test_mail_attachment_folder_and_name(window, tmp_path, monkeypatch, no_modal_boxes):
+    """La cartella provvisoria è foliant-invio-* e il file si chiama <nome documento>_dati."""
+    import tempfile
+
+    from foliant.modules.forms import module as M
+    temp = tmp_path / "temporanei"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    paths = []
+    monkeypatch.setattr(m, "launch_mail", lambda addr, subject, path: paths.append(Path(path)) or True)
+    assert m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test", "format": "fdf"})
+    path, = paths
+    assert path.parent.parent == temp and path.parent.name.startswith("foliant-invio-")
+    assert path.name == "sub_dati.fdf"
+    M.remove_temp_files()
+    assert list(temp.iterdir()) == []
 
 
 def test_detect_straightens_skewed_scan_on_request(window, tmp_path, monkeypatch):

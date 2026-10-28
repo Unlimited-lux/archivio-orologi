@@ -290,6 +290,7 @@ EN: dict[str, str] = {
     "Attenzione: l'indirizzo non è cifrato (non HTTPS), i dati viaggeranno in chiaro.": 'Warning: the address is not encrypted (not HTTPS), the data will travel in clear text.',
     'Invio del modulo': 'Submitting the form',
     'Invio non riuscito: {e}\n\nSalvare i dati in un file da inviare in seguito?': 'Submission failed: {e}\n\nSave the data to a file to send later?',
+    'Invio non riuscito: {e}': 'Submission failed: {e}',
     'Modulo inviato (risposta {s}).': 'Form submitted (response {s}).',
     'Inserisci password del proprietario': 'Enter owner password',
     'Password del proprietario': 'Owner password',
