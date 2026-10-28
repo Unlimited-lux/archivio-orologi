@@ -863,6 +863,39 @@ class Controller:
         elif act is not None:
             act.trigger()   # lo strumento chiede le sue conferme come nell'uso manuale
 
+    # ---------------------------------------------------------------- scheda prodotto (AI-30)
+    def open_product_sheet(self):
+        from foliant.api import Document
+
+        from . import product_sheet
+        from .product_sheet_view import ProductSheetDialog
+        view = self._ready_view()
+        if view is None:
+            return None
+        doc = view.document
+        panel = self.services.panel
+
+        def generate(language, tone, length):
+            kind = panel.scope_kind()
+            pages = None
+            if kind == engine.PAGES:
+                try:
+                    pages = content.parse_page_range(panel.pages_edit.text(), doc.page_count)
+                except ValueError as e:
+                    self.ctx.error(_("Scheda prodotto"), str(e))
+                    return None
+            scope = engine.build_scope(doc.pdf, engine.PAGES if pages else engine.DOCUMENT, pages=pages,
+                                       cache=self.services.cache, fingerprint=content.content_fingerprint(doc.pdf))
+            return self._run(_("Scheda prodotto…"), lambda job: product_sheet.make_product_sheet(
+                job, scope, language, tone, length))
+
+        def open_document(data):
+            self.ctx.open_document(Document.from_bytes(data, display_name=_("Scheda prodotto.pdf")))
+
+        dlg = ProductSheetDialog(generate, self.ctx.ask_save_path, open_document, self.ctx.window)
+        self.exec_dialog(dlg)
+        return dlg
+
     # ---------------------------------------------------------------- confronto e classifica (AI-32)
     def open_ranking(self):
         from . import ranking
@@ -1162,6 +1195,7 @@ def register(ctx, *, provider_factory=None) -> Services:
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
     a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_sheet = act(_("Scheda prodotto"), "tag", lambda: controller.open_product_sheet())
     a_rank = act(_("Confronta e classifica"), "list-ordered", lambda: controller.open_ranking(), requires=False)
     a_gfx = act(_("Genera elemento grafico"), "image-plus", lambda: controller.generate_graphic())
     a_docx = act(_("Converti in Word con l'IA"), "file-text", lambda: controller.convert_to_docx())
@@ -1183,7 +1217,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_log = act(_("Registro degli invii"), "list", lambda: services.show_log(), requires=False)
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
-                            a_section, a_sem, a_cmd, a_docx]
+                            a_section, a_sem, a_cmd, a_docx, a_sheet]
     services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank]
     services.local_actions = [a_pages, a_gfx]   # la generazione spiega da sé se manca il modello   # funziona anche senza profilo (controlli locali)
     for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
@@ -1198,7 +1232,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     more.setAutoRaise(True)
     more_menu = QMenu(more)
-    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_tasks, a_write, a_bib, a_cmd),
+    for group in ((a_trpdf, a_out, a_extract, a_sheet, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_tasks, a_write, a_bib, a_cmd),
                   (a_ops, a_log)):
         for a in group:
             more_menu.addAction(a)
