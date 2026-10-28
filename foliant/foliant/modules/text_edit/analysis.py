@@ -615,6 +615,69 @@ def page_has_images(page: pymupdf.Page) -> bool:
         return False
 
 
+def images_have_text_lines(page: pymupdf.Page) -> bool:
+    """Indica se almeno un'immagine della pagina contiene anche solo una riga di testo.
+
+    Righe di testo: fasce orizzontali scure separate da righe chiare, con molte alternanze
+    chiaro/scuro lungo la fascia (le lettere); le foto non hanno righe chiare né questo ritmo."""
+    try:
+        import numpy as np
+    except ImportError:
+        return True
+    try:
+        infos = page.get_image_info()
+    except Exception:
+        return False
+    for info in infos:
+        r = pymupdf.Rect(info.get("bbox")) & page.rect
+        if r.is_empty or r.width < 20 or r.height < 8:
+            continue
+        zoom = max(1.0, min(4.0, 600.0 / max(r.width, 1.0)))
+        try:
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=r, colorspace=pymupdf.csGRAY, alpha=False)
+        except Exception:
+            continue
+        gray = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.stride)[:, :pix.width]
+        if gray.size == 0 or min(gray.shape) < 8:
+            continue
+        lo, hi = float(gray.min()), float(gray.max())
+        if hi - lo < 60:
+            continue   # nessun contrasto
+        dark = gray < (lo + hi) / 2
+        if dark.mean() > 0.5:
+            dark = ~dark   # testo chiaro su fondo scuro
+        row_ratio = dark.mean(axis=1)
+        inked = row_ratio > 0.01
+        if inked.mean() > 0.85:
+            continue   # nessuna riga di fondo tra le righe: foto o riempimento
+        # fasce di righe con inchiostro
+        y = 0
+        h = len(inked)
+        while y < h:
+            if not inked[y]:
+                y += 1
+                continue
+            y0 = y
+            while y < h and inked[y]:
+                y += 1
+            band = dark[y0:y]
+            bh = y - y0
+            if bh < 4 or bh > 0.6 * h and h > 40:
+                continue
+            cols = band.any(axis=0)
+            width = cols.nonzero()[0]
+            if len(width) == 0:
+                continue
+            span = width[-1] - width[0] + 1
+            # alternanze chiaro/scuro lungo la riga centrale della fascia: almeno una ogni ~1,5 altezze
+            mid = band[bh // 2]
+            changes = int(np.count_nonzero(mid[1:] != mid[:-1]))
+            fill = band[:, width[0]:width[-1] + 1].mean()
+            if span >= 3 * bh and changes >= max(6, 2 * span / (1.5 * bh)) * 0.5 and 0.08 <= fill <= 0.7:
+                return True
+    return False
+
+
 # ---------------------------------------------------------------- unione e divisione (TXT-09)
 SEPARATOR_SPACE = "space"
 SEPARATOR_PARAGRAPH = "paragraph"

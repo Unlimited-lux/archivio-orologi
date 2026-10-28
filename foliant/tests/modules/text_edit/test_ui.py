@@ -352,6 +352,22 @@ def test_scanned_page_suggests_ocr(window, tmp_path, quiet, qtbot):
     assert not view.document.is_modified
 
 
+def test_small_text_image_suggests_ocr(window, tmp_path, quiet, qtbot):
+    """bug_09 (regressione): pagina A4 senza testo nativo con un'immagine di testo 495×140 px che non copre
+    la pagina: in Modifica compare comunque la proposta di OCR."""
+    from .conftest import render_text_image
+    doc = pymupdf.open()
+    doc.new_page(width=595, height=842).insert_image(
+        pymupdf.Rect(50, 100, 545, 240), stream=render_text_image("Mario Rossi 2019", size=(495, 140), fontsize=40))
+    path = tmp_path / "immagine_testo.pdf"
+    doc.save(str(path))
+    quiet["answer"] = False
+    view = open_in_edit_mode(window, str(path))
+    click(qtbot, view, 0, 300, 170)
+    assert any("scansione" in m for _t, m in quiet["confirms"])
+    assert not view.document.is_modified
+
+
 def test_accepted_ocr_proposal_makes_page_editable(window, tmp_path, quiet, qtbot):
     """bug_09: accettando la proposta, l'OCR rende la pagina modificabile senza riaprire il documento."""
     import shutil

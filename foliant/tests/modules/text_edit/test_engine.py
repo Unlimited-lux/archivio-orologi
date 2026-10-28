@@ -969,3 +969,26 @@ def test_arabic_letter_between_joined_letters(tmp_path):
     # forme contestuali: la «ت» inserita tra due lettere legate è in forma mediana
     assert "ﺘ" in raw
     assert shape_arabic("مرحتبا").count("ﺘ") == 1
+
+
+def test_images_have_text_lines_detects_single_line_not_photo():
+    """Proposta OCR (bug_09): anche un'immagine piccola con una sola riga di testo; non una foto."""
+    import numpy as np
+
+    from foliant.modules.text_edit.analysis import images_have_text_lines
+
+    from .conftest import render_text_image
+
+    def page_with(png, rect):
+        d = pymupdf.open()
+        p = d.new_page(width=595, height=842)
+        p.insert_image(pymupdf.Rect(rect), stream=png)
+        return d, p
+    _d1, p1 = page_with(render_text_image("Mario Rossi 2019", size=(495, 140), fontsize=40), (50, 100, 545, 240))
+    assert images_have_text_lines(p1)
+    rng = np.random.default_rng(1)
+    y, x = np.mgrid[0:300, 0:400]
+    a = (128 + 80 * np.sin(x / 37) * np.cos(y / 23) + rng.normal(0, 25, (300, 400))).clip(0, 255).astype(np.uint8)
+    png = pymupdf.Pixmap(pymupdf.csRGB, 400, 300, np.dstack([a, a, 255 - a]).copy().tobytes(), False).tobytes("png")
+    _d2, p2 = page_with(png, (50, 100, 450, 400))
+    assert not images_have_text_lines(p2)
