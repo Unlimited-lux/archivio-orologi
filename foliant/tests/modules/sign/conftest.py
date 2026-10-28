@@ -119,3 +119,91 @@ def pytest_runtest_call(item):
         if win is not None:
             for view in list(win.views()):
                 view.document._saved_state = view.document._state
+
+
+POLICY_OID = "1.3.76.16.6"
+
+
+@pytest.fixture(scope="session")
+def policy_id(id_dir):
+    """ID con l'estensione Certificate Policies (OID POLICY_OID), per i vincoli /SV /Cert /OID."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+
+    from foliant.modules.sign import digital
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Giulia Verdi")])
+    now = datetime.now(timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=365))
+            .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=True, key_encipherment=False,
+                                         data_encipherment=False, key_agreement=False, key_cert_sign=False,
+                                         crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
+            .add_extension(x509.CertificatePolicies([x509.PolicyInformation(
+                x509.ObjectIdentifier(POLICY_OID), None)]), critical=False)
+            .sign(key, hashes.SHA256()))
+    path = id_dir / "giulia.p12"
+    path.write_bytes(pkcs12.serialize_key_and_certificates(
+        b"giulia", key, cert, None, serialization.BestAvailableEncryption(PASSWORD.encode())))
+    did = digital.load_pkcs12(path, PASSWORD)
+    return path, did.info, did
+
+
+TOKEN_PIN = "123456"
+SOFTHSM_LIB = next((p for p in ("/usr/lib/softhsm/libsofthsm2.so", "/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so",
+                                "/usr/lib64/pkcs11/libsofthsm2.so") if Path(p).is_file()), None)
+
+
+@pytest.fixture(scope="session")
+def softhsm(tmp_path_factory):
+    """Token software SoftHSM con una chiave ECDSA e il suo certificato (id 01, «Firma di Mario Rossi»).
+    Restituisce (percorso del modulo, CertInfo). Saltato se SoftHSM o python-pkcs11 non ci sono."""
+    import os
+    import shutil
+    import subprocess
+    pytest.importorskip("pkcs11")
+    if SOFTHSM_LIB is None or shutil.which("softhsm2-util") is None:
+        pytest.skip("SoftHSM non installato")
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    from foliant.modules.sign.digital import cert_info_from_der
+    base = tmp_path_factory.mktemp("softhsm")
+    (base / "tokens").mkdir()
+    conf = base / "softhsm2.conf"
+    conf.write_text(f"directories.tokendir = {base / 'tokens'}\nobjectstore.backend = file\n")
+    os.environ["SOFTHSM2_CONF"] = str(conf)
+    subprocess.run(["softhsm2-util", "--init-token", "--free", "--label", "Carta firma", "--pin", TOKEN_PIN,
+                    "--so-pin", "654321"], check=True, capture_output=True)
+    key = ec.generate_private_key(ec.SECP256R1())
+    (base / "key.pem").write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                     serialization.NoEncryption()))
+    subprocess.run(["softhsm2-util", "--import", str(base / "key.pem"), "--token", "Carta firma", "--label", "firma",
+                    "--id", "01", "--pin", TOKEN_PIN], check=True, capture_output=True)
+    (base / "key.pem").unlink()
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Mario Rossi (carta)")])
+    now = datetime.now(timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=365))
+            .add_extension(x509.KeyUsage(digital_signature=False, content_commitment=True, key_encipherment=False,
+                                         data_encipherment=False, key_agreement=False, key_cert_sign=False,
+                                         crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
+            .sign(key, hashes.SHA256()))
+    der = cert.public_bytes(serialization.Encoding.DER)
+    import pkcs11
+    from pkcs11 import Attribute, CertificateType, ObjectClass
+    lib = pkcs11.lib(SOFTHSM_LIB)
+    tok = lib.get_token(token_label="Carta firma")
+    with tok.open(rw=True, user_pin=TOKEN_PIN) as s:
+        s.create_object({Attribute.CLASS: ObjectClass.CERTIFICATE, Attribute.CERTIFICATE_TYPE: CertificateType.X_509,
+                         Attribute.TOKEN: True, Attribute.VALUE: der, Attribute.LABEL: "firma", Attribute.ID: b"\x01",
+                         Attribute.SUBJECT: cert.subject.public_bytes()})
+    return SOFTHSM_LIB, cert_info_from_der(der)
