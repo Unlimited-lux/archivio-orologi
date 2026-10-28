@@ -303,3 +303,16 @@ def test_rename_by_editing_item(viewer_window, tmp_path):
     panel.item(0).setText(0, "Nuovo titolo")
     assert panel.items[0].title == "Nuovo titolo"
     assert view.document.undo_label == "Rinomina segnalibro"
+
+
+def test_read_only_kept_after_document_change(viewer_window, tmp_path):
+    path = tmp_path / "bloccato2.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="o", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_ANNOTATE)
+    view, panel = _open(viewer_window, str(path))
+    with view.document.change("Annotazione") as pdf:
+        pdf[0].add_text_annot((50, 50), "nota")
+    panel.reload()
+    assert not panel.editable

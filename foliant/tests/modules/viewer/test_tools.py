@@ -101,3 +101,16 @@ def test_escape_returns_to_selection(viewer_window, sample_pdf, qtbot):
     qtbot.keyClick(view, Qt.Key.Key_Escape)
     assert view.tool is view._default_tool
     assert not ctl.act_zoom.isChecked()
+
+
+def test_copy_permission_survives_edit(viewer_window, tmp_path):
+    path = tmp_path / "nocopia2.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Riservato")
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="o", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_MODIFY)
+    view = viewer_window.open_path(str(path))
+    with view.document.change("Modifica") as pdf:
+        pdf[0].insert_text((72, 200), "altro")
+    from foliant.modules.viewer.tools import copy_allowed
+    assert not copy_allowed(view)

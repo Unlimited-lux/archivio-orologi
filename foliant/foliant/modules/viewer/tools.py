@@ -39,11 +39,9 @@ DPI_CHOICES = (72, 96, 150, 300, 600, 1200)
 
 
 def copy_allowed(view: DocumentView) -> bool:
+    from .properties_engine import document_security
     with ENGINE_LOCK:
-        pdf = view.document.pdf
-        if not (pdf.metadata or {}).get("encryption"):
-            return True
-        return bool(pdf.permissions & pymupdf.PDF_PERM_COPY)
+        return bool(document_security(view.document).permissions & pymupdf.PDF_PERM_COPY)
 
 
 def capture_image(view: DocumentView, page: int, rect: pymupdf.Rect, dpi: int) -> tuple[QImage, int]:
