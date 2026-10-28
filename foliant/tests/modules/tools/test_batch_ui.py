@@ -434,21 +434,32 @@ def test_empty_file_has_clear_message(tmp_path):
 
 
 def test_english_defaults_and_layout_fit(window):
-    """C13: in inglese cartella «processed» e modello «{name}»; nessun campo oltre il bordo."""
+    """C13: in inglese cartella «processed» e modello «{name}»; nessun campo oltre il bordo,
+    anche con caratteri più grandi (come sulle macchine reali)."""
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication, QLineEdit
     from foliant.i18n import set_language
+    app = QApplication.instance()
+    old_font = app.font()
     set_language("en")
     try:
+        big = QFont(old_font)
+        big.setPointSizeF(max(old_font.pointSizeF(), 10.0) * 1.3)
+        app.setFont(big)
         w = bu.BatchWidget(window.ctx)
         assert w.subfolder.text() == "processed" and w.pattern.text() == "{name}"
         window.ctx.set_central_widget(w)
-        from PySide6.QtWidgets import QLineEdit
-        for size in ((1280, 800), (1024, 700)):
+        window.show()
+        for size in ((1280, 800), (1024, 700), (1920, 1080)):
             window.resize(*size)
-            window.show()
-            from PySide6.QtWidgets import QApplication
             QApplication.processEvents()
-            for edit in w.findChildren(QLineEdit):
-                if edit.isVisible():
-                    assert edit.mapTo(window, edit.rect().topRight()).x() <= window.width(), (size, edit.objectName())
+            QApplication.processEvents()
+            assert w._stacked == (w.width() < w.STACK_WIDTH)
+            for edit in (w.subfolder, w.common_password, w.dest_path, w.pattern):
+                area = next(a for a in w._areas if a.isAncestorOf(edit))
+                right = edit.mapTo(area.viewport(), edit.rect().topRight()).x()
+                assert right <= area.viewport().width(), (size, edit.placeholderText() or edit.text())
+                assert edit.mapTo(window, edit.rect().topRight()).x() <= window.width()
     finally:
+        app.setFont(old_font)
         set_language("it")

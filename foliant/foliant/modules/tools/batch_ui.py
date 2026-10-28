@@ -395,21 +395,21 @@ class BatchWidget(QWidget):
         self.preview.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.preview.setMaximumHeight(150)
         form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)   # etichette sopra i campi se stretto
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.addRow(drow)
         form.addRow(self.dest_same)
+        form.addRow(self.dest_sub)
         sub = QHBoxLayout()
-        sub.addWidget(self.dest_sub)
+        sub.setContentsMargins(24, 0, 0, 0)
         sub.addWidget(self.subfolder, 1)
         form.addRow(sub)
         form.addRow(self.keep_structure)
         form.addRow(_("Nome dei file"), prow)
         form.addRow(_("Contatore da"), self.counter_start)
         form.addRow(_("Se il file esiste"), self.conflict)
-        rep = QHBoxLayout()
-        rep.addWidget(self.replace_originals)
-        rep.addWidget(self.backup)
-        rep.addStretch(1)
-        form.addRow(rep)
+        form.addRow(self.replace_originals)
+        form.addRow(self.backup)
         form.addRow(_("In caso di errore"), self.error_policy)
         form.addRow(_("Password"), self.common_password)
         form.addRow(_("File in parallelo"), self.workers)
@@ -465,14 +465,32 @@ class BatchWidget(QWidget):
 
         top = QSplitter(Qt.Orientation.Horizontal)
         top.addWidget(queue_box)
+        # operazioni e destinazione: affiancate sugli schermi larghi, impilate (con scorrimento
+        # verticale) sotto STACK_WIDTH, così nessun campo esce dal bordo destro
+        self._steps_box, self._out_box = steps_box, out_box
+        self._column = QWidget()
+        self._column_layout = QVBoxLayout(self._column)
+        self._column_layout.setContentsMargins(0, 0, 0, 0)
+        self._areas = []
         for box in (steps_box, out_box):
             area = QScrollArea()
             area.setWidgetResizable(True)
             area.setFrameShape(QFrame.Shape.NoFrame)
-            area.setWidget(box)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            box.setMinimumWidth(0)
+            self._areas.append(area)
             top.addWidget(area)
+        for combo in steps_box.findChildren(QComboBox) + out_box.findChildren(QComboBox):
+            # le voci lunghe non devono imporre la larghezza della colonna (si leggono nel menu)
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(12)
+        self._areas[0].setWidget(self._column)
+        self._column_layout.addWidget(steps_box)
+        self._areas[1].setWidget(out_box)
+        self._stacked = False
         top.setSizes([520, 460, 420])
         top.setChildrenCollapsible(False)
+        self._top = top
         main = QSplitter(Qt.Orientation.Vertical)
         main.addWidget(top)
         main.addWidget(self.report_box)
@@ -874,6 +892,28 @@ class BatchWidget(QWidget):
             conflict=self.conflict.currentData(), replace_originals=self.replace_originals.isChecked(),
             backup=self.backup.isChecked(), error_policy=self.error_policy.currentData(),
             passwords=[pw] if pw else [], workers=self.workers.value())
+
+    STACK_WIDTH = 1400
+
+    def _apply_columns(self) -> None:
+        stack = self.width() < self.STACK_WIDTH
+        if stack == self._stacked:
+            return
+        self._stacked = stack
+        if stack:
+            self._areas[1].takeWidget()
+            self._column_layout.addWidget(self._out_box)
+            self._areas[1].hide()
+            self._top.setSizes([max(300, self.width() * 2 // 5), self.width() * 3 // 5, 0])
+        else:
+            self._column_layout.removeWidget(self._out_box)
+            self._areas[1].setWidget(self._out_box)
+            self._areas[1].show()
+            self._top.setSizes([520, 460, 420])
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_columns()
 
     def _suggest_pattern(self) -> None:
         """Modello predefinito: «{nome}» o «{nome}_<suffisso>» nella stessa cartella."""
