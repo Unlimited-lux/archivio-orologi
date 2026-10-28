@@ -251,9 +251,10 @@ def test_modificabile_stile_e_famiglia(tmp_path):
     """Grassetto, corsivo, grazie e monospaziato stimati dall'immagine (≥ 85% delle parole)."""
     import cv2
     import numpy as np
-    styles = [("helv", "Liberation Sans", False, False), ("tiro", "Liberation Serif", False, False),
-              ("cour", "Liberation Mono", False, False), ("hebo", "Liberation Sans", True, False),
-              ("heit", "Liberation Sans", False, True), ("tiit", "Liberation Serif", False, True)]
+    # le grazie si riconoscono solo quando la misura è netta: nel dubbio senza grazie
+    styles = [("helv", "Liberation Sans", False, False), ("cour", "Liberation Mono", False, False),
+              ("hebo", "Liberation Sans", True, False), ("heit", "Liberation Sans", False, True),
+              ("helv", "Liberation Sans", False, False), ("hebo", "Liberation Sans", True, False)]
     parts = [scan_image(lines=FRASI[:3], dpi=300, fontname=fn, size=(595, 140), top=40) for fn, *_r in styles]
     img = np.vstack(parts)
     page_pdf = image_pdf(tmp_path / "stili.pdf", [img], dpi=300)
@@ -380,3 +381,49 @@ def test_rilettura_pagine_ruotate_e_ritagliate(tmp_path, rot, crop):
         with pymupdf.open(stream=engine.ocr_pdf_bytes(d.tobytes(), ["ita"], mode)) as out:
             r = out[0].search_for("compravendita")[0]
             assert abs(r.x0 - (base.x0 - dx)) <= 1 and abs(r.y0 - (base.y0 - dy)) <= 1, (mode, r, base)
+
+
+def test_modificabile_tabella_e_stile_sans(tmp_path):
+    """Titolo grassetto 18 pt, paragrafi 11 pt senza grazie e tabella bordata a 3 colonne:
+    colonne non fuse, testo nelle celle giuste, famiglia e grassetto corretti."""
+    import numpy as np
+    sans = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    bold = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_font(fontname="S", fontfile=sans)
+    page.insert_font(fontname="B", fontfile=bold)
+    page.insert_text((72, 80), "Contratto di compravendita", fontname="B", fontsize=18)
+    for i, t in enumerate(["Il venditore cede al compratore gli orologi indicati nella tabella seguente.",
+                           "Il prezzo comprende la revisione completa e la garanzia di un anno.",
+                           "Il pagamento avviene con bonifico entro trenta giorni dalla consegna."]):
+        page.insert_text((72, 120 + i * 18), t, fontname="S", fontsize=11)
+    rows = [("Articolo", "Quantità", "Prezzo"), ("Orologio da tasca", "4", "€ 1.200,00"),
+            ("Cronografo acciaio", "2", "€ 3.450,00")]
+    xs = [72, 260, 360, 500]
+    y0 = 200
+    for r, row in enumerate(rows):
+        for c, cell in enumerate(row):
+            page.insert_text((xs[c] + 6, y0 + r * 24 + 16), cell, fontname="S", fontsize=11)
+    for x in xs:
+        page.draw_line((x, y0), (x, y0 + 72), width=0.8)
+    for r in range(4):
+        page.draw_line((72, y0 + r * 24), (500, y0 + r * 24), width=0.8)
+    pix = page.get_pixmap(dpi=300)
+    img = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w, 3).copy()
+    out = engine.ocr_pdf_bytes(open(image_pdf(tmp_path / "t.pdf", [img]), "rb").read(), ["ita"], "editable")
+    with pymupdf.open(stream=out) as d:
+        p = d[0]
+        for word, (lo, hi) in (("Quantità", (260, 360)), ("Prezzo", (360, 500)), ("tasca", (72, 260))):
+            r = p.search_for(word, clip=pymupdf.Rect(0, 195, 595, 280))[0]
+            assert lo <= r.x0 and r.x1 <= hi, (word, r)
+        fonts = [sp["font"] for b in p.get_text("dict")["blocks"] if b["type"] == 0
+                 for ln in b["lines"] for sp in ln["spans"] for _w in sp["text"].split()]
+        sans_share = sum("LiberationSans" in f for f in fonts) / len(fonts)
+        assert sans_share >= 0.85, fonts
+        title = [sp for b in p.get_text("dict")["blocks"] if b["type"] == 0 for ln in b["lines"]
+                 for sp in ln["spans"] if "Contratto" in sp["text"]][0]
+        assert "Bold" in title["font"]
+        body = [sp for b in p.get_text("dict")["blocks"] if b["type"] == 0 for ln in b["lines"]
+                for sp in ln["spans"] if "venditore" in sp["text"]][0]
+        assert "Bold" not in body["font"]

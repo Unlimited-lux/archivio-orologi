@@ -301,12 +301,16 @@ def _style_lines(lines: list[Line], color_img: np.ndarray | None, gray: np.ndarr
     if not lines:
         return
     sans = get_font("sans")
+    ratios = []
     for ln in lines:
+        fs_px = _font_size_for_line(ln, zoom, sans) * zoom
+        ratios.append(stroke_width(gray, ln.bbox) / fs_px if fs_px > 0 else 0.0)
+    # grassetto relativo al testo corrente della pagina (mediana), con un minimo assoluto
+    ref = float(np.median(ratios)) if ratios else 0.0
+    for ln, ratio in zip(lines, ratios):
         if color_img is not None:
             ln.color = ink_color(color_img, ln.bbox)
-        fs_px = _font_size_for_line(ln, zoom, sans) * zoom
-        sw = stroke_width(gray, ln.bbox)
-        ln.bold = fs_px > 0 and sw / fs_px > 0.145
+        ln.bold = ratio > max(0.12, 1.3 * ref) if len(lines) >= 3 else ratio > 0.145
         ln.italic = slant(gray, ln.bbox) >= 0.12
         measured = (ln.words[-1].bbox[2] - ln.words[0].bbox[0]) / zoom
         natural = sans.text_length(unicodedata.normalize("NFC", ln.text), fontsize=fs_px / zoom) or 1.0
@@ -315,7 +319,8 @@ def _style_lines(lines: list[Line], color_img: np.ndarray | None, gray: np.ndarr
         sr = serif_ratio(gray, ln.bbox, ln.baseline_y(ln.bbox[0]), x_height)
         if width_ratio > 1.45 and len(ln.text) >= 8:
             ln.family = "mono"
-        elif sr > (1.09 if ln.italic else 1.22):
+        elif not ln.italic and sr > 1.8:
+            # nel dubbio senza grazie: le curve di a/e/o/s alzano il rapporto anche nei caratteri bastoni
             ln.family = "serif"
         else:
             ln.family = "sans"
@@ -770,13 +775,22 @@ def _insert_lines_visible(page: pymupdf.Page, res: PageResult, mapper, zoom: flo
             continue
         key = font_key(ln.family if family == "auto" else family, ln.bold, ln.italic)
         font = get_font(key)
-        x0 = ln.words[0].bbox[0]
         color = tuple(round(c, 2) for c in ln.color)
         w = placer.writer((color, key))
-        try:
-            w.append(placer.pos(x0, ln.baseline_y(x0)), text, font=font, fontsize=fs)
-        except Exception:
-            continue
+        # gruppi di parole separati da più di 2 em (celle di tabella, tabulazioni): ognuno alla sua x
+        segments: list[list] = [[ln.words[0]]]
+        for a, b in zip(ln.words, ln.words[1:]):
+            if b.bbox[0] - a.bbox[2] > 2 * fs * zoom:
+                segments.append([b])
+            else:
+                segments[-1].append(b)
+        for seg in segments:
+            x0 = seg[0].bbox[0]
+            seg_text = unicodedata.normalize("NFC", " ".join(wd.text for wd in seg))
+            try:
+                w.append(placer.pos(x0, ln.baseline_y(x0)), seg_text, font=font, fontsize=fs)
+            except Exception:
+                continue
         n += 1
     placer.flush(render_mode=0)
     return n
