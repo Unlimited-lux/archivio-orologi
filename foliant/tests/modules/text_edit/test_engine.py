@@ -747,3 +747,28 @@ def test_underline_on_rotated_cropped_page(tmp_path, rotation):
     assert lines
     r = lines[0]
     assert abs(r.x1 - word.x1) <= 2 and word.y0 <= r.y0 <= word.y1 + 3
+
+
+def test_price_in_subset_font_stays_on_one_line(tmp_path):
+    """Prezzo allineato a destra in un font incorporato come sottoinsieme: «€ 9.500,00» → «€ 9.800,00»
+    resta su una riga (spazi e cifre misurati con lo stesso font)."""
+    cjk = pymupdf.Font("cjk")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_font(fontname="F9", fontbuffer=cjk.buffer)
+    for y, text in ((100, "Prezzo"), (116, "€ 9.500,00")):
+        w = cjk.text_length(text, fontsize=10)
+        page.insert_text((400 - w, y), text, fontname="F9", fontsize=10)
+    doc.subset_fonts()
+    d = Document.open(save(doc, tmp_path / "prezzo.pdf"))
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+    assert len(block.lines) == 2
+    with d.change("Sostituisci") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "9.500,00", "9.800,00"))
+    with d.lock:
+        lines = analysis.analyze_page(d.pdf[0], 0, "line")
+    texts = [ln.text for ln in lines]
+    assert "€ 9.800,00" in texts and len(lines) == 2
+    price = [ln for ln in lines if "9.800" in ln.text][0]
+    assert abs(price.x1 - 400) <= 1.5

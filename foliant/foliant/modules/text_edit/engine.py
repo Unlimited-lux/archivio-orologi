@@ -423,6 +423,8 @@ def replace_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, para
     if block.rotated:
         return _replace_rotated(page, composer, resolver, block, paragraphs, dx, dy)
     auto = block.auto_width if width is None else False
+    if len(block.lines) == 1 and width is None:
+        composer.slack = 1.0    # una riga sola: meglio sforare di 1 pt che andare a capo
     lay = _layout(page, composer, block, paragraphs, align=align or block.align,
                   leading=leading if leading is not None else block.leading,
                   width=width if width is not None else block.width,
