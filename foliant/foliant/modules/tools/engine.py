@@ -342,6 +342,7 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("position", "Posizione", "position", "bottom-right", pos),
             Param("fontsize", "Dimensione (pt)", "int", 9, minimum=4, maximum=72),
             Param("margin", "Margine (mm)", "float", 8.0, minimum=0, maximum=100),
+            Param("box", "Riquadro bianco dietro il numero (scansioni)", "bool", False),
         ]),
         ActionSpec("remove_marks", "Rimuovi filigrane, sfondi, intestazioni e Bates", "pulito", [
             Param("watermark", "Filigrane", "bool", True),
@@ -1059,7 +1060,7 @@ def add_background(data: bytes, color: str = "#FFF8E1", file: str = "", first_pa
 
 
 def _place(page: pymupdf.Page, text: str, position: str, fontsize: float, margin_pt: float,
-           color=(0, 0, 0)) -> None:
+           color=(0, 0, 0), box: bool = False) -> None:
     r = page.rect
     width = pymupdf.get_text_length(text, fontname="helv", fontsize=fontsize)
     vert, horiz = position.split("-")
@@ -1072,6 +1073,10 @@ def _place(page: pymupdf.Page, text: str, position: str, fontsize: float, margin
     y = margin_pt + fontsize if vert == "top" else r.height - margin_pt
     # le coordinate tengono conto della rotazione della pagina
     pt = pymupdf.Point(x, y) * page.derotation_matrix
+    if box:   # riquadro bianco dietro il testo, per la leggibilità sulle scansioni
+        rect = pymupdf.Rect(x - 2, y - fontsize, x + width + 2, y + fontsize * 0.35) * page.derotation_matrix
+        rect.normalize()
+        placement.draw_rect(page, rect, color=None, fill=(1, 1, 1), width=0)
     page.insert_text(pt, text, fontsize=fontsize, fontname="helv", color=color, rotate=page.rotation)
 
 
@@ -1130,7 +1135,7 @@ def bates_label(n: int, prefix: str = "", digits: int = 6, suffix: str = "") -> 
 
 def add_bates(data: bytes, start: int = 1, prefix: str = "", digits: int = 6, suffix: str = "",
               position: str = "bottom-right", fontsize: float = 9, margin_mm: float = 8.0,
-              check=None) -> tuple[bytes, int]:
+              check=None, box: bool = False) -> tuple[bytes, int]:
     """Numera le pagine; restituisce (dati, ultimo_numero)."""
     margin = margin_mm * 72 / 25.4
     with ENGINE_LOCK:
@@ -1143,7 +1148,7 @@ def add_bates(data: bytes, start: int = 1, prefix: str = "", digits: int = 6, su
                 if check:
                     check()
                 before = page.get_contents()
-                _place(page, bates_label(n, prefix, digits, suffix), position, fontsize, margin)
+                _place(page, bates_label(n, prefix, digits, suffix), position, fontsize, margin, box=box)
                 _mark_new_contents(doc, page, before, "bates")
                 n += 1
             return _save(doc), n - 1
@@ -1211,6 +1216,10 @@ def merge_pdfs(parts: list[tuple[str, bytes]], bookmarks: bool = True, blank_aft
                         out.insert_pdf(src)
                     if bookmarks:
                         toc.append([1, title, start + 1])
+                        # segnalibri originali del file, annidati sotto il suo
+                        for level, sub, pno, *_rest in src.get_toc(simple=True):
+                            if 1 <= pno <= src.page_count:
+                                toc.append([level + 1, sub, start + pno])
                     if blank_after_odd and src.page_count % 2 == 1:
                         ref = out[out.page_count - 1].rect
                         out.new_page(width=ref.width, height=ref.height)
@@ -1560,7 +1569,8 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
     if a == "bates":
         out, _last = add_bates(data, int(plan.get("bates_start", p.get("start", 1))), p.get("prefix", ""),
                                int(p.get("digits", 6)), p.get("suffix", ""), p.get("position", "bottom-right"),
-                               float(p.get("fontsize", 9)), float(p.get("margin", 8.0)), check=ctx.check)
+                               float(p.get("fontsize", 9)), float(p.get("margin", 8.0)), check=ctx.check,
+                               box=bool(p.get("box", False)))
         return out, protection
     if a == "remove_marks":
         kinds = {k for k in MARK_KINDS if p.get(k)}

@@ -758,4 +758,5 @@ EN: dict[str, str] = {
     "Escludi un'area": "Exclude an area",
     "Solo questa pagina": "This page only",
     "durata {s} s": "duration {s} s",
+    "Riquadro bianco dietro il numero (scansioni)": "White box behind the number (scans)",
 }
