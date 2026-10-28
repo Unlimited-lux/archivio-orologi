@@ -701,3 +701,22 @@ def test_scan_matches_widget_reader():
                 assert abs((va or 0) - (vb or 0)) < 0.01, (a.name, fld.name)
             else:
                 assert va == vb, (a.name, fld.name, va, vb)
+
+
+def test_rtl_value_appearance():
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 350, 72), "nome")
+    E.set_value(pdf, 0, x, "שלום עולם")
+    again = reopen(pdf)
+    assert E.list_fields(again)[0].value == "שלום עולם"
+    text = again[0].get_text()
+    assert "שלום" in text and "עולם" in text
+    # allineato a destra: l'inizio del testo è vicino al bordo destro del campo
+    words = [w for w in again[0].get_text("words") if w[4] in ("שלום", "עולם")]
+    assert max(w[2] for w in words) > 300
+    fonts = [again.xref_object(i, compressed=True) for i in range(1, again.xref_length())]
+    assert any("/FontFile" in o for o in fonts)
+    y = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 350, 122), "ar")
+    E.set_value(pdf, 0, y, "مرحبا")
+    assert E.field_info(pdf, 0, y).value == "مرحبا"
