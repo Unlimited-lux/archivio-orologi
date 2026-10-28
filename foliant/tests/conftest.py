@@ -9,6 +9,7 @@ os.environ.setdefault("FOLIANT_SYNC_TASKS", "1")
 
 import warnings
 
+import foliant  # noqa: F401  (prima di pymupdf: stessa configurazione dell'app, senza analisi del layout)
 import pymupdf
 import pytest
 
