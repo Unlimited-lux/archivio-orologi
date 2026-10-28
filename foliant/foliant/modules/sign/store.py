@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from foliant import i18n
 from foliant.i18n import _
 
 from .digital import CertInfo, SignError, cert_info_from_der
@@ -499,7 +500,7 @@ class AppearanceProfile:
     font_size: float = 10.0
     default: bool = False
     date_format: str = "gg/mm/aaaa hh:mm:ss"
-    label_language: str = "it"
+    label_language: str = field(default_factory=i18n.language)  # lingua delle etichette
 
     def __post_init__(self):
         if self.show is None:
