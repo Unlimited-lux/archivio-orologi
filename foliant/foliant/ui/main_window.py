@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QIntValidator, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QContextMenuEvent, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QToolBar, QToolButton,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractScrollArea, QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget,
+    QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import APP_NAME, __version__
@@ -413,8 +413,35 @@ class MainWindow(QMainWindow):
         self._shortcut("F9", self.toggle_sidebar)
         self._shortcut("Shift+F9", self.toggle_properties)
         self._shortcut("F10", lambda: self.menu_button.showMenu())
+        for seq in ("Shift+F10", "Menu"):      # su Linux Qt non li trasforma da sé in menu contestuale
+            self._shortcut(seq, self.open_context_menu)
         self._shortcut("F6", lambda: self._cycle_focus(1))
         self._shortcut("Shift+F6", lambda: self._cycle_focus(-1))
+
+    def open_context_menu(self) -> bool:
+        """Maiusc+F10 / tasto Menu (UX-18, UX-07): menu contestuale del widget con il fuoco, come il
+        clic destro; per l'area documento al centro della selezione o della vista."""
+        widget = QApplication.focusWidget()
+        if widget is None or widget.window() is not self:
+            widget = self.current_view()
+        if widget is None:
+            return False
+        target, pos = widget, widget.rect().center()
+        if isinstance(widget, DocumentView):
+            target, pos = widget.viewport(), widget.keyboard_menu_pos()
+        elif isinstance(widget, QAbstractScrollArea):
+            target = widget.viewport()
+            pos = target.rect().center()
+            if isinstance(widget, QAbstractItemView) and widget.currentIndex().isValid():
+                rect = widget.visualRect(widget.currentIndex())
+                if target.rect().contains(rect.center()):
+                    pos = rect.center()
+        elif isinstance(widget, QTabBar) and widget.currentIndex() >= 0:
+            pos = widget.tabRect(widget.currentIndex()).center()
+        event = QContextMenuEvent(QContextMenuEvent.Reason.Keyboard, pos, target.mapToGlobal(pos),
+                                  QApplication.keyboardModifiers())
+        QApplication.sendEvent(target, event)
+        return True
 
     def _focus_page_field(self) -> None:
         if self.current_view() is not None:

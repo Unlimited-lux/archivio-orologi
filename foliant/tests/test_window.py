@@ -578,6 +578,47 @@ def test_ctrl_n_opens_a_new_window_on_home(window, sample_pdf, qtbot):
     assert not set(new) & set(app_windows())
 
 
+def test_shift_f10_and_menu_key_open_the_context_menu(window, sample_pdf, qtbot, monkeypatch):
+    """UX-18 / UX-07: Maiusc+F10 e il tasto Menu aprono il menu contestuale del widget con il
+    fuoco (evento da tastiera); nell'area documento al centro della selezione."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QListWidget
+
+    view = window.open_path(sample_pdf)
+    window.activateWindow()
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    assert view.selected_text()
+    shown = []
+    monkeypatch.setattr(view, "exec_menu", lambda menu, pos: shown.append(
+        ([a.text() for a in menu.actions()], view.viewport().mapFromGlobal(pos))))
+    qtbot.keyClick(view, Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
+    assert len(shown) == 1 and "Copia" in shown[0][0]
+    sel = view.text_selection
+    area = view.page_to_view(sel.page, sel.rects[0])
+    for r in sel.rects[1:]:
+        area = area.united(view.page_to_view(sel.page, r))
+    assert (shown[0][1] - area.center().toPoint()).manhattanLength() <= 2
+    view.clear_text_selection()
+    qtbot.keyClick(view, Qt.Key.Key_Menu)
+    assert len(shown) == 2 and shown[1][1] == view.viewport().rect().center()
+
+    # un altro widget con il fuoco riceve il proprio menu (es. un elenco in un pannello)
+    panel = QListWidget(window)
+    panel.addItems(["uno", "due"])
+    panel.setCurrentRow(1)
+    panel.setGeometry(0, 0, 200, 200)
+    panel.show()
+    events = []
+    panel.contextMenuEvent = lambda ev: events.append((ev.reason(), QPoint(ev.pos())))
+    panel.setFocus()
+    qtbot.keyClick(panel, Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
+    assert events and events[0][0] == QContextMenuEvent.Reason.Keyboard
+    assert panel.visualItemRect(panel.item(1)).contains(events[0][1])
+    view.document._saved_state = view.document._state
+
+
 def test_quit_closes_every_window(settings, qtbot):
     """«Esci» (Ctrl+Q) chiude tutte le finestre dell'applicazione, non solo quella attiva."""
     from PySide6.QtCore import QEvent

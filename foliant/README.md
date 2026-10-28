@@ -158,7 +158,7 @@ Ctrl+N (Nuova finestra; «Nuovo documento» non ha scorciatoia), Ctrl+S, Ctrl+Ma
 Ctrl+Maiusc+T, Ctrl+Q (Esci: chiude tutte le finestre), Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
 Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
 N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
-Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
+Maiusc+F9, F10, Maiusc+F10 / Menu (menu contestuale del widget con il fuoco), F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
 Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
 duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
 «Righelli» (menu ☰ › Vista) non ha scorciatoia: UX-18 riserva Ctrl+R ai righelli e Ctrl+Maiusc++/-
