@@ -532,7 +532,11 @@ def create_freetext(pdf: pymupdf.Document, page_no: int, rect, text: str, style:
         annot = page.add_freetext_annot(rect, text, **kwargs)
         if not callout:
             pdf.xref_set_key(annot.xref, "CL", "null")
-            annot = page.load_annot(annot.xref)
+        else:
+            # il motore sottrae l'origine del /CropBox invece di sommarla: /CL, /Rect e /RD
+            # vengono riscritti con le conversioni di `placement`
+            _set_callout(pdf, page, annot.xref, rect, kwargs["callout"])
+        annot = page.load_annot(annot.xref)
     xref = _finish(annot, author, text, kind=CALLOUT if callout else FREETEXT)
     if style.autofit and not callout:
         pdf.xref_set_key(xref, AUTOFIT_KEY, "true")
