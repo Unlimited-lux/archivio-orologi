@@ -232,6 +232,10 @@ class FieldInfo:
     visibility: str = "visible"  # visible | hidden | screen | print
     locked: bool = False
     check_style: str = "check"   # stile del segno di caselle e opzioni
+    rotation: int = 0            # rotazione del contenuto (/MK /R)
+    caption: str = ""            # didascalia dei pulsanti
+    action: dict = field(default_factory=dict)  # azione al clic dei pulsanti
+    image: bool = False          # campo immagine
     custom_scripts: list = field(default_factory=list)  # azioni personalizzate non eseguite
     maxlen: int = 0
     font: str = "Helvetica"
@@ -406,6 +410,14 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.visibility = "print"
     elif not aflags & AF_PRINT:
         info.visibility = "screen"
+    try:
+        info.rotation = int(pdf.xref_get_key(w.xref, "MK/R")[1]) % 360 if pdf.xref_get_key(w.xref, "MK/R")[0] == "int" else 0
+    except ValueError:
+        info.rotation = 0
+    if kind == BUTTON:
+        info.caption = _value_of(*pdf.xref_get_key(w.xref, "MK/CA")) or ""
+        info.image = pdf.xref_get_key(w.xref, "MK/TP") == ("int", "1")
+        info.action = button_action(pdf, w.xref)
     if kind in (CHECKBOX, RADIO):
         ca = _value_of(*pdf.xref_get_key(w.xref, "MK/CA"))
         info.check_style = next((k for k, c in CHECK_STYLES.items() if c == ca), "check" if kind == CHECKBOX else "circle")
@@ -1567,6 +1579,13 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         if "locked" in props:
             af = (af | AF_LOCKED) if props["locked"] else (af & ~AF_LOCKED)
         pdf.xref_set_key(xref, "F", str(af))
+    if "rotation" in props:
+        rot = int(props["rotation"] or 0) % 360
+        if rot not in (0, 90, 180, 270):
+            raise FormError(_("Rotazione non valida."))
+        pdf.xref_set_key(xref, "MK/R", str(rot) if rot else "null")
+    if "action" in props and kind == BUTTON:
+        set_button_action(pdf, page, xref, props["action"])
     if "check_style" in props and kind in (CHECKBOX, RADIO):
         ch = CHECK_STYLES.get(props["check_style"], "4")
         pdf.xref_set_key(xref, "MK/CA", ps.encode_string(ch))

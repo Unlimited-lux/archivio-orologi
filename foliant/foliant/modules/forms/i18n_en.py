@@ -251,4 +251,12 @@ EN: dict[str, str] = {
     'Esporta dati XML': 'Export XML data',
     'Importa dati XML': 'Import XML data',
     'Dati XML esportati.': 'XML data exported.',
+    'Rotazione non valida.': 'Invalid rotation.',
+    "{n} pagine sembrano scansionate e senza testo: senza OCR i campi non avranno nomi. Eseguire prima l'OCR?": '{n} pages look scanned and have no text: without OCR the fields will have no names. Run OCR first?',
+    'Ordine di calcolo…': 'Calculation order…',
+    'Ordine di calcolo': 'Calculation order',
+    'Il modulo non contiene campi calcolati.': 'The form contains no calculated fields.',
+    "Trascina i campi per cambiare l'ordine in cui vengono calcolati.": 'Drag the fields to change the order in which they are calculated.',
+    'Ordina per dipendenze': 'Sort by dependencies',
+    '«{a}» è calcolato prima di «{b}», da cui dipende.': '“{a}” is calculated before “{b}”, which it depends on.',
 }

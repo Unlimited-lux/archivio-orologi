@@ -2,7 +2,7 @@
 
 Cerca, nelle pagine senza AcroForm, gli elementi che di solito indicano un
 campo da compilare: linee orizzontali, riquadri vuoti, sequenze di trattini
-bassi, glifi «casella» e, nelle pagine scansionate, le stesse forme ricavate
+bassi, glifi «casella», sequenze di caselle adiacenti («pettine») e, nelle pagine scansionate, le stesse forme ricavate
 dall'immagine. Restituisce dei *candidati*; la creazione dei widget spetta
 al chiamante.
 
@@ -22,7 +22,7 @@ import pymupdf
 TEXT, CHECKBOX = "text", "checkbox"
 
 # Priorità per l'eliminazione dei doppioni (valore più basso = vince).
-_PRIORITY = {"box": 0, "glyph": 1, "line": 2, "underscore": 3, "raster": 4}
+_PRIORITY = {"comb": -1, "box": 0, "glyph": 1, "line": 2, "underscore": 3, "raster": 4}
 
 _MIN_LINE = 36.0          # lunghezza minima di una linea-campo (pt)
 _FIELD_H = 18.0           # altezza massima di un campo su linea
@@ -30,6 +30,9 @@ _FIELD_MIN_H = 10.0       # altezza minima di un campo
 _LABEL_DIST = 150.0       # distanza massima dell'etichetta a sinistra/destra
 _LABEL_ABOVE = 14.0       # distanza massima dell'etichetta sopra
 _WORD_GAP = 12.0          # spazio massimo tra parole della stessa etichetta
+_COMB_MIN = 3             # caselle minime di un pettine
+_COMB_CELL = (4.0, 30.0)  # larghezza/altezza ammesse di una casella (pt)
+_COMB_GAP = 2.5           # spazio massimo tra caselle adiacenti
 _CHECK_GLYPHS = "☐□❑◻"
 _UNDERSCORES = re.compile(r"_{4,}")
 _LABEL_NOISE = re.compile(r"_{2,}|[" + _CHECK_GLYPHS + "]")
@@ -45,6 +48,7 @@ class Candidate:
     name: str
     multiline: bool = False
     source: str = ""
+    comb: int = 0          # caselle del pettine (0 = non è un pettine)
 
 
 class _Word(NamedTuple):
@@ -100,8 +104,9 @@ def detect_page(pdf: pymupdf.Document, page: int, *,
                  for w in pg.get_text("words")]
     label_words = _label_words(raw_words)
 
-    hlines, vlines, rects = _vector_shapes(pg)
+    hlines, vlines, rects, hsegs = _vector_shapes(pg)
     cands: list[Candidate] = []
+    cands += _from_combs(page, vlines, hsegs, label_words)
     cands += _from_rects(page, rects, hlines, raw_words, label_words, pg.rect)
     cands += _from_glyphs(page, pg, label_words)
     cands += _from_lines(page, hlines, vlines, rects, raw_words, label_words)
@@ -115,13 +120,26 @@ def detect_page(pdf: pymupdf.Document, page: int, *,
     return _postprocess(pg, cands)
 
 
+def page_needs_ocr(pdf: pymupdf.Document, page: int) -> bool:
+    """Vero se conviene eseguire prima l'OCR (FRM-27): pagina senza testo
+    (meno di 10 parole) con un'immagine che copre almeno metà pagina."""
+    pg = pdf[page]
+    return _looks_scanned(pg, len(pg.get_text("words")))
+
+
 # ------------------------------------------------------- forme vettoriali
 
 
 def _vector_shapes(pg: pymupdf.Page
-                   ) -> tuple[list[_HLine], list[_VLine], list[pymupdf.Rect]]:
-    """Estrae linee orizzontali, linee verticali e rettangoli dai disegni."""
+                   ) -> tuple[list[_HLine], list[_VLine], list[pymupdf.Rect],
+                              list[_HLine]]:
+    """Estrae linee orizzontali, linee verticali e rettangoli dai disegni.
+
+    L'ultimo elenco contiene tutti i tratti orizzontali, anche corti e
+    compresi i lati dei rettangoli (serve ai pettini).
+    """
     hsegs: list[_HLine] = []
+    edges: list[_HLine] = []
     vlines: list[_VLine] = []
     rects: list[pymupdf.Rect] = []
     for path in pg.get_drawings():
@@ -146,16 +164,18 @@ def _vector_shapes(pg: pymupdf.Page
                     r = pymupdf.Rect(it[1].rect)
                 else:
                     r = pymupdf.Rect(it[1]).normalize()
-                if r.height <= 2 and r.width >= _MIN_LINE:
+                if r.height <= 2 and r.width > 2:
                     hsegs.append(_HLine(r.x0, r.x1, (r.y0 + r.y1) / 2))
                 elif r.width <= 2 and r.height >= 2:
                     vlines.append(_VLine((r.x0 + r.x1) / 2, r.y0, r.y1))
                 elif r.width > 2 and r.height > 2:
                     rects.append(r)
+                    edges += [_HLine(r.x0, r.x1, r.y0), _HLine(r.x0, r.x1, r.y1)]
                     # i lati verticali servono a riconoscere le tabelle
                     vlines.append(_VLine(r.x0, r.y0, r.y1))
                     vlines.append(_VLine(r.x1, r.y0, r.y1))
-    return _merge_hlines(hsegs), vlines, rects
+    return (_merge_hlines(hsegs), vlines, rects,
+            _merge_hlines(hsegs + edges, 0.0))
 
 
 def _closed_rect(items: list, closed: bool) -> pymupdf.Rect | None:
@@ -186,7 +206,8 @@ def _cluster(vals: Iterable[float], tol: float = 1.0) -> list[float]:
     return out
 
 
-def _merge_hlines(segs: list[_HLine]) -> list[_HLine]:
+def _merge_hlines(segs: list[_HLine], min_len: float = _MIN_LINE
+                  ) -> list[_HLine]:
     """Unisce segmenti collineari vicini (linee tratteggiate o doppie)."""
     out: list[_HLine] = []
     for s in sorted(segs, key=lambda s: (round(s.y), s.x0)):
@@ -195,7 +216,78 @@ def _merge_hlines(segs: list[_HLine]) -> list[_HLine]:
             out[-1] = _HLine(last.x0, max(last.x1, s.x1), last.y)
         else:
             out.append(s)
-    return [s for s in out if s.x1 - s.x0 >= _MIN_LINE]
+    return [s for s in out if s.x1 - s.x0 >= min_len]
+
+
+def _from_combs(page: int, vlines: list[_VLine], hsegs: list[_HLine],
+                label_words: list[_Word]) -> list[Candidate]:
+    """Regola 5: pettini, cioè sequenze di caselle adiacenti.
+
+    Le caselle si ricavano dai tratti verticali della stessa altezza (lati
+    di rettangoli separati, divisori interni o linee sciolte), con lati
+    superiore e inferiore presenti.
+    """
+    lo, hi = _COMB_CELL
+    groups: list[list[_VLine]] = []
+    for v in sorted(vlines, key=lambda v: (round(v.y0), v.y1, v.x)):
+        if not lo <= v.y1 - v.y0 <= hi:
+            continue
+        for g in groups:
+            if abs(g[0].y0 - v.y0) <= 1 and abs(g[0].y1 - v.y1) <= 1:
+                g.append(v)
+                break
+        else:
+            groups.append([v])
+    out: list[Candidate] = []
+    for g in groups:
+        y0, y1 = g[0].y0, g[0].y1
+        xs: list[list[float]] = []          # x vicine = un solo divisore
+        for x in sorted(v.x for v in g):
+            if xs and x - xs[-1][-1] <= _COMB_GAP:
+                xs[-1].append(x)
+            else:
+                xs.append([x])
+        mid = [sum(a) / len(a) for a in xs]
+        for run in _comb_runs(list(zip(mid, mid[1:]))):
+            x0, x1 = run[0][0], run[-1][1]
+            if not (_covered(hsegs, x0, x1, y0) and _covered(hsegs, x0, x1, y1)):
+                continue
+            r = pymupdf.Rect(x0, y0, x1, y1)
+            out.append(Candidate(page, r, TEXT, _text_name(r, label_words),
+                                 False, "comb", len(run)))
+    return out
+
+
+def _comb_runs(cells: list[tuple[float, float]]
+               ) -> list[list[tuple[float, float]]]:
+    """Sequenze di almeno _COMB_MIN celle consecutive di larghezza simile."""
+    lo, hi = _COMB_CELL
+    runs: list[list[tuple[float, float]]] = []
+    cur: list[tuple[float, float]] = []
+    for c in cells:
+        w = c[1] - c[0]
+        fits = lo <= w <= hi
+        if cur:
+            ref = sorted(b - a for a, b in cur)[len(cur) // 2]
+            if not fits or abs(w - ref) > 0.25 * ref:
+                runs.append(cur)
+                cur = []
+        if fits:
+            cur.append(c)
+    runs.append(cur)
+    return [r for r in runs if len(r) >= _COMB_MIN]
+
+
+def _covered(hsegs: list[_HLine], x0: float, x1: float, y: float) -> bool:
+    """Vero se i tratti orizzontali alla quota `y` coprono [x0, x1]."""
+    spans = sorted((max(h.x0, x0), min(h.x1, x1)) for h in hsegs
+                   if abs(h.y - y) <= 1 and h.x1 > x0 and h.x0 < x1)
+    reach = x0
+    for a, b in spans:
+        if a > reach + _COMB_GAP:
+            return False
+        reach = max(reach, b)
+    return reach >= x1 - _COMB_GAP
 
 
 def _is_grid_line(h: _HLine, vlines: list[_VLine]) -> bool:
@@ -503,6 +595,9 @@ def _postprocess(pg: pymupdf.Page, cands: list[Candidate]) -> list[Candidate]:
     """Toglie doppioni, campi già esistenti e fuori pagina; ordina."""
     bounds = (pg.rect * pg.derotation_matrix).normalize()
     widgets = [pymupdf.Rect(w.rect) for w in (pg.widgets() or [])]
+    combs = [c.rect for c in cands if c.comb]
+    cands = [c for c in cands if c.comb or not any(
+        abs(c.rect & r) > 0.5 * abs(c.rect) for r in combs)]
     kept: list[Candidate] = []
     for c in sorted(cands, key=lambda c: _PRIORITY.get(c.source, 9)):
         area = abs(c.rect)

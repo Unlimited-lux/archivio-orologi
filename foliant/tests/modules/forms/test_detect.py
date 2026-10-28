@@ -5,7 +5,8 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-from foliant.modules.forms.detect import Candidate, detect, detect_page
+from foliant.modules.forms.detect import (Candidate, detect, detect_page,
+                                         page_needs_ocr)
 
 
 def _doc() -> tuple[pymupdf.Document, pymupdf.Page]:
@@ -191,3 +192,180 @@ def test_detect_progress():
     assert [c.page for c in cands] == [0, 0, 1, 1, 2, 2]
     assert all(isinstance(c, Candidate) for c in cands)
     assert [c.page for c in detect(doc, pages=[2])] == [2, 2]
+
+
+# ---------------------------------------------------------------- pettini
+
+
+def _iou(a: pymupdf.Rect, b: pymupdf.Rect) -> float:
+    inter = abs(a & b)
+    return inter / (abs(a) + abs(b) - inter)
+
+
+def _comb_boxes(page, x, y, n, w=14, h=16):
+    """Pettine di `n` rettangoli separati con i lati in comune."""
+    for i in range(n):
+        page.draw_rect(pymupdf.Rect(x + i * w, y, x + (i + 1) * w, y + h))
+    return pymupdf.Rect(x, y, x + n * w, y + h)
+
+
+def test_comb_separate_boxes():
+    doc, page = _doc()
+    page.insert_text((72, 212), "Codice fiscale:", fontsize=11)
+    box = _comb_boxes(page, 160, 200, 16)
+    (c,) = detect_page(doc, 0)
+    assert (c.kind, c.comb, c.source) == ("text", 16, "comb")
+    assert "Codice" in c.name
+    assert _iou(c.rect, box) >= 0.9
+
+
+def test_comb_outer_rect_with_dividers():
+    doc, page = _doc()
+    page.insert_text((72, 212), "Codice fiscale:", fontsize=11)
+    box = pymupdf.Rect(160, 200, 160 + 16 * 14, 216)
+    page.draw_rect(box)
+    for i in range(1, 16):
+        page.draw_line((160 + i * 14, 200), (160 + i * 14, 216))
+    (c,) = detect_page(doc, 0)
+    assert (c.kind, c.comb, c.name) == ("text", 16, "Codice_fiscale")
+    assert _iou(c.rect, box) >= 0.9
+
+
+def test_comb_loose_lines_and_gaps():
+    doc, page = _doc()
+    # solo linee: due orizzontali e 9 verticali (8 caselle)
+    page.draw_line((100, 300), (228, 300))
+    page.draw_line((100, 316), (228, 316))
+    for i in range(9):
+        page.draw_line((100 + i * 16, 300), (100 + i * 16, 316))
+    # rettangoli separati da 1,5 pt
+    for i in range(5):
+        x = 100 + i * 15.5
+        page.draw_rect(pymupdf.Rect(x, 400, x + 14, 414))
+    cands = detect_page(doc, 0)
+    assert [(c.comb, c.kind) for c in cands] == [(8, "text"), (5, "text")]
+    assert _iou(cands[0].rect, pymupdf.Rect(100, 300, 228, 316)) >= 0.9
+    assert _iou(cands[1].rect, pymupdf.Rect(100, 400, 176, 414)) >= 0.9
+
+
+def test_two_boxes_are_not_a_comb():
+    doc, page = _doc()
+    _comb_boxes(page, 100, 200, 2)
+    cands = detect_page(doc, 0)
+    assert [c.kind for c in cands] == ["checkbox", "checkbox"]
+    assert all(c.comb == 0 for c in cands)
+
+
+# -------------------------------------------------------------- benchmark
+
+
+def _benchmark_form(page) -> list[tuple[str, pymupdf.Rect]]:
+    """Modulo vettoriale con 20 campi attesi (tipo, rettangolo) e rumore."""
+    exp: list[tuple[str, pymupdf.Rect]] = []
+
+    def text(pos, s, size=10):
+        page.insert_text(pos, s, fontsize=size)
+
+    def line(label, x, y, x1, lx=None):
+        text((lx if lx is not None else x - 70, y - 2), label)
+        page.draw_line((x, y), (x1, y))
+        exp.append(("text", pymupdf.Rect(x, y - 16, x1, y)))
+
+    def box(label, r):
+        text((r.x0 - 70, r.y1 - 5), label)
+        page.draw_rect(r)
+        exp.append(("text", r))
+
+    def check(label, x, y):
+        r = pymupdf.Rect(x, y, x + 12, y + 12)
+        page.draw_rect(r)
+        text((x + 16, y + 10), label)
+        exp.append(("checkbox", r))
+
+    # rumore: titolo, intestazione con testo, tabella, sottolineatura
+    text((72, 50), "Domanda di iscrizione", 16)
+    page.draw_rect(pymupdf.Rect(60, 60, 535, 80), fill=(0.9, 0.9, 0.9))
+    text((70, 74), "Sezione A - Dati anagrafici")
+    text((72, 760), "Leggere attentamente l'informativa")
+    page.draw_line((72, 762), (240, 762))
+    for y in (700, 715, 730):
+        page.draw_line((72, y), (372, y))
+    for x in (72, 172, 272, 372):
+        page.draw_line((x, 700), (x, 730))
+
+    line("Nome:", 140, 110, 290)                    # 1
+    line("Cognome:", 370, 110, 530, lx=310)          # 2 stessa riga
+    line("Indirizzo:", 140, 140, 530)                # 3
+    line("Citta:", 140, 170, 360)                    # 4
+    line("CAP:", 400, 170, 530, lx=370)              # 5 stessa riga
+    text((72, 192), "Codice fiscale:")               # 6 pettine
+    cf = _comb_boxes(page, 160, 180, 16)
+    exp.append(("text", cf))
+    text((72, 222), "Partita IVA:")                  # 7 pettine a divisori
+    piva = pymupdf.Rect(160, 210, 160 + 11 * 14, 226)
+    page.draw_rect(piva)
+    for i in range(1, 11):
+        page.draw_line((160 + i * 14, 210), (160 + i * 14, 226))
+    exp.append(("text", piva))
+    box("Telefono", pymupdf.Rect(140, 240, 300, 260))  # 8
+    box("Email", pymupdf.Rect(370, 240, 530, 260))     # 9 stessa riga
+    text((72, 285), "Data di nascita: ____________")   # 10 trattini
+    w = pymupdf.get_text_length("Data di nascita: ", fontsize=10)
+    w2 = pymupdf.get_text_length("____________", fontsize=10)
+    exp.append(("text", pymupdf.Rect(72 + w, 271, 72 + w + w2, 287)))
+    text((72, 315), "Note")                            # 11 multiriga
+    page.draw_rect(pymupdf.Rect(72, 320, 530, 400))
+    exp.append(("text", pymupdf.Rect(72, 320, 530, 400)))
+    text((72, 425), "Descrizione dell'attivita")       # 12 multiriga
+    page.draw_rect(pymupdf.Rect(72, 430, 300, 500))
+    exp.append(("text", pymupdf.Rect(72, 430, 300, 500)))
+    check("Privato", 72, 520)                          # 13
+    check("Azienda", 160, 520)                         # 14
+    check("Si", 72, 545)                               # 15
+    check("No", 160, 545)                              # 16
+    check("Accetto il trattamento dei dati", 72, 570)  # 17
+    line("Luogo:", 140, 620, 290)                      # 18
+    line("Data:", 370, 620, 530, lx=330)               # 19 stessa riga
+    line("Firma:", 140, 660, 400)                      # 20
+    return exp
+
+
+def test_benchmark_vector_form():
+    doc, page = _doc()
+    exp = _benchmark_form(page)
+    assert len(exp) == 20
+    cands = detect_page(doc, 0)
+    used: set[int] = set()
+    matched = 0
+    for kind, r in exp:
+        best = max((i for i in range(len(cands)) if i not in used),
+                   key=lambda i: _iou(cands[i].rect, r), default=None)
+        if best is None or _iou(cands[best].rect, r) < 0.6:
+            continue
+        used.add(best)
+        if cands[best].kind == kind:
+            matched += 1
+    spurious = len(cands) - len(used)
+    assert matched >= 18, (matched, cands)
+    assert spurious <= 2, [cands[i] for i in range(len(cands)) if i not in used]
+    combs = sorted(c.comb for c in cands if c.comb)
+    assert combs == [11, 16]
+
+
+# -------------------------------------------------------------------- OCR
+
+
+def test_page_needs_ocr():
+    src, page = _doc()
+    _draw_form(page)
+    assert not page_needs_ocr(src, 0)          # testo presente
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))
+    doc = pymupdf.open()
+    scan = doc.new_page(width=595, height=842)
+    scan.insert_image(scan.rect, pixmap=pix)
+    small = doc.new_page(width=595, height=842)
+    small.insert_image(pymupdf.Rect(0, 0, 200, 200), pixmap=pix)
+    doc.new_page()
+    assert page_needs_ocr(doc, 0)
+    assert not page_needs_ocr(doc, 1)          # immagine piccola
+    assert not page_needs_ocr(doc, 2)          # pagina vuota

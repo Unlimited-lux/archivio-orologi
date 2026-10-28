@@ -142,11 +142,12 @@ class FormsModule(QObject):
         self.act_flatten = ctx.action(_("Appiattisci modulo…"), "layers", self.flatten_dialog)
         self.act_recalc = ctx.action(_("Ricalcola"), "calculator", self.recalculate)
         self.act_check = ctx.action(_("Verifica modulo"), "list-checks", self.check_form)
+        self.act_calc_order = ctx.action(_("Ordine di calcolo…"), "list-ordered", self.calc_order_dialog)
         self.act_xfa = ctx.action(_("Converti in modulo standard"), "file-check", self.convert_xfa)
         self.act_xfa_export = ctx.action(_("Esporta dati XML…"), "file-output", self.export_xfa_dialog)
         self.act_xfa_import = ctx.action(_("Importa dati XML…"), "file-input", self.import_xfa_dialog)
         data_menu = QMenu(_("Dati"), ctx.window)
-        for a in (self.act_import, self.act_export, None, self.act_reset, self.act_recalc, self.act_check,
+        for a in (self.act_import, self.act_export, None, self.act_reset, self.act_recalc, self.act_calc_order, self.act_check,
                   None, self.act_flatten, None, self.act_xfa_export, self.act_xfa_import, self.act_xfa):
             if a is None:
                 data_menu.addSeparator()
@@ -804,6 +805,29 @@ class FormsModule(QObject):
         names = self._change(_("Ricalcola"), E.recalculate) or []
         self.ctx.status(_("Campi ricalcolati: {n}").format(n=len(names)))
 
+    def calc_order_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            order = E.calc_order(view.document.pdf)
+        if not order:
+            self.ctx.info(_("Ordine di calcolo"), _("Il modulo non contiene campi calcolati."))
+            return
+        from .dialogs import ask_calc_order
+
+        def problems(names):
+            with ENGINE_LOCK:
+                return E.order_problems(view.document.pdf, names)
+
+        def auto():
+            with ENGINE_LOCK:
+                return E.dependency_order(view.document.pdf)
+
+        new = ask_calc_order(self.ctx.window, order, problems, auto)
+        if new and new != order:
+            self._change(_("Ordine di calcolo"), lambda pdf: E.set_calc_order(pdf, new) or True, view)
+
     def check_form(self) -> list[tuple[E.FieldInfo, str]]:
         view = self.ctx.current_view()
         if view is None:
@@ -884,6 +908,14 @@ class FormsModule(QObject):
             return
         doc = view.document
         page_count = view.page_count
+        with ENGINE_LOCK:
+            scanned = [i for i in range(page_count) if D.page_needs_ocr(doc.pdf, i)]
+        if scanned and self.ctx.mode("ocr") is not None and self.ctx.confirm(
+                _("Riconosci campi"),
+                _("{n} pagine sembrano scansionate e senza testo: senza OCR i campi non avranno nomi. "
+                  "Eseguire prima l'OCR?").format(n=len(scanned))):
+            self.ctx.set_mode("ocr")
+            return
 
         def work(progress):
             with ENGINE_LOCK:

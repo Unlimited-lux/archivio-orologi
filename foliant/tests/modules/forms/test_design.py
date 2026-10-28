@@ -350,3 +350,43 @@ def test_button_actions_reset_and_hide(window, tmp_path):
     f.click_field([i for i in f.state.fields if i.name == "hide"][0])
     c = [i for i in fields(view) if i.name == "C"][0]
     assert c.hidden
+
+
+def test_calc_order_dialog_auto(window, tmp_path, monkeypatch):
+    from foliant.modules.forms import dialogs
+    pdf = pymupdf.open()
+    pdf.new_page()
+    xs = {n: E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 40 + 30 * i, 200, 58 + 30 * i), n)
+          for i, n in enumerate(("a", "b", "k", "S", "T"))}
+    E.update_properties(pdf, 0, xs["T"], calc=E.Calculation("PRD", ["S", "k"]))
+    E.update_properties(pdf, 0, xs["S"], calc=E.Calculation("SUM", ["a", "b"]))
+    pdf.save(str(tmp_path / "co.pdf"))
+    view = open_form(window, tmp_path / "co.pdf")
+    seen = {}
+
+    def fake(parent, order, problems, auto):
+        seen["problems"] = problems(order)
+        return auto()
+
+    monkeypatch.setattr(dialogs, "ask_calc_order", fake)
+    module().calc_order_dialog()
+    assert seen["problems"] == [("T", "S")]
+    with view.document.lock:
+        assert E.calc_order(view.document.pdf) == ["S", "T"]
+
+
+def test_detect_offers_ocr_on_scans(window, tmp_path, monkeypatch, no_modal_boxes):
+    src = pymupdf.open()
+    pg = src.new_page()
+    pg.draw_line((100, 200), (400, 200))
+    pix = pg.get_pixmap(dpi=100)
+    pdf = pymupdf.open()
+    p2 = pdf.new_page()
+    p2.insert_image(p2.rect, stream=pix.tobytes("png"))
+    pdf.save(str(tmp_path / "scan.pdf"))
+    view = open_form(window, tmp_path / "scan.pdf")
+    if window.ctx.mode("ocr") is None:
+        window.ctx.add_mode("ocr", "OCR", "scan-text", 60)
+    module().detect_fields()
+    assert any(c[0] == "question" for c in no_modal_boxes)
+    assert window.ctx.current_mode() == "ocr"

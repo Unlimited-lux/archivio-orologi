@@ -195,3 +195,43 @@ def review_candidates(parent: QWidget, candidates: list) -> list:
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return []
     return [c for i, c in enumerate(candidates) if lst.item(i).checkState() == Qt.CheckState.Checked]
+
+
+def ask_calc_order(parent: QWidget, order: list[str], problems, auto) -> list[str] | None:
+    """Elenco riordinabile dei campi calcolati, con segnalazione delle dipendenze fuori ordine."""
+    from PySide6.QtWidgets import QAbstractItemView, QPushButton
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(_("Ordine di calcolo"))
+    lay = QVBoxLayout(dlg)
+    lay.addWidget(QLabel(_("Trascina i campi per cambiare l'ordine in cui vengono calcolati.")))
+    lst = QListWidget(dlg)
+    lst.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+    lst.addItems(order)
+    lay.addWidget(lst)
+    warn = QLabel(dlg)
+    warn.setWordWrap(True)
+    lay.addWidget(warn)
+    fix = QPushButton(_("Ordina per dipendenze"), dlg)
+    lay.addWidget(fix)
+
+    def names():
+        return [lst.item(i).text() for i in range(lst.count())]
+
+    def update():
+        bad = problems(names())
+        warn.setText("\n".join(_("«{a}» è calcolato prima di «{b}», da cui dipende.").format(a=a, b=b) for a, b in bad))
+        fix.setEnabled(bool(bad))
+
+    def apply_auto():
+        lst.clear()
+        lst.addItems(auto())
+        update()
+
+    fix.clicked.connect(apply_auto)
+    lst.model().rowsMoved.connect(lambda *a: update())
+    update()
+    lay.addWidget(_buttons(dlg))
+    dlg.resize(380, 360)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return names()
