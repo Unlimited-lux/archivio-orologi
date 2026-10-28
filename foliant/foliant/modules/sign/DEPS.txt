@@ -1,0 +1,1 @@
+# Nessuna nuova dipendenza: pyHanko, pyhanko-certvalidator, cryptography, Pillow e numpy sono già in requirements.txt.
