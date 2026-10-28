@@ -975,3 +975,29 @@ def test_certified_no_changes_and_signed_version_are_read_only(window, monkeypat
     c = _ctl(window)
     sv = c.open_signed_version(view, c.state(view).statuses[0])
     assert sv.document.locked and "sola lettura" in sv.document.locked_reason
+
+
+def test_document_banner_for_signatures_and_fields(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """SIG-18/SIG-20: barra sopra il documento con lo stato delle firme e i campi da firmare."""
+    from tests.conftest import make_pdf
+    store.TrustStore().add(id_a[1])
+    view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "bn.pdf", id_a)
+    assert "firme" in window.ctx.banners(view)
+    data = Path(make_pdf(tmp_path / "campi.pdf", pages=2)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Venditore", 0, (60, 700, 250, 760))
+    data, _n = digital.add_signature_field(data, "Acquirente", 1, (300, 700, 500, 760))
+    p = tmp_path / "campi-vuoti.pdf"
+    p.write_bytes(data)
+    v2 = window.open_path(str(p))
+    assert "firme" in window.ctx.banners(v2)
+    banner = window.ctx.show_banner(v2, "firme", "x")    # stesso id: restituisce l'avviso aggiornabile
+    assert banner is not None
+    _ctl(window).update_banner(v2)
+    pages = []
+    _ctl(window)._banner_next_field(v2)
+    pages.append(v2.current_page)
+    _ctl(window)._banner_next_field(v2)
+    pages.append(v2.current_page)
+    assert pages == [0, 1]
+    plain = window.open_path(make_pdf(tmp_path / "semplice.pdf"))
+    assert "firme" not in window.ctx.banners(plain)

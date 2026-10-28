@@ -57,6 +57,8 @@ class SignController(QObject):
         ctx.documentClosed.connect(self._on_closed)
         ctx.documentChanged.connect(self._on_changed)
         ctx.add_change_guard(self._change_guard)
+        self.panel = None                     # SignaturesPanel, impostato in register()
+        self.stateChanged.connect(self.update_banner)
 
     # ================================================================ libreria
     def library(self, interactive: bool = True) -> SignatureLibrary | None:
@@ -423,6 +425,49 @@ class SignController(QObject):
                 self.stateChanged.emit(view)
                 if st.signed and not doc.is_modified:
                     self.ctx.status(_("Documento firmato: modificare il contenuto invaliderà le firme."), 10000)
+
+    BANNER_ID = "firme"
+
+    def update_banner(self, view) -> None:
+        """SIG-18/SIG-20/SIG-21: barra sopra il documento con lo stato delle firme e i campi da firmare."""
+        if view is None or getattr(view.document, "closed", False):
+            return
+        st = self.state(view)
+        if st.running:
+            return
+        empties = [f for f in self.empty_fields(view) if not f.hidden]
+        if not st.statuses and not empties:
+            self.ctx.hide_banner(view, self.BANNER_ID)
+            return
+        from . import digital
+        text = digital.summary(st.statuses, empties)
+        if st.statuses and st.certification != 1:
+            text += " · " + _("Modificare il contenuto invaliderà le firme.")
+        bad = bool(st.error) or any(s.status != "valida" for s in st.statuses)
+        actions = []
+        if empties:
+            actions.append((_("Firma ora"), lambda v=view: self._banner_sign_now(v)))
+            actions.append((_("Campo successivo"), lambda v=view: self._banner_next_field(v)))
+        if st.statuses:
+            actions.append((_("Dettagli"), lambda: self.ctx.show_sidebar_panel("firme")))
+        if st.certification == 1:
+            actions.append((_("Lavora su una copia senza firme"), lambda v=view: self.open_unsigned_copy(v)))
+        level = "error" if bad else ("warning" if empties else "info")
+        self.ctx.show_banner(view, self.BANNER_ID, text, actions, level=level, priority=30)
+
+    def _banner_sign_now(self, view) -> None:
+        self.ctx.show_sidebar_panel("firme")
+        if self.panel is not None and self.panel.view is view:
+            self.panel.sign_now()
+        else:
+            fields = [f for f in self.empty_fields(view) if not f.hidden]
+            if fields:
+                self.digital_sign(view, field=fields[0])
+
+    def _banner_next_field(self, view) -> None:
+        self.ctx.show_sidebar_panel("firme")
+        if self.panel is not None and self.panel.view is view:
+            self.panel.next_field()
 
     def _apply_certification_lock(self, doc, st: VerifyState) -> None:
         """SIG-17/SIG-21: un documento certificato «nessuna modifica» è in sola lettura."""
@@ -935,6 +980,8 @@ TRANSLATIONS_EN = {
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
     "Operazione non riuscita: {e}": "Operation failed: {e}",
+    "Modificare il contenuto invaliderà le firme.": "Changing the content will invalidate the signatures.",
+    "Firma ora": "Sign now", "Campo successivo": "Next field", "Dettagli": "Details",
     "Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza firme.":
         "Document certified “no changes”: to change it, work on a copy without signatures.",
     "Versione firmata da {who}: sola lettura.": "Version signed by {who}: read-only.",
