@@ -643,3 +643,25 @@ def test_proposta_su_livello_ocr_con_strumento_modifica(window, qtbot, scan_two,
     assert bar is not None and bar.isVisible() and bar.page == 0
     assert "invisibile" in bar.label.text()
     view.set_tool(None)
+
+
+def test_avviso_bassa_risoluzione_visibile(window, tmp_path, monkeypatch):
+    """bug_08: la nota «Risoluzione bassa» compare in revisione, nel messaggio finale e nella barra di stato."""
+    path = image_pdf(tmp_path / "basso.pdf", [scan_image(lines=FRASI[:2], dpi=100)], dpi=100)
+    view = window.open_path(path)
+    ctl = ocr_controller()
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["summary"] = dlg._summary()
+        seen["tip"] = dlg.pages.item(0).toolTip()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(dialogs.ReviewDialog, "exec", fake_exec)
+    infos = []
+    monkeypatch.setattr(ctl.ctx, "info", lambda t, m: infos.append(m))
+    status = []
+    monkeypatch.setattr(ctl.ctx, "status", lambda m, *a: status.append(m))
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=True)
+    assert "Risoluzione bassa" in seen["summary"] and "Risoluzione bassa" in seen["tip"]
+    assert any("Risoluzione bassa" in m for m in infos)
+    assert any("Risoluzione bassa" in m for m in status)

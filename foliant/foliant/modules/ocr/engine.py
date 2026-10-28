@@ -242,6 +242,10 @@ class OcrResult:
     def text(self, page_separator: str = "\n\n") -> str:
         return page_separator.join(p.text for p in self.recognized).strip() + "\n"
 
+    def notes(self) -> list[str]:
+        """Avvisi per pagina (risoluzione bassa, pagina ridotta…), es. «Pagina 3: Risoluzione bassa…»."""
+        return [_("Pagina {n}: {m}").format(n=p.index + 1, m=note) for p in self.pages for note in p.notes]
+
     def page(self, index: int) -> PageResult | None:
         for p in self.pages:
             if p.index == index:

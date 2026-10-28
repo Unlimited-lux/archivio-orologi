@@ -833,7 +833,9 @@ class OcrController(QObject):
         for res in result.recognized:
             st.placed[res.index] = list(res.placed)
         st.dismissed = True
-        self.ctx.status(_("Risultato aperto in una nuova scheda; l'originale è invariato."), 8000)
+        notes = result.notes()
+        self.ctx.status(_("Risultato aperto in una nuova scheda; l'originale è invariato.") +
+                        ("" if not notes else " " + "; ".join(notes)), 15000)
         return new_view
 
     def apply(self, view, result: engine.OcrResult) -> None:
@@ -855,7 +857,12 @@ class OcrController(QObject):
         low = sum(len(p.low_confidence_words()) for p in result.recognized)
         msg = _("Testo riconosciuto in {n} pagine ({w} parole, {l} incerte).").format(
             n=len(result.recognized), w=words, l=low)
-        self.ctx.status(msg, 10000)
+        notes = result.notes()
+        if notes:
+            msg += " " + "; ".join(notes)
+        self.ctx.status(msg, 15000)
+        if notes:
+            self.ctx.info(_("Riconoscimento del testo"), _("Avvisi:") + "\n\n" + "\n".join(notes))
         if words and low / words > 0.3:
             self.ctx.info(_("Riconoscimento del testo"),
                           _("Molte parole sono incerte: controlla che le lingue scelte siano quelle del documento "

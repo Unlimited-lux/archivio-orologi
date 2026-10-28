@@ -807,10 +807,14 @@ class ReviewDialog(QDialog):
             else:
                 text = _("Pagina {n} — saltata ({m})").format(n=res.index + 1, m=res.message)
                 ic = icon("circle-minus")
+            if res.notes:
+                text += " · ⚠"
+                ic = icon("triangle-alert")
             item = QListWidgetItem(ic, text)
             item.setData(Qt.ItemDataRole.UserRole, res.index)
-            if res.message:
-                item.setToolTip(res.message)
+            tip = "\n".join(([res.message] if res.message else []) + res.notes)
+            if tip:
+                item.setToolTip(tip)
             self.pages.addItem(item)
         self.pages.currentRowChanged.connect(self._show_page)
         self.only_low.toggled.connect(lambda _c: self._fill_table())
@@ -831,7 +835,11 @@ class ReviewDialog(QDialog):
             parts.append(_("non riconosciute: {f}").format(f=engine.format_pages([p.index for p in r.failed])))
         if r.skipped:
             parts.append(_("saltate: {s}").format(s=len(r.skipped)))
-        return " · ".join(parts)
+        text = " · ".join(parts)
+        notes = r.notes()
+        if notes:
+            text += "\n" + "\n".join(notes)
+        return text
 
     def current_result(self) -> engine.PageResult | None:
         item = self.pages.currentItem()

@@ -327,4 +327,5 @@ EN = {
     'OCR in blocco annullato: i file completati restano, nessun file parziale.': 'Batch OCR cancelled: completed files are kept, no partial files.',
     'Avvia OCR': 'Start OCR',
     'La pagina {n} ha solo testo invisibile riconosciuto da un OCR: per modificarlo rendila modificabile.': 'Page {n} only has invisible text from an OCR: make it editable to edit that text.',
+    'Avvisi:': 'Warnings:',
 }
