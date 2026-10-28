@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 import pymupdf
 
@@ -103,6 +104,15 @@ def page_blocks(page: pymupdf.Page, kind: str = "dict", flags: int | None = None
     return reading_order(data.get("blocks", []))
 
 
+class Box(NamedTuple):
+    """Riquadro di un carattere: leggero (centinaia di migliaia per un documento grande),
+    con gli stessi campi di `pymupdf.Rect`, che lo accetta come argomento."""
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
 def extract_page_text(page: pymupdf.Page) -> PageText:
     """Testo della pagina carattere per carattere; le parole sillabate a fine
     riga ("infor-" + "mazione") sono ricomposte togliendo il trattino."""
@@ -135,7 +145,7 @@ def extract_page_text(page: pymupdf.Page) -> PageText:
                     pt.lines.append(-1)
             for c, bbox in line_chars:
                 chars.append(c)
-                pt.boxes.append(pymupdf.Rect(bbox))
+                pt.boxes.append(Box._make(bbox))
                 pt.lines.append(line_no)
             line_no += 1
     pt.text = "".join(chars)
@@ -219,24 +229,37 @@ def find_spans(pt: PageText, query: str, opts: SearchOptions | None = None) -> l
 
 
 def _rects_of(pt: PageText, src: list[int]) -> list[pymupdf.Rect]:
-    rects: dict[int, pymupdf.Rect] = {}
-    order: list[int] = []
+    # unione per riga calcolata sui numeri: un solo Rect per riga (le unioni di Rect costano)
+    rects: dict[int, list[float]] = {}
     for i in src:
         box = pt.boxes[i]
         line = pt.lines[i]
         if box is None or line == -2:
             continue
-        if line not in rects:
-            rects[line] = pymupdf.Rect(box)
-            order.append(line)
+        r = rects.get(line)
+        if r is None:
+            rects[line] = [box.x0, box.y0, box.x1, box.y1]
         else:
-            rects[line] |= box
-    return [rects[k] for k in order]
+            r[0], r[1] = min(r[0], box.x0), min(r[1], box.y0)
+            r[2], r[3] = max(r[2], box.x1), max(r[3], box.y1)
+    return [pymupdf.Rect(*r) for r in rects.values()]
+
+
+def rects_of(pt: PageText, src: list[int]) -> list[pymupdf.Rect]:
+    """Rettangoli (uno per riga) dei caratteri `src` di un'occorrenza."""
+    return _rects_of(pt, src)
 
 
 def find_in_page_text(pt: PageText, query: str, opts: SearchOptions | None = None) -> list[list[pymupdf.Rect]]:
     """Occorrenze di `query`: per ciascuna, i rettangoli (uno per riga coinvolta)."""
     return [_rects_of(pt, src) for src in find_spans(pt, query, opts)]
+
+
+def find_hits(pt: PageText, query: str,
+              opts: SearchOptions | None = None) -> list[tuple[list[pymupdf.Rect], tuple[str, str, str]]]:
+    """Occorrenze con rettangoli e contesto (prima, trovato, dopo) per l'elenco dei risultati:
+    il contesto si ricava dagli indici dei caratteri, senza riscorrere la pagina."""
+    return [(_rects_of(pt, src), span_snippet(pt, src, 28)) for src in find_spans(pt, query, opts)]
 
 
 def find_across_pages(a: PageText, b: PageText, query: str,
@@ -284,8 +307,18 @@ def context_snippet(pt: PageText, rects: list[pymupdf.Rect], width: int = 40) ->
             idx.append(i)
     if not idx:
         return "", "", ""
-    a, b = idx[0], idx[-1] + 1
+    return _snippet(pt, idx[0], idx[-1] + 1, width)
 
+
+def span_snippet(pt: PageText, src: list[int], width: int = 40) -> tuple[str, str, str]:
+    """Come `context_snippet`, dagli indici dei caratteri dell'occorrenza (tempo costante)."""
+    idx = [i for i in src if pt.boxes[i] is not None and pt.lines[i] != -2]
+    if not idx:
+        return "", "", ""
+    return _snippet(pt, idx[0], idx[-1] + 1, width)
+
+
+def _snippet(pt: PageText, a: int, b: int, width: int) -> tuple[str, str, str]:
     def clean(s: str) -> str:
         return re.sub(r"\s+", " ", s)
 

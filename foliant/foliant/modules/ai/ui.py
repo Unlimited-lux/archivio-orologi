@@ -961,7 +961,14 @@ class Controller:
         doc = view.document
         panel = self.services.panel
 
-        def generate(language, tone, length):
+        profile = self.services.store.active(check_key=False)
+        with ENGINE_LOCK:
+            all_pages = list(range(doc.page_count))
+        photos = content.photo_areas(doc.pdf, all_pages)
+        photos_reason = "" if profile is None or profile.images else \
+            _("Il modello del profilo non accetta immagini: la scheda usa solo il testo.")
+
+        def generate(language, tone, length, use_photos=False):
             kind = panel.scope_kind()
             pages = None
             if kind == engine.PAGES:
@@ -972,13 +979,40 @@ class Controller:
                     return None
             scope = engine.build_scope(doc.pdf, engine.PAGES if pages else engine.DOCUMENT, pages=pages,
                                        cache=self.services.cache, fingerprint=content.content_fingerprint(doc.pdf))
-            return self._run(_("Scheda prodotto…"), lambda job: product_sheet.make_product_sheet(
-                job, scope, language, tone, length))
+            images = []
+            if use_photos:
+                from .providers import ImagePart
+                chosen = [(p, r) for p, r in photos if pages is None or p in pages]
+                for p, r in chosen:
+                    png, w, h = content.render_area(doc.pdf, p, r, max_side=1568)
+                    images.append(ImagePart(png, "image/png", w, h))
+            textless = content.textless_pages(doc.pdf, scope.page_indices)
+            sheet = self._run(_("Scheda prodotto…"), lambda job: product_sheet.make_product_sheet(
+                job, scope, language, tone, length, images))
+            if sheet is not None and textless:
+                sheet.warnings.append(_("Le pagine {p} non hanno testo (scansioni): esegui prima l'OCR per usarne "
+                                        "i dati.").format(p=", ".join(str(i + 1) for i in textless)))
+            return sheet
 
         def open_document(data):
             self.ctx.open_document(Document.from_bytes(data, display_name=_("Scheda prodotto.pdf")))
 
-        dlg = ProductSheetDialog(generate, self.ctx.ask_save_path, open_document, self.ctx.window)
+        def insert(text):
+            if doc.closed:
+                self.ctx.error(_("Scheda prodotto"), _("Il documento d'origine non è più aperto."))
+                return
+            from . import compose
+            try:
+                compose.add_text_box(doc, view.current_page, None, text, author=self.ctx.author_name(),
+                                     label=_("Inserisci scheda prodotto"))
+            except FoliantError as e:
+                self.ctx.error(_("Scheda prodotto"), str(e))
+                return
+            self.ctx.notify(_("Scheda inserita a pagina {p}.").format(p=view.current_page + 1),
+                            [(_("Annulla"), doc.undo)])
+
+        dlg = ProductSheetDialog(generate, self.ctx.ask_save_path, open_document, self.ctx.window, insert=insert,
+                                 photos=len(photos), photos_reason=photos_reason)
         self.exec_dialog(dlg)
         return dlg
 

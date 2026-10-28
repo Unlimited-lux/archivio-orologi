@@ -89,18 +89,33 @@ def build_sheet(data: dict, scope: engine.Scope) -> ProductSheet:
     return sheet
 
 
+PHOTOS_RULE = (" Photos of the product are attached: use them only for features that are clearly visible "
+               "(e.g. dial colour, case shape, bracelet type); never infer serial numbers, references or technical "
+               "values from photos, and give no page for features taken only from photos.")
+
+
 def make_product_sheet(job: engine.Job, scope: engine.Scope, language: str = "it", tone: str = "tecnico",
-                       length_words: int = 150) -> ProductSheet:
+                       length_words: int = 150, images: list | None = None) -> ProductSheet:
+    """Scheda prodotto dal testo dell'ambito e, se indicate, dalle foto del documento (`ImagePart`)."""
     profile = job.profile()
     system = engine._system(prompts.BASE, language) + " " + _instructions(language, tone, length_words)
+    if images:
+        system += PHOTOS_RULE
     budget, out_tokens = engine.budget_for(profile, system)
-    body = engine.scope_text(scope)[:budget]
+    full = engine.scope_text(scope)
+    body = full[:budget]
+    truncated_at = None
+    if len(full) > budget:
+        # testo troppo lungo per una sola richiesta: si usa l'inizio e lo si dichiara
+        last = [p for p in scope.pages if f"=== [p. {p.label}] ===" in body]
+        truncated_at = last[-1].label if last else "?"
     data = None
     for attempt in range(2):
         text = f"<document>\n{body}\n</document>"
         if attempt:
             text += "\n\nReply ONLY with valid JSON as specified."
-        r = job.gateway.send(ChatRequest(system, [Message("user", text)], out_tokens), function="product-sheet",
+        r = job.gateway.send(ChatRequest(system, [Message("user", text, list(images or []))], out_tokens),
+                             function="product-sheet",
                              pages=scope.page_indices, fingerprint=scope.fingerprint, cancel=job.cancel,
                              on_wait=job.on_wait, profile=profile)
         try:
@@ -111,7 +126,15 @@ def make_product_sheet(job: engine.Job, scope: engine.Scope, language: str = "it
             break
     if not isinstance(data, dict):
         raise FoliantError(_("La risposta del modello non ha la struttura attesa."))
-    return build_sheet(data, scope)
+    sheet = build_sheet(data, scope)
+    if truncated_at is not None:
+        sheet.warnings.insert(0, _("Parziale: il documento è troppo lungo, è stato usato il testo fino alla "
+                                   "pagina {p}. Scegli le pagine del prodotto per un risultato completo.")
+                              .format(p=truncated_at))
+    if images:
+        sheet.warnings.append(_("Usate anche {n} foto: le caratteristiche ricavate solo dalle foto non hanno "
+                                "pagina d'origine e vanno controllate.").format(n=len(images)))
+    return sheet
 
 
 def specs_to_csv(sheet: ProductSheet, sep: str = ",") -> str:

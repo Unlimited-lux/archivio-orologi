@@ -194,6 +194,7 @@ class AdvancedSearchPanel(QDialog):
         self.export_button = QToolButton(self)
         bind_icon(self.export_button, "download")
         self.export_button.setToolTip(_("Esporta CSV…"))
+        self.export_button.setAccessibleName(_("Esporta CSV…"))
         self.export_button.setAutoRaise(True)
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(lambda: controller.export_csv())

@@ -15,7 +15,6 @@ from foliant.modules.objects import engine as E
 from foliant.modules.objects import extract as X
 from foliant.modules.objects import extras
 from foliant.modules.objects import links as L
-from foliant.modules.objects import linkopen as LO
 
 from .test_obj_ui import drag, make_doc, objs, png_bytes, ui, vpos  # noqa: F401
 
@@ -149,59 +148,35 @@ def test_snap_delta_pure():
 
 
 # ------------------------------------------------------------------ OBJ-41
-def test_decide_rules(tmp_path):
-    t = L.LinkTarget(kind=L.URI, uri="https://esempio.it/x")
-    assert LO.decide(t, 3, None, set()).action == "confirm_url"
-    assert LO.decide(t, 3, None, {"esempio.it"}).action == "open_url"
-    d = LO.decide(t, 3, None, set(), shown_text="www.banca.it")
-    assert d.mismatch == "www.banca.it"
-    assert LO.decide(L.LinkTarget(kind=L.URI, uri="javascript:alert(1)"), 3, None, set()).action == "blocked"
-    assert LO.decide(L.LinkTarget(kind=L.PAGE, page=19), 40, None, set()).action == "goto"
-    assert LO.decide(L.LinkTarget(kind=L.PAGE, page=49), 40, None, set()).action == "not_found"
-    assert LO.decide(L.LinkTarget(kind=L.LAUNCH, file="script.sh"), 3, None, set()).action == "blocked"
-    doc = tmp_path / "a.pdf"
-    (tmp_path / "allegati").mkdir()
-    (tmp_path / "allegati" / "b.pdf").write_bytes(b"%PDF")
-    d = LO.decide(L.LinkTarget(kind=L.FILE, file="allegati/b.pdf", page=3), 3, str(doc), set())
-    assert d.action == "open_pdf" and d.page == 3
-    assert LO.decide(L.LinkTarget(kind=L.FILE, file="manca.pdf"), 3, str(doc), set()).action == "missing"
-
-
-def test_allow_always_site(ui, tmp_path, monkeypatch):
+def test_ctrl_click_uri_goes_through_core_confirmation(ui, tmp_path, monkeypatch):
+    """Ctrl+clic negli strumenti di modifica: stessa conferma unica della lettura (VIS-19/SEC-27)."""
+    from foliant.modules.security import links as SL
     path = tmp_path / "w.pdf"
     doc = pymupdf.open()
-    doc.new_page()
-    L.create_link(doc, 0, pymupdf.Rect(100, 200, 200, 220), L.LinkTarget(kind=L.URI, uri="https://esempio.it"))
-    L.create_link(doc, 0, pymupdf.Rect(100, 300, 200, 320), L.LinkTarget(kind=L.URI, uri="https://esempio.it/b"))
+    doc.new_page().insert_text((100, 215), "www.banca.it", fontsize=12)
+    L.create_link(doc, 0, pymupdf.Rect(95, 200, 200, 220), L.LinkTarget(kind=L.URI, uri="https://altro.example"))
     doc.save(str(path))
     view = ui.open(str(path))
-    opened, asked = [], []
-    monkeypatch.setattr(LO, "open_url", lambda u: opened.append(u))
-    monkeypatch.setattr(LO, "confirm_url", lambda *a: asked.append(a) or (False, False))
-    LO.activate(ui.ctx, view, 0, pymupdf.Point(150, 210))
-    assert asked and not opened
-    monkeypatch.setattr(LO, "confirm_url", lambda *a: asked.append(a) or (True, True))
-    LO.activate(ui.ctx, view, 0, pymupdf.Point(150, 210))
-    assert opened == ["https://esempio.it"]
-    n = len(asked)
-    LO.activate(ui.ctx, view, 0, pymupdf.Point(150, 310))
-    assert len(asked) == n and opened[-1] == "https://esempio.it/b"
+    asked, opened = [], []
+    monkeypatch.setattr(SL, "ask_open", lambda parent, uri, host, warnings: asked.append((uri, warnings)) or "cancel")
+    monkeypatch.setattr(SL, "open_url", lambda u: opened.append(u))
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier,
+                     vpos(view, 0, 150, 210))
+    assert asked and asked[0][0] == "https://altro.example" and not opened
+    assert any("diverso" in w or "different" in w for w in asked[0][1])   # testo e destinazione diversi
     assert not view.document.is_modified
 
 
-def test_launch_link_blocked(ui, tmp_path, monkeypatch):
-    path = tmp_path / "x.pdf"
+def test_hover_link_shows_destination_tooltip(ui, tmp_path):
+    path = tmp_path / "t.pdf"
     doc = pymupdf.open()
-    doc.new_page()
-    L.create_link(doc, 0, pymupdf.Rect(100, 200, 200, 220), L.LinkTarget(kind=L.LAUNCH, file="esegui.sh"))
+    for _k in range(3):
+        doc.new_page()
+    L.create_link(doc, 0, pymupdf.Rect(100, 200, 200, 220), L.LinkTarget(kind=L.PAGE, page=2, fit="Fit"))
     doc.save(str(path))
     view = ui.open(str(path))
-    opened = []
-    monkeypatch.setattr(LO, "open_url", lambda u: opened.append(u))
-    LO.activate(ui.ctx, view, 0, pymupdf.Point(150, 210))
-    assert not opened
-    assert any("bloccati" in m for _t, m in ui.errors)
-
+    QTest.mouseMove(view.viewport(), vpos(view, 0, 150, 210))
+    assert "3" in view.toolTip()
 
 def test_advanced_actions(ui, tmp_path, monkeypatch):
     from foliant.modules.objects import dialogs as D
