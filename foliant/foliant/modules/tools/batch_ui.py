@@ -9,13 +9,13 @@ from datetime import datetime
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
+    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame,
     QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
     QPlainTextEdit, QPushButton, QRadioButton, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
-from foliant.api import OperationCancelled, _, atomic_write, bind_icon, format_number, icon, theme
+from foliant.api import OperationCancelled, _, atomic_write, bind_icon, format_date, format_number, icon, theme
 
 from . import engine as be
 
@@ -40,8 +40,10 @@ class ParamForm(QWidget):
 
     changed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, ask_file=None):
         super().__init__(parent)
+        # scelta dei file dei parametri «path» tramite il contesto (dialoghi senza cronologia)
+        self.ask_file = ask_file
         self.form = QFormLayout(self)
         self.form.setContentsMargins(0, 0, 0, 0)
         self.widgets: dict[str, QWidget] = {}
@@ -128,9 +130,10 @@ class ParamForm(QWidget):
             btn.setToolTip(_("Sfoglia…"))
 
             def browse(_c=False, e=edit):
-                path, _f = QFileDialog.getOpenFileName(self, _("Scegli il file"))
+                path = self.ask_file() if self.ask_file is not None else None
                 if path:
                     e.setText(path)
+            btn.setEnabled(self.ask_file is not None)
             btn.clicked.connect(browse)
             edit.textChanged.connect(self._store)
             row.addWidget(edit, 1)
@@ -217,7 +220,9 @@ class BatchWidget(QWidget):
         self.act_watch.triggered.connect(self.show_watches)
         self.act_history = bar.addAction(_("Cronologia"))
         bind_icon(self.act_history, "history")
+        self.act_history.setToolTip(_("Lavori di questa sessione (non vengono salvati)"))
         self.act_history.triggered.connect(self._history_menu)
+        self.history: list[be.JobReport] = []   # solo in memoria, il più recente per primo
         bar.addSeparator()
         act_close = bar.addAction(_("Chiudi"))
         bind_icon(act_close, "x")
@@ -313,7 +318,7 @@ class BatchWidget(QWidget):
             bind_icon(b, name)
             b.clicked.connect(lambda _c=False, s=slot: s())
             seqrow.addWidget(b)
-        self.params = ParamForm()
+        self.params = ParamForm(ask_file=self.ask_file)
         self.params.changed.connect(self._params_changed)
         pscroll = QScrollArea()
         pscroll.setWidgetResizable(True)
@@ -515,35 +520,10 @@ class BatchWidget(QWidget):
     def sequences_dir(self) -> str:
         return os.path.join(self._base_dir(), "foliant-sequenze")
 
-    def history_dir(self) -> str:
-        return os.path.join(self._base_dir(), "foliant-rapporti")
-
-    def journal_path(self) -> str:
-        return os.path.join(self._base_dir(), "foliant-lavoro-in-corso.json")
-
-    def check_interrupted(self) -> bool:
-        """Propone di riprendere un lavoro interrotto (chiusura anomala)."""
-        found = be.interrupted_job(self.journal_path())
-        if found is None:
-            return False
-        pending, settings = found
-        if not self.ctx.confirm(_("Lavoro interrotto"), _("Un'elaborazione in blocco è stata interrotta. "
-                                                            "Riprendere con i {n} file non completati?").format(
-                n=len(pending))):
-            be.discard_journal(self.journal_path())
-            return False
-        self.items = []
-        self.add_paths([p for p in pending if os.path.exists(p)])
-        self.steps = list(settings.steps)
-        self._refresh_steps(0)
-        self.dest_path.setText(settings.destination)
-        self.pattern.setText(settings.pattern)
-        self.counter_start.setValue(settings.counter_start)
-        self.conflict.setCurrentIndex(max(0, self.conflict.findData(settings.conflict)))
-        {"folder": self.dest_folder, "same": self.dest_same, "subfolder": self.dest_sub}.get(
-            settings.destination_mode, self.dest_folder).setChecked(True)
-        be.discard_journal(self.journal_path())
-        return True
+    def ask_file(self) -> str | None:
+        """File per un parametro di tipo «path» (dialogo del nucleo, senza cronologia)."""
+        paths = self.ctx.ask_open_paths(_("Scegli il file"), _("Tutti i file (*)"), multiple=False)
+        return paths[0] if paths else None
 
     def show_watches(self) -> "WatchDialog | None":
         service = getattr(self.ctx.tools_module, "watch_service", None) if hasattr(self.ctx, "tools_module") else None
@@ -555,22 +535,23 @@ class BatchWidget(QWidget):
         return dlg
 
     def _history_menu(self) -> None:
+        """Lavori di questa sessione: la cronologia non viene salvata su disco."""
         menu = QMenu(self)
-        files = be.list_history(self.history_dir())
-        if not files:
-            menu.addAction(_("Nessun lavoro precedente")).setEnabled(False)
-        for path in files:
-            name = os.path.basename(path)[7:-5]
-            label = f"{name[6:8]}/{name[4:6]}/{name[0:4]} {name[9:11]}:{name[11:13]}:{name[13:15]}"
-            menu.addAction(label, lambda p=path: self.show_history(p))
+        if not self.history:
+            menu.addAction(_("Nessun lavoro in questa sessione")).setEnabled(False)
+        for report in self.history:
+            label = format_date(report.started, time=True, seconds=True) + " · " + report.summary()
+            menu.addAction(label, lambda r=report: self.show_history(r))
         menu.exec(self.mapToGlobal(self.rect().topLeft()))
 
-    def show_history(self, path: str) -> bool:
-        try:
-            self.report = be.load_report(path)
-        except Exception as e:
-            self.ctx.error(_("Rapporto non leggibile"), str(e))
+    def remember_report(self, report: be.JobReport) -> None:
+        self.history.insert(0, report)
+        del self.history[be.HISTORY_LIMIT:]
+
+    def show_history(self, report: be.JobReport) -> bool:
+        if report is None:
             return False
+        self.report = report
         self._fill_report()
         self.report_box.show()
         return True
@@ -1033,12 +1014,12 @@ class BatchWidget(QWidget):
         self.act_run.setEnabled(False)
         # la finestra resta utilizzabile: avanzamento e Annulla nella barra di stato
         self.task = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, items, settings, started, None,
-                                      control, self.journal_path(), modal=False, on_done=done, on_error=failed)
+                                      control, modal=False, on_done=done, on_error=failed)
         return box.get("report")
 
     def _finish_run(self, report: be.JobReport, settings: be.JobSettings, items: list) -> be.JobReport:
+        self.remember_report(report)
         try:
-            be.save_history(self.history_dir(), report)
             be.record_bates_series(settings, items, report, self._base_dir())
         except Exception:
             pass
@@ -1194,7 +1175,9 @@ def ask_launch_parameters(parent, requests: list[tuple[int, be.Param, object]]) 
     dlg = QDialog(parent)
     dlg.setWindowTitle(_("Parametri del lavoro"))
     form = QFormLayout(dlg)
-    helper = ParamForm()
+    ctx = getattr(parent, "ctx", None)
+    ask_file = getattr(parent, "ask_file", None) if ctx is not None else None
+    helper = ParamForm(ask_file=ask_file)
     fields = []
     for i, p, value in requests:
         w = helper._widget(p, "" if p.secret else value)
@@ -1248,13 +1231,17 @@ class WatchDialog(QWidget):
         self.stable.setSuffix(" s")
         self.stable.setToolTip(_("Il file viene elaborato quando la sua dimensione non cambia per questo tempo"))
         info = QLabel(_("Le operazioni sono quelle scelte nel pannello «Operazioni». I file in errore vanno nella "
-                        "sottocartella «errori»."))
+                        "sottocartella «errori».") + " " +
+                      _("I monitoraggi restano attivi finché Foliant è aperto e non vengono salvati: per riusarli "
+                        "esporta la configurazione in un file."))
         info.setWordWrap(True)
         buttons = QHBoxLayout()
         for text, name, slot in ((_("Aggiungi cartella…"), "folder-plus", self.add_dialog),
                                  (_("Attiva/disattiva"), "power", self.toggle_selected),
                                  (_("Rimuovi"), "trash-2", self.remove_selected),
-                                 (_("Esporta rapporto"), "file-output", self.export_selected)):
+                                 (_("Esporta rapporto"), "file-output", self.export_selected),
+                                 (_("Esporta configurazione…"), "download", self.export_config_dialog),
+                                 (_("Importa configurazione…"), "upload", self.import_config_dialog)):
             b = QPushButton(text)
             bind_icon(b, name)
             b.clicked.connect(lambda _c=False, s=slot: s())
@@ -1307,7 +1294,51 @@ class WatchDialog(QWidget):
             return
         errors = self.add_watch(folder, dest)
         if errors:
-            ctx.error(_("Configurazione non salvata"), "\n".join(errors))
+            ctx.error(_("Monitoraggio non avviato"), "\n".join(errors))
+
+    def export_config(self, path: str) -> bool:
+        """Esporta i monitoraggi in un file scelto dall'utente (unico modo di conservarli)."""
+        from .watch import export_watches
+        configs = self.service.configs()
+        if not configs:
+            return False
+        try:
+            export_watches(path, configs)
+        except OSError as e:
+            self.batch.ctx.error(_("Configurazione non esportata"), str(e))
+            return False
+        return True
+
+    def export_config_dialog(self) -> None:
+        if not self.service.watchers:
+            self.batch.ctx.notify(_("Nessuna cartella monitorata da esportare."))
+            return
+        path = self.batch.ctx.ask_save_path(_("Esporta configurazione"), "cartelle-monitorate.json",
+                                            "JSON (*.json)", ".json")
+        if path:
+            self.export_config(path)
+
+    def import_config(self, path: str) -> list[str]:
+        """Riattiva i monitoraggi da un file esportato; restituisce gli errori."""
+        from .watch import import_watches
+        try:
+            configs = import_watches(path)
+        except Exception as e:
+            return [str(e)]
+        errors = []
+        for cfg in configs:
+            errors += [f"{cfg.folder}: {e}" for e in self.service.add(cfg)]
+        self.refresh()
+        return errors
+
+    def import_config_dialog(self) -> None:
+        ctx = self.batch.ctx
+        paths = ctx.ask_open_paths(_("Importa configurazione"), "JSON (*.json)", multiple=False)
+        if not paths:
+            return
+        errors = self.import_config(paths[0])
+        if errors:
+            ctx.error(_("Monitoraggio non avviato"), "\n".join(errors))
 
     def _selected_id(self) -> str | None:
         item = self.table.item(self.table.currentRow(), 0) if self.table.currentRow() >= 0 else None

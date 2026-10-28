@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pymupdf
@@ -131,6 +132,20 @@ def test_param_form_edits_step(batch):
     assert form.step is step
 
 
+def test_path_parameter_uses_core_dialog(batch, tmp_path, monkeypatch):
+    """Il file di un parametro si sceglie con il dialogo del nucleo (senza cronologia)."""
+    from PySide6.QtWidgets import QToolButton
+    letter = str(tmp_path / "carta.pdf")
+    asked = []
+    monkeypatch.setattr(batch.ctx, "ask_open_paths", lambda *a, **k: asked.append(k) or [letter])
+    step = batch.add_step("background")
+    w = batch.params.widgets["file"]
+    btn = w.findChild(QToolButton)
+    assert btn.isEnabled()
+    btn.click()
+    assert asked == [{"multiple": False}] and step.params["file"] == letter
+
+
 def test_missing_dependency_shown_clearly(batch, monkeypatch):
     monkeypatch.setattr(be, "_ocr_function", lambda: None)
     batch.add_step("ocr")
@@ -178,7 +193,18 @@ def test_batch_screenshot(window, batch, folder, tmp_path, theme_name):
     theme.apply(QApplication.instance(), "light")
 
 
+def _profile_tree() -> dict[str, bytes]:
+    out = {}
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+        for dirpath, _dirs, files in os.walk(os.environ.get(var) or "/nonexistent"):
+            for f in files:
+                with open(os.path.join(dirpath, f), "rb") as fh:
+                    out[os.path.join(dirpath, f)] = fh.read()
+    return out
+
+
 def test_pdf_report_and_history(batch, folder, tmp_path):
+    """La cronologia dei lavori vale per la sessione: nel profilo non resta nessun rapporto."""
     batch.add_paths([str(folder / "alfa.pdf")])
     batch.add_step("compress")
     batch.dest_path.setText(str(tmp_path / "out"))
@@ -186,32 +212,75 @@ def test_pdf_report_and_history(batch, folder, tmp_path):
     pdf = tmp_path / "rapporto.pdf"
     assert batch.export_report(str(pdf))
     assert "alfa.pdf" in pymupdf.open(str(pdf))[0].get_text()
-    files = be.list_history(batch.history_dir())
-    assert len(files) == 1
+    assert len(batch.history) == 1
+    report = batch.history[0]
     batch.report = None
-    assert batch.show_history(files[0])
+    assert batch.show_history(report)
     assert batch.report_table.rowCount() == 1
+    leaks = [p for p, data in _profile_tree().items() if b"alfa.pdf" in data or str(folder).encode() in data]
+    assert leaks == []
+    assert not any("foliant-rapporti" in p or "lavoro-in-corso" in p for p in _profile_tree())
+    for _k in range(25):
+        batch.remember_report(report)
+    assert len(batch.history) == be.HISTORY_LIMIT
 
 
-def test_interrupted_job_resumed_on_open(window, folder, tmp_path, monkeypatch):
+def test_old_journal_history_and_watches_removed_at_start(window, tmp_path):
+    """Pulizia una tantum dei dati delle versioni precedenti (percorsi dei file nel profilo)."""
+    from foliant.modules.tools import privacy
+    settings = window.ctx.settings()
+    base = privacy.base_dir(settings)
+    secret = str(tmp_path / "Riservato" / "perizia-rossi.pdf")
+    files = {
+        "foliant-lavoro-in-corso.json": {"format": "foliant-batch-journal", "files": [{"path": secret}]},
+        "foliant-monitor.json": [{"folder": str(tmp_path / "Riservato"), "destination": str(tmp_path)}],
+        "foliant-monitor/monitor-abc.json": {"processed": {secret: [1, 2]}, "log": [{"input": secret}]},
+        "foliant-rapporti/lavoro_20260101_000000_000000.json": {"file": [{"file_ingresso": secret}]},
+        "foliant-sequenze/Fatture.json": {
+            "format": "foliant-sequence", "version": 1, "name": "Fatture",
+            "steps": [{"action": "background", "params": {"file": secret, "pages": ""}},
+                      {"action": "compress", "params": {}}],
+            "output": {"destination_mode": "folder", "destination": str(tmp_path / "Riservato"),
+                       "pattern": "{nome}_x"}},
+    }
+    for rel, data in files.items():
+        path = os.path.join(base, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    unrelated = os.path.join(base, "foliant-rapporti", "appunti.txt")   # non di Foliant: resta
+    with open(unrelated, "w", encoding="utf-8") as f:
+        f.write("mio")
+    with open(os.path.join(base, "serie-bates.json"), "w", encoding="utf-8") as f:
+        json.dump({"VND": 12}, f)
+    settings.remove(privacy.CLEANUP_KEY)
+    assert privacy.cleanup_legacy(settings)
+    for rel in ("foliant-lavoro-in-corso.json", "foliant-monitor.json", "foliant-monitor",
+                "foliant-rapporti/lavoro_20260101_000000_000000.json"):
+        assert not os.path.exists(os.path.join(base, rel)), rel
+    assert os.path.exists(unrelated)
+    os.unlink(unrelated)
+    seq = os.path.join(base, "foliant-sequenze", "Fatture.json")
+    data = json.load(open(seq, encoding="utf-8"))
+    assert "destination" not in data["output"] and data["output"]["pattern"] == "{nome}_x"
+    assert data["steps"][0]["params"]["file"] == "" and "file" in data["steps"][0]["ask"]
+    assert os.path.exists(os.path.join(base, "serie-bates.json"))     # contatori Bates: ammessi
+    assert not any(b"perizia-rossi" in d or b"Riservato" in d for d in _profile_tree().values())
+    # una volta sola
+    with open(os.path.join(base, "foliant-lavoro-in-corso.json"), "w", encoding="utf-8") as f:
+        f.write("{}")
+    assert not privacy.cleanup_legacy(settings)
+    assert os.path.exists(os.path.join(base, "foliant-lavoro-in-corso.json"))
+    os.unlink(os.path.join(base, "foliant-lavoro-in-corso.json"))
+
+
+def test_tools_module_keeps_nothing_between_sessions(window, folder, tmp_path):
+    """Nessuna ripresa di lavori tra un avvio e l'altro: il pannello non legge giornali."""
     module = window.ctx.tools_module
-    from PySide6.QtCore import QSettings
-    base = os.path.dirname(window.ctx.settings().fileName())
-    journal = os.path.join(base, "foliant-lavoro-in-corso.json")
-    items = [be.analyze_file(str(folder / n)) for n in ("alfa.pdf", "doc2.pdf", "doc10.pdf")]
-    settings = be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "out"))
-    report = be.JobReport([be.FileResult(it.path, status=s) for it, s in zip(items, ("ok", "not_processed",
-                                                                                     "cancelled"))],
-                          settings.steps, __import__("datetime").datetime.now())
-    be.write_journal(journal, report, items, settings, finished=False)
-    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: True)
+    assert module.watch_service.configs() == []
     module.batch = None
     w = module.show_batch()
-    assert sorted(it.name for it in w.items) == ["doc10.pdf", "doc2.pdf"]
-    assert [s.action for s in w.steps] == ["compress"]
-    assert w.dest_path.text() == str(tmp_path / "out")
-    assert not os.path.exists(journal)
-    del QSettings
+    assert w.items == [] and not hasattr(w, "check_interrupted") and not hasattr(w, "journal_path")
 
 
 def test_control_panel_pause_toggle(batch):
@@ -328,12 +397,42 @@ def test_sequence_keeps_output_settings(batch, tmp_path):
     batch.conflict.setCurrentIndex(0)
     batch.error_policy.setCurrentIndex(0)
     assert batch.load_sequence(path)
-    assert batch.dest_path.text() == str(tmp_path / "fatture")
+    assert batch.dest_path.text() == ""                    # riservatezza: la cartella non si salva
     assert batch.pattern.text() == "{nome}_{contatore:3}"
     assert batch.conflict.currentData() == "skip" and batch.error_policy.currentData() == "stop"
     exported = tmp_path / "f.foliantseq"
     assert batch.export_sequence(str(exported))
     assert be.sequence_output(str(exported))["pattern"] == "{nome}_{contatore:3}"
+    for p in (path, str(exported)):
+        assert str(tmp_path).encode() not in open(p, "rb").read()
+
+
+def test_sequence_never_stores_file_paths(batch, tmp_path):
+    """Sequenze salvate, esportate e importate: niente percorsi di file nei parametri; il
+    parametro svuotato diventa «chiedi all'avvio»."""
+    letter = build_pdf(tmp_path / "carta-intestata-rossi.pdf", [["Carta"]])
+    batch.add_step("background", {"file": letter})
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "uscita"))
+    path = batch.save_sequence("Lettere")
+    raw = open(path, "rb").read()
+    assert b"carta-intestata-rossi" not in raw and str(tmp_path).encode() not in raw
+    name, steps = be.load_sequence(path)
+    assert steps[0].params["file"] == "" and "file" in steps[0].ask
+    assert batch.steps[0].params["file"] == letter          # la sessione in corso non cambia
+    exported = tmp_path / "lettere.foliantseq"
+    assert batch.export_sequence(str(exported))
+    assert b"carta-intestata-rossi" not in exported.read_bytes()
+    # file di una versione precedente con il percorso: l'importazione lo toglie
+    old = tmp_path / "vecchia.foliantseq"
+    old.write_text(json.dumps({"format": "foliant-sequence", "version": 1, "name": "Vecchia",
+                               "steps": [{"action": "background", "params": {"file": letter}}],
+                               "output": {"destination": str(tmp_path / "uscita"), "pattern": "{nome}"}}),
+                   encoding="utf-8")
+    saved, warnings = be.import_sequence(str(old), batch.sequences_dir())
+    assert any("chiesti all'avvio" in w for w in warnings)
+    data = open(saved, "rb").read()
+    assert b"carta-intestata-rossi" not in data and str(tmp_path).encode() not in data
 
 
 def test_conflict_ask_each_time(batch, folder, tmp_path, monkeypatch):

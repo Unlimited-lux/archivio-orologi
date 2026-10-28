@@ -3,6 +3,10 @@ automaticamente con un'operazione o una sequenza.
 
 Logica pura (scansione periodica, file «stabili», elaborazione, registro) più un
 piccolo servizio Qt che la richiama con un timer ed elabora in un thread.
+
+Riservatezza: configurazioni, file già elaborati e registro restano solo in memoria
+finché Foliant è aperto; nulla viene scritto nel profilo. Per riusare i monitoraggi in
+un'altra sessione l'utente li esporta (e reimporta) in un file scelto da lui.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from foliant.api import _, atomic_write
+from foliant.api import DocumentError, _, atomic_write
 
 from . import engine as be
 
@@ -80,50 +84,49 @@ def validate_watch(cfg: WatchConfig) -> list[str]:
     return errors
 
 
-def save_watches(path: str, configs: list[WatchConfig]) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    atomic_write(path, json.dumps([c.to_dict() for c in configs], ensure_ascii=False, indent=1).encode("utf-8"))
+WATCHES_FORMAT = "foliant-watches"
 
 
-def load_watches(path: str) -> list[WatchConfig]:
+def export_watches(path: str, configs: list[WatchConfig]) -> None:
+    """Esporta le configurazioni in un file scelto dall'utente (senza password)."""
+    data = {"format": WATCHES_FORMAT, "version": 1, "watches": [c.to_dict() for c in configs]}   # Step senza segreti
+    atomic_write(path, json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"))
+
+
+def import_watches(path: str) -> list[WatchConfig]:
+    """Configurazioni da un file esportato con `export_watches` (nuovi identificativi)."""
     try:
         with open(path, encoding="utf-8") as f:
-            return [WatchConfig.from_dict(d) for d in json.load(f)]
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise DocumentError(_("Configurazione non leggibile: {f}").format(f=os.path.basename(path))) from e
+    items = data.get("watches") if isinstance(data, dict) and data.get("format") == WATCHES_FORMAT else None
+    if not isinstance(items, list):
+        raise DocumentError(_("Il file non contiene cartelle monitorate di Foliant."))
+    out = []
+    for d in items:
+        try:
+            cfg = WatchConfig.from_dict({k: v for k, v in d.items() if k != "id"})
+        except (KeyError, TypeError, AttributeError, ValueError):
+            continue
+        out.append(cfg)
+    return out
 
 
 class FolderWatcher:
     """Monitoraggio di una cartella con scansione periodica (non ricorsiva)."""
 
-    def __init__(self, cfg: WatchConfig, state_dir: str, clock=time.monotonic):
+    LOG_LIMIT = 1000
+
+    def __init__(self, cfg: WatchConfig, clock=time.monotonic):
         self.cfg = cfg
         self.clock = clock
-        self.state_path = os.path.join(state_dir, f"monitor-{cfg.id}.json")
+        # tutto solo in memoria (riservatezza): sparisce alla chiusura di Foliant
         self._seen: dict[str, tuple[int, float]] = {}      # percorso -> (dimensione, da quando è stabile)
         self.processed: dict[str, list] = {}               # percorso -> [dimensione, mtime] già elaborati
         self.log: list[dict] = []
         self.status = "listening"
         self.last_error = ""
-        self._load_state()
-
-    # ---------------------------------------------------------------- stato persistente
-    def _load_state(self) -> None:
-        try:
-            with open(self.state_path, encoding="utf-8") as f:
-                data = json.load(f)
-            self.processed = dict(data.get("processed", {}))
-            self.log = list(data.get("log", []))[-1000:]
-        except (OSError, ValueError):
-            pass
-
-    def _save_state(self) -> None:
-        try:
-            os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
-            atomic_write(self.state_path, json.dumps({"processed": self.processed, "log": self.log[-1000:]},
-                                                     ensure_ascii=False).encode("utf-8"))
-        except Exception:
-            pass
 
     @property
     def processed_count(self) -> int:
@@ -196,7 +199,7 @@ class FolderWatcher:
             _move_into(path, os.path.join(self.cfg.folder, ERRORS_DIR))
         self.log.append({"time": datetime.now().isoformat(timespec="seconds"), "input": path,
                          "outputs": res.outputs, "status": res.status, "code": res.code, "message": res.message})
-        self._save_state()
+        del self.log[:-self.LOG_LIMIT]
         self.status = "listening"
         return res
 
@@ -236,18 +239,16 @@ def _move_into(path: str, directory: str) -> str | None:
 
 
 class WatchService:
-    """Esegue i monitoraggi attivi: scansione con un timer Qt, elaborazione in un thread."""
+    """Esegue i monitoraggi attivi: scansione con un timer Qt, elaborazione in un thread.
+
+    I monitoraggi valgono per la sessione: non vengono salvati e si fermano alla chiusura."""
 
     INTERVAL_MS = 2000
 
-    def __init__(self, config_path: str, state_dir: str):
-        self.config_path = config_path
-        self.state_dir = state_dir
+    def __init__(self):
         self.watchers: dict[str, FolderWatcher] = {}
         self._busy = threading.Lock()
         self.timer = None
-        for cfg in load_watches(config_path):
-            self.watchers[cfg.id] = FolderWatcher(cfg, state_dir)
 
     def configs(self) -> list[WatchConfig]:
         return [w.cfg for w in self.watchers.values()]
@@ -256,20 +257,18 @@ class WatchService:
         errors = validate_watch(cfg)
         if errors:
             return errors
-        self.watchers[cfg.id] = FolderWatcher(cfg, self.state_dir)
-        save_watches(self.config_path, self.configs())
+        self.watchers[cfg.id] = FolderWatcher(cfg)
         self.ensure_timer()
         return []
 
     def remove(self, watch_id: str) -> None:
         self.watchers.pop(watch_id, None)
-        save_watches(self.config_path, self.configs())
+        self.ensure_timer()
 
     def set_enabled(self, watch_id: str, enabled: bool) -> None:
         w = self.watchers.get(watch_id)
         if w is not None:
             w.cfg.enabled = enabled
-            save_watches(self.config_path, self.configs())
             self.ensure_timer()
 
     def ensure_timer(self) -> None:
@@ -281,7 +280,7 @@ class WatchService:
             self.timer.setInterval(self.INTERVAL_MS)
             self.timer.timeout.connect(self.tick)
             self.timer.start()
-            self.tick()   # scansione iniziale: file copiati ad applicazione chiusa
+            self.tick()   # scansione iniziale: file già presenti nella cartella
         elif not active and self.timer is not None:
             self.timer.stop()
             self.timer = None

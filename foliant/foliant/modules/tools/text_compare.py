@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit,
     QPushButton, QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -182,10 +182,11 @@ class _Side(QWidget):
             self.load_bytes(self._raw)
 
     def choose_file(self) -> None:
-        path, _f = QFileDialog.getOpenFileName(self, _("Apri file di testo"), "",
-                                               _("Testo (*.txt *.md *.csv);;Tutti i file (*)"))
-        if path:
-            self.load_path(path)
+        # dialogo del nucleo: nessuna cronologia dei file scelti
+        paths = self.owner.ctx.ask_open_paths(_("Apri file di testo"),
+                                              _("Testo (*.txt *.md *.csv);;Tutti i file (*)"), multiple=False)
+        if paths:
+            self.load_path(paths[0])
 
     def load_path(self, path: str) -> bool:
         try:

@@ -750,11 +750,24 @@ def test_skip_current_file_only(tmp_path):
     assert len(os.listdir(out)) == 2
 
 
-def test_journal_offers_resume_of_unfinished_files(tmp_path):
+def _profile_files() -> dict[str, bytes]:
+    out = {}
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+        root = os.environ.get(var)
+        for dirpath, _dirs, files in os.walk(root or "/nonexistent"):
+            for f in files:
+                with open(os.path.join(dirpath, f), "rb") as fh:
+                    out[os.path.join(dirpath, f)] = fh.read()
+    return out
+
+
+def test_interrupted_job_leaves_no_journal(tmp_path):
+    """Riservatezza: nessun giornale su disco con i percorsi della coda; dopo un'interruzione
+    i file restano integri e la ripresa si fa solo dal rapporto in memoria della sessione."""
     items = _queue(tmp_path, 5)
-    journal = str(tmp_path / "giornale.json")
     settings = be.JobSettings(steps=[be.Step("protect", {"user_password": "segreta", "owner_password": "capo"})],
                               destination=str(tmp_path / "out"))
+    before = set(os.listdir(tmp_path))
 
     class Crash:
         n = 0
@@ -767,33 +780,42 @@ def test_journal_offers_resume_of_unfinished_files(tmp_path):
         def check(self):
             pass
     try:
-        be.run_job(Crash(), items, settings, journal=journal)
+        be.run_job(Crash(), items, settings)
     except KeyboardInterrupt:
         pass
-    text = open(journal, encoding="utf-8").read()
-    assert "segreta" not in text and "capo" not in text
-    pending, restored = be.interrupted_job(journal)
-    assert [os.path.basename(p) for p in pending] == ["f3.pdf", "f4.pdf"] or len(pending) == 2
-    assert [s.action for s in restored.steps] == ["protect"]
+    assert set(os.listdir(tmp_path)) == before | {"out"}
+    assert not any(b"f3.pdf" in data or str(tmp_path).encode() in data for data in _profile_files().values())
+    assert not hasattr(be, "write_journal") and not hasattr(be, "interrupted_job")
     for f in os.listdir(tmp_path / "out"):
         assert pymupdf.open(str(tmp_path / "out" / f)).needs_pass   # nessun file corrotto
-    report = be.run_job(None, [be.analyze_file(p) for p in pending], settings, journal=journal)
-    assert report.counts()["ok"] == 2
-    assert not os.path.exists(journal)
-    assert be.interrupted_job(journal) is None
+    # annullamento ordinario: i file non completati restano nel rapporto in memoria
+    control = be.JobControl()
+
+    class Cancel:
+        n = 0
+
+        def update(self, f=None, t=None):
+            self.n += 1
+            if self.n == 3:
+                raise OperationCancelled()
+
+        def check(self):
+            pass
+    report = be.run_job(Cancel(), items, be.JobSettings(steps=[be.Step("compress")],
+                                                        destination=str(tmp_path / "out2")), control=control)
+    pending = report.pending_items()
+    assert pending and all(p in [it.path for it in items] for p in pending)
+    again = be.run_job(None, [be.analyze_file(p) for p in pending],
+                       be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "out2")))
+    assert again.counts()["ok"] == len(pending)
 
 
-def test_history_keeps_last_20_and_pdf_report(tmp_path):
+def test_pdf_report_and_no_history_on_disk(tmp_path):
     items = _queue(tmp_path, 2)
     report = be.run_job(None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "o")))
-    hist = tmp_path / "storia"
-    for k in range(23):
-        report.started = datetime(2026, 1, 1, 0, 0, k)
-        be.save_history(str(hist), report)
-    files = be.list_history(str(hist))
-    assert len(files) == 20
-    back = be.load_report(files[0])
-    assert [r.status for r in back.results] == [r.status for r in report.results]
+    assert not hasattr(be, "save_history") and not hasattr(be, "list_history")
+    assert be.HISTORY_LIMIT == 20
+    assert not any(b"f0.pdf" in data for data in _profile_files().values())
     data = be.report_pdf(report)
     doc = pymupdf.open(stream=data, filetype="pdf")
     text = doc[0].get_text()

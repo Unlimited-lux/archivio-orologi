@@ -10,16 +10,18 @@ from .translations import EN
 class ToolsModule:
     def __init__(self, ctx):
         from .compare_ui import CompareController
-        import os
-
+        from .privacy import cleanup_legacy
         from .watch import WatchService
         self.ctx = ctx
+        # riservatezza: dati delle versioni precedenti con percorsi dei file (una volta sola)
+        try:
+            cleanup_legacy(ctx.settings())
+        except Exception:
+            pass
         self.compare = CompareController(ctx)
         self.batch = None
-        base = os.path.dirname(ctx.settings().fileName()) or os.path.expanduser("~/.config/Foliant")
-        self.watch_service = WatchService(os.path.join(base, "foliant-monitor.json"),
-                                          os.path.join(base, "foliant-monitor"))
-        self.watch_service.ensure_timer()
+        # cartelle monitorate solo per la sessione: niente configurazione né registro su disco
+        self.watch_service = WatchService()
 
     # ---------------------------------------------------------------- confronto
     def start_compare(self, view=None):
@@ -51,14 +53,11 @@ class ToolsModule:
     # ---------------------------------------------------------------- in blocco
     def show_batch(self):
         from .batch_ui import BatchWidget
-        created = self.batch is None
-        if created:
+        if self.batch is None:
             self.batch = BatchWidget(self.ctx)
         if self.ctx.mode("strumenti") is not None:
             self.ctx.set_mode("strumenti")
         self.ctx.set_central_widget(self.batch)
-        if created:
-            self.batch.check_interrupted()
         return self.batch
 
 
