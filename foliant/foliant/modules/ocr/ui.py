@@ -766,7 +766,8 @@ class OcrController(QObject):
         dlg = OcrDialog(self.ctx.window, page_count=view.page_count, current_page=view.current_page,
                         detected=detected, settings=self.settings(),
                         mode=mode or str(self.settings().value("ocr/mode", engine.SEARCHABLE)), pages_text=text,
-                        infos=dict(st.infos), page_image_cb=lambda v=view: self._page_image(v))
+                        infos=dict(st.infos), page_image_cb=lambda v=view: self._page_image(v),
+                        selected=self._selected_pages(view))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.settings().setValue("ocr/mode", dlg.mode())
@@ -818,6 +819,12 @@ class OcrController(QObject):
         except BaseException as e:  # gestita come nell'esecuzione in background
             return self._complete(view, opts, None, e, data, preview, new_document)
         return self._complete(view, opts, result, None, data, preview, new_document)
+
+    def _selected_pages(self, view) -> list[int]:
+        try:
+            return list(self.ctx.selected_pages(view))
+        except Exception:
+            return []
 
     def _page_image(self, view):
         """Immagine della pagina corrente per l'editor delle zone (QImage) e in grigi per il rilevamento."""

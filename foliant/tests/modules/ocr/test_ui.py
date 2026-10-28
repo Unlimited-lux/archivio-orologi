@@ -952,3 +952,22 @@ def test_ocr_in_background_pausa_e_ripresa(window, qtbot, tmp_path):
     assert ctl.toggle_pause(view) is False
     _wait_job(qtbot, ctl, view)
     assert all(view.document.page_text(i).strip() for i in range(4))
+
+
+def test_intervallo_pagine_selezionate(window, tmp_path, monkeypatch):
+    """OCR-04: l'intervallo «Pagine selezionate» viene dalla selezione delle miniature (ctx.selected_pages)."""
+    imgs = [scan_image(lines=[f"Pagina {n}"], dpi=72) for n in range(5)]
+    view = window.open_path(image_pdf(tmp_path / "c.pdf", imgs, dpi=72))
+    ctl = ocr_controller()
+    monkeypatch.setattr(ctl.ctx, "selected_pages", lambda v=None: [1, 3, 4])
+    seen = {}
+
+    def fake_exec(dlg):
+        i = dlg.pages.findData("selected")
+        seen["label"] = dlg.pages.itemText(i)
+        dlg.pages.setCurrentIndex(i)
+        seen["pages"] = dlg.selected_pages()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(dialogs.OcrDialog, "exec", fake_exec)
+    ctl.open_dialog(view)
+    assert seen["pages"] == [1, 3, 4] and "2, 4-5" in seen["label"]
