@@ -2,7 +2,7 @@
 
 Legenda: **fatto** = criteri di accettazione verificati da test automatici; **parziale** = parte
 dei criteri o dei flussi; **nucleo** = già coperto dal nucleo (verificato dai test del nucleo
-o del modulo); **non fatto**.
+o del modulo); **altra area** = funzione di un altro modulo, raggiunta dal viewer; **non fatto**.
 I test sono in `tests/modules/viewer/` (file indicato tra parentesi). Le richieste al nucleo
 sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 
@@ -33,7 +33,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-23 Thread di articoli | P2 | fatto | `test_articles.py` | |
 | VIS-24 Ricerca | P0 | fatto | `test_search.py` (anche `test_search_also_in_comments`), `test_engine.py::test_case_sensitivity`, `test_whole_word`, `test_ignore_accents_and_ligatures`, `test_hyphenated_word_across_lines` | Ricerca incrementale non bloccante, opzioni, F3/Maiusc+F3 e Ctrl+G/Ctrl+Maiusc+G, pannello Risultati, cronologia delle ricerche, pagine senza testo. Frasi e parole sillabate a cavallo tra due pagine incluse (`test_phrase_continuing_on_next_page`). |
 | VIS-25 Ricerca avanzata | P2 | parziale | `test_advsearch.py` (11 test), `test_search.py::test_regex_and_invalid_expression`, `test_export_csv` | Ctrl+Maiusc+F: documento corrente, documenti aperti, cartella con sottocartelle (file cifrati/danneggiati nel riepilogo), frase/tutte/almeno una/regex con limite di tempo, commenti, segnalibri, campi, metadati, CSV. Indice full-text e allegati PDF: non fatti. |
-| VIS-26 Trova e sostituisci | P1 | non fatto | | Richiede il motore di modifica del testo (area Modifica testo). |
+| VIS-26 Trova e sostituisci | P1 | altra area | | Funzione del modulo Modifica testo (TXT-12/13: `FindReplaceDialog`, Ctrl+H in modalità Modifica). L'accesso dalla barra di ricerca del viewer richiede un servizio tra moduli (CORE_REQUESTS 24). |
 | VIS-27 Ricerca semantica IA | P2 | non fatto | | Area IA. |
 | VIS-28 Selezione e copia | P0 | parziale | `test_selection.py` (due colonne sinistra→destra, doppio clic, Ctrl+A e copia, selezione su più pagine in ordine, voci del menu contestuale; `xfail` per i criteri mancanti del nucleo), `test_tools.py::test_alt_drag_rectangular_table_selection` | Selezione rettangolare Alt+trascinamento con tabulazioni e voci Cerca / Leggi ad alta voce / Aggiungi segnalibro del menu contestuale qui. Mancano nel nucleo (CORE_REQUESTS 20, con proposta): ordine di lettura quando il flusso non lo segue, trattino di sillabazione nella copia, triplo clic, Maiusc+clic/frecce, F7, Ctrl+A su tutto il documento, `/ActualText`, artefatti. |
 | VIS-29 Cattura area | P1 | fatto | `test_tools.py::test_snapshot_*` | Copia/salva immagine a dpi scelti (limite 100 MP), copia testo, disabilitata senza permesso di copia. |

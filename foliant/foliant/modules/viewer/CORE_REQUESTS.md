@@ -146,3 +146,11 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     ridimensionamento, quindi un modulo non può imporle. Le preferenze di visualizzazione del
     viewer (vista, zoom, pannello iniziale, ultima posizione, impostazioni del documento,
     esporta/importa) sono già nel file delle impostazioni e si esportano con il resto.
+
+24. **Servizi tra moduli** (VIS-26): Trova e sostituisci / Trova ed elimina sono del modulo
+    Modifica testo (TXT-12/13, Ctrl+H in modalità Modifica, `FindReplaceDialog`); la specifica
+    chiede di raggiungerli dalla barra di ricerca del viewer, con Ctrl+H che estende la barra e
+    il testo cercato già inserito. Un modulo non può chiamare un altro modulo senza importarlo.
+    Proposta: `ctx.provide(name, fn)` / `ctx.service(name)` (per esempio
+    `"text.find_replace": fn(query, options)`), così il viewer aggiunge «Sostituisci…» alla barra
+    di ricerca solo quando il servizio c'è, e Ctrl+H vale anche in Leggi.
