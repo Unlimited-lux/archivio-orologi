@@ -21,24 +21,23 @@ OFFICE_FILTER_EXT = ("*.docx *.doc *.odt *.rtf *.xlsx *.xls *.ods *.pptx *.ppt *
                      "*.txt *.md *.markdown *.csv *.tsv *.html *.htm")
 
 
-def screen_image_pdf(image, dpi: int = 96) -> bytes:
-    """Una pagina con l'immagine (QImage) compressa senza perdita, dimensioni dalla risoluzione."""
-    buf = QByteArray()
-    dev = QBuffer(buf)
-    dev.open(QIODevice.OpenModeFlag.WriteOnly)
-    image.save(dev, "PNG")
-    dev.close()
+def screen_image_pdf(images, dpi: int = 96) -> bytes:
+    """Una pagina per immagine (QImage), compressa senza perdita, dimensioni dalla risoluzione."""
+    if not isinstance(images, (list, tuple)):
+        images = [images]
     with ENGINE_LOCK:
         doc = pymupdf.open()
-        page = doc.new_page(width=image.width() * 72 / dpi, height=image.height() * 72 / dpi)
-        page.insert_image(page.rect, stream=bytes(buf))
+        for image in images:
+            buf = QByteArray()
+            dev = QBuffer(buf)
+            dev.open(QIODevice.OpenModeFlag.WriteOnly)
+            image.save(dev, "PNG")
+            dev.close()
+            page = doc.new_page(width=image.width() * 72 / dpi, height=image.height() * 72 / dpi)
+            page.insert_image(page.rect, stream=bytes(buf))
         data = doc.tobytes(garbage=3, deflate=True)
         doc.close()
     return data
-
-
-# opzioni di scrittura compatte (flussi di oggetti, deduplica) registrate nel documento compresso
-WRITE_OPTIONS = {"garbage": 4, "deflate": True, "use_objstms": 1}
 
 
 class ConvertController:
@@ -525,96 +524,41 @@ class ConvertController:
         return view
 
     def create_from_screen(self, delay_s: int | None = None):
-        """CNV-25: cattura dello schermo in una pagina PDF senza perdita."""
+        """CNV-25: catture dello schermo (intere o ritagliate) in pagine PDF senza perdita."""
         from PySide6.QtCore import QEventLoop, QTimer
+        from .create_dialogs import CaptureDialog
         if delay_s is None:
             delay_s, ok = QInputDialog.getInt(self.window, _("Crea PDF da cattura schermo"),
                                               _("Ritardo prima della cattura (secondi):"), 3, 0, 30)
             if not ok:
                 return None
-        if delay_s:
-            loop = QEventLoop()
-            QTimer.singleShot(int(delay_s * 1000), loop.quit)
-            loop.exec()
-        screen = QGuiApplication.primaryScreen()
-        pixmap = screen.grabWindow(0) if screen is not None else None
-        if pixmap is None or pixmap.isNull() or pixmap.width() == 0:
-            self.ctx.error(_("Crea PDF da cattura schermo"),
-                           _("Il sistema non ha consentito la cattura dello schermo. Su Wayland usa lo strumento "
-                             "di cattura del desktop, copia l'immagine e scegli «Crea › Dagli appunti»."))
+        images = []
+        while True:
+            was_visible = self.window.isVisible()
+            if delay_s:
+                self.window.hide()          # Foliant non deve comparire nella cattura
+                loop = QEventLoop()
+                QTimer.singleShot(int(delay_s * 1000), loop.quit)
+                loop.exec()
+            screen = QGuiApplication.primaryScreen()
+            pixmap = screen.grabWindow(0) if screen is not None else None
+            if was_visible and not self.window.isVisible():
+                self.window.show()
+            if pixmap is None or pixmap.isNull() or pixmap.width() == 0:
+                self.ctx.error(_("Crea PDF da cattura schermo"),
+                               _("Il sistema non ha consentito la cattura dello schermo. Su Wayland usa lo strumento "
+                                 "di cattura del desktop, copia l'immagine e scegli «Crea › Dagli appunti»."))
+                break
+            dlg = CaptureDialog(self.window, pixmap.toImage(), len(images) + 1)
+            code = dlg.exec()
+            if code == QDialog.DialogCode.Rejected:
+                return None
+            images.append(dlg.cropped())
+            if code != CaptureDialog.ANOTHER:
+                break
+        if not images:
             return None
-        return self.open_created(screen_image_pdf(pixmap.toImage()), _("Cattura schermo") + ".pdf")
-
-    def _with_ocr(self, data: bytes) -> bytes:
-        """Livello di testo OCR invisibile (immagini intatte); se l'OCR non c'è, lo segnala."""
-        from .extract import add_ocr_layer, ocr_available
-        if not ocr_available():
-            self.ctx.info(_("OCR non disponibile"), _("Il riconoscimento del testo richiede Tesseract "
-                                                      "(sudo apt install tesseract-ocr tesseract-ocr-ita)."))
-            return data
-        ok, res = self._run(_("Riconoscimento del testo…"), add_ocr_layer, data)
-        return res[0] if ok and res else data
-
-    def create_portfolio(self, paths: list[str] | None = None):
-        """CNV-34: portfolio PDF con i file allegati intatti, cartelle, colonne e copertina."""
-        from .portfolio import create_portfolio
-        from .portfolio_dialog import PortfolioDialog
-
-        def ask_files():
-            return self.ctx.ask_open_paths(_("Scegli i file del portfolio"), _("Tutti i file (*)"))
-
-        if paths is None:
-            paths = ask_files()
-        if not paths:
-            return None
-        dlg = PortfolioDialog(self.window, paths, ask_files=ask_files,
-                              ask_cover=lambda: self.ctx.ask_open_paths(_("Copertina"), "PDF (*.pdf)", multiple=False))
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return None
-        entries, opts = dlg.values()
-        ok, res = self._run(_("Creazione del portfolio…"),
-                            lambda progress: create_portfolio(entries, progress=progress, **opts))
-        if not ok:
-            return None
-        data, warnings = res
-        view = self.open_created(data, opts["title"] + ".pdf")
-        if warnings:
-            self.ctx.info(_("Crea portfolio"), "\n".join(warnings[:15]))
-        return view
-
-    def edit_portfolio(self):
-        """CNV-34: aggiunge o rimuove file del portfolio aperto (anche creato da altri programmi)."""
-        from . import portfolio
-        from .portfolio_dialog import EditPortfolioDialog
-        view = self.ctx.current_view()
-        if view is None:
-            return None
-        doc = view.document
-        with ENGINE_LOCK:
-            files = []
-            for name in doc.pdf.embfile_names():
-                info = doc.pdf.embfile_info(name)
-                files.append((name, int(info.get("size") or 0), info.get("description") or ""))
-            folders = sorted(portfolio.folder_map(doc.pdf))
-        dlg = EditPortfolioDialog(self.window, files, folders,
-                                  ask_files=lambda: self.ctx.ask_open_paths(_("Aggiungi file"), _("Tutti i file (*)")))
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return None
-        added, removed = dlg.changes()
-        if not added and not removed:
-            return []
-        try:
-            with doc.change(_("Modifica portfolio")) as pdf:
-                portfolio.remove_files(pdf, removed)
-                names = portfolio.add_files(pdf, added)
-        except OSError as e:
-            self.ctx.error(_("Modifica portfolio"), _("File non leggibile: {e}").format(e=e.strerror or e))
-            return None
-        except Exception as e:
-            self.ctx.error(_("Modifica portfolio"), _("Errore imprevisto: {e}").format(e=e))
-            return None
-        self.ctx.status(_("Portfolio aggiornato: puoi annullare con Annulla."), 6000)
-        return names
+        return self.open_created(screen_image_pdf(images), _("Cattura schermo") + ".pdf")
 
     def create_blank(self):
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""

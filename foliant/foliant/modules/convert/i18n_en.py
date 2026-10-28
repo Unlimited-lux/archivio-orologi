@@ -804,3 +804,10 @@ EN.update({
     "Trasparenze non ammesse in PDF/X-3.": "Transparency is not allowed in PDF/X-3.",
     "TrimBox impostato uguale al CropBox su {n} pagine.": "TrimBox set equal to the CropBox on {n} pages.",
 })
+
+EN.update({
+    "Cattura {n}": "Capture {n}",
+    "Trascina per tenere solo un'area; senza selezione si usa tutta la cattura.":
+        "Drag to keep only an area; without a selection the whole capture is used.",
+    "Aggiungi un'altra cattura": "Add another capture",
+})

@@ -450,14 +450,27 @@ def test_batch_parallel(tmp_path):
 
 
 def test_screen_capture(window, ctrl, monkeypatch, messages):
+    from PySide6.QtCore import QRect
     from PySide6.QtGui import QPixmap, QScreen
+    from foliant.modules.convert.create_dialogs import CaptureDialog
     pm = QPixmap(800, 600)
     pm.fill()
     monkeypatch.setattr(QScreen, "grabWindow", lambda self, *a: pm)
+    steps = iter([CaptureDialog.ANOTHER, QDialog.DialogCode.Accepted])
+
+    def fake_exec(d):
+        code = next(steps)
+        if code == CaptureDialog.ANOTHER:
+            d.preview.set_selection(QRect(100, 50, 300, 200))     # area ritagliata
+        return code
+    monkeypatch.setattr(CaptureDialog, "exec", fake_exec)
     view = ctrl.create_from_screen(delay_s=0)
     with pymupdf.open(stream=view.document.to_bytes()) as d:
-        info = d[0].get_images(full=True)[0]
-        assert (info[2], info[3]) == (800, 600) and d.xref_get_key(info[0], "Filter")[1] == "/FlateDecode"
+        assert d.page_count == 2
+        sizes = [(img[2], img[3]) for p in d for img in p.get_images(full=True)]
+        assert sizes == [(300, 200), (800, 600)]
+        info = d[1].get_images(full=True)[0]
+        assert d.xref_get_key(info[0], "Filter")[1] == "/FlateDecode"
     monkeypatch.setattr(QScreen, "grabWindow", lambda self, *a: QPixmap())
     n = len(window.views())
     assert ctrl.create_from_screen(delay_s=0) is None

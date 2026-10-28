@@ -538,3 +538,86 @@ class PhotosDialog(QDialog):
         self._store()
         return ([{"path": it["path"], "corners": it["corners"]} for it in self.items],
                 {"page_size": self.size.currentData(), "filter_name": self.filter.currentData()})
+
+
+class CropLabel(QLabel):
+    """Anteprima della cattura con selezione rettangolare dell'area da tenere."""
+
+    def __init__(self, image):
+        super().__init__()
+        self._img = image
+        self._start = None
+        self._sel = None          # QRect in coordinate dell'immagine
+        self.setMinimumSize(480, 300)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def _geom(self):
+        k = min(self.width() / self._img.width(), self.height() / self._img.height())
+        ox, oy = (self.width() - self._img.width() * k) / 2, (self.height() - self._img.height() * k) / 2
+        return k, ox, oy
+
+    def _to_image(self, pos):
+        from PySide6.QtCore import QPoint
+        k, ox, oy = self._geom()
+        x = int(min(max(0, (pos.x() - ox) / k), self._img.width()))
+        y = int(min(max(0, (pos.y() - oy) / k), self._img.height()))
+        return QPoint(x, y)
+
+    def set_selection(self, rect) -> None:
+        self._sel = rect.intersected(self._img.rect()) if rect is not None else None
+        self.update()
+
+    def selection(self):
+        return self._sel if self._sel is not None and self._sel.width() > 4 and self._sel.height() > 4 else None
+
+    def paintEvent(self, ev) -> None:
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QPainter, QPen
+        p = QPainter(self)
+        k, ox, oy = self._geom()
+        p.drawImage(QRectF(ox, oy, self._img.width() * k, self._img.height() * k), self._img)
+        if self._sel is not None:
+            r = QRectF(ox + self._sel.x() * k, oy + self._sel.y() * k, self._sel.width() * k, self._sel.height() * k)
+            p.setPen(QPen(theme.color("accent"), 2))
+            p.drawRect(r)
+        p.end()
+
+    def mousePressEvent(self, ev) -> None:
+        self._start = self._to_image(ev.position())
+
+    def mouseMoveEvent(self, ev) -> None:
+        from PySide6.QtCore import QRect
+        if self._start is not None:
+            self.set_selection(QRect(self._start, self._to_image(ev.position())).normalized())
+
+    def mouseReleaseEvent(self, ev) -> None:
+        self._start = None
+
+
+class CaptureDialog(QDialog):
+    """Anteprima della cattura: ritaglio facoltativo, «Aggiungi un'altra cattura» o «Crea PDF»."""
+
+    ANOTHER = 2
+
+    def __init__(self, parent, image, count: int):
+        super().__init__(parent)
+        self.setWindowTitle(_("Cattura {n}").format(n=count))
+        self.resize(820, 580)
+        lay = QVBoxLayout(self)
+        hint = QLabel(_("Trascina per tenere solo un'area; senza selezione si usa tutta la cattura."))
+        hint.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
+        lay.addWidget(hint)
+        self.preview = CropLabel(image)
+        lay.addWidget(self.preview, 1)
+        buttons = QDialogButtonBox()
+        another = buttons.addButton(_("Aggiungi un'altra cattura"), QDialogButtonBox.ButtonRole.ActionRole)
+        create = buttons.addButton(_("Crea PDF"), QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton(_("Annulla"), QDialogButtonBox.ButtonRole.RejectRole)
+        another.clicked.connect(lambda: self.done(self.ANOTHER))
+        create.clicked.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def cropped(self):
+        sel = self.preview.selection()
+        return self.preview._img.copy(sel) if sel is not None else self.preview._img
