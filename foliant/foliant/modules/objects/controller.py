@@ -1085,7 +1085,10 @@ class ObjectsController(QObject):
             for k, i in enumerate(pages):
                 progress.update(k / max(1, len(pages)), _("Pagina {n}").format(n=i + 1))
                 with ENGINE_LOCK:
-                    found += L.detect_urls(view.document.pdf, i, web, email)
+                    try:
+                        found += L.detect_urls(view.document.pdf, i, web, email)
+                    except Exception:
+                        continue   # pagina danneggiata
             return found
         try:
             found = self.ctx.run_task(_("Ricerca degli indirizzi"), work)
