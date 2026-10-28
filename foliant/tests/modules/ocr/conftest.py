@@ -73,3 +73,13 @@ def _user_tessdata(tmp_path, monkeypatch):
     languages._reset_caches()
     yield
     languages._reset_caches()
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_boxes(monkeypatch):
+    """Niente finestre modali bloccanti nei test (es. «Salvare le modifiche?» alla chiusura)."""
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok))
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))

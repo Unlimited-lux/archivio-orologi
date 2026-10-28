@@ -248,7 +248,7 @@ def recognize(gray: np.ndarray, languages: list[str], dpi: int = 300, psm: int =
             return drop_noise(parse_hocr(f.read()))
 
 
-def drop_noise(lines: list[Line], min_conf: float = 45.0) -> list[Line]:
+def drop_noise(lines: list[Line], min_conf: float = 70.0) -> list[Line]:
     """Scarta i «segni» poco affidabili senza lettere né cifre (rumore della scansione)."""
     out = []
     for ln in lines:

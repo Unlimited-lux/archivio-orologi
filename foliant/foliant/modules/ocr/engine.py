@@ -133,6 +133,7 @@ class PageResult:
     background: bytes | None = None       # immagine di fondo (codificata)
     patches: list[tuple] = field(default_factory=list)   # pagine miste: (riquadro px, colore)
     notes: list[str] = field(default_factory=list)
+    placed: list[tuple] = field(default_factory=list)    # dopo l'applicazione: (Rect pagina, Word)
 
     @property
     def ok(self) -> bool:
@@ -557,21 +558,35 @@ def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: f
     return n
 
 
+def line_font_sizes(lines: list[Line], zoom: float, family: str) -> list[float]:
+    """Corpo di ogni riga: adattato alla larghezza, limitato dall'altezza e
+    uniformato sulla pagina (le righe del testo corrente hanno lo stesso corpo)."""
+    sizes = []
+    for ln in lines:
+        font = get_font(family + ("-bold" if ln.bold else ""))
+        fs_h = _font_size_for_line(ln, zoom, font)
+        text = unicodedata.normalize("NFC", ln.text)
+        width_pt = (ln.words[-1].bbox[2] - ln.words[0].bbox[0]) / zoom if ln.words else 0
+        natural = font.text_length(text, fontsize=fs_h) or 1.0
+        fs = fs_h * width_pt / natural if width_pt > 0 else fs_h
+        sizes.append(min(max(fs, fs_h * 0.6), fs_h * 1.4))
+    long_lines = [fs for fs, ln in zip(sizes, lines) if len(ln.words) >= 3] or sizes
+    if long_lines:
+        med = float(np.median(long_lines))
+        sizes = [med if abs(fs - med) / med < 0.15 else fs for fs in sizes]
+    return [round(fs * 2) / 2 for fs in sizes]
+
+
 def _insert_lines_visible(page: pymupdf.Page, res: PageResult, mapper, zoom: float, family: str) -> int:
     placer = _Placer(page, mapper, zoom)
     n = 0
-    for ln in res.lines:
+    sizes = line_font_sizes(res.lines, zoom, family)
+    for ln, fs in zip(res.lines, sizes):
         text = unicodedata.normalize("NFC", ln.text)
         if not text:
             continue
         font = get_font(family + ("-bold" if ln.bold else ""))
-        fs_h = _font_size_for_line(ln, zoom, font)
         x0 = ln.words[0].bbox[0]
-        x1 = ln.words[-1].bbox[2]
-        width_pt = (x1 - x0) / zoom
-        natural = font.text_length(text, fontsize=fs_h) or 1.0
-        fs = fs_h * width_pt / natural
-        fs = round(min(max(fs, fs_h * 0.8), fs_h * 1.2), 1)
         color = tuple(round(c, 2) for c in ln.color)
         w = placer.writer((color, family + ("b" if ln.bold else "")))
         try:
@@ -594,6 +609,8 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
             page.insert_image(page.rect * page.derotation_matrix, stream=res.background, keep_proportion=False,
                               rotate=page.rotation)
         _insert_words_invisible(page, res, res.processed_to_display, res.zoom)
+        der = page.derotation_matrix
+        res.placed = [(res.word_rect_display(w) * der, w) for w in res.words]
         if res.rasterize:
             _drop_unused_images(page)
     elif mode == EDITABLE:
@@ -602,6 +619,8 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
                 r = _box_display(res, box) * page.derotation_matrix
                 page.draw_rect(r, color=None, fill=color, overlay=True)
             _insert_lines_visible(page, res, res.processed_to_display, res.zoom, family)
+            der = page.derotation_matrix
+            res.placed = [(res.word_rect_display(w) * der, w) for w in res.words]
         else:
             _clear_page_content(page)
             page.set_rotation((res.page_rotation + res.rotation) % 360)
@@ -612,6 +631,9 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
             sy = page.rect.height / max(1.0, res.size[1])
             _insert_lines_visible(page, res, lambda x, y: (x * sx, y * sy), 2.0 / (sx + sy), family)
             _drop_unused_images(page)
+            der = page.derotation_matrix
+            res.placed = [(pymupdf.Rect(w.bbox[0] * sx, w.bbox[1] * sy, w.bbox[2] * sx, w.bbox[3] * sy) * der, w)
+                          for w in res.words]
 
 
 def _drop_unused_images(page: pymupdf.Page) -> None:
@@ -753,6 +775,103 @@ def ocr_page_text(source, page: int = 0, languages: list[str] | None = None, cli
     if progress is not None:
         progress.update(1.0)
     return res.text
+
+
+def replace_word(page: pymupdf.Page, rect: pymupdf.Rect, new_text: str, family: str = "sans") -> bool:
+    """Corregge una parola già inserita dall'OCR (visibile o invisibile) nell'area `rect`.
+
+    Il testo nell'area viene rimosso con la redazione (immagini e grafica
+    restano intatte) e reinserito con lo stesso corpo, colore, modalità di
+    resa e direzione. Restituisce False se nell'area non c'è testo.
+    """
+    rect = pymupdf.Rect(rect)
+    target = None
+    for span in page.get_texttrace():
+        if pymupdf.Rect(span["bbox"]).intersects(rect):
+            inter = pymupdf.Rect(span["bbox"]) & rect
+            if target is None or abs(inter) > abs(pymupdf.Rect(target["bbox"]) & rect):
+                target = span
+    if target is None:
+        return False
+    chars = [c for c in target["chars"] if pymupdf.Rect(c[3]).intersects(rect) and
+             abs(pymupdf.Rect(c[3]) & rect) > 0.3 * abs(pymupdf.Rect(c[3]))]
+    origin = pymupdf.Point(chars[0][2]) if chars else pymupdf.Point(rect.x0, rect.y1)
+    size = float(target["size"])
+    invisible = target["type"] == 3
+    color = tuple(target.get("color") or (0, 0, 0))
+    dx, dy = target.get("dir", (1, 0))
+    shrink = pymupdf.Rect(rect.x0 + 0.3, rect.y0 + 0.3, rect.x1 - 0.3, rect.y1 - 0.3)
+    page.add_redact_annot(shrink)
+    kwargs = {"images": pymupdf.PDF_REDACT_IMAGE_NONE}
+    if hasattr(pymupdf, "PDF_REDACT_LINE_ART_NONE"):
+        kwargs["graphics"] = pymupdf.PDF_REDACT_LINE_ART_NONE
+    page.apply_redactions(**kwargs)
+    text = unicodedata.normalize("NFC", new_text.strip())
+    if not text:
+        return True
+    font = get_font("sans" if invisible else family)
+    if invisible and chars:
+        natural = font.text_length(text, fontsize=size) or 1.0
+        size = min(max(size * rect.width / natural, size * 0.6), size * 1.4)
+    tw = pymupdf.TextWriter(page.rect)
+    tw.append(origin, text, font=font, fontsize=size)
+    angle = -math.degrees(math.atan2(dy, dx))
+    kw = {"render_mode": 3 if invisible else 0, "color": color}
+    if abs(angle) > 0.01:
+        kw["morph"] = (origin, pymupdf.Matrix(angle))
+    tw.write_text(page, **kw)
+    return True
+
+
+def parse_pages(text: str, count: int) -> list[int]:
+    """Intervallo di pagine scritto dall'utente → indici da 0.
+
+    Sintassi: «1-3, 7, 10-fine», «pari», «dispari», «tutte». Solleva
+    ValueError con un messaggio chiaro se l'espressione non è valida.
+    """
+    t = (text or "").strip().lower()
+    if t in ("", "tutte", "all"):
+        return list(range(count))
+    if t in ("pari", "even"):
+        return list(range(1, count, 2))
+    if t in ("dispari", "odd"):
+        return list(range(0, count, 2))
+    out: list[int] = []
+    for part in t.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = [b.strip() for b in part.split("-")]
+        try:
+            ends = [count if b in ("fine", "end", "ultima") else int(b) for b in bits]
+        except ValueError:
+            raise ValueError(_("Intervallo non valido: «{p}».").format(p=part)) from None
+        if len(ends) == 1:
+            ends = ends * 2
+        if len(ends) != 2 or min(ends) < 1 or max(ends) > count:
+            raise ValueError(_("Pagine fuori intervallo: «{p}» (il documento ha {n} pagine).").format(p=part, n=count))
+        a, b = ends
+        step = 1 if b >= a else -1
+        for n in range(a, b + step, step):
+            if n - 1 not in out:
+                out.append(n - 1)
+    if not out:
+        raise ValueError(_("Nessuna pagina indicata."))
+    return out
+
+
+def format_pages(indices: list[int]) -> str:
+    """Indici da 0 → «3, 7, 9-12»."""
+    nums = sorted({i + 1 for i in indices})
+    parts: list[str] = []
+    i = 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        parts.append(str(nums[i]) if i == j else f"{nums[i]}-{nums[j]}")
+        i = j + 1
+    return ", ".join(parts)
 
 
 def char_accuracy(got: str, expected: str) -> float:
