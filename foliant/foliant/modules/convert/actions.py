@@ -37,6 +37,10 @@ def screen_image_pdf(image, dpi: int = 96) -> bytes:
     return data
 
 
+# opzioni di scrittura compatte (flussi di oggetti, deduplica) registrate nel documento compresso
+WRITE_OPTIONS = {"garbage": 4, "deflate": True, "use_objstms": 1}
+
+
 class ConvertController:
     """Stato e comandi del modulo (uno per finestra)."""
 
@@ -694,7 +698,24 @@ class ConvertController:
         summary = _("Prima: {a} — Dopo: {b} — Riduzione: {p:.0f}%").format(a=human_size(before), b=human_size(after),
                                                                        p=percent)
         if target == "document" and doc is not None:
+            # «Dopo» misurato con le stesse opzioni con cui il documento verrà salvato
+            previous = dict(doc.save_options)
             doc.replace_with(out, title)
+            doc.save_options.update(WRITE_OPTIONS)
+            try:
+                after = len(doc.to_bytes())
+            except Exception:
+                after = len(out)
+            if after >= before:
+                doc.undo()
+                doc.save_options.clear()
+                doc.save_options.update(previous)
+                self.ctx.info(title, _("Nessuna riduzione possibile: il file è già ottimizzato ({s}). "
+                                       "Il documento non è stato modificato.").format(s=human_size(before)))
+                return {"before": before, "after": after, "reduced": False}
+            percent = (1 - after / before) * 100
+            summary = _("Prima: {a} — Dopo: {b} — Riduzione: {p:.0f}%").format(
+                a=human_size(before), b=human_size(after), p=percent)
             self.ctx.status(summary, 10000)
             self.ctx.info(title, summary + "\n\n" + _("Le modifiche si applicano al file quando salvi; "
                                                       "puoi annullarle con Annulla."))

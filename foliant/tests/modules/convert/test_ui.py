@@ -634,3 +634,31 @@ def test_images_as_image_size_ignores_margin(window, ctrl, tmp_path, monkeypatch
     view = ctrl.create_from_images([str(path)])
     with pymupdf.open(stream=view.document.to_bytes()) as d:
         assert abs(d[0].rect.width - 384) < 0.5 and abs(d[0].rect.height - 288) < 0.5
+
+
+def test_compress_document_reduction_survives_save(window, ctrl, tmp_path, monkeypatch, messages):
+    """«Applica al documento aperto»: la riduzione annunciata è quella del file salvato."""
+    import os
+    doc = pymupdf.open()
+    for i in range(40):
+        p = doc.new_page()
+        for k in range(30):
+            p.insert_text((50, 50 + k * 20), f"Pagina {i} riga {k} del catalogo orologi usati", fontsize=10)
+    path = tmp_path / "quaranta.pdf"
+    doc.save(str(path), garbage=0, deflate=True)       # senza flussi di oggetti
+    view = window.open_path(str(path))
+
+    def fake_exec(d):
+        d.table.selectRow(0)                            # senza perdita
+        d.target.setCurrentIndex(d.target.findData("document"))
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(CompressDialog, "exec", fake_exec)
+    res = ctrl.compress()
+    before = os.path.getsize(path)
+    assert res["reduced"], messages["info"]
+    if res["reduced"]:
+        assert window.save_view(view)
+        saved = os.path.getsize(path)
+        assert saved == res["after"] and saved < before
+    else:
+        assert not view.document.is_modified and os.path.getsize(path) == before
