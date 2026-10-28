@@ -393,3 +393,139 @@ class ScannerDialog(QDialog):
         return ScanSettings(source=self.source.currentData(), dpi=self.dpi.currentData(), mode=self.mode.currentData(),
                             brightness=self.brightness.value(), contrast=self.contrast.value(),
                             jpeg_quality=self.quality.value())
+
+
+class CornerEditor(QLabel):
+    """Anteprima della foto con i 4 angoli del foglio trascinabili."""
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(360, 420)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._img = None          # QImage
+        self._corners = None      # numpy 4x2 in pixel immagine
+        self._drag = -1
+
+    def set_photo(self, rgb, corners) -> None:
+        from PySide6.QtGui import QImage
+        h, w = rgb.shape[:2]
+        self._img = QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+        self._corners = corners.copy()
+        self.update()
+
+    def corners(self):
+        return None if self._corners is None else self._corners.copy()
+
+    def _geom(self):
+        iw, ih = self._img.width(), self._img.height()
+        k = min(self.width() / iw, self.height() / ih)
+        ox, oy = (self.width() - iw * k) / 2, (self.height() - ih * k) / 2
+        return k, ox, oy
+
+    def paintEvent(self, ev) -> None:
+        from PySide6.QtCore import QPointF, QRectF
+        from PySide6.QtGui import QPainter, QPen, QPolygonF
+        if self._img is None:
+            return super().paintEvent(ev)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        k, ox, oy = self._geom()
+        p.drawImage(QRectF(ox, oy, self._img.width() * k, self._img.height() * k), self._img)
+        pts = [QPointF(ox + x * k, oy + y * k) for x, y in self._corners]
+        pen = QPen(theme.color("accent"), 2)
+        p.setPen(pen)
+        p.drawPolygon(QPolygonF(pts))
+        p.setBrush(theme.color("accent"))
+        for pt in pts:
+            p.drawEllipse(pt, 6, 6)
+        p.end()
+
+    def mousePressEvent(self, ev) -> None:
+        if self._corners is None:
+            return
+        k, ox, oy = self._geom()
+        pos = ev.position()
+        d = [((ox + x * k - pos.x()) ** 2 + (oy + y * k - pos.y()) ** 2) for x, y in self._corners]
+        i = min(range(4), key=lambda j: d[j])
+        self._drag = i if d[i] < 400 else -1
+
+    def mouseMoveEvent(self, ev) -> None:
+        if self._drag < 0:
+            return
+        k, ox, oy = self._geom()
+        pos = ev.position()
+        x = min(max(0.0, (pos.x() - ox) / k), self._img.width() - 1)
+        y = min(max(0.0, (pos.y() - oy) / k), self._img.height() - 1)
+        self._corners[self._drag] = (x, y)
+        self.update()
+
+    def mouseReleaseEvent(self, ev) -> None:
+        self._drag = -1
+
+
+class PhotosDialog(QDialog):
+    """Foto di documenti: angoli rilevati e regolabili, filtro e formato (CNV-26)."""
+
+    def __init__(self, parent, paths: list[str]):
+        super().__init__(parent)
+        from .photo import detect_corners, load_image
+        self.setWindowTitle(_("Crea PDF da foto di documenti"))
+        self.resize(820, 600)
+        self.items: list[dict] = []
+        for p in paths:
+            try:
+                rgb = load_image(p)
+            except Exception:
+                continue
+            corners, found = detect_corners(rgb)
+            self.items.append({"path": p, "rgb": rgb, "corners": corners, "found": found})
+        lay = QHBoxLayout(self)
+        left = QVBoxLayout()
+        self.list = QListWidget()
+        for it in self.items:
+            self.list.addItem(Path(it["path"]).name + ("" if it["found"] else "  " + _("(bordi da regolare)")))
+        left.addWidget(self.list, 1)
+        form = QFormLayout()
+        self.filter = _combo([(_("Documento a colori"), "color"), (_("Originale"), "original"),
+                              (_("Scala di grigi"), "gray"), (_("Bianco e nero"), "bw"), (_("Lavagna"), "whiteboard")])
+        form.addRow(_("Filtro"), self.filter)
+        self.size = _combo([("A4", "A4"), ("Letter", "Letter"), (_("Biglietto da visita"), "card"),
+                            (_("Documento d'identità"), "id"), (_("Come rilevato"), None)])
+        form.addRow(_("Formato"), self.size)
+        left.addLayout(form)
+        hint = QLabel(_("Trascina gli angoli per correggere il bordo del foglio. Fotocamera non disponibile: "
+                        "importa le foto scattate con il telefono."))
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
+        left.addWidget(hint)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Crea PDF"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        left.addWidget(buttons)
+        lay.addLayout(left, 1)
+        self.editor = CornerEditor()
+        lay.addWidget(self.editor, 2)
+        self._current = -1
+        self.list.currentRowChanged.connect(self._select)
+        if self.items:
+            self.list.setCurrentRow(0)
+
+    def _store(self) -> None:
+        if 0 <= self._current < len(self.items):
+            c = self.editor.corners()
+            if c is not None:
+                self.items[self._current]["corners"] = c
+
+    def _select(self, row: int) -> None:
+        self._store()
+        self._current = row
+        if 0 <= row < len(self.items):
+            it = self.items[row]
+            self.editor.set_photo(it["rgb"], it["corners"])
+
+    def values(self) -> tuple[list[dict], dict]:
+        self._store()
+        return ([{"path": it["path"], "corners": it["corners"]} for it in self.items],
+                {"page_size": self.size.currentData(), "filter_name": self.filter.currentData()})

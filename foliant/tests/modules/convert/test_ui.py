@@ -447,3 +447,34 @@ def test_batch_parallel(tmp_path):
     assert [i.status for i in items[:4]] == [OK] * 4 and items[4].status == "errore"
     for k in range(4):
         assert "File %d pagina 2" % k in (tmp_path / "out" / f"f{k}.txt").read_text(encoding="utf-8")
+
+
+def test_screen_capture(window, ctrl, monkeypatch, messages):
+    from PySide6.QtGui import QPixmap, QScreen
+    pm = QPixmap(800, 600)
+    pm.fill()
+    monkeypatch.setattr(QScreen, "grabWindow", lambda self, *a: pm)
+    view = ctrl.create_from_screen(delay_s=0)
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        info = d[0].get_images(full=True)[0]
+        assert (info[2], info[3]) == (800, 600) and d.xref_get_key(info[0], "Filter")[1] == "/FlateDecode"
+    monkeypatch.setattr(QScreen, "grabWindow", lambda self, *a: QPixmap())
+    n = len(window.views())
+    assert ctrl.create_from_screen(delay_s=0) is None
+    assert len(window.views()) == n and messages["error"]
+
+
+def test_photos_dialog_manual_corners(window, ctrl, tmp_path, monkeypatch, messages):
+    pytest.importorskip("cv2")
+    from PIL import Image
+    from foliant.modules.convert.create_dialogs import PhotosDialog
+    path = tmp_path / "foto.png"
+    Image.new("RGB", (400, 300), "white").save(path)
+
+    def fake_exec(d):
+        d.editor._corners[:] = [[10, 10], [390, 20], [380, 290], [20, 280]]
+        d.size.setCurrentIndex(d.size.findData(None))
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(PhotosDialog, "exec", fake_exec)
+    view = ctrl.create_from_photos([str(path)])
+    assert view is not None and view.document.page_count == 1

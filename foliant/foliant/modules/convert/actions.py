@@ -21,6 +21,22 @@ OFFICE_FILTER_EXT = ("*.docx *.doc *.odt *.rtf *.xlsx *.xls *.ods *.pptx *.ppt *
                      "*.txt *.md *.markdown *.csv *.tsv *.html *.htm")
 
 
+def screen_image_pdf(image, dpi: int = 96) -> bytes:
+    """Una pagina con l'immagine (QImage) compressa senza perdita, dimensioni dalla risoluzione."""
+    buf = QByteArray()
+    dev = QBuffer(buf)
+    dev.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(dev, "PNG")
+    dev.close()
+    with ENGINE_LOCK:
+        doc = pymupdf.open()
+        page = doc.new_page(width=image.width() * 72 / dpi, height=image.height() * 72 / dpi)
+        page.insert_image(page.rect, stream=bytes(buf))
+        data = doc.tobytes(garbage=3, deflate=True)
+        doc.close()
+    return data
+
+
 class ConvertController:
     """Stato e comandi del modulo (uno per finestra)."""
 
@@ -448,6 +464,52 @@ class ConvertController:
                     new.close()
             return view
         return self.open_created(data, _("Scansione") + ".pdf")
+
+    def create_from_photos(self, paths: list[str] | None = None):
+        """CNV-26: foto di documenti con bordi rilevati, prospettiva corretta e filtri."""
+        from . import photo
+        from .create_dialogs import IMAGE_FILTER_EXT, PhotosDialog
+        if paths is None:
+            paths = self.ctx.ask_open_paths(_("Scegli le foto dei documenti"),
+                                            _("Immagini ({ext})").format(ext=IMAGE_FILTER_EXT + " *.heic"))
+        if not paths:
+            return None
+        dlg = PhotosDialog(self.window, paths)
+        if not dlg.items:
+            self.ctx.error(_("Crea PDF da foto"), _("Nessuna delle foto selezionate è leggibile."))
+            return None
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        items, opts = dlg.values()
+        ok, res = self._run(_("Creazione del PDF…"), photo.photos_to_pdf, items, **opts)
+        if not ok:
+            return None
+        data, warnings = res
+        view = self.open_created(data, _("Documento") + ".pdf")
+        if warnings:
+            self.ctx.info(_("Crea PDF da foto"), "\n".join(warnings[:15]))
+        return view
+
+    def create_from_screen(self, delay_s: int | None = None):
+        """CNV-25: cattura dello schermo in una pagina PDF senza perdita."""
+        from PySide6.QtCore import QEventLoop, QTimer
+        if delay_s is None:
+            delay_s, ok = QInputDialog.getInt(self.window, _("Crea PDF da cattura schermo"),
+                                              _("Ritardo prima della cattura (secondi):"), 3, 0, 30)
+            if not ok:
+                return None
+        if delay_s:
+            loop = QEventLoop()
+            QTimer.singleShot(int(delay_s * 1000), loop.quit)
+            loop.exec()
+        screen = QGuiApplication.primaryScreen()
+        pixmap = screen.grabWindow(0) if screen is not None else None
+        if pixmap is None or pixmap.isNull() or pixmap.width() == 0:
+            self.ctx.error(_("Crea PDF da cattura schermo"),
+                           _("Il sistema non ha consentito la cattura dello schermo. Su Wayland usa lo strumento "
+                             "di cattura del desktop, copia l'immagine e scegli «Crea › Dagli appunti»."))
+            return None
+        return self.open_created(screen_image_pdf(pixmap.toImage()), _("Cattura schermo") + ".pdf")
 
     def create_blank(self):
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""

@@ -636,3 +636,33 @@ EN.update({
     "File completati: {i} di {n}": "Files completed: {i} of {n}",
     "Processi paralleli": "Parallel processes",
 })
+
+# Foto di documenti (CNV-26) e cattura schermo (CNV-25)
+EN.update({
+    "(bordi da regolare)": "(edges need adjusting)",
+    "Biglietto da visita": "Business card",
+    "Cattura schermo": "Screenshot",
+    "Come rilevato": "As detected",
+    "Crea PDF da cattura schermo": "Create PDF from screenshot",
+    "Crea PDF da foto di documenti": "Create PDF from document photos",
+    "Crea PDF da foto": "Create PDF from photos",
+    "Da cattura schermo…": "From screenshot…",
+    "Da foto di documenti…": "From document photos…",
+    "Documento a colori": "Color document",
+    "Documento": "Document",
+    "Elaborazione della foto {i} di {n}": "Processing photo {i} of {n}",
+    "Filtro": "Filter",
+    "Foto {i}": "Photo {i}",
+    "Foto {i}: bordi del foglio non rilevati, usata l'intera immagine.": "Photo {i}: sheet edges not detected, the whole image was used.",
+    "Il sistema non ha consentito la cattura dello schermo. Su Wayland usa lo strumento di cattura del desktop, copia l'immagine e scegli «Crea › Dagli appunti».": "The system did not allow the screen capture. On Wayland use the desktop screenshot tool, copy the image and choose “Create › From clipboard”.",
+    "Immagine non leggibile: {e}": "Unreadable image: {e}",
+    "La foto contiene ampi riflessi: prova a cambiare angolazione o illuminazione.": "The photo has large reflections: try a different angle or lighting.",
+    "La foto sembra mossa o sfocata: il testo potrebbe risultare poco leggibile.": "The photo looks blurred: the text may be hard to read.",
+    "Lavagna": "Whiteboard",
+    "Manca il componente di elaborazione delle immagini (opencv-python-headless).": "The image processing component (opencv-python-headless) is missing.",
+    "Nessuna delle foto selezionate è leggibile.": "None of the selected photos can be read.",
+    "Nessuna foto selezionata.": "No photo selected.",
+    "Ritardo prima della cattura (secondi):": "Delay before capture (seconds):",
+    "Scegli le foto dei documenti": "Choose the document photos",
+    "Trascina gli angoli per correggere il bordo del foglio. Fotocamera non disponibile: importa le foto scattate con il telefono.": "Drag the corners to correct the sheet edge. No camera available: import photos taken with your phone.",
+})
