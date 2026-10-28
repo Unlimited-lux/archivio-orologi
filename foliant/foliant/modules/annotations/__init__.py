@@ -396,8 +396,6 @@ class AnnotationsModule:
         if s.value("annotations/author_confirmed", False) in (True, "true"):
             return
         s.setValue("annotations/author_confirmed", True)
-        if not s.value("annotations/author", ""):
-            self.ctrl.set_author(engine.default_author())
         self.ctx.status(_("I commenti useranno il nome autore «{a}» (modificabile dal menu Commenti).")
                         .format(a=self.ctrl.author()))
 

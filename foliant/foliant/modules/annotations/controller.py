@@ -85,15 +85,34 @@ class Controller(QObject):
         ctx.currentViewChanged.connect(lambda _v: self.clear_selection())
 
     # ------------------------------------------------------------------ preferenze
+    LEGACY_AUTHOR_KEY = "annotations/author"
+    CORE_AUTHOR_KEY = "author"
+
+    def _migrate_author(self) -> None:
+        """Il nome autore del modulo diventa la preferenza «Nome autore» del nucleo (una volta)."""
+        s = self.ctx.settings()
+        old = str(s.value(self.LEGACY_AUTHOR_KEY, "") or "").strip()
+        if old:
+            if old != str(s.value(self.CORE_AUTHOR_KEY, "") or "").strip():
+                s.setValue(self.CORE_AUTHOR_KEY, old)
+            s.remove(self.LEGACY_AUTHOR_KEY)
+
     def author(self) -> str:
-        name = str(self.ctx.settings().value("annotations/author", "") or "").strip()
+        self._migrate_author()
+        name = ""
+        if hasattr(self.ctx, "author_name"):
+            name = (self.ctx.author_name() or "").strip()
         return name or engine.default_author() or _("Utente")
 
     def set_author(self, name: str) -> None:
+        """Imposta la preferenza «Nome autore» del nucleo; vuoto = utente di sistema."""
+        self._migrate_author()
         name = name.strip()
-        if not name:
-            name = engine.default_author()
-        self.ctx.settings().setValue("annotations/author", name)
+        s = self.ctx.settings()
+        if name:
+            s.setValue(self.CORE_AUTHOR_KEY, name)
+        else:
+            s.remove(self.CORE_AUTHOR_KEY)
 
     def style_for(self, kind: str) -> Style:
         return self._styles.get(kind, Style()).copy()
