@@ -1,0 +1,97 @@
+"""Registrazione del modulo Strumenti: modalità, azioni, menu e Home."""
+
+from __future__ import annotations
+
+from foliant.api import _, add_translations
+
+from .translations import EN
+
+
+class ToolsModule:
+    def __init__(self, ctx):
+        from .compare_ui import CompareController
+        import os
+
+        from .watch import WatchService
+        self.ctx = ctx
+        self.compare = CompareController(ctx)
+        self.batch = None
+        base = os.path.dirname(ctx.settings().fileName()) or os.path.expanduser("~/.config/Foliant")
+        self.watch_service = WatchService(os.path.join(base, "foliant-monitor.json"),
+                                          os.path.join(base, "foliant-monitor"))
+        self.watch_service.ensure_timer()
+
+    # ---------------------------------------------------------------- confronto
+    def start_compare(self, view=None):
+        return self.compare.start(view)
+
+    def show_compare(self):
+        if self.compare.widget is None:
+            self.ctx.info(_("Confronto"), _("Nessun confronto aperto. Usa «Confronta documenti»."))
+            return
+        self.compare.reshow()
+
+    def open_session(self):
+        return self.compare.open_session()
+
+    def compare_text(self):
+        from .text_compare import TextCompareDialog
+        dlg = TextCompareDialog(self.ctx, self.ctx.window)
+        dlg.show()
+        self._text_dialog = dlg
+        return dlg
+
+    def show_revisions(self):
+        from .revisions import RevisionsDialog
+        dlg = RevisionsDialog(self.ctx, self.ctx.current_view())
+        dlg.show()
+        self._revisions_dialog = dlg
+        return dlg
+
+    # ---------------------------------------------------------------- in blocco
+    def show_batch(self):
+        from .batch_ui import BatchWidget
+        created = self.batch is None
+        if created:
+            self.batch = BatchWidget(self.ctx)
+        if self.ctx.mode("strumenti") is not None:
+            self.ctx.set_mode("strumenti")
+        self.ctx.set_central_widget(self.batch)
+        if created:
+            self.batch.check_interrupted()
+        return self.batch
+
+
+def register(ctx) -> None:
+    add_translations("en", EN)
+    module = ToolsModule(ctx)
+    ctx.tools_module = module
+    mode = ctx.add_mode("strumenti", _("Strumenti"), "wrench", 100)
+    act_compare = ctx.action(_("Confronta documenti"), "git-compare", lambda: module.start_compare(),
+                             requires_document=False, tooltip=_("Confronta due versioni di un PDF"))
+    act_show = ctx.action(_("Mostra confronto"), "diff", module.show_compare, requires_document=False)
+    act_session = ctx.action(_("Apri sessione di confronto"), "folder-open", module.open_session,
+                             requires_document=False)
+    act_text = ctx.action(_("Confronta testo"), "file-diff", module.compare_text, requires_document=False,
+                          tooltip=_("Confronta due testi incollati o caricati da file"))
+    act_revisions = ctx.action(_("Revisioni"), "history", module.show_revisions,
+                               tooltip=_("Confronta le revisioni salvate nello stesso file"))
+    act_batch = ctx.action(_("Operazioni in blocco"), "layers", module.show_batch, requires_document=False,
+                           tooltip=_("Applica operazioni a molti file"))
+    mode.add_action(act_compare)
+    mode.add_action(act_show)
+    mode.add_action(act_session)
+    mode.add_action(act_text)
+    mode.add_action(act_revisions)
+    mode.add_separator()
+    mode.add_action(act_batch)
+    ctx.add_menu_action(act_compare, _("Strumenti"))
+    ctx.add_menu_action(act_batch, _("Strumenti"))
+    ctx.add_home_action(_("Confronta documenti"), "git-compare", lambda: module.start_compare(),
+                        _("Trova le differenze tra due versioni"), order=100)
+    ctx.add_home_action(_("Operazioni in blocco"), "layers", module.show_batch,
+                        _("Comprimi, proteggi, numera, unisci molti file insieme"), order=101)
+
+    module.actions = {"compare": act_compare, "show": act_show, "session": act_session, "batch": act_batch,
+                      "text": act_text, "revisions": act_revisions}
+    module.mode = mode
