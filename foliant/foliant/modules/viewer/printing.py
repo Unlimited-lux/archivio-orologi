@@ -9,16 +9,16 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPageLayout
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from foliant.api import ENGINE_LOCK, OperationCancelled, _, add_translations, theme
 from foliant.i18n import pgettext
 
 from .printing_engine import (
-    ACTUAL_SIZE, FIT_PAGE, LAYERS_PRINT, LAYERS_SCREEN, PrintOptions, RangeError, document_print_capability,
-    parse_page_ranges, print_document,
+    ACTUAL_SIZE, FIT_PAGE, LAYERS_PRINT, LAYERS_SCREEN, LAYOUT_BOOKLET, LAYOUT_NORMAL, LAYOUT_POSTER, PrintOptions,
+    RangeError, document_print_capability, parse_page_ranges, print_document,
 )
 
 try:  # PySide6-Essentials include QtPrintSupport; ripiego su PDF se mancasse
@@ -29,6 +29,18 @@ except ImportError:  # pragma: no cover - dipende dall'installazione
     HAVE_PRINT_SUPPORT = False
 
 EN = {
+    "Modalità": "Mode",
+    "Normale": "Normal",
+    "Opuscolo (fogli piegati)": "Booklet (folded sheets)",
+    "Poster (pagina divisa su più fogli)": "Poster (page split over several sheets)",
+    "Rilegatura a destra": "Right-edge binding",
+    "Sovrapposizione": "Overlap",
+    "Due pagine per facciata in ordine di piegatura; se le pagine non sono multipli di 4 si aggiungono pagine "
+    "bianche in fondo. Stampa fronte/retro sul lato corto (o rigira i fogli a mano).":
+        "Two pages per side in folding order; blank pages are added at the end if the page count is not a "
+        "multiple of 4. Print two-sided on the short edge (or turn the sheets over by hand).",
+    "Ogni pagina a dimensione reale divisa su più fogli, con una fascia di sovrapposizione e segni di taglio.":
+        "Each page at actual size split over several sheets, with an overlap band and cut marks.",
     "solo fronte": "one-sided",
     "fronte/retro sul lato corto": "two-sided on the short edge",
     "fronte/retro sul lato lungo": "two-sided on the long edge",
@@ -120,7 +132,35 @@ class PrintOptionsDialog(QDialog):
         pl.addWidget(self.error_label)
         root.addWidget(pages_box)
 
+        mode_box = QGroupBox(_("Modalità"), self)
+        ml = QVBoxLayout(mode_box)       # non QFormLayout: il testo d'aiuto va a capo correttamente
+        self.layout_mode = QComboBox(mode_box)
+        self.layout_mode.addItem(_("Normale"), LAYOUT_NORMAL)
+        self.layout_mode.addItem(_("Opuscolo (fogli piegati)"), LAYOUT_BOOKLET)
+        self.layout_mode.addItem(_("Poster (pagina divisa su più fogli)"), LAYOUT_POSTER)
+        ml.addWidget(self.layout_mode)
+        self.booklet_rtl = QCheckBox(_("Rilegatura a destra"), mode_box)
+        ml.addWidget(self.booklet_rtl)
+        self.overlap = QDoubleSpinBox(mode_box)
+        self.overlap.setRange(0, 50)
+        self.overlap.setDecimals(1)
+        self.overlap.setValue(10)
+        self.overlap.setSuffix(" mm")
+        self.overlap_label = QLabel(_("Sovrapposizione"), mode_box)
+        overlap_row = QHBoxLayout()
+        overlap_row.addWidget(self.overlap_label)
+        overlap_row.addWidget(self.overlap)
+        overlap_row.addStretch(1)
+        ml.addLayout(overlap_row)
+        self.mode_hint = QLabel(mode_box)
+        self.mode_hint.setWordWrap(True)
+        self.mode_hint.setProperty("muted", True)
+        ml.addWidget(self.mode_hint)
+        self.layout_mode.currentIndexChanged.connect(self._on_layout_mode)
+        root.addWidget(mode_box)
+
         size_box = QGroupBox(_("Dimensione"), self)
+        self.size_box = size_box
         sl = QVBoxLayout(size_box)
         self.rb_fit = QRadioButton(pgettext("stampa", "Adatta alla pagina"), size_box)
         self.rb_actual = QRadioButton(_("Dimensione reale"), size_box)
@@ -177,6 +217,27 @@ class PrintOptionsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
         self.setMinimumWidth(400)
+        self._on_layout_mode()
+
+    def _on_layout_mode(self, *_a) -> None:
+        mode = self.layout_mode.currentData()
+        self.booklet_rtl.setVisible(mode == LAYOUT_BOOKLET)
+        self.overlap.setVisible(mode == LAYOUT_POSTER)
+        self.overlap_label.setVisible(mode == LAYOUT_POSTER)
+        self.size_box.setEnabled(mode == LAYOUT_NORMAL)
+        self.auto_rotate.setEnabled(mode == LAYOUT_NORMAL)
+        hints = {LAYOUT_BOOKLET: _("Due pagine per facciata in ordine di piegatura; se le pagine non sono multipli "
+                                   "di 4 si aggiungono pagine bianche in fondo. Stampa fronte/retro sul lato corto "
+                                   "(o rigira i fogli a mano)."),
+                 LAYOUT_POSTER: _("Ogni pagina a dimensione reale divisa su più fogli, con una fascia di "
+                                  "sovrapposizione e segni di taglio.")}
+        self.mode_hint.setText(hints.get(mode, ""))
+        self.mode_hint.setVisible(mode in hints)
+        # altezza del testo a capo calcolata sulla larghezza disponibile (i layout di Qt la
+        # sottostimano per le etichette con a capo), poi il dialogo si adatta
+        width = max(self.mode_hint.width(), self.minimumWidth() - 60)
+        self.mode_hint.setMinimumHeight(self.mode_hint.heightForWidth(width) if mode in hints else 0)
+        self.adjustSize()
 
     def apply_document_preferences(self, prefs) -> None:
         """Preselezione dalle preferenze di stampa del documento (VIS-42): scala, copie,
@@ -211,6 +272,9 @@ class PrintOptionsDialog(QDialog):
             auto_rotate=self.auto_rotate.isChecked(),
             layers=self.layers.currentData() or LAYERS_PRINT,
             duplex=self.duplex,
+            layout=self.layout_mode.currentData() or LAYOUT_NORMAL,
+            booklet_rtl=self.booklet_rtl.isChecked(),
+            poster_overlap_mm=self.overlap.value(),
         )
 
     def accept(self) -> None:
@@ -297,7 +361,12 @@ class PrintController:
         with ENGINE_LOCK:  # orientamento del documento, non della vista (VIS-11)
             rect = view.document.pdf[first].rect
         w, h = rect.width, rect.height
-        if options.auto_rotate:
+        if options.layout == LAYOUT_BOOKLET:      # due pagine affiancate per foglio
+            printer.setPageOrientation(QPageLayout.Orientation.Landscape if h >= w
+                                       else QPageLayout.Orientation.Portrait)
+        elif options.layout == LAYOUT_POSTER:
+            pass
+        elif options.auto_rotate:
             printer.setPageOrientation(QPageLayout.Orientation.Landscape if w > h
                                        else QPageLayout.Orientation.Portrait)
         dlg = QPrintDialog(printer, self.ctx.window)

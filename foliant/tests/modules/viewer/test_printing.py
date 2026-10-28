@@ -411,3 +411,128 @@ def test_empty_signature_field_not_printed(tmp_path):
     pixels = [img.pixelColor(x, y) for x in range(100, 300, 4) for y in range(100, 160, 4)]
     assert not any(orange(c) for c in pixels)
     assert not d.is_modified
+
+
+# ------------------------------------------------------------- opuscolo e poster (VIS-44)
+def _numbered(tmp_path, n, size=(595, 842), name="numerate.pdf"):
+    path = tmp_path / name
+    doc = pymupdf.open()
+    for i in range(n):
+        doc.new_page(width=size[0], height=size[1]).insert_text((50, 100), f"PAG{i + 1:02d}", fontsize=30)
+    doc.save(str(path))
+    return str(path)
+
+
+def _sides_of(doc):
+    """Per ogni facciata: (numero a sinistra, numero a destra) letti dal testo."""
+    out = []
+    for page in doc:
+        mid = page.rect.width / 2
+        left = right = None
+        for w in page.get_text("words"):
+            if w[4].startswith("PAG"):
+                if (w[0] + w[2]) / 2 < mid:
+                    left = int(w[4][3:])
+                else:
+                    right = int(w[4][3:])
+        out.append((left, right))
+    return out
+
+
+def test_booklet_sides_order():
+    from foliant.modules.viewer.printing_engine import booklet_sides
+    one_based = [tuple(None if x is None else x + 1 for x in s) for s in booklet_sides(8)]
+    assert one_based == [(8, 1), (2, 7), (6, 3), (4, 5)]
+    assert [tuple(None if x is None else x + 1 for x in s) for s in booklet_sides(8, rtl=True)][0] == (1, 8)
+
+
+def test_booklet_8_pages_to_file(qapp, tmp_path):
+    """Dato un documento di 8 pagine in modalità opuscolo, la stampa su file dà 4 facciate con le
+    coppie (8,1), (2,7), (6,3), (4,5)."""
+    from foliant.core.document import Document
+    from foliant.modules.viewer.printing_engine import LAYOUT_BOOKLET, impose_booklet
+    path = _numbered(tmp_path, 8)
+    assert _sides_of(impose_booklet(pymupdf.open(path), list(range(8)))) == [(8, 1), (2, 7), (6, 3), (4, 5)]
+    doc = Document.open(path)
+    out = tmp_path / "opuscolo.pdf"
+    printer = _printer(out)
+    printer.setPageOrientation(QPageLayout.Orientation.Landscape)
+    assert print_document(doc, printer, PrintOptions(pages=list(range(8)), layout=LAYOUT_BOOKLET)) == 4
+    del printer
+    doc.close()
+    printed = pymupdf.open(str(out))
+    assert printed.page_count == 4 and printed[0].rect.width > printed[0].rect.height
+
+
+def test_booklet_6_pages_adds_blanks(qapp, tmp_path):
+    """Dato un documento di 6 pagine in modalità opuscolo, si aggiungono 2 pagine bianche e si
+    ottengono 4 facciate."""
+    from foliant.core.document import Document
+    from foliant.modules.viewer.printing_engine import LAYOUT_BOOKLET, impose_booklet
+    path = _numbered(tmp_path, 6)
+    assert _sides_of(impose_booklet(pymupdf.open(path), list(range(6)))) == [(None, 1), (2, None), (6, 3), (4, 5)]
+    doc = Document.open(path)
+    out = tmp_path / "opuscolo6.pdf"
+    printer = _printer(out)
+    printer.setPageOrientation(QPageLayout.Orientation.Landscape)
+    assert print_document(doc, printer, PrintOptions(pages=list(range(6)), layout=LAYOUT_BOOKLET)) == 4
+    del printer
+    doc.close()
+    assert pymupdf.open(str(out)).page_count == 4
+
+
+def test_poster_a1_on_a4_with_10mm_overlap(qapp, tmp_path):
+    """Data una pagina A1 stampata come poster su A4 al 100% con sovrapposizione di 10 mm, ogni
+    punto della pagina compare in almeno un foglio e i fogli adiacenti condividono 10 mm."""
+    from foliant.core.document import Document
+    from foliant.modules.viewer.printing_engine import LAYOUT_POSTER, MM, poster_tiles
+    a1 = (1683.78, 2383.94)
+    a4 = (595.28, 841.89)
+    tiles = poster_tiles(*a1, *a4, 10 * MM)
+    # copertura: ogni punto di una griglia fitta cade in almeno un riquadro
+    for gx in range(0, 1684, 23):
+        for gy in range(0, 2384, 23):
+            assert any(t.x0 <= gx <= t.x1 and t.y0 <= gy <= t.y1 for t in tiles), (gx, gy)
+    # fogli adiacenti: fascia condivisa di 10 mm (salvo l'ultimo, che può sovrapporsi di più)
+    xs = sorted({round(t.x0, 3) for t in tiles})
+    ys = sorted({round(t.y0, 3) for t in tiles})
+    assert abs((xs[1] - xs[0]) - (a4[0] - 10 * MM)) < 0.01
+    assert abs((ys[1] - ys[0]) - (a4[1] - 10 * MM)) < 0.01
+    for t in tiles:
+        assert t.width <= a4[0] + 0.01 and t.height <= a4[1] + 0.01
+    path = tmp_path / "a1.pdf"
+    d = pymupdf.open()
+    d.new_page(width=a1[0], height=a1[1]).insert_text((60, 120), "POSTER", fontsize=40)
+    d.save(str(path))
+    doc = Document.open(str(path))
+    out = tmp_path / "poster.pdf"
+    printer = _printer(out)
+    assert print_document(doc, printer, PrintOptions(pages=[0], layout=LAYOUT_POSTER,
+                                                     poster_overlap_mm=10)) == len(tiles)
+    del printer
+    doc.close()
+    assert pymupdf.open(str(out)).page_count == len(tiles)
+    from foliant.modules.viewer.printing_engine import impose_poster
+    sheets = impose_poster(pymupdf.open(str(path)), [0], *a4, 10)
+    assert sheets.page_count == len(tiles) and "POSTER" in sheets[0].get_text()
+
+
+def test_small_page_poster_is_single_sheet():
+    from foliant.modules.viewer.printing_engine import poster_tiles
+    assert len(poster_tiles(300, 400, 595, 842, 28)) == 1
+
+
+def test_dialog_layout_modes(viewer_window, sample_pdf):
+    from foliant.modules.viewer.printing_engine import LAYOUT_BOOKLET, LAYOUT_POSTER
+    view = viewer_window.open_path(sample_pdf)
+    dlg = part(viewer_window, "printing").options_dialog(view)
+    assert dlg.options().layout == "normal" and not dlg.overlap.isVisibleTo(dlg)
+    dlg.layout_mode.setCurrentIndex(dlg.layout_mode.findData(LAYOUT_BOOKLET))
+    dlg.booklet_rtl.setChecked(True)
+    o = dlg.options()
+    assert o.layout == LAYOUT_BOOKLET and o.booklet_rtl and not dlg.size_box.isEnabled()
+    assert "pagine bianche" in dlg.mode_hint.text()
+    dlg.layout_mode.setCurrentIndex(dlg.layout_mode.findData(LAYOUT_POSTER))
+    dlg.overlap.setValue(15)
+    o = dlg.options()
+    assert o.layout == LAYOUT_POSTER and o.poster_overlap_mm == 15 and dlg.overlap.isVisibleTo(dlg)
