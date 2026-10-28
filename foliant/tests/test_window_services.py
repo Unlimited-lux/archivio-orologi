@@ -335,7 +335,85 @@ def test_quit_with_running_task_asks(window, monkeypatch):
         task.wait(5000)
 
 
+def test_task_callbacks_survive_nested_event_loops(window, monkeypatch):
+    """Un `on_done` che apre un dialogo modale (ciclo di eventi annidato) mentre altre attività
+    sono finite nello stesso giro: ognuna conclusa una sola volta, senza errori."""
+    monkeypatch.setenv("FOLIANT_SYNC_TASKS", "0")
+    ctx, manager = window.ctx, window.task_manager
+    gate = threading.Event()
+    calls = []
+
+    def on_first(result):
+        calls.append(("a", result))
+        manager.poll()                                               # come il ciclo di un dialogo modale
+    a = ctx.run_task("A", lambda p: gate.wait(5) and 1, modal=False, on_done=on_first)
+    b = ctx.run_task("B", lambda p: gate.wait(5) and 2, modal=False, on_done=lambda r: calls.append(("b", r)))
+    gate.set()
+    a._thread.join(5)
+    b._thread.join(5)
+    manager.poll()                                                   # entrambe finite nello stesso giro
+    assert calls == [("a", 1), ("b", 2)] and a.done and b.done and manager.running() == []
+
+
+def test_quit_stops_tasks_only_when_quit_is_confirmed(window, sample_pdf, monkeypatch):
+    """«Interrompi ed esci» seguito da un annullamento (controllo `quit` o domanda sulle
+    modifiche) non deve aver già interrotto le attività; a uscita confermata si attende che
+    smettano di lavorare prima di chiudere i documenti."""
+    import time
+    from PySide6.QtGui import QCloseEvent
+    monkeypatch.setenv("FOLIANT_SYNC_TASKS", "0")
+    ctx = window.ctx
+    view = window.open_path(sample_pdf)
+    seen_closed = []
+
+    def work(progress):
+        while True:
+            progress.update(0.5)                                     # OperationCancelled se annullata
+            seen_closed.append(view.document.closed)
+            time.sleep(0.01)
+
+    errors = []
+    task = ctx.run_task("Esportazione", work, modal=False, on_error=errors.append)
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: next(
+        b for b in box.buttons() if b.text() == "Interrompi ed esci").click() or 0)
+    refuse = lambda v, info: False
+    ctx.add_guard("quit", refuse)
+    try:
+        ev = QCloseEvent()
+        window.closeEvent(ev)
+        assert not ev.isAccepted() and window.views() == [view]
+        assert task.running and not task.cancelled                  # l'uscita è stata annullata
+    finally:
+        ctx.remove_guard("quit", refuse)
+    try:
+        ev = QCloseEvent()
+        window.closeEvent(ev)
+        assert ev.isAccepted() and window.views() == []
+        assert task.done and isinstance(errors[0], OperationCancelled)
+        assert not any(seen_closed)                                  # mai al lavoro su un documento chiuso
+    finally:
+        task.cancel()
+        task.wait(5000)
+
+
 # ====================================================================== schede e pannelli
+def test_services_ignore_closed_views(window, sample_pdf, qtbot):
+    """Callback in ritardo (es. fine di un'attività in background) su una scheda già chiusa."""
+    import shiboken6
+    ctx = window.ctx
+    view = window.open_path(sample_pdf)
+    qtbot.wait(50)                                                   # sistemazione della vista appena aperta
+    assert ctx.close_view(view, discard=True)
+    assert ctx.show_banner(view, "tardi", "Analisi completata") is None   # documento chiuso
+    qtbot.waitUntil(lambda: not shiboken6.isValid(view), timeout=3000)  # vista ormai distrutta
+    assert ctx.show_banner(view, "tardi", "Analisi completata") is None
+    assert ctx.banners(view) == [] and not ctx.hide_banner(view, "tardi")
+    assert not ctx.activate_view(view) and window.tabs.indexOf(view) == -1
+    n = ctx.notify("Fatto", [("Apri", lambda: None, True)], duration_ms=0)   # azioni come negli avvisi
+    assert [b.text() for b in n.buttons] == ["Apri"]
+    n.close_notification()
+
+
 def test_activate_view_close_view_and_refresh_state(window, sample_pdf, tmp_path):
     ctx = window.ctx
     v1 = window.open_path(sample_pdf)

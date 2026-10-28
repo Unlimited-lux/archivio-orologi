@@ -750,7 +750,9 @@ class MainWindow(QMainWindow):
     # ================================================================== avvisi del documento
     def _banner_bar(self, view: DocumentView | None) -> BannerBar | None:
         page = self.tabs.page(view)
-        return page.banners if page is not None else None
+        if page is None or view.document.closed:      # scheda chiusa (anche in attesa di eliminazione)
+            return None
+        return page.banners
 
     def show_banner(self, view: DocumentView | None, banner_id: str, text: str, actions=(), level: str = "info",
                     priority: int = 0, closable: bool = True, on_close: Callable | None = None) -> Banner | None:
@@ -1266,7 +1268,10 @@ class MainWindow(QMainWindow):
         return self.task_manager.running()
 
     def _confirm_stop_tasks(self, tasks: list[BackgroundTask]) -> bool:
-        """UX-12: con attività in corso l'uscita chiede se interromperle o attendere."""
+        """UX-12: con attività in corso l'uscita chiede se interromperle o attendere.
+
+        Solo la domanda: le attività si interrompono in `closeEvent` quando l'uscita è
+        confermata anche dai controlli `quit` e dalla domanda sulle modifiche non salvate."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle(_("Attività in corso"))
@@ -1276,10 +1281,9 @@ class MainWindow(QMainWindow):
         wait = box.addButton(_("Attendi"), QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(wait)
         box.exec()
-        if box.clickedButton() is not stop:
-            return False
-        self.task_manager.cancel_all()
-        return True
+        return box.clickedButton() is stop
+
+    STOP_TASKS_TIMEOUT_MS = 5000      # attesa massima all'uscita per le attività interrotte
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
@@ -1326,6 +1330,11 @@ class MainWindow(QMainWindow):
                     if not self.save_view(view):
                         event.ignore()
                         return
+        if self.task_manager.running():
+            # uscita confermata: solo ora si interrompono le attività, e si aspetta che smettano
+            # di usare i documenti prima di chiuderli (con un limite, per non bloccare l'uscita)
+            self.task_manager.cancel_all()
+            self.task_manager.wait_all(self.STOP_TASKS_TIMEOUT_MS)
         for view in views:
             self._close_view_now(view)
         self.settings.setValue("window/geometry", self.saveGeometry())

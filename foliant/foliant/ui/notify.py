@@ -41,7 +41,8 @@ class Notification(QFrame):
         self.label.setMaximumWidth(520)
         lay.addWidget(self.label, 1)
         self.buttons: list[QPushButton] = []
-        for label, callback in actions or ():
+        for action in actions or ():
+            label, callback = action[0], action[1]     # come gli avvisi: un terzo elemento è ignorato
             btn = QPushButton(str(label), self)
             btn.clicked.connect(lambda _c=False, f=callback: self._activate(f))
             lay.addWidget(btn)

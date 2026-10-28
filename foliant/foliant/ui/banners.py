@@ -301,8 +301,14 @@ class DocumentTabs(QTabWidget):
 
     @staticmethod
     def page(view: QWidget | None) -> DocumentPage | None:
-        """Contenitore (barre di avviso + vista) di `view`, o None."""
-        parent = view.parentWidget() if isinstance(view, DocumentView) else None
+        """Contenitore (barre di avviso + vista) di `view`, o None (anche per una vista già
+        distrutta, es. callback di un'attività in background dopo la chiusura della scheda)."""
+        if not isinstance(view, DocumentView):
+            return None
+        try:
+            parent = view.parentWidget()
+        except RuntimeError:            # oggetto C++ già eliminato
+            return None
         return parent if isinstance(parent, DocumentPage) else None
 
     def _wrap(self, widget: QWidget) -> QWidget:
@@ -328,7 +334,10 @@ class DocumentTabs(QTabWidget):
         return w.view if isinstance(w, DocumentPage) else w
 
     def indexOf(self, widget) -> int:
-        return super().indexOf(self._inner(widget))
+        try:
+            return super().indexOf(self._inner(widget))
+        except RuntimeError:            # vista già distrutta: non è (più) in una scheda
+            return -1
 
     def setCurrentWidget(self, widget) -> None:
         super().setCurrentWidget(self._inner(widget))

@@ -245,7 +245,7 @@ class FilesController:
         for view in self.views_for(path):
             doc = view.document
             doc._saved_state = doc._state  # modifiche già scartate dall'utente: nessuna richiesta
-            w.close_view(view)
+            w.close_view(view, ask=False)   # file eliminato o spostato: niente controlli né domande
         w._forget_recent(path)
         self.update_actions()
 

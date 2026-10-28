@@ -86,6 +86,21 @@ def test_revert_discards_changes(viewer_window, ctl, pdf30, monkeypatch):
     assert "*" not in viewer_window.tabs.tabText(viewer_window.tabs.indexOf(new))
 
 
+def test_reload_is_not_a_user_close(viewer_window, ctl, pdf30):
+    """La ricarica sostituisce la vista senza consultare i controlli `close_document` dei
+    moduli: un controllo che rifiuta non deve lasciare due schede dello stesso file."""
+    view = viewer_window.open_path(pdf30)
+    asked = []
+    guard = lambda v, info: asked.append(v) or False
+    viewer_window.ctx.add_guard("close_document", guard)
+    try:
+        new = ctl.revert(view)
+    finally:
+        viewer_window.ctx.remove_guard("close_document", guard)
+    assert new is not None and new is not view and asked == []
+    assert viewer_window.views() == [new]
+
+
 def test_revert_cancelled_keeps_changes(viewer_window, ctl, pdf30, monkeypatch):
     view = viewer_window.open_path(pdf30)
     with view.document.change("Elimina"):

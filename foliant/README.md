@@ -180,7 +180,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `current_view()`, `current_document()`, `views()` | vista/documento attivi |
 | `open_path(p)`, `open_document(doc)` | aprire file o mostrare un documento creato dal modulo |
 | `activate_view(view)` → bool | porta in primo piano la scheda, anche se è visibile la Home o un widget centrale |
-| `close_view(view, discard=False)` → bool | chiude la scheda come Ctrl+W (controlli `close_document` e domanda di salvataggio); `discard=True` chiude subito scartando le modifiche |
+| `close_view(view, discard=False)` → bool | chiude la scheda come Ctrl+W (controlli `close_document` e domanda di salvataggio); `discard=True` chiude subito scartando le modifiche e senza controlli: da usare per le chiusure decise dal modulo (ricarica, file eliminato o spostato) |
 | `refresh_state()` | ricalcola titolo, azioni (annulla/ripeti, Prima/Precedente/Successiva/Ultima) e barra di stato |
 | `add_mode(id, titolo, icona, order)` → `Mode` | modalità con barra contestuale (`mode.add_action`, `add_widget`, `add_separator`, segnali `entered`/`left`) |
 | `mode.set_default_tool(tool_o_factory)` | strumento attivato dal nucleo entrando nella modalità e sui documenti aperti mentre è attiva: un `Tool` o `factory(view) -> Tool \| None`; solo sulle viste con «Seleziona testo», prima di `entered`; vince l'ultima chiamata. Es. `ctx.mode("modifica").set_default_tool(lambda v: EditTextTool(c))` |

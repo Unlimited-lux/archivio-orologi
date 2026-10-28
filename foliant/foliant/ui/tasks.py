@@ -242,6 +242,10 @@ class TaskManager(QObject):
     def poll(self) -> None:
         ended = [t for t in self.tasks if t._thread is not None and not t._thread.is_alive()]
         for task in ended:
+            # un callback con un dialogo modale fa girare una poll annidata che può aver già
+            # concluso le altre attività di questo giro
+            if task not in self.tasks:
+                continue
             self.tasks.remove(task)
             self._finish(task)
         if not self.tasks:
@@ -251,6 +255,18 @@ class TaskManager(QObject):
     def cancel_all(self) -> None:
         for task in self.running():
             task.progress.cancel()
+
+    def wait_all(self, timeout_ms: int = 30000) -> bool:
+        """Attende la fine di tutte le attività (callback compresi) senza accettare clic e tasti
+        nel frattempo (es. all'uscita). True se sono finite tutte entro `timeout_ms`."""
+        deadline = time.monotonic() + timeout_ms / 1000
+        app = QCoreApplication.instance()
+        while self.running() and time.monotonic() < deadline:
+            if app is not None:
+                app.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents, 20)
+            self.poll()
+            time.sleep(0.005)
+        return not self.running()
 
     def _finish(self, task: BackgroundTask) -> None:
         task.done = True
