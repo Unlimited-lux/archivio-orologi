@@ -315,6 +315,14 @@ def test_access_user_owner_and_encryption_info(tmp_path):
     assert r2.allows(pymupdf.PDF_PERM_PRINT_HQ)                        # R2: i bit 9–12 non esistono
     everything = Document.open(_protected(tmp_path, perms=-4, name="tutto.pdf"), "cliente")
     assert everything.access == "user" and everything.permissions == -1
+    # documento costruito da un documento del motore già aperto: stessi permessi effettivi
+    engine = pymupdf.open(tmp_path / "rc4-40.pdf")
+    engine.authenticate("cliente")
+    direct = Document(engine)
+    assert direct.access == "user" and direct.allows(pymupdf.PDF_PERM_PRINT_HQ) and not direct.can_copy
+    engine = pymupdf.open(tmp_path / "tutto.pdf")
+    engine.authenticate("cliente")
+    assert Document(engine).permissions == -1
 
 
 def test_access_with_empty_open_password(tmp_path):
@@ -614,6 +622,38 @@ def test_signed_document_rewrites_when_protection_changes(tmp_path, test_signer)
     assert not doc.save_bytes().startswith(signed)        # nuova cifratura: riscrittura completa
     with pytest.raises(IncrementalSaveError):
         doc.save_bytes(incremental=True)
+
+
+def test_replace_with_renumbered_content_is_not_saved_incrementally(tmp_path, test_signer):
+    """Dopo `replace_with` con un PDF rinumerato il confronto per numero di oggetto non vale più:
+    niente aggiornamento incrementale (che produrrebbe un file incoerente) finché non si annulla."""
+    from foliant.core.incremental import IncrementalSaveError
+    path = _signed_pdf(tmp_path, test_signer, True)
+    signed = path.read_bytes()
+    doc = Document.open(path)
+    doc.replace_with(doc.to_bytes(), "Sostituisci")             # compattato: oggetti rinumerati
+    with pytest.raises(IncrementalSaveError):
+        doc.save_bytes(incremental=True)
+    out = doc.save_bytes()                                      # firmato ma non allineato: riscrittura completa
+    assert not out.startswith(signed)
+    r = pymupdf.open("pdf", out)
+    assert r.page_count == 2 and "Pagina 2" in r[1].get_text()
+    doc.undo()                                                  # di nuovo la numerazione del file
+    with doc.change("Nota", kind="annotation") as pdf:
+        pdf[1].add_text_annot((100, 100), "ok")
+    out = doc.save_bytes()
+    assert out.startswith(signed) and _validate(out, test_signer).intact
+    # una revisione in coda al file firmato conserva la numerazione: resta incrementale
+    tmp = tmp_path / "revisione.pdf"
+    tmp.write_bytes(signed)
+    rev = pymupdf.open(tmp)
+    rev[0].add_text_annot((50, 50), "revisione")
+    rev.save(str(tmp), incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP)
+    rev.close()
+    doc.replace_with(tmp.read_bytes(), "Sostituisci con la revisione")
+    out = doc.save_bytes(incremental=True)
+    assert out.startswith(signed) and _validate(out, test_signer).intact
+    assert len(list(pymupdf.open("pdf", out)[0].annots())) == 1
 
 
 def test_explicit_incremental_and_save_strategy(sample_pdf, tmp_path):

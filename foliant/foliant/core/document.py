@@ -72,6 +72,7 @@ class _Snapshot:
     data: bytes
     state: int
     save_options: dict = field(default_factory=dict)
+    aligned: bool = True     # numerazione degli oggetti continua con quella del file (vedi Document._aligned)
 
 
 @dataclass
@@ -94,7 +95,8 @@ class OpenState:
             if security.is_encrypted(pdf):
                 st.encryption = security.encryption_info(pdf)
                 st.access = ACCESS_USER
-                st.permissions = int(pdf.permissions)
+                # come all'apertura: bit 9–12 per R2, AND con /Perms, -1 se tutto è consentito
+                st.permissions, st.encryption["perms_tampered"] = security.effective_permissions(pdf, None)
         except Exception:
             pass
         return st
@@ -343,6 +345,10 @@ class Document:
         self.original_bytes: bytes | None = original_bytes
         self.has_signatures: bool = signed
         self._base_aligned = original_bytes is not None   # numerazione degli oggetti = quella di original_bytes
+        # Lo stato attuale conserva la numerazione degli oggetti del file: False dopo
+        # `replace_with()` con un PDF che non prosegue `original_bytes` (es. compattato e
+        # rinumerato). Segue annulla/ripeti tramite le istantanee.
+        self._aligned = True
         # Sola lettura logica (SIG-17) e strategia di salvataggio facoltativa di un modulo
         self.locked_reason: str | None = None
         self.save_strategy: SaveStrategy | None = None
@@ -625,6 +631,7 @@ class Document:
                 raise OperationCancelled(self.locked_reason)
             before = self._snapshot()
             before_opts = dict(self.save_options)
+            before_aligned = self._aligned
             previous_state = self._state
             self._depth = 1
             self._change_thread = threading.get_ident()
@@ -635,29 +642,39 @@ class Document:
                 self._change_thread = None
                 self._restore(before)
                 self.save_options = before_opts
+                self._aligned = before_aligned
                 raise
             self._depth = 0
             self._change_thread = None
-            self._push(self._undo, _Snapshot(label, before, previous_state, before_opts))
+            self._push(self._undo, _Snapshot(label, before, previous_state, before_opts, before_aligned))
             self._redo.clear()
             self._state = self._next_state
             self._next_state += 1
         self._notify(CONTENT)
 
     def replace_with(self, data: bytes, label: str, kind: str = "content") -> None:
-        """Sostituisce l'intero contenuto con un altro PDF (annullabile)."""
+        """Sostituisce l'intero contenuto con un altro PDF (annullabile).
+
+        Se `data` non prosegue i byte del file (`original_bytes` + revisioni in coda), la
+        numerazione degli oggetti cambia: fino all'annullamento il salvataggio incrementale
+        non è possibile e un documento firmato si riscrive per intero.
+        """
         with self.change(label, kind):
             self._restore(data)
+            base = self.original_bytes
+            self._aligned = bool(isinstance(data, (bytes, bytearray)) and base is not None and data.startswith(base))
 
     def undo(self) -> bool:
         with self.lock:
             if not self._undo or self._depth or self.locked_reason is not None:
                 return False
             snap = self._undo.pop()
-            self._redo.append(_Snapshot(snap.label, self._snapshot(), self._state, dict(self.save_options)))
+            self._redo.append(_Snapshot(snap.label, self._snapshot(), self._state, dict(self.save_options),
+                                        self._aligned))
             self._restore(snap.data)
             self._state = snap.state
             self.save_options = dict(snap.save_options)
+            self._aligned = snap.aligned
         self._notify(CONTENT)
         return True
 
@@ -666,10 +683,12 @@ class Document:
             if not self._redo or self._depth or self.locked_reason is not None:
                 return False
             snap = self._redo.pop()
-            self._push(self._undo, _Snapshot(snap.label, self._snapshot(), self._state, dict(self.save_options)))
+            self._push(self._undo, _Snapshot(snap.label, self._snapshot(), self._state, dict(self.save_options),
+                                             self._aligned))
             self._restore(snap.data)
             self._state = snap.state
             self.save_options = dict(snap.save_options)
+            self._aligned = snap.aligned
         self._notify(CONTENT)
         return True
 
@@ -755,7 +774,8 @@ class Document:
         """
         if incremental is False:
             return False
-        possible = self.original_bytes is not None and self._base_aligned and not self.repaired
+        possible = (self.original_bytes is not None and self._base_aligned and self._aligned
+                    and not self.repaired)
         same_protection = self.save_options == self.original_protection
         if incremental:
             if not possible:
