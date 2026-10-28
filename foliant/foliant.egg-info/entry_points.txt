@@ -1,0 +1,2 @@
+[console_scripts]
+foliant = foliant.app:main

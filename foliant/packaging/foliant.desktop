@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Foliant
+GenericName=Editor PDF
+GenericName[en]=PDF Editor
+Comment=Leggi, modifica, converti e firma documenti PDF
+Comment[en]=Read, edit, convert and sign PDF documents
+Exec=@EXEC@ %F
+Icon=foliant
+Terminal=false
+Categories=Office;Viewer;Graphics;
+MimeType=application/pdf;image/png;image/jpeg;image/tiff;
+Keywords=pdf;editor;ocr;firma;sign;annotate;convert;
+StartupWMClass=foliant
+StartupNotify=true

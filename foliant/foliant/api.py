@@ -1,0 +1,29 @@
+"""API pubblica per i moduli: importare da qui, non dagli internals.
+
+    from foliant.api import Context, Document, Tool, PageEvent, ENGINE_LOCK, run_task, icon, _
+"""
+
+from .core.document import CLOSED, CONTENT, SAVED, Document, atomic_write
+from .core.engine import ENGINE_LOCK, try_engine
+from .core.errors import DocumentError, FoliantError, OperationCancelled, PasswordRequired, WrongPassword
+from .i18n import _, add_translations, language
+from .ui import theme
+from .ui.context import PDF_FILTER, Context, Mode
+from .ui.document_view import (
+    FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView, page_geometry,
+)
+from .ui.icons import bind_icon, icon
+from .ui.tasks import Progress, run_task
+from .ui.tools import (
+    HandTool, PageEvent, SelectTextTool, TextSelection, Tool, copy_text_to_clipboard, follow_link,
+    selection_from_words, words_to_text,
+)
+
+__all__ = [
+    "CLOSED", "CONTENT", "SAVED", "Document", "atomic_write", "ENGINE_LOCK", "try_engine",
+    "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
+    "_", "add_translations", "language", "theme", "PDF_FILTER", "Context", "Mode",
+    "FIT_PAGE", "FIT_WIDTH", "VIEW_CONTINUOUS", "VIEW_COVER", "VIEW_FACING", "VIEW_SINGLE", "DocumentView",
+    "page_geometry", "bind_icon", "icon", "Progress", "run_task", "HandTool", "PageEvent", "SelectTextTool",
+    "TextSelection", "Tool", "copy_text_to_clipboard", "follow_link", "selection_from_words", "words_to_text",
+]

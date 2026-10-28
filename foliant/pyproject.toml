@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foliant"
+version = "0.1.0"
+description = "Editor PDF desktop per Linux"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+    "PySide6-Essentials>=6.7",
+    "PyMuPDF>=1.24",
+    "pyhanko>=0.25",
+    "pyhanko-certvalidator>=0.26",
+    "pdf2docx>=0.5.8",
+    "openpyxl>=3.1",
+    "python-pptx>=0.6.23",
+    "opencv-python-headless>=4.9",
+    "numpy>=1.26",
+    "Pillow>=10",
+    "keyring>=24",
+    "anthropic>=0.40",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-qt>=4.4"]
+
+[project.scripts]
+foliant = "foliant.app:main"
+
+[tool.setuptools.packages.find]
+include = ["foliant*"]
+
+[tool.setuptools.package-data]
+foliant = ["resources/**/*"]
+
+[tool.pytest.ini_options]
+qt_api = "pyside6"
+testpaths = ["tests"]
+addopts = "-q"
