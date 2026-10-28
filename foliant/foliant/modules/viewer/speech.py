@@ -524,7 +524,7 @@ class SpeechController(QObject):
         tip = "" if ok else _(NO_ENGINE_TEXT)
         if view.selected_text():
             act = menu.addAction(_("Leggi la selezione ad alta voce"), self.read_selection)
-        elif pe.page is not None:
+        elif pe.page is not None and ok:   # senza selezione la voce compare solo con un motore vocale
             act = menu.addAction(_("Leggi ad alta voce da qui"),
                                  lambda p=pe.page, pt=pe.point: self.read_to_end(p, pt))
         else:

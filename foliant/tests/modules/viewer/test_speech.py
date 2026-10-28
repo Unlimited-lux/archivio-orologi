@@ -210,6 +210,10 @@ def test_no_engine_disables_with_message(viewer_window, monkeypatch, tmp_path):
     pe = PageEvent(0, pymupdf.Point(100, 100), QPointF(10, 10), Qt.MouseButton.RightButton,
                    Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier)
     ctl._menu_provider(view, pe, menu)
+    assert not [a for a in menu.actions() if not a.isSeparator()]   # senza selezione: nessuna voce
+    from foliant.api import selection_from_words
+    view.set_text_selection(selection_from_words(0, view.words(0)[:3]))
+    ctl._menu_provider(view, pe, menu)
     acts = [a for a in menu.actions() if not a.isSeparator()]
     assert acts and not acts[0].isEnabled() and acts[0].toolTip() == msg
     assert not ctl.read_page() and ctl.last_message == msg
