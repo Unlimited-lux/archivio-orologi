@@ -245,3 +245,32 @@ def test_documento_lungo_analisi_incrementale(tmp_path):
     per_page = (time.monotonic() - t) / 50
     assert all(i.category == detect.IMAGE_ONLY for i in infos)
     assert per_page < 0.02          # 25 ms per passo nell'interfaccia: almeno una pagina per passo
+
+
+def test_modificabile_stile_e_famiglia(tmp_path):
+    """Grassetto, corsivo, grazie e monospaziato stimati dall'immagine (≥ 85% delle parole)."""
+    import cv2
+    import numpy as np
+    styles = [("helv", "Liberation Sans", False, False), ("tiro", "Liberation Serif", False, False),
+              ("cour", "Liberation Mono", False, False), ("hebo", "Liberation Sans", True, False),
+              ("heit", "Liberation Sans", False, True), ("tiit", "Liberation Serif", False, True)]
+    parts = [scan_image(lines=FRASI[:3], dpi=300, fontname=fn, size=(595, 140), top=40) for fn, *_r in styles]
+    img = np.vstack(parts)
+    page_pdf = image_pdf(tmp_path / "stili.pdf", [img], dpi=300)
+    out = engine.ocr_pdf_bytes(open(page_pdf, "rb").read(), ["ita"], "editable")
+    total = good = 0
+    with pymupdf.open(stream=out) as d:
+        for b in d[0].get_text("dict")["blocks"]:
+            for ln in b.get("lines", []):
+                for sp in ln["spans"]:
+                    y = sp["origin"][1]
+                    k = min(int(y // 140), len(styles) - 1)
+                    _fn, fam, bold, italic = styles[k]
+                    n = len(sp["text"].split())
+                    total += n
+                    name = sp["font"]
+                    ok = fam.replace(" ", "") in name.replace(" ", "") and (("Bold" in name) == bold) and \
+                        (("Italic" in name) == italic)
+                    good += n if ok else 0
+    assert total and good / total >= 0.85, good / total
+    del cv2

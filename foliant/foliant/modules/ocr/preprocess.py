@@ -299,3 +299,37 @@ def text_lines_present(gray: np.ndarray) -> bool:
 
 def angle_of(dx: float, dy: float) -> float:
     return math.degrees(math.atan2(dy, dx))
+
+
+def slant(gray: np.ndarray, box) -> float:
+    """Inclinazione dei tratti verticali (tangente): > 0,12 circa indica il corsivo."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    reg = gray[max(0, y0):max(0, y1), max(0, x0):max(0, x1)]
+    if reg.size == 0 or reg.shape[0] < 6:
+        return 0.0
+    _t, bw = cv2.threshold(reg, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    h, w = bw.shape
+    best_k, best_v = 0.0, -1.0
+    for k in np.arange(-0.5, 0.51, 0.05):
+        m = np.float32([[1, k, -k * h / 2], [0, 1, 0]])
+        v = float(np.var(cv2.warpAffine(bw, m, (w, h)).sum(axis=0, dtype=np.float64)))
+        if v > best_v:
+            best_k, best_v = float(k), v
+    return round(best_k, 2)
+
+
+def serif_ratio(gray: np.ndarray, box, baseline: float, x_height: float) -> float:
+    """Inchiostro appena sopra la linea di base ÷ inchiostro a metà dell'occhio medio.
+
+    Le «grazie» aggiungono tratti orizzontali al piede delle aste: il rapporto
+    è più alto nei caratteri con grazie."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    reg = gray[max(0, y0):max(0, y1), max(0, x0):max(0, x1)]
+    if reg.size == 0:
+        return 1.0
+    _t, bw = cv2.threshold(reg, 0, 1, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    b = int(baseline) - max(0, y0)
+    xh = max(3, int(x_height * 0.5))
+    foot = float(bw[max(0, b - 2):max(0, b)].sum())
+    mid = float(bw[max(0, b - xh - 1):max(1, b - xh + 1)].sum())
+    return foot / max(1.0, mid)

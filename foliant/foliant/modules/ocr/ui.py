@@ -871,7 +871,7 @@ class OcrController(QObject):
             painter.drawRect(QRectF(r.x0 - 1, r.y0 - 1, r.width + 2, r.height + 2))
 
     def correct_word(self, view, page: int, rect: pymupdf.Rect, word, new_text: str) -> bool:
-        family = str(self.settings().value("ocr/font", "sans"))
+        family = str(self.settings().value("ocr/font", "auto"))
         try:
             with view.document.change(_("Correggi parola OCR")) as pdf:
                 if not engine.replace_word(pdf[page], rect, new_text, family):

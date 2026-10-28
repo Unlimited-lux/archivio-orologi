@@ -343,3 +343,113 @@ def test_pagine(window):
     with pytest.raises(ValueError):
         engine.parse_pages("abc", 3)
     assert engine.format_pages([2, 6, 7, 8]) == "3, 7-9"
+
+
+def test_destinazione_nuovo_documento(window, scan_two):
+    original = open(scan_two, "rb").read()
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    ctl.run(view, engine.OcrOptions(languages=["ita"], mode=engine.EDITABLE), [0], preview=False,
+            new_document=True)
+    assert len(window.views()) == 2
+    new = window.current_view()
+    assert new is not view and "(OCR)" in new.document.display_name
+    assert "compravendita" in new.document.page_text(0)
+    assert not view.document.is_modified and view.document.page_text(0).strip() == ""
+    assert open(scan_two, "rb").read() == original
+    new.document._saved_state = new.document._state
+
+
+def test_profilo_esporta_importa(window, settings):
+    a = dialogs.OcrDialog(window, page_count=3, current_page=0, detected=[], settings=settings)
+    a.rb_editable.setChecked(True)
+    a.cb_denoise.setChecked(False)
+    a.existing.setCurrentIndex(a.existing.findData(engine.REPLACE))
+    a.dpi.setCurrentIndex(a.dpi.findData(400))
+    import json
+    data = json.loads(json.dumps(a.profile()))
+    b = dialogs.OcrDialog(window, page_count=3, current_page=0, detected=[], settings=None)
+    b.load_profile(data)
+    assert b.profile() == a.profile()
+    with pytest.raises(ValueError):
+        b.load_profile({"altro": 1})
+
+
+def test_convalida_immediata_intervallo(window):
+    dlg = dialogs.OcrDialog(window, page_count=10, current_page=0, detected=[], settings=None)
+    dlg.pages.setCurrentIndex(dlg.pages.findData("custom"))
+    for bad in ("12-15", "5-3"):
+        dlg.range_edit.setText(bad)
+        assert not dlg.ok_button.isEnabled() and dlg.error.text()
+    dlg.range_edit.setText("2-4, 7")
+    assert dlg.ok_button.isEnabled() and not dlg.error.text()
+    assert "Da elaborare: 4 pagine" in dlg.summary.text()
+
+
+def test_permessi_richiedono_password_proprietario(window, tmp_path, monkeypatch):
+    img = scan_image(lines=FRASI[:2], dpi=150)
+    plain = image_pdf(tmp_path / "p.pdf", [img], dpi=150)
+    path = tmp_path / "limitato.pdf"
+    with pymupdf.open(plain) as d:
+        d.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="capo", user_pw="",
+               permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_COPY)
+    view = window.open_path(str(path))
+    ctl = ocr_controller()
+    monkeypatch.setattr(ctl, "ask_owner_password", lambda: None)
+    assert ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False) is None
+    assert not view.document.is_modified
+    errors = []
+    monkeypatch.setattr(ctl.ctx, "error", lambda t, m: errors.append(m))
+    monkeypatch.setattr(ctl, "ask_owner_password", lambda: "sbagliata")
+    assert ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False) is None
+    assert errors and not view.document.is_modified
+    monkeypatch.setattr(ctl, "ask_owner_password", lambda: "capo")
+    assert ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False) is not None
+    assert "compravendita" in view.document.page_text(0)
+
+
+def test_documento_firmato_chiede_conferma(window, scan_two, monkeypatch):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    monkeypatch.setattr(ui.OcrController, "_is_signed", staticmethod(lambda v: True))
+    asked = []
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or False)
+    assert ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False) is None
+    assert asked and "firmato" in asked[0] and not view.document.is_modified
+
+
+def test_annulla_mantieni_pagine_completate(window, tmp_path, monkeypatch):
+    imgs = [scan_image(lines=["Una riga di prova"], dpi=150) for _ in range(3)]
+    path = image_pdf(tmp_path / "tre.pdf", imgs, dpi=150)
+    view = window.open_path(path)
+    ctl = ocr_controller()
+    real = engine.recognize_document
+
+    def interrupted(pdf, opts, pages=None, progress=None):
+        full = real(pdf, opts, [0], None)
+        raise engine.OcrInterrupted(full)
+    monkeypatch.setattr(engine, "recognize_document", interrupted)
+    monkeypatch.setattr(ctl, "ask_keep_partial", lambda partial: False)
+    assert ctl.run(view, engine.OcrOptions(languages=["ita"]), [0, 1, 2], preview=False) is None
+    assert not view.document.is_modified
+    monkeypatch.setattr(ctl, "ask_keep_partial", lambda partial: True)
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0, 1, 2], preview=False)
+    assert "prova" in view.document.page_text(0) and view.document.page_text(1).strip() == ""
+    view.document.undo()
+    assert view.document.page_text(0).strip() == ""
+
+
+def test_esportazione_alto_dal_pannello_testo(window, scan_two, monkeypatch, tmp_path):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    dest = tmp_path / "out.alto.xml"
+    monkeypatch.setattr(ctl.ctx, "ask_save_path", lambda *a, **k: str(dest))
+
+    def fake_exec(dlg):
+        dlg.btn_alto.click()
+        return 0
+    monkeypatch.setattr(dialogs.TextDialog, "exec", fake_exec)
+    ctl.run(view, engine.OcrOptions(languages=["ita"], mode=engine.TEXT_ONLY), [0])
+    import xml.etree.ElementTree as ET
+    root = ET.parse(dest).getroot()
+    assert "alto" in root.tag and len(root.findall(".//{*}String")) > 10

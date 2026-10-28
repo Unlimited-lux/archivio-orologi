@@ -57,6 +57,8 @@ class Line:
     par: int = 0
     color: tuple[float, float, float] = (0.0, 0.0, 0.0)
     bold: bool = False
+    italic: bool = False
+    family: str = "sans"     # sans | serif | mono (stimata dall'immagine)
 
     @property
     def text(self) -> str:

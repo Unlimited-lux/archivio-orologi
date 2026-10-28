@@ -192,10 +192,11 @@ class OcrDialog(QDialog):
         form.addRow(_("Risoluzione di lavoro:"), self.dpi)
 
         self.font = QComboBox(self)
+        self.font.addItem(_("Automatico (come nella scansione)"), "auto")
         self.font.addItem(_("Senza grazie"), "sans")
         self.font.addItem(_("Con grazie"), "serif")
         self.font.addItem(_("Monospaziato"), "mono")
-        self.font.setCurrentIndex(max(0, self.font.findData(get("font", "sans"))))
+        self.font.setCurrentIndex(max(0, self.font.findData(get("font", "auto"))))
         form.addRow(_("Carattere del testo modificabile:"), self.font)
         self.destination = QComboBox(self)
         self.destination.addItem(_("Documento corrente"), "current")

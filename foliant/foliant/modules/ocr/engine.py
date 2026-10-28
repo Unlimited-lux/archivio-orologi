@@ -41,7 +41,10 @@ from foliant.core.errors import OperationCancelled
 from foliant.i18n import _
 
 from . import detect
-from .preprocess import PreprocessOptions, apply_point, clean_background, ink_color, invert, prepare, stroke_width, warp
+from .preprocess import (
+    PreprocessOptions, apply_point, clean_background, ink_color, invert, prepare, serif_ratio, slant, stroke_width,
+    warp,
+)
 from .tess import Line, OcrCancelled, OcrError, Word, detect_orientation, recognize
 
 SEARCHABLE = "searchable"
@@ -78,8 +81,18 @@ FONT_FILES = {
                   "/usr/share/fonts/truetype/liberation2/LiberationMono-Bold.ttf",
                   "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"),
 }
+for _fam, _file in (("sans", "LiberationSans"), ("serif", "LiberationSerif"), ("mono", "LiberationMono")):
+    for _suffix, _style in (("-italic", "Italic"), ("-bold-italic", "BoldItalic")):
+        FONT_FILES[_fam + _suffix] = tuple(f"/usr/share/fonts/truetype/{d}/{_file}-{_style}.ttf"
+                                           for d in ("liberation", "liberation2"))
 _FALLBACK_BASE14 = {"sans": "helv", "sans-bold": "hebo", "serif": "tiro", "serif-bold": "tibo",
-                    "mono": "cour", "mono-bold": "cobo"}
+                    "mono": "cour", "mono-bold": "cobo", "sans-italic": "heit", "sans-bold-italic": "hebi",
+                    "serif-italic": "tiit", "serif-bold-italic": "tibi", "mono-italic": "coit",
+                    "mono-bold-italic": "cobi"}
+
+
+def font_key(family: str, bold: bool = False, italic: bool = False) -> str:
+    return family + ("-bold" if bold else "") + ("-italic" if italic else "")
 _fonts: dict[str, pymupdf.Font] = {}
 _fonts_lock = threading.Lock()
 
@@ -110,7 +123,7 @@ class OcrOptions:
     preprocess: PreprocessOptions = field(default_factory=PreprocessOptions)
     existing_text: str = SKIP
     workers: int = 0            # 0 = core disponibili meno uno
-    font: str = "sans"          # famiglia del testo modificabile: sans, serif, mono
+    font: str = "auto"          # famiglia del testo modificabile: auto (stimata), sans, serif, mono
     timeout: float = 120.0
     psm: int = 3
     apply_to_page: bool = False  # ricercabile: applica rotazione e raddrizzamento anche alla pagina visibile
@@ -257,16 +270,41 @@ def _encode_background(img: np.ndarray) -> bytes:
     return png.tobytes()
 
 
-def _style_lines(lines: list[Line], color_img: np.ndarray | None, gray: np.ndarray) -> None:
-    """Stima colore e grassetto di ogni riga (per il testo modificabile)."""
+def _style_lines(lines: list[Line], color_img: np.ndarray | None, gray: np.ndarray, zoom: float) -> None:
+    """Stima colore, famiglia (con/senza grazie, monospaziata), grassetto e corsivo di ogni riga."""
     if not lines:
         return
-    widths = [stroke_width(gray, ln.bbox) for ln in lines]
-    ref = float(np.median(widths)) if widths else 0.0
-    for ln, sw in zip(lines, widths):
+    sans = get_font("sans")
+    for ln in lines:
         if color_img is not None:
             ln.color = ink_color(color_img, ln.bbox)
-        ln.bold = ref > 0 and sw > ref * 1.4 and len(lines) >= 3
+        fs_px = _font_size_for_line(ln, zoom, sans) * zoom
+        sw = stroke_width(gray, ln.bbox)
+        ln.bold = fs_px > 0 and sw / fs_px > 0.11
+        ln.italic = slant(gray, ln.bbox) >= 0.12
+        measured = (ln.words[-1].bbox[2] - ln.words[0].bbox[0]) / zoom
+        natural = sans.text_length(unicodedata.normalize("NFC", ln.text), fontsize=fs_px / zoom) or 1.0
+        width_ratio = measured / natural
+        x_height = max(3.0, ln.x_size - ln.x_ascenders) if ln.x_size else (ln.bbox[3] - ln.bbox[1]) * 0.45
+        sr = serif_ratio(gray, ln.bbox, ln.baseline_y(ln.bbox[0]), x_height)
+        if width_ratio > 1.45 and len(ln.text) >= 8:
+            ln.family = "mono"
+        elif sr > (1.09 if ln.italic else 1.22):
+            ln.family = "serif"
+        else:
+            ln.family = "sans"
+    # voto di maggioranza per blocco: le righe di un paragrafo condividono il carattere
+    blocks: dict[int, list[Line]] = {}
+    for ln in lines:
+        blocks.setdefault(ln.block, []).append(ln)
+    for group in blocks.values():
+        if len(group) < 2:
+            continue
+        fams = [ln.family for ln in group]
+        top = max(set(fams), key=fams.count)
+        if fams.count(top) / len(fams) >= 0.6:
+            for ln in group:
+                ln.family = top
 
 
 def recognize_array(img: np.ndarray, languages: list[str], dpi: float, popts: PreprocessOptions | None = None,
@@ -346,7 +384,7 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
         lines = kept
     res.lines = lines
     if editable:
-        _style_lines(lines, color, prep.gray)
+        _style_lines(lines, color, prep.gray, res.zoom)
         # si ripulisce l'intera riga (parole e spazi tra loro): niente residui di glifi
         boxes = [w.bbox for ln in lines for w in ln.words] + [ln.bbox for ln in lines]
         if res.mixed:
@@ -634,7 +672,7 @@ def line_font_sizes(lines: list[Line], zoom: float, family: str) -> list[float]:
     uniformato sulla pagina (le righe del testo corrente hanno lo stesso corpo)."""
     sizes = []
     for ln in lines:
-        font = get_font(family + ("-bold" if ln.bold else ""))
+        font = get_font(font_key(ln.family if family == "auto" else family, ln.bold, ln.italic))
         fs_h = _font_size_for_line(ln, zoom, font)
         text = unicodedata.normalize("NFC", ln.text)
         width_pt = (ln.words[-1].bbox[2] - ln.words[0].bbox[0]) / zoom if ln.words else 0
@@ -656,10 +694,11 @@ def _insert_lines_visible(page: pymupdf.Page, res: PageResult, mapper, zoom: flo
         text = unicodedata.normalize("NFC", ln.text)
         if not text:
             continue
-        font = get_font(family + ("-bold" if ln.bold else ""))
+        key = font_key(ln.family if family == "auto" else family, ln.bold, ln.italic)
+        font = get_font(key)
         x0 = ln.words[0].bbox[0]
         color = tuple(round(c, 2) for c in ln.color)
-        w = placer.writer((color, family + ("b" if ln.bold else "")))
+        w = placer.writer((color, key))
         try:
             w.append(placer.pos(x0, ln.baseline_y(x0)), text, font=font, fontsize=fs)
         except Exception:
@@ -1005,6 +1044,12 @@ def replace_word(page: pymupdf.Page, rect: pymupdf.Rect, new_text: str, family: 
     text = unicodedata.normalize("NFC", new_text.strip())
     if not text:
         return True
+    if family == "auto":
+        name = str(target.get("font", ""))
+        family = "serif" if "Serif" in name else "mono" if "Mono" in name else "sans"
+        bold = "Bold" in name
+        italic = "Italic" in name
+        family = font_key(family, bold, italic)
     font = get_font("sans" if invisible else family)
     if invisible and chars:
         natural = font.text_length(text, fontsize=size) or 1.0
