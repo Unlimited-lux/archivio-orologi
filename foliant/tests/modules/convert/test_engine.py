@@ -1004,3 +1004,95 @@ def test_images_hide_unsigned_signature_placeholder(tmp_path):
     orange = sum(1 for r, g, b in img.getdata() if r > 200 and 80 < g < 200 and b < 80)
     assert orange == 0
     assert pymupdf.open(path)[0].first_widget is not None   # il file sorgente non cambia
+
+
+def _words(text: str) -> list[str]:
+    import unicodedata
+    return unicodedata.normalize("NFC", text).split()
+
+
+def test_docx_flow_similarity_ten_pages(tmp_path):
+    """CNV-03: PDF nativo di 10 pagine a colonna singola → similarità testuale ≥ 99%."""
+    import difflib
+    import docx
+    doc = pymupdf.open()
+    lorem = ("Il presente contratto di compravendita riguarda un orologio automatico con cassa in acciaio, "
+             "quadrante blu e bracciale originale. Il venditore garantisce la provenienza lecita del bene. ")
+    for i in range(10):
+        p = doc.new_page()
+        p.insert_textbox(pymupdf.Rect(72, 72, 523, 770), f"Articolo {i + 1}. " + lorem * 6, fontsize=11)
+    path = _save(doc, tmp_path / "dieci.pdf")
+    src = _words(" ".join(pymupdf.open(path)[i].get_text() for i in range(10)))
+    out = _words(" ".join(p.text for p in docx.Document(convert_pdf(path, tmp_path / "d.docx", "docx")[0]).paragraphs))
+    assert difflib.SequenceMatcher(None, src, out, autojunk=False).ratio() >= 0.99
+
+
+@pytest.mark.skipif(__import__("shutil").which("soffice") is None, reason="LibreOffice non installato")
+def test_docx_opens_in_office_suite(links_pdf, table_pdf, tmp_path):
+    """CNV-03: il DOCX prodotto è valido per un'applicazione d'ufficio indipendente (LibreOffice lo
+    apre e lo converte senza errori, con il testo atteso)."""
+    import subprocess
+    out = convert_pdf(table_pdf[0], tmp_path / "t.docx", "docx")[0]
+    profile = tmp_path / "lo-profile"
+    subprocess.run(["soffice", f"-env:UserInstallation=file://{profile}", "--headless", "--convert-to", "pdf",
+                    "--outdir", str(tmp_path / "rt"), out], capture_output=True, timeout=180)
+    back = tmp_path / "rt" / "t.pdf"
+    assert back.exists()
+    text = pymupdf.open(str(back))[0].get_text()
+    assert "Marca1" in text and "Prezzo" in text
+
+
+def test_docx_rotated_text_as_rotated_box(tmp_path):
+    """CNV-03: testo ruotato o verticale → casella di testo ruotata (fuori dal flusso)."""
+    import zipfile
+    import docx
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Fattura numero 42 del 3 marzo", fontsize=12)
+    p.insert_text((72, 130), "Orologio cronografo, cassa in acciaio, movimento automatico", fontsize=12)
+    p.insert_text((40, 700), "Codice modulo FT-2026", fontsize=8, rotate=90)
+    p.insert_text((560, 100), "Copia per il cliente", fontsize=8, rotate=270)
+    path = _save(doc, tmp_path / "ruotato.pdf")
+    out = convert_pdf(path, tmp_path / "r.docx", "docx")[0]
+    body = [q.text for q in docx.Document(out).paragraphs]
+    assert body == ["Fattura numero 42 del 3 marzo", "Orologio cronografo, cassa in acciaio, movimento automatico"]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert xml.count("<wps:txbx>") == 2
+    assert 'vert="vert270"' in xml and 'vert="vert"' in xml
+    assert "Codice modulo FT-2026" in xml and "Copia per il cliente" in xml
+    import shutil
+    import subprocess
+    if shutil.which("soffice"):
+        subprocess.run(["soffice", f"-env:UserInstallation=file://{tmp_path / 'lo'}", "--headless",
+                        "--convert-to", "pdf", "--outdir", str(tmp_path / "rt"), out],
+                       capture_output=True, timeout=180)
+        back = pymupdf.open(str(tmp_path / "rt" / "r.pdf"))[0]
+        dirs = {"".join(s["text"] for s in ln["spans"]): ln["dir"]
+                for b in back.get_text("dict")["blocks"] for ln in b.get("lines", [])}
+        assert dirs["Codice modulo FT-2026"] == (0.0, -1.0)
+        assert dirs["Copia per il cliente"] == (0.0, 1.0)
+
+
+def test_rotated_page_text_angle(tmp_path):
+    """L'angolo del testo è quello visualizzato: su una pagina con /Rotate 90 il testo orizzontale
+    della pagina non ruotata appare verticale."""
+    from foliant.modules.convert.extract import analyze_page
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Testo normale", fontsize=12)
+    p.set_rotation(90)
+    paras = [it for it in analyze_page(p).items if hasattr(it, "angle")]
+    assert [it.angle for it in paras] == [270]
+
+
+def test_docx_mostly_rotated_page_stays_in_flow(tmp_path):
+    """Pagina con /Rotate e testo tutto «ruotato»: il testo resta nel flusso del documento."""
+    import docx
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Listino prezzi autunno", fontsize=12)
+    p.insert_text((72, 130), "Cronografo in oro rosa", fontsize=12)
+    p.set_rotation(90)
+    path = _save(doc, tmp_path / "pagina_ruotata.pdf")
+    body = [q.text for q in docx.Document(convert_pdf(path, tmp_path / "p.docx", "docx")[0]).paragraphs]
+    assert body == ["Listino prezzi autunno", "Cronografo in oro rosa"]

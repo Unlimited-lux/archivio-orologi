@@ -72,6 +72,7 @@ class Para:
     bbox: tuple
     kind: str = "p"              # "p", "h1".."h6", "li"
     align: str = "left"
+    angle: int = 0               # rotazione del testo come visualizzato (gradi, antiorari)
 
     @property
     def text(self) -> str:
@@ -278,6 +279,9 @@ def find_tables(page: pymupdf.Page, strategy: str | None = None):
                 return _NoTables()
         except Exception:
             pass
+    # PyMuPDF cerca pymupdf.layout per suggerirne l'installazione: con l'esclusione del nucleo
+    # (NFR-19) quella ricerca solleva ModuleNotFoundError e find_tables fallirebbe
+    pymupdf._recommend_layout = False
     try:
         return page.find_tables(use_layout=False, **kwargs)
     except TypeError:
@@ -488,7 +492,21 @@ def _block_to_para(block: dict, links, dehyphenate: bool = True) -> Para | None:
     # rimuove spazi finali/iniziali
     spans[0].text = spans[0].text.lstrip()
     spans[-1].text = spans[-1].text.rstrip()
-    return Para(spans=spans, bbox=tuple(block["bbox"]))
+    return Para(spans=spans, bbox=tuple(block["bbox"]), angle=_line_angle(lines))
+
+
+def _line_angle(lines: list) -> int:
+    """Angolo prevalente delle righe del blocco, arrotondato a 90° (0 se il testo non è
+    chiaramente ruotato)."""
+    import math
+    votes: collections.Counter = collections.Counter()
+    for line in lines:
+        dx, dy = line.get("dir", (1, 0))
+        a = math.degrees(math.atan2(-dy, dx)) % 360
+        snapped = int(round(a / 90) * 90) % 360
+        if abs(((a - snapped) + 180) % 360 - 180) <= 10:
+            votes[snapped] += len("".join(sp.get("text", "") for sp in line.get("spans", [])))
+    return votes.most_common(1)[0][0] if votes else 0
 
 
 def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None = None,
@@ -557,10 +575,27 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
         for bbox, item in boxes:
             r = tuple(pymupdf.Rect(bbox) * m)
             item.bbox = r
+            if isinstance(item, Para):
+                item.angle = (item.angle - page.rotation) % 360
             rotated.append((r, item))
         boxes = rotated
-    content.items = _xy_cut(boxes)
+    content.items = _xy_cut(_upright(boxes))
     return content
+
+
+def _upright(boxes: list) -> list:
+    """Se il testo della pagina è in prevalenza ruotato, l'ordine di lettura si calcola sulle
+    coordinate raddrizzate (le righe di un testo verticale si leggono da destra a sinistra o
+    viceversa); i riquadri degli elementi restano quelli della pagina."""
+    votes: collections.Counter = collections.Counter()
+    for _b, it in boxes:
+        if isinstance(it, Para):
+            votes[it.angle] += len(it.text)
+    angle = votes.most_common(1)[0][0] if votes else 0
+    if not angle or votes[angle] < 0.5 * sum(votes.values()):
+        return boxes
+    m = pymupdf.Matrix(angle)
+    return [(tuple(pymupdf.Rect(b) * m), it) for b, it in boxes]
 
 
 def assign_headings(pages: list[PageContent], max_levels: int = 3) -> None:
@@ -648,7 +683,9 @@ def repeated_furniture(pages: list[PageContent]) -> set[int]:
             if not isinstance(it, Para):
                 continue
             top, bottom = it.bbox[1], it.bbox[3]
-            if top > pc.height * 0.12 and bottom < pc.height * 0.88:
+            # solo paragrafi contenuti per intero nella fascia alta o bassa: un paragrafo che
+            # occupa la pagina (stesso testo su ogni pagina) non è un'intestazione
+            if bottom > pc.height * 0.15 and top < pc.height * 0.85:
                 continue
             key = re.sub(r"\d+", "#", it.text.strip().lower())
             if key in seen:
