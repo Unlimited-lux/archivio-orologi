@@ -135,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     if send_request(name, options.request()):
         return 0
     server = InstanceServer(name, app)
+    # collegato prima di listen(): una richiesta che arriva mentre si aprono i file di questo avvio
+    # (domanda della password, avviso di errore: cicli di eventi annidati) non va persa
+    server.requestReceived.connect(lambda request: open_request(request, settings))
     if not server.listen() and send_request(name, options.request()):
         return 0                        # un'altra istanza è partita nel frattempo
 
@@ -148,7 +151,6 @@ def main(argv: list[str] | None = None) -> int:
     if options.unknown:
         window.statusBar().showMessage(
             _("Opzioni sconosciute ignorate: {o}").format(o=" ".join(options.unknown)), 10000)
-    server.requestReceived.connect(lambda request: open_request(request, settings))
     return app.exec()
 
 
