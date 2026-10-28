@@ -54,6 +54,7 @@ Collaudo end-to-end dell'orchestratore (08:00 UTC): corretti bug_07 (grafica che
 impostazione predefinita), bug_08 (pixel delle immagini col colore di riempimento), bug_05 (riquadro e testo
 sovrapposto disegnati con core/placement su pagine ruotate con CropBox spostato), bug_11 (stato «Da applicare»),
 bug_09 (gestore dei collegamenti a priorità 1000), bug_10 (indirizzi decodificati e non duplicati), bug_04
-(RC4 a 40 bit), bug_03 (lo sblocco riautentica il motore ed emette documentChanged). Aperti: bug_06 (il motore
-compensa male l'avanzamento dei glifi rimossi: il testo dopo il segno si sposta), bug_02 e bug_01 (viewer e
-nucleo).
+(RC4 a 40 bit), bug_03 (lo sblocco riautentica il motore ed emette documentChanged). Corretto anche bug_06: il motore
+dimentica l'avanzamento del primo glifo rimosso nell'array TJ; il modulo misura le sequenze rimosse prima
+dell'applicazione e corregge il numero inserito (test `test_bug06_following_text_keeps_position`). bug_02 e
+bug_01 sono del viewer e del nucleo.
