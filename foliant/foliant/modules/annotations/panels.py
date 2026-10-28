@@ -30,7 +30,7 @@ KIND_ICONS = {
     engine.CALLOUT: "message-square-quote", engine.RECT: "square", engine.ELLIPSE: "circle", engine.LINE: "minus",
     engine.ARROW: "move-up-right", engine.POLYGON: "pentagon", engine.POLYLINE: "spline", engine.CLOUD: "cloud",
     engine.INK: "pencil", engine.STAMP: "stamp", engine.ATTACHMENT: "paperclip", engine.DISTANCE: "ruler",
-    engine.PERIMETER: "ruler", engine.AREA: "land-plot", engine.TYPEWRITER: "text-cursor-input",
+    engine.PERIMETER: "ruler", engine.AREA: "land-plot", engine.ANGLE: "triangle-right", engine.TYPEWRITER: "text-cursor-input",
     engine.CARET: "text-cursor", engine.REPLACE: "replace",
 }
 
@@ -1025,6 +1025,8 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int,
             _("Aggiungi vertice"), lambda pdf: engine.edit_vertices(pdf, page, xref, point, True) or True))
         menu.addAction(_("Rimuovi vertice"), lambda: ctrl.apply(
             _("Rimuovi vertice"), lambda pdf: engine.edit_vertices(pdf, page, xref, point, False) or True))
+    if info.kind in engine.CONVERTIBLE:
+        menu.addAction(_("Converti in misura"), lambda: ctrl.convert_to_measure(page, xref))
     if info.type in ("Polygon", "Square", "Circle") and info.kind not in engine.MEASURE_KINDS:
         cl = menu.addMenu(_("Bordo a nuvola"))
         for n, label in ((0, "Nessuno"), (1, "Intensità 1"), (2, "Intensità 2")):

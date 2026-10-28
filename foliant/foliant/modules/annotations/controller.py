@@ -40,6 +40,7 @@ FACTORY_STYLES: dict[str, Style] = {
     engine.DISTANCE: Style(color=engine.MEASURE_COLOR, width=1.0),
     engine.PERIMETER: Style(color=engine.MEASURE_COLOR, width=1.0),
     engine.AREA: Style(color=engine.MEASURE_COLOR, width=1.0),
+    engine.ANGLE: Style(color=engine.MEASURE_COLOR, width=1.0),
 }
 
 STYLES_VERSION = 1
@@ -388,6 +389,25 @@ class Controller(QObject):
             return None
         tol = 8.0 / max(view.zoom, 0.05)        # 8 pixel dello schermo
         return engine.snap(targets, point, tol, kinds)
+
+    def convert_to_measure(self, page: int, xref: int, view=None) -> int | None:
+        """«Converti in misura»: su una pagina senza scala chiede prima la calibrazione (ANN-33)."""
+        view = view or self.view()
+        if view is None:
+            return None
+        info = self.info(page, xref, view=view)
+        if info is None:
+            return None
+        scale = self.scale_for(page, info.rect.tl, view)
+        if not scale.calibrated:
+            scale = dialogs.ask_scale(view, scale)
+            if scale is None:
+                return None
+            self.set_scale(scale, page)
+        new = self.apply(_("Converti in misura"), engine.convert_to_measure, page, xref, scale, view=view)
+        if new is not None:
+            self.select([(page, new)], view)
+        return new
 
     def read(self, fn: Callable[..., Any], *args, view=None) -> Any:
         view = view or self.view()

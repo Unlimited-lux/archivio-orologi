@@ -52,13 +52,14 @@ ATTACHMENT = "attachment"
 DISTANCE = "distance"
 PERIMETER = "perimeter"
 AREA = "area"
+ANGLE = "angle"
 TYPEWRITER = "typewriter"
 CARET = "caret"
 REPLACE = "replace"
 
 MARKUP_KINDS = (HIGHLIGHT, UNDERLINE, STRIKEOUT, SQUIGGLY)
 SHAPE_KINDS = (RECT, ELLIPSE, LINE, ARROW, POLYGON, POLYLINE, CLOUD)
-MEASURE_KINDS = (DISTANCE, PERIMETER, AREA)
+MEASURE_KINDS = (DISTANCE, PERIMETER, AREA, ANGLE)
 
 # Tipi del motore che non sono commenti (non elencati né esportati).
 NON_COMMENT_TYPES = {pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_POPUP}
@@ -122,7 +123,7 @@ SUBJECTS = {
     NOTE: "Nota", FREETEXT: "Casella di testo", CALLOUT: "Richiamo", RECT: "Rettangolo", ELLIPSE: "Ellisse",
     LINE: "Linea", ARROW: "Freccia", POLYGON: "Poligono", POLYLINE: "Polilinea", CLOUD: "Nuvola",
     INK: "Disegno a mano libera", STAMP: "Timbro", ATTACHMENT: "Allegato", DISTANCE: "Distanza",
-    PERIMETER: "Perimetro", AREA: "Area", TYPEWRITER: "Commento di testo", CARET: "Inserimento",
+    PERIMETER: "Perimetro", AREA: "Area", ANGLE: "Angolo", TYPEWRITER: "Commento di testo", CARET: "Inserimento",
     REPLACE: "Sostituzione",
 }
 
@@ -1130,7 +1131,35 @@ def format_measure(value: float, unit: str, square: bool = False) -> str:
     return f"{txt} {unit}²" if square else f"{txt} {unit}"
 
 
+def angle_degrees(points: Sequence) -> float:
+    """Angolo in gradi (0-180) al secondo vertice fra i lati verso il primo e il terzo."""
+    a, b, c = (pymupdf.Point(p) for p in points[:3])
+    u, v = a - b, c - b
+    nu, nv = abs(u), abs(v)
+    if nu == 0 or nv == 0:
+        return 0.0
+    cos = max(-1.0, min(1.0, (u.x * v.x + u.y * v.y) / (nu * nv)))
+    return math.degrees(math.acos(cos))
+
+
+def measure_number(kind: str, points: Sequence, scale: Scale) -> float:
+    """Valore numerico di una misura (unità reali; gradi per l'angolo)."""
+    if kind == DISTANCE:
+        return scale.length(polyline_length(points[:2]))
+    if kind == PERIMETER:
+        return scale.length(polyline_length(points))
+    if kind == AREA:
+        return scale.area(polygon_area(points))
+    if kind == ANGLE:
+        return angle_degrees(points)
+    raise AnnotationError("Misura sconosciuta.")
+
+
 def measure_value(kind: str, points: Sequence, scale: Scale) -> str:
+    if kind == ANGLE:
+        if len(points) < 3:
+            raise AnnotationError("Servono almeno 3 punti.")
+        return f"{angle_degrees(points):.1f}°".replace(".", ",")
     if kind == DISTANCE:
         return format_measure(scale.length(polyline_length(points[:2])), scale.unit)
     if kind == PERIMETER:
@@ -1140,11 +1169,13 @@ def measure_value(kind: str, points: Sequence, scale: Scale) -> str:
     raise AnnotationError("Misura sconosciuta.")
 
 
-def _measure_dict(scale: Scale) -> str:
+def _measure_dict(scale: Scale, angle: bool = False) -> str:
     unit = scale.unit
     num = f"<</Type/NumberFormat/U{_pdf_string(unit)}/C {scale.factor:.10g}/D 100>>"
     area = f"<</Type/NumberFormat/U{_pdf_string(unit + '2')}/C {scale.factor * scale.factor:.10g}/D 100>>"
-    return f"<</Type/Measure/Subtype/RL/R{_pdf_string(scale.text())}/X[{num}]/D[{num}]/A[{area}]>>"
+    # angolo: formato angolare /T (gradi) del dizionario di misura (ANN-33)
+    ang = f"/T[<</Type/NumberFormat/U{_pdf_string('°')}/C 1/D 10>>]" if angle else ""
+    return f"<</Type/Measure/Subtype/RL/R{_pdf_string(scale.text())}/X[{num}]/D[{num}]/A[{area}]{ang}>>"
 
 
 def scale_of(pdf: pymupdf.Document, xref: int) -> Scale | None:
@@ -1234,16 +1265,65 @@ def create_measure(pdf: pymupdf.Document, page_no: int, kind: str, points: Seque
         annot = page.add_polygon_annot(pts)
         _apply_style(annot, st.copy(fill=st.fill), fill=st.fill is not None)
         intent = "PolygonDimension"
+    elif kind == ANGLE:
+        if len(pts) < 3:
+            raise AnnotationError("Servono almeno 3 punti.")
+        annot = page.add_polyline_annot(pts[:3])        # polilinea di tre vertici (ANN-33)
+        _apply_style(annot, st)
+        intent = "PolyLineDimension"
     else:
         raise AnnotationError("Misura sconosciuta.")
     pdf.xref_set_key(annot.xref, "IT", "/" + intent)
-    pdf.xref_set_key(annot.xref, "Measure", _measure_dict(scale))
+    pdf.xref_set_key(annot.xref, "Measure", _measure_dict(scale, angle=kind == ANGLE))
     if kind == DISTANCE:
         try:
             mupdf.pdf_set_annot_line_caption(annot.this, 1)
         except Exception:
             pass
     return _finish(annot, author, value, kind=kind)
+
+
+CONVERTIBLE = {LINE: DISTANCE, ARROW: DISTANCE, POLYLINE: PERIMETER, POLYGON: AREA, CLOUD: AREA, RECT: AREA}
+
+
+def convert_to_measure(pdf: pymupdf.Document, page_no: int, xref: int, scale: Scale) -> int:
+    """«Converti in misura» (ANN-33): linea → /IT /LineDimension, polilinea → /PolyLineDimension,
+    poligono → /PolygonDimension, con /Measure e il valore come testo. Un rettangolo diventa un
+    poligono di misura dell'area con lo stesso aspetto. Restituisce l'xref della misura."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    kind = kind_of(pdf, annot)
+    target = CONVERTIBLE.get(kind)
+    if target is None:
+        raise AnnotationError("Questa annotazione non si può convertire in misura.")
+    if kind == RECT:
+        info = annot.info or {}
+        colors = annot.colors or {}
+        border = annot.border or {}
+        r = _freetext_inner(page, annot)           # riquadro della forma: /Rect meno /RD
+        style = Style(color=_rgb(colors.get("stroke")) if colors.get("stroke") else MEASURE_COLOR,
+                      fill=_rgb(colors.get("fill")) if colors.get("fill") else None,
+                      opacity=annot.opacity if annot.opacity is not None and annot.opacity >= 0 else 1.0,
+                      width=float(border.get("width", 1) if border.get("width", -1) >= 0 else 1))
+        new = create_measure(pdf, page_no, AREA, [r.tl, r.tr, r.br, r.bl], style, scale, info.get("title", ""))
+        delete_annot(pdf, page_no, xref, force=True)
+        return new
+    intent = {DISTANCE: "LineDimension", PERIMETER: "PolyLineDimension", AREA: "PolygonDimension"}[target]
+    pts = [pymupdf.Point(v) for v in annot.vertices or []]
+    value = measure_value(target, pts, scale)
+    pdf.xref_set_key(xref, "IT", "/" + intent)
+    pdf.xref_set_key(xref, "Measure", _measure_dict(scale))
+    if kind == CLOUD:
+        pdf.xref_set_key(xref, "BE", "null")
+    annot = get_annot(page, xref)
+    if target == DISTANCE:
+        try:
+            mupdf.pdf_set_annot_line_caption(annot.this, 1)
+        except Exception:
+            pass
+    annot.set_info(content=value, modDate=pdf_now())
+    _dirty_update(annot)
+    return xref
 
 
 # ------------------------------------------------------------------ aggancio (ANN-33)
@@ -2221,7 +2301,9 @@ def kind_of(pdf: pymupdf.Document, annot: pymupdf.Annot) -> str:
             return AREA
         return CLOUD if intent == "PolygonCloud" or pdf.xref_get_key(annot.xref, "BE/S")[1] == "/C" else POLYGON
     if t == pymupdf.PDF_ANNOT_POLY_LINE:
-        return PERIMETER if intent == "PolyLineDimension" else POLYLINE
+        if intent == "PolyLineDimension":
+            return ANGLE if pdf.xref_get_key(annot.xref, "Measure/T")[0] == "array" else PERIMETER
+        return POLYLINE
     if t == pymupdf.PDF_ANNOT_INK:
         return INK
     if t == pymupdf.PDF_ANNOT_STAMP:
@@ -3825,11 +3907,9 @@ def measures_csv(pdf: pymupdf.Document, sep: str = ",") -> str:
         annot = find_annot(page, a.xref)
         scale = scale_of(pdf, a.xref) or Scale()
         pts = [pymupdf.Point(v) for v in (annot.vertices or [])] if annot else []
-        if a.kind == AREA:
-            value = scale.area(polygon_area(pts))
-        else:
-            value = scale.length(polyline_length(pts))
-        w.writerow([a.page + 1, _(SUBJECTS[a.kind]), f"{value:.4f}", a.contents, scale.unit, scale.text(), a.author,
+        value = measure_number(a.kind, pts, scale) if len(pts) >= (3 if a.kind == ANGLE else 2) else 0.0
+        unit = "°" if a.kind == ANGLE else scale.unit
+        w.writerow([a.page + 1, _(SUBJECTS[a.kind]), f"{value:.4f}", a.contents, unit, scale.text(), a.author,
                     format_date(a.created)])
     return buf.getvalue()
 

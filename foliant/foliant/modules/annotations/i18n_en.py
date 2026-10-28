@@ -201,7 +201,10 @@ EN.update({
     "estremo": "endpoint", "punto medio": "midpoint", "intersezione": "intersection", "tracciato": "path",
     "annotazione": "annotation", "Aggancio": "Snap", "Estremi": "Endpoints", "Punti medi": "Midpoints",
     "Intersezioni": "Intersections", "Tracciati": "Paths", "Vertici delle annotazioni": "Annotation vertices",
-    "X {x} · Y {y}": "X {x} · Y {y}",
+    "X {x} · Y {y}": "X {x} · Y {y}", "Converti in misura": "Convert to measurement", "Angolo": "Angle",
+    "Questa annotazione non si può convertire in misura.": "This annotation cannot be converted to a measurement.",
+    "Separatore dei campi:": "Field separator:", "Virgola": "Comma", "Punto e virgola": "Semicolon",
+    "Tabulazione": "Tab",
     # controllo ortografico (ANN-44)
     "Nessun suggerimento": "No suggestions", "Aggiungi al dizionario": "Add to dictionary", "Ignora": "Ignore",
     "Controllo ortografico": "Spell check", "Lingua del controllo": "Spell check language",

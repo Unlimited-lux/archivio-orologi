@@ -271,19 +271,27 @@ def choose_image_stamp(ctrl: "Controller") -> tuple[bytes, str] | None:
     return data, os.path.splitext(os.path.basename(path))[0]
 
 
-def export_measures(ctrl: "Controller") -> str | None:
+def export_measures(ctrl: "Controller", sep: str | None = None) -> str | None:
+    """CSV UTF-8 di tutte le misure; separatore scelto dall'utente (ANN-33)."""
     view = ctrl.view()
     if view is None:
         return None
     if not any(i.kind in engine.MEASURE_KINDS for i in ctrl.annotations()):
         ctrl.ctx.info(_("Esporta misure"), _("Il documento non contiene misure."))
         return None
+    if sep is None:
+        seps = [",", ";", "\t"]
+        idx = dialogs.ask_item(view, _("Esporta misure"), _("Separatore dei campi:"),
+                               [_("Virgola"), _("Punto e virgola"), _("Tabulazione")], 0)
+        if idx is None:
+            return None
+        sep = seps[idx]
     path = ctrl.ctx.ask_save_path(_("Esporta misure"), _stem(ctrl) + " - " + _("misure") + ".csv", "CSV (*.csv)",
                                   default_suffix=".csv")
     if not path:
         return None
     with ENGINE_LOCK:
-        data = engine.measures_csv(view.document.pdf).encode("utf-8")
+        data = engine.measures_csv(view.document.pdf, sep).encode("utf-8")
     try:
         atomic_write(path, data)
     except Exception as e:

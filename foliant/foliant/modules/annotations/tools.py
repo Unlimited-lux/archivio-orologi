@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 HANDLE = 6.0   # lato delle maniglie in pixel
 VERTEX_BASE = 100   # maniglie dei vertici: VERTEX_BASE + indice
 VERTEX_KINDS = (engine.LINE, engine.ARROW, engine.POLYGON, engine.POLYLINE, engine.CLOUD, engine.DISTANCE,
-                engine.PERIMETER, engine.AREA)
+                engine.PERIMETER, engine.AREA, engine.ANGLE)
 
 
 def qcolor(c, alpha: float = 1.0) -> QColor:
@@ -878,6 +878,9 @@ class PolyTool(_MeasureAssist, AnnotTool):
             return True   # vertici coincidenti: fusi
         self.page = ev.page
         self.points.append(p)
+        if self.kind == engine.ANGLE and len(self.points) == 3:    # angolo: tre clic (ANN-33)
+            self.finish(view)
+            return True
         view.viewport().update()
         return True
 
@@ -923,7 +926,7 @@ class PolyTool(_MeasureAssist, AnnotTool):
         self.clear_assist()
         self.reset()
         view.viewport().update()
-        need = 3 if self.closed else 2
+        need = 3 if self.closed or self.kind == engine.ANGLE else 2
         if page is None or len(pts) < need:
             self.ctrl.ctx.status(_("Servono almeno {n} punti.").format(n=need))
             return

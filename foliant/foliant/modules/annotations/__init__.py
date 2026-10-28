@@ -57,6 +57,7 @@ class AnnotationsModule:
             engine.DISTANCE: ShapeTool(self.ctrl, engine.DISTANCE),
             engine.PERIMETER: PolyTool(self.ctrl, engine.PERIMETER),
             engine.AREA: PolyTool(self.ctrl, engine.AREA),
+            engine.ANGLE: PolyTool(self.ctrl, engine.ANGLE),
             "calibrate": CalibrateTool(self.ctrl),
             "snapshot": SnapshotTool(self.ctrl, on_done=self._snapshot_done),
         }
@@ -117,6 +118,7 @@ class AnnotationsModule:
             ("distance", engine.DISTANCE, _("Distanza"), "ruler"),
             ("perimeter", engine.PERIMETER, _("Perimetro"), "spline"),
             ("area-measure", engine.AREA, _("Area"), "land-plot"),
+            ("angle", engine.ANGLE, _("Angolo"), "triangle-right"),
         ], extra=self._measure_extra))
         mode.add_separator()
         mode.add_widget(self._commands_button())

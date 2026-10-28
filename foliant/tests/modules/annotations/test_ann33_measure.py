@@ -82,3 +82,68 @@ def test_snap_kinds_setting(comments):
     assert engine.SNAP_MID not in module.ctrl.snap_kinds()
     module.ctrl.set_snap_kind(engine.SNAP_MID, True)
     assert set(module.ctrl.snap_kinds()) == set(engine.SNAP_KINDS)
+
+
+def test_angle_measure(comments, tmp_path):
+    from .conftest import click, saved
+    window, view, module = comments
+    module.ctrl.set_snap_kind(engine.SNAP_PATH, False)
+    module.activate(engine.ANGLE)
+    for x, y in ((200, 300), (200, 400), (300, 400)):   # angolo retto al secondo vertice
+        click(view, 0, x, y)
+    info, = module.ctrl.annotations()
+    assert info.kind == engine.ANGLE and info.contents == "90,0°"
+    doc = saved(window, view, tmp_path)
+    page = doc[0]
+    a = [x for x in page.annots()][0]
+    assert a.type[1] == "PolyLine" and len(a.vertices) == 3
+    assert doc.xref_get_key(a.xref, "IT")[1] == "/PolyLineDimension"
+    assert doc.xref_get_key(a.xref, "Measure/T")[0] == "array"
+    import csv
+    import io
+    row = list(csv.reader(io.StringIO(engine.measures_csv(doc))))[1]
+    assert row[1:5] == ["Angolo", "90.0000", "90,0°", "°"]
+
+
+def test_convert_polyline_and_rect_to_measure(comments, monkeypatch):
+    from foliant.modules.annotations import dialogs, panels
+    from PySide6.QtWidgets import QMenu
+    window, view, module = comments
+    ctrl = module.ctrl
+    pl = ctrl.apply("p", engine.create_shape, 0, engine.POLYLINE, [(100, 100), (172, 100), (172, 172)],
+                    engine.Style(), "A")
+    asked = []
+    monkeypatch.setattr(dialogs, "ask_scale", lambda v, s, *a: asked.append(s) or engine.Scale("cm", 2.54 / 72, "", True))
+    menu = QMenu()
+    panels.build_annotation_menu(ctrl, menu, 0, pl)
+    [a for a in menu.actions() if a.text() == "Converti in misura"][0].trigger()
+    assert asked, "pagina senza scala: richiesta di calibrazione"
+    pdf = view.document.pdf
+    assert pdf.xref_get_key(pl, "IT")[1] == "/PolyLineDimension" and pdf.xref_get_key(pl, "Measure")[0] == "dict"
+    assert ctrl.info(0, pl).kind == engine.PERIMETER and ctrl.info(0, pl).contents == "5,08 cm"
+    rect = ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(300, 300), (372, 336)], engine.Style(), "A")
+    new = ctrl.convert_to_measure(0, rect)          # la scala ora c'è: nessuna nuova richiesta
+    assert len(asked) == 1 and new != rect and ctrl.info(0, rect) is None
+    assert ctrl.info(0, new).kind == engine.AREA and ctrl.info(0, new).contents == "3,23 cm²"
+
+
+def test_csv_three_measures_with_separator(comments, tmp_path, monkeypatch):
+    from foliant.modules.annotations import ui_actions
+    window, view, module = comments
+    ctrl = module.ctrl
+    sc = engine.Scale("mm", 25.4 / 72, "", True)
+    ctrl.apply("d", engine.create_measure, 0, engine.DISTANCE, [(100, 100), (172, 100)], engine.Style(), sc, "A")
+    ctrl.apply("p", engine.create_measure, 1, engine.PERIMETER, [(100, 100), (172, 100), (172, 172)],
+               engine.Style(), sc, "A")
+    ctrl.apply("a", engine.create_measure, 2, engine.AREA, [(100, 100), (172, 100), (172, 172), (100, 172)],
+               engine.Style(), sc, "A")
+    out = tmp_path / "misure.csv"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    assert ui_actions.export_measures(ctrl, ";")
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4 and lines[0].startswith("Pagina;Tipo;Valore")
+    rows = [ln.split(";") for ln in lines[1:]]
+    assert [r[0] for r in rows] == ["1", "2", "3"]
+    assert [r[1] for r in rows] == ["Distanza", "Perimetro", "Area"]
+    assert [r[2] for r in rows] == ["25.4000", "50.8000", "645.1600"]
+    assert [r[4] for r in rows] == ["mm", "mm", "mm"]
