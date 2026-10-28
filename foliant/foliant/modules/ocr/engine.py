@@ -773,6 +773,20 @@ def document_copy_bytes(pdf: pymupdf.Document) -> bytes:
         copy.close()
 
 
+def preview_page(pdf: pymupdf.Document, index: int, popts: PreprocessOptions, dpi: int = 150) -> dict:
+    """Anteprima della pre-elaborazione di una pagina (OCR-04): immagine originale, immagine di lavoro
+    (quella che vedrà il riconoscimento), orientamento e inclinazione rilevati, risoluzione effettiva."""
+    with ENGINE_LOCK:
+        page = pdf[index]
+        info = detect.classify_page(page, check_mixed=False)
+        img, zoom, _notes = render_page(page, dpi)
+    gray = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    osd = detect_orientation(gray) if popts.auto_rotate else 0
+    prep = prepare(img, popts, osd)
+    return {"original": img, "working": prep.gray, "rotation": prep.rotation, "skew": prep.skew,
+            "perspective": "perspective" in prep.notes, "dpi": info.dpi, "category": info.category}
+
+
 def recognize_area(pdf: pymupdf.Document, index: int, clip: pymupdf.Rect, opts: OcrOptions,
                    cancelled: Callable[[], bool] | None = None) -> PageResult:
     """Riconosce un'area (punti della pagina visualizzata) e restituisce un risultato

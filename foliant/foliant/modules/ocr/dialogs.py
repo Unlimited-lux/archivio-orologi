@@ -123,12 +123,13 @@ class OcrDialog(QDialog):
     def __init__(self, parent, *, page_count: int, current_page: int, detected: list[int],
                  settings=None, mode: str = engine.SEARCHABLE, pages_text: str | None = None,
                  allow_text_mode: bool = True, infos: dict | None = None, page_image_cb=None,
-                 selected: list[int] | None = None, existing: str | None = None):
+                 selected: list[int] | None = None, existing: str | None = None, preview_cb=None):
         super().__init__(parent)
         self.selected = sorted(set(selected or []))
         self.infos = infos or {}
         self.zones: list = []
         self._page_image_cb = page_image_cb
+        self._preview_cb = preview_cb
         self.setWindowTitle(_("Riconoscimento del testo (OCR)"))
         self.setObjectName("ocrDialog")
         self.page_count = page_count
@@ -278,6 +279,10 @@ class OcrDialog(QDialog):
         lay.addWidget(self.error)
 
         bottom = QHBoxLayout()
+        self.btn_preview = QPushButton(icon("eye"), _("Anteprima…"), self)
+        self.btn_preview.setEnabled(preview_cb is not None)
+        self.btn_preview.clicked.connect(self.show_preview)
+        bottom.addWidget(self.btn_preview)
         self.btn_save_profile = QPushButton(icon("save"), _("Salva profilo…"), self)
         self.btn_load_profile = QPushButton(icon("folder-open"), _("Carica profilo…"), self)
         bottom.addWidget(self.btn_save_profile)
@@ -312,6 +317,20 @@ class OcrDialog(QDialog):
         self.cb_keep.setEnabled(editable)
         self.destination.setEnabled(not text)
         self.validate()
+
+    def preview_page_index(self) -> int:
+        try:
+            pages = self.selected_pages()
+        except ValueError:
+            pages = []
+        return pages[0] if pages else self.current_page
+
+    def show_preview(self) -> None:
+        if self._preview_cb is None:
+            return
+        data = self._preview_cb(self.preview_page_index(), self.options().preprocess)
+        self._preview = PreviewDialog(self, data, self.preview_page_index())
+        self._preview.exec()
 
     def _update_zones_label(self) -> None:
         n = len(self.zones)
@@ -1494,3 +1513,54 @@ def zone_models(settings) -> dict:
     except (TypeError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+
+def _np_to_qimage(arr) -> QImage:
+    import numpy as np
+    arr = np.ascontiguousarray(arr)
+    if arr.ndim == 2:
+        return QImage(arr.data, arr.shape[1], arr.shape[0], arr.strides[0], QImage.Format.Format_Grayscale8).copy()
+    return QImage(arr.data, arr.shape[1], arr.shape[0], arr.strides[0], QImage.Format.Format_RGB888).copy()
+
+
+class PreviewDialog(QDialog):
+    """Pagina originale e immagine di lavoro affiancate, con le correzioni rilevate (OCR-04)."""
+
+    def __init__(self, parent, data: dict, page_index: int):
+        super().__init__(parent)
+        self.setWindowTitle(_("Anteprima della pre-elaborazione"))
+        self.setObjectName("ocrPreviewDialog")
+        self.resize(1000, 720)
+        lay = QVBoxLayout(self)
+        facts = [_("Pagina {n}").format(n=page_index + 1),
+                 _("orientamento corretto: {r}°").format(r=data.get("rotation", 0)),
+                 _("inclinazione corretta: {a:.1f}°").format(a=data.get("skew", 0.0))]
+        if data.get("perspective"):
+            facts.append(_("prospettiva raddrizzata"))
+        if data.get("dpi"):
+            facts.append(_("risoluzione effettiva: {d} dpi").format(d=int(data["dpi"])))
+        self.info = QLabel(" · ".join(facts), self)
+        self.info.setWordWrap(True)
+        lay.addWidget(self.info)
+        row = QHBoxLayout()
+        self.images = []
+        for title, key in ((_("Originale"), "original"), (_("Immagine di lavoro"), "working")):
+            col = QVBoxLayout()
+            head = QLabel(title, self)
+            head.setStyleSheet("font-weight: 600;")
+            col.addWidget(head)
+            scroll = QScrollArea(self)
+            scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label = QLabel()
+            pm = QPixmap.fromImage(_np_to_qimage(data[key]))
+            label.setPixmap(pm.scaledToWidth(460, Qt.TransformationMode.SmoothTransformation))
+            scroll.setWidget(label)
+            col.addWidget(scroll, 1)
+            row.addLayout(col, 1)
+            self.images.append(label)
+        lay.addLayout(row, 1)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
+        close.button(QDialogButtonBox.StandardButton.Close).setText(_("Chiudi"))
+        close.rejected.connect(self.reject)
+        lay.addWidget(close)
