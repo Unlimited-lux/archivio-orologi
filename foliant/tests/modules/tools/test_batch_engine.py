@@ -724,11 +724,8 @@ def test_pause_and_resume_give_same_results(tmp_path):
     th.join(20)
     assert box["r"].counts()["ok"] == 4
     for name in os.listdir(tmp_path / "ref"):
-        # stesso contenuto (l'identificatore /ID del file è generato a ogni salvataggio)
-        ra, rb = pymupdf.open(str(tmp_path / "ref" / name)), pymupdf.open(str(out / name))
-        assert ra.page_count == rb.page_count
-        assert [p.get_text() for p in ra] == [p.get_text() for p in rb]
-        assert [p.read_contents() for p in ra] == [p.read_contents() for p in rb]
+        # identici byte per byte (operazioni deterministiche, data fissata)
+        assert (tmp_path / "ref" / name).read_bytes() == (out / name).read_bytes()
 
 
 def test_skip_current_file_only(tmp_path):
@@ -1121,9 +1118,7 @@ def test_parallel_processing_same_results(tmp_path):
     assert all(r.status in ("ok", "warning") for r in four.results)
     assert sorted(os.listdir(tmp_path / "uno")) == sorted(os.listdir(tmp_path / "quattro"))
     for name in os.listdir(tmp_path / "uno"):
-        a = pymupdf.open(str(tmp_path / "uno" / name))
-        b = pymupdf.open(str(tmp_path / "quattro" / name))
-        assert [p.get_text() for p in a] == [p.get_text() for p in b]
+        assert (tmp_path / "uno" / name).read_bytes() == (tmp_path / "quattro" / name).read_bytes()
 
 
 def test_parallel_errors_and_cancel(tmp_path):

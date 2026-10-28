@@ -898,7 +898,8 @@ def _open(data: bytes) -> pymupdf.Document:
 
 
 def _save(doc: pymupdf.Document, **opts) -> bytes:
-    kw = {"garbage": 3, "deflate": True}
+    # no_new_id: senza un nuovo /ID casuale lo stesso lavoro dà file identici byte per byte (BAT-04)
+    kw = {"garbage": 3, "deflate": True, "no_new_id": True}
     kw.update(opts)
     return doc.tobytes(**kw)
 
@@ -1113,7 +1114,7 @@ def compress_pdf(data: bytes, level: str = "medium") -> bytes:
             except Exception:
                 pass
             return doc.tobytes(garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True,
-                               use_objstms=1)
+                               use_objstms=1, no_new_id=True)
         finally:
             doc.close()
 
@@ -1585,7 +1586,7 @@ def image_to_pdf(path: str, page_size: str = "a4", fit: str = "fit", margin_mm: 
             else:
                 target, keep = area, True
             page.insert_image(target, stream=buf.getvalue(), keep_proportion=keep)
-        data = out.tobytes(garbage=3, deflate=True)
+        data = out.tobytes(garbage=3, deflate=True, no_new_id=True)
         out.close()
     return data
 
@@ -1663,7 +1664,7 @@ def _open_input(data: bytes, item: QueueItem, candidates: list[str]) -> tuple[by
                               "user_pw": user_pw,
                               "owner_pw": used[1] if (used and owner_known) else secrets.token_urlsafe(24),
                               "_auth": auth, "_restricted": not owner_known}
-            plain = doc.tobytes(garbage=0, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
+            plain = doc.tobytes(garbage=0, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE, no_new_id=True)
             return plain, protection, (used[0] if used else None)
         finally:
             doc.close()
@@ -2291,7 +2292,7 @@ def report_pdf(report: JobReport) -> bytes:
                 if detail:
                     w.line(detail, size=8, indent=12, gap=2, color=(0.5, 0.2, 0.1))
                 w.space(3)
-            return doc.tobytes(garbage=3, deflate=True)
+            return doc.tobytes(garbage=3, deflate=True, no_new_id=True)
         finally:
             doc.close()
 
@@ -2721,10 +2722,10 @@ def _x_linearize(data: bytes, p: dict, item, ctx) -> bytes:
         doc = _open(data)
         try:
             try:
-                return doc.tobytes(garbage=4, deflate=True, linear=True)
+                return doc.tobytes(garbage=4, deflate=True, linear=True, no_new_id=True)
             except Exception:
                 ctx.warnings.append(_("linearizzazione non supportata dal motore: file solo ottimizzato"))
-                return doc.tobytes(garbage=4, deflate=True, clean=True)
+                return doc.tobytes(garbage=4, deflate=True, clean=True, no_new_id=True)
         finally:
             doc.close()
 
