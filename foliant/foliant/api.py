@@ -3,6 +3,7 @@
     from foliant.api import Context, Document, Tool, PageEvent, ENGINE_LOCK, run_task, icon, _
 """
 
+from .core import placement
 from .core.document import CLOSED, CONTENT, SAVED, Document, atomic_write
 from .core.engine import ENGINE_LOCK, try_engine
 from .core.errors import DocumentError, FoliantError, OperationCancelled, PasswordRequired, WrongPassword
@@ -20,7 +21,7 @@ from .ui.tools import (
 )
 
 __all__ = [
-    "CLOSED", "CONTENT", "SAVED", "Document", "atomic_write", "ENGINE_LOCK", "try_engine",
+    "placement", "CLOSED", "CONTENT", "SAVED", "Document", "atomic_write", "ENGINE_LOCK", "try_engine",
     "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
     "_", "add_translations", "language", "theme", "PDF_FILTER", "Context", "Mode",
     "FIT_PAGE", "FIT_WIDTH", "VIEW_CONTINUOUS", "VIEW_COVER", "VIEW_FACING", "VIEW_SINGLE", "DocumentView",

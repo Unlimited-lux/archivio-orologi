@@ -114,6 +114,43 @@ def ruota(ctx, gradi):
    modulo non deve mai chiudere l'applicazione.
 9. **Originalità**: nessun testo, icona o risorsa copiati da prodotti commerciali.
 
+### Scorciatoie da tastiera
+
+La tabella UX-18 della specifica è l'unica autorità. Il nucleo registra: Ctrl+O, Ctrl+T (Home),
+Ctrl+N, Ctrl+S, Ctrl+Maiusc+S, Ctrl+W, Ctrl+Maiusc+T, Ctrl+Q, Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
+Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
+N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
+Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R. Spettano ai moduli: Ctrl+P, Ctrl+F,
+Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
+duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
+Le scorciatoie specifiche di un modulo vanno **limitate alla sua modalità**:
+`ctx.action(..., shortcut="Ctrl+D", mode="pagine")` oppure `mode.scope_shortcuts(azione, ...)`.
+Così due modalità possono usare lo stesso tasto senza conflitti. Per i tasti che servono solo
+dentro un widget (es. Canc in un elenco) usa una scorciatoia del widget
+(`Qt.ShortcutContext.WidgetWithChildrenShortcut`) o `keyPressEvent`, non un'azione globale.
+
+### Inserire contenuti nella pagina: `placement`
+
+Le funzioni di inserimento del motore PDF (`draw_*`, `insert_image`, `insert_htmlbox`,
+`TextWriter`, `show_pdf_page`, `insert_link` e, con CropBox più grande del MediaBox, anche
+`insert_text`/`insert_textbox`) spostano il contenuto sulle pagine ruotate o con
+CropBox/MediaBox non allineati, e `page.get_links()` restituisce coordinate ruotate. Usare
+sempre `foliant.api.placement`, che lavora nelle coordinate standard (quelle di `get_text`,
+`get_drawings`, annotazioni) e compensa lo scarto in modo esatto:
+
+```python
+from foliant.api import placement as pl
+pl.insert_text(page, (72, 100), "Pagina 1 di 3", fontsize=9, upright=True)
+pl.insert_htmlbox(page, rect, "<b>Nota</b>", upright=True)
+pl.insert_image(page, rect, filename="firma.png", upright=True)
+pl.draw_rect(page, rect, fill=(1, 1, 1), color=None)
+pl.get_links(page)                       # from/to in coordinate standard
+pl.page_to_display_matrix(page)          # standard -> pagina visualizzata
+```
+
+`upright=True` raddrizza il contenuto nel verso in cui l'utente vede la pagina. Test di
+riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACEMENT=1`).
+
 ### API del contesto (`foliant/ui/context.py`)
 
 | Metodo | Uso |
@@ -129,6 +166,7 @@ def ruota(ctx, gradi):
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |
 | `set_central_widget(w)` / `central_widget()` | mostra un widget del modulo al posto della vista documento (None = ripristina) |
+| `add_link_handler(fn, priority=0)` | apertura dei collegamenti: `fn(view, link) -> bool` (True = gestito); priorità più alta = interrogato prima |
 | `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)` |
 | `run_task(titolo, fn, *args)` | lavoro lungo con avanzamento |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
