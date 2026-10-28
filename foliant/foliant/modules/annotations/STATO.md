@@ -66,3 +66,8 @@ elenco commenti con risposte e stato, maniglie di selezione e vertici).
 - Coordinate convertite con `core/placement.py` (CropBox diverso dal MediaBox, pagine ruotate):
   test_placement.py::test_reread_rotated_crop_larger_than_media.
 - Prestazioni: ridisegno, informazioni e hit test lineari (test_performance.py: 2000 annotazioni, ridisegno < 300 ms).
+- Interfaccia inglese (NFR-25): test_english_ui.py costruisce la finestra in italiano e in inglese e confronta
+  i testi di barra, menu, pannelli, mini barra, menu contestuale, menu principale e dialoghi, e i testi scritti
+  nei documenti (soggetto, stato, timbri, riepiloghi TXT/CSV/HTML/PDF, CSV delle misure), che seguono la lingua
+  dell'interfaccia. I modelli dei timbri dinamici accettano anche i segnaposto inglesi
+  ({author} {name} {date} {time} {file} {page} {counter}).

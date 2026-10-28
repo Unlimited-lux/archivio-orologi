@@ -1092,7 +1092,8 @@ class StampTool(AnnotTool):
             spec = self.spec or engine.StampSpec(_("Approvato"), name="Approved")
             if self.template:
                 filename = view.document.display_name
-                counter = self.ctrl.next_counter(self.template) if "{contatore}" in self.template else None
+                counter = self.ctrl.next_counter(self.template) if ("{contatore}" in self.template
+                                                                         or "{counter}" in self.template) else None
                 text = engine.fill_template(self.template, author=self.ctrl.author(), filename=filename, page=page,
                                             counter=counter)
                 spec = engine.StampSpec(text, spec.color, "", spec.name)
