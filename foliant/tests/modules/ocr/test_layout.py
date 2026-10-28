@@ -47,8 +47,9 @@ def test_tabella_con_bordi_4x5(tmp_path):
     assert t.shape == (5, 4)
     good = sum(engine.char_accuracy(t.cells[r][c], CELLS[r][c]) >= 0.95 for r in range(5) for c in range(4))
     assert good / 20 >= 0.95, t.cells
-    # le celle sono blocchi distinti: nessuna riga unisce celle diverse
-    assert "Articolo" in res.text and not any("Articolo" in ln and "Quantità" in ln for ln in res.text.splitlines())
+    # le celle non si fondono: una riga di testo per riga di tabella, colonne separate da tabulazioni
+    head = next(ln for ln in res.text.splitlines() if "Articolo" in ln)
+    assert head.split("\t")[0].strip() == "Articolo" and "Quantità" in head.split("\t")[1]
 
 
 def test_zona_da_ignorare_e_ordine(tmp_path):

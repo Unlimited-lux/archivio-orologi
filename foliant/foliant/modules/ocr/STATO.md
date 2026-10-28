@@ -55,6 +55,8 @@ Percentuale di parole attese ritrovate (lingue ita+eng, impostazioni predefinite
 | Testo piccolo 150 dpi in grigi (JPEG) | 0.681 | 1.000 |
 | Timbro rosso sopra il testo (IBAN coperto) | 0.964 | 1.000 |
 | Scontrino termico sbiadito | 1.000 | 1.000 |
+| Fattura A4 fotografata col telefono (prospettiva, ombra) | 1.000 | 1.000 |
+| Fattura scansionata storta 6°, 150 dpi grigi | 1.000 | 1.000 |
 
 Miglioramenti:
 1. Pre-elaborazione adattiva: normalizzazione dello sfondo solo con illuminazione davvero non uniforme;
@@ -64,3 +66,6 @@ Miglioramenti:
    e il passaporto veniva capovolto. Le pagine davvero capovolte si raddrizzano ancora.
 3. Timbri colorati sopra il testo nero attenuati prima del riconoscimento (canale più chiaro nei pixel
    colorati del timbro); il testo stampato a colori lontano dal nero (titoli, loghi) resta intatto.
+4. Layout delle tabelle nel testo (copia, TXT, «Solo testo»): una riga per riga di tabella con le colonne
+   separate da tabulazioni (incollabile in un foglio di calcolo), anche da foto o scansione storta;
+   prima ogni cella era un paragrafo a sé.

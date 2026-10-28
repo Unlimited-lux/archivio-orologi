@@ -12,8 +12,9 @@ from foliant.modules.ocr import engine
 from foliant.modules.ocr.preprocess import PreprocessOptions
 
 from .conftest import image_pdf
-from .realistic import (gray_150, id_card_far, id_card_photo, invoice, passport_mrz, red_stamp_over_text,
-                        small_gray_150, thermal_receipt, warranty, word_accuracy)
+from .realistic import (gray_150, id_card_far, id_card_photo, invoice, invoice_phone_photo, passport_mrz,
+                        red_stamp_over_text, skewed_gray_scan, small_gray_150, thermal_receipt, warranty,
+                        word_accuracy)
 
 CASES = {
     "carta_identita_foto": (id_card_photo, 0.95),
@@ -25,6 +26,8 @@ CASES = {
     "testo_piccolo_150": (small_gray_150, 0.95),
     "timbro_rosso": (red_stamp_over_text, 0.9),
     "scontrino_termico": (thermal_receipt, 0.95),
+    "fattura_fotografata": (invoice_phone_photo, 0.95),
+    "fattura_storta_150": (skewed_gray_scan, 0.95),
 }
 
 
@@ -86,3 +89,15 @@ def test_timbro_colorato_sopra_il_testo_si_attenua_titolo_colorato_resta():
     assert g[140:146, 600:700].min() >= 190          # cornice del timbro attenuata (era ~80)
     assert g[170:205, 20:290].min() < 60            # testo nero intatto
     assert g[20:70, 20:300].min() < 120             # titolo colorato lontano dal nero: intatto
+
+
+@pytest.mark.parametrize("gen", [invoice, invoice_phone_photo, skewed_gray_scan])
+def test_tabella_fattura_righe_con_colonne_separate_da_tabulazioni(tmp_path, gen):
+    """Il testo di una tabella esce riga per riga, con le celle separate da tabulazioni (incollabile
+    in un foglio di calcolo), anche da una foto o da una scansione storta."""
+    from foliant.modules.ocr.textexport import page_text
+
+    img, dpi, _expected = gen()
+    page = _ocr(tmp_path, img, dpi)
+    assert "Cinturino in pelle marrone\t2\t85,50 €\t171,00 €" in page.text
+    assert "Descrizione\tQ.tà\tPrezzo\tImporto" in page_text(page, paragraphs=True, dehyphenate=True)
