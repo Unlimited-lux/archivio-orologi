@@ -242,7 +242,8 @@ def test_crash_recovery_restore(qtbot, settings, sample_pdf, tmp_path):
     win = _new_window(qtbot, settings)
     try:
         rec = _rec(win)
-        qtbot.waitUntil(lambda: rec.dialog is not None and rec.dialog.isVisible(), timeout=3000)
+        qtbot.waitUntil(lambda: rec.notification is not None, timeout=3000)
+        rec.open_dialog()
         dialog = rec.dialog
         assert not dialog.isModal()
         assert dialog.tree.topLevelItemCount() == 1
@@ -273,7 +274,8 @@ def test_crash_recovery_restore_then_close_removes(qtbot, settings, sample_pdf, 
     win = _new_window(qtbot, settings)
     try:
         rec = _rec(win)
-        qtbot.waitUntil(lambda: rec.dialog is not None, timeout=3000)
+        qtbot.waitUntil(lambda: rec.notification is not None, timeout=3000)
+        rec.open_dialog()
         rec.dialog.restore()
         assert _files(d)
         _cleanup(win)
@@ -286,7 +288,8 @@ def test_crash_recovery_discard(qtbot, settings, sample_pdf, tmp_path):
     d, _id = _crash_with_modified_copy(tmp_path, sample_pdf)
     win = _new_window(qtbot, settings)
     rec = _rec(win)
-    qtbot.waitUntil(lambda: rec.dialog is not None and rec.dialog.isVisible(), timeout=3000)
+    qtbot.waitUntil(lambda: rec.notification is not None, timeout=3000)
+    rec.open_dialog()
     qtbot.mouseClick(rec.dialog.discard_button, Qt.MouseButton.LeftButton)
     assert _files(d) == []
     assert win.views() == []
@@ -296,7 +299,8 @@ def test_crash_recovery_later_keeps_files(qtbot, settings, sample_pdf, tmp_path)
     d, _id = _crash_with_modified_copy(tmp_path, sample_pdf)
     win = _new_window(qtbot, settings)
     rec = _rec(win)
-    qtbot.waitUntil(lambda: rec.dialog is not None and rec.dialog.isVisible(), timeout=3000)
+    qtbot.waitUntil(lambda: rec.notification is not None, timeout=3000)
+    rec.open_dialog()
     before = _files(d)
     qtbot.mouseClick(rec.dialog.later_button, Qt.MouseButton.LeftButton)
     assert not rec.dialog.isVisible()
@@ -326,7 +330,8 @@ def test_corrupt_json_still_restorable(qtbot, settings, sample_pdf, tmp_path):
     win = _new_window(qtbot, settings)
     try:
         rec = _rec(win)
-        qtbot.waitUntil(lambda: rec.dialog is not None, timeout=3000)
+        qtbot.waitUntil(lambda: rec.notification is not None, timeout=3000)
+        rec.open_dialog()
         assert rec.dialog.tree.topLevelItemCount() == 1
         views = rec.restore_entries(rec.dialog.entries)
         assert len(views) == 1
@@ -362,3 +367,22 @@ def test_restore_missing_folder_leaves_path_empty(viewer_window, sample_pdf, tmp
     views = rec.restore_entries(rec.orphans())
     assert views[0].document.path is None
     assert views[0].document.display_name == "doc.pdf"
+
+
+def test_crash_recovery_notification_restore_all(qtbot, settings, sample_pdf, tmp_path):
+    from PySide6.QtWidgets import QPushButton
+    d, entry_id = _crash_with_modified_copy(tmp_path, sample_pdf, page=1)
+    win = _new_window(qtbot, settings)
+    try:
+        rec = _rec(win)
+        qtbot.waitUntil(lambda: rec.notification is not None, timeout=3000)
+        note = rec.notification
+        assert "recuperabili" in note.label.text()    # avviso non bloccante del nucleo
+        assert rec.dialog is None                     # nessuna finestra finché non si sceglie «Scegli…»
+        buttons = {b.text(): b for b in note.findChildren(QPushButton)}
+        buttons["Ripristina"].click()
+        view = win.current_view()
+        assert view is not None and view.document.is_modified
+        assert "MODIFICA DI PROVA" in view.document.page_text(0)
+    finally:
+        _cleanup(win)

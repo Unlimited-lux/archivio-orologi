@@ -14,7 +14,7 @@ import pytest
 from foliant.api import OperationCancelled
 from foliant.modules.tools import engine as be
 
-from .conftest import build_pdf
+from .conftest import build_pdf, page_lines
 
 STARTED = datetime(2026, 10, 28, 9, 30, 0)
 
@@ -1061,3 +1061,95 @@ def test_bates_font_choice(tmp_path):
     fonts = {sp["font"] for b in page.get_text("dict")["blocks"] for ln in b.get("lines", [])
              for sp in ln["spans"] if "ACME" in sp["text"]}
     assert any("Courier" in f for f in fonts)
+
+
+def test_pdfa_step_reports_conformance(tmp_path, monkeypatch):
+    calls = []
+
+    def fake(data, level):
+        calls.append(level)
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        doc.set_metadata({"title": "archivio"})
+        out = doc.tobytes()
+        ok = "rotto" not in (pymupdf.open(stream=data, filetype="pdf")[0].get_text())
+        return out, {"level": level, "errors": [] if ok else ["font non incorporato: Helvetica"],
+                     "compliant": ok}
+    monkeypatch.setattr(be, "_pdfa_function", lambda: fake)
+    good = mk(tmp_path / "in" / "fattura.pdf", pages=1)
+    bad = tmp_path / "in" / "scheda.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "rotto", fontsize=12)
+    d.save(str(bad))
+    items = [be.analyze_file(p) for p in (good, str(bad))]
+    rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("pdfa", {"level": "2b"})],
+                                                 destination=str(tmp_path / "out")))
+    assert calls == ["2b", "2b"]
+    assert rep.results[0].status == "ok" and "conforme" in rep.results[0].message
+    assert rep.results[1].status == "error" and rep.results[1].code == "PDFA-02"
+    assert "font non incorporato" in rep.results[1].message
+    assert os.listdir(tmp_path / "out") == ["fattura.pdf"]
+    rep = be.run_job(None, items[1:], be.JobSettings(steps=[be.Step("pdfa", {"save_anyway": True})],
+                                                     destination=str(tmp_path / "out2")))
+    assert rep.results[0].status == "warning" and os.listdir(tmp_path / "out2") == ["scheda.pdf"]
+
+
+def test_pdfa_step_without_ghostscript_is_clear(tmp_path):
+    if be._pdfa_function() is None:
+        pytest.skip("modulo Converti non disponibile")
+    import shutil as _sh
+    if _sh.which("gs"):
+        pytest.skip("Ghostscript presente: verificato dal modulo Converti")
+    a = mk(tmp_path / "in" / "a.pdf", pages=1)
+    rep = be.run_job(None, [be.analyze_file(a)], be.JobSettings(steps=[be.Step("pdfa")],
+                                                               destination=str(tmp_path / "out")))
+    assert rep.results[0].status == "error" and rep.results[0].code == "PDFA-01"
+    assert "Ghostscript" in rep.results[0].message
+
+
+def test_parallel_processing_same_results(tmp_path):
+    """BAT-04: Comprimi su 10 file con parallelismo 4 e 1 dà gli stessi risultati."""
+    src = tmp_path / "src"
+    src.mkdir()
+    items = [be.analyze_file(build_pdf(src / f"f{i}.pdf", [page_lines(i), page_lines(i + 1)])) for i in range(10)]
+    started = datetime(2026, 10, 28, 9, 0, 0)
+    steps = [be.Step("watermark", {"text": "COPIA"}), be.Step("compress")]
+    one = be.run_job(None, items, be.JobSettings(steps=steps, destination=str(tmp_path / "uno"),
+                                                 pattern="{nome}_{contatore:2}"), started)
+    four = be.run_job(None, items, be.JobSettings(steps=steps, destination=str(tmp_path / "quattro"),
+                                                  pattern="{nome}_{contatore:2}", workers=4), started)
+    assert [r.status for r in four.results] == [r.status for r in one.results]
+    assert all(r.status in ("ok", "warning") for r in four.results)
+    assert sorted(os.listdir(tmp_path / "uno")) == sorted(os.listdir(tmp_path / "quattro"))
+    for name in os.listdir(tmp_path / "uno"):
+        a = pymupdf.open(str(tmp_path / "uno" / name))
+        b = pymupdf.open(str(tmp_path / "quattro" / name))
+        assert [p.get_text() for p in a] == [p.get_text() for p in b]
+
+
+def test_parallel_errors_and_cancel(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    paths = [build_pdf(src / f"f{i}.pdf", [page_lines(i)]) for i in range(6)]
+    (src / "f3.pdf").write_bytes(b"%PDF-1.4 rotto")
+    items = [be.analyze_file(p) for p in paths]
+    rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "o"),
+                                                 workers=3))
+    assert [r.status for r in rep.results].count("error") == 1 and rep.results[3].status == "error"
+
+    class Cancel:
+        cancelled = False
+        n = 0
+
+        def update(self, f=None, t=None):
+            self.n += 1
+            if self.n == 3:
+                self.cancelled = True
+            self.check()
+
+        def check(self):
+            if self.cancelled:
+                raise OperationCancelled()
+    out = tmp_path / "c"
+    rep = be.run_job(Cancel(), items, be.JobSettings(steps=[be.Step("compress")], destination=str(out), workers=3))
+    assert rep.cancelled
+    assert all(not n.startswith(".") for n in (os.listdir(out) if out.exists() else []))

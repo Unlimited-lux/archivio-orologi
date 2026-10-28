@@ -268,8 +268,9 @@ def test_pagemode_fullscreen_prompt_is_not_blocking(viewer_window, tmp_path, qtb
     ctl = viewer_window.ctx.viewer_parts["reading"]
     viewer_window.open_path(str(path))
     qtbot.waitUntil(lambda: getattr(ctl, "fullscreen_prompt", None) is not None, timeout=2000)
-    box = ctl.fullscreen_prompt
-    assert box.isVisible() and not viewer_window.isFullScreen()
-    box.button(QMessageBox.StandardButton.Yes).click()
+    note = ctl.fullscreen_prompt                 # avviso non bloccante del nucleo (ctx.notify)
+    assert note.is_open and not viewer_window.isFullScreen()
+    from PySide6.QtWidgets import QPushButton
+    [b for b in note.findChildren(QPushButton) if b.text() == "Schermo intero"][0].click()
     qtbot.waitUntil(viewer_window.isFullScreen, timeout=2000)
     viewer_window.toggle_fullscreen()

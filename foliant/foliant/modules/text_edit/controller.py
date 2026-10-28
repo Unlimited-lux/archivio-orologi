@@ -10,7 +10,7 @@ from PySide6.QtCore import QMimeData, QObject, QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter
 
 from ...core.engine import ENGINE_LOCK
-from ...core.errors import FoliantError
+from ...core.errors import FoliantError, OperationCancelled
 from ...i18n import _
 from ...ui import theme
 from . import engine
@@ -283,13 +283,8 @@ class TextEditController(QObject):
                            _("Il contenuto di questo documento è generato da un modulo dinamico (XFA) e non "
                              "può essere modificato come testo di pagina."))
             return False
-        if sigflags >= 1 and id(doc) not in self._signed_ok:
-            if not self.ctx.confirm(_("Documento firmato"),
-                                    _("Il documento contiene firme digitali: modificare il testo le invaliderà. "
-                                      "Ti consigliamo di salvare le modifiche con «Salva con nome» per "
-                                      "lasciare intatto l'originale.\n\nContinuare?")):
-                return False
-            self._signed_ok.add(id(doc))
+        # documenti firmati: l'avviso (e il blocco per la certificazione «nessuna modifica») è del modulo
+        # Firma, che lo mostra una sola volta prima della modifica (UX-13): qui nessuna conferma in più
         return True
 
     # ------------------------------------------------------------ messaggi
@@ -368,6 +363,9 @@ class TextEditController(QObject):
         try:
             with doc.change(label) as pdf:
                 result = fn(pdf)
+        except OperationCancelled:
+            # annullata da una guardia (es. avviso firme): il documento resta invariato, nessun altro messaggio
+            return None
         except FoliantError as e:
             self.ctx.error(_("Modifica del testo"), str(e))
             return None

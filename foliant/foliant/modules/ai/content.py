@@ -31,6 +31,8 @@ def extraction_allowed(pdf) -> bool:
     """
     if hasattr(pdf, "original_protection"):
         document = pdf
+        if getattr(document, "access", None) == "owner":     # aperto o sbloccato dal proprietario
+            return True
         prot = document.original_protection or {}
         perms = prot.get("permissions")
         if perms is not None:

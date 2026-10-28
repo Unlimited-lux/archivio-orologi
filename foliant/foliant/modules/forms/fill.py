@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QPlainTextEdit, QToolButton, QWidget, QMenu, QWidgetAction,
 )
 
-from foliant.api import ENGINE_LOCK, HandTool, OperationCancelled, SelectTextTool, _, bind_icon, theme
+from foliant.api import ACCESS, ENGINE_LOCK, HandTool, OperationCancelled, SelectTextTool, _, bind_icon, theme
 
 from . import engine as E
 from . import formats as fm
@@ -49,7 +49,6 @@ class FormState:
         self.xfa = "none"
         self.blocked: str | None = None
         self.custom: list[tuple[str, str]] = []
-        self.unlocked = False  # password del proprietario inserita
         self.xfa_unmapped: list[str] = []
 
     def refresh(self, force: bool = False) -> None:
@@ -63,8 +62,11 @@ class FormState:
             try:
                 self.fields = E.list_fields(pdf)
                 self.xfa = E.xfa_status(pdf)
-                perms = doc.original_protection.get("permissions") if doc.original_protection else None
-                self.blocked = None if self.unlocked else E.fill_blocked_reason(pdf, perms)
+                # permessi effettivi della sessione: dopo «Sblocca…» (document.unlock) tutto è consentito
+                if not doc.allows(pymupdf.PDF_PERM_FORM):
+                    self.blocked = _("I permessi del documento non consentono la compilazione dei moduli.")
+                else:
+                    self.blocked = E.fill_blocked_reason(pdf, -1)  # resta il controllo della certificazione
                 self.custom = E.custom_scripts(pdf, self.fields)
                 self.xfa_unmapped = E.xfa_unmapped(pdf) if self.xfa == "hybrid" else []
             except Exception:  # file danneggiato: nessun modulo utilizzabile
@@ -391,7 +393,13 @@ class FormFiller(QObject):
         self.changed.emit()
 
     def _on_document_event(self, _doc, kind: str) -> None:
-        """Il salvataggio compatta il file e può rinumerare gli oggetti: si rileggono i campi."""
+        """Il salvataggio compatta il file e può rinumerare gli oggetti: si rileggono i campi.
+        Con lo sblocco dei permessi (ACCESS) il modulo può diventare compilabile."""
+        if kind == ACCESS:
+            self.state.refresh(force=True)
+            self.update_bar()
+            self.changed.emit()
+            return
         if kind != "saved":
             return
         active = self.active
@@ -545,24 +553,11 @@ class FormFiller(QObject):
             self.unlock_with_owner_password(pw)
 
     def unlock_with_owner_password(self, password: str) -> bool:
-        """Verifica la password del proprietario sul file originale; se giusta consente la compilazione."""
-        doc = self.document
-        ok = False
-        try:
-            if doc.path is not None:
-                test = pymupdf.open(str(doc.path))
-                try:
-                    ok = test.authenticate(password) in (4, 6)
-                finally:
-                    test.close()
-        except Exception:
-            ok = False
-        if not ok:
+        """Sblocca con la password del proprietario tramite il nucleo (document.unlock): l'accesso
+        completo vale per tutta l'applicazione e l'evento ACCESS aggiorna il modulo."""
+        if not self.document.unlock(password):
             self.ctx.error(_("Password del proprietario"), _("Password errata."))
             return False
-        self.state.unlocked = True
-        self.state.refresh(force=True)
-        self.update_bar()
         self.ctx.status(_("Compilazione consentita."))
         return True
 

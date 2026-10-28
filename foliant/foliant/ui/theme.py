@@ -13,7 +13,7 @@ from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle
 
 LIGHT: dict[str, str | tuple] = {
     "accent": "#0F7C78",
@@ -99,6 +99,46 @@ def _system_is_dark(app: QApplication) -> bool:
         return app.palette().color(QPalette.ColorRole.Window).lightness() < 128
 
 
+class _Style(QProxyStyle):
+    """Fusion con l'icona dei comandi in eccesso delle barre («»») nei colori del tema: quella
+    di Fusion è un grigio fisso, invisibile nel tema scuro. Lo spazio riservato al pulsante
+    è quello dell'icona, così non esce dal bordo della barra."""
+
+    _EXTENSION = {QStyle.StandardPixmap.SP_ToolBarHorizontalExtensionButton: "chevrons-right",
+                  QStyle.StandardPixmap.SP_ToolBarVerticalExtensionButton: "chevrons-down"}
+
+    def __init__(self):
+        super().__init__("Fusion")
+
+    def standardIcon(self, sp, option=None, widget=None):
+        name = self._EXTENSION.get(sp)
+        if name is not None:
+            from .icons import icon        # import locale: icons dipende da theme
+            return icon(name)
+        return super().standardIcon(sp, option, widget)
+
+    def pixelMetric(self, metric, option=None, widget=None):
+        if metric == QStyle.PixelMetric.PM_ToolBarExtensionExtent:
+            return 20
+        return super().pixelMetric(metric, option, widget)
+
+
+def _refresh_extension_buttons(app: QApplication) -> None:
+    """Le barre impostano l'icona «»» quando vengono create: al cambio tema la ricolora."""
+    style = app.style()
+    for w in app.allWidgets():
+        if w.objectName() == "qt_toolbar_ext_button":
+            bar = w.parentWidget()
+            vertical = bar is not None and getattr(bar, "orientation", lambda: Qt.Orientation.Horizontal)() \
+                == Qt.Orientation.Vertical
+            sp = (QStyle.StandardPixmap.SP_ToolBarVerticalExtensionButton if vertical
+                  else QStyle.StandardPixmap.SP_ToolBarHorizontalExtensionButton)
+            try:
+                w.setIcon(style.standardIcon(sp, None, w))
+            except (RuntimeError, AttributeError):
+                pass
+
+
 def apply(app: QApplication, requested: str = "system") -> None:
     """Applica il tema: "light", "dark" o "system"."""
     global _dark, _mode, _applied
@@ -107,8 +147,8 @@ def apply(app: QApplication, requested: str = "system") -> None:
     if _applied == (_mode, _dark, id(app)):
         return              # tema invariato: ristilizzare tutti i widget è costoso e inutile
     _applied = (_mode, _dark, id(app))
-    if app.style().name().lower() != "fusion":   # reimpostarlo ripolirebbe tutti i widget
-        app.setStyle("Fusion")
+    if not isinstance(app.style(), _Style) and not isinstance(app.style().proxy(), _Style):
+        app.setStyle(_Style())                  # una volta sola: reimpostarlo ripolirebbe tutti i widget
     t = tokens()
     pal = QPalette()
 
@@ -135,6 +175,7 @@ def apply(app: QApplication, requested: str = "system") -> None:
         pal.setColor(QPalette.ColorGroup.Disabled, role, c("text_muted"))
     app.setPalette(pal)
     app.setStyleSheet(stylesheet(t))
+    _refresh_extension_buttons(app)
     for fn in list(_listeners):
         try:
             fn()
@@ -199,7 +240,7 @@ QToolButton:checked {{ background: {h('accent_soft')}; color: {h('accent')}; }}
 QToolButton[modeButton="true"] {{ padding: 5px 10px; font-weight: 500; }}
 QToolButton[modeButton="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; }}
 QToolButton::menu-indicator {{ image: none; }}
-QToolButton#qt_toolbar_ext_button {{ padding: 0px; border: none; min-width: 16px; }}
+QToolButton#qt_toolbar_ext_button {{ padding: 0px; border: none; }}
 QToolButton[homeAction="true"] {{ border: 1px solid {h('border')}; border-radius: 10px; background: {h('surface')}; }}
 QToolButton[homeAction="true"]:hover {{ border-color: {h('accent')}; }}
 QPushButton {{ background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px;

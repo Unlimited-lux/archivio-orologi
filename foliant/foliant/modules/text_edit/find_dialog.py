@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTabBar, QVBoxLayout, QWidget,
 )
 
-from foliant.api import FoliantError, _, icon, theme
+from foliant.api import FoliantError, OperationCancelled, _, icon, theme
 
 from .search import (
     Match, ReplaceSummary, SearchError, SearchOptions, check_replacement, compile_pattern, find_in_document,
@@ -338,6 +338,8 @@ class FindReplaceDialog(QDialog):
         except SearchError as e:
             self.error_label.setText(str(e))
             self.error_label.show()
+        except OperationCancelled:
+            pass   # annullata da una guardia del documento (es. avviso firme): nessun altro messaggio
         except FoliantError as e:
             self.ctx.error(self.windowTitle(), str(e))
         except Exception as e:  # noqa: BLE001 - un errore del modulo non deve chiudere l'applicazione

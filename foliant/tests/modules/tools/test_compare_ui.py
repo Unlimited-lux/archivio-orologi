@@ -343,7 +343,7 @@ def test_review_statuses_filter_report_and_session(window, pdf_builder, tmp_path
     from .conftest import build_pdf
     build_pdf(b, [lb2])
     infos = []
-    monkeypatch.setattr(window.ctx, "info", lambda t, m: infos.append((t, m)))
+    monkeypatch.setattr(window.ctx, "notify", lambda m, *a, **k: infos.append(("", m)))
     w3 = controller(window).open_session(path)
     assert any("aggiunta 1" in m for _t, m in infos)
     statuses = {d.text_b or d.text_a: d.status for d in w3.result.differences}
@@ -446,3 +446,38 @@ def test_tab_menu_compare_with(window, pdf_builder, monkeypatch):
     act = next(a for a in menu.actions() if a.text() == "Confronta con…")
     act.trigger()
     assert called == [view]
+
+
+def test_comparison_runs_without_blocking_window(window, pdf_builder, monkeypatch):
+    """CMP-01 flusso 5: il confronto non apre finestre modali e la finestra resta usabile."""
+    from PySide6.QtWidgets import QApplication
+    monkeypatch.delenv("FOLIANT_SYNC_TASKS", raising=False)
+    a = pdf_builder([page_lines(i) for i in range(1, 30)])
+    b = pdf_builder([page_lines(i) for i in range(2, 31)])
+    sa, sb = cu.Source.from_file(a), cu.Source.from_file(b)
+    shown = []
+    ctl = controller(window)
+    ret = ctl.run(ce.SideInput(sa.data, "a"), ce.SideInput(sb.data, "b"), sa, sb, ce.CompareOptions(dpi=100),
+                  then=shown.append)
+    assert ret is None and ctl.task is not None
+    assert QApplication.activeModalWidget() is None
+    assert ctl.task.wait(60000)
+    QApplication.processEvents()
+    assert shown and shown[0] is ctl.widget
+    assert window.ctx.central_widget() is ctl.widget
+
+
+def test_outcomes_use_non_blocking_notifications(window, pdf_builder, tmp_path, monkeypatch):
+    notes = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), **k: notes.append((text, actions)))
+    monkeypatch.setattr(window.ctx, "info", lambda *a: (_ for _ in ()).throw(AssertionError("finestra modale")))
+    w = start(window, pdf_builder([["alfa beta"]]), pdf_builder([["alfa gamma"]]))
+    w.export_report(str(tmp_path / "r.pdf"))
+    w.save_session(str(tmp_path / "s.foliantcmp"))
+    texts = [t for t, _a in notes]
+    assert any("Rapporto salvato" in t for t in texts) and any("Sessione salvata" in t for t in texts)
+    actions = next(a for t, a in notes if "Rapporto salvato" in t)
+    assert actions and actions[0][0] == "Apri"
+    window.ctx.tools_module.compare.close()
+    window.ctx.tools_module.show_compare()
+    assert any("Nessun confronto aperto" in t for t, _a in notes)

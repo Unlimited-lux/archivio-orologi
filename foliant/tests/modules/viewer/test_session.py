@@ -298,9 +298,8 @@ def test_close_others_stops_when_user_cancels(viewer_window, tmp_path, monkeypat
 def test_tab_context_menu(viewer_window, tmp_path):
     ctl = _session(viewer_window)
     views = _three_tabs(viewer_window, tmp_path)
-    bar = viewer_window.tabs.tabBar()
-    assert bar.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
-    menu = ctl.build_tab_menu(2)
+    menu = ctl.build_tab_menu(2)            # menu del nucleo con le voci del viewer
+    assert "Chiudi scheda" in [a.text() for a in menu.actions()]
     texts = {a.text(): a for a in menu.actions() if a.text()}
     assert not texts["Chiudi le schede a destra"].isEnabled()   # ultima scheda
     menu = ctl.build_tab_menu(0)

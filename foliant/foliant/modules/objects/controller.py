@@ -10,7 +10,7 @@ import pymupdf
 from PySide6.QtCore import QByteArray, QMimeData, QObject, QPointF, Signal
 from PySide6.QtGui import QGuiApplication, QImage
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, OperationCancelled, _
 
 from . import clipboard as C
 from . import dialogs as D
@@ -204,37 +204,32 @@ class ObjectsController(QObject):
 
     # ================================================================ modifiche
     def can_modify(self, view) -> bool:
-        """Permesso di modifica e conferma per i documenti firmati (una volta per documento)."""
+        """Permesso di modifica del documento. Le firme digitali le gestisce la guardia
+        del modulo Firma (SIG-21), in base al `kind` passato a `Document.change`."""
         doc = view.document
         with ENGINE_LOCK:
-            pdf = doc.pdf
-            perms = pdf.permissions
+            perms = doc.pdf.permissions
             encrypted = bool(doc.original_protection)
-            try:
-                sigflags = pdf.get_sigflags()
-            except Exception:
-                sigflags = -1
         if encrypted and perms != -1 and not perms & pymupdf.PDF_PERM_MODIFY:
             self.ctx.error(_("Modifica"), _("Il documento non consente modifiche al contenuto. "
                                             "Aprilo con la password del proprietario per modificarlo."))
             return False
-        if sigflags is not None and sigflags > 0 and id(doc) not in self._signed_ok:
-            if not self.ctx.confirm(_("Documento firmato"),
-                                    _("Il documento contiene firme digitali: modificarne il contenuto le "
-                                      "renderà non valide. Continuare?")):
-                return False
-            self._signed_ok.add(id(doc))
         return True
 
-    def run_change(self, view, label: str, fn: Callable, *args):
-        """Esegue `fn(pdf, *args)` come passo annullabile. None se fallisce."""
+    def run_change(self, view, label: str, fn: Callable, *args, kind: str = "content"):
+        """Esegue `fn(pdf, *args)` come passo annullabile. None se fallisce o è annullato.
+
+        `kind`: «content» per immagini, tracciati, ritagli…; «annotation» quando si
+        aggiungono, modificano o tolgono solo annotazioni (collegamenti)."""
         if view is None:
             return None
         if not self.can_modify(view):
             return None
         try:
-            with view.document.change(label) as pdf:
+            with view.document.change(label, kind=kind) as pdf:
                 return fn(pdf, *args)
+        except OperationCancelled as e:
+            self.status(str(e) or _("Operazione annullata."))
         except (E.ObjectError, L.LinkError) as e:
             self.ctx.error(label, _(str(e)))
         except Exception as e:
@@ -335,6 +330,9 @@ class ObjectsController(QObject):
         try:
             with view.document.change(label) as pdf:
                 fn(pdf)
+        except OperationCancelled as e:
+            self.status(str(e))
+            return
         except _NoChange:
             self.status(_("Gli oggetti sono già in posizione."))
             return
@@ -1043,7 +1041,8 @@ class ObjectsController(QObject):
             return None
         target, style, desc = res
         D.remember_style(style)
-        return self.run_change(view, _("Crea collegamento"), L.create_link, page, rect, target, style, desc, quads)
+        return self.run_change(view, _("Crea collegamento"), L.create_link, page, rect, target, style, desc, quads,
+                               kind="annotation")
 
     def create_link_from_selection(self, view) -> None:
         objs = self.selected_objects(view)
@@ -1075,7 +1074,7 @@ class ObjectsController(QObject):
                         rect = pymupdf.Rect(rect.x0, rect.y0, max(rect.x1, rect.x0 + 4), max(rect.y1, rect.y0 + 4))
                     out.append(L.create_link(pdf, page, rect, target, style, desc, quads))
                 return out
-            self.run_change(view, _("Crea collegamento"), fn)
+            self.run_change(view, _("Crea collegamento"), fn, kind="annotation")
             return
         self.status(_("Seleziona del testo o un oggetto, oppure usa lo strumento Collegamento."))
 
@@ -1094,7 +1093,7 @@ class ObjectsController(QObject):
                 L.update_link(pdf, page, info.xref, target=None if same_target else target, style=style,
                               description=None if len(infos) > 1 else desc)
             return True
-        self.run_change(view, _("Modifica collegamento"), fn)
+        self.run_change(view, _("Modifica collegamento"), fn, kind="annotation")
 
     def move_links(self, view, page: int, xrefs: list[int], dx: float, dy: float) -> None:
         def fn(pdf):
@@ -1103,13 +1102,14 @@ class ObjectsController(QObject):
                     raise L.LinkError(_("Il collegamento è bloccato e non si può spostare."))
                 L.update_link(pdf, page, x, move=(dx, dy))
             return True
-        self.run_change(view, _("Sposta collegamento"), fn)
+        self.run_change(view, _("Sposta collegamento"), fn, kind="annotation")
 
     def resize_link(self, view, page: int, xref: int, rect: pymupdf.Rect) -> None:
-        self.run_change(view, _("Ridimensiona collegamento"), lambda pdf: L.update_link(pdf, page, xref, rect=rect) or True)
+        self.run_change(view, _("Ridimensiona collegamento"), lambda pdf: L.update_link(pdf, page, xref, rect=rect) or True,
+                        kind="annotation")
 
     def delete_links(self, view, page: int, xrefs: list[int]) -> None:
-        self.run_change(view, _("Elimina collegamenti"), L.delete_links, page, xrefs)
+        self.run_change(view, _("Elimina collegamenti"), L.delete_links, page, xrefs, kind="annotation")
         self.link_tool.selection = []
 
     def copy_links(self, view, page: int, xrefs: list[int], clipboard: bool = True) -> None:
@@ -1136,7 +1136,7 @@ class ObjectsController(QObject):
                     continue
                 out.append(L.create_link(pdf, page, r, t, info.style, info.description))
             return out
-        res = self.run_change(view, _("Incolla collegamenti"), fn)
+        res = self.run_change(view, _("Incolla collegamenti"), fn, kind="annotation")
         if res:
             self.link_tool.selection = list(res)
             self.link_tool.page = page
@@ -1178,7 +1178,7 @@ class ObjectsController(QObject):
         chosen = D.ask_found_urls(self.ctx.window, found)
         if not chosen:
             return
-        n = self.run_change(view, _("Crea collegamenti dagli URL"), L.create_links_for, chosen)
+        n = self.run_change(view, _("Crea collegamenti dagli URL"), L.create_links_for, chosen, kind="annotation")
         if n:
             self.status(_("Creati {n} collegamenti.").format(n=n))
 
@@ -1196,7 +1196,7 @@ class ObjectsController(QObject):
             return
         if not self.ctx.confirm(_("Elimina collegamenti"), _("Eliminare {n} collegamenti?").format(n=n)):
             return
-        self.run_change(view, _("Elimina collegamenti"), L.delete_links_in, pages, cats)
+        self.run_change(view, _("Elimina collegamenti"), L.delete_links_in, pages, cats, kind="annotation")
 
     def selected_link_page(self) -> int | None:
         return self.link_tool.page

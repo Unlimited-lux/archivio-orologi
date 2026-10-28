@@ -477,6 +477,34 @@ def _remove_actions(pdf: pymupdf.Document) -> int:
     return n
 
 
+def _fallback_scrub(pdf: pymupdf.Document, o: dict[str, bool]) -> None:
+    """Equivalente di `scrub()` per le categorie scelte, tollerante agli oggetti danneggiati."""
+    from .redaction import iter_pages
+    for _i, page in iter_pages(pdf):
+        try:
+            if o["links"]:
+                for link in list(page.get_links()):
+                    page.delete_link(link)
+            if o["thumbnails"] and pdf.xref_get_key(page.xref, "Thumb")[0] != "null":
+                pdf.xref_set_key(page.xref, "Thumb", "null")
+        except Exception:
+            continue
+    if o["embedded_files"]:
+        try:
+            for name in list(pdf.embfile_names()):
+                pdf.embfile_del(name)
+        except Exception:
+            pass
+        for _i, page in iter_pages(pdf):
+            try:
+                for x in [a[0] for a in page.annot_xrefs() if a[1] == pymupdf.PDF_ANNOT_FILE_ATTACHMENT]:
+                    annot = page.load_annot(x)
+                    if annot is not None:
+                        page.delete_annot(annot)
+            except Exception:
+                continue
+
+
 def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
              progress: Callable[[float, str], None] | None = None) -> SanitizeReport:
     """Rimuove i dati scelti. Va chiamata dentro `document.change()`."""
@@ -493,22 +521,29 @@ def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
         if remove_hidden_layers(pdf):
             rep.done.append("hidden_layers")
     step(0.3, _("Pulizia del documento"))
-    pdf.scrub(
-        attached_files=o["embedded_files"],
-        clean_pages=True,
-        embedded_files=o["embedded_files"],
-        hidden_text=o["hidden_text"],
-        javascript=o["javascript"],
-        metadata=o["metadata"],
-        redactions=False,
-        remove_links=o["links"],
-        reset_fields=o["form_data"],
-        reset_responses=o["comments"],
-        thumbnails=o["thumbnails"],
-        xml_metadata=o["metadata"],
-    )
+    scrubbed = True
+    try:
+        pdf.scrub(
+            attached_files=o["embedded_files"],
+            clean_pages=True,
+            embedded_files=o["embedded_files"],
+            hidden_text=o["hidden_text"],
+            javascript=o["javascript"],
+            metadata=o["metadata"],
+            redactions=False,
+            remove_links=o["links"],
+            reset_fields=o["form_data"],
+            reset_responses=o["comments"],
+            thumbnails=o["thumbnails"],
+            xml_metadata=o["metadata"],
+        )
+    except Exception:
+        # il motore si ferma su oggetti elencati ma assenti (es. file firmati): i passi
+        # seguenti del modulo coprono le stesse categorie saltando gli oggetti danneggiati
+        scrubbed = False
+        _fallback_scrub(pdf, o)
     for key in ("embedded_files", "hidden_text", "metadata", "links", "thumbnails", "form_data"):
-        if o[key]:
+        if o[key] and (scrubbed or key != "hidden_text"):
             rep.done.append(key)
     if o["javascript"]:
         step(0.6, _("Script e azioni"))

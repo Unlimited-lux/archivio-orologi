@@ -16,25 +16,22 @@ def _broken_pdf(tmp_path):
     return str(path)
 
 
-def test_rebuilt_file_shows_bar_and_repair(viewer_window, tmp_path, monkeypatch):
-    view = viewer_window.open_path(_broken_pdf(tmp_path))
+def test_repaired_file_shows_a_single_banner(window, tmp_path):
+    """Tutti i moduli caricati: xref rotta → un solo avviso sulla riparazione, quello della
+    conversione con «Salva copia riparata»; il viewer non ne aggiunge un secondo."""
+    view = window.open_path(_broken_pdf(tmp_path))
     assert view.page_count == 3
-    ctl = viewer_window.ctx.viewer_parts["integrity"]
-    bars = ctl.bars[view]
-    assert bars and "ricostruito" in bars[0].label.text()
-    assert bars[0].isVisible()
-    out = tmp_path / "riparato.pdf"
-    monkeypatch.setattr(viewer_window.ctx, "ask_save_path", lambda *a, **k: str(out))
-    bars[0].button.click()
-    assert out.exists()
-    reopened = pymupdf.open(str(out))
-    assert not reopened.is_repaired and reopened.page_count == 3
-    assert view not in ctl.bars or not any(b.isVisible() for b in ctl.bars[view])
+    ids = window.ctx.banners(view)
+    assert [i for i in ids if "ripar" in i or "repair" in i] == ["riparato"]
+    bar = window.tabs.page(view).banners
+    assert "danneggiato" in bar.text_label.text()
+    texts = [b.text() for b in bar.action_buttons]
+    assert len([t for t in texts if "ripara" in t.lower()]) == 1
 
 
 def test_healthy_file_has_no_bar(viewer_window, sample_pdf):
     view = viewer_window.open_path(sample_pdf)
-    assert view not in viewer_window.ctx.viewer_parts["integrity"].bars
+    assert not viewer_window.ctx.banners(view)
 
 
 def test_deferred_callbacks_after_window_destroyed(qtbot, settings, tmp_path):

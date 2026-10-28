@@ -11,7 +11,7 @@ import pymupdf
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QMessageBox
 
-from foliant.api import ENGINE_LOCK, SAVED, Document, DocumentError, _, atomic_write
+from foliant.api import ENGINE_LOCK, SAVED, Document, DocumentError, OperationCancelled, _, atomic_write
 
 from . import graphic as g
 from .library import LibraryError, LibraryLocked, SignatureLibrary
@@ -33,10 +33,8 @@ class VerifyState:
     certification: int | None = None
     warned: bool = False
     source: bytes | None = None     # byte verificati (file su disco se il documento non è modificato)
-    base: bytes | None = None       # byte del file firmato su disco: base del salvataggio incrementale
-    incremental: bool = False       # salvataggio incrementale installato sul documento
     signed_hint: bool = False
-    warning_pending: bool = False       # il file contiene /ByteRange (firmato, anche se non ancora verificato)
+       # il file contiene /ByteRange (firmato, anche se non ancora verificato)
 
 
 class _Bridge(QObject):
@@ -55,11 +53,20 @@ class SignController(QObject):
         self._states: dict[int, VerifyState] = {}
         self._bridge = _Bridge()
         self._bridge.verified.connect(self._on_verified)
-        self._in_warning = False
-        self._own_change = False
         ctx.documentOpened.connect(self._on_opened)
         ctx.documentClosed.connect(self._on_closed)
         ctx.documentChanged.connect(self._on_changed)
+        ctx.add_change_guard(self._change_guard)
+        self.panel = None                     # SignaturesPanel, impostato in register()
+        self.stateChanged.connect(self.update_banner)
+        # SIG-20: avviso per le firme obbligatorie mancanti prima di stampa e «Salva con nome»
+        if hasattr(ctx, "add_guard"):
+            ctx.add_guard("print", lambda view, info: self._required_guard(view, _("Stampa")))
+            # NFR-09: avviso prima di un salvataggio che riscrive per intero un documento firmato
+            ctx.add_guard("save", lambda view, info: self._full_rewrite_guard(view, False, info))
+            ctx.add_guard("save_as", lambda view, info: self._full_rewrite_guard(view, True, info))
+            ctx.add_guard("save_as", lambda view, info: self._required_guard(
+                view, _("Salva una copia") if (info or {}).get("copy") else _("Salva con nome")))
 
     # ================================================================ libreria
     def library(self, interactive: bool = True) -> SignatureLibrary | None:
@@ -86,7 +93,11 @@ class SignController(QObject):
         return lib
 
     def default_name(self) -> str:
-        return str(self.ctx.settings().value("user/name", "") or "")
+        """Nome dell'autore (preferenza del nucleo «Nome autore», altrimenti l'utente di sistema)."""
+        try:
+            return str(self.ctx.author_name() or "")
+        except Exception:
+            return ""
 
     # ========================================================== firma grafica
     def tool_for(self, view) -> SignatureTool:
@@ -142,24 +153,35 @@ class SignController(QObject):
         self.ctx.status(_("Clic: posiziona la firma · trascina: dimensione · Invio: al centro · Esc: annulla"),
                         8000)
 
+    def _permission_ok(self, view, perms: tuple[int, ...], message: str) -> bool:
+        """Permessi effettivi del documento (nucleo: `allows`); se mancano propone di
+        sbloccare con la password del proprietario (`unlock`)."""
+        doc = view.document
+        if any(doc.allows(p) for p in perms):
+            return True
+        pw, ok = QInputDialog.getText(self.ctx.window, _("Permessi del documento"),
+                                      message + "\n\n" + _("Password del proprietario per sbloccarlo:"),
+                                      QLineEdit.EchoMode.Password)
+        if ok and pw:
+            if doc.unlock(pw):
+                return True
+            self.ctx.error(_("Permessi del documento"), _("La password del proprietario non è corretta."))
+        return False
+
     def _annotations_allowed(self, view) -> bool:
-        with ENGINE_LOCK:
-            perms = view.document.pdf.permissions
-        if not perms & pymupdf.PDF_PERM_ANNOTATE:
-            self.ctx.error(_("Firma"), _("I permessi del documento non consentono di aggiungere annotazioni o "
-                                          "firme grafiche. Apri il documento con la password del proprietario "
-                                          "per modificarlo."))
-            return False
-        return True
+        return self._permission_ok(view, (pymupdf.PDF_PERM_ANNOTATE,), _(
+            "I permessi del documento non consentono di aggiungere annotazioni o firme grafiche."))
 
     def _change(self, view, label: str, fn, kind: str = "annotation"):
-        """Esegue `fn(pdf)` come passo annullabile, con l'avviso SIG-21 se il documento è firmato."""
-        if not self.confirm_invalidating(view, label, kind):
-            return None
-        self._own_change = True
+        """Esegue `fn(pdf)` come passo annullabile; l'avviso SIG-21 per i documenti firmati
+        lo dà la guardia sulle modifiche (`_change_guard`), prima di modificare."""
         try:
-            with view.document.change(label) as pdf:
+            with view.document.change(label, kind=kind) as pdf:
                 return fn(pdf)
+        except OperationCancelled as e:
+            if str(e) and view.document.locked:
+                self.ctx.status(str(e), 6000)
+            return None
         except (g.GraphicSignatureError, DocumentError) as e:
             self.ctx.error(_("Firma"), str(e))
             return None
@@ -167,8 +189,6 @@ class SignController(QObject):
             self.tool_for(view).selected = None
             self.ctx.error(_("Firma"), _("Operazione non riuscita: {e}").format(e=str(e) or e.__class__.__name__))
             return None
-        finally:
-            self._own_change = False
 
     def place(self, view, page: int, rect: pymupdf.Rect, item: g.SignatureItem) -> int | None:
         author = self.default_name()
@@ -329,22 +349,20 @@ class SignController(QObject):
             self.verify(view)
 
     def detect_signed(self, view) -> None:
-        """Rilevamento sincrono ed economico delle firme: installa subito il
-        salvataggio incrementale, anche prima (o senza) la verifica completa."""
+        """Rilevamento sincrono delle firme (il nucleo salva già in modo incrementale i
+        documenti firmati, NFR-09) e nuova verifica dopo ogni salvataggio."""
         doc = view.document
         st = self.state(doc)
-        if doc.path is None or doc.is_modified:
-            return
-        try:
-            data = Path(doc.path).read_bytes()
-        except OSError:
-            return
-        if b"/ByteRange" in data:
-            st.base = data
+        if getattr(doc, "has_signatures", False):
             st.signed = True
             st.signed_hint = True
-            if not st.incremental:
-                self._install_incremental_save(doc, st)
+
+        def on_doc_event(d, kind, v=view) -> None:
+            if kind == SAVED and not d.closed:
+                st.signed_hint = bool(getattr(d, "has_signatures", False))
+                self.verify(v, force=True)
+
+        doc.add_listener(on_doc_event)
 
     def _on_closed(self, view) -> None:
         self._states.pop(id(view.document), None)
@@ -371,8 +389,6 @@ class SignController(QObject):
         except Exception as e:  # documento chiuso o illeggibile
             st.error = str(e)
             return
-        if doc.path is not None and not doc.is_modified:
-            st.base = data
         if b"/Sig" not in data and b"/ByteRange" not in data:
             st.version, st.statuses, st.fields, st.signed, st.certification = doc.version, [], [], False, None
             st.source = data
@@ -424,13 +440,68 @@ class SignController(QObject):
         st.fields = result.get("fields", [])
         st.certification = result.get("certification")
         st.signed = bool(st.statuses) or st.signed_hint
-        if st.signed and st.base is not None and not st.incremental:
-            self._install_incremental_save(doc, st)
+        self._apply_certification_lock(doc, st)
         for view in self.ctx.views():
             if view.document is doc:
                 self.stateChanged.emit(view)
                 if st.signed and not doc.is_modified:
                     self.ctx.status(_("Documento firmato: modificare il contenuto invaliderà le firme."), 10000)
+
+    BANNER_ID = "firme"
+
+    def update_banner(self, view) -> None:
+        """SIG-18/SIG-20/SIG-21: barra sopra il documento con lo stato delle firme e i campi da firmare."""
+        if view is None or getattr(view.document, "closed", False):
+            return
+        st = self.state(view)
+        if st.running:
+            return
+        empties = [f for f in self.empty_fields(view) if not f.hidden]
+        if not st.statuses and not empties:
+            self.ctx.hide_banner(view, self.BANNER_ID)
+            return
+        from . import digital
+        text = digital.summary(st.statuses, empties)
+        if st.statuses and st.certification != 1:
+            text += " · " + _("Modificare il contenuto invaliderà le firme.")
+        bad = bool(st.error) or any(s.status != "valida" for s in st.statuses)
+        actions = []
+        if empties:
+            actions.append((_("Firma ora"), lambda v=view: self._banner_sign_now(v)))
+            actions.append((_("Campo successivo"), lambda v=view: self._banner_next_field(v)))
+        if st.statuses:
+            actions.append((_("Dettagli"), lambda: self.ctx.show_sidebar_panel("firme")))
+        if st.certification == 1:
+            actions.append((_("Lavora su una copia senza firme"), lambda v=view: self.open_unsigned_copy(v)))
+        level = "error" if bad else ("warning" if empties else "info")
+        self.ctx.show_banner(view, self.BANNER_ID, text, actions, level=level, priority=30)
+
+    def _banner_sign_now(self, view) -> None:
+        self.ctx.show_sidebar_panel("firme")
+        if self.panel is not None and self.panel.view is view:
+            self.panel.sign_now()
+        else:
+            fields = [f for f in self.empty_fields(view) if not f.hidden]
+            if fields:
+                self.digital_sign(view, field=fields[0])
+
+    def _banner_next_field(self, view) -> None:
+        self.ctx.show_sidebar_panel("firme")
+        if self.panel is not None and self.panel.view is view:
+            self.panel.next_field()
+
+    def _apply_certification_lock(self, doc, st: VerifyState) -> None:
+        """SIG-17/SIG-21: un documento certificato «nessuna modifica» è in sola lettura."""
+        if not hasattr(doc, "set_locked"):
+            return
+        reason = _("Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza "
+                   "firme.")
+        current = getattr(doc, "locked_reason", None)
+        if st.certification == 1:
+            if current is None:          # non sostituire un altro motivo (es. versione firmata)
+                doc.set_locked(reason)
+        elif current == reason:
+            doc.set_locked(None)
 
     def empty_fields(self, view) -> list:
         return [f for f in self.state(view).fields if not f.signed]
@@ -438,6 +509,59 @@ class SignController(QObject):
     def missing_required_signatures(self, view) -> list:
         """Campi firma obbligatori, visibili e non firmati (SIG-20)."""
         return [f for f in self.empty_fields(view) if f.required and not f.hidden]
+
+    def _full_rewrite_guard(self, view, save_as: bool, info) -> bool:
+        """NFR-09/SIG-21: se il salvataggio riscriverà per intero un documento firmato (es. dopo
+        una redazione) le firme non saranno più valide. «Salva» sul file firmato: si propone
+        solo di salvare una copia (l'originale resta intatto) o di annullare. «Salva con nome»
+        / «Salva una copia» scrivono già un altro file: si chiede conferma."""
+        doc = getattr(view, "document", None)
+        if doc is None or not getattr(doc, "has_signatures", False):
+            return True
+        if getattr(doc, "saves_incrementally", True):
+            return True
+        choice = self._ask_full_rewrite(view, save_as)
+        if choice == "copy":
+            if save_as:
+                return True                       # sta già salvando un altro file
+            self._save_unsigned_copy(view)
+        return False
+
+    def _ask_full_rewrite(self, view, save_as: bool) -> str:
+        box = QMessageBox(self.ctx.window)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Documento firmato"))
+        box.setText(_("Questo salvataggio riscrive il file per intero (per esempio dopo una redazione): le "
+                      "firme digitali non saranno più valide."))
+        box.setInformativeText(_("Salva le modifiche in una copia: il file firmato resta intatto.") if not save_as
+                               else _("Il nuovo file non conterrà firme valide; il file firmato resta intatto."))
+        copy = box.addButton(_("Salva una copia"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(copy)
+        box.exec()
+        return "copy" if box.clickedButton() is copy else "cancel"
+
+    def _save_unsigned_copy(self, view) -> bool:
+        doc = view.document
+        stem = Path(doc.display_name).stem
+        path = self.ctx.ask_save_path(_("Salva una copia"), _("{name} (modificato).pdf").format(name=stem))
+        if not path:
+            return False
+        if doc.path is not None and Path(path).resolve() == Path(doc.path).resolve():
+            self.ctx.error(_("Salva una copia"), _("Scegli un file diverso dall'originale firmato."))
+            return False
+        try:
+            doc.save_copy(path)
+        except Exception as e:
+            self.ctx.error(_("Salva una copia"), str(e))
+            return False
+        self.ctx.status(_("Copia salvata: {p}").format(p=path), 6000)
+        return True
+
+    def _required_guard(self, view, action: str) -> bool:
+        if view is None or id(view.document) not in self._states:
+            return True
+        return self.confirm_unsigned_required(view, action)
 
     def confirm_unsigned_required(self, view, action: str) -> bool:
         """Da chiamare prima di stampare, inviare o salvare con nome: avvisa se mancano
@@ -450,46 +574,6 @@ class SignController(QObject):
             "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con "
             "«{action}»?").format(names=names, action=action))
 
-    # ============================================ salvataggio incrementale (SIG-21)
-    def _install_incremental_save(self, doc: Document, st: VerifyState) -> None:
-        """Per i documenti firmati «Salva» e «Salva una copia» accodano solo le
-        modifiche al file firmato (vedi CORE_REQUESTS.md, richiesta 1)."""
-        from .incremental import incremental_update
-        original_save, original_copy = doc.save, doc.save_copy
-        controller = self
-
-        def build() -> bytes:
-            try:
-                with doc.lock:
-                    return incremental_update(st.base, doc.pdf, doc.password)
-            except Exception as e:  # mai un'eccezione non gestita verso la finestra
-                raise DocumentError(_("Salvataggio incrementale non riuscito: {e}").format(
-                    e=str(e) or e.__class__.__name__)) from e
-
-        def save(path=None, **options):
-            if doc.is_protected and doc.save_options != doc.original_protection:
-                return original_save(path, **options)   # nuova protezione: riscrittura completa
-            target = Path(path) if path is not None else doc.path
-            if target is None:
-                raise DocumentError(_("Scegli dove salvare il documento."))
-            data = build()
-            atomic_write(target, data)
-            doc.path = target
-            doc._saved_state = doc._state
-            st.base = data
-            doc._notify(SAVED)
-            for v in controller.ctx.views():
-                if v.document is doc:
-                    controller.verify(v, force=True)
-
-        def save_copy(path, **options):
-            atomic_write(Path(path), build())
-
-        doc.save = save
-        doc.save_copy = save_copy
-        doc._foliant_original_save = original_save
-        st.incremental = True
-
     # =========================================================== SIG-21 avvisi
     def allowed_change(self, view, kind: str) -> bool:
         """True se una modifica del tipo indicato non invalida le firme presenti
@@ -497,29 +581,38 @@ class SignController(QObject):
         st = self.state(view)
         if not st.signed:
             return True
+        incremental = bool(getattr(view.document, "has_signatures", False))
         if kind == "annotation":
-            return st.incremental and st.certification in (None, 3)
+            return incremental and st.certification in (None, 3)
         if kind == "form":
-            return st.incremental and st.certification in (None, 2, 3)
+            return incremental and st.certification in (None, 2, 3)
         return False
 
-    def confirm_invalidating(self, view, what: str, kind: str = "content") -> bool:
-        """Prima di una modifica a un documento firmato: Annulla / Copia senza firme / Procedi."""
-        st = self.state(view)
+    def _view_of(self, document):
+        return next((v for v in self.ctx.views() if v.document is document), None)
+
+    def _change_guard(self, document, label: str, kind: str) -> bool:
+        """SIG-21, prima di ogni modifica (di qualsiasi modulo): le modifiche consentite
+        dalle firme presenti passano; per quelle invalidanti si chiede conferma con le
+        scelte Annulla / Lavora su una copia senza firme / Procedi comunque."""
+        st = self._states.get(id(document))
+        view = self._view_of(document)
+        if st is None or view is None or not st.signed:
+            return True
         if st.certification == 1:
             if self.ctx.confirm(_("Documento certificato"), _(
                     "Il documento è certificato con livello «nessuna modifica»: «{what}» non è consentito.\n\n"
-                    "Vuoi lavorare su una copia senza firme?").format(what=what)):
-                self.open_unsigned_copy(view)
+                    "Vuoi lavorare su una copia senza firme?").format(what=label)):
+                QTimer.singleShot(0, lambda v=view: self.open_unsigned_copy(v))
             return False
-        if not st.signed or st.warned or self.allowed_change(view, kind):
+        if st.warned or self.allowed_change(view, kind):
             return True
-        choice = self._ask_invalidation(view, what)
+        choice = self._ask_invalidation(view, label)
         if choice == "proceed":
             st.warned = True
             return True
         if choice == "copy":
-            self.open_unsigned_copy(view)
+            QTimer.singleShot(0, lambda v=view: self.open_unsigned_copy(v))
         return False
 
     def _ask_invalidation(self, view, what: str) -> str:
@@ -540,47 +633,8 @@ class SignController(QObject):
         return "proceed" if clicked is proceed else "copy" if clicked is copy else "cancel"
 
     def _on_changed(self, view) -> None:
-        doc = view.document
-        st = self._states.get(id(doc))
-        if st is None or self._in_warning or self._own_change:
-            return
-        if st.signed and not st.warned and doc.is_modified and not st.warning_pending:
-            # rimandato: la change() di chi ha modificato deve terminare prima di un eventuale annulla
-            st.warning_pending = True
-            QTimer.singleShot(0, lambda v=view: self._deferred_warning(v))
-        self.stateChanged.emit(view)
-
-    def _deferred_warning(self, view) -> None:
-        doc = view.document
-        st = self._states.get(id(doc))
-        if st is None:
-            return
-        st.warning_pending = False
-        if doc.closed or self._in_warning or st.warned or not doc.is_modified:
-            return
-        if self._content_changed(doc, st):
-            self._in_warning = True
-            try:
-                label = doc.undo_label or _("Modifica")
-                choice = self._ask_invalidation(view, label)
-                if choice == "proceed":
-                    st.warned = True
-                else:
-                    doc.undo()
-                    if choice == "copy":
-                        self.open_unsigned_copy(view)
-            finally:
-                self._in_warning = False
+        if id(view.document) in self._states:
             self.stateChanged.emit(view)
-
-    def _content_changed(self, doc, st: VerifyState) -> bool:
-        """Le modifiche consentite (annotazioni, moduli) non richiedono l'avviso
-        se il salvataggio è incrementale e la certificazione le ammette."""
-        if not st.incremental or st.base is None or st.certification not in (None, 3):
-            return True
-        from .incremental import changes_content
-        with doc.lock:
-            return changes_content(st.base, doc.pdf, doc.password)
 
     def open_unsigned_copy(self, view):
         from . import digital
@@ -633,6 +687,9 @@ class SignController(QObject):
         from . import digital
         from .ui_digital import DigitalSignDialog
         view.set_tool(None)
+        if not self._permission_ok(view, (pymupdf.PDF_PERM_FORM, pymupdf.PDF_PERM_ANNOTATE), _(
+                "I permessi del documento non consentono di firmarlo né di compilarne i moduli.")):
+            return False
         if not self._ensure_saved(view):
             return False
         doc = view.document
@@ -847,11 +904,10 @@ class SignController(QObject):
                 return
             self._reopen(view, target)
             return
-        self._own_change = True
         try:
-            doc.replace_with(new, _("Aggiungi campo firma"))
-        finally:
-            self._own_change = False
+            doc.replace_with(new, _("Aggiungi campo firma"), kind="form")
+        except OperationCancelled:
+            return
         self.verify(view, force=True)
 
     # ======================================================= ID e certificati
@@ -894,6 +950,8 @@ class SignController(QObject):
         except Exception as e:
             self.ctx.error(_("Versione firmata"), str(e))
             return
+        if hasattr(doc, "set_locked"):
+            doc.set_locked(_("Versione firmata da {who}: sola lettura.").format(who=status.signer or status.field_name))
         new_view = self.ctx.open_document(doc)
         self.state(doc).warned = False
         return new_view
@@ -999,7 +1057,30 @@ TRANSLATIONS_EN = {
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
     "Operazione non riuscita: {e}": "Operation failed: {e}",
+    "Permessi del documento": "Document permissions",
+    "Password del proprietario per sbloccarlo:": "Owner password to unlock it:",
+    "La password del proprietario non è corretta.": "The owner password is not correct.",
+    "I permessi del documento non consentono di aggiungere annotazioni o firme grafiche.":
+        "The document permissions do not allow adding annotations or graphic signatures.",
+    "I permessi del documento non consentono di firmarlo né di compilarne i moduli.":
+        "The document permissions do not allow signing it or filling its forms.",
+    "Modificare il contenuto invaliderà le firme.": "Changing the content will invalidate the signatures.",
+    "Firma ora": "Sign now", "Campo successivo": "Next field", "Dettagli": "Details",
+    "Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza firme.":
+        "Document certified “no changes”: to change it, work on a copy without signatures.",
+    "Versione firmata da {who}: sola lettura.": "Version signed by {who}: read-only.",
     "Firme mancanti": "Missing signatures",
+    "Questo salvataggio riscrive il file per intero (per esempio dopo una redazione): le firme digitali non "
+    "saranno più valide.": "This save rewrites the whole file (for example after a redaction): the digital "
+                           "signatures will no longer be valid.",
+    "Salva le modifiche in una copia: il file firmato resta intatto.":
+        "Save the changes to a copy: the signed file stays intact.",
+    "Il nuovo file non conterrà firme valide; il file firmato resta intatto.":
+        "The new file will not contain valid signatures; the signed file stays intact.",
+    "{name} (modificato).pdf": "{name} (modified).pdf",
+    "Scegli un file diverso dall'originale firmato.": "Choose a file other than the signed original.",
+    "Copia salvata: {p}": "Copy saved: {p}", "Stampa": "Print", "Salva una copia": "Save a copy",
+    "Salva con nome": "Save as",
     "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con «{action}»?":
         "The document has required signature fields not yet signed:\n\n{names}\n\nProceed with “{action}” anyway?",
     "Verifica online della revoca in corso…": "Online revocation check in progress…",
