@@ -60,7 +60,9 @@ def capture_image(view: DocumentView, page: int, rect: pymupdf.Rect, dpi: int) -
         pg = view.document.pdf[page]
         clip = rect * pg.rotation_matrix
         clip.normalize()
-        pix = pg.get_pixmap(dpi=dpi, clip=clip, alpha=False, annots=True)
+        from foliant.api import page_pixmap
+        pix = page_pixmap(view.document.pdf, page, hide_unsigned_signatures=True,
+                          dpi=dpi, clip=clip, alpha=False, annots=True)
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
     img.setDotsPerMeterX(int(dpi / 0.0254))
     img.setDotsPerMeterY(int(dpi / 0.0254))

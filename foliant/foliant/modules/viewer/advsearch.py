@@ -162,6 +162,8 @@ class AdvancedSearchPanel(QDialog):
         self.mode.currentIndexChanged.connect(lambda *_a: controller.validate())
         form.addRow(_("Modalità"), self.mode)
         opts = QHBoxLayout()
+        opts.setSpacing(16)
+        self.opts_layout = opts
         self.opt_case = QCheckBox(_("Maiuscole/minuscole"), self)
         self.opt_word = QCheckBox(_("Parola intera"), self)
         self.opt_accents = QCheckBox(_("Ignora accenti"), self)
@@ -171,6 +173,8 @@ class AdvancedSearchPanel(QDialog):
         opts.addStretch(1)
         form.addRow(_("Opzioni"), opts)
         inc = QHBoxLayout()
+        inc.setSpacing(16)
+        self.inc_layout = inc
         self.inc_comments = QCheckBox(_("Commenti"), self)
         self.inc_bookmarks = QCheckBox(_("Segnalibri"), self)
         self.inc_fields = QCheckBox(_("Campi modulo"), self)

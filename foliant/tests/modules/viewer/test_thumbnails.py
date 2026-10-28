@@ -127,3 +127,42 @@ def test_unreadable_page_placeholder(viewer_window, long_pdf, monkeypatch):
     panel.flush()
     assert 1 in panel.failed
     assert panel.image(0) is not None
+
+
+def test_cyclic_page_tree_does_not_break_painting(viewer_window, tmp_path, qtbot):
+    # /Kids contiene il nodo /Pages stesso: la terza «pagina» non è leggibile
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "uno")
+    doc.new_page().insert_text((72, 100), "due")
+    pages = doc.xref_get_key(doc.pdf_catalog(), "Pages")[1].split()[0]
+    kids = doc.xref_get_key(int(pages), "Kids")[1]
+    doc.xref_set_key(int(pages), "Kids", kids[:-1] + f" {pages} 0 R]")
+    doc.xref_set_key(int(pages), "Count", "3")
+    path = tmp_path / "ciclo.pdf"
+    doc.save(str(path), garbage=0)
+    # vista collegata direttamente al pannello (senza i controlli d'apertura di altri moduli)
+    from foliant.api import Document, DocumentView
+    view = DocumentView(Document.open(str(path)))
+    qtbot.addWidget(view)
+    assert view.page_count == 3
+    viewer_window.ctx.show_sidebar_panel("thumbnails")
+    panel = viewer_window.ctx.viewer_parts["thumbnails"].panel
+    panel.set_view(view)
+    errors = []
+    import sys
+    old = sys.excepthook
+    sys.excepthook = lambda *a: errors.append(a)
+    try:
+        panel.list.scrollTo(panel.model.index(2))
+        panel.flush()
+        panel.list.viewport().grab()       # disegno completo, anche della cella illeggibile
+        assert panel.page_aspect(2) == (595.0, 842.0)
+    finally:
+        sys.excepthook = old
+    assert not errors
+    assert 2 in panel.failed
+    panel.request(0)
+    panel.flush()
+    assert panel.image(0) is not None and 0 not in panel.failed   # le altre pagine restano visibili
+    panel.set_view(None)
+    view.dispose()

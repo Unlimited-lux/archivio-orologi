@@ -289,9 +289,10 @@ def test_close_others_right_all(viewer_window, tmp_path):
 def test_close_others_stops_when_user_cancels(viewer_window, tmp_path, monkeypatch):
     ctl = _session(viewer_window)
     views = _three_tabs(viewer_window, tmp_path)
-    monkeypatch.setattr(viewer_window, "close_view", lambda v: False)
-    assert ctl.close_other_tabs(views[0]) is False
-    assert len(viewer_window.views()) == 3
+    with monkeypatch.context() as m:      # ripristinato prima della chiusura della finestra
+        m.setattr(viewer_window, "close_view", lambda v, **_k: False)
+        assert ctl.close_other_tabs(views[0]) is False
+        assert len(viewer_window.views()) == 3
 
 
 def test_tab_context_menu(viewer_window, tmp_path):
