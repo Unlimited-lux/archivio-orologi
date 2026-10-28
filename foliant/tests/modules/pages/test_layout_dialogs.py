@@ -280,3 +280,123 @@ def test_dialog_screenshots(window, sample_pdf, mode):
             dlg.close()
     finally:
         theme.apply(QApplication.instance(), "light")
+
+
+# ======================================================================== follow-up
+def test_remove_margins_dialog_custom_rect(env, monkeypatch):
+    ctx, view, messages = env
+
+    def conf(d):
+        d.scope.set_scope("current")
+        d.set_custom_rect(0, (100, 200, 300, 500))      # coordinate visualizzate
+        assert d.options()["rects"] is not None
+
+    run_dialog(monkeypatch, conf)
+    assert ld.open_remove_margins_dialog(ctx, view, [])
+    box = raw_box(view, 0, "CropBox")
+    assert box == pytest.approx([100, 842 - 500, 300, 842 - 200], abs=0.01)
+    assert view.document.undo()
+
+
+def test_remove_margins_dialog_restore_detection(window, sample_pdf):
+    view = window.open_path(sample_pdf)
+    dlg = ld.RemoveMarginsDialog(window, view.document, [], 0)
+    from PySide6.QtCore import QRectF
+    dlg._rect_drawn(QRectF(10, 10, 100, 100))
+    assert 0 in dlg.custom
+    dlg.refresh()
+    assert dlg.restore_btn.isEnabled()
+    dlg._restore_detection()
+    dlg.refresh()
+    assert dlg.options()["rects"] is None and not dlg.restore_btn.isEnabled()
+
+
+def test_resize_dialog_fill_and_small_text_warning(env, monkeypatch):
+    ctx, view, messages = env
+
+    def conf(d):
+        ld._set_combo(d.paper, "custom")
+        d.width_mm.setValue(100)
+        d.height_mm.setValue(100)
+        ld._set_combo(d.orientation, "portrait")
+        d.mode_fill.setChecked(True)
+        d.scope.set_scope("current")
+        d.refresh()
+        assert "tagliate" in d.info.text()
+
+    run_dialog(monkeypatch, conf)
+    assert ld.open_resize_dialog(ctx, view, [])
+    assert abs(view.document.pdf[0].rect.width - 100 * MM) < 0.5
+    assert messages and "tagliato" in messages[-1][2]
+
+    def conf_small(d):
+        ld._set_combo(d.paper, "custom")
+        d.width_mm.setValue(30)
+        d.height_mm.setValue(42)
+        d.mode_scale.setChecked(True)
+        d.scope.set_scope("range", "2")
+        d.refresh()
+        assert "4 pt" in d.info.text()
+
+    run_dialog(monkeypatch, conf_small)
+    assert ld.open_resize_dialog(ctx, view, [])
+    assert "4 pt" in messages[-1][2]
+
+
+def test_split_dialog_fold_and_remove_outside(window, tmp_path, monkeypatch):
+    doc = pymupdf.open()
+    p = doc.new_page(width=842, height=595)
+    p.draw_rect(p.rect, color=None, fill=(0.85, 0.85, 0.85))
+    p.draw_rect(pymupdf.Rect(446, 0, 454, 595), color=None, fill=(0.2, 0.2, 0.2))
+    p.insert_text((60, 100), "SINISTRA", fontsize=20)
+    p.insert_text((600, 100), "DESTRA", fontsize=20)
+    path = tmp_path / "libro.pdf"
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    ctx = window.ctx
+    monkeypatch.setattr(ctx, "info", lambda *a: None, raising=False)
+    monkeypatch.setattr(ctx, "error", lambda *a: None, raising=False)
+
+    def conf(d):
+        ld._set_combo(d.method, "fold")
+        d.remove_outside.setChecked(True)
+        d.scope.set_scope("all")
+        d.refresh()
+        assert "Piega rilevata" in d.info.text()
+
+    run_dialog(monkeypatch, conf)
+    assert ld.open_split_page_dialog(ctx, view, [])
+    pdf = view.document.pdf
+    assert pdf.page_count == 2 and abs(pdf[0].rect.width - 450) <= 3
+    flags = pymupdf.TEXTFLAGS_TEXT & ~pymupdf.TEXT_MEDIABOX_CLIP
+    assert "DESTRA" not in pdf[0].get_text("text", flags=flags, clip=pymupdf.INFINITE_RECT())
+    assert view.document.undo() and view.document.page_count == 1
+
+
+def test_boxes_overlay_install_toggle(env, monkeypatch):
+    ctx, view, messages = env
+    from PySide6.QtGui import QImage, QPainter
+    with view.document.change("trim") as pdf:
+        from foliant.modules.pages import layout
+        layout.set_trim_with_bleed(pdf, [0], (500, 700), bleed=10)
+    dlg = ld.BoxesDialog(ctx.window, view.document, [], 0, view=view)
+    assert dlg.show_in_view.isEnabled() and not dlg.show_in_view.isChecked()
+    dlg.show_in_view.setChecked(True)
+    assert ld.boxes_overlay_installed(view)
+    ld.install_boxes_overlay(view)                       # idempotente
+    assert sum(getattr(f, "foliant_boxes", False) for f in view.overlays) == 1
+    img = QImage(600, 850, QImage.Format.Format_RGB32)
+    img.fill(0xFFFFFFFF)
+    p = QPainter(img)
+    for fn in view.overlays:
+        fn(view, p, 0)
+        fn(view, p, 1)
+    p.end()
+    assert img.pixel(int((595 - 500) / 2), 300) != 0xFFFFFFFF      # bordo del formato finito disegnato
+    view.grab()
+    dlg2 = ld.BoxesDialog(ctx.window, view.document, [], 0, view=view)
+    assert dlg2.show_in_view.isChecked()
+    dlg2.show_in_view.setChecked(False)
+    assert not ld.boxes_overlay_installed(view)
+    ld.remove_boxes_overlay(view)
+    assert ld.BoxesDialog(ctx.window, view.document, [], 0).show_in_view.isEnabled() is False

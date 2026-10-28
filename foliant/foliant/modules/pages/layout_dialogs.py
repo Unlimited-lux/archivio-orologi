@@ -148,6 +148,24 @@ TRANSLATIONS = {
     "Impossibile creare le pagine affiancate": "Cannot create the pages per sheet",
     "affiancate": "n-up",
     "Crea": "Create",
+    "Metodo": "Method",
+    "Griglia": "Grid",
+    "Rileva la piega centrale": "Detect the centre fold",
+    "Piega non rilevata: taglio al centro.": "Fold not detected: cut in the middle.",
+    "Piega rilevata a {x} mm dal bordo sinistro.": "Fold detected {x} mm from the left edge.",
+    "Rimuovi il testo esterno a ogni parte": "Remove the text outside each part",
+    "Riempi (taglia le eccedenze)": "Fill (crop the overflow)",
+    "Le parti eccedenti del contenuto saranno tagliate.": "The overflowing parts of the content will be cropped.",
+    "Il testo scenderà sotto 4 pt effettivi: potrebbe essere poco leggibile.":
+        "Text will drop below 4 pt effective size: it may be hard to read.",
+    "Contenuto tagliato nelle pagine {p}.": "Content cropped on pages {p}.",
+    "Testo sotto 4 pt effettivi (poco leggibile) nelle pagine {p}.":
+        "Text below 4 pt effective size (hard to read) on pages {p}.",
+    "Trascina sull'anteprima per correggere il rettangolo di questa pagina.":
+        "Drag on the preview to adjust this page's rectangle.",
+    "Ripristina il rilevamento": "Restore detection",
+    "Rettangolo modificato a mano per {n} pagine.": "Rectangle adjusted by hand on {n} pages.",
+    "Mostra i riquadri nella vista": "Show the boxes in the view",
 }
 
 UNIT_LABELS = [("mm", "mm"), ("pt", "pt"), ("in", "in"), ("%", "%")]
@@ -545,12 +563,17 @@ class _LayoutDialog(QDialog):
 
 def _dim_outside(p: QPainter, page: QRectF, keep: QRectF) -> None:
     shade = _alpha("page_shadow", 120)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, False)    # niente giunture chiare tra le fasce
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(shade)
     p.drawRect(QRectF(page.left(), page.top(), page.width(), max(0.0, keep.top() - page.top())))
     p.drawRect(QRectF(page.left(), keep.bottom(), page.width(), max(0.0, page.bottom() - keep.bottom())))
     p.drawRect(QRectF(page.left(), keep.top(), max(0.0, keep.left() - page.left()), keep.height()))
     p.drawRect(QRectF(keep.right(), keep.top(), max(0.0, page.right() - keep.right()), keep.height()))
+
+
+def _norm_rect(r: pymupdf.Rect) -> pymupdf.Rect:
+    return pymupdf.Rect(min(r.x0, r.x1), min(r.y0, r.y1), max(r.x0, r.x1), max(r.y0, r.y1))
 
 
 def _qrect(r: pymupdf.Rect) -> QRectF:
@@ -747,6 +770,7 @@ def open_crop_dialog(ctx, view, selected: list[int]) -> bool:
 class RemoveMarginsDialog(_LayoutDialog):
     TITLE = "Rimuovi margini bianchi"
     ICON = "scan"
+    INTERACTIVE = True
 
     def build(self) -> None:
         box = QGroupBox(_("Margini bianchi"))
@@ -762,9 +786,34 @@ class RemoveMarginsDialog(_LayoutDialog):
         f.addRow(self.uniform)
         f.addRow(self.annots)
         self.form.addWidget(box)
+        self.form.addWidget(_muted(_("Trascina sull'anteprima per correggere il rettangolo di questa pagina.")))
+        self.restore_btn = QPushButton(icon("rotate-ccw"), _("Ripristina il rilevamento"))
+        self.restore_btn.clicked.connect(self._restore_detection)
+        self.form.addWidget(self.restore_btn)
+        self.custom_label = _muted()
+        self.form.addWidget(self.custom_label)
         self._bbox: pymupdf.Rect | None = None
         self._key = None
+        self.custom: dict[int, pymupdf.Rect] = {}     # coordinate del motore, per pagina
+        self.preview.rectDrawn.connect(self._rect_drawn)
         self._connect(self.extra, self.tolerance, self.border, self.uniform, self.annots)
+
+    def set_custom_rect(self, index: int, rect_displayed) -> None:
+        """Rettangolo del contenuto scelto a mano (coordinate visualizzate) per una pagina."""
+        with ENGINE_LOCK:
+            page = self.document.pdf[index]
+            r = pymupdf.Rect(rect_displayed) & page.rect
+            self.custom[index] = _norm_rect(r * page.derotation_matrix)
+        self._key = None
+        self.schedule()
+
+    def _rect_drawn(self, r: QRectF) -> None:
+        self.set_custom_rect(self.preview_index(), (r.left(), r.top(), r.right(), r.bottom()))
+
+    def _restore_detection(self) -> None:
+        self.custom.pop(self.preview_index(), None)
+        self._key = None
+        self.schedule()
 
     def options(self) -> dict:
         return {
@@ -774,18 +823,25 @@ class RemoveMarginsDialog(_LayoutDialog):
             "ignore_border": self.border.value() / 100,
             "uniform": self.uniform.isChecked(),
             "include_annots": self.annots.isChecked(),
+            "rects": {i: pymupdf.Rect(r) for i, r in self.custom.items()} or None,
         }
 
     def update_preview_data(self) -> None:
         o = self.options()
         idx = self.preview_index()
         key = (idx, o["tolerance"], o["ignore_border"], o["include_annots"])
+        self.restore_btn.setEnabled(idx in self.custom)
+        self.custom_label.setText(_("Rettangolo modificato a mano per {n} pagine.").format(n=len(self.custom))
+                                  if self.custom else "")
         if key != self._key:
             self._key = key
             with ENGINE_LOCK:
                 page = self.document.pdf[idx]
-                bb = layout.content_bbox(page, o["tolerance"], o["ignore_border"], o["include_annots"])
-                self._bbox = None if bb is None else bb * page.rotation_matrix
+                if idx in self.custom:
+                    bb = self.custom[idx]
+                else:
+                    bb = layout.content_bbox(page, o["tolerance"], o["ignore_border"], o["include_annots"])
+                self._bbox = None if bb is None else _norm_rect(bb * page.rotation_matrix)
                 self._full = page.rect
         if self._bbox is None:
             self.info.setText(_("Pagina vuota: nessun ritaglio."))
@@ -827,7 +883,7 @@ def open_remove_margins_dialog(ctx, view, selected: list[int]) -> bool:
         with view.document.change(_("Rimuovi margini bianchi")) as pdf:
             rep = layout.remove_white_margins(pdf, o["pages"], extra=o["extra"], tolerance=o["tolerance"],
                                               uniform=o["uniform"], ignore_border=o["ignore_border"],
-                                              include_annots=o["include_annots"])
+                                              include_annots=o["include_annots"], rects=o["rects"])
             if not rep["cropped"]:
                 raise _NothingDone(rep)
         notes = [_("Pagine ritagliate: {n}.").format(n=len(rep["cropped"]))]
@@ -873,9 +929,63 @@ BOX_LABELS = [
 ]
 
 
+def _boxes_overlay(view, painter: QPainter, index: int) -> None:
+    """Disegna i riquadri di stampa presenti nel file (coordinate del motore)."""
+    with ENGINE_LOCK:
+        pdf = view.document.pdf
+        page = pdf[index]
+        boxes = layout.get_boxes(page)
+        crop = layout._crop(pdf, page)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    for name, _text, col in BOX_LABELS:
+        b = boxes[name]
+        if name == "CropBox" or (b["default"] and name != "MediaBox"):
+            continue
+        if name == "MediaBox" and b["rect"] == crop:
+            continue
+        pen = QPen(theme.color(col), 1.5, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawRect(_qrect(layout._user_to_engine(crop, b["rect"])))
+
+
+_boxes_overlay.foliant_boxes = True
+
+
+def boxes_overlay_installed(view) -> bool:
+    return any(getattr(fn, "foliant_boxes", False) for fn in getattr(view, "overlays", []))
+
+
+def _repaint(view) -> None:
+    try:
+        vp = view.viewport() if hasattr(view, "viewport") else view
+        vp.update()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def install_boxes_overlay(view) -> None:
+    """Mostra nella vista i riquadri di stampa (abbondanza, rifilo, area grafica, supporto)."""
+    if view is not None and not boxes_overlay_installed(view):
+        view.overlays.append(_boxes_overlay)
+        _repaint(view)
+
+
+def remove_boxes_overlay(view) -> None:
+    if view is None:
+        return
+    view.overlays[:] = [fn for fn in view.overlays if not getattr(fn, "foliant_boxes", False)]
+    _repaint(view)
+
+
 class BoxesDialog(_LayoutDialog):
     TITLE = "Riquadri di pagina"
     ICON = "frame"
+
+    def __init__(self, parent, document: Document, selected: list[int] | None = None, current: int = 0,
+                 view=None):
+        self.view = view
+        super().__init__(parent, document, selected, current)
 
     def build(self) -> None:
         cur = QGroupBox(_("Riquadri"))
@@ -934,11 +1044,22 @@ class BoxesDialog(_LayoutDialog):
             bf.addWidget(w, 1 + n // 2, (n % 2) * 2 + 1)
         self.form.addWidget(boxw)
         self.trim_panel, self.box_panel = trim, boxw
+        self.show_in_view = QCheckBox(_("Mostra i riquadri nella vista"))
+        self.show_in_view.setEnabled(self.view is not None)
+        self.show_in_view.setChecked(self.view is not None and boxes_overlay_installed(self.view))
+        self.show_in_view.toggled.connect(self._toggle_overlay)
+        self.form.addWidget(self.show_in_view)
         self.paper.currentIndexChanged.connect(self._paper_changed)
         self._connect(self.mode_trim, self.mode_box, self.paper, self.trim_w, self.trim_h, self.bleed, self.box_name,
                       self.m_top, self.m_bottom, self.m_left, self.m_right, self.remove)
         self._boxes: dict = {}
         self._paper_changed()
+
+    def _toggle_overlay(self, on: bool) -> None:
+        if on:
+            install_boxes_overlay(self.view)
+        else:
+            remove_boxes_overlay(self.view)
 
     def _paper_changed(self) -> None:
         key = self.paper.currentData()
@@ -1031,7 +1152,7 @@ def open_boxes_dialog(ctx, view, selected: list[int]) -> bool:
     """PAG-27: riquadri di stampa (abbondanza, rifilo, area grafica)."""
     if view is None:
         return False
-    dlg = BoxesDialog(_parent(ctx, view), view.document, selected, view.current_page)
+    dlg = BoxesDialog(_parent(ctx, view), view.document, selected, view.current_page, view=view)
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return False
     o = dlg.options()
@@ -1095,14 +1216,17 @@ class ResizeDialog(_LayoutDialog):
         mf = QVBoxLayout(mbox)
         self.mode_scale = QRadioButton(_("Scala il contenuto"))
         self.mode_canvas = QRadioButton(_("Cambia solo la tela"))
+        self.mode_fill = QRadioButton(_("Riempi (taglia le eccedenze)"))
         self.mode_scale.setChecked(True)
         grp = QButtonGroup(self)
         grp.addButton(self.mode_scale)
+        grp.addButton(self.mode_fill)
         grp.addButton(self.mode_canvas)
         self.proportional = QCheckBox(_("Mantieni le proporzioni"))
         self.proportional.setChecked(True)
         self.margin = _spin(0, 0, 500, 1, "mm")
         mf.addWidget(self.mode_scale)
+        mf.addWidget(self.mode_fill)
         mf.addWidget(self.mode_canvas)
         mf.addWidget(self.proportional)
         mrow = QHBoxLayout()
@@ -1132,7 +1256,7 @@ class ResizeDialog(_LayoutDialog):
         self.form.addWidget(mbox)
         self.paper.currentIndexChanged.connect(self._paper_changed)
         self._connect(self.paper, self.width_mm, self.height_mm, self.orientation, self.match, self.match_page,
-                      self.mode_scale, self.mode_canvas, self.proportional, self.margin)
+                      self.mode_scale, self.mode_fill, self.mode_canvas, self.proportional, self.margin)
         self._plan = None
         self._paper_changed()
 
@@ -1154,13 +1278,14 @@ class ResizeDialog(_LayoutDialog):
 
     def options(self) -> dict:
         m = self.margin.value() * MM
+        mode = "scale" if self.mode_scale.isChecked() else ("fill" if self.mode_fill.isChecked() else "canvas")
         return {
             "pages": self.selected_pages(),
             "size": (self.width_mm.value() * MM, self.height_mm.value() * MM),
-            "mode": "scale" if self.mode_scale.isChecked() else "canvas",
+            "mode": mode,
             "proportional": self.proportional.isChecked(),
             "anchor": self.anchor(),
-            "margins": (m, m, m, m) if m > 0 and self.mode_scale.isChecked() else None,
+            "margins": (m, m, m, m) if m > 0 and mode != "canvas" else None,
             "orientation": self.orientation.currentData(),
             "match_page": self.match_page.value() - 1 if self.match.isChecked() else None,
         }
@@ -1175,7 +1300,8 @@ class ResizeDialog(_LayoutDialog):
         self.height_mm.setEnabled(custom)
         self.match_page.setEnabled(matching)
         self.proportional.setEnabled(o["mode"] == "scale")
-        self.margin.setEnabled(o["mode"] == "scale")
+        self.margin.setEnabled(o["mode"] != "canvas")
+        self.mode_fill.setEnabled(not matching)
         idx = self.preview_index()
         with ENGINE_LOCK:
             pdf = self.document.pdf
@@ -1195,13 +1321,23 @@ class ResizeDialog(_LayoutDialog):
             if area.width < 3 or area.height < 3:
                 return _("I margini lasciano un'area troppo piccola per il contenuto.")
             sx, sy = area.width / dw, area.height / dh
-            if o["proportional"] or matching:
+            if o["mode"] == "fill" and not matching:
+                sx = sy = max(sx, sy)
+            elif o["proportional"] or matching:
                 sx = sy = min(sx, sy)
             cw, ch = dw * sx, dh * sy
         ox = area.x0 + (area.width - cw) * fx
         oy = area.y0 + (area.height - ch) * fy
         self._plan = (tw, th, pymupdf.Rect(ox, oy, ox + cw, oy + ch))
-        self.info.setText(f"{dw / MM:.1f} × {dh / MM:.1f} mm  →  {tw / MM:.1f} × {th / MM:.1f} mm".replace(".", ","))
+        notes = [f"{dw / MM:.1f} × {dh / MM:.1f} mm  →  {tw / MM:.1f} × {th / MM:.1f} mm".replace(".", ",")]
+        if o["mode"] == "fill" and not matching and (cw > tw + 0.5 or ch > th + 0.5):
+            notes.append(_("Le parti eccedenti del contenuto saranno tagliate."))
+        if o["mode"] != "canvas":
+            with ENGINE_LOCK:
+                small = layout.text_too_small(self.document.pdf[idx], min(cw / dw, ch / dh))
+            if small:
+                notes.append(_("Il testo scenderà sotto 4 pt effettivi: potrebbe essere poco leggibile."))
+        self.info.setText("\n".join(notes))
         return None
 
     def paint_overlay(self, p: QPainter, s: float) -> None:
@@ -1243,16 +1379,26 @@ def open_resize_dialog(ctx, view, selected: list[int]) -> bool:
     o = dlg.options()
 
     def run() -> bool:
+        report: dict = {}
         with view.document.change(_("Formato pagina")) as pdf:
             if o["match_page"] is not None:
-                changed = layout.match_page_size(pdf, o["pages"], o["match_page"], mode=o["mode"],
+                changed = layout.match_page_size(pdf, o["pages"], o["match_page"],
+                                                 mode="canvas" if o["mode"] == "canvas" else "scale",
                                                  proportional=True, anchor=o["anchor"])
             else:
                 changed = layout.resize_pages(pdf, o["pages"], o["size"], mode=o["mode"],
                                               proportional=o["proportional"], anchor=o["anchor"],
-                                              margins=o["margins"], orientation=o["orientation"])
+                                              margins=o["margins"], orientation=o["orientation"], report=report)
             if not changed:
                 raise PageOpError(_("Nessuna pagina modificata: il formato è già quello richiesto."))
+        notes = []
+        if report.get("overflow"):
+            notes.append(_("Contenuto tagliato nelle pagine {p}.").format(p=_pages_text(report["overflow"])))
+        if report.get("small_text"):
+            notes.append(_("Testo sotto 4 pt effettivi (poco leggibile) nelle pagine {p}.")
+                         .format(p=_pages_text(report["small_text"])))
+        if notes:
+            ctx.info(_("Formato pagina"), "\n\n".join(notes))
         return True
 
     return _guard(ctx, _("Impossibile cambiare il formato"), run)
@@ -1281,17 +1427,26 @@ class SplitPageDialog(_LayoutDialog):
         self.cuts_x.setPlaceholderText(_("facoltativi, es. 100, 210"))
         self.cuts_y = QLineEdit()
         self.cuts_y.setPlaceholderText(_("facoltativi, es. 100, 210"))
+        self.method = QComboBox()
+        self.method.addItem(_("Griglia"), "grid")
+        self.method.addItem(_("Rileva la piega centrale"), "fold")
+        self.remove_outside = QCheckBox(_("Rimuovi il testo esterno a ogni parte"))
+        f.addRow(_("Metodo"), self.method)
         f.addRow(_("Righe"), self.rows)
         f.addRow(_("Colonne"), self.cols)
         f.addRow(_("Tagli verticali (mm)"), self.cuts_x)
         f.addRow(_("Tagli orizzontali (mm)"), self.cuts_y)
         f.addRow(_("Sovrapposizione"), self.overlap)
         f.addRow(self.rtl)
+        f.addRow(self.remove_outside)
         self.form.addWidget(box)
-        self.form.addWidget(_muted(_("Il contenuto fuori da ciascuna parte resta nel file e può comparire in "
-                                     "ricerca e copia.")))
+        self.outside_note = _muted(_("Il contenuto fuori da ciascuna parte resta nel file e può comparire in "
+                                     "ricerca e copia."))
+        self.form.addWidget(self.outside_note)
         self._parts: list[pymupdf.Rect] = []
-        self._connect(self.rows, self.cols, self.rtl, self.overlap, self.cuts_x, self.cuts_y)
+        self._fold_cache: dict[int, float | None] = {}
+        self._connect(self.rows, self.cols, self.rtl, self.overlap, self.cuts_x, self.cuts_y, self.method,
+                      self.remove_outside)
 
     def _cuts(self, edit: QLineEdit):
         vals = _parse_numbers(edit.text().replace(",", " ")) if edit.text().strip() else []
@@ -1312,18 +1467,34 @@ class SplitPageDialog(_LayoutDialog):
             "cuts_x": cx,
             "cuts_y": cy,
             "overlap": self.overlap.value() * MM,
+            "fold": self.method.currentData() == "fold",
+            "remove_outside": self.remove_outside.isChecked(),
         }
 
     def validate(self) -> str | None:
         self._parts = []
+        fold = self.method.currentData() == "fold"
         cx, cy = self._cuts(self.cuts_x), self._cuts(self.cuts_y)
-        self.cols.setEnabled(cx is None)
+        self.cols.setEnabled(cx is None and not fold)
+        self.cuts_x.setEnabled(not fold)
         self.rows.setEnabled(cy is None)
+        self.outside_note.setVisible(not self.remove_outside.isChecked())
         o = self.options()
+        idx = self.preview_index()
+        note = ""
         with ENGINE_LOCK:
-            w, h = layout.displayed_crop_size(self.document.pdf, self.preview_index())
-        self._parts = layout.split_parts_disp(w, h, o["rows"], o["cols"], o["rtl"], cx, cy, o["overlap"])
-        self.info.setText(_("Ogni pagina sarà sostituita da {n} parti.").format(n=len(self._parts)))
+            w, h = layout.displayed_crop_size(self.document.pdf, idx)
+            if fold:
+                if idx not in self._fold_cache:
+                    self._fold_cache[idx] = layout.detect_fold(self.document.pdf[idx])
+                x = self._fold_cache[idx]
+                cx = [x if x is not None else w / 2]
+                note = (_("Piega non rilevata: taglio al centro.") if x is None else
+                        _("Piega rilevata a {x} mm dal bordo sinistro.").format(x=f"{x / MM:.1f}".replace(".", ",")))
+        self._parts = layout.split_parts_disp(w, h, o["rows"], 2 if fold else o["cols"], o["rtl"], cx, cy,
+                                              o["overlap"])
+        text = _("Ogni pagina sarà sostituita da {n} parti.").format(n=len(self._parts))
+        self.info.setText(text + ("\n" + note if note else ""))
         return None
 
     def paint_overlay(self, p: QPainter, s: float) -> None:
@@ -1358,7 +1529,8 @@ def open_split_page_dialog(ctx, view, selected: list[int]) -> bool:
     def run() -> bool:
         with view.document.change(_("Dividi pagina")) as pdf:
             layout.split_page_grid(pdf, o["pages"], rows=o["rows"], cols=o["cols"], rtl=o["rtl"],
-                                   cuts_x=o["cuts_x"], cuts_y=o["cuts_y"], overlap=o["overlap"])
+                                   cuts_x=o["cuts_x"], cuts_y=o["cuts_y"], overlap=o["overlap"],
+                                   remove_outside=o["remove_outside"], fold=o["fold"])
         return True
 
     return _guard(ctx, _("Impossibile dividere la pagina"), run)

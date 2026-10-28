@@ -656,11 +656,14 @@ def _wrap_content(pdf: pymupdf.Document, page: pymupdf.Page, m: pymupdf.Matrix, 
 
 
 def _scale_into(pdf: pymupdf.Document, index: int, new_media: pymupdf.Rect, area: pymupdf.Rect,
-                proportional: bool, ufrac: tuple[float, float], new_crop: pymupdf.Rect | None = None) -> None:
+                proportional: bool, ufrac: tuple[float, float], new_crop: pymupdf.Rect | None = None,
+                fill: bool = False) -> None:
     page = pdf[index]
     crop = _crop(pdf, page)
     sx, sy = area.width / crop.width, area.height / crop.height
-    if proportional:
+    if fill:
+        sx = sy = max(sx, sy)
+    elif proportional:
         sx = sy = min(sx, sy)
     dx = area.x0 + (area.width - crop.width * sx) * ufrac[0]
     dy = area.y0 + (area.height - crop.height * sy) * ufrac[1]
@@ -687,9 +690,35 @@ def _target_size(size, orientation: str, dw: float, dh: float) -> tuple[float, f
     raise PageOpError(_("Orientamento sconosciuto: {o}.").format(o=orientation))
 
 
+MIN_READABLE = 4.0
+
+
+def min_font_size(page: pymupdf.Page) -> float | None:
+    """Corpo minimo del testo visibile della pagina (punti), o None se non c'è testo."""
+    sizes = []
+    try:
+        for block in page.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    if span.get("text", "").strip() and span.get("size", 0) > 0:
+                        sizes.append(span["size"])
+    except Exception:  # noqa: BLE001 - testo illeggibile: nessun avviso
+        return None
+    return min(sizes) if sizes else None
+
+
+def text_too_small(page: pymupdf.Page, scale: float, limit: float = MIN_READABLE) -> bool:
+    """True se con la scala indicata il testo scende sotto `limit` pt effettivi."""
+    if scale >= 1:
+        return False
+    m = min_font_size(page)
+    return m is not None and m * scale < limit - 1e-6
+
+
 def resize_pages(pdf: pymupdf.Document, pages: Iterable[int], size: tuple[float, float] | None = None,
                  mode: str = "scale", proportional: bool = True, anchor: str = "center",
-                 margins: Sequence[float] | None = None, orientation: str = "auto") -> list[int]:
+                 margins: Sequence[float] | None = None, orientation: str = "auto",
+                 report: dict | None = None) -> list[int]:
     """Cambia il formato delle pagine (riferito alla pagina visualizzata).
 
     * `mode="scale"`: il contenuto è racchiuso in una trasformazione (`cm`) e
@@ -698,10 +727,17 @@ def resize_pages(pdf: pymupdf.Document, pages: Iterable[int], size: tuple[float,
     * `mode="canvas"`: cambia solo la tela; il contenuto non è scalato ed è
       posizionato secondo `anchor`; con `margins` la tela è il contenuto più i
       margini indicati (negativi per togliere spazio) e `size` è ignorato.
+    * `mode="fill"`: come "scale" ma proporzionale riempiendo l'area; le parti
+      eccedenti sono tagliate (segnalate in `report["overflow"]`).
     `orientation`: "auto" (come la pagina), "portrait", "landscape", "fixed".
+    `report` (dict facoltativo) riceve "small_text" (pagine il cui testo scende
+    sotto 4 pt effettivi) e "overflow" (pagine con contenuto tagliato).
     Restituisce le pagine modificate (formato uguale → pagina invariata).
     """
-    if mode not in ("scale", "canvas"):
+    if report is not None:
+        report.setdefault("small_text", [])
+        report.setdefault("overflow", [])
+    if mode not in ("scale", "canvas", "fill"):
         raise PageOpError(_("Modalità sconosciuta: {m}.").format(m=mode))
     if anchor not in ANCHORS:
         raise PageOpError(_("Ancoraggio sconosciuto: {a}.").format(a=anchor))
@@ -742,7 +778,17 @@ def resize_pages(pdf: pymupdf.Document, pages: Iterable[int], size: tuple[float,
         if tw - l - r < MIN_SIDE or th - t - b < MIN_SIDE:
             raise PageOpError(_("I margini lasciano un'area troppo piccola per il contenuto."))
         area = disp_to_user(new_media, rot, pymupdf.Rect(l, t, tw - r, th - b))
-        _scale_into(pdf, i, new_media, area, proportional, _disp_frac_to_user(rot, fx, fy))
+        if report is not None:
+            sx, sy = area.width / crop.width, area.height / crop.height
+            if mode == "fill":
+                scale = max(sx, sy)
+                if abs(sx - sy) > 1e-3:
+                    report["overflow"].append(i)
+            else:
+                scale = min(sx, sy)
+            if text_too_small(page, scale):
+                report["small_text"].append(i)
+        _scale_into(pdf, i, new_media, area, proportional, _disp_frac_to_user(rot, fx, fy), fill=mode == "fill")
         changed.append(i)
     return changed
 
@@ -826,14 +872,75 @@ def split_parts_disp(width: float, height: float, rows: int = 1, cols: int = 2, 
     return parts
 
 
+def detect_fold(page: pymupdf.Page, band: float = 0.3, min_contrast: float = 6.0) -> float | None:
+    """Ascissa (pagina visualizzata) della piega centrale di una scansione di libro.
+
+    Cerca, nel 30% centrale della larghezza, la fascia verticale più scura (o
+    più chiara) rispetto alle colonne vicine in un rendering in grigi a bassa
+    risoluzione; None se non c'è una fascia abbastanza evidente.
+    """
+    import numpy as np
+
+    disp = page.rect
+    if disp.width < 10 or disp.height < 10:
+        return None
+    zoom = min(1.0, 500.0 / disp.width)
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), colorspace=pymupdf.csGRAY, alpha=False, annots=False)
+    arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.stride)[:, :pix.width]
+    h = arr.shape[0]
+    cols = arr[int(h * 0.05):max(int(h * 0.95), int(h * 0.05) + 1), :].astype(float).mean(axis=0)
+    if cols.size >= 3:
+        cols = np.convolve(cols, np.ones(3) / 3, mode="same")
+    lo = int(pix.width * (0.5 - band / 2))
+    hi = max(int(pix.width * (0.5 + band / 2)), lo + 1)
+    mid = cols[lo:hi]
+    if mid.size == 0:
+        return None
+    base = float(np.median(mid))
+    dark, bright = base - float(mid.min()), float(mid.max()) - base
+    if max(dark, bright) < min_contrast:
+        return None
+    target = mid.min() if dark >= bright else mid.max()
+    idx = np.flatnonzero(mid == target)
+    x = (lo + (idx[0] + idx[-1]) / 2 + 0.5) / zoom
+    return float(min(max(x, 0.0), disp.width))
+
+
+_REDACT_TEXT_ONLY = dict(images=getattr(pymupdf, "PDF_REDACT_IMAGE_NONE", 0),
+                         graphics=getattr(pymupdf, "PDF_REDACT_LINE_ART_NONE", 0),
+                         text=getattr(pymupdf, "PDF_REDACT_TEXT_REMOVE", 0))
+
+
+def _remove_text_outside(pdf: pymupdf.Document, index: int, keep_user: pymupdf.Rect) -> None:
+    """Elimina dal contenuto il testo fuori da `keep_user` (immagini e grafica restano)."""
+    page = pdf[index]
+    crop = _crop(pdf, page)
+    keep = _user_to_engine(crop, keep_user)
+    outer = _user_to_engine(crop, _media(pdf, page)) | keep
+    outer = outer & pymupdf.Rect(0, 0, crop.width, crop.height)
+    pieces = [pymupdf.Rect(outer.x0, outer.y0, outer.x1, keep.y0), pymupdf.Rect(outer.x0, keep.y1, outer.x1, outer.y1),
+              pymupdf.Rect(outer.x0, keep.y0, keep.x0, keep.y1), pymupdf.Rect(keep.x1, keep.y0, outer.x1, keep.y1)]
+    added = False
+    for r in pieces:
+        if r.width > 0.01 and r.height > 0.01:
+            page.add_redact_annot(r)
+            added = True
+    if added:
+        page.apply_redactions(**_REDACT_TEXT_ONLY)
+
+
 def split_page_grid(pdf: pymupdf.Document, pages: Iterable[int], rows: int = 1, cols: int = 2, rtl: bool = False,
                     cuts_x: Sequence[float] | None = None, cuts_y: Sequence[float] | None = None,
-                    overlap: float = 0.0) -> list[int]:
+                    overlap: float = 0.0, remove_outside: bool = False, fold: bool = False) -> list[int]:
     """Sostituisce ogni pagina con le sue parti (griglia sulla pagina visualizzata).
 
     Le parti sono copie della pagina che condividono le risorse (immagini,
-    font) con `/MediaBox` pari alla porzione; ogni annotazione resta solo nella
-    parte con cui si sovrappone di più. Restituisce gli indici delle nuove pagine.
+    font) con `/MediaBox` pari alla porzione; ogni annotazione (campi modulo
+    inclusi, che restano registrati nell'AcroForm) viene spostata nella parte
+    con cui si sovrappone di più. `remove_outside=True` elimina dal contenuto
+    di ogni parte il testo esterno (non compare più in ricerca e copia).
+    `fold=True`: taglio verticale sulla piega rilevata (`detect_fold`), al
+    centro se non rilevata. Restituisce gli indici delle nuove pagine.
     """
     pages = sorted(set(pages))
     counts: dict[int, int] = {}
@@ -843,8 +950,12 @@ def split_page_grid(pdf: pymupdf.Document, pages: Iterable[int], rows: int = 1, 
         crop = _crop(pdf, page)
         media = _media(pdf, page)
         dw, dh = _disp_size(crop, rot)
+        cx = cuts_x
+        if fold:
+            x = detect_fold(page)
+            cx = [x if x is not None else dw / 2]
         parts = [disp_to_user(crop, rot, r) & media
-                 for r in split_parts_disp(dw, dh, rows, cols, rtl, cuts_x, cuts_y, overlap)]
+                 for r in split_parts_disp(dw, dh, rows, 2 if fold else cols, rtl, cx, cuts_y, overlap)]
         # assegnazione delle annotazioni alla parte con la sovrapposizione maggiore
         annots = _annot_xrefs(pdf, page)
         owner: list[int] = []
@@ -865,19 +976,24 @@ def split_page_grid(pdf: pymupdf.Document, pages: Iterable[int], rows: int = 1, 
             m = _REF.match(pdf.xref_get_key(ax, "Parent")[1] or "")
             if m and int(m.group(1)) in pos:
                 owner[n] = owner[pos[int(m.group(1))]]
+        # le copie nascono senza annotazioni: gli oggetti originali vengono poi
+        # spostati nella parte giusta (niente duplicati di campi o commenti)
+        if annots:
+            pdf.xref_set_key(page.xref, "Annots", "null")
         for _k in range(len(parts) - 1):
             pdf.fullcopy_page(i, i + 1 if i + 1 < pdf.page_count else -1)
         for k, part in enumerate(parts):
+            if remove_outside:
+                _remove_text_outside(pdf, i + k, part)
             pg = pdf[i + k]
             _set_raw(pdf, pg, "MediaBox", part)
             _set_raw(pdf, pg, "CropBox", None)
             for name in ("BleedBox", "TrimBox", "ArtBox"):
                 _set_raw(pdf, pg, name, None)
-            mine = _annot_xrefs(pdf, pg)
-            if mine:
-                keep = [x for n, x in enumerate(mine) if n < len(owner) and owner[n] == k]
-                pdf.xref_set_key(pg.xref, "Annots",
-                                 "[" + " ".join(f"{x} 0 R" for x in keep) + "]" if keep else "null")
+            keep = [ax for n, ax in enumerate(annots) if owner[n] == k]
+            pdf.xref_set_key(pg.xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in keep) + "]" if keep else "null")
+            for ax in keep:
+                pdf.xref_set_key(ax, "P", f"{pg.xref} 0 R")
         counts[i] = len(parts)
     out: list[int] = []
     offset = 0

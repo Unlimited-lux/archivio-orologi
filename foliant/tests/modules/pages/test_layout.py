@@ -419,3 +419,89 @@ def test_nup_rotated_source_and_repeat_and_errors():
         layout.nup(new_doc(1), cols=40, rows=40)
     plan = layout.nup_layout([A4] * 3, cols=2, rows=2)
     assert len(plan["sheets"]) == 1 and len(plan["sheets"][0]) == 3   # ultima cella vuota
+
+
+# ======================================================================== follow-up
+def _book_scan(fold_x=433.0, dark=True):
+    doc = pymupdf.open()
+    p = doc.new_page(width=842, height=595)
+    bg, band = ((0.85, 0.85, 0.85), (0.25, 0.25, 0.25)) if dark else ((0.6, 0.6, 0.6), (1, 1, 1))
+    p.draw_rect(p.rect, color=None, fill=bg)
+    p.draw_rect(pymupdf.Rect(fold_x - 4, 0, fold_x + 4, 595), color=None, fill=band)
+    p.insert_text((60, 100), "SINISTRA", fontsize=20)
+    p.insert_text((600, 100), "DESTRA", fontsize=20)
+    return doc
+
+
+def test_detect_fold_dark_bright_and_none():
+    assert abs(layout.detect_fold(_book_scan(450)[0]) - 450) <= 3
+    assert abs(layout.detect_fold(_book_scan(380, dark=False)[0]) - 380) <= 3
+    assert layout.detect_fold(new_doc(text=None)[0]) is None
+    doc = _book_scan(450)
+    out = layout.split_page_grid(doc, [0], fold=True)
+    assert out == [0, 1]
+    assert abs(doc[0].rect.width - 450) <= 3 and abs(doc[1].rect.width - (842 - 450)) <= 3
+
+
+def test_split_remove_outside_text():
+    flags = layout._TEXT_FLAGS
+    doc = _book_scan()
+    layout.split_page_grid(doc, [0], cols=2)
+    left_all = doc[0].get_text("text", flags=flags, clip=pymupdf.INFINITE_RECT())
+    assert "DESTRA" in left_all                    # senza opzione il testo esterno resta nel file
+    doc = _book_scan()
+    layout.split_page_grid(doc, [0], cols=2, remove_outside=True)
+    doc = reload(doc)
+    left = doc[0].get_text("text", flags=flags, clip=pymupdf.INFINITE_RECT())
+    right = doc[1].get_text("text", flags=flags, clip=pymupdf.INFINITE_RECT())
+    assert "SINISTRA" in left and "DESTRA" not in left
+    assert "DESTRA" in right and "SINISTRA" not in right
+    assert doc[0].get_images() == doc[1].get_images()   # immagini/risorse non toccate
+
+
+def test_split_moves_form_fields_without_duplicates():
+    doc = new_doc(size=(842, 595), text=None)
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = "nome"
+    w.rect = pymupdf.Rect(600, 200, 780, 230)
+    doc[0].add_widget(w)
+    doc[0].add_text_annot((100, 100), "nota a sinistra")
+    layout.split_page_grid(doc, [0], cols=2)
+    doc = reload(doc)
+    assert [x.field_name for x in doc[1].widgets()] == ["nome"]
+    assert list(doc[0].widgets()) == []
+    assert len(list(doc[0].annots())) == 1
+    cat = doc.pdf_catalog()
+    fields = doc.xref_get_key(cat, "AcroForm/Fields")[1]
+    refs = [int(x) for x in layout._REF.findall(fields)]
+    assert len(refs) == 1
+    wx = next(doc[1].widgets()).xref
+    assert doc.xref_get_key(wx, "P")[1] == f"{doc[1].xref} 0 R"
+
+
+def test_resize_fill_mode_and_overflow_report():
+    doc = new_doc()                                  # A4 verticale → quadrato: riempi taglia
+    rep = {}
+    layout.resize_pages(doc, [0], (400, 400), mode="fill", orientation="fixed", report=rep)
+    assert rep["overflow"] == [0]
+    page = doc[0]
+    assert abs(page.rect.width - 400) < 0.5 and abs(page.rect.height - 400) < 0.5
+    w = word_rect(page, "Orologeria")
+    w_ref = word_rect(new_doc()[0], "Orologeria")
+    assert abs(w.width / w_ref.width - 400 / A4[0]) < 0.01      # scala = max(sx, sy)
+    rep = {}
+    layout.resize_pages(new_doc(), [0], (400, 400), mode="scale", orientation="fixed", report=rep)
+    assert rep["overflow"] == []
+
+
+def test_resize_small_text_warning():
+    doc = new_doc()                                  # corpo minimo 12 pt
+    rep = {}
+    layout.resize_pages(doc, [0], PAPER_SIZES["A6"], report=rep)     # scala ~0,5 → 6 pt: ok
+    assert rep["small_text"] == []
+    doc = new_doc()
+    rep = {}
+    layout.resize_pages(doc, [0], (100, 141), report=rep)            # scala ~0,17 → 2 pt
+    assert rep["small_text"] == [0]
+    assert layout.min_font_size(new_doc()[0]) == pytest.approx(12, abs=0.1)

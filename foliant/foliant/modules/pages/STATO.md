@@ -31,11 +31,11 @@ layout_dialogs, images, images_dialogs). Funzioni del motore riusabili dagli alt
 | PAG-03 Integrità riferimenti | P0 | parziale | test_engine: move_keeps_bookmark_target, delete_cleans_references, delete_prunes_structure_tree, extract_prunes_structure_tree, merge_form_fields_distinct, duplicate_form_field_independent; test_organizer: signed_document_warning, assembly_denied_disables | mancano: avviso PDF/A, blocco specifico per documenti certificati (trattati come firmati), fili di articoli; avviso al salvataggio incrementale non necessario (il nucleo salva sempre completo) |
 | PAG-04 Riordino | P0 | fatto | test_engine: move_*; test_organizer: drag_reorder_via_signal, drop_index_geometry, move_end_and_duplicate; test_dialogs: move_dialog | indicatore di inserimento, scorrimento automatico, rilascio sull'origine senza voce di annullamento |
 | PAG-05 Inverti/scambia/fascicola | P1 | fatto | test_engine: reverse_swap_collate; test_organizer: reverse_swap_pairs; test_dialogs: collate_dialog | anteprima dell'ordine e avviso per parti diverse |
-| PAG-06 Pagina vuota | P0 | fatto | test_engine: insert_blank_*; test_dialogs: insert_blank_dialog, insert_blank_custom | manca il pulsante «+» tra le miniature e i modelli di carta (righe/quadretti) |
+| PAG-06 Pagina vuota | P0 | fatto | test_engine: insert_blank_*; test_dialogs: insert_blank_dialog, insert_blank_custom; test_organizer: plus_button_inserts_blank | pulsante «+» tra le miniature; mancano i modelli di carta (righe/quadretti), che dipendono dall'area Creazione |
 | PAG-07 Inserisci da file | P0 | fatto | test_engine: insert_from_other_file, insert_interleaved*, insert_same_document, insert_shared_image_stored_once, open_source_*, insert_with_source_bookmarks; test_dialogs: insert_file_* | anteprima a miniature della sorgente non presente (solo conteggio) |
 | PAG-08 Da immagini | P1 | fatto | test_images (jpeg_*, png_alpha_*, tiff_*, exif_*, …), test_images_dialogs | TIFF bitonali in Flate (non CCITT G4); HEIC solo con pillow-heif |
 | PAG-09 Dagli appunti | P1 | fatto | test_images: clipboard_*, text_200_lines_round_trip; test_images_dialogs: paste_* | |
-| PAG-10 Da scanner | P1 | parziale | test_dialogs: scanner_none, scanner_fake_device | SANE/`scanimage`; mancano preset salvabili, anteprima con riacquisizione, scarto pagine vuote |
+| PAG-10 Da scanner | P1 | parziale | test_dialogs: scanner_none, scanner_fake_device, scanned_bw_one_bit_and_blank_discard, scanner_preset_remembered | SANE/`scanimage`, alimentatore, scarto pagine vuote, ultime impostazioni ricordate, bianco e nero a 1 bit; manca l'anteprima con riacquisizione/rotazione delle singole facciate |
 | PAG-11 Elimina | P0 | fatto | test_engine: delete_*; test_organizer: delete_selected_and_undo, delete_all_refused | riepilogo segnalibri/link/campi nella conferma |
 | PAG-12 Estrai in PDF | P0 | fatto | test_engine: extract_*; test_dialogs: extract_single_opens_tab, extract_each_page_files_and_delete | file unico, per pagina, per intervallo; modello del nome |
 | PAG-13 Estrai come immagini | P1 | fatto | test_images: export_*; test_images_dialogs: export_* | WebP senza dpi nei metadati |
@@ -51,10 +51,10 @@ layout_dialogs, images, images_dialogs). Funzioni del motore riusabili dagli alt
 | PAG-23 Per separatori/testo | P2 | parziale | test_engine: split_separators_and_text | mancano area di ricerca, OCR e modifica manuale dei tagli |
 | PAG-24 Unisci | P0 | fatto | test_engine: merge_*; test_dialogs: merge_dialog* | segnalibri annidati, intervalli, pagina vuota dopo dispari, unione alternata; metadati personalizzati non esposti |
 | PAG-25 Ritaglia | P1 | fatto | test_layout: crop_*; test_layout_dialogs: crop_dialog_* | avviso contenuto nascosto all'applicazione (al salvataggio serve il nucleo, vedi CORE_REQUESTS) |
-| PAG-26 Margini bianchi | P1 | fatto | test_layout: white_margins_*, content_bbox_* | |
-| PAG-27 Riquadri di stampa | P2 | fatto | test_layout: trim_with_bleed, boxes_defaults_and_validation; test_layout_dialogs: boxes_dialog_* | /BoxColorInfo e /UserUnit non gestiti |
-| PAG-28 Formato pagina | P1 | fatto | test_layout: resize_*, match_page_size_to_first; test_layout_dialogs: resize_dialog_* | |
-| PAG-29 Dividi pagina | P1 | fatto | test_layout: split_*; test_layout_dialogs: split_dialog* | |
+| PAG-26 Margini bianchi | P1 | fatto | test_layout: white_margins_*, content_bbox_*; test_layout_dialogs: remove_margins_* | rettangolo modificabile a mano per pagina |
+| PAG-27 Riquadri di stampa | P2 | fatto | test_layout: trim_with_bleed, boxes_defaults_and_validation; test_layout_dialogs: boxes_dialog_*, boxes_overlay | riquadri visibili nella vista documento (sovrapposizione attivabile); /BoxColorInfo e /UserUnit non gestiti |
+| PAG-28 Formato pagina | P1 | fatto | test_layout: resize_*, match_page_size_to_first; test_layout_dialogs: resize_dialog_* | scala (contieni/riempi/non proporzionale) o tela; avviso testo < 4 pt; /UserUnit non usato oltre 14.400 pt (rifiutato) |
+| PAG-29 Dividi pagina | P1 | fatto | test_layout: split_*, detect_fold_dark_bright_and_none; test_layout_dialogs: split_dialog* | griglia, tagli manuali, piega centrale rilevata, rimozione del testo esterno |
 | PAG-30 N-up | P1 | fatto | test_layout: nup_*; test_layout_dialogs: nup_dialog_opens_new_document | |
 
 ## Funzioni richieste oltre la sezione 2 (filigrane, numeri, intestazioni, etichette)
