@@ -377,4 +377,6 @@ EN = {
     'Riprendi': 'Resume',
     'In pausa: {d} di {t} pagine riconosciute.': 'Paused: {d} of {t} pages recognized.',
     'Prospettiva (foto)': 'Perspective (photos)',
+    "Riconoscimento del testo in corso: il documento si può consultare ma non modificare finché l'OCR non termina.": 'Text recognition in progress: the document can be viewed but not edited until OCR finishes.',
+    'Pagine selezionate ({p})': 'Selected pages ({p})',
 }

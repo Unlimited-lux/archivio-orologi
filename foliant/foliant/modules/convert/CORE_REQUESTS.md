@@ -8,8 +8,6 @@
    orientamento, pagine, stile carta: CNV-23). Proposta: il nucleo potrebbe esporre un gancio per
    sostituire l'azione `act_new` con quella del modulo. Nel frattempo la voce è nel menu ☰ › Converti
    e nel menu «Crea PDF» della modalità Converti.
-3. **Selezione delle miniature** (CNV-01, intervallo «pagine selezionate»): serve un'API pubblica, ad es.
-   `ctx.selected_pages()` o `view.selected_pages()`. Soluzione locale: il modulo legge il pannello
-   registrato con id «thumbnails» da `window._sidebar` e ne usa `selected_pages()` (attributo privato).
-4. ~~Barra «File danneggiato, riparato in memoria»~~ (CNV-32, punto 1): ora la mostra il modulo viewer
-   (`integrity.py`, VIS-07) con «Ripara e salva con nome…». Nessuna richiesta aperta.
+3. ~~Selezione delle miniature~~: adottato `ctx.selected_pages(view)` del nucleo. Nessuna richiesta aperta.
+4. ~~Barra «File danneggiato, riparato in memoria»~~ (CNV-32): adottati `document.repaired` e
+   `ctx.show_banner(view, "riparato", …)` con «Salva copia riparata». Nessuna richiesta aperta.

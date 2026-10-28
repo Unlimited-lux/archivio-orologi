@@ -978,6 +978,30 @@ def delete_words_in_place(pdf: pymupdf.Document, page_index: int, block: TextBlo
     return removed
 
 
+def shared_copies(pdf: pymupdf.Document, page_index: int, block: TextBlock) -> list[tuple[int, TextBlock]]:
+    """Blocchi uguali su altre pagine che condividono con questa un Form XObject (TXT-20)."""
+    try:
+        mine = {x[0] for x in pdf[page_index].get_xobjects()}
+    except Exception:
+        return []
+    if not mine:
+        return []
+    out = []
+    for p in range(pdf.page_count):
+        if p == page_index:
+            continue
+        try:
+            if not mine & {x[0] for x in pdf[p].get_xobjects()}:
+                continue
+            for b in analyze_page(pdf[p], p):
+                if b.text == block.text and all(abs(a - c) < 0.5 for a, c in zip(b.bbox, block.bbox)):
+                    out.append((p, b))
+                    break
+        except Exception:
+            continue
+    return out
+
+
 def _flushing(fn):
     import functools
 

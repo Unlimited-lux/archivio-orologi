@@ -50,52 +50,21 @@ class ViewState:
 
 
 # =================================================================== barra proposta
-class ProposalBar(QFrame):
-    """Barra informativa non bloccante in cima alla vista del documento."""
+class ProposalBar:
+    """Proposta di OCR nella barra degli avvisi del documento (UX-14, `ctx.show_banner`)."""
+
+    BANNER_ID = "ocr-proposal"
 
     def __init__(self, view, controller: "OcrController"):
-        super().__init__(view)
-        self.setObjectName("ocrProposalBar")
         self.view = view
         self.controller = controller
         self.page: int | None = None   # proposta legata a una singola pagina
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 8, 6)
-        lay.setSpacing(8)
-        self.icon = QLabel(self)
-        self.icon.setPixmap(icon("scan-text").pixmap(18, 18))
-        lay.addWidget(self.icon)
-        self.label = QLabel(self)
-        self.label.setWordWrap(True)
-        lay.addWidget(self.label, 1)
-        self.btn_run = QPushButton(_("Esegui OCR"), self)
-        self.btn_run.setObjectName("ocrRun")
-        self.btn_all = QPushButton(_("Tutte le pagine rilevate"), self)
-        self.btn_details = QPushButton(_("Dettagli"), self)
-        self.btn_later = QPushButton(_("Non ora"), self)
-        self.btn_never = QPushButton(_("Non chiedere più per questo documento"), self)
-        for b in (self.btn_run, self.btn_all, self.btn_details, self.btn_later, self.btn_never):
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            lay.addWidget(b)
-        self.btn_run.clicked.connect(self._run)
-        self.btn_all.clicked.connect(lambda: controller.open_dialog(view, pages=controller.state(view).detected,
-                                                                    mode=engine.EDITABLE))
-        self.btn_details.clicked.connect(lambda: controller.show_details(view))
-        self.btn_later.clicked.connect(lambda: controller.dismiss(view))
-        self.btn_never.clicked.connect(lambda: controller.never_ask(view))
-        self.apply_theme()
-        view.installEventFilter(self)
-        self.hide()
+        self.text = ""
+        self.actions: list[tuple] = []
 
-    def apply_theme(self) -> None:
-        t = theme
-        self.setStyleSheet(
-            f"#ocrProposalBar {{ background: {t.hex_color('accent_soft')}; border: 1px solid {t.hex_color('border')};"
-            f" border-radius: 8px; }}"
-            f"#ocrProposalBar QLabel {{ color: {t.hex_color('text')}; background: transparent; border: none; }}"
-            f"#ocrProposalBar QPushButton {{ padding: 4px 10px; }}"
-            f"#ocrProposalBar QPushButton#ocrRun {{ background: {t.hex_color('accent')};"
-            f" color: {t.hex_color('accent_text')}; border: none; border-radius: 6px; }}")
+    def _show(self, priority: int) -> None:
+        self.controller.ctx.show_banner(self.view, self.BANNER_ID, self.text, self.actions, level="info",
+                                        priority=priority, on_close=lambda: self.controller.dismiss(self.view))
 
     def show_document(self, count: int, missing: list[str], restricted: bool, low_res: bool,
                       unextractable: bool = False) -> None:
@@ -112,50 +81,57 @@ class ProposalBar(QFrame):
                 l=", ".join(languages.language_name(c) for c in missing))
         if restricted:
             text += " " + _("Il documento non consente modifiche: servirà la password del proprietario.")
-        self.label.setText(text)
-        self.btn_run.setText(_("Esegui OCR"))
-        self.btn_all.hide()
-        self.btn_details.show()
-        self.btn_never.show()
-        self._reveal()
+        c, v = self.controller, self.view
+        self.text = text
+        self.actions = [(_("Esegui OCR"), self.run, True), (_("Dettagli"), lambda: c.show_details(v), False),
+                        (_("Non ora"), lambda: c.dismiss(v), False),
+                        (_("Non chiedere più per questo documento"), lambda: c.never_ask(v), False)]
+        self._show(10)
 
     def show_page(self, page: int, others: int, ocr_layer: bool = False) -> None:
         self.page = page
         if ocr_layer:
-            self.label.setText(_("La pagina {n} ha solo testo invisibile riconosciuto da un OCR: per modificarlo "
-                                 "rendila modificabile.").format(n=page + 1))
+            self.text = _("La pagina {n} ha solo testo invisibile riconosciuto da un OCR: per modificarlo "
+                          "rendila modificabile.").format(n=page + 1)
         else:
-            self.label.setText(_("La pagina {n} è un'immagine: il testo non si può selezionare né modificare. "
-                                 "Vuoi renderla modificabile con l'OCR?").format(n=page + 1))
-        self.btn_run.setText(_("Rendi modificabile questa pagina"))
-        self.btn_all.setVisible(others > 1)
-        self.btn_details.hide()
-        self.btn_never.hide()
-        self._reveal()
+            self.text = _("La pagina {n} è un'immagine: il testo non si può selezionare né modificare. "
+                          "Vuoi renderla modificabile con l'OCR?").format(n=page + 1)
+        c, v = self.controller, self.view
+        self.actions = [(_("Rendi modificabile questa pagina"), self.run, True)]
+        if others > 1:
+            self.actions.append((_("Tutte le pagine rilevate"),
+                                 lambda: c.open_dialog(v, pages=c.state(v).detected, mode=engine.EDITABLE), False))
+        self.actions.append((_("Non ora"), lambda: c.dismiss(v), False))
+        self._show(20)
 
-    def _reveal(self) -> None:
-        self._place()
-        self.show()
-        self.raise_()
-
-    def _run(self) -> None:
+    def run(self) -> None:
         if self.page is not None:
             self.controller.open_dialog(self.view, pages=[self.page], mode=engine.EDITABLE)
         else:
             self.controller.open_dialog(self.view, pages=self.controller.state(self.view).detected)
 
-    def _place(self) -> None:
-        vp = self.view.viewport().geometry()
-        margin = 12
-        w = max(200, vp.width() - 2 * margin)
-        self.setFixedWidth(w)
-        self.adjustSize()
-        self.move(vp.x() + margin, vp.y() + 8)
+    def trigger(self, label: str) -> None:
+        """Esegue l'azione con l'etichetta data (come un clic sul pulsante)."""
+        for act in self.actions:
+            if act[0] == label:
+                act[1]()
+                return
+        raise KeyError(label)
 
-    def eventFilter(self, obj, ev) -> bool:
-        if obj is self.view and ev.type() == QEvent.Type.Resize and self.isVisible():
-            self._place()
-        return False
+    def hide(self) -> None:
+        try:
+            self.controller.ctx.hide_banner(self.view, self.BANNER_ID)
+        except RuntimeError:
+            pass
+
+    def isVisible(self) -> bool:
+        try:
+            return self.BANNER_ID in self.controller.ctx.banners(self.view)
+        except RuntimeError:
+            return False
+
+    def apply_theme(self) -> None:
+        pass
 
 
 # =================================================================== OCR in background
@@ -249,6 +225,7 @@ class OcrJob:
     result: object = None
     error: BaseException | None = None
     done: bool = False
+    locked: bool = False
 
 
 # =================================================================== strumento area
@@ -601,6 +578,7 @@ class OcrController(QObject):
         if job is not None:
             job.progress.cancel()          # il lavoro si ferma; il risultato non viene applicato
             job.bar = None                 # distrutta insieme alla vista
+            self._unlock(job)
         st = self.states.pop(view, None)
         if st is not None and st.timer is not None:
             st.timer.stop()
@@ -788,7 +766,8 @@ class OcrController(QObject):
         dlg = OcrDialog(self.ctx.window, page_count=view.page_count, current_page=view.current_page,
                         detected=detected, settings=self.settings(),
                         mode=mode or str(self.settings().value("ocr/mode", engine.SEARCHABLE)), pages_text=text,
-                        infos=dict(st.infos), page_image_cb=lambda v=view: self._page_image(v))
+                        infos=dict(st.infos), page_image_cb=lambda v=view: self._page_image(v),
+                        selected=self._selected_pages(view))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.settings().setValue("ocr/mode", dlg.mode())
@@ -841,6 +820,12 @@ class OcrController(QObject):
             return self._complete(view, opts, None, e, data, preview, new_document)
         return self._complete(view, opts, result, None, data, preview, new_document)
 
+    def _selected_pages(self, view) -> list[int]:
+        try:
+            return list(self.ctx.selected_pages(view))
+        except Exception:
+            return []
+
     def _page_image(self, view):
         """Immagine della pagina corrente per l'editor delle zone (QImage) e in grigi per il rilevamento."""
         import numpy as np
@@ -872,6 +857,11 @@ class OcrController(QObject):
             prints = engine.page_fingerprints(doc.pdf)
         job = OcrJob(view, opts, pages, preview, new_document, data, doc.version, prints, _pausable_progress())
         self.jobs[view] = job
+        # durante l'OCR il documento si consulta ma non si modifica (il risultato si applica alla fine)
+        if opts.mode != engine.TEXT_ONLY and not new_document and hasattr(doc, "set_locked"):
+            doc.set_locked(_("Riconoscimento del testo in corso: il documento si può consultare ma non "
+                             "modificare finché l'OCR non termina."))
+            job.locked = bool(getattr(doc, "locked", False))
 
         def work():
             try:
@@ -879,15 +869,29 @@ class OcrController(QObject):
             except BaseException as e:  # riportata all'interfaccia
                 job.error = e
             job.done = True
-        job.bar = JobBar(view, lambda: self.cancel_job(view), lambda: self.toggle_pause(view))
-        job.bar.place()
-        job.thread = threading.Thread(target=work, name="foliant-ocr-job", daemon=True)
-        job.timer = QTimer(self)
-        job.timer.setInterval(150)
-        job.timer.timeout.connect(lambda j=job: self._poll_job(j))
-        job.thread.start()
-        job.timer.start()
+        try:
+            job.bar = JobBar(view, lambda: self.cancel_job(view), lambda: self.toggle_pause(view))
+            job.bar.place()
+            job.thread = threading.Thread(target=work, name="foliant-ocr-job", daemon=True)
+            job.timer = QTimer(self)
+            job.timer.setInterval(150)
+            job.timer.timeout.connect(lambda j=job: self._poll_job(j))
+            job.thread.start()
+            job.timer.start()
+        except BaseException:
+            self.jobs.pop(view, None)
+            self._unlock(job)
+            raise
         return job
+
+    @staticmethod
+    def _unlock(job: "OcrJob") -> None:
+        if job.locked:
+            job.locked = False
+            try:
+                job.view.document.set_locked(None)
+            except Exception:
+                pass
 
     def _poll_job(self, job: "OcrJob") -> None:
         if job.bar is not None:
@@ -907,14 +911,21 @@ class OcrController(QObject):
                 pass
             job.bar = None
         self.jobs.pop(job.view, None)
-        self.finish_job(job)
+        was_locked = job.locked
+        self._unlock(job)
+        try:
+            self.finish_job(job, was_locked)
+        except Exception as e:  # nessun errore deve lasciare il documento bloccato o chiudere l'app
+            self.ctx.error(_("Riconoscimento non riuscito"), _("Errore imprevisto: {e}").format(e=e))
 
-    def finish_job(self, job: "OcrJob") -> engine.OcrResult | None:
+    def finish_job(self, job: "OcrJob", was_locked: bool = False) -> engine.OcrResult | None:
         view = job.view
         if view.document.closed or view not in self.ctx.views():
             return None
         changed: set[int] = set()
-        if job.opts.mode != engine.TEXT_ONLY and not job.new_document and view.document.version != job.version:
+        # documento bloccato durante l'OCR: non può essere cambiato, nessuna conferma da chiedere
+        if not was_locked and job.opts.mode != engine.TEXT_ONLY and not job.new_document and \
+                view.document.version != job.version:
             with ENGINE_LOCK:
                 now = engine.page_fingerprints(view.document.pdf)
             if len(now) != len(job.fingerprints):

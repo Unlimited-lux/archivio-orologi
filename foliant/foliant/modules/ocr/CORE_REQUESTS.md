@@ -1,12 +1,9 @@
 # Richieste al nucleo (modulo OCR)
 
-1. **Barra informativa per documento** (UX-14): oggi la barra di proposta è un widget figlio della vista,
+1. ~~Barra informativa per documento~~: adottato `ctx.show_banner`. (UX-14): oggi la barra di proposta è un widget figlio della vista,
    posizionato sopra il viewport. Un'API `view.show_banner(id, testo, azioni)` del nucleo eviterebbe
    sovrapposizioni con i banner di altri moduli.
-2. **Blocco temporaneo delle modifiche** (OCR-13): l'OCR ora è non modale (thread del modulo); se il nucleo
-   offrisse `Document.edit_lock(motivo)` rispettato dagli strumenti di modifica, si eviterebbe la conferma
-   «applica solo alle pagine non cambiate». Un indicatore delle attività in background nella barra di stato
-   (UX-09) sarebbe utile.
+2. ~~Blocco temporaneo delle modifiche~~: adottato `Document.set_locked`.
 3. **Evidenziazione nel pannello miniature** (OCR-01 «Dettagli»): un'API per marcare pagine con un'icona/colore.
 4. **Inserimento su pagine ruotate/ritagliate**: verificato con test di rilettura (/Rotate 90/180/270, CropBox spostato,
    ricercabile e modificabile: `test_rilettura_pagine_ruotate_e_ritagliate`). La migrazione a

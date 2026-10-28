@@ -963,7 +963,8 @@ def test_scan_table_to_docx_and_xlsx_with_real_ocr(tmp_path):
     path, rows = _scanned_quote(tmp_path)
     d = docx.Document(convert_pdf(path, tmp_path / "s.docx", "docx", language="ita+eng")[0])
     assert "Preventivo di riparazione" in " ".join(p.text for p in d.paragraphs)
-    assert [[c.text for c in r.cells] for r in d.tables[0].rows] == rows
+    cells = [[sorted(c.text.split()) for c in r.cells] for r in d.tables[0].rows]
+    assert cells == [[sorted(v.split()) for v in row] for row in rows]   # parole di ogni cella
     ws = load_workbook(convert_pdf(path, tmp_path / "s.xlsx", "xlsx", language="ita+eng")[0]).active
     values = [[c.value for c in r] for r in ws.iter_rows()]
     assert values[0] == rows[0] and values[1] == ["Cinturino", 4, 120] and values[2][2] == 85.5
@@ -974,11 +975,16 @@ def test_grid_tables_ignores_paragraphs():
 
     def blk(x0, y0, x1, text):
         return {"type": 0, "bbox": (x0, y0, x1, y0 + 14),
-                "lines": [{"spans": [{"text": text}]}]}
+                "lines": [{"spans": [{"text": text, "bbox": (x0, y0, x1, y0 + 14), "size": 12}]}]}
     blocks = [blk(60, 100, 500, "Un paragrafo lungo"), blk(60, 130, 500, "Un altro paragrafo"),
               blk(60, 200, 100, "A"), blk(200, 200, 240, "B"), blk(60, 228, 100, "1"), blk(200, 228, 240, "2")]
     found = grid_tables(blocks)
     assert len(found) == 1 and found[0][1] == [["A", "B"], ["1", "2"]]
+    # una riga per blocco con le celle come segmenti separati (come l'OCR modificabile)
+    row = lambda y, cells: {"type": 0, "bbox": (60, y, 400, y + 14), "lines": [{"spans": [
+        {"text": t, "bbox": (x, y, x + 30, y + 14), "size": 12} for x, t in cells]}]}
+    found = grid_tables([row(300, [(60, "Art"), (200, "Qtà")]), row(330, [(60, "Vetro"), (200, "2")])])
+    assert found and found[0][1] == [["Art", "Qtà"], ["Vetro", "2"]]
 
 
 def test_images_hide_unsigned_signature_placeholder(tmp_path):

@@ -811,3 +811,13 @@ EN.update({
         "Drag to keep only an area; without a selection the whole capture is used.",
     "Aggiungi un'altra cattura": "Add another capture",
 })
+
+EN.update({
+    "Il file era danneggiato ed è stato riparato in memoria.": "The file was damaged and has been repaired in memory.",
+    "Salva copia riparata": "Save repaired copy",
+    "Scegli un nome diverso dall'originale.": "Choose a name different from the original.",
+    "Copia riparata salvata: {n}": "Repaired copy saved: {n}",
+})
+
+EN.update({"Avvisi: {n}": "Warnings: {n}", "Dettagli": "Details", "Mostra cartella": "Show folder",
+           "Saltati: {n}": "Skipped: {n}", "{t}: {n} avvisi": "{t}: {n} warnings"})

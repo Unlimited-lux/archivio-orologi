@@ -569,9 +569,24 @@ class TextEditController(QObject):
                     and abs(indent - block.indent) < 0.01 and space_after < 0.01):
                 result = None
             else:
-                result = self._apply(view, _("Modifica testo"), lambda pdf: engine.replace_block(
-                    pdf, page, block, paragraphs, align=align, leading=leading, indent=indent,
-                    space_after=space_after))
+                with ENGINE_LOCK:
+                    copies = engine.shared_copies(view.document.pdf, page, block)
+                if copies and not self.ctx.confirm(
+                        _("Contenuto condiviso"),
+                        _("Questo testo fa parte di un contenuto usato anche da {n} altre pagine.\n\n"
+                          "Applicare la modifica a tutte le pagine? (No: solo questa pagina)")
+                        .format(n=len(copies))):
+                    copies = []
+
+                def edit(pdf):
+                    res = engine.replace_block(pdf, page, block, paragraphs, align=align, leading=leading,
+                                               indent=indent, space_after=space_after)
+                    for p, b in copies:
+                        engine.replace_block(pdf, p, b, paragraphs, align=align, leading=leading,
+                                             indent=indent, space_after=space_after)
+                    return res
+
+                result = self._apply(view, _("Modifica testo"), edit)
         if select_after:
             nb = self._refind(view, page, result.bbox if result is not None and result.changed else block.bbox)
             if nb is not None:

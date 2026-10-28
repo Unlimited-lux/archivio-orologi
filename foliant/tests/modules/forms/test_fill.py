@@ -55,13 +55,13 @@ def test_mode_registered(window):
 
 def test_bar_counts(form_view):
     f = filler_of(form_view)
-    assert f.bar.isVisible()
+    assert f.bar_visible()
     assert "6 campi" in f.text_of_bar() and "1 obbligatorio da compilare" in f.text_of_bar()
 
 
 def test_no_bar_without_form(window, sample_pdf):
     view = open_form(window, sample_pdf)
-    assert not filler_of(view).bar.isVisible()
+    assert not filler_of(view).bar_visible()
 
 
 def test_click_text_field_and_type(qtbot, form_view):
@@ -445,7 +445,7 @@ def test_owner_password_unlocks(qtbot, window, tmp_path, no_modal_boxes):
              permissions=pymupdf.PDF_PERM_PRINT)
     view = open_form(window, path)
     f = filler_of(view)
-    assert f.state.blocked and not f.bar.buttons["owner"].isHidden()
+    assert f.state.blocked and "Inserisci password del proprietario" in f.banner_actions
     assert not f.unlock_with_owner_password("sbagliata")
     assert f.unlock_with_owner_password("capo")
     click_field(qtbot, view, "nome")
@@ -516,7 +516,7 @@ def test_large_form_bar_fast_and_commit_fast(qtbot, window, tmp_path, pages, per
     view = window.ctx.open_path(str(path))
     f = filler_of(view)
     # barra subito, analisi completa rimandata a dopo l'apertura (non la blocca)
-    assert f.bar.isVisible() and f.state.version < 0 and "Analisi" in f.text_of_bar()
+    assert f.bar_visible() and f.state.version < 0 and "Analisi" in f.text_of_bar()
     QApplication.processEvents()
     opened = time.time() - t0
     assert f.state.fields and "5000 campi" in f.text_of_bar()
@@ -544,3 +544,14 @@ def test_deferred_callbacks_after_window_destroyed(qtbot, settings, form_pdf):
     win.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     QApplication.processEvents()  # nessuna eccezione dai timer del modulo
+
+
+def test_form_banner_uses_core_banner(window, form_pdf):
+    view = open_form(window, form_pdf)
+    f = filler_of(view)
+    assert "forms" in window.ctx.banners(view)
+    assert "Evidenzia campi" in f.banner_actions and "Modifica modulo" in f.banner_actions
+    f.toggle_highlight(True)
+    assert "Nascondi evidenziazione" in f.banner_actions
+    f.close_bar()
+    assert "forms" not in window.ctx.banners(view) and not f.bar_visible()

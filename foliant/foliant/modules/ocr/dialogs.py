@@ -122,8 +122,10 @@ class OcrDialog(QDialog):
 
     def __init__(self, parent, *, page_count: int, current_page: int, detected: list[int],
                  settings=None, mode: str = engine.SEARCHABLE, pages_text: str | None = None,
-                 allow_text_mode: bool = True, infos: dict | None = None, page_image_cb=None):
+                 allow_text_mode: bool = True, infos: dict | None = None, page_image_cb=None,
+                 selected: list[int] | None = None):
         super().__init__(parent)
+        self.selected = sorted(set(selected or []))
         self.infos = infos or {}
         self.zones: list = []
         self._page_image_cb = page_image_cb
@@ -169,6 +171,8 @@ class OcrDialog(QDialog):
         self.pages = QComboBox(self)
         self.pages.addItem(_("Tutte le pagine"), "all")
         self.pages.addItem(_("Pagina corrente ({n})").format(n=current_page + 1), "current")
+        if self.selected and self.selected != [current_page]:
+            self.pages.addItem(_("Pagine selezionate ({p})").format(p=engine.format_pages(self.selected)), "selected")
         if detected:
             self.pages.addItem(_("Pagine senza testo ({p})").format(p=engine.format_pages(detected)), "detected")
         self.pages.addItem(_("Intervallo…"), "custom")
@@ -445,6 +449,8 @@ class OcrDialog(QDialog):
             return [self.current_page]
         if kind == "detected":
             return list(self.detected)
+        if kind == "selected":
+            return list(self.selected)
         if kind == "custom":
             return engine.parse_pages(self.range_edit.text(), self.page_count)
         return list(range(self.page_count))

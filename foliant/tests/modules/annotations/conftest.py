@@ -61,7 +61,7 @@ def comments(window, text_pdf, monkeypatch):
     monkeypatch.setattr(window, "close_view", close_view)
     if hasattr(window, "_ask_unsaved"):   # chiusura della finestra a fine test senza domande
         monkeypatch.setattr(window, "_ask_unsaved", lambda docs: "discard")
-    window.ctx.settings().setValue("annotations/author", "Maria Rossi")
+    window.ctx.settings().setValue("author", "Maria Rossi")
     window.ctx.settings().setValue("annotations/author_confirmed", True)
     window.set_mode("commenta")
     view.set_zoom(1.0)

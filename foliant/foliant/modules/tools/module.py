@@ -92,6 +92,15 @@ def register(ctx) -> None:
     ctx.add_home_action(_("Operazioni in blocco"), "layers", module.show_batch,
                         _("Comprimi, proteggi, numera, unisci molti file insieme"), order=101)
 
+    def tab_menu(view, menu):
+        from foliant.api import bind_icon
+        act = menu.addAction(_("Confronta con…"))
+        bind_icon(act, "git-compare")
+        act.triggered.connect(lambda _c=False, v=view: module.start_compare(v))
+
+    ctx.add_tab_menu_provider(tab_menu)
+    module.tab_menu = tab_menu
+
     module.actions = {"compare": act_compare, "show": act_show, "session": act_session, "batch": act_batch,
                       "text": act_text, "revisions": act_revisions}
     module.mode = mode

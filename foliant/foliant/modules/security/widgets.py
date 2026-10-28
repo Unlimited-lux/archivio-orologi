@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 import pymupdf
-from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QHeaderView, QLabel, QPushButton, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QHBoxLayout, QHeaderView, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -377,116 +377,51 @@ class Notice:
     kind: str = "warning"
 
 
-class Banner(QFrame):
-    """Barra non modale in cima all'area documento: un avviso alla volta."""
+class NoticeBoard:
+    """Avvisi del modulo per una vista, mostrati con `ctx.show_banner` del nucleo (UX-14)."""
 
-    def __init__(self, view):
-        super().__init__(view.viewport())
-        self.view = view
-        self.setObjectName("securityBanner")
-        self.notices: list[Notice] = []
-        self.dismissed: set[str] = set()
-        self._index = 0
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(10, 6, 6, 6)
-        outer.setSpacing(4)
-        top = QHBoxLayout()
-        self.icon = QLabel()
-        top.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
-        self.label = QLabel()
-        self.label.setWordWrap(True)
-        top.addWidget(self.label, 1)
-        self.close_button = QToolButton()
-        self.close_button.setIcon(icon("x"))
-        self.close_button.setToolTip(_("Chiudi"))
-        self.close_button.setAutoRaise(True)
-        self.close_button.clicked.connect(self.dismiss_current)
-        top.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
-        outer.addLayout(top)
-        bottom = QHBoxLayout()
-        self.more = QPushButton()
-        self.more.setFlat(True)
-        self.more.clicked.connect(self._next)
-        bottom.addWidget(self.more)
-        bottom.addStretch(1)
-        self.buttons_box = QHBoxLayout()
-        bottom.addLayout(self.buttons_box)
-        outer.addLayout(bottom)
-        self.hide()
-        view.viewport().installEventFilter(self)
+    PREFIX = "security-"
+    _LEVEL = {"warning": "warning", "danger": "error", "info": "info"}
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if obj is self.view.viewport() and event.type() == QEvent.Type.Resize:
-            self._place()
-        return False
+    def __init__(self, ctx, view):
+        import weakref
+        self.ctx = ctx
+        self._view = weakref.ref(view)
+        self._notices: dict[str, Notice] = {}
 
-    def _place(self) -> None:
-        vp = self.view.viewport().rect()
-        w = min(vp.width() - 24, 760)
-        self.setFixedWidth(max(200, w))
-        lay = self.layout()
-        lay.activate()
-        h = lay.totalHeightForWidth(self.width()) if lay.hasHeightForWidth() else lay.totalSizeHint().height()
-        self.setFixedHeight(max(h, lay.totalMinimumSize().height()))
-        self.move(vp.x() + (vp.width() - self.width()) // 2, vp.y() + 8)
+    @property
+    def view(self):
+        return self._view()
+
+    @property
+    def notices(self) -> list[Notice]:
+        return sorted(self._notices.values(), key=lambda n: n.priority)
 
     def set_notice(self, notice: Notice) -> None:
-        if notice.key in self.dismissed:
+        view = self.view
+        if view is None:
             return
-        self.notices = [n for n in self.notices if n.key != notice.key] + [notice]
-        self.notices.sort(key=lambda n: n.priority)
-        self._index = 0
-        self._show()
+        self._notices[notice.key] = notice
+        self.ctx.show_banner(view, self.PREFIX + notice.key, notice.text, list(notice.actions),
+                             level=self._LEVEL.get(notice.kind, "warning"), priority=100 - 40 * notice.priority)
 
     def remove_notice(self, key: str) -> None:
-        self.notices = [n for n in self.notices if n.key != key]
-        self._index = 0
-        self._show()
+        self._notices.pop(key, None)
+        view = self.view
+        if view is not None:
+            self.ctx.hide_banner(view, self.PREFIX + key)
 
     def current(self) -> Notice | None:
-        return self.notices[self._index] if self.notices else None
+        """Il primo avviso del modulo tra quelli visibili (non chiusi dall'utente)."""
+        view = self.view
+        if view is None:
+            return None
+        for banner_id in self.ctx.banners(view):
+            if banner_id.startswith(self.PREFIX):
+                notice = self._notices.get(banner_id[len(self.PREFIX):])
+                if notice is not None:
+                    return notice
+        return None
 
-    def dismiss_current(self) -> None:
-        n = self.current()
-        if n is not None:
-            self.dismissed.add(n.key)
-            self.remove_notice(n.key)
-
-    def _next(self) -> None:
-        if self.notices:
-            self._index = (self._index + 1) % len(self.notices)
-            self._show()
-
-    def _show(self) -> None:
-        n = self.current()
-        if n is None:
-            self.hide()
-            return
-        color = theme.hex_color(n.kind)
-        self.setStyleSheet(
-            f"#securityBanner {{ background: {theme.hex_color('surface')}; border: 1px solid {color};"
-            f" border-left: 4px solid {color}; border-radius: 6px; }}")
-        self.icon.setPixmap(icon("shield-alert" if n.priority == 0 else "info").pixmap(20, 20))
-        self.label.setText(n.text)
-        while self.buttons_box.count():
-            w = self.buttons_box.takeAt(0).widget()
-            if w is not None:
-                w.deleteLater()
-        for text, slot in n.actions:
-            b = QPushButton(text)
-            if isinstance(slot, list):        # pulsante con menu di scelte
-                from PySide6.QtWidgets import QMenu
-                menu = QMenu(b)
-                for sub_text, sub_slot in slot:
-                    menu.addAction(sub_text).triggered.connect(sub_slot)
-                b.setMenu(menu)
-            else:
-                b.clicked.connect(slot)
-            self.buttons_box.addWidget(b)
-        others = len(self.notices) - 1
-        self.more.setVisible(others > 0)
-        self.more.setText(_("1 altro avviso") if others == 1 else _("{n} altri avvisi").format(n=others))
-        self.show()
-        self.raise_()
-        self._place()
-        QTimer.singleShot(0, self._place)   # dopo che i pulsanti nuovi sono stati disposti
+    def isVisible(self) -> bool:
+        return self.current() is not None

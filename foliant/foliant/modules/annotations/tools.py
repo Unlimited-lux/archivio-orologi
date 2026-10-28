@@ -496,19 +496,29 @@ class TextMarkupTool(SelectTextTool):
             self.apply_selection(view)
 
     def apply_selection(self, view) -> int | None:
-        sel = view.text_selection
-        if sel is None or not sel.rects:
+        """Marca la selezione di testo; su più pagine un'annotazione per pagina in un solo passo."""
+        sels = [sel for sel in (getattr(view, "text_selections", None) or
+                                ([view.text_selection] if view.text_selection else [])) if sel.rects]
+        if not sels:
             return None
-        quads = engine.quads_from_words(sel.words) if sel.words else sel.quads
         label = {engine.HIGHLIGHT: _("Evidenzia"), engine.UNDERLINE: _("Sottolinea"),
                  engine.STRIKEOUT: _("Barra"), engine.SQUIGGLY: _("Ondulato")}[self.kind]
-        xref = self.ctrl.apply(label, engine.create_markup, sel.page, self.kind, quads,
-                               self.ctrl.style_for(self.kind), self.ctrl.author())
+        style, author = self.ctrl.style_for(self.kind), self.ctrl.author()
+
+        def run(pdf):
+            out = []
+            for sel in sels:
+                quads = engine.quads_from_words(sel.words) if sel.words else sel.quads
+                out.append((sel.page, engine.create_markup(pdf, sel.page, self.kind, quads, style, author)))
+            return out
+
+        created = self.ctrl.apply(label, run) or []
         view.clear_text_selection()
-        if xref is not None:
+        if created:
             self.ctrl.reveal_after_create(view)
-            self.ctrl.select([(sel.page, xref)], view)
-        return xref
+            self.ctrl.select(created, view)
+            return created[0][1]
+        return None
 
     def press(self, view, ev):
         if ev.button != Qt.MouseButton.LeftButton:

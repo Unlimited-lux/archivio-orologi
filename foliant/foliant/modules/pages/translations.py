@@ -131,6 +131,9 @@ EN = {
     "Duplica": "Duplicate",
     "Organizza pagine": "Organize pages",
     "Pagina non leggibile": "Unreadable page",
+    "Contenuto nascosto dal ritaglio": "Content hidden by cropping",
+    "Alcune pagine sono ritagliate: il testo fuori dall'area visibile resta nel file e può essere copiato o cercato. Per eliminarlo davvero usa l'appiattimento o la sanificazione nella modalità Proteggi.\n\nSalvare comunque?":
+        "Some pages are cropped: text outside the visible area stays in the file and can be copied or searched. To really remove it use flattening or sanitizing in Protect mode.\n\nSave anyway?",
     "Il documento è danneggiato: la struttura delle pagine non è valida e l'operazione non può essere eseguita. Prova a usare «Salva come» per riparare il file, poi riprova.":
         "The document is damaged: its page structure is invalid and the operation cannot be performed. Try «Save as» to repair the file, then try again.",
     "Trova pagine vuote e duplicate…": "Find blank and duplicate pages…",

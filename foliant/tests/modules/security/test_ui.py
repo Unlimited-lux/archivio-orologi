@@ -494,21 +494,38 @@ def test_preview_overlay(window, sec, sample_pdf):
     sec.set_preview(False)
 
 
-def test_unapplied_marks_banner_on_reopen(window, sec, sample_pdf, tmp_path):
+def test_unapplied_marks_banner_on_reopen(window, sec, sample_pdf, tmp_path, monkeypatch):
     view = window.open_path(sample_pdf)
     with view.document.change("Segna") as pdf:
         for i in range(3):
             R.add_mark(pdf, i, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
     out = tmp_path / "con-segni.pdf"
-    view.document.save(out)
-    # salvataggio con segni non applicati: avviso, testo ancora estraibile
-    assert sec.banners[view].current().key == "unapplied-saved"
-    assert "Pagina 1" in _text(out)
+    asked = []
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    # SEC-19: prima di salvare si chiede; «Annulla» non salva
+    monkeypatch.setattr(C, "ask_unapplied", lambda parent, n: asked.append(n) or "cancel")
+    assert not window.save_view(view, save_as=True) and not out.exists()
+    # «Continua con i segni»: il file contiene i segni e il testo è ancora estraibile
+    monkeypatch.setattr(C, "ask_unapplied", lambda parent, n: asked.append(n) or "keep")
+    assert window.save_view(view, save_as=True)
+    assert asked == [3, 3] and "Pagina 1" in _text(out)
+    assert len(R.marks(pymupdf.open(out))) == 3
     view.document._saved_state = view.document._state
     window.close_view(view)
     view2 = window.open_path(str(out))
     notice = sec.banners[view2].current()
     assert notice.key == "unapplied" and "3 segni" in notice.text
+
+
+def test_save_guard_apply_now(window, sec, sample_pdf, tmp_path, monkeypatch):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    out = tmp_path / "applicato.pdf"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    monkeypatch.setattr(C, "ask_unapplied", lambda parent, n: "apply")
+    assert window.save_view(view, save_as=True)
+    assert "Pagina 1" not in _text(out) and R.marks(pymupdf.open(out)) == []
 
 
 def test_style_dialog_values(qtbot):
@@ -783,12 +800,12 @@ def test_export_import_marks(window, sec, sample_pdf, tmp_path):
     assert sec.panel.count.text() == "1"
 
 
-def test_trusted_folder(window, sec, active_pdf, tmp_path):
+def test_trusted_folder(window, sec, active_pdf, tmp_path, monkeypatch):
     import shutil
     view = window.open_path(active_pdf)
     actions = dict(sec.banners[view].current().actions)
-    menu = dict(actions["Considera attendibile"])
-    menu["Tutti i documenti di questa cartella"]()
+    monkeypatch.setattr(C, "ask_trust_scope", lambda parent: "folder")
+    actions["Considera attendibile…"]()
     import tempfile
     from pathlib import Path
     other = Path(tempfile.mkdtemp(prefix="foliant-altra-"))
@@ -859,15 +876,14 @@ def test_bug09_gotor_refused_is_handled(window, sec, sample_pdf, monkeypatch):
 
 def test_bug03_unlock_notifies_and_grants_engine_permissions(window, sec, tmp_path, monkeypatch):
     view = window.open_path(_owner_only(tmp_path))
-    with view.document.lock:
-        assert not view.document.pdf.permissions & pymupdf.PDF_PERM_COPY
+    doc = view.document
+    assert doc.access == "user" and not doc.allows(pymupdf.PDF_PERM_COPY)
     seen = []
-    window.ctx.documentChanged.connect(lambda v: seen.append(v))
+    doc.add_listener(lambda d, kind: seen.append(kind))
     monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
-    assert sec.unlock(view.document)
-    assert view in seen
-    with view.document.lock:
-        assert view.document.pdf.permissions & pymupdf.PDF_PERM_COPY
+    assert sec.unlock(doc)
+    assert "access" in seen and doc.access == "owner" and doc.allows(pymupdf.PDF_PERM_COPY)
+    assert sec.lock_button.text() == "Accesso completo"
 
 
 def test_cyclic_page_tree_open_and_save(window, sec, cyclic_pdf, tmp_path, monkeypatch):

@@ -25,7 +25,8 @@
 
 5. **Messaggi temporanei nella barra di stato dai test.** `ctx.status` va bene; nessuna modifica.
 
-6. **Preferenze utente condivise (ANN-02).** Il nome autore è salvato in `annotations/author`;
+6. **Preferenze utente condivise (ANN-02).** RISOLTO: si usa `ctx.author_name()`; il vecchio valore di `annotations/author` viene migrato nella preferenza del nucleo.
+   (Testo originale:) Il nome autore è salvato in `annotations/author`;
    se il nucleo introduce una finestra Preferenze, conviene una voce «Nome autore» che usi questa chiave.
 
 7. **Finestre dei test mai distrutte.** La fixture `window` chiude la finestra ma non la elimina

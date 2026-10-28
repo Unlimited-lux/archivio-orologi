@@ -109,6 +109,8 @@ def register(ctx: Context) -> None:
     ctx.documentChanged.connect(lambda v: update_status(v) if v is ctx.current_view() else None)
     ctx.add_view_menu_provider(lambda view, ev, menu: _context_menu(c, view, ev, menu))
     links.install(ctx)
+    ctx.add_guard("save", c.save_guard)        # SEC-19: segni non applicati prima di salvare
+    ctx.add_guard("save_as", c.save_guard)
     _update_actions(c, None)
 
 

@@ -1,6 +1,6 @@
 # Richieste al nucleo — modulo Strumenti
 
-1. **Menu contestuale della scheda (CMP-01, flusso 1).** La specifica chiede di poter avviare
+1. **[RISOLTO: `ctx.add_tab_menu_provider`, voce «Confronta con…»] Menu contestuale della scheda (CMP-01, flusso 1).** La specifica chiede di poter avviare
    "Confronta documenti" dal menu contestuale di una scheda. Il nucleo non offre un punto
    di estensione per il menu delle schede. Inoltre `tests/test_window.py::test_view_menu_provider`
    presuppone che nessun modulo aggiunga voci al menu delle pagine, quindi la voce

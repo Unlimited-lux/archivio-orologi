@@ -499,4 +499,12 @@ EN: dict[str, str] = {
     "Da applicare": "To be applied",
     "RC4, chiave a 40 bit": "RC4, 40-bit key",
     "Immagini con metadati (EXIF, posizione GPS…): {n}": "Images with metadata (EXIF, GPS location…): {n}",
+    "Permessi del documento alterati": "Document permissions tampered with",
+    "/P e /Perms non coincidono: valgono i permessi più restrittivi.": "/P and /Perms differ: the most restrictive permissions apply.",
+    "Considera attendibile…": "Trust…",
+    "Gli avvisi sui contenuti attivi non verranno più mostrati per:": "Active content warnings will no longer be shown for:",
+    'Segni di redazione non applicati': 'Unapplied redaction marks',
+    'Il documento contiene {n} segni di redazione non applicati: il contenuto sotto i segni non è ancora stato rimosso.': 'The document contains {n} unapplied redaction marks: the content under the marks has not been removed yet.',
+    'Continua con i segni': 'Keep the marks',
+    "Analisi dei contenuti attivi…": "Checking active content…",
 }

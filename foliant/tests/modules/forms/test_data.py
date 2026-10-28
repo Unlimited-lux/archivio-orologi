@@ -231,7 +231,7 @@ def test_xfa_detection(window, tmp_path, sample_pdf):
     fs, fd, fn = (forms.instance().filler(v) for v in (vs, vd, vn))
     assert fs.state.xfa == "hybrid" and "XML statico" in fs.text_of_bar()
     assert fd.state.xfa == "dynamic" and "dinamico" in fd.text_of_bar()
-    assert not fn.bar.isVisible()
+    assert not fn.bar_visible()
 
 
 def test_xfa_static_sync_on_fill(window, tmp_path):
@@ -426,3 +426,22 @@ def test_convert_dynamic_from_window(window, tmp_path):
         assert E.xfa_status(new.document.pdf) == "none"
     assert vals["form1.nome"] == "Anna" and vals["form1.eta"] == "30"
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+
+
+def test_save_cancelled_for_unmapped_xml_fields(window, tmp_path, monkeypatch):
+    make_xfa(tmp_path / "s.pdf", True)
+    pdf = pymupdf.open(str(tmp_path / "s.pdf"))
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 250, 120), "form1.extra")
+    path = tmp_path / "s2.pdf"
+    pdf.save(str(path))
+    before = path.read_bytes()
+    view = open_form(window, path)
+    module().import_values({"form1.extra": "valore"}, view)
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda title, text: asked.append(text) or False)
+    assert not window.save_view(view)  # «Annulla»: il file su disco non cambia
+    assert asked and "form1.extra" in asked[0]
+    assert path.read_bytes() == before
+    monkeypatch.setattr(window.ctx, "confirm", lambda title, text: True)
+    assert window.save_view(view)
+    assert path.read_bytes() != before

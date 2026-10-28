@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import os
 from dataclasses import dataclass, field
 
 import pymupdf
@@ -622,7 +621,7 @@ class AIPanel(QWidget):
             "image": _("Domanda sull'immagine (facoltativa)"),
         }
         self.input.setPlaceholderText(placeholders.get(key, ""))
-        if key in ("explain", "rewrite") and self.view is not None and self.view.text_selection:
+        if key in ("explain", "rewrite") and content.view_selections(self.view):
             self.set_scope(SELECTION)
         if key == "image":
             self.set_scope(AREA)
@@ -663,7 +662,7 @@ class AIPanel(QWidget):
                 s.page_indices = content.parse_page_range(self.pages_edit.text(), doc.page_count)
             except ValueError:
                 s.page_indices = []
-        elif kind == SELECTION and self.view.text_selection:
+        elif kind == SELECTION and content.view_selections(self.view):
             s.selection = self.view.selected_text()
         elif kind == AREA and (self._area or self._external_image):
             s.images = [ImagePart(b"")]
@@ -816,8 +815,8 @@ class AIPanel(QWidget):
             return Scope(kind=NONE), [], ""
         fp = content.content_fingerprint(doc.pdf)
         if kind == SELECTION:
-            sel = self.view.text_selection if self.view else None
-            if sel is None or not sel.text.strip():
+            sel = content.view_selections(self.view)
+            if not sel or not "".join(x.text for x in sel).strip():
                 if text and fn in ("explain", "translate", "rewrite"):
                     return Scope(kind=SELECTION, selection=text), [], ""
                 raise FoliantError(_("Seleziona del testo nel documento."))
@@ -1317,8 +1316,8 @@ class AIPanel(QWidget):
         return doc
 
     def _author(self) -> str:
-        v = self.ctx.settings().value("author", "") or self.ctx.settings().value("preferences/author", "")
-        return str(v) if v else (os.environ.get("USER") or _("Assistente IA"))
+        # preferenza «Nome autore» del nucleo (altrimenti l'utente di sistema)
+        return self.ctx.author_name() or _("Assistente IA")
 
     def _safe(self, title: str, fn) -> None:
         try:
@@ -1458,7 +1457,10 @@ class AIPanel(QWidget):
         self.proposal_edit.setPlainText(answer.text)
         doc = self._last.document
         ok, why = (False, _("La proposta riguarda un testo incollato, non il documento."))
-        if doc is not None and scope.selection_page is not None:
+        if doc is not None and scope.selection_parts:
+            ok, why = False, _("La sostituzione nel documento funziona su una pagina alla volta: "
+                               "seleziona il testo di una sola pagina.")
+        elif doc is not None and scope.selection_page is not None:
             ok, why = compose.replace_check(doc.pdf, scope.selection_page, scope.selection_rects)
         if answer.flags and _("nessuna modifica proposta") in answer.flags:
             ok, why = False, _("Nessuna modifica proposta.")
@@ -1649,8 +1651,8 @@ class AIPanel(QWidget):
         kind = self.scope_kind()
         if doc is None or kind == NONE:
             return Scope()
-        if kind == SELECTION and self.view.text_selection:
-            return engine.build_scope(doc.pdf, SELECTION, selection=self.view.text_selection)
+        if kind == SELECTION and content.view_selections(self.view):
+            return engine.build_scope(doc.pdf, SELECTION, selection=content.view_selections(self.view))
         if kind in (DOCUMENT, PAGES):
             pages = list(range(doc.page_count)) if kind == DOCUMENT else content.parse_page_range(
                 self.pages_edit.text(), doc.page_count)
