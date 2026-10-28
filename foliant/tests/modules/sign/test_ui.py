@@ -751,3 +751,23 @@ def test_timestamp_failure_use_other_server(window, monkeypatch, sample_pdf, tmp
     st = digital.verify_pdf(target.read_bytes())
     assert st[0].time_source == "marca temporale"
     assert c.clock_skew_warning(target.read_bytes()) is None
+
+
+def test_field_duplicated_on_pages_with_required_certification(window, monkeypatch, sample_pdf):
+    """SIG-19: campo duplicato su più pagine, con livello di certificazione richiesto (/SV /MDP)."""
+    from foliant.modules.sign import ui_digital
+    view = window.open_path(sample_pdf)
+
+    def fake_exec(self):
+        self.pages.setText("tutte")
+        self.mdp.setCurrentIndex(self.mdp.findData(2))
+        return True
+
+    monkeypatch.setattr(ui_digital.FieldDialog, "exec", fake_exec)
+    _ctl(window).add_field(view, 0, pymupdf.Rect(100, 600, 300, 660))
+    fields = _ctl(window).state(view).fields
+    assert sorted(f.page for f in fields) == [0, 1, 2]
+    assert len({f.name for f in fields}) == 3
+    assert all(f.certify_level == 2 for f in fields)
+    view.document.undo()
+    assert not view.document.is_modified

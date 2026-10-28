@@ -347,6 +347,7 @@ class SignController(QObject):
         st.running = True
         st.source = data
         version = doc.version
+        use_system = str(self.ctx.settings().value("sign/system_certs", "false")).lower() == "true"
         self.stateChanged.emit(view)
 
         def work():
@@ -354,6 +355,8 @@ class SignController(QObject):
             result: dict = {}
             try:
                 trusted = store.TrustStore().certificates()
+                if use_system:
+                    trusted = trusted + store.system_certificates()
                 mode = self.revocation_mode()
                 result["statuses"] = digital.verify_pdf(data, trusted=trusted, revocation_mode=mode,
                                                         allow_fetching=mode == "sempre")
@@ -580,11 +583,16 @@ class SignController(QObject):
         if not self._ensure_saved(view):
             return False
         doc = view.document
+        required_level = getattr(field, "certify_level", None) if field is not None else None
+        if required_level:
+            certify = True      # il campo richiede una firma di certificazione (/SV /MDP)
         dlg = DigitalSignDialog(self.ctx.window, self, certify=certify, visible=not invisible and
                                 (rect is not None or (field is not None and not field.invisible)), field=field)
         if not dlg.exec():
             return False
         digital_id, options = dlg.digital_id, dlg.options
+        if required_level:
+            options.certify, options.docmdp_level = True, int(required_level)
         if field is not None:
             options.field_name = field.name
             options.page = field.page or 0
@@ -734,12 +742,25 @@ class SignController(QObject):
             else:
                 data = doc.to_bytes()
             lock_action, lock_fields = dlg.lock_spec()
-            new, name = digital.add_signature_field(
-                data, dlg.name.text().strip() or _("Firma"), page, tuple(rect), required=dlg.required.isChecked(),
-                tooltip=dlg.tooltip.text().strip(), timestamp_url=dlg.tsa.text().strip() or None,
-                timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
-                lock_action=lock_action, allowed_reasons=dlg.allowed_reasons(),
-                allowed_issuers=dlg.issuers or None)
+            try:
+                pages = dlg.page_list(view.page_count, page)
+            except ValueError as e:
+                self.ctx.error(_("Campo firma"), str(e))
+                return
+            new = data
+            names = []
+            wanted = dlg.name.text().strip() or _("Firma")
+            for p in pages:
+                with ENGINE_LOCK:
+                    prect = g.clamp_rect(doc.pdf[p], pymupdf.Rect(rect))
+                new, name = digital.add_signature_field(
+                    new, wanted, p, tuple(prect), required=dlg.required.isChecked(),
+                    tooltip=dlg.tooltip.text().strip(), timestamp_url=dlg.tsa.text().strip() or None,
+                    timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
+                    lock_action=lock_action, allowed_reasons=dlg.allowed_reasons(),
+                    allowed_issuers=dlg.issuers or None, certify_level=dlg.mdp.currentData())
+                names.append(name)
+            name = names[0]
         except digital.SignError as e:
             self.ctx.error(_("Campo firma"), str(e))
             return
@@ -747,7 +768,7 @@ class SignController(QObject):
             self.ctx.error(_("Campo firma"), _("Impossibile aggiungere il campo firma: {e}").format(
                 e=str(e) or e.__class__.__name__))
             return
-        if name != (dlg.name.text().strip() or _("Firma")):
+        if len(names) == 1 and name != (dlg.name.text().strip() or _("Firma")):
             self.ctx.info(_("Campo firma"), _("Esiste già un campo con quel nome: il nuovo campo si chiama «{n}».")
                           .format(n=name))
         if st.signed:

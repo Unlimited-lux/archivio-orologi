@@ -144,3 +144,11 @@ def test_tsa_config(tmp_path):
     assert cfg.remove("https://tsa2.example.org")
     assert [s.name for s in cfg.list()] == ["Interno"] and cfg.default().name == "Interno"
     assert (os.stat(cfg.path).st_mode & 0o777) == 0o600
+
+
+def test_system_certificates_optional(tmp_path, id_a):
+    bundle = tmp_path / "bundle.crt"
+    bundle.write_text(id_a[1].pem() + id_a[1].pem())
+    certs = store.system_certificates((str(tmp_path / "manca.crt"), str(bundle)))
+    assert [c.sha256 for c in certs] == [id_a[1].sha256] * 2
+    assert store.system_certificates((str(tmp_path / "manca.crt"),)) == []

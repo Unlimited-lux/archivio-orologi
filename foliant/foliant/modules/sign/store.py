@@ -436,6 +436,28 @@ class TSAConfig:
         return next((s for s in self.list() if s.default), None)
 
 
+SYSTEM_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt",
+                  "/etc/ssl/ca-bundle.pem")
+
+
+def system_certificates(paths=SYSTEM_BUNDLES) -> list[CertInfo]:
+    """Certificati dell'archivio di sistema (sola lettura). Pensati per i siti web:
+    si usano per la verifica solo se l'utente lo abilita."""
+    for p in paths:
+        try:
+            data = Path(p).read_bytes()
+        except OSError:
+            continue
+        out = []
+        for der in _parse_certificates(data):
+            try:
+                out.append(cert_info_from_der(der))
+            except Exception:  # noqa: BLE001 - certificato non leggibile: ignorato
+                continue
+        return out
+    return []
+
+
 # --------------------------------------------------------------------------- #
 # Profili di aspetto della firma digitale (SIG-09)
 # --------------------------------------------------------------------------- #

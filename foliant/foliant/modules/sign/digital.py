@@ -1044,6 +1044,7 @@ class FieldInfo:
     tooltip: str = ""
     allowed_reasons: list[str] | None = None        # /SV /Reasons
     allowed_issuers: list[CertInfo] | None = None   # /SV /Cert /Issuer
+    certify_level: int | None = None                # /SV /MDP /P: il campo richiede una certificazione
 
 
 def _locked_field_names(reader) -> set[str]:
@@ -1137,7 +1138,7 @@ def signature_fields(data: bytes) -> list[FieldInfo]:
         flags = int(widget.get("/F", 0) or 0)
         ff = int(fobj.get("/Ff", 0) or 0)
         ts_url = None
-        reasons = issuers = None
+        reasons = issuers = mdp = None
         sv = _deref(fobj.get("/SV"))
         if sv is not None:
             ts = _deref(sv.get("/TimeStamp"))
@@ -1146,6 +1147,9 @@ def signature_fields(data: bytes) -> list[FieldInfo]:
             try:
                 if "/Reasons" in sv:
                     reasons = [str(r) for r in _deref(sv.get("/Reasons"))] or None
+                mdp_d = _deref(sv.get("/MDP"))
+                if mdp_d is not None and int(mdp_d.get("/P", 0) or 0) in (1, 2, 3):
+                    mdp = int(mdp_d.get("/P"))
                 cert = _deref(sv.get("/Cert"))
                 if cert is not None and "/Issuer" in cert:
                     issuers = [cert_info_from_der(bytes(_deref(x))) for x in _deref(cert.get("/Issuer"))] or None
@@ -1155,7 +1159,7 @@ def signature_fields(data: bytes) -> list[FieldInfo]:
             name=name, page=page_idx, rect=rect, signed=value is not None,
             hidden=bool(flags & 2), required=bool(ff & 2), invisible=invisible,
             locked=name in locked, timestamp_required_url=ts_url, tooltip=str(fobj.get("/TU", "") or ""),
-            allowed_reasons=reasons, allowed_issuers=issuers,
+            allowed_reasons=reasons, allowed_issuers=issuers, certify_level=mdp,
         ))
     out.sort(key=lambda f: (f.page if f.page is not None else 1 << 30,
                             f.rect[1] if f.rect else 0, f.rect[0] if f.rect else 0))
@@ -1164,7 +1168,8 @@ def signature_fields(data: bytes) -> list[FieldInfo]:
 
 def add_signature_field(data, name, page, rect, *, required=False, tooltip="", timestamp_url=None,
                         timestamp_required=False, lock_fields=None, lock_action="Include",
-                        hidden=False, allowed_reasons=None, allowed_issuers=None) -> tuple[bytes, str]:
+                        hidden=False, allowed_reasons=None, allowed_issuers=None,
+                        certify_level=None) -> tuple[bytes, str]:
     from pyhanko.pdf_utils import generic
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
     from pyhanko.sign import fields as pfields
@@ -1191,7 +1196,7 @@ def add_signature_field(data, name, page, rect, *, required=False, tooltip="", t
     page_obj = pages[page].get_object()
     box = _to_pdf_rect(page_obj, rect) if rect else None
     sv = None
-    if timestamp_url or allowed_reasons or allowed_issuers:
+    if timestamp_url or allowed_reasons or allowed_issuers or certify_level:
         flags = pfields.SigSeedValFlags(0)
         cert = None
         if allowed_reasons:
@@ -1203,7 +1208,9 @@ def add_signature_field(data, name, page, rect, *, required=False, tooltip="", t
         sv = pfields.SigSeedValueSpec(
             flags=flags, reasons=list(allowed_reasons) if allowed_reasons else None,
             timestamp_server_url=timestamp_url or None,
-            timestamp_required=bool(timestamp_required and timestamp_url), cert=cert)
+            timestamp_required=bool(timestamp_required and timestamp_url), cert=cert,
+            seed_signature_type=pfields.SeedSignatureType(pfields.MDPPerm(int(certify_level)))
+            if certify_level else None)
     fmdp = None
     if lock_fields is not None or lock_action == "All":
         action = {"All": pfields.FieldMDPAction.ALL, "Include": pfields.FieldMDPAction.INCLUDE,

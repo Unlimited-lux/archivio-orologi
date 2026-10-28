@@ -500,6 +500,14 @@ class FieldDialog(QDialog):
         irow.addWidget(b_issuer)
         form.addRow(_("Emittente ammesso:"), irow)
         self.issuers: list = []
+        self.mdp = QComboBox()
+        self.mdp.addItem(_("Nessuno (firma di approvazione)"), None)
+        for lvl, label in LEVELS:
+            self.mdp.addItem(_(label), lvl)
+        form.addRow(_("Certificazione richiesta:"), self.mdp)
+        self.pages = QLineEdit()
+        self.pages.setPlaceholderText(_("solo questa pagina; es. «tutte» o «1-3,7»"))
+        form.addRow(_("Duplica sulle pagine:"), self.pages)
         self.lock_action = QComboBox()
         for key, label in [(None, _("Nessun campo")), ("All", _("Tutti i campi")),
                            ("Include", _("Solo i campi indicati")), ("Exclude", _("Tutti tranne quelli indicati"))]:
@@ -544,7 +552,21 @@ class FieldDialog(QDialog):
             return "Include", None
         return action, (names if action != "All" else None)
 
+    def page_list(self, page_count: int, current: int) -> list[int]:
+        """Pagine su cui creare il campo (sempre compresa quella corrente)."""
+        text = self.pages.text().strip()
+        if not text:
+            return [current]
+        pages = g.parse_page_range(text, page_count, current)
+        return sorted(set(pages) | {current})
+
     def _accept(self) -> None:
+        if self.pages.text().strip():
+            try:
+                g.parse_page_range(self.pages.text(), 10 ** 6)
+            except ValueError as e:
+                self.error.setText(str(e))
+                return
         if self.lock_action.currentData() in ("Include", "Exclude") and not self.lock_fields.text().strip():
             self.error.setText(_("Indica i nomi dei campi da bloccare."))
             return
@@ -751,6 +773,12 @@ class IDsDialog(QDialog):
         self.revocation.addItem(_("Sempre (interroga OCSP e CRL indicati nei certificati)"), "sempre")
         self.revocation.setCurrentIndex(max(0, self.revocation.findData(controller.revocation_mode())))
         f4.addRow(_("Controllo della revoca online:"), self.revocation)
+        self.system_certs = QCheckBox(_("Considera attendibili anche i certificati del sistema"))
+        self.system_certs.setToolTip(_("Sono pensati per i siti web, non per le firme: attivali solo se servono."))
+        self.system_certs.setChecked(str(settings.value("sign/system_certs", "false")).lower() == "true")
+        self.system_certs.toggled.connect(
+            lambda v: settings.setValue("sign/system_certs", "true" if v else "false"))
+        f4.addRow(self.system_certs)
         self.auto_verify.toggled.connect(lambda v: settings.setValue("sign/auto_verify", "true" if v else "false"))
         self.revocation.currentIndexChanged.connect(
             lambda _i: settings.setValue("sign/revocation", self.revocation.currentData()))
@@ -1050,7 +1078,9 @@ TRANSLATIONS_EN = {
     "Questo campo accetta solo certificati emessi da: {who}": "This field only accepts certificates issued by: {who}",
     "Il campo non accetta certificati emessi da «{who}».": "The field does not accept certificates issued by “{who}”.",
     "motivi separati da punto e virgola (facoltativo)": "reasons separated by semicolons (optional)",
-    "Motivi ammessi:": "Allowed reasons:", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
+    "Motivi ammessi:": "Allowed reasons:", "Nessuno (firma di approvazione)": "None (approval signature)",
+    "Certificazione richiesta:": "Required certification:", "Duplica sulle pagine:": "Duplicate on pages:",
+    "solo questa pagina; es. «tutte» o «1-3,7»": "this page only; e.g. “tutte” or “1-3,7”", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
     "Emittente ammesso:": "Allowed issuer:", "Certificato dell'emittente ammesso": "Certificate of the allowed issuer",
     "Certificato non leggibile.": "Unreadable certificate.",
     "Questi campi del modulo non potranno più essere modificati senza invalidare la firma.":
@@ -1062,7 +1092,10 @@ TRANSLATIONS_EN = {
     "Verifica le firme all'apertura dei documenti": "Verify signatures when opening documents",
     "Mai (solo dati incorporati, nessuna connessione)": "Never (embedded data only, no connection)",
     "Sempre (interroga OCSP e CRL indicati nei certificati)": "Always (query the OCSP and CRL in the certificates)",
-    "Controllo della revoca online:": "Online revocation check:", "Verifica": "Verification", "Pagine": "Pages", "Tutte": "All",
+    "Controllo della revoca online:": "Online revocation check:",
+    "Considera attendibili anche i certificati del sistema": "Also trust the system certificates",
+    "Sono pensati per i siti web, non per le firme: attivali solo se servono.":
+        "They are meant for websites, not signatures: enable them only if needed.", "Verifica": "Verification", "Pagine": "Pages", "Tutte": "All",
     "Tutte tranne la corrente": "All except the current one", "Pari": "Even", "Dispari": "Odd",
     "Intervallo:": "Range:", "es. 1-3,7,10-": "e.g. 1-3,7,10-", "Angolo più vicino": "Nearest corner",
     "In alto a sinistra": "Top left", "In alto a destra": "Top right", "In basso a sinistra": "Bottom left",
