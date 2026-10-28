@@ -34,6 +34,14 @@ def write_txt(work: pymupdf.Document, path: str, job) -> None:
     separator = {"ff": "\f", "none": ""}.get(sep_opt, sep_opt)
     annotations = job.options.get("annotations", False)
     n = work.page_count
+    struct: dict = {}
+    if mode != "layout" and job.options.get("use_structure", True):
+        from .structure import structure_order
+        with ENGINE_LOCK:
+            try:
+                struct = structure_order(work)
+            except Exception:
+                struct = {}
     with open(path, "w", encoding=encoding, newline="") as f:
         for i in range(n):
             check(job.progress, i / max(1, n), _("Pagina {i} di {n}").format(i=i + 1, n=n))
@@ -46,10 +54,18 @@ def write_txt(work: pymupdf.Document, path: str, job) -> None:
                     text = layout_text(page, tp)
                     pc = PageContent(index=job.source_index(i), width=0, height=0, ocr=tp is not None)
                 else:
-                    pc = analyze_page(page, ocr=job.ocr, language=job.language, images=False,
-                                      dehyphenate=job.options.get("dehyphenate", True))
-                    pc.index = job.source_index(i)
-                    text = pc.text()
+                    tagged = None
+                    if struct.get(page.xref):
+                        from .structure import tagged_page_text
+                        tagged = tagged_page_text(work, i, struct[page.xref])
+                    if tagged is not None:
+                        pc = PageContent(index=job.source_index(i), width=0, height=0)
+                        text = tagged
+                    else:
+                        pc = analyze_page(page, ocr=job.ocr, language=job.language, images=False,
+                                          dehyphenate=job.options.get("dehyphenate", True))
+                        pc.index = job.source_index(i)
+                        text = pc.text()
                 if annotations:
                     notes = [a.info.get("content", "") for a in page.annots() if a.info.get("content")]
                     if notes:

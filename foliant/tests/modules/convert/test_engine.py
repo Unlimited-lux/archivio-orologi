@@ -789,3 +789,30 @@ def test_long_names_and_bad_template(sample_pdf, tmp_path):
     with pytest.raises(ConversionError):
         convert_pdf(sample_pdf, tmp_path / "x.png", "png", dpi=72, name_template="{pagina:zz}")
     assert list(tmp_path.glob("*.png")) == []
+
+
+def _tagged_pdf(path):
+    """Pagina con due paragrafi: la struttura mette prima quello in basso."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "x", fontsize=1)
+    font = [f[4] for f in page.get_fonts()][0]
+    content = (f"/P <</MCID 0>> BDC BT /{font} 14 Tf 72 700 Td (Paragrafo in alto) Tj ET EMC\n"
+               f"/P <</MCID 1>> BDC BT /{font} 14 Tf 72 400 Td (Paragrafo in basso) Tj ET EMC").encode()
+    doc.update_stream(page.get_contents()[0], content)
+    root, el, p1, p0 = (doc.get_new_xref() for _ in range(4))
+    doc.update_object(p1, f"<</Type/StructElem/S/P/P {el} 0 R/Pg {page.xref} 0 R/K 1>>")
+    doc.update_object(p0, f"<</Type/StructElem/S/P/P {el} 0 R/Pg {page.xref} 0 R/K 0>>")
+    doc.update_object(el, f"<</Type/StructElem/S/Document/P {root} 0 R/K[{p1} 0 R {p0} 0 R]>>")
+    doc.update_object(root, f"<</Type/StructTreeRoot/K {el} 0 R>>")
+    doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
+    doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<</Marked true>>")
+    return _save(doc, path)
+
+
+def test_txt_follows_structure_tree(tmp_path):
+    path = _tagged_pdf(tmp_path / "tag.pdf")
+    text = open(convert_pdf(path, tmp_path / "t.txt", "txt")[0], encoding="utf-8").read()
+    assert text.index("Paragrafo in basso") < text.index("Paragrafo in alto")
+    geo = open(convert_pdf(path, tmp_path / "g.txt", "txt", use_structure=False)[0], encoding="utf-8").read()
+    assert geo.index("Paragrafo in alto") < geo.index("Paragrafo in basso")
