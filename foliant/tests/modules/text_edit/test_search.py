@@ -387,3 +387,28 @@ def test_rects_on_rotated_page():
             assert m.rects and any(r.intersects(expected) for r in m.rects)
             union = m.rects[0]
             assert union.get_area() < 4 * expected.get_area()
+
+
+def test_delete_without_recompose_keeps_positions(tmp_path):
+    """TXT-13: con «Ricomponi il paragrafo» disattivato le parole successive restano ferme (±0,5 pt)."""
+    import pymupdf as _pm
+    from foliant.api import Document as _Doc
+    from foliant.modules.text_edit import search as _search
+    doc = _pm.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Prima BOZZA dopo la parola", fontname="helv", fontsize=12)
+    page.insert_text((72, 130), "Seconda riga intatta", fontname="helv", fontsize=12)
+    path = tmp_path / "nr.pdf"
+    doc.save(str(path))
+    d = _Doc.open(str(path))
+    with d.lock:
+        before = {w[4]: w[:4] for w in d.pdf[0].get_text("words")}
+    s = _search.replace_all(d, "BOZZA", "", _search.SearchOptions(case_sensitive=True), delete=True,
+                            recompose=False)
+    assert s.replaced == 1
+    with d.lock:
+        after = {w[4]: w[:4] for w in d.pdf[0].get_text("words")}
+    assert "BOZZA" not in after
+    for word in ("Prima", "dopo", "la", "parola", "Seconda", "intatta"):
+        assert abs(after[word][0] - before[word][0]) <= 0.5 and abs(after[word][1] - before[word][1]) <= 0.5
+    assert d.undo() and "BOZZA" in d.page_text(0)

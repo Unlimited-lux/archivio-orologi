@@ -639,7 +639,18 @@ def _merge_substitutions(into: list[Substitution], new: list[Substitution]) -> N
 
 
 def _apply_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, matches: list[Match],
-                 texts: list[str], summary: ReplaceSummary, *, delete: bool, remove_adjacent_space: bool) -> None:
+                 texts: list[str], summary: ReplaceSummary, *, delete: bool, remove_adjacent_space: bool,
+                 recompose: bool = True) -> None:
+    if delete and not recompose:
+        # senza ricomposizione: via solo le parole trovate, il resto della riga resta dov'è
+        rects = [r for m in matches for r in m.rects]
+        if rects and engine.delete_words_in_place(pdf, page_index, block, rects):
+            summary.replaced += len(matches)
+            summary.blocks_changed += 1
+        else:
+            for m in matches:
+                summary.not_replaceable.append((m, _("L'occorrenza non copre parole intere.")))
+        return
     paragraphs = replace_in_block(block, matches, texts, delete=delete,
                                   remove_adjacent_space=remove_adjacent_space)
     try:
@@ -655,8 +666,8 @@ def _apply_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, match
 
 def replace_all(document, pattern: str, replacement: str, options: SearchOptions | None = None,
                 pages: Iterable[int] | None = None, granularity: str = "paragraph", delete: bool = False,
-                remove_adjacent_space: bool = True, exclude: Iterable[tuple[int, int, int]] = ()
-                ) -> ReplaceSummary:
+                remove_adjacent_space: bool = True, exclude: Iterable[tuple[int, int, int]] = (),
+                recompose: bool = True) -> ReplaceSummary:
     """Sostituisce (o elimina) tutte le occorrenze in un unico passo annullabile.
 
     `exclude`: chiavi (`match_key`) delle occorrenze da lasciare invariate, riferite
@@ -683,7 +694,7 @@ def replace_all(document, pattern: str, replacement: str, options: SearchOptions
     label = (_("Trova ed elimina ({n})") if removing else _("Sostituisci tutto ({n})")).format(n=n)
     try:
         _replace_pages(document, label, todo_pages, rx, replacement, options, granularity, summary,
-                       removing, remove_adjacent_space, excluded)
+                       removing, remove_adjacent_space, excluded, recompose)
     except _NothingChanged:
         pass
     summary.not_replaceable.extend((m, m.reason) for m in found if not m.replaceable and m.page not in todo_pages)
@@ -701,7 +712,7 @@ def match_key(match: Match) -> tuple[int, int, int]:
 
 
 def _replace_pages(document, label, todo_pages, rx, replacement, options, granularity, summary, removing,
-                   remove_adjacent_space, excluded) -> None:
+                   remove_adjacent_space, excluded, recompose: bool = True) -> None:
     with document.change(label) as pdf:
         for p in todo_pages:
             page = pdf[p]
@@ -721,7 +732,7 @@ def _replace_pages(document, label, todo_pages, rx, replacement, options, granul
                     summary.not_replaceable.extend((m, str(e)) for m in matches)
                     continue
                 _apply_block(pdf, p, block, matches, texts, summary, delete=removing,
-                             remove_adjacent_space=remove_adjacent_space)
+                             remove_adjacent_space=remove_adjacent_space, recompose=recompose)
         if summary.replaced == 0:
             # nessuna modifica riuscita: annulla il passo (il documento torna com'era)
             raise _NothingChanged()
