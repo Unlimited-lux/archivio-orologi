@@ -765,6 +765,9 @@ def register(ctx) -> PagesController:
     ctx.documentChanged.connect(c.on_document_changed)
     ctx.documentClosed.connect(c.on_document_closed)
     ctx.add_view_menu_provider(c.view_menu)
+    access_changed = getattr(ctx, "documentAccessChanged", None)
+    if access_changed is not None:   # sblocco con la password dei permessi, blocco durante l'OCR
+        access_changed.connect(lambda _view: c.update_actions())
     if hasattr(ctx, "add_guard"):
         ctx.add_guard("save", c.save_guard)
         ctx.add_guard("save_as", c.save_guard)

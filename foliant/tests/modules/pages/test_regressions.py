@@ -297,3 +297,18 @@ def test_signed_document_single_warning_with_sign_module(pages_window, monkeypat
     monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(t) or True)
     assert c.confirm_structural(view.document)
     assert "Documento firmato" not in asked
+
+
+def test_actions_follow_document_access_changes(window, tmp_path):
+    """Sblocco fatto da un altro modulo (document.unlock): i comandi di Pagine si riattivano subito."""
+    path = tmp_path / "bloccato.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 72), "x")
+    d.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="padrone",
+           permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(path))
+    window.set_mode("pagine")
+    c = window.ctx.pages_controller
+    assert not c.act_rotate_right.isEnabled()
+    assert view.document.unlock("padrone")
+    assert c.act_rotate_right.isEnabled() and c.act_delete.isEnabled()
