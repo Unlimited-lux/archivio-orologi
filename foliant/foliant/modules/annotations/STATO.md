@@ -4,15 +4,15 @@ Struttura: `engine.py` (logica pura sul motore PDF, senza Qt), `controller.py` (
 selezione, operazioni annullabili), `tools.py` (strumenti della vista), `panels.py` (pannello
 proprietà a destra, elenco commenti a sinistra), `dialogs.py` (finestre, sostituibili nei test),
 `ui_actions.py` (comandi con file: esporta/importa, riepilogo, appiattimento), `visibility.py`
-(mostra/nascondi), `i18n_en.py` (traduzioni inglesi). Ogni modifica passa da `document.change()`.
+(mostra/nascondi e filtro in pagina tramite le API della vista del nucleo), `i18n_en.py` (traduzioni inglesi). Ogni modifica passa da `document.change()`.
 
 Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (P0 dall'interfaccia),
 `test_p1_ui.py` (P1 dall'interfaccia), `test_engine_p1.py` (motore), `test_i18n.py` (traduzioni).
 
 | ID | Priorità | Stato | Test | Note |
 |---|---|---|---|---|
-| ANN-01 | P0 | parziale | test_ann01_every_type_saved_with_ap_nm_and_m, test_ann01_unhandled_annotation_untouched, test_ann01_private_key_kept_after_color_change | /NM UUID, /M, /AP /N per ogni tipo; tipi sconosciuti e chiavi private conservati; permesso «commenti» rispettato. Mancano: salvataggio incrementale per PDF firmati (nucleo, CORE_REQUESTS 1), vincoli PDF/A e struttura logica dei PDF taggati. |
-| ANN-02 | P0 | fatto | test_ann02_author_subject_dates, test_ann02_non_latin_author_utf16, test_ann02_empty_author_restores_account_name, test_ann02_tolerant_dates | Autore predefinito = nome completo dell'account; conferma al primo uso (messaggio); «Nome autore…» nel menu Commenti. |
+| ANN-01 | P0 | parziale | test_ann01_every_type_saved_with_ap_nm_and_m, test_ann01_unhandled_annotation_untouched, test_ann01_private_key_kept_after_color_change | /NM UUID, /M, /AP /N per ogni tipo; tipi sconosciuti e chiavi private conservati; permesso «commenti» rispettato. Commento su PDF firmato: firma ancora valida (salvataggio incrementale del nucleo, test_comment_keeps_signature_valid). Mancano: vincoli PDF/A e struttura logica dei PDF taggati. |
+| ANN-02 | P0 | fatto | test_ann02_author_subject_dates, test_ann02_non_latin_author_utf16, test_ann02_empty_author_restores_account_name, test_ann02_tolerant_dates | Autore predefinito = nome completo dell'account; conferma al primo uso (messaggio); «Nome autore…» nel menu Commenti. Nome da `ctx.author_name()` del nucleo; la vecchia chiave `annotations/author` viene migrata (test_ann02_legacy_author_migrated). |
 | ANN-03 | P0 | fatto | test_ann03_* (11), test_ann20_drag_vertex | Selezione (clic, Maiusc/Ctrl, rettangolo), spostamento (trascinamento, frecce 1/10 pt), maniglie, vertici, primo piano/sfondo, Canc, bloccate, rotazione di timbri, rettangoli, ellissi e caselle di testo (test_ann03_rotate_shapes_and_textbox), allinea/distribuisci, mini-barra (test_ann03_minibar). |
 | ANN-04 | P0 | fatto | test_ann04_* (5) | Pannello proprietà: colore, riempimento/nessuno, opacità, spessore 0–12 a passi 0,25, tratteggio, nuvola, estremità, testo (dimensione, colore, allineamento), icona note; un passo di annullamento per selezione multipla. Colori recenti/esadecimale libero tramite «Altro colore…». |
 | ANN-05 | P0 | fatto | test_ann05_comment_on_highlight_has_popup, test_ann05_rich_text_bold, test_ann05_long_comment_preserved, test_ann05_popup_left_open_is_saved | /Contents, /Popup collegata, /RC (grassetto, corsivo, sottolineato, colore), suggerimento al passaggio. Doppio clic apre l'editor del commento (intestazione autore/data); «Apri/chiudi finestra del commento» mostra la popup sulla pagina e salva /Open. La popup sulla pagina non si trascina né si ridimensiona. |
@@ -20,7 +20,7 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-07 | P1 | fatto | test_ann07_* (6) | Ctrl+C/X/V/D; taglia+incolla con risposte e stati; incolla in un altro documento aperto con aspetto e risorse (test_ann07_paste_into_other_document); testo e immagini dagli appunti di sistema. |
 | ANN-08 | P1 | fatto | test_ann08_default_style_survives_restart, test_ann08_keep_tool_three_rects, test_styles_corrupted_profile_falls_back | Stile per strumento persistente, «Imposta come predefinito», preferiti con nome (pannello proprietà), esporta/importa stili (JSON con versione), «Mantieni strumento». |
 | ANN-09 | P1 | fatto | test_ann09_flags, test_ann09_locked_contents, test_ann03_locked_not_moved_or_deleted | Bloccata, Contenuto bloccato, Sola lettura, Stampa; Print attivo sui nuovi, NoZoom/NoRotate su note e allegati. |
-| ANN-10 | P0 | parziale | test_ann10_* (5) | Trascinamento o selezione + comando/menu contestuale; quadrilateri per riga; fusione moltiplicativa; pagina senza testo → area con avviso OCR. Selezione su più pagine non disponibile (CORE_REQUESTS 3). |
+| ANN-10 | P0 | fatto | test_ann10_* (6) | Trascinamento o selezione + comando/menu contestuale; quadrilateri per riga; fusione moltiplicativa; pagina senza testo → area con avviso OCR. Selezione su più pagine (`view.text_selections`): un'annotazione per pagina in un solo passo annullabile. |
 | ANN-11 | P1 | fatto | test_ann11_area_highlight, test_ann10_image_page_area_highlight | Strumento «Evidenzia area» o Alt+trascinamento; /Rect = quadrilatero, ridimensionabile. |
 | ANN-12 | P0 | fatto | test_ann12_three_markups_same_quads, test_ann12_line_positions | Stessa selezione per sottolineato/barrato/ondulato (multipagina: vedi ANN-10). |
 | ANN-13 | P1 | fatto | test_ann13_insert_and_replace | Inserisci testo/paragrafo (/Caret /Sy), Sostituisci (barrato /IRT /RT /Group); voce unica «Sostituzione»; eliminazione di gruppo. |
@@ -45,11 +45,11 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-32 | P1 | fatto | test_ann32_area_measure_tool, test_area_measure, test_perimeter_measure | |
 | ANN-33 | P2 | parziale | test_ann33_measures_csv | Solo esportazione CSV delle misure. |
 | ANN-34 | P0 | fatto | test_ann34_* (4) | Gruppi per pagina, autore/data, testo marcato, stato, risposte, spunta, menu contestuale, doppio clic, contatore. |
-| ANN-35 | P1 | fatto | test_ann35_* (5) | Tipo, autore, colore, stato, spunta, risposte, pagine, data di modifica, ricerca senza maiuscole/accenti, «n di N», «Applica il filtro alla pagina» (solo nella vista, /F invariati). |
+| ANN-35 | P1 | fatto | test_ann35_* (5) | Tipo, autore, colore, stato, spunta, risposte, pagine, data di modifica, ricerca senza maiuscole/accenti, «n di N», «Applica il filtro alla pagina» (solo nella vista, /F invariati; `view.set_annotation_filter` del nucleo, valido anche a tasselle). |
 | ANN-36 | P1 | fatto | test_ann36_sort_by_date_desc | Pagina, data ±, autore, tipo, stato con gruppi. |
 | ANN-37 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_reply_structure_after_save, test_cyclic_irt_chain_lists_all, test_delete_root_removes_replies | |
 | ANN-38 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_status_* , test_marked_on_then_off | «Cronologia degli stati…» nel menu (test_ann38_history_menu). |
-| ANN-39 | P1 | fatto | test_ann39_hide_annotations | Soluzione locale (CORE_REQUESTS 2). |
+| ANN-39 | P1 | fatto | test_ann39_hide_annotations | `view.show_annotations` del nucleo. |
 | ANN-40 | P1 | fatto | test_ann40_flatten_from_ui, test_ann40_flatten_selection, test_flatten_* | Tutto il documento, pagina corrente o selezione; non stampabili esclusi; annullabile. Manca l'ambito «annotazioni filtrate». |
 | ANN-41 | P1 | fatto | test_ann41_42_export_import_ui, test_export_xfdf_*, test_export_fdf | XFDF (con aspetto dei timbri) e FDF. |
 | ANN-42 | P1 | fatto | test_ann41_42_export_import_ui, test_ann42_import_from_pdf_and_malformed, test_xfdf_* | XFDF, FDF, PDF; duplicati saltati; un passo di annullamento. |
