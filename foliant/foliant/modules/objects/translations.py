@@ -425,4 +425,7 @@ EN = {
     "Metodo di distribuzione": "Distribution method",
     "Spaziatura uguale": "Equal spacing",
     "Centri equidistanti": "Equidistant centers",
+    "Nuova dalla vista corrente…": "New from current view…",
+    "Nome della nuova destinazione:": "Name of the new destination:",
+    "Il nome della destinazione è già usato: scegline un altro.": "The destination name is already used: choose another one.",
 }

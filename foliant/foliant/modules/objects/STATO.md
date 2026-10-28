@@ -43,7 +43,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-33 Creare collegamento | P0 | fatto | ui: test_link_tool_creates_link, test_link_tool_cancel_dialog_no_change; lnk; geo | Elementi di struttura /Link non creati. |
 | OBJ-34 Collegamento dal testo | P1 | fatto | ui: test_create_link_from_text_selection; ui2: test_link_from_multiline_multipage_selection; lnk | Un quadrilatero per riga; selezione su più pagine (`view.text_selections`) → un collegamento per pagina con la stessa destinazione, un solo passo annullabile. |
 | OBJ-35 Destinazione web/e-mail | P0 | fatto | lnk (normalizzazione, punycode, javascript rifiutato, mailto) | |
-| OBJ-36 Pagina interna / con nome | P0 | fatto | ui: test_link_double_click_edits_to_page; lnk | Creazione di nuove destinazioni con nome non fatta. |
+| OBJ-36 Pagina interna / con nome | P0 | fatto | ui: test_link_double_click_edits_to_page; ui2: test_link_dialog_new_named_destination_from_view; lnk: test_named_destination_created_and_followed, test_named_destination_appended_to_names_tree | Pagina con tipo di vista, «Imposta dalla vista», destinazioni con nome esistenti o nuove dalla vista corrente (nome già usato rifiutato); i collegamenti con nome seguono le ridefinizioni. |
 | OBJ-37 File esterno | P1 | fatto | lnk; ui2: test_decide_rules | GoToR con percorso relativo; /Launch mai eseguito. |
 | OBJ-38 Modificare collegamenti | P0 | fatto | ui: test_link_tool_select_move_delete_undo; lnk (JavaScript intatto, QuadPoints traslati) | |
 | OBJ-39 Eliminare collegamenti | P0 | fatto | ui: test_delete_links_dialog; lnk | |

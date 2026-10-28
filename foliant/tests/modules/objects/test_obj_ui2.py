@@ -613,3 +613,20 @@ def test_distribute_centers_method(ui, tmp_path):
         assert max(gaps) - min(gaps) < 0.1
     finally:
         O._state["actions"]["dist_spacing"].trigger()
+
+
+def test_link_dialog_new_named_destination_from_view(ui, tmp_path, monkeypatch):
+    from foliant.modules.objects import dialogs as D
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[], pages=3))
+    view.go_to_page(2)
+    monkeypatch.setattr(D, "ask_text", lambda *a: "listino")
+    dlg = D.LinkDialog(None, view, 0, None)
+    dlg.kind.setCurrentIndex(dlg.kind.findData(L.NAMED))
+    dlg._new_named()
+    target, style, desc = dlg.values()
+    assert target.kind == L.NAMED and target.name == "listino" and target.new_dest[0] == 2
+    xref = ui.c.run_change(view, "Crea collegamento", L.create_link, 0, pymupdf.Rect(50, 300, 150, 320),
+                           target, style, desc, None, kind="annotation")
+    assert xref
+    with O.ENGINE_LOCK:
+        assert L.named_destinations(view.document.pdf)["listino"]["page"] == 2

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 import pymupdf
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
@@ -100,6 +100,11 @@ def ask_replace_options(parent, occurrences: int):
     return dlg.values()
 
 
+def ask_text(parent, title: str, label: str) -> str | None:
+    text, ok = QInputDialog.getText(parent, title, label)
+    return text.strip() if ok and text.strip() else None
+
+
 def ask_page(parent, title: str, count: int, current: int) -> int | None:
     n, ok = QInputDialog.getInt(parent, title, _("Numero di pagina (1–{n}):").format(n=count),
                                 current + 1, 1, max(1, count))
@@ -190,7 +195,11 @@ class LinkDialog(QDialog):
                 names = []
         self.named.addItems(names)
         self.named.setCurrentText(t.name if t.kind == L.NAMED else "")
+        self.new_dest = None
         ln.addWidget(self.named)
+        new_named = QPushButton(_("Nuova dalla vista corrente…"))
+        new_named.clicked.connect(self._new_named)
+        ln.addWidget(new_named)
         self.stack.addWidget(w_named)
         # file
         w_file = QWidget()
@@ -273,6 +282,26 @@ class LinkDialog(QDialog):
         self.stack.setCurrentIndex(min(idx, self.stack.count() - 1))
         self.validate()
 
+    def _new_named(self) -> None:
+        """Nuova destinazione con nome: pagina, posizione e zoom della vista corrente."""
+        v = self.view
+        if v is None:
+            return
+        name = ask_text(self, _("Destinazione con nome"), _("Nome della nuova destinazione:"))
+        if not name:
+            return
+        with ENGINE_LOCK:
+            used = name in L.named_destinations(v.document.pdf)
+        if used:
+            self.error.setText(_("Il nome della destinazione è già usato: scegline un altro."))
+            return
+        page = v.current_page
+        hit = v.view_to_page(QPointF(0, 0), clamp=True)
+        top = hit[1].y if hit is not None and hit[0] == page else None
+        self.new_dest = (page, top, v.zoom)
+        self.named.setCurrentText(name)
+        self.validate()
+
     def _browse(self) -> None:
         path, _f = QFileDialog.getOpenFileName(self, _("Scegli il file"), os.path.dirname(self.doc_path or ""))
         if path:
@@ -308,7 +337,8 @@ class LinkDialog(QDialog):
             return L.LinkTarget(kind=L.PAGE, page=n, fit=fit, top=self.top.value() if fit in ("XYZ", "FitH") else None,
                                 zoom=(self.zoom.value() / 100.0) or None if fit == "XYZ" else None)
         if k == L.NAMED:
-            return L.LinkTarget(kind=L.NAMED, name=self.named.currentText().strip())
+            name = self.named.currentText().strip()
+            return L.LinkTarget(kind=L.NAMED, name=name, new_dest=self.new_dest if self.new_dest else None)
         if k == L.FILE:
             path = self.file.text().strip()
             if path and self.relative.isChecked() and os.path.isabs(path):
