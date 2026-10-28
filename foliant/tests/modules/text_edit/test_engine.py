@@ -822,3 +822,24 @@ def test_table_rows_not_merged_with_paragraph(tmp_path):
         assert "9.960,00" in d.pdf[0].get_text()
     for word, r in before.items():
         assert word in after and abs(after[word][0] - r[0]) < 0.2 and abs(after[word][1] - r[1]) < 0.2
+
+
+def test_shared_form_xobject_only_this_page(tmp_path):
+    """TXT-20: testo in un Form XObject usato da più pagine: cambia solo la pagina modificata."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Testo condiviso 2024", fontsize=14)
+    doc = pymupdf.open()
+    for _i in range(4):
+        p = doc.new_page()
+        p.show_pdf_page(p.rect, src, 0)
+    d = Document.open(save(doc, tmp_path / "xobj.pdf"))
+    with d.lock:
+        block = blocks_of(d.pdf, 1)[0]
+        before = [pixels(d.pdf[i], dpi=50) for i in range(4)]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 1, block, replace_text(block, "2024", "2026"))
+    out = reopen(d, tmp_path)
+    assert "2026" in out[1].get_text() and "2024" not in out[1].get_text()
+    for i in (0, 2, 3):
+        assert "2024" in out[i].get_text()
+        assert pixels(out[i], dpi=50) == before[i]
