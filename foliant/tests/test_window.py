@@ -390,6 +390,198 @@ def test_save_warns_when_file_changed_on_disk(window, sample_pdf, monkeypatch):
     view.document._saved_state = view.document._state
 
 
+def test_save_failure_offers_save_as(window, sample_pdf, tmp_path, monkeypatch):
+    """NFR-08/2, NFR-15/3: disco pieno durante Ctrl+S → messaggio con causa, azione e i pulsanti
+    «Salva con nome…» e «Chiudi»; il documento resta modificato e «Salva con nome…» salva altrove."""
+    import errno
+    import os
+    import tempfile
+    view = window.open_path(sample_pdf)
+    doc = view.document
+    with doc.change("Ruota") as pdf:
+        pdf[0].set_rotation(90)
+    original = open(sample_pdf, "rb").read()
+    failing = {"fsync": True, "mkstemp": False}
+    real_fsync, real_mkstemp = os.fsync, tempfile.mkstemp
+
+    def fsync(fd):
+        if failing["fsync"]:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        return real_fsync(fd)
+
+    def mkstemp(*a, **k):
+        if failing["mkstemp"]:
+            raise OSError(errno.EACCES, os.strerror(errno.EACCES))
+        return real_mkstemp(*a, **k)
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
+    boxes = []
+
+    def answer(label):
+        def fake_exec(box):
+            boxes.append((box.windowTitle(), box.text(), [b.text() for b in box.buttons()]))
+            failing.update(fsync=False, mkstemp=False)            # l'altra posizione è scrivibile
+            next(b for b in box.buttons() if b.text() == label).click()
+            return 0
+        return fake_exec
+    monkeypatch.setattr(QMessageBox, "exec", answer("Chiudi"))
+    assert not window.save_view(view)
+    title, text, buttons = boxes[0]
+    assert title == "Salvataggio non riuscito" and buttons == ["Salva con nome…", "Chiudi"]
+    assert "«esempio.pdf»" in text and "spazio su disco insufficiente" in text and "Libera spazio" in text
+    assert doc.is_modified and open(sample_pdf, "rb").read() == original
+    assert sorted(os.listdir(tmp_path)) == ["esempio.pdf"]          # nessun file temporaneo
+
+    failing["mkstemp"] = True                                       # cartella in sola lettura
+    other = str(tmp_path / "altrove.pdf")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: other)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Salva con nome…"))
+    assert window.save_view(view)
+    assert "non è scrivibile" in boxes[1][1]
+    assert str(doc.path) == other and not doc.is_modified
+    assert pymupdf.open(other)[0].rotation == 90 and open(sample_pdf, "rb").read() == original
+
+    failing["fsync"] = True                                         # «Salva una copia»: altra posizione
+    copy = str(tmp_path / "copia.pdf")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: copy)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Scegli un'altra posizione…"))
+    assert window.save_copy(view)
+    assert boxes[2][2] == ["Scegli un'altra posizione…", "Chiudi"] and os.path.exists(copy)
+
+
+def test_save_of_deleted_or_moved_file_asks_where(window, sample_pdf, tmp_path, monkeypatch):
+    """NFR-12/4: salvando un file eliminato o spostato dopo l'apertura Foliant lo segnala e
+    propone di ricrearlo nella posizione originale o di sceglierne un'altra; `recreate=True`
+    (barra di avviso) lo ricrea senza chiedere, anche se manca la cartella."""
+    import os
+    view = window.open_path(sample_pdf)
+    doc = view.document
+
+    def modify_and_remove():
+        with doc.change("Ruota") as pdf:
+            pdf[0].set_rotation((pdf[0].rotation + 90) % 360)
+        if os.path.exists(sample_pdf):
+            os.remove(sample_pdf)
+    boxes = []
+
+    def answer(label):
+        def fake_exec(box):
+            boxes.append((box.text(), [b.text() for b in box.buttons()]))
+            next(b for b in box.buttons() if b.text() == label).click()
+            return 0
+        return fake_exec
+    modify_and_remove()
+    monkeypatch.setattr(QMessageBox, "exec", answer("Annulla"))
+    assert not window.save_view(view)
+    text, buttons = boxes[0]
+    assert "«esempio.pdf» è stato eliminato o spostato dopo l'apertura" in text
+    assert buttons == ["Ricrea nella posizione originale", "Salva con nome…", "Annulla"]
+    assert not os.path.exists(sample_pdf) and doc.is_modified
+
+    monkeypatch.setattr(QMessageBox, "exec", answer("Ricrea nella posizione originale"))
+    assert window.save_view(view)
+    assert os.path.exists(sample_pdf) and not doc.is_modified and len(boxes) == 2
+
+    modify_and_remove()
+    other = str(tmp_path / "archiviato.pdf")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: other)
+    monkeypatch.setattr(QMessageBox, "exec", answer("Salva con nome…"))
+    assert window.save_view(view)
+    assert str(doc.path) == other and not os.path.exists(sample_pdf) and len(boxes) == 3
+
+    moved = tmp_path / "sub" / "spostato.pdf"
+    doc.path = moved                                                  # la cartella non esiste più
+    modify_and_remove()
+    assert window.save_view(view, recreate=True)                      # nessuna domanda
+    assert len(boxes) == 3 and moved.exists() and not doc.is_modified
+
+
+def _core_holders(obj) -> list[str]:
+    """Oggetti del nucleo (foliant.ui, foliant.core) che trattengono `obj`, anche tramite il loro
+    __dict__ o una lista/tupla/cella/funzione intermedia."""
+    import gc
+    import types
+    found, seen = [], set()
+
+    def walk(target, depth):
+        for ref in gc.get_referrers(target):
+            if id(ref) in seen or isinstance(ref, types.FrameType):
+                continue
+            seen.add(id(ref))
+            if isinstance(ref, dict) and "__builtins__" in ref:          # variabili globali di un modulo
+                continue
+            holder = ref if isinstance(ref, types.FunctionType) else type(ref)     # chiusure: modulo della funzione
+            if (holder.__module__ or "").startswith(("foliant.ui", "foliant.core")):
+                found.append(holder.__qualname__)
+            elif depth < 3 and isinstance(ref, (dict, list, tuple, set, types.CellType, types.MethodType)):
+                walk(ref, depth + 1)
+    walk(obj, 0)
+    return found
+
+
+def _flush_closed_tabs(qtbot):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qtbot.wait(20)
+
+
+def test_closed_tab_returns_memory_and_releases_view(qtbot, settings, sample_pdf, monkeypatch):
+    """NFR-06: chiusa una scheda, dopo la distruzione effettiva la memoria liberata torna al sistema
+    (malloc_trim su Linux/glibc) e nessun oggetto del nucleo trattiene la vista: vista e documento
+    vengono raccolti anche se qualcuno tiene ancora il contenitore della scheda con i suoi avvisi."""
+    import ctypes
+    import gc
+    import os
+    import sys
+    import weakref
+
+    from foliant.ui.main_window import MainWindow, release_memory
+    calls = []
+
+    class FakeLibc:
+        def malloc_trim(self, pad):
+            calls.append(pad)
+            return 1
+    real_cdll = ctypes.CDLL
+    monkeypatch.setattr(ctypes, "CDLL", lambda name, *a, **k: FakeLibc() if "libc" in str(name)
+                        else real_cdll(name, *a, **k))
+    win = MainWindow(settings, load_modules=False)
+    qtbot.addWidget(win)
+    win.show()
+    view = win.open_path(sample_pdf)
+    doc = weakref.ref(view.document)
+    page = win.tabs.page(view)                    # es. un modulo che trattiene il contenitore
+    win.ctx.show_banner(view, "prova", "Avviso", [("Vai", lambda v=view: v.go_to_page(1))])
+    ref = weakref.ref(view)
+    assert win.close_view(view)
+    del view
+    assert calls == []                            # differito: dopo la distruzione effettiva
+    _flush_closed_tabs(qtbot)
+    glibc = sys.platform.startswith("linux") and (os.confstr("CS_GNU_LIBC_VERSION") or "").startswith("glibc")
+    assert calls == ([0] if glibc else [])
+    assert release_memory() is glibc
+    gc.collect()
+    alive = ref()
+    assert alive is None and doc() is None, _core_holders(alive)
+    assert page.view is None and page.banners.banner("prova") is None
+
+
+def test_closed_tab_view_not_held_by_core_with_modules(window, sample_pdf, qtbot):
+    """Con tutti i moduli caricati: se la vista chiusa resta viva, non è per oggetti del nucleo."""
+    import gc
+    import weakref
+    view = window.open_path(sample_pdf)
+    ref = weakref.ref(view)
+    assert window.close_view(view)
+    del view
+    _flush_closed_tabs(qtbot)
+    gc.collect()
+    alive = ref()
+    if alive is not None:
+        assert _core_holders(alive) == []
+
+
 def test_shortcuts_dialog_lists_all_modes_in_italian(window):
     from foliant.ui.dialogs import ShortcutsDialog, collect_shortcuts
     m = window.ctx.add_mode("prova_sc", "Prova scorciatoie", "star", 996)
@@ -544,3 +736,97 @@ def test_damaged_page_tree_is_reported_and_next_files_open(window, tmp_path, mon
         window.open_path(str(p))
     assert warnings_seen and warnings_seen[0][0] == "Impossibile aprire il file" and "rotto.pdf" in warnings_seen[0][1]
     assert [v.document.display_name for v in window.views()] == ["buono.pdf"]
+
+
+def test_ctrl_n_opens_a_new_window_on_home(window, sample_pdf, qtbot):
+    """UX-18 (Ctrl+N = Nuova finestra) e UX-02 («Nuova finestra» in testa al menu ☰): la nuova
+    finestra mostra la Home con le stesse impostazioni; «Nuovo documento» non ha scorciatoia."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.ui.main_window import MainWindow, app_windows
+    view = window.open_path(sample_pdf)
+    window.activateWindow()
+    view.setFocus()
+    before = set(app_windows())
+    qtbot.keyClick(view, Qt.Key.Key_N, Qt.KeyboardModifier.ControlModifier)
+    new = [w for w in app_windows() if w not in before]
+    try:
+        assert len(new) == 1 and isinstance(new[0], MainWindow)
+        other = new[0]
+        assert other.isVisible() and other is not window
+        assert other.settings is window.settings
+        assert other.current_view() is None and other.docs_stack.currentWidget() is other.home
+        assert window.tabs.count() == 1                 # nessun «Nuovo documento» nella prima finestra
+        assert window.act_new.shortcut().isEmpty()
+        window._rebuild_menu()
+        assert window.main_menu.actions()[0] is window.act_new_window
+        assert window.act_new_window.shortcut().toString() == "Ctrl+N"
+    finally:
+        window.close_view(view)
+        for w in new:
+            w.close()                                   # chiusa, la finestra viene distrutta e tolta dall'elenco
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not set(new) & set(app_windows())
+
+
+def test_shift_f10_and_menu_key_open_the_context_menu(window, sample_pdf, qtbot, monkeypatch):
+    """UX-18 / UX-07: Maiusc+F10 e il tasto Menu aprono il menu contestuale del widget con il
+    fuoco (evento da tastiera); nell'area documento al centro della selezione."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QListWidget
+
+    view = window.open_path(sample_pdf)
+    window.activateWindow()
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    assert view.selected_text()
+    shown = []
+    monkeypatch.setattr(view, "exec_menu", lambda menu, pos: shown.append(
+        ([a.text() for a in menu.actions()], view.viewport().mapFromGlobal(pos))))
+    qtbot.keyClick(view, Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
+    assert len(shown) == 1 and "Copia" in shown[0][0]
+    sel = view.text_selection
+    area = view.page_to_view(sel.page, sel.rects[0])
+    for r in sel.rects[1:]:
+        area = area.united(view.page_to_view(sel.page, r))
+    assert (shown[0][1] - area.center().toPoint()).manhattanLength() <= 2
+    view.clear_text_selection()
+    qtbot.keyClick(view, Qt.Key.Key_Menu)
+    assert len(shown) == 2 and shown[1][1] == view.viewport().rect().center()
+
+    # un altro widget con il fuoco riceve il proprio menu (es. un elenco in un pannello)
+    panel = QListWidget(window)
+    panel.addItems(["uno", "due"])
+    panel.setCurrentRow(1)
+    panel.setGeometry(0, 0, 200, 200)
+    panel.show()
+    events = []
+    panel.contextMenuEvent = lambda ev: events.append((ev.reason(), QPoint(ev.pos())))
+    panel.setFocus()
+    qtbot.keyClick(panel, Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
+    assert events and events[0][0] == QContextMenuEvent.Reason.Keyboard
+    assert panel.visualItemRect(panel.item(1)).contains(events[0][1])
+    view.document._saved_state = view.document._state
+
+
+def test_quit_closes_every_window(settings, qtbot):
+    """«Esci» (Ctrl+Q) chiude tutte le finestre dell'applicazione, non solo quella attiva."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.ui.main_window import MainWindow, app_windows, register_window
+    first = register_window(MainWindow(settings, load_modules=False))
+    second = register_window(MainWindow(settings, load_modules=False))
+    first.show()
+    second.show()
+    try:
+        assert app_windows() == [first, second]
+        first.act_quit.trigger()
+        assert not first.isVisible() and not second.isVisible()
+    finally:
+        for w in app_windows():
+            w.close()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert app_windows() == []

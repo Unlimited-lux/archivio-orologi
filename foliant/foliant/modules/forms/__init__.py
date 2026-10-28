@@ -13,12 +13,11 @@ ORDER = 50
 _module = None
 
 
-def register(ctx) -> None:
-    global _module
+def register_translations() -> None:
+    """Traduzioni inglesi del modulo (catalogo proprio del modulo nel nucleo)."""
     from foliant.api import add_translations
 
     from .i18n_en import EN
-    from .module import FormsModule
 
     add_translations("en", EN)
     try:
@@ -32,6 +31,13 @@ def register(ctx) -> None:
             add_translations("en", mod.TRANSLATIONS)
         except Exception:
             pass
+
+
+def register(ctx) -> None:
+    global _module
+    from .module import FormsModule
+
+    register_translations()
     _module = FormsModule(ctx)
     _module.register()
 

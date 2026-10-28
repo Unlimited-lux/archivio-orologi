@@ -119,8 +119,37 @@ def _context_menus(fns, out: list) -> None:
         timer.stop()
 
 
-def _collect(win, pdf: str) -> list[tuple[str, str]]:
+def _roots(win, view) -> dict[str, QWidget]:
+    """Pannelli, barre e dialoghi del viewer, aperti."""
     from foliant.modules.viewer.presentation import OptionsDialog
+    ctx = win.ctx
+    parts = ctx.viewer_parts
+    for pid in ("thumbnails", "bookmarks", "search", "attachments", "layers", "articles"):
+        ctx.show_sidebar_panel(pid)
+    QApplication.processEvents()
+    roots: dict[str, QWidget] = {}
+    for pname, ctl in parts.items():               # pannelli e barre
+        if isinstance(ctl, QWidget):
+            roots[pname] = ctl
+        for attr in ("panel", "bar", "widget", "toolbar"):
+            w = getattr(ctl, attr, None)
+            if isinstance(w, QWidget):
+                roots[f"{pname}.{attr}"] = w
+    commands = parts["commands"]
+    commands.open_palette()
+    commands.open_shortcuts()
+    dialogs = {"ricerca avanzata": parts["advsearch"].open(), "preferenze": parts["prefs"].open_dialog(),
+               "palette": commands.palette, "scorciatoie": commands.dialog,
+               "proprietà": parts["properties"].show_dialog(),
+               "stampa": parts["printing"].options_dialog(view),
+               "presentazione": OptionsDialog(win, parts["presentation"].options())}
+    for name, d in dialogs.items():
+        assert d is not None, name
+        roots[name] = d
+    return roots
+
+
+def _collect(win, pdf: str) -> list[tuple[str, str]]:
     from foliant.ui.document_view import PageEvent
     ctx = win.ctx
     parts = ctx.viewer_parts
@@ -134,28 +163,10 @@ def _collect(win, pdf: str) -> list[tuple[str, str]]:
                 for k, v in val.items():
                     if isinstance(v, QAction):
                         _action(v, out, f"{pname}.{attr}[{k}]")
-    for pid in ("thumbnails", "bookmarks", "search", "attachments", "layers", "articles"):
-        ctx.show_sidebar_panel(pid)
-    QApplication.processEvents()
-    for pname, ctl in parts.items():               # pannelli e barre
-        if isinstance(ctl, QWidget):
-            _widget(ctl, out, pname)
-        for attr in ("panel", "bar", "widget", "toolbar"):
-            w = getattr(ctl, attr, None)
-            if isinstance(w, QWidget):
-                _widget(w, out, f"{pname}.{attr}")
-    commands = parts["commands"]
-    commands.open_palette()
-    commands.open_shortcuts()
-    dialogs = {"ricerca avanzata": parts["advsearch"].open(), "preferenze": parts["prefs"].open_dialog(),
-               "palette": commands.palette, "scorciatoie": commands.dialog,
-               "proprietà": parts["properties"].show_dialog(),
-               "stampa": parts["printing"].options_dialog(view),
-               "presentazione": OptionsDialog(win, parts["presentation"].options())}
-    for name, d in dialogs.items():
-        assert d is not None, name
-        _widget(d, out, name)
-        d.hide()
+    for name, root in _roots(win, view).items():
+        _widget(root, out, name)
+        if isinstance(root, QDialog):
+            root.hide()
     bm, att, layers = parts["bookmarks"].panel, parts["attachments"], parts["layers"]
     _context_menus([
         lambda: bm._context_menu(bm.tree.visualItemRect(bm.tree.topLevelItem(0)).center()),
@@ -295,3 +306,21 @@ def test_no_key_registered_twice_with_different_values(qtbot, tmp_path, monkeypa
     british = {k[1]: list(v) for k, v in registered.items()
                if any(re.search(r"colour|behaviour|centre|favourite|licence|organis", t, re.I) for t in v)}
     assert not british, f"inglese britannico: {british}"
+
+
+def test_icon_only_buttons_have_tooltip_and_accessible_name(window, tmp_path):
+    """NFR-22: ogni pulsante a sola icona di pannelli, barre e dialoghi del viewer ha un
+    suggerimento e un nome accessibile (es. «⋮» del pannello Livelli: «Altre azioni»)."""
+    view = window.open_path(_pdf(tmp_path / "prova.pdf"))
+    missing = []
+    for name, root in _roots(window, view).items():
+        for b in [root] + root.findChildren(QAbstractButton):
+            if not isinstance(b, QAbstractButton) or b.text().strip() or (b is not root and not b.isVisibleTo(root)):
+                continue
+            if b.icon().isNull() or not b.toolTip().strip() or not b.accessibleName().strip():
+                missing.append(f"{name}: {type(b).__name__} tip={b.toolTip()!r} acc={b.accessibleName()!r}")
+        if isinstance(root, QDialog):
+            root.hide()
+    for v in window.views():
+        v.document._saved_state = v.document._state
+    assert not missing, "\n".join(missing)

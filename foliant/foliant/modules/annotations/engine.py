@@ -161,13 +161,33 @@ def parse_pdf_date(value: str | None) -> datetime | None:
     return dt
 
 
+def _english() -> bool:
+    try:
+        from foliant import i18n
+        return i18n.language() == "en"
+    except Exception:  # pragma: no cover - motore usato senza l'applicazione
+        return False
+
+
+def local_date(when: datetime) -> str:
+    """Data nella lingua dell'interfaccia (anno a 4 cifre): 28/10/2026 o 10/28/2026 (NFR-26)."""
+    return when.strftime("%m/%d/%Y" if _english() else "%d/%m/%Y")
+
+
+def local_time(when: datetime) -> str:
+    """Ora nella lingua dell'interfaccia: 14:05 o 2:05 PM."""
+    if _english():
+        return f"{when.hour % 12 or 12}:{when.minute:02d} {'AM' if when.hour < 12 else 'PM'}"
+    return when.strftime("%H:%M")
+
+
 def format_date(value: str | None) -> str:
     dt = parse_pdf_date(value)
     if dt is None:
         return ""
     if dt.tzinfo is not None:
         dt = dt.astimezone()
-    return dt.strftime("%d/%m/%Y %H:%M")
+    return f"{local_date(dt)} {local_time(dt)}"
 
 
 # ----------------------------------------------------------------- stile
@@ -246,6 +266,16 @@ def iter_annots(page: pymupdf.Page, types: Sequence[int] | None = None) -> Itera
         current, annot = annot, annot.next
         if types is None or current.type[0] in types:
             yield current
+
+
+def _silent(pdf: pymupdf.Document, annot: pymupdf.Annot) -> bool:
+    """Annotazione che non si vede né si seleziona: nascosta, oppure risposta o stato (/IRT senza
+    /RT /Group). Nei PDF/A le risposte non possono essere nascoste (ANN-01): hanno un aspetto vuoto."""
+    if annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+        return True
+    if not annot.irt_xref:
+        return False
+    return pdf.xref_get_key(annot.xref, "RT")[1] != "/Group"
 
 
 def find_annot(page: pymupdf.Page, xref: int) -> pymupdf.Annot | None:
@@ -1250,11 +1280,14 @@ DYNAMIC_STAMPS = [
 
 
 def fill_template(template: str, *, author: str = "", when: datetime | None = None, filename: str = "",
-                  page: int | None = None, date_format: str = "%d/%m/%Y", counter: int | None = None) -> str:
+                  page: int | None = None, date_format: str | None = None, counter: int | None = None) -> str:
+    """Compila un modello di timbro dinamico; data e ora nel formato della lingua dell'interfaccia,
+    salvo un `date_format` esplicito (strftime)."""
     when = when or datetime.now()
-    values = {"{autore}": author or "", "{nome}": author or "", "{data}": when.strftime(date_format),
+    date = when.strftime(date_format) if date_format else local_date(when)
+    values = {"{autore}": author or "", "{nome}": author or "", "{data}": date,
               "{contatore}": f"{counter:03d}" if counter is not None else "{contatore}",
-              "{ora}": when.strftime("%H:%M"), "{file}": filename,
+              "{ora}": local_time(when), "{file}": filename,
               "{pagina}": str(page + 1) if page is not None else ""}
     if counter is None:         # senza contatore il segnaposto resta, con il nome della lingua del modello
         values.pop("{contatore}")
@@ -1665,6 +1698,211 @@ def pdfa_part(pdf: pymupdf.Document) -> str:
     return (m.group(1) or m.group(2)) if m else ""
 
 
+# ------------------------------------------------------------------ PDF/A e PDF taggati (ANN-01)
+_FORBIDDEN_FLAGS = (pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_INVISIBLE | pymupdf.PDF_ANNOT_IS_NO_VIEW
+                    | pymupdf.PDF_ANNOT_IS_TOGGLE_NO_VIEW)
+
+
+def is_tagged(pdf: pymupdf.Document) -> bool:
+    return pdf.xref_get_key(pdf.pdf_catalog(), "StructTreeRoot")[0] == "xref"
+
+
+@dataclass
+class ConformResult:
+    opacity_forced: int = 0      # annotazioni portate a opacità 1 (PDF/A-1)
+    tagged: int = 0              # annotazioni inserite nella struttura logica
+
+
+def conform(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> ConformResult:
+    """Adegua le annotazioni di commento ai vincoli del documento (ANN-01).
+
+    PDF/A dichiarato: flag Print, nessun flag Hidden/Invisible/NoView/ToggleNoView, /AP con la sola
+    voce /N (le risposte e gli stati, che non si possono nascondere, ricevono un aspetto vuoto),
+    opacità 1 per PDF/A-1. Documento taggato: ogni annotazione non ancora nella struttura logica
+    diventa un elemento /Annot con testo alternativo e la pagina riceve /Tabs /S."""
+    res = ConformResult()
+    part = pdfa_part(pdf)
+    tagged = is_tagged(pdf)
+    if not part and not tagged:
+        return res
+    if tagged:
+        _prune_structure(pdf)
+    for page_no in (range(pdf.page_count) if pages is None else pages):
+        page = pdf[page_no]
+        items = [(x, t) for x, t, _n in page.annot_xrefs() if t not in (pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK)]
+        if not items:
+            continue
+        for x, t in items:
+            if part:
+                _conform_pdfa(pdf, page, x, t, part, res)
+            if tagged and t != pymupdf.PDF_ANNOT_POPUP:
+                if _add_to_structure(pdf, page, x):
+                    res.tagged += 1
+        if tagged and pdf.xref_get_key(page.xref, "Tabs")[1] != "/S":
+            pdf.xref_set_key(page.xref, "Tabs", "/S")
+    return res
+
+
+def _conform_pdfa(pdf, page, xref: int, t: int, part: str, res: ConformResult) -> None:
+    k, v = pdf.xref_get_key(xref, "F")
+    flags = int(v) if k == "int" else 0
+    hidden = bool(flags & pymupdf.PDF_ANNOT_IS_HIDDEN)
+    new = (flags | pymupdf.PDF_ANNOT_IS_PRINT) & ~_FORBIDDEN_FLAGS
+    if new != flags:
+        pdf.xref_set_key(xref, "F", str(new))
+    if t == pymupdf.PDF_ANNOT_POPUP:
+        return
+    if part == "1":
+        k, v = pdf.xref_get_key(xref, "CA")
+        try:
+            if k in ("float", "int") and float(v) < 1:
+                pdf.xref_set_key(xref, "CA", "1")
+                res.opacity_forced += 1
+        except ValueError:
+            pass
+    if hidden or (pdf.xref_get_key(xref, "IRT")[0] == "xref" and pdf.xref_get_key(xref, "RT")[1] != "/Group"):
+        # risposta, stato o annotazione nascosta: resta invisibile con un aspetto vuoto
+        empty = pdf.get_new_xref()
+        pdf.update_object(empty, "<</Type/XObject/Subtype/Form/BBox[0 0 0 0]/Resources<<>>/Length 0>>")
+        pdf.update_stream(empty, b"")
+        pdf.xref_set_key(xref, "AP", f"<</N {empty} 0 R>>")
+        return
+    ap_kind, _ap = pdf.xref_get_key(xref, "AP")
+    if ap_kind == "null":
+        return
+    for key in ("D", "R"):
+        if pdf.xref_get_key(xref, f"AP/{key}")[0] != "null":
+            pdf.xref_set_key(xref, f"AP/{key}", "null")
+    if pdf.xref_get_key(xref, "AP/N")[0] == "dict":    # aspetti per stato: solo /N con uno stream
+        k_as, v_as = pdf.xref_get_key(xref, "AS")
+        k_n, v_n = pdf.xref_get_key(xref, "AP/N/" + v_as.lstrip("/")) if k_as == "name" else ("null", "")
+        if k_n == "xref":
+            pdf.xref_set_key(xref, "AP/N", v_n)
+
+
+def _alt_text(pdf, xref: int) -> str:
+    for key in ("Contents", "Subj"):
+        k, v = pdf.xref_get_key(xref, key)
+        if k == "string" and v.strip():
+            return v.strip()
+    k, v = pdf.xref_get_key(xref, "Subtype")
+    sub = v.lstrip("/") if k == "name" else ""
+    return _(TYPE_LABELS.get(sub, sub)) or _("Annotazione")
+
+
+def _add_to_structure(pdf, page, xref: int) -> bool:
+    """Inserisce l'annotazione nella struttura logica come elemento /Annot (se non c'è già)."""
+    if pdf.xref_get_key(xref, "StructParent")[0] == "int":
+        return False
+    root = int(pdf.xref_get_key(pdf.pdf_catalog(), "StructTreeRoot")[1].split()[0])
+    # genitore: l'elemento /Document se è l'unico figlio della radice, altrimenti la radice
+    parent = root
+    k, v = pdf.xref_get_key(root, "K")
+    if k == "xref":
+        kid = int(v.split()[0])
+        if pdf.xref_get_key(kid, "S")[1] == "/Document":
+            parent = kid
+    k, v = pdf.xref_get_key(root, "ParentTreeNextKey")
+    key = int(v) if k == "int" else _next_parent_key(pdf, root)
+    elem = pdf.get_new_xref()
+    alt = _pdf_string(_alt_text(pdf, xref))
+    pdf.update_object(elem, f"<</Type/StructElem/S/Annot/P {parent} 0 R/Pg {page.xref} 0 R/Alt{alt}"
+                            f"/K<</Type/OBJR/Obj {xref} 0 R/Pg {page.xref} 0 R>>>>")
+    _append_kid(pdf, parent, elem)
+    pdf.xref_set_key(xref, "StructParent", str(key))
+    _parent_tree_add(pdf, root, key, elem)
+    pdf.xref_set_key(root, "ParentTreeNextKey", str(key + 1))
+    return True
+
+
+def _prune_structure(pdf) -> None:
+    """Toglie dalla struttura gli elementi /Annot di annotazioni eliminate."""
+    root = int(pdf.xref_get_key(pdf.pdf_catalog(), "StructTreeRoot")[1].split()[0])
+    k, v = pdf.xref_get_key(root, "ParentTree")
+    if k != "xref":
+        return
+    tree = int(v.split()[0])
+    k, nums = pdf.xref_get_key(tree, "Nums")
+    if k != "array":
+        return
+    changed = False
+    for key, elem in re.findall(r"(\d+)\s+(\d+)\s+0\s+R", nums):
+        elem = int(elem)
+        if pdf.xref_get_key(elem, "S")[1] != "/Annot":
+            continue
+        k_o, v_o = pdf.xref_get_key(elem, "K/Obj")
+        obj = int(v_o.split()[0]) if k_o == "xref" else 0
+        alive = obj and pdf.xref_get_key(obj, "Type")[1] == "/Annot" and _annot_on_page(pdf, elem, obj)
+        if alive:
+            continue
+        parent = pdf.xref_get_key(elem, "P")
+        if parent[0] == "xref":
+            pid = int(parent[1].split()[0])
+            k_k, v_k = pdf.xref_get_key(pid, "K")
+            if k_k == "array":
+                pdf.xref_set_key(pid, "K", re.sub(rf"(?<!\d){elem}\s+0\s+R", "", v_k))
+        nums = re.sub(rf"(?<!\d){key}\s+{elem}\s+0\s+R", "", nums)
+        changed = True
+    if changed:
+        pdf.xref_set_key(tree, "Nums", nums)
+
+
+def _annot_on_page(pdf, elem: int, obj: int) -> bool:
+    k, v = pdf.xref_get_key(elem, "K/Pg")
+    if k != "xref":
+        return True
+    k, v = pdf.xref_get_key(int(v.split()[0]), "Annots")
+    return k == "array" and re.search(rf"(?<!\d){obj}\s+0\s+R", v) is not None
+
+
+def _append_kid(pdf, parent: int, elem: int) -> None:
+    k, v = pdf.xref_get_key(parent, "K")
+    ref = f"{elem} 0 R"
+    if k == "array":
+        pdf.xref_set_key(parent, "K", v.rstrip()[:-1] + f" {ref}]")
+    elif k in ("xref", "int", "dict"):
+        pdf.xref_set_key(parent, "K", f"[{v} {ref}]")
+    else:
+        pdf.xref_set_key(parent, "K", f"[{ref}]")
+
+
+def _parent_tree_nums(pdf, node: int, out: list[int]) -> None:
+    k, v = pdf.xref_get_key(node, "Nums")
+    if k == "array":
+        out.extend(int(n) for n in re.findall(r"(?:^|[\[\s])(\d+)\s+(?=\d+\s+0\s+R|\[|<<)", v))
+    k, v = pdf.xref_get_key(node, "Kids")
+    if k == "array":
+        for kid in re.findall(r"(\d+)\s+0\s+R", v):
+            _parent_tree_nums(pdf, int(kid), out)
+
+
+def _next_parent_key(pdf, root: int) -> int:
+    k, v = pdf.xref_get_key(root, "ParentTree")
+    keys: list[int] = []
+    if k == "xref":
+        _parent_tree_nums(pdf, int(v.split()[0]), keys)
+    return max(keys) + 1 if keys else 0
+
+
+def _parent_tree_add(pdf, root: int, key: int, elem: int) -> None:
+    k, v = pdf.xref_get_key(root, "ParentTree")
+    if k != "xref":
+        tree = pdf.get_new_xref()
+        pdf.update_object(tree, f"<</Nums[{key} {elem} 0 R]>>")
+        pdf.xref_set_key(root, "ParentTree", f"{tree} 0 R")
+        return
+    tree = int(v.split()[0])
+    k, v = pdf.xref_get_key(tree, "Nums")
+    if k == "array":
+        pdf.xref_set_key(tree, "Nums", v.rstrip()[:-1] + f" {key} {elem} 0 R]")
+        return
+    # albero con /Kids: nuova foglia in coda (le chiavi nuove sono le più alte)
+    leaf = pdf.get_new_xref()
+    pdf.update_object(leaf, f"<</Limits[{key} {key}]/Nums[{key} {elem} 0 R]>>")
+    _append_kid(pdf, tree, leaf) if pdf.xref_get_key(tree, "Kids")[0] != "array" else \
+        pdf.xref_set_key(tree, "Kids", pdf.xref_get_key(tree, "Kids")[1].rstrip()[:-1] + f" {leaf} 0 R]")
+
+
 def attachment_data(pdf: pymupdf.Document, page_no: int, xref: int) -> tuple[str, bytes]:
     page = pdf[page_no]
     annot = get_annot(page, xref)
@@ -1977,7 +2215,7 @@ def annot_at(pdf: pymupdf.Document, page_no: int, point, tolerance: float = 4.0,
         if annot is None:
             continue
         t = annot.type[0]
-        if t in NON_COMMENT_TYPES or annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+        if t in NON_COMMENT_TYPES or _silent(pdf, annot):
             continue
         r = annot.rect
         if not (r + (-tolerance, -tolerance, tolerance, tolerance)).contains(p):
@@ -2256,7 +2494,7 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
             _fit_area_rect(pdf, page, xref)
     # sposta anche le risposte (stessa posizione del commento)
     for a in iter_annots(page):
-        if a.irt_xref == xref and a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+        if a.irt_xref == xref and _silent(pdf, a):
             try:
                 r = a.rect
                 a.set_rect(pymupdf.Rect(new_rect.x0, new_rect.y0, new_rect.x0 + r.width, new_rect.y0 + r.height))
@@ -2788,7 +3026,7 @@ def _flatten_selected(pdf: pymupdf.Document, selected: set[tuple[int, int]]) -> 
             chosen = {x for p, x in selected if p == page_no}
             keep = set()
             for a in iter_annots(tp):
-                if a.xref in chosen and a.flags & pymupdf.PDF_ANNOT_IS_PRINT and not a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+                if a.xref in chosen and a.flags & pymupdf.PDF_ANNOT_IS_PRINT and not _silent(tmp, a):
                     keep.add(a.xref)
             for x in [a.xref for a in iter_annots(tp) if a.xref not in keep
                       and a.type[0] not in (pymupdf.PDF_ANNOT_WIDGET,)]:
@@ -2820,7 +3058,7 @@ def _strip_hidden(pdf: pymupdf.Document, pages: Iterable[int]) -> None:
     for i in pages:
         page = pdf[i]
         for a in list(iter_annots(page)):
-            if a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN and a.type[0] not in NON_COMMENT_TYPES:
+            if a.type[0] not in NON_COMMENT_TYPES and _silent(pdf, a):
                 page.delete_annot(a)
 
 

@@ -133,6 +133,13 @@ class BannerBar(QFrame):
         self.changed.emit()
         return True
 
+    def clear(self) -> None:
+        """Toglie tutti gli avvisi senza notifiche (scheda chiusa): con loro anche le azioni,
+        che spesso trattengono la vista."""
+        self._banners.clear()
+        self._current = None
+        self._refresh()
+
     def banner(self, banner_id: str) -> Banner | None:
         return self._banners.get(banner_id)
 
@@ -275,8 +282,14 @@ class DocumentPage(QWidget):
         self.banners = BannerBar(self)
         lay.addWidget(self.banners)
         lay.addWidget(view, 1)
-        self.view = view
+        self.view: DocumentView | None = view
         self.setFocusProxy(view)
+
+    def release(self) -> None:
+        """Scheda chiusa: nessun riferimento alla vista né agli avvisi, così vista e documento
+        vengono raccolti anche se qualcuno trattiene ancora il contenitore (NFR-06)."""
+        self.view = None
+        self.banners.clear()
 
 
 class DocumentTabBar(QTabBar):

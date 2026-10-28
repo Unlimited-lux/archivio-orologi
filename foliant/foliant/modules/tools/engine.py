@@ -394,6 +394,9 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("background", "Sfondi", "bool", False),
             Param("header_footer", "Intestazioni, piè e numeri di pagina", "bool", False),
             Param("bates", "Numeri Bates", "bool", False),
+            Param("scope", "Ambito", "choice", "foliant",
+                  [("foliant", "Solo elementi aggiunti da Foliant"),
+                   ("marked", "Tutti gli elementi marcati come tali (anche da altri programmi)")]),
         ]),
         ActionSpec("insert_pages", "Inserisci pagine", "inserito", [
             Param("file", "PDF da inserire (vuoto = pagina bianca)", "path", ""),
@@ -895,7 +898,8 @@ def _open(data: bytes) -> pymupdf.Document:
 
 
 def _save(doc: pymupdf.Document, **opts) -> bytes:
-    kw = {"garbage": 3, "deflate": True}
+    # no_new_id: senza un nuovo /ID casuale lo stesso lavoro dà file identici byte per byte (BAT-04)
+    kw = {"garbage": 3, "deflate": True, "no_new_id": True}
     kw.update(opts)
     return doc.tobytes(**kw)
 
@@ -994,14 +998,103 @@ def _stamp_error(e: Exception) -> BatchError:
 
 
 def remove_marks(data: bytes, kinds: set[str] | list[str], check=None) -> tuple[bytes, int]:
+    out, counts = remove_marks_detailed(data, kinds)
+    return out, sum(counts.values())
+
+
+# sottotipi degli artefatti marcati secondo lo standard (BAT-16, ambito «tutti gli elementi marcati»)
+_ARTIFACT_SUBTYPES = {"watermark": ("Watermark",), "header_footer": ("Header", "Footer", "PageNum"),
+                      "bates": ("Bates",)}
+_BDC_RE = re.compile(rb"/Artifact\s*<<(.*?)>>\s*BDC", re.S)
+_MARK_TOKEN_RE = re.compile(rb"\b(BDC|BMC|EMC)\b")
+
+
+def _artifact_kind(props: bytes) -> str | None:
+    if re.search(rb"/Type\s*/Background", props):
+        return "background"
+    if not re.search(rb"/Type\s*/Pagination", props):
+        return None
+    m = re.search(rb"/Subtype\s*/(\w+)", props)
+    sub = m.group(1).decode() if m else ""
+    for kind, subs in _ARTIFACT_SUBTYPES.items():
+        if sub in subs:
+            return kind
+    return None
+
+
+def _strip_artifacts(stream: bytes, kinds: set[str]) -> tuple[bytes, dict[str, int]]:
+    """Toglie le sequenze /Artifact marcate dei tipi indicati (con le sequenze annidate)."""
+    counts: dict[str, int] = {}
+    out = bytearray()
+    pos = 0
+    while True:
+        m = _BDC_RE.search(stream, pos)
+        if m is None:
+            break
+        kind = _artifact_kind(m.group(1))
+        if kind is None or kind not in kinds or MARK_KEY.encode() in m.group(1):
+            out += stream[pos:m.end()]
+            pos = m.end()
+            continue
+        depth = 1
+        scan = m.end()
+        end = None
+        for t in _MARK_TOKEN_RE.finditer(stream, scan):
+            if t.group(1) in (b"BDC", b"BMC"):
+                depth += 1
+            else:
+                depth -= 1
+                if depth == 0:
+                    end = t.end()
+                    break
+        if end is None:   # sequenza non chiusa: non si tocca
+            out += stream[pos:m.end()]
+            pos = m.end()
+            continue
+        out += stream[pos:m.start()]
+        pos = end
+        counts[kind] = counts.get(kind, 0) + 1
+    out += stream[pos:]
+    return bytes(out), counts
+
+
+def remove_marks_detailed(data: bytes, kinds: set[str] | list[str], all_marked: bool = False
+                          ) -> tuple[bytes, dict[str, int]]:
+    """Rimuove filigrane, sfondi, intestazioni/piè e Bates; restituisce (dati, conteggio per tipo).
+
+    Predefinito: solo gli elementi aggiunti da Foliant (operazioni in blocco e modulo Pagine).
+    `all_marked`: anche quelli che altri programmi hanno marcato come artefatto secondo lo
+    standard e le annotazioni /Watermark. Il contenuto non marcato non viene mai toccato."""
     kinds = set(kinds)
+    counts: dict[str, int] = {}
+
+    def add(kind, n):
+        if n:
+            counts[kind] = counts.get(kind, 0) + n
+
     with ENGINE_LOCK:
         doc = _open(data)
         try:
-            n = _remove_stamps(doc, kinds)
+            for kind in kinds:
+                add(kind, _remove_stamps(doc, {kind}))
             for page in doc:
-                n += _remove_marks_page(doc, page, kinds)
-            return (_save(doc) if n else data), n
+                for kind in kinds:
+                    add(kind, _remove_marks_page(doc, page, {kind}))
+            if all_marked:
+                for page in doc:
+                    for xref in page.get_contents():
+                        stream = doc.xref_stream(xref) or b""
+                        cleaned, found = _strip_artifacts(stream, kinds)
+                        if found:
+                            doc.update_stream(xref, cleaned)
+                            for k, n in found.items():
+                                add(k, n)
+                    if "watermark" in kinds:
+                        for annot in list(page.annots() or []):
+                            if annot.type[1] == "Watermark":
+                                page.delete_annot(annot)
+                                add("watermark", 1)
+            return (_save(doc) if counts else data), counts
         finally:
             doc.close()
 
@@ -1021,7 +1114,7 @@ def compress_pdf(data: bytes, level: str = "medium") -> bytes:
             except Exception:
                 pass
             return doc.tobytes(garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True,
-                               use_objstms=1)
+                               use_objstms=1, no_new_id=True)
         finally:
             doc.close()
 
@@ -1392,6 +1485,7 @@ class JobControl:
         import threading
         self._paused = threading.Event()
         self._skip = threading.Event()
+        self.disk_full = False   # in pausa perché la destinazione è piena
 
     @property
     def paused(self) -> bool:
@@ -1492,7 +1586,7 @@ def image_to_pdf(path: str, page_size: str = "a4", fit: str = "fit", margin_mm: 
             else:
                 target, keep = area, True
             page.insert_image(target, stream=buf.getvalue(), keep_proportion=keep)
-        data = out.tobytes(garbage=3, deflate=True)
+        data = out.tobytes(garbage=3, deflate=True, no_new_id=True)
         out.close()
     return data
 
@@ -1570,7 +1664,7 @@ def _open_input(data: bytes, item: QueueItem, candidates: list[str]) -> tuple[by
                               "user_pw": user_pw,
                               "owner_pw": used[1] if (used and owner_known) else secrets.token_urlsafe(24),
                               "_auth": auth, "_restricted": not owner_known}
-            plain = doc.tobytes(garbage=0, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
+            plain = doc.tobytes(garbage=0, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE, no_new_id=True)
             return plain, protection, (used[0] if used else None)
         finally:
             doc.close()
@@ -1717,9 +1811,13 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         return out, protection
     if a == "remove_marks":
         kinds = {k for k in MARK_KINDS if p.get(k)}
-        out, n = remove_marks(data, kinds)
-        if not n:
-            raise BatchError("MRK-01", _("Nessun elemento riconoscibile da rimuovere."), status="skipped")
+        out, counts = remove_marks_detailed(data, kinds, p.get("scope") == "marked")
+        if not counts:
+            raise BatchError("MRK-01", _("Saltato: nessun elemento riconoscibile (si può intervenire con la "
+                                         "modifica manuale)."), status="skipped")
+        names = {"watermark": _("filigrane"), "background": _("sfondi"),
+                 "header_footer": _("intestazioni/piè/numeri"), "bates": _("numeri Bates")}
+        ctx.notes.append(_("rimossi: {d}").format(d=", ".join(f"{n} {names[k]}" for k, n in sorted(counts.items()))))
         return out, protection
     if a == "insert_pages":
         out, warns = insert_pages(data, p.get("file", ""), p.get("where", "start"), int(p.get("number", 1)))
@@ -1811,12 +1909,44 @@ def planned_conflicts(items: list[QueueItem], settings: JobSettings, started: da
     return out
 
 
+class DiskFull(Exception):
+    """Spazio esaurito nella destinazione (il file temporaneo è già stato rimosso)."""
+
+
+def _is_disk_full(e: BaseException) -> bool:
+    import errno
+    for x in (e, e.__cause__):
+        if isinstance(x, OSError) and x.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", -1)):
+            return True
+    return False
+
+
 def _write_output(path: str, data: bytes) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         atomic_write(path, data)
-    except DocumentError as e:
+    except (DocumentError, OSError) as e:
+        if _is_disk_full(e):
+            raise DiskFull() from e
         raise BatchError("WRT-01", str(e)) from e
+
+
+def _write_waiting(path: str, data: bytes, control: "JobControl | None", progress) -> None:
+    """Scrive il risultato; con il disco pieno il lavoro va in pausa finché l'utente libera spazio
+    e riprende (si riprova lo stesso file) oppure annulla (BAT-02)."""
+    while True:
+        try:
+            _write_output(path, data)
+            return
+        except DiskFull:
+            if control is None:
+                raise BatchError("DISK-01", _("Spazio esaurito nella destinazione: il file non è stato scritto."))
+            control.disk_full = True
+            control.pause()
+            control.checkpoint(progress)
+            control.disk_full = False
+            if progress is not None and getattr(progress, "cancelled", False):
+                raise OperationCancelled()
 
 
 def _compute_pdf(item: QueueItem, ctx: "_Ctx", steps, pre_steps, candidates, plan_i, csv_passwords):
@@ -2000,7 +2130,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                     if target is None:
                         raise BatchError("EXIST-01", _("Saltato: esiste già."), status="skipped")
                 reserved.add(target)
-                _write_output(target, data)
+                _write_waiting(target, data, control, progress)
                 res.outputs = [target]
                 res.bytes_out = len(data)
                 res.status = "ok"
@@ -2162,7 +2292,7 @@ def report_pdf(report: JobReport) -> bytes:
                 if detail:
                     w.line(detail, size=8, indent=12, gap=2, color=(0.5, 0.2, 0.1))
                 w.space(3)
-            return doc.tobytes(garbage=3, deflate=True)
+            return doc.tobytes(garbage=3, deflate=True, no_new_id=True)
         finally:
             doc.close()
 
@@ -2592,10 +2722,10 @@ def _x_linearize(data: bytes, p: dict, item, ctx) -> bytes:
         doc = _open(data)
         try:
             try:
-                return doc.tobytes(garbage=4, deflate=True, linear=True)
+                return doc.tobytes(garbage=4, deflate=True, linear=True, no_new_id=True)
             except Exception:
                 ctx.warnings.append(_("linearizzazione non supportata dal motore: file solo ottimizzato"))
-                return doc.tobytes(garbage=4, deflate=True, clean=True)
+                return doc.tobytes(garbage=4, deflate=True, clean=True, no_new_id=True)
         finally:
             doc.close()
 

@@ -48,6 +48,7 @@ class FormState:
         self.by_page: dict[int, list[E.FieldInfo]] = {}
         self.xfa = "none"
         self.blocked: str | None = None
+        self.blocked_by_permissions = False   # sbloccabile con la password del proprietario
         self.custom: list[tuple[str, str]] = []
         self.xfa_unmapped: list[str] = []
 
@@ -63,7 +64,8 @@ class FormState:
                 self.fields = E.list_fields(pdf)
                 self.xfa = E.xfa_status(pdf)
                 # permessi effettivi della sessione: dopo «Sblocca…» (document.unlock) tutto è consentito
-                if not doc.allows(pymupdf.PDF_PERM_FORM):
+                self.blocked_by_permissions = not doc.allows(pymupdf.PDF_PERM_FORM)
+                if self.blocked_by_permissions:
                     self.blocked = _("I permessi del documento non consentono la compilazione dei moduli.")
                 else:
                     self.blocked = E.fill_blocked_reason(pdf, -1)  # resta il controllo della certificazione
@@ -328,7 +330,8 @@ class FormFiller(QObject):
         """False se vista o barra sono già state distrutte (callback differiti tardivi)."""
         import shiboken6
         try:
-            return shiboken6.isValid(self) and shiboken6.isValid(self.view) and not self.document.closed
+            return (self.view is not None and shiboken6.isValid(self) and shiboken6.isValid(self.view)
+                    and not self.document.closed)
         except RuntimeError:
             return False
 
@@ -421,6 +424,13 @@ class FormFiller(QObject):
     last_warning: str | None = None
 
     def dispose(self) -> None:
+        """Scheda chiusa: scollega tutto e rilascia vista e documento, così che la memoria
+        si liberi (NFR-06). Il filler è figlio della vista: senza togliere i riferimenti
+        Python alla vista, vista e filler si terrebbero vivi a vicenda."""
+        view = self.view
+        if view is None:
+            return
+        self.blockSignals(True)          # niente «changed» che ricrei un filler per la vista chiusa
         try:
             self.document.remove_listener(self._on_document_event)
         except Exception:
@@ -430,10 +440,30 @@ class FormFiller(QObject):
         except (RuntimeError, TypeError):
             pass
         self.close_editor(commit=False)
+        self._hide_banner()
         try:
-            self.view.overlays.remove(self.paint_overlay)
+            view.overlays.remove(self.paint_overlay)
         except ValueError:
             pass
+        for signal, slot in ((view.verticalScrollBar().valueChanged, self.reposition),
+                             (view.horizontalScrollBar().valueChanged, self.reposition),
+                             (view.layoutChanged, self.reposition),
+                             (view.contentChanged, self._on_content_changed)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        try:
+            view.viewport().removeEventFilter(self)
+            view.removeEventFilter(self)
+        except RuntimeError:
+            pass
+        self.active = None
+        self.state.view = None
+        self.state.fields, self.state.by_page = [], {}
+        self.view = None
+        self.setParent(None)
+        self.deleteLater()
 
     # ------------------------------------------------------------------ barra
     def update_bar(self) -> None:
@@ -478,7 +508,7 @@ class FormFiller(QObject):
             actions.append((_("Importa/Esporta dati"), self.data_requested))
         if st.xfa != "dynamic" and not self.design and not st.blocked:
             actions.append((_("Modifica modulo"), self.design_requested))
-        if st.blocked and "permessi" in (st.blocked or ""):
+        if st.blocked and st.blocked_by_permissions:
             actions.insert(0, (_("Inserisci password del proprietario"), self.ask_owner_password))
         self._show_banner(text, actions, level)
 

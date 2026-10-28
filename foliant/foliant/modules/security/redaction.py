@@ -49,6 +49,7 @@ class Mark:
     rect: pymupdf.Rect
     text: str          # testo coperto (per l'elenco)
     source: str        # area, selezione, ricerca, schema:<id>, pagina-intera
+    group: str = ""    # segni creati insieme su più pagine (es. selezione che attraversa le pagine)
 
     @property
     def whole_page(self) -> bool:
@@ -160,8 +161,9 @@ def marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[Mar
             if annot is None:
                 continue
             info = annot.info or {}
+            source, _sep, group = (info.get("subject", "") or "area").partition("|")
             out.append(Mark(i, annot.xref, pymupdf.Rect(annot.rect), info.get("content", ""),
-                            info.get("subject", "") or "area"))
+                            source or "area", group))
     return out
 
 

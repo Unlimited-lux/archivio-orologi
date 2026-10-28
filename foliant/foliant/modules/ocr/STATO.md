@@ -25,7 +25,7 @@ Test: `tests/modules/ocr/` (engine, criteri, ui, languages, textexport).
 | OCR-16 Conversione Office | P1 | non fatto | — | modulo convert: può usare `ocr_page_text` / `recognize_document` |
 | OCR-17 PDF/A, PDF/UA | P1 | non fatto | — | |
 | OCR-18 Rimozione livello OCR / PDF solo immagine | P1 | fatto | test_ui: rimuovi_livello_ocr, pdf_solo_immagine | rimozione del livello invisibile; conversione in sole immagini con conferma, un passo di annulla |
-| OCR-19 Immagine compressa | P2 | non fatto | — | |
+| OCR-19 Immagine compressa | P2 | fatto (non come ottimizzazione autonoma di PDF già ricercabili) | test_compress (4) | livelli Esatta/Bilanciata/Massima: bitonale senza perdita oppure sfondo ridotto JPEG + maschera del testo PNG nel colore del testo; nessuna compressione se il guadagno è sotto il 10% |
 | OCR-20 Integrazione | P1 | parziale | — | API per gli altri moduli, `ctx.ocr`, proposta al clic in Modifica/Selezione |
 
 Note finali:

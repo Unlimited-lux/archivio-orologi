@@ -383,4 +383,8 @@ EN = {
     'Le pagine {p} hanno già testo: per riconoscerle comunque scegli «Forza OCR».': 'Pages {p} already have text: to recognize them anyway choose "Force OCR".',
     'Le pagine {p} sono vuote.': 'Pages {p} are empty.',
     'testo non estraibile: scegli «Forza OCR» per riconoscerlo': 'text cannot be extracted: choose "Force OCR" to recognize it',
+    'Esatta (immagine invariata)': 'Exact (image unchanged)',
+    'Compressa (bilanciata)': 'Compressed (balanced)',
+    'Compressa (massima)': 'Compressed (maximum)',
+    'Immagine della pagina:': 'Page image:',
 }
