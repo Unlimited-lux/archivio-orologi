@@ -31,5 +31,8 @@ Test: `tests/modules/ocr/` (engine, criteri, ui, languages, textexport).
 Note finali:
 - Nucleo aggiornato unito (07:50 UTC); suite completa verde, nessuna scorciatoia registrata dal modulo.
 - Pagine con /Rotate e CropBox spostato: verificate con `test_criteri.py::test_rilettura_pagine_ruotate_e_ritagliate`.
+- Stile del testo modificabile: grassetto relativo alla pagina; le grazie si assegnano solo con misura netta
+  (nel dubbio senza grazie), quindi i testi con grazie sottili possono uscire senza grazie.
+- Correzioni del collaudo (08:00–08:20 UTC): bug_07, bug_01/02, bug_04, bug_05, bug_08, tabelle e stile.
 - Verifica visiva fatta con catture offscreen (temi chiaro e scuro) di barra di proposta, impostazioni,
   anteprima/revisione, pannello parole incerte e confronto scansione/risultato modificabile.
