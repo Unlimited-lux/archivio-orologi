@@ -123,6 +123,11 @@ N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctr
 Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R. Spettano ai moduli: Ctrl+P, Ctrl+F,
 Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
 duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
+Le scorciatoie specifiche di un modulo vanno **limitate alla sua modalità**:
+`ctx.action(..., shortcut="Ctrl+D", mode="pagine")` oppure `mode.scope_shortcuts(azione, ...)`.
+Così due modalità possono usare lo stesso tasto senza conflitti. Per i tasti che servono solo
+dentro un widget (es. Canc in un elenco) usa una scorciatoia del widget
+(`Qt.ShortcutContext.WidgetWithChildrenShortcut`) o `keyPressEvent`, non un'azione globale.
 
 ### API del contesto (`foliant/ui/context.py`)
 
@@ -139,6 +144,7 @@ duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |
 | `set_central_widget(w)` / `central_widget()` | mostra un widget del modulo al posto della vista documento (None = ripristina) |
+| `add_link_handler(fn, priority=0)` | apertura dei collegamenti: `fn(view, link) -> bool` (True = gestito); priorità più alta = interrogato prima |
 | `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)` |
 | `run_task(titolo, fn, *args)` | lavoro lungo con avanzamento |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |

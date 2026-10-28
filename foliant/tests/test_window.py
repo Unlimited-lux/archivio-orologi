@@ -218,3 +218,37 @@ def test_service_dialogs(window, monkeypatch):
     sd.filter.setText("salva")
     assert 0 < sd.table.rowCount() < 10
     HelpDialog(window).close()
+
+
+def test_link_handler_extension(window, sample_pdf):
+    from foliant.ui import tools
+    seen = []
+    first = lambda view, link: (seen.append(("prima", link.get("uri"))), False)[1]
+    last = lambda view, link: (seen.append(("ultima", link.get("uri"))), True)[1]
+    saved = list(tools.LINK_HANDLERS)        # il test verifica il meccanismo, senza i gestori dei moduli
+    tools.LINK_HANDLERS.clear()
+    window.ctx.add_link_handler(last, priority=-1000)
+    window.ctx.add_link_handler(first, priority=1000)
+    window.ctx.add_link_handler(first, priority=1000)      # doppia registrazione ignorata
+    try:
+        view = window.open_path(sample_pdf)
+        tools.follow_link(view, {"kind": 2, "uri": "https://example.org"})
+        assert seen == [("prima", "https://example.org"), ("ultima", "https://example.org")]
+    finally:
+        tools.LINK_HANDLERS[:] = saved
+
+
+def test_mode_scoped_shortcuts(window, sample_pdf):
+    from PySide6.QtGui import QKeySequence
+    ctx = window.ctx
+    m1 = ctx.add_mode("prova1", "Prova 1", "star", 990)
+    m2 = ctx.add_mode("prova2", "Prova 2", "star", 991)
+    a1 = ctx.action("Duplica pagina", None, lambda: None, shortcut="Ctrl+D", mode="prova1")
+    a2 = ctx.action("Duplica campo", None, lambda: None, shortcut="Ctrl+D")
+    m2.scope_shortcuts(a2)
+    window.set_mode("leggi")
+    assert a1.shortcut().isEmpty() and a2.shortcut().isEmpty()
+    window.set_mode("prova1")
+    assert a1.shortcut() == QKeySequence("Ctrl+D") and a2.shortcut().isEmpty()
+    window.set_mode("prova2")
+    assert a1.shortcut().isEmpty() and a2.shortcut() == QKeySequence("Ctrl+D")
