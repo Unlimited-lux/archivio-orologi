@@ -1,4 +1,5 @@
-"""Proprietà del documento (VIS-40), in sola lettura."""
+"""Informazioni sul documento (VIS-40), in sola lettura: sezioni File, Contenuto,
+Protezione, Caratteri, Apertura."""
 
 from __future__ import annotations
 
@@ -11,12 +12,46 @@ from PySide6.QtWidgets import (
 from foliant.api import _, add_translations, bind_icon, theme
 
 from .properties_engine import (
-    DocumentInfo, advanced_rows, collect_fonts, collect_info, description_rows, info_to_text, security_rows,
+    DocumentInfo, collect_fonts, collect_info, content_rows, file_rows, info_to_text, opening_rows, security_rows,
 )
 
 LARGE_DOCUMENT_PAGES = 100   # oltre: raccolta dei font in un'attività con avanzamento
 
 EN = {
+    "Informazioni sul documento…": "Document information…",
+    "Informazioni su «{name}»": "Information about “{name}”",
+    "Contenuto": "Content",
+    "Caratteri": "Fonts",
+    "Apertura": "Opening",
+    "Creato con": "Created with",
+    "Convertito in PDF da": "Converted to PDF by",
+    "Data di creazione": "Creation date",
+    "Ultima modifica": "Last modified",
+    "Formato della pagina {n}": "Size of page {n}",
+    "Struttura logica per l'accessibilità": "Logical structure for accessibility",
+    "presente": "present",
+    "assente": "absent",
+    "Caricamento progressivo dalla rete": "Progressive loading from the network",
+    "previsto": "supported",
+    "non previsto": "not supported",
+    "Impostazioni del documento": "Document settings",
+    "nessuna: si usano le preferenze": "none: preferences are used",
+    "Pagina iniziale": "Initial page",
+    "Zoom iniziale": "Initial zoom",
+    "adatta larghezza": "fit width",
+    "adatta pagina": "fit page",
+    "Disposizione delle pagine": "Page layout",
+    "continua": "continuous",
+    "pagina singola": "single page",
+    "due pagine": "two pages",
+    "due pagine con copertina": "two pages with cover",
+    "Pannello all'apertura": "Panel on opening",
+    "segnalibri": "bookmarks",
+    "miniature": "thumbnails",
+    "allegati": "attachments",
+    "livelli": "layers",
+    "Schermo intero": "Full screen",
+    "richiesto dal documento": "requested by the document",
     "Proprietà del documento…": "Document properties…",
     "Proprietà del documento": "Document properties",
     "Proprietà di «{name}»": "Properties of “{name}”",
@@ -122,7 +157,8 @@ class PropertiesDialog(QDialog):
         self.info = info
         root = QVBoxLayout(self)
         self.tabs = QTabWidget(self)
-        self.tabs.addTab(_form_page(description_rows(info), self), _("Descrizione"))
+        self.tabs.addTab(_form_page(file_rows(info), self), _("File"))
+        self.tabs.addTab(_form_page(content_rows(info), self), _("Contenuto"))
         coloured = {_("Consentito"): theme.hex_color("success"), _("Non consentito"): theme.hex_color("danger")}
         self.tabs.addTab(_form_page(security_rows(info), self, coloured), _("Protezione"))
         self.font_tree = QTreeWidget(self)
@@ -140,8 +176,8 @@ class PropertiesDialog(QDialog):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for c in (1, 2, 3):
             header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
-        self.tabs.addTab(self.font_tree, _("Font"))
-        self.tabs.addTab(_form_page(advanced_rows(info), self), _("Avanzate"))
+        self.tabs.addTab(self.font_tree, _("Caratteri"))
+        self.tabs.addTab(_form_page(opening_rows(info), self), _("Apertura"))
         root.addWidget(self.tabs)
 
         buttons = QDialogButtonBox(self)
@@ -165,7 +201,7 @@ class PropertiesController:
     def __init__(self, ctx):
         self.ctx = ctx
         self.dialog: PropertiesDialog | None = None
-        self.action = ctx.action(_("Proprietà del documento…"), "info", self.show_dialog, shortcut="Alt+Return")
+        self.action = ctx.action(_("Informazioni sul documento…"), "info", self.show_dialog, shortcut="Alt+Return")
         mode = ctx.mode("leggi")
         if mode is not None:
             mode.add_action(self.action)
@@ -178,7 +214,36 @@ class PropertiesController:
         fonts = None
         if document.page_count > LARGE_DOCUMENT_PAGES:
             fonts = self.ctx.run_task(_("Lettura dei font"), lambda progress: collect_fonts(document.pdf, progress))
-        return collect_info(document, view.current_page, fonts)
+        info = collect_info(document, view.current_page, fonts)
+        info.opening = self._opening(document)
+        return info
+
+    @staticmethod
+    def _opening(document) -> list[tuple[str, str]]:
+        """Come il documento chiede di essere aperto (`/OpenAction`, `/PageLayout`, `/PageMode`)."""
+        try:
+            from .session_engine import read_initial_view
+            with document.lock:
+                iv = read_initial_view(document.pdf)
+        except Exception:
+            return []
+        rows = []
+        if iv.page is not None:
+            rows.append((_("Pagina iniziale"), str(iv.page + 1)))
+        if iv.fit or iv.zoom:
+            rows.append((_("Zoom iniziale"), {"width": _("adatta larghezza"), "page": _("adatta pagina")}
+                         .get(iv.fit or "", f"{round((iv.zoom or 1) * 100)}%")))
+        if iv.mode:
+            rows.append((_("Disposizione delle pagine"), {"continuous": _("continua"), "single": _("pagina singola"),
+                                                         "facing": _("due pagine"), "cover": _("due pagine con copertina")}
+                         .get(iv.mode, iv.mode)))
+        if iv.panel:
+            rows.append((_("Pannello all'apertura"), {"bookmarks": _("segnalibri"), "thumbnails": _("miniature"),
+                                                     "attachments": _("allegati"), "layers": _("livelli")}
+                         .get(iv.panel, iv.panel)))
+        if iv.fullscreen:
+            rows.append((_("Schermo intero"), _("richiesto dal documento")))
+        return rows
 
     def show_dialog(self) -> PropertiesDialog | None:
         """Mostra il dialogo (non modale) per il documento attivo."""
@@ -195,7 +260,7 @@ class PropertiesController:
         if self.dialog is not None:
             self.dialog.close()
             self.dialog.deleteLater()
-        title = _("Proprietà di «{name}»").format(name=view.document.display_name)
+        title = _("Informazioni su «{name}»").format(name=view.document.display_name)
         self.dialog = PropertiesDialog(info, title, self.ctx.window)
         self.dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.dialog.show()

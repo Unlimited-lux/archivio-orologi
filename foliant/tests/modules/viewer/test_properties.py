@@ -1,4 +1,4 @@
-"""Proprietà del documento (VIS-40): metadati, file, protezione, font, avanzate."""
+"""Informazioni sul documento (VIS-40): file, contenuto, protezione, caratteri, apertura."""
 
 from __future__ import annotations
 
@@ -203,7 +203,7 @@ def test_dialog_tabs_copy_and_no_modification(viewer_window, meta_pdf, qtbot):
     dlg = ctl.show_dialog()
     assert isinstance(dlg, PropertiesDialog) and dlg.isVisible() and not dlg.isModal()
     tabs = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
-    assert tabs == ["Descrizione", "Protezione", "Font", "Avanzate"]
+    assert tabs == ["File", "Contenuto", "Protezione", "Caratteri", "Apertura"]
     assert dlg.font_tree.topLevelItemCount() == len(dlg.info.fonts) >= 2
     dlg.copy_button.click()
     clip = QApplication.clipboard().text()
@@ -236,8 +236,28 @@ def test_english_translation(viewer_window, meta_pdf):
         info = part(viewer_window, "properties").collect(viewer_window.current_view())
         assert info.created == "2024-03-15 10:30:00 UTC+01:00"
         dlg = PropertiesDialog(info, "x", viewer_window)
-        assert dlg.tabs.tabText(1) == "Security"
+        assert dlg.tabs.tabText(2) == "Security"
         assert "Printing: Allowed" in dlg.text()
         dlg.deleteLater()
     finally:
         set_language("it")
+
+
+def test_opening_section_reads_document_settings(viewer_window, tmp_path):
+    import pymupdf
+    path = tmp_path / "apertura.pdf"
+    doc = pymupdf.open()
+    for _i in range(5):
+        doc.new_page()
+    cat = doc.pdf_catalog()
+    doc.xref_set_key(cat, "PageLayout", "/TwoColumnLeft")
+    doc.xref_set_key(cat, "PageMode", "/UseOutlines")
+    doc.xref_set_key(cat, "OpenAction", f"[{doc[2].xref} 0 R /FitH 800]")
+    doc.save(str(path))
+    viewer_window.open_path(str(path))
+    ctl = viewer_window.ctx.viewer_parts["properties"]
+    info = ctl.collect(viewer_window.current_view())
+    rows = dict(info.opening)
+    assert rows["Pagina iniziale"] == "3"
+    assert rows["Pannello all'apertura"] == "segnalibri"
+    assert "Apertura" in ctl.show_dialog().text() if hasattr(ctl.show_dialog(), "text") else True

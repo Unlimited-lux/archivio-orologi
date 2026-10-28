@@ -18,7 +18,7 @@ TRANSLATIONS = {
     "Ingrandisce la zona sotto il cursore": "Magnifies the area under the cursor",
     "Zoom area": "Zoom to area",
     "Traccia un rettangolo per ingrandirlo a tutta la vista": "Drag a rectangle to fill the view with it",
-    "Istantanea": "Snapshot",
+    "Cattura area": "Capture area",
     "Cattura un'area come immagine o testo": "Capture an area as image or text",
     "Copia immagine": "Copy image",
     "Salva immagine…": "Save image…",
@@ -34,7 +34,7 @@ TRANSLATIONS = {
     "Area troppo grande: la risoluzione è stata ridotta a {n} dpi.": "Area too large: resolution reduced to {n} dpi.",
     "Il documento non consente la copia del contenuto.": "The document does not allow copying its content.",
     "Impossibile salvare l'immagine.": "Could not save the image.",
-    "Istantanea non disponibile: il documento non consente la copia del contenuto.":
+    "Cattura area non disponibile: il documento non consente la copia del contenuto.":
         "Snapshot unavailable: the document does not allow copying its content.",
 }
 
@@ -306,7 +306,7 @@ class ToolsController:
         self.snapshot_tool = SnapshotTool(self)
         self.act_zoom = ctx.action(_("Zoom area"), "scan-search", lambda on: self._toggle(self.zoom_tool, on),
                                    tooltip=_("Traccia un rettangolo per ingrandirlo a tutta la vista"), checkable=True)
-        self.act_snapshot = ctx.action(_("Istantanea"), "camera", lambda on: self._toggle(self.snapshot_tool, on),
+        self.act_snapshot = ctx.action(_("Cattura area"), "camera", lambda on: self._toggle(self.snapshot_tool, on),
                                        tooltip=_("Cattura un'area come immagine o testo"), checkable=True)
         mode = ctx.mode("leggi")
         if mode is not None:
@@ -333,7 +333,7 @@ class ToolsController:
             return
         if on and tool is self.snapshot_tool and not copy_allowed(view):
             self.act_snapshot.setChecked(False)
-            self.ctx.status(_("Istantanea non disponibile: il documento non consente la copia del contenuto."))
+            self.ctx.status(_("Cattura area non disponibile: il documento non consente la copia del contenuto."))
             return
         if on:
             view.set_tool(tool)
@@ -352,7 +352,7 @@ class ToolsController:
             self._on_tool(view.tool)
             allowed = copy_allowed(view)
             self.act_snapshot.setToolTip(_("Cattura un'area come immagine o testo") if allowed else
-                                         _("Istantanea non disponibile: il documento non consente la copia del contenuto."))
+                                         _("Cattura area non disponibile: il documento non consente la copia del contenuto."))
         else:
             self._on_tool(None)
 

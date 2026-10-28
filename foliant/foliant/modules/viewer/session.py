@@ -90,7 +90,7 @@ class SessionController(QObject):
         for key, text in (
             (KEY_RESTORE_SESSION, _("Ripristina la sessione all'avvio")),
             (KEY_NO_HISTORY, _("Non registrare la cronologia")),
-            (KEY_IGNORE_DOC_VIEW, _("Ignora la vista iniziale dei documenti")),
+            (KEY_IGNORE_DOC_VIEW, _("Ignora le impostazioni di apertura dei documenti")),
         ):
             act = ctx.action(text, None, None, checkable=True, requires_document=False)
             act.setChecked(self.pref(key))
@@ -406,7 +406,7 @@ def install(ctx: Context) -> SessionController:
         "Copia percorso": "Copy path",
         "Ripristina la sessione all'avvio": "Restore session at startup",
         "Non registrare la cronologia": "Do not record history",
-        "Ignora la vista iniziale dei documenti": "Ignore documents' initial view",
+        "Ignora le impostazioni di apertura dei documenti": "Ignore documents' opening settings",
         "Schede": "Tabs",
         "Apertura dei documenti": "Opening documents",
         "Il file «{name}» non esiste più.": "The file “{name}” no longer exists.",

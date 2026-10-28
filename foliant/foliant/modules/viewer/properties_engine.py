@@ -254,6 +254,7 @@ class DocumentInfo:
     pdf_version: str = ""
     fast_web_view: bool = False
     tagged: bool = False
+    opening: list = field(default_factory=list)   # righe della sezione «Apertura»
     security: Security = field(default_factory=lambda: Security(False, "", ALL_PERMISSIONS, True))
     objects: int = 0
     attachments: int = 0
@@ -337,28 +338,49 @@ def _yes_no(value: bool) -> str:
     return _("Sì") if value else _("No")
 
 
-def description_rows(info: DocumentInfo) -> list[tuple[str, str]]:
+def file_rows(info: DocumentInfo) -> list[tuple[str, str]]:
     none = "—"
     size = format_size(info.file_size) if info.file_size is not None else _("non salvato")
     if info.unsaved_changes and info.file_size is not None:
         size += " — " + _("modifiche non salvate")
     return [
+        (_("Percorso"), info.path or _("non salvato")),
+        (_("Dimensione del file"), size),
+        (_("Versione PDF"), info.pdf_version or none),
+        (_("Creato con"), info.creator or none),
+        (_("Convertito in PDF da"), info.producer or none),
+        (_("Data di creazione"), info.created or none),
+        (_("Ultima modifica"), info.modified or none),
+    ]
+
+
+def content_rows(info: DocumentInfo) -> list[tuple[str, str]]:
+    none = "—"
+    return [
         (_("Titolo"), info.title or none),
         (_("Autore"), info.author or none),
         (_("Oggetto"), info.subject or none),
         (_("Parole chiave"), info.keywords or none),
-        (_("Applicazione"), info.creator or none),
-        (_("Produttore PDF"), info.producer or none),
-        (_("Creato"), info.created or none),
-        (_("Modificato"), info.modified or none),
-        (_("Percorso"), info.path or _("non salvato")),
-        (_("Dimensione del file"), size),
         (_("Pagine"), str(info.page_count)),
-        (_("Dimensione pagina {n}").format(n=info.current_page + 1), info.page_size),
-        (_("Versione PDF"), info.pdf_version or none),
-        (_("Vista web veloce"), _yes_no(info.fast_web_view)),
-        (_("Documento taggato"), _yes_no(info.tagged)),
+        (_("Formato della pagina {n}").format(n=info.current_page + 1), info.page_size),
+        (_("Struttura logica per l'accessibilità"), _("presente") if info.tagged else _("assente")),
+        (_("Segnalibri"), str(info.bookmarks)),
+        (_("Allegati"), str(info.attachments)),
+        (_("Livelli"), str(info.layers)),
+        (_("Campi modulo"), str(info.form_fields) if info.form_fields else _("Nessuno")),
+        (_("Oggetti PDF"), str(info.objects)),
     ]
+
+
+def opening_rows(info: DocumentInfo) -> list[tuple[str, str]]:
+    rows = [(_("Caricamento progressivo dalla rete"), _("previsto") if info.fast_web_view else _("non previsto"))]
+    rows.extend(info.opening or [(_("Impostazioni del documento"), _("nessuna: si usano le preferenze"))])
+    return rows
+
+
+# compatibilità con il codice precedente
+def description_rows(info: DocumentInfo) -> list[tuple[str, str]]:
+    return file_rows(info) + content_rows(info)
 
 
 def security_rows(info: DocumentInfo) -> list[tuple[str, str]]:
@@ -386,12 +408,12 @@ def advanced_rows(info: DocumentInfo) -> list[tuple[str, str]]:
 def info_to_text(info: DocumentInfo) -> str:
     """Testo semplice per gli appunti."""
     lines: list[str] = []
-    for title, rows in ((_("Descrizione"), description_rows(info)), (_("Protezione"), security_rows(info)),
-                        (_("Avanzate"), advanced_rows(info))):
+    for title, rows in ((_("File"), file_rows(info)), (_("Contenuto"), content_rows(info)),
+                        (_("Protezione"), security_rows(info)), (_("Apertura"), opening_rows(info))):
         lines.append(f"[{title}]")
         lines.extend(f"{label}: {value}" for label, value in rows)
         lines.append("")
-    lines.append(f"[{_('Font')}]")
+    lines.append(f"[{_('Caratteri')}]")
     for f in info.fonts:
         lines.append("\t".join((f.name, f.font_type, f.encoding or "—", f.embedding_label())))
     return "\n".join(lines).rstrip() + "\n"

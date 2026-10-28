@@ -31,12 +31,12 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-21 Livelli: gestione | P2 | parziale | `test_layers.py::test_save_visibility_as_default` | Solo «salva la visibilità come predefinita». |
 | VIS-22 Allegati | P1 | parziale | `test_attachments.py` (16 test) | Elenco, apri, salva, salva tutti, aggiungi, elimina, eseguibili bloccati. Portfolio: non fatto. |
 | VIS-23 Thread di articoli | P2 | fatto | `test_articles.py` | |
-| VIS-24 Ricerca | P0 | fatto | `test_search.py`, `test_engine.py::test_case_sensitivity`, `test_whole_word`, `test_ignore_accents_and_ligatures`, `test_hyphenated_word_across_lines` | Ricerca incrementale non bloccante, opzioni, F3/Maiusc+F3, pannello Risultati, cronologia delle ricerche, pagine senza testo. Frasi e parole sillabate a cavallo tra due pagine incluse (`test_phrase_continuing_on_next_page`). |
+| VIS-24 Ricerca | P0 | fatto | `test_search.py` (anche `test_search_also_in_comments`), `test_engine.py::test_case_sensitivity`, `test_whole_word`, `test_ignore_accents_and_ligatures`, `test_hyphenated_word_across_lines` | Ricerca incrementale non bloccante, opzioni, F3/Maiusc+F3, pannello Risultati, cronologia delle ricerche, pagine senza testo. Frasi e parole sillabate a cavallo tra due pagine incluse (`test_phrase_continuing_on_next_page`). |
 | VIS-25 Ricerca avanzata | P2 | parziale | `test_advsearch.py` (11 test), `test_search.py::test_regex_and_invalid_expression`, `test_export_csv` | Ctrl+Maiusc+F: documento corrente, documenti aperti, cartella con sottocartelle (file cifrati/danneggiati nel riepilogo), frase/tutte/almeno una/regex con limite di tempo, commenti, segnalibri, campi, metadati, CSV. Indice full-text e allegati PDF: non fatti. |
 | VIS-26 Trova e sostituisci | P1 | non fatto | | Richiede il motore di modifica del testo (area Modifica testo). |
 | VIS-27 Ricerca semantica IA | P2 | non fatto | | Area IA. |
 | VIS-28 Selezione e copia | P0 | parziale | `test_tools.py::test_alt_drag_rectangular_table_selection`, `tests/test_view.py::test_text_selection_by_drag` | Selezione rettangolare Alt+trascinamento con tabulazioni; il resto nel nucleo (selezione su più pagine, triplo clic: non fatti). |
-| VIS-29 Istantanea | P1 | fatto | `test_tools.py::test_snapshot_*` | Copia/salva immagine a dpi scelti (limite 100 MP), copia testo, disabilitata senza permesso di copia. |
+| VIS-29 Cattura area | P1 | fatto | `test_tools.py::test_snapshot_*` | Copia/salva immagine a dpi scelti (limite 100 MP), copia testo, disabilitata senza permesso di copia. |
 | VIS-30 Schede e sessioni | P0 | parziale | `test_session.py` | Ctrl+Tab, Alt+1…9, riapri scheda chiusa, chiudi altre/a destra/tutte, ripristino sessione. Trascinamento in altre finestre, gruppi, seconda vista: non fatti. |
 | VIS-31 Modalità lettura e schermo intero | P1 | fatto | `test_reading.py` | Preferenze colore di sfondo e monitor: non fatte. |
 | VIS-32 Presentazione | P1 | fatto | `test_presentation.py` | `/PresSteps`, transizioni diverse dalla dissolvenza: non fatte. |
@@ -47,7 +47,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-37 Multimedia e 3D | P2 | non fatto | | Segnalati come non supportati (VIS-07). |
 | VIS-38 Lente, panoramica, vista divisa | P2 | parziale | `test_tools.py::test_lens_magnifies_under_cursor` | Lente d'ingrandimento; la panoramica è l'area visibile trascinabile nelle miniature (VIS-14). Vista divisa: non fatta (richiede più viste dello stesso documento nel nucleo). |
 | VIS-39 Righelli, griglie, coordinate | P1 | parziale | `test_measure.py` | Coordinate del cursore nell'unità scelta, griglia, riquadri di pagina. Righelli, guide e aggancio, coordinate geospaziali: non fatti. |
-| VIS-40 Proprietà del documento | P1 | fatto | `test_properties.py` (14 test) | Sola lettura, Alt+Invio. Da riallineare alla specifica v2 («Informazioni sul documento» con sezioni File, Contenuto, Protezione, Caratteri, Apertura): non fatto per scadenza. |
+| VIS-40 Informazioni sul documento | P1 | fatto | `test_properties.py` (15 test) | Finestra «Informazioni sul documento» (Alt+Invio) con le sezioni File, Contenuto, Protezione, Caratteri, Apertura; sola lettura. |
 | VIS-41 Metadati avanzati | P2 | non fatto | | |
 | VIS-42 Vista iniziale | P2 | parziale | `test_session.py` (vista iniziale) | Lettura delle impostazioni del documento; la loro modifica non è fatta. |
 | VIS-43 Stampa | P0 | fatto | `test_printing.py` (21 test) | |
@@ -73,6 +73,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
   `tests/test_window.py::test_no_duplicate_shortcuts` passa con il modulo caricato.
 - Non integrate perché incomplete: stampa avanzata (VIS-44), modifica della vista iniziale (VIS-42),
   metadati avanzati (VIS-41).
-- Da allineare alla specifica v2: etichette «Cattura area» e «Apertura del documento», opzione
-  «Cerca anche nei commenti» nella barra Ctrl+F (la ricerca nei commenti c'è nella ricerca avanzata),
-  VIS-54 «Allegati del documento» (coperta in gran parte dal pannello Allegati).
+- Allineati alla specifica v2 (proroga fino alle 09:30): «Informazioni sul documento» con le sezioni
+  richieste, etichette «Cattura area» e impostazioni di «apertura», opzione «Cerca anche nei commenti»
+  nella barra Ctrl+F. VIS-54 «Allegati del documento» è coperta dal pannello Allegati (aggiungi,
+  estrai, elimina).
