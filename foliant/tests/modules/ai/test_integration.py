@@ -419,3 +419,42 @@ def test_chat_shortcut_scoped_to_ai_mode(window, sample_pdf):
     assert act.shortcut().isEmpty()
     window.ctx.set_mode("ia")
     assert act.shortcut() == QKeySequence("Ctrl+Shift+A")
+
+
+def test_customer_message_placeholders_highlighted(qtbot, window, ready, fake, sample_pdf):
+    from foliant.modules.ai import render
+    window.open_path(sample_pdf)
+    fake.responses = ["Gentile [nome del cliente], la consegna è prevista [p. 1]."]
+    task = next(t for t in tasks_library.BUILTIN if t.id == "customer-reply")
+    ready.panel.run_template(task, {"argomento": "consegna", "tono": "cordiale"}, "document")
+    wait_done(qtbot, ready.panel)
+    msg = ready.panel.conversation().messages[-1]
+    assert any("[nome del cliente]" in f for f in msg.flags)
+    out = render.render_markdown(msg.text)
+    assert out.placeholders == ["nome del cliente"] and "da completare" in out.html
+    assert "placeholders in square brackets" in fake.requests[0].system
+
+
+def test_business_plan_fixed_sections(qtbot, window, ready, fake, sample_pdf):
+    window.open_path(sample_pdf)
+    fake.responses = ["## Mercato\nOrologi usati.\n\n## Sintesi\nVendita online.\n\n## Offerta\nCatalogo.\n\n"
+                      "## Organizzazione\nDue persone.\n\n## Piano economico\nMargini."]
+    task = next(t for t in tasks_library.BUILTIN if t.id == "business-plan")
+    ready.panel.run_template(task, {"idea": "negozio di orologi"}, "document")
+    wait_done(qtbot, ready.panel)
+    text = ready.panel.conversation().messages[-1].text
+    order = [text.index(f"## {s}") for s in tasks_library.SECTIONS["business-plan"]]
+    assert order == sorted(order)
+    rischi = text.split("## Rischi", 1)[1]
+    assert "da completare" in rischi
+    assert "Use exactly these Markdown headings" in fake.requests[0].system
+
+
+def test_generic_template_pages_placeholder(qtbot, window, ready, fake, text_pdf):
+    window.open_path(text_pdf(5))
+    t = TaskTemplate.from_dict({"name": "Scadenze", "category": "Legale", "output": "table",
+                                "instructions": "Elenca le scadenze in {pagine} per {parametro:parte}",
+                                "params": [{"name": "parte", "default": "il cliente"}]})
+    ready.panel.run_template(t, {"parte": "il venditore"}, "pages", "2-4")
+    wait_done(qtbot, ready.panel)
+    assert "Elenca le scadenze in pagine 2–4 per il venditore" in fake.requests[0].system

@@ -527,6 +527,53 @@ def _fmt(v: float) -> str:
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def partita_iva_valid(value) -> bool:
+    """Partita IVA italiana: 11 cifre con cifra di controllo (prefisso «IT» ammesso)."""
+    v = str(value or "").strip().upper().replace(" ", "")
+    if v.startswith("IT"):
+        v = v[2:]
+    if len(v) != 11 or not v.isdigit():
+        return False
+    total = 0
+    for i, ch in enumerate(v[:10]):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return (10 - total % 10) % 10 == int(v[10])
+
+
+_CF_ODD = {**{str(i): v for i, v in enumerate([1, 0, 5, 7, 9, 13, 15, 17, 19, 21])},
+           **dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                      [1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 2, 4, 18, 20, 11, 3, 6, 8, 12, 14, 16, 10, 22, 25, 24, 23]))}
+
+
+def codice_fiscale_valid(value) -> bool:
+    """Codice fiscale di persona fisica: 16 caratteri con carattere di controllo."""
+    v = str(value or "").strip().upper().replace(" ", "")
+    if len(v) != 16 or not v.isalnum():
+        return False
+    total = 0
+    for i, ch in enumerate(v[:15]):
+        if i % 2 == 0:
+            total += _CF_ODD[ch]
+        else:
+            total += int(ch) if ch.isdigit() else ord(ch) - ord("A")
+    return chr(ord("A") + total % 26) == v[15]
+
+
+def tax_id_valid(value) -> bool:
+    v = str(value or "").strip().upper().replace(" ", "")
+    if not v:
+        return True
+    digits = v[2:] if v.startswith("IT") else v
+    if digits.isdigit():
+        return partita_iva_valid(v)
+    return codice_fiscale_valid(v)
+
+
 def consistency_checks(result: ExtractResult) -> list[str]:
     """Controlli di coerenza delle fatture: somma righe, imponibile + imposta = totale."""
     checks: list[str] = []
@@ -543,13 +590,19 @@ def consistency_checks(result: ExtractResult) -> list[str]:
             s = sum(amounts)
             if net is not None:
                 if abs(s - net) > 0.01:
-                    checks.append(_("{r}: la somma delle righe ({s}) è diversa dall'imponibile ({t})")
-                                  .format(r=name, s=_fmt(s), t=_fmt(net)))
+                    checks.append(_("{r}: la somma delle righe ({s}) è diversa dall'imponibile ({t}): "
+                                    "differenza {d}").format(r=name, s=_fmt(s), t=_fmt(net),
+                                                            d=f"{abs(s - net):.2f}".replace(".", ",")))
             elif total is not None:
                 expected = s + (tax or 0.0)
                 if abs(expected - total) > 0.01:
                     checks.append(_("{r}: la somma delle righe ({s}) non corrisponde al totale ({t})")
                                   .format(r=name, s=_fmt(expected), t=_fmt(total)))
+        for key in ("partita_iva", "codice_fiscale", "partita_iva_cliente"):
+            cell = rec.get(key)
+            if isinstance(cell, Cell) and cell.value not in (None, "") and not tax_id_valid(cell.value):
+                checks.append(_("{r}: «{v}» non è formalmente valido ({k})").format(
+                    r=name, v=cell.value, k=key.replace("_", " ")))
         if net is not None and tax is not None and total is not None and abs(net + tax - total) > 0.01:
             checks.append(_("{r}: imponibile + imposta ({s}) è diverso dal totale ({t})")
                           .format(r=name, s=_fmt(net + tax), t=_fmt(total)))
@@ -676,3 +729,72 @@ def to_json(result: ExtractResult, source_name: str = "", *, now: _dt.datetime |
         "record": [rec(r) for r in result.records],
     }
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+# ================================================================== fattura elettronica allegata (AI-29)
+def embedded_einvoices(pdf) -> list[dict]:
+    """Record grezzi delle fatture elettroniche XML (FatturaPA) allegate al PDF, letti in locale.
+
+    Restituisce [] se non ci sono allegati XML di fattura o se non sono leggibili.
+    """
+    import xml.etree.ElementTree as ET
+    from foliant.api import ENGINE_LOCK
+    out: list[dict] = []
+    with ENGINE_LOCK:
+        try:
+            names = list(pdf.embfile_names())
+        except Exception:  # noqa: BLE001
+            return out
+        blobs = []
+        for n in names:
+            if not n.lower().endswith(".xml"):
+                continue
+            try:
+                blobs.append(pdf.embfile_get(n))
+            except Exception:  # noqa: BLE001
+                continue
+    for data in blobs:
+        try:
+            root = ET.fromstring(data)
+        except ET.ParseError:
+            continue
+        if not root.tag.split("}")[-1].startswith("FatturaElettronica"):
+            continue
+
+        def find(node, path):
+            cur = [node]
+            for part in path.split("/"):
+                nxt = []
+                for c in cur:
+                    nxt.extend(ch for ch in c if ch.tag.split("}")[-1] == part)
+                cur = nxt
+            return cur
+
+        def text(node, path):
+            found = find(node, path)
+            return (found[0].text or "").strip() if found else ""
+
+        header = find(root, "FatturaElettronicaHeader")
+        head = header[0] if header else root
+        seller = text(head, "CedentePrestatore/DatiAnagrafici/Anagrafica/Denominazione") or " ".join(
+            filter(None, [text(head, "CedentePrestatore/DatiAnagrafici/Anagrafica/Nome"),
+                          text(head, "CedentePrestatore/DatiAnagrafici/Anagrafica/Cognome")]))
+        piva = text(head, "CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdCodice")
+        buyer = text(head, "CessionarioCommittente/DatiAnagrafici/Anagrafica/Denominazione") or " ".join(
+            filter(None, [text(head, "CessionarioCommittente/DatiAnagrafici/Anagrafica/Nome"),
+                          text(head, "CessionarioCommittente/DatiAnagrafici/Anagrafica/Cognome")]))
+        for body in find(root, "FatturaElettronicaBody"):
+            gen = "DatiGenerali/DatiGeneraliDocumento/"
+            lines = [{"descrizione": text(l, "Descrizione"), "quantita": text(l, "Quantita") or None,
+                      "prezzo_unitario": text(l, "PrezzoUnitario") or None,
+                      "aliquota": text(l, "AliquotaIVA") or None, "importo": text(l, "PrezzoTotale") or None}
+                     for l in find(body, "DatiBeniServizi/DettaglioLinee")]
+            summaries = find(body, "DatiBeniServizi/DatiRiepilogo")
+            net = sum(float(text(s, "ImponibileImporto") or 0) for s in summaries) if summaries else None
+            tax = sum(float(text(s, "Imposta") or 0) for s in summaries) if summaries else None
+            total = text(body, gen + "ImportoTotaleDocumento")
+            out.append({"numero": text(body, gen + "Numero"), "data": text(body, gen + "Data"),
+                        "fornitore": seller, "partita_iva": piva, "cliente": buyer, "righe": lines,
+                        "imponibile": net, "imposta": tax, "totale": float(total) if total else
+                        (net or 0) + (tax or 0), "valuta": text(body, gen + "Divisa") or "EUR"})
+    return out

@@ -94,6 +94,7 @@ def find_refs(text: str, spaces: list[PageSpace] | PageSpace | None) -> list[Pag
 # ------------------------------------------------------------------ Markdown
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _IMAGE = re.compile(r"!\[([^\]\n]*)\]\(([^)\s]+)[^)]*\)")
+_PLACEHOLDER = re.compile(r"\[([^\W\d_][^\[\]\n\x00—]{1,59})\](?!\()")
 _LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)[^)]*\)")
 _BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
 _ITALIC = re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])|(?<![\w_])_(?!\s)(.+?)(?<!\s)_(?![\w_])")
@@ -105,6 +106,7 @@ class Rendered:
     refs: list[PageRef]
     links: list[str]
     images: list[str]
+    placeholders: list[str] = field(default_factory=list)
 
 
 class _Renderer:
@@ -116,6 +118,7 @@ class _Renderer:
         self.refs: list[PageRef] = []
         self.links: list[str] = []
         self.images: list[str] = []
+        self.placeholders: list[str] = []
         self.colors = _colors()
 
     def inline(self, raw: str) -> str:
@@ -159,6 +162,11 @@ class _Renderer:
             return slot(f"<span style='color:{self.colors['muted']}' title='{html.escape(_('non verificato'))}'>"
                         f"{html.escape(shown)} <i>({html.escape(_('non verificato'))})</i></span>")
 
+        def placeholder(m):
+            self.placeholders.append(m.group(1))
+            return slot(f"<span style='background:{self.colors['warning']};color:#ffffff' "
+                        f"title='{html.escape(_('da completare'))}'>[{html.escape(m.group(1))}]</span>")
+
         def link(m):
             text, url = m.group(1), m.group(2)
             self.links.append(url)
@@ -168,6 +176,7 @@ class _Renderer:
         s = _IMAGE.sub(image, s)
         s = REF_RE.sub(ref, s)
         s = _LINK.sub(link, s)
+        s = _PLACEHOLDER.sub(placeholder, s)
         s = html.escape(s, quote=False)
         s = _BOLD.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", s)
         s = _ITALIC.sub(lambda m: f"<i>{m.group(1) or m.group(2)}</i>", s)
@@ -262,7 +271,12 @@ def render_markdown(text: str, spaces: list[PageSpace] | PageSpace | None = None
         spaces = [spaces]
     r = _Renderer(spaces or [], known_refs, prefix)
     body = r.render((text or "").replace("\x00", ""))
-    return Rendered(body, r.refs, r.links, r.images)
+    return Rendered(body, r.refs, r.links, r.images, r.placeholders)
+
+
+def placeholders(text: str) -> list[str]:
+    """Segnaposto «[…]» da completare (dati non forniti, mai inventati)."""
+    return render_markdown(text).placeholders
 
 
 def plain_text(text: str) -> str:

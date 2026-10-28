@@ -82,7 +82,7 @@ class TaskTemplate:
 
 
 def placeholders(text: str) -> set[str]:
-    return set(re.findall(r"\{(\w+)\}", text))
+    return set(re.findall(r"\{(?:parametro:)?(\w+)\}", text))
 
 
 def _b(id_, name, cat, desc, instr, scope="document", params=None, output="text"):
@@ -114,7 +114,7 @@ BUILTIN = [
                                                             ["e-commerce", "marketplace", "social"])]),
     _b("customer-reply", "Comunicazione al cliente", "Comunicazione",
        "Risposta o comunicazione al cliente basata sul documento.",
-       "Write a {tono} message to the customer about: {argomento}. Base facts only on the content and cite pages "
+       "Write a {tono} message to the customer about: {argomento}. Never invent recipient data: use placeholders in square brackets such as [nome del cliente]. Base facts only on the content and cite pages "
        "[p. N] in a separate note for the operator (not in the message). Answer in {lingua}.", scope="any",
        params=[Param("argomento", "text", ""), Param("tono", "choice", "cordiale",
                                                      ["cordiale", "formale", "professionale"])]),
@@ -168,6 +168,40 @@ BUILTIN = [
        "From the content produce: 5 video titles, a description, 10 keywords and a {durata}-minute script. "
        "Answer in {lingua}.", params=[Param("durata", "number", "3")]),
 ]
+
+
+# Sezioni fisse dei modelli predefiniti (AI-20 v2): mostrate nell'ordine del modello.
+SECTIONS = {
+    "business-plan": ["Sintesi", "Mercato", "Offerta", "Organizzazione", "Piano economico", "Rischi"],
+    "video": ["Titoli", "Descrizione", "Parole chiave", "Copione"],
+    "paper": ["Obiettivi", "Metodo", "Risultati", "Limiti"],
+    "cashflow": ["Gestione operativa", "Gestione di investimento", "Gestione di finanziamento"],
+    "strategy": ["Punti di forza", "Debolezze", "Opportunità", "Minacce", "Raccomandazione"],
+}
+
+
+def apply_sections(text: str, sections: list[str]) -> str:
+    """Riordina la risposta nelle sezioni del modello; le sezioni assenti risultano «da completare»."""
+    import re as _re
+    parts: dict[str, list[str]] = {}
+    extra: list[str] = []
+    current = None
+    for line in text.splitlines():
+        m = _re.match(r"^#{1,6}\s+(.*?)\s*#*\s*$", line)
+        if m:
+            title = m.group(1).strip().strip("*").strip()
+            current = next((sec for sec in sections if title.lower().startswith(sec.lower())), None)
+            if current is not None:
+                parts.setdefault(current, [])
+                continue
+        (parts[current] if current is not None else extra).append(line)
+    out = [line for line in extra if line.strip()] and ["\n".join(extra).strip(), ""] or []
+    for sec in sections:
+        body = "\n".join(parts.get(sec, [])).strip()
+        out.append(f"## {sec}")
+        out.append(body if body else "_" + _("da completare") + "_")
+        out.append("")
+    return "\n".join(out).strip()
 
 
 class TaskStore:
@@ -246,11 +280,12 @@ class TaskStore:
 def build_instructions(task: TaskTemplate, values: dict, scope: engine.Scope, language: str) -> str:
     vals = {p.name: str(values.get(p.name, p.default)) for p in task.params}
     vals.update({"lingua": prompts.language_name(language), "selezione": scope.selection or "",
-                 "pagine": engine.compact_ranges(scope.page_indices) if scope.page_indices else "",
+                 "pagine": _("pagine {p}").format(p=engine.compact_ranges(scope.page_indices))
+                 if scope.page_indices else "",
                  "documento": "the provided document"})
     text = task.instructions
     for k, v in vals.items():
-        text = text.replace("{" + k + "}", v)
+        text = text.replace("{" + k + "}", v).replace("{parametro:" + k + "}", v)
     return text.replace("{{", "{").replace("}}", "}")
 
 
@@ -260,6 +295,9 @@ def run_task(job: engine.Job, task: TaskTemplate, values: dict, scope: engine.Sc
         raise FoliantError(_("Questa attività richiede un modello che accetti immagini."))
     system = engine._system(prompts.BASE, job.language) + " " + prompts.CITE + " " + \
         build_instructions(task, values, scope, job.language)
+    if task.id in SECTIONS:
+        system += " Use exactly these Markdown headings (## …), in this order: " + \
+            "; ".join(SECTIONS[task.id]) + "."
     budget, out_tokens = engine.budget_for(profile, system)
     body = engine.scope_text(scope)
     if len(body) > budget:
@@ -273,6 +311,8 @@ def run_task(job: engine.Job, task: TaskTemplate, values: dict, scope: engine.Sc
                          on_wait=job.on_wait, profile=profile)
     text = r.text
     data = None
+    if task.id in SECTIONS:
+        text = apply_sections(text, SECTIONS[task.id])
     if task.output == "questions":
         try:
             data = parse_quiz(text)
@@ -283,6 +323,10 @@ def run_task(job: engine.Job, task: TaskTemplate, values: dict, scope: engine.Sc
     if task.sensitive:
         text = text.rstrip() + "\n\n> " + _(DISCLAIMER)
         flags.append(_("non sostituisce il parere di un professionista"))
+    from .render import placeholders as _placeholders
+    todo = _placeholders(text)
+    if todo:
+        flags.append(_("da completare: {p}").format(p=", ".join(f"[{t}]" for t in todo)))
     refs, rflags = engine._ref_flags(text, scope)
     return engine.Answer(text, engine._status(r), refs, flags, data=data)
 

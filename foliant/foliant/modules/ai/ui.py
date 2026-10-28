@@ -543,6 +543,15 @@ class Controller:
         except ValueError as e:
             self.ctx.error(_("Estrai dati"), str(e))
             return None
+        if kind == "invoice":
+            local = extract.embedded_einvoices(doc.pdf)
+            if local:
+                # fattura elettronica allegata: dati letti in locale, nessuna richiesta al fornitore
+                result = extract.build_result("invoice", local, scope)
+                result.model = _("fattura elettronica allegata")
+                dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=doc.display_name)
+                self.exec_dialog(dlg)
+                return dlg
         gateway = self.services.gateway()
         language = panel._answer_language()
         try:
@@ -800,6 +809,33 @@ class Controller:
             act(proposal.params)
         elif act is not None:
             act.trigger()   # lo strumento chiede le sue conferme come nell'uso manuale
+
+    # ---------------------------------------------------------------- confronto e classifica (AI-32)
+    def open_ranking(self):
+        from . import ranking
+        from .ranking_view import RankingDialog
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+
+        def run_eval(prepared, excluded, criteria, cv):
+            return self._run(_("Valutazione dei documenti…"), lambda job: ranking.evaluate(
+                job, prepared, criteria, cv_mode=cv, excluded=excluded))
+
+        def open_ref(path, page):
+            view = next((v for v in self.ctx.views() if str(v.document.path) == path), None)
+            if view is None:
+                view = self.ctx.open_path(path)
+            else:
+                self.ctx.window.tabs.setCurrentWidget(view)
+            if view is not None and 0 <= page < view.page_count:
+                view.go_to_page(page)
+
+        docs = {str(v.document.path): v.document for v in self.ctx.views() if v.document.path}
+        dlg = RankingDialog(run_eval, open_ref, lambda: self.ctx.ask_open_paths(_("Aggiungi documenti")),
+                            self.ctx.ask_save_path, docs, self.ctx.window, cache=self.services.cache)
+        self.exec_dialog(dlg)
+        return dlg
 
     # ---------------------------------------------------------------- analisi pagine (AI-24)
     def analyze_pages(self):
@@ -1073,6 +1109,7 @@ def register(ctx, *, provider_factory=None) -> Services:
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
     a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_rank = act(_("Confronta e classifica"), "list-ordered", lambda: controller.open_ranking(), requires=False)
     a_gfx = act(_("Genera elemento grafico"), "image-plus", lambda: controller.generate_graphic())
     a_docx = act(_("Converti in Word con l'IA"), "file-text", lambda: controller.convert_to_docx())
     a_bib = act(_("Ricerca bibliografica"), "library", lambda: controller.open_bibliography(), requires=False)
@@ -1094,7 +1131,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
                             a_section, a_sem, a_cmd, a_docx]
-    services.profile_actions = [a_tasks, a_write, a_coll, a_bib]
+    services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank]
     services.local_actions = [a_pages, a_gfx]   # la generazione spiega da sé se manca il modello   # funziona anche senza profilo (controlli locali)
     for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
         mode.add_action(a)
@@ -1108,7 +1145,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     more.setAutoRaise(True)
     more_menu = QMenu(more)
-    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_tasks, a_write, a_bib, a_cmd),
+    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_tasks, a_write, a_bib, a_cmd),
                   (a_ops, a_log)):
         for a in group:
             more_menu.addAction(a)
