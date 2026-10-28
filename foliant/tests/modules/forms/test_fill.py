@@ -297,9 +297,15 @@ def test_highlight_pixels_and_not_saved(qtbot, window, tmp_path):
         r = view.page_to_view(0, pymupdf.Rect(50, 50 + 40 * i, 250, 70 + 40 * i))
         c = img.pixelColor(r.center().toPoint())
         assert c != Qt.GlobalColor.white and c.blue() > c.red(), (i, c.name())
-    on = view.document.to_bytes(no_new_id=True)
+    def objects():
+        with view.document.lock:
+            pdf = view.document.pdf
+            return [(pdf.xref_object(i, compressed=True),
+                     pdf.xref_stream(i) if pdf.xref_is_stream(i) else None) for i in range(1, pdf.xref_length())]
+
+    on = objects()
     f.toggle_highlight(False)
-    assert view.document.to_bytes(no_new_id=True) == on
+    assert objects() == on  # gli oggetti salvati sono gli stessi con o senza evidenziazione
     # preferenza persistente
     f.toggle_highlight(True)
     view2 = open_form(window, _number_doc(tmp_path))
