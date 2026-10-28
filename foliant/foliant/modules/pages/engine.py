@@ -501,7 +501,161 @@ def delete_pages(pdf: pymupdf.Document, indices: Iterable[int]) -> int:
         raise PageOpError(_("Impossibile eliminare tutte le pagine: il documento deve conservarne almeno una."))
     pdf.delete_pages(sel)
     _fix_open_action(pdf)
+    prune_structure(pdf)
     return len(sel)
+
+
+# ---------------------------------------------------------------- struttura logica (PAG-03)
+
+def _split_array(text: str) -> list[str]:
+    """Elementi di un array PDF: riferimenti «n 0 R», numeri e dizionari «<<…>>»."""
+    text = text.strip()
+    if text.startswith("["):
+        text = text[1:-1]
+    items: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c.isspace():
+            i += 1
+            continue
+        if text.startswith("<<", i):
+            depth, j = 0, i
+            while j < n:
+                if text.startswith("<<", j):
+                    depth += 1
+                    j += 2
+                elif text.startswith(">>", j):
+                    depth -= 1
+                    j += 2
+                    if depth == 0:
+                        break
+                else:
+                    j += 1
+            items.append(text[i:j])
+            i = j
+            continue
+        m = re.match(r"(\d+)\s+(\d+)\s+R", text[i:])
+        if m:
+            items.append(m.group(0))
+            i += m.end()
+            continue
+        m = re.match(r"[^\s\[\]<>/]+|/[^\s\[\]<>/]+", text[i:])
+        if m:
+            items.append(m.group(0))
+            i += m.end()
+        else:
+            i += 1
+    return items
+
+
+def _ref(text: str) -> int | None:
+    m = re.fullmatch(r"\s*(\d+)\s+\d+\s+R\s*", text)
+    return int(m.group(1)) if m else None
+
+
+def _dict_pg(text: str) -> int | None:
+    m = re.search(r"/Pg\s+(\d+)\s+\d+\s+R", text)
+    return int(m.group(1)) if m else None
+
+
+def prune_structure(pdf: pymupdf.Document) -> int:
+    """Rimuove dall'albero di struttura i contenuti delle pagine che non esistono più.
+
+    Elementi rimasti senza contenuto vengono potati; il /ParentTree conserva solo
+    le voci delle pagine e annotazioni ancora presenti. Restituisce il numero di
+    elementi rimossi."""
+    try:
+        kind, root = pdf.xref_get_key(pdf.pdf_catalog(), "StructTreeRoot")
+    except Exception:
+        return 0
+    if kind != "xref":
+        return 0
+    root_x = int(root.split()[0])
+    live = {pdf[i].xref for i in range(pdf.page_count)}
+    removed = 0
+    seen: set[int] = set()
+
+    def prune_kids(owner: int, inherited_pg: int | None) -> bool:
+        """Pota /K di `owner`; True se resta qualcosa."""
+        nonlocal removed
+        k_kind, k_val = pdf.xref_get_key(owner, "K")
+        if k_kind == "null":
+            return owner == root_x
+        items = _split_array(k_val) if k_kind == "array" else [k_val]
+        p_kind, p_val = pdf.xref_get_key(owner, "Pg")
+        pg = int(p_val.split()[0]) if p_kind == "xref" else inherited_pg
+        kept: list[str] = []
+        for it in items:
+            x = _ref(it)
+            if x is not None:
+                if x in seen:
+                    kept.append(it)
+                    continue
+                seen.add(x)
+                t_kind, t_val = pdf.xref_get_key(x, "Type")
+                if t_val in ("/MCR", "/OBJR"):
+                    kpg = _dict_pg(pdf.xref_object(x, compressed=True)) or pg
+                    if kpg is None or kpg in live:
+                        kept.append(it)
+                    continue
+                if prune_kids(x, pg):
+                    kept.append(it)
+                else:
+                    removed += 1
+                continue
+            if it.startswith("<<"):
+                kpg = _dict_pg(it) or pg
+                if kpg is None or kpg in live:
+                    kept.append(it)
+                continue
+            if re.fullmatch(r"-?\d+", it):   # MCID sulla pagina dell'elemento
+                if pg is None or pg in live:
+                    kept.append(it)
+                continue
+            kept.append(it)
+        if len(kept) != len(items):
+            if not kept:
+                pdf.xref_set_key(owner, "K", "null")
+            else:
+                pdf.xref_set_key(owner, "K", "[" + " ".join(kept) + "]")
+        if owner != root_x and p_kind == "xref" and pg not in live:
+            pdf.xref_set_key(owner, "Pg", "null")
+        return bool(kept) or owner == root_x
+
+    prune_kids(root_x, None)
+    # ParentTree: solo le chiavi ancora usate da pagine e annotazioni
+    used: set[int] = set()
+    for i in range(pdf.page_count):
+        page = pdf[i]
+        k, v = pdf.xref_get_key(page.xref, "StructParents")
+        if k == "int":
+            used.add(int(v))
+        for a in page.annots() or []:
+            k, v = pdf.xref_get_key(a.xref, "StructParent")
+            if k == "int":
+                used.add(int(v))
+        for w in page.widgets() or []:
+            k, v = pdf.xref_get_key(w.xref, "StructParent")
+            if k == "int":
+                used.add(int(v))
+    k, v = pdf.xref_get_key(root_x, "ParentTree")
+    nodes = [int(v.split()[0])] if k == "xref" else []
+    while nodes:
+        node = nodes.pop()
+        nk, nv = pdf.xref_get_key(node, "Kids")
+        if nk == "array":
+            nodes += [r for r in (_ref(t) for t in _split_array(nv)) if r]
+        nk, nv = pdf.xref_get_key(node, "Nums")
+        if nk == "array":
+            items = _split_array(nv)
+            kept = []
+            for j in range(0, len(items) - 1, 2):
+                if re.fullmatch(r"\d+", items[j]) and int(items[j]) in used:
+                    kept += [items[j], items[j + 1]]
+            if len(kept) != len(items):
+                pdf.xref_set_key(node, "Nums", "[" + " ".join(kept) + "]")
+    return removed
 
 
 def _fix_open_action(pdf: pymupdf.Document) -> None:
@@ -679,6 +833,7 @@ def extract_pages(pdf: pymupdf.Document, indices: Sequence[int], *, annots: bool
             out = copy
         else:
             out = _subset(copy, indices)
+        prune_structure(out)
         if not annots:
             for page in out:
                 for a in list(page.annots() or []):
@@ -734,6 +889,7 @@ def replace_pages(pdf: pymupdf.Document, indices: Sequence[int], src: pymupdf.Do
             n_extra = len(extra_src)
             result += list(range(after, after + n_extra))
             pdf.delete_pages(list(range(pdf.page_count - k, pdf.page_count)))
+            prune_structure(pdf)
         else:
             pdf.delete_pages(sorted(set(to_delete)))
             removed_before = 0
@@ -743,6 +899,7 @@ def replace_pages(pdf: pymupdf.Document, indices: Sequence[int], src: pymupdf.Do
                 removed_before = sum(1 for g in gone if g < i)
                 fixed.append(i - removed_before)
             result = fixed
+        prune_structure(pdf)
         return result
     finally:
         if same:

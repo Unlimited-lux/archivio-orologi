@@ -807,6 +807,9 @@ class SplitDialog(BaseDialog):
             return   # costruzione in corso
         m = self.method()
         self.collect.setEnabled(m == "ranges")
+        defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
+        if self.template.text() in ("{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
+            self.template.setText(defaults.get(m, "{nome}_parte{n}"))
         if m in ("size", "blank"):
             self.preview.setText("")   # calcolo costoso: eseguito alla conferma
             self.set_error(None)

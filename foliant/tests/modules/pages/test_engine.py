@@ -550,3 +550,53 @@ def test_merge_alternate(tmp_path):
     r = save_numbered(tmp_path / "R.pdf", 3, prefix="R")
     out = pymupdf.open(stream=E.merge_alternate(f, r, reverse_b=True))
     assert page_texts(out) == ["F1", "R3", "F2", "R2", "F3", "R1"]
+
+
+def _tagged_pdf(n: int = 3) -> pymupdf.Document:
+    d = numbered_pdf(n)
+    els = []
+    root, doc_el = d.get_new_xref(), d.get_new_xref()
+    for i in range(n):
+        d[i].clean_contents()
+        c = d[i].get_contents()[0]
+        d.update_stream(c, b"/P <</MCID 0>> BDC BT /helv 12 Tf 72 720 Td (x) Tj ET EMC")
+        d.xref_set_key(d[i].xref, "StructParents", str(i))
+        e = d.get_new_xref()
+        els.append(e)
+        d.update_object(e, f"<</Type/StructElem/S/P/P {doc_el} 0 R/Pg {d[i].xref} 0 R/K 0>>")
+    pt = d.get_new_xref()
+    d.update_object(pt, "<</Nums[" + " ".join(f"{i} [{els[i]} 0 R]" for i in range(n)) + "]>>")
+    d.update_object(doc_el, f"<</Type/StructElem/S/Document/P {root} 0 R/K[{' '.join(f'{e} 0 R' for e in els)}]>>")
+    d.update_object(root, f"<</Type/StructTreeRoot/K {doc_el} 0 R/ParentTree {pt} 0 R>>")
+    d.xref_set_key(d.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
+    return pymupdf.open(stream=d.tobytes())
+
+
+def _struct_page_refs(doc):
+    refs = set()
+    for x in range(1, doc.xref_length()):
+        obj = doc.xref_object(x, compressed=True)
+        if "/StructElem" in obj:
+            refs |= {int(m) for m in __import__("re").findall(r"/Pg (\\d+) 0 R", obj)}
+    return refs
+
+
+def test_delete_prunes_structure_tree():
+    doc = _tagged_pdf(3)
+    E.delete_pages(doc, [1])
+    out = pymupdf.open(stream=doc.tobytes(garbage=3))
+    live = {out[i].xref for i in range(out.page_count)}
+    assert _struct_page_refs(out) <= live
+    root = int(out.xref_get_key(out.pdf_catalog(), "StructTreeRoot")[1].split()[0])
+    pt = int(out.xref_get_key(root, "ParentTree")[1].split()[0])
+    items = E._split_array(out.xref_get_key(pt, "Nums")[1])
+    assert items[0::2] == ["0", "2"]
+    doc_el = int(out.xref_get_key(root, "K")[1].split()[0])
+    assert len(E._split_array(out.xref_get_key(doc_el, "K")[1])) == 2
+
+
+def test_extract_prunes_structure_tree():
+    doc = _tagged_pdf(3)
+    out = pymupdf.open(stream=E.extract_pages(doc, [2]))
+    live = {out[i].xref for i in range(out.page_count)}
+    assert _struct_page_refs(out) <= live
