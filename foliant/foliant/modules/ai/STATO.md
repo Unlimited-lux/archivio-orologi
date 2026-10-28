@@ -80,7 +80,7 @@ La specifica v2 è arrivata dopo il completamento delle funzioni sopra. Rispetto
 | AI-29 Fatture e ricevute | parziale | Coperto da AI-10 (estrazione fattura, controllo somme, «non verificato», CSV/JSON); mancano controllo formale di partita IVA e codice fiscale, CSV con file d'origine su più PDF, lettura locale dell'XML di fattura elettronica allegato. |
 | AI-30 Schede prodotto | parziale | Attività «Scheda prodotto» testuale; manca la tabella delle specifiche strutturata con unità, limite di 300 caratteri ed esportazione CSV. |
 | AI-31 Comunicazioni ai clienti | parziale | Attività «Comunicazione al cliente» e scrittura assistita (AI-19, con «Crea nuovo PDF»); manca l'evidenziazione dei segnaposto e l'avvio dal risultato di una revisione. |
-| AI-32 Confronto e classifica | non fatto | Il confronto testuale è disponibile (attività «Confronto», «Più documenti › Confronta»); manca la classifica con criteri pesati e totali calcolati localmente. |
+| AI-32 Confronto e classifica | fatto | `test_ranking.py`: totali 7,50/7,25/6,25 e ordine, obbligatorio a 0 escluso in fondo, CSV una riga per documento, CV senza età/stato civile/foto/origine, senza immagini né nomi di file, avviso sulla decisione umana, clic sul punteggio apre la pagina. «Altri strumenti › Confronta e classifica». Esportazione PDF non implementata (solo CSV). |
 
 I subagenti avviati per queste funzioni si sono interrotti per il limite di utilizzo dell'API
 prima di produrre codice; nessun file parziale è stato aggiunto.
