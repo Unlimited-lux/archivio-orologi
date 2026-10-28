@@ -188,6 +188,12 @@ def protection_options(pdf: pymupdf.Document, password: str | None, auth_code: i
     return opts
 
 
+def _version_tuple(text: str | None) -> tuple[int, int]:
+    """(1, 4) da «PDF 1.4» o «/1.4»; (0, 0) se non si legge."""
+    m = re.search(r"(\d+)\.(\d+)", text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
 def _file_stamp(path) -> tuple | None:
     try:
         st = os.stat(path)
@@ -766,7 +772,8 @@ class Document:
         """Il documento come file PDF completo e compattato (senza toccare il documento aperto).
 
         Per impostazione predefinita senza flussi di oggetti, così chi cerca nei byte
-        (es. `/ByteRange`, `/Sig`) li trova; i file salvati su disco li usano (`save_bytes`).
+        (es. `/ByteRange`, `/Sig`) li trova; i file salvati su disco li usano se il documento è
+        già almeno PDF 1.5 (`save_bytes`, `uses_object_streams`).
         """
         opts = {"garbage": 3, "deflate": True}
         with self.lock:
@@ -844,7 +851,8 @@ class Document:
         - con una `save_strategy` registrata che restituisce dei byte, quelli;
         - per un documento firmato (o con `incremental=True`): `original_bytes` + un
           aggiornamento incrementale con gli oggetti cambiati;
-        - altrimenti il file completo, compattato e con flussi di oggetti.
+        - altrimenti il file completo, compattato e con flussi di oggetti se il documento
+          è già almeno PDF 1.5, nuovo o convertito (`uses_object_streams`).
         """
         if self.save_strategy is not None:
             data = self.save_strategy(self, Path(path) if path is not None else self.path)
@@ -853,7 +861,27 @@ class Document:
         if self._wants_incremental(incremental, options):
             with self.lock:
                 return incremental_update(self.original_bytes, self._pdf, self.password)
-        return self.to_bytes(**{"use_objstms": 1, **options})
+        return self.to_bytes(**{"use_objstms": int(self.uses_object_streams), **options})
+
+    @property
+    def uses_object_streams(self) -> bool:
+        """Il file salvato per intero userà i flussi di oggetti (PDF 1.5).
+
+        Solo se il documento dichiara già almeno la versione 1.5 (intestazione o /Version del
+        catalogo), oppure è nuovo o convertito: con i flussi di oggetti il motore alzerebbe a
+        1.5 l'intestazione di un file 1.4, anche solo per un'evidenziazione (NFR-29).
+        """
+        if self.original_bytes is None:
+            return True
+        with self.lock:
+            try:
+                version = _version_tuple((self._pdf.metadata or {}).get("format"))
+                kind, value = self._pdf.xref_get_key(self._pdf.pdf_catalog(), "Version")
+                if kind == "name":
+                    version = max(version, _version_tuple(value))
+            except Exception:
+                return True
+        return version >= (1, 5)
 
     def save(self, path: str | os.PathLike | None = None, *, incremental: bool | None = None, **options) -> None:
         """Salva (in modo atomico). Senza percorso usa quello corrente.

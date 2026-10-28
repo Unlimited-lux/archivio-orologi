@@ -1,4 +1,5 @@
 import os
+import re
 
 import pymupdf
 import pytest
@@ -481,6 +482,34 @@ def test_saved_notification_updates_disk_stamp(sample_pdf):
     assert not doc.disk_changed()
     atomic_write(sample_pdf, data + b"% ancora\n")      # le scritture di Foliant non contano come esterne
     assert not doc.disk_changed()
+
+
+def test_pdf_14_keeps_its_version_when_saved(tmp_path):
+    """NFR-29: un PDF 1.4 con un'evidenziazione aggiunta resta 1.4 (niente flussi di oggetti né
+    xref compresse); i documenti nuovi e quelli già ≥ 1.5 continuano a usare i flussi di oggetti."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Testo da evidenziare", fontsize=14)
+    data = src.tobytes().replace(b"%PDF-1.7", b"%PDF-1.4", 1)    # xref classica, stessa lunghezza
+    assert data.startswith(b"%PDF-1.4") and b"/ObjStm" not in data
+    path = tmp_path / "vecchio.pdf"
+    path.write_bytes(data)
+    doc = Document.open(path)
+    assert not doc.uses_object_streams
+    with doc.change("Evidenzia", kind="annotation") as pdf:
+        page = pdf[0]
+        page.add_highlight_annot(page.search_for("Testo")[0])
+    doc.save()
+    saved = path.read_bytes()
+    assert saved.startswith(b"%PDF-1.4")
+    assert b"/ObjStm" not in saved and not re.search(rb"/Type\s*/XRef", saved)
+    check = pymupdf.open(path)
+    assert [a.type[1] for a in check[0].annots()] == ["Highlight"]
+    # /Version 1.6 nel catalogo vale come versione del documento
+    with doc.change("Versione", kind="metadata") as pdf:
+        pdf.xref_set_key(pdf.pdf_catalog(), "Version", "/1.6")
+    assert doc.uses_object_streams and b"/ObjStm" in doc.save_bytes()
+    new = Document.new()
+    assert new.uses_object_streams and b"/ObjStm" in new.save_bytes()
 
 
 def test_to_bytes_without_object_streams(sample_pdf):

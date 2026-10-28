@@ -244,7 +244,7 @@ un proprio `customContextMenuRequested` sulla barra delle schede: le voci vanno 
 | `original_bytes`, `has_signatures` | byte del file all'apertura o dopo l'ultimo salvataggio; campi `/FT /Sig` con `/V` |
 | `save(path=None, incremental=None)`, `save_copy(path)`, `save_bytes(path=None)` | un documento firmato si salva **sempre** in modo incrementale (`original_bytes` + modifiche in coda), anche con «Salva con nome»; cambio di protezione, redazione (`kind="redaction"`), file riparato, `replace_with()` con un PDF che non prosegue il file (rinumerato; fino all'annullamento) o `incremental=False` = riscrittura completa; `incremental=True` lo forza (`IncrementalSaveError` se impossibile) |
 | `save_strategy` | facoltativa: `fn(document, path)` che restituisce i byte da scrivere, oppure None per il comportamento del nucleo |
-| `to_bytes(**opzioni)` | file completo compattato, senza flussi di oggetti (i byte restano cercabili); i file salvati li usano |
+| `to_bytes(**opzioni)` / `uses_object_streams` | file completo compattato, senza flussi di oggetti (i byte restano cercabili); i file salvati li usano solo se il documento è già almeno PDF 1.5 o è nuovo/convertito, così un file 1.4 resta 1.4 (NFR-29) |
 | notifiche `CONTENT`, `SAVED`, `CLOSED`, `ACCESS`, `LOCK` | `document.add_listener(fn(document, tipo))`; chi scrive il file da sé notifica `SAVED` (aggiorna anche il controllo «modificato da un altro programma») |
 
 `save_options["encrypt_metadata"] = False` (SEC-06, «cifra tutto tranne i metadati») è accettata ma
