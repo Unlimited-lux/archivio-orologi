@@ -38,6 +38,7 @@ def register(ctx: Context) -> None:
     global CONTROLLER
     add_translations("en", EN)
     c = SecurityController(ctx)
+    c.purge_old_trust()     # riservatezza: percorsi dei documenti attendibili delle versioni precedenti
     CONTROLLER = c
     _CONTROLLERS[id(ctx)] = c
 

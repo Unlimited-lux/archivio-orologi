@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pymupdf
+import pytest
 from PySide6.QtWidgets import QApplication
 
 from foliant.modules import security
@@ -75,3 +76,24 @@ def test_lock_covers_both_windows(window, monkeypatch):
         other.close()
         other.deleteLater()
         QApplication.processEvents()
+
+
+OLD_TRUST = '{"files": {"/home/rossi/zq7k-contratto.pdf": "ab"}, "folders": ["/home/rossi/zq7k"]}'
+
+
+@pytest.fixture(params=[OLD_TRUST, ""], ids=["elenco", "vuoto"])
+def old_trust_settings(request, settings):
+    settings.setValue("security/trusted", request.param)
+    settings.sync()
+    return settings
+
+
+def test_old_trust_list_removed_at_startup(old_trust_settings, window):
+    """Riservatezza: l'elenco dei documenti attendibili delle versioni precedenti (percorsi di file e
+    cartelle) si cancella all'avvio del modulo, senza aprire documenti; anche se vuoto."""
+    c = security.controller_for(window.ctx)
+    assert c is not None and c.TRUST_KEY == "security/trusted"
+    s = old_trust_settings
+    s.sync()
+    assert not s.contains("security/trusted")
+    assert all("zq7k" not in str(s.value(k)) for k in s.allKeys())

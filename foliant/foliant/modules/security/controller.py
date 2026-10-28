@@ -1797,6 +1797,18 @@ class SecurityController:
     # viene conservato tra un avvio e l'altro. L'attendibilità vale per la sessione, in memoria.
     TRUST_KEY = "security/trusted"          # valore delle versioni precedenti: viene cancellato
 
+    def purge_old_trust(self) -> None:
+        """All'avvio del modulo: cancella l'elenco dei documenti attendibili che le versioni
+        precedenti salvavano (percorsi di file e cartelle), anche se vuoto, senza attendere
+        l'apertura di un documento con contenuti attivi."""
+        s = self.settings()
+        if s is None:
+            return
+        try:
+            s.remove(self.TRUST_KEY)
+        except Exception:
+            pass
+
     def _trusted(self) -> dict:
         trusted = getattr(self, "_session_trust", None)
         if trusted is None:
