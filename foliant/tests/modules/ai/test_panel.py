@@ -869,3 +869,33 @@ def test_copy_formatted_and_dropped_image(qtbot, window, ready, fake, sample_pdf
     panel.send("cosa vedi?")
     wait_done(qtbot, panel)
     assert fake.requests[-1].image_count() == 1
+
+
+def test_translate_warns_when_already_target_language(window, ready, fake, tmp_path):
+    from foliant.modules.ai import content as ct
+    assert ct.guess_language("Il contratto è valido per la durata di un anno e non si rinnova") == "it"
+    assert ct.guess_language("The contract is valid for one year and it is not renewed") == "en"
+    path = tmp_path / "en.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "The contract is valid for one year and it is not renewed", fontsize=11)
+    doc.save(str(path))
+    window.open_path(str(path))
+    panel = ready.panel
+    panel.set_function("translate")
+    panel.target_lang.setCurrentIndex(panel.target_lang.findData("en"))
+    panel.set_scope("document")
+    asked = []
+    panel.ask_confirm = lambda t, m: asked.append(m) or False
+    assert panel.send() is None
+    assert asked and "già" in asked[0] and fake.requests == []
+
+
+def test_history_encrypted_with_keyring_key(memory_keyring):
+    from foliant.modules.ai.engine import ChatMessage, Conversation
+    h = history.HistoryStore(encrypt=True)
+    c = Conversation(title="segreta", messages=[ChatMessage("user", "testo riservato IBAN")])
+    assert h.save(c)
+    raw = h._path(c.id).read_text()
+    assert "IBAN" not in raw and raw.startswith(history.ENC_PREFIX)
+    assert ("foliant-ai", "history-key") in memory_keyring.store
+    assert history.HistoryStore().get(c.id).messages[0].text == "testo riservato IBAN"

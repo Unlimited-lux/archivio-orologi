@@ -360,3 +360,27 @@ def parse_page_range(text: str, page_count: int) -> list[int]:
     if not out:
         raise ValueError(_("Indica un intervallo di pagine, ad esempio «1-3, 7»."))
     return out
+
+
+_STOPWORDS = {
+    "it": {"il", "lo", "la", "gli", "le", "di", "che", "e", "è", "per", "con", "non", "una", "del", "della", "sono"},
+    "en": {"the", "and", "of", "to", "is", "in", "that", "for", "with", "are", "this", "not", "be", "on"},
+    "fr": {"le", "la", "les", "de", "des", "et", "est", "pour", "dans", "une", "que", "pas", "sur", "du"},
+    "de": {"der", "die", "das", "und", "ist", "nicht", "mit", "ein", "eine", "für", "von", "zu", "den", "auf"},
+    "es": {"el", "la", "los", "las", "de", "que", "y", "es", "para", "con", "una", "por", "del", "no"},
+    "pt": {"o", "a", "os", "as", "de", "que", "e", "é", "para", "com", "uma", "não", "do", "da"},
+}
+
+
+def guess_language(text: str) -> str | None:
+    """Lingua probabile (euristica locale sulle parole frequenti), None se incerta."""
+    import re as _re
+    words = _re.findall(r"[^\W\d_]+", (text or "").lower())
+    if len(words) < 4:
+        return None
+    scores = {lang: sum(1 for w in words if w in sw) for lang, sw in _STOPWORDS.items()}
+    best = max(scores, key=scores.get)
+    ranked = sorted(scores.values(), reverse=True)
+    if ranked[0] < 2 or ranked[0] < ranked[1] * 1.5:
+        return None
+    return best

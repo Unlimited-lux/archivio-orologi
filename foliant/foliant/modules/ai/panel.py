@@ -759,6 +759,14 @@ class AIPanel(QWidget):
         if prepared is None:
             return None
         scope, ocr_pages, ocr_lang = prepared
+        if fn == "translate":
+            from .prompts import LANGUAGE_NAMES_IT
+            target = self.target_lang.currentData()
+            sample = (scope.selection or text or "\n".join(p.text for p in scope.pages[:3]))[:4000]
+            if content.guess_language(sample) == target and not self.ask_confirm(
+                    _("Traduci"), _("Il testo sembra già in {l}. Tradurre comunque?").format(
+                        l=_(LANGUAGE_NAMES_IT.get(target, target)).lower())):
+                return None
         # stima per le operazioni onerose (AI-14)
         if fn in ("summary", "outline", "map") and scope.pages:
             n, chars = engine.plan_requests(scope, profile)

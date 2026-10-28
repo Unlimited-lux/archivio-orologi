@@ -46,6 +46,8 @@ class Services:
             self._history = history.HistoryStore()
         self._history.enabled = enabled
         self._history.retention_days = days
+        self._history.encrypt = self.store.option("history_encrypt", False)
+        self._history.secrets = self.store.secrets
         return self._history
 
     def register_worker(self, w) -> None:

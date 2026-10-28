@@ -19,12 +19,46 @@ from .engine import Conversation
 RETENTION_CHOICES = (0, 30, 90, 365)   # giorni; 0 = mai
 
 
+ENC_PREFIX = "FOLIANT-ENC1\n"
+
+
 class HistoryStore:
-    def __init__(self, directory: Path | None = None, enabled: bool = True, retention_days: int = 0):
+    """Archivio della cronologia. Con `encrypt` i file sono cifrati (chiave nel portachiavi)."""
+
+    def __init__(self, directory: Path | None = None, enabled: bool = True, retention_days: int = 0,
+                 encrypt: bool = False, secrets=None):
         self._dir = directory
         self.enabled = enabled
         self.retention_days = retention_days
+        self.encrypt = encrypt
+        self.secrets = secrets
         self.damaged: list[Path] = []
+
+    # ----------------------------------------------------------------- cifratura
+    def _fernet(self, create: bool):
+        from cryptography.fernet import Fernet
+        from .config import SecretStore
+        secrets = self.secrets or SecretStore()
+        key = secrets.get("history-key")
+        if not key and create:
+            key = Fernet.generate_key().decode("ascii")
+            secrets.set("history-key", key)   # KeyringUnavailable se manca il portachiavi
+        return Fernet(key.encode("ascii")) if key else None
+
+    def _dump(self, conv: Conversation) -> str:
+        text = json.dumps(conv.to_dict(), ensure_ascii=False, indent=1)
+        if self.encrypt:
+            return ENC_PREFIX + self._fernet(True).encrypt(text.encode("utf-8")).decode("ascii")
+        return text
+
+    def _read(self, f: Path) -> Conversation:
+        raw = f.read_text(encoding="utf-8")
+        if raw.startswith(ENC_PREFIX):
+            fernet = self._fernet(False)
+            if fernet is None:
+                raise ValueError("chiave della cronologia non disponibile")
+            raw = fernet.decrypt(raw[len(ENC_PREFIX):].encode("ascii")).decode("utf-8")
+        return Conversation.from_dict(json.loads(raw))
 
     @property
     def directory(self) -> Path:
@@ -40,8 +74,8 @@ class HistoryStore:
             return False
         conv.updated = _dt.datetime.now().isoformat(timespec="seconds")
         try:
-            write_private(self._path(conv.id), json.dumps(conv.to_dict(), ensure_ascii=False, indent=1))
-        except OSError:
+            write_private(self._path(conv.id), self._dump(conv))
+        except Exception:  # noqa: BLE001 - disco pieno o portachiavi mancante: resta in memoria
             return False
         return True
 
@@ -54,8 +88,8 @@ class HistoryStore:
             return out
         for f in files:
             try:
-                conv = Conversation.from_dict(json.loads(f.read_text(encoding="utf-8")))
-            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                conv = self._read(f)
+            except Exception:  # noqa: BLE001 - file danneggiato o non decifrabile
                 self._isolate(f)
                 continue
             out.append(conv)
@@ -88,8 +122,8 @@ class HistoryStore:
 
     def get(self, conv_id: str) -> Conversation | None:
         try:
-            return Conversation.from_dict(json.loads(self._path(conv_id).read_text(encoding="utf-8")))
-        except (OSError, ValueError, TypeError, KeyError):
+            return self._read(self._path(conv_id))
+        except Exception:  # noqa: BLE001
             return None
 
     def rename(self, conv_id: str, title: str) -> None:

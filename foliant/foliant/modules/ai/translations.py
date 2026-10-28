@@ -843,4 +843,8 @@ EN: dict[str, str] = {
         "Adds an invisible text layer: the PDF becomes searchable. Can be undone.",
     "Verifica della connessione…": "Checking connection…",
     "Testo riconosciuto salvato nel documento.": "Recognized text saved in the document.",
+    "facoltativo, per generare immagini": "optional, for image generation",
+    "Modello per immagini": "Image model",
+    "Il testo sembra già in {l}. Tradurre comunque?": "The text already seems to be in {l}. Translate anyway?",
+    "Cifra la cronologia (chiave nel portachiavi)": "Encrypt history (key stored in the keyring)",
 }
