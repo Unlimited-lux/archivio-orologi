@@ -280,7 +280,7 @@ def _style_lines(lines: list[Line], color_img: np.ndarray | None, gray: np.ndarr
             ln.color = ink_color(color_img, ln.bbox)
         fs_px = _font_size_for_line(ln, zoom, sans) * zoom
         sw = stroke_width(gray, ln.bbox)
-        ln.bold = fs_px > 0 and sw / fs_px > 0.11
+        ln.bold = fs_px > 0 and sw / fs_px > 0.145
         ln.italic = slant(gray, ln.bbox) >= 0.12
         measured = (ln.words[-1].bbox[2] - ln.words[0].bbox[0]) / zoom
         natural = sans.text_length(unicodedata.normalize("NFC", ln.text), fontsize=fs_px / zoom) or 1.0
