@@ -55,3 +55,4 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 Note:
 - Le posizioni sono calcolate direttamente dal content stream con le matrici della pagina e sono verificate su pagine ruotate e con CropBox spostato (test_obj_geometry.py); per questo il modulo non usa `core/placement.py`.
 - Un solo test resta `xfail`: incolla in altro documento senza opacità con differenze di ±1 livello (OBJ-30, causa non isolata).
+- Più finestre (Ctrl+N): lo stato del modulo (azioni, pannelli, controller) è separato per finestra e viene rimosso quando la finestra è distrutta (test_two_windows_close_second_first_still_works). Con la scheda chiusa, il filtro di trascinamento non raggiunge più la vista (NFR-06).

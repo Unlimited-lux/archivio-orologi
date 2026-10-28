@@ -5,6 +5,8 @@ from __future__ import annotations
 import gc
 import weakref
 
+import pytest
+
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
@@ -46,3 +48,32 @@ def test_closed_view_not_retained_by_module(ui, tmp_path):
     v = ref()
     if v is not None:
         assert not _module_referrers(v), _module_referrers(v)
+
+
+@pytest.mark.qt_no_exception_capture   # i difetti di altri moduli (OCR) non sono di objects
+def test_two_windows_close_second_first_still_works(ui, tmp_path, settings, qtbot):
+    """Ctrl+N: una seconda finestra nello stesso processo non sovrascrive lo stato della prima."""
+    import traceback
+
+    from foliant.ui.main_window import MainWindow
+    first_acts = O._st(ui.window.ctx)["actions"]
+    with qtbot.capture_exceptions() as errors:   # altri moduli possono avere difetti propri
+        win2 = MainWindow(settings)
+        win2.show()
+        assert O._state["actions"] is not first_acts
+        win2.close()
+        win2.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QApplication.processEvents()
+        gc.collect()
+        assert O._state["actions"] is first_acts
+        view = ui.open(make_doc(tmp_path / "b.pdf", images=[(50, 70, 250, 170)]))
+        first_acts["objects"].trigger()
+        ui.c.set_selection(view, 0, [0])
+        assert first_acts["rotate_cw"].isEnabled()
+        first_acts["rotate_cw"].trigger()
+        QApplication.processEvents()
+        view.document._saved_state = view.document._state
+    ours = ["".join(traceback.format_exception(*e)) for e in errors]
+    ours = [t for t in ours if "modules/objects" in t]
+    assert not ours, ours[0]
