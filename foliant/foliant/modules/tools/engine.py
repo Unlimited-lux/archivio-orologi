@@ -528,6 +528,7 @@ class JobSettings:
     error_policy: str = "continue"
     passwords: list[str] = field(default_factory=list)
     workers: int = 1
+    conflict_choices: dict = field(default_factory=dict)   # «chiedi ogni volta»: percorso -> scelta
 
     def to_dict(self) -> dict:
         """Impostazioni senza segreti (per giornale e rapporto)."""
@@ -1698,7 +1699,10 @@ def _target_dir(item: QueueItem, settings: JobSettings) -> str:
 
 def _resolve_conflict(path: str, settings: JobSettings, reserved: set[str]) -> str | None:
     """Percorso finale secondo la politica, o None se il file va saltato."""
-    if settings.conflict == "overwrite":
+    policy = settings.conflict_choices.get(path, settings.conflict)
+    if policy == "ask":            # nessuna risposta registrata: come «rinomina»
+        policy = "rename"
+    if policy == "overwrite":
         if path in reserved:
             pass
         else:
@@ -1706,7 +1710,7 @@ def _resolve_conflict(path: str, settings: JobSettings, reserved: set[str]) -> s
     exists = os.path.exists(path) or path in reserved
     if not exists:
         return path
-    if settings.conflict == "skip":
+    if policy == "skip":
         return None
     stem, ext = os.path.splitext(path)
     n = 1
@@ -1715,6 +1719,21 @@ def _resolve_conflict(path: str, settings: JobSettings, reserved: set[str]) -> s
         if not os.path.exists(cand) and cand not in reserved:
             return cand
         n += 1
+
+
+def planned_conflicts(items: list[QueueItem], settings: JobSettings, started: datetime) -> list[tuple[str, str]]:
+    """Per «chiedi ogni volta»: (ingresso, uscita già esistente) dei file da un PDF a un PDF."""
+    if settings.replace_originals or any(ACTIONS.get(s.action) and ACTIONS[s.action].kind != "pdf"
+                                         for s in settings.steps if s.enabled):
+        return []
+    plan = _bates_plan(items, settings)
+    out = []
+    for i, item in enumerate(items):
+        name = render_name(settings.pattern, item.path, i, settings, started, item.pages, plan[i])
+        target = os.path.join(_target_dir(item, settings), name)
+        if os.path.exists(target):
+            out.append((item.path, target))
+    return out
 
 
 def _write_output(path: str, data: bytes) -> None:

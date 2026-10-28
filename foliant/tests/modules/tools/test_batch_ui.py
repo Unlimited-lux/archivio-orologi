@@ -334,3 +334,31 @@ def test_sequence_keeps_output_settings(batch, tmp_path):
     exported = tmp_path / "f.foliantseq"
     assert batch.export_sequence(str(exported))
     assert be.sequence_output(str(exported))["pattern"] == "{nome}_{contatore:3}"
+
+
+def test_conflict_ask_each_time(batch, folder, tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    for n in ("alfa.pdf", "doc2.pdf"):
+        (out / n).write_bytes(b"vecchio")
+    asked = []
+    answers = iter([("skip", False), ("overwrite", False)])
+    monkeypatch.setattr(bu, "ask_conflict", lambda parent, target: asked.append(os.path.basename(target))
+                        or next(answers))
+    batch.add_paths([str(folder / n) for n in ("alfa.pdf", "doc2.pdf", "doc10.pdf")])
+    batch.add_step("compress")
+    batch.dest_path.setText(str(out))
+    batch.conflict.setCurrentIndex(batch.conflict.findData("ask"))
+    report = batch.run(confirm=False)
+    assert asked == ["alfa.pdf", "doc2.pdf"]
+    assert (out / "alfa.pdf").read_bytes() == b"vecchio"                  # saltato
+    assert (out / "doc2.pdf").read_bytes().startswith(b"%PDF")            # sovrascritto
+    assert (out / "doc10.pdf").exists()
+    assert [r.status for r in report.results] == ["skipped", "ok", "ok"]
+    # «applica a tutti» e annullamento
+    asked.clear()
+    monkeypatch.setattr(bu, "ask_conflict", lambda parent, target: asked.append(1) or ("rename", True))
+    batch.run(confirm=False)
+    assert len(asked) == 1 and (out / "alfa (1).pdf").exists()
+    monkeypatch.setattr(bu, "ask_conflict", lambda parent, target: None)
+    assert batch.run(confirm=False) is None

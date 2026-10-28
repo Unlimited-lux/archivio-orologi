@@ -370,6 +370,7 @@ class BatchWidget(QWidget):
         self.conflict.addItem(_("Rinomina con (1), (2)…"), "rename")
         self.conflict.addItem(_("Sovrascrivi"), "overwrite")
         self.conflict.addItem(_("Salta"), "skip")
+        self.conflict.addItem(_("Chiedi ogni volta"), "ask")
         self.replace_originals = QCheckBox(_("Sostituisci gli originali"))
         self.replace_originals.toggled.connect(self._settings_changed)
         self.backup = QCheckBox(_("Copia di sicurezza .bak"))
@@ -937,12 +938,25 @@ class BatchWidget(QWidget):
                 self.ctx.error(_("Impossibile avviare"), _("Impossibile creare la cartella: {e}").format(e=e.strerror))
                 return None
         be.prepare_bates_series(settings, self._base_dir())
+        started = datetime.now()
+        if settings.conflict == "ask":
+            apply_all = None
+            for src, target in be.planned_conflicts(list(self.items), settings, started):
+                choice = apply_all
+                if choice is None:
+                    answer = ask_conflict(self, target)
+                    if answer is None:
+                        return None
+                    choice, remember = answer
+                    if remember:
+                        apply_all = choice
+                settings.conflict_choices[target] = choice
         control = be.JobControl()
         panel = JobControlPanel(control, self)
         panel.show()
         try:
             report = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, list(self.items), settings,
-                                       None, None, control, self.journal_path())
+                                       started, None, control, self.journal_path())
         except Exception as e:   # il motore non dovrebbe sollevare: sicurezza in più
             self.ctx.error(_("Elaborazione non riuscita"), str(e))
             return None
@@ -1065,6 +1079,24 @@ class BatchWidget(QWidget):
             target = os.path.dirname(outputs[0]) if outputs else ""
         if target and os.path.isdir(target):
             QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+
+
+def ask_conflict(parent, target: str) -> tuple[str, bool] | None:
+    """«Chiedi ogni volta»: (scelta, vale per tutti) per un file già esistente (sostituibile nei test)."""
+    from PySide6.QtWidgets import QMessageBox
+    box = QMessageBox(parent)
+    box.setWindowTitle(_("File già esistente"))
+    box.setText(_("«{f}» esiste già nella destinazione.").format(f=os.path.basename(target)))
+    box.setInformativeText(target)
+    every = QCheckBox(_("Applica a tutti i conflitti"))
+    box.setCheckBox(every)
+    buttons = {box.addButton(_("Sovrascrivi"), QMessageBox.ButtonRole.AcceptRole): "overwrite",
+               box.addButton(_("Rinomina"), QMessageBox.ButtonRole.AcceptRole): "rename",
+               box.addButton(_("Salta"), QMessageBox.ButtonRole.AcceptRole): "skip"}
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    box.exec()
+    choice = buttons.get(box.clickedButton())
+    return (choice, every.isChecked()) if choice else None
 
 
 def ask_launch_parameters(parent, requests: list[tuple[int, be.Param, object]]) -> dict | None:
