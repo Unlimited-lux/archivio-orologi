@@ -185,6 +185,10 @@ class SecurityController:
             return False
         self.ctx.status(_("Accesso completo"))
         self.refresh_document_state(self.view())
+        # bug_03: gli altri moduli (stampa, copia) ricalcolano i comandi consentiti
+        view = next((v for v in self.ctx.views() if v.document is document), None)
+        if view is not None:
+            self.ctx.documentChanged.emit(view)
         return True
 
     # ------------------------------------------------------------ protezione

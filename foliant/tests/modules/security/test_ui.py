@@ -855,3 +855,16 @@ def test_bug09_gotor_refused_is_handled(window, sec, sample_pdf, monkeypatch):
     from foliant.ui import tools
     prio = max(p for p, _s, h in tools.LINK_HANDLERS if h is L.handler)
     assert prio >= max([p for p, _s, h in tools.LINK_HANDLERS if h is not L.handler] or [prio])
+
+
+def test_bug03_unlock_notifies_and_grants_engine_permissions(window, sec, tmp_path, monkeypatch):
+    view = window.open_path(_owner_only(tmp_path))
+    with view.document.lock:
+        assert not view.document.pdf.permissions & pymupdf.PDF_PERM_COPY
+    seen = []
+    window.ctx.documentChanged.connect(lambda v: seen.append(v))
+    monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
+    assert sec.unlock(view.document)
+    assert view in seen
+    with view.document.lock:
+        assert view.document.pdf.permissions & pymupdf.PDF_PERM_COPY

@@ -312,6 +312,12 @@ def unlock(document: Document, password: str) -> bool:
         if document.save_options.get("owner_pw") == orig_owner:
             document.save_options["owner_pw"] = password
         document.original_protection["owner_pw"] = password
+        # i moduli che leggono i permessi dal motore (stampa, copia) li vedono completi
+        try:
+            with ENGINE_LOCK:
+                document.pdf.authenticate(password)
+        except Exception:
+            pass
         return True
     return False
 
