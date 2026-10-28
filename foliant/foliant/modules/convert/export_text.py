@@ -36,11 +36,12 @@ def write_txt(work: pymupdf.Document, path: str, job) -> None:
     annotations = job.options.get("annotations", False)
     n = work.page_count
     struct: dict = {}
+    struct_cells: dict = {}
     if mode != "layout" and job.options.get("use_structure", True):
-        from .structure import structure_order
+        from .structure import structure_layout
         with ENGINE_LOCK:
             try:
-                struct = structure_order(work)
+                struct, struct_cells = structure_layout(work)
             except Exception:
                 struct = {}
     with open(path, "w", encoding=encoding, newline="") as f:
@@ -58,7 +59,7 @@ def write_txt(work: pymupdf.Document, path: str, job) -> None:
                     tagged = None
                     if struct.get(page.xref):
                         from .structure import tagged_page_text
-                        tagged = tagged_page_text(work, i, struct[page.xref])
+                        tagged = tagged_page_text(work, i, struct[page.xref], struct_cells.get(page.xref))
                     if tagged is not None:
                         pc = PageContent(index=job.source_index(i), width=0, height=0)
                         text = tagged

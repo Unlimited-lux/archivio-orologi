@@ -23,7 +23,7 @@ from typing import Iterable
 from foliant.i18n import _
 
 from .engine import OcrResult, PageResult
-from .tess import Line, Word
+from .tess import Line, Word, logical_lines
 
 SEPARATOR_LINE = "line"
 SEPARATOR_FORMFEED = "formfeed"
@@ -43,12 +43,13 @@ def _nfc(s: str) -> str:
 
 
 def _paragraphs(lines: Iterable[Line]) -> list[list[str]]:
-    """Righe raggruppate per paragrafo (cambio di (blocco, paragrafo))."""
+    """Righe raggruppate per paragrafo (cambio di (blocco, paragrafo)); una tabella è un paragrafo
+    con una riga per riga di tabella e le colonne separate da tabulazioni."""
     out: list[list[str]] = []
     prev = None
-    for ln in lines:
-        text = _nfc(ln.text).strip()
-        if not text:
+    for ln, text in logical_lines(list(lines)):
+        text = _nfc(text).strip(" ")
+        if not text.strip():
             continue
         key = (ln.block, ln.par)
         if prev is None or key != prev:
@@ -106,9 +107,10 @@ def page_text(res: PageResult, paragraphs: bool = False, dehyphenate: bool = Fal
         return ""
     blocks: list[str] = []
     for par in _paragraphs(res.lines):
-        if dehyphenate:
+        table = any("\t" in t for t in par)
+        if dehyphenate and not table:
             par = _dehyphenate(par)
-        blocks.append(_join_paragraph(par) if paragraphs else "\n".join(par))
+        blocks.append(_join_paragraph(par) if paragraphs and not table else "\n".join(par))
     return _nfc("\n\n".join(blocks))
 
 

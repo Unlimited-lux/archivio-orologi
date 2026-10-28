@@ -117,3 +117,14 @@ BAT-19, `patch` solo per un test di CMP-13.
   (interfaccia bloccata, annullamento impossibile) e ricomprimeva l'immagine condivisa a ogni pagina
   → ora un'immagine per volta, annullabile, 0,2 s (7fddfc0, b9773e7); «Annulla file» durante un passo
   risultava errore; aggiunti «Riprendi i non elaborati» e il messaggio per i file vuoti (9aa9ee5).
+
+## Aperti alla chiusura (17:00 UTC)
+
+- NFR-26 formato carta: `create_pdf` (engine.py, `PAGE_SIZES`, predefinito "a4") e le misure in mm
+  dei dialoghi non usano ancora `ctx.paper_size()` / `ctx.measure_unit()` (disponibili da cb29e8f).
+- NFR-26 numeri e date: virgola decimale fissa (`replace(".", ",")`) nei testi dell'interfaccia
+  (engine.py «area variata», compare_engine.py, batch_ui.py) e date con formato fisso nei rapporti
+  (report.py): da passare a `foliant.api.format_number` / `format_date`.
+- C13 punto 2 (colonna destinazione oltre il bordo a 1280×800): il test con la finestra reale a
+  1280×800 e 1024×700 (`test_english_defaults_and_layout_fit`) passa in ambiente offscreen; non
+  verificato con i caratteri della macchina di collaudo.

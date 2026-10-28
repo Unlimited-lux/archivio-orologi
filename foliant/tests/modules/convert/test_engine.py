@@ -1245,3 +1245,83 @@ def test_ocr_low_resolution_scan_warns(tmp_path):
     res = run_conversion(path, tmp_path / "b.txt", "txt", language="ita")
     assert res.ocr_pages == [1]
     assert any("Pagina 1" in w and "isoluzione" in w for w in res.warnings), res.warnings
+
+
+def test_total_line_right_below_table_is_kept(tmp_path):
+    """Collaudo B, D2: la riga «Totale imponibile» 3-4 pt sotto l'ultimo bordo della tabella, che
+    MuPDF unisce all'ultima riga in un solo blocco, non deve sparire (DOCX, HTML, RTF, TXT)."""
+    import docx
+    doc = pymupdf.open()
+    p = doc.new_page()
+    rows = [["Articolo", "Qtà", "Prezzo", "Importo"], ["Cronografo", "1", "18.000,00", "18.000,00"],
+            ["Cinturino", "2", "193,25", "386,50"], ["Revisione", "1", "4.000,00", "4.000,00"]]
+    x0, y0, cw, rh = 90, 140, 90, 14
+    for r, row in enumerate(rows):
+        for c, v in enumerate(row):
+            rect = pymupdf.Rect(x0 + c * cw, y0 + r * rh, x0 + (c + 1) * cw, y0 + (r + 1) * rh)
+            p.draw_rect(rect, color=(0, 0, 0), width=0.8)
+            p.insert_text((rect.x0 + 4, rect.y1 - 3), v, fontsize=10)
+    bottom = y0 + len(rows) * rh
+    p.insert_text((x0 + 4, bottom + 3.5 + 8), "Totale imponibile 22.386,50 EUR", fontsize=10)
+    path = _save(doc, tmp_path / "fattura.pdf")
+    # precondizione: MuPDF mette tabella e totale nello stesso blocco
+    with pymupdf.open(path) as chk:
+        merged = [b for b in chk[0].get_text("dict")["blocks"]
+                  if any("Totale" in "".join(s["text"] for s in ln["spans"]) for ln in b["lines"])]
+        assert len(merged[0]["lines"]) > 1
+    d = docx.Document(convert_pdf(path, tmp_path / "f.docx", "docx")[0])
+    assert any("Totale imponibile 22.386,50 EUR" in q.text for q in d.paragraphs)
+    assert len(d.tables) == 1 and d.tables[0].cell(3, 0).text == "Revisione"
+    for fmt in ("html", "rtf", "txt"):
+        out = convert_pdf(path, tmp_path / f"f.{fmt}", fmt)[0]
+        text = open(out, encoding="utf-8", errors="replace").read()
+        assert "22.386,50" in text, fmt
+        assert text.count("Revisione") == 1, fmt
+
+
+def test_parse_cell_swiss_francs():
+    """Collaudo A2: importi in franchi svizzeri con codice ISO, «Fr.» e apostrofo delle migliaia."""
+    from foliant.modules.convert.export_office import detect_decimal, parse_cell
+    cells = ["CHF 7,250.00", "7'250.00", "Fr. 7'250.00", "7,250.00 CHF", "SFr. 7’250.00"]
+    dec = detect_decimal(cells)
+    assert dec == "."
+    for c in cells:
+        assert parse_cell(c, dec)[0] == 7250.0, c
+    assert parse_cell("CHF 950", ".")[0] == 950
+    assert parse_cell("€ 1.234,50", ",")[0] == 1234.5 and parse_cell("1.234,50 EUR", ",")[0] == 1234.5
+    assert parse_cell("ABC", ".")[0] == "ABC" and parse_cell("REF 00123", ".")[0] == "REF 00123"
+
+
+def test_txt_tagged_table_cells_and_artifacts(tmp_path):
+    """Collaudo B, D3: nel TXT di un PDF taggato le celle di una riga TR sono separate da
+    tabulazioni e l'intestazione /Artifact non finisce in fondo al testo."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "x", fontsize=1)
+    font = [f[4] for f in page.get_fonts()][0]
+    cells = [("Referenza", 72, 600), ("Prezzo", 250, 600), ("5513", 72, 580), ("9.800", 250, 580)]
+    content = [f"/Artifact <</Type/Pagination/Subtype/Header>> BDC BT /{font} 9 Tf 72 800 Td "
+               f"(Orologeria Verdi - Listino) Tj ET EMC",
+               f"/P <</MCID 0>> BDC BT /{font} 12 Tf 72 700 Td (Listino autunno) Tj ET EMC"]
+    for k, (text, x, y) in enumerate(cells, 1):
+        content.append(f"/TD <</MCID {k}>> BDC BT /{font} 11 Tf {x} {y} Td ({text}) Tj ET EMC")
+    doc.update_stream(page.get_contents()[0], "\n".join(content).encode())
+    root, docel, para, table, tr1, tr2 = (doc.get_new_xref() for _ in range(6))
+    tds = [doc.get_new_xref() for _ in cells]
+    for k, td in enumerate(tds):
+        parent = tr1 if k < 2 else tr2
+        doc.update_object(td, f"<</Type/StructElem/S/TD/P {parent} 0 R/Pg {page.xref} 0 R/K {k + 1}>>")
+    doc.update_object(tr1, f"<</Type/StructElem/S/TR/P {table} 0 R/K[{tds[0]} 0 R {tds[1]} 0 R]>>")
+    doc.update_object(tr2, f"<</Type/StructElem/S/TR/P {table} 0 R/K[{tds[2]} 0 R {tds[3]} 0 R]>>")
+    doc.update_object(table, f"<</Type/StructElem/S/Table/P {docel} 0 R/K[{tr1} 0 R {tr2} 0 R]>>")
+    doc.update_object(para, f"<</Type/StructElem/S/P/P {docel} 0 R/Pg {page.xref} 0 R/K 0>>")
+    doc.update_object(docel, f"<</Type/StructElem/S/Document/P {root} 0 R/K[{para} 0 R {table} 0 R]>>")
+    doc.update_object(root, f"<</Type/StructTreeRoot/K {docel} 0 R>>")
+    doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
+    doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<</Marked true>>")
+    path = _save(doc, tmp_path / "listino_taggato.pdf")
+    text = open(convert_pdf(path, tmp_path / "l.txt", "txt")[0], encoding="utf-8").read()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    assert "Referenza\tPrezzo" in lines and "5513\t9.800" in lines
+    assert lines[0] == "Listino autunno"
+    assert "Orologeria Verdi - Listino" not in lines[-1]

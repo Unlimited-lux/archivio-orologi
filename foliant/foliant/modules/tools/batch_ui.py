@@ -346,10 +346,10 @@ class BatchWidget(QWidget):
         drow.addWidget(self.dest_folder)
         drow.addWidget(self.dest_path, 1)
         drow.addWidget(browse)
-        self.subfolder = QLineEdit("elaborati")
+        self.subfolder = QLineEdit(_("elaborati"))
         self.subfolder.textChanged.connect(self._settings_changed)
         self.keep_structure = QCheckBox(_("Mantieni la struttura delle sottocartelle"))
-        self.pattern = QLineEdit("{nome}")
+        self.pattern = QLineEdit(be.default_name_placeholder())
         self.pattern.textChanged.connect(self._settings_changed)
         ph = QToolButton()
         ph.setText("{ }")
@@ -869,7 +869,7 @@ class BatchWidget(QWidget):
         pw = self.common_password.text()
         return be.JobSettings(
             steps=list(self.steps), destination_mode=mode, destination=self.dest_path.text().strip(),
-            subfolder=self.subfolder.text().strip() or "elaborati", keep_structure=self.keep_structure.isChecked(),
+            subfolder=self.subfolder.text().strip() or _("elaborati"), keep_structure=self.keep_structure.isChecked(),
             input_root=root, pattern=self.pattern.text(), counter_start=self.counter_start.value(),
             conflict=self.conflict.currentData(), replace_originals=self.replace_originals.isChecked(),
             backup=self.backup.isChecked(), error_policy=self.error_policy.currentData(),
@@ -878,7 +878,8 @@ class BatchWidget(QWidget):
     def _suggest_pattern(self) -> None:
         """Modello predefinito: «{nome}» o «{nome}_<suffisso>» nella stessa cartella."""
         current = self.pattern.text()
-        if current == "{nome}" or current.startswith("{nome}_") and current.count("{") == 1:
+        if (current in ("{nome}", "{name}") or current.startswith(("{nome}_", "{name}_"))
+                and current.count("{") == 1):
             self.pattern.blockSignals(True)
             self.pattern.setText(be.default_pattern(self.settings()))
             self.pattern.blockSignals(False)
@@ -1251,7 +1252,7 @@ class WatchDialog(QWidget):
         exts = be.INPUT_EXTENSIONS + (be.CREATE_EXTENSIONS if any(s.action == "create_pdf" for s in steps) else ())
         cfg = WatchConfig(folder=folder, steps=steps, destination=destination, extensions=exts,
                           originals=self.originals.currentData(), stable_seconds=float(self.stable.value()),
-                          pattern=self.batch.pattern.text() or "{nome}", conflict=self.batch.conflict.currentData())
+                          pattern=self.batch.pattern.text() or be.default_name_placeholder(), conflict=self.batch.conflict.currentData())
         errors = self.service.add(cfg)
         self.refresh()
         return errors

@@ -843,11 +843,7 @@ class SignController(QObject):
                                                   "eliminato? Salvalo di nuovo e riprova.").format(
                 p=doc.path, e=e.strerror or e))
             return False
-        try:
-            signed = self._run_signing(data, digital_id, options)
-        finally:
-            if hasattr(digital_id, "close"):      # SIG-23: chiude la sessione del dispositivo
-                digital_id.close()
+        signed = self._run_signing(data, digital_id, options)
         if signed is None:
             return False
         try:
@@ -957,6 +953,26 @@ class SignController(QObject):
         if new_view is not None:
             self.verify(new_view, force=True)
         return new_view
+
+    def request_signature(self, view, field_name: str) -> bool:
+        """`ctx.request_signature(view, nome_campo)`: apre la firma digitale con il campo preselezionato.
+        True se la procedura è partita (campo firma vuoto trovato)."""
+        if view is None:
+            return False
+        field = next((f for f in self.empty_fields(view) if f.name == field_name), None)
+        if field is None:
+            from . import digital
+            try:
+                with view.document.lock:
+                    data = view.document.to_bytes() if hasattr(view.document, "to_bytes") else None
+                fields = digital.signature_fields(data, view.document.password) if data else []
+            except Exception:  # noqa: BLE001
+                fields = []
+            field = next((f for f in fields if f.name == field_name and not f.signed), None)
+        if field is None:
+            return False
+        self.digital_sign(view, field=field)
+        return True
 
     def trusted_certificates(self) -> list:
         """Certificati attendibili dell'utente (più quelli di sistema se abilitati)."""

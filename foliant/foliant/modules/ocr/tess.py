@@ -60,6 +60,8 @@ class Line:
     bold: bool = False
     italic: bool = False
     family: str = "sans"     # sans | serif | mono (stimata dall'immagine)
+    row: int = -1            # cella di tabella: riga e colonna (−1 fuori tabella)
+    col: int = -1
 
     @property
     def text(self) -> str:
@@ -68,6 +70,21 @@ class Line:
     def baseline_y(self, x: float) -> float:
         slope, offset = self.baseline
         return self.bbox[3] + offset + slope * (x - self.bbox[0])
+
+
+def logical_lines(lines: list[Line]) -> list[tuple[Line, str]]:
+    """Righe di testo per l'esportazione: le celle di una stessa riga di tabella diventano una riga
+    sola, con le colonne separate da tabulazioni. Restituisce (prima riga, testo)."""
+    out: list[tuple[Line, str]] = []
+    prev: Line | None = None
+    for ln in lines:
+        if (prev is not None and ln.row >= 0 and prev.row == ln.row and prev.block == ln.block and out):
+            first, text = out[-1]
+            out[-1] = (first, text + "\t" * max(1, ln.col - prev.col) + ln.text)
+        else:
+            out.append((ln, "\t" * max(0, ln.col) + ln.text))
+        prev = ln
+    return out
 
 
 def tesseract_cmd() -> str | None:

@@ -78,7 +78,11 @@ def test_all_strings_translated():
 
 def test_placeholders_match():
     from foliant.modules.tools.translations import EN
-    bad = [k for k, v in EN.items() if sorted(_PH.findall(k)) != sorted(_PH.findall(v))]
+    from foliant.modules.tools.engine import PLACEHOLDER_ALIASES
+
+    def norm(text):   # i segnaposti dei modelli possono usare gli alias inglesi
+        return sorted(PLACEHOLDER_ALIASES.get(p[1:-1], p[1:-1]) for p in _PH.findall(text))
+    bad = [k for k, v in EN.items() if norm(k) != norm(v)]
     assert bad == []
 
 

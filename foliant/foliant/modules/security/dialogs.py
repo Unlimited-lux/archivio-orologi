@@ -381,6 +381,47 @@ class PolicyPasswordDialog(QDialog):
             self.accept()
 
 
+class PasswordPairDialog(QDialog):
+    """Una password con conferma (es. per la busta di sicurezza)."""
+
+    def __init__(self, title: str, intro: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        lay = QVBoxLayout(self)
+        if intro:
+            lay.addWidget(_note(intro))
+        form = QFormLayout()
+        self.pw, self.pw2 = PasswordField(), PasswordField()
+        self.strength = StrengthBar()
+        self.pw.changed.connect(lambda: self.strength.set_password(self.pw.text()))
+        form.addRow(_("Password:"), self.pw)
+        form.addRow(_("Conferma:"), self.pw2)
+        form.addRow("", self.strength)
+        lay.addLayout(form)
+        self.error = _note("", "danger")
+        lay.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def problem(self) -> str:
+        if not self.pw.text():
+            return _("Scrivi la password.")
+        if self.pw.text() != self.pw2.text():
+            return _("Le password non coincidono")
+        if len(self.pw.text().encode()) > 127:
+            return _("La password è troppo lunga (massimo 127 byte).")
+        return ""
+
+    def _accept(self) -> None:
+        problem = self.problem()
+        self.error.setText(problem)
+        if not problem:
+            self.accept()
+
+
 class PolicyDialog(QDialog):
     """Gestione delle policy: applica, applica a più file, rinomina, duplica, elimina,
     importa, esporta."""

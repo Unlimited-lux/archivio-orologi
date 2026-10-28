@@ -72,6 +72,11 @@ def _overlay_flatten(pdf: pymupdf.Document, pages: list[int], keep) -> None:
     baked.close()
 
 
+def _protected(annot) -> bool:
+    """Annotazioni che l'appiattimento lascia come sono: redazioni da applicare e nascoste."""
+    return annot.type[0] == pymupdf.PDF_ANNOT_REDACT or bool(annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN)
+
+
 def flatten_annotations(pdf: pymupdf.Document, pages: list[int], *, types: set[int] | None = None,
                         include_links: bool = False, forms: bool = True, report: dict) -> None:
     lost_notes = 0
@@ -86,10 +91,31 @@ def flatten_annotations(pdf: pymupdf.Document, pages: list[int], *, types: set[i
     if forms and signed:
         report["warnings"].append(_("Le firme appiattite non sono più verificabili."))
     all_pages = pages == list(range(pdf.page_count))
+    # mai appiattire in silenzio i segni di redazione non applicati (il testo resterebbe sotto un
+    # semplice rettangolo) né le annotazioni nascoste: restano annotazioni
+    protected = {i: [a.xref for a in pdf[i].annots() if _protected(a)] for i in pages}
+    n_redact = sum(1 for i in pages for a in pdf[i].annots() if a.type[0] == pymupdf.PDF_ANNOT_REDACT)
+    if n_redact:
+        report["warnings"].append(_("{n} segni di redazione non applicati non sono stati appiattiti: restano da "
+                                    "applicare.").format(n=n_redact))
     if types is None and all_pages:
         links = None if include_links else _save_links(pdf)
-        count = sum(len(list(pdf[i].annots())) for i in pages)
+        count = sum(1 for i in pages for a in pdf[i].annots() if not _protected(a))
+        kept = {}
+        for i, xrefs in protected.items():
+            if xrefs:
+                page = pdf[i]
+                kept[i] = xrefs
+                others = [a.xref for a in page.annots() if a.xref not in xrefs]
+                others += [w.xref for w in (page.widgets() or [])]
+                others += [lk["xref"] for lk in page.get_links() if lk.get("xref")]
+                pdf.xref_set_key(page.xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in others) + "]")
         pdf.bake(annots=True, widgets=forms)
+        for i, xrefs in kept.items():
+            page = pdf[i]
+            kind, val = pdf.xref_get_key(page.xref, "Annots")
+            current = [int(x) for x in re.findall(r"(\d+) 0 R", val)] if kind == "array" else []
+            pdf.xref_set_key(page.xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in current + xrefs) + "]")
         if links is not None:
             _restore_links(pdf, links)
         report["annotations"] = count
@@ -97,7 +123,7 @@ def flatten_annotations(pdf: pymupdf.Document, pages: list[int], *, types: set[i
         wanted = MARKUP_TYPES if types is None else types
 
         def keep(annot) -> bool:
-            return annot.type[0] not in wanted
+            return annot.type[0] not in wanted or _protected(annot)
 
         report["annotations"] = sum(1 for i in pages for a in pdf[i].annots() if not keep(a))
         _overlay_flatten(pdf, pages, keep)

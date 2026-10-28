@@ -208,7 +208,7 @@ def fill_table(table: Table, lines: list[Line]) -> list[Line]:
         offset = src.baseline_y(bbox[0]) - bbox[3]
         cell_lines.append(Line(bbox=bbox, words=ws, baseline=(src.baseline[0], offset), x_size=src.x_size,
                                x_ascenders=src.x_ascenders, x_descenders=src.x_descenders,
-                               block=base_block + r * 100 + c, par=base_block + r * 100 + c))
+                               block=base_block, par=base_block, row=r, col=c))
     # le celle prendono il posto della tabella nell'ordine di lettura (prima delle righe sotto la tabella)
     top = table.ys[0]
     before = [ln for ln in outside if ln.bbox[3] <= top]

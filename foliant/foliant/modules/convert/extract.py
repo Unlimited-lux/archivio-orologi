@@ -614,7 +614,20 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
     bad_fonts = _undecodable_fonts(page) if textpage is None and ocr != "never" else set()
     for block in data.get("blocks", []):
         bbox = tuple(block.get("bbox", (0, 0, 0, 0)))
-        if any(_inside(bbox, t.bbox) for t in table_items):
+        if table_items and block.get("type") == 0:
+            # MuPDF può unire l'ultima riga di una tabella al paragrafo che la segue (es. «Totale…»):
+            # si scartano solo le righe che cadono nella tabella, non l'intero blocco
+            lines = block.get("lines", [])
+            keep = [ln for ln in lines if not any(_inside(tuple(ln.get("bbox", bbox)), t.bbox) for t in table_items)]
+            if not keep:
+                continue
+            if len(keep) != len(lines):
+                r = pymupdf.Rect(keep[0]["bbox"])
+                for ln in keep[1:]:
+                    r |= pymupdf.Rect(ln["bbox"])
+                bbox = tuple(r)
+                block = dict(block, lines=keep, bbox=bbox)
+        elif any(_inside(bbox, t.bbox) for t in table_items):
             continue
         if block.get("type") == 1:
             if not images:

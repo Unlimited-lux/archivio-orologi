@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, format_number
 
 from .common import ConversionError, check
 
@@ -166,7 +166,7 @@ def _cover(doc: pymupdf.Document, title: str, files, page_size: str = "A4") -> N
 def _size(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}".replace(".", ",")
+            return f"{n:.0f} {unit}" if unit == "B" else f"{format_number(n, 1)} {unit}"
         n /= 1024
     return ""
 

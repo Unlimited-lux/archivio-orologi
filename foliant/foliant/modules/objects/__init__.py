@@ -27,7 +27,7 @@ _by_ctx: dict[int, dict] = {}   # stato di ogni finestra (Ctrl+N apre più fines
 
 
 def _st(ctx) -> dict:
-    return _by_ctx.get(id(ctx), _state)
+    return _by_ctx.get(id(ctx), {})   # finestra distrutta: nessuno stato, gli slot non fanno nulla
 
 
 def controller() -> ObjectsController | None:
@@ -313,9 +313,12 @@ def _toggle_tool(ctx: Context, tool, checked: bool, switch: bool = True) -> None
 
 
 def _sync_tool_buttons(ctx: Context) -> None:
+    import shiboken6
     st = _st(ctx)
     c = st.get("controller")
     acts = st.get("actions", {})
+    if c is None or not all(shiboken6.isValid(a) for a in acts.values()):
+        return
     view = ctx.current_view()
     tool = view.tool if view is not None else None
     if "objects" in acts:
@@ -344,7 +347,10 @@ def _on_mode_left(ctx: Context, c: ObjectsController) -> None:
 
 
 def _update_actions(ctx: Context, c: ObjectsController) -> None:
+    import shiboken6
     acts = _st(ctx).get("actions", {})
+    if not acts or not all(shiboken6.isValid(a) for a in acts.values()):
+        return
     view = ctx.current_view()
     objs = c.selected_objects(view) if view is not None else []
     n = len(objs)

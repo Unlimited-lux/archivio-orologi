@@ -78,25 +78,33 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
 
 ### Problemi noti
 
-Stato del 28/10 alle 14:20 (ora italiana 15:20). Dopo la consegna ci sono stati altri due giri di
-collaudo indipendente, oltre ai precedenti. I 99 script di riproduzione raccolti finora (un file
-`bug_NN.py` per ogni difetto confermato, che esce con 0 quando il difetto non c'è più) sono stati
-rieseguiti sulla versione integrata:
-- tutti i problemi elencati in precedenza, cioè il primo collaudo, i 28 confermati alle 09:10 e
-  quelli visivi, sono **corretti** e verificati con il loro script;
-- il collaudo delle 13:10 ha confermato 9 nuovi difetti, tutti corretti con un test. Il più grave
-  era una fuga di dati: una redazione su un PDF firmato veniva salvata in modo incrementale e il
-  testo restava nella revisione firmata. Ora il nucleo riscrive il file per intero e il modulo
-  Firma avvisa prima (NFR-09).
+Stato del 28/10 alle 17:25 UTC (18:25 italiane), dopo l'integrazione finale. Nel pomeriggio ci
+sono stati altri quattro collaudi indipendenti: flussi reali, conversioni e OCR, aspetto e lingue,
+robustezza. A questi si aggiungono il collaudo 6 sui requisiti non funzionali e una revisione
+avversaria del codice del nucleo cambiato oggi. Ogni difetto confermato ha uno script di
+riproduzione che esce con 0 quando il difetto non c'è più. Gli script sono stati rieseguiti sulla
+versione integrata.
+- I difetti dei collaudi precedenti risultano **corretti**. Le eccezioni sono elencate qui sotto.
+- Tra i corretti oggi i più importanti sono quattro:
+  - in Word, HTML e RTF la riga del totale sotto la tabella di una fattura spariva;
+  - gli importi in CHF e con l'apostrofo restavano testo in Excel;
+  - la stampa senza commenti toglieva anche i valori dei campi modulo;
+  - il canale dell'istanza singola finiva nella /tmp condivisa.
 
 Restano aperti:
 | Gravità | Area | Problema |
 |---|---|---|
-| media | annotations | Chiudendo l'ultima scheda in Commenta la mini barra viene distrutta e i cambi di scheda successivi sollevano un'eccezione; su un PDF firmato i commenti chiedono la conferma SIG-21 perché il modulo non li dichiara ancora `kind="annotation"`. In correzione. |
-| bassa | text_edit | La riga riscritta usa una nuova copia del font (in sottoinsieme) invece della risorsa originale: il file cresce di pochi KB. |
-| bassa | nucleo | Su documenti molto grandi (5.000 campi in una pagina) ogni modifica costa circa 0,2 s per la copia di annullamento; sui documenti comuni pochi millisecondi. |
-| — | specifica | Funzioni P1/P2 non completate: elencate per ID in `foliant/modules/*/STATO.md` (es. icone dei pulsanti per stato FRM-18). |
-| — | motore | «Cifra tutto tranne i metadati» (SEC-06) non disponibile: PyMuPDF/MuPDF cifrano sempre i metadati. |
+| media | viewer | Ricerca di una parola molto frequente su 500 pagine (circa 18.000 risultati): il conteggio completo richiede circa 12 s contro i 3 s di NFR-07. L'interfaccia resta usabile durante la ricerca. |
+| media | viewer | Stampa (VIS-43): non ci sono ancora «4 pagine per foglio», fronte/retro, scala di grigi e la scelta del «Contenuto». Per ora si usano le opzioni della stampante di sistema. |
+| media | ocr | Sulle scansioni inclinate di 1-2° il testo invisibile spezza le parole in Evince, Okular e pdftotext (poppler). In Foliant la ricerca funziona. |
+| media | ocr, viewer | Con due finestre (Ctrl+N), chiudendo la seconda il pannello «Parole incerte» dell'OCR produce errori. Con «Ripristina la sessione» attivo, la nuova finestra può riaprire la sessione invece di mostrare la Home. |
+| media | annotations | L'importazione di commenti da XFDF gira nel thread dell'interfaccia, senza avanzamento: 1.000 commenti richiedono 5-11 s secondo la macchina, 3.000 circa 100 s, con la finestra bloccata. Il tempo cresce più che linearmente dentro PyMuPDF. I file comuni, con poche decine di commenti, si importano subito. |
+| bassa | convert | Nell'esportazione in Excel le tabelle senza bordi richiedono la strategia «auto», che può dividere male le colonne: controllare il risultato. |
+| bassa | viewer, tools, sign | In inglese alcuni numeri e date usano ancora il formato italiano: dimensioni dei file negli allegati, date in Proprietà, Allegati e Firma, migliaia senza separatore in «Informazioni sul documento». In Strumenti «Crea PDF» propone A4 anche con impostazioni USA e, a 1280×800, due campi delle Operazioni in blocco escono dal bordo destro. In Firma › Gestisci ID l'elenco vuoto non ha spiegazione e alcuni comandi restano attivi senza selezione. |
+| bassa | ocr | Alcuni pulsanti tagliati nel pannello «Parole incerte». Una foto senza testo può ricevere la proposta di OCR. L'analisi delle pagine all'apertura gira nel thread dell'interfaccia. |
+| bassa | nucleo | Su documenti con centinaia di commenti ogni modifica costa circa 0,3 s per la copia di annullamento. Il salvataggio incrementale dei PDF firmati non alza la versione PDF. Un secondo avvio mentre Foliant è occupato da più di 6 s può aprire il file due volte. |
+| — | specifica | Funzioni P1/P2 non completate e richieste al nucleo ancora aperte: elencate per ID in `foliant/modules/*/STATO.md` e in `foliant/modules/viewer/CORE_REQUESTS.md`. La firma con smart card (SIG-23) è pronta nel commit 863560a ma rinviata, perché aggiunge una dipendenza. |
+| — | motore | «Cifra tutto tranne i metadati» (SEC-06) non è disponibile: PyMuPDF/MuPDF cifrano sempre i metadati. |
 
 ## Log
 - 28/10 00:57 — Fase 0: struttura, subagent, `.gitignore`.
@@ -139,3 +147,25 @@ Restano aperti:
   lo sblocco con la password, le notifiche impilate schiacciate, il pulsante «»» invisibile nel
   tema scuro, i nomi dei tasti in inglese nel menu e il doppio avviso per i file riparati.
   Suite: 4.255 test superati.
+- 28/10 14:20–17:25 — Lavoro dopo la consegna, seconda parte.
+  - Moduli: completate quasi tutte le P0 e P1 e gran parte delle P2.
+  - Nucleo: corretti i 14 difetti del collaudo 6 (contrasti e fuoco visibile, pulsanti
+    raggiungibili con Tab, messaggi di salvataggio chiari, PDF 1.4 mantenuto, file eliminato da
+    ricreare, memoria restituita, Ctrl+N e istanza singola, Home con documenti fissati e filtro,
+    formato carta A4/Letter secondo le impostazioni locali); date e numeri secondo la lingua;
+    privacy senza analisi del layout ma con le tabelle funzionanti.
+  - Revisione avversaria del nucleo: 14 difetti confermati, 12 corretti con test.
+  - Quattro collaudi indipendenti: flussi reali dell'azienda, conversioni e OCR, aspetto e
+    lingue, robustezza e concorrenza. I difetti confermati sono stati assegnati ai moduli e
+    corretti con test.
+  - Integrazione finale dei 12 moduli senza conflitti. Prima suite completa: 4.865 test
+    superati e 3 falliti. La causa era l'identificativo casuale dei timbri, che rendeva le
+    elaborazioni non ripetibili e nascondeva le filigrane all'appiattimento; è stata
+    corretta. Dopo le ultime correzioni dei moduli (taglio alle 17:12 UTC): 4.894 test
+    superati, 0 falliti. Alle 17:25 sono state integrate anche le ultime tre correzioni di Converti
+    (decimali in inglese, appiattimento che conserva le redazioni non applicate, elenco vuoto di
+    «Converti più file»): test di Converti e della finestra verdi.
+  - Script dei difetti rieseguiti sulla versione consegnata: 136 su 142 escono con 0. Dei 6
+    rimanenti, 3 controllano funzioni interne mentre nell'interfaccia il comportamento è corretto,
+    2 sono noti (uno fallisce solo sotto carico, l'altro è un falso positivo) e 1 è la ricerca
+    su 500 pagine, tra i problemi aperti.

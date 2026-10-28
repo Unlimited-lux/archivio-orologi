@@ -68,3 +68,21 @@ modulo, il test fallisce. Proposta: nel test confrontare solo le pagine aggiunte
 `security/__init__.py` basta
 `ctx.add_preferences_page(_("Sicurezza e riservatezza"), lambda parent=None: LockPreferences(c.applock, parent))`.
 Per ora la stessa pagina si apre da Proteggi › Blocco dell'applicazione….
+
+## 11. Apertura delle buste di sicurezza e funzioni di pyHanko per la cifratura (SEC-10, SEC-06, SEC-11)
+
+- **Buste (/EFF):** MuPDF 1.28 chiede la password anche quando solo gli allegati sono
+  cifrati (/StmF e /StrF /Identity, /AuthEvent /EFOpen), quindi in Foliant le pagine di
+  una busta si vedono solo dopo la password. Proposta: se l'utente annulla la richiesta
+  di password e il file è una busta (`security.envelope.is_envelope` sul trailer), aprire
+  le pagine con una copia in cui /Encrypt è tolto (gli allegati restano illeggibili) e
+  chiedere la password solo all'apertura di un allegato.
+- **§8 (cifratura senza metadati):** pyHanko 0.38, già nelle dipendenze, scrive AES-256
+  R6 con `/EncryptMetadata false`, e MuPDF apre il risultato
+  (`StandardSecurityHandler.build_from_pw(..., encrypt_metadata=False, pdf_mac=False)`
+  su una copia non cifrata). Il nucleo potrebbe usarlo dopo il salvataggio quando
+  `save_options` chiede di non cifrare i metadati.
+- **SEC-11:** pyHanko scrive il MAC di ISO/TS 32004 (`pdf_mac=True`) e AES-GCM di
+  ISO/TS 32003 (`use_gcm=True`). MuPDF 1.28 apre i file con MAC (senza verificarlo) e
+  rifiuta quelli GCM («unknown encryption version»). L'apertura e la verifica dell'integrità
+  sono del nucleo.

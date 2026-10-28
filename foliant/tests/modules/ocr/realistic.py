@@ -263,3 +263,37 @@ def thermal_receipt():
 
 HARD = {"carta_identita_lontana": id_card_far, "passaporto_mrz": passport_mrz, "testo_piccolo_150": small_gray_150,
         "timbro_rosso": red_stamp_over_text, "scontrino_termico": thermal_receipt}
+
+
+def invoice_phone_photo(seed: int = 5):
+    """Fattura A4 fotografata col telefono: prospettiva marcata, ombra della mano, JPEG."""
+    rng = np.random.default_rng(seed)
+    img, _dpi, expected = invoice(200)
+    ih, iw = img.shape[:2]
+    W, H = int(iw * 1.25), int(ih * 1.2)
+    src = np.float32([[0, 0], [iw, 0], [iw, ih], [0, ih]])
+    dst = np.float32([[W * 0.12, H * 0.06], [W * 0.90, H * 0.10], [W * 0.95, H * 0.96], [W * 0.05, H * 0.92]])
+    m = cv2.getPerspectiveTransform(src, dst)
+    canvas = np.full((H, W, 3), (95, 80, 70), np.uint8)
+    photo = cv2.warpPerspective(img, m, (W, H), dst=canvas, borderMode=cv2.BORDER_TRANSPARENT)
+    yy, xx = np.mgrid[0:H, 0:W]
+    shadow = 1.0 - 0.35 * np.exp(-(((xx - W * 0.8) / (W * 0.25)) ** 2 + ((yy - H * 0.85) / (H * 0.2)) ** 2))
+    photo = np.clip(photo.astype(np.float32) * shadow[..., None] * 0.92, 0, 255)
+    photo = np.clip(photo + rng.normal(0, 3, photo.shape), 0, 255).astype(np.uint8)
+    ok, buf = cv2.imencode(".jpg", cv2.cvtColor(photo, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 75])
+    return cv2.cvtColor(cv2.imdecode(buf, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB), 200, expected
+
+
+def skewed_gray_scan():
+    """Fattura scansionata storta (6°) a 150 dpi in scala di grigi."""
+    img, _dpi, expected = invoice(150)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    h, w = gray.shape
+    m = cv2.getRotationMatrix2D((w / 2, h / 2), 6, 1.0)
+    gray = cv2.warpAffine(gray, m, (w, h), borderValue=235)
+    ok, buf = cv2.imencode(".jpg", gray, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    return cv2.cvtColor(cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE), cv2.COLOR_GRAY2RGB), 150, expected
+
+
+HARD2 = {"fattura_fotografata": invoice_phone_photo, "fattura_storta_150": skewed_gray_scan}
+
