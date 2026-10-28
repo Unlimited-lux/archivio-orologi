@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QVBoxLayout,
+    QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout,
 )
 
 from foliant.api import _, bind_icon
 
-from .library import LibraryError, SignatureLibrary
+from .library import PACKAGE_EXT, LibraryError, SignatureLibrary, export_package, import_package, read_package
 from .ui_create import CreateSignatureDialog, item_pixmap
 
 THUMB = QSize(180, 48)
@@ -54,6 +54,7 @@ class LibraryDialog(QDialog):
             ("down", _("Sposta giù"), "move-down"), ("default", _("Imposta predefinito"), "check"),
             ("duplicate", _("Duplica"), "copy"), ("remove", _("Elimina…"), "trash-2"),
             ("protect", _("Proteggi la libreria…"), "lock"),
+            ("export", _("Esporta…"), "upload"), ("import", _("Importa…"), "download"),
         ]:
             b = QPushButton(text)
             bind_icon(b, icon_name)
@@ -131,6 +132,12 @@ class LibraryDialog(QDialog):
                         self.lib.protect(pw)
                 self.refresh()
                 return
+            if key == "export":
+                self.export_items()
+                return
+            if key == "import":
+                self.import_items()
+                return
             if eid is None:
                 return
             e = self.lib.entry(eid)
@@ -156,8 +163,110 @@ class LibraryDialog(QDialog):
         except LibraryError as ex:
             QMessageBox.warning(self, _("Libreria firme"), str(ex))
 
+    # ------------------------------------------------------- SIG-07
+    def export_items(self) -> int:
+        """Esporta gli elementi scelti in un pacchetto cifrato con password obbligatoria."""
+        entries = [e for e in self.lib.entries() if e.available]
+        if not entries:
+            QMessageBox.information(self, _("Esporta"), _("La libreria non contiene elementi da esportare."))
+            return 0
+        pick = ExportPickDialog(entries, self)
+        if not pick.exec() or not pick.selected():
+            return 0
+        pw = ask_password(self, _("Esporta"), _("Password per proteggere il pacchetto (obbligatoria):"),
+                          confirm=True)
+        if not pw:
+            return 0
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta la libreria"), "firme" + PACKAGE_EXT,
+                                               _("Pacchetto di firme (*{ext})").format(ext=PACKAGE_EXT))
+        if not path:
+            return 0
+        if not path.endswith(PACKAGE_EXT):
+            path += PACKAGE_EXT
+        n = export_package(self.lib, pick.selected(), pw, path)
+        QMessageBox.information(self, _("Esporta"), _("Elementi esportati: {n}.").format(n=n))
+        return n
+
+    def import_items(self) -> dict | None:
+        """Importa un pacchetto: password, anteprima degli elementi e scelta per i duplicati."""
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa nella libreria"), "",
+                                               _("Pacchetto di firme (*{ext})").format(ext=PACKAGE_EXT))
+        if not path:
+            return None
+        pw = ask_password(self, _("Importa"), _("Password del pacchetto:"))
+        if pw is None:
+            return None
+        items, _files, warnings = read_package(path, pw)    # PackageError → messaggio, niente importato
+        have = {e.sha256 for e in self.lib.entries()}
+        dups = [it for it in items if it.get("sha256") in have]
+        names = "\n".join("• " + str(it.get("name") or "?") + (_(" (già presente)") if it in dups else "")
+                          for it in items)
+        box = QMessageBox(QMessageBox.Icon.Question, _("Importa"),
+                          _("Il pacchetto contiene {n} elementi:").format(n=len(items)), parent=self)
+        box.setInformativeText(names + ("\n\n" + "\n".join(warnings) if warnings else ""))
+        if dups:
+            b_skip = box.addButton(_("Importa e salta i duplicati"), QMessageBox.ButtonRole.AcceptRole)
+            b_repl = box.addButton(_("Sostituisci i duplicati"), QMessageBox.ButtonRole.AcceptRole)
+            b_both = box.addButton(_("Mantieni entrambi"), QMessageBox.ButtonRole.AcceptRole)
+        else:
+            b_skip = box.addButton(_("Importa"), QMessageBox.ButtonRole.AcceptRole)
+            b_repl = b_both = None
+        box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked not in (b_skip, b_repl, b_both) or clicked is None:
+            return None
+        mode = "replace" if clicked is b_repl else ("both" if clicked is b_both else "skip")
+        res = import_package(self.lib, path, pw, mode)
+        self.refresh()
+        text = _("Importati: {a} · saltati: {s} · sostituiti: {r}").format(
+            a=res["added"], s=res["skipped"], r=res["replaced"])
+        if res["warnings"]:
+            text += "\n\n" + "\n".join(res["warnings"])
+        QMessageBox.information(self, _("Importa"), text)
+        return res
+
+
+class ExportPickDialog(QDialog):
+    """Scelta degli elementi da esportare (tutti selezionati all'inizio)."""
+
+    def __init__(self, entries, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(_("Esporta la libreria"))
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(_("Elementi da esportare:")))
+        self.list = QListWidget()
+        for e in entries:
+            it = QListWidgetItem(e.name + "  ·  " + (_("Iniziali") if e.kind == "iniziali" else _("Firma")))
+            it.setData(Qt.ItemDataRole.UserRole, e.id)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked)
+            self.list.addItem(it)
+        lay.addWidget(self.list)
+        box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        box.button(QDialogButtonBox.StandardButton.Ok).setText(_("Avanti…"))
+        box.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        lay.addWidget(box)
+
+    def selected(self) -> list[str]:
+        return [self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count())
+                if self.list.item(i).checkState() == Qt.CheckState.Checked]
+
 
 TRANSLATIONS_EN = {
+    "Esporta…": "Export…", "Importa…": "Import…", "Esporta": "Export", "Importa": "Import",
+    "La libreria non contiene elementi da esportare.": "The library contains no items to export.",
+    "Password per proteggere il pacchetto (obbligatoria):": "Password to protect the package (required):",
+    "Esporta la libreria": "Export the library", "Pacchetto di firme (*{ext})": "Signature package (*{ext})",
+    "Elementi esportati: {n}.": "Items exported: {n}.", "Importa nella libreria": "Import into the library",
+    "Password del pacchetto:": "Package password:", " (già presente)": " (already present)",
+    "Il pacchetto contiene {n} elementi:": "The package contains {n} items:",
+    "Importa e salta i duplicati": "Import and skip duplicates", "Sostituisci i duplicati": "Replace duplicates",
+    "Mantieni entrambi": "Keep both", "Annulla": "Cancel",
+    "Importati: {a} · saltati: {s} · sostituiti: {r}": "Imported: {a} · skipped: {s} · replaced: {r}",
+    "Elementi da esportare:": "Items to export:", "Avanti…": "Next…", "Iniziali": "Initials", "Firma": "Signature",
     "Ripeti la password:": "Repeat the password:",
     "Le due password non coincidono.": "The two passwords do not match.",
     "Libreria firme": "Signature library", "Elementi della libreria": "Library items",

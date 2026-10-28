@@ -1249,3 +1249,58 @@ def test_on_save_embed_skips_digitally_signed(window, monkeypatch, tmp_path, id_
     assert c._embed_on_save_guard(view, {"event": "save"})
     with view.document.lock:
         assert len(g.placed_signatures(view.document.pdf, 0)) == 1
+
+
+def test_library_export_import_commands(qtbot, monkeypatch, tmp_path):
+    """SIG-07: «Esporta…» e «Importa…» del dialogo Libreria: 5 elementi esportati e importati in un profilo
+    vuoto con nomi, tipi e impronte uguali; password sbagliata → niente importato; duplicati gestiti."""
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+    from foliant.modules.sign import ui_library
+    from foliant.modules.sign.library import SignatureLibrary
+    src = SignatureLibrary(tmp_path / "profilo1")
+    for i in range(5):
+        kind = "iniziali" if i == 4 else "firma"
+        src.add(g.SignatureItem(kind=kind, art=g.strokes_to_art(g.process_strokes(
+            [[(0, 0, 1), (40 + i * 10, 10, 1), (90, 0, 1)]]))), f"Elemento {i}")
+    pkg = tmp_path / "firme.foliant-signatures"
+    answers = []
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: answers.pop(0))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(pkg), ""))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(pkg), ""))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda _p, _t, text: warnings.append(text))
+    monkeypatch.setattr(ui_library.ExportPickDialog, "exec", lambda self: True)
+    dlg = ui_library.LibraryDialog(src)
+    qtbot.addWidget(dlg)
+    answers[:] = [("Pacchetto-2026", True), ("Pacchetto-2026", True)]
+    assert dlg.export_items() == 5 and pkg.is_file()
+
+    dst = SignatureLibrary(tmp_path / "profilo2")
+    dlg2 = ui_library.LibraryDialog(dst)
+    qtbot.addWidget(dlg2)
+    clicks = []
+
+    def fake_exec(box):
+        texts = {b.text(): b for b in box.buttons()}
+        clicks.append(sorted(texts))
+        box._chosen = texts.get(_choice[0])
+        return 0
+    _choice = ["Importa"]
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda box: box._chosen)
+    answers[:] = [("sbagliata", True)]
+    dlg2._do("import")                                   # password errata: messaggio, niente importato
+    assert dst.entries() == [] and "Password errata" in warnings[-1]
+    assert not [p for p in tmp_path.rglob("*") if p.suffix in (".svg", ".png", ".json") and "profilo2" in str(p)
+                and p.name != "manifest.json"]
+    answers[:] = [("Pacchetto-2026", True)]
+    res = dlg2.import_items()
+    assert res["added"] == 5
+    key = sorted((e.name, e.kind, e.sha256) for e in src.entries())
+    assert sorted((e.name, e.kind, e.sha256) for e in dst.entries()) == key
+    _choice[0] = "Mantieni entrambi"                     # di nuovo: tutti duplicati
+    answers[:] = [("Pacchetto-2026", True)]
+    res = dlg2.import_items()
+    assert "Sostituisci i duplicati" in clicks[-1] and res["added"] == 5 and len(dst.entries()) == 10
