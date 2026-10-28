@@ -433,3 +433,18 @@ def test_customer_message_placeholders_highlighted(qtbot, window, ready, fake, s
     out = render.render_markdown(msg.text)
     assert out.placeholders == ["nome del cliente"] and "da completare" in out.html
     assert "placeholders in square brackets" in fake.requests[0].system
+
+
+def test_business_plan_fixed_sections(qtbot, window, ready, fake, sample_pdf):
+    window.open_path(sample_pdf)
+    fake.responses = ["## Mercato\nOrologi usati.\n\n## Sintesi\nVendita online.\n\n## Offerta\nCatalogo.\n\n"
+                      "## Organizzazione\nDue persone.\n\n## Piano economico\nMargini."]
+    task = next(t for t in tasks_library.BUILTIN if t.id == "business-plan")
+    ready.panel.run_template(task, {"idea": "negozio di orologi"}, "document")
+    wait_done(qtbot, ready.panel)
+    text = ready.panel.conversation().messages[-1].text
+    order = [text.index(f"## {s}") for s in tasks_library.SECTIONS["business-plan"]]
+    assert order == sorted(order)
+    rischi = text.split("## Rischi", 1)[1]
+    assert "da completare" in rischi
+    assert "Use exactly these Markdown headings" in fake.requests[0].system
