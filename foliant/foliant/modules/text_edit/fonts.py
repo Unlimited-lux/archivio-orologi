@@ -222,11 +222,9 @@ class FontChoice:
         hit = self._cover.get(ch)
         if hit is None:
             if self.base14:
-                try:
-                    ch.encode("cp1252")
-                    hit = bool(self.font.has_glyph(ord(ch)))
-                except UnicodeEncodeError:
-                    hit = False
+                # codifica dei font standard scritti dal motore: ASCII e Latin-1 stampabili
+                o = ord(ch)
+                hit = (0x20 <= o < 0x7F or (0xA1 <= o <= 0xFF and o != 0xAD)) and bool(self.font.has_glyph(o))
             else:
                 hit = bool(self.font.has_glyph(ord(ch)))
             self._cover[ch] = hit

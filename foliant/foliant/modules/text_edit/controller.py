@@ -67,6 +67,7 @@ class TextEditController(QObject):
         # raggruppamento scelto dall'utente (TXT-09): (id documento, pagina) -> (unioni, divisioni)
         self._grouping: dict[tuple, tuple[list, set]] = {}
         self._grouping_version = 0
+        self._filtered: dict[int, object] = {}
         self.clipboard: dict | None = None
         self.last_substitutions: list = []
         self.last_change: tuple | None = None   # (vista, pagina, bbox) dell'ultima modifica
@@ -87,7 +88,69 @@ class TextEditController(QObject):
         return self.tools(view)[1]
 
     def tool_activated(self, view, tool) -> None:
-        pass
+        vp = view.viewport()
+        if not vp.property("textEditDrops"):
+            vp.setProperty("textEditDrops", True)
+            vp.setAcceptDrops(True)
+            vp.installEventFilter(self)
+            self._filtered[id(vp)] = view
+
+    # ------------------------------------------------------------ testo formattato (TXT-19)
+    def _drop_target_active(self, view) -> bool:
+        tools = self._tools.get(id(view))
+        return tools is not None and view.tool in tools
+
+    def eventFilter(self, obj, event) -> bool:
+        from PySide6.QtCore import QEvent
+        et = event.type()
+        if et not in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
+            return False
+        view = self._filtered.get(id(obj))
+        if view is None or not self._drop_target_active(view):
+            return False
+        mime = event.mimeData()
+        supported = mime.hasText() or mime.hasHtml() or mime.hasFormat("text/rtf") or any(
+            u.isLocalFile() and u.toLocalFile().lower().endswith((".rtf", ".txt", ".html", ".htm"))
+            for u in mime.urls())
+        if not supported:
+            return False
+        if et != QEvent.Type.Drop:
+            event.acceptProposedAction()
+            return True
+        hit = view.view_to_page(event.position())
+        if hit is None:
+            return False
+        event.acceptProposedAction()
+        self.insert_formatted(view, mime, hit[0], hit[1] * self.frame(hit[0], view))
+        return True
+
+    def insert_formatted(self, view, mime, page: int, top_left: pymupdf.Point):
+        """Nuovo blocco dal contenuto trascinato o incollato, nel punto indicato (coordinate di lavoro)."""
+        from .rich_import import MAX_SIZE_BYTES, from_mime
+        try:
+            imported = from_mime(mime, self.default_style)
+        except Exception as e:
+            self.ctx.error(_("Inserisci testo"), _("Il contenuto non può essere letto: {e}").format(e=e))
+            return None
+        if imported is None or not imported.text.strip():
+            return None
+        if len(imported.text.encode("utf-8")) > MAX_SIZE_BYTES and not self.ctx.confirm(
+                _("Inserisci testo"), _("Il testo supera 1 MB. Inserirlo comunque?")):
+            return None
+        if not self.ensure_editable(view):
+            return None
+        self.commit_editor(view)
+        self._last_page = page
+        result = self._apply(view, _("Inserisci testo"), lambda pdf: engine.add_text(
+            pdf, page, top_left, imported.paragraphs, align=imported.align))
+        if result is not None:
+            if imported.omitted:
+                self.ctx.status(_("Testo inserito; elementi omessi: {n} (immagini o oggetti).").format(
+                    n=len(imported.omitted)), 10000)
+            nb = self._refind(view, page, result.bbox)
+            if nb is not None:
+                self.edit_tool(view).select(view, page, nb)
+        return result
 
     # ------------------------------------------------------------ blocchi
     def _view(self, view=None):
@@ -558,7 +621,16 @@ class TextEditController(QObject):
     def paste_block(self, view) -> bool:
         data = self._clipboard_block()
         if data is None:
-            return False
+            # testo da altre applicazioni: nuovo blocco al centro della vista (TXT-19)
+            mime = QGuiApplication.clipboard().mimeData()
+            if mime is None or not (mime.hasText() or mime.hasHtml() or mime.hasFormat("text/rtf")):
+                return False
+            vp = view.viewport()
+            hit = view.view_to_page(QPointF(vp.width() / 2, vp.height() / 3), clamp=True)
+            if hit is None:
+                return False
+            self.insert_formatted(view, mime, hit[0], hit[1] * self.frame(hit[0], view))
+            return True
         if not self.ensure_editable(view):
             return True
         page = view.current_page

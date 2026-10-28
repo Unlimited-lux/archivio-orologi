@@ -164,4 +164,9 @@ EN: dict[str, str] = {
     'In basso': 'Bottom',
     "{n} annotazioni non trovano più il loro testo e restano al loro posto (orfane).":
         "{n} annotations no longer find their text and stay in place (orphaned).",
+    "Inserisci testo": "Insert text",
+    "Il contenuto non può essere letto: {e}": "The content cannot be read: {e}",
+    "Il testo supera 1 MB. Inserirlo comunque?": "The text exceeds 1 MB. Insert it anyway?",
+    "Testo inserito; elementi omessi: {n} (immagini o oggetti).":
+        "Text inserted; omitted items: {n} (images or objects).",
 }
