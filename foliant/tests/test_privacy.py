@@ -137,14 +137,105 @@ def test_legacy_shared_files_cleaned_once(tmp_path, monkeypatch):
     try:
         s = QSettings(str(tmp_path / "f.ini"), QSettings.Format.IniFormat)
         assert privacy.cleanup_legacy(s) is True
+        # la cronologia dei dialoghi di Qt è condivisa e non dice chi l'ha scritta: non si tocca
         state = _qt_file_dialog_group()
-        assert "history" not in state and "lastVisited" not in state and state.get("viewMode") == "Detail"
+        assert state.get("history") in (["file:///home/u/zq7"], "file:///home/u/zq7")
+        assert state.get("lastVisited") == "file:///home/u/zq7" and state.get("viewMode") == "Detail"
         assert sorted(p.name for p in (data / "RecentDocuments").iterdir()) == ["altro.txt.desktop"]
         _set_qt_file_dialog_group({"history": ["file:///altra/app"]})
         assert privacy.cleanup_legacy(s) is False                  # una volta sola
         assert _qt_file_dialog_group().get("history") in (["file:///altra/app"], "file:///altra/app")
     finally:
         _set_qt_file_dialog_group(before)
+
+
+def test_file_dialog_keeps_what_another_app_writes_while_it_is_open(window, tmp_path):
+    """Un'altra applicazione Qt scrive la cronologia mentre un dialogo di Foliant è aperto: alla
+    chiusura il dialogo di Foliant toglie solo ciò che ha scritto lui, i valori dell'altra restano."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    before = _qt_file_dialog_group()
+    _set_qt_file_dialog_group({"history": ["file:///prima"], "lastVisited": "file:///prima", "viewMode": "List"})
+    try:
+        folder = tmp_path / "zq7 dialogo aperto"
+        folder.mkdir()
+        dialog = QFileDialog(window, "Apri", str(folder))
+        dialog.show()
+        dialog.setDirectory(str(folder))
+        QApplication.processEvents()
+        _set_qt_file_dialog_group({"history": ["file:///durante/altra/app"],    # l'altra app
+                                   "lastVisited": "file:///durante/altra/app", "viewMode": "List"})
+        dialog.done(0)
+        dialog.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        state = _qt_file_dialog_group()
+        assert "zq7" not in repr(state)
+        assert state.get("lastVisited") == "file:///durante/altra/app"
+        assert state.get("history") in (["file:///durante/altra/app"], "file:///durante/altra/app")
+    finally:
+        _set_qt_file_dialog_group(before)
+
+
+_OTHER_APP = r'''
+import sys
+from PySide6.QtCore import QSettings
+s = QSettings(QSettings.Scope.UserScope, "QtProject")
+s.beginGroup("FileDialog")
+s.setValue("history", [sys.argv[1]])
+s.setValue("lastVisited", sys.argv[1])
+s.endGroup()
+s.sync()
+'''
+
+_FOLIANT_SESSION = r'''
+import subprocess, sys
+from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtWidgets import QApplication, QFileDialog
+from foliant.ui import privacy
+privacy.prepare()
+app = QApplication([])
+privacy.install(app)
+folder, other_app, other_value = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def scenario():
+    # un dialogo di Foliant visita la cartella del documento
+    d = QFileDialog(None, "Apri", folder)
+    d.show(); d.setDirectory(folder); d.done(0); d.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # un'altra applicazione Qt (un altro processo) scrive la sua cronologia mentre Foliant è aperto
+    subprocess.run([sys.executable, "-c", other_app, other_value], check=True)
+    # un secondo dialogo di Foliant, chiuso con il metodo statico come fanno i moduli
+    QTimer.singleShot(100, lambda: [w.reject() for w in QApplication.topLevelWidgets()
+                                    if isinstance(w, QFileDialog) and w.isVisible()])
+    QFileDialog.getExistingDirectory(None, "Cartella", folder)
+    QTimer.singleShot(50, app.quit)
+
+QTimer.singleShot(0, scenario)
+sys.exit(app.exec())
+'''
+
+
+def test_other_app_history_survives_foliant_exit(tmp_path):
+    """Processo vero: un'altra «app» scrive la cronologia dei dialoghi mentre Foliant è aperto;
+    dopo l'uscita di Foliant i suoi valori restano e le cartelle dei dialoghi di Foliant no."""
+    config = tmp_path / "config"
+    (config / "QtProject.conf").parent.mkdir(parents=True)
+    (config / "QtProject.conf").write_text(
+        "[FileDialog]\nhistory=file:///altra/prima\nlastVisited=file:///altra/prima\nviewMode=Detail\n",
+        encoding="utf-8")
+    folder = tmp_path / "zq7 cartella di foliant"
+    folder.mkdir()
+    env = dict(os.environ, XDG_CONFIG_HOME=str(config), HOME=str(tmp_path / "home"),
+               XDG_DATA_HOME=str(tmp_path / "dati"), XDG_STATE_HOME=str(tmp_path / "stato"),
+               QT_QPA_PLATFORM="offscreen")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([sys.executable, "-c", _FOLIANT_SESSION, str(folder), _OTHER_APP, "file:///altra/durante"],
+                       cwd=root, env=env, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    text = (config / "QtProject.conf").read_text(encoding="utf-8")
+    assert "zq7" not in text, text
+    assert "lastVisited=file:///altra/durante" in text and "history=file:///altra/durante" in text, text
+    assert "viewMode=Detail" in text, text
 
 
 XBEL = """<?xml version="1.0" encoding="UTF-8"?>

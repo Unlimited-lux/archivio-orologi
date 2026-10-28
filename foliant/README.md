@@ -64,15 +64,22 @@ preferenze generali (tema, lingua, unità…) e i file che salvi tu dove scegli.
 - I dialoghi di file sono quelli di Qt, non quelli del desktop (GTK/KDE/portale), che
   registrerebbero i file scelti nella cronologia del sistema (`~/.local/share/recently-used.xbel`).
   Qt scrive le cartelle visitate in `~/.config/QtProject.conf` (gruppo `FileDialog`, chiavi
-  `history`, `lastVisited`, `shortcuts`): Foliant le rimette com'erano appena il dialogo si
-  chiude, e di nuovo all'uscita (`foliant/ui/privacy.py`).
-- Al primo avvio di questa versione Foliant cancella da sé i dati delle versioni precedenti:
-  recenti, documenti fissati, ultima cartella, guide per documento, la cronologia `history` e
-  `lastVisited` di `QtProject.conf` (condivisa con le altre applicazioni Qt), le proprie voci in
-  `recently-used.xbel` e nei documenti recenti di KDE. Le versioni precedenti, con il dialogo
-  GTK, potevano registrare i file scelti come applicazione «python»: quelle voci non si
-  distinguono da quelle di altri programmi e vanno tolte dal sistema (es. «Cancella cronologia»
-  nelle impostazioni di riservatezza del desktop).
+  `history`, `lastVisited`, `shortcuts`), un file condiviso con tutte le applicazioni Qt.
+  Foliant fotografa quelle chiavi subito prima di ogni suo dialogo di file e, appena il dialogo
+  si chiude e Qt ha scritto, rimette com'erano solo le chiavi che quel dialogo ha cambiato
+  (`foliant/ui/privacy.py`). Ciò che le altre applicazioni Qt scrivono, anche mentre Foliant è
+  aperto, resta: niente ripristino globale all'uscita.
+- Al primo avvio di questa versione Foliant cancella da sé i propri dati delle versioni
+  precedenti: recenti, documenti fissati, ultima cartella, guide per documento, le proprie voci
+  in `recently-used.xbel` e nei documenti recenti di KDE.
+- Non tocca invece le voci che le versioni precedenti hanno lasciato in `history` e
+  `lastVisited` di `QtProject.conf`: quel file è condiviso con le altre applicazioni Qt e le sue
+  voci non dicono chi le ha scritte, quindi non si possono distinguere da quelle degli altri
+  programmi. Allo stesso modo le versioni precedenti, con il dialogo GTK, potevano registrare i
+  file scelti come applicazione «python» in `recently-used.xbel`. Chi vuole toglierle lo fa a
+  mano (la cronologia del dialogo di Qt è nel gruppo `[FileDialog]` di
+  `~/.config/QtProject.conf`; per il desktop, es. «Cancella cronologia» nelle impostazioni di
+  riservatezza).
 - Nei messaggi di errore sul terminale (che possono finire nel giornale di sistema) non compaiono
   nomi né percorsi di file.
 

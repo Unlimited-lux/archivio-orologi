@@ -126,8 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv)
     settings = QSettings()
     # riservatezza: nessun nome o percorso di file su disco tra un avvio e l'altro; si cancellano
-    # (una volta sola) quelli lasciati dalle versioni precedenti e i dialoghi di file non lasciano
-    # cronologia in QtProject.conf
+    # quelli lasciati dalle versioni precedenti (solo dati di Foliant) e i dialoghi di file di
+    # Foliant non lasciano cronologia in QtProject.conf (si toglie solo ciò che loro hanno scritto)
     privacy.cleanup_legacy(settings)
     privacy.install(app)
     set_language(settings.value("language") or detect_language())

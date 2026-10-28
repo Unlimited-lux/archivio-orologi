@@ -12,8 +12,11 @@ UTF-8, UTF-16 (LE/BE) e come impronta MD5/SHA-1/SHA-256 del percorso o del conte
 I file che il test salva esplicitamente stanno fuori dal profilo e non vengono cercati.
 
 Il profilo parte con i dati di una versione precedente (recenti, documenti fissati, ultima
-cartella, guide per documento, cronologia dei dialoghi di file di Qt, una voce di Foliant in
-recently-used.xbel): la pulizia all'avvio deve toglierli, lasciando quelli delle altre applicazioni.
+cartella, guide per documento, una voce di Foliant in recently-used.xbel): la pulizia all'avvio
+deve toglierli, lasciando quelli delle altre applicazioni. La cronologia dei dialoghi di file di
+Qt (QtProject.conf) è condivisa e non dice chi l'ha scritta: Foliant non tocca le voci che c'erano
+(qui solo di un'altra applicazione) né quelle che un'altra applicazione scrive mentre Foliant è
+aperto, e toglie solo ciò che scrivono i suoi dialoghi.
 
 Le tracce dei moduli ancora da correggere (PENDING) non fanno fallire il test ma lo segnano come
 «xfail» con il loro elenco: quando i moduli saranno corretti il test passerà da solo, e PENDING
@@ -103,6 +106,10 @@ CHILD = textwrap.dedent(r'''
             window.open_dialog()                               # «Apri» con il dialogo vero
             assert any(str(v.document.path) == args["second"] for v in window.views()), "«Apri» non ha aperto il file"
             report["steps"].append("aperto dal dialogo")
+            # un'altra applicazione Qt (un altro processo) scrive la sua cronologia dei dialoghi
+            import subprocess
+            subprocess.run([sys.executable, "-c", args["other_app"]], check=True, timeout=60)
+            report["steps"].append("altra applicazione")
             for view in window.views():
                 window.activate_view(view)
                 with view.document.change("Prova") as pdf:
@@ -227,10 +234,12 @@ def _legacy_profile(home: Path, old_file: Path, old_folder: Path) -> None:
         f"guides\\{old_sha1}={guides}\n\n"
         # preferenza generale senza percorsi: recupero automatico ogni secondo, per esercitarlo
         "[viewer]\nautosave_seconds=1\n", encoding="utf-8")
+    # cronologia dei dialoghi di Qt di un'altra applicazione (le voci delle versioni precedenti di
+    # Foliant qui non si distinguerebbero e resterebbero: vedi README, «Riservatezza»)
     (home / ".config" / "QtProject.conf").write_text(
         "[FileDialog]\n"
-        f"history=file:///altra/applicazione, {old_folder.as_uri()}\n"
-        f"lastVisited={old_folder.as_uri()}\n"
+        "history=file:///altra/applicazione\n"
+        "lastVisited=file:///altra/applicazione\n"
         "viewMode=Detail\n", encoding="utf-8")
     data_home = home / ".local" / "share"
     data_home.mkdir(parents=True, exist_ok=True)
@@ -270,8 +279,14 @@ def test_no_traces_of_opened_or_saved_files(tmp_path):
     _legacy_profile(home, old_file, old_folder)
 
     snapshot = tmp_path / "recupero durante la sessione"
+    other_app = ("from PySide6.QtCore import QSettings\n"
+                 "s = QSettings(QSettings.Scope.UserScope, 'QtProject')\n"
+                 "s.beginGroup('FileDialog')\n"
+                 "s.setValue('history', ['file:///altra/applicazione', 'file:///altra/durante'])\n"
+                 "s.setValue('lastVisited', 'file:///altra/durante')\n"
+                 "s.endGroup()\ns.sync()\n")
     args = {"first": str(first), "second": str(second), "save_as": str(save_as), "copy": str(copy),
-            "recovery_snapshot": str(snapshot)}
+            "recovery_snapshot": str(snapshot), "other_app": other_app}
     r = subprocess.run([sys.executable, "-c", CHILD, json.dumps(args)], cwd=ROOT, env=env,
                        capture_output=True, text=True, timeout=280)
     marker = [line for line in r.stdout.splitlines() if line.startswith("ZQ7-REPORT")]
@@ -283,11 +298,11 @@ def test_no_traces_of_opened_or_saved_files(tmp_path):
     # nessun nome di file nemmeno nei messaggi del processo (possono finire nel giornale di sistema)
     assert not [t for t in tok.values() if t in r.stderr], r.stderr[-3000:]
 
-    # i dati delle altre applicazioni e le preferenze generali restano. La cronologia dei dialoghi
-    # di Qt («history», «lastVisited») è condivisa e non dice chi l'ha scritta: la pulizia unica la
-    # toglie tutta; durante la sessione i valori delle altre app restano (tests/test_privacy.py)
+    # i dati delle altre applicazioni e le preferenze generali restano: anche la cronologia dei
+    # dialoghi di Qt che un'altra applicazione ha scritto mentre Foliant era aperto
     qt = (home / ".config" / "QtProject.conf").read_text(encoding="utf-8")
-    assert "viewMode=Detail" in qt and "history" not in qt and "lastVisited" not in qt, qt
+    assert "viewMode=Detail" in qt and "lastVisited=file:///altra/durante" in qt, qt
+    assert "history=file:///altra/applicazione, file:///altra/durante" in qt, qt
     xbel = (home / ".local" / "share" / "recently-used.xbel").read_text(encoding="utf-8")
     assert "altro-programma.txt" in xbel and "gedit" in xbel, xbel
     assert "theme=dark" in (home / ".config" / "Foliant" / "Foliant.conf").read_text(encoding="utf-8")

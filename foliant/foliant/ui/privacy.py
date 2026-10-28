@@ -6,14 +6,18 @@ Qui stanno le parti del nucleo che lo garantiscono anche fuori dal codice di Fol
 - `prepare()`: i dialoghi di file sono quelli di Qt, non quelli nativi (GTK, portale, KDE), che
   registrerebbero i file scelti nella cronologia del sistema (~/.local/share/recently-used.xbel);
 - `install(app)`: il dialogo di file di Qt, quando viene distrutto, scrive le cartelle visitate
-  in ~/.config/QtProject.conf (gruppo «FileDialog»: «history», «lastVisited», «shortcuts»). Un
-  filtro degli eventi fotografa queste chiavi quando un dialogo nasce e le rimette com'erano
-  appena il dialogo è distrutto (anche per QFileDialog.getOpenFileName & co. usati dai moduli);
-  all'uscita le si rimette come all'avvio, per sicurezza. I valori delle altre applicazioni Qt
-  restano, come le preferenze dell'aspetto del dialogo (vista, colonne), che non hanno percorsi;
-- `cleanup_legacy(settings)`: una volta sola, cancella i dati salvati dalle versioni precedenti
-  (recenti, documenti fissati, ultima cartella, guide per documento; cronologia dei dialoghi di
-  file; voci di Foliant in recently-used.xbel e nei documenti recenti di KDE).
+  in ~/.config/QtProject.conf (gruppo «FileDialog»: «history», «lastVisited», «shortcuts»), un
+  file condiviso con tutte le applicazioni Qt. Un filtro degli eventi fotografa queste chiavi
+  subito prima di ogni dialogo di file di Foliant (quando nasce, si mostra, si nasconde o sta per
+  essere distrutto: conta l'ultima fotografia) e, appena il dialogo è distrutto e Qt ha scritto,
+  rimette com'erano solo le chiavi che quel salvataggio ha cambiato (anche per
+  QFileDialog.getOpenFileName & co. usati dai moduli). Nient'altro: niente ripristino globale
+  all'uscita, che cancellerebbe ciò che le altre applicazioni Qt hanno scritto nel frattempo.
+  Le preferenze dell'aspetto del dialogo (vista, colonne), senza percorsi, restano;
+- `cleanup_legacy(settings)`: cancella i dati salvati dalle versioni precedenti di Foliant
+  (recenti, documenti fissati, ultima cartella, guide per documento; una volta sola le voci di
+  Foliant in recently-used.xbel e nei documenti recenti di KDE). La cronologia dei dialoghi in
+  QtProject.conf non si tocca: è condivisa e non dice quale applicazione l'ha scritta.
 
 L'ultima cartella usata e le guide dei documenti restano solo in memoria durante la sessione.
 """
@@ -24,7 +28,7 @@ import os
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QObject, QSettings, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSettings, Qt
 from PySide6.QtWidgets import QFileDialog
 
 CLEANUP_KEY = "privacy/cleanup"
@@ -80,15 +84,36 @@ def restore_file_dialog_state(snapshot: dict, keys=None) -> None:
 class _FileDialogGuard(QObject):
     """Filtro degli eventi dell'applicazione: per ogni QFileDialog (anche quelli creati dai
     metodi statici, in C++) fotografa le chiavi con cartelle del gruppo «FileDialog» al primo
-    evento e le ripristina quando il dialogo viene distrutto (`destroyed` arriva dopo il
-    salvataggio di Qt in ~QFileDialog). Costo: meno di un microsecondo per evento."""
+    evento e di nuovo quando il dialogo si mostra, si nasconde, si chiude o sta per essere
+    distrutto; le ripristina quando il dialogo viene distrutto (`destroyed` arriva dopo il
+    salvataggio di Qt in ~QFileDialog). Fotografare il più tardi possibile conserva ciò che
+    un'altra applicazione ha scritto mentre il dialogo di Foliant era aperto. Costo: meno di un
+    microsecondo per evento."""
+
+    _REFRESH = (QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.Close, QEvent.Type.DeferredDelete)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._snapshots: dict[int, dict] = {}       # dialogo vivo (contrassegno) → ultima fotografia
+        self._next = 0
 
     def eventFilter(self, obj, event) -> bool:
-        if isinstance(obj, QFileDialog) and not obj.property(_GUARDED):
-            obj.setProperty(_GUARDED, True)
-            snapshot = file_dialog_state(QT_DIALOG_KEYS)
-            obj.destroyed.connect(lambda *_a, s=snapshot: restore_file_dialog_state(s, QT_DIALOG_KEYS))
+        if isinstance(obj, QFileDialog):
+            token = obj.property(_GUARDED)
+            if not token:
+                self._next += 1
+                token = self._next
+                obj.setProperty(_GUARDED, token)
+                self._snapshots[token] = file_dialog_state(QT_DIALOG_KEYS)
+                obj.destroyed.connect(lambda *_a, t=token: self._restore(t))
+            elif token in self._snapshots and event.type() in self._REFRESH:
+                self._snapshots[token] = file_dialog_state(QT_DIALOG_KEYS)
         return False
+
+    def _restore(self, token: int) -> None:
+        snapshot = self._snapshots.pop(token, None)
+        if snapshot is not None:
+            restore_file_dialog_state(snapshot, QT_DIALOG_KEYS)
 
 
 def prepare() -> None:
@@ -104,20 +129,20 @@ def install(app) -> None:
         return
     guard = _FileDialogGuard(app)
     app.installEventFilter(guard)
-    start = file_dialog_state(QT_DIALOG_KEYS)
-    app.aboutToQuit.connect(lambda: restore_file_dialog_state(start, QT_DIALOG_KEYS))
     app._foliant_privacy = guard
 
 
 # ------------------------------------------------------------------ dati delle versioni precedenti
 def cleanup_legacy(settings: QSettings) -> bool:
     """Cancella i dati con nomi o percorsi di file salvati dalle versioni precedenti, in modo
-    silenzioso; solo chiavi e file noti di Foliant, ogni errore viene ignorato.
+    silenzioso; solo chiavi e voci di Foliant, ogni errore viene ignorato.
 
-    Le chiavi di Foliant si tolgono a ogni avvio, se ci sono (costa nulla). I file condivisi con
-    il sistema e con le altre applicazioni (QtProject.conf, recently-used.xbel, documenti recenti
-    di KDE) si puliscono una volta sola: segno `privacy/cleanup` nelle impostazioni, senza
-    percorsi. Restituisce True se quella pulizia è stata fatta ora."""
+    Le chiavi di Foliant si tolgono a ogni avvio, se ci sono (costa nulla). Nei file condivisi
+    con il sistema e con le altre applicazioni (recently-used.xbel, documenti recenti di KDE) si
+    tolgono, una volta sola, le voci che portano il nome di Foliant: segno `privacy/cleanup` nelle
+    impostazioni, senza percorsi. La cronologia dei dialoghi in QtProject.conf («history»,
+    «lastVisited») non si tocca: è condivisa e non dice chi l'ha scritta. Restituisce True se la
+    pulizia dei file condivisi è stata fatta ora."""
     keys = settings.allKeys()
     for key in LEGACY_KEYS:
         if any(k == key or k.startswith(key + "/") for k in keys):
@@ -126,15 +151,6 @@ def cleanup_legacy(settings: QSettings) -> bool:
         if int(settings.value(CLEANUP_KEY, 0) or 0) >= CLEANUP_VERSION:
             return False
     except (TypeError, ValueError):
-        pass
-    try:
-        s = _qt_settings()
-        s.beginGroup(QT_GROUP)
-        for key in QT_PATH_KEYS:
-            s.remove(key)
-        s.endGroup()
-        s.sync()
-    except Exception:
         pass
     data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     clean_recently_used(data / "recently-used.xbel")
