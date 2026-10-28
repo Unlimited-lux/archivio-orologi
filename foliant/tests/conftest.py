@@ -7,8 +7,42 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("FOLIANT_SYNC_TASKS", "1")
 
+import warnings
+
 import pymupdf
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_blocking_dialogs(monkeypatch):
+    """Rete di sicurezza: nei test nessuna finestra modale reale può bloccare la suite.
+
+    Le finestre di dialogo non simulate dal test si chiudono subito (Annulla/No) con un
+    avviso. I test che vogliono una risposta precisa la simulano con monkeypatch, come sempre.
+    """
+    from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMenu, QMessageBox
+
+    def warn(what):
+        warnings.warn(f"finestra modale non simulata nel test: {what}", stacklevel=3)
+
+    def box_exec(self, *a, **k):
+        warn(f"QMessageBox «{self.text()[:60]}»")
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QMessageBox, "exec", box_exec)
+    for name in ("question", "warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, name, staticmethod(
+            lambda *a, _n=name, **k: (warn(f"QMessageBox.{_n}"), QMessageBox.StandardButton.No)[1]))
+    monkeypatch.setattr(QDialog, "exec", lambda self, *a, **k: (warn(type(self).__name__), 0)[1])
+    monkeypatch.setattr(QMenu, "exec", lambda self, *a, **k: (warn("QMenu"), None)[1])
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: (warn("QInputDialog.getText"), ("", False))[1]))
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: (warn("QInputDialog.getItem"), ("", False))[1]))
+    monkeypatch.setattr(QInputDialog, "getInt", staticmethod(lambda *a, **k: (warn("QInputDialog.getInt"), (0, False))[1]))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (warn("QFileDialog"), ("", ""))[1]))
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: (warn("QFileDialog"), ([], ""))[1]))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (warn("QFileDialog"), ("", ""))[1]))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: (warn("QFileDialog"), "")[1]))
+    yield
 
 
 def make_pdf(path, pages: int = 3, text: str = "Pagina {n}", size=(595, 842), extra=None) -> str:
@@ -62,5 +96,6 @@ def window(qtbot, settings):
     win.show()
     yield win
     for view in list(win.views()):
-        view.document._saved_state = view.document._state  # niente richieste di salvataggio
+        if not view.document.closed:
+            view.document._saved_state = view.document._state  # niente richieste di salvataggio
         win.close_view(view)

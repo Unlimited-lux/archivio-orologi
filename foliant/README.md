@@ -114,6 +114,16 @@ def ruota(ctx, gradi):
    modulo non deve mai chiudere l'applicazione.
 9. **Originalità**: nessun testo, icona o risorsa copiati da prodotti commerciali.
 
+### Scorciatoie da tastiera
+
+La tabella UX-18 della specifica è l'unica autorità. Il nucleo registra: Ctrl+O, Ctrl+T (Home),
+Ctrl+N, Ctrl+S, Ctrl+Maiusc+S, Ctrl+W, Ctrl+Maiusc+T, Ctrl+Q, Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
+Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
+N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
+Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R. Spettano ai moduli: Ctrl+P, Ctrl+F,
+Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
+duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
+
 ### API del contesto (`foliant/ui/context.py`)
 
 | Metodo | Uso |
