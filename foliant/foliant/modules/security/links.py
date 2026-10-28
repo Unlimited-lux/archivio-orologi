@@ -1,8 +1,7 @@
 """Conferma dei collegamenti esterni e blocco delle azioni pericolose (SEC-27).
 
-Il nucleo gestisce il clic sui collegamenti in `foliant.ui.tools.follow_link`;
-il modulo lo sostituisce con una versione che applica le regole di sicurezza e
-delega al nucleo i collegamenti interni (vedi CORE_REQUESTS.md).
+Registrato con `ctx.add_link_handler`: gestisce i collegamenti che escono da
+Foliant e lascia al nucleo quelli interni.
 """
 
 from __future__ import annotations
@@ -165,8 +164,8 @@ def _base_uri(view) -> str:
         return ""
 
 
-def follow_external(view, link: dict, original) -> None:
-    """Gestisce i collegamenti che escono da Foliant; gli altri vanno al nucleo."""
+def follow_external(view, link: dict) -> bool:
+    """Gestisce i collegamenti che escono da Foliant (True); gli altri restano al nucleo (False)."""
     kind = link.get("kind")
     if kind == pymupdf.LINK_URI and link.get("uri"):
         uri = link["uri"].strip()
@@ -180,11 +179,11 @@ def follow_external(view, link: dict, original) -> None:
         if not ok:
             QMessageBox.warning(view, _("Collegamento bloccato"),
                                 _("Il collegamento è stato bloccato:\n\n{u}\n\n{r}").format(u=uri, r=reason))
-            return
+            return True
         if scheme_of(uri) == "file":
             path = urlsplit(uri).path
             _open_pdf(view, path)
-            return
+            return True
         host = host_of(uri)
         settings = _settings_of(view)
         puny, warnings = host_warnings(host)
@@ -193,26 +192,26 @@ def follow_external(view, link: dict, original) -> None:
             warnings.append(mismatch)
         if host and host in allowed_domains(settings) and not warnings:
             open_url(uri)
-            return
+            return True
         choice = ask_open(view, uri, puny or host, warnings)
         if choice == "always":
             allow_domain(settings, host)
         if choice in ("open", "always"):
             open_url(uri)
-        return
+        return True
     if kind == pymupdf.LINK_LAUNCH:
         target = link.get("file") or link.get("uri") or ""
         QMessageBox.warning(view, _("Azione bloccata"),
                             _("Il documento vuole avviare un programma o aprire un file:\n\n{f}\n\n"
                               "Foliant non avvia programmi indicati dai documenti.").format(f=target or "—"))
-        return
+        return True
     if kind == pymupdf.LINK_GOTOR and link.get("file"):
         target = link["file"]
         if view.document.path is not None and not os.path.isabs(target):
             target = str(view.document.path.parent / target)
         _open_pdf(view, target)
-        return
-    original(view, link)
+        return True
+    return False
 
 
 def _open_pdf(view, path: str) -> None:
@@ -232,19 +231,25 @@ def _open_pdf(view, path: str) -> None:
 _installed = False
 
 
-def install() -> None:
-    """Sostituisce una sola volta il gestore dei collegamenti del nucleo."""
+def handler(view, link: dict) -> bool:
+    # Il controllo di sicurezza è l'ultima istanza prima del comportamento del nucleo:
+    # i gestori registrati dopo questo (altri moduli) hanno la precedenza.
+    from foliant.ui.tools import LINK_HANDLERS
+    if handler in LINK_HANDLERS:
+        for other in LINK_HANDLERS[LINK_HANDLERS.index(handler) + 1:]:
+            if other(view, link):
+                return True
+    try:
+        return follow_external(view, link)
+    except Exception as e:   # un errore del modulo non deve chiudere l'applicazione
+        view.status(_("Collegamento non gestito: {e}").format(e=e))
+        return True
+
+
+def install(ctx) -> None:
+    """Registra una sola volta il gestore dei collegamenti (l'elenco del nucleo è globale)."""
     global _installed
     if _installed:
         return
-    from foliant.ui import tools as core_tools
-    original = core_tools.follow_link
-
-    def follow_link(view, link):
-        try:
-            follow_external(view, link, original)
-        except Exception as e:   # un errore del modulo non deve chiudere l'applicazione
-            view.status(_("Collegamento non gestito: {e}").format(e=e))
-
-    core_tools.follow_link = follow_link
+    ctx.add_link_handler(handler)
     _installed = True

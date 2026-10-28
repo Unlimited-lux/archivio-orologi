@@ -580,9 +580,9 @@ def test_link_javascript_blocked(window, sec, sample_pdf, monkeypatch):
     blocked, opened = [], []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: blocked.append(a[2]))
     monkeypatch.setattr(L, "open_url", lambda uri: opened.append(uri))
-    L.follow_external(view, {"kind": pymupdf.LINK_URI, "uri": "javascript:alert(1)"}, lambda *a: None)
+    L.follow_external(view, {"kind": pymupdf.LINK_URI, "uri": "javascript:alert(1)"})
     assert blocked and not opened
-    L.follow_external(view, {"kind": pymupdf.LINK_LAUNCH, "file": "/usr/bin/xterm"}, lambda *a: None)
+    L.follow_external(view, {"kind": pymupdf.LINK_LAUNCH, "file": "/usr/bin/xterm"})
     assert len(blocked) == 2 and not opened
 
 
@@ -593,13 +593,13 @@ def test_link_confirm_and_allow_domain(window, sec, sample_pdf, monkeypatch):
     answers = iter(["cancel", "always", "open"])
     monkeypatch.setattr(L, "ask_open", lambda parent, uri, host, warnings: asked.append(host) or next(answers))
     link = {"kind": pymupdf.LINK_URI, "uri": "https://esempio.it/pagina", "from": pymupdf.Rect(0, 0, 1, 1)}
-    L.follow_external(view, link, lambda *a: None)
+    L.follow_external(view, link)
     assert opened == [] and asked == ["esempio.it"]
-    L.follow_external(view, link, lambda *a: None)          # «Sì a tutti»
+    L.follow_external(view, link)          # «Sì a tutti»
     assert opened == ["https://esempio.it/pagina"]
-    L.follow_external(view, link, lambda *a: None)          # ora senza conferma
+    L.follow_external(view, link)          # ora senza conferma
     assert len(asked) == 2 and len(opened) == 2
-    L.follow_external(view, {"kind": pymupdf.LINK_URI, "uri": "https://altro.it"}, lambda *a: None)
+    L.follow_external(view, {"kind": pymupdf.LINK_URI, "uri": "https://altro.it"})
     assert asked[-1] == "altro.it"
 
 
@@ -610,13 +610,16 @@ def test_link_homograph_warning():
 
 def test_core_link_hook_installed(window, sec):
     from foliant.ui import tools
-    assert tools.follow_link.__name__ == "follow_link" and L._installed
+    assert L._installed and tools.LINK_HANDLERS.count(L.handler) == 1
 
 
 def test_internal_links_delegated(window, sec, sample_pdf):
     view = window.open_path(sample_pdf)
     seen = []
-    L.follow_external(view, {"kind": pymupdf.LINK_GOTO, "page": 1}, lambda v, link: seen.append(link["page"]))
+    assert L.follow_external(view, {"kind": pymupdf.LINK_GOTO, "page": 1}) is False
+    from foliant.ui import tools
+    tools.follow_link(view, {"kind": pymupdf.LINK_GOTO, "page": 1})
+    seen.append(view.current_page)
     assert seen == [1]
 
 

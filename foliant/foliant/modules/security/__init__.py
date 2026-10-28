@@ -107,7 +107,7 @@ def register(ctx: Context) -> None:
     ctx.currentViewChanged.connect(on_view)
     ctx.documentChanged.connect(lambda v: update_status(v) if v is ctx.current_view() else None)
     ctx.add_view_menu_provider(lambda view, ev, menu: _context_menu(c, view, ev, menu))
-    links.install()
+    links.install(ctx)
     _update_actions(c, None)
 
 

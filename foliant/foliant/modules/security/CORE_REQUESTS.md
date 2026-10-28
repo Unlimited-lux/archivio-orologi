@@ -37,22 +37,13 @@ di modifica. Barra di stato: pulsante lucchetto «Accesso completo/limitato».
   Maiusc, messaggio «Password non corretta» nella stessa finestra, gestore di
   sicurezza non supportato con il suo nome.
 
-## 3. Collegamenti esterni (SEC-27)
+## 3. Collegamenti esterni (SEC-27) — risolta
 
-**Problema.** `foliant.ui.tools.follow_link` apre gli indirizzi web con una
-semplice domanda e non blocca schemi pericolosi (`javascript:`, `data:`,
-`file:` non PDF), azioni `/Launch` o file eseguibili; non c'è «consenti sempre
-per questo dominio».
-
-**Soluzione locale.** `links.install()` sostituisce una sola volta
-`foliant.ui.tools.follow_link` con `links.follow_external`, che applica le
-regole e delega al gestore originale i collegamenti interni. La conferma usa
-`QMessageBox.question` statico (Sì / Sì a tutti / No) per restare compatibile
-con i test degli altri moduli.
-
-**Proposta.** Un punto di estensione ufficiale, ad esempio
-`Context.set_link_handler(fn)` o un segnale `linkActivated(view, link)`
-annullabile, invece della sostituzione della funzione del modulo `tools`.
+Il modulo usa `ctx.add_link_handler` (registrato una sola volta: l'elenco del
+nucleo è globale). Poiché il controllo di sicurezza deve valere come ultima
+istanza prima del comportamento predefinito, il gestore del modulo interroga
+prima i gestori registrati dopo di lui. Proposta: un parametro `priority` in
+`add_link_handler` (es. «ultimo») per evitare questa precedenza manuale.
 
 ## 4. Avviso al salvataggio con segni non applicati (SEC-19)
 
