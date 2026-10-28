@@ -1,0 +1,35 @@
+# === Analisi / materiale di riferimento (MAI nel repo) ===
+# Tutto il materiale di analisi vive fuori dal repo (es. /tmp). Per sicurezza
+# ignoriamo anche eventuali cartelle di appunti/analisi che finissero qui.
+updf-analisi/
+**/updf-analisi/
+appunti/
+**/appunti/
+*.exe
+*.msi
+
+# === Build / artefatti dell'app (Fase 2) ===
+foliant/build/
+foliant/dist/
+foliant/.venv/
+foliant/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+node_modules/
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.AppImage
+*.deb
+*.rpm
+
+# === Sistema / editor ===
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+.idea/
+.vscode/
