@@ -207,10 +207,8 @@ class AnnotationsModule:
         for label, name, color in engine.PRESET_STAMPS:
             std.addAction(_(label), lambda _c=False, t=label, n=name, c=color:
                           self.use_stamp(engine.StampSpec(_(t), c, "", n)))
-        dyn = menu.addMenu(_("Dinamici"))
-        for label, template, color in engine.DYNAMIC_STAMPS:
-            dyn.addAction(_(template), lambda _c=False, t=label, tpl=template, c=color:
-                          self.use_stamp(engine.StampSpec(_(t), c), template=_(tpl)))
+        self.dyn_menu = menu.addMenu(_("Dinamici"))
+        self.dyn_menu.aboutToShow.connect(self._fill_dynamic)
         stickers = menu.addMenu(_("Adesivi"))
         for key, (label, _ops) in engine.STICKERS.items():
             stickers.addAction(_(label), lambda _c=False, k=key: self.use_sticker(k))
@@ -280,6 +278,36 @@ class AnnotationsModule:
         tool.spec, tool.template, tool.image, tool.name = spec, template, image, name
         tool.sticker = ""
         self.activate(engine.STAMP)
+
+    def _fill_dynamic(self) -> None:
+        m = self.dyn_menu
+        m.clear()
+        for label, template, color in engine.DYNAMIC_STAMPS:
+            m.addAction(_(template), lambda _c=False, t=label, tpl=template, c=color:
+                        self.use_stamp(engine.StampSpec(_(t), c), template=_(tpl)))
+        custom = self.ctrl.dynamic_templates()
+        if custom:
+            m.addSeparator()
+            for d in custom:
+                m.addAction(d["template"], lambda _c=False, d=d: self.use_stamp(
+                    engine.StampSpec(d["template"], engine.hex_to_color(d.get("color")) or (0.15, 0.3, 0.7)),
+                    template=d["template"]))
+        m.addSeparator()
+        m.addAction(_("Nuovo timbro dinamico…"), self.new_dynamic_template)
+
+    def new_dynamic_template(self) -> str | None:
+        from . import dialogs
+        text = dialogs.ask_text(self.ctx.window, _("Nuovo timbro dinamico"),
+                                _("Testo con segnaposto {autore} {data} {ora} {file} {pagina} {contatore}:"),
+                                _("Ricevuto da {autore} il {data}"))
+        if not text or not text.strip():
+            return None
+        unknown = engine.unknown_placeholders(text)
+        if unknown:
+            self.ctx.info(_("Nuovo timbro dinamico"),
+                          _("Segnaposto sconosciuti, mostrati letteralmente: {p}").format(p=", ".join(unknown)))
+        self.ctrl.add_dynamic_template(text.strip())
+        return text.strip()
 
     def use_sticker(self, key: str) -> None:
         tool: StampTool = self.tools[engine.STAMP]

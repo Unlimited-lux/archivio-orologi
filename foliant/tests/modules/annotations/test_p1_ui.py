@@ -904,3 +904,16 @@ def test_ann35_pages_and_marked_filters(comments, monkeypatch):
     assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(1, b)]
     from foliant.modules.annotations.panels import parse_pages
     assert parse_pages("1-3, 7; 99", 10) == {0, 1, 2, 6}
+
+
+def test_ann25_custom_dynamic_template(comments, monkeypatch):
+    """ANN-25: nuovo modello con segnaposto salvato in libreria e apposto con i valori correnti."""
+    window, view, module = comments
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "Visto da {autore} {sconosciuto}")
+    assert module.new_dynamic_template() == "Visto da {autore} {sconosciuto}"
+    assert any("{sconosciuto}" in m[2] for m in module.messages)
+    module._fill_dynamic()
+    act = [a for a in module.dyn_menu.actions() if a.text() == "Visto da {autore} {sconosciuto}"][0]
+    act.trigger()
+    click(view, 0, 300, 400)
+    assert module.ctrl.annotations()[0].contents == "Visto da Maria Rossi {sconosciuto}"

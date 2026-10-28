@@ -194,6 +194,19 @@ class Controller(QObject):
         self.ctx.settings().setValue(key, value)
         return value
 
+    def dynamic_templates(self) -> list[dict]:
+        raw = self.ctx.settings().value("annotations/dynamic_templates", "")
+        try:
+            data = json.loads(str(raw)) if raw else []
+            return [d for d in data if isinstance(d, dict) and d.get("template")]
+        except Exception:
+            return []
+
+    def add_dynamic_template(self, template: str, color: str = "#2650B3") -> None:
+        items = [d for d in self.dynamic_templates() if d["template"] != template]
+        items.append({"template": template, "color": color})
+        self.ctx.settings().setValue("annotations/dynamic_templates", json.dumps(items))
+
     def custom_stamps(self) -> list[dict]:
         raw = self.ctx.settings().value("annotations/custom_stamps", "")
         try:

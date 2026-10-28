@@ -1190,6 +1190,13 @@ def fill_template(template: str, *, author: str = "", when: datetime | None = No
     return template
 
 
+PLACEHOLDERS = ("{autore}", "{nome}", "{data}", "{ora}", "{file}", "{pagina}", "{contatore}")
+
+
+def unknown_placeholders(template: str) -> list[str]:
+    return [p for p in re.findall(r"\{[^{}]*\}", template) if p not in PLACEHOLDERS]
+
+
 def dynamic_subtitle(template: str, author: str, when: datetime | None = None) -> str:
     return fill_template(template, author=author, when=when)
 

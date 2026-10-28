@@ -146,7 +146,12 @@ EN: dict[str, str] = {
         "Annotations can only be pasted into the same document.",
     "Le annotazioni erano nascoste: sono di nuovo visibili.": "Annotations were hidden: they are visible again.",
     "Sola lettura": "Read only", "Contenuto bloccato": "Locked contents", "Cancellazione": "Deletion",
-    "Sostituzione": "Replacement", "Spunta": "Checkmark", "Con spunta": "Checked", "Senza spunta": "Unchecked",
+    "Sostituzione": "Replacement", "Nuovo timbro dinamico…": "New dynamic stamp…",
+    "Nuovo timbro dinamico": "New dynamic stamp",
+    "Testo con segnaposto {autore} {data} {ora} {file} {pagina} {contatore}:":
+        "Text with placeholders {autore} {data} {ora} {file} {pagina} {contatore}:",
+    "Ricevuto da {autore} il {data}": "Received by {autore} on {data}",
+    "Segnaposto sconosciuti, mostrati letteralmente: {p}": "Unknown placeholders, shown literally: {p}", "Spunta": "Checkmark", "Con spunta": "Checked", "Senza spunta": "Unchecked",
     "Pagine…": "Pages…", "Filtra per pagine": "Filter by pages",
     "Pagine (es. 1-3, 7; vuoto = tutte):": "Pages (e.g. 1-3, 7; empty = all):", "Annulla per ripristinarle.": "Undo to restore them.", "tutte le pagine": "all pages", "pagina {n}": "page {n}", "Aggiungi vertice qui": "Add vertex here", "Aggiungi vertice": "Add vertex",
     "Rimuovi vertice": "Remove vertex", "Intensità 1": "Intensity 1", "Intensità 2": "Intensity 2", "Allinea": "Align", "Distribuisci": "Distribute",
