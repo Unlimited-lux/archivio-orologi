@@ -257,13 +257,29 @@ def test_deleted_file_bar_and_save_recreates(viewer_window, ctl, pdf30, qtbot):
     os.remove(pdf30)
     qtbot.waitUntil(lambda: ctl.bar(view) is not None, timeout=3000)
     bar = ctl.bar(view)
-    assert bar.kind == "missing" and list(bar.buttons) == ["Salva"]
+    assert bar.kind == "missing" and list(bar.buttons) == ["Salva", "Salva con nome…"]
     assert ctl.reload_count == 0
     bar.buttons["Salva"].click()
     assert os.path.exists(pdf30)
     assert ctl.bar(view) is None
     qtbot.wait(400)
     assert ctl.reload_count == 0 and viewer_window.current_view() is view
+
+
+def test_deleted_file_save_as_elsewhere(viewer_window, ctl, pdf30, qtbot, monkeypatch, tmp_path):
+    """NFR-12/VIS-49: l'avviso del file eliminato o spostato offre anche «Salva con nome…»."""
+    view = viewer_window.open_path(pdf30)
+    os.remove(pdf30)
+    qtbot.waitUntil(lambda: ctl.bar(view) is not None, timeout=3000)
+    target = tmp_path / "altrove.pdf"
+    monkeypatch.setattr(viewer_window.ctx, "ask_save_path", lambda *a, **k: str(target))
+    banner = viewer_window.tabs.page(view).banners
+    [b for b in banner.action_buttons if b.text() == "Salva con nome…"][0].click()
+    assert target.exists() and not os.path.exists(pdf30)
+    assert str(view.document.path) == str(target)
+    assert ctl.bar(view) is None
+    from foliant.modules.viewer.reload import ReloadBar
+    assert ReloadBar.BANNER_ID not in viewer_window.ctx.banners(view)
 
 
 def test_replaced_file_still_watched(viewer_window, ctl, pdf30, qtbot):

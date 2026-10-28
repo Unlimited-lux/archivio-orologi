@@ -19,6 +19,7 @@ Regole per chi modifica un documento:
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import secrets
@@ -35,7 +36,7 @@ import pymupdf
 from ..i18n import _
 from . import security
 from .engine import ENGINE_LOCK
-from .errors import DocumentError, OperationCancelled, PasswordRequired, WrongPassword
+from .errors import DocumentError, DocumentWriteError, OperationCancelled, PasswordRequired, WrongPassword
 from .incremental import IncrementalSaveError, incremental_update, signed_fields
 from .security import ACCESS_NONE, ACCESS_OWNER, ACCESS_USER, ALL_PERMISSIONS
 
@@ -116,16 +117,45 @@ _OWN_WRITES: dict[str, tuple | None] = {}
 _OWN_WRITES: dict[str, tuple | None] = {}
 
 
+def write_error(target: str | os.PathLike, error: OSError) -> DocumentWriteError:
+    """Errore di scrittura con il nome del file, la causa in parole semplici e l'azione possibile."""
+    target = Path(target)
+    code = error.errno
+    if code in (errno.ENOSPC, errno.EDQUOT):
+        reason, action = _("spazio su disco insufficiente"), _("Libera spazio o salva in un'altra posizione.")
+    elif code in (errno.EACCES, errno.EPERM, errno.EROFS):
+        reason = _("la cartella «{folder}» non è scrivibile").format(folder=target.parent)
+        action = _("Salva in un'altra posizione.")
+    elif code in (errno.EBUSY, errno.ETXTBSY):
+        reason = _("il file è in uso da un altro programma")
+        action = _("Chiudi l'altro programma e riprova, oppure salva in un'altra posizione.")
+    elif code == errno.ENOENT:
+        reason = _("la cartella «{folder}» non esiste più").format(folder=target.parent)
+        action = _("Salva in un'altra posizione.")
+    elif code == errno.EFBIG:
+        reason, action = _("il file è troppo grande per questo disco"), _("Salva in un'altra posizione.")
+    else:
+        reason = _("errore di scrittura sul disco ({error})").format(error=error.strerror or error)
+        action = _("Riprova o salva in un'altra posizione.")
+    message = _("Impossibile salvare «{name}»: {reason}. {action}").format(name=target.name, reason=reason,
+                                                                       action=action)
+    return DocumentWriteError(message, code, str(target))
+
+
 def atomic_write(target: str | os.PathLike, data: bytes) -> None:
-    """Scrive `data` in `target` senza mai lasciare un file a metà."""
+    """Scrive `data` in `target` senza mai lasciare un file a metà.
+
+    Se la scrittura non riesce solleva `DocumentWriteError` (l'originale resta intatto e
+    nessun file temporaneo rimane nella cartella)."""
     target = Path(os.path.realpath(target))          # salva nel file vero, non sul collegamento
     directory = target.parent
     if target.exists() and (not os.access(target, os.W_OK) or not (target.stat().st_mode & 0o222)):
-        raise DocumentError(_("«{name}» è in sola lettura: salvalo con un altro nome.").format(name=target.name))
+        raise DocumentWriteError(_("«{name}» è in sola lettura: salvalo con un altro nome.").format(name=target.name),
+                                 errno.EACCES, str(target))
     try:
         fd, tmp = tempfile.mkstemp(prefix=".foliant-", suffix=".tmp", dir=directory)
     except OSError as e:
-        raise DocumentError(_("Impossibile scrivere nella cartella «{folder}»: {error}.").format(folder=directory, error=e.strerror)) from e
+        raise write_error(target, e) from e
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -147,7 +177,7 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
         except OSError:
             pass
         if isinstance(e, OSError):
-            raise DocumentError(_("Salvataggio non riuscito: {error}.").format(error=e.strerror)) from e
+            raise write_error(target, e) from e
         raise
 
 
@@ -186,6 +216,12 @@ def protection_options(pdf: pymupdf.Document, password: str | None, auth_code: i
         opts["user_pw"] = ""
         opts["owner_pw"] = password if (owner_known and password) else secrets.token_urlsafe(24)
     return opts
+
+
+def _version_tuple(text: str | None) -> tuple[int, int]:
+    """(1, 4) da «PDF 1.4» o «/1.4»; (0, 0) se non si legge."""
+    m = re.search(r"(\d+)\.(\d+)", text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
 
 def _file_stamp(path) -> tuple | None:
@@ -766,7 +802,8 @@ class Document:
         """Il documento come file PDF completo e compattato (senza toccare il documento aperto).
 
         Per impostazione predefinita senza flussi di oggetti, così chi cerca nei byte
-        (es. `/ByteRange`, `/Sig`) li trova; i file salvati su disco li usano (`save_bytes`).
+        (es. `/ByteRange`, `/Sig`) li trova; i file salvati su disco li usano se il documento è
+        già almeno PDF 1.5 (`save_bytes`, `uses_object_streams`).
         """
         opts = {"garbage": 3, "deflate": True}
         with self.lock:
@@ -844,7 +881,8 @@ class Document:
         - con una `save_strategy` registrata che restituisce dei byte, quelli;
         - per un documento firmato (o con `incremental=True`): `original_bytes` + un
           aggiornamento incrementale con gli oggetti cambiati;
-        - altrimenti il file completo, compattato e con flussi di oggetti.
+        - altrimenti il file completo, compattato e con flussi di oggetti se il documento
+          è già almeno PDF 1.5, nuovo o convertito (`uses_object_streams`).
         """
         if self.save_strategy is not None:
             data = self.save_strategy(self, Path(path) if path is not None else self.path)
@@ -853,7 +891,27 @@ class Document:
         if self._wants_incremental(incremental, options):
             with self.lock:
                 return incremental_update(self.original_bytes, self._pdf, self.password)
-        return self.to_bytes(**{"use_objstms": 1, **options})
+        return self.to_bytes(**{"use_objstms": int(self.uses_object_streams), **options})
+
+    @property
+    def uses_object_streams(self) -> bool:
+        """Il file salvato per intero userà i flussi di oggetti (PDF 1.5).
+
+        Solo se il documento dichiara già almeno la versione 1.5 (intestazione o /Version del
+        catalogo), oppure è nuovo o convertito: con i flussi di oggetti il motore alzerebbe a
+        1.5 l'intestazione di un file 1.4, anche solo per un'evidenziazione (NFR-29).
+        """
+        if self.original_bytes is None:
+            return True
+        with self.lock:
+            try:
+                version = _version_tuple((self._pdf.metadata or {}).get("format"))
+                kind, value = self._pdf.xref_get_key(self._pdf.pdf_catalog(), "Version")
+                if kind == "name":
+                    version = max(version, _version_tuple(value))
+            except Exception:
+                return True
+        return version >= (1, 5)
 
     def save(self, path: str | os.PathLike | None = None, *, incremental: bool | None = None, **options) -> None:
         """Salva (in modo atomico). Senza percorso usa quello corrente.

@@ -24,3 +24,23 @@ def test_startup_loads_no_telemetry_component(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert not (tmp_path / "cache" / "Microsoft").exists()
     assert not (tmp_path / "home" / ".cache" / "Microsoft").exists()
+
+
+def test_table_detection_still_works_without_layout_analysis():
+    """Escludere l'analisi del layout non deve rompere le funzioni di pymupdf che ne
+    controllano la presenza (find_tables chiama importlib.util.find_spec("pymupdf.layout"))."""
+    import importlib.util
+    import sys
+
+    import pymupdf
+    assert "onnxruntime" not in sys.modules
+    importlib.util.find_spec("pymupdf.layout")          # non solleva
+    d = pymupdf.open()
+    page = d.new_page()
+    for r in range(4):
+        for c in range(3):
+            x, y = 72 + c * 120, 100 + r * 30
+            page.draw_rect(pymupdf.Rect(x, y, x + 120, y + 30), color=(0, 0, 0), width=1)
+            page.insert_text((x + 5, y + 20), f"R{r}C{c}", fontsize=10)
+    tables = page.find_tables().tables
+    assert tables and tables[0].row_count == 4 and tables[0].col_count == 3

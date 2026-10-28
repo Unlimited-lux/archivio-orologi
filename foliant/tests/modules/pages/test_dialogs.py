@@ -291,7 +291,7 @@ def test_scanner_fake_device(pages_window, accept, monkeypatch):
     monkeypatch.setattr(D, "list_scanners", lambda: [("test:0", "Scanner di prova")])
     monkeypatch.setattr(D, "scan_pages", lambda dev, dpi, mode, **k: [png, png, png])
     monkeypatch.setattr(D, "scanned_to_pdf", lambda imgs, dpi, discard=False: _order_pdf(imgs, dpi))
-    accept(lambda d: d.position.set_where("start"))
+    accept(lambda d: d.position.set_where("start") if isinstance(d, D.ScannerDialog) else None)
     assert D.open_scanner_dialog(window.ctx, view, [0])
     assert view.page_count == 13
     assert texts(view)[:3] == ["S1", "S2", "S3"]
@@ -355,3 +355,57 @@ def test_dialog_screenshots(window, ten_pdf, tmp_path):
             assert dlg.grab().save(str(tmp_path / f"{type(dlg).__name__}_{mode}.png"))
             dlg.close()
     fast_theme("light")
+
+
+def test_template_field_menu_preview_and_validation(window, ten_pdf):
+    """PAG-32: «Inserisci campo», anteprima sul caso corrente, conferma bloccata se il segnaposto è sconosciuto."""
+    view = window.open_path(ten_pdf)
+    dlg = D.ExtractDialog(window, view.document, [0, 1])
+    dlg.rb_each.setChecked(True)
+    field = dlg.template_field
+    field.edit.setText("{nome}_")
+    field.insert("{pagina:3}")
+    assert field.edit.text() == "{nome}_{pagina:3}"
+    assert "doc_001.pdf" in field.example.text()
+    assert dlg.ok_button().isEnabled()
+    field.edit.setText("{sconosciuto}")
+    assert not dlg.ok_button().isEnabled() and "sconosciuto" in dlg.message.text()
+    split = D.SplitDialog(window, view.document)
+    split.template_field.edit.setText("{nome}_{xyz}")
+    assert not split.ok_button().isEnabled()
+
+
+def test_scan_review_rotate_delete_more_and_cancel(pages_window, monkeypatch):
+    """PAG-10: le facciate si possono ruotare, eliminare e riacquisire; se il dispositivo si
+    scollega restano quelle già acquisite; l'annullamento non modifica il documento."""
+    window, view = pages_window
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 280), False)
+    pix.clear_with(255)
+    png = pix.tobytes("png")
+    calls = []
+
+    def more():
+        calls.append(1)
+        if len(calls) > 1:
+            raise E.PageOpError("Scanner scollegato")
+        return [png]
+    dlg = D.ScanReviewDialog(window, [png, png, png], scan_more=more)
+    dlg.list.setCurrentRow(0)
+    dlg.list.item(0).setSelected(True)
+    dlg.rotate()
+    dlg.list.clearSelection()
+    dlg.list.item(1).setSelected(True)
+    dlg.remove()
+    dlg.more()
+    assert len(dlg.pages) == 3
+    dlg.more()
+    assert len(dlg.pages) == 3 and "scollegato" in dlg.message.text()
+    out = D.scanned_to_pdf(dlg.result_pages(), 300)
+    assert out.page_count == 3 and out[0].rotation == 90 and out[1].rotation == 0
+    # annullamento della revisione → nessuna modifica
+    monkeypatch.setattr(D, "list_scanners", lambda: [("test:0", "Prova")])
+    monkeypatch.setattr(D, "scan_pages", lambda *a, **k: [png])
+    monkeypatch.setattr(QDialog, "exec", lambda d: QDialog.DialogCode.Accepted if isinstance(d, D.ScannerDialog)
+                        else QDialog.DialogCode.Rejected)
+    assert not D.open_scanner_dialog(window.ctx, view, [0])
+    assert view.page_count == 10 and not view.document.can_undo

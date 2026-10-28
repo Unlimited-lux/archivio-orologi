@@ -19,6 +19,18 @@ foliant documento.pdf
 Opzioni: `--default-pdf` imposta Foliant come lettore PDF predefinito.
 Disinstallazione: `./packaging/uninstall.sh`.
 
+Riga di comando: `foliant [--page N] [--new-window] file…` apre i file in schede, il primo alla
+pagina N (`-p N`; per un file qualsiasi anche `file.pdf#page=N`); le opzioni sconosciute sono
+segnalate e ignorate. Istanza singola: se Foliant è già aperto, il nuovo avvio consegna file e
+pagina alla finestra attiva (nuove schede, oppure la scheda del file se è già aperto) e termina;
+con `--new-window` si apre invece una nuova finestra (`foliant/ui/instance.py`). `--create` apre
+«Crea PDF da file» e `--merge` il dialogo «Unisci file»: sono le azioni rapide della voce nel menu
+delle applicazioni (`packaging/foliant.desktop`: Nuova finestra, Crea PDF da file…, Unisci file…).
+Eseguono il comando registrato da un modulo con `ctx.add_command("create-pdf" | "merge", fn)`;
+finché nessun modulo lo registra, il nucleo usa l'azione rapida della Home con lo stesso scopo
+(«Crea PDF da file», «Unisci PDF») e, se manca anche quella, mostra la Home.
+L'installazione copia anche l'icona simbolica monocromatica (`foliant-symbolic.svg`, colore del tema).
+
 ## Uso quotidiano
 
 La barra in alto contiene le modalità; ognuna mostra i propri strumenti nella barra sotto.
@@ -82,6 +94,7 @@ foliant/
     theme.py        tema chiaro/scuro e colori
     icons.py        icone (nomi = file in resources/icons)
     home.py         schermata Home
+    instance.py     istanza singola: un secondo avvio consegna file e comandi alla finestra attiva
   modules/     funzioni, una cartella per area (scoperte automaticamente)
   api.py       tutto ciò che serve a un modulo
   i18n.py      traduzioni (sorgente italiano, catalogo inglese per modulo)
@@ -140,20 +153,27 @@ def ruota(ctx, gradi):
    `foliant.modules.<nome>` usa prima le voci di quel modulo, poi quelle del nucleo, poi quelle
    degli altri moduli. Le parole con più significati nello stesso modulo usano
    `pgettext("contesto", "Annulla")` con la voce `"contesto\x04Annulla"`. Inglese americano
-   («Color», «Canceled»).
+   («Color», «Canceled»). Date e numeri mostrati o scritti nei documenti con
+   `format_date(dt, time=True)` e `format_number(n, decimali)` (da `foliant.api`):
+   «28/10/2026 14:30», «1.234,5» in italiano; «10/28/2026 2:30 PM», «1,234.5» in inglese.
 7. **Icone** con `icon("nome")` o `bind_icon(azione, "nome")` (nomi dei file in
    `foliant/resources/icons`). **Colori** con `theme.color("accent")` ecc., mai valori fissi.
 8. **Errori**: messaggi chiari per l'utente (`ctx.error(titolo, testo)`); un errore di un
    modulo non deve mai chiudere l'applicazione.
 9. **Originalità**: nessun testo, icona o risorsa copiati da prodotti commerciali.
+10. **Più finestre**: «Nuova finestra» (Ctrl+N) crea un'altra `MainWindow` nello stesso processo e
+   `register(ctx)` viene chiamata di nuovo con il suo `Context`. Lo stato del modulo va tenuto
+   nel controller legato a quel `ctx`, non in variabili globali del modulo, che l'ultima
+   finestra aperta sovrascriverebbe.
 
 ### Scorciatoie da tastiera
 
 La tabella UX-18 della specifica è l'unica autorità. Il nucleo registra: Ctrl+O, Ctrl+T (Home),
-Ctrl+N, Ctrl+S, Ctrl+Maiusc+S, Ctrl+W, Ctrl+Maiusc+T, Ctrl+Q, Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
+Ctrl+N (Nuova finestra; «Nuovo documento» non ha scorciatoia), Ctrl+S, Ctrl+Maiusc+S, Ctrl+W,
+Ctrl+Maiusc+T, Ctrl+Q (Esci: chiude tutte le finestre), Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
 Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
 N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
-Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
+Maiusc+F9, F10, Maiusc+F10 / Menu (menu contestuale del widget con il fuoco), F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
 Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
 duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
 «Righelli» (menu ☰ › Vista) non ha scorciatoia: UX-18 riserva Ctrl+R ai righelli e Ctrl+Maiusc++/-
@@ -195,6 +215,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `open_path(p)`, `open_document(doc)` | aprire file o mostrare un documento creato dal modulo |
 | `activate_view(view)` → bool | porta in primo piano la scheda, anche se è visibile la Home o un widget centrale |
 | `close_view(view, discard=False)` → bool | chiude la scheda come Ctrl+W (controlli `close_document` e domanda di salvataggio); `discard=True` chiude subito scartando le modifiche e senza controlli: da usare per le chiusure decise dal modulo (ricarica, file eliminato o spostato) |
+| `window.save_view(view, save_as=False, recreate=False)` → bool | salva come Ctrl+S (`save_as`: Salva con nome); se il file è stato eliminato o spostato dopo l'apertura chiede se ricrearlo nella posizione originale o salvarlo altrove (NFR-12/4); `recreate=True` lo ricrea senza chiedere, anche la cartella (pulsante di una barra «file eliminato»). Se la scrittura non riesce propone «Salva con nome…» |
 | `refresh_state()` | ricalcola titolo, azioni (annulla/ripeti, Prima/Precedente/Successiva/Ultima) e barra di stato |
 | `add_mode(id, titolo, icona, order)` → `Mode` | modalità con barra contestuale (`mode.add_action`, `add_widget`, `add_separator`, segnali `entered`/`left`) |
 | `mode.set_default_tool(tool_o_factory)` | strumento attivato dal nucleo entrando nella modalità e sui documenti aperti mentre è attiva: un `Tool` o `factory(view) -> Tool \| None`; solo sulle viste con «Seleziona testo», prima di `entered`; vince l'ultima chiamata. Es. `ctx.mode("modifica").set_default_tool(lambda v: EditTextTool(c))` |
@@ -202,6 +223,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `action(testo, icona, slot, shortcut=, checkable=, requires_document=)` | crea un'azione (disattivata senza documento) |
 | `add_menu_action(azione, sezione)` | voce nel menu principale ☰ |
 | `add_home_action(titolo, icona, callback, descrizione, order)` | azione rapida nella Home |
+| `add_command(nome, fn)` | comando per la riga di comando e le azioni del file .desktop: `"create-pdf"` (`foliant --create`), `"merge"` (`foliant --merge`); senza, il nucleo usa l'azione rapida della Home «Crea PDF da file» / «Unisci PDF» |
 | `add_sidebar_panel(id, titolo, icona, widget, order)` / `show_sidebar_panel(id)` / `toggle_sidebar_panel(id)` | pannello sinistro (`widget.set_view(view)` chiamato a ogni cambio documento); `toggle` lo nasconde se è già quello visibile |
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |
@@ -221,7 +243,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `recent_files()`, `replace_recent(vecchio, nuovo)`, `remove_recent(p)` | elenco dei recenti: file rinominato/spostato (stessa posizione) o da togliere |
 | `add_change_guard(fn)` / `remove_change_guard(fn)` | guardia su tutti i documenti aperti e futuri: `fn(document, etichetta, kind) -> bool`, False annulla la modifica (vedi sotto) |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
-| segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `documentAccessChanged`, `modeChanged`, `fullscreenChanged(bool)` | eventi; `documentAccessChanged(view)`: accesso o permessi cambiati (`unlock`) o documento bloccato/sbloccato (`set_locked`): ricalcolare i comandi che dipendono da `allows()`/`locked` |
+| segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `documentAccessChanged`, `modeChanged`, `fullscreenChanged(bool)` | eventi; `documentAccessChanged(view)`: accesso o permessi cambiati (`unlock`) o documento bloccato/sbloccato (`set_locked`): ricalcolare i comandi che dipendono da `allows()`/`locked`; su `documentClosed(view)` il modulo azzera i propri riferimenti alla vista e al documento, così vengono raccolti e la memoria torna al sistema (NFR-06: dopo la distruzione della scheda il nucleo chiama `malloc_trim` su Linux/glibc) |
 
 Ogni scheda è un contenitore (`window.tabs.page(view)`: barre di avviso sopra la vista), ma
 `window.tabs.widget(i)`, `currentWidget()`, `indexOf(view)` e `setCurrentWidget(view)` lavorano
@@ -243,8 +265,9 @@ un proprio `customContextMenuRequested` sulla barra delle schede: le voci vanno 
 | `repaired` | il motore ha ricostruito la xref all'apertura (CNV-32: barra «file riparato») |
 | `original_bytes`, `has_signatures` | byte del file all'apertura o dopo l'ultimo salvataggio; campi `/FT /Sig` con `/V` |
 | `save(path=None, incremental=None)`, `save_copy(path)`, `save_bytes(path=None)` | un documento firmato si salva **sempre** in modo incrementale (`original_bytes` + modifiche in coda), anche con «Salva con nome»; cambio di protezione, redazione (`kind="redaction"`), file riparato, `replace_with()` con un PDF che non prosegue il file (rinumerato; fino all'annullamento) o `incremental=False` = riscrittura completa; `incremental=True` lo forza (`IncrementalSaveError` se impossibile) |
+| `atomic_write(percorso, dati)` | scrittura atomica (temporaneo + sostituzione); se non riesce solleva `DocumentWriteError` (sottoclasse di `DocumentError`, in `core/errors.py`) con `errno`, `filename` e un messaggio con causa e azione (disco pieno, cartella non scrivibile, file in uso): la finestra propone «Salva con nome…» |
 | `save_strategy` | facoltativa: `fn(document, path)` che restituisce i byte da scrivere, oppure None per il comportamento del nucleo |
-| `to_bytes(**opzioni)` | file completo compattato, senza flussi di oggetti (i byte restano cercabili); i file salvati li usano |
+| `to_bytes(**opzioni)` / `uses_object_streams` | file completo compattato, senza flussi di oggetti (i byte restano cercabili); i file salvati li usano solo se il documento è già almeno PDF 1.5 o è nuovo/convertito, così un file 1.4 resta 1.4 (NFR-29) |
 | notifiche `CONTENT`, `SAVED`, `CLOSED`, `ACCESS`, `LOCK` | `document.add_listener(fn(document, tipo))`; chi scrive il file da sé notifica `SAVED` (aggiorna anche il controllo «modificato da un altro programma») |
 
 `save_options["encrypt_metadata"] = False` (SEC-06, «cifra tutto tranne i metadati») è accettata ma

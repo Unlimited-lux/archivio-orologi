@@ -25,7 +25,9 @@ import pymupdf
 
 from foliant.core.errors import OperationCancelled
 
-from .engine import PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_in_page_text
+from .engine import (
+    PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_spans, rects_of, span_snippet,
+)
 
 # modalità
 PHRASE = "phrase"
@@ -130,7 +132,7 @@ def find_in_string(s: str, opts: AdvOptions, width: int = 40) -> list[tuple[str,
     if spans is None:
         return []
     out = []
-    for rects in spans:
+    for rects, _src in spans:
         a = int(round(rects[0].x0))
         b = int(round(rects[-1].x1))
         out.append((_clean(s[max(0, a - width):a]).lstrip(), _clean(s[a:b]), _clean(s[b:b + width]).rstrip()))
@@ -138,21 +140,24 @@ def find_in_string(s: str, opts: AdvOptions, width: int = 40) -> list[tuple[str,
 
 
 def _match_units(pt: PageText, opts: AdvOptions) -> list | None:
-    """Occorrenze (liste di rettangoli) in un testo secondo la modalità; None se
-    la modalità "tutte le parole" non è soddisfatta."""
+    """Occorrenze in un testo secondo la modalità, come (rettangoli, indici dei caratteri);
+    None se la modalità "tutte le parole" non è soddisfatta."""
     so = opts.search_options()
     terms = opts.terms()
     if not terms:
         return []
+
+    def hits(term: str) -> list:
+        return [(rects_of(pt, src), src) for src in find_spans(pt, term, so)]
     if opts.mode in (PHRASE, REGEX):
-        return find_in_page_text(pt, terms[0], so)
+        return hits(terms[0])
     found: list = []
     for t in terms:
-        hits = find_in_page_text(pt, t, so)
-        if not hits and opts.mode == ALL_WORDS:
+        found_t = hits(t)
+        if not found_t and opts.mode == ALL_WORDS:
             return None
-        found.extend(hits)
-    found.sort(key=lambda rects: (rects[0].y0, rects[0].x0))
+        found.extend(found_t)
+    found.sort(key=lambda h: (h[0][0].y0, h[0][0].x0))
     return found
 
 
@@ -343,8 +348,8 @@ def search_document(pdf: pymupdf.Document, opts: AdvOptions, file: str, *, doc_k
                 summary.timed_out.append((file, i))
             continue
         units = _match_units(pt, opts) if pt.text else []
-        for rects in units or []:
-            b, f, a = page_snippet(pt, rects, width=40)
+        for rects, src in units or []:
+            b, f, a = span_snippet(pt, src, width=40)
             if not add(AdvHit(file, i, KIND_TEXT, b, f, a, [_rect_tuple(r) for r in rects], doc_key)):
                 break
         for content, rect in comments:

@@ -212,6 +212,12 @@ class OcrDialog(QDialog):
         self.font.addItem(_("Monospaziato"), "mono")
         self.font.setCurrentIndex(max(0, self.font.findData(get("font", "auto"))))
         form.addRow(_("Carattere del testo modificabile:"), self.font)
+        self.compression = QComboBox(self)
+        self.compression.addItem(_("Esatta (immagine invariata)"), "exact")
+        self.compression.addItem(_("Compressa (bilanciata)"), "balanced")
+        self.compression.addItem(_("Compressa (massima)"), "maximum")
+        self.compression.setCurrentIndex(max(0, self.compression.findData(get("compression", "exact"))))
+        form.addRow(_("Immagine della pagina:"), self.compression)
         self.destination = QComboBox(self)
         self.destination.addItem(_("Documento corrente"), "current")
         self.destination.addItem(_("Nuovo documento (l'originale resta invariato)"), "new")
@@ -301,6 +307,7 @@ class OcrDialog(QDialog):
         self.font.setEnabled(editable)
         self.cb_preview.setEnabled(not text)
         self.cb_apply_page.setEnabled(self.rb_searchable.isChecked())
+        self.compression.setEnabled(self.rb_searchable.isChecked())
         self.cb_clean_page.setEnabled(self.rb_searchable.isChecked())
         self.cb_keep.setEnabled(editable)
         self.destination.setEnabled(not text)
@@ -378,6 +385,7 @@ class OcrDialog(QDialog):
                 "dpi": self.dpi.currentData(), "existing_text": o.existing_text, "font": o.font,
                 "preprocess": o.preprocess.as_dict(), "apply_to_page": o.apply_to_page, "keep_original": o.keep_original, "clean_page": o.clean_page,
                 "zones": [z.to_dict() for z in o.zones], "auto_tables": o.auto_tables,
+                "compression": self.compression.currentData(),
                 "destination": self.destination.currentData(), "preview": self.cb_preview.isChecked()}
 
     def load_profile(self, data: dict) -> None:
@@ -390,7 +398,7 @@ class OcrDialog(QDialog):
         for c in langs:
             self.languages.set_checked(c, True)
         for combo, key in ((self.dpi, "dpi"), (self.existing, "existing_text"), (self.font, "font"),
-                           (self.destination, "destination")):
+                           (self.destination, "destination"), (self.compression, "compression")):
             i = combo.findData(data.get(key))
             if i >= 0:
                 combo.setCurrentIndex(i)
@@ -462,6 +470,7 @@ class OcrDialog(QDialog):
             keep_original=self.cb_keep.isChecked() and self.mode() == engine.EDITABLE,
             clean_page=self.cb_clean_page.isChecked() and self.mode() == engine.SEARCHABLE,
             zones=list(self.zones), auto_tables=self.cb_tables.isChecked(),
+            compression=self.compression.currentData() if self.mode() == engine.SEARCHABLE else "exact",
             preprocess=PreprocessOptions(deskew=self.cb_deskew.isChecked(), auto_rotate=self.cb_rotate.isChecked(),
                                          denoise=self.cb_denoise.isChecked(),
                                          contrast=self.cb_contrast.isChecked(),
@@ -487,6 +496,7 @@ class OcrDialog(QDialog):
             s.setValue("ocr/destination", self.destination.currentData())
             s.setValue("ocr/apply_to_page", "true" if self.cb_apply_page.isChecked() else "false")
             s.setValue("ocr/keep_original", "true" if self.cb_keep.isChecked() else "false")
+            s.setValue("ocr/compression", self.compression.currentData())
             s.setValue("ocr/auto_tables", "true" if self.cb_tables.isChecked() else "false")
             s.setValue("ocr/clean_page", "true" if self.cb_clean_page.isChecked() else "false")
             s.setValue("ocr/keep_review", "true" if self.cb_keep_review.isChecked() else "false")
