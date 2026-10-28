@@ -1094,4 +1094,6 @@ EN: dict[str, str] = {
     'risposta': 'answer',
     'Profilo modificato': 'Profile modified',
     'Salvare le modifiche al profilo?': 'Save the changes to the profile?',
+    'La sostituzione nel documento funziona su una pagina alla volta: seleziona il testo di una sola pagina.': 'Replacing in the document works one page at a time: select text on a single page.',
+    "Chiedi all'assistente": 'Ask the assistant',
 }

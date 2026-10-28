@@ -424,7 +424,7 @@ class Controller:
         view = self.ctx.current_view()
         panel = self.services.panel
         dlg = TasksDialog(TaskStore(), self.ctx.window, has_document=view is not None,
-                          has_selection=bool(view and view.text_selection),
+                          has_selection=bool(content.view_selections(view)),
                           ask_save_path=self.ctx.ask_save_path,
                           ask_open_path=lambda: (self.ctx.ask_open_paths(_("Importa attività"), "JSON (*.json)",
                                                                          multiple=False) or [None])[0],
@@ -540,8 +540,8 @@ class Controller:
         doc = view.document
         kind_scope = panel.scope_kind()
         try:
-            if kind_scope == engine.SELECTION and view.text_selection:
-                scope = engine.build_scope(doc.pdf, engine.SELECTION, selection=view.text_selection)
+            if kind_scope == engine.SELECTION and content.view_selections(view):
+                scope = engine.build_scope(doc.pdf, engine.SELECTION, selection=content.view_selections(view))
             elif kind_scope == engine.PAGES:
                 scope = engine.build_scope(doc.pdf, engine.PAGES, pages=content.parse_page_range(
                     panel.pages_edit.text(), doc.page_count), cache=self.services.cache,
@@ -851,7 +851,7 @@ class Controller:
         if view is None or panel is None or not panel._ensure_ready():
             return None
         catalog = self.tool_catalog()
-        sel_pages = [view.text_selection.page] if view.text_selection else []
+        sel_pages = [x.page for x in content.view_selections(view)]
 
         def propose(q):
             return self._run(_("Ricerca dello strumento…"), lambda job: commands.propose(
@@ -1312,7 +1312,7 @@ def register(ctx, *, provider_factory=None) -> Services:
         if not services.store.enabled():
             return
         import pymupdf
-        sel = view.text_selection is not None and bool(view.selected_text().strip())
+        sel = bool(content.view_selections(view)) and bool(view.selected_text().strip())
         hit = None
         if pe.page is not None and pe.point is not None:
             with ENGINE_LOCK:
@@ -1320,11 +1320,17 @@ def register(ctx, *, provider_factory=None) -> Services:
             hit = next((pymupdf.Rect(i["bbox"]) for i in infos if pymupdf.Rect(i["bbox"]).contains(pe.point)), None)
         if not sel and hit is None:
             return
-        sub = menu.addMenu(_("Assistente IA"))
-        bind_icon(sub.menuAction(), "sparkles")
         enabled = services.store.active() is not None and content.extraction_allowed(view.document)
         if sel:
-            for key, text in (("chat", "Chiedi"), ("summary", "Riassumi"), ("translate", "Traduci"),
+            # voce principale: la selezione (anche su più pagine) diventa il contesto della domanda
+            ask = menu.addAction(_("Chiedi all'assistente"))
+            bind_icon(ask, "sparkles")
+            ask.setEnabled(enabled)
+            ask.triggered.connect(lambda _c=False: selection_action("chat"))
+        sub = menu.addMenu(_("Assistente IA"))
+        bind_icon(sub.menuAction(), "sparkles")
+        if sel:
+            for key, text in (("summary", "Riassumi"), ("translate", "Traduci"),
                               ("explain", "Spiega"), ("rewrite", "Correggi"), ("rewrite-improve", "Riscrivi")):
                 a = sub.addAction(_(text))
                 a.setEnabled(enabled)

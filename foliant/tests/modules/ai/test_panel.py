@@ -1038,3 +1038,46 @@ def test_status_after_interruption(qtbot, window, ready, fake, sample_pdf):
     panel.stop()
     wait_done(qtbot, panel)
     assert panel.status.text() in ("Operazione interrotta.", "Operation interrupted.")
+
+
+# ------------------------------------------------------------------ menu contestuale, selezione su più pagine
+def test_context_menu_ask_with_multipage_selection(qtbot, window, ready, fake, text_pdf):
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QMenu
+    view = window.open_path(text_pdf(3))
+    sels = []
+    for page in (0, 1):
+        words = [w for w in view.words(page) if w[4].startswith("parola")]
+        sels.append(selection_from_words(page, words))
+    view.set_text_selections(sels)
+    assert len(view.text_selections) == 2
+    menu = QMenu(window)
+    for provider in window.view_menu_providers:
+        provider(view, SimpleNamespace(page=None, point=None), menu)
+    ask = next(a for a in menu.actions() if a.text() == "Chiedi all'assistente")
+    assert ask.isEnabled()
+    ask.trigger()
+    panel = ready.panel
+    assert window.ctx.current_mode() == "ia" and panel.scope_kind() == "selection"
+    fake.responses = ["Risposta [p. 2]"]
+    panel.send("Che cosa dicono?")
+    wait_done(qtbot, panel)
+    sent = fake.all_text()
+    assert "parola1" in sent and "parola2" in sent and "parola3" not in sent
+    assert "[p. 1]" in sent and "[p. 2]" in sent
+    menu.deleteLater()
+
+
+def test_rewrite_multipage_selection_not_replaceable(qtbot, window, ready, fake, text_pdf):
+    view = window.open_path(text_pdf(2))
+    view.set_text_selections([selection_from_words(p, [w for w in view.words(p) if w[4].startswith("parola")])
+                              for p in (0, 1)])
+    fake.responses = ["testo nuovo"]
+    panel = ready.panel
+    panel.set_function("rewrite")
+    panel.set_scope("selection")
+    panel.send()
+    wait_done(qtbot, panel)
+    assert not panel.accept_btn.isEnabled()
+    assert "una pagina alla volta" in panel.replace_reason.text()

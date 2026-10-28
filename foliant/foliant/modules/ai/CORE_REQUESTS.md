@@ -10,10 +10,9 @@
    `dialogs.SettingsPage`; il comando «Impostazioni dell'Assistente IA» apre le Preferenze su
    questa pagina.
 
-4. **Voce «Chiedi all'assistente» nel menu contestuale della selezione.** Il modulo
-   la aggiunge con `add_view_menu_provider` (sottomenu «Assistente IA», solo con
-   testo selezionato o su un'immagine). Nessuna modifica necessaria, segnalato per
-   coerenza con le altre aree.
+4. **Voce «Chiedi all'assistente» nel menu contestuale della selezione.** *Risolta:* voce
+   principale + sottomenu «Assistente IA»; la selezione su più pagine (`view.text_selections`)
+   è inviata pagina per pagina con i riferimenti.
 
 5. **Test del nucleo e moduli che chiudono la finestra.** pytest-qt chiude la
    finestra prima dei finalizzatori della fixture `window`: un test di modulo che

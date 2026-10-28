@@ -141,6 +141,7 @@ class Scope:
     selection: str = ""
     selection_page: int | None = None
     selection_rects: list[tuple] = field(default_factory=list)
+    selection_parts: list[tuple[int, str]] = field(default_factory=list)   # selezione su più pagine
     paragraph: str = ""
     images: list[ImagePart] = field(default_factory=list)
     space: PageSpace | None = None
@@ -280,15 +281,24 @@ def build_scope(pdf: pymupdf.Document, kind: str, *, pages: list[int] | None = N
                 msg = _("pagina {p}: {n}").format(p=pt.label, n=note)
                 scope.notes.append(msg)
         scope.space = page_space(pdf, keep, fingerprint, doc_name)
-    elif kind == SELECTION and selection is not None:
-        rects = [pymupdf.Rect(r) for r in selection.rects]
-        scope.selection = content.selection_text(pdf, selection.page, rects)
-        scope.selection_page = selection.page
+    elif kind == SELECTION and selection:
+        # una selezione (`TextSelection`) o l'elenco `view.text_selections`, una per pagina
+        sels = [x for x in (selection if isinstance(selection, (list, tuple)) else [selection]) if x is not None]
+        first = sels[0]
+        rects = [pymupdf.Rect(r) for r in first.rects]
+        scope.selection_page = first.page
         scope.selection_rects = [tuple(r) for r in rects]
-        scope.paragraph = content.surrounding_paragraph(pdf, selection.page, rects)
-        scope.page_indices = [selection.page]
-        scope.space = page_space(pdf, [selection.page], fingerprint, doc_name)
-        if len(scope.selection) < len(selection.text.strip()) * 0.9:
+        if len(sels) == 1:
+            scope.selection = content.selection_text(pdf, first.page, rects)
+            scope.paragraph = content.surrounding_paragraph(pdf, first.page, rects)
+        else:
+            scope.selection_parts = [(x.page, content.selection_text(pdf, x.page, [pymupdf.Rect(r) for r in x.rects]))
+                                     for x in sels]
+            scope.selection = "\n".join(t for _p, t in scope.selection_parts if t)
+        scope.page_indices = [x.page for x in sels]
+        scope.space = page_space(pdf, scope.page_indices, fingerprint, doc_name)
+        raw = sum(len((x.text or "").strip()) for x in sels)
+        if len(scope.selection) < raw * 0.9:
             scope.notes.append(_("parte della selezione è nascosta o oscurata ed è stata esclusa"))
     return scope
 
@@ -464,18 +474,21 @@ def chat(job: Job, conv: Conversation, scope: Scope, question: str) -> Answer:
     return Answer(result.text, _status(result), refs, flags + _partial_flags(scope))
 
 
-def _label(scope: Scope) -> str:
-    if scope.selection_page is None:
+def _label(scope: Scope, page: int | None = None) -> str:
+    page = scope.selection_page if page is None else page
+    if page is None:
         return "?"
     for lab, idx in (scope.space.labels if scope.space else {}).items():
-        if idx == scope.selection_page:
+        if idx == page:
             return lab
-    return str(scope.selection_page + 1)
+    return str(page + 1)
 
 
 def scope_text(scope: Scope) -> str:
     if scope.pages:
         return chunking.format_pages(scope.pages)
+    if scope.selection_parts:
+        return "\n\n".join(f"=== [p. {_label(scope, p)}] ===\n{t}" for p, t in scope.selection_parts if t)
     if scope.selection:
         return f"=== [p. {_label(scope)}] ===\n{scope.selection}"
     return ""
