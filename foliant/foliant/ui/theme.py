@@ -57,6 +57,7 @@ DARK: dict[str, str | tuple] = {
 
 _dark = False
 _mode = "system"
+_applied: tuple | None = None          # (modalità, scuro) dell'ultima applicazione
 _listeners: list[Callable[[], None]] = []
 
 
@@ -100,9 +101,12 @@ def _system_is_dark(app: QApplication) -> bool:
 
 def apply(app: QApplication, requested: str = "system") -> None:
     """Applica il tema: "light", "dark" o "system"."""
-    global _dark, _mode
+    global _dark, _mode, _applied
     _mode = requested if requested in ("light", "dark", "system") else "system"
     _dark = _system_is_dark(app) if _mode == "system" else _mode == "dark"
+    if _applied == (_mode, _dark, id(app)):
+        return              # tema invariato: ristilizzare tutti i widget è costoso e inutile
+    _applied = (_mode, _dark, id(app))
     app.setStyle("Fusion")
     t = tokens()
     pal = QPalette()
