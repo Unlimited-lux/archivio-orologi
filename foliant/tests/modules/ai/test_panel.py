@@ -190,6 +190,21 @@ def test_extraction_forbidden_disables_commands(window, ready, fake, tmp_path):
     assert fake.requests == [] and errors
 
 
+def test_unlock_with_owner_password_enables_assistant(window, ready, fake, tmp_path):
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Riservato", fontsize=12)
+    path = tmp_path / "vietato.pdf"
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="prop", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(path))
+    panel = ready.panel
+    panel.set_scope("document")
+    panel.refresh_state()
+    assert not panel.send_btn.isEnabled()
+    assert view.document.unlock("prop")             # il nucleo emette documentAccessChanged
+    assert panel.send_btn.isEnabled() and not panel.blocked_reason()
+
+
 def test_send_line_and_preview_flag_redaction(window, ready, tmp_path):
     doc = pymupdf.open()
     page = doc.new_page()
@@ -1100,3 +1115,32 @@ def test_rewrite_multipage_selection_not_replaceable(qtbot, window, ready, fake,
     wait_done(qtbot, panel)
     assert not panel.accept_btn.isEnabled()
     assert "una pagina alla volta" in panel.replace_reason.text()
+
+
+# ------------------------------------------------------------------ documenti firmati (SIG-21)
+from tests.test_document import _signed_pdf, _validate, test_signer  # noqa: E402,F401 - fixture e utilità firmate
+
+
+def test_ai_note_on_signed_pdf_keeps_signature(qtbot, window, ready, fake, tmp_path, test_signer, monkeypatch):
+    path = _signed_pdf(tmp_path, test_signer, objstm=False)
+    view = window.open_path(str(path))
+    asked = []
+    monkeypatch.setattr(window.ctx.sign_controller, "_ask_invalidation",
+                        lambda v, what: asked.append(what) or "cancel")
+    fake.responses = ["Nota sul documento firmato"]
+    panel = ready.panel
+    panel.send("domanda")
+    wait_done(qtbot, panel)
+    panel.insert_note()
+    panel.insert_textbox()
+    assert asked == []                                  # annotazioni: nessuna domanda
+    assert len(annots_of(view.document, view.current_page)) == 2
+    view.document.save()
+    st = _validate(path.read_bytes(), test_signer)
+    assert st.intact and st.valid
+    # una modifica del contenuto invece chiede conferma (qui annullata: nessuna modifica)
+    from foliant.modules.ai import compose
+    from foliant.api import OperationCancelled
+    with pytest.raises(OperationCancelled):
+        compose.insert_text_page(view.document, "Pagina IA")
+    assert asked and view.page_count == 2

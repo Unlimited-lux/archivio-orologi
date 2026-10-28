@@ -268,7 +268,7 @@ def apply_bookmarks(document: Document, nodes: list[BNode], mode: str = "replace
     """Scrive i segnalibri con destinazione (pagina e posizione): un solo passo annullabile."""
     new = nodes_to_toc(nodes)
     label = _("Sostituisci segnalibri (IA)") if mode == "replace" else _("Unisci segnalibri (IA)")
-    with document.change(label) as pdf:
+    with document.change(label, kind="metadata") as pdf:
         if mode == "merge":
             old = [_clean_entry(e) for e in pdf.get_toc(simple=False)]
             existing = {(_norm(e[1]).lower(), e[2]) for e in old}

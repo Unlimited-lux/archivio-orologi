@@ -384,14 +384,18 @@ def apply_as_stamp(document, page: int, rect, png: bytes, *, label: str | None =
     immagine nel contenuto della pagina, sopra il testo).
     """
     rect = pymupdf.Rect(rect)
-    with document.change(label or _("Timbro generato")) as pdf:
-        pg = pdf[page]
-        try:
-            pg.add_stamp_annot(rect, stamp=png)   # aspetto = immagine, trasparenza conservata
-            return "annot"
-        except Exception:  # noqa: BLE001 - motore senza timbri immagine: ripiego robusto
-            pg.insert_image(rect, stream=png, overlay=True, keep_proportion=True)
-            return "image"
+    from foliant.api import OperationCancelled
+    try:
+        # annotazione timbro (aspetto = immagine, trasparenza conservata): ammessa anche sui firmati
+        with document.change(label or _("Timbro generato"), kind="annotation") as pdf:
+            pdf[page].add_stamp_annot(rect, stamp=png)
+        return "annot"
+    except OperationCancelled:
+        raise
+    except Exception:  # noqa: BLE001 - motore senza timbri immagine: ripiego robusto nel contenuto
+        with document.change(label or _("Timbro generato"), kind="content") as pdf:
+            pdf[page].insert_image(rect, stream=png, overlay=True, keep_proportion=True)
+        return "image"
 
 
 def apply_as_watermark(document, pages, png: bytes, opacity: float = 0.3, *, scale: float = 0.6,
@@ -399,7 +403,7 @@ def apply_as_watermark(document, pages, png: bytes, opacity: float = 0.3, *, sca
     """Filigrana centrata sopra il contenuto delle pagine indicate, con l'opacità scelta."""
     data = with_opacity(png, opacity)
     w, h = image_size(png)
-    with document.change(label or _("Filigrana generata")) as pdf:
+    with document.change(label or _("Filigrana generata"), kind="content") as pdf:
         xref = 0
         for i in pages:
             pg = pdf[i]
@@ -412,7 +416,7 @@ def apply_as_watermark(document, pages, png: bytes, opacity: float = 0.3, *, sca
 
 def apply_as_background(document, pages, png: bytes, *, label: str | None = None) -> None:
     """Sfondo a pagina intera sotto il contenuto delle pagine indicate."""
-    with document.change(label or _("Sfondo generato")) as pdf:
+    with document.change(label or _("Sfondo generato"), kind="content") as pdf:
         xref = 0
         for i in pages:
             pg = pdf[i]
@@ -478,7 +482,7 @@ def vector_stamp_png(stamp_pdf: bytes, dpi: int = 300) -> bytes:
 def apply_vector_stamp(document, page: int, rect, stamp_pdf: bytes, *, label: str | None = None) -> None:
     """Inserisce il timbro vettoriale nel contenuto della pagina (un passo di annulla)."""
     rect = pymupdf.Rect(rect)
-    with document.change(label or _("Timbro testuale")) as pdf:
+    with document.change(label or _("Timbro testuale"), kind="content") as pdf:
         src = pymupdf.open("pdf", stamp_pdf)
         try:
             pdf[page].show_pdf_page(rect, src, 0, overlay=True, keep_proportion=True)

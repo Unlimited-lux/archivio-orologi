@@ -97,7 +97,7 @@ class MindMapScreen(QWidget):
             self.ctx.error(_("Mappa concettuale"), _("Il documento d'origine non è più aperto."))
             return None
         root = self.tree()
-        with doc.change(_("Inserisci mappa concettuale")) as pdf:
+        with doc.change(_("Inserisci mappa concettuale"), kind="pages") as pdf:
             at = 0 if where == "start" else pdf.page_count
             like = pdf[0 if where == "start" else pdf.page_count - 1].rect
             index = mindmap.insert_page(pdf, root, at=at, size=(like.width, like.height))

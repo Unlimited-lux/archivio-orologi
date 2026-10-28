@@ -722,7 +722,7 @@ class Controller:
             panel.input.setPlainText(_("A proposito di questo passaggio: «{t}» — ").format(t=r.excerpt[:300]))
 
         def highlight(r):
-            with doc.change(_("Evidenzia risultato")) as pdf:
+            with doc.change(_("Evidenzia risultato"), kind="annotation") as pdf:
                 annot = pdf[r.page].add_highlight_annot(result_quads(r))
                 annot.update()
 
@@ -1406,6 +1406,9 @@ def register(ctx, *, provider_factory=None) -> Services:
 
     ctx.currentViewChanged.connect(on_view)
     ctx.documentClosed.connect(on_closed)
+    if hasattr(ctx, "documentAccessChanged"):
+        # «Sblocca…» con la password del proprietario (o blocco/sblocco): i permessi di estrazione cambiano
+        ctx.documentAccessChanged.connect(lambda view: services.refresh())
 
     def close_guard(view, info) -> bool:
         # AI-17: conferma prima di chiudere una scheda (o uscire) con operazioni dell'assistente in corso
