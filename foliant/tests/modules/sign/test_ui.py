@@ -1021,3 +1021,27 @@ def test_author_name_from_core_preference(window, sample_pdf):
     with view.document.lock:
         assert view.document.pdf.xref_get_key(xref, "T")[1] == "Giulia Verdi"
     window.settings.remove("author")
+
+
+def test_permissions_from_core_with_owner_unlock(window, monkeypatch, tmp_path, id_a):
+    """Permessi letti con Document.allows; senza permesso si propone lo sblocco da proprietario (unlock)."""
+    from PySide6.QtWidgets import QInputDialog
+    d0 = pymupdf.open()
+    d0.new_page()
+    p = tmp_path / "solo-stampa.pdf"
+    d0.save(str(p), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="utente", owner_pw="proprietario",
+            permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(p), "utente")
+    c = _ctl(window)
+    assert not view.document.allows(pymupdf.PDF_PERM_ANNOTATE)
+    errors = []
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(m))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("sbagliata", True))
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]])))
+    c.start_placement(view, item)
+    assert errors and view.tool is not c.tool_for(view) or c.tool_for(view).pending is None
+    assert c.digital_sign(view, invisible=True) is False
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("proprietario", True))
+    c.start_placement(view, item)
+    assert view.document.access == "owner" and c.tool_for(view).pending is item
+    assert c.place(view, 0, pymupdf.Rect(10, 10, 100, 40), item)

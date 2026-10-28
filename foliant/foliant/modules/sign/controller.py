@@ -150,15 +150,24 @@ class SignController(QObject):
         self.ctx.status(_("Clic: posiziona la firma · trascina: dimensione · Invio: al centro · Esc: annulla"),
                         8000)
 
+    def _permission_ok(self, view, perms: tuple[int, ...], message: str) -> bool:
+        """Permessi effettivi del documento (nucleo: `allows`); se mancano propone di
+        sbloccare con la password del proprietario (`unlock`)."""
+        doc = view.document
+        if any(doc.allows(p) for p in perms):
+            return True
+        pw, ok = QInputDialog.getText(self.ctx.window, _("Permessi del documento"),
+                                      message + "\n\n" + _("Password del proprietario per sbloccarlo:"),
+                                      QLineEdit.EchoMode.Password)
+        if ok and pw:
+            if doc.unlock(pw):
+                return True
+            self.ctx.error(_("Permessi del documento"), _("La password del proprietario non è corretta."))
+        return False
+
     def _annotations_allowed(self, view) -> bool:
-        with ENGINE_LOCK:
-            perms = view.document.pdf.permissions
-        if not perms & pymupdf.PDF_PERM_ANNOTATE:
-            self.ctx.error(_("Firma"), _("I permessi del documento non consentono di aggiungere annotazioni o "
-                                          "firme grafiche. Apri il documento con la password del proprietario "
-                                          "per modificarlo."))
-            return False
-        return True
+        return self._permission_ok(view, (pymupdf.PDF_PERM_ANNOTATE,), _(
+            "I permessi del documento non consentono di aggiungere annotazioni o firme grafiche."))
 
     def _change(self, view, label: str, fn, kind: str = "annotation"):
         """Esegue `fn(pdf)` come passo annullabile; l'avviso SIG-21 per i documenti firmati
@@ -627,6 +636,9 @@ class SignController(QObject):
         from . import digital
         from .ui_digital import DigitalSignDialog
         view.set_tool(None)
+        if not self._permission_ok(view, (pymupdf.PDF_PERM_FORM, pymupdf.PDF_PERM_ANNOTATE), _(
+                "I permessi del documento non consentono di firmarlo né di compilarne i moduli.")):
+            return False
         if not self._ensure_saved(view):
             return False
         doc = view.document
@@ -994,6 +1006,13 @@ TRANSLATIONS_EN = {
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
     "Operazione non riuscita: {e}": "Operation failed: {e}",
+    "Permessi del documento": "Document permissions",
+    "Password del proprietario per sbloccarlo:": "Owner password to unlock it:",
+    "La password del proprietario non è corretta.": "The owner password is not correct.",
+    "I permessi del documento non consentono di aggiungere annotazioni o firme grafiche.":
+        "The document permissions do not allow adding annotations or graphic signatures.",
+    "I permessi del documento non consentono di firmarlo né di compilarne i moduli.":
+        "The document permissions do not allow signing it or filling its forms.",
     "Modificare il contenuto invaliderà le firme.": "Changing the content will invalidate the signatures.",
     "Firma ora": "Sign now", "Campo successivo": "Next field", "Dettagli": "Details",
     "Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza firme.":
