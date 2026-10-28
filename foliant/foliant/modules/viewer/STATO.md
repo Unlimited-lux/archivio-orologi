@@ -45,7 +45,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-35 Lettura ad alta voce | P1 | fatto | `test_speech.py` (16 test) | Evidenziazione per frase (non per parola); servono `speech-dispatcher` o `espeak-ng`. |
 | VIS-36 Riflusso | P2 | non fatto | | |
 | VIS-37 Multimedia e 3D | P2 | non fatto | | Segnalati come non supportati (VIS-07). |
-| VIS-38 Lente, panoramica, vista divisa | P2 | non fatto | | |
+| VIS-38 Lente, panoramica, vista divisa | P2 | parziale | `test_tools.py::test_lens_magnifies_under_cursor` | Lente d'ingrandimento; la panoramica è l'area visibile trascinabile nelle miniature (VIS-14). Vista divisa: non fatta (richiede più viste dello stesso documento nel nucleo). |
 | VIS-39 Righelli, griglie, coordinate | P1 | parziale | `test_measure.py` | Coordinate del cursore nell'unità scelta, griglia, riquadri di pagina. Righelli, guide e aggancio, coordinate geospaziali: non fatti. |
 | VIS-40 Proprietà del documento | P1 | fatto | `test_properties.py` (14 test) | Sola lettura. |
 | VIS-41 Metadati avanzati | P2 | non fatto | | |

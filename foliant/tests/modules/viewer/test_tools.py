@@ -139,3 +139,24 @@ def test_alt_drag_rectangular_table_selection(viewer_window, tmp_path, qtbot):
     assert view.selected_text() == "Modello\tAnno\tPrezzo\nDaytona\t2019\t28000\nNautilus\t2021\t95000"
     qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
     assert QGuiApplication.clipboard().text().startswith("Modello\tAnno")
+
+
+def test_lens_magnifies_under_cursor(viewer_window, sample_pdf, qtbot):
+    view = viewer_window.open_path(sample_pdf)
+    ctl = _ctl(viewer_window)
+    ctl.act_lens.trigger()
+    assert view.tool is ctl.lens_tool
+    view.flush_rendering()
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QMouseEvent
+    pos = view.page_transform(0).map(QPointF(150, 95))
+    view.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, pos, view.viewport().mapToGlobal(pos),
+                                    Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+    lens = ctl.lens_tool
+    assert lens.page == 0 and lens.image is not None
+    src = lens.source_rect(view)
+    # l'immagine copre una zona FACTOR volte più piccola della lente: è ingrandita
+    assert abs(src.width * view.zoom * 96 / 72 * lens.FACTOR - lens.SIZE) < 1
+    assert not view.document.is_modified
+    ctl.act_lens.trigger()
+    assert view.tool is view._default_tool

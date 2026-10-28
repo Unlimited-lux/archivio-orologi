@@ -14,6 +14,8 @@ from foliant.api import (
 )
 
 TRANSLATIONS = {
+    "Lente": "Magnifier",
+    "Ingrandisce la zona sotto il cursore": "Magnifies the area under the cursor",
     "Zoom area": "Zoom to area",
     "Traccia un rettangolo per ingrandirlo a tutta la vista": "Drag a rectangle to fill the view with it",
     "Istantanea": "Snapshot",
@@ -218,6 +220,77 @@ class _AltDragFilter(QObject):
         return False  # la vista inoltra la pressione allo strumento appena attivato
 
 
+class LensTool(Tool):
+    """Lente d'ingrandimento (VIS-38): mostra ingrandita la zona sotto il cursore."""
+
+    id = "lens"
+    cursor = Qt.CursorShape.CrossCursor
+    FACTOR = 3.0
+    SIZE = 220          # lato della lente in pixel
+
+    def __init__(self):
+        self.page: int | None = None
+        self.point: pymupdf.Point | None = None
+        self.image: QImage | None = None
+
+    def move(self, view, ev):
+        if ev.page is None:
+            if self.page is not None:
+                self.page = None
+                view.viewport().update()
+            return False
+        self.page, self.point = ev.page, ev.point
+        self.image = self.render(view)
+        view.viewport().update()
+        return True
+
+    def press(self, view, ev):
+        return ev.button == Qt.MouseButton.LeftButton
+
+    def release(self, view, ev):
+        return ev.button == Qt.MouseButton.LeftButton
+
+    def wheel_factor(self, delta: int) -> None:
+        self.FACTOR = max(1.5, min(8.0, self.FACTOR * (1.15 if delta > 0 else 1 / 1.15)))
+
+    def source_rect(self, view) -> pymupdf.Rect:
+        scale = view.zoom * 96 / 72
+        half = self.SIZE / (2 * scale * self.FACTOR)
+        p = self.point
+        return pymupdf.Rect(p.x - half, p.y - half, p.x + half, p.y + half)
+
+    def render(self, view) -> QImage | None:
+        from foliant.api import try_engine
+        with try_engine() as ok:
+            if not ok:
+                return self.image
+            try:
+                pg = view.document.pdf[self.page]
+                clip = self.source_rect(view) * pg.rotation_matrix
+                clip.normalize()
+                dpi = int(96 * view.zoom * self.FACTOR * (view.devicePixelRatioF() or 1.0))
+                pix = pg.get_pixmap(dpi=max(36, min(2400, dpi)), clip=clip, alpha=False, annots=True)
+                return QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
+            except Exception:
+                return None
+
+    def paint(self, view, painter, page):
+        if self.page != page or self.image is None or self.point is None:
+            return
+        scale = view.zoom * 96 / 72
+        half = self.SIZE / (2 * scale)
+        p = self.point
+        target = QRectF(p.x - half, p.y - half, 2 * half, 2 * half)
+        painter.setClipping(False)
+        painter.drawImage(target, self.image)
+        pen = QPen(theme.color("accent"))
+        pen.setCosmetic(True)
+        pen.setWidthF(2.0)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(target)
+
+
 class ToolsController:
     def __init__(self, ctx: Context):
         self.ctx = ctx
@@ -227,6 +300,9 @@ class ToolsController:
         for v in ctx.views():
             v.viewport().installEventFilter(self._alt_filter)
         self.zoom_tool = ZoomAreaTool(self)
+        self.lens_tool = LensTool()
+        self.act_lens = ctx.action(_("Lente"), "search", lambda on: self._toggle(self.lens_tool, on),
+                                   tooltip=_("Ingrandisce la zona sotto il cursore"), checkable=True)
         self.snapshot_tool = SnapshotTool(self)
         self.act_zoom = ctx.action(_("Zoom area"), "scan-search", lambda on: self._toggle(self.zoom_tool, on),
                                    tooltip=_("Traccia un rettangolo per ingrandirlo a tutta la vista"), checkable=True)
@@ -237,6 +313,7 @@ class ToolsController:
             mode.add_separator()
             mode.add_action(self.act_zoom)
             mode.add_action(self.act_snapshot)
+            mode.add_action(self.act_lens)
         ctx.currentViewChanged.connect(self._on_view)
         self._connected: DocumentView | None = None
 
@@ -282,6 +359,7 @@ class ToolsController:
     def _on_tool(self, tool) -> None:
         self.act_zoom.setChecked(tool is self.zoom_tool)
         self.act_snapshot.setChecked(tool is self.snapshot_tool)
+        self.act_lens.setChecked(tool is self.lens_tool)
 
     # ------------------------------------------------- selezione rettangolare
     def begin_temporary(self, view: DocumentView) -> None:
