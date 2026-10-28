@@ -169,6 +169,7 @@ def stylesheet(t: dict) -> str:
     close_hover = _asset("x", h("text"))
     arrow = _asset("chevron-down", h("text_muted"))
     arrow_up = _asset("chevron-up", h("text_muted"))
+    check = _asset("check", h("accent_text"))
     return f"""
 QMainWindow, QDialog {{ background: {h('window')}; }}
 QTabBar::close-button {{ image: url({close_icon}); subcontrol-position: right; margin: 2px; width: 14px; height: 14px; }}
@@ -238,4 +239,14 @@ QProgressBar {{ border: 1px solid {h('border')}; border-radius: 6px; text-align:
 QProgressBar::chunk {{ background: {h('accent')}; border-radius: 5px; }}
 QGroupBox {{ border: 1px solid {h('border')}; border-radius: 8px; margin-top: 14px; padding-top: 8px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {h('text_muted')}; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; background: {h('surface')};
+    border: 1px solid {h('text_muted')}; }}
+QCheckBox::indicator {{ border-radius: 4px; }}
+QRadioButton::indicator {{ border-radius: 8px; }}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {h('accent')}; }}
+QCheckBox::indicator:checked {{ background: {h('accent')}; border-color: {h('accent')}; image: url({check}); }}
+QRadioButton::indicator:checked {{ border-color: {h('accent')}; background: qradialgradient(cx:0.5, cy:0.5,
+    radius:0.5, fx:0.5, fy:0.5, stop:0 {h('accent')}, stop:0.45 {h('accent')}, stop:0.55 {h('surface')}, stop:1 {h('surface')}); }}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{ border-color: {h('border')}; background: {h('surface_alt')}; }}
+QCheckBox::indicator:checked:disabled {{ background: {h('text_muted')}; border-color: {h('text_muted')}; }}
 """
