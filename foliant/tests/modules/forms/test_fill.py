@@ -425,3 +425,22 @@ def test_file_select_stores_path(qtbot, window, tmp_path, monkeypatch):
     click_field(qtbot, view, "allegato")
     filler_of(view).browse_file()
     assert values(view)["allegato"] == "/home/utente/documento.txt"
+
+
+def test_owner_password_unlocks(qtbot, window, tmp_path, no_modal_boxes):
+    pdf = build_form()
+    path = tmp_path / "p.pdf"
+    pdf.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="capo", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    view = open_form(window, path)
+    f = filler_of(view)
+    assert f.state.blocked and not f.bar.buttons["owner"].isHidden()
+    assert not f.unlock_with_owner_password("sbagliata")
+    assert f.unlock_with_owner_password("capo")
+    click_field(qtbot, view, "nome")
+    assert f.editor is not None
+    qtbot.keyClicks(f.editor, "Ok")
+    f.commit_active()
+    assert values(view)["nome"] == "Ok"
+    f.state.refresh(force=True)
+    assert not f.state.blocked  # resta sbloccato dopo la modifica

@@ -1415,13 +1415,14 @@ def custom_scripts(pdf: pymupdf.Document) -> list[tuple[str, str]]:
     return out
 
 
-def fill_blocked_reason(pdf: pymupdf.Document) -> str | None:
-    """Motivo per cui il documento non consente la compilazione (None se consentita)."""
+def fill_blocked_reason(pdf: pymupdf.Document, permissions: int | None = None) -> str | None:
+    """Motivo per cui il documento non consente la compilazione (None se consentita).
+    `permissions`: permessi del file originale (le copie interne non sono cifrate)."""
     try:
-        perms = pdf.permissions
+        perms = pdf.permissions if permissions is None else permissions
     except Exception:
         perms = -1
-    if pdf.is_encrypted or (pdf.metadata or {}).get("encryption"):
+    if permissions is not None or pdf.is_encrypted or (pdf.metadata or {}).get("encryption"):
         if not (perms & pymupdf.PDF_PERM_FORM) and not (perms & pymupdf.PDF_PERM_ANNOTATE):
             return _("I permessi del documento non consentono la compilazione dei moduli.")
     t, v = pdf.xref_get_key(pdf.pdf_catalog(), "Perms/DocMDP")

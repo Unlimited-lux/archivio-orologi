@@ -140,6 +140,12 @@ class FieldSelectTool(Tool):
         if key == Qt.Key.Key_Escape:
             self.m.set_selection([])
             return True
+        if key == Qt.Key.Key_C and mods & Qt.KeyboardModifier.ControlModifier:
+            self.m.copy_selected()
+            return True
+        if key == Qt.Key.Key_V and mods & Qt.KeyboardModifier.ControlModifier:
+            self.m.paste_fields(view)
+            return True
         if key == Qt.Key.Key_D and mods & Qt.KeyboardModifier.ControlModifier:
             self.m.duplicate_selected()
             return True

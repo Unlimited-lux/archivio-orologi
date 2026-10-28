@@ -49,6 +49,7 @@ class FormState:
         self.xfa = "none"
         self.blocked: str | None = None
         self.custom: list[tuple[str, str]] = []
+        self.unlocked = False  # password del proprietario inserita
 
     def refresh(self, force: bool = False) -> None:
         doc = self.view.document
@@ -61,7 +62,8 @@ class FormState:
             try:
                 self.fields = E.list_fields(pdf)
                 self.xfa = E.xfa_status(pdf)
-                self.blocked = E.fill_blocked_reason(pdf)
+                perms = doc.original_protection.get("permissions") if doc.original_protection else None
+                self.blocked = None if self.unlocked else E.fill_blocked_reason(pdf, perms)
                 self.custom = E.custom_scripts(pdf)
             except Exception:  # file danneggiato: nessun modulo utilizzabile
                 self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
@@ -264,6 +266,7 @@ class FormBar(QFrame):
             ("reset", _("Reimposta"), "rotate-ccw", filler.reset_requested),
             ("data", _("Importa/Esporta dati"), "arrow-down-up", filler.data_requested),
             ("design", _("Modifica modulo"), "square-pen", filler.design_requested),
+            ("owner", _("Inserisci password del proprietario"), "key-round", filler.ask_owner_password),
         ):
             b = QToolButton(self)
             b.setText(text)
@@ -470,7 +473,9 @@ class FormFiller(QObject):
         self.bar.buttons["next"].setVisible(fill)
         self.bar.buttons["next"].setEnabled(req > 0)
         self.bar.buttons["reset"].setVisible(fill)
-        self.bar.buttons["design"].setVisible(st.xfa != "dynamic" and not self.design)
+        self.bar.buttons["design"].setVisible(st.xfa != "dynamic" and not self.design and not st.blocked)
+        self.bar.buttons["owner"].setVisible(bool(st.blocked) and "permessi" in (st.blocked or ""))
+        self.bar.buttons["owner"].setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._set_bar_visible(True)
 
     def _set_bar_visible(self, visible: bool) -> None:
@@ -528,6 +533,35 @@ class FormFiller(QObject):
         target = unique[self._next_required_index]
         self.activate(target)
         return target
+
+    def ask_owner_password(self) -> None:
+        from .dialogs import ask_password
+        pw = ask_password(self.view, _("Password del proprietario"),
+                          _("Inserisci la password del proprietario per consentire la compilazione:"))
+        if pw is not None:
+            self.unlock_with_owner_password(pw)
+
+    def unlock_with_owner_password(self, password: str) -> bool:
+        """Verifica la password del proprietario sul file originale; se giusta consente la compilazione."""
+        doc = self.document
+        ok = False
+        try:
+            if doc.path is not None:
+                test = pymupdf.open(str(doc.path))
+                try:
+                    ok = test.authenticate(password) in (4, 6)
+                finally:
+                    test.close()
+        except Exception:
+            ok = False
+        if not ok:
+            self.ctx.error(_("Password del proprietario"), _("Password errata."))
+            return False
+        self.state.unlocked = True
+        self.state.refresh(force=True)
+        self.update_bar()
+        self.ctx.status(_("Compilazione consentita."))
+        return True
 
     def reset_requested(self) -> None:
         self.resetRequested.emit()

@@ -291,4 +291,11 @@ EN: dict[str, str] = {
     'Invio del modulo': 'Submitting the form',
     'Invio non riuscito: {e}\n\nSalvare i dati in un file da inviare in seguito?': 'Submission failed: {e}\n\nSave the data to a file to send later?',
     'Modulo inviato (risposta {s}).': 'Form submitted (response {s}).',
+    'Inserisci password del proprietario': 'Enter owner password',
+    'Password del proprietario': 'Owner password',
+    'Inserisci la password del proprietario per consentire la compilazione:': 'Enter the owner password to allow filling in:',
+    'Password errata.': 'Wrong password.',
+    'Compilazione consentita.': 'Filling in allowed.',
+    'Campi copiati: {n}': 'Fields copied: {n}',
+    'Incolla campi': 'Paste fields',
 }

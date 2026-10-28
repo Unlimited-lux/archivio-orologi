@@ -241,3 +241,9 @@ def ask_text(parent: QWidget, title: str, label: str, default: str = "") -> str 
     from PySide6.QtWidgets import QInputDialog
     text, ok = QInputDialog.getText(parent, title, label, text=default)
     return text.strip() if ok and text.strip() else None
+
+
+def ask_password(parent: QWidget, title: str, label: str) -> str | None:
+    from PySide6.QtWidgets import QInputDialog
+    text, ok = QInputDialog.getText(parent, title, label, QLineEdit.EchoMode.Password)
+    return text if ok else None

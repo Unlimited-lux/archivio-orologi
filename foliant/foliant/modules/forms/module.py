@@ -625,6 +625,46 @@ class FormsModule(QObject):
         self.set_selection(keys)
         return keys
 
+    field_clipboard: list[dict] = []
+
+    def copy_selected(self) -> int:
+        """Copia i campi selezionati (tipo, posizione, proprietà) per incollarli anche in altri documenti."""
+        items = []
+        for f in self.selected_fields():
+            props = E.properties_of(f)
+            if f.kind == E.RADIO:
+                props.pop("export", None)
+            items.append({"kind": E.BUTTON if f.kind == E.BUTTON else f.kind, "rect": pymupdf.Rect(f.rect),
+                          "name": f.name, "props": props, "image": f.image})
+        FormsModule.field_clipboard = items
+        if items:
+            self.ctx.status(_("Campi copiati: {n}").format(n=len(items)))
+        return len(items)
+
+    def paste_fields(self, view=None) -> list[tuple[int, int]]:
+        """Incolla i campi copiati nella pagina corrente; i nomi già usati vengono resi univoci."""
+        view = view or self.ctx.current_view()
+        items = FormsModule.field_clipboard
+        if view is None or not items:
+            return []
+        page = view.current_page
+
+        def run(pdf):
+            keys = []
+            for it in items:
+                name = it["name"]
+                if name in E.field_names(pdf):
+                    name = E.unique_name(pdf, name)
+                x = E.create_field(pdf, page, it["kind"], it["rect"], name, **it["props"])
+                if it.get("image"):
+                    E.mark_image_field(pdf, page, x)
+                keys.append((page, x))
+            return keys
+
+        keys = self._change(_("Incolla campi"), run, view) or []
+        self.set_selection(keys)
+        return keys
+
     def copy_to_pages(self, pages: list[int], shared: bool) -> int:
         sel = self.selected_fields()
         if not sel:

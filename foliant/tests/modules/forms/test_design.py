@@ -464,3 +464,26 @@ def test_submit_blocked_and_preview(window, tmp_path, monkeypatch, no_modal_boxe
     m.toggle_preview(True)
     assert not m.submit(filler_of(view), action) and not calls
     assert any("Anteprima" in c[2] for c in no_modal_boxes)
+
+
+def test_copy_paste_between_documents_renames(qtbot, window, form_pdf, tmp_path):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    nome = [f for f in fields(view) if f.name == "nome"][0]
+    m.set_selection([(0, nome.xref)])
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    other = tmp_path / "altro.pdf"
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(300, 300, 400, 320), "nome")
+    pdf.save(str(other))
+    view2 = open_form(window, other)
+    window.ctx.set_mode("moduli")
+    view2.setFocus()
+    qtbot.keyClick(view2, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+    names = sorted(f.name for f in fields(view2))
+    assert names == ["nome", "nome_2"]
+    pasted = [f for f in fields(view2) if f.name == "nome_2"][0]
+    assert pasted.required and abs(pasted.rect.x0 - nome.rect.x0) < 0.01
