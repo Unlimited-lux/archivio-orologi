@@ -83,7 +83,6 @@ Dal primo collaudo (verificati):
 |---|---|---|
 | bassa | Moduli | Il campo firma vuoto mostra il segnaposto del motore a schermo e in stampa da Foliant (nel file è vuoto). |
 | bassa | Modifica testo | La riga riscritta usa una nuova copia del font invece della risorsa originale (file un po' più grande). |
-| bassa | Visualizzazione | Zoom massimo 800% (la specifica chiede 6400%: serve il disegno della pagina a tasselli). |
 | bassa | OCR | Durante l'OCR il documento non è consultabile (finestra di avanzamento modale, con annullamento). |
 | — | Specifica | Funzioni P1/P2 non completate: elencate per ID in `foliant/modules/*/STATO.md`. |
 

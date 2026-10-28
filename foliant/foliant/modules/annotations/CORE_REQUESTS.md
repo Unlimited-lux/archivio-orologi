@@ -9,7 +9,8 @@
 2. **Disegno delle pagine senza annotazioni (ANN-39).** `DocumentView._render_page` chiama sempre
    `get_pixmap(annots=True)`. Serve una proprietà della vista, ad es. `view.show_annotations`,
    rispettata da rendering, miniature e stampa a schermo.
-   *Soluzione locale:* `visibility.py` sostituisce `_render_page` sulla singola vista.
+   *Fatto in parte:* la vista ha `show_annotations` (pagine intere e tasselle) e `visibility.py`
+   la usa; miniature e stampa disegnano ancora le annotazioni.
 
 3. **Selezione di testo su più pagine (ANN-10, ANN-12).** `TextSelection` è limitata a una pagina:
    per evidenziare una selezione che attraversa due pagine servirebbe una selezione multipagina
