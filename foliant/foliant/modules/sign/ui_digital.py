@@ -28,7 +28,8 @@ LEVELS = [(1, "Nessuna modifica consentita"), (2, "Consentite solo compilazione 
 
 
 def _date(dt) -> str:
-    return dt.strftime("%d/%m/%Y") if dt else "—"
+    from foliant.api import format_date
+    return format_date(dt) if dt else "—"
 
 
 def _error_label() -> QLabel:

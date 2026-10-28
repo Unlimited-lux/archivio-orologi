@@ -265,3 +265,17 @@ def test_font_names_are_not_interface_texts(qapp):
     font = QFontDatabase.families()[0]
     texts = [("QListWidget.item", font), ("QLabel", "Zzz qwerty")]
     assert _problems(texts, texts) == ["QLabel: «Zzz qwerty» identico nelle due lingue"]
+
+
+def test_dates_follow_interface_language(qapp, english):
+    """NFR-26: le date di pannello, dettagli e dialoghi seguono la lingua (formato del nucleo)."""
+    from datetime import datetime, timezone
+
+    from foliant.modules.sign import panel, ui_digital
+    dt = datetime(2026, 10, 28, 14, 30, 5, tzinfo=timezone.utc)
+    i18n.set_language("it")
+    assert ui_digital._date(dt) == "28/10/2026" and digital._fmt_date(dt).endswith("/2026")
+    assert panel._fmt_time(dt).startswith("28/10/2026")
+    i18n.set_language("en")
+    assert ui_digital._date(dt) == "10/28/2026"
+    assert panel._fmt_time(dt).startswith("10/28/2026") and ("AM" in panel._fmt_time(dt) or "PM" in panel._fmt_time(dt))
