@@ -452,6 +452,8 @@ class AppearanceProfile:
     graphic: str | None = None     # id dell'elemento della libreria firme
     font_size: float = 10.0
     default: bool = False
+    date_format: str = "gg/mm/aaaa hh:mm:ss"
+    label_language: str = "it"
 
     def __post_init__(self):
         if self.show is None:
@@ -461,7 +463,8 @@ class AppearanceProfile:
         self.show = [x for x in self.show if x in SHOW_ITEMS]
 
     def appearance(self, image_png: bytes | None = None) -> dict:
-        d = {"layout": self.layout, "show": list(self.show), "font_size": self.font_size}
+        d = {"layout": self.layout, "show": list(self.show), "font_size": self.font_size,
+             "date_format": self.date_format, "label_language": self.label_language}
         if image_png and self.layout in ("grafica", "grafica_testo"):
             d["image_png"] = image_png
         return d
@@ -470,7 +473,7 @@ class AppearanceProfile:
 class AppearanceProfiles:
     """Profili di aspetto salvati con nome in JSON nella cartella dati."""
 
-    _FIELDS = ("name", "layout", "show", "graphic", "font_size", "default")
+    _FIELDS = ("name", "layout", "show", "graphic", "font_size", "default", "date_format", "label_language")
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else _sign_dir() / "appearances.json"

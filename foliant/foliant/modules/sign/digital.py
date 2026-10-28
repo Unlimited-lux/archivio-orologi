@@ -619,19 +619,43 @@ def _pdf_hex(text: str) -> bytes:
     return b"<" + text.encode("cp1252", errors="replace").hex().encode("ascii") + b">"
 
 
-def _appearance_lines(info: CertInfo, opts: "SignOptions", now: datetime, show: list[str]) -> list[str]:
+APPEARANCE_LABELS = {
+    "it": {"nome": "Firmato digitalmente da ", "data": "Data: ", "motivo": "Motivo: ", "luogo": "Luogo: ",
+           "dn": "DN: "},
+    "en": {"nome": "Digitally signed by ", "data": "Date: ", "motivo": "Reason: ", "luogo": "Location: ",
+           "dn": "DN: "},
+}
+DATE_FORMATS = {
+    "gg/mm/aaaa hh:mm:ss": "%d/%m/%Y %H:%M:%S %z",
+    "gg/mm/aaaa hh:mm": "%d/%m/%Y %H:%M %Z",
+    "aaaa-mm-gg hh:mm:ss": "%Y-%m-%d %H:%M:%S %z",
+    "gg/mm/aaaa": "%d/%m/%Y",
+}
+
+
+def _appearance_lines(info: CertInfo, opts: "SignOptions", now: datetime, show: list[str],
+                      app: dict | None = None) -> list[str]:
+    """Righe di testo dell'aspetto. `app` può indicare "label_language" ("it"/"en"),
+    "date_format" (chiave di DATE_FORMATS o formato strftime) e "utc" (bool)."""
+    app = app or {}
     labels = "etichette" in show
+    lang = app.get("label_language") or "it"
+    lab = APPEARANCE_LABELS.get(lang, APPEARANCE_LABELS["it"])
+    fmt = app.get("date_format") or "%d/%m/%Y %H:%M:%S %z"
+    fmt = DATE_FORMATS.get(fmt, fmt)
+    if app.get("utc"):
+        now = now.astimezone(timezone.utc)
     lines = []
     if "nome" in show:
-        lines.append((_("Firmato digitalmente da ") if labels else "") + info.subject)
+        lines.append((lab["nome"] if labels else "") + info.subject)
     if "data" in show:
-        lines.append((_("Data: ") if labels else "") + now.strftime("%d/%m/%Y %H:%M:%S %z"))
+        lines.append((lab["data"] if labels else "") + now.strftime(fmt).strip())
     if "motivo" in show and opts.reason:
-        lines.append((_("Motivo: ") if labels else "") + opts.reason)
+        lines.append((lab["motivo"] if labels else "") + opts.reason)
     if "luogo" in show and opts.location:
-        lines.append((_("Luogo: ") if labels else "") + opts.location)
+        lines.append((lab["luogo"] if labels else "") + opts.location)
     if "dn" in show:
-        lines.append((_("DN: ") if labels else "") + info.subject_dn)
+        lines.append((lab["dn"] if labels else "") + info.subject_dn)
     return lines
 
 
@@ -692,7 +716,7 @@ class _FoliantStamp:
         rot = st.rotation
         W, H = (self.h, self.w) if rot in (90, 270) else (self.w, self.h)
         now = datetime.now().astimezone()
-        lines = _appearance_lines(st.info, opts, now, show)
+        lines = _appearance_lines(st.info, opts, now, show, app)
         pad = 2.0
         cmds: list[bytes] = []
         xobjects = {}

@@ -474,11 +474,14 @@ def test_appearance_profiles(window, qtbot, monkeypatch, sample_pdf, id_a):
     qtbot.addWidget(dlg)
     dlg.layout_combo.setCurrentIndex(dlg.layout_combo.findData("nome_grande"))
     dlg.show_checks["luogo"].setChecked(False)
+    dlg.lang_combo.setCurrentIndex(dlg.lang_combo.findData("en"))
+    assert any(line.startswith("Digitally signed by") for line in dlg.preview.lines)
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Contratti", True))
     dlg._save_profile()
     profiles = store.AppearanceProfiles().list()
     assert [p.name for p in profiles] == ["Contratti"] and profiles[0].default
     assert profiles[0].layout == "nome_grande" and "luogo" not in profiles[0].show
+    assert profiles[0].label_language == "en"
     store.AppearanceProfiles().save(store.AppearanceProfile("Logo", graphic="non-esiste"))
     dlg2 = DigitalSignDialog(window, _ctl(window))
     qtbot.addWidget(dlg2)
@@ -491,6 +494,7 @@ def test_appearance_profiles(window, qtbot, monkeypatch, sample_pdf, id_a):
     dlg2.password.setText(PASSWORD)
     dlg2._accept()
     assert dlg2.options.appearance["layout"] == "nome_grande"
+    assert dlg2.options.appearance["label_language"] == "en"
     assert "luogo" not in dlg2.options.appearance["show"]
 
 

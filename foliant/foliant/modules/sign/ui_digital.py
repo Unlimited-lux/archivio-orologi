@@ -111,13 +111,20 @@ class DigitalSignDialog(QDialog):
             cb.setChecked(key != "dn")
             self.show_checks[key] = cb
             show_row.addWidget(cb)
+        self.date_combo = QComboBox()
+        for key in digital.DATE_FORMATS:
+            self.date_combo.addItem(key, key)
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItem("Italiano", "it")
+        self.lang_combo.addItem("English", "en")
+        self.preview = AppearancePreview(self)
         self.save_profile = QPushButton(_("Salva come aspetto…"))
         for p in store.AppearanceProfiles().list():
             missing = p.graphic and self.graphic_combo.findData(p.graphic) < 0
             self.profile_combo.addItem(p.name + (_(" (da completare)") if missing else ""), p)
             if p.default:
                 self.profile_combo.setCurrentIndex(self.profile_combo.count() - 1)
-        self.profile_combo.currentIndexChanged.connect(lambda _i: self._apply_profile())
+        self.profile_combo.currentIndexChanged.connect(lambda _i: (self._apply_profile(), self.update_preview()))
         self.save_profile.clicked.connect(self._save_profile)
         self._apply_profile()
         if visible:
@@ -128,10 +135,22 @@ class DigitalSignDialog(QDialog):
             form.addRow(_("Disposizione:"), self.layout_combo)
             form.addRow(_("Firma grafica:"), self.graphic_combo)
             form.addRow(_("Mostra:"), show_row)
+            drow = QHBoxLayout()
+            drow.addWidget(self.date_combo, 1)
+            drow.addWidget(QLabel(_("Etichette in:")))
+            drow.addWidget(self.lang_combo)
+            form.addRow(_("Formato data:"), drow)
+            form.addRow(_("Anteprima:"), self.preview)
         else:
             for w in (self.profile_combo, self.save_profile, self.layout_combo, self.graphic_combo,
-                      *self.show_checks.values()):
+                      self.date_combo, self.lang_combo, self.preview, *self.show_checks.values()):
                 w.hide()
+        for sig in (self.layout_combo.currentIndexChanged, self.graphic_combo.currentIndexChanged,
+                    self.date_combo.currentIndexChanged, self.lang_combo.currentIndexChanged,
+                    self.reason.currentTextChanged, self.location.textChanged):
+            sig.connect(lambda *_a: self.update_preview())
+        for cb in self.show_checks.values():
+            cb.toggled.connect(lambda _v: self.update_preview())
         self.tsa = QComboBox()
         self.tsa.addItem(_("Nessuna marca temporale"), None)
         cfg = store.TSAConfig()
@@ -174,6 +193,7 @@ class DigitalSignDialog(QDialog):
         lay.addWidget(box)
         self._paths: dict[int, str] = {}
         self._reload_ids()
+        self.update_preview()
         self.browse.clicked.connect(self._browse)
         self.create_id.clicked.connect(self._create_id)
         self.password.editingFinished.connect(self._preview)
@@ -244,6 +264,8 @@ class DigitalSignDialog(QDialog):
 
     def _show_info(self, did) -> None:
         i = did.info
+        self._preview_info = i
+        self.update_preview()
         txt = _("Titolare: {s}\nEmittente: {iss}\nValido dal {a} al {b}\nUsi della chiave: {ku}").format(
             s=i.subject, iss=i.issuer, a=_date(i.not_before), b=_date(i.not_after),
             ku=", ".join(i.key_usage) or "—")
@@ -309,7 +331,35 @@ class DigitalSignDialog(QDialog):
         return self.store.AppearanceProfile(
             name=name, layout=self.layout_combo.currentData(),
             show=[k for k, cb in self.show_checks.items() if cb.isChecked()],
-            graphic=self.graphic_combo.currentData())
+            graphic=self.graphic_combo.currentData(), date_format=self.date_combo.currentData(),
+            label_language=self.lang_combo.currentData())
+
+    def update_preview(self) -> None:
+        if not hasattr(self, "preview"):
+            return
+        from datetime import datetime
+        info = self.digital_id.info if self.digital_id is not None else getattr(self, "_preview_info", None)
+        name = info.subject if info else (self.c.default_name() or _("Nome del titolare"))
+        prof = self.current_profile()
+        opts = self.digital.SignOptions(reason=self.reason.currentText(), location=self.location.text())
+
+        class _Info:
+            subject = name
+            subject_dn = info.subject_dn if info else f"CN={name}"
+        lines = self.digital._appearance_lines(_Info, opts, datetime.now().astimezone(), prof.show,
+                                               prof.appearance())
+        pix = None
+        eid = self.graphic_combo.currentData()
+        if eid and prof.layout in ("grafica", "grafica_testo"):
+            lib = self.c.library(interactive=False)
+            try:
+                from PySide6.QtCore import QSize
+
+                from .ui_create import item_pixmap
+                pix = item_pixmap(lib.load_item(eid), QSize(240, 80)) if lib else None
+            except Exception:
+                pix = None
+        self.preview.set_content(prof.layout, lines, pix)
 
     def _apply_profile(self) -> None:
         p = self.profile_combo.currentData()
@@ -320,6 +370,9 @@ class DigitalSignDialog(QDialog):
             self.layout_combo.setCurrentIndex(i)
         j = self.graphic_combo.findData(p.graphic)
         self.graphic_combo.setCurrentIndex(max(0, j))
+        if hasattr(self, "date_combo"):
+            self.date_combo.setCurrentIndex(max(0, self.date_combo.findData(p.date_format)))
+            self.lang_combo.setCurrentIndex(max(0, self.lang_combo.findData(p.label_language)))
         for k, cb in self.show_checks.items():
             cb.setChecked(k in p.show)
 
@@ -358,6 +411,63 @@ class DigitalSignDialog(QDialog):
         buf.open(QIODevice.OpenModeFlag.WriteOnly)
         pm.toImage().save(buf, "PNG")
         return bytes(ba.data())
+
+
+class AppearancePreview(QWidget):
+    """Anteprima approssimativa dell'aspetto (proporzioni 200×60 pt, sfondo bianco)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(300, 90)
+        self.layout_key = "testo"
+        self.lines: list[str] = []
+        self.pixmap = None
+        self.setAccessibleName(_("Anteprima dell'aspetto della firma"))
+
+    def set_content(self, layout_key: str, lines: list[str], pixmap) -> None:
+        self.layout_key, self.lines, self.pixmap = layout_key, lines, pixmap
+        self.setToolTip("\n".join(lines))
+        self.update()
+
+    def paintEvent(self, _ev) -> None:
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QColor, QFont, QPainter
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.fillRect(r, QColor(255, 255, 255))
+        p.setPen(QColor(160, 168, 180))
+        p.drawRect(r)
+        text_r = r.adjusted(6, 4, -6, -4)
+        if self.layout_key in ("grafica", "grafica_testo") and self.pixmap is not None:
+            g_r = QRectF(text_r.left(), text_r.top(), text_r.width() / (1 if self.layout_key == "grafica" else 2),
+                         text_r.height())
+            pm = self.pixmap.scaled(int(g_r.width()), int(g_r.height()), Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.SmoothTransformation)
+            p.drawPixmap(int(g_r.left()), int(g_r.top() + (g_r.height() - pm.height()) / 2), pm)
+            text_r.setLeft(g_r.right() + 6)
+        if self.layout_key != "grafica" and self.lines:
+            p.setPen(QColor(20, 20, 20))
+            lines = list(self.lines)
+            if self.layout_key == "nome_grande":
+                f = QFont("Helvetica")
+                f.setPointSizeF(15)
+                p.setFont(f)
+                half = QRectF(text_r.left(), text_r.top(), text_r.width() / 2, text_r.height())
+                name = lines.pop(0).split(" da ")[-1].split(" by ")[-1] if lines else ""
+                p.drawText(half, Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap, name)
+                text_r.setLeft(half.right() + 4)
+            size = 9.0
+            f = QFont("Helvetica")
+            while size >= 5:
+                f.setPointSizeF(size)
+                p.setFont(f)
+                need = p.fontMetrics().lineSpacing() * len(lines)
+                if need <= text_r.height():
+                    break
+                size -= 0.5
+            p.drawText(text_r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "\n".join(lines))
+        p.end()
 
 
 # ============================================================== campo firma
@@ -876,7 +986,9 @@ TRANSLATIONS_EN = {
     "Motivo": "Reason", "Luogo": "Location", "Nome distinto": "Distinguished name", "Etichette": "Labels",
     "Salva come aspetto…": "Save as appearance…", " (da completare)": " (to be completed)",
     "Profilo aspetto:": "Appearance profile:", "Disposizione:": "Layout:", "Mostra:": "Show:",
-    "Salva aspetto": "Save appearance", "Nome dell'aspetto:": "Appearance name:", "Firma grafica:": "Graphic signature:",
+    "Salva aspetto": "Save appearance", "Etichette in:": "Labels in:", "Formato data:": "Date format:",
+    "Anteprima:": "Preview:", "Nome del titolare": "Holder name",
+    "Anteprima dell'aspetto della firma": "Signature appearance preview", "Nome dell'aspetto:": "Appearance name:", "Firma grafica:": "Graphic signature:",
     "Nessuna marca temporale": "No timestamp",
     "Il campo richiede una marca temporale da questo server.": "The field requires a timestamp from this server.",
     "Marca temporale:": "Timestamp:", "Modifiche consentite:": "Allowed changes:",

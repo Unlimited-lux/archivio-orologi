@@ -512,3 +512,20 @@ def test_visible_appearance_in_box_on_rotated_cropped_page(id_a, rotation):
     st = d.signature_fields(out)[0]
     got = pymupdf.Rect(st.rect)
     assert abs(got.x0 - unrot.x0) < 1 and abs(got.y0 - unrot.y0) < 1
+
+
+def test_appearance_date_format_and_label_language():
+    from datetime import datetime, timezone
+
+    class Info:
+        subject = "Mario Rossi"
+        subject_dn = "CN=Mario Rossi"
+    now = datetime(2026, 3, 4, 5, 6, 7, tzinfo=timezone.utc)
+    opts = d.SignOptions(reason="Approvo", location="Milano")
+    it = d._appearance_lines(Info, opts, now, ["nome", "data", "motivo", "etichette"],
+                             {"date_format": "gg/mm/aaaa", "label_language": "it"})
+    en = d._appearance_lines(Info, opts, now, ["nome", "data", "luogo", "etichette"],
+                             {"date_format": "aaaa-mm-gg hh:mm:ss", "label_language": "en"})
+    assert it == ["Firmato digitalmente da Mario Rossi", "Data: 04/03/2026", "Motivo: Approvo"]
+    assert en[0] == "Digitally signed by Mario Rossi" and en[1].startswith("Date: 2026-03-04 ")
+    assert en[2] == "Location: Milano"
