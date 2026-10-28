@@ -222,3 +222,17 @@ def test_control_panel_pause_toggle(batch):
     panel.toggle_pause()
     assert not control.paused
     panel.close()
+
+
+def test_bates_series_and_index_from_ui(batch, folder, tmp_path):
+    batch.add_paths([str(folder / "alfa.pdf"), str(folder / "doc2.pdf")])
+    batch.add_step("bates", {"prefix": "VND-", "digits": 5, "series": "VND", "continue_series": True})
+    batch.dest_path.setText(str(tmp_path / "o1"))
+    batch.run(confirm=False)
+    idx = tmp_path / "indice.csv"
+    assert batch.export_bates_index(str(idx))
+    assert "doc2.pdf,VND-00003,VND-00004" in idx.read_text(encoding="utf-8")
+    batch.dest_path.setText(str(tmp_path / "o2"))
+    batch.run(confirm=False)
+    doc = pymupdf.open(str(tmp_path / "o2" / "alfa.pdf"))
+    assert "VND-00005" in doc[0].get_text()

@@ -337,6 +337,8 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("digits", "Cifre", "int", 6, minimum=1, maximum=12),
             Param("start", "Numero iniziale", "int", 1, minimum=0),
             Param("restart", "Ricomincia per documento", "bool", False),
+            Param("series", "Serie (nome, facoltativo)", "str", ""),
+            Param("continue_series", "Continua la serie (ultimo numero usato + 1)", "bool", False),
             Param("position", "Posizione", "position", "bottom-right", pos),
             Param("fontsize", "Dimensione (pt)", "int", 9, minimum=4, maximum=72),
             Param("margin", "Margine (mm)", "float", 8.0, minimum=0, maximum=100),
@@ -358,6 +360,11 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("bookmarks", "Un segnalibro per file", "bool", True),
             Param("blank_after_odd", "Pagina bianca dopo i file con pagine dispari", "bool", False),
             Param("name", "Nome del file unito", "str", "Unione"),
+            Param("group", "Modalità", "choice", "all",
+                  [("all", "Un unico file"), ("folder", "Un file per cartella"), ("every", "Un file ogni N ingressi")]),
+            Param("every_n", "N (per «un file ogni N ingressi»)", "int", 10, minimum=1),
+            Param("on_error", "Se un file è in errore", "choice", "stop",
+                  [("stop", "Interrompi l'unione"), ("omit", "Ometti il file e prosegui")]),
         ], kind="merge"),
         ActionSpec("ocr", "OCR (rendi ricercabile)", "ocr", [
             Param("languages", "Lingue (es. ita+eng)", "str", "ita+eng"),
@@ -1558,7 +1565,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                     pass
     plan = _bates_plan(items, settings)
     reserved: set[str] = set()
-    merged_parts: list[tuple[str, bytes]] = []
+    merged_parts: list[tuple[int, str, bytes]] = []
     n = max(1, len(items))
     stop = False
 
@@ -1616,7 +1623,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                 elif spec.kind == "convert":
                     res.outputs = _do_convert(data, step, item, i, settings, started, res.pages, reserved, ctx)
             if merge_index is not None:
-                merged_parts.append((Path(item.path).stem, data))
+                merged_parts.append((i, Path(item.path).stem, data))
                 res.status = "ok"
             elif any(ACTIONS[s.action].kind in ("print", "convert") for s in pre_steps if s.action in ACTIONS):
                 res.status = "ok"
@@ -1798,44 +1805,139 @@ def report_pdf(report: JobReport) -> bytes:
             doc.close()
 
 
+def _merge_groups(items, parts, p: dict) -> list[tuple[str, str, list[tuple[int, str, bytes]]]]:
+    """Gruppi da unire: (cartella di riferimento, nome, parti)."""
+    name = p.get("name") or "Unione"
+    mode = p.get("group", "all")
+    if mode == "folder":
+        groups: dict[str, list] = {}
+        for part in parts:
+            groups.setdefault(os.path.dirname(items[part[0]].path), []).append(part)
+        return [(folder, os.path.basename(folder) or name, g) for folder, g in groups.items()]
+    if mode == "every":
+        n = max(1, int(p.get("every_n", 10) or 10))
+        chunks = [parts[k:k + n] for k in range(0, len(parts), n)]
+        return [(os.path.dirname(items[c[0][0]].path), f"{name}_{k + 1:03d}", c) for k, c in enumerate(chunks)]
+    return [(os.path.dirname(items[parts[0][0]].path) if parts else "", name, parts)]
+
+
 def _finish_merge(report: JobReport, items, parts, step: Step, post_steps, settings, started, plan,
                   progress) -> None:
-    failed = [r for r in report.results if r.status in ("error", "skipped")]
-    if failed or len(parts) != len(items):
+    p = step.merged_params()
+    failed = [r for r in report.results if r.status in ("error", "skipped", "cancelled")]
+    if (failed and p.get("on_error", "stop") == "stop") or not parts:
         for r in report.results:
-            if r.status == "ok":
+            if r.status in ("ok", "warning"):
                 r.status = "skipped"
                 r.code = "MRG-01"
                 r.message = _("Unione non eseguita: un file della coda non è stato elaborato ({f}).").format(
                     f=os.path.basename(failed[0].input) if failed else "")
         return
-    p = step.merged_params()
+    if failed:
+        note = _("file omessi dall'unione: {f}").format(f=", ".join(os.path.basename(r.input) for r in failed))
+        for _i, _t, _d in parts:
+            r = report.results[_i]
+            r.status = "warning"
+            r.message = "; ".join(x for x in (r.message, note) if x)
+    reserved: set[str] = set()
+    check = progress.check if progress is not None and hasattr(progress, "check") else None
+    for folder, gname, gparts in _merge_groups(items, parts, p):
+        try:
+            data = merge_pdfs([(t, d) for _i, t, d in gparts], bool(p.get("bookmarks", True)),
+                              bool(p.get("blank_after_odd")), check=check)
+            dummy = QueueItem(path=os.path.join(folder, gname + ".pdf"))
+            ctx = _Ctx(progress, 0, 1)
+            for s in post_steps:
+                if ACTIONS[s.action].kind == "pdf":
+                    data, _prot = _apply_step(s, data, dummy, ctx, {}, {}, {})
+            pattern = settings.pattern if settings.pattern not in ("{nome}", "") else "{nome}"
+            name = render_name(pattern, dummy.path, 0, settings, started, _page_count(data))
+            target_dir = settings.destination if settings.destination_mode == "folder" else _target_dir(dummy, settings)
+            target = _resolve_conflict(os.path.join(target_dir, name), settings, reserved)
+            if target is None:
+                raise BatchError("EXIST-01", _("Saltato: esiste già."), status="skipped")
+            reserved.add(target)
+            _write_output(target, data)
+            for _i, _t, _d in gparts:
+                report.results[_i].outputs = [target]
+            report.results[gparts[-1][0]].bytes_out = len(data)
+        except OperationCancelled:
+            report.cancelled = True
+            for _i, _t, _d in gparts:
+                report.results[_i].status = "cancelled"
+                report.results[_i].message = _("Annullato dall'utente.")
+            return
+        except BatchError as e:
+            for _i, _t, _d in gparts:
+                r = report.results[_i]
+                r.status, r.code, r.message = e.status, e.code, e.message
+
+
+# =============================================================================
+# Indice e serie Bates (BAT-15)
+# =============================================================================
+def bates_index(items: list[QueueItem], settings: JobSettings) -> list[tuple[str, str, str]]:
+    """Per ogni file: (nome, primo numero, ultimo numero)."""
+    plan = _bates_plan(items, settings)
+    return [(it.name, plan[i].get("bates_inizio", ""), plan[i].get("bates_fine", ""))
+            for i, it in enumerate(items) if plan[i].get("bates_inizio")]
+
+
+def bates_index_csv(items: list[QueueItem], settings: JobSettings, sep: str = ",") -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=sep, lineterminator="\n")
+    w.writerow(["file", "bates_inizio", "bates_fine"])
+    for row in bates_index(items, settings):
+        w.writerow(row)
+    return buf.getvalue()
+
+
+def _series_path(directory: str) -> str:
+    return os.path.join(directory, "serie-bates.json")
+
+
+def load_series(directory: str) -> dict[str, int]:
     try:
-        data = merge_pdfs(parts, bool(p.get("bookmarks", True)), bool(p.get("blank_after_odd")),
-                          check=(progress.check if progress is not None and hasattr(progress, "check") else None))
-        dummy = QueueItem(path=os.path.join(os.path.dirname(items[0].path), (p.get("name") or "Unione") + ".pdf"))
-        ctx = _Ctx(progress, 0, 1)
-        for s in post_steps:
-            if ACTIONS[s.action].kind == "pdf":
-                data, _prot = _apply_step(s, data, dummy, ctx, {}, {}, {})
-        pattern = settings.pattern if settings.pattern not in ("{nome}", "") else "{nome}"
-        name = render_name(pattern, dummy.path, 0, settings, started, _page_count(data))
-        target = _resolve_conflict(os.path.join(_target_dir(QueueItem(dummy.path), settings) if
-                                                settings.destination_mode != "folder" else settings.destination,
-                                                name), settings, set())
-        if target is None:
-            raise BatchError("EXIST-01", _("Saltato: esiste già."), status="skipped")
-        _write_output(target, data)
-        for r in report.results:
-            r.outputs = [target]
-        report.results[-1].bytes_out = len(data)
-    except OperationCancelled:
-        report.cancelled = True
-        for r in report.results:
-            r.status, r.message = "cancelled", _("Annullato dall'utente.")
-    except BatchError as e:
-        for r in report.results:
-            r.status, r.code, r.message = e.status, e.code, e.message
+        with open(_series_path(directory), encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): int(v) for k, v in data.items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def prepare_bates_series(settings: JobSettings, directory: str) -> None:
+    """«Continua la serie»: il numero iniziale diventa l'ultimo usato + 1."""
+    series = load_series(directory)
+    for step in settings.steps:
+        if step.action == "bates":
+            p = step.merged_params()
+            name = str(p.get("series") or "").strip()
+            if name and p.get("continue_series") and name in series:
+                step.params["start"] = series[name] + 1
+
+
+def record_bates_series(settings: JobSettings, items: list[QueueItem], report: JobReport, directory: str) -> None:
+    """Aggiorna la serie con l'ultimo numero usato dai file completati."""
+    series = load_series(directory)
+    changed = False
+    plan = _bates_plan(items, settings)
+    for step in settings.steps:
+        if step.action != "bates":
+            continue
+        p = step.merged_params()
+        name = str(p.get("series") or "").strip()
+        if not name:
+            continue
+        last = None
+        for i, it in enumerate(items):
+            if report.results[i].status in ("ok", "warning") and "bates_start" in plan[i]:
+                last = plan[i]["bates_start"] + max(1, it.pages) - 1
+        if last is not None:
+            series[name] = max(series.get(name, 0), last)
+            changed = True
+    if changed:
+        os.makedirs(directory, exist_ok=True)
+        atomic_write(_series_path(directory), json.dumps(series, ensure_ascii=False, indent=1).encode("utf-8"))
 
 
 def _do_print(data: bytes, step: Step, item: QueueItem, ctx: _Ctx, printer: str | None, protection: dict) -> None:

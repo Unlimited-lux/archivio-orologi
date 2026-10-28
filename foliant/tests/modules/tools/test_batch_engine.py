@@ -800,3 +800,61 @@ def test_history_keeps_last_20_and_pdf_report(tmp_path):
     doc = pymupdf.open(stream=data, filetype="pdf")
     text = doc[0].get_text()
     assert "Rapporto dell'elaborazione in blocco" in text and "f0.pdf" in text
+
+
+# ----------------------------------------------------------------- BAT-15 indice e serie, BAT-17 modalità
+def test_bates_index_and_series(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    items = [be.analyze_file(build_pdf(src / f"{n}.pdf", [["x"]] * k)) for n, k in (("a", 2), ("b", 3), ("c", 1))]
+    settings = be.JobSettings(steps=[be.Step("bates", {"prefix": "ACME-", "digits": 6, "start": 1,
+                                                       "series": "ACME"})],
+                              destination=str(tmp_path / "out"), pattern="{bates_inizio}_{bates_fine}")
+    csv_text = be.bates_index_csv(items, settings)
+    assert "b.pdf,ACME-000003,ACME-000005" in csv_text
+    report = be.run_job(None, items, settings)
+    assert report.counts()["ok"] == 3
+    assert os.path.exists(tmp_path / "out" / "ACME-000003_ACME-000005.pdf")
+    store = str(tmp_path / "conf")
+    be.record_bates_series(settings, items, report, store)
+    assert be.load_series(store) == {"ACME": 6}
+    nxt = be.JobSettings(steps=[be.Step("bates", {"prefix": "ACME-", "digits": 6, "series": "ACME",
+                                                  "continue_series": True})], destination=str(tmp_path / "o2"))
+    be.prepare_bates_series(nxt, store)
+    be.run_job(None, items[:1], nxt)
+    doc = pymupdf.open(str(tmp_path / "o2" / "a.pdf"))
+    assert "ACME-000007" in doc[0].get_text()
+
+
+def test_merge_one_file_per_folder(tmp_path):
+    root = tmp_path / "in"
+    for sub, names in (("uno", ("a", "b")), ("due", ("c",))):
+        (root / sub).mkdir(parents=True)
+        for n in names:
+            build_pdf(root / sub / f"{n}.pdf", [[n]])
+    paths, _ign = be.collect_inputs([str(root)])
+    items = [be.analyze_file(p) for p in paths]
+    out = tmp_path / "out"
+    report = be.run_job(None, items, be.JobSettings(steps=[be.Step("merge", {"group": "folder"})],
+                                                   destination=str(out)))
+    assert sorted(os.listdir(out)) == ["due.pdf", "uno.pdf"]
+    assert pymupdf.open(str(out / "uno.pdf")).page_count == 2
+    assert report.counts()["ok"] == 3
+
+
+def test_merge_omit_failed_file(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    good = [build_pdf(src / f"{n}.pdf", [[n]]) for n in ("a", "b")]
+    bad = src / "rotto.pdf"
+    bad.write_bytes(b"%PDF-1.4 rotto")
+    items = [be.analyze_file(p) for p in (good[0], str(bad), good[1])]
+    out = tmp_path / "out"
+    stop = be.run_job(None, items, be.JobSettings(steps=[be.Step("merge")], destination=str(out)))
+    assert not out.exists() or not os.listdir(out)
+    assert any(r.code == "MRG-01" for r in stop.results)
+    omit = be.run_job(None, items, be.JobSettings(steps=[be.Step("merge", {"on_error": "omit"})],
+                                                 destination=str(out)))
+    assert os.listdir(out) == ["Unione.pdf"]
+    assert pymupdf.open(str(out / "Unione.pdf")).page_count == 2
+    assert omit.results[0].status == "warning" and "rotto.pdf" in omit.results[0].message

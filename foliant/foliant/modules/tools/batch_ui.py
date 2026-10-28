@@ -400,6 +400,7 @@ class BatchWidget(QWidget):
         rbar.addStretch(1)
         for text, name, slot in ((_("Riprova i non riusciti"), "rotate-cw", self.retry_failed),
                                  (_("Esporta rapporto"), "file-output", self.export_report_dialog),
+                                 (_("Indice Bates"), "list-ordered", self.export_bates_index_dialog),
                                  (_("Apri cartella"), "folder-open", self.open_destination)):
             b = QPushButton(text)
             bind_icon(b, name)
@@ -794,6 +795,7 @@ class BatchWidget(QWidget):
             except OSError as e:
                 self.ctx.error(_("Impossibile avviare"), _("Impossibile creare la cartella: {e}").format(e=e.strerror))
                 return None
+        be.prepare_bates_series(settings, self._base_dir())
         control = be.JobControl()
         panel = JobControlPanel(control, self)
         panel.show()
@@ -809,8 +811,10 @@ class BatchWidget(QWidget):
             panel.deleteLater()
         try:
             be.save_history(self.history_dir(), report)
+            be.record_bates_series(settings, list(self.items), report, self._base_dir())
         except Exception:
             pass
+        self.last_items = list(self.items)
         self.report = report
         self.last_settings = settings
         self._fill_report()
@@ -885,6 +889,24 @@ class BatchWidget(QWidget):
             return False
         self.ctx.status(_("Rapporto esportato: {p}").format(p=path))
         return True
+
+    def export_bates_index(self, path: str) -> bool:
+        settings = getattr(self, "last_settings", None) or self.settings()
+        items = getattr(self, "last_items", None) or self.items
+        if not any(s.action == "bates" for s in settings.steps):
+            self.ctx.info(_("Indice Bates"), _("Il lavoro non contiene una numerazione Bates."))
+            return False
+        try:
+            atomic_write(path, be.bates_index_csv(items, settings).encode("utf-8"))
+        except Exception as e:
+            self.ctx.error(_("Indice non esportato"), str(e))
+            return False
+        return True
+
+    def export_bates_index_dialog(self) -> None:
+        path = self.ctx.ask_save_path(_("Esporta indice Bates"), "indice_bates.csv", "CSV (*.csv)", ".csv")
+        if path:
+            self.export_bates_index(path)
 
     def export_report_dialog(self) -> None:
         if self.report is None:
