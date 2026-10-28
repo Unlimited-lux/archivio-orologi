@@ -1521,11 +1521,229 @@ def _kill(proc: subprocess.Popen) -> None:
         pass
 
 
-def office_to_pdf(path, *, password: str | None = None, timeout: float = 180, progress=None) -> bytes:
+# ---------------------------------------------------------------- opzioni Office (CNV-18)
+OFFICE_DEFAULTS = {
+    "bookmarks": True,          # segnalibri dai titoli
+    "tagged": False,            # PDF taggato (accessibile)
+    "comments": False,          # commenti come annotazioni
+    "image_quality": 90,        # qualità JPEG delle immagini (1-100)
+    "max_image_dpi": 0,         # 0 = risoluzione originale
+    "pdfa": "",                 # "", "1b", "2b", "3b"
+    "sheets": "all",            # fogli di calcolo: all | active
+    "fit_width": False,         # fogli di calcolo: adatta le colonne alla larghezza della pagina
+    "notes_pages": False,       # presentazioni: aggiunge le pagine delle note
+    "hidden_slides": False,     # presentazioni: include le diapositive nascoste
+    "final_state": True,        # revisioni tracciate: stato finale senza marcature
+}
+_PDFA_VERSION = {"1b": 1, "2b": 2, "3b": 3}
+SHEET_PAGE_LIMIT = 500
+_SS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_WML = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_BEFORE_PAGESETUP = ("sheetPr", "dimension", "sheetViews", "sheetFormatPr", "cols", "sheetData", "sheetCalcPr",
+                     "sheetProtection", "protectedRanges", "scenarios", "autoFilter", "sortState",
+                     "dataConsolidate", "customSheetViews", "mergeCells", "phoneticPr", "conditionalFormatting",
+                     "dataValidations", "hyperlinks", "printOptions", "pageMargins")
+
+
+def _filter_options(options: dict) -> str:
+    import json
+    o = {**OFFICE_DEFAULTS, **(options or {})}
+
+    def b(v):
+        return {"type": "boolean", "value": "true" if v else "false"}
+    data = {"ExportBookmarks": b(o["bookmarks"]), "ExportNotes": b(o["comments"]),
+            "ExportNotesPages": b(o["notes_pages"]), "ExportHiddenSlides": b(o["hidden_slides"]),
+            "UseTaggedPDF": b(o["tagged"]),
+            "Quality": {"type": "long", "value": str(max(1, min(100, int(o["image_quality"]))))}}
+    if int(o.get("max_image_dpi") or 0) > 0:
+        data["ReduceImageResolution"] = b(True)
+        data["MaxImageResolution"] = {"type": "long", "value": str(int(o["max_image_dpi"]))}
+    if o.get("pdfa") in _PDFA_VERSION:
+        data["SelectPdfVersion"] = {"type": "long", "value": str(_PDFA_VERSION[o["pdfa"]])}
+    return "pdf:writer_pdf_Export:" + json.dumps(data)
+
+
+def _rewrite_zip(src: str, dst: str, fixers: dict) -> None:
+    """Copia un pacchetto OOXML applicando `fixers[nome](byte) -> byte` alle parti indicate
+    (chiavi: nome esatto o prefisso terminato da «*»)."""
+    import zipfile
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            for key, fn in fixers.items():
+                if item.filename == key or (key.endswith("*") and item.filename.startswith(key[:-1])
+                                            and item.filename.endswith(".xml")):
+                    data = fn(data)
+            zout.writestr(item, data)
+
+
+def _xml(data: bytes):
+    from lxml import etree
+    return etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=True))
+
+
+def _xml_bytes(root) -> bytes:
+    from lxml import etree
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _fit_sheet_width(data: bytes) -> bytes:
+    """Foglio adattato a una pagina in larghezza (altezza libera)."""
+    from lxml import etree
+    root = _xml(data)
+    q = lambda n: f"{{{_SS}}}{n}"   # noqa: E731
+    sp = root.find(q("sheetPr"))
+    if sp is None:
+        sp = etree.Element(q("sheetPr"))
+        root.insert(0, sp)
+    psp = sp.find(q("pageSetUpPr"))
+    if psp is None:
+        psp = etree.SubElement(sp, q("pageSetUpPr"))
+    psp.set("fitToPage", "1")
+    ps = root.find(q("pageSetup"))
+    if ps is None:
+        ps = etree.Element(q("pageSetup"))
+        idx = 0
+        for i, ch in enumerate(root):
+            if isinstance(ch.tag, str) and etree.QName(ch).localname in _BEFORE_PAGESETUP:
+                idx = i + 1
+        root.insert(idx, ps)
+    ps.set("fitToWidth", "1")
+    ps.set("fitToHeight", "0")
+    return _xml_bytes(root)
+
+
+def _only_active_sheet(data: bytes) -> bytes:
+    """Nasconde tutti i fogli tranne quello attivo (i fogli nascosti non vengono stampati)."""
+    root = _xml(data)
+    q = lambda n: f"{{{_SS}}}{n}"   # noqa: E731
+    view = root.find(f"{q('bookViews')}/{q('workbookView')}")
+    active = int(view.get("activeTab", "0")) if view is not None else 0
+    sheets = root.findall(f"{q('sheets')}/{q('sheet')}")
+    for i, sh in enumerate(sheets):
+        if i == active:
+            sh.attrib.pop("state", None)
+        else:
+            sh.set("state", "hidden")
+    return _xml_bytes(root)
+
+
+def _final_revisions(data: bytes) -> bytes:
+    """Revisioni tracciate mostrate nello stato finale, senza marcature."""
+    from lxml import etree
+    root = _xml(data)
+    q = lambda n: f"{{{_WML}}}{n}"   # noqa: E731
+    rv = root.find(q("revisionView"))
+    if rv is None:
+        rv = etree.Element(q("revisionView"))
+        root.insert(0, rv)
+    for attr in ("markup", "insDel", "formatting", "comments"):
+        rv.set(q(attr), "0")
+    return _xml_bytes(root)
+
+
+def _prepare_office(src: str, tmp: str, options: dict) -> str:
+    """Applica al documento (in una copia) le opzioni che LibreOffice legge dal file stesso."""
+    o = {**OFFICE_DEFAULTS, **(options or {})}
+    ext = _ext(src)
+    fixers: dict = {}
+    if ext in (".xlsx", ".xlsm"):
+        if o["fit_width"]:
+            fixers["xl/worksheets/*"] = _fit_sheet_width
+        if o["sheets"] == "active":
+            fixers["xl/workbook.xml"] = _only_active_sheet
+    elif ext in (".docx", ".docm") and o["final_state"]:
+        fixers["word/settings.xml"] = _final_revisions
+    if not fixers:
+        return src
+    out = os.path.join(tmp, "preparato" + ext)
+    try:
+        _rewrite_zip(src, out, fixers)
+    except Exception:
+        return src     # pacchetto non standard: si converte così com'è
+    return out
+
+
+def office_fonts(path) -> list[str]:
+    """Font citati da un documento OOXML (DOCX, XLSX, PPTX)."""
+    import zipfile
+    names: set[str] = set()
+    try:
+        with zipfile.ZipFile(str(path)) as z:
+            for part in z.namelist():
+                if not part.endswith(".xml"):
+                    continue
+                if part == "word/fontTable.xml":
+                    names.update(re.findall(rb'<w:font w:name="([^"]+)"', z.read(part)))
+                elif part.startswith("word/") and part.endswith(("document.xml", "styles.xml")):
+                    names.update(re.findall(rb'w:ascii="([^"]+)"', z.read(part)))
+                elif part == "xl/styles.xml":
+                    names.update(re.findall(rb'<name val="([^"]+)"', z.read(part)))
+                elif part.startswith(("ppt/slides/", "ppt/theme/", "ppt/slideMasters/")):
+                    names.update(re.findall(rb'<a:latin typeface="([^"+][^"]*)"', z.read(part)))
+    except Exception:
+        return []
+    return sorted({n.decode("utf-8", "replace") for n in names if n.strip()})
+
+
+@functools.lru_cache(maxsize=1)
+def _installed_families() -> frozenset:
+    exe = shutil.which("fc-list")
+    if not exe:
+        return frozenset()
+    try:
+        out = subprocess.run([exe, ":", "family"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    fams = set()
+    for line in out.splitlines():
+        for f in line.split(","):
+            if f.strip():
+                fams.add(f.strip().lower())
+    return frozenset(fams)
+
+
+def missing_fonts(path) -> list[str]:
+    """Font del documento non installati (LibreOffice userà sostituti metricamente compatibili)."""
+    installed = _installed_families()
+    if not installed:
+        return []
+    return [f for f in office_fonts(path) if f.lower() not in installed]
+
+
+def estimate_sheet_pages(path) -> int:
+    """Stima delle pagine di un foglio di calcolo XLSX (dalle dimensioni dei fogli): circa 50
+    righe e 10 colonne per pagina. 0 se non stimabile."""
+    import zipfile
+    total = 0
+    try:
+        with zipfile.ZipFile(str(path)) as z:
+            for part in z.namelist():
+                if part.startswith("xl/worksheets/sheet") and part.endswith(".xml"):
+                    with z.open(part) as f:
+                        head = f.read(4096)
+                    m = re.search(rb'<dimension ref="[A-Z]+\d+:([A-Z]+)(\d+)"', head)
+                    if not m:
+                        continue
+                    col = 0
+                    for ch in m.group(1).decode():
+                        col = col * 26 + (ord(ch) - 64)
+                    rows = int(m.group(2))
+                    total += math.ceil(rows / 50) * math.ceil(col / 10)
+    except Exception:
+        return 0
+    return total
+
+
+def office_to_pdf(path, *, password: str | None = None, timeout: float = 180, progress=None,
+                  options: dict | None = None, warnings: list | None = None) -> bytes:
     """Converte un documento Office/ODF/RTF/Visio in PDF con LibreOffice in modalità headless.
 
     Usa un profilo isolato (funziona anche con un'altra istanza aperta); le macro non vengono
     eseguite. L'annullamento termina il processo. XPS/OXPS sono convertiti direttamente.
+    `options` (vedi OFFICE_DEFAULTS): segnalibri, PDF taggato, commenti, qualità e risoluzione
+    delle immagini, PDF/A, fogli (tutti o attivo, adatta alla larghezza), note e diapositive
+    nascoste, revisioni nello stato finale. Gli avvisi (font sostituiti) vanno in `warnings`.
     """
     path = str(path)
     if not os.path.isfile(path):
@@ -1541,6 +1759,12 @@ def office_to_pdf(path, *, password: str | None = None, timeout: float = 180, pr
             if not password:
                 raise PasswordRequired()
             src = _decrypt_office(path, password, tmp)
+        if warnings is not None:
+            gone = missing_fonts(src)
+            if gone:
+                warnings.append(_("Font non installati, sostituiti con equivalenti (l'impaginazione può "
+                                  "cambiare): {f}").format(f=", ".join(gone[:8]) + (" …" if len(gone) > 8 else "")))
+        src = _prepare_office(src, tmp, options or {})
         # nome sorgente sicuro (LibreOffice non gradisce alcuni caratteri)
         safe = os.path.join(tmp, "in", "documento" + _ext(src))
         os.makedirs(os.path.dirname(safe))
@@ -1548,9 +1772,7 @@ def office_to_pdf(path, *, password: str | None = None, timeout: float = 180, pr
         outdir = os.path.join(tmp, "out")
         os.makedirs(outdir)
         profile = Path(tmp, "profile").resolve().as_uri()
-        filt = ('pdf:writer_pdf_Export:{"ExportBookmarks":{"type":"boolean","value":"true"},'
-                '"ExportNotes":{"type":"boolean","value":"false"},'
-                '"ExportHiddenSlides":{"type":"boolean","value":"false"}}')
+        filt = _filter_options(options or {})
         cmd = [exe, f"-env:UserInstallation={profile}", "--headless", "--invisible", "--nologo",
                "--nodefault", "--nofirststartwizard", "--nolockcheck", "--norestore",
                "--convert-to", filt, "--outdir", outdir, safe]
@@ -1673,7 +1895,9 @@ def file_to_pdf(path, progress=None, **opts) -> tuple[bytes, list[str]]:
     if ext in MUPDF_DOC_EXTENSIONS:
         return _mupdf_doc_to_pdf(path), warnings
     if ext in OFFICE_EXTENSIONS:
-        return office_to_pdf(path, password=opts.get("password"), progress=progress), warnings
+        office = {k: opts[k] for k in OFFICE_DEFAULTS if k in opts}
+        return office_to_pdf(path, password=opts.get("password"), progress=progress, options=office,
+                             warnings=warnings), warnings
     raise ConversionError(_("Formato «{e}» non supportato.").format(e=ext or name))
 
 

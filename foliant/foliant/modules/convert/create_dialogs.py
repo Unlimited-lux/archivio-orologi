@@ -812,3 +812,96 @@ class CaptureDialog(QDialog):
     def cropped(self):
         sel = self.preview.selection()
         return self.preview._img.copy(sel) if sel is not None else self.preview._img
+
+
+class OfficeOptionsDialog(QDialog):
+    """Opzioni di conversione dei documenti d'ufficio in PDF (CNV-18), ricordate tra le sessioni."""
+
+    KEY = "convert/office_options"
+
+    def __init__(self, parent, *, kinds: set[str], settings=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QCheckBox
+        from .create import OFFICE_DEFAULTS
+        self.setWindowTitle(_("Opzioni dei documenti d'ufficio"))
+        self._settings = settings
+        values = {**OFFICE_DEFAULTS, **self._stored()}
+        lay = QVBoxLayout(self)
+        general = QGroupBox(_("Documento"))
+        g = QFormLayout(general)
+        self.bookmarks = QCheckBox(_("Segnalibri dai titoli"))
+        self.tagged = QCheckBox(_("PDF taggato (accessibile)"))
+        self.comments = QCheckBox(_("Commenti come annotazioni"))
+        self.final_state = QCheckBox(_("Revisioni: stampa lo stato finale senza marcature"))
+        for cb in (self.bookmarks, self.tagged, self.comments, self.final_state):
+            g.addRow(cb)
+        self.image_quality = QSpinBox()
+        self.image_quality.setRange(10, 100)
+        self.image_quality.setSuffix(" %")
+        g.addRow(_("Qualità delle immagini"), self.image_quality)
+        self.max_dpi = _combo([(_("Originale"), 0), ("300 ppi", 300), ("150 ppi", 150), ("96 ppi", 96)])
+        g.addRow(_("Risoluzione massima delle immagini"), self.max_dpi)
+        self.pdfa = _combo([(_("PDF normale"), ""), ("PDF/A-1b", "1b"), ("PDF/A-2b", "2b"), ("PDF/A-3b", "3b")])
+        g.addRow(_("Formato di uscita"), self.pdfa)
+        lay.addWidget(general)
+        self.sheet_box = QGroupBox(_("Fogli di calcolo"))
+        sf = QFormLayout(self.sheet_box)
+        self.sheets = _combo([(_("Tutti i fogli"), "all"), (_("Solo il foglio attivo"), "active")])
+        sf.addRow(_("Fogli"), self.sheets)
+        self.fit_width = QCheckBox(_("Adatta le colonne alla larghezza della pagina"))
+        sf.addRow(self.fit_width)
+        lay.addWidget(self.sheet_box)
+        self.slide_box = QGroupBox(_("Presentazioni"))
+        pf = QFormLayout(self.slide_box)
+        self.notes_pages = QCheckBox(_("Aggiungi le pagine delle note"))
+        self.hidden_slides = QCheckBox(_("Includi le diapositive nascoste"))
+        pf.addRow(self.notes_pages)
+        pf.addRow(self.hidden_slides)
+        lay.addWidget(self.slide_box)
+        self.sheet_box.setVisible("sheet" in kinds)
+        self.slide_box.setVisible("slides" in kinds)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Crea PDF"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.load(values)
+
+    def _stored(self) -> dict:
+        import json
+        if self._settings is None:
+            return {}
+        try:
+            data = json.loads(self._settings.value(self.KEY, "{}") or "{}")
+            return data if isinstance(data, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def load(self, values: dict) -> None:
+        for cb, key in ((self.bookmarks, "bookmarks"), (self.tagged, "tagged"), (self.comments, "comments"),
+                        (self.final_state, "final_state"), (self.fit_width, "fit_width"),
+                        (self.notes_pages, "notes_pages"), (self.hidden_slides, "hidden_slides")):
+            cb.setChecked(bool(values.get(key)))
+        try:
+            self.image_quality.setValue(int(values.get("image_quality", 90)))
+        except (TypeError, ValueError):
+            pass
+        for box, key in ((self.max_dpi, "max_image_dpi"), (self.pdfa, "pdfa"), (self.sheets, "sheets")):
+            i = box.findData(values.get(key))
+            if i >= 0:
+                box.setCurrentIndex(i)
+
+    def values(self) -> dict:
+        return {"bookmarks": self.bookmarks.isChecked(), "tagged": self.tagged.isChecked(),
+                "comments": self.comments.isChecked(), "final_state": self.final_state.isChecked(),
+                "image_quality": self.image_quality.value(), "max_image_dpi": self.max_dpi.currentData(),
+                "pdfa": self.pdfa.currentData(), "sheets": self.sheets.currentData(),
+                "fit_width": self.fit_width.isChecked(), "notes_pages": self.notes_pages.isChecked(),
+                "hidden_slides": self.hidden_slides.isChecked()}
+
+    def _accept(self) -> None:
+        import json
+        if self._settings is not None:
+            self._settings.setValue(self.KEY, json.dumps(self.values()))
+        self.accept()

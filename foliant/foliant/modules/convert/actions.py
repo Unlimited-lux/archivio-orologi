@@ -346,6 +346,9 @@ class ConvertController:
                 + ";;" + _("Tutti i file (*)"))
         if not paths:
             return []
+        office = self._office_options(paths)
+        if office is None:
+            return []
         views = []
         for path in paths:
             ext = Path(path).suffix.lower()
@@ -357,7 +360,7 @@ class ConvertController:
             password = None
             while True:
                 try:
-                    extra = {"password": password} if password else {}
+                    extra = dict(office, **({"password": password} if password else {}))
                     data, warnings = self.ctx.run_task(
                         _("Creazione del PDF…"), lambda progress, path=path, extra=extra: create.file_to_pdf(
                             path, progress=progress, **extra))
@@ -386,6 +389,32 @@ class ConvertController:
             if warnings:
                 self.ctx.status("; ".join(warnings[:3]), 10000)
         return views
+
+    def _office_options(self, paths: list[str]) -> dict | None:
+        """Opzioni per i documenti d'ufficio tra i file scelti ({} se non ce ne sono, None se
+        l'utente annulla); conferma per i fogli di calcolo molto lunghi."""
+        from . import create
+        from .create_dialogs import OfficeOptionsDialog
+        exts = {Path(p).suffix.lower() for p in paths}
+        if not exts & set(create.OFFICE_EXTENSIONS):
+            return {}
+        kinds = set()
+        if exts & {".xlsx", ".xlsm", ".xls", ".ods", ".ots", ".xltx", ".csv"}:
+            kinds.add("sheet")
+        if exts & {".pptx", ".pptm", ".ppt", ".odp", ".otp", ".ppsx", ".pps", ".potx"}:
+            kinds.add("slides")
+        dlg = OfficeOptionsDialog(self.window, kinds=kinds, settings=self.ctx.settings())
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        options = dlg.values()
+        for p in paths:
+            if Path(p).suffix.lower() in (".xlsx", ".xlsm"):
+                n = create.estimate_sheet_pages(p)
+                if n > create.SHEET_PAGE_LIMIT and not self.ctx.confirm(
+                        _("Foglio di calcolo molto lungo"),
+                        _("«{f}» produrrà circa {n} pagine. Vuoi continuare?").format(f=Path(p).name, n=n)):
+                    return None
+        return options
 
     def create_from_images(self, paths: list[str] | None = None):
         """CNV-19: PDF da una o più immagini, con ordine, formato pagina e qualità."""

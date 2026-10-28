@@ -648,3 +648,126 @@ def test_add_ocr_layer_keeps_images(tmp_path):
     assert pages == [1] and "Ricevuta" in res[0].get_text()
     imgs = res[0].get_images(full=True)
     assert len(imgs) == 1 and res.xref_stream(imgs[0][0]) == raw
+
+
+# ------------------------------------------------------- opzioni Office (CNV-18)
+def _revision_docx(path, font: str | None = None):
+    import docx
+    from docx.oxml import parse_xml
+    d = docx.Document()
+    p = d.add_paragraph("Prezzo finale: ")
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    p._p.append(parse_xml(f'<w:del {w} w:id="1" w:author="A" w:date="2026-01-01T00:00:00Z"><w:r>'
+                          '<w:delText>VECCHIO</w:delText></w:r></w:del>'))
+    p._p.append(parse_xml(f'<w:ins {w} w:id="2" w:author="A" w:date="2026-01-01T00:00:00Z"><w:r>'
+                          '<w:t>NUOVO</w:t></w:r></w:ins>'))
+    q = d.add_paragraph()
+    run = q.add_run("Garanzia di dodici mesi")
+    if font:
+        run.font.name = font
+    d.add_comment(run, text="Verificare la durata", author="Ufficio")
+    d.save(path)
+    return str(path)
+
+
+@needs_soffice
+def test_office_options_revisions_comments_tagged_pdfa(tmp_path):
+    path = _revision_docx(tmp_path / "contratto.docx")
+    pdf = _open(create.office_to_pdf(path))
+    text = pdf[0].get_text()
+    assert "NUOVO" in text and "VECCHIO" not in text          # stato finale senza marcature
+    assert not list(pdf[0].annots())                           # commenti non esportati di default
+    marked = _open(create.office_to_pdf(path, options={"final_state": False}))
+    assert "VECCHIO" in marked[0].get_text()
+    pdf = _open(create.office_to_pdf(path, options={"comments": True, "tagged": True, "pdfa": "2b"}))
+    notes = [a.info.get("content", "") for a in pdf[0].annots()]
+    assert any("Verificare la durata" in n for n in notes)
+    assert pdf.xref_get_key(pdf.pdf_catalog(), "StructTreeRoot")[0] == "xref"
+    assert 'pdfaid:part="2"' in pdf.get_xml_metadata() or "<pdfaid:part>2</pdfaid:part>" in pdf.get_xml_metadata()
+
+
+@needs_soffice
+def test_office_spreadsheet_fit_width_and_active_sheet(tmp_path):
+    """Listino largo: «adatta alla larghezza» lo porta su una pagina; «foglio attivo» stampa solo quello."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Listino"
+    for r in range(1, 40):
+        for c in range(1, 31):
+            ws.cell(r, c, f"R{r}C{c} valore")
+    other = wb.create_sheet("Magazzino")
+    other["A1"] = "foglio magazzino"
+    path = tmp_path / "listino.xlsx"
+    wb.save(path)
+    assert create.estimate_sheet_pages(path) == 3 + 1
+    wide = _open(create.office_to_pdf(str(path)))
+    assert wide.page_count > 2
+    fit = _open(create.office_to_pdf(str(path), options={"fit_width": True, "sheets": "active"}))
+    text = "".join(p.get_text() for p in fit)
+    assert fit.page_count == 1 and "R1C30" in text and "magazzino" not in text
+
+
+@needs_soffice
+def test_office_missing_font_warning(tmp_path):
+    path = _revision_docx(tmp_path / "font.docx", font="Carattere Inesistente Foliant")
+    data, warnings = create.file_to_pdf(path)
+    assert _open(data).page_count == 1
+    assert any("Carattere Inesistente Foliant" in w for w in warnings)
+
+
+def test_office_prepare_handles_bad_package(tmp_path):
+    bad = tmp_path / "rotto.xlsx"
+    bad.write_bytes(b"PK\x03\x04 non un pacchetto")
+    assert create._prepare_office(str(bad), str(tmp_path), {"fit_width": True}) == str(bad)
+    assert create.estimate_sheet_pages(bad) == 0 and create.office_fonts(bad) == []
+
+
+def _make_vsdx(path, texts: list[str]) -> str:
+    """VSDX minimo (una forma con testo per pagina), scritto secondo lo schema Visio 2013."""
+    import zipfile
+    ns = 'xmlns="http://schemas.microsoft.com/office/visio/2012/main"'
+    rns = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    vrel = "http://schemas.microsoft.com/visio/2010/relationships"
+    head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    overrides = "".join(f'<Override PartName="/visio/pages/page{i + 1}.xml" '
+                        f'ContentType="application/vnd.ms-visio.page+xml"/>' for i in range(len(texts)))
+    ct = (f'{head}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+          '<Default Extension="xml" ContentType="application/xml"/>'
+          '<Override PartName="/visio/document.xml" ContentType="application/vnd.ms-visio.drawing.main+xml"/>'
+          '<Override PartName="/visio/pages/pages.xml" ContentType="application/vnd.ms-visio.pages+xml"/>'
+          f'{overrides}</Types>')
+    size = '<PageSheet><Cell N="PageWidth" V="8.2677"/><Cell N="PageHeight" V="11.6929"/></PageSheet>'
+    pages = "".join(f'<Page ID="{i}" NameU="P{i + 1}" Name="P{i + 1}">{size}<Rel r:id="rId{i + 1}"/></Page>'
+                    for i in range(len(texts)))
+    rels = "".join(f'<Relationship Id="rId{i + 1}" Type="{vrel}/page" Target="page{i + 1}.xml"/>'
+                   for i in range(len(texts)))
+    geo = "".join(f'<Row T="{t}" IX="{k + 1}"><Cell N="X" V="{x}"/><Cell N="Y" V="{y}"/></Row>' for k, (t, x, y) in
+                  enumerate([("MoveTo", 0, 0), ("LineTo", 4, 0), ("LineTo", 4, 1), ("LineTo", 0, 1), ("LineTo", 0, 0)]))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", ct)
+        z.writestr("_rels/.rels", f'{head}<Relationships xmlns="{rel_ns}"><Relationship Id="rId1" '
+                                  f'Type="{vrel}/document" Target="visio/document.xml"/></Relationships>')
+        z.writestr("visio/document.xml", f"{head}<VisioDocument {ns} {rns}/>")
+        z.writestr("visio/_rels/document.xml.rels", f'{head}<Relationships xmlns="{rel_ns}"><Relationship Id="rId1" '
+                                                    f'Type="{vrel}/pages" Target="pages/pages.xml"/></Relationships>')
+        z.writestr("visio/pages/pages.xml", f"{head}<Pages {ns} {rns}>{pages}</Pages>")
+        z.writestr("visio/pages/_rels/pages.xml.rels", f'{head}<Relationships xmlns="{rel_ns}">{rels}</Relationships>')
+        for i, text in enumerate(texts):
+            z.writestr(f"visio/pages/page{i + 1}.xml",
+                       f'{head}<PageContents {ns}><Shapes><Shape ID="1" Type="Shape"><Cell N="PinX" V="4"/>'
+                       '<Cell N="PinY" V="8"/><Cell N="Width" V="4"/><Cell N="Height" V="1"/>'
+                       '<Cell N="LocPinX" V="2"/><Cell N="LocPinY" V="0.5"/>'
+                       f'<Section N="Geometry" IX="0">{geo}</Section><Text>{text}</Text></Shape></Shapes></PageContents>')
+    return str(path)
+
+
+@needs_soffice
+def test_office_vsdx_pages_and_text(tmp_path):
+    """CNV-18: diagramma VSDX → una pagina per pagina del disegno, testo estraibile."""
+    steps = ["Ricezione orologio", "Perizia e valutazione", "Offerta al cliente"]
+    pdf = _open(create.office_to_pdf(_make_vsdx(tmp_path / "flusso.vsdx", steps)))
+    assert pdf.page_count == 3
+    assert [p.get_text().strip() for p in pdf] == steps

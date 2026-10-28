@@ -856,3 +856,20 @@ EN.update({"Lingue OCR: {l}": "OCR languages: {l}", "Confidenza media OCR: {c:.0
                "check the result.",
            "Pagina {p}: parte del testo non è decodificabile e non è stato possibile riconoscerla con l'OCR.":
                "Page {p}: part of the text cannot be decoded and could not be recognized with OCR."})
+
+# CNV-18: opzioni dei documenti d'ufficio
+EN.update({"Aggiungi le pagine delle note": "Add notes pages", "Commenti come annotazioni": "Comments as annotations",
+           "Segnalibri dai titoli": "Bookmarks from headings", "Solo il foglio attivo": "Active sheet only",
+           "Risoluzione massima delle immagini": "Maximum image resolution",
+           "Opzioni dei documenti d'ufficio": "Office document options",
+           "«{f}» produrrà circa {n} pagine. Vuoi continuare?": "“{f}” will produce about {n} pages. Continue?",
+           "Tutti i fogli": "All sheets",
+           "Revisioni: stampa lo stato finale senza marcature": "Tracked changes: print the final state without markup",
+           "PDF taggato (accessibile)": "Tagged PDF (accessible)",
+           "Adatta le colonne alla larghezza della pagina": "Fit columns to the page width",
+           "Foglio di calcolo molto lungo": "Very long spreadsheet", "PDF normale": "Regular PDF",
+           "Includi le diapositive nascoste": "Include hidden slides", "Fogli di calcolo": "Spreadsheets",
+           "Formato di uscita": "Output format", "Qualità delle immagini": "Image quality",
+           "Presentazioni": "Presentations",
+           "Font non installati, sostituiti con equivalenti (l'impaginazione può cambiare): {f}":
+               "Fonts not installed, replaced with equivalents (the layout may change): {f}"})

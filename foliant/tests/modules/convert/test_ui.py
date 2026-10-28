@@ -867,3 +867,44 @@ def test_scanner_dialog_presets_save_export_import(window, settings, tmp_path, m
     assert dlg.preview_button.isVisible() or not dlg.isVisible()
     dlg.preview_button.click()
     assert dlg.preview_label.pixmap() is not None and not dlg.preview_label.pixmap().isNull()
+
+
+@pytest.mark.skipif(__import__("shutil").which("soffice") is None, reason="LibreOffice non installato")
+def test_create_from_office_with_options(window, ctrl, settings, tmp_path, monkeypatch, messages):
+    """CNV-18: opzioni dei documenti d'ufficio (fogli di calcolo) ricordate; conferma per i fogli lunghi."""
+    import openpyxl
+
+    from foliant.modules.convert import create
+    from foliant.modules.convert.create_dialogs import OfficeOptionsDialog
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for r in range(1, 30):
+        for c in range(1, 26):
+            ws.cell(r, c, f"Ref{r}-{c}")
+    wb.create_sheet("Altro")["A1"] = "foglio da escludere"
+    path = tmp_path / "listino.xlsx"
+    wb.save(path)
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["sheet"] = dlg.sheet_box.isVisibleTo(dlg)
+        seen["slides"] = dlg.slide_box.isVisibleTo(dlg)
+        dlg.fit_width.setChecked(True)
+        dlg.sheets.setCurrentIndex(dlg.sheets.findData("active"))
+        dlg._accept()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(OfficeOptionsDialog, "exec", fake_exec)
+    views = ctrl.create_from_files([str(path)])
+    assert seen == {"sheet": True, "slides": False}
+    assert len(views) == 1 and views[0].document.page_count == 1
+    assert "foglio da escludere" not in views[0].document.page_text(0)
+    remembered = OfficeOptionsDialog(window, kinds={"sheet"}, settings=window.ctx.settings())
+    assert remembered.fit_width.isChecked() and remembered.sheets.currentData() == "active"
+    # foglio molto lungo: conferma; se rifiutata non si crea nulla
+    monkeypatch.setattr(create, "SHEET_PAGE_LIMIT", 1)
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: messages["confirm"].append(m) or False)
+    assert ctrl.create_from_files([str(path)]) == []
+    assert "pagine" in messages["confirm"][-1]
+    # annullando le opzioni non si crea nulla
+    monkeypatch.setattr(OfficeOptionsDialog, "exec", lambda d: QDialog.DialogCode.Rejected)
+    assert ctrl.create_from_files([str(path)]) == []
