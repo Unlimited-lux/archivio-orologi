@@ -982,6 +982,23 @@ class OcrController(QObject):
         self.state(view).placed.setdefault(res.index, []).extend(res.placed)
         view.viewport().update()
 
+    def to_image_only(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        if not self.ctx.confirm(_("PDF solo immagine"), _(
+                "Tutte le pagine diventeranno immagini: il testo non sarà più selezionabile né ricercabile. "
+                "Annotazioni e campi modulo restano. Continuare?")):
+            return
+        try:
+            with view.document.change(_("Converti in PDF solo immagine")) as pdf:
+                n = engine.rasterize_pages(pdf)
+        except Exception as e:
+            self.ctx.error(_("Conversione non riuscita"), str(e))
+            return
+        self.state(view).placed.clear()
+        self.ctx.status(_("{n} pagine convertite in immagine.").format(n=n))
+
     def remove_layer(self) -> None:
         view = self.ctx.current_view()
         if view is None:

@@ -75,7 +75,10 @@ def register(ctx: Context) -> None:
     act_remove = ctx.action(_("Rimuovi livello OCR"), "eraser", controller.remove_layer,
                             tooltip=_("Togli il testo invisibile riconosciuto, lasciando le immagini"))
     controller.actions["remove"] = act_remove
-    for a in (menu_run, act_remove, act_batch, act_langs, act_detect):
+    act_image = ctx.action(_("Converti in PDF solo immagine"), "image", controller.to_image_only,
+                           tooltip=_("Rende ogni pagina un'immagine, senza testo estraibile"))
+    controller.actions["image_only"] = act_image
+    for a in (menu_run, act_remove, act_image, act_batch, act_langs, act_detect):
         ctx.add_menu_action(a, _("OCR"))
 
     controller.review_panel = ReviewPanel(controller)

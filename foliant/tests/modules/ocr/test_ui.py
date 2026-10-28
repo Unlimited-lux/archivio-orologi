@@ -665,3 +665,23 @@ def test_avviso_bassa_risoluzione_visibile(window, tmp_path, monkeypatch):
     assert "Risoluzione bassa" in seen["summary"] and "Risoluzione bassa" in seen["tip"]
     assert any("Risoluzione bassa" in m for m in infos)
     assert any("Risoluzione bassa" in m for m in status)
+
+
+def test_pdf_solo_immagine(window, sample_pdf, monkeypatch):
+    """OCR-18: le pagine diventano immagini senza testo, l'aspetto resta, un Annulla ripristina."""
+    import numpy as np
+    view = window.open_path(sample_pdf)
+    ctl = ocr_controller()
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: True)
+    from foliant.api import ENGINE_LOCK
+    with ENGINE_LOCK:
+        before = np.frombuffer(view.document.pdf[0].get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
+    ctl.actions["image_only"].trigger()
+    with ENGINE_LOCK:
+        page = view.document.pdf[0]
+        assert page.get_text().strip() == "" and len(page.get_images()) == 1
+        after = np.frombuffer(page.get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
+        assert detect.classify_page(page).category == detect.IMAGE_ONLY
+    assert np.abs(before.astype(int) - after.astype(int)).mean() < 3
+    view.document.undo()
+    assert "Orologeria" in view.document.page_text(0)
