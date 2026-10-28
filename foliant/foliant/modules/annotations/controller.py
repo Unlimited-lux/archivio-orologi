@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -84,6 +85,7 @@ class Controller(QObject):
         self.hidden_views: set[int] = set()
         ctx.documentChanged.connect(self._on_document_changed)
         ctx.currentViewChanged.connect(lambda _v: self.clear_selection())
+        self.rename_file_named_stamps()
 
     # ------------------------------------------------------------------ preferenze
     LEGACY_AUTHOR_KEY = "annotations/author"
@@ -244,6 +246,45 @@ class Controller(QObject):
             entry["origin"] = origin
         stamps.append(entry)
         self.ctx.settings().setValue("annotations/custom_stamps", json.dumps(stamps))
+
+    #: nomi generici della libreria («Immagine 3», «Istantanea 2», anche con l'interfaccia inglese)
+    GENERIC_STAMP_NAME = re.compile(r"(Immagine|Istantanea|Image|Snapshot) [1-9][0-9]*")
+
+    def rename_file_named_stamps(self) -> int:
+        """Riservatezza, pulizia una tantum e idempotente: le versioni precedenti davano ai timbri
+        da immagine il nome del file scelto. Ogni voce senza origine «ia» e senza un nome generico
+        diventa «Immagine N»; le impostazioni si riscrivono solo se qualcosa cambia (nessun
+        marcatore). Restituisce il numero di voci rinominate."""
+        try:
+            s = self.ctx.settings()
+            raw = s.value("annotations/custom_stamps", "")
+            data = json.loads(str(raw)) if raw else []
+        except Exception:
+            return 0
+        if not isinstance(data, list):
+            return 0
+        stamps = self.custom_stamps()
+        changed = len(stamps) != len(data)          # voci illeggibili: mai mostrate, si scartano
+        names = {d["name"] for d in stamps}
+        base = _("Immagine")
+        renamed = 0
+        for d in stamps:
+            name = str(d["name"])
+            if d.get("origin") == "ia" or self.GENERIC_STAMP_NAME.fullmatch(name):
+                continue
+            names.discard(name)
+            n = 1
+            while f"{base} {n}" in names:
+                n += 1
+            d["name"] = f"{base} {n}"
+            names.add(d["name"])
+            renamed += 1
+        if renamed or changed:
+            try:
+                s.setValue("annotations/custom_stamps", json.dumps(stamps))
+            except Exception:
+                return 0
+        return renamed
 
     def remove_custom_stamp(self, name: str) -> None:
         stamps = [d for d in self.custom_stamps() if d["name"] != name]

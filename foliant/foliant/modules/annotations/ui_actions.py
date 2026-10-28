@@ -408,7 +408,7 @@ def import_stamp_library(ctrl: "Controller", path: str | None = None) -> int:
         for d in data.get("stamps", []):
             png = base64.b64decode(d["png"])
             pymupdf.Pixmap(png)              # immagine valida
-            ctrl.add_custom_stamp(str(d["name"]), png)
+            ctrl.add_custom_stamp(str(d["name"]), png, origin="ia" if d.get("origin") == "ia" else "")
             n += 1
         for d in data.get("dynamic", []):
             ctrl.add_dynamic_template(str(d["template"]), str(d.get("color", "#2650B3")))
