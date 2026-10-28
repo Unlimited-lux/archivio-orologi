@@ -57,7 +57,7 @@ alla volta in un thread di lavoro. Per ora il modulo security offre un proprio c
 «Policy di protezione › Applica a più file…» (`SecurityController.apply_policy_to_files`).
 Con il registro basterebbe iscrivere `policies.protect_file`.
 
-## 10. Pagina «Sicurezza e riservatezza» delle Preferenze (SEC-32, UX-17)
+## 10. Pagina «Sicurezza e riservatezza» delle Preferenze (SEC-32, UX-17) — risolta (nucleo fa4edea)
 
 La specifica colloca le impostazioni del blocco in Preferenze › Sicurezza e
 riservatezza. Il modulo ha già la pagina (`applock.LockPreferences`, con `apply()`),

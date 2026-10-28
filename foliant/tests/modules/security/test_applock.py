@@ -177,3 +177,7 @@ def test_lock_action_without_code_asks_settings(window, monkeypatch):
     assert len(seen) == 1 and c.applock.locked
     c.applock.attempt(CODE)
     assert not c.applock.locked
+
+
+def test_preferences_page_registered(window):
+    assert "Sicurezza e riservatezza" in [title for title, _f in window.preference_pages()]
