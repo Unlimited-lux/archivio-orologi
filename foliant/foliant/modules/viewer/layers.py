@@ -25,6 +25,7 @@ from .layers_engine import Layer
 ROLE_LAYER = Qt.ItemDataRole.UserRole
 
 EN = {
+    "Altre azioni": "More actions",
     "Livelli": "Layers",
     "Filtra per nome": "Filter by name",
     "Ripristina visibilità iniziale": "Restore initial visibility",
@@ -83,6 +84,8 @@ class LayersPanel(QWidget):
         self.btn_show_all = self._button("eye", _("Mostra tutti"), self.show_all)
         self.btn_more = QToolButton(self)
         bind_icon(self.btn_more, "ellipsis-vertical")
+        self.btn_more.setToolTip(_("Altre azioni"))
+        self.btn_more.setAccessibleName(_("Altre azioni"))
         self.btn_more.setAutoRaise(True)
         self.btn_more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         more = QMenu(self.btn_more)

@@ -186,6 +186,7 @@ class ResultsPanel(QWidget):
         self.export_button = QToolButton(self)
         bind_icon(self.export_button, "download")
         self.export_button.setToolTip(_("Esporta i risultati (CSV)…"))
+        self.export_button.setAccessibleName(_("Esporta i risultati (CSV)…"))
         self.export_button.setAutoRaise(True)
         self.export_button.clicked.connect(lambda: self.controller.export_csv())
         head.addWidget(self.export_button)
