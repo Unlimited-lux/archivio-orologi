@@ -77,9 +77,70 @@ def common_root(paths: list[str]) -> str | None:
         return None
 
 
+def default_workers() -> int:
+    """Processi paralleli predefiniti: core disponibili − 1 (almeno 1)."""
+    return max(1, (os.cpu_count() or 2) - 1)
+
+
+def _convert_one(path: str, out: str, fmt: str, password: str | None, options: dict) -> tuple:
+    """Conversione di un file in un processo separato (nessun oggetto Qt)."""
+    try:
+        result = run_conversion(path, out, fmt, None, password=password, **options)
+        return (WARNINGS if result.warnings else OK), result.paths, "; ".join(result.warnings)
+    except (PasswordRequired, WrongPassword):
+        return SKIPPED, [], _("Protetto da password")
+    except FoliantError as e:
+        return ERROR, [], str(e)
+    except Exception as e:
+        return ERROR, [], _("Errore imprevisto: {e}").format(e=e)
+
+
+def _batch_parallel(items, fmt, out_dir, keep_structure, root, passwords, progress, workers, options):
+    import multiprocessing
+    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+    n = len(items)
+    ctx = multiprocessing.get_context("spawn")
+    done_count = 0
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
+        futures = {}
+        for k, item in enumerate(items):
+            out = output_for(item.path, fmt, out_dir, root, keep_structure)
+            futures[pool.submit(_convert_one, item.path, out, fmt, passwords.get(item.path), options)] = k
+            item.status = "in attesa"
+        pending = set(futures)
+        try:
+            while pending:
+                finished, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+                for fut in finished:
+                    k = futures[fut]
+                    try:
+                        items[k].status, items[k].outputs, items[k].message = fut.result()
+                    except Exception as e:   # processo terminato in modo anomalo
+                        items[k].status, items[k].message = ERROR, _("Errore imprevisto: {e}").format(e=e)
+                    done_count += 1
+                check(progress, done_count / max(1, n), _("File completati: {i} di {n}").format(i=done_count, n=n))
+        except OperationCancelled:
+            for fut in pending:
+                fut.cancel()
+            # i file in corso al momento dell'annullamento sono scartati senza residui
+            for fut in pending:
+                k = futures[fut]
+                try:
+                    status, outputs, _msg = fut.result()
+                except Exception:
+                    outputs = []
+                for p in outputs:
+                    try:
+                        os.unlink(p)
+                    except OSError:
+                        pass
+                items[k].status, items[k].outputs, items[k].message = SKIPPED, [], _("Annullato")
+    return items
+
+
 def batch_convert(files: list[str], fmt: str, *, out_dir: str | None = None, keep_structure: bool = False,
                   root: str | None = None, passwords: dict[str, str] | None = None, progress=None,
-                  **options) -> list[BatchItem]:
+                  workers: int = 1, **options) -> list[BatchItem]:
     """Converte i file uno dopo l'altro; un errore su un file non ferma gli altri.
 
     I file cifrati senza password nota sono saltati e segnalati. Con
@@ -90,6 +151,8 @@ def batch_convert(files: list[str], fmt: str, *, out_dir: str | None = None, kee
     root = root or common_root(files)
     items = [BatchItem(p) for p in files]
     n = len(items)
+    if workers > 1 and n > 1:
+        return _batch_parallel(items, fmt, out_dir, keep_structure, root, passwords, progress, workers, options)
 
     class _Sub:
         """Avanzamento del singolo file riportato su quello complessivo."""

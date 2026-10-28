@@ -665,3 +665,22 @@ def test_pdfa_through_engine(sample_pdf, tmp_path):
     assert pdfa.verify_pdfa(data, "2b") == []
     assert result.details["pdfa"]["compliant"]
     assert os.path.basename(result.paths[0]) == "a.pdf"
+
+
+def test_pptx_comments_as_notes(sample_pdf, tmp_path):
+    from pptx import Presentation
+    doc = pymupdf.open(sample_pdf)
+    doc[1].add_text_annot((100, 300), "Ricordare il prezzo")
+    path = _save(doc, tmp_path / "note.pdf")
+    prs = Presentation(convert_pdf(path, tmp_path / "n.pptx", "pptx")[0])
+    assert prs.slides[1].notes_slide.notes_text_frame.text == "Ricordare il prezzo"
+    assert not prs.slides[0].has_notes_slide
+
+
+def test_ocr_language_from_catalog(tmp_path):
+    from foliant.modules.convert.engine import _lang_to_tesseract
+    doc = pymupdf.open()
+    doc.new_page()
+    assert _lang_to_tesseract(doc) == "ita+eng"
+    doc.xref_set_key(doc.pdf_catalog(), "Lang", "(de-DE)")
+    assert _lang_to_tesseract(doc) == "deu+eng"

@@ -631,3 +631,8 @@ EN.update({
     "Sorgente": "Source",
     "nessuna risposta dallo scanner": "no response from the scanner",
 })
+
+EN.update({
+    "File completati: {i} di {n}": "Files completed: {i} of {n}",
+    "Processi paralleli": "Parallel processes",
+})

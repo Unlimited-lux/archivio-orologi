@@ -187,6 +187,20 @@ class Job:
         return out
 
 
+_LANGS = {"it": "ita", "en": "eng", "de": "deu", "fr": "fra", "es": "spa", "pt": "por", "nl": "nld"}
+
+
+def _lang_to_tesseract(pdf: pymupdf.Document) -> str:
+    """Lingue OCR predefinite dalla chiave /Lang del catalogo (più l'inglese)."""
+    try:
+        kind, val = pdf.xref_get_key(pdf.pdf_catalog(), "Lang")
+        code = val.strip("()").lower()[:2] if kind == "string" else ""
+    except Exception:
+        code = ""
+    main = _LANGS.get(code, "ita")
+    return main if main == "eng" else f"{main}+eng"
+
+
 def _make_work_document(src: pymupdf.Document, pages: list[int]) -> pymupdf.Document:
     """Documento con le sole pagine scelte, nell'ordine scelto (link e segnalibri adattati)."""
     if pages == list(range(src.page_count)):
@@ -223,6 +237,9 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
             name = Path(str(source)).stem if not isinstance(source, (bytes, bytearray)) else \
                 Path(output_path).stem
             name = options.get("name") or name
+            if not options.get("language"):
+                options = dict(options)
+                options["language"] = _lang_to_tesseract(src)
             if fmt.startswith("pdfa"):
                 work = None
                 src_bytes = src.tobytes(garbage=0) if page_list == list(range(src.page_count)) else None

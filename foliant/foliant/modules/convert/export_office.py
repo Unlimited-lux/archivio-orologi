@@ -558,6 +558,12 @@ def write_pptx(work: pymupdf.Document, path: str, job) -> None:
     for pi, pc in enumerate(pages):
         check(job.progress, 0.6 + 0.38 * pi / len(pages), _("Diapositiva {i} di {n}").format(i=pi + 1, n=len(pages)))
         slide = prs.slides.add_slide(blank)
+        if job.options.get("comments_as_notes", True):
+            with ENGINE_LOCK:
+                notes = [a.info.get("content", "").strip() for a in work[pi].annots()
+                         if a.info.get("content", "").strip()]
+            if notes:
+                slide.notes_slide.notes_text_frame.text = "\n".join(notes)
         scale = min(sw / pc.width, sh / pc.height)
         ox, oy = (sw - pc.width * scale) / 2, (sh - pc.height * scale) / 2
 

@@ -72,6 +72,12 @@ class BatchDialog(QDialog):
         self.policy_box.addItem(_("Aggiungi un suffisso numerico"), "rename")
         self.policy_box.addItem(_("Sovrascrivi"), "overwrite")
         form.addRow(_("Se il file esiste"), self.policy_box)
+        from PySide6.QtWidgets import QSpinBox
+        from .batch import default_workers
+        self.workers = QSpinBox()
+        self.workers.setRange(1, max(1, (__import__("os").cpu_count() or 1)))
+        self.workers.setValue(default_workers())
+        form.addRow(_("Processi paralleli"), self.workers)
         lay.addLayout(form)
         self.options_holder = QVBoxLayout()
         lay.addLayout(self.options_holder)
@@ -146,6 +152,7 @@ class BatchDialog(QDialog):
         root = self._roots[0] if len(self._roots) == 1 else common_root(files)
         options = dict(self.panel.values()) if self.panel else {}
         options["policy"] = self.policy_box.currentData()
+        options["workers"] = self.workers.value()
         return files, self.format_box.currentData(), out_dir or None, self.keep.isChecked(), root, options
 
 

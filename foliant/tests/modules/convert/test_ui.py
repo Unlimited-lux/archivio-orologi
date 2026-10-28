@@ -435,3 +435,15 @@ def test_scanner_none_found(window, ctrl, messages):
     ctrl.scanner_backend = Empty()
     assert ctrl.create_from_scanner() is None
     assert "Nessuno scanner" in messages["info"][0][1]
+
+
+def test_batch_parallel(tmp_path):
+    from tests.conftest import make_pdf
+    from foliant.modules.convert.batch import OK, batch_convert
+    files = [make_pdf(tmp_path / f"f{k}.pdf", pages=2, text=f"File {k} pagina {{n}}") for k in range(4)]
+    (tmp_path / "rotto.pdf").write_bytes(b"%PDF-1.4 rotto")
+    files.append(str(tmp_path / "rotto.pdf"))
+    items = batch_convert(files, "txt", out_dir=str(tmp_path / "out"), workers=2)
+    assert [i.status for i in items[:4]] == [OK] * 4 and items[4].status == "errore"
+    for k in range(4):
+        assert "File %d pagina 2" % k in (tmp_path / "out" / f"f{k}.txt").read_text(encoding="utf-8")
