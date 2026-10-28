@@ -82,7 +82,7 @@ class TaskTemplate:
 
 
 def placeholders(text: str) -> set[str]:
-    return set(re.findall(r"\{(\w+)\}", text))
+    return set(re.findall(r"\{(?:parametro:)?(\w+)\}", text))
 
 
 def _b(id_, name, cat, desc, instr, scope="document", params=None, output="text"):
@@ -280,11 +280,12 @@ class TaskStore:
 def build_instructions(task: TaskTemplate, values: dict, scope: engine.Scope, language: str) -> str:
     vals = {p.name: str(values.get(p.name, p.default)) for p in task.params}
     vals.update({"lingua": prompts.language_name(language), "selezione": scope.selection or "",
-                 "pagine": engine.compact_ranges(scope.page_indices) if scope.page_indices else "",
+                 "pagine": _("pagine {p}").format(p=engine.compact_ranges(scope.page_indices))
+                 if scope.page_indices else "",
                  "documento": "the provided document"})
     text = task.instructions
     for k, v in vals.items():
-        text = text.replace("{" + k + "}", v)
+        text = text.replace("{" + k + "}", v).replace("{parametro:" + k + "}", v)
     return text.replace("{{", "{").replace("}}", "}")
 
 

@@ -448,3 +448,13 @@ def test_business_plan_fixed_sections(qtbot, window, ready, fake, sample_pdf):
     rischi = text.split("## Rischi", 1)[1]
     assert "da completare" in rischi
     assert "Use exactly these Markdown headings" in fake.requests[0].system
+
+
+def test_generic_template_pages_placeholder(qtbot, window, ready, fake, text_pdf):
+    window.open_path(text_pdf(5))
+    t = TaskTemplate.from_dict({"name": "Scadenze", "category": "Legale", "output": "table",
+                                "instructions": "Elenca le scadenze in {pagine} per {parametro:parte}",
+                                "params": [{"name": "parte", "default": "il cliente"}]})
+    ready.panel.run_template(t, {"parte": "il venditore"}, "pages", "2-4")
+    wait_done(qtbot, ready.panel)
+    assert "Elenca le scadenze in pagine 2–4 per il venditore" in fake.requests[0].system
