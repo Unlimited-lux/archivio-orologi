@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import itertools
 import logging
 import os
+import sys
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
@@ -18,8 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
-from ..core.document import ACCESS, CONTENT, LOCK, Document
-from ..core.errors import DocumentError, PasswordRequired, WrongPassword
+from ..core.document import ACCESS, CONTENT, LOCK, Document, write_error
+from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import theme
 from .banners import Banner, BannerBar, DocumentTabs
@@ -66,8 +68,24 @@ class PageField(QLineEdit):
 OPEN_FILTER = "Documenti (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.xps *.epub *.svg *.txt);;PDF (*.pdf);;Tutti i file (*)"
 
 
+def release_memory() -> bool:
+    """Restituisce al sistema la memoria già liberata (NFR-06). Con glibc i blocchi delle
+    immagini di pagina di una scheda chiusa restano all'allocatore e la memoria residente
+    resterebbe al picco: `malloc_trim(0)` li rende al sistema. Solo su Linux con glibc."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        if not os.confstr("CS_GNU_LIBC_VERSION").startswith("glibc"):
+            return False
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:           # altra libc o libreria non disponibile: nulla da fare
+        return False
+    return True
+
+
 class MainWindow(QMainWindow):
     _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
+    _memory_timer: QTimer | None = None
 
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
@@ -967,17 +985,53 @@ class MainWindow(QMainWindow):
             self.tabs.removeTab(index)
         view.deleteLater()
         if page is not None:
+            page.release()
             page.deleteLater()                  # contenitore con le barre di avviso
+        # distrutte davvero vista e contenitore, la memoria liberata torna al sistema (NFR-06)
+        (page if page is not None else view).destroyed.connect(self._schedule_memory_release)
         if self.tabs.count() == 0:
             self.show_home()
         self._on_current_changed()
 
-    def save_view(self, view: DocumentView | None, save_as: bool = False) -> bool:
+    def _schedule_memory_release(self, *_args) -> None:
+        """Dopo la chiusura di una o più schede: un solo `release_memory()` al prossimo giro
+        del ciclo degli eventi."""
+        if self._memory_timer is None:
+            self._memory_timer = QTimer(self)
+            self._memory_timer.setSingleShot(True)
+            self._memory_timer.setInterval(0)
+            self._memory_timer.timeout.connect(lambda: release_memory())
+        self._memory_timer.start()
+
+    def save_view(self, view: DocumentView | None, save_as: bool = False, recreate: bool = False) -> bool:
+        """Salva il documento (con `save_as` chiede dove). Se il file è stato eliminato o spostato
+        dopo l'apertura chiede se ricrearlo lì o salvarlo altrove (NFR-12/4); `recreate=True`
+        lo ricrea senza chiedere (l'utente l'ha già scelto, es. dalla barra di avviso)."""
         if view is None:
             return False
         self.commit_pending_edits(view)
         doc = view.document
         path = None
+        missing = doc.path is not None and not os.path.exists(doc.path)
+        if missing and not (save_as or recreate):
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle(_("File eliminato o spostato"))
+            box.setText(_("«{name}» è stato eliminato o spostato dopo l'apertura.").format(name=doc.display_name))
+            box.setInformativeText(_("Puoi ricrearlo nella posizione originale o salvarlo in un'altra posizione."))
+            here = box.addButton(_("Ricrea nella posizione originale"), QMessageBox.ButtonRole.AcceptRole)
+            other = box.addButton(_("Salva con nome…"), QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(other)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is other:
+                save_as = True
+            elif clicked is here:
+                recreate = True
+            else:
+                return False
+        recreate = missing and recreate and not save_as
         if not (save_as or doc.needs_save_as) and doc.disk_changed():
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
@@ -994,7 +1048,7 @@ class MainWindow(QMainWindow):
                 save_as = True
             elif clicked is not overwrite:
                 return False
-        as_new = save_as or doc.needs_save_as
+        as_new = save_as or (doc.needs_save_as and not recreate)
         info = {"path": None if as_new or doc.path is None else str(doc.path), "copy": False}
         if not self.ctx.run_guards("save_as" if as_new else "save", view, info):
             return False
@@ -1003,7 +1057,14 @@ class MainWindow(QMainWindow):
             if not path:
                 return False
         try:
+            if recreate:
+                try:
+                    doc.path.parent.mkdir(parents=True, exist_ok=True)   # anche la cartella era sparita
+                except OSError as e:
+                    raise write_error(doc.path, e) from e
             doc.save(path)
+        except DocumentWriteError as e:         # disco pieno, cartella non scrivibile…: il documento resta modificato
+            return self._write_failed(e, _("Salva con nome…"), lambda: self.save_view(view, save_as=True))
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
             return False
@@ -1029,10 +1090,27 @@ class MainWindow(QMainWindow):
         try:
             view.document.save_copy(path)
             self.statusBar().showMessage(_("Copia salvata: {p}").format(p=path), 4000)
+        except DocumentWriteError as e:
+            return self._write_failed(e, _("Scegli un'altra posizione…"), lambda: self.save_copy(view))
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
             return False
         return True
+
+    def _write_failed(self, error: DocumentWriteError, other_label: str, other: Callable[[], bool]) -> bool:
+        """Scrittura non riuscita (NFR-08, NFR-15): il messaggio dice causa e azione e propone
+        un'altra posizione. Restituisce l'esito di `other` se l'utente la sceglie."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Salvataggio non riuscito"))
+        box.setText(str(error))
+        retry = box.addButton(other_label, QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Chiudi"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(retry)
+        box.exec()
+        if box.clickedButton() is retry:
+            return other()
+        return False
 
     def undo(self) -> None:
         view = self.current_view()
