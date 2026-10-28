@@ -906,3 +906,19 @@ def test_dialogo_ocr_con_zone_e_profilo(window, settings, monkeypatch, scan_two)
     prof["zones"] = [{"rect": [0, 0, 1, 1], "kind": "text", "languages": ["deu"]}]
     other.load_profile(prof)
     assert not other.ok_button.isEnabled() and "tedesco" in other.error.text()
+
+
+def test_ocr_in_background_pausa_e_ripresa(window, qtbot, tmp_path):
+    """OCR-13: in pausa non partono nuove pagine; alla ripresa il lavoro si completa."""
+    imgs = [scan_image(lines=[f"Pagina numero {n} della prova"], dpi=120) for n in range(4)]
+    view = window.open_path(image_pdf(tmp_path / "p.pdf", imgs, dpi=120))
+    ctl = ocr_controller()
+    job = ctl.run_background(view, engine.OcrOptions(languages=["ita"], workers=1), [0, 1, 2, 3], preview=False)
+    assert ctl.toggle_pause(view) is True and job.bar.btn_pause.text() == "Riprendi"
+    qtbot.wait(2500)
+    frozen = job.progress.fraction
+    qtbot.wait(1500)
+    assert job.progress.fraction == frozen and frozen < 1.0 and not job.done
+    assert ctl.toggle_pause(view) is False
+    _wait_job(qtbot, ctl, view)
+    assert all(view.document.page_text(i).strip() for i in range(4))

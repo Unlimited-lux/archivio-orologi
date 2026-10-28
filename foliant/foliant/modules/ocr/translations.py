@@ -373,4 +373,7 @@ EN = {
     'Lingue delle zone non installate: {l}.': 'Zone languages not installed: {l}.',
     'Nessuno (layout automatico)': 'None (automatic layout)',
     'Modello di zone:': 'Zone template:',
+    'Pausa': 'Pause',
+    'Riprendi': 'Resume',
+    'In pausa: {d} di {t} pagine riconosciute.': 'Paused: {d} of {t} pages recognized.',
 }

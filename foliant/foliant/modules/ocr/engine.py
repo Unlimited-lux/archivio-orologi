@@ -27,6 +27,7 @@ import math
 import os
 import re
 import threading
+import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -481,6 +482,10 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
             return True
         return False
 
+    def paused() -> bool:
+        fn = getattr(progress, "is_paused", None)
+        return bool(fn()) if callable(fn) else False
+
     def report(done: int, text: str) -> None:
         if progress is not None:
             progress.update(done / len(indices), text)
@@ -509,6 +514,11 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
             exhausted = False
             while pending or not exhausted:
                 while not exhausted and len(pending) < workers * 2:
+                    # pausa (OCR-13): nessuna nuova pagina finché dura; le pagine in corso terminano
+                    while paused() and not cancelled():
+                        time.sleep(0.1)
+                        if not pending:
+                            report(done, _("In pausa: {d} di {t} pagine riconosciute.").format(d=done, t=len(indices)))
                     try:
                         index = next(it)
                     except StopIteration:

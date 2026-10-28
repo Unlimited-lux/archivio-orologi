@@ -159,10 +159,32 @@ class ProposalBar(QFrame):
 
 
 # =================================================================== OCR in background
+def _pausable_progress():
+    """Avanzamento con pausa: l'engine non avvia nuove pagine finché è in pausa."""
+    import threading
+
+    from foliant.api import Progress
+
+    class PausableProgress(Progress):
+        def __init__(self):
+            super().__init__()
+            self._pause = threading.Event()
+
+        def pause(self) -> None:
+            self._pause.set()
+
+        def resume(self) -> None:
+            self._pause.clear()
+
+        def is_paused(self) -> bool:
+            return self._pause.is_set()
+    return PausableProgress()
+
+
 class JobBar(QFrame):
     """Avanzamento dell'OCR in background, in cima alla vista: il documento resta consultabile."""
 
-    def __init__(self, view, on_cancel):
+    def __init__(self, view, on_cancel, on_pause=None):
         from PySide6.QtWidgets import QProgressBar
         super().__init__(view)
         self.setObjectName("ocrJobBar")
@@ -178,6 +200,11 @@ class JobBar(QFrame):
         self.bar.setRange(0, 1000)
         self.bar.setFixedWidth(180)
         lay.addWidget(self.bar)
+        self.btn_pause = QPushButton(_("Pausa"), self)
+        self.btn_pause.setVisible(on_pause is not None)
+        if on_pause is not None:
+            self.btn_pause.clicked.connect(on_pause)
+        lay.addWidget(self.btn_pause)
         self.btn_cancel = QPushButton(_("Annulla"), self)
         self.btn_cancel.clicked.connect(on_cancel)
         lay.addWidget(self.btn_cancel)
@@ -834,7 +861,6 @@ class OcrController(QObject):
         solo passo; se nel frattempo il documento è cambiato, solo alle pagine rimaste identiche."""
         import threading
 
-        from foliant.api import Progress
         if self.jobs.get(view) is not None:
             self.ctx.info(_("Riconoscimento del testo"), _("Il riconoscimento di questo documento è già in corso."))
             return None
@@ -844,7 +870,7 @@ class OcrController(QObject):
         with ENGINE_LOCK:
             data = engine.document_copy_bytes(doc.pdf)
             prints = engine.page_fingerprints(doc.pdf)
-        job = OcrJob(view, opts, pages, preview, new_document, data, doc.version, prints, Progress())
+        job = OcrJob(view, opts, pages, preview, new_document, data, doc.version, prints, _pausable_progress())
         self.jobs[view] = job
 
         def work():
@@ -853,7 +879,7 @@ class OcrController(QObject):
             except BaseException as e:  # riportata all'interfaccia
                 job.error = e
             job.done = True
-        job.bar = JobBar(view, lambda: job.progress.cancel())
+        job.bar = JobBar(view, lambda: self.cancel_job(view), lambda: self.toggle_pause(view))
         job.bar.place()
         job.thread = threading.Thread(target=work, name="foliant-ocr-job", daemon=True)
         job.timer = QTimer(self)
@@ -911,7 +937,22 @@ class OcrController(QObject):
     def cancel_job(self, view) -> None:
         job = self.jobs.get(view)
         if job is not None:
+            job.progress.resume()
             job.progress.cancel()
+
+    def toggle_pause(self, view) -> bool:
+        """Mette in pausa o riprende l'OCR in background; restituisce True se ora è in pausa."""
+        job = self.jobs.get(view)
+        if job is None:
+            return False
+        if job.progress.is_paused():
+            job.progress.resume()
+        else:
+            job.progress.pause()
+        paused = job.progress.is_paused()
+        if job.bar is not None:
+            job.bar.btn_pause.setText(_("Riprendi") if paused else _("Pausa"))
+        return paused
 
     def _complete(self, view, opts, result, error, data: bytes, preview: bool, new_document: bool,
                   changed_pages: set[int] | None = None) -> engine.OcrResult | None:
