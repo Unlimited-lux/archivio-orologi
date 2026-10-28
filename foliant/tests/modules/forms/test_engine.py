@@ -555,3 +555,23 @@ def test_fill_blocked_by_permissions(tmp_path):
     again = pymupdf.open(str(path))
     assert E.fill_blocked_reason(again)
     assert E.fill_blocked_reason(build_form()) is None
+
+
+def test_formula_field():
+    pdf = pymupdf.open()
+    pdf.new_page()
+    xs = {n: E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 40 + 30 * i, 200, 58 + 30 * i), n)
+          for i, n in enumerate(("Imponibile", "Sconto", "Totale", "c"))}
+    E.update_properties(pdf, 0, xs["Totale"], formula="Imponibile * 1.22 - Sconto")
+    E.apply_values(pdf, {"Imponibile": "100", "Sconto": "10"})
+    E.recalculate(pdf)
+    again = reopen(pdf)
+    t = one(again, "Totale")
+    assert t.value == "112" and t.formula.expression == "Imponibile * 1.22 - Sconto"
+    assert E.custom_scripts(again) == []
+    E.update_properties(pdf, 0, xs["Totale"], formula="(Imponibile + Sconto) / c")
+    E.recalculate(pdf)
+    assert one(pdf, "Totale").value == ""
+    with pytest.raises(E.FormError):
+        E.update_properties(pdf, 0, xs["Totale"], formula="Imponibile * Inesistente")
+    assert E.find_cycle(pdf, "Imponibile", E.FX.parse("Totale + 1")) == ["Imponibile", "Totale", "Imponibile"]

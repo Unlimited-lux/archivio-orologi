@@ -42,7 +42,7 @@ def form():
 
 
 def reopen(pdf: pymupdf.Document) -> pymupdf.Document:
-    return pymupdf.open("pdf", pdf.tobytes(garbage=3, deflate=True))
+    return pymupdf.open("pdf", pdf.tobytes(deflate=True))  # garbage>1 rinumera anche il documento vivo
 
 
 @pytest.fixture(autouse=True)

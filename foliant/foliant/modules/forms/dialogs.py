@@ -235,3 +235,9 @@ def ask_calc_order(parent: QWidget, order: list[str], problems, auto) -> list[st
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return None
     return names()
+
+
+def ask_text(parent: QWidget, title: str, label: str, default: str = "") -> str | None:
+    from PySide6.QtWidgets import QInputDialog
+    text, ok = QInputDialog.getText(parent, title, label, text=default)
+    return text.strip() if ok and text.strip() else None

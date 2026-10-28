@@ -26,11 +26,12 @@ def register(ctx) -> None:
         add_translations("en", PANEL_EN)
     except Exception:
         pass
-    try:
-        from .fields_panel import TRANSLATIONS as FIELDS_EN
-        add_translations("en", FIELDS_EN)
-    except Exception:
-        pass
+    for name in ("fields_panel", "formula", "batch"):
+        try:
+            mod = __import__(f"{__name__}.{name}", fromlist=["TRANSLATIONS"])
+            add_translations("en", mod.TRANSLATIONS)
+        except Exception:
+            pass
     _module = FormsModule(ctx)
     _module.register()
 

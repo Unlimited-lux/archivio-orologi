@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import io
 import json
 import xml.etree.ElementTree as ET
@@ -342,3 +343,27 @@ def test_xfa_export_import_data(window, tmp_path):
     with pytest.raises(E.FormError) as exc:
         E.import_xfa_data(again, bad.read_bytes())
     assert "riga 2" in str(exc.value)
+
+
+def test_collect_and_series_from_window(window, tmp_path, form_pdf):
+    view = open_form(window, form_pdf)
+    paths = []
+    for i in range(3):
+        pdf = build_form()
+        E.apply_values(pdf, {"nome": f"N{i}"})
+        p = tmp_path / f"c{i}.pdf"
+        pdf.save(str(p))
+        paths.append(str(p))
+    out = tmp_path / "raccolta.csv"
+    report = module().collect(paths, str(out))
+    rows = list(csv.reader(io.StringIO(out.read_text())))
+    assert len(rows) == 4 and rows[0][0] == "File" and rows[1][0] == "c0.pdf"
+    src = tmp_path / "serie.csv"
+    src.write_text("nome,cognome\nAnna,Rossi\nLuca,Rossi\n")
+    outdir = tmp_path / "serie"
+    outdir.mkdir()
+    rep = module().fill_series(str(src), str(outdir), "{cognome}.pdf", view)
+    names = sorted(os.path.basename(p) for p in rep["created"])
+    assert names == ["Rossi (2).pdf", "Rossi.pdf"]
+    assert E.form_values(pymupdf.open(str(outdir / "Rossi (2).pdf")))["nome"] == "Luca"
+    del report

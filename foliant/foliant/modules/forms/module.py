@@ -142,12 +142,15 @@ class FormsModule(QObject):
         self.act_flatten = ctx.action(_("Appiattisci modulo…"), "layers", self.flatten_dialog)
         self.act_recalc = ctx.action(_("Ricalcola"), "calculator", self.recalculate)
         self.act_check = ctx.action(_("Verifica modulo"), "list-checks", self.check_form)
+        self.act_collect = ctx.action(_("Raccogli dati da più PDF…"), "table", self.collect_dialog, requires_document=False)
+        self.act_series = ctx.action(_("Compila in serie da CSV…"), "files", self.series_dialog)
         self.act_calc_order = ctx.action(_("Ordine di calcolo…"), "list-ordered", self.calc_order_dialog)
         self.act_xfa = ctx.action(_("Converti in modulo standard"), "file-check", self.convert_xfa)
         self.act_xfa_export = ctx.action(_("Esporta dati XML…"), "file-output", self.export_xfa_dialog)
         self.act_xfa_import = ctx.action(_("Importa dati XML…"), "file-input", self.import_xfa_dialog)
         data_menu = QMenu(_("Dati"), ctx.window)
         for a in (self.act_import, self.act_export, None, self.act_reset, self.act_recalc, self.act_calc_order, self.act_check,
+                  None, self.act_collect, self.act_series,
                   None, self.act_flatten, None, self.act_xfa_export, self.act_xfa_import, self.act_xfa):
             if a is None:
                 data_menu.addSeparator()
@@ -171,7 +174,7 @@ class FormsModule(QObject):
         eb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         eb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         mode.add_widget(eb)
-        for a in (self.act_import, self.act_export, self.act_reset, self.act_flatten):
+        for a in (self.act_import, self.act_export, self.act_reset, self.act_flatten, self.act_collect, self.act_series):
             ctx.add_menu_action(a, _("Moduli"))
         mode.entered.connect(self.enter_design)
         mode.left.connect(self.leave_design)
@@ -463,6 +466,20 @@ class FormsModule(QObject):
                     if cycle:
                         self.ctx.error(_("Calcolo"), _("Il calcolo creerebbe un ciclo: {c}.").format(c=" → ".join(cycle)))
                         return False
+        if props.get("formula"):
+            from . import formula as FX
+            try:
+                parsed = FX.parse(props["formula"]) if isinstance(props["formula"], str) else props["formula"]
+            except FX.FormulaError as e:
+                self.ctx.error(_("Formula"), _("{m} (posizione {p}).").format(m=e.message, p=e.position + 1))
+                return False
+            with ENGINE_LOCK:
+                for page, xref in keys:
+                    name = E.field_info(view.document.pdf, page, xref).name
+                    cycle = E.find_cycle(view.document.pdf, name, parsed)
+                    if cycle:
+                        self.ctx.error(_("Calcolo"), _("Il calcolo creerebbe un ciclo: {c}.").format(c=" → ".join(cycle)))
+                        return False
         if "name" in props and len(keys) == 1:
             page, xref = keys[0]
             try:
@@ -483,7 +500,7 @@ class FormsModule(QObject):
         def run(pdf):
             for page, xref in keys:
                 E.update_properties(pdf, page, xref, **props)
-            if "calc" in props:
+            if "calc" in props or "formula" in props:
                 E.recalculate(pdf)
             return True
 
@@ -900,6 +917,75 @@ class FormsModule(QObject):
         paths = self.ctx.ask_open_paths(_("Importa dati XML"), "XML (*.xml)", multiple=False)
         if paths:
             self.import_xfa(paths[0])
+
+    # ================================================================ elaborazione multipla
+    def collect(self, paths: list[str], out_path: str) -> dict:
+        from . import batch as B
+        return self.ctx.run_task(_("Raccolta dei dati dei moduli"), lambda progress: B.collect_csv(
+            paths, out_path, progress=lambda fr, t: progress.update(fr, t)))
+
+    def collect_dialog(self) -> None:
+        paths = self.ctx.ask_open_paths(_("Scegli i PDF compilati"))
+        if not paths:
+            return
+        out = self.ctx.ask_save_path(_("Salva i dati raccolti"), "dati_moduli.csv", "CSV (*.csv)", ".csv")
+        if not out:
+            return
+        try:
+            report = self.collect(paths, out)
+        except OperationCancelled:
+            return
+        except Exception as e:
+            self.ctx.error(_("Raccogli dati"), str(e))
+            return
+        lines = [_("Righe scritte: {n}").format(n=report.get("rows", 0))]
+        lines += [f"{os.path.basename(p)}: {m}" for p, m in report.get("errors", [])]
+        self.ctx.info(_("Raccogli dati"), "\n".join(lines))
+
+    def fill_series(self, csv_path: str, out_dir: str, pattern: str, view=None) -> dict:
+        import tempfile
+        from . import batch as B
+        view = view or self.ctx.current_view()
+        with open(csv_path, "rb") as fh:
+            records = X.csv_records(fh.read())
+        data = view.document.to_bytes()
+        fd, template = tempfile.mkstemp(suffix=".pdf")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        try:
+            return self.ctx.run_task(_("Compilazione in serie"), lambda progress: B.fill_series(
+                template, records, out_dir, pattern, progress=lambda fr, t: progress.update(fr, t)))
+        finally:
+            os.unlink(template)
+
+    def series_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        paths = self.ctx.ask_open_paths(_("Scegli il file CSV con i dati"), "CSV (*.csv)", multiple=False)
+        if not paths:
+            return
+        out_dir = self.ctx.ask_directory(_("Cartella per i PDF compilati"))
+        if not out_dir:
+            return
+        from .dialogs import ask_text
+        pattern = ask_text(self.ctx.window, _("Nomi dei file"),
+                           _("Modello del nome ({Campo} = valore del campo, {n} = numero di riga):"), "{n}.pdf")
+        if not pattern:
+            return
+        try:
+            report = self.fill_series(paths[0], out_dir, pattern, view)
+        except OperationCancelled:
+            return
+        except Exception as e:
+            self.ctx.error(_("Compila in serie"), str(e))
+            return
+        lines = [_("PDF creati: {n}").format(n=len(report.get("created", [])))]
+        if report.get("unknown"):
+            lines.append(_("Colonne senza campo corrispondente: {l}").format(l=", ".join(report["unknown"])))
+        for row, fieldname, msg in report.get("errors", [])[:30]:
+            lines.append(_("Riga {r}, campo «{f}»: {m}").format(r=row, f=fieldname, m=msg))
+        self.ctx.info(_("Compila in serie"), "\n".join(lines))
 
     # ================================================================ rilevamento
     def detect_fields(self) -> None:

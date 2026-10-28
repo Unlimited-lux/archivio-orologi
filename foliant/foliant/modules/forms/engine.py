@@ -24,6 +24,7 @@ import pymupdf
 from foliant.i18n import _
 
 from . import formats as fm
+from . import formula as FX
 from . import pdfsyntax as ps
 from .formats import Format, parse_number, parse_date
 
@@ -250,6 +251,7 @@ class FieldInfo:
     default: Any = None
     fmt: Format = field(default_factory=Format)
     calc: Calculation | None = None
+    formula: "FX.Formula | None" = None
     validation: Validation = field(default_factory=Validation)
 
     @property
@@ -446,7 +448,9 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.comb = bool(flags & pymupdf.PDF_TX_FIELD_IS_COMB)
         info.maxlen = int(w.text_maxlen or 0)
         info.fmt = Format.from_script(_action_script(pdf, w.xref, "F") or w.script_format)
-        info.calc = Calculation.from_script(_action_script(pdf, w.xref, "C") or w.script_calc)
+        c_js = _action_script(pdf, w.xref, "C") or w.script_calc
+        info.calc = Calculation.from_script(c_js)
+        info.formula = FX.from_script(c_js) if info.calc is None else None
         info.validation = Validation.from_script(_action_script(pdf, w.xref, "V"))
     elif kind in (CHECKBOX, RADIO):
         info.export = _on_state(w)
@@ -972,7 +976,15 @@ def expand_names(names: Iterable[str], all_names: Iterable[str]) -> list[str]:
 
 def _dependencies(fields: list[FieldInfo]) -> dict[str, list[str]]:
     names = [f.name for f in fields]
-    return {f.name: expand_names(f.calc.fields, names) for f in fields if f.kind == TEXT and f.calc}
+    out = {}
+    for f in fields:
+        if f.kind != TEXT or f.name in out:
+            continue
+        if f.calc:
+            out[f.name] = expand_names(f.calc.fields, names)
+        elif f.formula:
+            out[f.name] = expand_names(f.formula.names, names)
+    return out
 
 
 def find_cycle(pdf: pymupdf.Document, target: str, calc: Calculation | None) -> list[str] | None:
@@ -983,7 +995,8 @@ def find_cycle(pdf: pymupdf.Document, target: str, calc: Calculation | None) -> 
     if calc is None:
         deps.pop(target, None)
     else:
-        deps[target] = expand_names(calc.fields, names)
+        refs = calc.fields if isinstance(calc, Calculation) else calc.names
+        deps[target] = expand_names(refs, names)
 
     def visit(node, path):
         for d in deps.get(node, []):
@@ -1027,7 +1040,7 @@ def calc_order(pdf: pymupdf.Document) -> list[str]:
     by_xref = {f.field_xref: f.name for f in fields}
     names = [by_xref[x] for x in _calc_order(pdf) if x in by_xref]
     for f in fields:
-        if f.kind == TEXT and f.calc and f.name not in names:
+        if f.kind == TEXT and (f.calc or f.formula) and f.name not in names:
             names.append(f.name)
     return [n for i, n in enumerate(names) if n not in names[:i]]
 
@@ -1044,7 +1057,7 @@ def set_calc_order(pdf: pymupdf.Document, names: list[str]) -> None:
     fields = list_fields(pdf)
     by_name = {}
     for f in fields:
-        if f.kind == TEXT and f.calc:
+        if f.kind == TEXT and (f.calc or f.formula):
             by_name.setdefault(f.name, f.field_xref)
     xrefs = [by_name[n] for n in names if n in by_name]
     xrefs += [x for x in by_name.values() if x not in xrefs]
@@ -1071,7 +1084,7 @@ def recalculate(pdf: pymupdf.Document) -> list[str]:
             values.setdefault(f.name, export_value(f))
     first = {}
     for f in fields:
-        if f.name in deps and f.name not in first:
+        if f.name in deps and f.name not in first and (f.calc or f.formula):
             first[f.name] = f
     changed: list[str] = []
     for name in calc_order(pdf):
@@ -1085,8 +1098,11 @@ def recalculate(pdf: pymupdf.Document) -> list[str]:
                 v = v[0] if v else None
             n = parse_number(v)
             nums.append(n if n is not None else 0.0)
-        result = compute(f.calc.op, nums)
-        text = fm.canonical_number(result, f.fmt.decimals if f.fmt.numeric else None)
+        if f.calc is not None:
+            result = compute(f.calc.op, nums)
+        else:
+            result = FX.evaluate(f.formula, values)
+        text = "" if result is None else fm.canonical_number(result, f.fmt.decimals if f.fmt.numeric else None)
         if values.get(name) != text:
             values[name] = text
             set_value(pdf, f.page, f.xref, text)
@@ -1366,7 +1382,7 @@ def custom_scripts(pdf: pymupdf.Document) -> list[tuple[str, str]]:
             js = _action_script(pdf, f.xref, trig)
             if not js:
                 continue
-            if trig == "C" and Calculation.from_script(js):
+            if trig == "C" and (Calculation.from_script(js) or FX.from_script(js)):
                 continue
             if trig == "V" and (Validation.from_script(js).empty is False):
                 continue
@@ -1510,6 +1526,19 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         if "calc" in props:
             calc = props["calc"]
             _set_action(pdf, fx, "C", calc.script() if calc and calc.fields else None)
+        if "formula" in props:
+            expr = props["formula"]
+            if expr:
+                try:
+                    formula = FX.parse(expr) if isinstance(expr, str) else expr
+                except FX.FormulaError as e:
+                    raise FormError(e.message) from e
+                unknown = FX.check(formula, {f.name for f in list_fields(pdf)})
+                if unknown:
+                    raise FormError(_("Campi inesistenti nella formula: {n}").format(n=", ".join(unknown)))
+                _set_action(pdf, fx, "C", FX.to_script(formula))
+            else:
+                _set_action(pdf, fx, "C", None)
         if "validation" in props:
             _set_action(pdf, fx, "V", (props["validation"] or Validation()).script())
     if kind in (COMBO, LIST):
@@ -1642,7 +1671,7 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
             pdf.xref_set_key(xref, "AS", ps.encode_name(state))
     else:
         _regen_field(pdf, fx, page, xref)
-    if "calc" in props:
+    if "calc" in props or "formula" in props:
         _set_calc_order(pdf)
 
 
