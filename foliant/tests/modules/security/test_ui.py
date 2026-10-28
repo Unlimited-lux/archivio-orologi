@@ -917,3 +917,26 @@ def test_protect_dialog_not_truncated(qtbot):
     assert dlg.width() >= dlg.minimumSizeHint().width()
     cb = dlg.perm_boxes["assemble"]
     assert cb.width() >= cb.sizeHint().width()
+
+
+def test_open_many_annotations_fast(window, sec, tmp_path):
+    import time
+    from tests.modules.security.conftest import build_many_annots
+    view = window.open_path(build_many_annots(tmp_path / "annot.pdf"))
+    assert sec.scans[view.document].comments == 2000
+    t = time.perf_counter()
+    sec.on_document_opened(view)          # quota del modulo nell'apertura
+    assert time.perf_counter() - t < 0.5
+
+
+def test_scan_many_fields_fast(tmp_path):
+    import time
+    from foliant.modules.security import sanitize as S
+    from tests.modules.security.conftest import build_many_fields
+    pdf = pymupdf.open(build_many_fields(tmp_path / "campi.pdf"))
+    t = time.perf_counter()
+    rep = S.scan(pdf)
+    assert time.perf_counter() - t < 0.5 and rep.form_fields == 5000
+    t = time.perf_counter()
+    assert R.marks(pdf) == [] and not R.has_marks(pdf)
+    assert time.perf_counter() - t < 0.3

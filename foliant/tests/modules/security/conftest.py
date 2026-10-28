@@ -120,3 +120,38 @@ def cyclic_pdf(tmp_path):
              permissions=pymupdf.PDF_PERM_PRINT)
     doc.close()
     return str(path)
+
+
+def build_many_fields(path, count: int = 5000) -> str:
+    """PDF di una pagina con `count` campi di testo, costruito a oggetti (veloce)."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    xrefs = []
+    for n in range(count):
+        x = doc.get_new_xref()
+        x0, y0 = 10 + (n % 50) * 11, 10 + (n // 50) * 8
+        doc.update_object(x, f"<< /Type /Annot /Subtype /Widget /FT /Tx /T (c{n}) /V (valore {n}) "
+                             f"/Rect [{x0} {y0} {x0 + 10} {y0 + 7}] /P {page.xref} 0 R >>")
+        xrefs.append(x)
+    refs = " ".join(f"{x} 0 R" for x in xrefs)
+    doc.xref_set_key(page.xref, "Annots", f"[{refs}]")
+    doc.xref_set_key(doc.pdf_catalog(), "AcroForm", f"<< /Fields [{refs}] >>")
+    doc.save(str(path))
+    doc.close()
+    return str(path)
+
+
+def build_many_annots(path, count: int = 2000) -> str:
+    doc = pymupdf.open()
+    page = doc.new_page()
+    xrefs = []
+    for n in range(count):
+        x = doc.get_new_xref()
+        x0, y0 = 10 + (n % 50) * 10, 10 + (n // 50) * 10
+        doc.update_object(x, f"<< /Type /Annot /Subtype /Text /Contents (n{n}) "
+                             f"/Rect [{x0} {y0} {x0 + 8} {y0 + 8}] /P {page.xref} 0 R >>")
+        xrefs.append(x)
+    doc.xref_set_key(page.xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in xrefs) + "]")
+    doc.save(str(path))
+    doc.close()
+    return str(path)

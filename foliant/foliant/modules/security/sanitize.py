@@ -61,70 +61,108 @@ def _uri_of(obj: str) -> str | None:
     return m.group(1) if m else None
 
 
-def scan(pdf: pymupdf.Document, max_objects: int = 400_000) -> ScanReport:
-    """Cerca script, azioni e collegamenti esterni, file incorporati, livelli nascosti."""
+_RX_ACTION_REF = re.compile(
+    r"/(OpenAction|A|O|C|U|D|K|F|V|E|X|Fo|Bl|PO|PC|PV|PI|WC|WS|DS|WP|DP)\s+(\d+)\s+0\s+R")
+
+
+def scan(pdf: pymupdf.Document, max_objects: int = 400_000, chunk: int = 2000) -> ScanReport:
+    """Cerca script, azioni e collegamenti esterni, file incorporati, livelli nascosti.
+
+    Costo lineare: non carica annotazioni né campi come oggetti. Il lock del motore
+    viene preso a blocchi di `chunk` oggetti, così può girare fuori dal thread
+    dell'interfaccia senza bloccarla."""
+    from foliant.api import ENGINE_LOCK
+
+    from .redaction import iter_pages
+
     rep = ScanReport()
     uris: set[str] = set()
-    if not pdf.is_pdf:
-        return rep
-    locations = _locations(pdf)
-    n = min(pdf.xref_length(), max_objects)
-    for xref in range(1, n):
-        try:
-            obj = pdf.xref_object(xref, compressed=True)
-        except Exception:
-            continue
-        if not obj or obj == "null":
-            continue
-        if "/S" in obj or "/JS" in obj:
-            where = locations.get(xref, _("Documento"))
-            if _RX_JS.search(obj):
-                rep.javascript += 1
-                rep.items.append(("javascript", where, _js_code(pdf, xref)))
-            if _RX_LAUNCH.search(obj):
-                rep.launch += 1
-                rep.items.append(("launch", where, _target(obj)))
-            if _RX_GOTOR.search(obj):
-                rep.remote_files += 1
-                rep.items.append(("remote", where, _target(obj)))
-            if _RX_SUBMIT.search(obj):
-                rep.submit_forms += 1
-                rep.items.append(("submit", where, _target(obj)))
-            if _RX_URI.search(obj):
-                # stringa decodificata dal motore (niente escape PDF grezzi, bug_10)
+    with ENGINE_LOCK:
+        if not pdf.is_pdf:
+            return rep
+        cat = pdf.pdf_catalog()
+        owner_page: dict[int, int] = {}       # xref di pagina o annotazione → pagina
+        for i, page in iter_pages(pdf):
+            try:
+                owner_page[page.xref] = i
+                for link in page.get_links():
+                    if link.get("kind") == pymupdf.LINK_URI and link.get("uri"):
+                        uris.add(link["uri"])
+                # annot_xrefs è lineare (page.annots() è quadratico con migliaia di annotazioni)
+                for x, kind, _id in page.annot_xrefs():
+                    owner_page[x] = i
+                    if kind == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
+                        rep.embedded_files += 1
+                    if kind == pymupdf.PDF_ANNOT_WIDGET:
+                        rep.form_fields += 1
+                    elif kind not in (pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_REDACT, pymupdf.PDF_ANNOT_POPUP):
+                        rep.comments += 1
+            except Exception:
+                continue   # pagina danneggiata: rapporto parziale
+        n = min(pdf.xref_length(), max_objects)
+    parent: dict[int, tuple[int, str]] = {}   # azione → (oggetto che la richiama, chiave)
+    found: list[tuple[str, int, str]] = []     # (tipo, xref, dettaglio)
+    for start in range(1, n, chunk):
+        with ENGINE_LOCK:
+            for xref in range(start, min(n, start + chunk)):
                 try:
-                    kind, uri = pdf.xref_get_key(xref, "URI")
+                    obj = pdf.xref_object(xref, compressed=True)
                 except Exception:
-                    kind, uri = "null", ""
-                if kind == "string" and uri:
-                    uris.add(uri)
-    # collegamenti con indirizzo diretto (senza oggetto azione separato)
-    from .redaction import iter_pages
-    for _i, page in iter_pages(pdf):
-        try:
-            for link in page.get_links():
-                if link.get("kind") == pymupdf.LINK_URI and link.get("uri"):
-                    uris.add(link["uri"])
-            # annot_xrefs è lineare (page.annots() è quadratico con migliaia di annotazioni)
-            for _x, kind, _id in page.annot_xrefs():
-                if kind == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
-                    rep.embedded_files += 1
-                if kind == pymupdf.PDF_ANNOT_WIDGET:
-                    rep.form_fields += 1
-                elif kind not in (pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_REDACT, pymupdf.PDF_ANNOT_POPUP):
-                    rep.comments += 1
-        except Exception:
-            continue   # pagina danneggiata: rapporto parziale
+                    continue
+                if not obj or obj == "null":
+                    continue
+                if "0 R" in obj and ("/A" in obj or "/O" in obj or "/C" in obj or "/K" in obj):
+                    for m in _RX_ACTION_REF.finditer(obj):
+                        parent.setdefault(int(m.group(2)), (xref, m.group(1)))
+                if "/S" not in obj and "/JS" not in obj:
+                    continue
+                if _RX_JS.search(obj):
+                    rep.javascript += 1
+                    found.append(("javascript", xref, _js_code(pdf, xref)))
+                if _RX_LAUNCH.search(obj):
+                    rep.launch += 1
+                    found.append(("launch", xref, _target(obj)))
+                if _RX_GOTOR.search(obj):
+                    rep.remote_files += 1
+                    found.append(("remote", xref, _target(obj)))
+                if _RX_SUBMIT.search(obj):
+                    rep.submit_forms += 1
+                    found.append(("submit", xref, _target(obj)))
+                if _RX_URI.search(obj):
+                    # stringa decodificata dal motore (niente escape PDF grezzi, bug_10)
+                    try:
+                        kind, uri = pdf.xref_get_key(xref, "URI")
+                    except Exception:
+                        kind, uri = "null", ""
+                    if kind == "string" and uri:
+                        uris.add(uri)
+
+    def where(xref: int) -> str:
+        seen = set()
+        while xref not in seen:
+            seen.add(xref)
+            if xref in owner_page:
+                return _("Pagina {n}").format(n=owner_page[xref] + 1)
+            up = parent.get(xref)
+            if up is None:
+                break
+            if up[0] == cat and up[1] == "OpenAction":
+                return _("Apertura del documento")
+            xref = up[0]
+        return _("Documento")
+
+    rep.items.extend((kind, where(x), detail) for kind, x, detail in found)
     rep.external_links = sorted(uris)
     rep.items.extend(("uri", "", u) for u in rep.external_links)
-    try:
-        rep.embedded_files += pdf.embfile_count()
-    except Exception:
-        pass
-    rep.hidden_layers = len(hidden_layers(pdf))
-    meta = pdf.metadata or {}
-    rep.has_metadata = any(v for k, v in meta.items() if k not in ("format", "encryption")) or bool(
-        _xml_metadata(pdf))
+    with ENGINE_LOCK:
+        try:
+            rep.embedded_files += pdf.embfile_count()
+        except Exception:
+            pass
+        rep.hidden_layers = len(hidden_layers(pdf))
+        meta = pdf.metadata or {}
+        rep.has_metadata = any(v for k, v in meta.items() if k not in ("format", "encryption")) or bool(
+            _xml_metadata(pdf))
     return rep
 
 
