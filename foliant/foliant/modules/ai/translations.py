@@ -1144,4 +1144,9 @@ EN: dict[str, str] = {
     'sì': 'yes',
     'Creato con l’Assistente IA di Foliant il {d}': 'Created with the Foliant AI Assistant on {d}',
     'Nessun elemento.': 'No items.',
+    'piatto': 'flat',
+    'acquerello': 'watercolor',
+    'linea': 'line art',
+    'fotografico': 'photographic',
+    'minimalista': 'minimalist',
 }
