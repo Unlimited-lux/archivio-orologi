@@ -206,7 +206,7 @@ def passport_mrz():
                            "Data di nascita / Date of birth: 12 MAR 1975", "Numero / No.: YA1234567"]):
         page.insert_text((150, 40 + i * 24), t, fontname="S", fontsize=11)
         expected += _words(t)
-    mrz = ["P<ITAROSSI<<MARIO<<<<<<<<<<<<<<<<<<<<<<<<<<", "YA12345674ITA7503127M3103128<<<<<<<<<<<<<<02"]
+    mrz = ["P<ITAROSSI<<MARIO<<<<<<<<<<<<<<<<<<<<<<<<<<<", "YA12345676ITA7503120M3103120<<<<<<<<<<<<<<04"]
     for i, t in enumerate(mrz):
         page.insert_text((20, 290 + i * 22), t, fontname="M", fontsize=12.5)
         expected.append(t)

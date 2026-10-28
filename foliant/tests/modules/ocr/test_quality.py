@@ -22,7 +22,7 @@ CASES = {
     "garanzia_timbro_firma": (warranty, 0.95),
     "ricevuta_grigi_150": (gray_150, 0.95),
     "carta_identita_lontana": (id_card_far, 0.95),
-    "passaporto_mrz": (passport_mrz, 0.9),
+    "passaporto_mrz": (passport_mrz, 0.95),
     "testo_piccolo_150": (small_gray_150, 0.95),
     "timbro_rosso": (red_stamp_over_text, 0.9),
     "scontrino_termico": (thermal_receipt, 0.95),

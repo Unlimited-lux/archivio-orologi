@@ -51,7 +51,7 @@ Percentuale di parole attese ritrovate (lingue ita+eng, impostazioni predefinite
 | Garanzia con timbro e firma | 1.000 | 1.000 |
 | Ricevuta 150 dpi in grigi | 1.000 | 1.000 |
 | Carta d'identità fotografata da lontano, luce non uniforme | 0.857 | 1.000 |
-| Passaporto con zona MRZ | 0.179 | 0.964 |
+| Passaporto con zona MRZ | 0.179 | 1.000 |
 | Testo piccolo 150 dpi in grigi (JPEG) | 0.681 | 1.000 |
 | Timbro rosso sopra il testo (IBAN coperto) | 0.964 | 1.000 |
 | Scontrino termico sbiadito | 1.000 | 1.000 |
@@ -69,3 +69,6 @@ Miglioramenti:
 4. Layout delle tabelle nel testo (copia, TXT, «Solo testo»): una riga per riga di tabella con le colonne
    separate da tabulazioni (incollabile in un foglio di calcolo), anche da foto o scansione storta;
    prima ogni cella era un paragrafo a sé.
+5. Righe MRZ (passaporti TD3, carte d'identità TD1, `mrz.py`): correzione per tipo di campo (O/0, I/1,
+   S/5, B/8), riempitivo «<<<<» riportato alla lunghezza giusta; cifre di controllo ICAO verificate e,
+   se non tornano, parole segnalate come incerte nella revisione.

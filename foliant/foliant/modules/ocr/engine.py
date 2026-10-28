@@ -43,6 +43,7 @@ from foliant.core.errors import OperationCancelled
 from foliant.i18n import _
 
 from . import detect
+from .mrz import fix_mrz
 from .preprocess import (
     PreprocessOptions, apply_point, clean_background, ink_color, invert, prepare, rotation_affine, serif_ratio, slant, stroke_width,
     warp,
@@ -544,6 +545,7 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
     editable = opts.mode == EDITABLE
     lines, prep, color = recognize_array(img, opts.languages, res.zoom * 72, opts.preprocess, opts.psm, cancelled,
                                          opts.timeout, keep_color=editable)
+    fix_mrz(lines)
     res.affine = prep.affine
     res.size = prep.size
     res.rotation = prep.rotation
