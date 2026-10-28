@@ -935,14 +935,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, _("Password errata"), _("La password non è corretta. Riprova."))
             except DocumentError as e:
                 QMessageBox.warning(self, _("Impossibile aprire il file"), f"{Path(path).name}\n\n{e}")
-                self._forget_recent(path)
+                self._forget_unreadable(path)
                 return None
             except Exception as e:          # errore imprevisto del motore: un file non ferma gli altri
                 logging.getLogger(__name__).exception("apertura di %s", path)
                 QMessageBox.warning(self, _("Impossibile aprire il file"),
                                     f"{Path(path).name}\n\n" + _("Il file non è un PDF valido oppure è danneggiato.")
                                     + f"\n({type(e).__name__})")
-                self._forget_recent(path)
+                self._forget_unreadable(path)
                 return None
             password, ok = QInputDialog.getText(
                 self, _("Documento protetto"),
@@ -1640,6 +1640,11 @@ class MainWindow(QMainWindow):
             self._set_pinned([p for p in self.pinned_recent() if p != path])
         self._refresh_recent()
 
+    def _forget_unreadable(self, path: str) -> None:
+        # un fissato resta: l'errore può essere passeggero (rete, permessi, file in riscrittura)
+        if path not in self.pinned_recent():
+            self._forget_recent(path)
+
     def remove_recent(self, path: str) -> None:
         """Toglie `path` dai recenti (API pubblica: `ctx.remove_recent`)."""
         self._forget_recent(path)
@@ -1661,8 +1666,11 @@ class MainWindow(QMainWindow):
         self._refresh_recent()
 
     def _refresh_recent(self) -> None:
-        # anche i file che non esistono più: la Home li mostra attenuati («File non trovato»)
-        self.home.set_recent(self.recent_files(), self.pinned_recent())
+        # anche i file che non esistono più: la Home li mostra attenuati («File non trovato»);
+        # le impostazioni sono condivise, quindi si aggiorna la Home di tutte le finestre
+        paths, pinned = self.recent_files(), self.pinned_recent()
+        for window in {self, *app_windows()}:
+            window.home.set_recent(paths, pinned)
 
     def last_directory(self) -> str:
         d = self.settings.value("lastDirectory", "")
