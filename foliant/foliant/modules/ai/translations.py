@@ -1012,4 +1012,9 @@ EN: dict[str, str] = {
     'fattura elettronica allegata': 'attached electronic invoice',
     'da completare: {p}': 'to be completed: {p}',
     'da completare': 'to be completed',
+    'Fatture da elaborare': 'Invoices to process',
+    'estrazione del contenuto non consentita': 'content extraction not allowed',
+    'Estrazione da {f}…': 'Extracting from {f}…',
+    'Nessun dato trovato.': 'No data found.',
+    'Fatture da più file': 'Invoices from several files',
 }

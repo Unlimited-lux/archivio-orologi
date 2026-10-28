@@ -575,13 +575,66 @@ class Controller:
         self.exec_dialog(dlg)
         return dlg
 
+    def extract_invoice_files(self, paths: list[str] | None = None):
+        """Fatture da più PDF: un record per fattura con il file d'origine (AI-29)."""
+        from foliant.api import Document, DocumentError
+
+        from . import extract
+        from .extract_view import ExtractDialog
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+        paths = paths if paths is not None else self.ctx.ask_open_paths(_("Fatture da elaborare"))
+        if not paths:
+            return None
+        named, problems = [], []
+        gateway = self.services.gateway()
+        language = panel._answer_language()
+        for path in paths:
+            name = os.path.basename(path)
+            try:
+                doc = Document.open(path)
+            except DocumentError as e:
+                problems.append(f"{name}: {e}")
+                continue
+            try:
+                if not content.extraction_allowed(doc):
+                    problems.append(f"{name}: " + _("estrazione del contenuto non consentita"))
+                    continue
+                scope = engine.build_scope(doc.pdf, engine.DOCUMENT)
+                local = extract.embedded_einvoices(doc.pdf)
+                if local:
+                    res = extract.build_result("invoice", local, scope)
+                else:
+                    res = self.ctx.run_task(_("Estrazione da {f}…").format(f=name), lambda progress, sc=scope:
+                                            extract.extract_data(self._job(progress, gateway, language), sc,
+                                                                 "invoice"))
+                named.append((name, res))
+            except OperationCancelled:
+                return None
+            except Exception as e:  # noqa: BLE001 - un file non leggibile non ferma gli altri
+                from .providers import AIError
+                problems.append(f"{name}: " + (e.user_message() if isinstance(e, AIError) else str(e)))
+            finally:
+                doc.close()
+        if not named:
+            self.ctx.error(_("Estrai dati"), "\n".join(problems) or _("Nessun dato trovato."))
+            return None
+        result = extract.merge_results(named)
+        result.checks.extend(problems)
+        dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=result.source)
+        self.exec_dialog(dlg)
+        return dlg
+
     def choose_extraction(self):
         from PySide6.QtWidgets import QInputDialog
-        kinds = [(_("Tabelle"), "tables"), (_("Fattura o ricevuta"), "invoice")]
+        kinds = [(_("Tabelle"), "tables"), (_("Fattura o ricevuta"), "invoice"),
+                 (_("Fatture da più file"), "invoice-files")]
         label, ok = QInputDialog.getItem(self.ctx.window, _("Estrai dati"), _("Tipo di dati:"),
                                          [k[0] for k in kinds], 0, False)
         if ok:
-            return self.extract_data(dict(kinds)[label])
+            kind = dict(kinds)[label]
+            return self.extract_invoice_files() if kind == "invoice-files" else self.extract_data(kind)
         return None
 
     # ---------------------------------------------------------------- ricerca per significato (AI-21)
