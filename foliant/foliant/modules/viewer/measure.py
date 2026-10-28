@@ -3,7 +3,8 @@
 - barra di stato con X/Y del cursore e dimensioni della pagina nell'unità scelta
   (origine in alto a sinistra della pagina visualizzata; il motore applica già `/UserUnit`);
 - griglia sopra la pagina, diradata automaticamente a zoom bassi;
-- contorni dei riquadri di pagina (MediaBox, CropBox, BleedBox, TrimBox, ArtBox).
+- contorni dei riquadri di pagina (MediaBox, CropBox, BleedBox, TrimBox, ArtBox);
+- latitudine e longitudine sotto il cursore nei PDF geospaziali (`geo.py`).
 Griglia e riquadri sono solo a schermo: non compaiono in stampa né nel file.
 """
 
@@ -15,6 +16,8 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QPen
 from PySide6.QtWidgets import QLabel, QMenu
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, theme
+
+from .geo import format_latlon, geo_viewports, latlon_at
 
 TRANSLATIONS = {
     "Coordinate e griglia": "Coordinates and grid",
@@ -93,6 +96,7 @@ class MeasureController(QObject):
             self.grid_step = 10.0
         self.boxes = False
         self._boxes_cache: dict[tuple, list] = {}
+        self._geo_cache: dict = {}
 
         self.label = QLabel(ctx.window)
         self.label.setProperty("muted", True)
@@ -120,7 +124,7 @@ class MeasureController(QObject):
         self.menu_action.setMenu(self.menu)
         ctx.add_menu_action(self.menu_action, _("Vista"))
         ctx.documentOpened.connect(self._attach)
-        ctx.documentChanged.connect(lambda _v: self._boxes_cache.clear())
+        ctx.documentChanged.connect(lambda _v: (self._boxes_cache.clear(), self._geo_cache.clear()))
         ctx.currentViewChanged.connect(lambda v: self.label.hide() if v is None else None)
         for v in ctx.views():
             self._attach(v)
@@ -201,7 +205,32 @@ class MeasureController(QObject):
             return ""
         _p, x, y, w, h = c
         u = UNIT_LABEL[self.unit]
-        return f"X {fmt(x, self.unit)}  Y {fmt(y, self.unit)} {u}  ·  {fmt(w, self.unit)} × {fmt(h, self.unit)} {u}"
+        text = f"X {fmt(x, self.unit)}  Y {fmt(y, self.unit)} {u}  ·  {fmt(w, self.unit)} × {fmt(h, self.unit)} {u}"
+        geo = self.latlon(view, pos)
+        if geo is not None:
+            from foliant.api import language
+            g = format_latlon(*geo)
+            text += "  ·  " + (g.replace(".", ",") if language() == "it" else g)
+        return text
+
+    def latlon(self, view: DocumentView, pos: QPointF) -> tuple[float, float] | None:
+        """Latitudine e longitudine sotto il cursore, nei PDF geospaziali (`/VP` con `/GEO`)."""
+        hit = view.view_to_page(pos)
+        if hit is None:
+            return None
+        page, point = hit
+        key = (id(view), page, view.document.version)
+        if key not in self._geo_cache:
+            with ENGINE_LOCK:
+                try:
+                    self._geo_cache[key] = geo_viewports(view.document.pdf, page)
+                except Exception:
+                    self._geo_cache[key] = []
+        vps = self._geo_cache[key]
+        if not vps:
+            return None
+        with ENGINE_LOCK:
+            return latlon_at(view.document.pdf, page, point, vps)
 
     def _attach(self, view: DocumentView) -> None:
         view.viewport().installEventFilter(self)

@@ -2,7 +2,7 @@
 
 Legenda: **fatto** = criteri di accettazione verificati da test automatici; **parziale** = parte
 dei criteri o dei flussi; **nucleo** = già coperto dal nucleo (verificato dai test del nucleo
-o del modulo); **non fatto**.
+o del modulo); **altra area** = funzione di un altro modulo, raggiunta dal viewer; **non fatto**.
 I test sono in `tests/modules/viewer/` (file indicato tra parentesi). Le richieste al nucleo
 sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 
@@ -29,11 +29,11 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-19 Collegamenti | P0 | fatto | `test_navigation.py::test_describe_link`, `test_gotor_*`, `test_tab_visits_links_in_reading_order`, `test_link_order_tabs_structure`, `test_detect_url_in_text` | Suggerimento con la destinazione, GoToR in nuova scheda, Launch bloccato, Tab/Invio sui link, rilevamento URL nel testo. Conferma URI nel nucleo («consenti sempre per il dominio» non fatto). |
 | VIS-20 Livelli: visualizzazione | P1 | fatto | `test_layers.py` | OCMD `/VE`, `/Usage` zoom/lingua, configurazioni alternative: non fatto. Stampa secondo `/Print`: `test_printing.py::test_layers_print_state`. |
 | VIS-21 Livelli: gestione | P2 | parziale | `test_layers.py::test_save_visibility_as_default` | Solo «salva la visibilità come predefinita». |
-| VIS-22 Allegati | P1 | parziale | `test_attachments.py` (16 test) | Elenco, apri, salva, salva tutti, aggiungi, elimina, eseguibili bloccati. Portfolio: non fatto. |
+| VIS-22 Allegati | P1 | fatto | `test_attachments.py` (elenco con nome, dimensione e descrizione, allegato di pagina con salto, `test_portfolio_folders_and_initial_document`, `test_portfolio_search_by_name_inside_folders`, `test_plain_document_search_filter`) | Elenco, apri, salva, salva tutti, aggiungi, elimina, eseguibili bloccati; portfolio (`/Collection`) con cartelle navigabili, documento iniziale `/D` evidenziato e selezionato, ricerca per nome anche nelle cartelle, PDF contenuti aperti in schede. Non fatti: vista a griglia con i campi dello schema, stampa dei file del portfolio in un unico lavoro. |
 | VIS-23 Thread di articoli | P2 | fatto | `test_articles.py` | |
 | VIS-24 Ricerca | P0 | fatto | `test_search.py` (anche `test_search_also_in_comments`), `test_engine.py::test_case_sensitivity`, `test_whole_word`, `test_ignore_accents_and_ligatures`, `test_hyphenated_word_across_lines` | Ricerca incrementale non bloccante, opzioni, F3/Maiusc+F3 e Ctrl+G/Ctrl+Maiusc+G, pannello Risultati, cronologia delle ricerche, pagine senza testo. Frasi e parole sillabate a cavallo tra due pagine incluse (`test_phrase_continuing_on_next_page`). |
 | VIS-25 Ricerca avanzata | P2 | parziale | `test_advsearch.py` (11 test), `test_search.py::test_regex_and_invalid_expression`, `test_export_csv` | Ctrl+Maiusc+F: documento corrente, documenti aperti, cartella con sottocartelle (file cifrati/danneggiati nel riepilogo), frase/tutte/almeno una/regex con limite di tempo, commenti, segnalibri, campi, metadati, CSV. Indice full-text e allegati PDF: non fatti. |
-| VIS-26 Trova e sostituisci | P1 | non fatto | | Richiede il motore di modifica del testo (area Modifica testo). |
+| VIS-26 Trova e sostituisci | P1 | altra area | | Funzione del modulo Modifica testo (TXT-12/13: `FindReplaceDialog`, Ctrl+H in modalità Modifica). L'accesso dalla barra di ricerca del viewer richiede un servizio tra moduli (CORE_REQUESTS 24). |
 | VIS-27 Ricerca semantica IA | P2 | non fatto | | Area IA. |
 | VIS-28 Selezione e copia | P0 | parziale | `test_selection.py` (due colonne sinistra→destra, doppio clic, Ctrl+A e copia, selezione su più pagine in ordine, voci del menu contestuale; `xfail` per i criteri mancanti del nucleo), `test_tools.py::test_alt_drag_rectangular_table_selection` | Selezione rettangolare Alt+trascinamento con tabulazioni e voci Cerca / Leggi ad alta voce / Aggiungi segnalibro del menu contestuale qui. Mancano nel nucleo (CORE_REQUESTS 20, con proposta): ordine di lettura quando il flusso non lo segue, trattino di sillabazione nella copia, triplo clic, Maiusc+clic/frecce, F7, Ctrl+A su tutto il documento, `/ActualText`, artefatti. |
 | VIS-29 Cattura area | P1 | fatto | `test_tools.py::test_snapshot_*` | Copia/salva immagine a dpi scelti (limite 100 MP), copia testo, disabilitata senza permesso di copia. |
@@ -46,7 +46,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-36 Riflusso | P2 | fatto | `test_reflow.py` | Titoli dalla dimensione del carattere (struttura taggata non usata), Ctrl++/Ctrl+-, uscita sul paragrafo corrispondente; immagini e tabelle non mostrate. |
 | VIS-37 Multimedia e 3D | P2 | non fatto | | Segnalati come non supportati (VIS-07). |
 | VIS-38 Lente, panoramica, vista divisa | P2 | parziale | `test_tools.py::test_lens_magnifies_under_cursor` | Lente d'ingrandimento; la panoramica è l'area visibile trascinabile nelle miniature (VIS-14). Vista divisa: non fatta (richiede più viste dello stesso documento nel nucleo). |
-| VIS-39 Righelli, griglie, coordinate | P1 | parziale | `test_measure.py` | Coordinate del cursore nell'unità scelta, griglia, riquadri di pagina. Righelli, guide e aggancio, coordinate geospaziali: non fatti. |
+| VIS-39 Righelli, griglie, coordinate | P1 | parziale | `test_measure.py` (A4 in mm: 210,0 × 297,0 nell'angolo, `/UserUnit`, riquadri MediaBox/TrimBox con colori diversi e legenda, `test_geospatial_coordinates_at_control_points` entro 0,00001°, trasformazione proiettiva) | Coordinate del cursore nell'unità scelta, latitudine/longitudine nei PDF geospaziali (`/VP` con `/Measure /GEO`, `geo.py`), griglia, riquadri di pagina con legenda; righelli e guide nel nucleo. Manca l'aggancio di annotazioni e oggetti a guide e griglia (aree Annotazioni/Oggetti, CORE_REQUESTS 22). |
 | VIS-40 Informazioni sul documento | P1 | fatto | `test_properties.py` (15 test) | Finestra «Informazioni sul documento» (Alt+Invio) con le sezioni File, Contenuto, Protezione, Caratteri, Apertura; sola lettura. |
 | VIS-41 Metadati avanzati | P2 | non fatto | | |
 | VIS-42 Vista iniziale | P2 | parziale | `test_session.py` (vista iniziale) | Lettura delle impostazioni del documento; la loro modifica non è fatta. |
@@ -58,7 +58,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-48 Salva con nome / copia | P0 | nucleo | `tests/test_document.py::test_save_as_changes_path`, `test_save_copy_keeps_path` | |
 | VIS-49 Ripristina e ricarica | P1 | fatto | `test_reload.py` (16 test) | Ripristina, ricarica automatica/chiedi/mai con debounce, barre non modali per conflitto e file eliminato. |
 | VIS-50 Recupero dopo chiusura anomala | P1 | fatto | `test_recovery.py` (20 test) | Copia periodica in `~/.local/state/foliant/recovery/` (0700/0600, cifrata se l'originale lo è), proposta non bloccante all'avvio, pulizia dopo salvataggio o chiusura. |
-| VIS-51 Barre e preferenze | P1 | parziale | `test_prefs.py` | Layout/zoom/pannello predefiniti, rispetto impostazioni del documento, ultima posizione, esporta/importa, ripristina predefiniti. Personalizzazione delle barre: non fatta. |
+| VIS-51 Barre e preferenze | P1 | parziale | `test_prefs.py` (`test_default_fit_width_without_restore`: zoom predefinito «adatta larghezza» senza ultima posizione → pagina 1 adattata; chiavi del nucleo view/mode e view/zoom; esporta/importa; ripristina predefiniti) | Vista e zoom predefiniti (chiavi del nucleo), pannello iniziale, rispetto delle impostazioni del documento, ultima posizione, esporta/importa con migrazione delle vecchie chiavi, ripristina predefiniti. Barre e pannelli visibili, etichette, dimensione icone e sezione Aspetto: nucleo (CORE_REQUESTS 23). |
 | VIS-52 Scorciatoie e ricerca comandi | P2 | fatto | `test_commands.py` | Ctrl+K, assegnazione con conflitti, esporta/importa. Schemi predefiniti ed elenco stampabile: non fatti. |
 | VIS-53 Integrazione desktop | P1 | parziale | `test_thumbnailer.py` | Generatore di miniature (processo separato, limiti, nessuna miniatura dei cifrati); registrazione MIME e installazione nel nucleo (CORE_REQUESTS 14). |
 
