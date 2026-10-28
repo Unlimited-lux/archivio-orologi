@@ -315,11 +315,8 @@ class ObjectTool(Tool):
         if ctrl and key == Qt.Key.Key_A:
             self.c.select_all(view)
             return True
-        if ctrl and key == Qt.Key.Key_V:
-            if shift:
-                self.c.paste(view, in_place=True)
-            else:
-                self.c.paste(view)
+        if ctrl and key == Qt.Key.Key_V and not shift:
+            self.c.paste(view)
             return True
         if key == Qt.Key.Key_Tab or key == Qt.Key.Key_Backtab:
             self.c.cycle(view, -1 if (shift or key == Qt.Key.Key_Backtab) else 1)
@@ -334,9 +331,6 @@ class ObjectTool(Tool):
             return True
         if ctrl and key == Qt.Key.Key_X:
             self.c.cut(view)
-            return True
-        if ctrl and key == Qt.Key.Key_D:
-            self.c.duplicate(view, E.PASTE_OFFSET, E.PASTE_OFFSET)
             return True
         if ctrl and key in (Qt.Key.Key_BracketRight, Qt.Key.Key_BraceRight):
             self.c.reorder(view, E.FRONT if shift else E.FORWARD)
@@ -725,10 +719,6 @@ class LinkTool(Tool):
             return True
         if ctrl and key == Qt.Key.Key_V:
             self.c.paste_links(view)
-            return True
-        if ctrl and key == Qt.Key.Key_D:
-            self.c.copy_links(view, self.page, list(self.selection), clipboard=False)
-            self.c.paste_links(view, offset=E.PASTE_OFFSET, use_last=True)
             return True
         arrows = {Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0), Qt.Key.Key_Up: (0, -1), Qt.Key.Key_Down: (0, 1)}
         if key in arrows:

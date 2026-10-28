@@ -193,14 +193,7 @@ def register(ctx: Context) -> None:
     from . import extras
     capture_tool = extras.CaptureTool(ctx, c)
     _state["capture_tool"] = capture_tool
-    cap = ctx.action(_("Cattura area"), "scan", None, checkable=True,
-                     tooltip=_("Copia, salva o inserisci un'area come immagine o testo"))
-    cap.triggered.connect(lambda checked=False: _toggle_tool(ctx, capture_tool, checked, switch=False))
-    acts["capture"] = cap
-    more.addAction(cap)
-    read_mode = ctx.mode("leggi")
-    if read_mode is not None:
-        read_mode.add_action(cap)
+    # La cattura di un'area è del visualizzatore (VIS-29): lo strumento resta solo come logica testata.
     acts["extract_all"] = ctx.action(_("Estrai tutte le immagini…"), "images",
                                      lambda: extras.extract_all(ctx, c, ctx.current_view()))
     more.addAction(acts["extract_all"])
@@ -266,8 +259,7 @@ def _sync_tool_buttons(ctx: Context) -> None:
     if "objects" in acts:
         acts["objects"].setChecked(tool is c.object_tool)
         acts["links"].setChecked(tool is c.link_tool)
-    if "capture" in acts:
-        acts["capture"].setChecked(tool is _state.get("capture_tool"))
+
 
 
 def _on_mode_entered(ctx: Context, c: ObjectsController) -> None:

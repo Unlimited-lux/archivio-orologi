@@ -435,8 +435,8 @@ def test_duplicate_twice_does_not_touch_clipboard(ui, tmp_path):
     view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 250, 170)]))
     QGuiApplication.clipboard().setText("invariato")
     click(view, 0, 100, 100)
-    QTest.keyClick(view, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
-    QTest.keyClick(view, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
+    O._state["actions"]["duplicate"].trigger()
+    O._state["actions"]["duplicate"].trigger()
     xs = sorted(round(o.rect.x0) for o in objs(view))
     assert xs == [50, 60, 70]
     assert QGuiApplication.clipboard().text() == "invariato"

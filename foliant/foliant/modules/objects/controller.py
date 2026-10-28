@@ -884,12 +884,13 @@ class ObjectsController(QObject):
 
     # ================================================================ collegamenti
     def follow_link_at(self, view, page: int, point: pymupdf.Point) -> bool:
-        from . import linkopen
-        try:
-            return linkopen.activate(self.ctx, view, page, point)
-        except Exception as e:
-            self.ctx.error(_("Collegamento"), str(e))
-            return True
+        """Segue il collegamento sotto il punto con la conferma unica del nucleo (VIS-19)."""
+        from foliant.api import follow_link
+        link = view.link_at(page, point)
+        if link is None:
+            return False
+        follow_link(view, link)
+        return True
 
     def links_selection_changed(self, view) -> None:
         view.viewport().update()
