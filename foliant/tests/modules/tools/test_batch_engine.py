@@ -1153,3 +1153,26 @@ def test_parallel_errors_and_cancel(tmp_path):
     rep = be.run_job(Cancel(), items, be.JobSettings(steps=[be.Step("compress")], destination=str(out), workers=3))
     assert rep.cancelled
     assert all(not n.startswith(".") for n in (os.listdir(out) if out.exists() else []))
+
+
+@pytest.mark.parametrize("workers", [1, 3])
+def test_compress_does_not_discard_other_steps(tmp_path, workers):
+    """Filigrana > Comprimi > Proteggi su PDF piccoli: protezione e filigrana restano anche se
+    la compressione non riduce il file."""
+    src = tmp_path / "src"
+    src.mkdir()
+    paths = [build_pdf(src / f"f{i}.pdf", [["testo"], ["testo"], ["testo"]]) for i in range(2)]
+    items = [be.analyze_file(p) for p in paths]
+    steps = [be.Step("watermark", {"text": "BOZZA"}), be.Step("compress"),
+             be.Step("protect", {"user_password": "aperta", "owner_password": "capo"})]
+    out = tmp_path / "out"
+    rep = be.run_job(None, items, be.JobSettings(steps=steps, destination=str(out), workers=workers))
+    for r in rep.results:
+        assert r.status in ("ok", "warning")
+        doc = pymupdf.open(r.outputs[0])
+        assert doc.needs_pass and doc.authenticate("aperta")
+        assert "BOZZA" in doc[0].get_text()
+    # Comprimi > Proteggi: sempre protetto
+    rep = be.run_job(None, items[:1], be.JobSettings(steps=steps[1:], destination=str(tmp_path / "o2"),
+                                                     workers=workers))
+    assert pymupdf.open(rep.results[0].outputs[0]).needs_pass
