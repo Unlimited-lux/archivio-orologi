@@ -73,7 +73,8 @@ class DigitalSignDialog(QDialog):
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.setAccessibleName(_("Password dell'ID digitale"))
-        form.addRow(_("Password:"), self.password)
+        self.password_label = QLabel(_("Password:"))
+        form.addRow(self.password_label, self.password)
         self.cert_info = QLabel(_("Inserisci la password per vedere i dati del certificato."))
         self.cert_info.setWordWrap(True)
         self.cert_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -215,6 +216,8 @@ class DigitalSignDialog(QDialog):
         self._reload_ids()
         self.update_preview()
         self.browse.clicked.connect(self._browse)
+        self.id_combo.currentIndexChanged.connect(lambda _i: self._on_id_changed())
+        self._on_id_changed()
         self.create_id.clicked.connect(self._create_id)
         self.password.editingFinished.connect(self._preview)
 
@@ -237,6 +240,14 @@ class DigitalSignDialog(QDialog):
         if allowed:
             self.cert_info.setText(_("Questo campo accetta solo certificati emessi da: {who}").format(
                 who="; ".join(sorted(c.subject for c in self.field.allowed_issuers))))
+        # SIG-23: certificati su smart card e token (PKCS#11), senza PIN: i certificati sono pubblici
+        self._device_certs = {}
+        for tc in self.device_certificates():
+            refused = (allowed is not None and not self._issuer_allowed(tc.info)) or not self._policy_allowed(tc.info)
+            self.id_combo.addItem("🔐 " + tc.display + (_(" (non ammesso dal campo)") if refused else ""), tc.uri)
+            self._device_certs[tc.uri] = tc
+            if refused:
+                self.id_combo.model().item(self.id_combo.count() - 1).setEnabled(False)
         policies = getattr(self.field, "allowed_policies", None)
         if policies:
             text = _("Questo campo accetta solo certificati con una di queste policy: {oids}").format(
@@ -274,6 +285,23 @@ class DigitalSignDialog(QDialog):
         fp = getattr(entry_or_info, "fingerprint", None) or getattr(entry_or_info, "sha256", "")
         return issuer in names or getattr(entry_or_info, "issuer", "") in names or fp in fps
 
+    def device_certificates(self) -> list:
+        try:
+            from . import devices
+            certs, errors = devices.list_certificates()
+        except ImportError:          # python-pkcs11 non installato: nessun dispositivo
+            return []
+        self._device_errors = errors
+        return certs
+
+    def _on_id_changed(self) -> None:
+        tc = getattr(self, "_device_certs", {}).get(self.current_path() or "")
+        self.password_label.setText(_("PIN:") if tc else _("Password:"))
+        self.password.setAccessibleName(_("PIN del dispositivo") if tc else _("Password dell'ID digitale"))
+        self.password.setPlaceholderText(_("vuoto se il lettore ha un tastierino") if tc else "")
+        if tc is not None:
+            self._show_info(type("Info", (), {"info": tc.info})())
+
     def _graphic_only(self) -> None:
         self.graphic_only = True
         self.reject()
@@ -299,11 +327,16 @@ class DigitalSignDialog(QDialog):
         path = self.current_path()
         if not path:
             raise self.digital.SignError(_("Scegli un ID digitale (file .p12 o .pfx)."))
+        if path in getattr(self, "_device_certs", {}):
+            from . import devices
+            return devices.open_digital_id(path, self.password.text() or None)
         return self.digital.load_pkcs12(path, self.password.text())
 
     def _preview(self) -> None:
         if not self.password.text() or not self.current_path():
             return
+        if self.current_path() in getattr(self, "_device_certs", {}):
+            return               # dispositivo: i dati del certificato sono già mostrati, il PIN serve solo alla firma
         try:
             did = self._load()
         except self.digital.SignError as e:
@@ -871,6 +904,26 @@ class IDsDialog(QDialog):
         c3.addStretch(1)
         l3.addLayout(c3)
         tabs.addTab(w3, _("Server marca temporale"))
+        # --- SIG-23: smart card e token PKCS#11
+        w5 = QWidget()
+        l5 = QVBoxLayout(w5)
+        l5.addWidget(QLabel(_("Moduli PKCS#11 (driver delle smart card e dei token):")))
+        self.modules = QListWidget()
+        l5.addWidget(self.modules, 1)
+        l5.addWidget(QLabel(_("Certificati sui dispositivi inseriti:")))
+        self.device_certs = QListWidget()
+        l5.addWidget(self.device_certs, 1)
+        self.device_status = QLabel("")
+        self.device_status.setWordWrap(True)
+        l5.addWidget(self.device_status)
+        r5 = QHBoxLayout()
+        for text, fn in [(_("Aggiungi modulo…"), self._add_module), (_("Rimuovi modulo"), self._remove_module),
+                         (_("Aggiorna"), self.refresh_devices)]:
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            r5.addWidget(b)
+        l5.addLayout(r5)
+        tabs.addTab(w5, _("Dispositivi"))
         # --- impostazioni di verifica
         w4 = QWidget()
         f4 = QFormLayout(w4)
@@ -901,7 +954,52 @@ class IDsDialog(QDialog):
         lay.addWidget(box)
         self.refresh()
 
+    def refresh_devices(self) -> None:
+        """Moduli registrati e certificati dei dispositivi inseriti (rilevati a ogni aggiornamento)."""
+        self.modules.clear()
+        self.device_certs.clear()
+        try:
+            import pkcs11  # noqa: F401
+            from . import devices
+        except ImportError:
+            self.device_status.setText(_("Supporto per smart card non disponibile: manca il pacchetto "
+                                         "python-pkcs11."))
+            return
+        for m in devices.modules():
+            it = QListWidgetItem(m + ("" if m in devices.added_modules() else "  " + _("(rilevato)")))
+            it.setData(Qt.ItemDataRole.UserRole, m)
+            self.modules.addItem(it)
+        certs, errors = devices.list_certificates()
+        for tc in certs:
+            it = QListWidgetItem("🔐 " + tc.display + "  ·  " + _("scade il") + " " + _date(tc.info.not_after))
+            it.setToolTip(certificate_details(tc.info))
+            self.device_certs.addItem(it)
+        msg = [] if devices.modules() else [_("Nessun modulo rilevato: aggiungi il modulo fornito con la carta o "
+                                                "il lettore (es. opensc-pkcs11.so).")]
+        self.device_status.setText("\n".join(msg + errors))
+
+    def _add_module(self) -> None:
+        path, _f = QFileDialog.getOpenFileName(self, _("Modulo PKCS#11"), "/usr/lib", _("Moduli (*.so *.so.*)"))
+        if not path:
+            return
+        from . import devices
+        try:
+            devices.add_module(path)
+        except devices.TokenError as e:
+            self.device_status.setText(str(e))
+            return
+        self.refresh_devices()
+
+    def _remove_module(self) -> None:
+        it = self.modules.currentItem()
+        if it is None:
+            return
+        from . import devices
+        devices.remove_module(it.data(Qt.ItemDataRole.UserRole))
+        self.refresh_devices()
+
     def refresh(self) -> None:
+        self.refresh_devices()
         self.ids.clear()
         for e in self.store.IDRegistry().list():
             exp = e.expires
@@ -1198,6 +1296,17 @@ class SignPreferences(QWidget):
 
 
 TRANSLATIONS_EN = {
+    "Moduli PKCS#11 (driver delle smart card e dei token):": "PKCS#11 modules (smart card and token drivers):",
+    "Certificati sui dispositivi inseriti:": "Certificates on the inserted devices:",
+    "Aggiungi modulo…": "Add module…", "Rimuovi modulo": "Remove module", "Aggiorna": "Refresh",
+    "Dispositivi": "Devices", "(rilevato)": "(detected)",
+    "Supporto per smart card non disponibile: manca il pacchetto python-pkcs11.":
+        "Smart card support not available: the python-pkcs11 package is missing.",
+    "Nessun modulo rilevato: aggiungi il modulo fornito con la carta o il lettore (es. opensc-pkcs11.so).":
+        "No module detected: add the module supplied with the card or reader (e.g. opensc-pkcs11.so).",
+    "Modulo PKCS#11": "PKCS#11 module", "Moduli (*.so *.so.*)": "Modules (*.so *.so.*)",
+    "PIN:": "PIN:", "PIN del dispositivo": "Device PIN",
+    "vuoto se il lettore ha un tastierino": "empty if the reader has a keypad",
     "Livello PAdES": "PAdES level", "Livello:": "Level:", "B-B — firma di base": "B-B — basic signature",
     "B-T — con marca temporale": "B-T — with timestamp",
     "B-LT — con dati di verifica (lungo termine)": "B-LT — with validation data (long term)",
