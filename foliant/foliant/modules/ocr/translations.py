@@ -2,7 +2,7 @@
 
 EN = {
 'OCR': 'OCR',
-'Riconosci testo': 'Recognize text',
+'Esegui OCR': 'Run OCR',
 'Riconosci il testo delle pagine scannerizzate (PDF ricercabile)': 'Recognize the text of scanned pages (searchable PDF)',
 'Rendi modificabile': 'Make editable',
 'Converti le pagine scannerizzate in testo vero e modificabile': 'Convert scanned pages into real, editable text',
@@ -17,7 +17,7 @@ EN = {
 'Lingue': 'Languages',
 'Lingue di riconoscimento installate e disponibili': 'Installed and available recognition languages',
 "Proponi l'OCR per i documenti scannerizzati": 'Suggest OCR for scanned documents',
-'Riconosci testo (OCR)…': 'Recognize text (OCR)…',
+'Esegui OCR…': 'Run OCR…',
 'OCR di un PDF scannerizzato': 'OCR a scanned PDF',
 'Rendi ricercabile o modificabile un documento scannerizzato': 'Make a scanned document searchable or editable',
 'PDF scannerizzato': 'Scanned PDF',
@@ -325,4 +325,5 @@ EN = {
     'PDF e immagini (*.pdf *.tif *.tiff *.png *.jpg *.jpeg *.bmp)': 'PDF and images (*.pdf *.tif *.tiff *.png *.jpg *.jpeg *.bmp)',
     'Cartella': 'Folder',
     'OCR in blocco annullato: i file completati restano, nessun file parziale.': 'Batch OCR cancelled: completed files are kept, no partial files.',
+    'Avvia OCR': 'Start OCR',
 }

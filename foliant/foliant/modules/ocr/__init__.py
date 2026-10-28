@@ -25,7 +25,7 @@ def register(ctx: Context) -> None:
     ctx.ocr = controller   # accesso facoltativo per altri moduli (es. proposta dalla modalità Modifica)
     mode = ctx.add_mode("ocr", _("OCR"), "scan-text", 60)
 
-    act_run = ctx.action(_("Riconosci testo"), "scan-text", lambda: controller.open_dialog(),
+    act_run = ctx.action(_("Esegui OCR"), "scan-text", lambda: controller.open_dialog(),
                          tooltip=_("Riconosci il testo delle pagine scannerizzate (PDF ricercabile)"))
     act_edit = ctx.action(_("Rendi modificabile"), "file-pen-line",
                           lambda: controller.open_dialog(mode=engine.EDITABLE),
@@ -71,7 +71,7 @@ def register(ctx: Context) -> None:
     act_detect.setChecked(controller.detection_enabled())
     act_detect.toggled.connect(controller.set_detection_enabled)
     controller.actions["detect"] = act_detect
-    menu_run = ctx.action(_("Riconosci testo (OCR)…"), "scan-text", lambda: controller.open_dialog())
+    menu_run = ctx.action(_("Esegui OCR…"), "scan-text", lambda: controller.open_dialog())
     act_remove = ctx.action(_("Rimuovi livello OCR"), "eraser", controller.remove_layer,
                             tooltip=_("Togli il testo invisibile riconosciuto, lasciando le immagini"))
     controller.actions["remove"] = act_remove

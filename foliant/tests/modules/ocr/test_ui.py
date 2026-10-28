@@ -365,7 +365,7 @@ def test_traduzioni_inglesi():
     i18n.add_translations("en", EN)
     i18n.set_language("en")
     try:
-        assert i18n._("Riconosci testo") == "Recognize text"
+        assert i18n._("Esegui OCR") == "Run OCR"
         from foliant.modules.ocr.languages import language_name
         assert language_name("deu") == "German"
     finally:

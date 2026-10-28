@@ -245,7 +245,7 @@ class OcrDialog(QDialog):
         bottom.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        self.ok_button.setText(_("Avvia"))
+        self.ok_button.setText(_("Avvia OCR"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
