@@ -464,7 +464,7 @@ class FormFiller(QObject):
             text = ", ".join(parts)
         self.bar.label.setText(text)
         self.bar.label.setToolTip("\n".join(f"{n}: {ev}" for n, ev in st.custom) if st.custom else "")
-        fill = st.xfa != "dynamic" and not st.blocked
+        fill = st.xfa != "dynamic" and not st.blocked and not self.design
         self.bar.buttons["highlight"].setVisible(fill)
         self.bar.buttons["highlight"].setChecked(self.highlight)
         self.bar.buttons["next"].setVisible(fill)
