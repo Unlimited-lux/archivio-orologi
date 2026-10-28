@@ -77,15 +77,48 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
   pacchetto verificato in un ambiente pulito.
 
 ### Problemi noti (da chiudere dopo la consegna)
+
+Dal primo collaudo (verificati):
 | Gravità | Area | Problema |
 |---|---|---|
-| media | Proteggi | Dopo la redazione il testo rimanente sulla stessa riga si sposta di ~3 pt (limite del motore PDF). |
 | bassa | Moduli | Il campo firma vuoto mostra il segnaposto del motore a schermo e in stampa da Foliant (nel file è vuoto). |
-| bassa | Nucleo | File in sola lettura: indicazione nel titolo e «Salva con nome», ma senza banner nelle modalità di modifica. |
-| bassa | Modifica testo | Su pagina scansionata la proposta OCR in Modifica è un messaggio di stato (il modulo OCR mostra la sua barra). |
 | bassa | Modifica testo | La riga riscritta usa una nuova copia del font invece della risorsa originale (file un po' più grande). |
-| bassa | Nucleo | Tornando a «Leggi» da Assistente IA o Proteggi resta aperto il pannello destro della modalità precedente (si chiude con Maiusc+F9). |
-| — | Specifica | Funzioni P1/P2 non completate per lo stop del limite di spesa (04:30–07:45): elencate per ID in `foliant/modules/*/STATO.md`. |
+| bassa | Visualizzazione | Zoom massimo 800% (la specifica chiede 6400%: serve il disegno della pagina a tasselli). |
+| bassa | OCR | Durante l'OCR il documento non è consultabile (finestra di avanzamento modale, con annullamento). |
+| — | Specifica | Funzioni P1/P2 non completate: elencate per ID in `foliant/modules/*/STATO.md`. |
+
+Dal collaudo finale delle 09:10 (script di riproduzione in uno dei collaudi; NON ancora verificati in modo
+indipendente, alcuni potrebbero essere falsi positivi). I 3 casi di perdita di dati trovati (Salva/Chiudi
+con l'editor di testo o un campo modulo ancora aperto) sono già corretti nella consegna.
+| Gravità | Riferimento | Descrizione |
+|---|---|---|
+| alta | TXT-02/TXT-03 (P0) — modulo: text_edit. | Correggere il prezzo «€ 9.500,00» → «€ 9.800,00» in una fattura esportata da LibreOffice (tabella con la colonna «Prezzo» allineata a destra, font Carlito incorporato com |
+| media | TXT-02 (P0, punto 6 del flusso e 3° criterio) / TXT-03 — modulo: text_edit. | In una fattura esportata da LibreOffice, correggendo l'importo nella frase sotto la tabella («Totale documento: € 9.950,00 — …», paragrafo giustificato) cambiano anche ri |
+| bassa | CNV-19 (P0, passo 3 «Formato pagina: come l'immagine») — modulo: convert. | Con «Formato pagina: Come l'immagine» il campo «Margini» viene disattivato (quindi non modificabile), ma il suo valore predefinito (10 mm) viene applicato lo stesso: ogni |
+| media | PAG-33 (Numeri di pagina, flusso punto 4) — modulo: pages. | Rinumerare un documento che ha già i numeri aggiunti da Foliant ne aggiunge una seconda serie: lo strumento non propone «Modifica»/«Rimuovi» né sostituisce i numeri esist |
+| media | CNV-29 (P0, Comprimi › «Applica al documento aperto») — modulo: convert. | Applicando la compressione al documento aperto il messaggio annuncia una riduzione («Prima: 421,1 KB — Dopo: 381,1 KB — Riduzione: 9%») ma il file salvato dopo non è più  |
+| media | BAT-12 (P0, «usa le regole di PAG-36») / PAG-36 — modulo: tools. | Le filigrane di Strumenti › Operazioni in blocco e quelle di Pagine › Timbri › Filigrana non si riconoscono tra loro, anche se sono entrambe «aggiunte con Foliant»: |
+| bassa | TXT-06 / TXT-10 (P0, «font aggiunto … come sottoinsieme incorporato») — modulo: text_edit. | Il testo aggiunto (o riscritto) incorpora il programma COMPLETO del font invece di un sottoinsieme: una scheda prodotto di 1 KB a cui si aggiunge la riga «Rolex Submarine |
+| media | OBJ-38/OBJ-39 (pannello «Collegamenti», verifica dei collegamenti) + NFR-13/NFR-15. | Aprendo un PDF troncato che il motore ricostruisce (banner «Il file era danneggiato ed è stato ricostruito.») il pannello laterale «Collegamenti» solleva ValueError: bad  |
+| media | ANN-01/ANN-05 (visualizzazione commenti) + NFR-05/NFR-07 (reattività). | Su una pagina con 2000 annotazioni (rettangoli con nota, file da revisione intensiva) ogni ridisegno della vista dopo l'apertura e dopo OGNI modifica blocca l'interfaccia |
+| media | SEC-26 (analisi dei contenuti attivi all'apertura) + NFR-02/NFR-05. | All'apertura di un PDF di UNA pagina con 2000 annotazioni la finestra resta bloccata ~4 s prima che la scheda compaia: il modulo Proteggi esegue sanitize.scan() in modo s |
+| media | SEC-26 / NFR-17 (avviso dei contenuti attivi) + SEC-02 (banner «Documento con | restrizioni») + NFR-13 (PDF malformati). Basta un albero delle pagine con un riferimento ciclico (/Kids che contiene il nodo /Pages stesso, (script con errori: da riverificare) |
+| media | VIS-47/VIS-48 (Salva, Salva con nome) + NFR-13/NFR-15 (PDF malformati, messaggi). | Con un PDF il cui albero delle pagine contiene un ciclo (si apre: 3 pagine annunciate, la 3ª illeggibile), «Salva con nome» SCRIVE il file ma mostra comunque «Salvataggio (script con errori: da riverificare) |
+| media | NFR-14 (isolamento dei guasti, criterio 1) / VIS-01 (vista pagine). | Una pagina che il motore non riesce a caricare (qui: 3ª pagina di un albero delle pagine con ciclo) viene mostrata come una normale pagina A4 BIANCA, indistinguibile da u (script con errori: da riverificare) |
+| bassa | VIS-10 (pannello Miniature) + NFR-14 (isolamento dei guasti). | Con un documento che ha una pagina illeggibile (albero delle pagine con ciclo, 3ª pagina) il delegato delle miniature solleva un'eccezione NON gestita (FzErrorFormat «cyc (script con errori: da riverificare) |
+| bassa | TXT-01 (strumento «Modifica testo») + NFR-14 (isolamento dei guasti). | Entrando in «Modifica» mentre la pagina corrente è illeggibile (3ª pagina di un albero delle pagine con ciclo) l'attivazione dello strumento solleva un'eccezione NON gest (script con errori: da riverificare) |
+| media | NFR-12 (nessuna perdita silenziosa di modifiche, criterio 1) / VIS-48. | Chiudendo la finestra con più documenti modificati Foliant non mostra un'unica finestra con l'elenco dei documenti modificati: chiede documento per documento e chiude cia |
+| media | NFR-12 (criterio 3) / VIS-49 (file modificato da un'altra applicazione). | Documento con modifiche non salvate in Foliant; un'altra applicazione riscrive il file su disco. Foliant mostra (nella vista) la barra «Il file «ext.pdf» è stato modifica |
+| alta | UX-02/UX-20 (barra delle modalità, layout a finestra ridotta) — nucleo. | Passi: finestra 1280x800 (anche 1366x768: sparisce il menu ☰), aprire un PDF qualsiasi. Atteso (specifica, sezione layout: «Da 1024 px di larghezza in su sono visibili tu |
+| media | UX-05/UX-20 (barra contestuale, comandi in eccesso) — nucleo. | Passi: finestra 1920x1080 (Full HD), aprire un PDF, modalità «Leggi». Atteso: tutti i comandi della barra contestuale visibili oppure raggiungibili da un pulsante di |
+| bassa | NFR-23 (contrasto) / tema chiaro e scuro — nucleo (ui/theme.py). | Passi: aprire un PDF, Proteggi → «Password e permessi» (dialogo «Proteggi con password»); la password non è ancora scritta, quindi «Applica» è disattivato. Stesso effetto |
+| bassa | SEC-04/SEC-05 (dialogo «Proteggi con password») — security. | Passi: aprire un PDF, modalità Proteggi → «Password e permessi»; il dialogo si apre alla dimensione iniziale (tema chiaro o scuro, 1280x800 o 1920x1080). |
+| media | UX (lingua italiana dell'interfaccia) / NFR localizzazione — nucleo. | Passi: interfaccia in italiano. (a) Qualsiasi conferma dei moduli passa da ctx.confirm() (54 chiamate) o QMessageBox.question (20): es. Pagine → Elimina pagine, Segnalibr |
+| bassa | UX-18 (Ctrl+? «Scorciatoie da tastiera» mostra tutte le scorciatoie) — nucleo. | Passi: aprire un PDF, restare in «Leggi», premere Ctrl+? (o ☰ → Scorciatoie da tastiera). Atteso (README/UX-18: «Ctrl+? mostra tutte le scorciatoie»): l'elenco contiene a |
+| bassa | VIS-20 (pannello Segnalibri) — viewer. | Passi: aprire un PDF senza segnalibri (finestra 1280x800 o 1920x1080, tema chiaro o scuro), pannello laterale → icona Segnalibri. |
+| bassa | SIG-15 (pannello Firme) — sign. | Passi: aprire un PDF (anche senza firme), pannello laterale → icona Firme (finestra 1280x800 o 1920x1080: la larghezza del pannello è la stessa), tema chiaro o scuro. |
+| bassa | VIS-33 (Ricerca avanzata) — viewer. | Passi: aprire un PDF, Leggi → «Ricerca avanzata…» (Ctrl+Maiusc+F); tema chiaro o scuro. Atteso: le caselle «Opzioni» (Maiuscole/minuscole, Parola intera, Ignora accenti)  |
+| bassa | OCR-03 (gestione lingue di riconoscimento) — ocr. | Passi: aprire un PDF, modalità OCR → «Lingue» (dialogo «Lingue di riconoscimento») alla dimensione iniziale 620x520, tema chiaro o scuro. |
 
 ## Log
 - 28/10 00:57 — Fase 0: struttura, subagent, `.gitignore`.
@@ -113,3 +146,9 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
 - 28/10 08:35 — Integrazione finale dei 12 moduli nel branch principale.
 - 28/10 08:52 — Suite completa sul branch unito: 2.598 test superati, 0 falliti (13 suite);
   12 moduli caricati, 11 modalità, nessuna scorciatoia duplicata. Consegna.
+- 28/10 09:00–09:30 — Proroga alle 11:00 italiane: chiusi altri bug (redazione senza spostamento
+  del testo, proposta OCR in Modifica, pannello destro, avviso sola lettura) e aggiunte funzioni P1
+  (informazioni sul documento, ricerca nei commenti, scansione → Word con tabelle native, portfolio,
+  controlli fatture con l'IA, ottimizzazione immagini, etichette di pagina, pagine vuote/duplicate).
+- 28/10 09:39 — Suite completa sul branch finale: 2.654 test superati, 0 falliti.
+- 28/10 09:48 — Collaudo finale: corretti i 3 casi di perdita di dati con editor aperto.
