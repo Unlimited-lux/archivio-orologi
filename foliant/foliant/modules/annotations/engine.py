@@ -1,0 +1,2366 @@
+"""Logica delle annotazioni, senza interfaccia.
+
+Tutte le funzioni lavorano su un `pymupdf.Document` già bloccato dal chiamante
+(dentro `Document.change()` per le modifiche, `ENGINE_LOCK` per le letture) e
+usano coordinate pagina non ruotate (origine in alto a sinistra, punti).
+Le annotazioni create sono annotazioni PDF standard: restano visibili negli
+altri lettori e sopravvivono a salvataggio e riapertura.
+
+Le annotazioni si identificano con (indice pagina, xref): lo xref resta stabile
+anche dopo annulla/ripeti perché le copie interne non rinumerano gli oggetti.
+"""
+
+from __future__ import annotations
+
+import getpass
+import math
+import re
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Iterable, Iterator, Sequence
+
+import pymupdf
+
+mupdf = pymupdf.mupdf
+
+# --------------------------------------------------------------------- tipi
+HIGHLIGHT = "highlight"
+UNDERLINE = "underline"
+STRIKEOUT = "strikeout"
+SQUIGGLY = "squiggly"
+NOTE = "note"
+FREETEXT = "freetext"
+CALLOUT = "callout"
+RECT = "rect"
+ELLIPSE = "ellipse"
+LINE = "line"
+ARROW = "arrow"
+POLYGON = "polygon"
+POLYLINE = "polyline"
+CLOUD = "cloud"
+INK = "ink"
+STAMP = "stamp"
+ATTACHMENT = "attachment"
+DISTANCE = "distance"
+PERIMETER = "perimeter"
+AREA = "area"
+
+MARKUP_KINDS = (HIGHLIGHT, UNDERLINE, STRIKEOUT, SQUIGGLY)
+SHAPE_KINDS = (RECT, ELLIPSE, LINE, ARROW, POLYGON, POLYLINE, CLOUD)
+MEASURE_KINDS = (DISTANCE, PERIMETER, AREA)
+
+# Tipi del motore che non sono commenti (non elencati né esportati).
+NON_COMMENT_TYPES = {pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_POPUP}
+
+# Colori predefiniti (RGB 0-1) per tipo.
+DEFAULT_COLORS = {
+    HIGHLIGHT: (1.0, 0.85, 0.0),
+    UNDERLINE: (0.05, 0.45, 0.85),
+    STRIKEOUT: (0.85, 0.1, 0.1),
+    SQUIGGLY: (0.1, 0.6, 0.2),
+    NOTE: (1.0, 0.8, 0.1),
+    FREETEXT: (0.0, 0.0, 0.0),
+    CALLOUT: (0.0, 0.0, 0.0),
+    INK: (0.1, 0.25, 0.75),
+    STAMP: (0.75, 0.1, 0.1),
+    ATTACHMENT: (0.3, 0.3, 0.8),
+}
+SHAPE_COLOR = (0.85, 0.15, 0.15)
+MEASURE_COLOR = (0.05, 0.45, 0.85)
+
+# Stati di revisione (modello «Review» dello standard PDF).
+STATE_NONE = "None"
+STATE_ACCEPTED = "Accepted"
+STATE_REJECTED = "Rejected"
+STATE_CANCELLED = "Cancelled"
+STATE_COMPLETED = "Completed"
+REVIEW_STATES = (STATE_NONE, STATE_ACCEPTED, STATE_REJECTED, STATE_CANCELLED, STATE_COMPLETED)
+
+DASH_STYLES = {"solid": None, "dashed": [6, 3], "dotted": [1, 2]}
+
+
+# Chiave privata (seconda classe) con i dati dei timbri creati da Foliant.
+STAMP_KEY = "FoliantStamp"
+
+
+class AnnotationError(Exception):
+    """Errore con messaggio per l'utente."""
+
+
+def default_author() -> str:
+    """Nome completo dell'account di sistema (o nome utente)."""
+    try:
+        import pwd
+
+        gecos = pwd.getpwuid(__import__("os").getuid()).pw_gecos.split(",")[0].strip()
+        if gecos:
+            return gecos
+    except Exception:
+        pass
+    try:
+        return getpass.getuser()
+    except Exception:
+        return ""
+
+
+# Soggetto predefinito = nome del tipo di strumento (ANN-02).
+SUBJECTS = {
+    HIGHLIGHT: "Evidenziazione", UNDERLINE: "Sottolineatura", STRIKEOUT: "Barrato", SQUIGGLY: "Ondulato",
+    NOTE: "Nota", FREETEXT: "Casella di testo", CALLOUT: "Richiamo", RECT: "Rettangolo", ELLIPSE: "Ellisse",
+    LINE: "Linea", ARROW: "Freccia", POLYGON: "Poligono", POLYLINE: "Polilinea", CLOUD: "Nuvola",
+    INK: "Disegno a mano libera", STAMP: "Timbro", ATTACHMENT: "Allegato", DISTANCE: "Distanza",
+    PERIMETER: "Perimetro", AREA: "Area",
+}
+
+
+def pdf_now() -> str:
+    """Data corrente nel formato delle date PDF."""
+    now = datetime.now().astimezone()
+    off = now.utcoffset() or timezone.utc.utcoffset(None)
+    minutes = int(off.total_seconds() // 60) if off else 0
+    sign = "+" if minutes >= 0 else "-"
+    minutes = abs(minutes)
+    return now.strftime("D:%Y%m%d%H%M%S") + f"{sign}{minutes // 60:02d}'{minutes % 60:02d}'"
+
+
+_DATE_RE = re.compile(r"D?:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?([Zz+\-])?(\d{2})?'?(\d{2})?'?")
+
+
+def parse_pdf_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    m = _DATE_RE.match(value.strip())
+    if not m:
+        return None
+    y, mo, d, h, mi, s = (int(g) if g else dflt for g, dflt in zip(m.groups()[:6], (0, 1, 1, 0, 0, 0)))
+    try:
+        dt = datetime(y, mo, d, h, mi, s)
+    except ValueError:
+        return None
+    sign = m.group(7)
+    if sign in ("+", "-"):
+        from datetime import timedelta
+        off = timedelta(hours=int(m.group(8) or 0), minutes=int(m.group(9) or 0))
+        dt = dt.replace(tzinfo=timezone(off if sign == "+" else -off))
+    elif sign in ("Z", "z"):
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def format_date(value: str | None) -> str:
+    dt = parse_pdf_date(value)
+    if dt is None:
+        return ""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone()
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
+# ----------------------------------------------------------------- stile
+@dataclass
+class Style:
+    """Aspetto di un'annotazione. Colori RGB 0-1; None = nessuno."""
+
+    color: tuple | None = None
+    fill: tuple | None = None
+    opacity: float = 1.0
+    width: float = 1.5
+    dash: str = "solid"          # solid / dashed / dotted
+    cloud: bool = False
+    fontsize: float = 12.0
+    text_color: tuple | None = None
+    align: int = 0               # 0 sinistra, 1 centro, 2 destra
+    icon: str = "Comment"        # icona delle note
+
+    def copy(self, **changes) -> "Style":
+        data = dict(self.__dict__)
+        data.update(changes)
+        return Style(**data)
+
+
+def _rgb(c) -> tuple | None:
+    if c is None:
+        return None
+    c = tuple(float(v) for v in c)
+    if len(c) == 1:
+        return (c[0], c[0], c[0])
+    if len(c) == 4:  # CMYK -> RGB
+        cc, mm, yy, kk = c
+        return ((1 - cc) * (1 - kk), (1 - mm) * (1 - kk), (1 - yy) * (1 - kk))
+    return c[:3]
+
+
+def color_to_hex(c) -> str:
+    c = _rgb(c)
+    if c is None:
+        return ""
+    return "#" + "".join(f"{max(0, min(255, round(v * 255))):02X}" for v in c)
+
+
+def hex_to_color(h: str | None) -> tuple | None:
+    if not h:
+        return None
+    h = h.strip().lstrip("#")
+    if len(h) != 6:
+        return None
+    try:
+        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+# ----------------------------------------------------------------- utilità motore
+@contextmanager
+def unrotated(page: pymupdf.Page) -> Iterator[pymupdf.Page]:
+    """Le funzioni di basso livello lavorano nello spazio pagina visualizzato:
+    togliamo temporaneamente la rotazione così da usare coordinate non ruotate."""
+    rot = page.rotation
+    if rot:
+        page.set_rotation(0)
+    try:
+        yield page
+    finally:
+        if rot:
+            page.set_rotation(rot)
+
+
+def get_annot(page: pymupdf.Page, xref: int) -> pymupdf.Annot:
+    annot = page.load_annot(xref)
+    if annot is None:
+        raise AnnotationError("L'annotazione non esiste più.")
+    return annot
+
+
+def to_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
+    mb = page.mediabox
+    return x + mb.x0, mb.y1 - y
+
+
+def from_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
+    mb = page.mediabox
+    return x - mb.x0, mb.y1 - y
+
+
+def to_pdf_rect(page: pymupdf.Page, r) -> tuple[float, float, float, float]:
+    r = pymupdf.Rect(r)
+    x0, y1 = to_pdf_point(page, r.x0, r.y0)
+    x1, y0 = to_pdf_point(page, r.x1, r.y1)
+    return x0, y0, x1, y1
+
+
+def from_pdf_rect(page: pymupdf.Page, r: Sequence[float]) -> pymupdf.Rect:
+    x0, y0, x1, y1 = r
+    a = from_pdf_point(page, x0, y0)
+    b = from_pdf_point(page, x1, y1)
+    return pymupdf.Rect(min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
+
+
+def _fz_point(p) -> "mupdf.FzPoint":
+    return mupdf.FzPoint(float(p[0]), float(p[1]))
+
+
+def new_name() -> str:
+    return str(uuid.uuid4())
+
+
+def _finish(annot: pymupdf.Annot, author: str | None, contents: str | None = None,
+            subject: str | None = None, date: str | None = None, kind: str = "") -> int:
+    """Completa una nuova annotazione: autore, soggetto, date uguali, /NM univoco."""
+    now = date or pdf_now()
+    info = {"title": author if author is not None else default_author(), "creationDate": now, "modDate": now}
+    if contents is not None:
+        info["content"] = contents
+    subject = subject if subject is not None else SUBJECTS.get(kind)
+    if subject:
+        info["subject"] = subject
+    annot.set_info(**info)
+    annot.update()
+    doc = annot.get_parent().parent
+    doc.xref_set_key(annot.xref, "NM", _pdf_string(new_name()))
+    return annot.xref
+
+
+def _apply_style(annot: pymupdf.Annot, style: Style, *, stroke=True, fill=False) -> None:
+    colors = {}
+    if stroke and style.color is not None:
+        colors["stroke"] = _rgb(style.color)
+    if fill:
+        colors["fill"] = _rgb(style.fill) if style.fill is not None else None
+    if colors:
+        annot.set_colors(**{k: v for k, v in colors.items() if v is not None})
+    dashes = DASH_STYLES.get(style.dash)
+    try:
+        annot.set_border(width=max(0.0, float(style.width)), dashes=dashes or [],
+                         clouds=1 if style.cloud else 0)
+    except Exception:
+        pass
+    annot.set_opacity(max(0.05, min(1.0, float(style.opacity))))
+
+
+def touch(annot: pymupdf.Annot) -> None:
+    annot.set_info(modDate=pdf_now())
+
+
+def _dirty_update(annot: pymupdf.Annot) -> None:
+    mupdf.pdf_dirty_annot(annot.this)
+    annot.update()
+
+
+# ------------------------------------------------------------------ creazione
+def quads_from_words(words: Iterable[tuple]) -> list[pymupdf.Quad]:
+    """Unisce le parole della stessa riga in un quadrilatero per riga."""
+    lines: dict[tuple, pymupdf.Rect] = {}
+    order: list[tuple] = []
+    for w in words:
+        key = (w[5], w[6]) if len(w) > 6 else (len(order), 0)
+        r = pymupdf.Rect(w[:4])
+        if key in lines:
+            lines[key] |= r
+        else:
+            lines[key] = r
+            order.append(key)
+    return [lines[k].quad for k in order]
+
+
+def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequence, style: Style,
+                  author: str | None = None, contents: str = "", area: bool = False) -> int:
+    if kind not in MARKUP_KINDS:
+        raise AnnotationError("Tipo di evidenziazione sconosciuto.")
+    quads = [q if isinstance(q, pymupdf.Quad) else pymupdf.Rect(q).quad for q in quads]
+    quads = [q for q in quads if not q.rect.is_empty]
+    if not quads:
+        raise AnnotationError("Nessun testo selezionato.")
+    page = pdf[page_no]
+    fn = {HIGHLIGHT: page.add_highlight_annot, UNDERLINE: page.add_underline_annot,
+          STRIKEOUT: page.add_strikeout_annot, SQUIGGLY: page.add_squiggly_annot}[kind]
+    annot = fn(quads=quads)
+    if annot is None:
+        raise AnnotationError("Impossibile creare l'evidenziazione.")
+    annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[kind]))
+    annot.set_opacity(max(0.0, min(1.0, style.opacity)))
+    xref = _finish(annot, author, contents, kind=kind)
+    if area:
+        pdf.xref_set_key(xref, AREA_KEY, "true")
+    if contents:
+        ensure_popup(pdf, page_no, xref)
+    return xref
+
+
+AREA_KEY = "FoliantArea"
+
+
+def is_area_markup(pdf: pymupdf.Document, xref: int) -> bool:
+    return pdf.xref_get_key(xref, AREA_KEY)[1] == "true"
+
+
+def marked_text(page: pymupdf.Page, annot: pymupdf.Annot) -> str:
+    """Testo coperto dai quadrilateri di un markup (non memorizzato nel file)."""
+    verts = annot.vertices or []
+    parts = []
+    for i in range(0, len(verts) - 3, 4):
+        r = pymupdf.Quad(*verts[i:i + 4]).rect
+        # si restringe in verticale per non prendere le righe vicine
+        h = r.height
+        r = pymupdf.Rect(r.x0, r.y0 + h * 0.2, r.x1, r.y1 - h * 0.2)
+        try:
+            words = page.get_text("words", clip=r)
+        except Exception:
+            words = []
+        words = [w for w in words if pymupdf.Rect(w[:4]).intersects(r)]
+        parts.append(" ".join(w[4] for w in words))
+    return " ".join(p for p in parts if p).strip()
+
+
+def ensure_popup(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool | None = None) -> None:
+    """Crea (se manca) la finestra popup collegata all'annotazione (ANN-05)."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    if annot.type[0] in (pymupdf.PDF_ANNOT_FREE_TEXT, pymupdf.PDF_ANNOT_POPUP) or \
+            annot.type[0] in NON_COMMENT_TYPES:
+        return
+    if not annot.popup_xref:
+        r = annot.rect
+        pr = page.rect if not page.rotation else pymupdf.Rect(0, 0, page.mediabox.width, page.mediabox.height)
+        x0 = min(r.x1 + 8, pr.x1 - 200)
+        y0 = max(pr.y0, min(r.y0, pr.y1 - 120))
+        with unrotated(page):
+            annot.set_popup(pymupdf.Rect(x0, y0, x0 + 200, y0 + 120))
+        annot = page.load_annot(xref)
+    if open_ is not None:
+        annot.set_open(bool(open_))
+
+
+NOTE_ICONS = ["Comment", "Note", "Key", "Help", "Paragraph", "NewParagraph", "Insert"]
+NOTE_SIZE = 20.0
+
+
+def create_note(pdf: pymupdf.Document, page_no: int, point, text: str, style: Style,
+                author: str | None = None, icon: str | None = None) -> int:
+    page = pdf[page_no]
+    p = pymupdf.Point(point)
+    icon = icon or style.icon or "Comment"
+    if icon not in NOTE_ICONS:
+        icon = "Note"
+    with unrotated(page):
+        annot = page.add_text_annot(p, text, icon=icon)
+        h = NOTE_SIZE / 2
+        annot.set_rect(pymupdf.Rect(p.x - h, p.y - h, p.x + h, p.y + h))
+    annot.set_flags(pymupdf.PDF_ANNOT_IS_PRINT | pymupdf.PDF_ANNOT_IS_NO_ZOOM | pymupdf.PDF_ANNOT_IS_NO_ROTATE)
+    annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[NOTE]))
+    annot.set_opacity(max(0.0, min(1.0, style.opacity)))
+    xref = _finish(annot, author, text, kind=NOTE)
+    ensure_popup(pdf, page_no, xref)
+    return xref
+
+
+def create_freetext(pdf: pymupdf.Document, page_no: int, rect, text: str, style: Style,
+                    author: str | None = None, callout: Sequence | None = None) -> int:
+    page = pdf[page_no]
+    rect = pymupdf.Rect(rect).normalize()
+    if rect.width < 8 or rect.height < 8:
+        rect = pymupdf.Rect(rect.x0, rect.y0, rect.x0 + 180, rect.y0 + max(28, style.fontsize * 2.2))
+    kwargs = dict(fontsize=max(4.0, float(style.fontsize)),
+                  text_color=_rgb(style.text_color or style.color or (0, 0, 0)),
+                  fill_color=_rgb(style.fill),
+                  border_width=float(style.width) if style.width > 0 else 0,
+                  opacity=max(0.0, min(1.0, style.opacity)),
+                  align=int(style.align) if style.align in (0, 1, 2) else 0,
+                  fontname="Helv")
+    if style.dash in ("dashed", "dotted"):
+        kwargs["dashes"] = DASH_STYLES[style.dash]
+    if callout:
+        pts = [pymupdf.Point(p) for p in callout]
+        kwargs["callout"] = pts
+        kwargs["line_end"] = pymupdf.PDF_ANNOT_LE_OPEN_ARROW
+    with unrotated(page):
+        annot = page.add_freetext_annot(rect, text, **kwargs)
+        if not callout:
+            pdf.xref_set_key(annot.xref, "CL", "null")
+            annot = page.load_annot(annot.xref)
+    xref = _finish(annot, author, text, kind=CALLOUT if callout else FREETEXT)
+    if style.width > 0 and style.color is not None:
+        pdf.xref_set_key(xref, FT_BORDER_KEY, "[{:.3f} {:.3f} {:.3f}]".format(*_rgb(style.color)))
+    refresh_freetext(pdf, page_no, xref)
+    return xref
+
+
+FT_BORDER_KEY = "FoliantBorder"
+
+
+def _array(pdf: pymupdf.Document, xref: int, key: str) -> list[float] | None:
+    k, v = pdf.xref_get_key(xref, key)
+    if k != "array":
+        return None
+    try:
+        return [float(x) for x in v.strip("[]").split()]
+    except ValueError:
+        return None
+
+
+def _da(pdf: pymupdf.Document, xref: int) -> tuple[str, float, tuple]:
+    k, v = pdf.xref_get_key(xref, "DA")
+    da = _decode_text_string(v) if k == "string" else "0 g /Helv 12 Tf"
+    m = re.search(r"/(\S+)\s+([\d.]+)\s+Tf", da)
+    font = m.group(1) if m else "Helv"
+    size = float(m.group(2)) if m else 12.0
+    cm = re.search(r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", da)
+    gm = re.search(r"(?<![\d.])([\d.]+)\s+g\b", da)
+    color = tuple(float(x) for x in cm.groups()) if cm else ((float(gm.group(1)),) * 3 if gm else (0.0, 0.0, 0.0))
+    return font, size or 12.0, color
+
+
+def _wrap(text: str, width: float, size: float) -> list[str]:
+    lines: list[str] = []
+    for para in text.split("\n"):
+        words = para.split(" ")
+        cur = ""
+        for w in words:
+            cand = w if not cur else cur + " " + w
+            if pymupdf.get_text_length(cand, fontname="helv", fontsize=size) <= width or not cur:
+                cur = cand
+            else:
+                lines.append(cur)
+                cur = w
+        lines.append(cur)
+    return lines
+
+
+def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
+    """Aspetto vettoriale di caselle di testo e richiami: riempimento, bordo (colore proprio),
+    testo a capo con allineamento, linea di richiamo con punta. Per testi fuori dalla codifica
+    dei caratteri standard o pagine ruotate si usa l'aspetto generato dal motore."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    text = (annot.info or {}).get("content", "")
+    try:
+        text.encode("cp1252")
+        custom = page.rotation == 0
+    except UnicodeEncodeError:
+        custom = False
+    if not custom:
+        _dirty_update(annot)
+        return
+    _font, size, tcolor = _da(pdf, xref)
+    fill = _array(pdf, xref, "C")
+    border = _array(pdf, xref, FT_BORDER_KEY)
+    bs = annot.border or {}
+    bw = float(bs.get("width", 0) or 0) if bs.get("width", -1) >= 0 else 0.0
+    dashes = bs.get("dashes") or []
+    q = pdf.xref_get_key(xref, "Q")
+    align = int(q[1]) if q[0] == "int" else 0
+    rect = pymupdf.Rect(annot.rect)
+    inner = _freetext_inner(page, annot)
+    cl = _array(pdf, xref, "CL")
+    pts = []
+    if cl and _intent(pdf, xref) == "FreeTextCallout":
+        pts = [pymupdf.Point(*from_pdf_point(page, cl[i], cl[i + 1])) for i in range(0, len(cl) - 1, 2)]
+    opacity = annot.opacity if annot.opacity is not None and annot.opacity >= 0 else 1.0
+    H = rect.height
+
+    def loc(p: pymupdf.Point) -> tuple[float, float]:
+        return p.x - rect.x0, H - (p.y - rect.y0)
+
+    ops = ["/GS0 gs"]
+    x0, y1 = loc(inner.tl)
+    x1, y0 = loc(inner.br)
+    if fill:
+        r, g, b = _rgb(fill)
+        ops.append(f"{r:.3f} {g:.3f} {b:.3f} rg {x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f} re f")
+    stroke = _rgb(border) if border else (0.0, 0.0, 0.0)
+    if bw > 0 and border:
+        r, g, b = stroke
+        dash = "[" + " ".join(f"{d:g}" for d in dashes) + "] 0 d " if dashes else ""
+        ops.append(f"{dash}{r:.3f} {g:.3f} {b:.3f} RG {bw:.2f} w "
+                   f"{x0 + bw / 2:.2f} {y0 + bw / 2:.2f} {x1 - x0 - bw:.2f} {y1 - y0 - bw:.2f} re S [] 0 d")
+    if len(pts) >= 2:
+        r, g, b = stroke if border else _rgb(tcolor)
+        lw = max(bw, 1.0)
+        path = " ".join(f"{loc(p)[0]:.2f} {loc(p)[1]:.2f} {'m' if i == 0 else 'l'}" for i, p in enumerate(pts))
+        tip, nxt = pts[0], pts[1]
+        ang = math.atan2(nxt.y - tip.y, nxt.x - tip.x)
+        head = 6 + 2 * lw
+        wing = []
+        for da_ in (0.45, -0.45):
+            wp = pymupdf.Point(tip.x + head * math.cos(ang + da_), tip.y + head * math.sin(ang + da_))
+            wing.append(loc(wp))
+        tx, ty = loc(tip)
+        ops.append(f"{r:.3f} {g:.3f} {b:.3f} RG {lw:.2f} w 1 J 1 j {path} S "
+                   f"{wing[0][0]:.2f} {wing[0][1]:.2f} m {tx:.2f} {ty:.2f} l {wing[1][0]:.2f} {wing[1][1]:.2f} l S")
+    pad = 2 + bw
+    avail = max(10.0, inner.width - 2 * pad)
+    lines = _wrap(text, avail, size)
+    r, g, b = _rgb(tcolor)
+    lead = size * 1.2
+    y = y1 - pad - size * 0.9
+    ops.append(f"BT /Helv {size:.2f} Tf {r:.3f} {g:.3f} {b:.3f} rg")
+    for line in lines:
+        if y < y0 + pad - size * 0.3:
+            break
+        w = pymupdf.get_text_length(line, fontname="helv", fontsize=size)
+        x = x0 + pad
+        if align == 1:
+            x = x0 + (inner.width - w) / 2
+        elif align == 2:
+            x = x1 - pad - w
+        ops.append(f"1 0 0 1 {x:.2f} {y:.2f} Tm {_pdf_string(line)} Tj")
+        y -= lead
+    ops.append("ET")
+    font = pdf.get_new_xref()
+    pdf.update_object(font, "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>")
+    ap = pdf.get_new_xref()
+    pdf.update_object(ap, f"<</Type/XObject/Subtype/Form/BBox[0 0 {rect.width:.2f} {H:.2f}]/Matrix[1 0 0 1 0 0]"
+                          f"/Resources<</Font<</Helv {font} 0 R>>"
+                          f"/ExtGState<</GS0<</Type/ExtGState/CA {opacity:.3f}/ca {opacity:.3f}>>>>>>>>")
+    pdf.update_stream(ap, "\n".join(ops).encode("latin-1"))
+    pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+
+
+def create_shape(pdf: pymupdf.Document, page_no: int, kind: str, points: Sequence, style: Style,
+                 author: str | None = None, contents: str = "") -> int:
+    """Forme: RECT/ELLIPSE ricevono due punti opposti; LINE/ARROW due estremi;
+    POLYGON/POLYLINE/CLOUD i vertici."""
+    page = pdf[page_no]
+    pts = [pymupdf.Point(p) for p in points]
+    if kind in (RECT, ELLIPSE):
+        if len(pts) < 2:
+            raise AnnotationError("Forma troppo piccola.")
+        r = pymupdf.Rect(pts[0], pts[1]).normalize()
+        if r.width < 2 or r.height < 2:
+            raise AnnotationError("Forma troppo piccola.")
+        annot = page.add_rect_annot(r) if kind == RECT else page.add_circle_annot(r)
+        _apply_style(annot, style.copy(color=style.color or SHAPE_COLOR), fill=True)
+    elif kind in (LINE, ARROW):
+        if len(pts) < 2 or abs(pts[0] - pts[1]) < 2:
+            raise AnnotationError("Linea troppo corta.")
+        annot = page.add_line_annot(pts[0], pts[-1])
+        _apply_style(annot, style.copy(color=style.color or SHAPE_COLOR, cloud=False), fill=style.fill is not None)
+        if kind == ARROW:
+            annot.set_line_ends(pymupdf.PDF_ANNOT_LE_NONE, pymupdf.PDF_ANNOT_LE_OPEN_ARROW)
+        if contents:
+            try:
+                mupdf.pdf_set_annot_line_caption(annot.this, 1)
+            except Exception:
+                pass
+    elif kind in (POLYGON, POLYLINE, CLOUD):
+        need = 2 if kind == POLYLINE else 3
+        if len(pts) < need:
+            raise AnnotationError("Servono almeno {n} punti.".replace("{n}", str(need)))
+        if kind == POLYLINE:
+            annot = page.add_polyline_annot(pts)
+        else:
+            annot = page.add_polygon_annot(pts)
+        st = style.copy(color=style.color or SHAPE_COLOR, cloud=style.cloud or kind == CLOUD)
+        _apply_style(annot, st, fill=kind != POLYLINE)
+    else:
+        raise AnnotationError("Forma sconosciuta.")
+    xref = _finish(annot, author, contents, kind=kind)
+    if kind == ARROW:
+        pdf.xref_set_key(xref, "IT", "/LineArrow")
+    elif kind == CLOUD:
+        pdf.xref_set_key(xref, "IT", "/PolygonCloud")
+    return xref
+
+
+INK_TOLERANCE = 0.5
+INK_MAX_POINTS = 2000
+
+
+def simplify(points: Sequence, tolerance: float = INK_TOLERANCE) -> list[tuple[float, float]]:
+    """Semplificazione di Ramer-Douglas-Peucker (scarto massimo `tolerance`)."""
+    pts = [pymupdf.Point(p) for p in points]
+    if len(pts) < 3:
+        return [(p.x, p.y) for p in pts]
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        best, idx = 0.0, -1
+        for i in range(a + 1, b):
+            d = _dist_to_segment(pts[i], pts[a], pts[b])
+            if d > best:
+                best, idx = d, i
+        if idx >= 0 and best > tolerance:
+            keep[idx] = True
+            stack.append((a, idx))
+            stack.append((idx, b))
+    return [(p.x, p.y) for p, k in zip(pts, keep) if k]
+
+
+def _clean_strokes(strokes: Sequence[Sequence]) -> list[list[tuple[float, float]]]:
+    out = []
+    for s in strokes:
+        pts = [tuple(map(float, p[:2])) for p in s]
+        if not pts:
+            continue
+        if len(pts) == 1 or all(abs(pymupdf.Point(p) - pymupdf.Point(pts[0])) < 0.01 for p in pts):
+            # tocco senza movimento: un punto visibile
+            pts = [pts[0], (pts[0][0] + 0.01, pts[0][1] + 0.01)]
+        else:
+            pts = simplify(pts)
+        out.append(pts)
+    total = sum(len(s) for s in out)
+    tol = INK_TOLERANCE
+    while total > INK_MAX_POINTS and tol < 50:
+        tol *= 1.5
+        out = [simplify(s, tol) for s in out]
+        total = sum(len(s) for s in out)
+    return out
+
+
+def create_ink(pdf: pymupdf.Document, page_no: int, strokes: Sequence[Sequence], style: Style,
+               author: str | None = None, marker: bool = False) -> int:
+    """Disegno a mano libera; con `marker` è un pennarello evidenziatore (fusione moltiplicativa)."""
+    strokes = _clean_strokes(strokes)
+    if not strokes:
+        raise AnnotationError("Disegno vuoto.")
+    page = pdf[page_no]
+    with unrotated(page):
+        annot = page.add_ink_annot(strokes)
+    _apply_style(annot, style.copy(color=style.color or DEFAULT_COLORS[INK], cloud=False, dash="solid"))
+    if marker:
+        annot.set_blendmode(pymupdf.PDF_BM_Multiply)
+    return _finish(annot, author, "", kind=INK)
+
+
+def add_ink_strokes(pdf: pymupdf.Document, page_no: int, xref: int, strokes: Sequence[Sequence]) -> None:
+    """Aggiunge tratti a un disegno esistente (tratti consecutivi = un'unica annotazione)."""
+    page = pdf[page_no]
+    new = _clean_strokes(strokes)
+    if not new:
+        return
+    with unrotated(page):
+        annot = get_annot(page, xref)
+        old = [[pymupdf.Point(v) for v in s] for s in annot.vertices or []]
+        _set_ink(annot, old + [[pymupdf.Point(p) for p in s] for s in new])
+        touch(annot)
+        _dirty_update(annot)
+
+
+# ------------------------------------------------------------------ misure
+@dataclass
+class Scale:
+    """Scala di misura: `factor` unità reali per punto, `unit` unità reale."""
+
+    unit: str = "mm"
+    factor: float = 25.4 / 72
+    label: str = ""
+    calibrated: bool = False
+
+    @classmethod
+    def from_ratio(cls, paper: float, paper_unit: str, real: float, real_unit: str) -> "Scale":
+        """Es. 1 cm = 2 m → from_ratio(1, "cm", 2, "m")."""
+        if paper <= 0 or real <= 0:
+            raise AnnotationError("I valori della scala devono essere maggiori di zero.")
+        pts = paper * PAGE_UNITS.get(paper_unit, 1.0)
+        return cls(real_unit, real / pts, f"{_num(paper)} {paper_unit} = {_num(real)} {real_unit}", True)
+
+    @classmethod
+    def calibrate(cls, points: float, real: float, real_unit: str) -> "Scale":
+        if points <= 0 or real <= 0:
+            raise AnnotationError("La lunghezza di calibrazione deve essere maggiore di zero.")
+        return cls(real_unit, real / points, f"{_num(points)} pt = {_num(real)} {real_unit}", True)
+
+    def length(self, points: float) -> float:
+        return points * self.factor
+
+    def area(self, points2: float) -> float:
+        return points2 * self.factor * self.factor
+
+    def text(self) -> str:
+        return self.label or f"1 pt = {_num(self.factor)} {self.unit}"
+
+
+PAGE_UNITS = {"pt": 1.0, "mm": 72 / 25.4, "cm": 72 / 2.54, "in": 72.0}
+REAL_UNITS = ["mm", "cm", "m", "km", "in", "ft", "yd", "mi", "pt"]
+
+
+def _num(v: float) -> str:
+    return f"{v:g}".replace(".", ",")
+
+
+def polyline_length(points: Sequence) -> float:
+    pts = [pymupdf.Point(p) for p in points]
+    return sum(abs(pts[i + 1] - pts[i]) for i in range(len(pts) - 1))
+
+
+def polygon_area(points: Sequence) -> float:
+    pts = [pymupdf.Point(p) for p in points]
+    s = 0.0
+    for i in range(len(pts)):
+        a, b = pts[i], pts[(i + 1) % len(pts)]
+        s += a.x * b.y - b.x * a.y
+    return abs(s) / 2
+
+
+def format_measure(value: float, unit: str, square: bool = False) -> str:
+    """Valore con due decimali e virgola decimale (lingua italiana)."""
+    txt = f"{value:.2f}".replace(".", ",")
+    return f"{txt} {unit}²" if square else f"{txt} {unit}"
+
+
+def measure_value(kind: str, points: Sequence, scale: Scale) -> str:
+    if kind == DISTANCE:
+        return format_measure(scale.length(polyline_length(points[:2])), scale.unit)
+    if kind == PERIMETER:
+        return format_measure(scale.length(polyline_length(points)), scale.unit)
+    if kind == AREA:
+        return format_measure(scale.area(polygon_area(points)), scale.unit, square=True)
+    raise AnnotationError("Misura sconosciuta.")
+
+
+def _measure_dict(scale: Scale) -> str:
+    unit = scale.unit
+    num = f"<</Type/NumberFormat/U{_pdf_string(unit)}/C {scale.factor:.10g}/D 100>>"
+    area = f"<</Type/NumberFormat/U{_pdf_string(unit + '2')}/C {scale.factor * scale.factor:.10g}/D 100>>"
+    return f"<</Type/Measure/Subtype/RL/R{_pdf_string(scale.text())}/X[{num}]/D[{num}]/A[{area}]>>"
+
+
+def scale_of(pdf: pymupdf.Document, xref: int) -> Scale | None:
+    """Scala memorizzata in una misura (`/Measure`)."""
+    k, v = pdf.xref_get_key(xref, "Measure/D")
+    if k != "array":
+        k, v = pdf.xref_get_key(xref, "Measure/X")
+    if k != "array":
+        return None
+    m = re.search(r"/C\s+([\d.eE+-]+)", v)
+    u = re.search(r"/U\s*\(([^)]*)\)", v)
+    if not m:
+        return None
+    r = pdf.xref_get_key(xref, "Measure/R")
+    return Scale(u.group(1) if u else "", float(m.group(1)),
+                 _unescape_pdf_string(r[1]) if r[0] == "string" else "", True)
+
+
+def update_measure(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
+    """Ricalcola il valore di una misura dalla sua geometria e dalla sua scala."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    kind = kind_of(pdf, annot)
+    if kind not in MEASURE_KINDS:
+        return
+    scale = scale_of(pdf, xref) or Scale()
+    value = measure_value(kind, [pymupdf.Point(v) for v in annot.vertices or []], scale)
+    annot.set_info(content=value, modDate=pdf_now())
+    annot.update()
+
+
+def create_measure(pdf: pymupdf.Document, page_no: int, kind: str, points: Sequence, style: Style,
+                   scale: Scale, author: str | None = None) -> int:
+    page = pdf[page_no]
+    pts = [pymupdf.Point(p) for p in points]
+    value = measure_value(kind, pts, scale)
+    st = style.copy(color=style.color or MEASURE_COLOR, cloud=False)
+    if kind == DISTANCE:
+        if len(pts) < 2 or abs(pts[0] - pts[1]) < 1:
+            raise AnnotationError("Linea troppo corta.")
+        annot = page.add_line_annot(pts[0], pts[1])
+        _apply_style(annot, st)
+        annot.set_line_ends(pymupdf.PDF_ANNOT_LE_BUTT, pymupdf.PDF_ANNOT_LE_BUTT)
+        intent = "LineDimension"
+    elif kind == PERIMETER:
+        if len(pts) < 2:
+            raise AnnotationError("Servono almeno 2 punti.")
+        annot = page.add_polyline_annot(pts)
+        _apply_style(annot, st)
+        intent = "PolyLineDimension"
+    elif kind == AREA:
+        if len(pts) < 3:
+            raise AnnotationError("Servono almeno 3 punti.")
+        annot = page.add_polygon_annot(pts)
+        _apply_style(annot, st.copy(fill=st.fill), fill=st.fill is not None)
+        intent = "PolygonDimension"
+    else:
+        raise AnnotationError("Misura sconosciuta.")
+    pdf.xref_set_key(annot.xref, "IT", "/" + intent)
+    pdf.xref_set_key(annot.xref, "Measure", _measure_dict(scale))
+    if kind == DISTANCE:
+        try:
+            mupdf.pdf_set_annot_line_caption(annot.this, 1)
+        except Exception:
+            pass
+    return _finish(annot, author, value, kind=kind)
+
+
+# ------------------------------------------------------------------ timbri
+@dataclass
+class StampSpec:
+    text: str
+    color: tuple = (0.75, 0.1, 0.1)
+    subtitle: str = ""      # seconda riga (data, autore) per i timbri dinamici
+    name: str = ""          # /Name standard (Approved, Draft, …) o personalizzato
+
+
+_GREEN, _RED, _BLUE, _GREY, _ORANGE, _PURPLE = ((0.08, 0.5, 0.24), (0.75, 0.1, 0.1), (0.15, 0.3, 0.7),
+                                                 (0.4, 0.4, 0.4), (0.85, 0.35, 0.0), (0.5, 0.2, 0.6))
+# Timbri predefiniti: (etichetta, /Name, colore). Etichette nella lingua dell'interfaccia.
+PRESET_STAMPS = [
+    ("Approvato", "Approved", _GREEN), ("Non approvato", "NotApproved", _RED), ("Bozza", "Draft", _BLUE),
+    ("Definitivo", "Final", _GREEN), ("Riservato", "Confidential", _RED), ("Per commenti", "ForComment", _BLUE),
+    ("Per la divulgazione", "ForPublicRelease", _GREEN), ("Non per la divulgazione", "NotForPublicRelease", _RED),
+    ("Scaduto", "Expired", _RED), ("Così com'è", "AsIs", _BLUE), ("Sperimentale", "Experimental", _BLUE),
+    ("Venduto", "Sold", _PURPLE), ("Dipartimentale", "Departmental", _BLUE), ("Segretissimo", "TopSecret", _RED),
+    ("Ricevuto", "FoliantRicevuto", _BLUE), ("Pagato", "FoliantPagato", _GREEN),
+    ("Verificato", "FoliantVerificato", _GREEN), ("Urgente", "FoliantUrgente", _ORANGE),
+    ("Copia", "FoliantCopia", _GREY), ("Originale", "FoliantOriginale", _GREY),
+]
+
+# Modelli di timbri dinamici (segnaposto: {autore} {data} {ora} {file} {pagina}).
+DYNAMIC_STAMPS = [
+    ("Ricevuto", "Ricevuto il {data} alle {ora}", _BLUE),
+    ("Approvato", "Approvato da {autore} il {data}", _GREEN),
+    ("Verificato", "Verificato da {autore} il {data} {ora}", _GREEN),
+    ("Pagato", "Pagato il {data}", _GREEN),
+]
+
+
+def fill_template(template: str, *, author: str = "", when: datetime | None = None, filename: str = "",
+                  page: int | None = None, date_format: str = "%d/%m/%Y") -> str:
+    when = when or datetime.now()
+    values = {"{autore}": author or "", "{nome}": author or "", "{data}": when.strftime(date_format),
+              "{ora}": when.strftime("%H:%M"), "{file}": filename,
+              "{pagina}": str(page + 1) if page is not None else ""}
+    for k, v in values.items():
+        template = template.replace(k, v)
+    return template
+
+
+def dynamic_subtitle(template: str, author: str, when: datetime | None = None) -> str:
+    return fill_template(template, author=author, when=when)
+
+
+def _pdf_string(text: str) -> str:
+    data = text.encode("cp1252", errors="replace")
+    out = []
+    for b in data:
+        ch = chr(b)
+        if ch in "()\\":
+            out.append("\\" + ch)
+        elif 32 <= b < 127:
+            out.append(ch)
+        else:
+            out.append(f"\\{b:03o}")
+    return "(" + "".join(out) + ")"
+
+
+def stamp_size(spec: StampSpec, height: float = 44.0) -> tuple[float, float]:
+    main = pymupdf.get_text_length(spec.text.upper(), fontname="hebo", fontsize=height * 0.45)
+    sub = pymupdf.get_text_length(spec.subtitle, fontname="helv", fontsize=height * 0.2) if spec.subtitle else 0
+    return max(main, sub) + height * 0.6, height
+
+
+def _stamp_appearance(spec: StampSpec, w: float, h: float, opacity: float) -> bytes:
+    r, g, b = _rgb(spec.color)
+    lw = max(1.5, h * 0.06)
+    big = h * (0.4 if spec.subtitle else 0.5)
+    small = h * 0.22
+    main = spec.text.upper()
+    main_w = pymupdf.get_text_length(main, fontname="hebo", fontsize=big)
+    if main_w > w - h * 0.3:
+        big *= (w - h * 0.3) / max(main_w, 1)
+        main_w = pymupdf.get_text_length(main, fontname="hebo", fontsize=big)
+    y_main = h * 0.5 - big * 0.35 + (small * 0.75 if spec.subtitle else 0)
+    ops = [f"/GS0 gs {r:.3f} {g:.3f} {b:.3f} RG {r:.3f} {g:.3f} {b:.3f} rg {lw:.2f} w",
+           f"{lw:.2f} {lw:.2f} {w - 2 * lw:.2f} {h - 2 * lw:.2f} re S",
+           f"BT /FoHB {big:.2f} Tf {(w - main_w) / 2:.2f} {y_main:.2f} Td {_pdf_string(main)} Tj ET"]
+    if spec.subtitle:
+        sub_w = pymupdf.get_text_length(spec.subtitle, fontname="helv", fontsize=small)
+        if sub_w > w - lw * 4:
+            small *= (w - lw * 4) / max(sub_w, 1)
+            sub_w = pymupdf.get_text_length(spec.subtitle, fontname="helv", fontsize=small)
+        ops.append(f"BT /FoH {small:.2f} Tf {(w - sub_w) / 2:.2f} {h * 0.16:.2f} Td {_pdf_string(spec.subtitle)} Tj ET")
+    return "\n".join(ops).encode("latin-1")
+
+
+def _write_stamp_ap(pdf: pymupdf.Document, annot: pymupdf.Annot, spec: StampSpec, opacity: float) -> None:
+    r = annot.rect
+    w, h = r.width, r.height
+    font_b = pdf.get_new_xref()
+    pdf.update_object(font_b, "<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>")
+    font_r = pdf.get_new_xref()
+    pdf.update_object(font_r, "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>")
+    ap = pdf.get_new_xref()
+    pdf.update_object(ap, f"<</Type/XObject/Subtype/Form/BBox[0 0 {w:.2f} {h:.2f}]/Matrix[1 0 0 1 0 0]"
+                          f"/Resources<</Font<</FoHB {font_b} 0 R/FoH {font_r} 0 R>>"
+                          f"/ExtGState<</GS0<</Type/ExtGState/CA {opacity:.3f}/ca {opacity:.3f}>>>>>>>>")
+    pdf.update_stream(ap, _stamp_appearance(spec, w, h, opacity))
+    pdf.xref_set_key(annot.xref, "AP", f"<</N {ap} 0 R>>")
+
+
+def create_stamp(pdf: pymupdf.Document, page_no: int, point, spec: StampSpec, style: Style,
+                 author: str | None = None, height: float = 44.0) -> int:
+    """Timbro vettoriale con aspetto proprio, centrato su `point`."""
+    page = pdf[page_no]
+    w, h = stamp_size(spec, height)
+    p = pymupdf.Point(point)
+    rect = pymupdf.Rect(p.x - w / 2, p.y - h / 2, p.x + w / 2, p.y + h / 2)
+    return _stamp_in_rect(pdf, page, rect, spec, style.opacity, author)
+
+
+def _stamp_in_rect(pdf, page, rect, spec: StampSpec, opacity: float, author: str | None,
+                   date: str | None = None) -> int:
+    with unrotated(page):
+        annot = page.add_stamp_annot(rect, 0)
+    xref = _finish(annot, author, spec.text + (f" {spec.subtitle}" if spec.subtitle else ""), kind=STAMP,
+                   date=date)
+    annot = page.load_annot(xref)
+    annot.set_opacity(max(0.0, min(1.0, opacity)))
+    annot.update()
+    name = spec.name or re.sub(r"[^A-Za-z0-9]", "", "Foliant" + spec.text.title())[:60] or "FoliantTimbro"
+    pdf.xref_set_key(xref, "Name", "/" + name)
+    pdf.xref_set_key(xref, "C", "[{:.3f} {:.3f} {:.3f}]".format(*_rgb(spec.color)))
+    pdf.xref_set_key(xref, STAMP_KEY, "<</T{}/S{}>>".format(_pdf_string(spec.text), _pdf_string(spec.subtitle)))
+    _write_stamp_ap(pdf, page.load_annot(xref), spec, max(0.05, min(1.0, opacity)))
+    return xref
+
+
+def stamp_spec_of(pdf: pymupdf.Document, xref: int) -> StampSpec | None:
+    kind, _val = pdf.xref_get_key(xref, STAMP_KEY)
+    if kind != "dict":
+        return None
+    t = pdf.xref_get_key(xref, STAMP_KEY + "/T")[1]
+    s = pdf.xref_get_key(xref, STAMP_KEY + "/S")[1]
+    c = pdf.xref_get_key(xref, "C")[1]
+    try:
+        color = tuple(float(v) for v in c.strip("[]").split())
+    except ValueError:
+        color = DEFAULT_COLORS[STAMP]
+    n = pdf.xref_get_key(xref, "Name")
+    return StampSpec(_unescape_pdf_string(t), _rgb(color) or DEFAULT_COLORS[STAMP], _unescape_pdf_string(s),
+                     n[1].lstrip("/") if n[0] == "name" else "")
+
+
+def _unescape_pdf_string(s: str) -> str:
+    if s is None:
+        return ""
+    s = s.strip()
+    if s.startswith("(") and s.endswith(")"):
+        s = s[1:-1]
+    out = bytearray()
+    i = 0
+    raw = s.encode("latin-1", errors="replace")
+    while i < len(raw):
+        c = raw[i]
+        if c == 0x5C and i + 1 < len(raw):
+            n = raw[i + 1]
+            if 0x30 <= n <= 0x37:
+                j = i + 1
+                digits = b""
+                while j < len(raw) and len(digits) < 3 and 0x30 <= raw[j] <= 0x37:
+                    digits += bytes([raw[j]])
+                    j += 1
+                out.append(int(digits, 8) & 0xFF)
+                i = j
+                continue
+            out.append({ord("n"): 10, ord("r"): 13, ord("t"): 9}.get(n, n))
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return out.decode("cp1252", errors="replace")
+
+
+def refresh_stamp(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
+    """Ridisegna l'aspetto di un timbro Foliant (dopo spostamento o modifica)."""
+    spec = stamp_spec_of(pdf, xref)
+    if spec is None:
+        return
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    _write_stamp_ap(pdf, annot, spec, annot.opacity if annot.opacity >= 0 else 1.0)
+
+
+def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes, style: Style,
+                       author: str | None = None, max_side: float = 160.0, name: str = "") -> int:
+    page = pdf[page_no]
+    try:
+        pix = pymupdf.Pixmap(image)
+        w, h = pix.width, pix.height
+    except Exception as e:
+        raise AnnotationError("L'immagine non è leggibile.") from e
+    if w <= 0 or h <= 0:
+        raise AnnotationError("L'immagine non è leggibile.")
+    k = max_side / max(w, h)
+    p = pymupdf.Point(point)
+    rect = pymupdf.Rect(p.x - w * k / 2, p.y - h * k / 2, p.x + w * k / 2, p.y + h * k / 2)
+    with unrotated(page):
+        annot = page.add_stamp_annot(rect, image)
+    annot.set_opacity(max(0.0, min(1.0, style.opacity)))
+    xref = _finish(annot, author, name or "Timbro immagine", kind=STAMP)
+    pdf.xref_set_key(xref, "IT", "/StampImage")
+    return xref
+
+
+# ------------------------------------------------------------------ allegati
+MAX_ATTACHMENT = 200 * 1024 * 1024
+
+
+def create_attachment(pdf: pymupdf.Document, page_no: int, point, data: bytes, filename: str,
+                      style: Style, author: str | None = None, description: str = "") -> int:
+    if len(data) > MAX_ATTACHMENT:
+        raise AnnotationError("Il file è troppo grande per essere allegato (massimo 200 MB).")
+    page = pdf[page_no]
+    annot = page.add_file_annot(pymupdf.Point(point), data, filename, desc=description or filename,
+                                icon="PushPin")
+    annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[ATTACHMENT]))
+    annot.set_flags(pymupdf.PDF_ANNOT_IS_PRINT | pymupdf.PDF_ANNOT_IS_NO_ZOOM | pymupdf.PDF_ANNOT_IS_NO_ROTATE)
+    return _finish(annot, author, description or filename, kind=ATTACHMENT)
+
+
+def attachment_data(pdf: pymupdf.Document, page_no: int, xref: int) -> tuple[str, bytes]:
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    info = annot.file_info
+    return info.get("filename") or "allegato", annot.get_file()
+
+
+# ------------------------------------------------------------------ lettura
+TYPE_LABELS = {
+    "Text": "Nota", "FreeText": "Casella di testo", "Highlight": "Evidenziazione", "Underline": "Sottolineatura",
+    "StrikeOut": "Barrato", "Squiggly": "Ondulato", "Square": "Rettangolo", "Circle": "Ellisse",
+    "Line": "Linea", "Polygon": "Poligono", "PolyLine": "Polilinea", "Ink": "Disegno a mano", "Stamp": "Timbro",
+    "FileAttachment": "Allegato", "Caret": "Inserimento", "Sound": "Suono", "Redact": "Redazione",
+}
+
+
+@dataclass
+class AnnotInfo:
+    page: int
+    xref: int
+    type: str                 # nome del tipo PDF ("Highlight", "Square", …)
+    kind: str                 # tipo Foliant (HIGHLIGHT, RECT, …) o ""
+    author: str
+    contents: str
+    subject: str
+    created: str
+    modified: str
+    color: tuple | None
+    fill: tuple | None
+    opacity: float
+    width: float
+    dashed: bool
+    rect: pymupdf.Rect
+    name: str                 # /NM
+    irt: int = 0              # xref della annotazione a cui risponde
+    state: str = ""           # stato di revisione (per le risposte di stato)
+    state_model: str = ""
+    hidden: bool = False
+    flags: int = 0
+    marked_text: str = ""
+    replies: list["AnnotInfo"] = field(default_factory=list)
+    status: str = STATE_NONE   # stato corrente (ultimo stato registrato)
+    marked: bool = False
+    history: list["AnnotInfo"] = field(default_factory=list)   # stati registrati, in ordine
+
+    @property
+    def is_state(self) -> bool:
+        return bool(self.state_model)
+
+    @property
+    def locked(self) -> bool:
+        return bool(self.flags & pymupdf.PDF_ANNOT_IS_LOCKED)
+
+    @property
+    def label(self) -> str:
+        return TYPE_LABELS.get(self.type, self.type)
+
+
+def _intent(pdf: pymupdf.Document, xref: int) -> str:
+    k, v = pdf.xref_get_key(xref, "IT")
+    return v.lstrip("/") if k == "name" else ""
+
+
+MARKUP_TYPES = (pymupdf.PDF_ANNOT_HIGHLIGHT, pymupdf.PDF_ANNOT_UNDERLINE, pymupdf.PDF_ANNOT_STRIKE_OUT,
+                pymupdf.PDF_ANNOT_SQUIGGLY)
+
+
+def kind_of(pdf: pymupdf.Document, annot: pymupdf.Annot) -> str:
+    t = annot.type[0]
+    intent = _intent(pdf, annot.xref)
+    if t == pymupdf.PDF_ANNOT_HIGHLIGHT:
+        return HIGHLIGHT
+    if t == pymupdf.PDF_ANNOT_UNDERLINE:
+        return UNDERLINE
+    if t == pymupdf.PDF_ANNOT_STRIKE_OUT:
+        return STRIKEOUT
+    if t == pymupdf.PDF_ANNOT_SQUIGGLY:
+        return SQUIGGLY
+    if t == pymupdf.PDF_ANNOT_TEXT:
+        return NOTE
+    if t == pymupdf.PDF_ANNOT_FREE_TEXT:
+        return CALLOUT if intent == "FreeTextCallout" else FREETEXT
+    if t == pymupdf.PDF_ANNOT_SQUARE:
+        return RECT
+    if t == pymupdf.PDF_ANNOT_CIRCLE:
+        return ELLIPSE
+    if t == pymupdf.PDF_ANNOT_LINE:
+        if intent == "LineDimension":
+            return DISTANCE
+        return ARROW if intent == "LineArrow" or any(annot.line_ends or ()) else LINE
+    if t == pymupdf.PDF_ANNOT_POLYGON:
+        if intent == "PolygonDimension":
+            return AREA
+        return CLOUD if intent == "PolygonCloud" or pdf.xref_get_key(annot.xref, "BE/S")[1] == "/C" else POLYGON
+    if t == pymupdf.PDF_ANNOT_POLY_LINE:
+        return PERIMETER if intent == "PolyLineDimension" else POLYLINE
+    if t == pymupdf.PDF_ANNOT_INK:
+        return INK
+    if t == pymupdf.PDF_ANNOT_STAMP:
+        return STAMP
+    if t == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
+        return ATTACHMENT
+    return ""
+
+
+def _info(pdf: pymupdf.Document, page_no: int, annot: pymupdf.Annot) -> AnnotInfo:
+    info = annot.info or {}
+    colors = annot.colors or {}
+    border = annot.border or {}
+    sm = pdf.xref_get_key(annot.xref, "StateModel")
+    st = pdf.xref_get_key(annot.xref, "State")
+    state_model = _unescape_pdf_string(sm[1]) if sm[0] == "string" else (sm[1].lstrip("/") if sm[0] == "name" else "")
+    state = _unescape_pdf_string(st[1]) if st[0] == "string" else (st[1].lstrip("/") if st[0] == "name" else "")
+    op = annot.opacity
+    return AnnotInfo(
+        page=page_no, xref=annot.xref, type=annot.type[1], kind=kind_of(pdf, annot),
+        author=info.get("title", ""), contents=info.get("content", ""), subject=info.get("subject", ""),
+        created=info.get("creationDate", ""), modified=info.get("modDate", ""),
+        color=_rgb(colors.get("stroke")) if colors.get("stroke") else None,
+        fill=_rgb(colors.get("fill")) if colors.get("fill") else None,
+        opacity=1.0 if op is None or op < 0 else float(op),
+        width=float(border.get("width", 1) if border.get("width", -1) >= 0 else 1),
+        dashed=bool(border.get("dashes")),
+        rect=pymupdf.Rect(annot.rect), name=info.get("id", ""), irt=annot.irt_xref or 0,
+        state=state, state_model=state_model, hidden=bool(annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN),
+        flags=annot.flags,
+        marked_text=marked_text(annot.get_parent(), annot) if annot.type[0] in MARKUP_TYPES else "",
+    )
+
+
+def page_annotations(pdf: pymupdf.Document, page_no: int) -> list[AnnotInfo]:
+    page = pdf[page_no]
+    out = []
+    for annot in page.annots():
+        if annot.type[0] in NON_COMMENT_TYPES:
+            continue
+        try:
+            out.append(_info(pdf, page_no, annot))
+        except Exception:
+            continue
+    return out
+
+
+def list_annotations(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[AnnotInfo]:
+    """Commenti principali con risposte e stato (le risposte non compaiono in cima)."""
+    result: list[AnnotInfo] = []
+    for page_no in (pages if pages is not None else range(pdf.page_count)):
+        items = page_annotations(pdf, page_no)
+        by_xref = {a.xref: a for a in items}
+        roots: list[AnnotInfo] = []
+        states: list[AnnotInfo] = []
+        for a in items:
+            parent = by_xref.get(a.irt) if a.irt else None
+            if parent is None:
+                if not a.is_state:
+                    roots.append(a)
+                continue
+            if a.is_state:
+                states.append(a)
+                continue
+            # risalire al commento principale (catene cicliche interrotte)
+            seen = {a.xref}
+            root = parent
+            cyclic = False
+            while root.irt and root.irt in by_xref:
+                if root.xref in seen:
+                    cyclic = True
+                    break
+                seen.add(root.xref)
+                root = by_xref[root.irt]
+            if cyclic or root.xref in seen:
+                roots.append(a)
+            else:
+                root.replies.append(a)
+        for st in sorted(states, key=lambda x: (x.created, x.xref)):
+            parent = by_xref[st.irt]
+            parent.history.append(st)
+            if st.state_model.lower() == "marked":
+                parent.marked = st.state.lower() == "marked"
+            else:
+                parent.status = st.state or STATE_NONE
+        for r in roots:
+            r.replies.sort(key=lambda x: (x.created, x.xref))
+        result.extend(roots)
+    return result
+
+
+def annotation(pdf: pymupdf.Document, page_no: int, xref: int) -> AnnotInfo | None:
+    for a in list_annotations(pdf, [page_no]):
+        if a.xref == xref:
+            return a
+        for r in a.replies:
+            if r.xref == xref:
+                return r
+    return None
+
+
+def _dist_to_segment(p: pymupdf.Point, a: pymupdf.Point, b: pymupdf.Point) -> float:
+    ab = b - a
+    l2 = ab.x * ab.x + ab.y * ab.y
+    if l2 == 0:
+        return abs(p - a)
+    t = max(0.0, min(1.0, ((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / l2))
+    return abs(p - (a + ab * t))
+
+
+def annot_at(pdf: pymupdf.Document, page_no: int, point, tolerance: float = 4.0) -> int | None:
+    """Xref dell'annotazione più in alto sotto il punto (None se nessuna)."""
+    page = pdf[page_no]
+    p = pymupdf.Point(point)
+    hit = None
+    for annot in page.annots():
+        t = annot.type[0]
+        if t in NON_COMMENT_TYPES or annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+            continue
+        r = annot.rect
+        if not (r + (-tolerance, -tolerance, tolerance, tolerance)).contains(p):
+            continue
+        if t in (pymupdf.PDF_ANNOT_LINE, pymupdf.PDF_ANNOT_POLY_LINE, pymupdf.PDF_ANNOT_INK):
+            verts = annot.vertices or []
+            strokes = verts if t == pymupdf.PDF_ANNOT_INK else [verts]
+            tol = tolerance + (annot.border or {}).get("width", 1)
+            ok = False
+            for s in strokes:
+                pts = [pymupdf.Point(v) for v in s]
+                if len(pts) == 1 and abs(p - pts[0]) <= tol:
+                    ok = True
+                for i in range(len(pts) - 1):
+                    if _dist_to_segment(p, pts[i], pts[i + 1]) <= tol:
+                        ok = True
+                        break
+                if ok:
+                    break
+            if not ok:
+                continue
+        elif t in (pymupdf.PDF_ANNOT_HIGHLIGHT, pymupdf.PDF_ANNOT_UNDERLINE, pymupdf.PDF_ANNOT_STRIKE_OUT,
+                   pymupdf.PDF_ANNOT_SQUIGGLY):
+            verts = annot.vertices or []
+            quads = [pymupdf.Quad(*verts[i:i + 4]).rect for i in range(0, len(verts) - 3, 4)]
+            if quads and not any((q + (-1, -1, 1, 1)).contains(p) for q in quads):
+                continue
+        hit = annot.xref
+    return hit
+
+
+# ------------------------------------------------------------------ modifica
+def set_style(pdf: pymupdf.Document, page_no: int, xref: int, *, color=..., fill=..., opacity=None,
+              width=None, dash=None, cloud=None, fontsize=None, text_color=...) -> None:
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    t = annot.type[0]
+    if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
+        if color is not ... and color is not None:
+            pdf.xref_set_key(xref, "C", "[{:.3f} {:.3f} {:.3f}]".format(*_rgb(color)))
+        if opacity is not None:
+            annot.set_opacity(max(0.05, min(1.0, float(opacity))))
+            annot.update()
+        touch(page.load_annot(xref))
+        refresh_stamp(pdf, page_no, xref)
+        return
+    if t == pymupdf.PDF_ANNOT_FREE_TEXT:
+        _set_freetext_style(pdf, page, annot, color=color, fill=fill, opacity=opacity, width=width, dash=dash,
+                            fontsize=fontsize, text_color=text_color)
+        return
+    if color is not ... and color is not None:
+        annot.set_colors(stroke=_rgb(color))
+        if t == pymupdf.PDF_ANNOT_LINE and annot.line_ends and any(annot.line_ends) and \
+                pdf.xref_get_key(xref, "IC")[0] != "null":
+            annot.set_colors(fill=_rgb(color))
+    if fill is not ... and t in (pymupdf.PDF_ANNOT_SQUARE, pymupdf.PDF_ANNOT_CIRCLE, pymupdf.PDF_ANNOT_POLYGON):
+        if fill is None:
+            pdf.xref_set_key(xref, "IC", "null")
+            annot = page.load_annot(xref)
+        else:
+            annot.set_colors(fill=_rgb(fill))
+    if opacity is not None:
+        annot.set_opacity(max(0.05, min(1.0, float(opacity))))
+    if width is not None or dash is not None or cloud is not None:
+        border = annot.border or {}
+        w = float(width) if width is not None else border.get("width", 1)
+        dashes = DASH_STYLES.get(dash) if dash is not None else (border.get("dashes") or None)
+        clouds = (1 if cloud else 0) if cloud is not None else border.get("clouds", 0)
+        if t not in (pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_ANNOT_SQUARE, pymupdf.PDF_ANNOT_CIRCLE):
+            clouds = 0
+        annot.set_border(width=max(0.0, w), dashes=dashes or [], clouds=max(0, clouds or 0))
+    touch(annot)
+    annot.update()
+
+
+def _set_freetext_style(pdf, page, annot, *, color, fill, opacity, width, dash, fontsize, text_color) -> None:
+    xref = annot.xref
+    if color is not ...:
+        if color is None:
+            pdf.xref_set_key(xref, FT_BORDER_KEY, "null")
+        else:
+            pdf.xref_set_key(xref, FT_BORDER_KEY, "[{:.3f} {:.3f} {:.3f}]".format(*_rgb(color)))
+    if fill is not ...:
+        if fill is None:
+            pdf.xref_set_key(xref, "C", "null")
+        else:
+            pdf.xref_set_key(xref, "C", "[{:.3f} {:.3f} {:.3f}]".format(*_rgb(fill)))
+    da = pdf.xref_get_key(xref, "DA")[1] or "0 g /Helv 12 Tf"
+    m = re.search(r"/(\S+)\s+([\d.]+)\s+Tf", da)
+    font = m.group(1) if m else "Helv"
+    size = float(fontsize) if fontsize is not None else (float(m.group(2)) if m else 12.0)
+    tc = text_color if text_color is not ... else None
+    if tc is None:
+        cm = re.search(r"([\d.]+\s+[\d.]+\s+[\d.]+)\s+rg", da)
+        gm = re.search(r"([\d.]+)\s+g", da)
+        tc = tuple(float(v) for v in cm.group(1).split()) if cm else ((float(gm.group(1)),) * 3 if gm else (0, 0, 0))
+    r, g, b = _rgb(tc)
+    pdf.xref_set_key(xref, "DA", _pdf_string(f"{r:.3f} {g:.3f} {b:.3f} rg /{font} {size:g} Tf"))
+    annot = page.load_annot(xref)
+    if opacity is not None:
+        annot.set_opacity(max(0.0, min(1.0, float(opacity))))
+    if width is not None or dash is not None:
+        border = annot.border or {}
+        w = float(width) if width is not None else border.get("width", 0)
+        dashes = DASH_STYLES.get(dash) if dash is not None else (border.get("dashes") or None)
+        annot.set_border(width=max(0.0, w), dashes=dashes or [])
+        if w > 0 and pdf.xref_get_key(xref, FT_BORDER_KEY)[0] != "array":
+            pdf.xref_set_key(xref, FT_BORDER_KEY, "[0 0 0]")
+    touch(annot)
+    _dirty_update(annot)
+    refresh_freetext(pdf, page.number, xref)
+
+
+def get_rich_text(pdf: pymupdf.Document, xref: int) -> str:
+    k, v = pdf.xref_get_key(xref, "RC")
+    if k == "string":
+        try:
+            return _decode_text_string(v)
+        except Exception:
+            return ""
+    return ""
+
+
+def _decode_text_string(v: str) -> str:
+    v = v.strip()
+    if v.startswith("<") and v.endswith(">"):
+        raw = bytes.fromhex(v[1:-1])
+        if raw.startswith(b"\xfe\xff"):
+            return raw[2:].decode("utf-16-be", errors="replace")
+        return raw.decode("latin-1")
+    return _unescape_pdf_string(v)
+
+
+def set_contents(pdf: pymupdf.Document, page_no: int, xref: int, text: str, rich: str | None = None) -> None:
+    """Testo del commento (/Contents) ed eventuale testo formattato XHTML (/RC)."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    if annot.flags & FLAG_LOCKED_CONTENTS:
+        raise AnnotationError("Il contenuto dell'annotazione è bloccato.")
+    if annot.type[0] != pymupdf.PDF_ANNOT_FREE_TEXT:
+        pdf.xref_set_key(xref, "RC", pymupdf.get_pdf_str(rich) if rich else "null")
+        annot = page.load_annot(xref)
+    annot.set_info(content=text, modDate=pdf_now())
+    if annot.type[0] == pymupdf.PDF_ANNOT_FREE_TEXT:
+        mupdf.pdf_set_annot_contents(annot.this, text)
+        _dirty_update(annot)
+        refresh_freetext(pdf, page_no, xref)
+    else:
+        annot.update()
+        if annot.type[0] == pymupdf.PDF_ANNOT_STAMP:
+            refresh_stamp(pdf, page_no, xref)
+
+
+def set_author(pdf: pymupdf.Document, page_no: int, xref: int, author: str) -> None:
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    annot.set_info(title=author, modDate=pdf_now())
+    annot.update()
+    if annot.type[0] == pymupdf.PDF_ANNOT_STAMP:
+        refresh_stamp(pdf, page_no, xref)
+
+
+def _geometry(annot: pymupdf.Annot) -> dict:
+    t = annot.type[0]
+    g: dict = {"rect": pymupdf.Rect(annot.rect)}
+    if t in (pymupdf.PDF_ANNOT_LINE, pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_ANNOT_POLY_LINE):
+        g["vertices"] = [pymupdf.Point(v) for v in annot.vertices or []]
+    elif t == pymupdf.PDF_ANNOT_INK:
+        g["ink"] = [[pymupdf.Point(v) for v in s] for s in annot.vertices or []]
+    elif t in (pymupdf.PDF_ANNOT_HIGHLIGHT, pymupdf.PDF_ANNOT_UNDERLINE, pymupdf.PDF_ANNOT_STRIKE_OUT,
+               pymupdf.PDF_ANNOT_SQUIGGLY):
+        v = annot.vertices or []
+        g["quads"] = [pymupdf.Quad(*v[i:i + 4]) for i in range(0, len(v) - 3, 4)]
+    return g
+
+
+def _set_vertices(annot: pymupdf.Annot, pts: Sequence[pymupdf.Point]) -> None:
+    t = annot.type[0]
+    if t == pymupdf.PDF_ANNOT_LINE:
+        mupdf.pdf_set_annot_line(annot.this, _fz_point(pts[0]), _fz_point(pts[-1]))
+    else:
+        mupdf.pdf_clear_annot_vertices(annot.this)
+        for p in pts:
+            mupdf.pdf_add_annot_vertex(annot.this, _fz_point(p))
+
+
+def _set_ink(annot: pymupdf.Annot, strokes: Sequence[Sequence[pymupdf.Point]]) -> None:
+    mupdf.pdf_clear_annot_ink_list(annot.this)
+    for s in strokes:
+        mupdf.pdf_add_annot_ink_list_stroke(annot.this)
+        for p in s:
+            mupdf.pdf_add_annot_ink_list_stroke_vertex(annot.this, _fz_point(p))
+
+
+def _set_quads(annot: pymupdf.Annot, quads: Sequence[pymupdf.Quad]) -> None:
+    mupdf.pdf_clear_annot_quad_points(annot.this)
+    for q in quads:
+        fq = mupdf.fz_make_quad(q.ul.x, q.ul.y, q.ur.x, q.ur.y, q.ll.x, q.ll.y, q.lr.x, q.lr.y)
+        mupdf.pdf_add_annot_quad_point(annot.this, fq)
+
+
+def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) -> None:
+    """Sposta/ridimensiona un'annotazione portando il suo rettangolo in `new_rect`
+    (i vertici di linee, poligoni, disegni ed evidenziazioni vengono scalati)."""
+    page = pdf[page_no]
+    new_rect = pymupdf.Rect(new_rect).normalize()
+    with unrotated(page):
+        annot = get_annot(page, xref)
+        if annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
+            raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
+        t = annot.type[0]
+        g = _geometry(annot)
+        old = g["rect"]
+        if old.width <= 0 or old.height <= 0:
+            raise AnnotationError("Annotazione non valida.")
+        sx = new_rect.width / old.width
+        sy = new_rect.height / old.height
+
+        def tr(p: pymupdf.Point) -> pymupdf.Point:
+            return pymupdf.Point(new_rect.x0 + (p.x - old.x0) * sx, new_rect.y0 + (p.y - old.y0) * sy)
+
+        if "vertices" in g:
+            _set_vertices(annot, [tr(p) for p in g["vertices"]])
+        elif "ink" in g:
+            _set_ink(annot, [[tr(p) for p in s] for s in g["ink"]])
+        elif "quads" in g:
+            _set_quads(annot, [pymupdf.Quad(tr(q.ul), tr(q.ur), tr(q.ll), tr(q.lr)) for q in g["quads"]])
+        elif t == pymupdf.PDF_ANNOT_FREE_TEXT:
+            cl = pdf.xref_get_key(xref, "CL")
+            if cl[0] == "array":
+                # sposta il riquadro del testo e la linea di richiamo insieme
+                nums = [float(v) for v in cl[1].strip("[]").split()]
+                pts = [pymupdf.Point(*from_pdf_point(page, nums[i], nums[i + 1])) for i in range(0, len(nums) - 1, 2)]
+                inner = _freetext_inner(page, annot)
+                dx, dy = new_rect.x0 - old.x0, new_rect.y0 - old.y0
+                moved_pts = [p + (dx, dy) for p in pts]
+                inner2 = pymupdf.Rect(inner.x0 + dx, inner.y0 + dy, inner.x0 + dx + inner.width * sx,
+                                      inner.y0 + dy + inner.height * sy)
+                _set_callout(pdf, page, xref, inner2, moved_pts)
+                annot = page.load_annot(xref)
+            else:
+                annot.set_rect(new_rect)
+        else:
+            annot.set_rect(new_rect)
+        touch(annot)
+        _dirty_update(annot)
+        if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
+            refresh_stamp(pdf, page_no, xref)
+        if t == pymupdf.PDF_ANNOT_FREE_TEXT:
+            refresh_freetext(pdf, page_no, xref)
+    # sposta anche le risposte (stessa posizione del commento)
+    for a in page.annots():
+        if a.irt_xref == xref and a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+            try:
+                r = a.rect
+                a.set_rect(pymupdf.Rect(new_rect.x0, new_rect.y0, new_rect.x0 + r.width, new_rect.y0 + r.height))
+                a.update()
+            except Exception:
+                pass
+
+
+def _freetext_inner(page: pymupdf.Page, annot: pymupdf.Annot) -> pymupdf.Rect:
+    """Riquadro del testo di una casella con richiamo (Rect meno /RD)."""
+    r = annot.rect
+    k, v = page.parent.xref_get_key(annot.xref, "RD")
+    if k == "array":
+        try:
+            left, top, right, bottom = (float(x) for x in v.strip("[]").split())
+            # /RD è in coordinate PDF: sinistra, basso, destra, alto
+            return pymupdf.Rect(r.x0 + left, r.y0 + bottom, r.x1 - right, r.y1 - top)
+        except ValueError:
+            pass
+    return r
+
+
+def _set_callout(pdf, page, xref, inner: pymupdf.Rect, pts: Sequence[pymupdf.Point]) -> None:
+    allpts = [inner.tl, inner.br] + list(pts)
+    xs = [p.x for p in allpts]
+    ys = [p.y for p in allpts]
+    outer = pymupdf.Rect(min(xs) - 6, min(ys) - 6, max(xs) + 6, max(ys) + 6)
+    pdf_outer = to_pdf_rect(page, outer)
+    pdf.xref_set_key(xref, "Rect", "[{:.2f} {:.2f} {:.2f} {:.2f}]".format(*pdf_outer))
+    left = inner.x0 - outer.x0
+    right = outer.x1 - inner.x1
+    top = inner.y0 - outer.y0
+    bottom = outer.y1 - inner.y1
+    pdf.xref_set_key(xref, "RD", f"[{left:.2f} {bottom:.2f} {right:.2f} {top:.2f}]")
+    flat = []
+    for p in pts:
+        flat.extend(to_pdf_point(page, p.x, p.y))
+    pdf.xref_set_key(xref, "CL", "[" + " ".join(f"{v:.2f}" for v in flat) + "]")
+
+
+def move_annot(pdf: pymupdf.Document, page_no: int, xref: int, dx: float, dy: float) -> None:
+    page = pdf[page_no]
+    r = pymupdf.Rect(get_annot(page, xref).rect)
+    transform_annot(pdf, page_no, xref, r + (dx, dy, dx, dy))
+
+
+def delete_annot(pdf: pymupdf.Document, page_no: int, xref: int, force: bool = False) -> None:
+    """Elimina un'annotazione con le sue risposte, i suoi stati e la sua popup."""
+    page = pdf[page_no]
+    target = get_annot(page, xref)
+    if not force and target.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
+        raise AnnotationError("L'annotazione è bloccata: non si può eliminare.")
+    del target
+    victims = {xref}
+    changed = True
+    annots = list(page.annots())
+    while changed:
+        changed = False
+        for a in annots:
+            if a.xref not in victims and a.irt_xref in victims:
+                victims.add(a.xref)
+                changed = True
+    for x in sorted(victims, reverse=True):
+        a = page.load_annot(x)
+        if a is not None:
+            page.delete_annot(a)
+
+
+def _annots_array(pdf: pymupdf.Document, page: pymupdf.Page) -> tuple[int, str, list[int]]:
+    """(xref dell'oggetto che contiene l'array, chiave, xref delle annotazioni)."""
+    kind, value = pdf.xref_get_key(page.xref, "Annots")
+    if kind == "xref":
+        holder = int(value.split()[0])
+        return holder, "", [int(x) for x in re.findall(r"(\d+)\s+0\s+R", pdf.xref_object(holder))]
+    return page.xref, "Annots", [int(x) for x in re.findall(r"(\d+)\s+0\s+R", value or "")]
+
+
+def _write_annots_array(pdf, holder: int, key: str, refs: list[int]) -> None:
+    arr = "[" + " ".join(f"{x} 0 R" for x in refs) + "]"
+    if key:
+        pdf.xref_set_key(holder, key, arr)
+    else:
+        pdf.update_object(holder, arr)
+
+
+def restack(pdf: pymupdf.Document, page_no: int, xref: int, front: bool) -> None:
+    """Porta in primo piano (fine dell'array /Annots) o sullo sfondo (inizio)."""
+    page = pdf[page_no]
+    holder, key, refs = _annots_array(pdf, page)
+    if xref not in refs:
+        raise AnnotationError("L'annotazione non esiste più.")
+    refs.remove(xref)
+    if front:
+        refs.append(xref)
+    else:
+        refs.insert(0, xref)
+    _write_annots_array(pdf, holder, key, refs)
+
+
+FLAG_PRINT = pymupdf.PDF_ANNOT_IS_PRINT
+FLAG_LOCKED = pymupdf.PDF_ANNOT_IS_LOCKED
+FLAG_READ_ONLY = pymupdf.PDF_ANNOT_IS_READ_ONLY
+FLAG_LOCKED_CONTENTS = 512
+FLAG_HIDDEN = pymupdf.PDF_ANNOT_IS_HIDDEN
+
+
+def set_flag(pdf: pymupdf.Document, page_no: int, xref: int, flag: int, on: bool) -> None:
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    flags = annot.flags | flag if on else annot.flags & ~flag
+    annot.set_flags(flags)
+    touch(annot)
+    annot.update()
+
+
+def delete_all(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
+    n = 0
+    for page_no in (pages if pages is not None else range(pdf.page_count)):
+        page = pdf[page_no]
+        for a in list(page.annots()):
+            if a.type[0] in NON_COMMENT_TYPES:
+                continue
+            page.delete_annot(a)
+            n += 1
+    return n
+
+
+# ------------------------------------------------------------------ risposte e stato
+def add_reply(pdf: pymupdf.Document, page_no: int, parent_xref: int, text: str, author: str | None = None,
+              date: str | None = None) -> int:
+    page = pdf[page_no]
+    parent = get_annot(page, parent_xref)
+    if parent.type[0] in NON_COMMENT_TYPES:
+        raise AnnotationError("Non si può rispondere a collegamenti o campi modulo.")
+    r = pymupdf.Rect(parent.rect)
+    with unrotated(page):
+        annot = page.add_text_annot(r.tl, text, icon="Comment")
+        annot.set_rect(r)
+    annot.set_flags(pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_PRINT)
+    annot.set_irt_xref(parent_xref)
+    xref = _finish(annot, author, text, date=date, subject="")
+    pdf.xref_set_key(xref, "RT", "/R")
+    return xref
+
+
+def set_status(pdf: pymupdf.Document, page_no: int, xref: int, state: str, author: str | None = None,
+               model: str = "Review", date: str | None = None) -> int:
+    """Registra uno stato (risposta di stato nascosta, come da standard PDF)."""
+    page = pdf[page_no]
+    parent = get_annot(page, xref)
+    annot = page.add_text_annot(parent.rect.tl, "", icon="Comment")
+    annot.set_flags(pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_PRINT)
+    annot.set_irt_xref(xref)
+    who = author if author is not None else default_author()
+    new = _finish(annot, who, f"{state} impostato da {who}" if who else state, date=date, subject="")
+    pdf.xref_set_key(new, "State", "/" + _name_token(state))
+    pdf.xref_set_key(new, "StateModel", "/" + _name_token(model))
+    return new
+
+
+def _name_token(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "", text) or "None"
+
+
+def set_marked(pdf: pymupdf.Document, page_no: int, xref: int, marked: bool, author: str | None = None) -> int:
+    return set_status(pdf, page_no, xref, "Marked" if marked else "Unmarked", author, model="Marked")
+
+
+# ------------------------------------------------------------------ gomma
+def erase_ink(pdf: pymupdf.Document, page_no: int, point, radius: float = 6.0, whole: bool = False) -> int:
+    """Cancella i tratti a mano libera vicini al punto. Spezza i tratti attraversati;
+    le annotazioni che restano vuote vengono eliminate. Restituisce i tratti toccati."""
+    page = pdf[page_no]
+    p = pymupdf.Point(point)
+    touched = 0
+    with unrotated(page):
+        for annot in list(page.annots(types=[pymupdf.PDF_ANNOT_INK])):
+            r = annot.rect + (-radius, -radius, radius, radius)
+            if not r.contains(p) or annot.flags & (pymupdf.PDF_ANNOT_IS_LOCKED | pymupdf.PDF_ANNOT_IS_READ_ONLY):
+                continue
+            strokes = [_densify([pymupdf.Point(v) for v in s], max(0.5, radius / 3))
+                       for s in annot.vertices or []]
+            new: list[list[pymupdf.Point]] = []
+            hit = False
+
+            def keep(piece):
+                if len(piece) > 1:
+                    # si tengono i vertici originali e gli estremi del tratto rimasto
+                    new.append([v for i, (v, orig) in enumerate(piece) if orig or i in (0, len(piece) - 1)])
+
+            for s in strokes:
+                if whole:
+                    if any(abs(v - p) <= radius for v, _o in s):
+                        hit = True
+                    else:
+                        keep(s)
+                    continue
+                cur: list = []
+                for v, orig in s:
+                    if abs(v - p) <= radius:
+                        hit = True
+                        keep(cur)
+                        cur = []
+                    else:
+                        cur.append((v, orig))
+                keep(cur)
+            if not hit:
+                continue
+            touched += 1
+            if not new:
+                xref = annot.xref
+                delete_annot(pdf, page_no, xref, force=True)
+                continue
+            _set_ink(annot, new)
+            touch(annot)
+            _dirty_update(annot)
+    return touched
+
+
+def _densify(points: list[pymupdf.Point], step: float) -> list[tuple[pymupdf.Point, bool]]:
+    """Punti intermedi ogni `step` punti; il booleano indica i vertici originali."""
+    if len(points) < 2:
+        return [(p, True) for p in points]
+    out = [(points[0], True)]
+    for a, b in zip(points, points[1:]):
+        n = int(abs(b - a) / step)
+        for k in range(1, n + 1):
+            out.append((a + (b - a) * (k / (n + 1)), False))
+        out.append((b, True))
+    return out
+
+
+# ------------------------------------------------------------------ appiattimento
+def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
+    """Rende le annotazioni parte del contenuto della pagina (non più modificabili).
+
+    Con `pages` si appiattiscono solo quelle pagine. I campi modulo restano."""
+    targets = set(pages) if pages is not None else set(range(pdf.page_count))
+    count = 0
+    for i in targets:
+        page = pdf[i]
+        count += sum(1 for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES)
+    if not count:
+        return 0
+    if targets == set(range(pdf.page_count)):
+        _strip_hidden(pdf, targets)
+        pdf.bake(annots=True, widgets=False)
+        return count
+    # pagine scelte: si nascondono temporaneamente le annotazioni delle altre pagine
+    saved: dict[int, tuple[str, str]] = {}
+    _strip_hidden(pdf, targets)
+    try:
+        for i in range(pdf.page_count):
+            if i not in targets:
+                xref = pdf[i].xref
+                saved[xref] = pdf.xref_get_key(xref, "Annots")
+                pdf.xref_set_key(xref, "Annots", "null")
+        pdf.bake(annots=True, widgets=False)
+    finally:
+        for xref, (kind, value) in saved.items():
+            if kind != "null":
+                pdf.xref_set_key(xref, "Annots", value)
+    return count
+
+
+def _strip_hidden(pdf: pymupdf.Document, pages: Iterable[int]) -> None:
+    for i in pages:
+        page = pdf[i]
+        for a in list(page.annots()):
+            if a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN and a.type[0] not in NON_COMMENT_TYPES:
+                page.delete_annot(a)
+
+
+# ------------------------------------------------------------------ XFDF
+XFDF_NS = "http://ns.adobe.com/xfdf/"
+
+_XFDF_TAGS = {
+    "Text": "text", "FreeText": "freetext", "Highlight": "highlight", "Underline": "underline",
+    "StrikeOut": "strikeout", "Squiggly": "squiggly", "Square": "square", "Circle": "circle", "Line": "line",
+    "Polygon": "polygon", "PolyLine": "polyline", "Ink": "ink", "Stamp": "stamp",
+    "FileAttachment": "fileattachment", "Caret": "caret",
+}
+_TAG_TYPES = {v: k for k, v in _XFDF_TAGS.items()}
+
+
+def _fmt(v: float) -> str:
+    s = f"{v:.4f}".rstrip("0").rstrip(".")
+    return s if s not in ("-0", "") else "0"
+
+
+def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] | None = None) -> str:
+    """Esporta i commenti in XFDF (XML standard di interscambio delle annotazioni)."""
+    from xml.sax.saxutils import escape, quoteattr
+
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', f'<xfdf xmlns="{XFDF_NS}" xml:space="preserve">', "<annots>"]
+    for page_no in (pages if pages is not None else range(pdf.page_count)):
+        page = pdf[page_no]
+        names: dict[int, str] = {}
+        annots = [a for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES]
+        for a in annots:
+            names[a.xref] = (a.info or {}).get("id") or f"foliant-{page_no}-{a.xref}"
+        for a in annots:
+            tag = _XFDF_TAGS.get(a.type[1])
+            if tag is None:
+                continue
+            info = a.info or {}
+            attrs = {"page": str(page_no), "name": names[a.xref],
+                     "rect": ",".join(_fmt(v) for v in to_pdf_rect(page, a.rect)),
+                     "flags": _xfdf_flags(a.flags)}
+            if info.get("title"):
+                attrs["title"] = info["title"]
+            if info.get("subject"):
+                attrs["subject"] = info["subject"]
+            if info.get("creationDate"):
+                attrs["creationdate"] = info["creationDate"]
+            if info.get("modDate"):
+                attrs["date"] = info["modDate"]
+            colors = a.colors or {}
+            stroke = colors.get("stroke")
+            if a.type[0] == pymupdf.PDF_ANNOT_FREE_TEXT:
+                k, v = pdf.xref_get_key(a.xref, "C")
+                if k == "array":
+                    try:
+                        attrs["color"] = color_to_hex([float(x) for x in v.strip("[]").split()])
+                    except ValueError:
+                        pass
+            elif stroke:
+                attrs["color"] = color_to_hex(stroke)
+            if colors.get("fill") and a.type[0] != pymupdf.PDF_ANNOT_FREE_TEXT:
+                attrs["interior-color"] = color_to_hex(colors["fill"])
+            if a.opacity is not None and 0 <= a.opacity < 1:
+                attrs["opacity"] = _fmt(a.opacity)
+            border = a.border or {}
+            if border.get("width", -1) >= 0 and a.type[0] not in (pymupdf.PDF_ANNOT_TEXT,):
+                attrs["width"] = _fmt(border["width"])
+            if border.get("dashes"):
+                attrs["style"] = "dash"
+                attrs["dashes"] = ",".join(_fmt(d) for d in border["dashes"])
+            if border.get("clouds", 0) > 0:
+                attrs["style"] = "cloudy"
+                attrs["intensity"] = _fmt(border["clouds"])
+            if a.irt_xref and a.irt_xref in names:
+                attrs["inreplyto"] = names[a.irt_xref]
+                k, v = pdf.xref_get_key(a.xref, "RT")
+                if k == "name" and v == "/Group":
+                    attrs["replyType"] = "group"
+            for key, attr in (("State", "state"), ("StateModel", "statemodel")):
+                k, v = pdf.xref_get_key(a.xref, key)
+                if k == "string":
+                    attrs[attr] = _unescape_pdf_string(v)
+                elif k == "name":
+                    attrs[attr] = v.lstrip("/")
+            intent = _intent(pdf, a.xref)
+            if intent:
+                attrs["intent"] = intent
+            t = a.type[0]
+            children: list[str] = []
+            verts = a.vertices or []
+            if t in (pymupdf.PDF_ANNOT_HIGHLIGHT, pymupdf.PDF_ANNOT_UNDERLINE, pymupdf.PDF_ANNOT_STRIKE_OUT,
+                     pymupdf.PDF_ANNOT_SQUIGGLY):
+                coords = []
+                for v in verts:
+                    coords.extend(to_pdf_point(page, v[0], v[1]))
+                attrs["coords"] = ",".join(_fmt(c) for c in coords)
+            elif t == pymupdf.PDF_ANNOT_LINE and len(verts) >= 2:
+                s = to_pdf_point(page, *verts[0])
+                e = to_pdf_point(page, *verts[1])
+                attrs["start"] = f"{_fmt(s[0])},{_fmt(s[1])}"
+                attrs["end"] = f"{_fmt(e[0])},{_fmt(e[1])}"
+                le = a.line_ends or (0, 0)
+                attrs["head"] = _LE_NAMES.get(le[0], "None")
+                attrs["tail"] = _LE_NAMES.get(le[1], "None")
+            elif t in (pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_ANNOT_POLY_LINE):
+                pts = []
+                for v in verts:
+                    x, y = to_pdf_point(page, v[0], v[1])
+                    pts.append(f"{_fmt(x)},{_fmt(y)}")
+                children.append(f"<vertices>{';'.join(pts)}</vertices>")
+            elif t == pymupdf.PDF_ANNOT_INK:
+                gestures = []
+                for s in verts:
+                    pts = []
+                    for v in s:
+                        x, y = to_pdf_point(page, v[0], v[1])
+                        pts.append(f"{_fmt(x)},{_fmt(y)}")
+                    gestures.append(f"<gesture>{';'.join(pts)}</gesture>")
+                children.append("<inklist>" + "".join(gestures) + "</inklist>")
+            elif t == pymupdf.PDF_ANNOT_TEXT:
+                k, v = pdf.xref_get_key(a.xref, "Name")
+                attrs["icon"] = v.lstrip("/") if k == "name" else "Comment"
+            elif t == pymupdf.PDF_ANNOT_STAMP:
+                k, v = pdf.xref_get_key(a.xref, "Name")
+                attrs["icon"] = v.lstrip("/") if k == "name" else "Draft"
+                spec = stamp_spec_of(pdf, a.xref)
+                if spec is not None:
+                    attrs["foliant-stamp"] = spec.text
+                    if spec.subtitle:
+                        attrs["foliant-stamp-sub"] = spec.subtitle
+            elif t == pymupdf.PDF_ANNOT_FREE_TEXT:
+                da = pdf.xref_get_key(a.xref, "DA")[1]
+                if da:
+                    children.append(f"<defaultappearance>{escape(_unescape_pdf_string(da))}</defaultappearance>")
+                k, v = pdf.xref_get_key(a.xref, "CL")
+                if k == "array" and _intent(pdf, a.xref) == "FreeTextCallout":
+                    attrs["callout"] = ",".join(_fmt(float(x)) for x in v.strip("[]").split())
+                k, v = pdf.xref_get_key(a.xref, "RD")
+                if k == "array":
+                    attrs["fringe"] = ",".join(_fmt(float(x)) for x in v.strip("[]").split())
+            elif t == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
+                fi = a.file_info or {}
+                attrs["file"] = fi.get("filename", "")
+                attrs["icon"] = "PushPin"
+            content = info.get("content", "")
+            if content:
+                children.insert(0, f"<contents>{escape(content)}</contents>")
+            attr_txt = " ".join(f"{k}={quoteattr(str(v))}" for k, v in attrs.items())
+            lines.append(f"<{tag} {attr_txt}>" + "".join(children) + f"</{tag}>")
+    lines.append("</annots>")
+    if filename:
+        lines.append(f'<f href={quoteattr(filename)}/>')
+    lines.append("</xfdf>")
+    return "\n".join(lines) + "\n"
+
+
+_LE_NAMES = {
+    pymupdf.PDF_ANNOT_LE_NONE: "None", pymupdf.PDF_ANNOT_LE_SQUARE: "Square", pymupdf.PDF_ANNOT_LE_CIRCLE: "Circle",
+    pymupdf.PDF_ANNOT_LE_DIAMOND: "Diamond", pymupdf.PDF_ANNOT_LE_OPEN_ARROW: "OpenArrow",
+    pymupdf.PDF_ANNOT_LE_CLOSED_ARROW: "ClosedArrow", pymupdf.PDF_ANNOT_LE_BUTT: "Butt",
+    pymupdf.PDF_ANNOT_LE_R_OPEN_ARROW: "ROpenArrow", pymupdf.PDF_ANNOT_LE_R_CLOSED_ARROW: "RClosedArrow",
+    pymupdf.PDF_ANNOT_LE_SLASH: "Slash",
+}
+_LE_VALUES = {v: k for k, v in _LE_NAMES.items()}
+
+_FLAG_NAMES = [(pymupdf.PDF_ANNOT_IS_INVISIBLE, "invisible"), (pymupdf.PDF_ANNOT_IS_HIDDEN, "hidden"),
+               (pymupdf.PDF_ANNOT_IS_PRINT, "print"), (pymupdf.PDF_ANNOT_IS_NO_ZOOM, "nozoom"),
+               (pymupdf.PDF_ANNOT_IS_NO_ROTATE, "norotate"), (pymupdf.PDF_ANNOT_IS_NO_VIEW, "noview"),
+               (pymupdf.PDF_ANNOT_IS_READ_ONLY, "readonly"), (pymupdf.PDF_ANNOT_IS_LOCKED, "locked"),
+               (pymupdf.PDF_ANNOT_IS_TOGGLE_NO_VIEW, "togglenoview")]
+
+
+def _xfdf_flags(flags: int) -> str:
+    return ",".join(name for bit, name in _FLAG_NAMES if flags & bit)
+
+
+def _parse_flags(text: str | None) -> int:
+    if not text:
+        return pymupdf.PDF_ANNOT_IS_PRINT
+    names = {n.strip().lower() for n in text.split(",")}
+    return sum(bit for bit, name in _FLAG_NAMES if name in names)
+
+
+def _floats(text: str | None) -> list[float]:
+    if not text:
+        return []
+    return [float(v) for v in re.split(r"[,;\s]+", text.strip()) if v]
+
+
+def _points(text: str | None) -> list[tuple[float, float]]:
+    v = _floats(text)
+    return [(v[i], v[i + 1]) for i in range(0, len(v) - 1, 2)]
+
+
+@dataclass
+class ImportResult:
+    imported: int = 0
+    skipped: int = 0
+    messages: list[str] = field(default_factory=list)
+
+
+def import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = False) -> ImportResult:
+    """Importa commenti da XFDF. Con `replace` elimina prima i commenti esistenti.
+
+    I commenti già presenti con lo stesso nome (/NM) non vengono duplicati."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(data if isinstance(data, bytes) else data.encode("utf-8"))
+    except ET.ParseError as e:
+        raise AnnotationError("Il file non è un XFDF valido.") from e
+    if root.tag.split("}")[-1] != "xfdf":
+        raise AnnotationError("Il file non è un XFDF valido.")
+    annots_el = None
+    for child in root:
+        if child.tag.split("}")[-1] == "annots":
+            annots_el = child
+    result = ImportResult()
+    if annots_el is None:
+        return result
+    if replace:
+        delete_all(pdf)
+    name_map: dict[str, tuple[int, int]] = {}
+    for i in range(pdf.page_count):
+        page = pdf[i]
+        for a in page.annots():
+            nm = (a.info or {}).get("id")
+            if nm:
+                name_map[(i, nm)] = (i, a.xref)
+    existing = set(name_map)
+    pending_irt: list[tuple[int, int, str]] = []
+    for el in annots_el:
+        tag = el.tag.split("}")[-1]
+        try:
+            page_no = int(el.get("page", "0"))
+        except ValueError:
+            result.skipped += 1
+            continue
+        if not 0 <= page_no < pdf.page_count:
+            result.skipped += 1
+            result.messages.append(f"Pagina {page_no + 1} inesistente: commento ignorato.")
+            continue
+        nm = el.get("name") or ""
+        if nm and (page_no, nm) in existing:
+            result.skipped += 1
+            continue
+        try:
+            xref = _import_one(pdf, page_no, tag, el)
+        except Exception as e:  # un elemento difettoso non blocca gli altri
+            xref = None
+            result.messages.append(f"Commento «{tag}» non importato: {e}")
+        if xref is None:
+            result.skipped += 1
+            continue
+        if nm:
+            pdf.xref_set_key(xref, "NM", _pdf_string(nm) if nm.isascii() else pymupdf.get_pdf_str(nm))
+            name_map[(page_no, nm)] = (page_no, xref)
+            existing.add((page_no, nm))
+        irt = el.get("inreplyto")
+        if irt:
+            pending_irt.append((page_no, xref, irt))
+        result.imported += 1
+    for page_no, xref, irt in pending_irt:
+        target = name_map.get((page_no, irt))
+        if target is None or target[0] != page_no:
+            continue
+        page = pdf[page_no]
+        annot = page.load_annot(xref)
+        if annot is not None:
+            annot.set_irt_xref(target[1])
+    return result
+
+
+def _el_text(el, name: str) -> str | None:
+    for child in el:
+        if child.tag.split("}")[-1] == name:
+            if name == "contents-richtext":
+                return "".join(child.itertext())
+            return child.text or ""
+    return None
+
+
+def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None:
+    page = pdf[page_no]
+    t = _TAG_TYPES.get(tag)
+    if t is None:
+        return None
+    rect_vals = _floats(el.get("rect"))
+    rect = from_pdf_rect(page, rect_vals) if len(rect_vals) == 4 else None
+    color = hex_to_color(el.get("color"))
+    fill = hex_to_color(el.get("interior-color"))
+    opacity = float(el.get("opacity", "1") or 1)
+    width = float(el.get("width", "1") or 1)
+    dash = "dashed" if el.get("style") == "dash" else "solid"
+    cloud = el.get("style") == "cloudy"
+    author = el.get("title", "")
+    contents = _el_text(el, "contents")
+    if contents is None:
+        contents = _el_text(el, "contents-richtext") or ""
+    date = el.get("creationdate") or el.get("date")
+    style = Style(color=color, fill=fill, opacity=opacity, width=width, dash=dash, cloud=cloud)
+    intent = el.get("intent", "")
+    with unrotated(page):
+        if t in ("Highlight", "Underline", "StrikeOut", "Squiggly"):
+            pts = [pymupdf.Point(*from_pdf_point(page, x, y)) for x, y in _points(el.get("coords"))]
+            quads = [pymupdf.Quad(*pts[i:i + 4]) for i in range(0, len(pts) - 3, 4)]
+            if not quads and rect is not None:
+                quads = [rect.quad]
+            kind = {"Highlight": HIGHLIGHT, "Underline": UNDERLINE, "StrikeOut": STRIKEOUT, "Squiggly": SQUIGGLY}[t]
+            xref = create_markup(pdf, page_no, kind, quads, style, author, contents)
+        elif t == "Text":
+            if rect is None:
+                return None
+            annot = page.add_text_annot(rect.tl, contents, icon=el.get("icon") or "Comment")
+            if color:
+                annot.set_colors(stroke=color)
+            annot.set_opacity(opacity)
+            xref = _finish(annot, author, contents, date=date)
+            state = el.get("state")
+            if state:
+                pdf.xref_set_key(xref, "State", "/" + _name_token(state))
+                pdf.xref_set_key(xref, "StateModel", "/" + _name_token(el.get("statemodel") or "Review"))
+                annot = page.load_annot(xref)
+                annot.set_flags(pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_PRINT)
+        elif t == "FreeText":
+            if rect is None:
+                return None
+            da = _el_text(el, "defaultappearance") or ""
+            m = re.search(r"([\d.]+)\s+Tf", da)
+            style.fontsize = float(m.group(1)) if m else 12
+            cm = re.search(r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", da)
+            style.text_color = tuple(float(v) for v in cm.groups()) if cm else (0, 0, 0)
+            style.fill = color
+            style.color = None
+            style.width = float(el.get("width", "0") or 0)
+            callout_vals = _floats(el.get("callout"))
+            fringe = _floats(el.get("fringe"))
+            inner = rect
+            if len(fringe) == 4:
+                left, bottom, right, top = fringe
+                inner = pymupdf.Rect(rect.x0 + left, rect.y0 + top, rect.x1 - right, rect.y1 - bottom)
+            callout = None
+            if callout_vals:
+                callout = [pymupdf.Point(*from_pdf_point(page, x, y)) for x, y in
+                           zip(callout_vals[::2], callout_vals[1::2])]
+            xref = create_freetext(pdf, page_no, inner, contents, style, author, callout=callout)
+        elif t in ("Square", "Circle"):
+            if rect is None:
+                return None
+            xref = create_shape(pdf, page_no, RECT if t == "Square" else ELLIPSE, [rect.tl, rect.br], style, author,
+                                contents)
+        elif t == "Line":
+            s = _floats(el.get("start"))
+            e = _floats(el.get("end"))
+            if len(s) < 2 or len(e) < 2:
+                return None
+            a = pymupdf.Point(*from_pdf_point(page, s[0], s[1]))
+            b = pymupdf.Point(*from_pdf_point(page, e[0], e[1]))
+            annot = page.add_line_annot(a, b)
+            _apply_style(annot, style.copy(color=color or SHAPE_COLOR), fill=fill is not None)
+            head = _LE_VALUES.get(el.get("head", "None"), 0)
+            tail = _LE_VALUES.get(el.get("tail", "None"), 0)
+            if head or tail:
+                annot.set_line_ends(head, tail)
+            xref = _finish(annot, author, contents, date=date)
+            if intent:
+                pdf.xref_set_key(xref, "IT", "/" + intent)
+        elif t in ("Polygon", "PolyLine"):
+            pts = [pymupdf.Point(*from_pdf_point(page, x, y)) for x, y in _points(_el_text(el, "vertices"))]
+            if len(pts) < 2:
+                return None
+            annot = page.add_polygon_annot(pts) if t == "Polygon" else page.add_polyline_annot(pts)
+            _apply_style(annot, style.copy(color=color or SHAPE_COLOR), fill=t == "Polygon")
+            xref = _finish(annot, author, contents, date=date)
+            if intent:
+                pdf.xref_set_key(xref, "IT", "/" + intent)
+        elif t == "Ink":
+            strokes = []
+            for child in el:
+                if child.tag.split("}")[-1] == "inklist":
+                    for g in child:
+                        pts = [from_pdf_point(page, x, y) for x, y in _points(g.text)]
+                        if pts:
+                            strokes.append(pts)
+            if not strokes:
+                return None
+            xref = create_ink(pdf, page_no, strokes, style, author)
+            page.load_annot(xref).set_info(content=contents)
+        elif t == "Stamp":
+            if rect is None:
+                return None
+            text = el.get("foliant-stamp") or el.get("icon") or "Timbro"
+            spec = StampSpec(text, color or DEFAULT_COLORS[STAMP], el.get("foliant-stamp-sub", ""))
+            xref = _stamp_in_rect(pdf, page, rect, spec, opacity, author, date=date)
+            if contents:
+                page.load_annot(xref).set_info(content=contents)
+        elif t == "FileAttachment":
+            return None  # i dati del file non viaggiano nell'XFDF senza flusso incorporato
+        else:
+            return None
+    annot = page.load_annot(xref)
+    if annot is None:
+        return None
+    info = {}
+    if date:
+        info["creationDate"] = el.get("creationdate") or date
+        info["modDate"] = el.get("date") or date
+    if el.get("subject"):
+        info["subject"] = el.get("subject")
+    if info:
+        annot.set_info(**info)
+    flags = _parse_flags(el.get("flags"))
+    if flags != annot.flags:
+        annot.set_flags(flags)
+    if t != "Stamp":
+        annot.update()
+    else:
+        annot.update()
+        refresh_stamp(pdf, page_no, xref)
+    return xref
+
+
+# ------------------------------------------------------------------ FDF
+def export_fdf(pdf: pymupdf.Document, filename: str = "") -> bytes:
+    """FDF minimale (formato a oggetti PDF) con i commenti: un oggetto per annotazione."""
+    objs: list[bytes] = []
+    annot_refs: list[int] = []
+    next_num = 2
+    for page_no in range(pdf.page_count):
+        page = pdf[page_no]
+        for a in page.annots():
+            if a.type[0] in NON_COMMENT_TYPES:
+                continue
+            src = pdf.xref_object(a.xref, compressed=True)
+            # rimuove riferimenti non trasferibili (pagina, aspetto, popup, IRT)
+            src = re.sub(r"/(P|AP|Popup|IRT|Parent)\s*(\d+\s+\d+\s+R|<<.*?>>)", "", src, flags=re.S)
+            src = src.strip()
+            if src.endswith(">>"):
+                src = src[:-2] + f"/Page {page_no}>>"
+            objs.append(f"{next_num} 0 obj\n{src}\nendobj\n".encode("latin-1", errors="replace"))
+            annot_refs.append(next_num)
+            next_num += 1
+    refs = " ".join(f"{n} 0 R" for n in annot_refs)
+    head = f"%FDF-1.2\n1 0 obj\n<</FDF<</Annots[{refs}]" + (f"/F{_pdf_string(filename)}" if filename else "") + \
+        ">>>>\nendobj\n"
+    body = head.encode("latin-1", errors="replace") + b"".join(objs)
+    return body + b"trailer\n<</Root 1 0 R>>\n%%EOF\n"
+
+
+# ------------------------------------------------------------------ riepilogo
+def summary_rows(pdf: pymupdf.Document) -> list[dict]:
+    rows = []
+    for a in list_annotations(pdf):
+        rows.append({"pagina": a.page + 1, "tipo": a.label, "autore": a.author, "data": format_date(a.modified or a.created),
+                     "testo": a.contents, "testo_marcato": a.marked_text,
+                     "stato": a.status, "risposte": [(r.author, format_date(r.created), r.contents) for r in a.replies],
+                     "colore": color_to_hex(a.color)})
+    return rows
+
+
+def summary_text(pdf: pymupdf.Document, title: str = "") -> str:
+    out = [f"Riepilogo commenti — {title}" if title else "Riepilogo commenti", ""]
+    rows = summary_rows(pdf)
+    if not rows:
+        out.append("Nessun commento.")
+    current = None
+    for r in rows:
+        if r["pagina"] != current:
+            current = r["pagina"]
+            out.append(f"Pagina {current}")
+        head = f"  • {r['tipo']}"
+        if r["autore"]:
+            head += f" — {r['autore']}"
+        if r["data"]:
+            head += f" ({r['data']})"
+        if r["stato"] and r["stato"] != STATE_NONE:
+            head += f" [{r['stato']}]"
+        out.append(head)
+        if r["testo_marcato"]:
+            out.append(f"    «{r['testo_marcato']}»")
+        if r["testo"]:
+            out.extend("    " + line for line in r["testo"].splitlines())
+        for author, date, text in r["risposte"]:
+            out.append(f"    ↳ {author} ({date}): {text}")
+    return "\n".join(out) + "\n"
+
+
+def summary_csv(pdf: pymupdf.Document) -> str:
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Pagina", "Tipo", "Autore", "Data", "Stato", "Testo", "Testo marcato", "Risposte"])
+    for r in summary_rows(pdf):
+        replies = " | ".join(f"{a}: {t}" for a, _d, t in r["risposte"])
+        w.writerow([r["pagina"], r["tipo"], r["autore"], r["data"], r["stato"], r["testo"], r["testo_marcato"], replies])
+    return buf.getvalue()
+
+
+def summary_pdf(pdf: pymupdf.Document, title: str = "") -> bytes:
+    """Riepilogo dei commenti come nuovo PDF (testo semplice impaginato)."""
+    text = summary_text(pdf, title)
+    out = pymupdf.open()
+    lines = text.splitlines()
+    width, height, margin, size = 595, 842, 50, 10
+    lh = size * 1.45
+    max_chars = 95
+    wrapped: list[str] = []
+    for line in lines:
+        while len(line) > max_chars:
+            cut = line.rfind(" ", 0, max_chars)
+            cut = cut if cut > 20 else max_chars
+            wrapped.append(line[:cut])
+            line = "      " + line[cut:].lstrip()
+        wrapped.append(line)
+    page = None
+    y = 0.0
+    for line in wrapped:
+        if page is None or y > height - margin:
+            page = out.new_page(width=width, height=height)
+            y = margin + size
+        page.insert_text((margin, y), line, fontsize=size, fontname="helv")
+        y += lh
+    data = out.tobytes(garbage=3, deflate=True)
+    out.close()
+    return data
+
+
+def summary_html(pdf: pymupdf.Document, title: str = "") -> str:
+    from html import escape
+
+    parts = ["<!doctype html><html lang='it'><head><meta charset='utf-8'>",
+             f"<title>{escape(title or 'Riepilogo commenti')}</title>",
+             "<style>body{font-family:sans-serif;max-width:820px;margin:2em auto;color:#222}"
+             "h2{border-bottom:1px solid #ccc}.c{margin:.6em 0;padding:.4em .8em;border-left:4px solid #999}"
+             ".m{color:#555;font-size:.9em}.q{font-style:italic}.r{margin-left:1.5em;color:#333}</style></head><body>",
+             f"<h1>{escape(title or 'Riepilogo commenti')}</h1>"]
+    rows = summary_rows(pdf)
+    if not rows:
+        parts.append("<p>Nessun commento.</p>")
+    current = None
+    for r in rows:
+        if r["pagina"] != current:
+            current = r["pagina"]
+            parts.append(f"<h2>Pagina {current}</h2>")
+        color = r["colore"] or "#999999"
+        meta = " · ".join(x for x in (r["tipo"], r["autore"], r["data"],
+                                      r["stato"] if r["stato"] != STATE_NONE else "") if x)
+        parts.append(f"<div class='c' style='border-color:{color}'><div class='m'>{escape(meta)}</div>")
+        if r["testo_marcato"]:
+            parts.append(f"<div class='q'>«{escape(r['testo_marcato'])}»</div>")
+        if r["testo"]:
+            parts.append("<div>" + escape(r["testo"]).replace("\n", "<br>") + "</div>")
+        for author, date, text in r["risposte"]:
+            parts.append(f"<div class='r'>↳ <b>{escape(author)}</b> <span class='m'>{escape(date)}</span>: "
+                         f"{escape(text)}</div>")
+        parts.append("</div>")
+    parts.append("</body></html>")
+    return "".join(parts)
