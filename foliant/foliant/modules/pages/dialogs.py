@@ -157,6 +157,9 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Inserisci campo": "Insert field",
+    "Esempio: {f}": "Example: {f}",
+    "Capitolo": "Chapter",
     "{nome}_parte{n}": "{nome}_part{n}",
     "Fattura n\\. (\\d+)": "Invoice no\\. (\\d+)",
     "Il documento ha una sola pagina: non c'è nulla da dividere.": "The document has only one page: there is nothing to split.",
@@ -307,6 +310,56 @@ class PageScope(QGroupBox):
 
     def pages(self) -> list[int]:
         return list(self._pages)
+
+
+class TemplateField(QWidget):
+    """Modello di nome file con menu «Inserisci campo» e anteprima del risultato (PAG-32)."""
+
+    changed = Signal()
+
+    def __init__(self, text: str, base_name: str = "doc", parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QMenu, QToolButton
+        from . import fields as F
+        self.base_name = base_name
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.edit = QLineEdit(text)
+        self.button = QToolButton()
+        self.button.setText(_("Inserisci campo"))
+        self.button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.button)
+        for code, label in F.MENU:
+            act = menu.addAction(f"{_(label)}  {code}")
+            act.triggered.connect(lambda _c=False, code=code: self.insert(code))
+        self.button.setMenu(menu)
+        row.addWidget(self.edit, 1)
+        row.addWidget(self.button)
+        lay.addLayout(row)
+        self.example = QLabel()
+        self.example.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
+        lay.addWidget(self.example)
+        self.edit.textChanged.connect(self._update)
+        self._update()
+
+    def insert(self, code: str) -> None:
+        self.edit.insert(code)
+        self.edit.setFocus()
+
+    def error(self) -> str | None:
+        from . import fields as F
+        return F.validate_template(self.edit.text())
+
+    def _update(self, *_a) -> None:
+        err = self.error()
+        if err:
+            self.example.setText("")
+        else:
+            name = E.render_name(self.edit.text() or "{nome}", nome=self.base_name, n=1, pagina=1, inizio=1,
+                                 fine=1, intervallo="1", segnalibro=_("Capitolo"), match1="101")
+            self.example.setText(_("Esempio: {f}").format(f=name + ".pdf"))
+        self.changed.emit()
 
 
 class BaseDialog(QDialog):
@@ -673,9 +726,11 @@ class ExtractDialog(BaseDialog):
             rb.toggled.connect(self._update)
         self.layout_.addWidget(box)
         form = QFormLayout()
-        self.template = QLineEdit("{nome}_p{pagina}")
+        self.template_field = TemplateField("{nome}_p{pagina}", Path(document.display_name).stem)
+        self.template = self.template_field.edit
         self.template.setToolTip(_("Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}"))
-        form.addRow(_("Nome dei file:"), self.template)
+        self.template_field.changed.connect(lambda: self._update())
+        form.addRow(_("Nome dei file:"), self.template_field)
         self.layout_.addLayout(form)
         self.delete_after = QCheckBox(_("Elimina le pagine dal documento dopo l'estrazione"))
         self.open_result = QCheckBox(_("Apri il risultato"))
@@ -690,8 +745,13 @@ class ExtractDialog(BaseDialog):
         return "single" if self.rb_single.isChecked() else "each" if self.rb_each.isChecked() else "ranges"
 
     def _update(self, *_a) -> None:
-        self.template.setEnabled(self.mode() != "single")
+        if not hasattr(self, "template_field"):
+            return
+        self.template_field.setEnabled(self.mode() != "single")
         self.open_result.setEnabled(self.mode() == "single")
+        if self.mode() != "single" and self.template_field.error():
+            self.set_error(self.template_field.error())
+            return
         if self.mode() == "ranges":
             text = self.scope.range_edit.text()
             try:
@@ -823,9 +883,10 @@ class SplitDialog(BaseDialog):
         self.top_only = QCheckBox(_("Cerca il testo solo nel quarto superiore della pagina"))
         self.layout_.addWidget(self.top_only)
         form = QFormLayout()
-        self.template = QLineEdit(_("{nome}_parte{n}"))
+        self.template_field = TemplateField(_("{nome}_parte{n}"), Path(document.display_name).stem)
+        self.template = self.template_field.edit
         self.template.setToolTip(_("Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}"))
-        form.addRow(_("Nome dei file:"), self.template)
+        form.addRow(_("Nome dei file:"), self.template_field)
         self.layout_.addLayout(form)
         self.overwrite = QCheckBox(_("Sovrascrivi i file esistenti"))
         self.layout_.addWidget(self.overwrite)
@@ -849,6 +910,7 @@ class SplitDialog(BaseDialog):
             w.textChanged.connect(self._update)
         self.collect.toggled.connect(self._update)
         self.top_only.toggled.connect(self._update)
+        self.template_field.changed.connect(self._update)
         self._update()
 
     def method(self) -> str:
@@ -902,6 +964,10 @@ class SplitDialog(BaseDialog):
         defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
         if self.template.text() in (part, "{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
             self.template.setText(defaults.get(m, part))
+        if self.template_field.error():
+            self.preview.setText("")
+            self.set_error(self.template_field.error())
+            return
         if m in ("size", "blank"):
             self.preview.setText("")   # calcolo costoso: eseguito alla conferma
             self.set_error(None)

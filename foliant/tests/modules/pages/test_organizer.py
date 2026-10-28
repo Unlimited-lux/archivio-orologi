@@ -489,3 +489,13 @@ def test_find_blank_and_duplicates_selects_and_deletes(window, tmp_path, monkeyp
     assert view.page_count == 4
     view.document.undo()
     assert view.page_count == 6
+
+
+def test_bates_files_action_opens_dialog(pages_window, monkeypatch):
+    window, view = pages_window
+    c = ctrl(window)
+    from foliant.modules.pages import bates_dialogs
+    called = []
+    monkeypatch.setattr(bates_dialogs, "open_bates_files_dialog", lambda ctx, v, sel: called.append((v, sel)) or False)
+    c.act_bates_files.trigger()
+    assert called and called[0][0] is view

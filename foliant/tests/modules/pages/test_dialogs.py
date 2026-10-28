@@ -355,3 +355,21 @@ def test_dialog_screenshots(window, ten_pdf, tmp_path):
             assert dlg.grab().save(str(tmp_path / f"{type(dlg).__name__}_{mode}.png"))
             dlg.close()
     fast_theme("light")
+
+
+def test_template_field_menu_preview_and_validation(window, ten_pdf):
+    """PAG-32: «Inserisci campo», anteprima sul caso corrente, conferma bloccata se il segnaposto è sconosciuto."""
+    view = window.open_path(ten_pdf)
+    dlg = D.ExtractDialog(window, view.document, [0, 1])
+    dlg.rb_each.setChecked(True)
+    field = dlg.template_field
+    field.edit.setText("{nome}_")
+    field.insert("{pagina:3}")
+    assert field.edit.text() == "{nome}_{pagina:3}"
+    assert "doc_001.pdf" in field.example.text()
+    assert dlg.ok_button().isEnabled()
+    field.edit.setText("{sconosciuto}")
+    assert not dlg.ok_button().isEnabled() and "sconosciuto" in dlg.message.text()
+    split = D.SplitDialog(window, view.document)
+    split.template_field.edit.setText("{nome}_{xyz}")
+    assert not split.ok_button().isEnabled()

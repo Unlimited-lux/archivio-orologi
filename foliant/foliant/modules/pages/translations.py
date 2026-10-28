@@ -131,6 +131,7 @@ EN = {
     "Duplica": "Duplicate",
     "Organizza pagine": "Organize pages",
     "Pagina non leggibile": "Unreadable page",
+    "Numerazione Bates su più file…": "Bates numbering across files…",
     "Il documento dichiara la conformità PDF/A: le pagine inserite provengono da file non PDF/A e il risultato potrebbe non essere più conforme.":
         "The document declares PDF/A conformance: the inserted pages come from non-PDF/A files and the result may no longer conform.",
     "PDF/A": "PDF/A",
