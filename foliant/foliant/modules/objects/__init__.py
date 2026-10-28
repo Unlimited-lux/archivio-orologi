@@ -251,6 +251,8 @@ def register(ctx: Context) -> None:
     ctx.add_properties_panel("oggetti", panel)
     _state["panel"] = panel
     c.selectionChanged.connect(lambda: _update_actions(ctx, c))
+    if hasattr(ctx, "documentAccessChanged"):   # sblocco con password dei permessi, fine dell'OCR…
+        ctx.documentAccessChanged.connect(lambda v: _update_actions(ctx, c) if v is ctx.current_view() else None)
     ctx.currentViewChanged.connect(lambda v: (_install_drop(ctx, c, v), _update_actions(ctx, c)))
     ctx.documentOpened.connect(lambda v: _install_drop(ctx, c, v))
     mode.entered.connect(lambda: _on_mode_entered(ctx, c))
