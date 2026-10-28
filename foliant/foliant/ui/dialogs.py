@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
 
+from ..core import locale_defaults as loc
 from ..i18n import _, language, pgettext
 
 
@@ -81,7 +82,7 @@ class PreferencesDialog(QDialog):
         self.view_mode.setCurrentIndex(max(0, self.view_mode.findData(settings.value("view/mode", "continuous"))))
         form.addRow(_("Visualizzazione predefinita"), self.view_mode)
         self.zoom = QComboBox(self)
-        for key, label in (("width", _("Adatta larghezza")), ("page", _("Adatta pagina")), ("100", "100%")):
+        for key, label in (("width", _("Adatta alla larghezza")), ("page", _("Adatta alla pagina")), ("100", "100%")):
             self.zoom.addItem(label, key)
         self.zoom.setCurrentIndex(max(0, self.zoom.findData(settings.value("view/zoom", "width"))))
         form.addRow(_("Zoom predefinito"), self.zoom)
@@ -91,6 +92,19 @@ class PreferencesDialog(QDialog):
             self.ruler_unit.addItem(label, key)
         self.ruler_unit.setCurrentIndex(max(0, self.ruler_unit.findData(settings.value("view/ruler_unit", "mm"))))
         form.addRow(_("Unità dei righelli"), self.ruler_unit)
+        self.paper_size = QComboBox(self)
+        self.paper_size.addItem(_("Automatico ({v})").format(v=loc.default_paper_size()), loc.AUTO)
+        for key in loc.PAPER_SIZES:
+            self.paper_size.addItem(key, key)
+        self.paper_size.setCurrentIndex(max(0, self.paper_size.findData(settings.value(loc.PAPER_KEY, loc.AUTO))))
+        form.addRow(_("Formato carta"), self.paper_size)
+        self.measure_unit = QComboBox(self)
+        unit_label = {"mm": _("Millimetri"), "in": _("Pollici")}
+        self.measure_unit.addItem(_("Automatico ({v})").format(v=unit_label[loc.default_unit()]), loc.AUTO)
+        for key in loc.UNITS:
+            self.measure_unit.addItem(unit_label[key], key)
+        self.measure_unit.setCurrentIndex(max(0, self.measure_unit.findData(settings.value(loc.UNIT_KEY, loc.AUTO))))
+        form.addRow(_("Unità di misura"), self.measure_unit)
         note = QLabel(_("La lingua viene applicata al prossimo avvio."))
         note.setProperty("muted", True)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -150,6 +164,8 @@ class PreferencesDialog(QDialog):
         s.setValue("view/mode", self.view_mode.currentData())
         s.setValue("view/zoom", self.zoom.currentData())
         s.setValue("view/ruler_unit", self.ruler_unit.currentData())
+        s.setValue(loc.PAPER_KEY, self.paper_size.currentData())
+        s.setValue(loc.UNIT_KEY, self.measure_unit.currentData())
         for widget in self.module_pages:
             apply = getattr(widget, "apply", None)
             if callable(apply):

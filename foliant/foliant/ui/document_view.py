@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Iterator
 
 import pymupdf
-from PySide6.QtCore import QEvent, QLineF, QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QLineF, QObject, QPoint, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import QActionGroup, QColor, QImage, QKeySequence, QPainter, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSlider, QFrame, QMenu
 
@@ -1586,6 +1586,18 @@ class DocumentView(QAbstractScrollArea):
         if not menu.isEmpty():
             self.exec_menu(menu, ev.globalPos())
         menu.deleteLater()
+
+    def keyboard_menu_pos(self) -> QPoint:
+        """Dove aprire il menu contestuale da tastiera: al centro della parte visibile della
+        selezione di testo, altrimenti al centro della vista (coordinate del viewport)."""
+        area = self.viewport().rect()
+        shown = QRectF()
+        for sel in self.text_selections:
+            if 0 <= sel.page < len(self._geoms):
+                for rect in sel.rects:
+                    shown = shown.united(self.page_to_view(sel.page, rect))
+        shown = shown.intersected(QRectF(area))
+        return shown.center().toPoint() if not shown.isEmpty() else area.center()
 
     def exec_menu(self, menu: QMenu, global_pos) -> None:
         """Mostra il menu contestuale (separato per poterlo simulare nei test)."""
