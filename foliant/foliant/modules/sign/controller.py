@@ -226,6 +226,24 @@ class SignController(QObject):
         if ok and val:
             self._change(view, _("Ruota firma"), lambda pdf: g.rotate_signature(pdf, page, xref, val))
 
+    def embed_all(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            count = sum(len(g.placed_signatures(view.document.pdf, p)) for p in range(view.document.pdf.page_count))
+        if not count:
+            self.ctx.info(_("Incorpora le firme"), _("Il documento non contiene firme grafiche da incorporare."))
+            return
+        if not self.ctx.confirm(_("Incorpora le firme"), _(
+                "Incorporare {n} firme grafiche nel contenuto delle pagine? Non saranno più spostabili "
+                "(l'operazione si può annullare).").format(n=count)):
+            return
+        n = self._change(view, _("Incorpora le firme"), g.embed_all_signatures, kind="content")
+        self.tool_for(view).selected = None
+        if n:
+            self.ctx.status(_("Firme incorporate: {n}.").format(n=n), 5000)
+
     def set_opacity(self, view, page: int, xref: int) -> None:
         val, ok = QInputDialog.getInt(self.ctx.window, _("Opacità"), _("Opacità della firma (%):"), 100, 5, 100)
         if ok:
@@ -889,6 +907,12 @@ TRANSLATIONS_EN = {
     "Ripeti firma su più pagine": "Repeat signature on several pages",
     "Firma ripetuta su {n} pagine.": "Signature repeated on {n} pages.",
     "Ridotta per entrare nelle pagine: {p}.": "Shrunk to fit on pages: {p}.",
+    "Incorpora le firme": "Embed signatures",
+    "Il documento non contiene firme grafiche da incorporare.": "The document has no graphic signatures to embed.",
+    "Incorporare {n} firme grafiche nel contenuto delle pagine? Non saranno più spostabili (l'operazione si può "
+    "annullare).": "Embed {n} graphic signatures into the page content? They can no longer be moved (the operation "
+                    "can be undone).",
+    "Firme incorporate: {n}.": "Signatures embedded: {n}.",
     "Ruota di 90°": "Rotate 90°", "Ruota…": "Rotate…",
     "Gradi in senso orario (negativi: antiorario):": "Degrees clockwise (negative: counter-clockwise):", "Ruota firma": "Rotate signature",
     "Duplica": "Duplicate", "Elimina": "Delete", "Opacità…": "Opacity…",

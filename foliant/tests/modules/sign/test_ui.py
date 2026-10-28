@@ -803,3 +803,31 @@ def test_repeat_dialog_thumbnails(window, qtbot, tmp_path):
     dlg.r_range.setChecked(True)
     dlg.range.setText("2-3")
     assert dlg.thumbs.count() == 2 and shown[-1] == [1, 2]
+
+
+def test_embed_all_signatures(window, monkeypatch, tmp_path):
+    from tests.conftest import make_pdf
+    view = window.open_path(make_pdf(tmp_path / "inc.pdf", pages=3))
+    c = _ctl(window)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    for p in range(3):
+        c.place(view, p, pymupdf.Rect(400, 700, 500, 730), item)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: True)
+    c.embed_all()
+    with view.document.lock:
+        assert all(not g.placed_signatures(view.document.pdf, p) for p in range(3))
+    view.document.undo()
+    with view.document.lock:
+        assert all(len(g.placed_signatures(view.document.pdf, p)) == 1 for p in range(3))
+
+
+def test_guides_include_form_fields():
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = "Nome"
+    w.rect = pymupdf.Rect(300, 500, 450, 520)
+    page.add_widget(w)
+    xs, ys, _lines = g.page_guides(pdf[0])
+    assert 300 in [round(x) for x in xs] and 520 in [round(y) for y in ys]

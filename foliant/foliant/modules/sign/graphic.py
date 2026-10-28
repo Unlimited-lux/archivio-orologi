@@ -973,6 +973,16 @@ def rotate_signature(pdf: pymupdf.Document, page_index: int, xref: int, degrees:
     return set_signature_rect(pdf, page_index, xref, pymupdf.Rect(cx - nw / 2, cy - nh / 2, cx + nw / 2, cy + nh / 2))
 
 
+def embed_all_signatures(pdf: pymupdf.Document) -> int:
+    """Incorpora nel contenuto tutte le firme grafiche del documento."""
+    n = 0
+    for p in range(pdf.page_count):
+        for sig in placed_signatures(pdf, p):
+            embed_signature(pdf, p, sig.xref)
+            n += 1
+    return n
+
+
 def embed_signature(pdf: pymupdf.Document, page_index: int, xref: int) -> None:
     """Incorpora l'aspetto nel contenuto della pagina e rimuove l'annotazione."""
     sig = find_signature(pdf, page_index, xref)
@@ -1044,6 +1054,13 @@ def page_guides(page: pymupdf.Page) -> tuple[list[float], list[float], list[tupl
         for b in page.get_text("words"):
             if set(b[4]) <= {"_"} and b[2] - b[0] >= 40:
                 lines.append((b[3] - 1, b[0], b[2]))
+    except Exception:
+        pass
+    try:   # bordi dei campi del modulo vicini
+        for w in page.widgets() or []:
+            r = w.rect
+            xs += [r.x0, r.x1]
+            ys += [r.y0, r.y1]
     except Exception:
         pass
     return xs, ys, lines

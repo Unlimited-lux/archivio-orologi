@@ -29,7 +29,8 @@ def _translations() -> dict:
         "Aggiungi un campo firma vuoto da far firmare": "Add an empty signature field to be signed",
         "Seleziona, sposta o ridimensiona le firme inserite": "Select, move or resize placed signatures",
         "Firma un PDF": "Sign a PDF", "Firma grafica o digitale": "Graphic or digital signature",
-        "Libreria bloccata": "Library locked",
+        "Libreria bloccata": "Library locked", "Incorpora le firme": "Embed signatures",
+        "Incorpora le firme grafiche nel contenuto delle pagine": "Embed the graphic signatures into the page content",
     })
     return merged
 
@@ -92,6 +93,9 @@ def register(ctx: Context) -> None:
     act_edit = ctx.action(_("Modifica firma"), "move", lambda: _edit_tool(ctx, c),
                           tooltip=_("Seleziona, sposta o ridimensiona le firme inserite"))
     mode.add_action(act_edit)
+    act_embed = ctx.action(_("Incorpora le firme"), "stamp", c.embed_all,
+                           tooltip=_("Incorpora le firme grafiche nel contenuto delle pagine"))
+    ctx.add_menu_action(act_embed, _("Firma"))
     mode.add_separator()
     act_digital = ctx.action(_("Firma digitale"), "file-badge", lambda: c.start_digital_sign(False),
                              tooltip=_("Firma il documento con un certificato"))
