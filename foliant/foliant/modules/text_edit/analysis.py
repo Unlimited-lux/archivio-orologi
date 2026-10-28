@@ -428,9 +428,13 @@ def group_lines(lines: list[Line], rules: list | None = None) -> list[list[Line]
     neighbors = {id(ln): has_neighbor(ln) for ln in ordered}
     groups: list[list[Line]] = []
     for line in ordered:
+        if neighbors[id(line)]:
+            # cella di tabella: blocco a sé, così una modifica non rifluisce nella riga sotto
+            groups.append([line])
+            continue
         best, best_d = None, None
         for g in groups:
-            if neighbors[id(g[-1])] != neighbors[id(line)]:
+            if neighbors[id(g[-1])]:
                 continue
             if rules and _rule_between(g[-1], line, rules):
                 continue

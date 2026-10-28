@@ -106,3 +106,58 @@ def test_listino_add_row(listino):
              if "Tudor" in sp["text"]][0]
     assert abs(s["size"] - st.size) < 0.05 and s["font"].startswith("Carlito")
     assert abs(s["bbox"][0] - model_cell.x0) <= 1
+
+
+@pytest.fixture(scope="module")
+def chrome_invoice(tmp_path_factory) -> Path:
+    """Fattura stampata in PDF da Chromium (font Type0 Identity-H in sottoinsieme, come browser e gestionali)."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node non disponibile")
+    out = tmp_path_factory.mktemp("chrome")
+    html = out / "fattura.html"
+    html.write_text((HERE / "fattura.html").read_text(encoding="utf-8"), encoding="utf-8")
+    pdf = out / "fattura.pdf"
+    script = out / "stampa.js"
+    script.write_text(
+        "const { chromium } = require('playwright');(async () => {const b = await chromium.launch();"
+        f"const p = await b.newPage(); await p.goto('file://{html}');"
+        f"await p.pdf({{ path: '{pdf}', format: 'A4' }}); await b.close();}})();", encoding="utf-8")
+    import os
+    env = dict(os.environ)
+    try:
+        root = subprocess.run(["npm", "root", "-g"], capture_output=True, text=True, timeout=30).stdout.strip()
+        env["NODE_PATH"] = root
+    except Exception:
+        pass
+    subprocess.run([node, str(script)], capture_output=True, timeout=120, env=env)
+    if not pdf.exists():
+        pytest.skip("stampa con Chromium non riuscita")
+    return pdf
+
+
+def test_chrome_invoice_cells_and_edits(chrome_invoice):
+    d = Document.open(str(chrome_invoice))
+    with d.lock:
+        page = d.pdf[0]
+        blocks = analysis.analyze_page(page, 0)
+        f0 = fonts(page)
+        before = words(page)
+    # ogni cella è un blocco a sé (le celle di una colonna non diventano un paragrafo)
+    assert all(len(b.lines) == 1 for b in blocks if "Revisione" in b.text or "Rolex" in b.text)
+    s = search.replace_all(d, "9.500,00", "9.900,00", search.SearchOptions(case_sensitive=True))
+    assert s.replaced == 1
+    with d.lock:
+        page = d.pdf[0]
+        assert fonts(page) == f0
+        cell = [b for b in analysis.analyze_page(page, 0) if b.text.startswith("Revisione")][0]
+    new = [[Run("Revisione completa e lucidatura della cassa", r.style) for r in cell.paragraphs[0][:1]]]
+    with d.change("Modifica cella") as pdf:
+        engine.replace_block(pdf, 0, cell, new)
+    with d.lock:
+        after = words(d.pdf[0])
+    # le altre righe e colonne non si spostano
+    for key, r in before.items():
+        if key[0] in ("Revisione", "e", "lucidatura", "9.500,00"):
+            continue
+        assert key in after and abs(after[key][0] - r[0]) < 0.2, key
