@@ -138,13 +138,32 @@ def is_custom_script(script: str | None) -> bool:
 
 
 # ====================================================================== numeri
-def parse_number(text: Any) -> float | None:
-    """Interpreta numeri all'italiana o all'inglese («1.234,5», «1,234.5», «1'234.5», «€ 3»)."""
+def _decimal_comma(separator: int | None) -> bool:
+    """Stili 2 («1.234,56») e 3 («1234,56»): la virgola è il separatore decimale."""
+    return separator in (2, 3)
+
+
+def parse_number(text: Any, separator: int | None = None) -> float | None:
+    """Interpreta numeri all'italiana o all'inglese («1.234,5», «1,234.5», «1'234.5», «€ 3»).
+
+    `separator`: stile dei separatori del campo (0-4) per l'input dell'utente: il testo si legge
+    secondo quello stile («12.500» con lo stile 2 è dodicimilacinquecento). Senza stile si
+    indovina, come per i valori memorizzati (canonici, con il punto decimale) e importati."""
     if text is None or isinstance(text, bool):
         return None
     if isinstance(text, (int, float)):
         return float(text) if math.isfinite(text) else None
     s = str(text).strip().replace("−", "-").replace("'", "").replace(" ", "").replace(" ", "")
+    if separator is not None:
+        if _decimal_comma(separator):
+            s = s.replace(".", "")
+            if s.count(",") > 1:
+                return None
+            s = s.replace(",", ".")
+        else:
+            s = s.replace(",", "")
+            if s.count(".") > 1:
+                return None
     negative = s.startswith("(") and s.endswith(")")
     s = re.sub(r"[^\d,.\-+eE]", "", s)
     s = re.sub(r"[eE](?![-+]?\d)", "", s)
@@ -240,7 +259,7 @@ def normalize(fmt: Format, text: str) -> str:
     if not s or fmt.type == NONE:
         return text
     if fmt.type in (NUMBER, PERCENT):
-        v = parse_number(s)
+        v = parse_number(s, fmt.separator)
         if v is None:
             raise FormatError(_("Va inserito un numero."))
         if fmt.type == PERCENT and s.endswith("%"):
@@ -262,6 +281,16 @@ def normalize(fmt: Format, text: str) -> str:
             raise FormatError(_("Il valore non rispetta il formato {m}.").format(m=fmt.mask))
         return raw
     return text
+
+
+def edit_text(fmt: Format, value: str) -> str:
+    """Testo nell'editor per un valore memorizzato: per i numeri la forma canonica con il
+    separatore decimale dello stile del campo, senza migliaia («1234,5» con lo stile 2), così
+    che confermarlo senza modifiche dia lo stesso valore."""
+    if fmt.type in (NUMBER, PERCENT) and value and _decimal_comma(fmt.separator):
+        if parse_number(value) is not None and "," not in value:
+            return value.replace(".", ",")
+    return value
 
 
 def filter_input(fmt: Format, text: str) -> str:
