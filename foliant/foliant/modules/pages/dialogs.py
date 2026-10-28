@@ -643,6 +643,9 @@ def open_insert_file_dialog(ctx, view, selected: list[int], path: str | None = N
                                                     reverse=o["reverse"], annots=o["annots"], widgets=o["widgets"],
                                                     bookmark_title=o["bookmark_title"]),
                      select=lambda r: r)
+        c = getattr(ctx, "pages_controller", None)
+        if res is not None and c is not None:
+            c.warn_pdfa(view, [src])
         return res is not None
     finally:
         if dlg.source is not None:

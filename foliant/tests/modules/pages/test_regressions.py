@@ -424,3 +424,65 @@ def test_delete_shows_undo_notification(window, tmp_path, qtbot, monkeypatch):
     assert actions[0][0] == "Annulla"
     actions[0][1]()
     assert view.page_count == 6
+
+
+def _threaded_pdf():
+    d = numbered_pdf(4)
+    th = d.get_new_xref()
+    beads = [d.get_new_xref() for _ in range(4)]
+    for i, b in enumerate(beads):
+        d.update_object(b, f"<</Type/Bead/T {th} 0 R/N {beads[(i + 1) % 4]} 0 R/V {beads[i - 1]} 0 R"
+                           f"/P {d[i].xref} 0 R/R[72 600 300 700]>>")
+        d.xref_set_key(d[i].xref, "B", f"[{b} 0 R]")
+    d.update_object(th, f"<</Type/Thread/F {beads[0]} 0 R/I<</Title(Articolo)>>>>")
+    d.xref_set_key(d.pdf_catalog(), "Threads", f"[{th} 0 R]")
+    return pymupdf.open(stream=d.tobytes())
+
+
+def test_delete_pages_rethreads_article_beads():
+    """PAG-03: i bead delle pagine eliminate sono tolti e il thread ricucito."""
+    doc = _threaded_pdf()
+    E.delete_pages(doc, [1, 2])
+    out = pymupdf.open(stream=doc.tobytes(garbage=3))
+    live = {out[i].xref for i in range(out.page_count)}
+    th = E._ref(E._split_array(out.xref_get_key(out.pdf_catalog(), "Threads")[1])[0])
+    first = E._ref(out.xref_get_key(th, "F")[1])
+    chain, b = [], first
+    while b not in chain:
+        chain.append(b)
+        assert E._ref(out.xref_get_key(b, "P")[1]) in live
+        b = E._ref(out.xref_get_key(b, "N")[1])
+    assert len(chain) == 2
+    assert E._ref(out.xref_get_key(chain[0], "V")[1]) == chain[1]
+
+
+def test_delete_all_thread_pages_removes_thread():
+    doc = _threaded_pdf()
+    E.insert_blank_pages(doc, 4, 1)
+    E.delete_pages(doc, [0, 1, 2, 3])
+    assert doc.xref_get_key(doc.pdf_catalog(), "Threads")[0] in ("null", "array")
+    kind, val = doc.xref_get_key(doc.pdf_catalog(), "Threads")
+    assert kind == "null" or not E._split_array(val)
+
+
+def test_pdfa_warning_when_inserting_non_pdfa(window, tmp_path, monkeypatch):
+    """PAG-03: documento PDF/A + pagine da un file non PDF/A → avviso (non bloccante)."""
+    d = numbered_pdf(2)
+    d.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                       '<rdf:Description xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="2" '
+                       'pdfaid:conformance="B"/></rdf:RDF></x:xmpmeta>')
+    a = tmp_path / "a.pdf"
+    d.save(str(a))
+    b = save_numbered(tmp_path / "b.pdf", 1, prefix="B")
+    view = window.open_path(str(a))
+    window.set_mode("pagine")
+    c = window.ctx.pages_controller
+    shown = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: shown.append(text))
+    from PySide6.QtCore import QMimeData, QUrl
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(b)])
+    c.drop_mime(mime, 1, True)
+    assert view.page_count == 3
+    assert shown and "PDF/A" in shown[0]
+    assert E.declares_pdfa(pymupdf.open(str(a)))

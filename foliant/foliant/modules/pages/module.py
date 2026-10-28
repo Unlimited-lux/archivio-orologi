@@ -434,6 +434,19 @@ class PagesController:
         at = (pages[0] if before else pages[-1] + 1) if pages else view.page_count
         self.insert_pdf_bytes(data, at, _("Incolla pagine"))
 
+    def warn_pdfa(self, view, sources) -> None:
+        """PAG-03: inserire pagine da file non PDF/A in un documento che dichiara PDF/A."""
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            target = E.declares_pdfa(view.document.pdf)
+            foreign = any(not E.declares_pdfa(s) for s in sources)
+        if target and foreign:
+            text = _("Il documento dichiara la conformità PDF/A: le pagine inserite provengono da file non "
+                     "PDF/A e il risultato potrebbe non essere più conforme.")
+            notify = getattr(self.ctx, "notify", None)
+            notify(text) if notify else self.ctx.info(_("PDF/A"), text)
+
     def insert_pdf_bytes(self, data: bytes, at: int, label: str, view=None) -> None:
         try:
             src = pymupdf.open(stream=data, filetype="pdf")
@@ -441,7 +454,9 @@ class PagesController:
             self.ctx.error(label, _("Il contenuto non è un PDF valido."))
             return
         try:
-            self.apply(label, lambda pdf: E.insert_pdf_pages(pdf, src, at), select=lambda r: r, view=view)
+            if self.apply(label, lambda pdf: E.insert_pdf_pages(pdf, src, at), select=lambda r: r,
+                          view=view) is not None:
+                self.warn_pdfa(view or self.view(), [src])
         finally:
             src.close()
 
@@ -524,7 +539,8 @@ class PagesController:
                 new += added
             return new
         try:
-            self.apply(_("Inserisci pagine"), work, select=lambda r: r)
+            if self.apply(_("Inserisci pagine"), work, select=lambda r: r) is not None and sources:
+                self.warn_pdfa(view, sources)
         finally:
             for s in sources:
                 s.close()
