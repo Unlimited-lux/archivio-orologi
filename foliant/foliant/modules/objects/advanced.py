@@ -260,3 +260,73 @@ def group(pdf: pymupdf.Document, page_index: int, indices) -> list[int]:
         if ob.kind == FORM and ob.name == name:
             return [ob.index]
     return []
+
+
+# ================================================================ OBJ-25
+NONE = "none"
+
+
+def _color_op(color, stroke: bool) -> bytes:
+    vals = " ".join(fmt_num(max(0.0, min(1.0, float(v)))) for v in color).encode()
+    op = {1: b"G", 3: b"RG", 4: b"K"}.get(len(color))
+    if op is None:
+        raise ObjectError("Colore non valido.")
+    return vals + b" " + (op if stroke else op.lower())
+
+
+def restyle_paths(pdf: pymupdf.Document, page_index: int, indices, stroke=None, fill=None,
+                  width: float | None = None, dash: list | None = None) -> list[int]:
+    """Cambia colore di tratto/riempimento, spessore e tratteggio dei tracciati.
+
+    `stroke`/`fill`: None = invariato, NONE = nessuno, tupla di 1 (grigio), 3 (RGB)
+    o 4 (CMYK) componenti 0–1."""
+    from .content import PATH
+    page = pdf[page_index]
+    parsed = parse_page(pdf, page)
+    objs = _check_indices(parsed, indices)
+    if any(o.kind != PATH for o in objs):
+        raise ObjectError("Lo stile si può cambiare solo sui tracciati.")
+    if width is not None and width < 0:
+        raise ObjectError("Lo spessore non può essere negativo.")
+    edits = []
+    for o in objs:
+        paint = o.paint
+        has_fill = paint in ("f", "F", "f*", "B", "B*", "b", "b*")
+        has_stroke = paint in ("S", "s", "B", "B*", "b", "b*")
+        evenodd = paint.endswith("*")
+        close = paint in ("s", "b", "b*")
+        if stroke == NONE:
+            has_stroke = False
+        elif stroke is not None:
+            has_stroke = True
+        if fill == NONE:
+            has_fill = False
+        elif fill is not None:
+            has_fill = True
+        if has_fill and has_stroke:
+            new_paint = "B*" if evenodd else "B"
+        elif has_fill:
+            new_paint = "f*" if evenodd else "f"
+        elif has_stroke:
+            new_paint = "S"
+        else:
+            new_paint = "n"
+        body = parsed.data[o.start:o.end]
+        assert body.rstrip().endswith(paint.encode())
+        body = body.rstrip()[: -len(paint)] + (b"h " if close else b"") + new_paint.encode()
+        state = []
+        if stroke not in (None, NONE):
+            state.append(_color_op(stroke, True))
+        if fill not in (None, NONE):
+            state.append(_color_op(fill, False))
+        if width is not None:
+            scale = abs(o.ctm.a * o.ctm.d - o.ctm.b * o.ctm.c) ** 0.5 or 1.0
+            state.append(fmt_num(width / scale).encode() + b" w")
+        if dash is not None:
+            state.append(b"[" + b" ".join(fmt_num(v).encode() for v in dash) + b"] 0 d")
+        full = b"\n".join(state + [body]) if state else body
+        s, e = o.span
+        edits.append((s, e, _sep(unit_bytes(parsed, o, o.ctm, outer_of(o), body=full))))
+    data, _ = apply_edits(parsed.data, edits)
+    write_content(pdf, page, data)
+    return [o.index for o in objs]

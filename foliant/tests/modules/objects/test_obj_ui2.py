@@ -204,3 +204,22 @@ def test_advanced_actions(ui, tmp_path, monkeypatch):
     monkeypatch.setattr(D, "ask_replicate", lambda parent, n: ([0, 1], True))
     O._state["actions"]["replicate"].trigger()
     assert len(objs(view, 1)) == 1
+
+
+def test_image_tools_actions(ui, tmp_path, monkeypatch):
+    from foliant.modules.objects import dialogs as D
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 150, 120)], paths=[(300, 300, 400, 380)]))
+    ui.c.set_selection(view, 0, [0])
+    monkeypatch.setattr(D, "ask_adjust", lambda parent, n: dict(grayscale=True))
+    O._state["actions"]["adjust"].trigger()
+    with O.ENGINE_LOCK:
+        o = objs(view)[0]
+        assert "Gray" in view.document.pdf.xref_get_key(o.xref, "ColorSpace")[1]
+    ui.c.set_selection(view, 0, [0])
+    monkeypatch.setattr(D, "ask_optimize", lambda parent, est: (est(max_ppi=72), dict(max_ppi=72))[1])
+    O._state["actions"]["optimize"].trigger()
+    assert objs(view)[0].width <= 101 or any("pesante" in m for _t, m in ui.errors)
+    ui.c.set_selection(view, 0, [1])
+    monkeypatch.setattr(D, "ask_path_style", lambda parent, obj: dict(stroke=(0, 0, 1), fill=None, width=4, dash=None))
+    O._state["actions"]["path_style"].trigger()
+    assert abs(objs(view)[1].state.line_width - 4) < 1e-6

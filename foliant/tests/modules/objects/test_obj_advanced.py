@@ -146,3 +146,33 @@ def test_group_move_and_ungroup():
         objs = E.objects(d.pdf, 0).objects
     assert len(objs) == 3
     assert [round(o.quad.rect.x0) for o in objs] == [80, 140, 200]
+
+
+def test_restyle_cmyk_fill_red():
+    doc = pymupdf.open()
+    page = doc.new_page()
+    x = doc.get_new_xref()
+    doc.update_object(x, "<<>>")
+    doc.update_stream(x, b"0 0 1 0 k 100 600 100 100 re f", new=True)
+    doc.xref_set_key(page.xref, "Contents", f"{x} 0 R")
+    A.restyle_paths(doc, 0, [0], fill=(0, 1, 1, 0))
+    from foliant.modules.objects.content import page_content
+    assert b"0 1 1 0 k" in page_content(doc, doc[0])
+    pix = doc[0].get_pixmap(dpi=72)
+    r, g, b = pix.pixel(150, 200)[:3]
+    assert r > 200 and g < 60 and b < 60
+
+
+def test_restyle_width_and_dash_and_no_fill():
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.draw_rect(pymupdf.Rect(100, 100, 200, 200), color=(0, 0, 0), fill=(1, 1, 0), width=1)
+    A.restyle_paths(doc, 0, [0], width=3, dash=[4, 2], fill=A.NONE)
+    o = E.objects(doc, 0).objects[0]
+    assert o.paint == "S" and abs(o.state.line_width - 3) < 1e-6
+    ref = pymupdf.open()
+    rp = ref.new_page()
+    rp.draw_rect(pymupdf.Rect(100, 100, 200, 200), color=(0, 0, 0), width=3, dashes="[4 2] 0")
+    a = doc[0].get_pixmap(dpi=72).samples
+    b = rp.get_pixmap(dpi=72).samples
+    assert sum(1 for x, y in zip(a, b) if abs(x - y) > 1) < len(a) * 0.002

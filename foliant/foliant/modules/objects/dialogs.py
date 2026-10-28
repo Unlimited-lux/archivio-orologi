@@ -597,3 +597,146 @@ def ask_transform(parent):
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return None
     return dlg.values()
+
+
+class AdjustDialog(QDialog):
+    def __init__(self, parent, occurrences: int):
+        super().__init__(parent)
+        self.setWindowTitle(_("Regola immagine"))
+        lay = QFormLayout(self)
+        self.sliders = {}
+        from PySide6.QtWidgets import QSlider
+        for key, text in (("brightness", _("Luminosità:")), ("contrast", _("Contrasto:")),
+                          ("saturation", _("Saturazione:"))):
+            sl = QSlider(Qt.Orientation.Horizontal)
+            sl.setRange(-100, 100)
+            sl.setMinimumWidth(200)
+            self.sliders[key] = sl
+            lay.addRow(text, sl)
+        self.gray = QCheckBox(_("Scala di grigi"))
+        self.invert = QCheckBox(_("Inverti i colori"))
+        self.all = QCheckBox(_("Applica a tutte le {n} occorrenze").format(n=occurrences))
+        self.all.setVisible(occurrences > 1)
+        reset = QPushButton(_("Reimposta"))
+        reset.clicked.connect(lambda: [sl.setValue(0) for sl in self.sliders.values()])
+        for w in (self.gray, self.invert, self.all, reset):
+            lay.addRow("", w)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText(_("Applica"))
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+
+    def values(self) -> dict:
+        v = {k: sl.value() for k, sl in self.sliders.items()}
+        v.update(grayscale=self.gray.isChecked(), invert=self.invert.isChecked(),
+                 all_occurrences=self.all.isChecked())
+        return v
+
+
+def ask_adjust(parent, occurrences: int):
+    dlg = AdjustDialog(parent, occurrences)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dlg.values()
+
+
+class OptimizeDialog(QDialog):
+    def __init__(self, parent, estimate):
+        super().__init__(parent)
+        self.setWindowTitle(_("Ottimizza immagini"))
+        self.estimate = estimate
+        lay = QFormLayout(self)
+        self.ppi = QSpinBox()
+        self.ppi.setRange(36, 2400)
+        self.ppi.setValue(150)
+        self.ppi.setSuffix(" ppi")
+        self.mode = QComboBox()
+        self.mode.addItem(_("JPEG"), "jpeg")
+        self.mode.addItem(_("Senza perdita"), "lossless")
+        self.quality = QSpinBox()
+        self.quality.setRange(10, 100)
+        self.quality.setValue(80)
+        self.gray = QCheckBox(_("Converti in scala di grigi"))
+        self.info = QLabel()
+        lay.addRow(_("Risoluzione massima:"), self.ppi)
+        lay.addRow(_("Compressione:"), self.mode)
+        lay.addRow(_("Qualità JPEG:"), self.quality)
+        lay.addRow("", self.gray)
+        lay.addRow(self.info)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+        for w in (self.ppi, self.quality):
+            w.valueChanged.connect(self._update)
+        self.mode.currentIndexChanged.connect(self._update)
+        self.gray.toggled.connect(self._update)
+        self._update()
+
+    def values(self) -> dict:
+        return dict(max_ppi=self.ppi.value(), mode=self.mode.currentData(), quality=self.quality.value(),
+                    grayscale=self.gray.isChecked())
+
+    def _update(self, *_a) -> None:
+        try:
+            r = self.estimate(**self.values())
+            self.info.setText(_("Peso: {a} KB → {b} KB").format(a=round(r["before"] / 1024, 1),
+                                                                 b=round(r["after"] / 1024, 1)))
+        except Exception as e:
+            self.info.setText(str(e))
+
+
+def ask_optimize(parent, estimate):
+    dlg = OptimizeDialog(parent, estimate)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dlg.values()
+
+
+class PathStyleDialog(QDialog):
+    def __init__(self, parent, obj):
+        super().__init__(parent)
+        self.setWindowTitle(_("Stile del tracciato"))
+        lay = QFormLayout(self)
+        self.stroke = None
+        self.fill = None
+        self.no_stroke = QCheckBox(_("Nessun tratto"))
+        self.no_fill = QCheckBox(_("Nessun riempimento"))
+        sb = QPushButton(_("Colore del tratto…"))
+        fb = QPushButton(_("Colore del riempimento…"))
+        sb.clicked.connect(lambda: self._pick("stroke"))
+        fb.clicked.connect(lambda: self._pick("fill"))
+        self.width = QDoubleSpinBox()
+        self.width.setRange(0, 200)
+        self.width.setSuffix(" pt")
+        self.width.setValue(obj.state.line_width if obj is not None else 1)
+        self.dash = QLineEdit()
+        self.dash.setPlaceholderText(_("es. 4 2 (vuoto = continuo)"))
+        lay.addRow(sb, self.no_stroke)
+        lay.addRow(fb, self.no_fill)
+        lay.addRow(_("Spessore:"), self.width)
+        lay.addRow(_("Tratteggio:"), self.dash)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+
+    def _pick(self, which):
+        c = QColorDialog.getColor(parent=self)
+        if c.isValid():
+            setattr(self, which, (c.redF(), c.greenF(), c.blueF()))
+
+    def values(self) -> dict:
+        from .advanced import NONE
+        dash = [float(x) for x in self.dash.text().replace(",", " ").split() if x.replace(".", "", 1).isdigit()]
+        return dict(stroke=NONE if self.no_stroke.isChecked() else self.stroke,
+                    fill=NONE if self.no_fill.isChecked() else self.fill,
+                    width=self.width.value(), dash=dash)
+
+
+def ask_path_style(parent, obj):
+    dlg = PathStyleDialog(parent, obj)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dlg.values()

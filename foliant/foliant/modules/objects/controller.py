@@ -371,6 +371,67 @@ class ObjectsController(QObject):
         if r is not None:
             self.set_selection(view, page, r)
 
+    def adjust_image(self, view) -> None:
+        from . import imaging as IM
+        objs = self.selected_objects(view)
+        if len(objs) != 1 or objs[0].kind != IMAGE:
+            self.status(_("Seleziona una sola immagine."))
+            return
+        o = objs[0]
+        occ = 1
+        if o.xref:
+            with ENGINE_LOCK:
+                occ = len(E.image_occurrences(view.document.pdf, o.xref))
+        vals = D.ask_adjust(self.ctx.window, occ)
+        if vals is None:
+            return
+        page = self.sel_page
+        r = self.run_change(view, _("Regola immagine"), lambda pdf: IM.adjust_image(pdf, page, o.index, **vals))
+        if r is not None:
+            self.set_selection(view, page, r)
+
+    def optimize_images(self, view) -> None:
+        from . import imaging as IM
+        objs = [o for o in self.selected_objects(view) if o.kind == IMAGE]
+        if not objs:
+            self.status(_("Seleziona una o più immagini."))
+            return
+        page = self.sel_page
+        indices = [o.index for o in objs]
+
+        def estimate(**kw):
+            with ENGINE_LOCK:
+                return IM.estimate_optimization(view.document.pdf, page, indices, **kw)
+        vals = D.ask_optimize(self.ctx.window, estimate)
+        if vals is None:
+            return
+        r = self.run_change(view, _("Ottimizza immagini"),
+                            lambda pdf: IM.optimize_images(pdf, page, indices, **vals))
+        if r is not None:
+            if r.get("kept"):
+                self.ctx.info(_("Ottimizza immagini"),
+                              _("Alcune immagini sono state lasciate invariate perché il risultato sarebbe più pesante."))
+            self.status(_("Peso delle immagini: {a} KB → {b} KB").format(
+                a=round(r["before"] / 1024, 1), b=round(r["after"] / 1024, 1)))
+
+    def path_style(self, view) -> None:
+        from . import advanced as A
+        objs = [o for o in self.selected_objects(view) if o.kind == PATH]
+        if not objs:
+            self.status(_("Seleziona uno o più tracciati."))
+            return
+        vals = D.ask_path_style(self.ctx.window, objs[0])
+        if vals is None:
+            return
+        if vals["stroke"] == A.NONE and vals["fill"] == A.NONE and not self.ctx.confirm(
+                _("Stile del tracciato"), _("Senza tratto né riempimento il tracciato diventerà invisibile. Continuare?")):
+            return
+        page = self.sel_page
+        r = self.run_change(view, _("Stile del tracciato"),
+                            lambda pdf: A.restyle_paths(pdf, page, [o.index for o in objs], **vals))
+        if r is not None:
+            self.set_selection(view, page, r)
+
     # ---------------------------------------------------------------- ritaglio
     def start_crop(self, view) -> None:
         if view.tool is not self.object_tool:
