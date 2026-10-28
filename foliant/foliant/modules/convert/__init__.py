@@ -68,11 +68,14 @@ def register(ctx) -> None:
     act_screen = ctx.action(_("Da cattura schermo…"), "monitor", lambda: c.create_from_screen(),
                             requires_document=False)
     act_blank = ctx.action(_("PDF vuoto…"), "file", lambda: c.create_blank(), requires_document=False)
+    act_portfolio = ctx.action(_("Crea portfolio…"), "folder-archive", lambda: c.create_portfolio(),
+                               requires_document=False)
     act_batch_create = ctx.action(_("Crea in blocco…"), "files", lambda: c.batch_create(), requires_document=False)
     for a in (act_from_file, act_from_images, act_from_url, act_clipboard, act_scanner, act_photos, act_screen,
               act_blank):
         create_menu.addAction(a)
     create_menu.addSeparator()
+    create_menu.addAction(act_portfolio)
     create_menu.addAction(act_batch_create)
     create_btn = QToolButton()
     create_btn.setText(_("Crea PDF"))

@@ -605,3 +605,16 @@ def test_compress_open_encrypted_keeps_protection(window, ctrl, tmp_path, monkey
     assert not result.permissions & pymupdf.PDF_PERM_COPY
     assert not result.permissions & pymupdf.PDF_PERM_MODIFY
     assert result.permissions & pymupdf.PDF_PERM_PRINT
+
+
+def test_create_portfolio_ui(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
+    from PySide6.QtWidgets import QInputDialog
+    (tmp_path / "b").mkdir()
+    other = tmp_path / "b" / "nota.txt"
+    other.write_text("ciao", encoding="utf-8")
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Pratica 42", True))
+    view = ctrl.create_portfolio([sample_pdf, str(other)])
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert d.embfile_count() == 2 and "Pratica 42" in d[0].get_text()
+        assert d.xref_get_key(d.pdf_catalog(), "Collection")[0] == "xref"
+    assert view.document.display_name == "Pratica 42.pdf"

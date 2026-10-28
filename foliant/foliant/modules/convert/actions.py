@@ -533,6 +533,30 @@ class ConvertController:
         ok, res = self._run(_("Riconoscimento del testo…"), add_ocr_layer, data)
         return res[0] if ok and res else data
 
+    def create_portfolio(self, paths: list[str] | None = None):
+        """CNV-34: portfolio PDF con i file allegati intatti; cartelle dalle cartelle di origine."""
+        from .portfolio import create_portfolio
+        if paths is None:
+            paths = self.ctx.ask_open_paths(_("Scegli i file del portfolio"), _("Tutti i file (*)"))
+        if not paths:
+            return None
+        title, ok = QInputDialog.getText(self.window, _("Crea portfolio"), _("Titolo del portfolio:"),
+                                         text=_("Portfolio"))
+        if not ok:
+            return None
+        parents = {str(Path(p).parent) for p in paths}
+        entries = [{"path": p, "folder": Path(p).parent.name if len(parents) > 1 else ""} for p in paths]
+        name = title.strip() or _("Portfolio")
+        ok, res = self._run(_("Creazione del portfolio…"),
+                            lambda progress: create_portfolio(entries, title=name, progress=progress))
+        if not ok:
+            return None
+        data, warnings = res
+        view = self.open_created(data, (title.strip() or _("Portfolio")) + ".pdf")
+        if warnings:
+            self.ctx.info(_("Crea portfolio"), "\n".join(warnings[:15]))
+        return view
+
     def create_blank(self):
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""
         from . import create
