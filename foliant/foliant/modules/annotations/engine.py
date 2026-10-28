@@ -282,6 +282,12 @@ def from_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float
     return x - mb.x0, mb.y1 - y
 
 
+def display_matrix(page: pymupdf.Page) -> pymupdf.Matrix:
+    """Coordinate standard → pagina visualizzata (ruotata come nella vista)."""
+    pl = _placement()
+    return pl.page_to_display_matrix(page) if pl is not None else page.rotation_matrix
+
+
 def to_pdf_rect(page: pymupdf.Page, r) -> tuple[float, float, float, float]:
     r = pymupdf.Rect(r)
     x0, y1 = to_pdf_point(page, r.x0, r.y0)
@@ -502,6 +508,17 @@ def create_note(pdf: pymupdf.Document, page_no: int, point, text: str, style: St
         h = NOTE_SIZE / 2
         annot.set_rect(pymupdf.Rect(p.x - h, p.y - h, p.x + h, p.y + h))
     annot.set_flags(pymupdf.PDF_ANNOT_IS_PRINT | pymupdf.PDF_ANNOT_IS_NO_ZOOM | pymupdf.PDF_ANNOT_IS_NO_ROTATE)
+    if page.rotation:
+        # /NoRotate: l'icona resta diritta ruotando attorno all'angolo superiore sinistro di /Rect,
+        # quindi su una pagina ruotata cade fuori da /Rect. Si trasla /Rect perché l'icona
+        # visualizzata (annot.rect del motore) sia centrata sul punto.
+        xref = annot.xref
+        shown = pymupdf.Rect(page.load_annot(xref).rect)
+        dx, dy = p.x - (shown.x0 + shown.x1) / 2, p.y - (shown.y0 + shown.y1) / 2
+        with unrotated(page):
+            annot = page.load_annot(xref)
+            annot.set_rect(pymupdf.Rect(p.x - h + dx, p.y - h + dy, p.x + h + dx, p.y + h + dy))
+        annot = page.load_annot(xref)
     annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[NOTE]))
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
     xref = _finish(annot, author, text, kind=NOTE)
@@ -532,7 +549,11 @@ def create_freetext(pdf: pymupdf.Document, page_no: int, rect, text: str, style:
         annot = page.add_freetext_annot(rect, text, **kwargs)
         if not callout:
             pdf.xref_set_key(annot.xref, "CL", "null")
-            annot = page.load_annot(annot.xref)
+        else:
+            # il motore sottrae l'origine del /CropBox invece di sommarla: /CL, /Rect e /RD
+            # vengono riscritti con le conversioni di `placement`
+            _set_callout(pdf, page, annot.xref, rect, kwargs["callout"])
+        annot = page.load_annot(annot.xref)
     xref = _finish(annot, author, text, kind=CALLOUT if callout else FREETEXT)
     if style.autofit and not callout:
         pdf.xref_set_key(xref, AUTOFIT_KEY, "true")
@@ -1891,18 +1912,33 @@ def _dist_to_segment(p: pymupdf.Point, a: pymupdf.Point, b: pymupdf.Point) -> fl
     return abs(p - (a + ab * t))
 
 
+ICON_TYPES = (pymupdf.PDF_ANNOT_TEXT, pymupdf.PDF_ANNOT_FILE_ATTACHMENT, pymupdf.PDF_ANNOT_SOUND)
+
+
+def _no_rotate(pdf: pymupdf.Document, xref: int) -> bool:
+    k, v = pdf.xref_get_key(xref, "F")
+    try:
+        return k == "int" and bool(int(v) & pymupdf.PDF_ANNOT_IS_NO_ROTATE)
+    except ValueError:
+        return False
+
+
 def annot_rects(pdf: pymupdf.Document, page_no: int) -> list[tuple[int, pymupdf.Rect | None]]:
     """(xref, riquadro standard) delle annotazioni di commento, in ordine di sovrapposizione."""
     page = pdf[page_no]
     pl = _placement()
     m = pl.pdf_to_page_matrix(page) if pl is not None else None
     out = []
+    rotated = bool(page.rotation)
     for x, t, _n in page.annot_xrefs():
         if t in NON_COMMENT_TYPES:
             continue
         raw = _array(pdf, x, "Rect")
         if not raw or len(raw) != 4:
             out.append((x, None))
+        elif rotated and t in ICON_TYPES and _no_rotate(pdf, x):
+            a = find_annot(page, x)     # icona diritta: il riquadro visualizzato non è /Rect
+            out.append((x, pymupdf.Rect(a.rect) if a is not None else None))
         elif m is not None:
             out.append((x, pymupdf.Rect(pymupdf.Point(raw[0], raw[1]) * m,
                                         pymupdf.Point(raw[2], raw[3]) * m).normalize()))
@@ -2789,6 +2825,14 @@ def _fmt(v: float) -> str:
     return s if s not in ("-0", "") else "0"
 
 
+def _export_rect(pdf: pymupdf.Document, page: pymupdf.Page, a: pymupdf.Annot) -> tuple:
+    """/Rect così com'è nel file (per le icone diritte su pagine ruotate differisce da annot.rect)."""
+    raw = _array(pdf, a.xref, "Rect")
+    if raw and len(raw) == 4:
+        return min(raw[0], raw[2]), min(raw[1], raw[3]), max(raw[0], raw[2]), max(raw[1], raw[3])
+    return to_pdf_rect(page, a.rect)
+
+
 def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] | None = None) -> str:
     """Esporta i commenti in XFDF (XML standard di interscambio delle annotazioni)."""
     from xml.sax.saxutils import escape, quoteattr
@@ -2806,7 +2850,7 @@ def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] 
                 continue
             info = a.info or {}
             attrs = {"page": str(page_no), "name": names[a.xref],
-                     "rect": ",".join(_fmt(v) for v in to_pdf_rect(page, a.rect)),
+                     "rect": ",".join(_fmt(v) for v in _export_rect(pdf, page, a)),
                      "flags": _xfdf_flags(a.flags)}
             if info.get("title"):
                 attrs["title"] = info["title"]
@@ -2914,6 +2958,11 @@ def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] 
                 k, v = pdf.xref_get_key(a.xref, "RD")
                 if k == "array":
                     attrs["fringe"] = ",".join(_fmt(float(x)) for x in v.strip("[]").split())
+                border_color = _array(pdf, a.xref, FT_BORDER_KEY)
+                if border_color and len(border_color) == 3:
+                    attrs["foliant-border-color"] = color_to_hex(border_color)
+                if pdf.xref_get_key(a.xref, AUTOFIT_KEY)[1] == "true":
+                    attrs["foliant-autofit"] = "true"
             elif t == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
                 fi = a.file_info or {}
                 attrs["file"] = fi.get("filename", "")
@@ -3088,6 +3137,8 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
             if rect is None:
                 return None
             annot = page.add_text_annot(rect.tl, contents, icon=el.get("icon") or "Comment")
+            pdf.xref_set_key(annot.xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*rect_vals))
+            annot = page.load_annot(annot.xref)
             if color:
                 annot.set_colors(stroke=color)
             annot.set_opacity(opacity)
@@ -3107,7 +3158,8 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
             cm = re.search(r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", da)
             style.text_color = tuple(float(v) for v in cm.groups()) if cm else (0, 0, 0)
             style.fill = color
-            style.color = None
+            style.color = hex_to_color(el.get("foliant-border-color"))
+            style.autofit = el.get("foliant-autofit") == "true"
             style.width = float(el.get("width", "0") or 0)
             callout_vals = _floats(el.get("callout"))
             fringe = _floats(el.get("fringe"))
@@ -3120,6 +3172,9 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
                 callout = [pymupdf.Point(*from_pdf_point(page, x, y)) for x, y in
                            zip(callout_vals[::2], callout_vals[1::2])]
             xref = create_freetext(pdf, page_no, inner, contents, style, author, callout=callout)
+            if not callout:     # /Rect esportato tal quale (create_freetext lo allarga del bordo)
+                pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*rect_vals))
+                refresh_freetext(pdf, page_no, xref)
         elif t in ("Square", "Circle"):
             if rect is None:
                 return None
@@ -3212,25 +3267,32 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
 
 # ------------------------------------------------------------------ FDF
 def export_fdf(pdf: pymupdf.Document, filename: str = "") -> bytes:
-    """FDF minimale (formato a oggetti PDF) con i commenti: un oggetto per annotazione."""
-    objs: list[bytes] = []
-    annot_refs: list[int] = []
-    next_num = 2
+    """FDF minimale (formato a oggetti PDF) con i commenti: un oggetto per annotazione.
+
+    /IRT (risposte e stati) punta all'oggetto FDF del commento padre; /RT e /NM restano."""
+    items: list[tuple[int, int]] = []           # (pagina, xref)
     for page_no in range(pdf.page_count):
         page = pdf[page_no]
         for a in iter_annots(page):
-            if a.type[0] in NON_COMMENT_TYPES:
-                continue
-            src = pdf.xref_object(a.xref, compressed=True)
-            # rimuove riferimenti non trasferibili (pagina, aspetto, popup, IRT)
-            src = re.sub(r"/(P|AP|Popup|IRT|Parent)\s*(\d+\s+\d+\s+R|<<.*?>>)", "", src, flags=re.S)
-            src = src.strip()
-            if src.endswith(">>"):
-                src = src[:-2] + f"/Page {page_no}>>"
-            objs.append(f"{next_num} 0 obj\n{src}\nendobj\n".encode("latin-1", errors="replace"))
-            annot_refs.append(next_num)
-            next_num += 1
-    refs = " ".join(f"{n} 0 R" for n in annot_refs)
+            if a.type[0] not in NON_COMMENT_TYPES:
+                items.append((page_no, a.xref))
+    numbers = {xref: i + 2 for i, (_p, xref) in enumerate(items)}
+
+    def irt(m: re.Match) -> str:
+        n = numbers.get(int(m.group(1)))
+        return f"/IRT {n} 0 R" if n is not None else ""
+
+    objs: list[bytes] = []
+    for page_no, xref in items:
+        src = pdf.xref_object(xref, compressed=True)
+        src = re.sub(r"/IRT\s*(\d+)\s+\d+\s+R", irt, src)
+        # rimuove riferimenti non trasferibili (pagina, aspetto, popup)
+        src = re.sub(r"/(P|AP|Popup|Parent)\s*(\d+\s+\d+\s+R|<<.*?>>)", "", src, flags=re.S)
+        src = src.strip()
+        if src.endswith(">>"):
+            src = src[:-2] + f"/Page {page_no}>>"
+        objs.append(f"{numbers[xref]} 0 obj\n{src}\nendobj\n".encode("latin-1", errors="replace"))
+    refs = " ".join(f"{numbers[x]} 0 R" for _p, x in items)
     head = f"%FDF-1.2\n1 0 obj\n<</FDF<</Annots[{refs}]" + (f"/F{_pdf_string(filename)}" if filename else "") + \
         ">>>>\nendobj\n"
     body = head.encode("latin-1", errors="replace") + b"".join(objs)

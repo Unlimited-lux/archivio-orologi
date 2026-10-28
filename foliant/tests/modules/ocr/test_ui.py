@@ -1007,3 +1007,26 @@ def test_messaggio_pagine_vuote_distinto(window, tmp_path, monkeypatch):
     monkeypatch.setattr(ctl.ctx, "info", lambda t, m: infos.append(m))
     ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
     assert infos and "vuote" in infos[0] and "Forza OCR" not in infos[0]
+
+
+def test_dialogo_lingue_in_inglese(window):
+    """NFR-25: in inglese le colonne del catalogo (lingua, scrittura, stato) sono tradotte, anche nei tooltip."""
+    from foliant import i18n
+    from foliant.modules.ocr.translations import EN
+    i18n.add_translations("en", EN)
+    i18n.set_language("en")
+    try:
+        dlg = dialogs.LanguagesDialog(window)
+        t = dlg.table
+        rows = {t.item(r, 1).text(): r for r in range(t.rowCount())}
+        expected = {"ita": "Latin", "ell": "Greek", "rus": "Cyrillic", "ara": "Arabic", "heb": "Hebrew",
+                    "jpn": "Japanese", "chi_sim": "Han", "kor": "Hangul", "hin": "Devanagari"}
+        for code, script in expected.items():
+            item = t.item(rows[code], 2)
+            assert item.text() == script and item.toolTip() == script, (code, item.text())
+        assert t.item(rows["deu"], 0).text() == "German"
+        assert t.item(rows["ita"], 3).text().startswith("installed")
+        italian = {"latino", "greco", "cirillico", "arabo", "ebraico", "giapponese"}
+        assert not any(t.item(r, 2).text() in italian for r in range(t.rowCount()))
+    finally:
+        i18n.set_language("it")

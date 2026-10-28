@@ -121,11 +121,11 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
     target = Path(os.path.realpath(target))          # salva nel file vero, non sul collegamento
     directory = target.parent
     if target.exists() and (not os.access(target, os.W_OK) or not (target.stat().st_mode & 0o222)):
-        raise DocumentError(f"«{target.name}» è in sola lettura: salvalo con un altro nome.")
+        raise DocumentError(_("«{name}» è in sola lettura: salvalo con un altro nome.").format(name=target.name))
     try:
         fd, tmp = tempfile.mkstemp(prefix=".foliant-", suffix=".tmp", dir=directory)
     except OSError as e:
-        raise DocumentError(f"Impossibile scrivere nella cartella «{directory}»: {e.strerror}.") from e
+        raise DocumentError(_("Impossibile scrivere nella cartella «{folder}»: {error}.").format(folder=directory, error=e.strerror)) from e
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -147,7 +147,7 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
         except OSError:
             pass
         if isinstance(e, OSError):
-            raise DocumentError(f"Salvataggio non riuscito: {e.strerror}.") from e
+            raise DocumentError(_("Salvataggio non riuscito: {error}.").format(error=e.strerror)) from e
         raise
 
 
@@ -232,6 +232,14 @@ def _empty_user_password_access(pdf: pymupdf.Document, data: bytes, password: st
     return code
 
 
+def _close_quietly(pdf: pymupdf.Document) -> None:
+    try:
+        if not pdf.is_closed:
+            pdf.close()
+    except Exception:
+        pass
+
+
 def open_document_bytes(data: bytes, password: str | None = None,
                         filetype: str | None = None) -> tuple[pymupdf.Document, OpenState]:
     """Apre dati PDF (o altri formati supportati, convertiti in PDF).
@@ -245,8 +253,8 @@ def open_document_bytes(data: bytes, password: str | None = None,
         except Exception as e:
             handler = _security_handler(data)
             if handler and handler != "Standard":
-                raise DocumentError(f"Il file è protetto con un sistema di sicurezza non supportato ({handler}).") from e
-            raise DocumentError("Il file non è un PDF valido oppure è danneggiato.") from e
+                raise DocumentError(_("Il file è protetto con un sistema di sicurezza non supportato ({handler}).").format(handler=handler)) from e
+            raise DocumentError(_("Il file non è un PDF valido oppure è danneggiato.")) from e
         needed_password = bool(pdf.needs_pass)
         auth_code = 0
         if needed_password:
@@ -257,30 +265,36 @@ def open_document_bytes(data: bytes, password: str | None = None,
             if not auth_code:
                 pdf.close()
                 raise WrongPassword()
-        state = OpenState()
-        if pdf.is_pdf:
-            state.repaired = bool(getattr(pdf, "is_repaired", False))
-            if security.is_encrypted(pdf):
-                if not needed_password:
-                    auth_code = _empty_user_password_access(pdf, data, password)
-                state.encryption = security.encryption_info(pdf)
-                state.access = ACCESS_OWNER if auth_code & 4 else ACCESS_USER
-                used = password if (needed_password or auth_code & 4) else ""
-                state.permissions, tampered = security.effective_permissions(pdf, used)
-                state.encryption["perms_tampered"] = tampered
-            state.protection = protection_options(pdf, password, auth_code, needed_password)
-        if not pdf.is_pdf:
-            try:
-                pdf_bytes = pdf.convert_to_pdf()
-            except Exception as e:
+        try:
+            state = OpenState()
+            if pdf.is_pdf:
+                state.repaired = bool(getattr(pdf, "is_repaired", False))
+                if security.is_encrypted(pdf):
+                    if not needed_password:
+                        auth_code = _empty_user_password_access(pdf, data, password)
+                    state.encryption = security.encryption_info(pdf)
+                    state.access = ACCESS_OWNER if auth_code & 4 else ACCESS_USER
+                    used = password if (needed_password or auth_code & 4) else ""
+                    state.permissions, tampered = security.effective_permissions(pdf, used)
+                    state.encryption["perms_tampered"] = tampered
+                state.protection = protection_options(pdf, password, auth_code, needed_password)
+            if not pdf.is_pdf:
+                try:
+                    pdf_bytes = pdf.convert_to_pdf()
+                except Exception as e:
+                    pdf.close()
+                    raise DocumentError(_("Impossibile convertire il file in PDF.")) from e
                 pdf.close()
-                raise DocumentError("Impossibile convertire il file in PDF.") from e
-            pdf.close()
-            pdf = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-            state.converted = True
-        if pdf.page_count == 0:
-            pdf.close()
-            raise DocumentError("Il documento non contiene pagine.")
+                pdf = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+                state.converted = True
+            if pdf.page_count == 0:
+                raise DocumentError(_("Il documento non contiene pagine."))
+        except (PasswordRequired, WrongPassword, DocumentError):
+            _close_quietly(pdf)
+            raise
+        except Exception as e:      # albero delle pagine o cifratura illeggibili (NFR-13)
+            _close_quietly(pdf)
+            raise DocumentError(_("Il file è danneggiato: non è possibile leggerne le pagine.")) from e
         return pdf, state
 
 
@@ -375,11 +389,11 @@ class Document:
         try:
             data = path.read_bytes()
         except FileNotFoundError as e:
-            raise DocumentError(f"Il file «{path.name}» non esiste.") from e
+            raise DocumentError(_("Il file «{name}» non esiste.").format(name=path.name)) from e
         except IsADirectoryError as e:
-            raise DocumentError(f"«{path.name}» è una cartella, non un file.") from e
+            raise DocumentError(_("«{name}» è una cartella, non un file.").format(name=path.name)) from e
         except OSError as e:
-            raise DocumentError(f"Impossibile leggere «{path.name}»: {e.strerror}.") from e
+            raise DocumentError(_("Impossibile leggere «{name}»: {error}.").format(name=path.name, error=e.strerror)) from e
         suffix = path.suffix.lower()
         filetype = None
         if suffix in _IMAGE_TYPES or suffix in _OTHER_TYPES:
@@ -640,7 +654,7 @@ class Document:
             self._check_change(label, kind)
         with self.lock:
             if self.closed:
-                raise DocumentError("Il documento è stato chiuso.")
+                raise DocumentError(_("Il documento è stato chiuso."))
             if self._depth:
                 self._depth += 1
                 try:
@@ -849,7 +863,7 @@ class Document:
         """
         target = Path(path) if path is not None else self.path
         if target is None:
-            raise DocumentError("Scegli dove salvare il documento.")
+            raise DocumentError(_("Scegli dove salvare il documento."))
         if (path is None and not options and incremental is None and not self.is_modified
                 and self.save_options == self.original_protection and target.exists()):
             self._emit(SAVED)   # niente da scrivere: non invalidare firme né cifratura

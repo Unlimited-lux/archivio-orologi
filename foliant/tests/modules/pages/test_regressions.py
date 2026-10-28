@@ -367,3 +367,32 @@ def test_signed_rotation_single_warning(window, tmp_path, test_signer, monkeypat
     with E.ENGINE_LOCK:
         assert view.document.pdf[0].rotation == 0
     assert not view.document.can_undo
+
+
+def test_split_regex_placeholder_translated(window, ten_pdf):
+    from foliant import i18n
+    view = window.open_path(ten_pdf)
+    i18n.set_language("en")
+    try:
+        dlg = D.SplitDialog(window, view.document)
+        assert dlg.pattern.placeholderText() == r"Invoice no\. (\d+)"
+    finally:
+        i18n.set_language("it")
+    assert D.SplitDialog(window, view.document).pattern.placeholderText() == r"Fattura n\. (\d+)"
+
+
+def test_resize_anchor_buttons_have_readable_names(window, ten_pdf):
+    from foliant import i18n
+    from foliant.modules.pages import layout_dialogs as LD
+    view = window.open_path(ten_pdf)
+    dlg = LD.ResizeDialog(window, view.document, [0])
+    tips = {k: b.toolTip() for k, b in dlg.anchor_buttons.items()}
+    assert tips["top-left"] == "In alto a sinistra" and tips["center"] == "Al centro"
+    assert all("-" not in t and t != k for k, t in tips.items())
+    assert dlg.anchor_buttons["bottom-right"].accessibleName() == "In basso a destra"
+    i18n.set_language("en")
+    try:
+        dlg = LD.ResizeDialog(window, view.document, [0])
+        assert dlg.anchor_buttons["top-left"].toolTip() == "Top left"
+    finally:
+        i18n.set_language("it")

@@ -137,7 +137,7 @@ class ConvertController:
         doc = view.document
         stem = Path(doc.display_name).stem
         folder = str(doc.path.parent) if doc.path else self.window.last_directory()
-        path = self.ctx.ask_save_path(_("Salva copia riparata"), os.path.join(folder, stem + "_riparato.pdf"),
+        path = self.ctx.ask_save_path(_("Salva copia riparata"), os.path.join(folder, stem + _("_riparato") + ".pdf"),
                                       "PDF (*.pdf)")
         if not path:
             return None
