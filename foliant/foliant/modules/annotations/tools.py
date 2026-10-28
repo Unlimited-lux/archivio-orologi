@@ -495,8 +495,9 @@ class TextMarkupTool(SelectTextTool):
         if sel is not None and sel.rects and not self.area_mode:
             self.apply_selection(view)
 
-    def apply_selection(self, view) -> int | None:
-        """Marca la selezione di testo; su più pagine un'annotazione per pagina in un solo passo."""
+    def apply_selection(self, view, contents: str = "") -> int | None:
+        """Marca la selezione di testo; su più pagine un'annotazione per pagina in un solo passo.
+        `contents` è il commento della marcatura («Aggiungi nota» del menu contestuale)."""
         sels = [sel for sel in (getattr(view, "text_selections", None) or
                                 ([view.text_selection] if view.text_selection else [])) if sel.rects]
         if not sels:
@@ -509,7 +510,8 @@ class TextMarkupTool(SelectTextTool):
             out = []
             for sel in sels:
                 quads = engine.quads_from_words(sel.words) if sel.words else sel.quads
-                out.append((sel.page, engine.create_markup(pdf, sel.page, self.kind, quads, style, author)))
+                out.append((sel.page, engine.create_markup(pdf, sel.page, self.kind, quads, style, author,
+                                                           contents)))
             return out
 
         created = self.ctrl.apply(label, run) or []
