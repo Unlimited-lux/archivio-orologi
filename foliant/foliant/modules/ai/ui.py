@@ -15,7 +15,7 @@ from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, _, add_tr
 from . import content, engine, history, translate_pdf
 from .chunking import IndexCache
 from .config import ProfileStore, SendLog
-from .dialogs import InfoTextDialog, SendLogDialog, SettingsDialog, language_combo
+from .dialogs import InfoTextDialog, SendLogDialog, SettingsDialog, SettingsPage, language_combo
 from .engine import Gateway
 from .panel import AIPanel
 from .translations import EN
@@ -79,9 +79,18 @@ class Services:
             a.setEnabled(self.ctx.current_view() is not None)
 
     # ---------------------------------------------------------------- dialoghi
+    def settings_page(self, parent=None):
+        """Pagina «Assistente IA» delle Preferenze (creata a ogni apertura)."""
+        from PySide6.QtCore import QTimer
+        page = SettingsPage(self.store, parent)
+        page.destroyed.connect(lambda *_a: QTimer.singleShot(0, self.refresh))
+        return page
+
     def open_settings(self, parent=None) -> None:
-        dlg = SettingsDialog(self.store, parent or self.ctx.window)
-        dlg.exec()
+        if hasattr(self.ctx, "show_preferences"):
+            self.ctx.show_preferences(_("Assistente IA"))
+        else:
+            SettingsDialog(self.store, parent or self.ctx.window).exec()
         self.refresh()
 
     def show_log(self, parent=None) -> None:
@@ -1295,6 +1304,7 @@ def register(ctx, *, provider_factory=None) -> Services:
         pages_mode.add_action(a_pages)
     ctx.add_menu_action(a_set, _("Assistente IA"))
     ctx.add_menu_action(a_trpdf, _("Assistente IA"))
+    ctx.add_preferences_page(_("Assistente IA"), services.settings_page, 110)
     ctx.add_home_action(_("Assistente IA"), "sparkles", lambda: GeneralChatDialog(ctx, services, ctx.window).exec(),
                         _("Chat generale con il fornitore configurato"), 110)
 

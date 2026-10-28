@@ -1092,4 +1092,6 @@ EN: dict[str, str] = {
     "L'assistente sta ancora lavorando ({f}). Uscire e annullare le operazioni?": 'The assistant is still working ({f}). Quit and cancel the operations?',
     "L'assistente sta ancora lavorando su questo documento ({f}). Chiudere e annullare le operazioni?": 'The assistant is still working on this document ({f}). Close and cancel the operations?',
     'risposta': 'answer',
+    'Profilo modificato': 'Profile modified',
+    'Salvare le modifiche al profilo?': 'Save the changes to the profile?',
 }

@@ -8,11 +8,9 @@
    `settings.value("author")` o `"preferences/author"`, con il nome dell'account di
    sistema come ripiego: sarebbe utile una chiave condivisa documentata nel README.
 
-3. **Pagina Preferenze › Assistente IA.** La specifica (0.x, Preferenze) colloca le
-   impostazioni dei fornitori nella finestra Preferenze. *Soluzione locale:* finestra
-   «Impostazioni dell'Assistente IA» aperta dal pannello, dalla barra della modalità e
-   dal menu ☰ (sezione «Assistente IA»). Se il nucleo offrirà un registro di pagine
-   delle preferenze, `dialogs.SettingsDialog` si può incorporare così com'è.
+3. **Pagina Preferenze › Assistente IA.** *Risolta:* `ctx.add_preferences_page` con
+   `dialogs.SettingsPage`; il comando «Impostazioni dell'Assistente IA» apre le Preferenze su
+   questa pagina.
 
 4. **Voce «Chiedi all'assistente» nel menu contestuale della selezione.** Il modulo
    la aggiunge con `add_view_menu_provider` (sottomenu «Assistente IA», solo con

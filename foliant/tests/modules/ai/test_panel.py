@@ -89,6 +89,28 @@ def test_key_never_written_to_files(qtbot, window, ai, fake, sample_pdf, tmp_pat
                 assert b"chiave-di-prova-123" not in fh.read(), f
 
 
+def test_preferences_page_saves_profile(window, ai, monkeypatch):
+    from foliant.ui.dialogs import PreferencesDialog
+    from foliant.modules.ai.dialogs import SettingsPage
+    make_active_profile(ai.store)
+    pid = ai.store.active_id()
+    dlg = PreferencesDialog(window.settings, window, pages=window.preference_pages())
+    assert dlg.show_page("Assistente IA")
+    page = next(w for w in dlg.module_pages if isinstance(w, SettingsPage))
+    assert not page.dirty                     # caricare il profilo non conta come modifica
+    page.name.setText("Profilo dalle preferenze")
+    assert page.dirty
+    dlg.apply()                               # «Salva» delle Preferenze
+    assert ai.store.get(pid).name == "Profilo dalle preferenze"
+    assert not page.dirty
+    # il comando «Impostazioni» del modulo apre la stessa pagina delle Preferenze
+    shown = []
+    monkeypatch.setattr(window.ctx, "show_preferences", lambda page=None: shown.append(page))
+    ai.open_settings()
+    assert shown == ["Assistente IA"]
+    dlg.deleteLater()
+
+
 def test_verify_models_and_auth_failure(window, ai):
     from foliant.modules.ai.dialogs import SettingsDialog
     dlg = SettingsDialog(ai.store, window, verify=lambda p, k: ["m1", "m2", "m3"])
