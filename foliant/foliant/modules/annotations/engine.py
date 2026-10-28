@@ -2310,24 +2310,34 @@ def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: i
     Con `keep_identity` conserva /NM, autore e date (taglia+incolla), altrimenti la copia
     riceve un nuovo /NM e l'autore e le date correnti."""
     page = pdf[src_page]
-    get_annot(page, xref)
-    dst = pdf[dst_page]
-    new = pdf.get_new_xref()
-    pdf.update_object(new, pdf.xref_object(xref, compressed=False))
+    subtype = get_annot(page, xref).type[0]
+    dst = page if dst_page == src_page else pdf[dst_page]
+    # annotazione creata dal motore (registrata nella pagina aperta) e poi riempita con il dizionario
+    with unrotated(dst):
+        created = mupdf.pdf_create_annot(dst._pdf_page(), subtype)
+        new = mupdf.pdf_to_num(mupdf.pdf_annot_obj(created))
+    for key in pdf.xref_get_keys(xref):
+        if key in ("P", "Popup", "IRT", "RT", "Parent", "Type", "Subtype"):
+            continue
+        kind, value = pdf.xref_get_key(xref, key)
+        if kind == "null":
+            continue
+        if kind == "string":
+            value = pymupdf.get_pdf_str(value)
+        pdf.xref_set_key(new, key, value)
     for key in ("Popup", "IRT", "RT"):
         pdf.xref_set_key(new, key, "null")
-    pdf.xref_set_key(new, "P", f"{dst.xref} 0 R")
-    kind, value = pdf.xref_get_key(new, "AP/N")
+    kind, value = pdf.xref_get_key(xref, "AP/N")
     if kind == "xref":
         src_ap = int(value.split()[0])
         ap = pdf.get_new_xref()
         pdf.update_object(ap, pdf.xref_object(src_ap, compressed=False))
         pdf.update_stream(ap, pdf.xref_stream(src_ap) or b"")
         pdf.xref_set_key(new, "AP", f"<</N {ap} 0 R>>")
-    holder, key, refs = _annots_array(pdf, dst)
-    _write_annots_array(pdf, holder, key, refs + [new])
-    del page
-    dst = pdf.reload_page(dst)
+    try:   # l'aspetto copiato è già valido: il motore non lo deve rigenerare
+        created.m_internal.needs_new_ap = 0
+    except Exception:
+        pass
     annot = get_annot(dst, new)
     if not keep_identity:
         now = pdf_now()
@@ -2339,6 +2349,33 @@ def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: i
             r = pymupdf.Rect(annot.rect)
         transform_annot(pdf, dst_page, new, r + (dx, dy, dx, dy))
     return new
+
+
+def move_thread(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: int, dx: float = 0.0,
+                dy: float = 0.0) -> int:
+    """Sposta un commento con risposte e stati (taglia+incolla): identità conservate, /IRT ricollegati."""
+    page = pdf[src_page]
+    order = [xref]
+    i = 0
+    while i < len(order):          # discendenti in ampiezza (catene cicliche interrotte)
+        parent = order[i]
+        for x, t, _n in page.annot_xrefs():
+            if t not in NON_COMMENT_TYPES and x not in order and _irt_of(pdf, x) == parent:
+                order.append(x)
+        i += 1
+    mapping: dict[int, int] = {}
+    for x in order:
+        parent = _irt_of(pdf, x) if x != xref else 0
+        new = duplicate_annot(pdf, src_page, x, dst_page, dx, dy, keep_identity=True)
+        mapping[x] = new
+        if parent in mapping:
+            dst = pdf[dst_page]
+            get_annot(dst, new).set_irt_xref(mapping[parent])
+            k, v = pdf.xref_get_key(x, "RT")
+            if k == "name":
+                pdf.xref_set_key(new, "RT", v)
+    delete_annot(pdf, src_page, xref, force=True)
+    return mapping[xref]
 
 
 def delete_all(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:

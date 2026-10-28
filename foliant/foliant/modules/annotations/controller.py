@@ -655,13 +655,12 @@ class Controller(QObject):
         def run(pdf):
             out = []
             for src_page, xref in items:
-                same = src_page == target and not cut
-                off = 10.0 if same else 0.0
-                new = engine.duplicate_annot(pdf, src_page, xref, target, off, off, self.author(), keep_identity=cut)
+                if cut:
+                    out.append((target, engine.move_thread(pdf, src_page, xref, target)))
+                    continue
+                off = 10.0 if src_page == target else 0.0
+                new = engine.duplicate_annot(pdf, src_page, xref, target, off, off, self.author())
                 out.append((target, new))
-            if cut:
-                for src_page, xref in items:
-                    engine.delete_annot(pdf, src_page, xref)
             return out
 
         res = self.apply(_("Incolla annotazioni"), run, view=view) or []

@@ -52,6 +52,22 @@ def test_ann07_cut_paste_keeps_identity(comments):
     assert (moved.name, moved.author, moved.created) == (info.name, info.author, info.created)
 
 
+def test_ann07_cut_paste_moves_replies(comments):
+    """ANN-07: nota con due risposte tagliata da pagina 2 e incollata a pagina 4: risposte collegate con /IRT."""
+    window, view, module = comments
+    xref = module.ctrl.apply("n", engine.create_note, 1, (300, 300), "nota", engine.Style(), "Mario")
+    module.ctrl.reply(1, xref, "prima")
+    module.ctrl.reply(1, xref, "seconda")
+    module.ctrl.set_status(1, xref, engine.STATE_ACCEPTED)
+    module.ctrl.select([(1, xref)], view)
+    module.ctrl.copy(cut=True)
+    (page, new), = module.ctrl.paste(3)
+    assert module.ctrl.annotations() and all(i.page == 3 for i in module.ctrl.annotations())
+    moved = module.ctrl.info(3, new)
+    assert sorted(r.contents for r in moved.replies) == ["prima", "seconda"]
+    assert moved.status == engine.STATE_ACCEPTED
+
+
 def test_ann07_duplicate_same_page_offset(comments):
     window, view, module = comments
     xref = _rect(module)
