@@ -608,7 +608,10 @@ def test_selection_reset_after_save(comments, tmp_path, qtbot):
     module.ctrl.select([(0, a)], view)
     view.document.save(str(tmp_path / "x.pdf"))
     qtbot.wait(20)
-    assert module.ctrl.selection == []
+    assert module.ctrl.selection == [(0, a)]       # selezione valida dopo il salvataggio
+    from .conftest import key as _key
+    _key(view, Qt.Key.Key_Delete)
+    assert module.ctrl.info(0, a) is None
     module.comments.reload()
     for it in module.comments.items():
         assert module.ctrl.info(*it.data(0, Qt.ItemDataRole.UserRole)) is not None

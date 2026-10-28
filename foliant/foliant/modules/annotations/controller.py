@@ -684,12 +684,11 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------ visibilità (ANN-39)
     def after_save(self, view) -> None:
-        """Dopo il salvataggio gli xref in memoria sono rinumerati: si azzerano i riferimenti."""
+        """Dopo il salvataggio: selezione conservata se ancora valida."""
+        # il nucleo non rinumera più gli oggetti al salvataggio: si conserva la selezione,
+        # scartando solo le voci eventualmente non più valide
         self._saves = getattr(self, "_saves", 0) + 1
-        if self._sel_view is view:
-            self.clear_selection()
-        if self.clipboard and self.clipboard.get("view") is view:
-            self.clipboard = None
+        self._on_document_changed(view)
         view.viewport().update()
 
     def popups(self, view, page: int) -> list:
