@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import TYPE_CHECKING, Callable
 
 import pymupdf
@@ -31,6 +32,7 @@ _last_links: list | None = None
 
 class ObjectsController(QObject):
     selectionChanged = Signal()
+    _parsedReady = Signal(object, object)
 
     def __init__(self, ctx: "Context"):
         super().__init__(ctx)
@@ -44,6 +46,8 @@ class ObjectsController(QObject):
         self._link_cache: dict = {}
         self._paste_counts: dict = {}
         self._signed_ok: set = set()
+        self._pending: set = set()
+        self._parsedReady.connect(self._on_parsed_ready)
         self.smart_guides = True
         self.links_follow = True     # i collegamenti che coincidono con l'oggetto si spostano con esso
         self.grid_on = False
@@ -80,17 +84,24 @@ class ObjectsController(QObject):
 
     def tool_activated(self, view) -> None:
         self.view = view
+        for i in view.visible_pages():   # analisi anticipata delle pagine visibili
+            self.parsed(view, i, quiet=True, background=True)
 
     def tool_deactivated(self, view) -> None:
         self.clear_selection(view)
 
-    def parsed(self, view, page: int, quiet: bool = False) -> ParsedPage | None:
+    def parsed(self, view, page: int, quiet: bool = False, background: bool = False) -> ParsedPage | None:
+        """Oggetti della pagina (in cache). Con `background` l'analisi di una pagina
+        non ancora pronta parte in un thread e la funzione restituisce None."""
         if view is None or page is None:
             return None
         key = (id(view.document), view.document.version, page)
         hit = self._cache.get(key)
         if hit is not None:
             return hit
+        if background and not os.environ.get("FOLIANT_SYNC_TASKS"):
+            self._parse_async(view, page, key)
+            return None
         try:
             with ENGINE_LOCK:
                 pdf = view.document.pdf
@@ -105,6 +116,32 @@ class ObjectsController(QObject):
             self._cache.clear()
         self._cache[key] = parsed
         return parsed
+
+    def _parse_async(self, view, page: int, key) -> None:
+        if key in self._pending:
+            return
+        self._pending.add(key)
+        doc = view.document
+
+        def work():
+            result = None
+            try:
+                with ENGINE_LOCK:
+                    if doc.version == key[1] and not doc.closed and 0 <= page < doc.pdf.page_count:
+                        result = parse_page(doc.pdf, doc.pdf[page])
+            except Exception:
+                result = None
+            self._parsedReady.emit(key, result)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_parsed_ready(self, key, result) -> None:
+        self._pending.discard(key)
+        if result is not None:
+            if len(self._cache) > 16:
+                self._cache.clear()
+            self._cache[key] = result
+            if self.view is not None:
+                self.view.viewport().update()
 
     def links(self, view, page: int) -> list:
         key = (id(view.document), view.document.version, page)

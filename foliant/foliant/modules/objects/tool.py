@@ -425,7 +425,7 @@ class ObjectTool(Tool):
                          Qt.CursorShape.SizeBDiagCursor if h in (2, 6) else
                          Qt.CursorShape.SizeVerCursor if h in (1, 5) else Qt.CursorShape.SizeHorCursor)
             else:
-                parsed = self.c.parsed(view, ev.page)
+                parsed = self.c.parsed(view, ev.page, quiet=True, background=True)
                 hits = E.hit_test(parsed, ev.point, 3.0 / view_scale(view, ev.page)) if parsed else []
                 if hits:
                     self.hover = (ev.page, hits[0])
@@ -492,7 +492,7 @@ class ObjectTool(Tool):
     def paint(self, view, painter: QPainter, page: int) -> None:
         s = view_scale(view, page)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        parsed = self.c.parsed(view, page, quiet=True)
+        parsed = self.c.parsed(view, page, quiet=True, background=True)
         if parsed is None:
             return
         if self.hover and self.hover[0] == page and 0 <= self.hover[1] < len(parsed.objects):

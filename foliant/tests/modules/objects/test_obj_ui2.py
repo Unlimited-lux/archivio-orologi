@@ -308,3 +308,12 @@ def test_parser_fuzz_never_crashes():
                 E.delete_objects(d, 0, [0])
             except E.ObjectError:
                 pass
+
+
+def test_background_parse(ui, tmp_path, monkeypatch, qtbot):
+    view = ui.open(make_doc(tmp_path / "a.pdf"))
+    monkeypatch.delenv("FOLIANT_SYNC_TASKS", raising=False)
+    ui.c._cache.clear()
+    assert ui.c.parsed(view, 0, quiet=True, background=True) is None
+    qtbot.waitUntil(lambda: ui.c.parsed(view, 0, quiet=True, background=True) is not None, timeout=5000)
+    assert len(ui.c.parsed(view, 0).objects) == 1
