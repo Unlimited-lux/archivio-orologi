@@ -367,6 +367,7 @@ class SearchController(QObject):
         self.panel = ResultsPanel(self)
         ctx.add_sidebar_panel("search", pgettext("barra di ricerca", "Cerca"), "search", self.panel, order=30)
 
+        ctx.add_view_menu_provider(self._menu_provider)
         self.act_find = ctx.action(_("Cerca nel documento"), "search", self.open, shortcut=QKeySequence.StandardKey.Find)
         # UX-18: F3 / Ctrl+G successivo, Maiusc+F3 / Ctrl+Maiusc+G precedente
         self.act_next = ctx.action(_("Risultato successivo"), "chevron-down", self.next, shortcut="F3")
@@ -456,6 +457,13 @@ class SearchController(QObject):
         return pt
 
     # ------------------------------------------------------------------ comandi
+    def _menu_provider(self, view, _page_event, menu) -> None:
+        """UX-07: «Cerca» nel menu contestuale del testo selezionato (precompila la barra)."""
+        if not view.selected_text().strip():
+            return
+        act = menu.addAction(pgettext("barra di ricerca", "Cerca"), self.open)
+        bind_icon(act, "search")
+
     def open(self) -> None:
         view = self.ctx.current_view()
         if view is None:

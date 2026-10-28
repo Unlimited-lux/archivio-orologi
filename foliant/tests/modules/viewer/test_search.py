@@ -320,3 +320,27 @@ def test_ux18_ctrl_g_moves_between_results(viewer_window, tmp_path, qtbot):
     assert ctl.current == 1
     qtbot.keyClick(view, Qt.Key.Key_G, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
     assert ctl.current == 0
+
+
+def test_context_menu_search_selected_text(viewer_window, tmp_path):
+    """UX-07: «Cerca» nel menu contestuale del testo selezionato."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QMenu
+
+    from foliant.api import PageEvent, selection_from_words
+    view = viewer_window.open_path(_pdf(tmp_path, [["Rolex Daytona Rolex"]]))
+    ctl = _ctl(viewer_window)
+    pe = PageEvent(0, pymupdf.Point(100, 100), QPointF(10, 10), Qt.MouseButton.RightButton,
+                   Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier)
+    menu = QMenu()
+    ctl._menu_provider(view, pe, menu)
+    assert menu.isEmpty()                      # senza selezione nessuna voce
+    view.set_text_selection(selection_from_words(0, view.words(0)[:1]))
+    assert ctl._menu_provider in viewer_window.view_menu_providers
+    ctl._menu_provider(view, pe, menu)
+    [act] = [a for a in menu.actions() if not a.isSeparator()]
+    assert act.text() == "Cerca"
+    act.trigger()
+    ctl.finish()
+    assert ctl.bar.isVisible() and ctl.bar.field.text() == "Rolex"
+    assert len(ctl.hits) == 2
