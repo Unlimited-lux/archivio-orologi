@@ -544,3 +544,56 @@ def test_damaged_page_tree_is_reported_and_next_files_open(window, tmp_path, mon
         window.open_path(str(p))
     assert warnings_seen and warnings_seen[0][0] == "Impossibile aprire il file" and "rotto.pdf" in warnings_seen[0][1]
     assert [v.document.display_name for v in window.views()] == ["buono.pdf"]
+
+
+def test_ctrl_n_opens_a_new_window_on_home(window, sample_pdf, qtbot):
+    """UX-18 (Ctrl+N = Nuova finestra) e UX-02 («Nuova finestra» in testa al menu ☰): la nuova
+    finestra mostra la Home con le stesse impostazioni; «Nuovo documento» non ha scorciatoia."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.ui.main_window import MainWindow, app_windows
+    view = window.open_path(sample_pdf)
+    window.activateWindow()
+    view.setFocus()
+    before = set(app_windows())
+    qtbot.keyClick(view, Qt.Key.Key_N, Qt.KeyboardModifier.ControlModifier)
+    new = [w for w in app_windows() if w not in before]
+    try:
+        assert len(new) == 1 and isinstance(new[0], MainWindow)
+        other = new[0]
+        assert other.isVisible() and other is not window
+        assert other.settings is window.settings
+        assert other.current_view() is None and other.docs_stack.currentWidget() is other.home
+        assert window.tabs.count() == 1                 # nessun «Nuovo documento» nella prima finestra
+        assert window.act_new.shortcut().isEmpty()
+        window._rebuild_menu()
+        assert window.main_menu.actions()[0] is window.act_new_window
+        assert window.act_new_window.shortcut().toString() == "Ctrl+N"
+    finally:
+        window.close_view(view)
+        for w in new:
+            w.close()                                   # chiusa, la finestra viene distrutta e tolta dall'elenco
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not set(new) & set(app_windows())
+
+
+def test_quit_closes_every_window(settings, qtbot):
+    """«Esci» (Ctrl+Q) chiude tutte le finestre dell'applicazione, non solo quella attiva."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.ui.main_window import MainWindow, app_windows, register_window
+    first = register_window(MainWindow(settings, load_modules=False))
+    second = register_window(MainWindow(settings, load_modules=False))
+    first.show()
+    second.show()
+    try:
+        assert app_windows() == [first, second]
+        first.act_quit.trigger()
+        assert not first.isVisible() and not second.isVisible()
+    finally:
+        for w in app_windows():
+            w.close()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert app_windows() == []

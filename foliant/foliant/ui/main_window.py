@@ -9,7 +9,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
@@ -65,9 +65,49 @@ class PageField(QLineEdit):
         self.clearFocus()
 OPEN_FILTER = "Documenti (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.xps *.epub *.svg *.txt);;PDF (*.pdf);;Tutti i file (*)"
 
+# Finestre aperte dell'applicazione («Nuova finestra», istanza singola), dalla meno alla più
+# recentemente attiva: l'elenco le tiene vive finché non vengono chiuse (WA_DeleteOnClose).
+_windows: list["MainWindow"] = []
+
+
+def app_windows() -> list["MainWindow"]:
+    """Finestre di Foliant ancora aperte, l'ultima è quella attiva più di recente."""
+    import shiboken6
+    alive = [w for w in _windows if shiboken6.isValid(w)]
+    _windows[:] = alive
+    return [w for w in alive if not w._closed]
+
+
+def active_window() -> "MainWindow | None":
+    """La finestra a cui vanno i file aperti da fuori (gestore file, riga di comando)."""
+    current = QApplication.activeWindow()
+    windows = app_windows()
+    if current in windows:
+        return current
+    return windows[-1] if windows else None
+
+
+def register_window(window: "MainWindow") -> "MainWindow":
+    """Aggiunge `window` alle finestre dell'applicazione; chiusa, viene distrutta e tolta."""
+    if window not in _windows:
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        _windows.append(window)
+    return window
+
+
+def open_window(settings: QSettings, near: "MainWindow | None" = None) -> "MainWindow":
+    """Nuova finestra con le stesse impostazioni, sulla Home (UX-18: Ctrl+N)."""
+    window = register_window(MainWindow(settings))
+    if near is not None and not near.isMaximized() and not near.isFullScreen():
+        window.move(near.pos() + QPoint(32, 32))      # non esattamente sopra l'altra
+    window.show()
+    window.show_home()
+    return window
+
 
 class MainWindow(QMainWindow):
     _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
+    _closed = False             # chiusura confermata (closeEvent accettato)
 
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
@@ -228,7 +268,9 @@ class MainWindow(QMainWindow):
 
     def _build_core_actions(self) -> None:
         a = self._act
-        self.act_new = a(_("Nuovo documento"), "file-plus", self.new_document, "Ctrl+N")
+        # UX-18: Ctrl+N è «Nuova finestra»; il PDF vuoto resta senza scorciatoia (Home e menu ☰)
+        self.act_new_window = a(_("Nuova finestra"), "app-window", self.new_window, "Ctrl+N")
+        self.act_new = a(_("Nuovo documento"), "file-plus", self.new_document)
         self.act_open = a(_("Apri…"), "folder-open", self.open_dialog, QKeySequence.StandardKey.Open)
         self.act_save = a(_("Salva"), "save", lambda: self.save_view(self.current_view()),
                           QKeySequence.StandardKey.Save, requires_document=True)
@@ -238,7 +280,7 @@ class MainWindow(QMainWindow):
         self.act_save_copy = a(_("Salva una copia…"), "copy", lambda: self.save_copy(), requires_document=True)
         self.act_close = a(_("Chiudi documento"), "x", lambda: self.close_view(self.current_view()),
                            QKeySequence.StandardKey.Close, requires_document=True)
-        self.act_quit = a(_("Esci"), "log-out", self.close, "Ctrl+Q")
+        self.act_quit = a(_("Esci"), "log-out", self.quit_application, "Ctrl+Q")
         # UX-18: tasti espliciti, non quelli della piattaforma (fuori da GNOME/KDE Close è solo
         # Ctrl+F4 e Quit non ha tasti)
         self.act_close.setShortcuts([QKeySequence("Ctrl+W"), QKeySequence("Ctrl+F4")])
@@ -527,7 +569,7 @@ class MainWindow(QMainWindow):
     def _rebuild_menu(self) -> None:
         m = self.main_menu
         m.clear()
-        for act in (self.act_new, self.act_open):
+        for act in (self.act_new_window, self.act_new, self.act_open):
             m.addAction(act)
         recent = m.addMenu(_("Apri recenti"))
         paths = self.recent_files()
@@ -801,6 +843,16 @@ class MainWindow(QMainWindow):
 
     def new_document(self) -> DocumentView:
         return self.add_document(Document.new())
+
+    def new_window(self) -> "MainWindow":
+        """«Nuova finestra» (Ctrl+N): un'altra finestra di Foliant sulla Home."""
+        return open_window(self.settings, near=self)
+
+    def quit_application(self) -> None:
+        """«Esci»: chiude tutte le finestre; ognuna chiede delle proprie modifiche e un Annulla ferma l'uscita."""
+        for window in [w for w in app_windows() if w is not self] + [self]:
+            if not window.close():
+                return
 
     def open_dialog(self) -> None:
         paths = self.ctx.ask_open_paths(_("Apri documenti"), OPEN_FILTER)
@@ -1362,6 +1414,9 @@ class MainWindow(QMainWindow):
     # ================================================================== eventi finestra
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow() and self in _windows:
+            _windows.remove(self)
+            _windows.append(self)           # in fondo: la finestra attiva più di recente
         if event.type() == QEvent.Type.WindowStateChange:
             full = self.isFullScreen()
             if full != self._was_fullscreen:
@@ -1449,4 +1504,5 @@ class MainWindow(QMainWindow):
         self.settings.setValue("window/geometry", self.saveGeometry())
         if getattr(self, "_splitter_ready", False):
             self.settings.setValue("window/splitter", self.splitter.saveState())
+        self._closed = True
         event.accept()

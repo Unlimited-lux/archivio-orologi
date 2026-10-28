@@ -146,11 +146,16 @@ def ruota(ctx, gradi):
 8. **Errori**: messaggi chiari per l'utente (`ctx.error(titolo, testo)`); un errore di un
    modulo non deve mai chiudere l'applicazione.
 9. **Originalità**: nessun testo, icona o risorsa copiati da prodotti commerciali.
+10. **Più finestre**: «Nuova finestra» (Ctrl+N) crea un'altra `MainWindow` nello stesso processo e
+   `register(ctx)` viene chiamata di nuovo con il suo `Context`. Lo stato del modulo va tenuto
+   nel controller legato a quel `ctx`, non in variabili globali del modulo, che l'ultima
+   finestra aperta sovrascriverebbe.
 
 ### Scorciatoie da tastiera
 
 La tabella UX-18 della specifica è l'unica autorità. Il nucleo registra: Ctrl+O, Ctrl+T (Home),
-Ctrl+N, Ctrl+S, Ctrl+Maiusc+S, Ctrl+W, Ctrl+Maiusc+T, Ctrl+Q, Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
+Ctrl+N (Nuova finestra; «Nuovo documento» non ha scorciatoia), Ctrl+S, Ctrl+Maiusc+S, Ctrl+W,
+Ctrl+Maiusc+T, Ctrl+Q (Esci: chiude tutte le finestre), Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
 Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
 N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
 Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,

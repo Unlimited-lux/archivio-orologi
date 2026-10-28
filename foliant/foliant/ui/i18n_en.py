@@ -57,6 +57,7 @@ EN = {
     "Non salvare": "Don't save",
     "Nuovo PDF vuoto": "New blank PDF",
     "Nuovo documento": "New document",
+    "Nuova finestra": "New window",
     "Pagina": "Page",
     "Pagina precedente": "Previous page",
     "Pagina singola": "Single page",
