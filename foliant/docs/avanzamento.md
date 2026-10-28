@@ -50,35 +50,42 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
 ### Fase 1 — Specifica ✅ (approvata dall'orchestratore su delega del committente)
 - Ricerca da fonti pubbliche: inventario di parità UPDF (189 funzioni), concorrenti, standard.
 - `docs/funzionalita.md`: catalogo di 312 funzioni (188 in parità, 124 aggiunte).
-- `docs/specifica.md`: 418 funzioni in 12 aree (159 P0, 177 P1, 82 P2), più 34 requisiti
-  non funzionali e 22 di interfaccia.
+- `docs/specifica.md` (v2, dopo la revisione): 425 funzioni in 12 aree (146 P0, 223 P1, 52 P2,
+  4 fuori ambito), più 34 requisiti non funzionali, 22 di interfaccia e la matrice di copertura
+  del catalogo (188 righe di parità tutte coperte).
 - Revisione indipendente: «approvata con correzioni». Copertura parità: 158 righe su 177
   coperte del tutto, 19 in parte, nessuna assente. Correzioni (originalità di VIS-40 ed
-  etichette, ambito, priorità, regole di precedenza, scorciatoie) comunicate alle sessioni
-  e in applicazione al documento.
+  etichette, ambito, priorità, regole di precedenza, scorciatoie) applicate nella v2.
 
-### Fase 2 — Implementazione 🔄
-- ✅ Nucleo (orchestratore): documento, vista, finestra, tema, Home, Preferenze, scorciatoie
-  UX-18, installazione Ubuntu verificata. Prestazioni: PDF di 500 pagine, modifica +
-  impaginazione in ~50 ms.
-- ✅ Revisione indipendente del nucleo: 24 bug riprodotti e corretti (cifratura, salvataggio,
-  coordinate su pagine ritagliate, stabilità), con test di regressione. 42 test verdi.
-- 🔄 12 moduli in sessioni parallele (viewer, annotations, text_edit, objects, pages, forms,
-  ocr, convert, security, sign, tools, ai): alle 03:20 UTC tutti avevano già pushato
-  (~80.000 righe, ~1.350 test); unione senza conflitti.
-- ✅ Difetto del motore PDF su pagine ruotate/ritagliate: misurato su 120 geometrie,
-  compensato in `core/placement.py` (posizionamento esatto), collegamenti cliccabili sulle
-  pagine ruotate; le 7 sessioni interessate lo adottano.
-- ✅ Integrazione: 12 moduli uniti senza conflitti, tutti caricati, 11 modalità operative.
-  Trovati e segnalati: scorciatoie duplicate (risolte con scorciatoie per modalità nel
-  nucleo), bug degli appunti nel modulo Converti, messaggio di stato persistente di Pagine,
-  etichetta OCR da rinominare; corretti nel nucleo larghezza pannelli e campi numerici.
-- 🔄 Collaudo end-to-end sulla build integrata. Alle 04:30 il limite di spesa ha fermato
-  collaudatori e 9 sessioni su 12; ripartiti alle 07:45. Gli script di riproduzione già
-  scritti sono stati rieseguiti sull'ultima build: **42 bug confermati** (Pagine 7, Proteggi 11,
-  Modifica testo 11, OCR 6, Oggetti 5, Firma 2, scorciatoie duplicate tra Visualizzazione,
-  Pagine e Moduli), 4 risultati già corretti. Inviati alle sessioni con priorità (perdita di
-  dati e redazione prima). In corso il collaudo di Commenti, Moduli e Converti.
+### Fase 2 — Implementazione ✅ (consegna del 28/10/2026)
+- ✅ Nucleo: documento con annulla/ripeti e ripristino in caso di errore, salvataggio atomico che
+  mantiene la protezione e non rinumera gli oggetti del documento aperto, vista con coordinate
+  esatte su pagine ruotate/ritagliate (`core/placement.py`), finestra, tema chiaro/scuro, Home,
+  Preferenze, scorciatoie UX-18 limitate alla modalità, permessi del PDF rispettati (copia),
+  file in sola lettura con «Salva con nome».
+- ✅ 12 moduli integrati nel branch principale: Leggi, Commenta, Modifica (testo e oggetti),
+  Pagine, Moduli, OCR, Converti, Proteggi, Firma, Strumenti (confronto e operazioni in blocco),
+  Assistente IA. Tutti caricati, 11 modalità, nessuna scorciatoia duplicata.
+- ✅ Collaudo end-to-end sull'app completa (15 collaudatori + verificatori indipendenti):
+  63 bug riprodotti con script; **56 corretti e verificati** sulla versione finale, 2 chiusi per
+  scelta della specifica (Ctrl+D tolto), 5 noti (sotto).
+- ✅ Flussi chiave verificati sull'app completa: PDF scannerizzato → OCR modificabile (tabelle e
+  stile del testo) → modifica → salvataggio; scansione → Word (100% delle parole sul campione);
+  contratto → commenti → modulo → protezione con password → firma digitale valida e file ancora
+  cifrato; unione, compressione, esportazione; annulla/ripeti tra modalità.
+- ✅ Installazione: `packaging/install.sh` (dipendenze di sistema, ambiente Python, voce nel menu);
+  pacchetto verificato in un ambiente pulito.
+
+### Problemi noti (da chiudere dopo la consegna)
+| Gravità | Area | Problema |
+|---|---|---|
+| media | Proteggi | Dopo la redazione il testo rimanente sulla stessa riga si sposta di ~3 pt (limite del motore PDF). |
+| bassa | Moduli | Il campo firma vuoto mostra il segnaposto del motore a schermo e in stampa da Foliant (nel file è vuoto). |
+| bassa | Nucleo | File in sola lettura: indicazione nel titolo e «Salva con nome», ma senza banner nelle modalità di modifica. |
+| bassa | Modifica testo | Su pagina scansionata la proposta OCR in Modifica è un messaggio di stato (il modulo OCR mostra la sua barra). |
+| bassa | Modifica testo | La riga riscritta usa una nuova copia del font invece della risorsa originale (file un po' più grande). |
+| bassa | Nucleo | Tornando a «Leggi» da Assistente IA o Proteggi resta aperto il pannello destro della modalità precedente (si chiude con Maiusc+F9). |
+| — | Specifica | Funzioni P1/P2 non completate per lo stop del limite di spesa (04:30–07:45): elencate per ID in `foliant/modules/*/STATO.md`. |
 
 ## Log
 - 28/10 00:57 — Fase 0: struttura, subagent, `.gitignore`.
@@ -100,3 +107,9 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
   entro 08:35, integrazione finale entro 09:00 UTC).
 - 28/10 07:50 — Nucleo: le azioni disattivate da un modulo (permessi) non vengono più
   riattivate al cambio documento. 42 bug confermati inviati alle sessioni.
+- 28/10 08:00–08:30 — Correzioni nel nucleo: salvataggio senza rinumerazione degli oggetti,
+  permesso di copia, sola lettura, gestore di sicurezza nominato, tema più veloce, indicatori
+  leggibili nel tema scuro. Secondo collaudo (viewer, strumenti, IA, scansioni, percorsi utente).
+- 28/10 08:35 — Integrazione finale dei 12 moduli nel branch principale.
+- 28/10 08:52 — Suite completa sul branch unito: 2.598 test superati, 0 falliti (13 suite);
+  12 moduli caricati, 11 modalità, nessuna scorciatoia duplicata. Consegna.
