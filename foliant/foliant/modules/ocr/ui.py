@@ -96,11 +96,14 @@ class ProposalBar(QFrame):
             f"#ocrProposalBar QPushButton#ocrRun {{ background: {t.hex_color('accent')};"
             f" color: {t.hex_color('accent_text')}; border: none; border-radius: 6px; }}")
 
-    def show_document(self, count: int, missing: list[str], restricted: bool, low_res: bool) -> None:
+    def show_document(self, count: int, missing: list[str], restricted: bool, low_res: bool,
+                      unextractable: bool = False) -> None:
         self.page = None
         text = _("Questo documento contiene pagine scannerizzate senza testo ({n}).").format(n=count) if count != 1 \
             else _("Questo documento contiene 1 pagina scannerizzata senza testo.")
         text += " " + _("Riconosci il testo per cercarlo, copiarlo e modificarlo.")
+        if unextractable:
+            text += " " + _("Il testo di alcune pagine non è estraibile correttamente: è consigliato l'OCR forzato.")
         if low_res:
             text += " " + _("Alcune pagine hanno risoluzione bassa: accuratezza ridotta.")
         if missing:
@@ -475,7 +478,8 @@ class OcrController(QObject):
             except Exception:
                 restricted = False
         low = any(st.infos[i].low_resolution for i in found)
-        st.bar.show_document(len(found), missing, restricted, low)
+        unextractable = any(st.infos[i].category == detect.UNEXTRACTABLE for i in found)
+        st.bar.show_document(len(found), missing, restricted, low, unextractable)
 
     def dismiss(self, view) -> None:
         st = self.state(view)
@@ -577,6 +581,18 @@ class OcrController(QObject):
                 return None
         if not self._check_permissions(view, opts.mode, new_document):
             return None
+        if opts.existing_text == engine.FORCE and opts.mode != engine.TEXT_ONLY:
+            st = self.state(view)
+            with ENGINE_LOCK:
+                for i in pages:
+                    if i not in st.infos:
+                        st.infos[i] = detect.classify_page(doc.pdf[i])
+            with_text = [i for i in pages if st.infos[i].category in (detect.TEXT, detect.OCR_LAYER, detect.MIXED)]
+            if with_text and not self.ctx.confirm(_("Forza OCR"), _(
+                    "Le pagine con testo ({p}) saranno convertite in immagine e riconosciute di nuovo: si perde la "
+                    "nitidezza vettoriale e il file può crescere. Annotazioni e campi modulo restano. "
+                    "Continuare?").format(p=engine.format_pages(with_text))):
+                return None
         if opts.mode != engine.TEXT_ONLY and not new_document and self._is_signed(view):
             if not self.ctx.confirm(_("Documento firmato"), _(
                     "Il documento è firmato digitalmente. Il riconoscimento del testo ne modifica il contenuto: "
@@ -781,7 +797,7 @@ class OcrController(QObject):
         return None
 
     # ------------------------------------------------------------- testo
-    def show_text(self, text: str, title: str, result: engine.OcrResult | None = None) -> None:
+    def show_text(self, text: str, title: str, result: engine.OcrResult | None = None, actions=None) -> None:
         def save(t: str) -> None:
             view = self.ctx.current_view()
             name = os.path.splitext(view.document.display_name)[0] + ".txt" if view else "testo.txt"
@@ -795,7 +811,7 @@ class OcrController(QObject):
         view = self.ctx.current_view()
         self._text_dialog = TextDialog(self.ctx.window, text, title, save, result=result,
                                        save_path_cb=self.ctx.ask_save_path,
-                                       source_name=view.document.display_name if view else "")
+                                       source_name=view.document.display_name if view else "", actions=actions)
         self._text_dialog.exec()
 
     def extract_text(self) -> None:
@@ -810,26 +826,71 @@ class OcrController(QObject):
         if on:
             self.ctx.status(_("Trascina un rettangolo sull'area da riconoscere."))
 
-    def ocr_area(self, view, page: int, rect: pymupdf.Rect) -> None:
+    def ocr_area(self, view, page: int, rect: pymupdf.Rect, force: bool = False) -> None:
+        """OCR di un'area (rect in coordinate della pagina non ruotata)."""
         langs = self._saved_languages()
         with ENGINE_LOCK:
             pg = view.document.pdf[page]
             clip = rect * pg.rotation_matrix
-            data_page = page
+            existing = pg.get_text("text", clip=rect, sort=True).strip()
+        if existing and not force:
+            # testo già estraibile: mostrato subito, senza riconoscimento (OCR-11)
+            self.show_text(existing, _("Testo dell'area"),
+                           actions=[(_("Riconosci comunque"), lambda: self.ocr_area(view, page, rect, True))])
+            return
+        # riconoscimento con i dati di stile e di sfondo: il risultato si può applicare in entrambe le forme
+        opts = engine.OcrOptions(languages=langs, mode=engine.EDITABLE)
 
         def work(progress):
-            return engine.ocr_page_text(view.document, data_page, langs, clip=clip, progress=progress)
+            with ENGINE_LOCK:
+                data = view.document.pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_NONE)
+                pdf = pymupdf.open(stream=data, filetype="pdf")
+            try:
+                return engine.recognize_area(pdf, page, clip, opts, lambda: progress.cancelled)
+            finally:
+                with ENGINE_LOCK:
+                    pdf.close()
         try:
-            text = self.ctx.run_task(_("Riconoscimento dell'area…"), work)
+            res = self.ctx.run_task(_("Riconoscimento dell'area…"), work)
         except OperationCancelled:
             return
         except Exception as e:
             self.ctx.error(_("Riconoscimento non riuscito"), str(e))
             return
-        if not text.strip():
-            self.ctx.info(_("OCR dell'area"), _("Nessun testo riconosciuto nell'area scelta."))
+        if not res.ok or not res.text.strip():
+            self.ctx.info(_("OCR dell'area"), res.message or _("Nessun testo riconosciuto nell'area scelta."))
             return
-        self.show_text(text, _("Testo dell'area"))
+        self.show_text(res.text, _("Testo dell'area"), actions=[
+            (_("Aggiungi come testo ricercabile"), lambda: self.apply_area(view, res, engine.SEARCHABLE)),
+            (_("Converti in testo modificabile"), lambda: self.apply_area(view, res, engine.EDITABLE)),
+        ])
+
+    def apply_area(self, view, res: engine.PageResult, mode: str) -> None:
+        family = str(self.settings().value("ocr/font", "auto"))
+        try:
+            with view.document.change(_("OCR dell'area")) as pdf:
+                engine.apply_page(pdf, res, mode, family)
+        except Exception as e:
+            self.ctx.error(_("Riconoscimento non riuscito"),
+                           _("Impossibile applicare il testo riconosciuto: {e}").format(e=e))
+            return
+        self.state(view).placed.setdefault(res.index, []).extend(res.placed)
+        view.viewport().update()
+
+    def remove_layer(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        try:
+            with view.document.change(_("Rimuovi livello OCR")) as pdf:
+                n = engine.remove_ocr_layer(pdf)
+                if not n:
+                    raise OcrError(_("Il documento non ha un livello di testo invisibile."))
+        except OcrError as e:
+            self.ctx.info(_("Rimuovi livello OCR"), str(e))
+            return
+        self.state(view).placed.clear()
+        self.ctx.status(_("Livello OCR rimosso da {n} pagine.").format(n=n))
 
     def _saved_languages(self) -> list[str]:
         saved = self.settings().value("ocr/languages", None)

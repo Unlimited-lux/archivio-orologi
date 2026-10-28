@@ -453,3 +453,65 @@ def test_esportazione_alto_dal_pannello_testo(window, scan_two, monkeypatch, tmp
     import xml.etree.ElementTree as ET
     root = ET.parse(dest).getroot()
     assert "alto" in root.tag and len(root.findall(".//{*}String")) > 10
+
+
+def test_area_nel_documento_e_testo_esistente(window, scan_two, monkeypatch, sample_pdf):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    clicked = {}
+
+    def fake_exec(dlg):
+        clicked["buttons"] = list(dlg.action_buttons)
+        clicked["text"] = dlg.edit.toPlainText()
+        btn = dlg.action_buttons.get(clicked.get("press", ""))
+        if btn is not None:
+            btn.click()
+        return 0
+    monkeypatch.setattr(dialogs.TextDialog, "exec", fake_exec)
+    errors = []
+    monkeypatch.setattr(ctl.ctx, "error", lambda t, m: errors.append(m))
+    area = pymupdf.Rect(50, 75, 545, 100)
+    for label, mode_word in (("Aggiungi come testo ricercabile", 3), ("Converti in testo modificabile", 0)):
+        clicked["press"] = label
+        ctl.ocr_area(view, 0, area)
+        assert engine.char_accuracy(clicked["text"], FRASI[0]) >= 0.95
+        assert not errors, errors
+        page_text = view.document.page_text(0)
+        assert "compravendita" in page_text and "acciaio" not in page_text      # solo l'area
+        with ENGINE_LOCK_ctx():
+            spans = view.document.pdf[0].get_texttrace()
+        assert spans and all(s["type"] == mode_word for s in spans)
+        view.document.undo()
+        assert view.document.page_text(0).strip() == ""
+    # area con testo già estraibile: niente OCR, testo mostrato e «Riconosci comunque»
+    view2 = window.open_path(sample_pdf)
+    clicked["press"] = ""
+    monkeypatch.setattr(engine, "recognize_area", lambda *a, **k: (_ for _ in ()).throw(AssertionError("OCR")))
+    ctl.ocr_area(view2, 0, pymupdf.Rect(60, 120, 400, 150))
+    assert "Orologeria Verdi" in clicked["text"] and "Riconosci comunque" in clicked["buttons"]
+
+
+def ENGINE_LOCK_ctx():
+    from foliant.api import ENGINE_LOCK
+    return ENGINE_LOCK
+
+
+def test_rimuovi_livello_ocr(window, scan_two):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    assert view.document.page_text(1).strip()
+    ctl.actions["remove"].trigger()
+    assert view.document.page_text(0).strip() == "" and view.document.page_text(1).strip() == ""
+    view.document.undo()
+    assert "compravendita" in view.document.page_text(0)
+
+
+def test_forza_ocr_chiede_conferma(window, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    ctl = ocr_controller()
+    asked = []
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or False)
+    opts = engine.OcrOptions(languages=["ita"], existing_text=engine.FORCE)
+    assert ctl.run(view, opts, [0], preview=False) is None
+    assert asked and not view.document.is_modified

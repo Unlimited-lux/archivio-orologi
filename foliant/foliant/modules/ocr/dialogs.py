@@ -220,6 +220,9 @@ class OcrDialog(QDialog):
         self.cb_apply_page = QCheckBox(_("Raddrizza e ruota anche la pagina visibile (PDF ricercabile)"))
         self.cb_apply_page.setChecked(str(get("apply_to_page", "false")).lower() in ("true", "1"))
         lay.addWidget(self.cb_apply_page)
+        self.cb_keep = QCheckBox(_("Conserva la scansione originale come livello nascosto (PDF modificabile)"))
+        self.cb_keep.setChecked(str(get("keep_original", "false")).lower() in ("true", "1"))
+        lay.addWidget(self.cb_keep)
 
         self.cb_preview = QCheckBox(_("Mostra l'anteprima e le parole incerte prima di applicare"))
         self.cb_preview.setChecked(str(get("preview", "true")).lower() in ("true", "1"))
@@ -264,6 +267,7 @@ class OcrDialog(QDialog):
         self.font.setEnabled(editable)
         self.cb_preview.setEnabled(not text)
         self.cb_apply_page.setEnabled(self.rb_searchable.isChecked())
+        self.cb_keep.setEnabled(editable)
         self.destination.setEnabled(not text)
         self.validate()
 
@@ -318,7 +322,7 @@ class OcrDialog(QDialog):
         o = self.options()
         return {"format": "foliant-ocr-profile", "version": 1, "mode": o.mode, "languages": o.languages,
                 "dpi": self.dpi.currentData(), "existing_text": o.existing_text, "font": o.font,
-                "preprocess": o.preprocess.as_dict(), "apply_to_page": o.apply_to_page,
+                "preprocess": o.preprocess.as_dict(), "apply_to_page": o.apply_to_page, "keep_original": o.keep_original,
                 "destination": self.destination.currentData(), "preview": self.cb_preview.isChecked()}
 
     def load_profile(self, data: dict) -> None:
@@ -341,6 +345,7 @@ class OcrDialog(QDialog):
             if key in pre:
                 cb.setChecked(bool(pre[key]))
         self.cb_apply_page.setChecked(bool(data.get("apply_to_page", False)))
+        self.cb_keep.setChecked(bool(data.get("keep_original", False)))
         self.cb_preview.setChecked(bool(data.get("preview", True)))
         self.validate()
 
@@ -391,6 +396,7 @@ class OcrDialog(QDialog):
         return engine.OcrOptions(
             languages=self.languages.selected(), mode=self.mode(), dpi=int(self.dpi.currentData()) or 300,
             apply_to_page=self.cb_apply_page.isChecked() and self.mode() == engine.SEARCHABLE,
+            keep_original=self.cb_keep.isChecked() and self.mode() == engine.EDITABLE,
             preprocess=PreprocessOptions(deskew=self.cb_deskew.isChecked(), auto_rotate=self.cb_rotate.isChecked(),
                                          denoise=self.cb_denoise.isChecked(),
                                          contrast=self.cb_contrast.isChecked()),
@@ -414,6 +420,7 @@ class OcrDialog(QDialog):
             s.setValue("ocr/dpi", self.dpi.currentData())
             s.setValue("ocr/destination", self.destination.currentData())
             s.setValue("ocr/apply_to_page", "true" if self.cb_apply_page.isChecked() else "false")
+            s.setValue("ocr/keep_original", "true" if self.cb_keep.isChecked() else "false")
             s.setValue("ocr/font", o.font)
             s.setValue("ocr/existing", o.existing_text)
             for k, v in o.preprocess.as_dict().items():
@@ -563,7 +570,7 @@ class TextDialog(QDialog):
     """Testo riconosciuto: copia, salvataggio TXT e, con un risultato OCR, opzioni ed export ALTO/hOCR."""
 
     def __init__(self, parent, text: str, title: str | None = None, save_cb=None, result=None, save_path_cb=None,
-                 source_name: str = ""):
+                 source_name: str = "", actions: list | None = None):
         super().__init__(parent)
         self.setWindowTitle(title or _("Testo riconosciuto"))
         self.setObjectName("ocrTextDialog")
@@ -613,6 +620,12 @@ class TextDialog(QDialog):
             row.addWidget(self.btn_hocr)
             self.btn_alto.clicked.connect(lambda: self.save_xml("alto"))
             self.btn_hocr.clicked.connect(lambda: self.save_xml("hocr"))
+        self.action_buttons = {}
+        for label, cb in actions or []:
+            b = QPushButton(label, self)
+            b.clicked.connect(lambda _c=False, cb=cb: (self.accept(), cb()))
+            row.addWidget(b)
+            self.action_buttons[label] = b
         row.addStretch(1)
         close = QPushButton(_("Chiudi"), self)
         row.addWidget(close)

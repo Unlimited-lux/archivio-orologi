@@ -72,7 +72,10 @@ def register(ctx: Context) -> None:
     act_detect.toggled.connect(controller.set_detection_enabled)
     controller.actions["detect"] = act_detect
     menu_run = ctx.action(_("Riconosci testo (OCR)…"), "scan-text", lambda: controller.open_dialog())
-    for a in (menu_run, act_batch, act_langs, act_detect):
+    act_remove = ctx.action(_("Rimuovi livello OCR"), "eraser", controller.remove_layer,
+                            tooltip=_("Togli il testo invisibile riconosciuto, lasciando le immagini"))
+    controller.actions["remove"] = act_remove
+    for a in (menu_run, act_remove, act_batch, act_langs, act_detect):
         ctx.add_menu_action(a, _("OCR"))
 
     controller.review_panel = ReviewPanel(controller)

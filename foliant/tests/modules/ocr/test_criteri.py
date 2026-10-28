@@ -274,3 +274,20 @@ def test_modificabile_stile_e_famiglia(tmp_path):
                     good += n if ok else 0
     assert total and good / total >= 0.85, good / total
     del cv2
+
+
+def test_conserva_originale_come_livello_nascosto(tmp_path):
+    src = _data(tmp_path, dpi=200)
+    out = engine.ocr_pdf_bytes(src, ["ita"], "editable", options=engine.OcrOptions(keep_original=True))
+    with pymupdf.open(stream=out) as d:
+        ocgs = d.get_ocgs()
+        assert len(ocgs) == 1 and not list(ocgs.values())[0]["on"]
+        assert len(d[0].get_images()) == 2
+        assert d[0].get_text().count("compravendita") == 1
+
+
+def test_parallelismo_limitato_dalla_memoria(monkeypatch):
+    monkeypatch.setattr(engine, "available_memory", lambda: 400 * 1024 * 1024)
+    assert engine.OcrOptions().worker_count() == 1
+    monkeypatch.setattr(engine, "available_memory", lambda: 0)
+    assert engine.OcrOptions().worker_count() >= 1

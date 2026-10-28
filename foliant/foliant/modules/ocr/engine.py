@@ -127,11 +127,30 @@ class OcrOptions:
     timeout: float = 120.0
     psm: int = 3
     apply_to_page: bool = False  # ricercabile: applica rotazione e raddrizzamento anche alla pagina visibile
+    keep_original: bool = False  # modificabile: conserva la scansione come livello nascosto (OCG)
 
     def worker_count(self) -> int:
         if self.workers > 0:
             return self.workers
-        return max(1, (os.cpu_count() or 2) - 1)
+        n = max(1, (os.cpu_count() or 2) - 1)
+        # poca memoria: ogni lavoro tiene un'immagine di pagina e un processo del motore
+        free = available_memory()
+        if free:
+            per_job = 350 * 1024 * 1024 * (self.dpi / 300) ** 2
+            n = max(1, min(n, int(free * 0.5 // per_job)))
+        return n
+
+
+def available_memory() -> int:
+    """Memoria disponibile in byte (0 se non determinabile)."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return 0
 
 
 @dataclass
@@ -155,6 +174,8 @@ class PageResult:
     placed: list[tuple] = field(default_factory=list)    # dopo l'applicazione: (Rect pagina, Word)
     existing_text: str = ""               # pagine saltate perché già con testo: testo estraibile
     remove_layer: bool = False            # togliere il livello OCR invisibile esistente
+    original: bytes | None = None         # scansione originale (per il livello nascosto)
+    offset: tuple[float, float] = (0.0, 0.0)   # OCR di un'area: origine dell'area sulla pagina (punti)
 
     @property
     def ok(self) -> bool:
@@ -187,10 +208,11 @@ class PageResult:
     # ---------------------------------------------------------- coordinate
     def processed_to_display(self, x: float, y: float) -> tuple[float, float]:
         """Pixel dell'immagine elaborata → punti della pagina come visualizzata all'OCR."""
+        dx, dy = self.offset
         if self.affine is None:
-            return (x / self.zoom, y / self.zoom)
+            return (x / self.zoom + dx, y / self.zoom + dy)
         ox, oy = apply_point(invert(np.asarray(self.affine)), x, y)
-        return (ox / self.zoom, oy / self.zoom)
+        return (ox / self.zoom + dx, oy / self.zoom + dy)
 
     def word_rect_display(self, word: Word) -> pymupdf.Rect:
         x0, y0, x1, y1 = word.bbox
@@ -398,6 +420,8 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
         else:
             bg = cv2.medianBlur(color, 3) if opts.preprocess.denoise else color
             res.background = _encode_background(clean_background(bg, boxes))
+            if opts.keep_original:
+                res.original = _encode_background(img)
     elif opts.mode == SEARCHABLE and res.rasterize:
         res.background = _encode_background(img)
     return res
@@ -504,6 +528,35 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
         raise
     result.pages = [results[i] for i in indices if i in results]
     return result
+
+
+def recognize_area(pdf: pymupdf.Document, index: int, clip: pymupdf.Rect, opts: OcrOptions,
+                   cancelled: Callable[[], bool] | None = None) -> PageResult:
+    """Riconosce un'area (punti della pagina visualizzata) e restituisce un risultato
+    applicabile alla pagina come le pagine miste: testo solo dentro l'area (OCR-11)."""
+    from .languages import check_languages
+    check_languages(opts.languages)
+    with ENGINE_LOCK:
+        page = pdf[index]
+        clip = pymupdf.Rect(clip) & page.rect
+        img, zoom, notes = render_page(page, max(opts.dpi, 300), clip)
+        rotation = page.rotation
+    res = PageResult(index=index, category=detect.MIXED, page_rotation=rotation, zoom=zoom, mixed=True,
+                     offset=(clip.x0, clip.y0), notes=notes)
+    popts = PreprocessOptions(deskew=opts.preprocess.deskew, auto_rotate=False, denoise=opts.preprocess.denoise,
+                              contrast=opts.preprocess.contrast)
+    sub = OcrOptions(languages=opts.languages, mode=opts.mode, dpi=opts.dpi, preprocess=popts, psm=6,
+                     timeout=opts.timeout)
+    return _process(res, img, sub, cancelled or (lambda: False))
+
+
+def remove_ocr_layer(pdf: pymupdf.Document, pages: list[int] | None = None) -> int:
+    """Rimuove il livello di testo invisibile dalle pagine (OCR-18). Restituisce le pagine modificate."""
+    n = 0
+    for i in (range(pdf.page_count) if pages is None else pages):
+        if remove_invisible_text(pdf[i]):
+            n += 1
+    return n
 
 
 # ===================================================================== applicazione
@@ -709,7 +762,7 @@ def _insert_lines_visible(page: pymupdf.Page, res: PageResult, mapper, zoom: flo
 
 
 def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = "sans",
-               apply_to_page: bool = False) -> None:
+               apply_to_page: bool = False, original_ocg: int = 0) -> None:
     """Applica il risultato di una pagina al documento (dentro `document.change()`)."""
     if not res.ok or mode == TEXT_ONLY:
         return
@@ -749,6 +802,10 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
         else:
             _clear_page_content(page)
             page.set_rotation((res.page_rotation + res.rotation) % 360)
+            if res.original and original_ocg:
+                # la scansione originale resta nel file, nascosta in visualizzazione e stampa
+                page.insert_image(page.rect * page.derotation_matrix, stream=res.original, keep_proportion=False,
+                                  rotate=(page.rotation - res.rotation) % 360, oc=original_ocg)
             page.insert_image(page.rect * page.derotation_matrix, stream=res.background, keep_proportion=False,
                               rotate=page.rotation)
             # l'immagine elaborata (raddrizzata) riempie la pagina visualizzata
@@ -901,10 +958,13 @@ def apply_result(pdf: pymupdf.Document, result: OcrResult, mode: str | None = No
     """Applica tutte le pagine riconosciute. Restituisce il numero di pagine modificate."""
     mode = mode or result.options.mode
     n = 0
+    ocg = 0
+    if mode == EDITABLE and any(r.original for r in result.recognized):
+        ocg = pdf.add_ocg(_("Scansione originale"), on=False)
     for res in result.recognized:
         if not res.lines and not res.rasterize and not res.remove_layer:
             continue
-        apply_page(pdf, res, mode, result.options.font, result.options.apply_to_page)
+        apply_page(pdf, res, mode, result.options.font, result.options.apply_to_page, ocg)
         n += 1
     if n:
         _record_ocr(pdf, result)
