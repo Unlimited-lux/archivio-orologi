@@ -626,3 +626,32 @@ def test_system_font_embedded(tmp_path):
         E.update_properties(pdf, 0, x, font="Carattere Inesistente XYZ")
     E.update_properties(pdf, 0, x, font="Times")
     assert E.field_info(pdf, 0, x).font == "Times"
+
+
+def test_tagged_document_form_element(tmp_path):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    cat = pdf.pdf_catalog()
+    root, docel, pt = pdf.get_new_xref(), pdf.get_new_xref(), pdf.get_new_xref()
+    pdf.update_object(pt, "<</Nums[]>>")
+    pdf.update_object(docel, f"<</Type/StructElem/S/Document/P {root} 0 R/K[]>>")
+    pdf.update_object(root, f"<</Type/StructTreeRoot/K {docel} 0 R/ParentTree {pt} 0 R/ParentTreeNextKey 0>>")
+    pdf.xref_set_key(cat, "StructTreeRoot", f"{root} 0 R")
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "nome")
+    assert pdf.xref_get_key(x, "StructParent") == ("int", "0")
+    kids = pdf.xref_get_key(docel, "K")[1]
+    elem = int(kids.strip("[]").split()[0])
+    assert pdf.xref_get_key(elem, "S") == ("name", "/Form")
+    assert pdf.xref_get_key(elem, "K/Obj") == ("xref", f"{x} 0 R")
+    assert pdf.xref_get_key(pt, "Nums")[1].replace(" ", "") == f"[0{elem}0R]"
+    y = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 90, 200, 110), "cognome")
+    assert pdf.xref_get_key(y, "StructParent") == ("int", "1")
+    E.delete_field(pdf, 0, x)
+    assert str(elem) not in pdf.xref_get_key(docel, "K")[1]
+    again = reopen(pdf)
+    assert [f.name for f in E.list_fields(again)] == ["cognome"]
+    # documento senza struttura: nessun collegamento
+    plain = pymupdf.open()
+    plain.new_page()
+    z = E.create_field(plain, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "a")
+    assert plain.xref_get_key(z, "StructParent")[0] == "null"

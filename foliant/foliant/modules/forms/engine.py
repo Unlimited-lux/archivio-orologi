@@ -1239,6 +1239,7 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
         pdf.xref_set_key(xref, "AS", "/Off")
     if pg.rotation:
         pdf.xref_set_key(xref, "MK/R", str(pg.rotation))
+    tag_widget(pdf, page, xref)
     if full_name:
         fx = _field_xref(pdf, xref)
         if fx == xref:
@@ -1958,6 +1959,7 @@ def merge_into(pdf: pymupdf.Document, page: int, xref: int, target_name: str) ->
 
 
 def delete_field(pdf: pymupdf.Document, page: int, xref: int) -> None:
+    untag_widget(pdf, xref)
     w = find_widget(pdf, page, xref)
     fx = _field_xref(pdf, xref)
     pdf[page].delete_widget(w)
@@ -2818,3 +2820,103 @@ def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) 
     pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]/Resources{res}>>")
     pdf.update_stream(form, b"/Tx BMC\n" + stream + b"\nEMC\n")
     pdf.xref_set_key(xref, "AP", f"<</N {form} 0 R>>")
+
+
+# ====================================================================== struttura logica
+def _struct_root(pdf: pymupdf.Document) -> int | None:
+    t, v = pdf.xref_get_key(pdf.pdf_catalog(), "StructTreeRoot")
+    return int(v.split()[0]) if t == "xref" else None
+
+
+def _parent_tree_nums(pdf: pymupdf.Document, root: int) -> tuple[int | None, list] | None:
+    """(xref dell'albero dei genitori, voci /Nums) se l'albero è piatto; None se assente o annidato."""
+    t, v = pdf.xref_get_key(root, "ParentTree")
+    if t != "xref":
+        return None
+    pt = int(v.split()[0])
+    if pdf.xref_get_key(pt, "Kids")[0] != "null":
+        return None  # albero numerico annidato: non lo modifichiamo
+    t, v = pdf.xref_get_key(pt, "Nums")
+    try:
+        nums = ps.parse(v) if t == "array" else []
+    except ps.PdfSyntaxError:
+        return None
+    return pt, nums
+
+
+def tag_widget(pdf: pymupdf.Document, page: int, xref: int) -> int | None:
+    """Nei documenti con struttura logica collega il widget a un nuovo elemento /Form
+    (OBJR + /StructParent + albero dei genitori). Restituisce lo xref dell'elemento."""
+    root = _struct_root(pdf)
+    if root is None or pdf.xref_get_key(xref, "StructParent")[0] != "null":
+        return None
+    tree = _parent_tree_nums(pdf, root)
+    if tree is None:
+        return None
+    pt, nums = tree
+    t, v = pdf.xref_get_key(root, "ParentTreeNextKey")
+    keys = [n for n in nums[0::2] if isinstance(n, int)]
+    key = max([int(v) if t == "int" else 0] + [k + 1 for k in keys])
+    # genitore: il primo elemento sotto la radice (di solito «Document»), altrimenti la radice
+    t, v = pdf.xref_get_key(root, "K")
+    parent = root
+    if t == "xref" and pdf.xref_get_key(int(v.split()[0]), "Type")[1] in ("/StructElem", "null"):
+        parent = int(v.split()[0])
+    elif t == "array":
+        try:
+            first = next((r for r in ps.parse(v) if isinstance(r, ps.Ref)), None)
+        except ps.PdfSyntaxError:
+            first = None
+        if first is not None:
+            parent = first[0]
+    pxref = pdf.page_xref(page)
+    elem = pdf.get_new_xref()
+    pdf.update_object(elem, f"<</Type/StructElem/S/Form/P {parent} 0 R/Pg {pxref} 0 R"
+                            f"/K<</Type/OBJR/Obj {xref} 0 R/Pg {pxref} 0 R>>>>")
+    t, v = pdf.xref_get_key(parent, "K")
+    if t == "array":
+        kids = v[:-1] + f" {elem} 0 R]"
+    elif t == "null":
+        kids = f"[{elem} 0 R]"
+    else:
+        kids = f"[{v} {elem} 0 R]"
+    pdf.xref_set_key(parent, "K", kids)
+    pdf.xref_set_key(xref, "StructParent", str(key))
+    pdf.xref_set_key(pt, "Nums", ps.serialize(list(nums) + [key, ps.Ref(elem)]))
+    pdf.xref_set_key(root, "ParentTreeNextKey", str(key + 1))
+    return elem
+
+
+def untag_widget(pdf: pymupdf.Document, xref: int) -> None:
+    """Toglie l'elemento /Form del widget (prima di eliminarlo)."""
+    root = _struct_root(pdf)
+    t, v = pdf.xref_get_key(xref, "StructParent")
+    if root is None or t != "int":
+        return
+    tree = _parent_tree_nums(pdf, root)
+    if tree is None:
+        return
+    pt, nums = tree
+    key = int(v)
+    elem = None
+    for i in range(0, len(nums) - 1, 2):
+        if nums[i] == key and isinstance(nums[i + 1], ps.Ref):
+            elem = nums[i + 1][0]
+            del nums[i:i + 2]
+            break
+    if elem is None:
+        return
+    pdf.xref_set_key(pt, "Nums", ps.serialize(nums))
+    tp, vp = pdf.xref_get_key(elem, "P")
+    if tp == "xref":
+        parent = int(vp.split()[0])
+        tk, vk = pdf.xref_get_key(parent, "K")
+        if tk == "array":
+            try:
+                kids = [k for k in ps.parse(vk) if not (isinstance(k, ps.Ref) and k[0] == elem)]
+                pdf.xref_set_key(parent, "K", ps.serialize(kids))
+            except ps.PdfSyntaxError:
+                pass
+        elif tk == "xref" and int(vk.split()[0]) == elem:
+            pdf.xref_set_key(parent, "K", "[]")
+    pdf.xref_set_key(elem, "K", "null")
