@@ -1793,15 +1793,18 @@ class SecurityController:
             cb(view)
 
     # ---------------------------------------------------------- attendibili
-    TRUST_KEY = "security/trusted"
+    # Riservatezza (regola del committente): nessun nome, percorso o cartella dei documenti
+    # viene conservato tra un avvio e l'altro. L'attendibilità vale per la sessione, in memoria.
+    TRUST_KEY = "security/trusted"          # valore delle versioni precedenti: viene cancellato
 
     def _trusted(self) -> dict:
-        s = self.settings()
-        raw = s.value(self.TRUST_KEY, "") if s is not None else ""
-        try:
-            return json.loads(raw) if raw else {}
-        except ValueError:
-            return {}
+        trusted = getattr(self, "_session_trust", None)
+        if trusted is None:
+            trusted = self._session_trust = {"files": {}, "folders": []}
+            s = self.settings()
+            if s is not None and s.value(self.TRUST_KEY, ""):
+                s.remove(self.TRUST_KEY)
+        return trusted
 
     def is_trusted(self, doc) -> bool:
         if doc.path is None:
@@ -1809,9 +1812,9 @@ class SecurityController:
         trusted = self._trusted()
         real = str(Path(doc.path).resolve())
         digest = _file_hash(real)
-        if trusted.get("files", {}).get(real) == digest and digest:
+        if trusted["files"].get(real) == digest and digest:
             return True
-        return any(real.startswith(folder.rstrip("/") + "/") for folder in trusted.get("folders", []))
+        return any(real.startswith(folder.rstrip("/") + "/") for folder in trusted["folders"])
 
     def trust_document(self, view, folder: bool = False) -> None:
         doc = view.document
@@ -1821,14 +1824,11 @@ class SecurityController:
         trusted = self._trusted()
         real = str(Path(doc.path).resolve())
         if folder:
-            trusted.setdefault("folders", []).append(str(Path(real).parent))
+            trusted["folders"].append(str(Path(real).parent))
         else:
-            trusted.setdefault("files", {})[real] = _file_hash(real)
-        s = self.settings()
-        if s is not None:
-            s.setValue(self.TRUST_KEY, json.dumps(trusted))
+            trusted["files"][real] = _file_hash(real)
         self.banner(view).remove_notice("active")
-        self.ctx.status(_("Documento considerato attendibile"))
+        self.ctx.status(_("Documento considerato attendibile fino alla chiusura di Foliant"))
 
     def trust_dialog(self, view) -> None:
         scope = ask_trust_scope(self.parent)
@@ -1836,9 +1836,10 @@ class SecurityController:
             self.trust_document(view, folder=scope == "folder")
 
     def revoke_trust(self) -> None:
+        self._session_trust = {"files": {}, "folders": []}
         s = self.settings()
         if s is not None:
-            s.setValue(self.TRUST_KEY, "")
+            s.remove(self.TRUST_KEY)
 
 
 class _Nothing(Exception):
@@ -1989,8 +1990,12 @@ _METHOD_TEXT = {"AES-256": "AES, chiave a 256 bit", "AES-128": "AES, chiave a 12
 
 def CONTROLLER_RESULTS(doc) -> str | None:
     """Esito della verifica di integrità registrato all'apertura (SEC-11)."""
-    from . import CONTROLLER
-    return CONTROLLER.integrity_results.get(doc) if CONTROLLER is not None else None
+    from . import controllers
+    for c in controllers():
+        result = c.integrity_results.get(doc)
+        if result is not None:
+            return result
+    return None
 
 
 def security_rows(doc) -> list[tuple[str, list[str]]]:

@@ -782,4 +782,5 @@ EN: dict[str, str] = {
     'Verifica di integrità superata': 'Integrity check passed',
     'metadati in chiaro': 'unencrypted metadata',
     'verifica di integrità': 'integrity protection',
+    'Documento considerato attendibile fino alla chiusura di Foliant': 'Document trusted until Foliant is closed',
 }

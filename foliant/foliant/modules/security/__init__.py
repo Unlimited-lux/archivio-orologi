@@ -20,8 +20,18 @@ from .translations import EN
 
 ORDER = 80
 
-#: controller dell'ultima finestra registrata (usato dai test)
+#: controller dell'ultima finestra registrata (usato dai test); il modulo usa `controller_for`
 CONTROLLER: SecurityController | None = None
+#: un controller per finestra (Ctrl+N apre altre finestre nello stesso processo)
+_CONTROLLERS: dict[int, SecurityController] = {}
+
+
+def controller_for(ctx) -> SecurityController | None:
+    return _CONTROLLERS.get(id(ctx))
+
+
+def controllers() -> list[SecurityController]:
+    return list(_CONTROLLERS.values())
 
 
 def register(ctx: Context) -> None:
@@ -29,6 +39,14 @@ def register(ctx: Context) -> None:
     add_translations("en", EN)
     c = SecurityController(ctx)
     CONTROLLER = c
+    _CONTROLLERS[id(ctx)] = c
+
+    def forget(*_a, key=id(ctx)):
+        global CONTROLLER
+        gone = _CONTROLLERS.pop(key, None)
+        if CONTROLLER is gone:
+            CONTROLLER = next(reversed(_CONTROLLERS.values()), None)
+    ctx.window.destroyed.connect(forget)
     mode = ctx.add_mode("proteggi", _("Proteggi"), "shield", 80)
 
     def act(text, icon_name, slot, **kw):
@@ -90,15 +108,16 @@ def register(ctx: Context) -> None:
     ctx.add_menu_action(revoke, _("Proteggi"))
     # Blocco dell'applicazione (SEC-32)
     from .applock import AppLock, LockPreferences
-    c.applock = AppLock(lambda: c.settings(), ctx.window)
+    c.applock = AppLock.shared(lambda: c.settings())   # uno per l'applicazione: blocca tutte le finestre
     lock_now = ctx.action(_("Blocca Foliant"), "lock-keyhole", c.lock_app, requires_document=False)
     c.actions["lock"] = lock_now
     ctx.add_menu_action(lock_now, _("Proteggi"))
     lock_settings = ctx.action(_("Blocco dell'applicazione…"), "shield", c.lock_settings, requires_document=False)
     c.actions["lock_settings"] = lock_settings
     ctx.add_menu_action(lock_settings, _("Proteggi"))
-    # la pagina «Sicurezza e riservatezza» delle Preferenze attende CORE_REQUESTS §10
     c.lock_preferences = LockPreferences
+    ctx.add_preferences_page(_("Sicurezza e riservatezza"), lambda parent=None: LockPreferences(c.applock, parent),
+                             order=80)
 
     ctx.add_properties_panel(PANEL_ID, c.panel)
     mode.entered.connect(lambda: ctx.show_properties(PANEL_ID) if ctx.current_view() else None)

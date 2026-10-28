@@ -144,6 +144,24 @@ class LockScreen(QWidget):
 # ------------------------------------------------------------------ blocco
 
 class AppLock(QObject):
+    _shared: "AppLock | None" = None
+
+    @classmethod
+    def shared(cls, settings_getter) -> "AppLock":
+        """L'unico blocco dell'applicazione, condiviso dalle finestre (Ctrl+N). Le
+        impostazioni si leggono da una qualunque finestra ancora aperta."""
+        lock = cls._shared
+        try:
+            alive = lock is not None and lock.parent() is QApplication.instance()
+        except RuntimeError:
+            alive = False
+        if not alive:
+            lock = cls._shared = cls(lambda: None, QApplication.instance())
+            lock._getters = []
+        lock._getters.append(settings_getter)
+        lock.reload()
+        return lock
+
     def __init__(self, settings_getter, parent=None):
         super().__init__(parent)
         self._settings = settings_getter
@@ -167,8 +185,18 @@ class AppLock(QObject):
         self.reload()
 
     # ------------------------------------------------------------ impostazioni
+    def _current_settings(self):
+        for getter in reversed(getattr(self, "_getters", [])):
+            try:
+                s = getter()
+            except RuntimeError:            # finestra già chiusa
+                continue
+            if s is not None:
+                return s
+        return self._settings()
+
     def _value(self, key, default=None):
-        s = self._settings()
+        s = self._current_settings()
         return s.value(key, default) if s is not None else default
 
     @property
@@ -185,7 +213,7 @@ class AppLock(QObject):
         return str(self._value(KEY_STARTUP, "false")).lower() in ("true", "1")
 
     def configure(self, enabled: bool, code: str | None, minutes: int, at_startup: bool) -> None:
-        s = self._settings()
+        s = self._current_settings()
         if s is None:
             return
         if code:
