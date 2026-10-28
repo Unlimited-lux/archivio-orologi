@@ -174,3 +174,45 @@ def test_export_images(tmp_path):
     assert pymupdf.Pixmap(outs[0]).width == 40
     none = _run(tmp_path, _files(tmp_path, 1), "export_images", out="vuoto").results[0]
     assert none.status == "skipped"
+
+
+def _form(path, value=""):
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for k, name in enumerate(("cliente", "importo")):
+        w = pymupdf.Widget()
+        w.field_name = name
+        w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+        w.rect = pymupdf.Rect(72, 100 + 40 * k, 300, 120 + 40 * k)
+        w.field_value = value
+        page.add_widget(w)
+    doc.save(str(path))
+    return str(path)
+
+
+def test_form_data_export_and_import(tmp_path):
+    """BAT-23: esporta e importa in blocco i dati dei moduli (ricevute, schede di acquisto)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    a = _form(src / "scheda1.pdf")
+    b = _form(src / "scheda2.pdf")
+    data = tmp_path / "dati.csv"
+    data.write_text("File,cliente,importo\nscheda1.pdf,Rossi,8500\nscheda2.pdf,Bianchi,12000\n", encoding="utf-8")
+    items = [be.analyze_file(p) for p in (a, b)]
+    rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("form_import", {"file": str(data)})],
+                                                 destination=str(tmp_path / "compilati")))
+    assert all(r.status == "ok" and "2 campi" in r.message for r in rep.results)
+    filled = [be.analyze_file(r.outputs[0]) for r in rep.results]
+    rep = be.run_job(None, filled, be.JobSettings(steps=[be.Step("form_export", {"format": "json"})],
+                                                  destination=str(tmp_path / "dati")))
+    import json
+    out = {os.path.basename(r.outputs[0]): json.loads(open(r.outputs[0], encoding="utf-8").read())
+           for r in rep.results}
+    assert any(v.get("cliente") == "Rossi" for v in out.values())
+    assert any(str(v.get("importo")) == "12000" for v in out.values())
+    assert all(name.endswith(".json") for name in out)
+    # file senza campi: saltato
+    plain = build_pdf(src / "lettera.pdf", [["testo"]])
+    rep = be.run_job(None, [be.analyze_file(plain)], be.JobSettings(steps=[be.Step("form_export")],
+                                                                   destination=str(tmp_path / "x")))
+    assert rep.results[0].status == "skipped"

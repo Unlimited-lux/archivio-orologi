@@ -456,6 +456,14 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("ignore_case", "Ignora maiuscole/minuscole", "bool", True),
         ]),
         ActionSpec("linearize", "Ottimizza per il web", "web", []),
+        ActionSpec("form_export", "Esporta i dati dei moduli", "dati", [
+            Param("format", "Formato", "choice", "csv",
+                  [("csv", "CSV"), ("json", "JSON"), ("xfdf", "XFDF"), ("fdf", "FDF"), ("xml", "XML")]),
+        ], kind="multi"),
+        ActionSpec("form_import", "Importa i dati dei moduli", "compilato", [
+            Param("file", "File dei dati (CSV con colonna «File» per file diversi, JSON, XFDF, FDF, XML)",
+                  "path", ""),
+        ]),
         ActionSpec("export_images", "Esporta tutte le immagini", "immagine", [
             Param("min_size", "Dimensione minima (px)", "int", 16, minimum=1),
         ], kind="multi"),
@@ -2730,7 +2738,72 @@ def _x_linearize(data: bytes, p: dict, item, ctx) -> bytes:
             doc.close()
 
 
+def _forms():
+    try:
+        from foliant.modules.forms import engine as fe
+        from foliant.modules.forms import interchange as fx
+    except Exception:
+        raise BatchError("DEP-01", _("I dati dei moduli non sono disponibili: il modulo Moduli non è installato."))
+    return fe, fx
+
+
+def _form_export_parts(data: bytes, p: dict) -> list[tuple[bytes, str]]:
+    fe, fx = _forms()
+    fmt = p.get("format", "csv")
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            values = fe.form_values(doc)
+        finally:
+            doc.close()
+    if not values:
+        raise BatchError("FRM-01", _("Saltato: il file non contiene campi modulo."), status="skipped")
+    return [(fx.export_data(fmt, values), "." + fmt)]
+
+
+def _x_form_import(data: bytes, p: dict, item, ctx) -> bytes:
+    fe, fx = _forms()
+    path = str(p.get("file", "") or "")
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        raise BatchError("FILE-02", _("File dei dati non leggibile: {f}").format(f=os.path.basename(path) or "–"))
+    fmt = fx.format_of(path, raw)
+    try:
+        if fmt == "csv":
+            records = fx.csv_records(raw)
+            keyed = [r for r in records if str(r.get("File", "")).strip()]
+            if keyed:   # una riga per file, riconosciuto dal nome
+                names = {item.name.lower(), Path(item.path).stem.lower()}
+                rec = next((r for r in keyed if str(r["File"]).strip().lower() in names), None)
+                if rec is None:
+                    raise BatchError("FRM-02", _("Saltato: nessuna riga per questo file nei dati."), status="skipped")
+                values = {k: v for k, v in rec.items() if k != "File"}
+            else:
+                values = records[0] if records else {}
+        else:
+            values = fx.parse_data(fmt, raw)
+    except BatchError:
+        raise
+    except Exception as e:
+        raise BatchError("FRM-03", _("Dati dei moduli non validi: {e}").format(e=e)) from e
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            applied, unknown = fe.apply_values(doc, values)
+            if not applied:
+                raise BatchError("FRM-04", _("Saltato: nessun campo corrisponde ai dati."), status="skipped")
+            ctx.notes.append(_("{n} campi compilati").format(n=len(applied)))
+            if unknown:
+                ctx.warnings.append(_("campi sconosciuti: {c}").format(c=", ".join(unknown[:5])))
+            return _save(doc)
+        finally:
+            doc.close()
+
+
 EXTRA_PDF_ACTIONS = {
+    "form_import": _x_form_import,
     "rotate": _x_rotate, "delete_pages": _x_delete_pages, "extract_pages": _x_extract_pages,
     "flatten": _x_flatten, "sanitize": _x_sanitize, "metadata": _x_metadata, "initial_view": _x_initial_view,
     "redact": _x_redact, "linearize": _x_linearize,
@@ -2796,9 +2869,14 @@ def _do_multi(data: bytes, step: Step, item: QueueItem, index: int, settings: Jo
               pages: int, reserved: set[str], ctx: _Ctx) -> list[str]:
     """Passi che producono più file per ingresso (dividi, esporta immagini)."""
     p = step.merged_params()
-    parts = _split_parts(data, p) if step.action == "split" else _image_parts(data, p)
+    if step.action == "split":
+        parts = _split_parts(data, p)
+    elif step.action == "form_export":
+        parts = _form_export_parts(data, p)
+    else:
+        parts = _image_parts(data, p)
     pattern = settings.pattern
-    if "{pagina" not in pattern and "{parte" not in pattern:
+    if len(parts) > 1 and "{pagina" not in pattern and "{parte" not in pattern:
         pattern += "_{parte:3}"
     dest = _target_dir(item, settings)
     outputs: list[str] = []
