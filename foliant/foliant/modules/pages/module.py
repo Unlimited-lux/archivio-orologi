@@ -515,6 +515,41 @@ class PagesController:
                           _("Nessun programma di posta disponibile. Il file è stato salvato in:\n{p}").format(p=path))
         return path
 
+    # ================================================================ PAG-40
+    def find_blank_and_duplicates(self, mode: str = "identical") -> list[int]:
+        """Trova pagine vuote e duplicate, le seleziona e propone di eliminarle."""
+        view = self.view()
+        if view is None:
+            return []
+        from . import detect
+        document = view.document
+
+        def work(progress):
+            with ENGINE_LOCK:
+                blank = detect.find_blank_pages(document.pdf)
+                dups = detect.find_duplicate_pages(document.pdf, mode=mode)
+            return blank, dups
+        try:
+            blank, dups = self.ctx.run_task(_("Ricerca di pagine vuote e duplicate…"), work)
+        except FoliantError as e:
+            self.ctx.error(_("Pagine vuote e duplicate"), str(e))
+            return []
+        found = sorted(set(blank) | {d for d, _o in dups})
+        if not found:
+            self.ctx.info(_("Pagine vuote e duplicate"), _("Nessuna pagina vuota o duplicata trovata."))
+            return []
+        if self.active():
+            self.organizer.grid.select_pages(found)
+        lines = [_("Pagina {n}: vuota").format(n=i + 1) for i in blank]
+        lines += [_("Pagina {n}: duplicato della pagina {o}").format(n=d + 1, o=o + 1) for d, o in dups]
+        shown = "\n".join(lines[:30]) + ("\n…" if len(lines) > 30 else "")
+        if len(found) < view.page_count and self.ctx.confirm(
+                _("Pagine vuote e duplicate"),
+                _("Trovate {n} pagine:").format(n=len(found)) + "\n" + shown + "\n\n" + _("Eliminarle?")):
+            self.apply(_("Elimina pagine vuote e duplicate"), lambda pdf: E.delete_pages(pdf, found),
+                       select=lambda r: [min(found[0], view.page_count - 1)])
+        return found
+
     # ================================================================ sblocco
     def unlock(self) -> None:
         view = self.view()
