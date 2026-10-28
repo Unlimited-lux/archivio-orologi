@@ -20,21 +20,21 @@ def test_rebuilt_file_shows_bar_and_repair(viewer_window, tmp_path, monkeypatch)
     view = viewer_window.open_path(_broken_pdf(tmp_path))
     assert view.page_count == 3
     ctl = viewer_window.ctx.viewer_parts["integrity"]
-    bars = ctl.bars[view]
-    assert bars and "ricostruito" in bars[0].label.text()
-    assert bars[0].isVisible()
+    assert ctl.BANNER_REPAIRED in viewer_window.ctx.banners(view)     # barra di avviso del nucleo
+    bar = viewer_window.tabs.page(view).banners
+    assert "ricostruito" in bar.text_label.text() and bar.isVisible()
     out = tmp_path / "riparato.pdf"
     monkeypatch.setattr(viewer_window.ctx, "ask_save_path", lambda *a, **k: str(out))
-    bars[0].button.click()
+    [b for b in bar.action_buttons if "Ripara" in b.text()][0].click()
     assert out.exists()
     reopened = pymupdf.open(str(out))
     assert not reopened.is_repaired and reopened.page_count == 3
-    assert view not in ctl.bars or not any(b.isVisible() for b in ctl.bars[view])
+    assert ctl.BANNER_REPAIRED not in viewer_window.ctx.banners(view)
 
 
 def test_healthy_file_has_no_bar(viewer_window, sample_pdf):
     view = viewer_window.open_path(sample_pdf)
-    assert view not in viewer_window.ctx.viewer_parts["integrity"].bars
+    assert not viewer_window.ctx.banners(view)
 
 
 def test_deferred_callbacks_after_window_destroyed(qtbot, settings, tmp_path):

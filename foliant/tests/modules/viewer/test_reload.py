@@ -156,15 +156,18 @@ def test_modified_document_shows_bar_without_reload(viewer_window, ctl, pdf30, q
         view.document.pdf.delete_page(0)
     _write(pdf30, _pdf_bytes(30, "B"))
     qtbot.waitUntil(lambda: ctl.bar(view) is not None, timeout=3000)
-    bar = ctl.bar(view)
     assert ctl.reload_count == 0
-    assert bar.isVisible() and bar.isWindow() is False
-    assert set(bar.buttons) == {"Ricarica e perdi le modifiche", "Ignora", "Salva con nome…"}
-    assert view.viewportMargins().top() == bar.height() > 0
+    # barra di avviso del nucleo sopra la vista, con le tre scelte
+    from foliant.modules.viewer.reload import ReloadBar
+    assert ReloadBar.BANNER_ID in viewer_window.ctx.banners(view)
+    banner_bar = viewer_window.tabs.page(view).banners
+    assert banner_bar.isVisible()
+    buttons = {b.text(): b for b in banner_bar.action_buttons}
+    assert set(buttons) == {"Ricarica e perdi le modifiche", "Ignora", "Salva con nome…"}
     assert view.document.is_modified and view.page_count == 29
     # «Ignora»: la barra sparisce, nessuna ricarica, nessuna nuova barra per lo stesso cambiamento
-    bar.buttons["Ignora"].click()
-    assert ctl.bar(view) is None and view.viewportMargins().top() == 0
+    buttons["Ignora"].click()
+    assert ctl.bar(view) is None and ReloadBar.BANNER_ID not in viewer_window.ctx.banners(view)
     qtbot.wait(400)
     assert ctl.bar(view) is None and ctl.reload_count == 0
     # nuovo cambiamento → barra di nuovo; «Ricarica e perdi le modifiche»
