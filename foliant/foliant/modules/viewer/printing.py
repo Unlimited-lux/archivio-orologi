@@ -46,7 +46,7 @@ EN = {
     "fronte/retro sul lato corto": "two-sided on the short edge",
     "fronte/retro sul lato lungo": "two-sided on the long edge",
     "Il documento chiede la stampa {mode}.": "The document asks for {mode} printing.",
-    "Pagine per foglio": "Pages per sheet",
+    "Pagine per foglio": "Pages on each sheet",
     "Ordine per colonne": "Column order",
     "Bordo attorno alle pagine": "Border around pages",
     "Fronte/retro": "Two-sided",
