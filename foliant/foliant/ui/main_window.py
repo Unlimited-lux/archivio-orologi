@@ -199,7 +199,7 @@ class MainWindow(QMainWindow):
         self.zoom_combo.setFixedWidth(150)
         self.zoom_combo.addItem(_("Adatta larghezza"), FIT_WIDTH)
         self.zoom_combo.addItem(_("Adatta pagina"), FIT_PAGE)
-        for z in (50, 75, 100, 125, 150, 200, 300, 400):
+        for z in (10, 25, 50, 75, 100, 125, 150, 200, 300, 400, 800, 1600, 3200, 6400):
             self.zoom_combo.addItem(f"{z}%", z / 100)
         self.zoom_combo.activated.connect(self._on_zoom_combo)
         self.zoom_combo.lineEdit().returnPressed.connect(self._on_zoom_text)

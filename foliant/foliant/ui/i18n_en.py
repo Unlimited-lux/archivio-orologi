@@ -105,6 +105,8 @@ EN = {
     "Spazio / Maiusc+Spazio": "Space / Shift+Space",
     "Torna a Seleziona testo": "Back to Select text",
     "Chiudi": "Close",
+    'Impossibile visualizzare la pagina {n}: il file è danneggiato.': 'Page {n} cannot be displayed: the file is damaged.',
+    'Impossibile visualizzare questa pagina': 'This page cannot be displayed',
     "Tutte": "All",
     'Questi documenti hanno modifiche non salvate:': 'These documents have unsaved changes:',
     'Salva tutti': 'Save all',

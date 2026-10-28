@@ -133,6 +133,7 @@ class DocumentView(QAbstractScrollArea):
         # Coda delle rese: chiavi di `_cache` (4 elementi) o di `_tiles` (6 elementi).
         self._queue: list[tuple] = []
         self._failed: set[tuple] = set()
+        self._failed_pages: set[tuple[int, int]] = set()   # (pagina, versione) che il motore non riesce a disegnare
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render_step)
@@ -517,6 +518,7 @@ class DocumentView(QAbstractScrollArea):
 
     def _invalidate_render(self, keep_stale: bool = False) -> None:
         self._failed.clear()
+        self._failed_pages.clear()
         self._cache.clear()
         self._cache_bytes = 0
         if not keep_stale:
@@ -624,9 +626,8 @@ class DocumentView(QAbstractScrollArea):
         key = self._queue.pop(0)
         try:
             self._render_key(key)
-        except Exception as e:  # una pagina danneggiata non deve bloccare la vista
-            self._failed.add(key)
-            self.status(f"Errore nel disegno di una pagina: {e}")
+        except Exception:  # una pagina danneggiata non deve bloccare la vista
+            self._mark_failed(key)
         finally:
             ENGINE_LOCK.release()
         self.viewport().update()
@@ -637,10 +638,22 @@ class DocumentView(QAbstractScrollArea):
         """Disegna subito le pagine (o le tasselle) visibili in attesa (test, stampa, catture)."""
         self._schedule_visible()
         while self._queue:
+            key = self._queue.pop(0)
             with ENGINE_LOCK:
-                self._render_key(self._queue.pop(0))
+                try:
+                    self._render_key(key)
+                except Exception:
+                    self._mark_failed(key)
         self._render_timer.stop()
         self.viewport().update()
+
+    def _mark_failed(self, key: tuple) -> None:
+        from ..i18n import _
+        self._failed.add(key)
+        page = (key[0], key[3])
+        if page not in self._failed_pages:
+            self._failed_pages.add(page)
+            self.status(_("Impossibile visualizzare la pagina {n}: il file è danneggiato.").format(n=key[0] + 1))
 
     def _render_key(self, key: tuple) -> None:
         """Esegue una voce della coda, tenendo ENGINE_LOCK: pagina intera (4 elementi) o tassella (6)."""
@@ -783,6 +796,9 @@ class DocumentView(QAbstractScrollArea):
             r = self.page_rect(i)
             p.fillRect(r.adjusted(1, 2, 2, 3), shadow)
             p.fillRect(r, QColor(255, 255, 255))
+            if (i, ver) in self._failed_pages:      # NFR-14: la pagina danneggiata lo dice, le altre restano visibili
+                self._paint_failed(p, r)
+                continue
             if self._tiled(i, key):
                 missing = self._paint_tiles(p, i, r, key, ver) or missing
             else:
@@ -801,6 +817,17 @@ class DocumentView(QAbstractScrollArea):
             p.restore()
         if missing and not self._render_timer.isActive():
             self._schedule_visible()
+
+    def _paint_failed(self, p: QPainter, r: QRectF) -> None:
+        from ..i18n import _
+        p.save()
+        p.fillRect(r, QColor(246, 246, 246))
+        p.setPen(QColor(150, 150, 150))
+        p.drawRect(r.adjusted(0, 0, -1, -1))
+        p.setPen(QColor(90, 90, 90))
+        p.drawText(r.adjusted(12, 12, -12, -12), int(Qt.AlignmentFlag.AlignCenter) | int(Qt.TextFlag.TextWordWrap),
+                   _("Impossibile visualizzare questa pagina"))
+        p.restore()
 
     def _paint_tiles(self, p: QPainter, index: int, r: QRectF, key: float, ver: int) -> bool:
         """Pagina a tasselle: solo la parte visibile. Restituisce True se manca qualche tassella.

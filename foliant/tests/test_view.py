@@ -424,3 +424,31 @@ def test_copy_respects_permission(qtbot, tmp_path):
     assert v.copy_selection()
     assert QGuiApplication.clipboard().text() != "ORIGINALE"
     QGuiApplication.clipboard().clear()
+
+
+def test_unreadable_page_shows_notice(qtbot, tmp_path):
+    """NFR-14: una pagina che il motore non carica mostra un riquadro, le altre restano visibili."""
+    d = pymupdf.open()
+    for i in range(2):
+        d.new_page().insert_text((72, 72), f"Pagina {i + 1}")
+    px = d.pdf_catalog()
+    px = int(d.xref_get_key(px, "Pages")[1].split()[0])
+    d.xref_set_key(px, "Kids", d.xref_get_key(px, "Kids")[1].replace("]", f" {px} 0 R]"))
+    d.xref_set_key(px, "Count", "3")
+    path = tmp_path / "ciclo.pdf"
+    d.save(str(path))
+    v = DocumentView(Document.open(path))
+    qtbot.addWidget(v)
+    v.resize(700, 900)
+    v.show()
+    qtbot.waitExposed(v)
+    if v.page_count < 3:          # il motore ha ricostruito l'albero: nessuna pagina illeggibile
+        return
+    v.set_fit(FIT_PAGE)
+    v.go_to_page(2)
+    v.flush_rendering()                                   # nessuna eccezione
+    img = v.grab().toImage()
+    r = v.page_rect(2)
+    dpr = img.devicePixelRatio()
+    c = img.pixelColor(int(r.center().x() * dpr), int((r.top() + 20) * dpr))
+    assert (c.red(), c.green(), c.blue()) != (255, 255, 255)   # riquadro grigio, non pagina bianca
