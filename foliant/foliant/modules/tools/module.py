@@ -13,7 +13,7 @@ class ToolsModule:
         from .privacy import cleanup_legacy
         from .watch import WatchService
         self.ctx = ctx
-        # riservatezza: dati delle versioni precedenti con percorsi dei file (una volta sola)
+        # riservatezza: dati delle versioni precedenti con percorsi dei file (solo se presenti)
         try:
             cleanup_legacy(ctx.settings())
         except Exception:

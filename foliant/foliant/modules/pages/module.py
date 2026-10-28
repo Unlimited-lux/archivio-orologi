@@ -41,7 +41,7 @@ def temp_dir() -> str:
 
 
 def _privacy_cleanup(ctx) -> None:
-    """All'avvio: file temporanei rimasti e, una volta sola, percorsi nei modelli salvati."""
+    """All'avvio: file temporanei rimasti e percorsi nei modelli salvati."""
     from . import privacy
     try:
         privacy.cleanup_temp_dirs(keep=_TEMP_DIR)

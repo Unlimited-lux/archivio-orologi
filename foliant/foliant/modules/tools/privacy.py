@@ -1,4 +1,4 @@
-"""Riservatezza: pulizia una tantum dei dati delle versioni precedenti del modulo Strumenti.
+"""Riservatezza: pulizia all'avvio dei dati delle versioni precedenti del modulo Strumenti.
 
 Le versioni precedenti conservavano nel profilo (accanto al file delle impostazioni)
 percorsi di file e cartelle: configurazione e registro delle cartelle monitorate,
@@ -13,9 +13,6 @@ from __future__ import annotations
 import glob
 import os
 
-CLEANUP_KEY = "tools/privacy_cleanup"
-CLEANUP_VERSION = 1
-
 
 def base_dir(settings) -> str:
     """Cartella del file delle impostazioni (dove le versioni precedenti scrivevano)."""
@@ -26,50 +23,49 @@ def base_dir(settings) -> str:
     return os.path.dirname(name) if name else ""
 
 
-def _unlink(path: str) -> None:
+def _unlink(path: str) -> bool:
     try:
         if os.path.isfile(path) and not os.path.islink(path):
             os.unlink(path)
+            return True
     except OSError:
         pass
+    return False
 
 
-def _rmdir_if_empty(path: str) -> None:
+def _rmdir_if_empty(path: str) -> bool:
     try:
         if os.path.isdir(path) and not os.path.islink(path) and not os.listdir(path):
             os.rmdir(path)
+            return True
     except OSError:
         pass
+    return False
 
 
-def remove_legacy_files(base: str) -> None:
-    """Cancella i file delle versioni precedenti con percorsi dei file elaborati."""
+def remove_legacy_files(base: str) -> list[str]:
+    """Cancella i file delle versioni precedenti con percorsi dei file elaborati e ripulisce
+    le sequenze; restituisce i file toccati (vuoto se non c'era nulla da fare)."""
     if not base or not os.path.isdir(base):
-        return
+        return []
     from . import engine as be
-    _unlink(os.path.join(base, "foliant-monitor.json"))               # cartelle monitorate
+    touched = []
     state = os.path.join(base, "foliant-monitor")                     # registro dei file elaborati
-    for path in glob.glob(os.path.join(glob.escape(state), "monitor-*.json")):
-        _unlink(path)
-    _rmdir_if_empty(state)
-    _unlink(os.path.join(base, "foliant-lavoro-in-corso.json"))       # giornale del lavoro in corso
     history = os.path.join(base, "foliant-rapporti")                  # cronologia dei rapporti
-    for path in glob.glob(os.path.join(glob.escape(history), "lavoro_*.json")):
-        _unlink(path)
-    _rmdir_if_empty(history)
+    candidates = [os.path.join(base, "foliant-monitor.json"),         # cartelle monitorate
+                  os.path.join(base, "foliant-lavoro-in-corso.json")]  # giornale del lavoro in corso
+    candidates += glob.glob(os.path.join(glob.escape(state), "monitor-*.json"))
+    candidates += glob.glob(os.path.join(glob.escape(history), "lavoro_*.json"))
+    touched += [p for p in candidates if _unlink(p)]
+    touched += [d for d in (state, history) if _rmdir_if_empty(d)]
     sequences = os.path.join(base, "foliant-sequenze")                # sequenze: si tengono, senza percorsi
-    for path in glob.glob(os.path.join(glob.escape(sequences), "*.json")):
-        be.scrub_sequence_file(path)
+    touched += [p for p in glob.glob(os.path.join(glob.escape(sequences), "*.json"))
+                if be.scrub_sequence_file(p)]
+    return touched
 
 
 def cleanup_legacy(settings) -> bool:
-    """Pulizia una tantum all'avvio. Restituisce True se è stata eseguita ora."""
-    try:
-        done = int(settings.value(CLEANUP_KEY, 0) or 0)
-    except (TypeError, ValueError):
-        done = 0
-    if done >= CLEANUP_VERSION:
-        return False
-    remove_legacy_files(base_dir(settings))
-    settings.setValue(CLEANUP_KEY, CLEANUP_VERSION)
-    return True
+    """Pulizia all'avvio, silenziosa e idempotente: agisce solo se trova dati delle versioni
+    precedenti (quindi, in pratica, una volta sola) e non scrive nulla nelle impostazioni.
+    Restituisce True se ha cancellato o ripulito qualcosa."""
+    return bool(remove_legacy_files(base_dir(settings)))

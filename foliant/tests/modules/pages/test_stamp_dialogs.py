@@ -502,18 +502,15 @@ def test_header_footer_preview_page_navigation(opened, qtbot):
 
 
 def test_old_templates_lose_logo_path_once(window, tmp_path):
-    """Pulizia una tantum: i modelli delle versioni precedenti perdono il percorso del logo."""
+    """Pulizia all'avvio: i modelli delle versioni precedenti perdono il percorso del logo."""
     from foliant.modules.pages import privacy
     settings = window.ctx.settings()
     secret = str(tmp_path / "Riservato" / "logo-studio-rossi.png")
     settings.setValue(sd.TEMPLATES_KEY, json.dumps({"Carta": {"logo": secret, "margin": 20, "underline": True}}))
-    settings.remove(privacy.CLEANUP_KEY)
     assert privacy.cleanup_legacy(settings)
     data = json.loads(settings.value(sd.TEMPLATES_KEY))
     assert data == {"Carta": {"logo": None, "margin": 20, "underline": True}}
-    settings.setValue(sd.TEMPLATES_KEY, json.dumps({"Altro": {"logo": secret}}))
-    assert not privacy.cleanup_legacy(settings)        # una volta sola
-    settings.setValue(privacy.CLEANUP_KEY, 0)
+    assert not privacy.cleanup_legacy(settings)        # niente più da togliere: nessuna scrittura
     settings.setValue(sd.TEMPLATES_KEY, "non è json")
     assert privacy.cleanup_legacy(settings)
     assert not settings.contains(sd.TEMPLATES_KEY)

@@ -9,8 +9,8 @@ blocco; le stesse azioni sono nel menu ☰ e nella Home.
 cartelle dei file elaborati. Cronologia dei lavori, stato di ripresa, cartelle monitorate e il
 loro registro restano solo in memoria per la sessione; le sequenze salvate non contengono né la
 cartella di destinazione né i file dei parametri (diventano «chiedi all'avvio»); i file si
-scelgono con i dialoghi del contesto. All'avvio `privacy.cleanup_legacy` cancella una volta sola
-giornale, rapporti e monitoraggi delle versioni precedenti e ripulisce le sequenze
+scelgono con i dialoghi del contesto. All'avvio `privacy.cleanup_legacy` cancella, se li trova (in pratica una volta
+sola), giornale, rapporti e monitoraggi delle versioni precedenti e ripulisce le sequenze
 (bu: `test_old_journal_history_and_watches_removed_at_start`). Ammessi: contatori delle serie
 Bates (`serie-bates.json`, solo etichette e numeri) e file salvati dall'utente dove sceglie lui.
 
@@ -32,7 +32,7 @@ Test: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/modules/too
 | `engine.py` | logica pura delle operazioni in blocco: coda, azioni, nomi, esecuzione, rapporto, sequenze (il giornale su disco è stato tolto) |
 | `batch_ui.py` | pannello Operazioni in blocco, parametri, sequenze, rapporto, cartelle monitorate |
 | `watch.py` | cartelle monitorate (BAT-21) |
-| `privacy.py` | pulizia una tantum dei dati delle versioni precedenti |
+| `privacy.py` | pulizia all'avvio dei dati delle versioni precedenti |
 | `cli.py` | riga di comando (BAT-22): `python -m foliant.modules.tools.cli --help` |
 | `translations.py` | catalogo inglese (verificato da `test_translations.py`) |
 

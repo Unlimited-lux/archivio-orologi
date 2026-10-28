@@ -3,7 +3,7 @@
 - `cleanup_temp_dirs`: a ogni avvio cancella le cartelle temporanee `foliant-pagine-*`
   (pagine trascinate o condivise, con il nome del documento) rimaste da una sessione
   terminata in modo anomalo; solo quelle dell'utente e di processi non più attivi.
-- `cleanup_legacy`: una volta sola, toglie il percorso del logo dai modelli di
+- `cleanup_legacy`: se li trova (in pratica una volta sola), toglie il percorso del logo dai modelli di
   intestazione e piè di pagina salvati dalle versioni precedenti.
 """
 
@@ -17,8 +17,6 @@ import tempfile
 import time
 
 TEMP_PREFIX = "foliant-pagine-"
-CLEANUP_KEY = "pages/privacy_cleanup"
-CLEANUP_VERSION = 1
 TEMPLATES_KEY = "pages/headerfooter_templates"
 LEGACY_GRACE_SECONDS = 3600   # cartelle delle versioni precedenti: tolte dopo un'ora
 
@@ -71,18 +69,19 @@ def cleanup_temp_dirs(keep: str | None = None, base: str | None = None) -> list[
     return removed
 
 
-def scrub_templates(settings) -> None:
-    """Toglie i percorsi del logo dai modelli salvati (il logo incorporato resta)."""
+def scrub_templates(settings) -> bool:
+    """Toglie i percorsi del logo dai modelli salvati (il logo incorporato resta).
+    Restituisce True se la chiave è stata modificata o cancellata."""
+    if not settings.contains(TEMPLATES_KEY):
+        return False
     raw = settings.value(TEMPLATES_KEY, "")
-    if not raw:
-        return
     try:
-        data = json.loads(raw)
+        data = json.loads(raw) if raw else {}
     except (TypeError, ValueError):
         data = None
     if not isinstance(data, dict):
         settings.remove(TEMPLATES_KEY)
-        return
+        return True
     changed = False
     for params in data.values():
         if isinstance(params, dict) and params.get("logo") is not None:
@@ -90,16 +89,10 @@ def scrub_templates(settings) -> None:
             changed = True
     if changed:
         settings.setValue(TEMPLATES_KEY, json.dumps(data, ensure_ascii=False))
+    return changed
 
 
 def cleanup_legacy(settings) -> bool:
-    """Pulizia una tantum dei dati delle versioni precedenti; True se eseguita ora."""
-    try:
-        done = int(settings.value(CLEANUP_KEY, 0) or 0)
-    except (TypeError, ValueError):
-        done = 0
-    if done >= CLEANUP_VERSION:
-        return False
-    scrub_templates(settings)
-    settings.setValue(CLEANUP_KEY, CLEANUP_VERSION)
-    return True
+    """Pulizia all'avvio, silenziosa e idempotente: scrive solo se trova percorsi lasciati
+    dalle versioni precedenti (quindi, in pratica, una volta sola)."""
+    return scrub_templates(settings)

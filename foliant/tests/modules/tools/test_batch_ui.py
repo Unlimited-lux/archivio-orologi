@@ -226,7 +226,7 @@ def test_pdf_report_and_history(batch, folder, tmp_path):
 
 
 def test_old_journal_history_and_watches_removed_at_start(window, tmp_path):
-    """Pulizia una tantum dei dati delle versioni precedenti (percorsi dei file nel profilo)."""
+    """Pulizia all'avvio dei dati delle versioni precedenti (percorsi dei file nel profilo)."""
     from foliant.modules.tools import privacy
     settings = window.ctx.settings()
     base = privacy.base_dir(settings)
@@ -253,25 +253,20 @@ def test_old_journal_history_and_watches_removed_at_start(window, tmp_path):
         f.write("mio")
     with open(os.path.join(base, "serie-bates.json"), "w", encoding="utf-8") as f:
         json.dump({"VND": 12}, f)
-    settings.remove(privacy.CLEANUP_KEY)
     assert privacy.cleanup_legacy(settings)
     for rel in ("foliant-lavoro-in-corso.json", "foliant-monitor.json", "foliant-monitor",
                 "foliant-rapporti/lavoro_20260101_000000_000000.json"):
         assert not os.path.exists(os.path.join(base, rel)), rel
     assert os.path.exists(unrelated)
-    os.unlink(unrelated)
     seq = os.path.join(base, "foliant-sequenze", "Fatture.json")
     data = json.load(open(seq, encoding="utf-8"))
     assert "destination" not in data["output"] and data["output"]["pattern"] == "{nome}_x"
     assert data["steps"][0]["params"]["file"] == "" and "file" in data["steps"][0]["ask"]
     assert os.path.exists(os.path.join(base, "serie-bates.json"))     # contatori Bates: ammessi
     assert not any(b"perizia-rossi" in d or b"Riservato" in d for d in _profile_tree().values())
-    # una volta sola
-    with open(os.path.join(base, "foliant-lavoro-in-corso.json"), "w", encoding="utf-8") as f:
-        f.write("{}")
+    # idempotente: alla seconda volta non c'è più nulla da fare (e non si scrive nulla)
     assert not privacy.cleanup_legacy(settings)
-    assert os.path.exists(os.path.join(base, "foliant-lavoro-in-corso.json"))
-    os.unlink(os.path.join(base, "foliant-lavoro-in-corso.json"))
+    assert not settings.contains("tools/privacy_cleanup")
 
 
 def test_tools_module_keeps_nothing_between_sessions(window, folder, tmp_path):
