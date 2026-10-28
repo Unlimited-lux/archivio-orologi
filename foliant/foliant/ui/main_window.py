@@ -873,7 +873,8 @@ class MainWindow(QMainWindow):
         doc = view.document
         if doc.closed:
             return
-        self.tabs.setTabText(index, ("• " if doc.is_modified else "") + doc.display_name)
+        self.tabs.setTabText(index, ("• " if doc.is_modified else "") + doc.display_name
+                             + (" " + _("(sola lettura)") if doc.read_only else ""))
         self.tabs.setTabToolTip(index, str(doc.path or doc.display_name))
         if view is self.current_view():
             self._update_state()
@@ -892,7 +893,8 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(APP_NAME)
             return
         doc = view.document
-        self.setWindowTitle(f"{'• ' if doc.is_modified else ''}{doc.display_name} — {APP_NAME}")
+        ro = " " + _("(sola lettura)") if doc.read_only else ""
+        self.setWindowTitle(f"{'• ' if doc.is_modified else ''}{doc.display_name}{ro} — {APP_NAME}")
         self.act_undo.setEnabled(doc.can_undo)
         self.act_redo.setEnabled(doc.can_redo)
         self.act_undo.setToolTip(_("Annulla: {x}").format(x=doc.undo_label) if doc.undo_label else _("Annulla"))

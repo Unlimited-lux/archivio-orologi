@@ -272,7 +272,17 @@ class Document:
 
     @property
     def needs_save_as(self) -> bool:
-        return self.path is None
+        return self.path is None or self.read_only
+
+    @property
+    def read_only(self) -> bool:
+        """Il file su disco non è scrivibile: «Salva» diventa «Salva con nome»."""
+        if self.path is None:
+            return False
+        target = os.path.realpath(self.path)
+        if os.path.exists(target):
+            return not os.access(target, os.W_OK)
+        return not os.access(os.path.dirname(target) or ".", os.W_OK)
 
     @property
     def can_undo(self) -> bool:

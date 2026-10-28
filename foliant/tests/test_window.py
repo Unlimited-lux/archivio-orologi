@@ -272,3 +272,22 @@ def test_module_disabled_action_survives_view_switch(window, sample_pdf, tmp_pat
         pdf.delete_page(0)
     assert not act.isEnabled()
     view.document._saved_state = view.document._state     # chiusura senza domanda di salvataggio
+
+
+def test_read_only_file_saves_as(window, sample_pdf, tmp_path, monkeypatch):
+    """File senza permesso di scrittura: indicazione nel titolo e Salva chiede un nuovo nome."""
+    import os
+    from foliant.core import document as docmod
+    real_access = os.access
+    ro = os.path.realpath(sample_pdf)
+    monkeypatch.setattr(docmod.os, "access",
+                        lambda p, mode: False if (mode == os.W_OK and os.path.realpath(p) == ro) else real_access(p, mode))
+    view = window.open_path(sample_pdf)
+    assert view.document.read_only and "sola lettura" in window.windowTitle()
+    with view.document.change("x") as pdf:
+        pdf.delete_page(0)
+    target = str(tmp_path / "copia.pdf")
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: target)
+    assert window.save_view(view)
+    assert pymupdf.open(target).page_count == 2
+    assert pymupdf.open(sample_pdf).page_count == 3          # l'originale non è stato toccato
