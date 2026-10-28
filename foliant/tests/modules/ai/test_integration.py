@@ -290,3 +290,55 @@ def test_collection_excludes_forbidden(window, ready, fake, text_pdf, tmp_path):
     assert "escluso" in dlg.list.item(1).text()
     dlg.ask("Domanda")
     assert "Segreto" not in fake.all_text() and "Documento libero" in fake.all_text()
+
+
+# ------------------------------------------------------------------ AI-23 / AI-17
+def test_command_proposal_validated_and_no_content_sent(window, ready, fake, text_pdf):
+    view = window.open_path(text_pdf(10))
+    fake.responses = [json.dumps({"proposals": [{"tool": "vai-a-pagina", "params": {"page": 7},
+                                                 "explanation": "pagina richiesta"}]})]
+    ready.controller.exec_dialog = lambda dlg: dlg.choose()
+    ready.controller.open_commands("vai a pagina 7")
+    assert view.current_page == 6
+    sent = fake.all_text()
+    assert "Contenuto unico" not in sent and "10 pages" in sent
+
+
+def test_command_out_of_range_rejected(window, ready, fake, text_pdf):
+    view = window.open_path(text_pdf(10))
+    fake.responses = [json.dumps({"proposals": [{"tool": "vai-a-pagina", "params": {"page": "30-35"}}]})]
+    ready.controller.exec_dialog = lambda dlg: dlg.choose()
+    dlg = ready.controller.open_commands("ruota le pagine 30-35")
+    assert dlg.chosen is None and dlg.proposals == []
+    assert "non valide" in dlg.notice.text()
+    assert view.current_page == 0
+
+
+def test_command_catalog_contains_app_actions(window, ready):
+    from foliant.modules.ai import commands
+    cat = ready.controller.tool_catalog()
+    assert any(t.id == "vai-a-pagina" for t in cat)
+    ok, rej = commands.validate({"proposals": [{"tool": "inesistente"}]}, cat, 5)
+    assert not ok and "inesistente" in rej[0]
+
+
+def test_operations_dialog_lists_and_cancels(qtbot, window, ready, fake, sample_pdf):
+    from foliant.modules.ai.ui import OperationsDialog
+    window.open_path(sample_pdf)
+    fake.responses = [{"chunks": ["a", "b", "c", "d"], "delay": 0.3}]
+    panel = ready.panel
+    panel.send("x")
+    dlg = OperationsDialog(ready, window)
+    assert "chat" in dlg.list.item(0).text()
+    dlg.list.setCurrentRow(0)
+    dlg.cancel_selected()
+    wait_done(qtbot, panel)
+    assert panel.conversation().messages[-1].status == "interrupted"
+
+
+def test_shortcut_opens_assistant_mode(window, sample_pdf):
+    window.open_path(sample_pdf)
+    act = next(a for a in window.findChildren(__import__("PySide6.QtGui", fromlist=["QAction"]).QAction)
+               if a.shortcut().toString() == "Ctrl+Alt+I")
+    act.trigger()
+    assert window.ctx.current_mode() == "ia"

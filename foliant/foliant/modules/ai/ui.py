@@ -636,6 +636,46 @@ class Controller:
         self.exec_dialog(dlg)
         return dlg
 
+    # ---------------------------------------------------------------- comandi (AI-23)
+    def tool_catalog(self):
+        from . import commands
+        actions = []
+        for mode_id, mode in self.ctx.window.modes.items():
+            if mode_id == "ia":
+                continue
+            for a in mode.toolbar.actions():
+                if not a.isSeparator():
+                    actions.append((mode_id, a))
+        return commands.builtin_tools(self.ctx) + commands.catalog_from_actions(actions)
+
+    def open_commands(self, request: str | None = None):
+        from . import commands
+        view = self.ctx.current_view()
+        panel = self.services.panel
+        if view is None or panel is None or not panel._ensure_ready():
+            return None
+        catalog = self.tool_catalog()
+        sel_pages = [view.text_selection.page] if view.text_selection else []
+
+        def propose(q):
+            return self._run(_("Ricerca dello strumento…"), lambda job: commands.propose(
+                job, q, catalog, view.page_count, sel_pages))
+
+        dlg = CommandsDialog(propose, self.ctx.window)
+        if request:
+            dlg.ask(request)
+        self.exec_dialog(dlg)
+        if dlg.chosen is not None:
+            self.run_proposal(dlg.chosen)
+        return dlg
+
+    def run_proposal(self, proposal) -> None:
+        act = proposal.tool.action
+        if callable(act) and not hasattr(act, "trigger"):
+            act(proposal.params)
+        elif act is not None:
+            act.trigger()   # lo strumento chiede le sue conferme come nell'uso manuale
+
     # ---------------------------------------------------------------- analisi pagine (AI-24)
     def analyze_pages(self):
         from . import page_analysis
@@ -727,6 +767,116 @@ def _plain_bytes(doc) -> bytes:
         return doc.pdf.tobytes(garbage=0, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
 
 
+# =================================================================== operazioni in corso (AI-17)
+class OperationsDialog(QDialog):
+    def __init__(self, services: Services, parent=None):
+        super().__init__(parent)
+        self.services = services
+        self.setWindowTitle(_("Operazioni dell'assistente"))
+        self.resize(520, 300)
+        lay = QVBoxLayout(self)
+        self.list = QListWidget()
+        lay.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        stop = QPushButton(_("Annulla l'operazione"))
+        bind_icon(stop, "circle-stop")
+        stop.clicked.connect(self.cancel_selected)
+        close = QPushButton(_("Chiudi"))
+        close.clicked.connect(self.accept)
+        row.addWidget(stop)
+        row.addStretch(1)
+        row.addWidget(close)
+        lay.addLayout(row)
+        self.reload()
+
+    def reload(self) -> None:
+        self.list.clear()
+        for w in self.services.workers:
+            doc = w.document.display_name if w.document is not None else _("nessun documento")
+            text = f"{w.function} · {doc} · {w.started.strftime('%H:%M:%S')} · {w.state}"
+            if w.phase:
+                text += f" · {w.phase}"
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, w)
+            self.list.addItem(item)
+        if not self.services.workers:
+            self.list.addItem(_("Nessuna operazione in corso."))
+
+    def cancel_selected(self) -> None:
+        item = self.list.currentItem()
+        w = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if w is not None:
+            w.cancel()
+            self.reload()
+
+
+# =================================================================== assistente comandi (AI-23)
+class CommandsDialog(QDialog):
+    def __init__(self, propose, parent=None):
+        super().__init__(parent)
+        self.propose = propose
+        self.proposals = []
+        self.setWindowTitle(_("Assistente comandi"))
+        self.resize(560, 380)
+        lay = QVBoxLayout(self)
+        lab = QLabel(_("Descrivi cosa vuoi fare, ad esempio «vai a pagina 12». Il contenuto del documento non "
+                       "viene inviato; l'operazione parte solo quando la confermi nello strumento."))
+        lab.setWordWrap(True)
+        lay.addWidget(lab)
+        row = QHBoxLayout()
+        self.request = QLineEdit()
+        self.request.returnPressed.connect(self.ask)
+        go = QPushButton(_("Proponi"))
+        go.clicked.connect(self.ask)
+        row.addWidget(self.request, 1)
+        row.addWidget(go)
+        lay.addLayout(row)
+        self.list = QListWidget()
+        self.list.itemActivated.connect(lambda _i: self.choose())
+        lay.addWidget(self.list, 1)
+        self.notice = QLabel("")
+        self.notice.setWordWrap(True)
+        lay.addWidget(self.notice)
+        row = QHBoxLayout()
+        use = QPushButton(_("Apri lo strumento"))
+        use.clicked.connect(self.choose)
+        close = QPushButton(_("Chiudi"))
+        close.clicked.connect(self.reject)
+        row.addStretch(1)
+        row.addWidget(close)
+        row.addWidget(use)
+        lay.addLayout(row)
+        self.chosen = None
+
+    def ask(self, text: str | None = None) -> None:
+        if text is not None:
+            self.request.setText(text)
+        q = self.request.text().strip()
+        if not q:
+            return
+        result = self.propose(q)
+        if result is None:
+            return
+        self.proposals, rejected = result
+        self.list.clear()
+        for p in self.proposals:
+            params = ", ".join(f"{k}={v}" for k, v in p.params.items())
+            self.list.addItem(f"{p.tool.description}" + (f" ({params})" if params else "") +
+                              (f" — {p.explanation}" if p.explanation else ""))
+        notes = list(rejected)
+        if not self.proposals:
+            notes.append(_("Nessuna proposta valida: prova a riformulare o scegli lo strumento dalla barra."))
+        self.notice.setText(" ".join(notes))
+        if self.proposals:
+            self.list.setCurrentRow(0)
+
+    def choose(self) -> None:
+        row = self.list.currentRow()
+        if 0 <= row < len(self.proposals):
+            self.chosen = self.proposals[row]
+            self.accept()
+
+
 # =================================================================== chat generale senza documento
 class GeneralChatDialog(QDialog):
     def __init__(self, ctx, services, parent=None):
@@ -791,6 +941,12 @@ def register(ctx, *, provider_factory=None) -> Services:
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
     a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_cmd = act(_("Assistente comandi"), "terminal", lambda: controller.open_commands())
+    a_ops = act(_("Operazioni in corso"), "activity", lambda: OperationsDialog(services, ctx.window).exec(),
+                requires=False)
+    a_open = act(_("Assistente IA"), "sparkles", lambda: (ctx.set_mode("ia"), show_panel()), "Ctrl+Alt+I",
+                 requires=False)
+    ctx.add_menu_action(a_open, _("Assistente IA"))
     a_tasks = act(_("Attività"), "briefcase", lambda: controller.open_tasks(), requires=False)
     a_write = act(_("Scrivi"), "pen-line", lambda: controller.open_writer(), requires=False)
     a_extract = act(_("Estrai dati"), "table", lambda: controller.choose_extraction())
@@ -802,23 +958,36 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_log = act(_("Registro degli invii"), "list", lambda: services.show_log(), requires=False)
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
-                            a_section, a_sem]
+                            a_section, a_sem, a_cmd]
     services.profile_actions = [a_tasks, a_write, a_coll]
     services.local_actions = [a_pages]   # funziona anche senza profilo (controlli locali)
-    for a in (a_chat, a_sum, a_tr, a_exp, a_rw):
+    for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
         mode.add_action(a)
     mode.add_separator()
-    for a in (a_out, a_map, a_area, a_trpdf, a_extract, a_sem, a_bm, a_section, a_pages):
-        mode.add_action(a)
+    from PySide6.QtWidgets import QToolButton
+    more = QToolButton()
+    more.setText(_("Altri strumenti"))
+    more.setToolTip(_("Altri strumenti dell'assistente"))
+    bind_icon(more, "ellipsis")
+    more.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+    more.setAutoRaise(True)
+    more_menu = QMenu(more)
+    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages), (a_coll, a_tasks, a_write, a_cmd),
+                  (a_ops, a_log)):
+        for a in group:
+            more_menu.addAction(a)
+        more_menu.addSeparator()
+    more.setMenu(more_menu)
+    services.more_menu = more_menu
+    mode.add_widget(more)
     mode.add_separator()
-    for a in (a_coll, a_tasks, a_write):
+    a_set.setIconText(_("Impostazioni"))
+    for a in (a_hist, a_set):
         mode.add_action(a)
     pages_mode = ctx.mode("pagine")
     if pages_mode is not None:
         pages_mode.add_action(a_pages)
-    mode.add_separator()
-    for a in (a_hist, a_log, a_set):
-        mode.add_action(a)
     ctx.add_menu_action(a_set, _("Assistente IA"))
     ctx.add_menu_action(a_trpdf, _("Assistente IA"))
     ctx.add_home_action(_("Assistente IA"), "sparkles", lambda: GeneralChatDialog(ctx, services, ctx.window).exec(),

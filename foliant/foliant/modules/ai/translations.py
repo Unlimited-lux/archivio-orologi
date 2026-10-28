@@ -816,4 +816,26 @@ EN: dict[str, str] = {
     "idea": "idea",
     "durata": "duration (minutes)",
     "parte": "part",
+    # assistente comandi e operazioni (AI-23, AI-17)
+    "Vai a una pagina": "Go to a page",
+    "La risposta non contiene proposte valide.": "The answer contains no valid proposals.",
+    "Strumento inesistente: «{t}».": "Unknown tool: “{t}”.",
+    "Pagine non valide per «{t}»: il documento ha {n} pagine.": "Invalid pages for “{t}”: the document has {n} pages.",
+    "Parametro non valido: {p}.": "Invalid parameter: {p}.",
+    "Assistente comandi": "Command assistant",
+    "Operazioni in corso": "Running operations",
+    "Altri strumenti": "More tools",
+    "Altri strumenti dell'assistente": "More assistant tools",
+    "Impostazioni": "Settings",
+    "Operazioni dell'assistente": "Assistant operations",
+    "Annulla l'operazione": "Cancel operation",
+    "Descrivi cosa vuoi fare, ad esempio «vai a pagina 12». Il contenuto del documento non viene inviato; l'operazione parte solo quando la confermi nello strumento.":
+        "Describe what you want to do, for example “go to page 12”. The document content is not sent; the operation starts only when you confirm it in the tool.",
+    "Proponi": "Suggest",
+    "Apri lo strumento": "Open tool",
+    "Ricerca dello strumento…": "Finding the tool…",
+    "nessun documento": "no document",
+    "Nessuna operazione in corso.": "No running operations.",
+    "Nessuna proposta valida: prova a riformulare o scegli lo strumento dalla barra.":
+        "No valid proposal: try rephrasing or pick the tool from the toolbar.",
 }
