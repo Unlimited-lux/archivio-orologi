@@ -202,7 +202,7 @@ def test_image_tools_actions(ui, tmp_path, monkeypatch):
     from foliant.modules.objects import dialogs as D
     view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 150, 120)], paths=[(300, 300, 400, 380)]))
     ui.c.set_selection(view, 0, [0])
-    monkeypatch.setattr(D, "ask_adjust", lambda parent, n: dict(grayscale=True))
+    monkeypatch.setattr(D, "ask_adjust", lambda parent, n, *a: dict(grayscale=True))
     O._state["actions"]["adjust"].trigger()
     with O.ENGINE_LOCK:
         o = objs(view)[0]
@@ -308,7 +308,7 @@ def test_background_parse(ui, tmp_path, monkeypatch, qtbot):
     ui.c._cache.clear()
     assert ui.c.parsed(view, 0, quiet=True, background=True) is None
     qtbot.waitUntil(lambda: ui.c.parsed(view, 0, quiet=True, background=True) is not None, timeout=5000)
-    assert len(ui.c.parsed(view, 0).objects) == 1
+    assert [o.kind for o in ui.c.parsed(view, 0).objects] == ["immagine", "testo"]
 
 
 def test_context_menu_full_on_selected_object(ui, tmp_path):
@@ -524,3 +524,134 @@ def test_actions_follow_document_access_changes(ui, tmp_path, monkeypatch):
     monkeypatch.setattr(type(ui.c), "extract_allowed", lambda self, v: True)
     ui.ctx.documentAccessChanged.emit(view)
     assert O._state["actions"]["save_image"].isEnabled()
+
+
+def test_pdfa_warning_once_and_xfa_blocked(ui, tmp_path):
+    path = tmp_path / "pdfa.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_image(pymupdf.Rect(50, 70, 250, 170), stream=png_bytes(20, 10))
+    doc.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                         '<rdf:Description xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="1" '
+                         'pdfaid:conformance="B"/></rdf:RDF></x:xmpmeta>')
+    doc.save(str(path))
+    view = ui.open(str(path))
+    ui.c.set_selection(view, 0, [0])
+    ui.c.translate(view, 5, 0)
+    ui.c.translate(view, 5, 0)
+    warns = [m for t, m in ui.errors if "PDF/A-1" in m]
+    assert len(warns) == 1 and abs(objs(view)[0].rect.x0 - 60) < 0.01
+    path2 = tmp_path / "xfa.pdf"
+    d2 = pymupdf.open()
+    d2.new_page().insert_image(pymupdf.Rect(50, 70, 250, 170), stream=png_bytes(20, 10))
+    d2.xref_set_key(d2.pdf_catalog(), "NeedsRendering", "true")
+    d2.save(str(path2))
+    v2 = ui.open(str(path2))
+    ui.c.set_selection(v2, 0, [0])
+    ui.c.translate(v2, 5, 0)
+    assert not v2.document.can_undo
+    assert any("XFA" in m for _t, m in ui.errors)
+
+
+def test_opacity_on_pdfa1_asks_before_applying(ui, tmp_path, monkeypatch):
+    path = tmp_path / "pdfa1.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_image(pymupdf.Rect(50, 70, 250, 170), stream=png_bytes(20, 10))
+    doc.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                         '<rdf:Description xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="1"/></rdf:RDF></x:xmpmeta>')
+    doc.save(str(path))
+    view = ui.open(str(path))
+    ui.c.set_selection(view, 0, [0])
+    asked = []
+    monkeypatch.setattr(ui.ctx, "confirm", lambda title, msg: asked.append(msg) or False)
+    ui.c.set_opacity(view, 0.8)
+    assert asked and not view.document.can_undo
+    monkeypatch.setattr(ui.ctx, "confirm", lambda title, msg: True)
+    ui.c.set_opacity(view, 0.8)
+    assert abs(objs(view)[0].opacity - 0.8) < 1e-6
+
+
+def test_huge_image_proposes_resampling(ui, tmp_path, monkeypatch):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[]))
+    monkeypatch.setattr(E, "MAX_PIXELS", 10_000)          # soglia ridotta per il test
+    asked = []
+    monkeypatch.setattr(ui.ctx, "confirm", lambda title, msg: asked.append(msg) or True)
+    ui.c.insert_image_bytes(view, [png_bytes(200, 100)], 0, pymupdf.Point(300, 400))
+    o = objs(view)[-1]
+    assert asked and o.width * o.height <= 10_000 and abs(o.width / o.height - 2) < 0.05
+
+
+def test_align_key_object_and_page_reference(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 300, 70, 320), (80, 400, 100, 420),
+                                                         (120, 500, 140, 520)]))
+    ui.c.set_selection(view, 0, [2, 0, 1])          # oggetto chiave: il primo selezionato (indice 2)
+    O._state["actions"]["ref_key"].trigger()
+    try:
+        O._state["actions"]["al_bottom"].trigger()
+        ys = [round(o.rect.y1) for o in objs(view)]
+        assert ys == [520, 520, 520]
+        assert round(objs(view)[2].rect.y0) == 500   # l'oggetto chiave non si muove
+        ui.c.set_selection(view, 0, [0])
+        O._state["actions"]["ref_page"].trigger()
+        O._state["actions"]["al_hc"].trigger()
+        r = objs(view)[0].rect
+        with O.ENGINE_LOCK:
+            pw = view.document.pdf[0].rect.width
+        assert abs((r.x0 + r.x1) / 2 - pw / 2) < 0.1
+    finally:
+        O._state["actions"]["ref_auto"].trigger()
+
+
+def test_distribute_centers_method(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(0, 300, 20, 320), (30, 300, 70, 320),
+                                                         (100, 300, 110, 320), (200, 300, 260, 320)]))
+    ui.c.set_selection(view, 0, [0, 1, 2, 3])
+    O._state["actions"]["dist_centers"].trigger()
+    try:
+        O._state["actions"]["dist_h"].trigger()
+        cs = sorted((o.rect.x0 + o.rect.x1) / 2 for o in objs(view))
+        gaps = [b - a for a, b in zip(cs, cs[1:])]
+        assert max(gaps) - min(gaps) < 0.1
+    finally:
+        O._state["actions"]["dist_spacing"].trigger()
+
+
+def test_link_dialog_new_named_destination_from_view(ui, tmp_path, monkeypatch):
+    from foliant.modules.objects import dialogs as D
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[], pages=3))
+    view.go_to_page(2)
+    monkeypatch.setattr(D, "ask_text", lambda *a: "listino")
+    dlg = D.LinkDialog(None, view, 0, None)
+    dlg.kind.setCurrentIndex(dlg.kind.findData(L.NAMED))
+    dlg._new_named()
+    target, style, desc = dlg.values()
+    assert target.kind == L.NAMED and target.name == "listino" and target.new_dest[0] == 2
+    xref = ui.c.run_change(view, "Crea collegamento", L.create_link, 0, pymupdf.Rect(50, 300, 150, 320),
+                           target, style, desc, None, kind="annotation")
+    assert xref
+    with O.ENGINE_LOCK:
+        assert L.named_destinations(view.document.pdf)["listino"]["page"] == 2
+
+
+def test_adjust_dialog_live_preview(ui, tmp_path):
+    from foliant.modules.objects import dialogs as D
+    dlg = D.AdjustDialog(None, 1, png_bytes(40, 20, (200, 30, 30)))
+    before = dlg._preview_arr.copy()
+    assert not dlg.preview.pixmap().isNull()
+    dlg.gray.setChecked(True)
+    after = dlg._preview_arr
+    assert (after[..., 0] == after[..., 1]).all() and (after != before).any()
+    dlg.gray.setChecked(False)
+    dlg.sliders["brightness"].setValue(50)
+    assert dlg._preview_arr.mean() > before.mean()
+
+
+def test_percent_without_space(ui):
+    from PySide6.QtWidgets import QAbstractSpinBox, QLabel
+    from foliant.modules.objects import dialogs as D
+    assert O._state["panel"].opacity.suffix() == "%"
+    labels = [w.text() for w in ui.window.findChildren(QLabel) if w.text().endswith("%")]
+    assert "100%" in labels and not any(t.endswith(" %") for t in labels)
+    dlg = D.TransformDialog(None) if hasattr(D, "TransformDialog") else None
+    if dlg is not None:
+        sfx = [s.suffix() for s in dlg.findChildren(QAbstractSpinBox) if hasattr(s, "suffix") and "%" in s.suffix()]
+        assert sfx and all(s == "%" for s in sfx)

@@ -248,7 +248,8 @@ def test_move_object_outside_others_pixels_unchanged(blank):
     add_image(blank, 0, (50, 50, 150, 100), png_bytes(100, 50, RED))
     clip = pymupdf.Rect(250, 550, 595, 650)
     before = render(blank, clip=clip)
-    engine.translate(blank, 0, [0], 0, 100)
+    img = [o.index for o in engine.objects(blank, 0).objects if o.kind == IMAGE][0]
+    engine.translate(blank, 0, [img], 0, 100)
     assert render(blank, clip=clip) == before
     assert _dominant(pixel(blank, 0, 100, 75)) == "white"
     assert _dominant(pixel(blank, 0, 100, 175)) == "red"
@@ -309,14 +310,14 @@ def test_move_40_paths_by_50(blank):
     shape.commit()
     page.insert_text((400, 800), "fisso")
     parsed = engine.objects(blank, 0)
-    assert [o.kind for o in parsed.objects] == [PATH] * 40
-    rects = [pymupdf.Rect(o.rect) for o in parsed.objects]
+    assert [o.kind for o in parsed.objects if o.kind != "testo"] == [PATH] * 40
+    rects = [pymupdf.Rect(o.rect) for o in parsed.objects if o.kind == PATH]
     sel = engine.objects_in_rect(parsed, pymupdf.Rect(40, 90, 160, 600))
     assert len(sel) == 40
     fixed = render(blank, clip=pymupdf.Rect(350, 700, 595, 842))
     region = render(blank, clip=pymupdf.Rect(40, 90, 160, 500))
     engine.translate(blank, 0, sel, 50, 0)
-    after = engine.objects(blank, 0).objects
+    after = [o for o in engine.objects(blank, 0).objects if o.kind == PATH]
     for r0, o in zip(rects, after):
         assert approx_rect(o.rect, (r0.x0 + 50, r0.y0, r0.x1 + 50, r0.y1), 0.01)
     assert render(blank, clip=pymupdf.Rect(90, 90, 210, 500)) == region
@@ -1001,17 +1002,17 @@ def test_five_operations_undo_redo_pixel_identical():
     with doc.change("Inserisci immagine") as p:
         engine.insert_images(p, 0, [png_bytes(100, 50, BLUE)], center=pymupdf.Point(150, 200))
     with doc.change("Sposta") as p:
-        engine.translate(p, 0, [1], 20, 30)
+        engine.translate(p, 0, [2], 20, 30)      # 0 = testo, 1 = immagine, 2 = immagine inserita
     with doc.change("Ruota") as p:
-        engine.rotate(p, 0, [0], -90)
+        engine.rotate(p, 0, [1], -90)
     with doc.change("Ritaglia") as p:
-        engine.set_crop(p, 0, 0, (0, 0, 0.5, 1))
+        engine.set_crop(p, 0, 1, (0, 0, 0.5, 1))
     with doc.change("Collegamento") as p:
         links.create_link(p, 0, pymupdf.Rect(50, 500, 150, 520), links.LinkTarget(uri="https://esempio.it"))
     final = [render(doc.pdf, i) for i in range(2)]
     final_objects = len(engine.objects(doc.pdf, 0).objects)
     final_annots = len(links.link_xrefs(doc.pdf, 0))
-    assert final_annots == 1 and final_objects == 2
+    assert final_annots == 1 and final_objects == 3
     for _ in range(5):
         assert doc.undo()
     assert not doc.is_modified

@@ -206,3 +206,105 @@ def test_insert_bad_svg():
     doc.new_page()
     with pytest.raises(E.ObjectError):
         A.insert_svg(doc, 0, b"<svg nonvalido", None)
+
+
+# ------------------------------------------------------------------ OBJ-01: blocchi di testo
+def _mixed_page():
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for k in range(3):
+        page.insert_image(pymupdf.Rect(50 + 120 * k, 60, 150 + 120 * k, 120), stream=png(20, 10))
+    for k in range(10):
+        page.draw_line((50, 200 + 10 * k), (300, 200 + 10 * k), color=(0, 0, 0), width=1)
+    page.insert_text((60, 400), "Rolex Submariner 2021", fontsize=14)
+    page.insert_text((60, 450), "Prezzo: 9.800 EUR", fontsize=12)
+    return doc
+
+
+def test_text_blocks_are_objects_with_their_box():
+    doc = _mixed_page()
+    objs = E.objects(doc, 0).objects
+    kinds = [o.kind for o in objs]
+    assert kinds.count("immagine") == 3 and kinds.count(PATH) == 10 and kinds.count("testo") == 2
+    t = [o for o in objs if o.kind == "testo"][0]
+    words = [w for w in doc[0].get_text("words") if w[4] == "Rolex"][0]
+    assert abs(t.rect.x0 - words[0]) < 1 and abs(t.rect.y1 - words[3]) < 2
+    # il test del punto trova esattamente quel blocco
+    hits = E.hit_test(E.objects(doc, 0), pymupdf.Point(words[0] + 2, (words[1] + words[3]) / 2))
+    assert objs[hits[0]].kind == "testo"
+
+
+def test_move_delete_and_copy_text_block():
+    from foliant.modules.objects import clipboard as C
+    doc = _mixed_page()
+    idx = [o.index for o in E.objects(doc, 0).objects if o.kind == "testo"]
+    E.translate(doc, 0, [idx[0]], 100, 0)
+    w = [w for w in doc[0].get_text("words") if w[4] == "Rolex"][0]
+    assert abs(w[0] - 160) < 1
+    pl = C.make_payload(doc, 0, [idx[1]])
+    other = pymupdf.open()
+    other.new_page()
+    C.paste_payload(other, 0, pl)
+    data = other.tobytes(garbage=3)
+    assert "Prezzo: 9.800 EUR" in pymupdf.open(stream=data, filetype="pdf")[0].get_text()
+    E.delete_objects(doc, 0, [idx[1]])
+    assert "Prezzo" not in doc[0].get_text()
+
+
+def test_flip_excludes_text_blocks():
+    doc = _mixed_page()
+    t = [o.index for o in E.objects(doc, 0).objects if o.kind == "testo"][0]
+    with pytest.raises(E.ObjectError):
+        E.flip(doc, 0, [t], True)
+    img = [o.index for o in E.objects(doc, 0).objects if o.kind == "immagine"][0]
+    assert E.flip(doc, 0, [img, t], True) == [img]
+
+
+def test_invisible_ocr_text_is_hidden_object():
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "testo OCR", fontsize=12, render_mode=3)
+    o = [o for o in E.objects(doc, 0).objects if o.kind == "testo"][0]
+    assert o.hidden
+    assert E.hit_test(E.objects(doc, 0), pymupdf.Point(80, 96)) == []
+    assert E.hit_test(E.objects(doc, 0), pymupdf.Point(80, 96), include_hidden=True) == [o.index]
+
+
+# ------------------------------------------------------------------ OBJ-07: formati aggiuntivi
+def _pil_bytes(fmt, size=(64, 32), mode="RGB", **kw):
+    from PIL import Image as PImage
+    b = io.BytesIO()
+    PImage.new(mode, size, (10, 120, 200) if mode == "RGB" else (10, 120, 200, 255)).save(b, fmt, **kw)
+    return b.getvalue()
+
+
+def test_insert_jpeg2000_keeps_codestream():
+    data = _pil_bytes("JPEG2000")
+    doc = pymupdf.open()
+    doc.new_page()
+    E.insert_images(doc, 0, [data])
+    o = E.objects(doc, 0).objects[0]
+    assert "JPX" in doc.xref_get_key(o.xref, "Filter")[1]
+    assert (o.width, o.height) == (64, 32)
+
+
+@pytest.mark.parametrize("fmt", ["AVIF", "TGA", "ICO", "PPM"])
+def test_insert_additional_formats_same_pixels(fmt):
+    data = _pil_bytes(fmt, size=(64, 32) if fmt != "ICO" else (48, 48))
+    doc = pymupdf.open()
+    doc.new_page()
+    E.insert_images(doc, 0, [data])
+    o = E.objects(doc, 0).objects[0]
+    assert (o.width, o.height) == ((64, 32) if fmt != "ICO" else (48, 48))
+
+
+def test_insert_heic_same_pixel_size():
+    pytest.importorskip("pillow_heif")
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    data = _pil_bytes("HEIF", size=(80, 40))
+    doc = pymupdf.open()
+    doc.new_page()
+    E.insert_images(doc, 0, [data])
+    o = E.objects(doc, 0).objects[0]
+    assert (o.width, o.height) == (80, 40)

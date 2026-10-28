@@ -117,15 +117,15 @@ def test_paste_into_other_document_renders_identical_after_save(tmp_path):
     a.close()  # l'incolla funziona anche dopo la chiusura del documento d'origine
     b = new_pdf()
     b[0].insert_text((72, 700), "Documento B")
-    assert clipboard.paste_payload(b, 0, pl) == [0, 1, 2]
+    assert clipboard.paste_payload(b, 0, pl) == [1, 2, 3]   # 0 = testo «Documento B»
     path = tmp_path / "b.pdf"
     b.save(str(path), garbage=3, deflate=True)
     b.close()
     reopened = pymupdf.open(str(path))
     assert render(reopened, clip=region) == ref
     parsed = engine.objects(reopened, 0)
-    assert [o.kind for o in parsed.objects] == [PATH, PATH, IMAGE]
-    assert parsed.objects[2].opacity == pytest.approx(0.6)
+    assert [o.kind for o in parsed.objects] == ["testo", PATH, PATH, IMAGE]
+    assert parsed.objects[3].opacity == pytest.approx(0.6)
     # nessun riferimento a risorse mancanti
     for cat, names in parsed.names_used.items():
         for n in names:
