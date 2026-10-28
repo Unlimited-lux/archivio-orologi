@@ -37,9 +37,11 @@ def default_codes() -> list[str]:
 # ------------------------------------------------- dialoghi (sostituibili)
 
 
-def ask_protection(parent, document, save_policy=None) -> D.ProtectDialog | None:
+def ask_protection(parent, document, save_policy=None, integrity: bool = False) -> D.ProtectDialog | None:
     i = P.info(document)
-    dlg = D.ProtectDialog(P.settings_from_document(document), already_protected=i.protected,
+    current = P.settings_from_document(document)
+    current.integrity = integrity
+    dlg = D.ProtectDialog(current, already_protected=i.protected,
                           has_open_password=i.has_open_password, parent=parent, save_policy=save_policy)
     return dlg if dlg.exec() == QDialog.DialogCode.Accepted else None
 
@@ -182,6 +184,8 @@ class SecurityController:
         self._pending: "weakref.WeakSet" = weakref.WeakSet()
         self.vault_docs: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # doc → id nello spazio
         self.cert_docs: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()    # doc → file d'origine
+        self.integrity: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()    # doc → protezione con MAC
+        self.integrity_results: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
         self.panel = RedactionPanel(self)
         self._load_style()
 
@@ -362,7 +366,7 @@ class SecurityController:
         if warnings and not confirm(self.parent, _("Proteggere comunque il documento?"), "\n\n".join(warnings),
                                     _("Continua")):
             return False
-        dlg = ask_protection(self.parent, doc, save_policy=self.save_policy)
+        dlg = ask_protection(self.parent, doc, save_policy=self.save_policy, integrity=self.has_integrity(doc))
         if dlg is None:
             return False
         settings = dlg.settings()
@@ -376,12 +380,79 @@ class SecurityController:
         except P.ProtectionError as e:
             self.ctx.error(_("Protezione non applicata"), str(e))
             return False
+        self.set_integrity(doc, settings.integrity)
         if _declares_pdfa(doc):
             with self._change(doc, _("Rimuovi dichiarazione PDF/A")) as pdf:
                 S.drop_conformance(pdf)
         self.ctx.status(_("Protezione impostata: verrà applicata al salvataggio."))
         self.refresh_document_state(self.view())
         return True
+
+    # ------------------------------- metadati in chiaro e integrità (SEC-06, SEC-11)
+    @staticmethod
+    def _options_print(opts: dict) -> tuple:
+        return (opts.get("encryption"), opts.get("user_pw"), opts.get("owner_pw"), opts.get("permissions"))
+
+    def set_integrity(self, doc, on: bool) -> None:
+        if on:
+            self.integrity[doc] = self._options_print(doc.save_options)
+        else:
+            self.integrity.pop(doc, None)
+
+    def has_integrity(self, doc) -> bool:
+        """La protezione impostata chiede la verifica di integrità (e non è cambiata dopo)."""
+        return self.integrity.get(doc) == self._options_print(doc.save_options)
+
+    def save_strategy(self, doc, path):
+        """`Document.save_strategy`: con «Cifra tutto tranne i metadati» o con la verifica
+        di integrità il file cifrato è scritto con pyHanko; altrimenti decide il nucleo."""
+        from . import crypto as X
+        opts = doc.save_options
+        if opts.get("encryption") != pymupdf.PDF_ENCRYPT_AES_256:
+            return None
+        plain_metadata = opts.get("encrypt_metadata", True) is False
+        mac = self.has_integrity(doc)
+        if not plain_metadata and not mac:
+            return None
+        plain = doc.to_bytes(encryption=pymupdf.PDF_ENCRYPT_NONE)
+        if plain_metadata:
+            # i metadati in chiaro servono all'indicizzazione: senza XMP se ne crea uno
+            # allineato al dizionario Info (che invece resta cifrato)
+            tmp = pymupdf.open("pdf", plain)
+            try:
+                if not (tmp.get_xml_metadata() or "").strip():
+                    values = S.read_metadata(tmp)
+                    values["custom"] = S.read_custom(tmp)
+                    tmp.set_xml_metadata(S.minimal_xmp(values))
+                    plain = tmp.tobytes()
+            finally:
+                tmp.close()
+        return X.encrypt(plain, opts.get("user_pw", ""), opts.get("owner_pw", ""), opts.get("permissions", -1),
+                         encrypt_metadata=not plain_metadata, mac=mac)
+
+    def check_integrity(self, view) -> str:
+        """All'apertura (SEC-11): con un file alterato avviso e sola lettura."""
+        from . import crypto as X
+        doc = view.document
+        data = getattr(doc, "original_bytes", None)
+        if not data or not X.has_integrity(data):
+            return X.INTEGRITY_NONE
+        protection = getattr(doc, "original_protection", {}) or {}
+        passwords = [p for p in (getattr(doc, "password", None), protection.get("owner_pw"),
+                                 protection.get("user_pw")) if p is not None] + [""]
+        result = X.verify(data, passwords)
+        self.integrity_results[doc] = result
+        board = self.banners.get(view)
+        if result == X.INTEGRITY_TAMPERED:
+            doc.set_locked(_("Documento cifrato alterato: aperto in sola lettura."))
+            if board is not None:
+                board.set_notice(Notice("integrity", 0, _("Documento cifrato alterato: la verifica di integrità non "
+                                                          "è superata. Il documento è aperto in sola lettura."),
+                                        [], kind="danger"))
+        elif result == X.INTEGRITY_UNVERIFIABLE and board is not None:
+            board.set_notice(Notice("integrity", 1, _("Integrità non verificabile: il codice di autenticazione "
+                                                      "manca o non è leggibile."), []))
+        return result
 
     # ------------------------------------------------------ blocco (SEC-32)
     def lock_app(self) -> bool:
@@ -848,11 +919,13 @@ class SecurityController:
         pw = ask_policy_passwords(self.parent, policy)
         if pw is None:
             return False
+        settings = policy.settings(*pw)
         try:
-            P.apply_protection(doc, policy.settings(*pw))
+            P.apply_protection(doc, settings)
         except P.ProtectionError as e:
             self.ctx.error(_("Protezione non applicata"), str(e))
             return False
+        self.set_integrity(doc, settings.integrity)
         if _declares_pdfa(doc):
             with self._change(doc, _("Rimuovi dichiarazione PDF/A")) as pdf:
                 S.drop_conformance(pdf)
@@ -1580,6 +1653,12 @@ class SecurityController:
         if view not in self.banners:
             self.banners[view] = NoticeBoard(self.ctx, view)
         doc.add_listener(self._listener_for(view))
+        if getattr(doc, "save_strategy", "absent") is None:
+            doc.save_strategy = self.save_strategy
+        try:
+            self.check_integrity(view)
+        except Exception:
+            pass
         self.refresh_document_state(view)
         # analisi fuori dal thread dell'interfaccia: il documento è subito utilizzabile e gli
         # avvisi compaiono quando finisce (con FOLIANT_SYNC_TASKS=1 gira subito)
@@ -1908,6 +1987,12 @@ _METHOD_TEXT = {"AES-256": "AES, chiave a 256 bit", "AES-128": "AES, chiave a 12
                 "RC4-128": "RC4, chiave a 128 bit", "RC4-40": "RC4, chiave a 40 bit"}
 
 
+def CONTROLLER_RESULTS(doc) -> str | None:
+    """Esito della verifica di integrità registrato all'apertura (SEC-11)."""
+    from . import CONTROLLER
+    return CONTROLLER.integrity_results.get(doc) if CONTROLLER is not None else None
+
+
 def security_rows(doc) -> list[tuple[str, list[str]]]:
     """Righe del riepilogo «Protezione» (SEC-03), dalla cifratura letta dal nucleo."""
     i = P.info(doc)
@@ -1939,6 +2024,17 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
         elif method:
             head += " — " + method
         rows.append((head, details))
+        from . import crypto as X
+        result = CONTROLLER_RESULTS(doc)
+        if result == X.INTEGRITY_OK:
+            rows.append((_("Verifica di integrità superata"),
+                         [_("Il file cifrato non è stato alterato (ISO/TS 32004).")]))
+        elif result == X.INTEGRITY_TAMPERED:
+            rows.append((_("Documento cifrato alterato"),
+                         [_("La verifica di integrità non è superata: il documento è aperto in sola lettura.")]))
+        elif result == X.INTEGRITY_UNVERIFIABLE:
+            rows.append((_("Integrità non verificabile"),
+                         [_("Il codice di autenticazione manca o non è leggibile.")]))
         from .envelope import is_envelope
         with ENGINE_LOCK:
             envelope = is_envelope(doc.pdf)

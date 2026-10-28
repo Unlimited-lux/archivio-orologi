@@ -41,7 +41,7 @@ di risorse sono del nucleo. Proposta: nessuna cache su disco per i documenti
 con `original_protection` non vuota; rendering in processo separato con limiti
 di memoria e tempo.
 
-## 8. Cifratura «tutto tranne i metadati» (SEC-06) — ancora aperta (`ENCRYPT_METADATA_SUPPORTED = False` nel nucleo)
+## 8. Cifratura «tutto tranne i metadati» (SEC-06) — risolta nel modulo con `Document.save_strategy` e pyHanko (vedi §11)
 
 PyMuPDF non permette di scrivere `/EncryptMetadata false`. Servirebbe un
 post-processo del file salvato (riscrittura del dizionario /Encrypt e di /Perms
