@@ -99,8 +99,8 @@ Restano aperti:
 | media | ocr | Sulle scansioni inclinate di 1-2° il testo invisibile spezza le parole in Evince, Okular e pdftotext (poppler). In Foliant la ricerca funziona. |
 | media | ocr, viewer | Con due finestre (Ctrl+N), chiudendo la seconda il pannello «Parole incerte» dell'OCR produce errori. Con «Ripristina la sessione» attivo, la nuova finestra può riaprire la sessione invece di mostrare la Home. |
 | media | annotations | L'importazione di commenti da XFDF gira nel thread dell'interfaccia, senza avanzamento: 1.000 commenti richiedono 5-11 s secondo la macchina, 3.000 circa 100 s, con la finestra bloccata. Il tempo cresce più che linearmente dentro PyMuPDF. I file comuni, con poche decine di commenti, si importano subito. |
-| bassa | convert | «Appiattisci» elimina in silenzio i segni di redazione non ancora applicati, mentre il testo resta: applicare le redazioni prima di appiattire. Le tabelle senza bordi richiedono la strategia «auto», che può dividere male le colonne. |
-| bassa | convert, viewer, tools, sign | In inglese alcuni numeri e date usano ancora il formato italiano: dimensioni dei file in Comprimi e negli allegati, date in Proprietà, Allegati e Firma, migliaia senza separatore in «Informazioni sul documento». In Strumenti «Crea PDF» propone A4 anche con impostazioni USA e, a 1280×800, due campi delle Operazioni in blocco escono dal bordo destro. In Firma › Gestisci ID l'elenco vuoto non ha spiegazione e alcuni comandi restano attivi senza selezione. |
+| bassa | convert | Nell'esportazione in Excel le tabelle senza bordi richiedono la strategia «auto», che può dividere male le colonne: controllare il risultato. |
+| bassa | viewer, tools, sign | In inglese alcuni numeri e date usano ancora il formato italiano: dimensioni dei file negli allegati, date in Proprietà, Allegati e Firma, migliaia senza separatore in «Informazioni sul documento». In Strumenti «Crea PDF» propone A4 anche con impostazioni USA e, a 1280×800, due campi delle Operazioni in blocco escono dal bordo destro. In Firma › Gestisci ID l'elenco vuoto non ha spiegazione e alcuni comandi restano attivi senza selezione. |
 | bassa | ocr | Alcuni pulsanti tagliati nel pannello «Parole incerte». Una foto senza testo può ricevere la proposta di OCR. L'analisi delle pagine all'apertura gira nel thread dell'interfaccia. |
 | bassa | nucleo | Su documenti con centinaia di commenti ogni modifica costa circa 0,3 s per la copia di annullamento. Il salvataggio incrementale dei PDF firmati non alza la versione PDF. Un secondo avvio mentre Foliant è occupato da più di 6 s può aprire il file due volte. |
 | — | specifica | Funzioni P1/P2 non completate e richieste al nucleo ancora aperte: elencate per ID in `foliant/modules/*/STATO.md` e in `foliant/modules/viewer/CORE_REQUESTS.md`. La firma con smart card (SIG-23) è pronta nel commit 863560a ma rinviata, perché aggiunge una dipendenza. |
@@ -162,4 +162,10 @@ Restano aperti:
     superati e 3 falliti. La causa era l'identificativo casuale dei timbri, che rendeva le
     elaborazioni non ripetibili e nascondeva le filigrane all'appiattimento; è stata
     corretta. Dopo le ultime correzioni dei moduli (taglio alle 17:12 UTC): 4.894 test
-    superati, 0 falliti.
+    superati, 0 falliti. Alle 17:25 sono state integrate anche le ultime tre correzioni di Converti
+    (decimali in inglese, appiattimento che conserva le redazioni non applicate, elenco vuoto di
+    «Converti più file»): test di Converti e della finestra verdi.
+  - Script dei difetti rieseguiti sulla versione consegnata: 136 su 142 escono con 0. Dei 6
+    rimanenti, 3 controllano funzioni interne mentre nell'interfaccia il comportamento è corretto,
+    2 sono noti (uno fallisce solo sotto carico, l'altro è un falso positivo) e 1 è la ricerca
+    su 500 pagine, tra i problemi aperti.
