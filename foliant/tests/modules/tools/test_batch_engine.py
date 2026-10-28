@@ -1256,3 +1256,45 @@ def test_remove_watermark_visually_identical(tmp_path):
     r = ce.run_compare(None, ce.SideInput(original, "a"), ce.SideInput(cleaned, "b"),
                        ce.CompareOptions(mode=ce.MODE_VISUAL, dpi=72))
     assert r.differences == []
+
+
+# ----------------------------------------------------------------- BAT-02 disco pieno
+def test_disk_full_pauses_and_retries(tmp_path, monkeypatch):
+    import errno
+    import threading
+    import time as _t
+    items = _queue(tmp_path, 3)
+    real = be.atomic_write
+    fails = {"n": 1}
+
+    def flaky(path, data):
+        if fails["n"] and os.path.basename(str(path)) == "f1.pdf":
+            fails["n"] -= 1
+            raise be.DocumentError("Salvataggio non riuscito") from OSError(errno.ENOSPC, "No space left")
+        return real(path, data)
+    monkeypatch.setattr(be, "atomic_write", flaky)
+    control = be.JobControl()
+    box = {}
+    out = tmp_path / "out"
+    th = threading.Thread(target=lambda: box.setdefault("r", be.run_job(
+        None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(out)), control=control)))
+    th.start()
+    for _i in range(200):
+        if control.disk_full:
+            break
+        _t.sleep(0.02)
+    assert control.disk_full and control.paused
+    assert sorted(os.listdir(out)) == ["f0.pdf"]            # in pausa sul secondo file
+    control.resume()                                       # «spazio liberato»
+    th.join(20)
+    assert all(r.status in ("ok", "warning") for r in box["r"].results)
+    assert sorted(os.listdir(out)) == ["f0.pdf", "f1.pdf", "f2.pdf"]
+
+
+def test_disk_full_without_control_is_file_error(tmp_path, monkeypatch):
+    import errno
+    items = _queue(tmp_path, 2)
+    monkeypatch.setattr(be, "atomic_write", lambda p, d: (_ for _ in ()).throw(
+        OSError(errno.ENOSPC, "No space left")))
+    rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "o")))
+    assert [r.code for r in rep.results] == ["DISK-01", "DISK-01"]

@@ -1484,6 +1484,7 @@ class JobControl:
         import threading
         self._paused = threading.Event()
         self._skip = threading.Event()
+        self.disk_full = False   # in pausa perché la destinazione è piena
 
     @property
     def paused(self) -> bool:
@@ -1907,12 +1908,44 @@ def planned_conflicts(items: list[QueueItem], settings: JobSettings, started: da
     return out
 
 
+class DiskFull(Exception):
+    """Spazio esaurito nella destinazione (il file temporaneo è già stato rimosso)."""
+
+
+def _is_disk_full(e: BaseException) -> bool:
+    import errno
+    for x in (e, e.__cause__):
+        if isinstance(x, OSError) and x.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", -1)):
+            return True
+    return False
+
+
 def _write_output(path: str, data: bytes) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         atomic_write(path, data)
-    except DocumentError as e:
+    except (DocumentError, OSError) as e:
+        if _is_disk_full(e):
+            raise DiskFull() from e
         raise BatchError("WRT-01", str(e)) from e
+
+
+def _write_waiting(path: str, data: bytes, control: "JobControl | None", progress) -> None:
+    """Scrive il risultato; con il disco pieno il lavoro va in pausa finché l'utente libera spazio
+    e riprende (si riprova lo stesso file) oppure annulla (BAT-02)."""
+    while True:
+        try:
+            _write_output(path, data)
+            return
+        except DiskFull:
+            if control is None:
+                raise BatchError("DISK-01", _("Spazio esaurito nella destinazione: il file non è stato scritto."))
+            control.disk_full = True
+            control.pause()
+            control.checkpoint(progress)
+            control.disk_full = False
+            if progress is not None and getattr(progress, "cancelled", False):
+                raise OperationCancelled()
 
 
 def _compute_pdf(item: QueueItem, ctx: "_Ctx", steps, pre_steps, candidates, plan_i, csv_passwords):
@@ -2096,7 +2129,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                     if target is None:
                         raise BatchError("EXIST-01", _("Saltato: esiste già."), status="skipped")
                 reserved.add(target)
-                _write_output(target, data)
+                _write_waiting(target, data, control, progress)
                 res.outputs = [target]
                 res.bytes_out = len(data)
                 res.status = "ok"

@@ -829,4 +829,6 @@ EN: dict[str, str] = {
     "numeri Bates": "Bates numbers",
     "rimossi: {d}": "removed: {d}",
     "sfondi": "backgrounds",
+    "Spazio esaurito nella destinazione: il file non è stato scritto.": "No space left at the destination: the file was not written.",
+    "Spazio esaurito nella destinazione: libera spazio e premi Riprendi, oppure annulla il lavoro.": "No space left at the destination: free some space and press Resume, or cancel the job.",
 }
