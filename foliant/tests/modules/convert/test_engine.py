@@ -838,3 +838,18 @@ def test_docx_comments_and_header_footer(tmp_path):
         comments = z.read("word/comments.xml").decode()
     assert 'w:instr="PAGE"' in footer and 'w:instr="NUMPAGES"' in footer
     assert "Verificare il prezzo" in comments and 'w:author="Anna"' in comments
+
+
+def test_many_pages_fast(tmp_path):
+    """Documenti grandi: elaborazione per pagina senza il modello di layout (≈ ms per pagina)."""
+    import time
+    doc = pymupdf.open()
+    for i in range(300):
+        p = doc.new_page()
+        for k in range(15):
+            p.insert_text((72, 100 + k * 14), f"Pagina {i} riga {k} del registro di magazzino", fontsize=10)
+    path = _save(doc, tmp_path / "grande.pdf")
+    t = time.time()
+    out = convert_pdf(path, tmp_path / "g.txt", "txt")[0]
+    assert time.time() - t < 30
+    assert open(out, encoding="utf-8").read().count("\f") == 299

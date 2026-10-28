@@ -19,7 +19,8 @@ from foliant.api import ENGINE_LOCK, _
 
 from .common import ConversionError, check
 from .extract import (
-    TEXT_FLAGS, ImageItem, Para, TableItem, analyze_page, assign_headings, normalize_text, table_rows,
+    TEXT_FLAGS, ImageItem, Para, TableItem, analyze_page, assign_headings, find_tables, normalize_text,
+    table_rows,
 )
 
 
@@ -415,9 +416,9 @@ def collect_tables(work: pymupdf.Document, job, strategy: str = "lines") -> list
         with ENGINE_LOCK:
             page = work[i]
             try:
-                tabs = page.find_tables(strategy=strategy) if strategy != "lines" else page.find_tables()
+                tabs = find_tables(page, strategy if strategy != "auto" else None)
                 if not tabs.tables and strategy == "auto":
-                    tabs = page.find_tables(strategy="text")
+                    tabs = find_tables(page, "text")
             except Exception:
                 tabs = None
             words = page.get_text("words", flags=TEXT_FLAGS) if tabs and tabs.tables else []

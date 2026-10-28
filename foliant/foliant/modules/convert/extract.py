@@ -254,6 +254,28 @@ def _xy_cut(boxes: list[tuple[tuple, object]], min_gap: float = 6.0) -> list[obj
     return [o for _b, o in sorted(boxes, key=lambda t: (round(t[0][1]), t[0][0]))]
 
 
+class _NoTables:
+    tables: list = []
+
+
+def find_tables(page: pymupdf.Page, strategy: str | None = None):
+    """`page.find_tables` senza il modello di layout facoltativo (lento: ~0,15 s per pagina).
+
+    Con la strategia a linee le pagine senza grafica vettoriale non possono avere
+    tabelle bordate e vengono saltate subito."""
+    kwargs = {"strategy": strategy} if strategy and strategy != "lines" else {}
+    if not kwargs:
+        try:
+            if not page.get_cdrawings():
+                return _NoTables()
+        except Exception:
+            pass
+    try:
+        return page.find_tables(use_layout=False, **kwargs)
+    except TypeError:
+        return page.find_tables(**kwargs)
+
+
 def table_rows(page: pymupdf.Page, table, words: list | None = None) -> list[list[str | None]]:
     """Testo delle celle di una tabella ricavato dalle parole della pagina.
 
@@ -399,7 +421,7 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
     table_items: list[TableItem] = []
     if tables and textpage is None:
         try:
-            found = page.find_tables()
+            found = find_tables(page)
             words = page.get_text("words", flags=TEXT_FLAGS) if found.tables else []
             for t in found.tables:
                 rows = [[(c or "").strip() for c in row] for row in table_rows(page, t, words)]
