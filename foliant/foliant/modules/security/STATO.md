@@ -1,7 +1,14 @@
 # Stato del modulo Proteggi (sezione 10 della specifica)
 
 Test in `tests/modules/security/`: `test_protection.py` (P), `test_redaction.py` (R),
-`test_sanitize.py` (S), `test_ui.py` (U), `test_i18n.py` (I).
+`test_sanitize.py` (S), `test_ui.py` (U), `test_i18n.py` (I), `test_flatten.py` (F), `test_policies.py` (P),
+`test_applock.py` (L), `test_envelope.py` (E), `test_vault.py` (V), `test_vault_ui.py` (VU),
+`test_certenc.py` (CE), `test_certenc_ui.py` (CU), `test_crypto.py` (X), oltre a `test_signed.py` e
+`test_english.py`.
+
+Riepilogo: 34 requisiti. Fatti 25 (SEC-34 per la parte del modulo); parziali 5, perché dipendono dal nucleo o dal
+motore (SEC-01, SEC-02, SEC-09, SEC-10, SEC-11); non fatti 3, che sono del nucleo o di un altro modulo (SEC-25
+modulo convert, SEC-29 e SEC-30 nucleo); SEC-33 fuori ambito. Le richieste aperte sono in CORE_REQUESTS.md.
 
 | ID | Priorità | Stato | Test | Note |
 |---|---|---|---|---|
@@ -63,4 +70,5 @@ Adozione delle API del nucleo (base 3d69387): accesso e permessi da `document.ac
 `encryption_info` (anche «Permessi del documento alterati» con `perms_tampered`), avvisi con `ctx.show_banner`,
 controllo prima del salvataggio con `ctx.add_guard("save"/"save_as")` (U `test_unapplied_marks_banner_on_reopen`,
 `test_save_guard_apply_now`), analisi all'apertura con `ctx.run_task(modal=False)`. «Cifra tutto tranne i
-metadati» resta non disponibile: il nucleo dichiara `ENCRYPT_METADATA_SUPPORTED = False`.
+metadati» (il nucleo dichiara `ENCRYPT_METADATA_SUPPORTED = False`) è realizzata dal modulo con
+`Document.save_strategy` e pyHanko (SEC-06).
