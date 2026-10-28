@@ -25,7 +25,8 @@ from typing import Callable
 import numpy as np
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, DocumentError, OperationCancelled, PasswordRequired, WrongPassword, _
+from foliant.api import (ENGINE_LOCK, DocumentError, OperationCancelled, PasswordRequired, WrongPassword, _,
+                         format_number)
 
 ADDED = "added"
 DELETED = "deleted"
@@ -794,7 +795,7 @@ def format_details(ta: Token, tb: Token, options: CompareOptions) -> list[str]:
 
 def _fmt_num(v: float) -> str:
     r = round(v, 1)
-    return str(int(r)) if r == int(r) else str(r).replace(".", ",")
+    return format_number(r)
 
 
 def format_differences(a: list[Token], b: list[Token], ops, options: CompareOptions,
@@ -1269,7 +1270,7 @@ def run_compare(progress, side_a: SideInput, side_b: SideInput, options: Compare
         if ocr_stats is not None and ocr_stats[2]:
             mark_uncertain(result, ocr_stats[0], ocr_stats[1])
             result.warnings.append(_("Parole riconosciute con bassa affidabilità: {p}%").format(
-                p=f"{100 * ocr_stats[3] / ocr_stats[2]:.1f}".replace(".", ",")))
+                p=format_number(100 * ocr_stats[3] / ocr_stats[2], 1)))
         return result
     finally:
         with ENGINE_LOCK:
@@ -1472,7 +1473,7 @@ def visual_pair_differences(doc_a, pa: int, doc_b, pb: int, options: CompareOpti
         if (skip_a and _center_in(r_a, skip_a)) or (skip_b and _center_in(r_b, skip_b)):
             continue
         out.append(Difference(VISUAL, subtype="region", rects_a=[(pa, *r_a)], rects_b=[(pb, *r_b)], area=area,
-                              detail=_("area variata {p}%").format(p=f"{area:.2f}".replace(".", ","))))
+                              detail=_("area variata {p}%").format(p=format_number(area, 2))))
     return out
 
 

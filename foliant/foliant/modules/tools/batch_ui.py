@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
-from foliant.api import OperationCancelled, _, atomic_write, bind_icon, icon, theme
+from foliant.api import OperationCancelled, _, atomic_write, bind_icon, format_number, icon, theme
 
 from . import engine as be
 
@@ -27,7 +27,7 @@ def _human_size(n: int) -> str:
     size = float(n)
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024 or unit == "GB":
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}".replace(".", ",")
+            return f"{size:.0f} {unit}" if unit == "B" else f"{format_number(size, 1)} {unit}"
         size /= 1024
     return str(n)
 

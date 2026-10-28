@@ -1298,3 +1298,24 @@ def test_disk_full_without_control_is_file_error(tmp_path, monkeypatch):
         OSError(errno.ENOSPC, "No space left")))
     rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "o")))
     assert [r.code for r in rep.results] == ["DISK-01", "DISK-01"]
+
+
+def test_numbers_and_dates_follow_language(tmp_path):
+    """C11 (NFR-26): in inglese punto decimale e date all'americana; in italiano la virgola."""
+    from datetime import datetime
+    from foliant.api import add_translations
+    from foliant.i18n import set_language
+    from foliant.modules.tools import batch_ui as bu
+    from foliant.modules.tools import compare_engine as ce
+    from foliant.modules.tools.translations import EN
+    add_translations("en", EN)
+    assert bu._human_size(1536) == "1,5 KB" and ce._fmt_num(2.5) == "2,5"
+    set_language("en")
+    try:
+        assert bu._human_size(1536) == "1.5 KB" and ce._fmt_num(2.5) == "2.5"
+        rep = be.JobReport([be.FileResult("a.pdf", status="ok")], [], datetime(2026, 10, 28, 14, 30, 5))
+        rep.finished = datetime(2026, 10, 28, 14, 30, 7)
+        text = pymupdf.open(stream=be.report_pdf(rep))[0].get_text()
+        assert "10/28/2026" in text and "28/10/2026" not in text
+    finally:
+        set_language("it")
