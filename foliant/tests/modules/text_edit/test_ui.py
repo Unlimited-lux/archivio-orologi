@@ -544,3 +544,29 @@ def test_panel_indent_and_space_after(window, paragraphs_pdf, quiet, qtbot):
                  if "contratto" in b.text or "Secondo" in b.text]
     gap = lines[1].first_baseline - lines[0].first_baseline
     assert abs(gap - (block.leading + 12)) <= 0.2
+
+
+def test_drag_snaps_to_other_block_edge(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-08: trascinando vicino al bordo sinistro di un altro blocco il blocco si aggancia; Alt sospende."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "contratto")
+    view.tool.select(view, 0, block)
+    c = block.bbox
+    start = pymupdf.Point((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    vp = view.viewport()
+    # spostamento di 31 pt in orizzontale: nessun aggancio atteso; poi ritorno a +1,5 pt dal bordo x=72
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, start.x, start.y))
+    qtbot.mouseMove(vp, to_view(view, 0, start.x + 1.5, start.y + 60))
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, start.x + 1.5, start.y + 60))
+    moved = block_with(ctrl, view, "contratto")
+    assert abs(moved.bbox.x0 - 72) <= 0.05          # agganciato al bordo sinistro dei paragrafi
+    view.tool.select(view, 0, moved)
+    c = moved.bbox
+    start = pymupdf.Point((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    alt = Qt.KeyboardModifier.AltModifier
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, start.x, start.y))
+    qtbot.mouseMove(vp, to_view(view, 0, start.x + 2, start.y + 30))
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, alt, to_view(view, 0, start.x + 2, start.y + 30))
+    moved2 = block_with(ctrl, view, "contratto")
+    assert moved2.bbox.x0 > 72.8                     # con Alt nessun aggancio

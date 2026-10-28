@@ -174,6 +174,7 @@ class EditTextTool(Tool):
                 else:
                     self.drag.target_page = self.drag.page
                     self.drag.current = ev.point * self.ctrl.frame(self.drag.page)
+                    self._snap(view, ev.modifiers)
             view.viewport().update()
             return True
         hit = self._hit(view, ev)
@@ -230,6 +231,11 @@ class EditTextTool(Tool):
             if drag.kind == "move" and ev.page != drag.page:
                 drag.target_page = ev.page
             drag.current = ev.point * self.ctrl.frame(drag.target_page)
+            if drag.target_page == drag.page:
+                self.drag = drag
+                self._snap(view, ev.modifiers)
+                self.drag = None
+        self.guides = []
         dx = drag.current.x - drag.start.x
         dy = drag.current.y - drag.start.y
         if drag.kind == "move-multi":
@@ -259,6 +265,55 @@ class EditTextTool(Tool):
 
     def double_click(self, view, ev):
         return False
+
+    # ------------------------------------------------------------ guide magnetiche (TXT-08)
+    guides: list = []
+    SNAP_PX = 5
+
+    def _snap(self, view, modifiers) -> None:
+        """Aggancia lo spostamento a bordi, centri e linee di base di pagina e altri blocchi.
+        Alt sospende l'aggancio."""
+        d = self.drag
+        self.guides = []
+        if d is None or d.kind not in ("move", "move-multi") or modifiers & Qt.KeyboardModifier.AltModifier:
+            return
+        tol = self.SNAP_PX / max(view.zoom * 1.333, 0.05)
+        dx, dy = d.current.x - d.start.x, d.current.y - d.start.y
+        r = d.block.bbox
+        moving = {id(d.block)} | {id(b) for _p, b in self.multi}
+        xs: list[float] = []
+        ys: list[float] = []
+        try:
+            pw, ph = view.page_size(d.page)
+            xs += [0.0, pw / 2, pw]
+            ys += [0.0, ph / 2, ph]
+        except Exception:
+            pass
+        for b in self.ctrl.blocks(view, d.page):
+            if id(b) in moving or any(b.bbox == m.bbox for _p, m in self.multi) or b.bbox == r:
+                continue
+            xs += [b.bbox.x0, (b.bbox.x0 + b.bbox.x1) / 2, b.bbox.x1]
+            ys += [b.bbox.y0, (b.bbox.y0 + b.bbox.y1) / 2, b.bbox.y1, b.first_baseline]
+        own_x = [r.x0, (r.x0 + r.x1) / 2, r.x1]
+        own_y = [r.y0, (r.y0 + r.y1) / 2, r.y1, d.block.first_baseline]
+
+        def best(own, cands, delta):
+            found = None
+            for o in own:
+                for c in cands:
+                    diff = c - (o + delta)
+                    if abs(diff) <= tol and (found is None or abs(diff) < abs(found[0])):
+                        found = (diff, c)
+            return found
+
+        bx = best(own_x, xs, dx)
+        by = best(own_y, ys, dy)
+        if bx:
+            d.current = pymupdf.Point(d.current.x + bx[0], d.current.y)
+            self.guides.append(("v", bx[1]))
+        if by:
+            d.current = pymupdf.Point(d.current.x, d.current.y + by[0])
+            self.guides.append(("h", by[1]))
 
     # ------------------------------------------------------------ tastiera
     def key(self, view, event) -> bool:
@@ -386,6 +441,17 @@ class EditTextTool(Tool):
             painter.setBrush(fill)
             painter.drawRect(frame_rect_to_page(self.ctrl, page, r))
         d = self.drag
+        if d is not None and self.guides and d.target_page == page and d.target_page == d.page:
+            painter.setPen(QPen(theme.color("secondary"), 1.0 / z, Qt.PenStyle.DashLine))
+            try:
+                pw, ph = view.page_size(page)
+            except Exception:
+                pw, ph = 1e4, 1e4
+            for kind, value in self.guides:
+                line = pymupdf.Rect(value, 0, value, ph) if kind == "v" else pymupdf.Rect(0, value, pw, value)
+                a = pymupdf.Point(line.x0, line.y0) * self.ctrl.unframe(page)
+                b = pymupdf.Point(line.x1, line.y1) * self.ctrl.unframe(page)
+                painter.drawLine(QPointF(a.x, a.y), QPointF(b.x, b.y))
         if d is not None and d.kind == "move-multi" and d.target_page == page:
             dx, dy = d.current.x - d.start.x, d.current.y - d.start.y
             painter.setPen(QPen(accent, 1.2 / z, Qt.PenStyle.DashLine))
