@@ -304,4 +304,5 @@ EN: dict[str, str] = {
     'Firma qui': 'Sign here',
     'I caratteri di sistema sono disponibili solo per i campi di testo.': 'System fonts are only available for text fields.',
     'Il carattere «{f}» non è installato.': 'The font “{f}” is not installed.',
+    'Analisi del modulo…': 'Analysing the form…',
 }

@@ -198,6 +198,8 @@ class FieldsPanel(QWidget):
             return []
         try:
             state = self.module.filler(view).state
+            if getattr(state, "version", 0) < 0:
+                return []  # analisi iniziale ancora in corso: il pannello si aggiorna dopo
             state.refresh()
             return list(state.fields)
         except Exception:

@@ -64,13 +64,39 @@ class FormState:
                 self.xfa = E.xfa_status(pdf)
                 perms = doc.original_protection.get("permissions") if doc.original_protection else None
                 self.blocked = None if self.unlocked else E.fill_blocked_reason(pdf, perms)
-                self.custom = E.custom_scripts(pdf)
+                self.custom = E.custom_scripts(pdf, self.fields)
             except Exception:  # file danneggiato: nessun modulo utilizzabile
                 self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
         self.version = doc.version
         self.by_page = {}
         for f in self.fields:
             self.by_page.setdefault(f.page, []).append(f)
+
+    def patch(self, names: set[str]) -> None:
+        """Rilegge solo i campi con questi nomi (dopo una compilazione): con migliaia di campi
+        rileggere tutto a ogni valore sarebbe troppo lento."""
+        doc = self.view.document
+        pages = sorted({f.page for f in self.fields if f.name in names})
+        with ENGINE_LOCK:
+            if doc.closed:
+                return
+            try:
+                fresh = E.fields_named(doc.pdf, names, pages)
+            except Exception:
+                fresh = None
+        if fresh is None or len(fresh) != sum(1 for f in self.fields if f.name in names):
+            self.refresh(force=True)
+            return
+        by_key = {(f.page, f.xref): f for f in fresh}
+        self.fields = [by_key.get((f.page, f.xref), f) for f in self.fields]
+        self.by_page = {}
+        for f in self.fields:
+            self.by_page.setdefault(f.page, []).append(f)
+        self.version = doc.version
+
+    @property
+    def has_calculations(self) -> bool:
+        return any(f.calc or f.formula for f in self.fields)
 
     @property
     def has_form(self) -> bool:
@@ -336,6 +362,7 @@ class FormFiller(QObject):
         self._next_required_index = -1
         self._error_label: QLabel | None = None
         self._custom_warned = False
+        self._pending_patch: set[str] | None = None
         self.bar = FormBar(self)
         self.bar.hide()
         self._bar_height = 0
@@ -347,9 +374,31 @@ class FormFiller(QObject):
         view.layoutChanged.connect(self.reposition)
         view.contentChanged.connect(self._on_content_changed)
         self.document.add_listener(self._on_document_event)
+        # FRM-01: la barra compare subito; l'analisi completa (lenta con migliaia di campi)
+        # parte appena la vista è mostrata
+        with ENGINE_LOCK:
+            try:
+                quick = bool(self.document.pdf.is_form_pdf) or \
+                    self.document.pdf.xref_get_key(self.document.pdf.pdf_catalog(), "AcroForm/XFA")[0] != "null"
+            except Exception:
+                quick = False
+        if quick:
+            self.bar.label.setText(_("Analisi del modulo…"))
+            for b in self.bar.buttons.values():
+                b.hide()
+            self._set_bar_visible(True)
+        QTimer.singleShot(0, self._initial_analysis)
+
+    def _initial_analysis(self) -> None:
+        try:
+            if self.document.closed:
+                return
+        except RuntimeError:
+            return
         self.state.refresh(force=True)
         self.update_bar()
-        QTimer.singleShot(0, self.repair_on_open)
+        self.changed.emit()
+        self.repair_on_open()
 
     def repair_on_open(self) -> None:
         """Aspetti mancanti (/NeedAppearances) o widget non collegati al modulo: si
@@ -394,7 +443,11 @@ class FormFiller(QObject):
             pass
 
     def _on_content_changed(self) -> None:
-        self.state.refresh()
+        if self._pending_patch is not None:
+            names, self._pending_patch = self._pending_patch, None
+            self.state.patch(names)
+        else:
+            self.state.refresh()
         if self.active is not None and not self._committing:
             again = self.state.find(self.active.page, self.active.xref)
             if again is None:
@@ -445,6 +498,8 @@ class FormFiller(QObject):
     # ------------------------------------------------------------------ barra
     def update_bar(self) -> None:
         st = self.state
+        if st.version < 0:
+            return  # analisi iniziale non ancora fatta: resta «Analisi del modulo…»
         st.refresh()
         if not st.has_form or self.bar_closed:
             self._set_bar_visible(False)
@@ -824,12 +879,13 @@ class FormFiller(QObject):
             value = stored
         self._committing = True
         try:
+            calcs = self.state.has_calculations
             with self.document.change(_("Compila «{n}»").format(n=f.name)) as pdf:
-                E.prepare_for_edit(pdf)
                 E.set_value(pdf, f.page, f.xref, value)
-                E.recalculate(pdf)
-                if E.xfa_status(pdf) == "hybrid":
+                changed = {f.name} | set(E.recalculate(pdf) if calcs else [])
+                if self.state.xfa == "hybrid":
                     E.sync_xfa_from_fields(pdf)
+                self._pending_patch = changed
         except E.FormError as e:
             self.show_error(f, str(e))
             return False
@@ -838,6 +894,7 @@ class FormFiller(QObject):
             return False
         finally:
             self._committing = False
+            self._pending_patch = None
         self.state.refresh()
         if self.active is not None:
             self.active = self.state.find(self.active.page, self.active.xref) or self.active
@@ -979,15 +1036,18 @@ class FormFiller(QObject):
         if f is None or f.readonly:
             return
         try:
+            calcs = self.state.has_calculations
             with self.document.change(_("Compila «{n}»").format(n=f.name)) as pdf:
-                E.prepare_for_edit(pdf)
                 E.toggle(pdf, f.page, f.xref)
-                E.recalculate(pdf)
-                if E.xfa_status(pdf) == "hybrid":
+                changed = {f.name} | set(E.recalculate(pdf) if calcs else [])
+                if self.state.xfa == "hybrid":
                     E.sync_xfa_from_fields(pdf)
+                self._pending_patch = changed
         except E.FormError as e:
+            self._pending_patch = None
             self.show_error(f, str(e))
             return
+        self._pending_patch = None
         self.state.refresh()
         self.active = self.state.find(f.page, f.xref) or f
         self.update_bar()

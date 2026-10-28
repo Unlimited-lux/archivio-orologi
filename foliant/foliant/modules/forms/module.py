@@ -414,6 +414,8 @@ class FormsModule(QObject):
         if view is None:
             return []
         f = self.filler(view)
+        if not self.selection or f.state.version < 0:
+            return []
         f.state.refresh()
         out = []
         for page, xref in self.selection:
@@ -429,7 +431,8 @@ class FormsModule(QObject):
             radios: dict[str, list[str]] = {}
             if view is not None:
                 st = self.filler(view).state
-                st.refresh()
+                if st.version >= 0:
+                    st.refresh()
                 names = list(dict.fromkeys(f.name for f in st.fields))
                 for f in st.fields:
                     if f.kind == E.RADIO and f.export:

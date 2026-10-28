@@ -457,11 +457,12 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.password = bool(flags & pymupdf.PDF_TX_FIELD_IS_PASSWORD)
         info.comb = bool(flags & pymupdf.PDF_TX_FIELD_IS_COMB)
         info.maxlen = int(w.text_maxlen or 0)
-        info.fmt = Format.from_script(_action_script(pdf, w.xref, "F") or w.script_format)
-        c_js = _action_script(pdf, w.xref, "C") or w.script_calc
-        info.calc = Calculation.from_script(c_js)
-        info.formula = FX.from_script(c_js) if info.calc is None else None
-        info.validation = Validation.from_script(_action_script(pdf, w.xref, "V"))
+        if _has_actions(pdf, w.xref, fx):
+            info.fmt = Format.from_script(_action_script(pdf, w.xref, "F") or w.script_format)
+            c_js = _action_script(pdf, w.xref, "C") or w.script_calc
+            info.calc = Calculation.from_script(c_js)
+            info.formula = FX.from_script(c_js) if info.calc is None else None
+            info.validation = Validation.from_script(_action_script(pdf, w.xref, "V"))
     elif kind in (CHECKBOX, RADIO):
         info.export = _on_state(w)
         state = _value_of(*pdf.xref_get_key(w.xref, "AS"))
@@ -507,6 +508,17 @@ def _action_script(pdf: pymupdf.Document, xref: int, trigger: str) -> str | None
             except Exception:
                 return None
     return None
+
+
+def fields_named(pdf: pymupdf.Document, names: set[str], pages: Iterable[int]) -> list[FieldInfo]:
+    """Campi con questi nomi nelle pagine indicate (rilettura mirata dopo una modifica)."""
+    out = []
+    for i in pages:
+        pg = pdf[i]
+        for w in pg.widgets():
+            if w.field_name in names:
+                out.append(_info(pdf, i, w))
+    return out
 
 
 def list_fields(pdf: pymupdf.Document, page: int | None = None) -> list[FieldInfo]:
@@ -1472,11 +1484,18 @@ def prepare_for_edit(pdf: pymupdf.Document) -> None:
         regenerate_all(pdf)
 
 
-def custom_scripts(pdf: pymupdf.Document) -> list[tuple[str, str]]:
+def _has_actions(pdf: pymupdf.Document, xref: int, fx: int) -> bool:
+    """True se widget o campo hanno azioni aggiuntive (/AA): evita letture inutili."""
+    return pdf.xref_get_key(xref, "AA")[0] != "null" or (fx != xref and pdf.xref_get_key(fx, "AA")[0] != "null")
+
+
+def custom_scripts(pdf: pymupdf.Document, fields: list[FieldInfo] | None = None) -> list[tuple[str, str]]:
     """(nome del campo, evento) delle azioni personalizzate che Foliant non esegue."""
     out = []
     names = {"K": _("battitura"), "F": _("formato"), "V": _("validazione"), "C": _("calcolo")}
-    for f in list_fields(pdf):
+    for f in (list_fields(pdf) if fields is None else fields):
+        if not _has_actions(pdf, f.xref, f.field_xref):
+            continue
         for trig, label in names.items():
             js = _action_script(pdf, f.xref, trig)
             if not js:
