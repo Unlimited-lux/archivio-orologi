@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, DocumentError, OperationCancelled, _, atomic_write
+from foliant.api import ENGINE_LOCK, DocumentError, OperationCancelled, _, atomic_write, placement
 
 INPUT_EXTENSIONS = (".pdf",)
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp")
@@ -1043,11 +1043,13 @@ def add_background(data: bytes, color: str = "#FFF8E1", file: str = "", first_pa
                     check()
                 page = doc[pno]
                 before = page.get_contents()
+                # placement corregge le pagine ruotate e ritagliate (page.rect è la pagina visualizzata)
+                area = placement.page_rect(page)
                 if src is not None:
                     spage = 0 if (not first_page_separate or pno == 0 or src.page_count < 2) else 1
-                    page.show_pdf_page(page.rect, src, spage, overlay=False)
+                    placement.show_pdf_page(page, area, src, spage, overlay=False, upright=True)
                 else:
-                    page.draw_rect(page.rect, color=None, fill=_rgb(color), overlay=False, width=0)
+                    placement.draw_rect(page, area, color=None, fill=_rgb(color), overlay=False, width=0)
                 _mark_new_contents(doc, page, before, "background")
             return _save(doc)
         finally:
@@ -1948,6 +1950,12 @@ def _finish_merge(report: JobReport, items, parts, step: Step, post_steps, setti
             r = report.results[_i]
             r.status = "warning"
             r.message = "; ".join(x for x in (r.message, note) if x)
+    # segnalibri distinguibili per file omonimi di cartelle diverse: «relazione (a)», «relazione (b)»
+    counts: dict[str, int] = {}
+    for _i, t, _d in parts:
+        counts[t] = counts.get(t, 0) + 1
+    parts = [(i, f"{t} ({os.path.basename(os.path.dirname(items[i].path)) or '/'})" if counts[t] > 1 else t, d)
+             for i, t, d in parts]
     reserved: set[str] = set()
     check = progress.check if progress is not None and hasattr(progress, "check") else None
     for folder, gname, gparts in _merge_groups(items, parts, p):

@@ -899,3 +899,35 @@ def test_marks_on_rotated_and_cropped_pages(tmp_path, rot, crop):
     assert pos["ACME-000001"][0] > 0.6 and pos["ACME-000001"][1] > 0.8
     assert pos["TESTATA"][0] < 0.4 and pos["TESTATA"][1] < 0.15
     assert abs(pos["PIEDE"][0] - 0.5) < 0.1 and pos["PIEDE"][1] > 0.85
+
+
+@pytest.mark.parametrize("rot", [0, 90, 180, 270])
+def test_background_covers_rotated_cropped_page(tmp_path, rot):
+    import numpy as np
+    lh = pymupdf.open()
+    lh.new_page(width=595, height=842).insert_text((60, 60), "INTESTATA", fontsize=30)
+    lh_path = tmp_path / "carta.pdf"
+    lh.save(str(lh_path))
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.set_cropbox(pymupdf.Rect(20, 30, 575, 820))
+    page.set_rotation(rot)
+    out = pymupdf.open(stream=be.add_background(doc.tobytes(), color="#FF0000"), filetype="pdf")[0]
+    pix = out.get_pixmap(dpi=20)
+    a = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)
+    assert ((a[:, :, 0] > 200) & (a[:, :, 1] < 50)).mean() > 0.97
+    out2 = pymupdf.open(stream=be.add_background(doc.tobytes(), file=str(lh_path)), filetype="pdf")[0]
+    w = next(x for x in out2.get_text("words") if x[4] == "INTESTATA")
+    c = pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2) * out2.rotation_matrix
+    assert c.y / out2.rect.height < 0.15      # in alto nella pagina visualizzata
+
+
+def test_merge_bookmarks_disambiguate_same_names(tmp_path):
+    for sub in ("a", "b"):
+        (tmp_path / "in" / sub).mkdir(parents=True)
+        build_pdf(tmp_path / "in" / sub / "relazione.pdf", [[sub]])
+    paths, _ign = be.collect_inputs([str(tmp_path / "in")])
+    items = [be.analyze_file(p) for p in paths]
+    be.run_job(None, items, be.JobSettings(steps=[be.Step("merge")], destination=str(tmp_path / "out")))
+    toc = pymupdf.open(str(tmp_path / "out" / "Unione.pdf")).get_toc()
+    assert [t[1] for t in toc] == ["relazione (a)", "relazione (b)"]
