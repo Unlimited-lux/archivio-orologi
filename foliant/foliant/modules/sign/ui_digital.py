@@ -1149,7 +1149,37 @@ class RepeatDialog(QDialog):
             self.accept()
 
 
+# ============================================================ preferenze
+class SignPreferences(QWidget):
+    """Pagina «Firma» delle Preferenze: comportamento delle firme grafiche al salvataggio (SIG-05)."""
+
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.c = controller
+        form = QFormLayout(self)
+        self.on_save = QComboBox()
+        self.on_save.setAccessibleName(_("Firme grafiche al salvataggio"))
+        self.on_save.addItem(_("Mantieni come annotazioni (modificabili)"), "keep")
+        self.on_save.addItem(_("Incorpora nel contenuto della pagina"), "embed")
+        self.on_save.setCurrentIndex(max(0, self.on_save.findData(controller.on_save_mode())))
+        form.addRow(_("Firme grafiche al salvataggio:"), self.on_save)
+        note = QLabel(_("Nei documenti firmati digitalmente le firme grafiche restano sempre annotazioni, "
+                        "perché incorporarle invaliderebbe le firme."))
+        note.setWordWrap(True)
+        form.addRow(note)
+
+    def apply(self) -> None:
+        self.c.ctx.settings().setValue(self.c.ON_SAVE_KEY, self.on_save.currentData())
+
+
 TRANSLATIONS_EN = {
+    "Firme grafiche al salvataggio": "Graphic signatures on save",
+    "Firme grafiche al salvataggio:": "Graphic signatures on save:",
+    "Mantieni come annotazioni (modificabili)": "Keep as annotations (editable)",
+    "Incorpora nel contenuto della pagina": "Embed into the page content",
+    "Nei documenti firmati digitalmente le firme grafiche restano sempre annotazioni, perché incorporarle "
+    "invaliderebbe le firme.": "In digitally signed documents graphic signatures always stay annotations, "
+                               "because embedding them would invalidate the signatures.",
     "Solo firma grafica…": "Graphic signature only…",
     "Inserisce una firma grafica sopra il campo: non è una firma digitale e il campo resta da firmare.":
         "Places a graphic signature over the field: it is not a digital signature and the field stays unsigned.",

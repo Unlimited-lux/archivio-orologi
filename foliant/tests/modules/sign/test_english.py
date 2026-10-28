@@ -175,7 +175,8 @@ def _build_all(qtbot, settings, tmp_path, id_a, monkeypatch):
                 ui_digital.FieldDialog(win),
                 ui_digital.SelfSignedDialog(win, c),
                 ui_digital.IDsDialog(win, c),
-                ui_digital.RepeatDialog(win, 10, 0, preview=lambda pages, anchor: [])):
+                ui_digital.RepeatDialog(win, 10, 0, preview=lambda pages, anchor: []),
+                ui_digital.SignPreferences(win, c)):
         qtbot.addWidget(dlg)
         widgets.append(dlg)
         if isinstance(dlg, ui_create.CreateSignatureDialog):

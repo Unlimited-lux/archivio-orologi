@@ -61,6 +61,9 @@ class SignController(QObject):
         self.stateChanged.connect(self.update_banner)
         # SIG-20: avviso per le firme obbligatorie mancanti prima di stampa e «Salva con nome»
         if hasattr(ctx, "add_guard"):
+            # SIG-05: preferenza «Mantieni come annotazione» / «Incorpora» al salvataggio
+            ctx.add_guard("save", self._embed_on_save_guard)
+            ctx.add_guard("save_as", self._embed_on_save_guard)
             ctx.add_guard("print", lambda view, info: self._required_guard(view, _("Stampa")))
             # NFR-09: avviso prima di un salvataggio che riscrive per intero un documento firmato
             ctx.add_guard("save", lambda view, info: self._full_rewrite_guard(view, False, info))
@@ -263,6 +266,29 @@ class SignController(QObject):
         self.tool_for(view).selected = None
         if n:
             self.ctx.status(_("Firme incorporate: {n}.").format(n=n), 5000)
+
+    ON_SAVE_KEY = "sign/on_save"     # "keep" (predefinito) | "embed"
+
+    def on_save_mode(self) -> str:
+        return "embed" if str(self.ctx.settings().value(self.ON_SAVE_KEY, "keep")) == "embed" else "keep"
+
+    def _embed_on_save_guard(self, view, info) -> bool:
+        """SIG-05: con la preferenza «Incorpora» le firme grafiche entrano nel contenuto al salvataggio
+        (un solo passo annullabile). Non vale per «Salva una copia» né per i documenti firmati
+        digitalmente, dove incorporare invaliderebbe le firme: lì restano annotazioni."""
+        if view is None or (info or {}).get("copy") or self.on_save_mode() != "embed":
+            return True
+        doc = view.document
+        with ENGINE_LOCK:
+            count = sum(len(g.placed_signatures(doc.pdf, p)) for p in range(doc.pdf.page_count))
+        if not count:
+            return True
+        if getattr(doc, "has_signatures", False) or self.state(view).statuses:
+            self.ctx.status(_("Documento firmato digitalmente: le firme grafiche restano annotazioni."), 6000)
+            return True
+        n = self._change(view, _("Incorpora le firme"), g.embed_all_signatures, kind="content")
+        self.tool_for(view).selected = None
+        return n is not None
 
     def set_opacity(self, view, page: int, xref: int) -> None:
         val, ok = QInputDialog.getInt(self.ctx.window, _("Opacità"), _("Opacità della firma (%):"), 100, 5, 100)
@@ -1031,6 +1057,8 @@ class SignController(QObject):
 
 
 TRANSLATIONS_EN = {
+    "Documento firmato digitalmente: le firme grafiche restano annotazioni.":
+        "Digitally signed document: graphic signatures stay as annotations.",
     "Firma grafica": "Graphic signature",
     "Prossimo campo da firmare: «{name}»": "Next field to sign: “{name}”",
     "La firma grafica è stata inserita sopra il campo «{name}». Non è una firma digitale: il campo resta da "

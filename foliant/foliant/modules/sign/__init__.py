@@ -121,6 +121,9 @@ def register(ctx: Context) -> None:
     c.panel = panel
     ctx.add_sidebar_panel("firme", _("Firme"), "file-badge", panel, order=90)
     ctx.add_view_menu_provider(c.menu_provider)
+    if hasattr(ctx, "add_preferences_page"):
+        from .ui_digital import SignPreferences
+        ctx.add_preferences_page(_("Firma"), lambda parent: SignPreferences(parent, c), 90)
     ctx.add_home_action(_("Firma un PDF"), "signature", lambda: _home(ctx), _("Firma grafica o digitale"), 90)
 
     def on_state(view) -> None:

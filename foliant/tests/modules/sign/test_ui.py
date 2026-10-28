@@ -1207,3 +1207,45 @@ def test_banner_explains_missing_sign_permission(window, tmp_path):
     c.update_banner(view)
     text, actions = calls[-1]
     assert "password del proprietario" in text and "Firma ora" not in actions
+
+
+def test_on_save_preference_keep_or_embed(window, qtbot, tmp_path):
+    """SIG-05 punto 5: al salvataggio vale «Mantieni come annotazione» (predefinita) o «Incorpora»."""
+    from foliant.modules.sign.ui_digital import SignPreferences
+    from tests.conftest import make_pdf
+    path = Path(make_pdf(tmp_path / "pref.pdf", pages=1))
+    view = window.open_path(str(path))
+    c = _ctl(window)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    c.place(view, 0, pymupdf.Rect(400, 700, 500, 730), item)
+    assert c.on_save_mode() == "keep"
+    assert window.ctx.save_current()
+    assert len(g.placed_signatures(pymupdf.open(str(path)), 0)) == 1      # annotazione salvata
+    page = SignPreferences(None, c)
+    qtbot.addWidget(page)
+    page.on_save.setCurrentIndex(page.on_save.findData("embed"))
+    page.apply()
+    assert c.on_save_mode() == "embed"
+    c.place(view, 0, pymupdf.Rect(100, 700, 200, 730), item)
+    assert window.ctx.save_current()
+    saved = pymupdf.open(str(path))
+    assert not g.placed_signatures(saved, 0) and saved[0].get_drawings()   # incorporate nel contenuto
+    view.document.undo()                                                   # un solo passo annullabile
+    with view.document.lock:
+        assert len(g.placed_signatures(view.document.pdf, 0)) == 2
+
+
+def test_on_save_embed_skips_digitally_signed(window, monkeypatch, tmp_path, id_a):
+    """Con «Incorpora» un documento firmato digitalmente mantiene le firme grafiche come annotazioni."""
+    from tests.conftest import make_pdf
+    src = Path(make_pdf(tmp_path / "s.pdf", pages=1))
+    signed = tmp_path / "s_firmato.pdf"
+    signed.write_bytes(digital.sign_pdf(src.read_bytes(), id_a[2], digital.SignOptions()))
+    view = window.open_path(str(signed))
+    c = _ctl(window)
+    window.ctx.settings().setValue(c.ON_SAVE_KEY, "embed")
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    c.place(view, 0, pymupdf.Rect(400, 700, 500, 730), item)
+    assert c._embed_on_save_guard(view, {"event": "save"})
+    with view.document.lock:
+        assert len(g.placed_signatures(view.document.pdf, 0)) == 1
