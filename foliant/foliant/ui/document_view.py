@@ -9,23 +9,32 @@ Sistemi di coordinate:
 Resa: sotto `TILE_THRESHOLD` pixel ogni pagina visibile è un'unica immagine; oltre
 (zoom elevati, pagine enormi) si disegnano solo le tasselle visibili, `TILE_SIZE` pixel
 di lato, con la stessa matrice della resa intera e un ritaglio (`clip`).
+
+Guide (VIS-39, OBJ-23): linee orizzontali o verticali nelle coordinate della *pagina
+visualizzata* (riquadro /CropBox con /Rotate applicato, origine in alto a sinistra, punti;
+senza la rotazione della vista, così restano attaccate al contenuto). `display_transform(i)`
+converte queste coordinate -> viewport, `page_guide_lines(i)` le riporta in coordinate pagina.
 """
 
 from __future__ import annotations
 
 import math
 from collections import OrderedDict
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Iterator
 
 import pymupdf
-from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPolygonF, QTransform
+from PySide6.QtCore import QEvent, QLineF, QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
+from PySide6.QtGui import QActionGroup, QColor, QImage, QKeySequence, QPainter, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSlider, QFrame, QMenu
 
 from ..core import placement
 from ..core.document import CLOSED, CONTENT, Document
 from ..core.engine import ENGINE_LOCK
+from ..core.render import annotations_hidden
 from . import theme
+from .rulers import PT_PER_UNIT, RULER_SIZE, RULER_UNITS, Ruler, RulerCorner, unit_names
 from .tools import HandTool, PageEvent, SelectTextTool, TextSelection, Tool, copy_text_to_clipboard, selection_color
 
 PX_PER_PT = 96.0 / 72.0
@@ -46,6 +55,37 @@ FIT_PAGE = "page"
 ZOOM_STEPS = (0.01, 0.02, 0.05, 0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
               4.0, 5.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0)
 
+GUIDE_HORIZONTAL = "horizontal"  # guida orizzontale: y costante nella pagina visualizzata
+GUIDE_VERTICAL = "vertical"      # guida verticale: x costante
+_GUIDE_ALIASES = {"horizontal": GUIDE_HORIZONTAL, "h": GUIDE_HORIZONTAL, "y": GUIDE_HORIZONTAL,
+                  "vertical": GUIDE_VERTICAL, "v": GUIDE_VERTICAL, "x": GUIDE_VERTICAL}
+GUIDE_HIT_PX = 4.0               # distanza (pixel) entro cui il puntatore «prende» una guida
+AUTOSCROLL_EDGE = 12.0           # pixel dal bordo del viewport in cui parte lo scorrimento automatico
+AUTOSCROLL_INTERVAL_MS = 30
+
+
+def guide_orientation(value: str) -> str:
+    """Orientamento normalizzato di una guida: GUIDE_HORIZONTAL o GUIDE_VERTICAL.
+
+    Accetta anche "h"/"v" e, come le guide «x»/«y» del modulo oggetti, "y" (orizzontale) e
+    "x" (verticale)."""
+    try:
+        return _GUIDE_ALIASES[str(value).lower()]
+    except KeyError:
+        raise ValueError(f"orientamento della guida non valido: {value!r}") from None
+
+
+def _qt_matrix(m: pymupdf.Matrix) -> QTransform:
+    return QTransform(m.a, m.b, m.c, m.d, m.e, m.f)
+
+
+def _distance_to_segment(line: QLineF, p: QPointF) -> float:
+    ax, ay, bx, by = line.x1(), line.y1(), line.x2(), line.y2()
+    dx, dy = bx - ax, by - ay
+    length2 = dx * dx + dy * dy
+    t = 0.0 if length2 == 0 else max(0.0, min(1.0, ((p.x() - ax) * dx + (p.y() - ay) * dy) / length2))
+    return math.hypot(p.x() - (ax + t * dx), p.y() - (ay + t * dy))
+
 
 class DocumentBridge(QObject):
     """Riporta le notifiche del documento nel thread dell'interfaccia."""
@@ -64,11 +104,17 @@ class DocumentBridge(QObject):
         self.document.remove_listener(self._on_change)
 
 
+def _identity() -> pymupdf.Matrix:
+    return pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+
+
 @dataclass
 class PageGeometry:
     width: float             # punti, come visualizzata (rotazioni incluse)
     height: float
     matrix: pymupdf.Matrix   # pagina non ruotata -> punti visualizzati
+    # pagina visualizzata senza la rotazione della vista (/CropBox e /Rotate applicati) -> punti visualizzati
+    view: pymupdf.Matrix = field(default_factory=_identity)
 
 
 def _extra_rotation(w: float, h: float, deg: int) -> tuple[pymupdf.Matrix, float, float]:
@@ -90,7 +136,7 @@ def page_geometry(page: pymupdf.Page, view_rotation: int = 0) -> PageGeometry:
         m = page.rotation_matrix
     w, h = page.rect.width, page.rect.height
     extra, w2, h2 = _extra_rotation(w, h, view_rotation % 360)
-    return PageGeometry(w2, h2, m * extra)
+    return PageGeometry(w2, h2, m * extra, extra)
 
 
 class DocumentView(QAbstractScrollArea):
@@ -101,6 +147,8 @@ class DocumentView(QAbstractScrollArea):
     contentChanged = Signal()
     layoutChanged = Signal()
     statusMessage = Signal(str)
+    guidesChanged = Signal()           # guide aggiunte, spostate o rimosse
+    rulerUnitChanged = Signal(str)     # unità dei righelli scelta dall'utente ("mm", "pt", "in")
 
     GAP = 16.0
     MARGIN = 24.0
@@ -144,14 +192,33 @@ class DocumentView(QAbstractScrollArea):
         self.hand_tool = HandTool()
         # False: pagine disegnate senza annotazioni (solo a schermo, il file non cambia; ANN-39).
         self.show_annotations = True
+        # Filtro delle annotazioni disegnate: fn(pagina, xref) -> bool (True = visibile); None = tutte.
+        self._annot_filter = None
         # Disegni aggiuntivi dei moduli: callable(view, painter, page_index), painter in coordinate pagina.
         self.overlays: list = []
         # Voci del menu contestuale (tasto destro): callable(view, page_event, menu).
         # La finestra principale condivide qui la lista registrata dai moduli.
         self.menu_providers: list = []
-        self.text_selection: TextSelection | None = None
+        # Selezione del testo: una TextSelection per pagina, in ordine di pagina (VIS-28).
+        self._selections: list[TextSelection] = []
         self.search_hits: dict[int, list] = {}
         self.current_hit: tuple[int, int] | None = None
+        # Trascinamento di uno strumento col tasto sinistro (per lo scorrimento automatico).
+        self._tool_dragging = False
+        self._autoscroll_state: tuple | None = None    # (posizione, pulsanti, modificatori)
+        self._autoscroll_timer = QTimer(self)
+        self._autoscroll_timer.setInterval(AUTOSCROLL_INTERVAL_MS)
+        self._autoscroll_timer.timeout.connect(self._autoscroll_step)
+        # Righelli e guide (VIS-39).
+        self._pointer: QPointF | None = None           # ultima posizione del puntatore nel viewport
+        self._rulers_visible = False
+        self._rulers: tuple[Ruler, Ruler, RulerCorner] | None = None
+        self._ruler_unit = "mm"
+        self._guides: list[tuple[str, float, int | None]] = []
+        self._guides_visible = True
+        self._guides_locked = False
+        self._guide_drag: dict | None = None
+        self._guide_hover = False
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.viewport().setMouseTracking(True)
@@ -188,6 +255,22 @@ class DocumentView(QAbstractScrollArea):
     def view_rotation(self) -> int:
         return self._view_rotation
 
+    @property
+    def text_selection(self) -> TextSelection | None:
+        """Selezione di testo della prima pagina selezionata (None = nessuna selezione).
+
+        Per una selezione su più pagine: `text_selections`."""
+        return self._selections[0] if self._selections else None
+
+    @text_selection.setter
+    def text_selection(self, selection: TextSelection | None) -> None:
+        self._selections = [selection] if selection is not None else []
+
+    @property
+    def text_selections(self) -> list[TextSelection]:
+        """Selezione di testo: una TextSelection per pagina, in ordine di pagina (copia dell'elenco)."""
+        return list(self._selections)
+
     def status(self, message: str) -> None:
         self.statusMessage.emit(message)
 
@@ -206,6 +289,7 @@ class DocumentView(QAbstractScrollArea):
     def dispose(self) -> None:
         """Da chiamare prima di chiudere il documento."""
         self._render_timer.stop()
+        self._stop_autoscroll()
         self._bridge.detach()
         self._cache.clear()
         self._stale.clear()
@@ -214,6 +298,8 @@ class DocumentView(QAbstractScrollArea):
 
     # ================================================================ strumenti
     def set_tool(self, tool: Tool | None) -> None:
+        self._tool_dragging = False
+        self._stop_autoscroll()
         old = self.tool
         old.deactivate(self)
         self._tool = tool
@@ -266,12 +352,18 @@ class DocumentView(QAbstractScrollArea):
                 return row
         return [page]
 
+    def _inset(self) -> float:
+        """Spazio occupato dai righelli sul bordo superiore e sinistro del viewport."""
+        return float(RULER_SIZE) if self._rulers_visible else 0.0
+
     def _available_size(self) -> tuple[float, float]:
         vbar = self.verticalScrollBar().sizeHint().width()
         w = self.viewport().width()
         if self.verticalScrollBar().isHidden():
             w -= vbar
-        return max(80.0, w - 2 * self.MARGIN), max(80.0, self.viewport().height() - 2 * self.MARGIN)
+        inset = self._inset()
+        return (max(80.0, w - 2 * self.MARGIN - inset),
+                max(80.0, self.viewport().height() - 2 * self.MARGIN - inset))
 
     def _fit_zoom(self) -> float:
         rows = self._rows()
@@ -296,7 +388,8 @@ class DocumentView(QAbstractScrollArea):
         n = len(self._geoms)
         rects = [QRectF() for _ in range(n)]
         rows = self._rows()
-        y = self.MARGIN
+        inset = self._inset()           # i righelli coprono il bordo: le pagine iniziano dopo
+        y = self.MARGIN + inset
         max_w = 0.0
         laid: list[tuple[list[int], float, float]] = []
         for row in rows:
@@ -304,9 +397,9 @@ class DocumentView(QAbstractScrollArea):
             row_h = max(self._geoms[i].height * s for i in row)
             laid.append((row, row_w, row_h))
             max_w = max(max_w, row_w)
-        content_w = max(float(self.viewport().width()), max_w + 2 * self.MARGIN)
+        content_w = max(float(self.viewport().width()), max_w + 2 * self.MARGIN + inset)
         for row, row_w, row_h in laid:
-            x = (content_w - row_w) / 2
+            x = inset + (content_w - inset - row_w) / 2
             for i in row:
                 g = self._geoms[i]
                 w, h = g.width * s, g.height * s
@@ -327,22 +420,38 @@ class DocumentView(QAbstractScrollArea):
         vbar.setSingleStep(36)
         self.layoutChanged.emit()
         self.viewport().update()
+        self._update_rulers()
         self._schedule_visible()
 
     def page_rect(self, index: int) -> QRectF:
         """Rettangolo della pagina nel viewport (pixel)."""
         return self._rects[index].translated(-self.horizontalScrollBar().value(), -self.verticalScrollBar().value())
 
-    def page_transform(self, index: int) -> QTransform:
-        """Trasformazione coordinate pagina -> viewport."""
-        g = self._geoms[index]
+    def _shown_to_view(self, index: int) -> QTransform:
+        """Punti visualizzati (rotazione della vista inclusa) -> viewport."""
         r = self._rects[index]
         s = self._scale()
-        m = g.matrix
-        return (QTransform(m.a, m.b, m.c, m.d, m.e, m.f)
-                * QTransform.fromScale(s, s)
+        return (QTransform.fromScale(s, s)
                 * QTransform.fromTranslate(r.x() - self.horizontalScrollBar().value(),
                                            r.y() - self.verticalScrollBar().value()))
+
+    def page_transform(self, index: int) -> QTransform:
+        """Trasformazione coordinate pagina -> viewport."""
+        return _qt_matrix(self._geoms[index].matrix) * self._shown_to_view(index)
+
+    def display_transform(self, index: int) -> QTransform:
+        """Trasformazione coordinate della pagina visualizzata -> viewport.
+
+        Coordinate della pagina visualizzata: punti dall'angolo superiore sinistro della pagina
+        come la mostra il documento (/CropBox con /Rotate applicato), senza la rotazione della
+        vista: sono le coordinate delle guide e di `placement.page_to_display_matrix`."""
+        return _qt_matrix(self._geoms[index].view) * self._shown_to_view(index)
+
+    def display_size(self, index: int) -> tuple[float, float]:
+        """Larghezza e altezza della pagina visualizzata (senza la rotazione della vista), in punti."""
+        g = self._geoms[index]
+        r = pymupdf.Rect(0, 0, g.width, g.height) * ~g.view
+        return r.width, r.height
 
     def page_to_view(self, index: int, rect: pymupdf.Rect) -> QRectF:
         return self.page_transform(index).mapRect(QRectF(rect.x0, rect.y0, rect.width, rect.height))
@@ -395,10 +504,11 @@ class DocumentView(QAbstractScrollArea):
             self._relayout()
             self.currentPageChanged.emit(index)
         r = self._rects[index]
-        y = r.top() - self.MARGIN / 2
+        inset = self._inset()
+        y = r.top() - self.MARGIN / 2 - inset
         if point is not None:
             p = self.page_transform(index).map(QPointF(point.x, point.y))
-            y = p.y() + self.verticalScrollBar().value() - self.MARGIN
+            y = p.y() + self.verticalScrollBar().value() - self.MARGIN - inset
         self.verticalScrollBar().setValue(int(y))
         self._set_current(index)
 
@@ -507,8 +617,8 @@ class DocumentView(QAbstractScrollArea):
         self._words.clear()
         self._links.clear()
         self._invalidate_render(keep_stale=True)
-        if self.text_selection is not None:
-            self.text_selection = None
+        if self._selections:
+            self._selections = []
             self.selectionChanged.emit()
         top = self.verticalScrollBar().value()
         self._reload_geometry()
@@ -565,21 +675,75 @@ class DocumentView(QAbstractScrollArea):
         return None
 
     def set_text_selection(self, selection: TextSelection | None) -> None:
-        self.text_selection = selection
+        """Selezione di testo su una pagina (None = nessuna selezione)."""
+        self.set_text_selections([selection] if selection is not None else [])
+
+    def set_text_selections(self, selections: list[TextSelection]) -> None:
+        """Selezione di testo su più pagine: una TextSelection per pagina (riordinate per pagina)."""
+        self._selections = sorted((s for s in selections if s is not None), key=lambda s: s.page)
         self.viewport().update()
         self.selectionChanged.emit()
 
     def clear_text_selection(self) -> None:
-        if self.text_selection is not None:
-            self.set_text_selection(None)
+        if self._selections:
+            self.set_text_selections([])
 
     def selected_text(self) -> str:
-        return self.text_selection.text if self.text_selection else ""
+        """Testo selezionato; su più pagine i testi delle pagine sono separati da una riga vuota."""
+        return "\n\n".join(s.text for s in self._selections if s.text)
 
     def set_search_hits(self, hits: dict[int, list], current: tuple[int, int] | None = None) -> None:
         self.search_hits = hits
         self.current_hit = current
         self.viewport().update()
+
+    # ================================================================ filtro delle annotazioni
+    @property
+    def annotation_filter(self):
+        return self._annot_filter
+
+    def set_annotation_filter(self, fn) -> None:
+        """Annotazioni da disegnare: `fn(pagina, xref) -> bool` (True = visibile), None = tutte.
+
+        Vale per la resa a pagina intera e per le tasselle degli zoom elevati, solo a schermo
+        (il file non cambia; miniature e stampa non lo usano). `fn` riceve ogni voce di /Annots
+        (anche campi e collegamenti) e va chiamata di nuovo, anche con la stessa funzione, quando
+        cambia ciò che nasconde: la vista ridisegna le pagine. Con `show_annotations = False`
+        non si disegna comunque nessuna annotazione."""
+        self._annot_filter = fn
+        self.refresh_rendering()
+
+    def refresh_rendering(self) -> None:
+        """Ridisegna le pagine con lo stesso documento (es. filtro cambiato): finché non arriva la
+        resa nuova resta visibile quella precedente."""
+        self._invalidate_render(keep_stale=True)
+        self._tiles.clear()               # stessa versione del documento: le tasselle non si riusano
+        self._tiles_bytes = 0
+        self._schedule_visible()
+        self.viewport().update()
+
+    @contextmanager
+    def _filtered_annotations(self, index: int) -> Iterator[None]:
+        """Durante la resa della pagina nasconde le annotazioni escluse dal filtro (flag Hidden,
+        ripristinato subito dopo). Va usato tenendo ENGINE_LOCK."""
+        fn = self._annot_filter
+        if fn is None or not self.show_annotations:
+            yield
+            return
+        pdf = self.document.pdf
+        hidden = []
+        for xref, *_rest in pdf[index].annot_xrefs():
+            try:
+                visible = bool(fn(index, xref))
+            except Exception:             # un filtro difettoso non deve impedire di vedere la pagina
+                visible = True
+            if not visible:
+                hidden.append(xref)
+        if not hidden:
+            yield
+            return
+        with annotations_hidden(pdf, hidden):
+            yield
 
     # ================================================================ rendering
     def _scale_key(self) -> float:
@@ -681,7 +845,8 @@ class DocumentView(QAbstractScrollArea):
             scale *= math.sqrt(MAX_RENDER_PIXELS / pixels)
         page = self.document.pdf[index]
         mat = self._render_matrix(scale)
-        pix = page.get_pixmap(matrix=mat, alpha=False, annots=self.show_annotations)
+        with self._filtered_annotations(index):
+            pix = page.get_pixmap(matrix=mat, alpha=False, annots=self.show_annotations)
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
         return img
 
@@ -751,7 +916,8 @@ class DocumentView(QAbstractScrollArea):
         y0 = math.floor(oy + 1e-3) + row * TILE_SIZE
         clip = pymupdf.Rect(x0, y0, x0 + TILE_SIZE, y0 + TILE_SIZE) * ~mat
         page = self.document.pdf[index]
-        pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False, annots=self.show_annotations)
+        with self._filtered_annotations(index):
+            pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False, annots=self.show_annotations)
         if pix.width <= 0 or pix.height <= 0:
             return QImage(), 0.0, 0.0
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
@@ -815,6 +981,9 @@ class DocumentView(QAbstractScrollArea):
             p.setWorldTransform(self.page_transform(i))
             self._paint_overlays(p, i)
             p.restore()
+            if self._guides_visible and self._guides:
+                self._paint_guides(p, i)
+        self._paint_guide_preview(p)
         if missing and not self._render_timer.isActive():
             self._schedule_visible()
 
@@ -885,8 +1054,9 @@ class DocumentView(QAbstractScrollArea):
                 else:
                     r = pymupdf.Rect(h)
                     p.drawRect(QRectF(r.x0, r.y0, r.width, r.height))
-        sel = self.text_selection
-        if sel is not None and sel.page == index:
+        for sel in self._selections:
+            if sel.page != index:
+                continue
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(selection_color())
             for r in sel.rects:
@@ -906,16 +1076,402 @@ class DocumentView(QAbstractScrollArea):
         finally:
             p.restore()
 
+    # ================================================================ righelli (VIS-39)
+    @property
+    def rulers_visible(self) -> bool:
+        return self._rulers_visible
+
+    def set_rulers_visible(self, visible: bool) -> None:
+        """Mostra o nasconde i righelli; le pagine si spostano per non esserne coperte."""
+        visible = bool(visible)
+        if visible == self._rulers_visible:
+            return
+        self._rulers_visible = visible
+        if visible and self._rulers is None:
+            self._rulers = (Ruler(self, True), Ruler(self, False), RulerCorner(self))
+        if not visible:
+            self._guide_drag = None
+            self._guide_hover = False
+        self._place_rulers()
+        if self._rulers is not None:
+            for w in self._rulers:
+                w.setVisible(visible)
+        self._relayout()
+
+    def _place_rulers(self) -> None:
+        if self._rulers is None:
+            return
+        h, v, corner = self._rulers
+        vw, vh = self.viewport().width(), self.viewport().height()
+        h.setGeometry(0, 0, vw, RULER_SIZE)
+        v.setGeometry(0, 0, RULER_SIZE, vh)
+        corner.setGeometry(0, 0, RULER_SIZE, RULER_SIZE)
+        corner.raise_()
+
+    def _update_rulers(self) -> None:
+        if self._rulers is not None and self._rulers_visible:
+            for w in self._rulers:
+                w.update()
+
+    def _track_pointer(self, pos: QPointF) -> None:
+        """Posizione del puntatore (viewport) per i righelli: pagina di riferimento e indicatore."""
+        self._pointer = QPointF(pos)
+        self._update_rulers()
+
+    @property
+    def ruler_unit(self) -> str:
+        return self._ruler_unit
+
+    def set_ruler_unit(self, unit: str) -> None:
+        """Unità dei righelli: "mm", "pt" o "in" (pollici)."""
+        if unit not in RULER_UNITS:
+            raise ValueError(f"unità dei righelli non valida: {unit!r}")
+        if unit == self._ruler_unit:
+            return
+        self._ruler_unit = unit
+        self._update_rulers()
+        self.rulerUnitChanged.emit(unit)
+
+    def ruler_page(self) -> int | None:
+        """Pagina a cui si riferiscono i righelli: quella sotto il puntatore (o la più vicina),
+        altrimenti la pagina corrente."""
+        if not self._geoms:
+            return None
+        if self._pointer is not None:
+            hit = self.view_to_page(self._pointer, clamp=True)
+            if hit is not None:
+                return hit[0]
+        visible = self.visible_pages()
+        if self._current in visible or not visible:
+            return self._current
+        return visible[0]
+
+    def ruler_position(self, pos: QPointF, page: int | None = None) -> tuple[float, float] | None:
+        """Posizione `pos` (viewport) misurata come sui righelli: dall'angolo superiore sinistro
+        della pagina come si vede (CropBox, /Rotate, rotazione della vista), nell'unità dei righelli."""
+        page = self.ruler_page() if page is None else page
+        if page is None or not (0 <= page < len(self._rects)):
+            return None
+        r = self.page_rect(page)
+        f = self._scale() * PT_PER_UNIT[self._ruler_unit]
+        return (pos.x() - r.left()) / f, (pos.y() - r.top()) / f
+
+    def _ruler_menu(self, global_pos) -> None:
+        from ..i18n import _
+        menu = QMenu(self)
+        units = menu.addMenu(_("Unità dei righelli"))
+        group = QActionGroup(units)
+        for key, label in unit_names():
+            act = units.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(key == self._ruler_unit)
+            group.addAction(act)
+            act.triggered.connect(lambda _c=False, k=key: self.set_ruler_unit(k))
+        menu.addSeparator()
+        lock = menu.addAction(_("Blocca le guide"))
+        lock.setCheckable(True)
+        lock.setChecked(self._guides_locked)
+        lock.toggled.connect(self.set_guides_locked)
+        clear = menu.addAction(_("Rimuovi tutte le guide"), self.clear_guides)
+        clear.setEnabled(bool(self._guides))
+        self.exec_menu(menu, global_pos)
+        menu.deleteLater()
+
+    # ================================================================ guide (VIS-39, OBJ-23)
+    # Una guida è (orientamento, posizione in punti, pagina | None): GUIDE_HORIZONTAL = y costante,
+    # GUIDE_VERTICAL = x costante, nelle coordinate della pagina visualizzata; pagina None = tutte.
+    def guides(self) -> list[tuple[str, float, int | None]]:
+        """Guide del documento in questa vista: (orientamento, posizione_pt, pagina | None)."""
+        return list(self._guides)
+
+    def guides_on_page(self, index: int) -> list[tuple[str, float]]:
+        """(orientamento, posizione_pt) delle guide che valgono per la pagina `index`."""
+        return [(o, v) for o, v, page in self._guides if page is None or page == index]
+
+    def add_guide(self, orientation: str, position_pt: float, page: int | None = None) -> tuple[str, float, int | None]:
+        """Aggiunge una guida (se non c'è già) e la restituisce normalizzata."""
+        guide = (guide_orientation(orientation), float(position_pt), None if page is None else int(page))
+        if guide not in self._guides:
+            self._guides.append(guide)
+            self._guides_changed()
+        return guide
+
+    def remove_guide(self, orientation: str, position_pt: float, page: int | None = None) -> bool:
+        """Rimuove la guida indicata (posizione con tolleranza di 0,01 pt); False se non c'è.
+
+        Accetta una voce di `guides()`: `view.remove_guide(*view.guides()[0])`."""
+        o = guide_orientation(orientation)
+        for n, (go, gv, gp) in enumerate(self._guides):
+            if go == o and gp == page and abs(gv - float(position_pt)) < 0.01:
+                del self._guides[n]
+                self._guides_changed()
+                return True
+        return False
+
+    def set_guides(self, guides) -> None:
+        """Sostituisce tutte le guide: elementi (orientamento, posizione_pt[, pagina])."""
+        out: list[tuple[str, float, int | None]] = []
+        for g in guides:
+            o, v, *rest = g
+            page = rest[0] if rest else None
+            item = (guide_orientation(o), float(v), None if page is None else int(page))
+            if item not in out:
+                out.append(item)
+        if out != self._guides:
+            self._guides = out
+            self._guides_changed()
+
+    def clear_guides(self) -> None:
+        if self._guides:
+            self._guides = []
+            self._guides_changed()
+
+    def page_guide_lines(self, index: int) -> dict[str, list[float]]:
+        """Guide della pagina in coordinate pagina (non ruotata, come testo e disegni):
+        {"x": [x delle linee verticali], "y": [y delle linee orizzontali]}, per l'aggancio.
+
+        Su una pagina con /Rotate 90 una guida verticale della pagina visualizzata è una linea
+        con y costante nelle coordinate pagina: finisce in "y"."""
+        g = self._geoms[index]
+        to_page = ~(g.matrix * ~g.view)        # pagina visualizzata -> coordinate pagina
+        out: dict[str, list[float]] = {"x": [], "y": []}
+        for o, v in self.guides_on_page(index):
+            if o == GUIDE_VERTICAL:
+                a, b = pymupdf.Point(v, 0) * to_page, pymupdf.Point(v, 100) * to_page
+            else:
+                a, b = pymupdf.Point(0, v) * to_page, pymupdf.Point(100, v) * to_page
+            if abs(a.x - b.x) < 1e-6:
+                out["x"].append(a.x)
+            else:
+                out["y"].append(a.y)
+        return out
+
+    @property
+    def guides_visible(self) -> bool:
+        return self._guides_visible
+
+    def set_guides_visible(self, visible: bool) -> None:
+        """Mostra o nasconde le guide (restano memorizzate)."""
+        self._guides_visible = bool(visible)
+        self.viewport().update()
+
+    @property
+    def guides_locked(self) -> bool:
+        return self._guides_locked
+
+    def set_guides_locked(self, locked: bool) -> None:
+        """Con le guide bloccate non si possono spostare né eliminare trascinandole."""
+        self._guides_locked = bool(locked)
+
+    def _guides_changed(self) -> None:
+        self.viewport().update()
+        self._update_rulers()
+        self.guidesChanged.emit()
+
+    def _guides_interactive(self) -> bool:
+        """Le guide si trascinano con i righelli visibili, se sono visibili e non bloccate."""
+        return self._rulers_visible and self._guides_visible and not self._guides_locked and bool(self._guides)
+
+    def _guide_line(self, index: int, orientation: str, value: float) -> QLineF:
+        """Segmento della guida sulla pagina `index`, in coordinate del viewport."""
+        w, h = self.display_size(index)
+        t = self.display_transform(index)
+        if orientation == GUIDE_VERTICAL:
+            return QLineF(t.map(QPointF(value, 0)), t.map(QPointF(value, h)))
+        return QLineF(t.map(QPointF(0, value)), t.map(QPointF(w, value)))
+
+    def _guide_at(self, pos: QPointF) -> tuple[int, int] | None:
+        """(indice in guides(), pagina) della guida sotto `pos`, entro GUIDE_HIT_PX pixel."""
+        best = None
+        m = GUIDE_HIT_PX
+        for i in self.visible_pages():
+            if not self.page_rect(i).adjusted(-m, -m, m, m).contains(pos):
+                continue
+            for n, (o, v, page) in enumerate(self._guides):
+                if page is not None and page != i:
+                    continue
+                d = _distance_to_segment(self._guide_line(i, o, v), pos)
+                if d <= m and (best is None or d < best[0]):
+                    best = (d, n, i)
+        return None if best is None else (best[1], best[2])
+
+    def _horizontal_on_screen(self, orientation: str) -> bool:
+        return (orientation == GUIDE_HORIZONTAL) != (self._view_rotation in (90, 270))
+
+    def _paint_guides(self, p: QPainter, index: int) -> None:
+        moving = self._guide_drag.get("index") if self._guide_drag is not None else None
+        p.save()
+        p.setClipRect(self.page_rect(index))
+        p.setPen(QPen(theme.color("accent"), 0))
+        for n, (o, v, page) in enumerate(self._guides):
+            if n == moving or (page is not None and page != index):
+                continue
+            p.drawLine(self._guide_line(index, o, v))
+        p.restore()
+
+    def _paint_guide_preview(self, p: QPainter) -> None:
+        d = self._guide_drag
+        if d is None or d.get("pos") is None:
+            return
+        pos = d["pos"]
+        p.save()
+        p.setPen(QPen(theme.color("accent"), 0, Qt.PenStyle.DashLine))
+        if d["screen"] == "h":
+            p.drawLine(QPointF(0, pos.y()), QPointF(self.viewport().width(), pos.y()))
+        else:
+            p.drawLine(QPointF(pos.x(), 0), QPointF(pos.x(), self.viewport().height()))
+        p.restore()
+
+    def _begin_new_guide(self, from_horizontal_ruler: bool, pos: QPointF) -> None:
+        """Inizio del trascinamento da un righello: quello in alto crea guide orizzontali sullo schermo."""
+        self._guide_drag = {"index": None, "screen": "h" if from_horizontal_ruler else "v", "pos": QPointF(pos)}
+        self.viewport().update()
+
+    def _begin_guide_move(self, index: int, pos: QPointF) -> None:
+        horizontal = self._horizontal_on_screen(self._guides[index][0])
+        self._guide_drag = {"index": index, "screen": "h" if horizontal else "v", "pos": QPointF(pos)}
+        self.viewport().update()
+
+    def _guide_drag_move(self, pos: QPointF) -> None:
+        if self._guide_drag is None:
+            return
+        self._guide_drag["pos"] = QPointF(pos)
+        self._pointer = QPointF(pos)
+        self.viewport().update()
+        self._update_rulers()
+
+    def _guide_drag_end(self, pos: QPointF, modifiers) -> None:
+        """Fine del trascinamento: crea o sposta la guida; fuori dalle pagine la elimina."""
+        d, self._guide_drag = self._guide_drag, None
+        if d is None:
+            return
+        target = self._guide_target(d, pos, modifiers)
+        n = d["index"]
+        if n is None:
+            if target is not None:
+                self.add_guide(*target)
+        elif n < len(self._guides):
+            if target is None or (target != self._guides[n] and target in self._guides):
+                del self._guides[n]
+                self._guides_changed()
+            elif target != self._guides[n]:
+                self._guides[n] = target
+                self._guides_changed()
+        self._guide_hover = False
+        self.viewport().setCursor(self.tool.cursor)
+        self.viewport().update()
+
+    def _guide_target(self, d: dict, pos: QPointF, modifiers) -> tuple[str, float, int | None] | None:
+        """Guida che risulta rilasciando in `pos` (None = fuori dalle pagine: nessuna guida)."""
+        inset = self._inset()
+        if not QRectF(self.viewport().rect()).contains(pos) or pos.x() < inset or pos.y() < inset:
+            return None                      # fuori dalla vista o di nuovo sopra i righelli
+        hit = self.view_to_page(pos)
+        if hit is None:
+            return None
+        page = hit[0]
+        inv, _ok = self.display_transform(page).inverted()
+        dp = inv.map(pos)
+        if (d["screen"] == "h") != (self._view_rotation in (90, 270)):
+            orientation, value = GUIDE_HORIZONTAL, dp.y()
+        else:
+            orientation, value = GUIDE_VERTICAL, dp.x()
+        n = d["index"]
+        if n is None:                        # nuova: sulla pagina, con Ctrl su tutte
+            target_page = None if modifiers & Qt.KeyboardModifier.ControlModifier else page
+        else:                                # spostata: una guida di tutte le pagine resta tale
+            target_page = None if self._guides[n][2] is None else page
+        return orientation, round(value, 2), target_page
+
+    # ================================================================ scorrimento automatico
+    def _autoscroll_delta(self, pos: QPointF) -> tuple[int, int]:
+        """Passo (pixel) dello scorrimento automatico col puntatore in `pos`; (0, 0) = nessuno."""
+        inset = self._inset()
+        w, h = self.viewport().width(), self.viewport().height()
+
+        def speed(distance: float) -> int:
+            return int(min(80.0, 4.0 + distance * 0.6))
+
+        dx = dy = 0
+        edge = AUTOSCROLL_EDGE
+        if pos.y() < inset + edge:
+            dy = -speed(inset + edge - pos.y())
+        elif pos.y() > h - edge:
+            dy = speed(pos.y() - (h - edge))
+        if pos.x() < inset + edge:
+            dx = -speed(inset + edge - pos.x())
+        elif pos.x() > w - edge:
+            dx = speed(pos.x() - (w - edge))
+        return dx, dy
+
+    def _update_autoscroll(self, pos: QPointF, buttons, modifiers) -> None:
+        self._autoscroll_state = (QPointF(pos), buttons, modifiers)
+        dx, dy = self._autoscroll_delta(pos)
+        if dx or dy:
+            if not self._autoscroll_timer.isActive():
+                self._autoscroll_timer.start()
+        else:
+            self._autoscroll_timer.stop()
+
+    def _stop_autoscroll(self) -> None:
+        self._autoscroll_timer.stop()
+        self._autoscroll_state = None
+
+    def _autoscroll_step(self) -> None:
+        """Scorre di un passo e ripete `move()` dello strumento con la stessa posizione del puntatore."""
+        state = self._autoscroll_state
+        if state is None or not self._tool_dragging or not getattr(self.tool, "autoscroll", False):
+            self._stop_autoscroll()
+            return
+        pos, buttons, modifiers = state
+        dx, dy = self._autoscroll_delta(pos)
+        hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
+        before = (hbar.value(), vbar.value())
+        if dx:
+            hbar.setValue(hbar.value() + dx)
+        if dy:
+            vbar.setValue(vbar.value() + dy)
+        if (hbar.value(), vbar.value()) == before:
+            self._autoscroll_timer.stop()     # al limite: riparte al prossimo movimento
+            return
+        hit = self.view_to_page(pos)
+        pe = PageEvent(page=hit[0] if hit else None, point=hit[1] if hit else None, pos=QPointF(pos),
+                       button=Qt.MouseButton.NoButton, buttons=buttons, modifiers=modifiers, event=None)
+        try:
+            if self.tool.move(self, pe):
+                self.viewport().update()
+        except Exception as e:
+            self._stop_autoscroll()
+            self.status(f"Errore nello strumento attivo: {e}")
+
     # ================================================================ eventi
+    def event(self, ev) -> bool:
+        # Tab e Maiusc+Tab vanno prima allo strumento attivo (es. per scorrere gli oggetti):
+        # se li gestisce non spostano il fuoco, altrimenti vale il comportamento normale.
+        if (ev.type() == QEvent.Type.KeyPress and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)
+                and not ev.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)):
+            try:
+                handled = self.tool.key(self, ev)
+            except Exception as e:
+                handled = False
+                self.status(f"Errore nello strumento attivo: {e}")
+            if handled:
+                ev.accept()
+                self.viewport().update()
+                return True
+        return super().event(ev)
+
     def resizeEvent(self, event) -> None:
         page = self._current
         super().resizeEvent(event)
+        self._place_rulers()
         self._relayout()
         if self._fit:
             self.go_to_page(page)
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         self.viewport().update()
+        self._update_rulers()
         self._update_current_from_scroll()
         self._schedule_visible()
 
@@ -939,24 +1495,59 @@ class DocumentView(QAbstractScrollArea):
                                                  ev.buttons(), ev.modifiers(), ev))
             self._middle_pan = True
             return
+        if ev.button() == Qt.MouseButton.LeftButton and self._guides_interactive():
+            hit = self._guide_at(ev.position())
+            if hit is not None:              # guida sotto il puntatore: si sposta o si elimina
+                self._begin_guide_move(hit[0], ev.position())
+                ev.accept()
+                return
         if self.tool.press(self, self._page_event(ev)):
+            if ev.button() == Qt.MouseButton.LeftButton:
+                self._tool_dragging = True
             ev.accept()
             self.viewport().update()
         else:
             super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev) -> None:
+        pos = ev.position()
+        self._pointer = QPointF(pos)
+        if self._guide_drag is not None:
+            self._guide_drag_move(pos)
+            ev.accept()
+            return
+        self._update_rulers()
         if getattr(self, "_middle_pan", False):
             self.hand_tool.move(self, PageEvent(None, None, ev.position(), Qt.MouseButton.NoButton,
                                                 ev.buttons(), ev.modifiers(), ev))
             return
+        if self._guides_interactive() and ev.buttons() == Qt.MouseButton.NoButton:
+            hit = self._guide_at(pos)
+            if hit is not None:
+                horizontal = self._horizontal_on_screen(self._guides[hit[0]][0])
+                self.viewport().setCursor(Qt.CursorShape.SplitVCursor if horizontal else Qt.CursorShape.SplitHCursor)
+                self._guide_hover = True
+                return
+        if self._guide_hover:
+            self._guide_hover = False
+            self.viewport().setCursor(self.tool.cursor)
         if self.tool.move(self, self._page_event(ev)):
             ev.accept()
             self.viewport().update()
         else:
             super().mouseMoveEvent(ev)
+        if (self._tool_dragging and ev.buttons() & Qt.MouseButton.LeftButton
+                and getattr(self.tool, "autoscroll", False)):
+            self._update_autoscroll(pos, ev.buttons(), ev.modifiers())
 
     def mouseReleaseEvent(self, ev) -> None:
+        if self._guide_drag is not None and ev.button() == Qt.MouseButton.LeftButton:
+            self._guide_drag_end(ev.position(), ev.modifiers())
+            ev.accept()
+            return
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._tool_dragging = False
+            self._stop_autoscroll()
         if getattr(self, "_middle_pan", False) and ev.button() == Qt.MouseButton.MiddleButton:
             self._middle_pan = False
             self.hand_tool.release(self, PageEvent(None, None, ev.position(), Qt.MouseButton.LeftButton,
@@ -1022,6 +1613,10 @@ class DocumentView(QAbstractScrollArea):
         super().wheelEvent(ev)
 
     def keyPressEvent(self, ev) -> None:
+        if ev.key() == Qt.Key.Key_Escape and self._guide_drag is not None:
+            self._guide_drag = None           # trascinamento di una guida annullato
+            self.viewport().update()
+            return
         if self.tool.key(self, ev):
             ev.accept()
             self.viewport().update()

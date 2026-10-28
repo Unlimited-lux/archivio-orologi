@@ -403,6 +403,22 @@ class Context(QObject):
         if view is not None:
             view.set_tool(tool)
 
+    # ------------------------------------------------------------------ righelli
+    def set_rulers_visible(self, visible: bool) -> None:
+        """Mostra o nasconde i righelli (VIS-39) su tutte le viste, anche future, come la voce
+        «Righelli» del menu Vista; la scelta resta tra una sessione e l'altra."""
+        self._w.set_rulers_visible(visible)
+
+    def rulers_visible(self) -> bool:
+        return self._w.rulers_visible()
+
+    def set_ruler_unit(self, unit: str) -> None:
+        """Unità dei righelli per tutte le viste: "mm", "pt" o "in" (preferenza salvata)."""
+        self._w.set_ruler_unit(unit)
+
+    def ruler_unit(self) -> str:
+        return self._w.ruler_unit()
+
     # ----------------------------------------------------------------- dialoghi
     def status(self, message: str, timeout_ms: int = 5000) -> None:
         self._w.statusBar().showMessage(message, timeout_ms)

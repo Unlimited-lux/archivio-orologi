@@ -4,7 +4,7 @@
 """
 
 from .core import placement
-from .core.render import page_pixmap
+from .core.render import annotations_hidden, page_pixmap
 from .core.document import (
     ACCESS, CHANGE_KINDS, CLOSED, CONTENT, ENCRYPT_METADATA_SUPPORTED, LOCK, SAVED, Document, atomic_write,
 )
@@ -16,8 +16,10 @@ from .ui import theme
 from .ui.banners import Banner
 from .ui.context import GUARD_EVENTS, PDF_FILTER, Context, Mode
 from .ui.document_view import (
-    FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView, page_geometry,
+    FIT_PAGE, FIT_WIDTH, GUIDE_HORIZONTAL, GUIDE_VERTICAL, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE,
+    DocumentView, page_geometry,
 )
+from .ui.rulers import RULER_UNITS
 from .ui.icons import bind_icon, icon
 from .ui.tasks import BackgroundTask, Progress, run_task
 from .ui.tools import (
@@ -26,7 +28,7 @@ from .ui.tools import (
 )
 
 __all__ = [
-    "page_pixmap",
+    "page_pixmap", "annotations_hidden", "GUIDE_HORIZONTAL", "GUIDE_VERTICAL", "RULER_UNITS",
     "placement", "CLOSED", "CONTENT", "SAVED", "ACCESS", "LOCK", "CHANGE_KINDS", "ENCRYPT_METADATA_SUPPORTED",
     "Document", "atomic_write", "IncrementalSaveError", "ENGINE_LOCK", "try_engine",
     "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
