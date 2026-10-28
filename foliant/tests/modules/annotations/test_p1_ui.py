@@ -962,3 +962,26 @@ def test_ann03_rotate_shapes_and_textbox(comments, tmp_path):
     ap2 = int(key_of(doc, ft.xref, "AP/N")[1].split()[0])
     assert key_of(doc, ap2, "Matrix")[1] != "[1 0 0 1 0 0]"
     assert "Ruotata due" in doc[0].get_text()
+
+
+def test_ann07_paste_into_other_document(comments, tmp_path):
+    """ANN-07: timbro personalizzato copiato dal documento A e incollato nel documento B con resa identica."""
+    window, view_a, module = comments
+    xref = module.ctrl.apply("s", engine.create_stamp, 0, (300, 300), engine.StampSpec("Venduto", name="Sold"),
+                             engine.Style(), "A")
+    module.ctrl.select([(0, xref)], view_a)
+    module.ctrl.copy()
+    other = pymupdf.open()
+    other.new_page()
+    other.new_page()
+    other.save(str(tmp_path / "b.pdf"))
+    view_b = window.open_path(str(tmp_path / "b.pdf"))
+    (page, new), = module.ctrl.paste(1)
+    info = module.ctrl.info(1, new, view=view_b)
+    assert info.kind == engine.STAMP and info.name != module.ctrl.info(0, xref, view=view_a).name
+    out = tmp_path / "b_salvato.pdf"
+    view_b.document.save(str(out))
+    doc = pymupdf.open(str(out))
+    assert "VENDUTO" in doc[1].get_text()
+    st, = annots(doc, 1, "Stamp")
+    assert key_of(doc, st.xref, "P")[1] == f"{doc[1].xref} 0 R"

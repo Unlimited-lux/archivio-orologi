@@ -2385,6 +2385,46 @@ def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: i
     return new
 
 
+def copy_annot_to(src: pymupdf.Document, src_page: int, xref: int, dst: pymupdf.Document, dst_page: int,
+                  author: str | None = None, keep_identity: bool = False) -> int:
+    """Copia un'annotazione in un altro documento: dizionario, aspetto e risorse (caratteri, immagini,
+    file incorporati) vengono innestati nel documento di destinazione."""
+    sp = src[src_page]
+    subtype = get_annot(sp, xref).type[0]
+    obj = mupdf.pdf_load_object(pymupdf._as_pdf_document(src), xref)
+    copy = mupdf.pdf_copy_dict(obj)
+    for key in ("P", "Popup", "IRT", "RT", "Parent"):
+        mupdf.pdf_dict_dels(copy, key)
+    grafted = mupdf.pdf_graft_object(pymupdf._as_pdf_document(dst), copy)
+    dp = dst[dst_page]
+    with unrotated(dp):
+        created = mupdf.pdf_create_annot(dp._pdf_page(), subtype)
+        target = mupdf.pdf_annot_obj(created)
+        for i in range(mupdf.pdf_dict_len(grafted)):
+            k = mupdf.pdf_dict_get_key(grafted, i)
+            if mupdf.pdf_to_name(k) in ("Type", "Subtype"):
+                continue
+            mupdf.pdf_dict_put(target, k, mupdf.pdf_dict_get_val(grafted, i))
+        try:
+            created.m_internal.needs_new_ap = 0
+        except Exception:
+            pass
+        new = mupdf.pdf_to_num(target)
+    if not keep_identity:
+        now = pdf_now()
+        get_annot(dp, new).set_info(title=author if author is not None else default_author(), creationDate=now,
+                                    modDate=now)
+        dst.xref_set_key(new, "NM", _pdf_string(new_name()))
+    # il riquadro resta nella stessa posizione relativa, ricondotto dentro la pagina di destinazione
+    r = _std_rect(dst, dp, new)
+    box = pymupdf.Rect(0, 0, dp.mediabox.width, dp.mediabox.height)
+    dx = min(0.0, box.x1 - r.x1) + max(0.0, box.x0 - r.x0)
+    dy = min(0.0, box.y1 - r.y1) + max(0.0, box.y0 - r.y0)
+    if dx or dy:
+        transform_annot(dst, dst_page, new, r + (dx, dy, dx, dy))
+    return new
+
+
 def move_thread(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: int, dx: float = 0.0,
                 dy: float = 0.0) -> int:
     """Sposta un commento con risposte e stati (taglia+incolla): identità conservate, /IRT ricollegati."""

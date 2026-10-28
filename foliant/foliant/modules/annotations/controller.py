@@ -656,10 +656,9 @@ class Controller(QObject):
         view = self.view()
         if not clip or view is None:
             return []
-        if clip["view"] is not view:
-            self.ctx.error(_("Commenti"), _("Le annotazioni si possono incollare solo nello stesso documento."))
-            return []
         target = view.current_page if page is None else page
+        if clip["view"] is not view:
+            return self._paste_other_document(clip, view, target)
         items = [it for it in clip["items"] if self.info(*it, view=view) is not None]
         if not items:
             return []
@@ -678,6 +677,32 @@ class Controller(QObject):
 
         res = self.apply(_("Incolla annotazioni"), run, view=view) or []
         if cut and res:
+            self.clipboard = {"view": view, "items": res, "cut": False, "data": None}
+        if res:
+            self.select(res, view)
+        return res
+
+    def _paste_other_document(self, clip: dict, view, target: int) -> list[tuple[int, int]]:
+        src_view = clip["view"]
+        if src_view not in self.ctx.views() or src_view.document.closed:
+            self.ctx.error(_("Commenti"), _("Il documento di origine è stato chiuso."))
+            return []
+        items = [it for it in clip["items"] if self.info(*it, view=src_view) is not None]
+        cut = clip["cut"]
+
+        def run(pdf):
+            with ENGINE_LOCK:
+                src = src_view.document.pdf
+                return [(target, engine.copy_annot_to(src, p, x, pdf, target, self.author(), keep_identity=cut))
+                        for p, x in items]
+
+        res = self.apply(_("Incolla annotazioni"), run, view=view) or []
+        if res and cut:
+            def remove(pdf):
+                for p, x in items:
+                    engine.delete_annot(pdf, p, x, force=True)
+                return True
+            self.apply(_("Taglia annotazioni"), remove, view=src_view)
             self.clipboard = {"view": view, "items": res, "cut": False, "data": None}
         if res:
             self.select(res, view)
