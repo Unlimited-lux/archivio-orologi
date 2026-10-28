@@ -625,3 +625,19 @@ def test_rotation_handle(window, paragraphs_pdf, quiet, qtbot):
     angle = -math.degrees(math.atan2(line["dir"][1], line["dir"][0]))
     assert abs(angle - 90) <= 0.5
     assert "contratto" in view.document.page_text(0, sort=False)
+
+
+def test_panel_left_indent(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-05: rientro sinistro di tutto il paragrafo; il bordo destro non supera quello originale."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "Lorem")
+    x0, x1, n = block.x0, block.x0 + block.width, len(block.lines)
+    view.tool.select(view, 0, block)
+    ctrl.panel.left_indent.setValue(30)
+    ctrl.panel._left_indent_chosen()
+    nb = block_with(ctrl, view, "Lorem")
+    for ln in nb.lines:
+        assert abs(ln.bbox.x0 - (x0 + 30)) <= 0.6 and ln.bbox.x1 <= x1 + 0.6
+    assert len(nb.lines) > n
+    assert ctrl.panel.left_indent.value() == 0
