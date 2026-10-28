@@ -1100,3 +1100,29 @@ def test_fill_parent_kids_field_in_window_keeps_signature_valid(window, monkeypa
     assert out.startswith(signed)
     st = digital.verify_pdf(out, trusted=[id_a[1]])[0]
     assert st.status == "valida" and "compilazione di campi modulo" in st.modifications
+
+
+def test_field_policy_filters_ids(window, qtbot, tmp_path, id_a, policy_id):
+    """SIG-19/20: un campo che richiede una policy rende selezionabile solo l'ID con quella policy."""
+    from foliant.modules.sign.ui_digital import DigitalSignDialog, FieldDialog
+    from tests.conftest import make_pdf
+
+    from .conftest import POLICY_OID
+    fd = FieldDialog(window)
+    qtbot.addWidget(fd)
+    fd.policies.setText("1.2.x")
+    fd._accept()
+    assert "OID" in fd.error.text() and not fd.result()
+    fd.policies.setText(f" {POLICY_OID} ;")
+    assert fd.allowed_policies() == [POLICY_OID]
+    data = Path(make_pdf(tmp_path / "policy.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Cliente", 0, (300, 700, 500, 760), allowed_policies=[POLICY_OID])
+    field = digital.signature_fields(data)[0]
+    store.IDRegistry().add(id_a[0], id_a[1])
+    store.IDRegistry().add(policy_id[0], policy_id[1])
+    dlg = DigitalSignDialog(window, _ctl(window), field=field)
+    qtbot.addWidget(dlg)
+    model = dlg.id_combo.model()
+    enabled = [dlg.id_combo.itemText(i) for i in range(dlg.id_combo.count()) if model.item(i).isEnabled()]
+    assert enabled == ["Giulia Verdi"]
+    assert POLICY_OID in dlg.cert_info.text()

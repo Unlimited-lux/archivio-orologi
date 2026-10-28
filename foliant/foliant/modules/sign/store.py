@@ -94,6 +94,7 @@ class IDEntry:
     issuer: str = ""
     default: bool = False
     missing: bool = False
+    policies: list = field(default_factory=list)   # OID delle policy del certificato (SIG-19)
 
     @property
     def expires(self) -> datetime | None:
@@ -106,7 +107,7 @@ class IDEntry:
 class IDRegistry:
     """Elenco degli ID digitali dell'utente (solo riferimenti: percorso e impronta)."""
 
-    _ALLOWED = ("path", "alias", "fingerprint", "subject", "not_after", "issuer", "default")
+    _ALLOWED = ("path", "alias", "fingerprint", "subject", "not_after", "issuer", "default", "policies")
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else _sign_dir() / "ids.json"
@@ -131,6 +132,7 @@ class IDRegistry:
             "issuer": info.issuer,
             "not_after": info.not_after.isoformat(),
             "default": False,
+            "policies": list(getattr(info, "policies", []) or []),
         }
         replaced = False
         for i, it in enumerate(items):
@@ -190,6 +192,7 @@ class IDRegistry:
             fingerprint=str(it.get("fingerprint", "")), subject=str(it.get("subject", "")),
             not_after=str(it.get("not_after", "")), issuer=str(it.get("issuer", "")),
             default=bool(it.get("default")),
+            policies=[str(o) for o in it.get("policies") or [] if isinstance(o, str)],
         )
         e.missing = not Path(e.path).is_file()
         return e

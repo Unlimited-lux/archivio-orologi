@@ -119,3 +119,36 @@ def pytest_runtest_call(item):
         if win is not None:
             for view in list(win.views()):
                 view.document._saved_state = view.document._state
+
+
+POLICY_OID = "1.3.76.16.6"
+
+
+@pytest.fixture(scope="session")
+def policy_id(id_dir):
+    """ID con l'estensione Certificate Policies (OID POLICY_OID), per i vincoli /SV /Cert /OID."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+
+    from foliant.modules.sign import digital
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Giulia Verdi")])
+    now = datetime.now(timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=365))
+            .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=True, key_encipherment=False,
+                                         data_encipherment=False, key_agreement=False, key_cert_sign=False,
+                                         crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
+            .add_extension(x509.CertificatePolicies([x509.PolicyInformation(
+                x509.ObjectIdentifier(POLICY_OID), None)]), critical=False)
+            .sign(key, hashes.SHA256()))
+    path = id_dir / "giulia.p12"
+    path.write_bytes(pkcs12.serialize_key_and_certificates(
+        b"giulia", key, cert, None, serialization.BestAvailableEncryption(PASSWORD.encode())))
+    did = digital.load_pkcs12(path, PASSWORD)
+    return path, did.info, did

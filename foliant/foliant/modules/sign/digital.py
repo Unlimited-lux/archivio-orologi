@@ -115,6 +115,7 @@ class CertInfo:
     self_signed: bool
     email: str = ""
     der: bytes = field(default=b"", repr=False)
+    policies: list[str] = field(default_factory=list)   # OID delle policy del certificato
 
     def is_valid_now(self) -> bool:
         now = datetime.now(timezone.utc)
@@ -146,6 +147,12 @@ def _cert_info(cert: cx509.Certificate) -> CertInfo:
             email = mails[0]
     except cx509.ExtensionNotFound:
         pass
+    policies: list[str] = []
+    try:
+        ext = cert.extensions.get_extension_for_oid(ExtensionOID.CERTIFICATE_POLICIES).value
+        policies = [p.policy_identifier.dotted_string for p in ext]
+    except cx509.ExtensionNotFound:
+        pass
     if not email:
         attrs = cert.subject.get_attributes_for_oid(NameOID.EMAIL_ADDRESS)
         if attrs:
@@ -164,6 +171,7 @@ def _cert_info(cert: cx509.Certificate) -> CertInfo:
         self_signed=cert.subject == cert.issuer,
         email=email,
         der=der,
+        policies=policies,
     )
 
 
@@ -917,16 +925,21 @@ def _timestamp_error(exc: BaseException) -> TimestampError:
 
 
 def _check_field_constraints(sv, digital_id: "DigitalID", options: "SignOptions") -> bool:
-    """Verifica i vincoli /SV del campo su motivo ed emittente. Restituisce True
-    se il campo ha un vincolo sull'emittente (che verifichiamo noi)."""
+    """Verifica i vincoli /SV del campo su motivo, policy ed emittente. Restituisce True
+    se il campo ha un vincolo sull'emittente o sulla policy (che verifichiamo noi)."""
     if sv is None:
         return False
     reasons = [str(r) for r in (_deref(sv.get("/Reasons")) or [])]
     if reasons and (options.reason or "") not in reasons:
         raise SigningNotAllowed(_("Il campo ammette solo questi motivi: {r}").format(r="; ".join(reasons)))
     cert = _deref(sv.get("/Cert"))
+    if cert is not None and "/OID" in cert:
+        oids = [str(o) for o in _deref(cert.get("/OID"))]
+        if oids and not set(oids) & set(digital_id.info.policies):
+            raise SigningNotAllowed(_("Il campo richiede un certificato con una di queste policy: {oids}").format(
+                oids=", ".join(oids)))
     if cert is None or "/Issuer" not in cert:
-        return False
+        return cert is not None and "/OID" in cert   # policy verificata qui: pyHanko non la gestisce
     allowed = [cert_info_from_der(bytes(_deref(x))) for x in _deref(cert.get("/Issuer"))]
     chain = [digital_id.info, *digital_id.chain]
     ok_dn = {c.subject_dn for c in allowed}
@@ -1062,7 +1075,7 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     pdf_signer = signers.PdfSigner(meta, digital_id.signer, timestamper=timestamper, stamp_style=style,
                                    new_field_spec=new_field_spec)
     if own_sv_check:
-        # vincolo sull'emittente già verificato qui (pyHanko richiederebbe un percorso di
+        # vincoli su emittente e policy già verificati qui (pyHanko richiederebbe un percorso di
         # validazione completo); la marca temporale obbligatoria è gestita sopra con sv_ts_url
         pdf_signer._ignore_sv = True
     out = io.BytesIO()
@@ -1117,6 +1130,7 @@ class FieldInfo:
     allowed_issuers: list[CertInfo] | None = None   # /SV /Cert /Issuer
     certify_level: int | None = None                # /SV /MDP /P: il campo richiede una certificazione
     digest_methods: list[str] | None = None         # /SV /DigestMethod
+    allowed_policies: list[str] | None = None       # /SV /Cert /OID
 
 
 def _locked_field_names(reader) -> set[str]:
@@ -1210,7 +1224,7 @@ def signature_fields(data: bytes, password: str | None = None) -> list[FieldInfo
         flags = int(widget.get("/F", 0) or 0)
         ff = int(fobj.get("/Ff", 0) or 0)
         ts_url = None
-        reasons = issuers = mdp = digests = None
+        reasons = issuers = mdp = digests = policies = None
         sv = _deref(fobj.get("/SV"))
         if sv is not None:
             ts = _deref(sv.get("/TimeStamp"))
@@ -1227,6 +1241,8 @@ def signature_fields(data: bytes, password: str | None = None) -> list[FieldInfo
                 cert = _deref(sv.get("/Cert"))
                 if cert is not None and "/Issuer" in cert:
                     issuers = [cert_info_from_der(bytes(_deref(x))) for x in _deref(cert.get("/Issuer"))] or None
+                if cert is not None and "/OID" in cert:
+                    policies = [str(o) for o in _deref(cert.get("/OID"))] or None
             except Exception:  # noqa: BLE001 - vincoli illeggibili: ignorati
                 pass
         out.append(FieldInfo(
@@ -1234,16 +1250,39 @@ def signature_fields(data: bytes, password: str | None = None) -> list[FieldInfo
             hidden=bool(flags & 2), required=bool(ff & 2), invisible=invisible,
             locked=name in locked, timestamp_required_url=ts_url, tooltip=str(fobj.get("/TU", "") or ""),
             allowed_reasons=reasons, allowed_issuers=issuers, certify_level=mdp, digest_methods=digests or None,
+            allowed_policies=policies,
         ))
     out.sort(key=lambda f: (f.page if f.page is not None else 1 << 30,
                             f.rect[1] if f.rect else 0, f.rect[0] if f.rect else 0))
     return out
 
 
+def _cert_constraints_class():
+    from pyhanko.pdf_utils import generic
+    from pyhanko.sign import fields as pfields
+
+    class CertConstraints(pfields.SigCertConstraints):
+        """/SV /Cert con anche /OID (le policy ammesse), che pyHanko non scrive."""
+        policies: list[str] = []
+
+        def as_pdf_object(self):
+            out = super().as_pdf_object()
+            if self.policies:
+                out[generic.NameObject("/OID")] = generic.ArrayObject(
+                    generic.TextStringObject(o) for o in self.policies)
+            return out
+    return CertConstraints
+
+
+def _CertConstraints(**kw):  # noqa: N802
+    return _cert_constraints_class()(**kw)
+
+
 def add_signature_field(data, name, page, rect, *, required=False, tooltip="", timestamp_url=None,
                         timestamp_required=False, lock_fields=None, lock_action="Include",
                         hidden=False, allowed_reasons=None, allowed_issuers=None,
-                        certify_level=None, digest_methods=None, password=None) -> tuple[bytes, str]:
+                        certify_level=None, digest_methods=None, allowed_policies=None,
+                        password=None) -> tuple[bytes, str]:
     from pyhanko.pdf_utils import generic
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
     from pyhanko.sign import fields as pfields
@@ -1272,17 +1311,27 @@ def add_signature_field(data, name, page, rect, *, required=False, tooltip="", t
         bad = [m for m in digest_methods if m not in ("sha256", "sha384", "sha512")]
         if bad:
             raise SignError(_("Algoritmo di hash non supportato: {alg}").format(alg=", ".join(bad)))
-    if timestamp_url or allowed_reasons or allowed_issuers or certify_level or digest_methods:
+    policies = [str(o).strip() for o in (allowed_policies or []) if str(o).strip()]
+    bad = [o for o in policies if not re.fullmatch(r"[0-2](\.\d+)+", o)]
+    if bad:
+        raise SignError(_("OID di policy non valido: {oid}").format(oid=", ".join(bad)))
+    if timestamp_url or allowed_reasons or allowed_issuers or certify_level or digest_methods or policies:
         flags = pfields.SigSeedValFlags(0)
         cert = None
         if allowed_reasons:
             flags |= pfields.SigSeedValFlags.REASONS
         if digest_methods:
             flags |= pfields.SigSeedValFlags.DIGEST_METHOD
-        if allowed_issuers:
-            cert = pfields.SigCertConstraints(
-                flags=pfields.SigCertConstraintFlags.ISSUER,
-                issuers=[_to_cert_info(c).to_asn1() for c in allowed_issuers])
+        if allowed_issuers or policies:
+            cflags = pfields.SigCertConstraintFlags(0)
+            if allowed_issuers:
+                cflags |= pfields.SigCertConstraintFlags.ISSUER
+            if policies:
+                cflags |= pfields.SigCertConstraintFlags.OID
+            cert = _CertConstraints(
+                flags=cflags, issuers=[_to_cert_info(c).to_asn1() for c in allowed_issuers] if allowed_issuers
+                else None)
+            cert.policies = policies
         sv = pfields.SigSeedValueSpec(
             flags=flags, reasons=list(allowed_reasons) if allowed_reasons else None,
             timestamp_server_url=timestamp_url or None,
@@ -1633,6 +1682,24 @@ def _trusted_der(trusted) -> list[bytes]:
     return out
 
 
+def _embedded_signature_class(base):
+    """EmbeddedPdfSignature che nasconde a pyHanko il vincolo /SV /Cert /OID (non supportato:
+    solleverebbe NotImplementedError); la policy la controlla `_verify_one`."""
+    import dataclasses
+
+    from pyhanko.sign.fields import SigCertConstraintFlags
+
+    class Embedded(base):
+        @property
+        def seed_value_spec(self):
+            spec = super().seed_value_spec
+            if spec is not None and spec.cert is not None and spec.cert.flags & SigCertConstraintFlags.OID:
+                spec = dataclasses.replace(spec, cert=dataclasses.replace(
+                    spec.cert, flags=spec.cert.flags & ~SigCertConstraintFlags.OID))
+            return spec
+    return Embedded
+
+
 def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
                revocation_mode: str = "mai", password: str | None = None) -> list[SignatureStatus]:
     from pyhanko.pdf_utils.reader import PdfFileReader
@@ -1678,7 +1745,7 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
             br = [int(v) for v in val("/ByteRange", [])]
             if len(br) == 4:
                 st.revision_end = br[2] + br[3]
-            emb = EmbeddedPdfSignature(reader, fref, name)
+            emb = _embedded_signature_class(EmbeddedPdfSignature)(reader, fref, name)
         except Exception as exc:  # noqa: BLE001
             _set_status(st, INVALID)
             st.reasons.append(_("Formato della firma non valido") + f" ({type(exc).__name__})")
@@ -1697,6 +1764,13 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
             _set_status(st, INVALID if not st.intact else INDETERMINATE)
             st.reasons.append(_("Impossibile verificare la firma: {detail}").format(
                 detail=str(exc) or type(exc).__name__))
+        fi = finfo.get(st.field_name)
+        wanted = getattr(fi, "allowed_policies", None)
+        if wanted and st.signer_cert is not None and not set(wanted) & set(st.signer_cert.policies):
+            # come per gli altri vincoli /SV, la firma che non li rispetta non è valida
+            _set_status(st, INVALID)
+            st.reasons.append(_("Il certificato non ha la policy richiesta dal campo ({oids})").format(
+                oids=", ".join(wanted)))
     results.sort(key=lambda s: s.revision_end)
     return results
 
@@ -1971,6 +2045,11 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "Il certificato non ha la policy richiesta dal campo ({oids})":
+        "The certificate does not have the policy required by the field ({oids})",
+    "Il campo richiede un certificato con una di queste policy: {oids}":
+        "The field requires a certificate with one of these policies: {oids}",
+    "OID di policy non valido: {oid}": "Invalid policy OID: {oid}",
     "I permessi del documento non consentono di firmarlo né di compilarne i moduli. Riaprilo con la password del "
     "proprietario per firmarlo": "The document permissions do not allow signing it or filling its forms. Reopen it "
                                   "with the owner password to sign it",

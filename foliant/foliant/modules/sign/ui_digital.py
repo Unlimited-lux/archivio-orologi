@@ -3,6 +3,7 @@ gestione ID e certificati attendibili, ripetizione della firma grafica."""
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -208,7 +209,7 @@ class DigitalSignDialog(QDialog):
         self.id_combo.clear()
         allowed = self.allowed_issuers()
         for e in self.store.IDRegistry().list():
-            refused = allowed is not None and not self._issuer_allowed(e)
+            refused = (allowed is not None and not self._issuer_allowed(e)) or not self._policy_allowed(e)
             label = e.alias + (_(" (file non trovato)") if e.missing else "") + \
                 (_(" (non ammesso dal campo)") if refused else "")
             self.id_combo.addItem(label, e.path)
@@ -219,6 +220,11 @@ class DigitalSignDialog(QDialog):
         if allowed:
             self.cert_info.setText(_("Questo campo accetta solo certificati emessi da: {who}").format(
                 who="; ".join(sorted(c.subject for c in self.field.allowed_issuers))))
+        policies = getattr(self.field, "allowed_policies", None)
+        if policies:
+            text = _("Questo campo accetta solo certificati con una di queste policy: {oids}").format(
+                oids=", ".join(policies))
+            self.cert_info.setText((self.cert_info.text() + "\n" if allowed else "") + text)
         if self.id_combo.count() == 0 and not select_path:
             self.id_combo.setPlaceholderText(_("Nessun ID digitale: usa «Sfoglia…» o «Crea…»"))
         if select_path and self.id_combo.findData(select_path) < 0:
@@ -234,6 +240,10 @@ class DigitalSignDialog(QDialog):
         issuer = getattr(entry_or_info, "issuer_dn", None) or getattr(entry_or_info, "issuer", "")
         fp = getattr(entry_or_info, "fingerprint", None) or getattr(entry_or_info, "sha256", "")
         return issuer in names or getattr(entry_or_info, "issuer", "") in names or fp in fps
+
+    def _policy_allowed(self, entry_or_info) -> bool:
+        wanted = getattr(self.field, "allowed_policies", None)
+        return not wanted or bool(set(wanted) & set(getattr(entry_or_info, "policies", None) or []))
 
     def _create_id(self) -> None:
         dlg = SelfSignedDialog(self, self.c)
@@ -294,6 +304,10 @@ class DigitalSignDialog(QDialog):
         self._show_info(did)
         if not self._issuer_allowed(did.info):
             self.error.setText(_("Il campo non accetta certificati emessi da «{who}».").format(who=did.info.issuer))
+            return
+        if not self._policy_allowed(did.info):
+            self.error.setText(_("Il campo richiede un certificato con una di queste policy: {oids}").format(
+                oids=", ".join(self.field.allowed_policies)))
             return
         try:
             warnings = self.digital.check_usable(did, allow_expired=self.allow_expired.isChecked())
@@ -516,6 +530,9 @@ class FieldDialog(QDialog):
         irow.addWidget(b_issuer)
         form.addRow(_("Emittente ammesso:"), irow)
         self.issuers: list = []
+        self.policies = QLineEdit()
+        self.policies.setPlaceholderText(_("OID separati da virgola, es. 1.3.76.16.6 (facoltativo)"))
+        form.addRow(_("Policy del certificato:"), self.policies)
         self.mdp = QComboBox()
         self.mdp.addItem(_("Nessuno (firma di approvazione)"), None)
         for lvl, label in LEVELS:
@@ -563,6 +580,9 @@ class FieldDialog(QDialog):
             return
         self.issuer_label.setText(", ".join(c.subject for c in self.issuers) or _("Qualsiasi"))
 
+    def allowed_policies(self) -> list[str] | None:
+        return [o.strip() for o in self.policies.text().replace(";", ",").split(",") if o.strip()] or None
+
     def allowed_reasons(self) -> list[str] | None:
         return [r.strip() for r in self.reasons.text().split(";") if r.strip()] or None
 
@@ -594,6 +614,10 @@ class FieldDialog(QDialog):
         if self.tsa_required.isChecked() and not self.tsa.text().strip().startswith(("http://", "https://")):
             self.error.setText(_("Per rendere obbligatoria la marca temporale indica l'indirizzo del server "
                                  "(http:// o https://)."))
+            return
+        bad = [o for o in self.allowed_policies() or [] if not re.fullmatch(r"[0-2](\.\d+)+", o)]
+        if bad:
+            self.error.setText(_("OID di policy non valido: {oid}").format(oid=", ".join(bad)))
             return
         self.accept()
 
@@ -1064,6 +1088,10 @@ class RepeatDialog(QDialog):
 
 
 TRANSLATIONS_EN = {
+    "Questo campo accetta solo certificati con una di queste policy: {oids}":
+        "This field only accepts certificates with one of these policies: {oids}",
+    "OID separati da virgola, es. 1.3.76.16.6 (facoltativo)": "comma-separated OIDs, e.g. 1.3.76.16.6 (optional)",
+    "Policy del certificato:": "Certificate policy:",
     "ID digitale (*.p12 *.pfx)": "Digital ID (*.p12 *.pfx)",
     "Certificati (*.cer *.crt *.pem *.der *.p7b *.p7c)": "Certificates (*.cer *.crt *.pem *.der *.p7b *.p7c)",
     "Approvo il documento": "I approve this document", "Sono l'autore del documento": "I am the author of this document",

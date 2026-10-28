@@ -879,7 +879,8 @@ class SignController(QObject):
                     timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
                     lock_action=lock_action, allowed_reasons=dlg.allowed_reasons(),
                     allowed_issuers=dlg.issuers or None, certify_level=dlg.mdp.currentData(),
-                    digest_methods=dlg.digest.currentData(), password=doc.password)
+                    digest_methods=dlg.digest.currentData(), allowed_policies=dlg.allowed_policies(),
+                    password=doc.password)
                 names.append(name)
             name = names[0]
         except digital.SignError as e:
