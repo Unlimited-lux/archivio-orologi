@@ -6,6 +6,7 @@ import os
 import stat
 
 import pymupdf
+from PySide6.QtWidgets import QApplication
 import pytest
 
 from foliant.modules.viewer import attachments_engine as engine
@@ -226,8 +227,10 @@ def test_add_and_delete_are_undoable(viewer_window, attach_pdf, monkeypatch, tmp
     assert doc.is_modified and doc.undo_label == "Aggiungi allegato"
     assert panel.data_of(_by_name(panel, "foto.png")) == b"\x89PNG finta"
     doc.undo()
+    QApplication.processEvents()          # l'elenco si rilegge una volta, al giro di eventi
     assert panel.tree.topLevelItemCount() == 3
     doc.redo()
+    QApplication.processEvents()
     assert panel.tree.topLevelItemCount() == 4
 
     monkeypatch.setattr(panel, "confirm", lambda t, m: False)
@@ -241,6 +244,42 @@ def test_add_and_delete_are_undoable(viewer_window, attach_pdf, monkeypatch, tmp
     assert {a.filename for a in panel.items()} == {"contratto.pdf", "note.txt", "installa.sh", "foto.png"}
     doc.redo()
     assert "note.txt" not in {a.filename for a in panel.items()}
+
+
+def test_hidden_panel_does_not_read_attachments_on_change(viewer_window, attach_pdf, monkeypatch):
+    """Prestazioni: a pannello nascosto una modifica non rilegge gli allegati; si rileggono
+    una sola volta quando il pannello viene mostrato."""
+    view, panel = _open(viewer_window, attach_pdf)
+    viewer_window.ctx.toggle_sidebar_panel("attachments")
+    QApplication.processEvents()
+    assert not panel.isVisible()
+    calls = []
+    real = engine.list_attachments
+    monkeypatch.setattr(engine, "list_attachments", lambda pdf: calls.append(1) or real(pdf))
+    for i in range(3):
+        with view.document.change("Testo") as pdf:
+            pdf[0].insert_text((72, 300 + 10 * i), "x")
+    QApplication.processEvents()
+    assert calls == []
+    viewer_window.ctx.show_sidebar_panel("attachments")
+    QApplication.processEvents()
+    assert len(calls) == 1 and panel.tree.topLevelItemCount() == 3
+    view.document._saved_state = view.document._state
+
+
+def test_visible_panel_groups_changes(viewer_window, attach_pdf, monkeypatch):
+    view, panel = _open(viewer_window, attach_pdf)
+    assert panel.isVisible()
+    calls = []
+    real = engine.list_attachments
+    monkeypatch.setattr(engine, "list_attachments", lambda pdf: calls.append(1) or real(pdf))
+    for i in range(3):
+        with view.document.change("Testo") as pdf:
+            pdf[0].insert_text((72, 300 + 10 * i), "x")
+    assert calls == []
+    QApplication.processEvents()
+    assert len(calls) == 1
+    view.document._saved_state = view.document._state
 
 
 def test_engine_delete_middle_item_keeps_others():
