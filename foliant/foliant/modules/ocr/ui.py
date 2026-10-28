@@ -67,13 +67,18 @@ class ProposalBar:
                                         priority=priority, on_close=lambda: self.controller.dismiss(self.view))
 
     def show_document(self, count: int, missing: list[str], restricted: bool, low_res: bool,
-                      unextractable: bool = False) -> None:
+                      unextractable: int = 0) -> None:
         self.page = None
-        text = _("Questo documento contiene pagine scannerizzate senza testo ({n}).").format(n=count) if count != 1 \
-            else _("Questo documento contiene 1 pagina scannerizzata senza testo.")
-        text += " " + _("Riconosci il testo per cercarlo, copiarlo e modificarlo.")
+        scans = count - unextractable
+        parts = []
+        if scans == 1:
+            parts.append(_("Questo documento contiene 1 pagina scannerizzata senza testo."))
+        elif scans > 1:
+            parts.append(_("Questo documento contiene pagine scannerizzate senza testo ({n}).").format(n=scans))
         if unextractable:
-            text += " " + _("Il testo di alcune pagine non è estraibile correttamente: è consigliato l'OCR forzato.")
+            parts.append(_("Pagine con testo non estraibile (caratteri senza mappatura Unicode): {n}. "
+                           "È consigliato l'OCR forzato.").format(n=unextractable))
+        text = " ".join(parts) + " " + _("Riconosci il testo per cercarlo, copiarlo e modificarlo.")
         if low_res:
             text += " " + _("Alcune pagine hanno risoluzione bassa: accuratezza ridotta.")
         if missing:
@@ -465,11 +470,12 @@ class ReviewPanel(QWidget):
 
 
 # =================================================================== controller
-def _recognize_copy(data: bytes, opts: engine.OcrOptions, pages: list[int], progress) -> engine.OcrResult:
+def _recognize_copy(data: bytes, opts: engine.OcrOptions, pages: list[int], progress,
+                    isolated: bool = False) -> engine.OcrResult:
     with ENGINE_LOCK:
         pdf = pymupdf.open(stream=data, filetype="pdf")
     try:
-        return engine.recognize_document(pdf, opts, pages, progress)
+        return engine.recognize_document(pdf, opts, pages, progress, render_data=data if isolated else None)
     finally:
         with ENGINE_LOCK:
             pdf.close()
@@ -674,7 +680,7 @@ class OcrController(QObject):
             except Exception:
                 restricted = False
         low = any(st.infos[i].low_resolution for i in found)
-        unextractable = any(st.infos[i].category == detect.UNEXTRACTABLE for i in found)
+        unextractable = sum(1 for i in found if st.infos[i].category == detect.UNEXTRACTABLE)
         st.bar.show_document(len(found), missing, restricted, low, unextractable)
 
     def dismiss(self, view) -> None:
@@ -767,6 +773,9 @@ class OcrController(QObject):
                         detected=detected, settings=self.settings(),
                         mode=mode or str(self.settings().value("ocr/mode", engine.SEARCHABLE)), pages_text=text,
                         infos=dict(st.infos), page_image_cb=lambda v=view: self._page_image(v),
+                        existing=engine.FORCE if any(
+                            st.infos.get(i) is not None and st.infos[i].category == detect.UNEXTRACTABLE
+                            for i in (pages if pages is not None else detected)) else None,
                         selected=self._selected_pages(view))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -790,7 +799,8 @@ class OcrController(QObject):
                 for i in pages:
                     if i not in st.infos:
                         st.infos[i] = detect.classify_page(doc.pdf[i])
-            with_text = [i for i in pages if st.infos[i].category in (detect.TEXT, detect.OCR_LAYER, detect.MIXED)]
+            with_text = [i for i in pages if st.infos[i].category in (detect.TEXT, detect.OCR_LAYER, detect.MIXED,
+                                                                       detect.UNEXTRACTABLE)]
             if with_text and not self.ctx.confirm(_("Forza OCR"), _(
                     "Le pagine con testo ({p}) saranno convertite in immagine e riconosciute di nuovo: si perde la "
                     "nitidezza vettoriale e il file può crescere. Annotazioni e campi modulo restano. "
@@ -865,7 +875,8 @@ class OcrController(QObject):
 
         def work():
             try:
-                job.result = _recognize_copy(data, opts, pages, job.progress)
+                # in background la resa delle pagine avviene in un altro processo: l'interfaccia resta fluida
+                job.result = _recognize_copy(data, opts, pages, job.progress, isolated=True)
             except BaseException as e:  # riportata all'interfaccia
                 job.error = e
             job.done = True
@@ -996,8 +1007,14 @@ class OcrController(QObject):
                 msg += "\n\n" + "\n".join(_("Pagina {n}: {m}").format(n=p.index + 1, m=p.message)
                                           for p in result.failed)
             elif result.skipped:
-                msg += " " + _("Le pagine scelte hanno già testo: per riconoscerle comunque scegli "
-                               "«Riconosci anche quelle».")
+                empty = [p for p in result.skipped if p.category == detect.EMPTY]
+                with_text = [p for p in result.skipped if p.category != detect.EMPTY]
+                if with_text:
+                    msg += " " + _("Le pagine {p} hanno già testo: per riconoscerle comunque scegli "
+                                   "«Forza OCR».").format(
+                        p=engine.format_pages([p.index for p in with_text]))
+                if empty:
+                    msg += " " + _("Le pagine {p} sono vuote.").format(p=engine.format_pages([p.index for p in empty]))
             self.ctx.info(_("Riconoscimento del testo"), msg)
             return result
         if opts.mode == engine.TEXT_ONLY:
