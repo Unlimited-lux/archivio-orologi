@@ -1096,4 +1096,13 @@ EN: dict[str, str] = {
     'Salvare le modifiche al profilo?': 'Save the changes to the profile?',
     'La sostituzione nel documento funziona su una pagina alla volta: seleziona il testo di una sola pagina.': 'Replacing in the document works one page at a time: select text on a single page.',
     "Chiedi all'assistente": 'Ask the assistant',
+    'Estrazione dalle fatture…': 'Extracting from invoices…',
+    'Apri': 'Open',
+    'Rapporto': 'Report',
+    'Estrazione annullata.': 'Extraction cancelled.',
+    'Ritenta': 'Retry',
+    'Traduzione salvata in «{f}»: {n} pagine non riuscite.': 'Translation saved to “{f}”: {n} pages failed.',
+    'Traduzione salvata in «{f}».': 'Translation saved to “{f}”.',
+    'Dati estratti da {n} fatture su {t}.': 'Data extracted from {n} of {t} invoices.',
+    'Mostra': 'Show',
 }

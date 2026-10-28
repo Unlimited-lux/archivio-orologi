@@ -345,37 +345,47 @@ class Controller:
         return self._run_translation(source, pages, options, path, None, None)
 
     def _run_translation(self, source: bytes, pages, options, path, retry_pages, previous):
+        """Traduzione in background (`run_task(modal=False)`): si continua a lavorare; l'esito arriva
+        con un avviso (`ctx.notify`) con «Apri» e «Rapporto». Restituisce il `BackgroundTask`."""
         gateway = self.services.gateway()
         gateway.profile()
+        title = _("Traduci in un nuovo PDF")
 
         def work(progress):
             job = engine.Job(gateway, cancel=_CancelBridge(progress))
             translator = engine.block_translator(job, options["target"], options["glossary"])
-            return translate_pdf.translate_document(
+            data, report = translate_pdf.translate_document(
                 source, pages, options["mode"], translator, progress, target_language=options["target"],
                 min_fontsize=options["min_size"], retry_pages=retry_pages, previous=previous)
+            atomic_write(path, data)     # file temporaneo + rinomina: nessun file parziale
+            return data, report
 
-        try:
-            data, report = self.ctx.run_task(_("Traduzione del documento…"), work)
-        except OperationCancelled:
-            self.ctx.status(_("Traduzione annullata: nessun file creato."))
-            return None
-        except FoliantError as e:
-            self.ctx.error(_("Traduci in un nuovo PDF"), str(e))
-            return None
-        except Exception as e:  # noqa: BLE001
-            self.ctx.error(_("Traduci in un nuovo PDF"), _("Traduzione non riuscita: {e}").format(e=e))
-            return None
-        try:
-            atomic_write(path, data)
-        except FoliantError as e:
-            self.ctx.error(_("Traduci in un nuovo PDF"), str(e))
-            return None
-        self.last_translation = dict(source=source, pages=pages, options=options, path=path, data=data,
-                                     report=report)
-        self.ctx.open_path(path)
-        self.show_report(report)
-        return report
+        def done(result):
+            data, report = result
+            self.last_translation = dict(source=source, pages=pages, options=options, path=path, data=data,
+                                         report=report)
+            name = os.path.basename(path)
+            actions = [(_("Apri"), lambda: self.ctx.open_path(path)),
+                       (_("Rapporto"), lambda: self.show_report(report))]
+            if report.failed_pages:
+                actions.insert(1, (_("Ritenta"), self.retry_failed))
+                text = _("Traduzione salvata in «{f}»: {n} pagine non riuscite.").format(
+                    f=name, n=len(report.failed_pages))
+            else:
+                text = _("Traduzione salvata in «{f}».").format(f=name)
+            self.ctx.notify(text, actions, 0 if report.failed_pages else None)
+
+        def failed(e):
+            if isinstance(e, OperationCancelled):
+                self.ctx.notify(_("Traduzione annullata: nessun file creato."))
+            elif isinstance(e, FoliantError):
+                self.ctx.notify(f"{title}: {e}", duration_ms=0)
+            else:
+                from .providers import AIError
+                msg = e.user_message() if isinstance(e, AIError) else str(e)
+                self.ctx.notify(f"{title}: " + _("Traduzione non riuscita: {e}").format(e=msg), duration_ms=0)
+
+        return self.ctx.run_task(_("Traduzione del documento…"), work, modal=False, on_done=done, on_error=failed)
 
     # ---------------------------------------------------------------- utilità comuni
     def _job(self, progress, gateway=None, language=None):
@@ -596,44 +606,66 @@ class Controller:
         paths = paths if paths is not None else self.ctx.ask_open_paths(_("Fatture da elaborare"))
         if not paths:
             return None
-        named, problems = [], []
         gateway = self.services.gateway()
+        gateway.profile()
         language = panel._answer_language()
-        for path in paths:
-            name = os.path.basename(path)
-            try:
-                doc = Document.open(path)
-            except DocumentError as e:
-                problems.append(f"{name}: {e}")
-                continue
-            try:
-                if not content.extraction_allowed(doc):
-                    problems.append(f"{name}: " + _("estrazione del contenuto non consentita"))
+
+        def work(progress):
+            # in background (`run_task(modal=False)`): un file alla volta, i nomi dei file non vengono inviati
+            named, problems = [], []
+            for n, path in enumerate(paths):
+                name = os.path.basename(path)
+                progress.update(n / len(paths), _("Estrazione da {f}…").format(f=name))
+                try:
+                    doc = Document.open(path)
+                except DocumentError as e:
+                    problems.append(f"{name}: {e}")
                     continue
-                scope = engine.build_scope(doc.pdf, engine.DOCUMENT)
-                local = extract.embedded_einvoices(doc.pdf)
-                if local:
-                    res = extract.build_result("invoice", local, scope)
-                else:
-                    res = self.ctx.run_task(_("Estrazione da {f}…").format(f=name), lambda progress, sc=scope:
-                                            extract.extract_data(self._job(progress, gateway, language), sc,
-                                                                 "invoice"))
-                named.append((name, res))
-            except OperationCancelled:
-                return None
-            except Exception as e:  # noqa: BLE001 - un file non leggibile non ferma gli altri
+                try:
+                    if not content.extraction_allowed(doc):
+                        problems.append(f"{name}: " + _("estrazione del contenuto non consentita"))
+                        continue
+                    scope = engine.build_scope(doc.pdf, engine.DOCUMENT)
+                    local = extract.embedded_einvoices(doc.pdf)
+                    if local:
+                        res = extract.build_result("invoice", local, scope)
+                    else:
+                        res = extract.extract_data(self._job(progress, gateway, language), scope, "invoice")
+                    named.append((name, res))
+                except OperationCancelled:
+                    raise
+                except Exception as e:  # noqa: BLE001 - un file non leggibile non ferma gli altri
+                    from .providers import AIError
+                    problems.append(f"{name}: " + (e.user_message() if isinstance(e, AIError) else str(e)))
+                finally:
+                    doc.close()
+            return named, problems
+
+        def done(outcome):
+            named, problems = outcome
+            if not named:
+                self.ctx.notify(_("Estrai dati") + ": " + ("; ".join(problems) or _("Nessun dato trovato.")),
+                                duration_ms=0)
+                return
+            result = extract.merge_results(named)
+            result.checks.extend(problems)
+
+            def show():
+                dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=result.source)
+                self.last_dialog = dlg
+                self.exec_dialog(dlg)
+            self.ctx.notify(_("Dati estratti da {n} fatture su {t}.").format(n=len(named), t=len(paths)),
+                            [(_("Mostra"), show)], 0)
+
+        def failed(e):
+            if isinstance(e, OperationCancelled):
+                self.ctx.notify(_("Estrazione annullata."))
+            else:
                 from .providers import AIError
-                problems.append(f"{name}: " + (e.user_message() if isinstance(e, AIError) else str(e)))
-            finally:
-                doc.close()
-        if not named:
-            self.ctx.error(_("Estrai dati"), "\n".join(problems) or _("Nessun dato trovato."))
-            return None
-        result = extract.merge_results(named)
-        result.checks.extend(problems)
-        dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=result.source)
-        self.exec_dialog(dlg)
-        return dlg
+                self.ctx.notify(_("Estrai dati") + ": " + (e.user_message() if isinstance(e, AIError) else str(e)),
+                                duration_ms=0)
+
+        return self.ctx.run_task(_("Estrazione dalle fatture…"), work, modal=False, on_done=done, on_error=failed)
 
     def choose_extraction(self):
         from PySide6.QtWidgets import QInputDialog
