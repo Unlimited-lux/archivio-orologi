@@ -1052,3 +1052,12 @@ def test_convert_step_with_real_convert_module(tmp_path, fmt, ext, count):
     assert report.results[0].status in ("ok", "warning"), report.results[0].message
     produced = sorted(os.listdir(tmp_path / "out"))
     assert len(produced) == count and all(n.endswith(ext) for n in produced)
+
+
+def test_bates_font_choice(tmp_path):
+    a = mk(tmp_path / "in" / "a.pdf", pages=1)
+    data, _last = be.add_bates(open(a, "rb").read(), 1, "ACME-", font="cobo")
+    page = pymupdf.open(stream=data, filetype="pdf")[0]
+    fonts = {sp["font"] for b in page.get_text("dict")["blocks"] for ln in b.get("lines", [])
+             for sp in ln["spans"] if "ACME" in sp["text"]}
+    assert any("Courier" in f for f in fonts)

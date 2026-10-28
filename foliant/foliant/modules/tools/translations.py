@@ -768,4 +768,11 @@ EN: dict[str, str] = {
     "Solo differenze incerte (OCR)": "Uncertain differences only (OCR)",
     "Solo differenze incerte (OCR): {n}": "Uncertain differences only (OCR): {n}",
     "Parole riconosciute con bassa affidabilità: {p}%": "Words recognized with low confidence: {p}%",
+    "Font": "Font",
+    "Helvetica": "Helvetica",
+    "Helvetica grassetto": "Helvetica bold",
+    "Times": "Times",
+    "Times grassetto": "Times bold",
+    "Courier": "Courier",
+    "Courier grassetto": "Courier bold",
 }
