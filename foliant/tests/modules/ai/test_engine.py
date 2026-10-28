@@ -406,3 +406,23 @@ def test_consent_required(store, fake_provider):
     with pytest.raises(engine.ConsentRequired):
         engine.chat(engine.Job(gw), Conversation(), Scope(), "x")
     assert fake_provider.requests == []
+
+
+def test_placeholder_contrast_in_both_themes(qapp):
+    """NFR-23: i segnaposto «[…]» hanno contrasto ≥ 4,5:1 nel tema chiaro e in quello scuro."""
+    import re
+
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.modules.ai import render
+    from foliant.ui import theme
+    app = QApplication.instance()
+    try:
+        for name in ("light", "dark"):
+            theme.apply(app, name)
+            html_out = render.render_markdown("Gentile [nome del cliente], grazie.").html
+            m = re.search(r"background:(#[0-9a-fA-F]{6});color:(#[0-9a-fA-F]{6})", html_out)
+            assert m, html_out
+            assert render.contrast_ratio(m.group(1), m.group(2)) >= 4.5, (name, m.groups())
+    finally:
+        theme.apply(app, "light")
