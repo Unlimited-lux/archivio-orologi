@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import io
 import datetime as _dt
 import fcntl
 import hashlib
@@ -365,11 +366,18 @@ class SignatureLibrary:
                 pass
 
     def add(self, item: SignatureItem, name: str | None = None) -> LibraryEntry:
+        return self.add_raw(item, name, None)
+
+    def add_raw(self, item: SignatureItem, name: str | None, raw: bytes | None) -> LibraryEntry:
+        """Aggiunge un elemento; `raw` (se dato) sono i byte già serializzati, così l'impronta
+        SHA-256 resta identica a quella d'origine (importazione)."""
         with self._modify():
             self._reload_for_write()
             if len(self.entries(item.kind)) >= MAX_PER_KIND:
                 raise LibraryError(_("La libreria contiene già {n} elementi di questo tipo.").format(n=MAX_PER_KIND))
             data, ext = self.serialize(item)
+            if raw is not None:
+                data = raw
             eid = uuid.uuid4().hex
             default_name = _("Iniziali") if item.kind == "iniziali" else _("Firma")
             n = len(self.entries(item.kind)) + 1
@@ -473,5 +481,117 @@ TRANSLATIONS_EN = {
     "La libreria contiene già {n} elementi di questo tipo.": "The library already contains {n} items of this type.",
     "Il nome non può essere vuoto.": "The name cannot be empty.",
     "{name} (copia)": "{name} (copy)",
+    "Indica una password per il pacchetto.": "Enter a password for the package.",
+    "Impossibile leggere il pacchetto: {e}": "Cannot read the package: {e}",
+    "Il file non è un pacchetto di firme di Foliant.": "The file is not a Foliant signature package.",
+    "Password errata o pacchetto danneggiato.": "Wrong password or damaged package.",
+    "Il pacchetto è di una versione successiva: importati solo i dati riconosciuti.":
+        "The package is from a later version: only the recognised data was imported.",
+    "Elemento «{n}» danneggiato: non importato.": "Item “{n}” is damaged: not imported.",
     "L'elemento «{name}» è danneggiato e non può essere usato.": "The item “{name}” is damaged and cannot be used.",
 }
+
+
+# =================================================== pacchetti esportati (SIG-07)
+PACKAGE_MAGIC = b"FOLIANT-SIGPKG1\n"
+PACKAGE_EXT = ".foliant-signatures"
+
+
+class PackageError(LibraryError):
+    pass
+
+
+def export_package(library: SignatureLibrary, entry_ids: list[str], password: str, path) -> int:
+    """Esporta gli elementi scelti in un pacchetto ZIP cifrato (AES-256-GCM, chiave
+    scrypt dalla password). L'intestazione in chiaro contiene solo i parametri della
+    derivazione. Restituisce il numero di elementi esportati."""
+    import zipfile
+    if not password:
+        raise PackageError(_("Indica una password per il pacchetto."))
+    buf = io.BytesIO()
+    items = []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for eid in entry_ids:
+            e = library.entry(eid)
+            if e is None or not e.available:
+                continue
+            data = library._read_file(e)
+            name = f"{e.id}.{e.file.split('.')[1]}"
+            z.writestr(name, data)
+            meta = e.to_json()
+            meta["file"] = name
+            meta["sha256"] = hashlib.sha256(data).hexdigest()
+            items.append(meta)
+        z.writestr("manifest.json", json.dumps({"version": MANIFEST_VERSION, "items": items}, ensure_ascii=False))
+    salt = os.urandom(16)
+    header = {"kdf": "scrypt", "salt": base64.b64encode(salt).decode("ascii"), "n": 2 ** 15, "r": 8, "p": 1,
+              "version": MANIFEST_VERSION}
+    blob = _encrypt(_derive_key(password, salt), buf.getvalue())
+    _atomic_write(Path(path), PACKAGE_MAGIC + json.dumps(header).encode("ascii") + b"\n" + blob)
+    return len(items)
+
+
+def read_package(path, password: str) -> tuple[list[dict], dict[str, bytes], list[str]]:
+    """Decifra un pacchetto in memoria (nessun file in chiaro su disco).
+    Restituisce (elementi, contenuti per nome file, avvisi)."""
+    import zipfile
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as e:
+        raise PackageError(_("Impossibile leggere il pacchetto: {e}").format(e=e.strerror)) from e
+    if not raw.startswith(PACKAGE_MAGIC):
+        raise PackageError(_("Il file non è un pacchetto di firme di Foliant."))
+    try:
+        head, blob = raw[len(PACKAGE_MAGIC):].split(b"\n", 1)
+        header = json.loads(head.decode("ascii"))
+        key = _derive_key(password, base64.b64decode(header["salt"]), header.get("n", 2 ** 15),
+                          header.get("r", 8), header.get("p", 1))
+    except Exception as e:
+        raise PackageError(_("Password errata o pacchetto danneggiato.")) from e
+    try:
+        data = _decrypt(key, blob)
+    except LibraryError as e:
+        raise PackageError(_("Password errata o pacchetto danneggiato.")) from e
+    warnings = []
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+        if int(manifest.get("version", 1)) > MANIFEST_VERSION or int(header.get("version", 1)) > MANIFEST_VERSION:
+            warnings.append(_("Il pacchetto è di una versione successiva: importati solo i dati riconosciuti."))
+        files = {n: z.read(n) for n in z.namelist() if n != "manifest.json"}
+    return manifest.get("items", []), files, warnings
+
+
+def import_package(library: SignatureLibrary, path, password: str, duplicates: str = "skip") -> dict:
+    """Importa un pacchetto. `duplicates`: "skip" (salta), "replace" (sostituisce),
+    "both" (mantiene entrambi). I duplicati si riconoscono dall'impronta SHA-256."""
+    items, files, warnings = read_package(path, password)
+    existing = {e.sha256: e for e in library.entries()}
+    added = skipped = replaced = 0
+    for it in items:
+        data = files.get(it.get("file", ""))
+        if data is None or hashlib.sha256(data).hexdigest() != it.get("sha256"):
+            warnings.append(_("Elemento «{n}» danneggiato: non importato.").format(n=it.get("name", "?")))
+            continue
+        origin = it.get("origin", "disegnata")
+        item = SignatureItem(kind=it.get("kind", "firma"), origin=origin, name=it.get("name", ""),
+                             color=it.get("color", "#000000"))
+        if origin == "immagine":
+            item.png = data
+        elif origin == "digitata":
+            d = json.loads(data.decode("utf-8"))
+            item.text, item.style_id = d.get("text", ""), d.get("style", "")
+            item.slant, item.color = float(d.get("slant", 0)), d.get("color", item.color)
+            item.art = text_to_art(item.text, style_by_id(item.style_id), item.slant)
+        else:
+            item.art = svg_to_art(data.decode("utf-8"))
+        dup = existing.get(it.get("sha256"))
+        if dup is not None:
+            if duplicates == "skip":
+                skipped += 1
+                continue
+            if duplicates == "replace":
+                library.remove(dup.id)
+                replaced += 1
+        library.add_raw(item, it.get("name") or None, data)
+        added += 1
+    return {"added": added, "skipped": skipped, "replaced": replaced, "warnings": warnings}

@@ -129,3 +129,23 @@ def test_limit_per_kind(lib_root, monkeypatch):
     with pytest.raises(LibraryError):
         lib.add(_drawn())
     lib.add(_drawn("iniziali"))
+
+
+def test_export_import_package(lib_root, tmp_path):
+    """SIG-07: pacchetto cifrato; importazione con nomi, tipi e impronte identici; password errata."""
+    from foliant.modules.sign.library import PackageError, export_package, import_package
+    lib = SignatureLibrary()
+    ids = [lib.add(_drawn(), f"F{i}").id for i in range(3)] + [lib.add(_drawn("iniziali"), "MR").id]
+    pkg = tmp_path / "firme.foliant-signatures"
+    assert export_package(lib, ids, "pw-pacchetto", pkg) == 4
+    assert b"polyline" not in pkg.read_bytes() and b"MR" not in pkg.read_bytes()
+    before = {(e.name, e.kind, e.sha256) for e in lib.entries()}
+    other = SignatureLibrary(tmp_path / "altro")
+    with pytest.raises(PackageError):
+        import_package(other, pkg, "sbagliata")
+    assert other.entries() == [] and not list((tmp_path / "altro").glob("*.svg"))
+    res = import_package(other, pkg, "pw-pacchetto")
+    assert res["added"] == 4
+    assert {(e.name, e.kind, e.sha256) for e in other.entries()} == before
+    assert import_package(other, pkg, "pw-pacchetto")["skipped"] == 4
+    assert import_package(other, pkg, "pw-pacchetto", duplicates="both")["added"] == 4
