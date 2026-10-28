@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.i18n import pgettext
+from foliant.i18n import format_number
 from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, Document, _, icon, theme
 
@@ -737,7 +738,7 @@ class CropDialog(_LayoutDialog):
             self._proposed = layout.user_to_disp(crop, layout._rot(page), new)
         w, h = self._proposed.width, self._proposed.height
         self.info.setText(_("Dimensione risultante: {w} × {h} mm").format(
-            w=f"{w / MM:.1f}".replace(".", ","), h=f"{h / MM:.1f}".replace(".", ",")))
+            w=format_number(w / MM, 1), h=format_number(h / MM, 1)))
         return None
 
     def paint_overlay(self, p: QPainter, s: float) -> None:
@@ -876,7 +877,7 @@ class RemoveMarginsDialog(_LayoutDialog):
         else:
             r = self._proposal()
             self.info.setText(_("Dimensione risultante: {w} × {h} mm").format(
-                w=f"{r.width / MM:.1f}".replace(".", ","), h=f"{r.height / MM:.1f}".replace(".", ",")))
+                w=format_number(r.width / MM, 1), h=format_number(r.height / MM, 1)))
 
     def _proposal(self) -> pymupdf.Rect:
         e = self.extra.value() * MM
@@ -1122,8 +1123,9 @@ class BoxesDialog(_LayoutDialog):
         for name, _t, _c in BOX_LABELS:
             b = self._boxes[name]
             r = b["rect"]
-            txt = (f"{r.x0 / MM:.1f}  {r.y0 / MM:.1f}  {r.x1 / MM:.1f}  {r.y1 / MM:.1f}  "
-                   f"({r.width / MM:.1f} × {r.height / MM:.1f})").replace(".", ",")
+            txt = (f"{format_number(r.x0 / MM, 1)}  {format_number(r.y0 / MM, 1)}  "
+                   f"{format_number(r.x1 / MM, 1)}  {format_number(r.y1 / MM, 1)}  "
+                   f"({format_number(r.width / MM, 1)} × {format_number(r.height / MM, 1)})")
             if b["default"]:
                 txt += "  — " + _("predefinito")
             self.value_labels[name].setText(txt)
@@ -1355,7 +1357,8 @@ class ResizeDialog(_LayoutDialog):
         ox = area.x0 + (area.width - cw) * fx
         oy = area.y0 + (area.height - ch) * fy
         self._plan = (tw, th, pymupdf.Rect(ox, oy, ox + cw, oy + ch))
-        notes = [f"{dw / MM:.1f} × {dh / MM:.1f} mm  →  {tw / MM:.1f} × {th / MM:.1f} mm".replace(".", ",")]
+        notes = [f"{format_number(dw / MM, 1)} × {format_number(dh / MM, 1)} mm  →  "
+                 f"{format_number(tw / MM, 1)} × {format_number(th / MM, 1)} mm"]
         if o["mode"] == "fill" and not matching and (cw > tw + 0.5 or ch > th + 0.5):
             notes.append(_("Le parti eccedenti del contenuto saranno tagliate."))
         if o["mode"] != "canvas":
@@ -1516,7 +1519,7 @@ class SplitPageDialog(_LayoutDialog):
                 x = self._fold_cache[idx]
                 cx = [x if x is not None else w / 2]
                 note = (_("Piega non rilevata: taglio al centro.") if x is None else
-                        _("Piega rilevata a {x} mm dal bordo sinistro.").format(x=f"{x / MM:.1f}".replace(".", ",")))
+                        _("Piega rilevata a {x} mm dal bordo sinistro.").format(x=format_number(x / MM, 1)))
         self._parts = layout.split_parts_disp(w, h, o["rows"], 2 if fold else o["cols"], o["rtl"], cx, cy,
                                               o["overlap"])
         text = _("Ogni pagina sarà sostituita da {n} parti.").format(n=len(self._parts))

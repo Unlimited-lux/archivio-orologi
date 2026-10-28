@@ -137,3 +137,17 @@ def test_default_output_names_follow_language(pages_window):
     finally:
         i18n.set_language("it")
     assert D.SplitDialog(window, view.document).template.text() == "{nome}_parte{n}"
+
+
+def test_decimal_separator_follows_language(pages_window):
+    """NFR-26: in inglese i decimali usano il punto (es. «179.9 × 267.0 mm»), in italiano la virgola."""
+    from foliant.modules.pages import layout_dialogs as L
+    window, view = pages_window
+    i18n.set_language("en")
+    try:
+        dlg = L.CropDialog(window, view.document, [0])
+        assert re.search(r"\d\.\d", dlg.info.text()) and not re.search(r"\d,\d", dlg.info.text())
+    finally:
+        i18n.set_language("it")
+    dlg = L.CropDialog(window, view.document, [0])
+    assert re.search(r"\d,\d", dlg.info.text())

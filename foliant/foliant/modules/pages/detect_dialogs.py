@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
+from foliant.i18n import format_number
 from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, _, icon
 
 from . import detect
@@ -157,7 +158,7 @@ def run_detection(pdf, o: dict, progress=None) -> list[dict]:
             info = details[i]
             reason = (_("Pagina {n}: non valida (non renderizzabile o di dimensione nulla)").format(n=i + 1)
                       if info.invalid else _("Pagina {n}: vuota (inchiostro {p}%)").format(
-                          n=i + 1, p=f"{info.ink * 100:.2f}".replace(".", ",")))
+                          n=i + 1, p=format_number(info.ink * 100, 2)))
             found[i] = {"page": i, "kind": "blank", "original": None, "reason": reason}
     if o["duplicates"]:
         for dup, orig in detect.find_duplicate_pages(pdf, o["pages"], mode=o["mode"], scope=o["scope"],

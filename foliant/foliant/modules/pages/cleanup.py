@@ -20,6 +20,7 @@ from typing import Iterable
 
 import pymupdf
 
+from foliant.i18n import format_number
 from foliant.api import _
 
 from . import detect, layout
@@ -199,7 +200,7 @@ def analyze(pdf: pymupdf.Document, checks: Iterable[str] = CATEGORIES, pages: It
             info = details[i]
             reason = (_("Pagina {n}: non valida (non renderizzabile o di dimensione nulla)").format(n=i + 1)
                       if info.invalid else
-                      _("Pagina {n}: vuota (inchiostro {p}%)").format(n=i + 1, p=f"{info.ink * 100:.2f}".replace(".", ",")))
+                      _("Pagina {n}: vuota (inchiostro {p}%)").format(n=i + 1, p=format_number(info.ink * 100, 2)))
             result["blank"].append(Proposal("blank", i, "delete", reason, {"invalid": info.invalid}))
         excluded = set(blanks)
     if "orientation" in checks:
