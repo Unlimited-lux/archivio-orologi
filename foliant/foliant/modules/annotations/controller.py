@@ -326,6 +326,69 @@ class Controller(QObject):
             return False
         return True
 
+    # ------------------------------------------------------------------ aggancio delle misure (ANN-33)
+    SNAP_KEY = "annotations/snap"
+
+    def snap_kinds(self) -> tuple[str, ...]:
+        raw = self.ctx.settings().value(self.SNAP_KEY, None)
+        if raw is None:
+            return engine.SNAP_KINDS
+        kinds = [k for k in str(raw).split("|") if k in engine.SNAP_KINDS]
+        return tuple(kinds)
+
+    def set_snap_kind(self, kind: str, on: bool) -> None:
+        kinds = [k for k in self.snap_kinds() if k != kind] + ([kind] if on else [])
+        self.ctx.settings().setValue(self.SNAP_KEY, "|".join(k for k in engine.SNAP_KINDS if k in kinds))
+
+    def snap_targets(self, view, page: int, wait: bool = False) -> engine.SnapTargets | None:
+        """Punti di aggancio della pagina, calcolati una volta per versione del documento in un
+        thread (le pagine vettoriali complesse non bloccano l'interfaccia). Finché il calcolo non
+        è pronto restituisce None (`wait=True` attende, per i test)."""
+        import threading
+        key = (id(view), page, view.document.version)
+        cache = self.__dict__.setdefault("_snap_cache", {})
+        hit = cache.get(key)
+        if isinstance(hit, engine.SnapTargets):
+            return hit
+        if hit is None:
+            done = threading.Event()
+            cache[key] = done
+            if len(cache) > 64:
+                for k in list(cache)[:32]:
+                    if k != key:
+                        cache.pop(k, None)
+            doc = view.document
+
+            def work():
+                try:
+                    with ENGINE_LOCK:
+                        if doc.closed:
+                            return
+                        result = engine.snap_targets(doc.pdf, page)
+                    cache[key] = result
+                except Exception:
+                    cache[key] = engine.SnapTargets()
+                finally:
+                    done.set()
+
+            threading.Thread(target=work, daemon=True).start()
+            hit = done
+        if wait:
+            hit.wait(30)
+            res = cache.get(key)
+            return res if isinstance(res, engine.SnapTargets) else None
+        return None
+
+    def snap(self, view, page: int, point, wait: bool = False) -> tuple[pymupdf.Point, str] | None:
+        kinds = self.snap_kinds()
+        if not kinds:
+            return None
+        targets = self.snap_targets(view, page, wait)
+        if targets is None:
+            return None
+        tol = 8.0 / max(view.zoom, 0.05)        # 8 pixel dello schermo
+        return engine.snap(targets, point, tol, kinds)
+
     def read(self, fn: Callable[..., Any], *args, view=None) -> Any:
         view = view or self.view()
         if view is None:

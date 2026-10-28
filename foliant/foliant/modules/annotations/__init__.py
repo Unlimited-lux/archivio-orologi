@@ -180,6 +180,22 @@ class AnnotationsModule:
         return button
 
     def _measure_extra(self, menu: QMenu) -> None:
+        snap = menu.addMenu(_("Aggancio"))
+        labels = {engine.SNAP_END: _("Estremi"), engine.SNAP_MID: _("Punti medi"),
+                  engine.SNAP_CROSS: _("Intersezioni"), engine.SNAP_PATH: _("Tracciati"),
+                  engine.SNAP_ANNOT: _("Vertici delle annotazioni")}
+
+        def fill():
+            snap.clear()
+            active = self.ctrl.snap_kinds()
+            for kind in engine.SNAP_KINDS:
+                a = snap.addAction(labels[kind])
+                a.setCheckable(True)
+                a.setChecked(kind in active)
+                a.toggled.connect(lambda on, k=kind: self.ctrl.set_snap_kind(k, on))
+
+        snap.aboutToShow.connect(fill)
+        fill()
         menu.addAction(_("Scala di misura…"), lambda: ui_actions.set_scale(self.ctrl))
         menu.addAction(_("Calibra da un segmento"), lambda: self.activate("calibrate"))
         menu.addAction(_("Esporta misure (CSV)…"), lambda: ui_actions.export_measures(self.ctrl))

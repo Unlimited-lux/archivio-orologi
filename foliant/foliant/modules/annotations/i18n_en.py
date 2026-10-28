@@ -197,6 +197,11 @@ EN.update({
     "Valore": "Value", "Valore formattato": "Formatted value", "Unità": "Unit", "Scala": "Scale", "Data": "Date",
     "Testo": "Text", "Testo marcato": "Marked text", "N.": "No.", "Risposta a": "Reply to", "Risposta": "Reply",
     "Nessun commento.": "No comments.",
+    # aggancio e mirino delle misure (ANN-33)
+    "estremo": "endpoint", "punto medio": "midpoint", "intersezione": "intersection", "tracciato": "path",
+    "annotazione": "annotation", "Aggancio": "Snap", "Estremi": "Endpoints", "Punti medi": "Midpoints",
+    "Intersezioni": "Intersections", "Tracciati": "Paths", "Vertici delle annotazioni": "Annotation vertices",
+    "X {x} · Y {y}": "X {x} · Y {y}",
     # controllo ortografico (ANN-44)
     "Nessun suggerimento": "No suggestions", "Aggiungi al dizionario": "Add to dictionary", "Ignora": "Ignore",
     "Controllo ortografico": "Spell check", "Lingua del controllo": "Spell check language",

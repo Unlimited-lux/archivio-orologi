@@ -614,7 +614,59 @@ class NoteTool(AnnotTool):
         return True
 
 
-class _DragTool(AnnotTool):
+class _MeasureAssist:
+    """Aggancio, mirino e coordinate del cursore per gli strumenti di misura (ANN-33)."""
+
+    _snap_hit: tuple[int, pymupdf.Point, str] | None = None
+    _cross: tuple[int, pymupdf.Point] | None = None
+
+    def measuring(self) -> bool:
+        return getattr(self, "kind", "") in engine.MEASURE_KINDS
+
+    def assist(self, view, page: int, p: pymupdf.Point) -> pymupdf.Point:
+        if not self.measuring():
+            return p
+        hit = self.ctrl.snap(view, page, p)
+        self._snap_hit = (page, hit[0], hit[1]) if hit else None
+        q = hit[0] if hit else p
+        self._cross = (page, q)
+        scale = self.ctrl.scale_for(page, q, view)
+        self.ctrl.ctx.status(_("X {x} · Y {y}").format(x=engine.format_measure(scale.length(q.x), scale.unit),
+                                                       y=engine.format_measure(scale.length(q.y), scale.unit))
+                             + (f" · {_(hit[1])}" if hit else ""), 3000)
+        return q
+
+    def clear_assist(self) -> None:
+        self._snap_hit = None
+        self._cross = None
+
+    def paint_assist(self, view, painter, page: int) -> None:
+        z = max(view.zoom, 0.1)
+        if self._cross and self._cross[0] == page:
+            c = self._cross[1]
+            arm = 14 / z
+            painter.setPen(_cosmetic(theme.color("text_muted"), 1))
+            painter.drawLine(QPointF(c.x - arm, c.y), QPointF(c.x + arm, c.y))
+            painter.drawLine(QPointF(c.x, c.y - arm), QPointF(c.x, c.y + arm))
+        if self._snap_hit and self._snap_hit[0] == page:
+            q, kind = self._snap_hit[1], self._snap_hit[2]
+            r = 5 / z
+            painter.setPen(_cosmetic(theme.color("accent"), 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if kind == engine.SNAP_MID:
+                painter.drawPolygon(QPolygonF([QPointF(q.x, q.y - r), QPointF(q.x + r, q.y + r),
+                                               QPointF(q.x - r, q.y + r)]))
+            elif kind == engine.SNAP_CROSS:
+                painter.drawLine(QPointF(q.x - r, q.y - r), QPointF(q.x + r, q.y + r))
+                painter.drawLine(QPointF(q.x - r, q.y + r), QPointF(q.x + r, q.y - r))
+            elif kind == engine.SNAP_PATH:
+                painter.drawEllipse(QPointF(q.x, q.y), r, r)
+            else:
+                painter.drawRect(QRectF(q.x - r, q.y - r, 2 * r, 2 * r))
+            _paint_label(view, painter, q, _(kind))
+
+
+class _DragTool(_MeasureAssist, AnnotTool):
     """Strumento con trascinamento da un punto a un altro sulla stessa pagina."""
 
     def __init__(self, ctrl):
@@ -630,15 +682,20 @@ class _DragTool(AnnotTool):
     def press(self, view, ev):
         if ev.button != Qt.MouseButton.LeftButton or ev.page is None:
             return False
-        self._start = (ev.page, ev.point)
-        self._end = ev.point
+        p = self.assist(view, ev.page, ev.point)
+        self._start = (ev.page, p)
+        self._end = p
         self._mods = ev.modifiers
         return True
 
     def move(self, view, ev):
         if self._start is None:
+            if self.measuring() and ev.page is not None:      # mirino anche prima del clic
+                self.assist(view, ev.page, ev.point)
+                view.viewport().update()
+                return True
             return False
-        self._end = view.clamp_to_page(self._start[0], ev.pos)
+        self._end = self.assist(view, self._start[0], view.clamp_to_page(self._start[0], ev.pos))
         self._mods = ev.modifiers
         view.viewport().update()
         return True
@@ -647,8 +704,9 @@ class _DragTool(AnnotTool):
         if self._start is None or ev.button != Qt.MouseButton.LeftButton:
             return False
         page, a = self._start
-        b = view.clamp_to_page(page, ev.pos)
+        b = self.assist(view, page, view.clamp_to_page(page, ev.pos))
         mods = ev.modifiers
+        self.clear_assist()
         self.reset()
         view.viewport().update()
         self.finish(view, page, a, b, mods)
@@ -745,6 +803,7 @@ class ShapeTool(_DragTool):
         self.created(view, page, xref)
 
     def paint(self, view, painter, page):
+        self.paint_assist(view, painter, page)
         if not (self._start and self._start[0] == page and self._end is not None):
             return
         st = self.style()
@@ -781,7 +840,7 @@ def _paint_label(view, painter: QPainter, at: pymupdf.Point, text: str) -> None:
     painter.restore()
 
 
-class PolyTool(AnnotTool):
+class PolyTool(_MeasureAssist, AnnotTool):
     """Poligono, polilinea, nuvola, perimetro e area: clic per i vertici; doppio clic,
     Invio o clic sul primo vertice per terminare; Backspace toglie l'ultimo; Esc annulla."""
 
@@ -809,6 +868,7 @@ class PolyTool(AnnotTool):
         p = ev.point
         if self.points and ev.modifiers & Qt.KeyboardModifier.ShiftModifier:
             p = _snap45(self.points[-1], p)
+        p = self.assist(view, ev.page, p)
         if len(self.points) >= 3 and self.closed:
             tol = 6 / max(view.zoom, 0.1)
             if abs(p - self.points[0]) <= tol:
@@ -826,7 +886,11 @@ class PolyTool(AnnotTool):
             p = view.clamp_to_page(self.page, ev.pos)
             if self.points and ev.modifiers & Qt.KeyboardModifier.ShiftModifier:
                 p = _snap45(self.points[-1], p)
-            self._hover = p
+            self._hover = self.assist(view, self.page, p)
+            view.viewport().update()
+            return True
+        if self.measuring() and ev.page is not None:
+            self.assist(view, ev.page, ev.point)
             view.viewport().update()
             return True
         return False
@@ -856,6 +920,7 @@ class PolyTool(AnnotTool):
 
     def finish(self, view) -> None:
         pts, page = list(self.points), self.page
+        self.clear_assist()
         self.reset()
         view.viewport().update()
         need = 3 if self.closed else 2
@@ -872,6 +937,7 @@ class PolyTool(AnnotTool):
         self.created(view, page, xref)
 
     def paint(self, view, painter, page):
+        self.paint_assist(view, painter, page)
         if self.page != page or not self.points:
             return
         st = self.style()
@@ -1227,6 +1293,9 @@ class CalibrateTool(_DragTool):
     """Calibrazione della scala: segmento di lunghezza nota (ANN-30)."""
 
     kind = "calibrate"
+
+    def measuring(self) -> bool:      # la calibrazione si aggancia agli estremi come le misure
+        return True
 
     def finish(self, view, page, a, b, mods):
         if mods & Qt.KeyboardModifier.ShiftModifier:

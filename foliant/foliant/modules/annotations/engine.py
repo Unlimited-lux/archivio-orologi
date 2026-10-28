@@ -1246,6 +1246,157 @@ def create_measure(pdf: pymupdf.Document, page_no: int, kind: str, points: Seque
     return _finish(annot, author, value, kind=kind)
 
 
+# ------------------------------------------------------------------ aggancio (ANN-33)
+SNAP_END = "estremo"
+SNAP_MID = "punto medio"
+SNAP_CROSS = "intersezione"
+SNAP_PATH = "tracciato"
+SNAP_ANNOT = "annotazione"
+SNAP_KINDS = (SNAP_END, SNAP_MID, SNAP_CROSS, SNAP_PATH, SNAP_ANNOT)
+MAX_SNAP_SEGMENTS = 20000      # oltre: solo estremi e punti medi
+MAX_CROSS_SEGMENTS = 3000      # oltre: niente intersezioni (costo quadratico anche con la griglia)
+
+
+@dataclass
+class SnapTargets:
+    """Punti di aggancio di una pagina, in coordinate standard."""
+    points: list = field(default_factory=list)          # [(Point, tipo)]
+    segments: list = field(default_factory=list)        # [(Point, Point)] del contenuto vettoriale
+
+
+def _bezier(p0, p1, p2, p3, n: int = 8) -> list[pymupdf.Point]:
+    out = []
+    for i in range(n + 1):
+        t = i / n
+        u = 1 - t
+        out.append(p0 * (u ** 3) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + p3 * (t ** 3))
+    return out
+
+
+def _segment_cross(a, b, c, d) -> pymupdf.Point | None:
+    r = b - a
+    q = d - c
+    den = r.x * q.y - r.y * q.x
+    if abs(den) < 1e-9:
+        return None
+    t = ((c.x - a.x) * q.y - (c.y - a.y) * q.x) / den
+    u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / den
+    if -1e-9 <= t <= 1 + 1e-9 and -1e-9 <= u <= 1 + 1e-9:
+        return a + r * t
+    return None
+
+
+def snap_targets(pdf: pymupdf.Document, page_no: int) -> SnapTargets:
+    """Estremi, punti medi, intersezioni e segmenti del contenuto vettoriale della pagina e vertici
+    delle annotazioni. Pagina senza grafica vettoriale (scansione): solo le annotazioni."""
+    page = pdf[page_no]
+    res = SnapTargets()
+    straight: list[tuple[pymupdf.Point, pymupdf.Point]] = []
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        drawings = []
+    for d in drawings:
+        for item in d.get("items", ()):
+            op = item[0]
+            if op == "l":
+                straight.append((pymupdf.Point(item[1]), pymupdf.Point(item[2])))
+            elif op == "re":
+                r = pymupdf.Rect(item[1])
+                c = [r.tl, r.tr, r.br, r.bl]
+                straight += [(c[i], c[(i + 1) % 4]) for i in range(4)]
+            elif op == "qu":
+                q = item[1]
+                c = [q.ul, q.ur, q.lr, q.ll]
+                straight += [(c[i], c[(i + 1) % 4]) for i in range(4)]
+            elif op == "c":
+                pts = _bezier(*(pymupdf.Point(x) for x in item[1:5]))
+                res.points += [(pts[0], SNAP_END), (pts[-1], SNAP_END)]
+                res.segments += [(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
+            if len(straight) + len(res.segments) > MAX_SNAP_SEGMENTS:
+                break
+    for a, b in straight:
+        if abs(b - a) < 0.01:
+            continue
+        res.points += [(a, SNAP_END), (b, SNAP_END), ((a + b) * 0.5, SNAP_MID)]
+        res.segments.append((a, b))
+    if len(straight) <= MAX_CROSS_SEGMENTS:
+        res.points += [(p, SNAP_CROSS) for p in _crossings(straight)]
+    for a in iter_annots(page):
+        if a.type[0] in NON_COMMENT_TYPES or _silent(pdf, a):
+            continue
+        verts = a.vertices or []
+        if a.type[0] == pymupdf.PDF_ANNOT_INK:          # dei tratti a mano libera solo inizio e fine
+            verts = [v for stroke in verts for v in stroke[:1] + stroke[-1:]]
+        res.points += [(pymupdf.Point(v), SNAP_ANNOT) for v in verts]
+        if a.type[0] in (pymupdf.PDF_ANNOT_SQUARE, pymupdf.PDF_ANNOT_CIRCLE, pymupdf.PDF_ANNOT_FREE_TEXT,
+                         pymupdf.PDF_ANNOT_STAMP):
+            r = a.rect
+            res.points += [(p, SNAP_ANNOT) for p in (r.tl, r.tr, r.br, r.bl)]
+    return res
+
+
+def _crossings(segs: list) -> list[pymupdf.Point]:
+    """Intersezioni dei segmenti con una griglia (costo quasi lineare sui disegni tecnici)."""
+    cell = 40.0
+    grid: dict[tuple[int, int], list[int]] = {}
+    for i, (a, b) in enumerate(segs):
+        x0, x1 = sorted((a.x, b.x))
+        y0, y1 = sorted((a.y, b.y))
+        for gx in range(int(x0 // cell), int(x1 // cell) + 1):
+            for gy in range(int(y0 // cell), int(y1 // cell) + 1):
+                grid.setdefault((gx, gy), []).append(i)
+    seen: set[tuple[int, int]] = set()
+    out: list[pymupdf.Point] = []
+    for ids in grid.values():
+        for n, i in enumerate(ids):
+            for j in ids[n + 1:]:
+                key = (i, j) if i < j else (j, i)
+                if key in seen:
+                    continue
+                seen.add(key)
+                a, b = segs[i]
+                c, d = segs[j]
+                # gli estremi condivisi sono già punti di aggancio
+                p = _segment_cross(a, b, c, d)
+                if p is not None and min(abs(p - a), abs(p - b), abs(p - c), abs(p - d)) > 0.5:
+                    out.append(p)
+    return out
+
+
+def _nearest_on_segment(p, a, b) -> pymupdf.Point:
+    d = b - a
+    ln = d.x * d.x + d.y * d.y
+    if ln <= 0:
+        return pymupdf.Point(a)
+    t = max(0.0, min(1.0, ((p.x - a.x) * d.x + (p.y - a.y) * d.y) / ln))
+    return a + d * t
+
+
+def snap(targets: SnapTargets, point, tolerance: float, kinds=SNAP_KINDS) -> tuple[pymupdf.Point, str] | None:
+    """Punto di aggancio più vicino entro la tolleranza: prima i punti notevoli (estremi,
+    intersezioni, vertici delle annotazioni, punti medi), poi il tracciato più vicino."""
+    p = pymupdf.Point(point)
+    best = None
+    best_d = tolerance
+    priority = {SNAP_END: 0, SNAP_ANNOT: 0, SNAP_CROSS: 1, SNAP_MID: 2}
+    for q, kind in targets.points:
+        if kind not in kinds:
+            continue
+        dist = abs(q - p)
+        if dist <= tolerance and (best is None or (priority[kind], dist) < (priority[best[1]], best_d)):
+            best, best_d = (pymupdf.Point(q), kind), dist
+    if best is not None:
+        return best
+    if SNAP_PATH in kinds:
+        for a, b in targets.segments:
+            q = _nearest_on_segment(p, a, b)
+            dist = abs(q - p)
+            if dist <= best_d:
+                best, best_d = (q, SNAP_PATH), dist
+    return best
+
+
 # ------------------------------------------------------------------ timbri
 @dataclass
 class StampSpec:
