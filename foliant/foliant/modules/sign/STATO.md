@@ -74,3 +74,21 @@ Test in `tests/modules/sign/`; i nomi dei test qui sotto omettono il prefisso `t
 - **Nome dell'autore:** `ctx.author_name()`. Test: `author_name_from_core_preference`.
 - **Permessi:** `Document.allows`, con sblocco da proprietario tramite `unlock`. Test:
   `permissions_from_core_with_owner_unlock`.
+
+## Verifica dei flussi reali (`tests/modules/sign/test_flows.py`)
+
+- **Contratto di vendita con due firmatari:** il venditore aggiunge i campi Venditore e Acquirente
+  (obbligatori). Poi certifica con «compilazione e firme consentite», blocca Prezzo e Matricola e aggiunge
+  la marca temporale. L'acquirente compila le note nella finestra senza avvisi; il salvataggio è
+  incrementale e la firma resta valida. Poi l'acquirente firma il proprio campo. Risultato: due firme
+  valide B-T.
+  - La barra ora dice anche «tutte le 2 firme sono valide» accanto a «Certificato da…».
+  - Se dopo le firme si cambia il prezzo, la firma del venditore diventa «Non valida» con il motivo
+    «campo bloccato modificato: «Prezzo»». Prima il motivo era solo «modifiche al documento non ammesse».
+- **PDF firmati da altri programmi:** le firme sono prodotte direttamente con pyHanko, con impostazioni
+  diverse da Foliant.
+  - adbe.pkcs7.detached con marca temporale incorporata: valida, ora e TSA dalla marca.
+  - Firma PAdES seguita da una marca temporale del documento: entrambe valide.
+  - Un commento salvato su un file firmato esternamente lascia la firma valida.
+  - Non ci sono campioni reali di Acrobat o di firme qualificate italiane nel repository: andrebbero
+    aggiunti in `tests/` quando disponibili.

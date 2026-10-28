@@ -1204,6 +1204,25 @@ class FieldInfo:
     allowed_policies: list[str] | None = None       # /SV /Cert /OID
 
 
+def _sig_locked_fields(sig, all_names: set[str]) -> set[str]:
+    """Campi bloccati dai riferimenti FieldMDP di un dizionario di firma."""
+    locked: set[str] = set()
+    for ref in (sig["/Reference"] if "/Reference" in sig else []):
+        ref = ref.get_object()
+        if ref.get("/TransformMethod") != "/FieldMDP":
+            continue
+        params = _deref(ref.get("/TransformParams")) or {}
+        action = str(params.get("/Action", "/All"))
+        fields_ = {str(f) for f in (params.get("/Fields") or [])}
+        if action == "/All":
+            locked |= all_names
+        elif action == "/Include":
+            locked |= fields_
+        elif action == "/Exclude":
+            locked |= all_names - fields_
+    return locked
+
+
 def _locked_field_names(reader) -> set[str]:
     """Campi bloccati da riferimenti FieldMDP di firme esistenti."""
     from pyhanko.sign.fields import enumerate_sig_fields
@@ -1213,21 +1232,8 @@ def _locked_field_names(reader) -> set[str]:
     try:
         for _name, sig_ref, _fref in enumerate_sig_fields(reader, filled_status=True):
             sig = sig_ref.get_object() if sig_ref is not None else None
-            if sig is None:
-                continue
-            for ref in (sig["/Reference"] if "/Reference" in sig else []):
-                ref = ref.get_object()
-                if ref.get("/TransformMethod") != "/FieldMDP":
-                    continue
-                params = _deref(ref.get("/TransformParams")) or {}
-                action = str(params.get("/Action", "/All"))
-                fields_ = {str(f) for f in (params.get("/Fields") or [])}
-                if action == "/All":
-                    locked |= all_names
-                elif action == "/Include":
-                    locked |= fields_
-                elif action == "/Exclude":
-                    locked |= all_names - fields_
+            if sig is not None:
+                locked |= _sig_locked_fields(sig, all_names)
     except Exception:  # noqa: BLE001
         pass
     return locked
@@ -1490,8 +1496,9 @@ def _plural(n: int, one: str, many: str) -> str:
     return (one if n == 1 else many).format(n=n)
 
 
-def _analyze_changes(reader, signed_rev: int) -> tuple[list[str], list[str]]:
-    """Descrive le modifiche dopo la revisione firmata: (consentite, non consentite)."""
+def _analyze_changes(reader, signed_rev: int, filled: set | None = None) -> tuple[list[str], list[str]]:
+    """Descrive le modifiche dopo la revisione firmata: (consentite, non consentite).
+    In `filled` (se dato) aggiunge i nomi dei campi modulo modificati."""
     total = reader.xrefs.total_revisions
     if signed_rev >= total - 1:
         return [], []
@@ -1577,6 +1584,10 @@ def _analyze_changes(reader, signed_rev: int) -> tuple[list[str], list[str]]:
             ft = obj.get("/FT") or (parent.get("/FT") if isinstance(parent, generic.DictionaryObject) else None)
             if ft != "/Sig" and not is_new:
                 form_fill += 1
+                if filled is not None:
+                    name = obj.get("/T") or (parent.get("/T") if isinstance(parent, generic.DictionaryObject) else None)
+                    if name is not None:
+                        filled.add(str(name))
             continue
         if sub == "/Popup":
             continue
@@ -1938,14 +1949,21 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
         reasons.append(_("Algoritmo debole ({alg})").format(alg=st.md_algorithm.upper().replace("SHA", "SHA-")))
     # modifiche
     allowed, forbidden = [], []
+    filled: set[str] = set()
     try:
-        allowed, forbidden = _analyze_changes(reader, emb.signed_revision)
+        allowed, forbidden = _analyze_changes(reader, emb.signed_revision, filled)
     except Exception:  # noqa: BLE001
         pass
     docmdp_ok = getattr(status, "docmdp_ok", None)
     diff = getattr(status, "diff_result", None)
     mod_bad = docmdp_ok is False or isinstance(diff, SuspiciousModification)
     if mod_bad:
+        try:   # campi bloccati da questa firma (FieldMDP) e modificati dopo: si dice quali
+            touched = sorted(filled & _sig_locked_fields(emb.sig_object, _existing_field_names(reader)))
+        except Exception:  # noqa: BLE001
+            touched = []
+        forbidden = [_("campo bloccato modificato: «{name}»").format(name=n) for n in touched] + forbidden
+        allowed = [a for a in allowed if not (touched and a == _("compilazione di campi modulo"))]
         if not forbidden:
             forbidden = [_("modifiche al documento non ammesse")]
         st.modifications = _("Modifiche non consentite: ") + ", ".join(forbidden)
@@ -2110,12 +2128,16 @@ def summary(statuses, empty_fields) -> str:
         if cert is not None and cert.docmdp_level:
             text = _("Certificato da {name} — consentito: {what}").format(
                 name=cert.signer, what=_(_DOCMDP_DESC.get(cert.docmdp_level, "")))
+            if len(statuses) > 1:       # es. contratto con venditore (certifica) e acquirente
+                text += " · " + _("tutte le {n} firme sono valide").format(n=len(statuses))
         else:
             text = _("Firmato: tutte le firme sono valide")
     return f"{text} — {req}" if req else text
 
 
 TRANSLATIONS_EN = {
+    "campo bloccato modificato: «{name}»": "locked field changed: “{name}”",
+    "tutte le {n} firme sono valide": "all {n} signatures are valid",
     "Certificato client per la marca temporale non leggibile o password errata":
         "Client certificate for the timestamp server unreadable or wrong password",
     "Il certificato non ha la policy richiesta dal campo ({oids})":
