@@ -727,3 +727,9 @@ EN.update({
 
 EN.update({"Impossibile ricreare la protezione del documento: il file non è stato salvato per non lasciarlo senza cifratura.":
            "The document protection could not be recreated: the file was not saved so that it is not left unencrypted."})
+
+EN.update({
+    "Il modulo OCR non ha restituito un documento: uso il riconoscimento di base.":
+        "The OCR module did not return a document: using basic recognition.",
+    "OCR non riuscito ({e}): uso il riconoscimento di base.": "OCR failed ({e}): using basic recognition.",
+})

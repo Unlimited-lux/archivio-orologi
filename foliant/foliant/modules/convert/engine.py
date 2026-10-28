@@ -99,6 +99,18 @@ class ConversionResult:
         return "\n".join(lines)
 
 
+def foliant_ocr_module():
+    """(ocr_pdf_bytes, modalità EDITABLE) del modulo OCR di Foliant, o None se non installato."""
+    try:
+        from foliant.modules.ocr import engine as ocr_engine  # type: ignore
+    except Exception:
+        return None
+    fn = getattr(ocr_engine, "ocr_pdf_bytes", None)
+    if fn is None:
+        return None
+    return fn, getattr(ocr_engine, "EDITABLE", "editable")
+
+
 class Job:
     """Stato di una conversione: opzioni, avanzamento e report."""
 
@@ -145,24 +157,26 @@ class Job:
                    if classify_page(work[i]) == SCANNED or (self.ocr == "always" and classify_page(work[i]) != NATIVE)]
         if not scanned:
             return data
-        try:  # modulo OCR (sviluppato a parte): preferito se disponibile
-            from foliant.modules.ocr.engine import ocr_pdf_bytes  # type: ignore
-        except Exception:
-            ocr_pdf_bytes = None
-        if ocr_pdf_bytes is not None:
-            for kwargs in ({"pages": scanned, "language": self.language, "progress": None},
-                           {"pages": scanned}, {}):
+        ocr_module = foliant_ocr_module()
+        if ocr_module is not None:   # modulo OCR di Foliant: testo vero e modificabile (modalità EDITABLE)
+            ocr_pdf_bytes, editable = ocr_module
+            langs = [x for x in (self.language or "ita+eng").split("+") if x]
+            try:
+                ENGINE_LOCK.release()   # il modulo OCR prende il lock da sé, pagina per pagina
                 try:
-                    out = ocr_pdf_bytes(data, **{k: v for k, v in kwargs.items() if v is not None or k == "progress"})
-                    if isinstance(out, tuple):
-                        out = out[0]
-                    if isinstance(out, (bytes, bytearray)) and out:
-                        self.result.ocr_pages.extend(self.source_index(i) + 1 for i in scanned)
-                        return bytes(out)
-                except TypeError:
-                    continue
-                except Exception:
-                    break
+                    out = ocr_pdf_bytes(data, langs, editable, pages=scanned, progress=self.progress)
+                finally:
+                    ENGINE_LOCK.acquire()
+                if isinstance(out, tuple):
+                    out = out[0]
+                if isinstance(out, (bytes, bytearray)) and out:
+                    self.result.ocr_pages.extend(self.source_index(i) + 1 for i in scanned)
+                    return bytes(out)
+                self.warn(_("Il modulo OCR non ha restituito un documento: uso il riconoscimento di base."))
+            except OperationCancelled:
+                raise
+            except Exception as e:
+                self.warn(_("OCR non riuscito ({e}): uso il riconoscimento di base.").format(e=e))
         if not ocr_available():
             for i in scanned:
                 self.warn(_("Pagina {p} scansionata: OCR non disponibile (installa tesseract-ocr).").format(
@@ -276,19 +290,30 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
             if src is not None:
                 src.close()
 
+    job = Job(fmt, name, page_list, progress, dict(options))
     try:
-        return _run_job(work, Job(fmt, name, page_list, progress, dict(options)), fmt, output_path,
+        return _run_job(work, job, fmt, output_path,
                         src_bytes if work is None else None, signed if work is not None else False,
                         embedded if work is not None else 0, progress, options)
     finally:
-        if work is not None:
-            with ENGINE_LOCK:
-                work.close()
+        with ENGINE_LOCK:
+            for doc in (work, getattr(job, "_replaced_work", None)):
+                if doc is not None and not doc.is_closed:
+                    doc.close()
 
 
 def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool, embedded: int, progress,
              options: dict) -> ConversionResult:
     from . import export_image, export_office, export_text
+    if work is not None and fmt in TEXT_FORMATS and job.ocr != "never" and foliant_ocr_module() is not None:
+        # pagine scansionate riconosciute dal modulo OCR prima dell'analisi (tutti i layout)
+        with ENGINE_LOCK:
+            scanned_any = any(classify_page(work[i]) == SCANNED for i in range(work.page_count))
+            if scanned_any:
+                data = job.ocr_document_bytes(work)
+                work.close()
+                work = pymupdf.open(stream=data, filetype="pdf")
+                job._replaced_work = work
     if work is not None:
         if signed:
             job.warn(_("Il documento è firmato: le firme non sono trasferibili nel formato di uscita."))

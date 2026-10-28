@@ -896,3 +896,37 @@ def test_ocr_skewed_scan(tmp_path):
     path = _save(doc, tmp_path / "storto.pdf")
     text = " ".join(open(convert_pdf(path, tmp_path / "s.txt", "txt")[0], encoding="utf-8").read().split())
     assert difflib.SequenceMatcher(None, " ".join(lines), text).ratio() >= 0.95
+
+
+def test_scan_to_docx_uses_ocr_module_both_layouts(scanned_mixed, tmp_path, monkeypatch):
+    """Scansione → Word: il modulo OCR (modalità EDITABLE) alimenta entrambi i layout."""
+    import sys
+    import types
+    import docx
+    calls = []
+    words = "Articolo Quantità Prezzo orologio cinturino garanzia"
+
+    def fake_ocr_pdf_bytes(data, languages, mode, pages=None, progress=None, options=None):
+        calls.append((languages, mode, pages))
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        for i in pages:
+            page = doc[i]
+            page.insert_text((72, 200), words, fontsize=14)   # testo vero e visibile
+        out = doc.tobytes()
+        doc.close()
+        return out
+
+    engine_mod = types.ModuleType("foliant.modules.ocr.engine")
+    engine_mod.ocr_pdf_bytes = fake_ocr_pdf_bytes
+    engine_mod.EDITABLE = "editable"
+    pkg = types.ModuleType("foliant.modules.ocr")
+    pkg.engine = engine_mod
+    monkeypatch.setitem(sys.modules, "foliant.modules.ocr", pkg)
+    monkeypatch.setitem(sys.modules, "foliant.modules.ocr.engine", engine_mod)
+    for layout in ("flow", "faithful"):
+        result = run_conversion(scanned_mixed, tmp_path / f"{layout}.docx", "docx", layout=layout, language="ita+eng")
+        text = " ".join(p.text for p in docx.Document(result.paths[0]).paragraphs)
+        found = sum(1 for w in words.split() if w in text)
+        assert found / len(words.split()) >= 0.95, (layout, text)
+        assert result.ocr_pages == [3]
+    assert calls[0] == (["ita", "eng"], "editable", [2])
