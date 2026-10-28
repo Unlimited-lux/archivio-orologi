@@ -32,7 +32,6 @@ import json
 import math
 import os
 import re
-import uuid
 from collections.abc import Iterable, Sequence
 
 import pymupdf
@@ -569,8 +568,20 @@ def _artifact_props(kind: str, subtype: str | None) -> str:
 # Inserimento e identificazione
 # =========================================================================
 
-def _new_id() -> str:
-    return uuid.uuid4().hex[:10]
+def _new_id(pdf: pymupdf.Document) -> str:
+    """Identificativo del nuovo timbro: il primo intero libero nel documento. Deterministico
+    (stesse operazioni → stesso file, BAT-04) e numerico, come lo riconoscono gli altri moduli
+    (es. l'appiattimento di security)."""
+    used = 0
+    for pno in range(pdf.page_count):
+        try:
+            for item in pdf[pno].get_xobjects():
+                tail = item[1].rsplit("_", 1)[-1]
+                if item[1].startswith(_NAME_PREFIX) and tail.isdigit():
+                    used = max(used, int(tail) + 1)
+        except Exception:
+            pass
+    return str(used)
 
 
 def _encode_params(params: dict) -> str:
@@ -651,7 +662,7 @@ def _apply_layers(pdf: pymupdf.Document, kind: str, targets: Sequence[int], buil
     livello (un solo XObject nel file). `subtype(pno)` sceglie il sottotipo di artefatto.
     """
     oc = _layer_xref(pdf, kind, visibility)
-    sid = _new_id()
+    sid = _new_id(pdf)
     record = f"<</K/{kind}/Id({sid})/P{_encode_params(params)}>>"
     cache: dict = {}
     stamped: list[int] = []
