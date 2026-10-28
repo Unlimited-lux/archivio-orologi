@@ -218,3 +218,16 @@ def test_service_dialogs(window, monkeypatch):
     sd.filter.setText("salva")
     assert 0 < sd.table.rowCount() < 10
     HelpDialog(window).close()
+
+
+def test_link_handler_extension(window, sample_pdf):
+    from foliant.ui import tools
+    seen = []
+    handler = lambda view, link: (seen.append(link.get("uri")), True)[1]
+    window.ctx.add_link_handler(handler)
+    try:
+        view = window.open_path(sample_pdf)
+        tools.follow_link(view, {"kind": 2, "uri": "https://example.org"})
+        assert seen == ["https://example.org"]
+    finally:
+        tools.LINK_HANDLERS.remove(handler)

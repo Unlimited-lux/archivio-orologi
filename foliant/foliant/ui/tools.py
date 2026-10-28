@@ -110,7 +110,19 @@ def selection_from_words(page: int, words: list[tuple]) -> TextSelection:
     return TextSelection(page=page, rects=rects, text=words_to_text(words), words=list(words))
 
 
+# Gestori registrati dai moduli (ctx.add_link_handler): callable(view, link) -> bool.
+# Il primo che restituisce True ha gestito il collegamento; altrimenti vale il comportamento base.
+LINK_HANDLERS: list = []
+
+
 def follow_link(view: "DocumentView", link: dict) -> None:
+    for handler in list(LINK_HANDLERS):
+        try:
+            if handler(view, link):
+                return
+        except Exception as e:
+            view.status(f"Errore nell'apertura del collegamento: {e}")
+            return
     kind = link.get("kind")
     if kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED) and link.get("page", -1) >= 0:
         to = link.get("to")

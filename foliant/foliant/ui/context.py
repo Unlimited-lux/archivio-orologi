@@ -166,6 +166,16 @@ class Context(QObject):
     def central_widget(self) -> QWidget | None:
         return self._w.central_override()
 
+    def add_link_handler(self, handler: Callable) -> None:
+        """Gestisce l'apertura dei collegamenti cliccati nel documento.
+
+        `handler(view, link) -> bool`: `link` è il dizionario del motore (`kind`, `uri`,
+        `page`, `file`, …). Restituire True se il collegamento è stato gestito (anche
+        rifiutato); False per lasciare il comportamento predefinito.
+        """
+        from .tools import LINK_HANDLERS
+        LINK_HANDLERS.append(handler)
+
     def add_view_menu_provider(self, provider: Callable) -> None:
         """Voci del menu contestuale sulle pagine.
 

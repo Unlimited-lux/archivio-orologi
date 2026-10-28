@@ -139,6 +139,7 @@ duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |
 | `set_central_widget(w)` / `central_widget()` | mostra un widget del modulo al posto della vista documento (None = ripristina) |
+| `add_link_handler(fn)` | apertura dei collegamenti: `fn(view, link) -> bool` (True = gestito) |
 | `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)` |
 | `run_task(titolo, fn, *args)` | lavoro lungo con avanzamento |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
