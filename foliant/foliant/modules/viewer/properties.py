@@ -165,7 +165,7 @@ class PropertiesController:
     def __init__(self, ctx):
         self.ctx = ctx
         self.dialog: PropertiesDialog | None = None
-        self.action = ctx.action(_("Proprietà del documento…"), "info", self.show_dialog, shortcut="Ctrl+D")
+        self.action = ctx.action(_("Proprietà del documento…"), "info", self.show_dialog, shortcut="Alt+Return")
         mode = ctx.mode("leggi")
         if mode is not None:
             mode.add_action(self.action)

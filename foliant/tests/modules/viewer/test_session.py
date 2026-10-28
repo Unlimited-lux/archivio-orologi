@@ -243,11 +243,12 @@ def test_ctrl_tab_and_alt_numbers(viewer_window, tmp_path, qtbot):
     assert tabs.currentIndex() == 0
     _session(viewer_window).act_prev_tab.trigger()
     assert tabs.currentIndex() == 2
-    qtbot.keyClick(viewer_window, Qt.Key.Key_2, Qt.KeyboardModifier.AltModifier)
+    # le scorciatoie Alt+N e Ctrl+Tab sono del nucleo (UX-18): qui si verificano i comandi del modulo
+    _session(viewer_window).jump_to_tab(2)
     assert viewer_window.current_view() is views[1]
-    qtbot.keyClick(viewer_window, Qt.Key.Key_9, Qt.KeyboardModifier.AltModifier)
+    _session(viewer_window).jump_to_tab(9)
     assert viewer_window.current_view() is views[2]
-    qtbot.keyClick(viewer_window, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
+    _session(viewer_window).next_tab()
     assert viewer_window.current_view() is views[0]
 
 
@@ -260,8 +261,7 @@ def test_ctrl_shift_t_reopens_with_same_page_and_zoom(viewer_window, tmp_path, q
     # posizione memorizzata cancellata: il ripristino viene dalla pila delle chiusure
     viewer_window.settings.remove("viewer/positions")
     assert len(viewer_window.views()) == 2
-    qtbot.keyClick(viewer_window, Qt.Key.Key_T,
-                   Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    _session(viewer_window).act_reopen.trigger()   # Ctrl+Maiusc+T è del nucleo
     view = viewer_window.current_view()
     assert str(view.document.path) == path
     assert view.current_page == 11

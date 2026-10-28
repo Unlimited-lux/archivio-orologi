@@ -75,23 +75,16 @@ class SessionController(QObject):
     # ================================================================ azioni
     def _build_actions(self) -> None:
         ctx = self.ctx
-        self.act_next_tab = ctx.action(_("Scheda successiva"), "chevron-right", self.next_tab, shortcut="Ctrl+Tab")
-        self.act_prev_tab = ctx.action(_("Scheda precedente"), "chevron-left", self.previous_tab,
-                                       shortcut="Ctrl+Shift+Tab")
-        self.act_prev_tab.setShortcuts([QKeySequence("Ctrl+Shift+Tab"), QKeySequence("Ctrl+Shift+Backtab")])
+        # Ctrl+Tab, Ctrl+Maiusc+Tab, Ctrl+Maiusc+T e Alt+1…9 sono scorciatoie globali del nucleo (UX-18):
+        # qui solo le voci di menu, senza scorciatoia (scorciatoie duplicate si annullano in Qt).
+        self.act_next_tab = ctx.action(_("Scheda successiva"), "chevron-right", self.next_tab)
+        self.act_prev_tab = ctx.action(_("Scheda precedente"), "chevron-left", self.previous_tab)
         self.act_reopen = ctx.action(_("Riapri scheda chiusa"), "history", self.reopen_closed_tab,
-                                     shortcut="Ctrl+Shift+T", requires_document=False)
+                                     requires_document=False)
         self.act_close_others = ctx.action(_("Chiudi le altre schede"), "copy-x", lambda: self.close_other_tabs())
         self.act_close_right = ctx.action(_("Chiudi le schede a destra"), "arrow-right-to-line",
                                           lambda: self.close_tabs_to_right())
         self.act_close_all = ctx.action(_("Chiudi tutte le schede"), "square-x", self.close_all_tabs)
-        self.jump_actions: list[QAction] = []
-        for n in range(1, 10):
-            act = QAction(self.window)
-            act.setShortcut(QKeySequence(f"Alt+{n}"))
-            act.triggered.connect(lambda _c=False, n=n: self.jump_to_tab(n))
-            self.window.addAction(act)
-            self.jump_actions.append(act)
 
         self.pref_actions: dict[str, QAction] = {}
         for key, text in (

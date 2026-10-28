@@ -32,7 +32,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-22 Allegati | P1 | parziale | `test_attachments.py` (16 test) | Elenco, apri, salva, salva tutti, aggiungi, elimina, eseguibili bloccati. Portfolio: non fatto. |
 | VIS-23 Thread di articoli | P2 | fatto | `test_articles.py` | |
 | VIS-24 Ricerca | P0 | fatto | `test_search.py`, `test_engine.py::test_case_sensitivity`, `test_whole_word`, `test_ignore_accents_and_ligatures`, `test_hyphenated_word_across_lines` | Ricerca incrementale non bloccante, opzioni, F3/Maiusc+F3, pannello Risultati, cronologia delle ricerche, pagine senza testo. Frasi e parole sillabate a cavallo tra due pagine incluse (`test_phrase_continuing_on_next_page`). |
-| VIS-25 Ricerca avanzata | P2 | parziale | `test_search.py::test_regex_and_invalid_expression`, `test_export_csv`, `test_advsearch.py` | Vedi parte `advsearch` (se integrata). |
+| VIS-25 Ricerca avanzata | P2 | parziale | `test_advsearch.py` (11 test), `test_search.py::test_regex_and_invalid_expression`, `test_export_csv` | Ctrl+Maiusc+F: documento corrente, documenti aperti, cartella con sottocartelle (file cifrati/danneggiati nel riepilogo), frase/tutte/almeno una/regex con limite di tempo, commenti, segnalibri, campi, metadati, CSV. Indice full-text e allegati PDF: non fatti. |
 | VIS-26 Trova e sostituisci | P1 | non fatto | | Richiede il motore di modifica del testo (area Modifica testo). |
 | VIS-27 Ricerca semantica IA | P2 | non fatto | | Area IA. |
 | VIS-28 Selezione e copia | P0 | parziale | `test_tools.py::test_alt_drag_rectangular_table_selection`, `tests/test_view.py::test_text_selection_by_drag` | Selezione rettangolare Alt+trascinamento con tabulazioni; il resto nel nucleo (selezione su più pagine, triplo clic: non fatti). |
@@ -47,7 +47,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-37 Multimedia e 3D | P2 | non fatto | | Segnalati come non supportati (VIS-07). |
 | VIS-38 Lente, panoramica, vista divisa | P2 | parziale | `test_tools.py::test_lens_magnifies_under_cursor` | Lente d'ingrandimento; la panoramica è l'area visibile trascinabile nelle miniature (VIS-14). Vista divisa: non fatta (richiede più viste dello stesso documento nel nucleo). |
 | VIS-39 Righelli, griglie, coordinate | P1 | parziale | `test_measure.py` | Coordinate del cursore nell'unità scelta, griglia, riquadri di pagina. Righelli, guide e aggancio, coordinate geospaziali: non fatti. |
-| VIS-40 Proprietà del documento | P1 | fatto | `test_properties.py` (14 test) | Sola lettura. |
+| VIS-40 Proprietà del documento | P1 | fatto | `test_properties.py` (14 test) | Sola lettura, Alt+Invio. Da riallineare alla specifica v2 («Informazioni sul documento» con sezioni File, Contenuto, Protezione, Caratteri, Apertura): non fatto per scadenza. |
 | VIS-41 Metadati avanzati | P2 | non fatto | | |
 | VIS-42 Vista iniziale | P2 | parziale | `test_session.py` (vista iniziale) | Lettura delle impostazioni del documento; la loro modifica non è fatta. |
 | VIS-43 Stampa | P0 | fatto | `test_printing.py` (21 test) | |
@@ -56,7 +56,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-46 Link e QR | P2 | non fatto | | |
 | VIS-47 Salvataggio | P0 | nucleo | `tests/test_document.py` | Salvataggio atomico nel nucleo. |
 | VIS-48 Salva con nome / copia | P0 | nucleo | `tests/test_document.py::test_save_as_changes_path`, `test_save_copy_keeps_path` | |
-| VIS-49 Ripristina e ricarica | P1 | vedi nota | `test_reload.py` | Parte `reload` (se integrata). |
+| VIS-49 Ripristina e ricarica | P1 | fatto | `test_reload.py` (16 test) | Ripristina, ricarica automatica/chiedi/mai con debounce, barre non modali per conflitto e file eliminato. |
 | VIS-50 Recupero dopo chiusura anomala | P1 | fatto | `test_recovery.py` (20 test) | Copia periodica in `~/.local/state/foliant/recovery/` (0700/0600, cifrata se l'originale lo è), proposta non bloccante all'avvio, pulizia dopo salvataggio o chiusura. |
 | VIS-51 Barre e preferenze | P1 | parziale | `test_prefs.py` | Layout/zoom/pannello predefiniti, rispetto impostazioni del documento, ultima posizione, esporta/importa, ripristina predefiniti. Personalizzazione delle barre: non fatta. |
 | VIS-52 Scorciatoie e ricerca comandi | P2 | fatto | `test_commands.py` | Ctrl+K, assegnazione con conflitti, esporta/importa. Schemi predefiniti ed elenco stampabile: non fatti. |
@@ -66,3 +66,13 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 - `FOLIANT_VIEWER_PARTS="a,b"` carica solo alcune parti (sviluppo e test isolati).
 - Nessun dialogo modale parte da solo: recupero dopo crash e proposta di schermo intero sono non bloccanti.
 - Catture verificate in tema chiaro e scuro per tutti i pannelli e dialoghi.
+
+## Dopo la scadenza (stabilizzazione)
+- Incorporato il nucleo aggiornato; tolte le scorciatoie duplicate con quelle globali del nucleo
+  (Ctrl+Tab, Ctrl+Maiusc+Tab, Ctrl+Maiusc+T, Alt+1…9, Ctrl+D → Alt+Invio per le proprietà):
+  `tests/test_window.py::test_no_duplicate_shortcuts` passa con il modulo caricato.
+- Non integrate perché incomplete: stampa avanzata (VIS-44), modifica della vista iniziale (VIS-42),
+  metadati avanzati (VIS-41).
+- Da allineare alla specifica v2: etichette «Cattura area» e «Apertura del documento», opzione
+  «Cerca anche nei commenti» nella barra Ctrl+F (la ricerca nei commenti c'è nella ricerca avanzata),
+  VIS-54 «Allegati del documento» (coperta in gran parte dal pannello Allegati).

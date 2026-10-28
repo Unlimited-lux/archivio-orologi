@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QKeySequence
 import hashlib
 
 import pymupdf
@@ -215,7 +216,7 @@ def test_dialog_tabs_copy_and_no_modification(viewer_window, meta_pdf, qtbot):
 
 def test_action_menu_and_shortcut(viewer_window, sample_pdf):
     ctl = part(viewer_window, "properties")
-    assert ctl.action.shortcut().toString() == "Ctrl+D"
+    assert ctl.action.shortcut() == QKeySequence("Alt+Return")
     assert ctl.action in viewer_window.modes["leggi"].toolbar.actions()
     assert any(ctl.action in acts for acts in viewer_window._menu_sections.values())
     assert not ctl.action.isEnabled()
