@@ -241,3 +241,65 @@ def test_read_only_when_modification_forbidden(viewer_window, tmp_path):
     assert not panel.editable
     assert not panel.actions["add"].isEnabled()
     assert panel.add_bookmark() is None
+
+
+# ------------------------------------------------------------ VIS-17 (strumenti)
+
+def test_export_import_text(viewer_window, tmp_path):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    out = panel.export_text(str(tmp_path / "s.txt"))
+    text = open(out, encoding="utf-8").read()
+    assert "\tSezione 1.1\t2" in text
+    (tmp_path / "nuovi.txt").write_text("Uno\t1\n\tDue\t2\n\t\tTre\t3\nFuori\t999\n", encoding="utf-8")
+    assert panel.import_text(str(tmp_path / "nuovi.txt"), replace=True)
+    assert [(b.level, b.title, b.page) for b in panel.items] == [(1, "Uno", 0), (2, "Due", 1), (3, "Tre", 2)]
+    view.document.undo()
+    assert panel.items[0].title == "Capitolo 1"
+
+
+def test_generate_every_n_and_from_headings(viewer_window, tmp_path, monkeypatch):
+    path = tmp_path / "titoli.pdf"
+    doc = pymupdf.open()
+    for i in range(4):
+        p = doc.new_page()
+        p.insert_text((72, 80), f"Capitolo {i + 1}", fontsize=22)
+        for k in range(8):
+            p.insert_text((72, 120 + k * 14), "corpo del testo normale " * 3, fontsize=10)
+    doc.save(str(path))
+    view, panel = _open(viewer_window, str(path))
+    assert panel.generate("every", n=2, replace=True)
+    assert [b.page for b in panel.items] == [0, 2]
+    monkeypatch.setattr(viewer_window.ctx, "confirm", lambda *a: True)
+    assert panel.generate("headings")
+    assert [b.title for b in panel.items] == ["Capitolo 1", "Capitolo 2", "Capitolo 3", "Capitolo 4"]
+
+
+def test_generate_from_scan_reports(viewer_window, tmp_path, monkeypatch):
+    path = tmp_path / "vuoto.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(str(path))
+    view, panel = _open(viewer_window, str(path))
+    msgs = []
+    monkeypatch.setattr(viewer_window.ctx, "info", lambda t, m: msgs.append(m))
+    assert not panel.generate("headings")
+    assert "OCR" in msgs[0]
+    assert not view.document.is_modified
+
+
+def test_verify_lists_broken(viewer_window, tmp_path, monkeypatch):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    with view.document.change("Elimina") as pdf:
+        pdf.delete_pages(from_page=10, to_page=19)
+    msgs = []
+    monkeypatch.setattr(viewer_window.ctx, "info", lambda t, m: msgs.append(m))
+    problems = panel.verify()
+    assert {panel.items[i].title for i, why in problems if why == "broken"} == {"Sezione 3.3"}
+    assert "Sezione 3.3" in msgs[0]
+
+
+def test_rename_by_editing_item(viewer_window, tmp_path):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    panel.item(0).setText(0, "Nuovo titolo")
+    assert panel.items[0].title == "Nuovo titolo"
+    assert view.document.undo_label == "Rinomina segnalibro"

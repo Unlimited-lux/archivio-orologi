@@ -167,3 +167,46 @@ def test_write_outline_roundtrip_with_style_and_collapse():
     assert [b.page for b in back] == [b.page for b in items]
     assert back[0].collapsed and not back[3].collapsed
     assert back[3].bold and back[3].italic and back[3].color == (1.0, 0.0, 0.0)
+
+
+def test_outline_text_roundtrip():
+    items = _items()
+    text = E.outline_to_text(items)
+    assert text.splitlines()[1] == "\t1.1\t2"
+    back, errors = E.outline_from_text(text, 10)
+    assert not errors
+    assert [(b.level, b.title, b.page) for b in back] == [(b.level, b.title, b.page) for b in items]
+
+
+def test_outline_import_three_levels_and_bad_lines():
+    text = "Uno\t1\n  Due\t2\n    Tre\t3\nFuori\t99\nsenza numero\n"
+    items, errors = E.outline_from_text(text, 10)
+    assert [(b.level, b.title, b.page) for b in items] == [(1, "Uno", 0), (2, "Due", 1), (3, "Tre", 2)]
+    assert len(errors) == 2
+
+
+def test_outline_every_n():
+    items = E.outline_every_n(25, 10)
+    assert [b.page for b in items] == [0, 10, 20]
+    assert items[-1].title == "Pagine 21-25"
+
+
+def test_outline_from_headings():
+    doc = pymupdf.open()
+    for i in range(3):
+        p = doc.new_page()
+        p.insert_text((72, 80), f"Capitolo {i + 1}", fontsize=22)
+        p.insert_text((72, 120), f"Sezione {i + 1}.1", fontsize=16)
+        for k in range(10):
+            p.insert_text((72, 150 + k * 14), "testo normale del corpo del documento " * 2, fontsize=10)
+    items = E.outline_from_headings(doc)
+    assert [(b.level, b.title, b.page) for b in items][:2] == [(1, "Capitolo 1", 0), (2, "Sezione 1.1", 0)]
+    assert len(items) == 6
+
+
+def test_verify_outline():
+    items = _items()
+    items.append(E.Bookmark(1, "Cap 3", 8))
+    items.append(E.Bookmark(1, "Rotto", 50))
+    problems = dict((i, why) for i, why in E.verify_outline(items, 10))
+    assert problems[7] == "broken" and problems[6] == "duplicate"

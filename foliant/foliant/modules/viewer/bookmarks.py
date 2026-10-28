@@ -53,6 +53,33 @@ TRANSLATIONS = {
     "Il documento non consente modifiche: segnalibri in sola lettura.":
         "The document does not allow changes: bookmarks are read-only.",
     "Vai": "Go",
+    "Strumenti dei segnalibri": "Bookmark tools",
+    "Esporta come testo…": "Export as text…",
+    "Importa da testo…": "Import from text…",
+    "Genera dai titoli del testo": "Generate from text headings",
+    "Genera ogni N pagine…": "Generate every N pages…",
+    "Verifica segnalibri": "Check bookmarks",
+    "Esporta segnalibri": "Export bookmarks",
+    "Importa segnalibri": "Import bookmarks",
+    "Genera segnalibri": "Generate bookmarks",
+    "Testo (*.txt)": "Text (*.txt)",
+    "Segnalibri esportati: {p}": "Bookmarks exported: {p}",
+    "Impossibile leggere il file: {e}": "Cannot read the file: {e}",
+    "Nessun segnalibro valido nel file.": "No valid bookmarks in the file.",
+    "{n} righe scartate (pagina fuori intervallo o formato non valido):": "{n} lines discarded (page out of range or invalid format):",
+    "Sostituire i segnalibri esistenti? Scegli No per aggiungerli in fondo.":
+        "Replace the existing bookmarks? Choose No to append them.",
+    "Nessun titolo riconosciuto: il documento potrebbe essere una scansione (usa l'OCR).":
+        "No headings recognised: the document may be a scan (use OCR).",
+    "Trovati {n} titoli. Creare i segnalibri?": "Found {n} headings. Create the bookmarks?",
+    "Ogni quante pagine?": "Every how many pages?",
+    "Pagine {a}-{b}": "Pages {a}-{b}",
+    "Nessun problema trovato nei segnalibri.": "No problems found in the bookmarks.",
+    "{n} segnalibri con problemi:": "{n} bookmarks with problems:",
+    "destinazione non valida": "invalid destination",
+    "senza titolo": "untitled",
+    "duplicato": "duplicate",
+    "Ricerca dei titoli…": "Looking for headings…",
     "Vista": "View",
 }
 
@@ -152,6 +179,21 @@ class BookmarksPanel(QWidget):
             if key in ("delete", "outdent"):
                 bar.addSpacing(6)
         bar.addStretch(1)
+        self.tools_button = QToolButton(self)
+        bind_icon(self.tools_button, "ellipsis")
+        self.tools_button.setToolTip(_("Strumenti dei segnalibri"))
+        self.tools_button.setAutoRaise(True)
+        self.tools_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        tools = QMenu(self.tools_button)
+        tools.addAction(_("Esporta come testo…"), self.export_text)
+        self.act_import = tools.addAction(_("Importa da testo…"), self.import_text)
+        tools.addSeparator()
+        self.act_gen_headings = tools.addAction(_("Genera dai titoli del testo"), lambda: self.generate("headings"))
+        self.act_gen_every = tools.addAction(_("Genera ogni N pagine…"), lambda: self.generate("every"))
+        tools.addSeparator()
+        tools.addAction(_("Verifica segnalibri"), self.verify)
+        self.tools_button.setMenu(tools)
+        bar.addWidget(self.tools_button)
         layout.addLayout(bar)
 
         self.filter = QLineEdit(self)
@@ -306,6 +348,10 @@ class BookmarksPanel(QWidget):
                 act.setEnabled(bool(self.items))
             else:
                 act.setEnabled(has_view and self.editable and sel is not None)
+        for act in (getattr(self, "act_import", None), getattr(self, "act_gen_headings", None),
+                    getattr(self, "act_gen_every", None)):
+            if act is not None:
+                act.setEnabled(has_view and self.editable)
         tip = None if self.editable or not has_view else _("Il documento non consente modifiche: segnalibri in sola lettura.")
         for key in ("add", "rename", "delete", "up", "down", "indent", "outdent"):
             self.actions[key].setToolTip(tip or self.actions[key].text())
@@ -603,6 +649,114 @@ class BookmarksPanel(QWidget):
             self._on_page(self.view.current_page)
         else:
             self._paint_current()
+
+
+def _bookmark_tools(panel_cls):
+    """Strumenti avanzati (VIS-17) aggiunti al pannello."""
+
+    def export_text(self, path: str | None = None) -> str | None:
+        if self.view is None:
+            return None
+        if path is None:
+            stem = self.view.document.display_name.rsplit(".", 1)[0]
+            path = self.ctx.ask_save_path(_("Esporta segnalibri"), f"{stem} - segnalibri.txt",
+                                          _("Testo (*.txt)"), ".txt")
+        if not path:
+            return None
+        from foliant.api import atomic_write
+        try:
+            atomic_write(path, E.outline_to_text(self.items).encode("utf-8"))
+        except Exception as e:
+            self.ctx.error(_("Esporta segnalibri"), str(e))
+            return None
+        self.ctx.status(_("Segnalibri esportati: {p}").format(p=path))
+        return path
+
+    def _merge(self, label: str, new: list, replace: bool | None) -> bool:
+        if replace is None:
+            replace = not self.items or self.ctx.confirm(
+                label, _("Sostituire i segnalibri esistenti? Scegli No per aggiungerli in fondo."))
+        items = new if replace else [E.Bookmark(b.level, b.title, b.page, dict(b.dest)) for b in self.items] + new
+        return self._apply(label, items, 0)
+
+    def import_text(self, path: str | None = None, replace: bool | None = None) -> bool:
+        if self.view is None or not self.editable:
+            return False
+        if path is None:
+            paths = self.ctx.ask_open_paths(_("Importa segnalibri"), _("Testo (*.txt)"), multiple=False)
+            path = paths[0] if paths else None
+        if not path:
+            return False
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            self.ctx.error(_("Importa segnalibri"), _("Impossibile leggere il file: {e}").format(e=e))
+            return False
+        items, errors = E.outline_from_text(text, self.view.page_count)
+        if errors:
+            self.ctx.status(_("{n} righe scartate (pagina fuori intervallo o formato non valido):").format(n=len(errors))
+                            + " " + "; ".join(errors[:5]), 10000)
+        if not items:
+            self.ctx.error(_("Importa segnalibri"), _("Nessun segnalibro valido nel file."))
+            return False
+        return self._merge(_("Importa segnalibri"), items, replace)
+
+    def generate(self, method: str, n: int | None = None, replace: bool | None = None) -> bool:
+        view = self.view
+        if view is None or not self.editable:
+            return False
+        if method == "every":
+            if n is None:
+                from PySide6.QtWidgets import QInputDialog
+                n, ok = QInputDialog.getInt(self, _("Genera segnalibri"), _("Ogni quante pagine?"), 10, 1,
+                                            max(1, view.page_count))
+                if not ok:
+                    return False
+            items = E.outline_every_n(view.page_count, n, _("Pagine {a}-{b}"))
+        else:
+            document = view.document
+
+            def work(progress):
+                with ENGINE_LOCK:
+                    return E.outline_from_headings(document.pdf, progress=lambda f: progress.update(f))
+
+            try:
+                items = self.ctx.run_task(_("Ricerca dei titoli…"), work)
+            except Exception as e:
+                from foliant.api import OperationCancelled
+                if not isinstance(e, OperationCancelled):
+                    self.ctx.error(_("Genera segnalibri"), str(e))
+                return False
+            if not items:
+                self.ctx.info(_("Genera segnalibri"),
+                              _("Nessun titolo riconosciuto: il documento potrebbe essere una scansione (usa l'OCR)."))
+                return False
+            if replace is None and not self.ctx.confirm(_("Genera segnalibri"),
+                                                        _("Trovati {n} titoli. Creare i segnalibri?").format(n=len(items))):
+                return False
+        return self._merge(_("Genera segnalibri"), items, replace)
+
+    def verify(self) -> list:
+        if self.view is None:
+            return []
+        problems = E.verify_outline(self.items, self.view.page_count)
+        if not problems:
+            self.ctx.info(_("Verifica segnalibri"), _("Nessun problema trovato nei segnalibri."))
+            return []
+        reasons = {"broken": _("destinazione non valida"), "untitled": _("senza titolo"), "duplicate": _("duplicato")}
+        lines = [f"• {self.items[i].title or _('(senza titolo)')} — {reasons.get(why, why)}" for i, why in problems[:30]]
+        self.tree.setCurrentItem(self._tree_items[problems[0][0]])
+        self.ctx.info(_("Verifica segnalibri"), _("{n} segnalibri con problemi:").format(n=len(problems))
+                      + "\n\n" + "\n".join(lines))
+        return problems
+
+    for fn in (export_text, _merge, import_text, generate, verify):
+        setattr(panel_cls, fn.__name__, fn)
+    return panel_cls
+
+
+_bookmark_tools(BookmarksPanel)
 
 
 class BookmarksController:

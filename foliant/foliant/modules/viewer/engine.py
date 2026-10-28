@@ -520,3 +520,120 @@ def section_pages(items: list[Bookmark], index: int, page_count: int) -> range:
             end = max(start + 1, b.page)
             break
     return range(max(0, start), end)
+
+
+# ============================================= segnalibri: strumenti avanzati (VIS-17)
+
+def outline_to_text(items: list[Bookmark]) -> str:
+    """Formato di scambio: rientro con tabulazioni per livello, "titolo<TAB>pagina"."""
+    lines = []
+    for b in items:
+        title = " ".join(b.title.split())
+        lines.append("\t" * (b.level - 1) + f"{title}\t{b.page + 1 if b.page >= 0 else ''}".rstrip())
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def outline_from_text(text: str, page_count: int) -> tuple[list[Bookmark], list[str]]:
+    """Legge il formato di scambio (rientro con tabulazioni o con 2/4 spazi).
+
+    Restituisce (voci, errori): le righe con pagine fuori intervallo sono scartate e segnalate."""
+    items: list[Bookmark] = []
+    errors: list[str] = []
+    indent_unit = None
+    for n, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip():
+            continue
+        stripped = raw.lstrip("\t ")
+        lead = raw[:len(raw) - len(stripped)]
+        if "\t" in lead:
+            depth = lead.count("\t")
+        else:
+            spaces = len(lead)
+            if spaces and indent_unit is None:
+                indent_unit = spaces
+            depth = spaces // indent_unit if indent_unit else 0
+        parts = stripped.rsplit("\t", 1) if "\t" in stripped else stripped.rsplit(" ", 1)
+        if len(parts) != 2 or not parts[1].strip().isdigit():
+            errors.append(f"{n}: {stripped}")
+            continue
+        title, page = parts[0].strip(), int(parts[1])
+        if not (1 <= page <= page_count):
+            errors.append(f"{n}: {stripped}")
+            continue
+        prev = items[-1].level if items else 0
+        level = max(1, min(depth + 1, prev + 1))
+        items.append(Bookmark(level, title, page - 1, {"kind": pymupdf.LINK_GOTO, "page": page - 1,
+                                                        "to": pymupdf.Point(0, 0)}))
+    return items, errors
+
+
+def outline_every_n(page_count: int, n: int, template: str = "Pagine {a}-{b}") -> list[Bookmark]:
+    n = max(1, int(n))
+    out = []
+    for start in range(0, page_count, n):
+        end = min(page_count, start + n)
+        title = template.format(a=start + 1, b=end) if end - start > 1 else template.split("{a}")[0] + str(start + 1)
+        out.append(Bookmark(1, title.strip(), start, {"kind": pymupdf.LINK_GOTO, "page": start,
+                                                       "to": pymupdf.Point(0, 0)}))
+    return out
+
+
+def outline_from_headings(pdf: pymupdf.Document, max_levels: int = 3, progress=None) -> list[Bookmark]:
+    """Titoli riconosciuti dallo stile del testo: righe brevi con corpo più grande
+    del testo normale (o in grassetto e più grandi). I corpi distinti diventano livelli."""
+    from collections import Counter
+    lines: list[tuple[int, float, float, str, bool]] = []
+    sizes: Counter = Counter()
+    count = pdf.page_count
+    for i in range(count):
+        if progress is not None:
+            progress(i / max(1, count))
+        try:
+            data = pdf[i].get_text("dict", sort=True)
+        except Exception:
+            continue
+        for block in data.get("blocks", []):
+            if block.get("type", 0) != 0:
+                continue
+            for line in block.get("lines", []):
+                spans = [s for s in line.get("spans", []) if s.get("text", "").strip()]
+                if not spans:
+                    continue
+                text = " ".join(s["text"].strip() for s in spans)
+                size = max(round(s["size"], 1) for s in spans)
+                bold = all(s.get("flags", 0) & 16 for s in spans)
+                for s in spans:
+                    sizes[round(s["size"], 1)] += len(s["text"])
+                lines.append((i, line["bbox"][1], size, text, bold))
+    if not sizes:
+        return []
+    body = sizes.most_common(1)[0][0]
+    candidates = [ln for ln in lines if ln[2] >= body * 1.15 and len(ln[3]) <= 120]
+    levels = sorted({ln[2] for ln in candidates}, reverse=True)[:max_levels]
+    out: list[Bookmark] = []
+    for page, y, size, text, _bold in candidates:
+        if size not in levels:
+            continue
+        level = levels.index(size) + 1
+        prev = out[-1].level if out else 0
+        level = min(level, prev + 1)
+        out.append(Bookmark(level, text, page, {"kind": pymupdf.LINK_GOTO, "page": page,
+                                                "to": pymupdf.Point(0, max(0.0, y - 10))}))
+    return out
+
+
+def verify_outline(items: list[Bookmark], page_count: int) -> list[tuple[int, str]]:
+    """Segnalibri con problemi: (indice, motivo)."""
+    problems = []
+    seen: dict[tuple[str, int], int] = {}
+    for i, b in enumerate(items):
+        kind = b.dest.get("kind", pymupdf.LINK_GOTO)
+        if kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED, pymupdf.LINK_NONE) and not (0 <= b.page < page_count):
+            problems.append((i, "broken"))
+        elif not b.title.strip():
+            problems.append((i, "untitled"))
+        key = (b.title.strip().casefold(), b.page)
+        if b.title.strip() and key in seen and items[seen[key]].level == b.level:
+            problems.append((i, "duplicate"))
+        seen.setdefault(key, i)
+    return problems
