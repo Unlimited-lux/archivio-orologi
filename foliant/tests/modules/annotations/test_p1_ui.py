@@ -7,7 +7,8 @@ from __future__ import annotations
 import re
 
 import pymupdf
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import QApplication
 
 from foliant.modules.annotations import dialogs, engine, ui_actions
 
@@ -1081,3 +1082,34 @@ def test_ann30_document_viewport_scale(comments):
     vals = sorted(i.contents for i in module.ctrl.annotations())
     assert "50,00 m" in vals
     assert any(v.endswith(" mm") for v in vals)
+
+
+def test_minibar_survives_closing_last_tab(comments, tmp_path, monkeypatch):
+    """Chiudere l'ultima scheda in Commenta non distrugge la mini barra; il documento seguente funziona."""
+    import sys
+
+    import pymupdf
+    import shiboken6
+
+    from foliant.modules.annotations.tools import SelectAnnotTool
+    window, view, module = comments
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *a: errors.append(a))
+    module.minibar.attach(view)
+    window.close_view(view)
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)   # deleteLater della vista chiusa
+    QApplication.processEvents()
+    assert not shiboken6.isValid(view)
+    assert shiboken6.isValid(module.minibar)
+    path = tmp_path / "b.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Altro documento")
+    doc.save(str(path))
+    v2 = window.open_path(str(path))
+    QApplication.processEvents()
+    assert not errors
+    assert isinstance(v2.tool, SelectAnnotTool)
+    assert module.minibar.view is v2 and module.minibar.parent() is v2.viewport()
+    xref = module.ctrl.apply("n", engine.create_note, 0, (200, 200), "x", engine.Style(), "A", view=v2)
+    module.ctrl.select([(0, xref)], v2)
+    assert module.minibar.isVisibleTo(v2.viewport())

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import shiboken6
+
 from PySide6.QtCore import QPoint, QSize
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton
 
@@ -47,13 +49,31 @@ class MiniBar(QFrame):
     def attach(self, view) -> None:
         if self.view is view:
             return
+        self.detach()
         self.view = view
         self.setParent(view.viewport())
-        view.verticalScrollBar().valueChanged.connect(self.reposition)
-        view.horizontalScrollBar().valueChanged.connect(self.reposition)
-        view.layoutChanged.connect(self.reposition)
-        view.contentChanged.connect(self.reposition)
+        for sig in self._signals(view):
+            sig.connect(self.reposition)
         self.hide()
+
+    def detach(self) -> None:
+        """Si stacca dalla vista corrente (prima che venga chiusa e distrutta con i suoi figli)."""
+        view, self.view = self.view, None
+        self.hide()
+        if view is None:
+            return
+        if shiboken6.isValid(view):
+            for sig in self._signals(view):
+                try:
+                    sig.disconnect(self.reposition)
+                except (RuntimeError, TypeError):
+                    pass
+        self.setParent(None)
+
+    @staticmethod
+    def _signals(view):
+        return (view.verticalScrollBar().valueChanged, view.horizontalScrollBar().valueChanged,
+                view.layoutChanged, view.contentChanged)
 
     def reposition(self, *_a) -> None:
         view = self.view
