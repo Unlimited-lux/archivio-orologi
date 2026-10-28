@@ -129,7 +129,7 @@ def test_view_menu_provider(window, sample_pdf, monkeypatch):
     view.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(int(r.center().x()), int(r.top() + 20)),
                                             view.viewport().mapToGlobal(QPoint(int(r.center().x()), int(r.top() + 20)))))
     assert seen == [0]
-    assert shown == [["Voce di prova"]]
+    assert len(shown) == 1 and "Voce di prova" in shown[0]      # anche i moduli possono aggiungere voci
 
 
 def test_central_widget_override(window, sample_pdf):

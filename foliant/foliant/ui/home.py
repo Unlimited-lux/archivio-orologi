@@ -123,6 +123,7 @@ class HomeScreen(QScrollArea):
         while self.actions_grid.count():
             item = self.actions_grid.takeAt(0)
             if item.widget():
+                item.widget().hide()            # altrimenti resta visibile finché non viene distrutto
                 item.widget().deleteLater()
         for n, (_o, t, ic, cb, desc) in enumerate(self._actions):
             btn = QToolButton(self)
