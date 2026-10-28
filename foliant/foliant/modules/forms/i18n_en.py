@@ -339,4 +339,10 @@ EN: dict[str, str] = {
     'Apri cartella': 'Open folder',
     'Comportamento al clic non valido.': 'Invalid click behavior.',
     'Il campo «{n}» è bloccato da una firma.': 'The field “{n}” is locked by a signature.',
+    'contenuto presente': 'content present',
+    'Scansione a bassa risoluzione (meno di 150 dpi) nelle pagine {l}: il riconoscimento può essere meno preciso.':
+        'Low-resolution scan (under 150 dpi) on pages {l}: recognition may be less accurate.',
+    'Le pagine {l} sono inclinate di oltre 5°. Raddrizzarle prima del riconoscimento?':
+        'Pages {l} are skewed by more than 5°. Straighten them before recognition?',
+    'Raddrizza pagine': 'Straighten pages',
 }

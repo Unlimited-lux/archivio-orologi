@@ -1189,6 +1189,8 @@ class FormsModule(QObject):
                   "Eseguire prima l'OCR?").format(n=len(scanned))):
             self.ctx.set_mode("ocr")
             return
+        if scanned:
+            self._check_scan_quality(view, scanned)
 
         def work(progress):
             with ENGINE_LOCK:
@@ -1215,6 +1217,21 @@ class FormsModule(QObject):
         if accepted:
             n = self.create_candidates(accepted, view)
             self.ctx.status(_("Campi creati: {n}").format(n=n))
+
+    def _check_scan_quality(self, view, pages: list[int]) -> None:
+        """FRM-27: avviso sotto i 150 dpi; oltre 5° di inclinazione si propone di raddrizzare."""
+        with ENGINE_LOCK:
+            quality = {p: D.scan_quality(view.document.pdf, p) for p in pages}
+        low = [p + 1 for p, q in quality.items() if 0 < q["dpi"] < 150]
+        if low:
+            self.ctx.notify(_("Scansione a bassa risoluzione (meno di 150 dpi) nelle pagine {l}: "
+                              "il riconoscimento può essere meno preciso.").format(l=", ".join(map(str, low))))
+        skewed = {p: q["skew"] for p, q in quality.items() if abs(q["skew"]) > 5}
+        if skewed and self.ctx.confirm(_("Riconosci campi"), _(
+                "Le pagine {l} sono inclinate di oltre 5°. Raddrizzarle prima del riconoscimento?").format(
+                l=", ".join(str(p + 1) for p in skewed))):
+            self._change(_("Raddrizza pagine"),
+                         lambda pdf: [D.straighten_page(pdf, p, a) for p, a in skewed.items()], view)
 
     def create_candidates(self, candidates: list, view=None) -> int:
         view = view or self._current_view()

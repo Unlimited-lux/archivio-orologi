@@ -628,3 +628,27 @@ def test_submit_by_mail_cancelled(window, tmp_path, monkeypatch):
     monkeypatch.setattr(window.ctx, "confirm", lambda *a, **k: False)
     assert not m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test"})
     assert not mails
+
+
+def test_detect_straightens_skewed_scan_on_request(window, tmp_path, monkeypatch):
+    """FRM-27: oltre 5° di inclinazione si propone di raddrizzare la pagina (passo annullabile)."""
+    from foliant.modules.forms import detect as D
+    from foliant.modules.forms import dialogs
+    from .test_detect import _skewed_scan
+    doc = _skewed_scan(7)
+    doc.save(str(tmp_path / "storta.pdf"))
+    view = open_form(window, tmp_path / "storta.pdf")
+    asked = []
+
+    def confirm(title, text, *a, **k):
+        asked.append(text)
+        return "inclinate" in text   # no all'OCR, sì al raddrizzamento
+    monkeypatch.setattr(window.ctx, "confirm", confirm)
+    seen = []
+    monkeypatch.setattr(dialogs, "review_candidates", lambda parent, cands: seen.extend(cands) or [])
+    module().detect_fields()
+    assert any("inclinate di oltre 5°" in t for t in asked)
+    with view.document.lock:
+        assert abs(D.estimate_skew(view.document.pdf[0])) < 0.5
+    assert seen and all(abs(c.angle) < 0.5 for c in seen)
+    assert view.document.can_undo

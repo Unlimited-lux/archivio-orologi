@@ -185,7 +185,10 @@ def review_candidates(parent: QWidget, candidates: list) -> list:
     for c in candidates:
         kind = _("Casella di controllo") if c.kind == "checkbox" else (_("Testo su più righe") if getattr(c, "multiline", False) else _("Testo"))
         name = c.name or _("(senza nome)")
-        item = QListWidgetItem(_("Pagina {p}: {k} «{n}»").format(p=c.page + 1, k=kind, n=name))
+        text = _("Pagina {p}: {k} «{n}»").format(p=c.page + 1, k=kind, n=name)
+        if getattr(c, "note", ""):
+            text += " — " + c.note
+        item = QListWidgetItem(text)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(Qt.CheckState.Checked)
         lst.addItem(item)
