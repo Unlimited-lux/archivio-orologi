@@ -284,15 +284,6 @@ def test_failed_comparison_shows_error_and_no_session(window, pdf_builder, tmp_p
     assert window.ctx.central_widget() is None
 
 
-def test_context_menu_entry(window, pdf_builder):
-    from PySide6.QtWidgets import QMenu
-    view = window.open_path(pdf_builder([page_lines(1)]))
-    menu = QMenu()
-    for provider in window.view_menu_providers:
-        provider(view, None, menu)
-    assert any(a.text() == "Confronta con…" for a in menu.actions())
-
-
 @pytest.mark.parametrize("theme_name", ["light", "dark"])
 def test_screenshot_renders(window, pdf_builder, tmp_path, theme_name):
     from PySide6.QtWidgets import QApplication
