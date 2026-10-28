@@ -390,3 +390,70 @@ def test_include_invalid_check_digit(tmp_path):
     p = P2.pattern_by_id("cf")
     assert P2.find(pdf, [p]) == []
     assert len(P2.find(pdf, [replace(p, check=None)])) == 1
+
+
+def test_bug07_line_crossing_mark_removed(sample_pdf, tmp_path):
+    doc = Document.open(sample_pdf)
+    with doc.change("Segna") as pdf:
+        pdf[0].draw_line((300, 420), (500, 620), color=(0, 0, 0), width=2)
+        R.add_mark(pdf, 0, pymupdf.Rect(350, 480, 450, 560), R.MarkStyle())
+        R.apply(pdf)
+    out = tmp_path / "linea.pdf"
+    doc.save(out)
+    area = pymupdf.Rect(350, 480, 450, 560)
+    for d in pymupdf.open(out)[0].get_drawings():
+        for item in d["items"]:
+            if item[0] == "l":
+                p, q = item[1], item[2]
+                for k in range(21):
+                    pt = p + (q - p) * (k / 20)
+                    assert not (area.x0 < pt.x < area.x1 and area.y0 < pt.y < area.y1)
+    doc.close()
+
+
+def test_bug08_image_pixels_take_fill_color(tmp_path):
+    path = tmp_path / "foto.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 200), False)
+    pix.set_rect(pix.irect, (40, 160, 90))
+    page.insert_image(pymupdf.Rect(72, 420, 272, 620), pixmap=pix)
+    src.save(str(path))
+    doc = Document.open(path)
+    with doc.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(172, 470, 272, 570), R.MarkStyle(fill=(0, 0, 0)))
+        R.apply(pdf)
+    out = tmp_path / "foto-redatta.pdf"
+    doc.save(out)
+    res = pymupdf.open(out)
+    xref = res[0].get_images()[0][0]
+    img = pymupdf.Pixmap(res, xref)
+    if img.n > 3:
+        img = pymupdf.Pixmap(pymupdf.csRGB, img)
+    sx = img.width / 200
+    assert img.pixel(int(150 * sx), int(100 * sx)) == (0, 0, 0)       # dentro l'area
+    assert img.pixel(int(30 * sx), int(100 * sx)) == (40, 160, 90)    # fuori
+    doc.close()
+
+
+def test_bug05_rotated_cropbox_fill_position(tmp_path):
+    path = tmp_path / "ritaglio.pdf"
+    src = pymupdf.open()
+    page = src.new_page(width=600, height=800)
+    page.insert_text((200, 300), "BERSAGLIO", fontsize=14)
+    page.set_cropbox(pymupdf.Rect(100, 150, 500, 700))
+    page.set_rotation(90)
+    src.save(str(path))
+    doc = Document.open(path)
+    with doc.lock:
+        hit = doc.pdf[0].search_for("BERSAGLIO")[0]
+    with doc.change("Segna") as pdf:
+        R.add_mark(pdf, 0, hit + (-2, -2, 2, 2), R.MarkStyle(fill=(0, 0, 0)))
+        R.apply(pdf)
+        p = pdf[0]
+        assert "BERSAGLIO" not in p.get_text()
+        pix = p.get_pixmap(matrix=pymupdf.Matrix(1, 1))
+        c = hit.tl + (hit.br - hit.tl) * 0.5
+        pt = c * p.rotation_matrix
+        assert pix.pixel(int(pt.x), int(pt.y)) == (0, 0, 0)
+    doc.close()

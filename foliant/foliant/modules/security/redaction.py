@@ -37,7 +37,7 @@ class MarkStyle:
 @dataclass
 class ApplyOptions:
     images: str = IMAGES_PIXELS
-    graphics: str = GRAPHICS_COVERED
+    graphics: str = GRAPHICS_TOUCHED   # nessun punto di un tracciato resta nell'area (SEC-20)
     remove_annotations: bool = True   # commenti e collegamenti che toccano le aree
 
 
@@ -96,7 +96,8 @@ def add_mark(pdf: pymupdf.Document, page_index: int, rect: pymupdf.Rect, style: 
             overlay = _repeat(overlay, rect, size)
         kwargs.update(text=overlay, fontname="helv", fontsize=size, align=pymupdf.TEXT_ALIGN_CENTER,
                       text_color=_clean_color(style.text_color))
-    annot = page.add_redact_annot(rect, **kwargs)
+    from foliant.core import placement
+    annot = placement.add_redact_annot(page, rect, **kwargs)
     covered = covered_text(page, rect) if text is None else text
     annot.set_info(title=MARK_TITLE, subject=source, content=covered)
     annot.update(fill_color=fill, cross_out=False)
@@ -204,12 +205,100 @@ def apply(pdf: pymupdf.Document, options: ApplyOptions | None = None, pages: Ite
         images = pymupdf.PDF_REDACT_IMAGE_REMOVE if whole else _IMAGES.get(options.images,
                                                                             pymupdf.PDF_REDACT_IMAGE_PIXELS)
         graphics = (pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED if whole
-                    else _GRAPHICS.get(options.graphics, pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED))
+                    else _GRAPHICS.get(options.graphics, pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED))
+        fills = [(pymupdf.Rect(a.rect), tuple((a.colors or {}).get("fill") or (0, 0, 0))) for a in redacts]
+        # Il motore disegna riempimento e testo sovrapposto nel posto sbagliato sulle pagine
+        # con /CropBox spostato: li togliamo dai segni e li disegniamo noi (core/placement).
+        boxes = [_box_of(pdf, a) for a in redacts]
+        for a in redacts:
+            pdf.xref_set_key(a.xref, "IC", "null")
+            pdf.xref_set_key(a.xref, "OverlayText", "null")
         page.apply_redactions(images=images, graphics=graphics, text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        _draw_boxes(page, boxes)
+        if images == pymupdf.PDF_REDACT_IMAGE_PIXELS:
+            _paint_image_pixels(pdf, page, fills)
         # la miniatura incorporata mostrerebbe ancora il contenuto rimosso
         if pdf.xref_get_key(page.xref, "Thumb")[0] != "null":
             pdf.xref_set_key(page.xref, "Thumb", "null")
     return report
+
+
+def _box_of(pdf: pymupdf.Document, annot) -> tuple:
+    import re
+    rect = pymupdf.Rect(annot.rect)
+    fill = tuple((annot.colors or {}).get("fill") or (0, 0, 0))
+    text = ""
+    kind, val = pdf.xref_get_key(annot.xref, "OverlayText")
+    if kind == "string":
+        text = val
+    size, color = 11.0, contrast_color(fill)
+    kind, da = pdf.xref_get_key(annot.xref, "DA")
+    if kind == "string":
+        m = re.search(r"([\d.]+)\s+Tf", da)
+        if m:
+            size = float(m.group(1))
+        m = re.search(r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", da)
+        if m:
+            color = tuple(float(x) for x in m.groups())
+    return rect, fill, text, size, color
+
+
+def _draw_boxes(page: pymupdf.Page, boxes) -> None:
+    from foliant.core import placement
+    for rect, fill, text, size, color in boxes:
+        placement.draw_rect(page, rect, color=None, fill=fill, width=0, overlay=True)
+        if text and rect.height >= 6:
+            fs = size
+            while fs >= 4:
+                rc = placement.insert_textbox(page, rect, text, fontsize=fs, fontname="helv", color=color,
+                                              align=pymupdf.TEXT_ALIGN_CENTER)
+                rc = rc[0] if isinstance(rc, tuple) else rc
+                if rc >= 0:
+                    break
+                fs -= 1
+
+
+def _paint_image_pixels(pdf: pymupdf.Document, page: pymupdf.Page, fills) -> None:
+    """Il motore cancella i pixel coperti in bianco: li porta al colore di riempimento,
+    così l'immagine estratta dal file mostra il riquadro scelto (SEC-20)."""
+    for info in page.get_image_info(xrefs=True):
+        xref = info.get("xref") or 0
+        if not xref:
+            continue
+        bbox = pymupdf.Rect(info["bbox"])
+        hits = [(r & bbox, c) for r, c in fills if r.intersects(bbox)]
+        if not hits or bbox.is_empty:
+            continue
+        try:
+            pix = pymupdf.Pixmap(pdf, xref)
+            if pix.alpha or pix.n not in (1, 3):
+                pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+            elif pix.n == 1:
+                pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+        except Exception:
+            continue
+        # trasformazione pagina → pixel (immagini non ruotate né inclinate)
+        t = pymupdf.Matrix(info.get("transform") or (1, 0, 0, 1, 0, 0))
+        if abs(t.b) > 1e-6 or abs(t.c) > 1e-6:
+            continue
+        sx, sy = pix.width / bbox.width, pix.height / bbox.height
+        flip_y = t.d < 0
+        for r, color in hits:
+            x0 = int((r.x0 - bbox.x0) * sx)
+            x1 = int(round((r.x1 - bbox.x0) * sx))
+            if flip_y:
+                y0 = int((bbox.y1 - r.y1) * sy)
+                y1 = int(round((bbox.y1 - r.y0) * sy))
+            else:
+                y0 = int((r.y0 - bbox.y0) * sy)
+                y1 = int(round((r.y1 - bbox.y0) * sy))
+            irect = pymupdf.IRect(x0, y0, x1, y1) & pix.irect
+            if not irect.is_empty:
+                pix.set_rect(irect, tuple(int(round(c * 255)) for c in color[:3]))
+        try:
+            page.replace_image(xref, pixmap=pix)
+        except Exception:
+            continue
 
 
 def _remove_touching(page: pymupdf.Page, rects: list[pymupdf.Rect], whole: bool) -> int:

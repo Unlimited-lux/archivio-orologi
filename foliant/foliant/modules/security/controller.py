@@ -104,7 +104,7 @@ class SecurityController:
                                      text_color=tuple(d.get("text_color", (1, 1, 1))),
                                      font_size=float(d.get("size", 0)), repeat_text=bool(d.get("repeat")))
             self.apply_options = R.ApplyOptions(images=d.get("images", R.IMAGES_PIXELS),
-                                                graphics=d.get("graphics", R.GRAPHICS_COVERED))
+                                                graphics=d.get("graphics", R.GRAPHICS_TOUCHED))
         except (ValueError, TypeError):
             pass
 
