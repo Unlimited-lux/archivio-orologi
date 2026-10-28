@@ -46,6 +46,10 @@ TRANSLATIONS = {
     "Sostituisci tutto": "Replace all",
     "Elimina tutto": "Delete all",
     "Rimuovi anche uno spazio adiacente": "Also remove an adjacent space",
+    "Ricomponi il paragrafo": "Reflow the paragraph",
+    "Se disattivata, il testo restante non si sposta e resta un vuoto.":
+        "When off, the remaining text does not move and a gap is left.",
+    "L'occorrenza non copre parole intere.": "The occurrence does not cover whole words.",
     "Chiudi": "Close",
     "Nell'espressione regolare usa $1, $2… o ${nome} per inserire i gruppi trovati.":
         "In a regular expression use $1, $2… or ${name} to insert the captured groups.",
@@ -182,6 +186,10 @@ class FindReplaceDialog(QDialog):
         self.space_box = QCheckBox(_("Rimuovi anche uno spazio adiacente"), self)
         self.space_box.setChecked(True)
         root.addWidget(self.space_box)
+        self.recompose_box = QCheckBox(_("Ricomponi il paragrafo"), self)
+        self.recompose_box.setChecked(True)
+        self.recompose_box.setToolTip(_("Se disattivata, il testo restante non si sposta e resta un vuoto."))
+        root.addWidget(self.recompose_box)
 
         self.error_label = QLabel(self)
         self.error_label.setWordWrap(True)
@@ -265,7 +273,7 @@ class FindReplaceDialog(QDialog):
         self.setWindowTitle(_("Trova ed elimina") if deleting else _("Trova e sostituisci"))
         for w in (self.replace_label, self.replace_edit, self.replace_btn, self.replace_all_btn):
             w.setVisible(not deleting)
-        for w in (self.delete_all_btn, self.space_box, self.delete_note):
+        for w in (self.delete_all_btn, self.space_box, self.recompose_box, self.delete_note):
             w.setVisible(deleting)
         self._fill_results()
         self._validate()
@@ -538,7 +546,8 @@ class FindReplaceDialog(QDialog):
             self.ctx.info(self.windowTitle(), _("Nessuna occorrenza selezionata da eliminare."))
             return
         summary = replace_all(view.document, self.find_edit.text(), "", self.options(), pages=self._pages(view),
-                              delete=True, remove_adjacent_space=self.space_box.isChecked(), exclude=excluded)
+                              delete=True, remove_adjacent_space=self.space_box.isChecked(), exclude=excluded,
+                              recompose=self.recompose_box.isChecked())
         self._after_bulk(summary, deleting=True)
 
     def _after_bulk(self, summary: ReplaceSummary, deleting: bool) -> None:

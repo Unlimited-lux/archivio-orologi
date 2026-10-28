@@ -366,7 +366,7 @@ def test_copy_paste_block_shortcuts(window, paragraphs_pdf, quiet, qtbot):
     ctrl = ctrl_of(window)
     block = block_with(ctrl, view, "contratto")
     view.tool.select(view, 0, block)
-    qtbot.keyClick(view, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
+    ctrl.duplicate_block(view, 0, block)   # Duplica dal menu contestuale (Ctrl+D non usato, specifica v2)
     assert view.document.page_text(0).count("contratto") == 2
     qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
     qtbot.keyClick(view, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
@@ -517,3 +517,85 @@ def test_page_tree_cycle_does_not_break_edit_mode(window, tmp_path, quiet, qtbot
     ctrl.frame(view.page_count - 1, view)
     window.ctx.set_mode("modifica")
     assert window.ctx.current_mode() == "modifica"
+
+
+def test_panel_indent_and_space_after(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-05: rientro della prima riga e spazio dopo dal pannello."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "Lorem")
+    x0 = block.x0
+    view.tool.select(view, 0, block)
+    ctrl.panel.indent.setValue(20)
+    ctrl.panel._indent_chosen()
+    nb = block_with(ctrl, view, "Lorem")
+    assert abs(nb.lines[0].bbox.x0 - (x0 + 20)) <= 0.6 and abs(nb.lines[1].bbox.x0 - x0) <= 0.6
+    # nell'editor: due paragrafi con 12 pt di spazio dopo
+    block = block_with(ctrl, view, "contratto")
+    ed = ctrl.open_editor(view, 0, block)
+    ed.moveCursor(QTextCursor.MoveOperation.End)
+    ed.insertPlainText("\nSecondo paragrafo")
+    ctrl.panel.space_after.setValue(12)
+    ctrl.panel._space_after_chosen()
+    ctrl.commit_editor(view)
+    from foliant.modules.text_edit import analysis
+    with view.document.lock:
+        lines = [b for b in analysis.analyze_page(view.document.pdf[0], 0, "line")
+                 if "contratto" in b.text or "Secondo" in b.text]
+    gap = lines[1].first_baseline - lines[0].first_baseline
+    assert abs(gap - (block.leading + 12)) <= 0.2
+
+
+def test_drag_snaps_to_other_block_edge(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-08: trascinando vicino al bordo sinistro di un altro blocco il blocco si aggancia; Alt sospende."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "contratto")
+    view.tool.select(view, 0, block)
+    c = block.bbox
+    start = pymupdf.Point((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    vp = view.viewport()
+    # spostamento di 31 pt in orizzontale: nessun aggancio atteso; poi ritorno a +1,5 pt dal bordo x=72
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, start.x, start.y))
+    qtbot.mouseMove(vp, to_view(view, 0, start.x + 1.5, start.y + 60))
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, start.x + 1.5, start.y + 60))
+    moved = block_with(ctrl, view, "contratto")
+    assert abs(moved.bbox.x0 - 72) <= 0.05          # agganciato al bordo sinistro dei paragrafi
+    view.tool.select(view, 0, moved)
+    c = moved.bbox
+    start = pymupdf.Point((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    alt = Qt.KeyboardModifier.AltModifier
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, start.x, start.y))
+    qtbot.mouseMove(vp, to_view(view, 0, start.x + 2, start.y + 30))
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, alt, to_view(view, 0, start.x + 2, start.y + 30))
+    moved2 = block_with(ctrl, view, "contratto")
+    assert moved2.bbox.x0 > 72.8                     # con Alt nessun aggancio
+
+
+def test_copy_paste_with_formatting_between_editors(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-18: copiato da un riquadro, incollato in un altro con font, corpo e colore di origine;
+    Ctrl+Maiusc+V incolla testo semplice con lo stile del punto d'inserimento."""
+    from PySide6.QtGui import QGuiApplication
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    src = block_with(ctrl, view, "contratto")
+    ed = ctrl.open_editor(view, 0, src)
+    cur = ed.textCursor()
+    cur.setPosition(3)
+    cur.setPosition(12, QTextCursor.MoveMode.KeepAnchor)     # «contratto»
+    ed.setTextCursor(cur)
+    ed.copy()
+    ctrl.commit_editor(view)
+    dst = block_with(ctrl, view, "Lorem")
+    ed2 = ctrl.open_editor(view, 0, dst)
+    ed2.moveCursor(QTextCursor.MoveOperation.End)
+    ed2.paste()
+    runs = [r for p in ed2.paragraphs() for r in p]
+    pasted = [r for r in runs if "contratto" in r.text][0]
+    assert abs(pasted.style.size - 12) < 0.05 and pasted.style.color == src.style.color
+    QGuiApplication.clipboard().setText(" semplice")
+    qtbot.keyClick(ed2, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    runs = [r for p in ed2.paragraphs() for r in p]
+    plain = [r for r in runs if "semplice" in r.text][0]
+    assert abs(plain.style.size - 12) < 0.05 and plain.style.color == src.style.color   # stile del punto
+    ctrl.cancel_editor(view)

@@ -786,3 +786,60 @@ def test_new_font_embedded_as_subset(tmp_path):
     d.save(out)
     assert out.stat().st_size < 60_000          # DejaVu Sans intero supera 700 KB
     assert "Totale — € 9.800,00" in pymupdf.open(str(out))[0].get_text()
+
+
+def test_table_rows_not_merged_with_paragraph(tmp_path):
+    """Fattura: modificare il paragrafo giustificato sotto la tabella non sposta le righe della tabella."""
+    from foliant.modules.text_edit.model import Style as _Style
+    doc, page = new_doc_with_font(SANS)
+    rows = [("Revisione e lucidatura", "1", "€ 350,00"), ("Cinturino in pelle con garanzia", "1", "€ 9.500,00"),
+            ("Spedizione assicurata", "1", "€ 100,00")]
+    y = 100
+    f = pymupdf.Font(fontfile=SANS)
+    for desc, qty, price in rows:
+        page.insert_text((58, y), desc, fontname="F1", fontsize=10)
+        page.insert_text((300, y), qty, fontname="F1", fontsize=10)
+        page.insert_text((540 - f.text_length(price, fontsize=10), y), price, fontname="F1", fontsize=10)
+        y += 16
+    path = save(doc, tmp_path / "fattura0.pdf")
+    d = Document.open(path)
+    text = ("Totale documento: € 9.950,00 — pagamento a trenta giorni data fattura mediante bonifico "
+            "bancario sul conto indicato in calce, salvo diversi accordi scritti tra le parti. La merce viaggia "
+            "assicurata a cura del venditore e la garanzia decorre dalla data di consegna indicata.")
+    with d.change("Paragrafo") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(58, y + 2), [[Run(text, _Style(font="Liberation Sans", size=10))]],
+                        width=482, align="justify")
+    with d.lock:
+        before = {w[4]: w[:4] for w in d.pdf[0].get_text("words") if w[1] < y}
+        blocks = blocks_of(d.pdf)
+    para = [b for b in blocks if "Totale" in b.text][0]
+    assert not any("Revisione" in ln.text for ln in para.lines)
+    assert para.align == "justify", [(ln.text, ln.bbox.x0, ln.bbox.x1, [(w.text, round(w.x,1), round(w.x1,1)) for w in ln.words][:5]) for ln in para.lines]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, para, replace_text(para, "9.950,00", "9.960,00"))
+    with d.lock:
+        after = {w[4]: w[:4] for w in d.pdf[0].get_text("words") if w[1] < y}
+        assert "9.960,00" in d.pdf[0].get_text()
+    for word, r in before.items():
+        assert word in after and abs(after[word][0] - r[0]) < 0.2 and abs(after[word][1] - r[1]) < 0.2
+
+
+def test_shared_form_xobject_only_this_page(tmp_path):
+    """TXT-20: testo in un Form XObject usato da più pagine: cambia solo la pagina modificata."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Testo condiviso 2024", fontsize=14)
+    doc = pymupdf.open()
+    for _i in range(4):
+        p = doc.new_page()
+        p.show_pdf_page(p.rect, src, 0)
+    d = Document.open(save(doc, tmp_path / "xobj.pdf"))
+    with d.lock:
+        block = blocks_of(d.pdf, 1)[0]
+        before = [pixels(d.pdf[i], dpi=50) for i in range(4)]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 1, block, replace_text(block, "2024", "2026"))
+    out = reopen(d, tmp_path)
+    assert "2026" in out[1].get_text() and "2024" not in out[1].get_text()
+    for i in (0, 2, 3):
+        assert "2024" in out[i].get_text()
+        assert pixels(out[i], dpi=50) == before[i]

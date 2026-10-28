@@ -270,8 +270,11 @@ def _subset_font(data: bytes, chars: set[str]) -> bytes:
     try:
         import io
 
+        import logging
+
         from fontTools import subset
         from fontTools.ttLib import TTFont
+        logging.getLogger("fontTools").setLevel(logging.ERROR)
         font = TTFont(io.BytesIO(data), fontNumber=0)
         opts = subset.Options()
         opts.notdef_outline = True
@@ -937,6 +940,44 @@ def restack_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, fron
     return EditResult(bbox=block.bbox, changed=True)
 
 
+def delete_words_in_place(pdf: pymupdf.Document, page_index: int, block: TextBlock,
+                          rects: list[pymupdf.Rect]) -> int:
+    """Elimina le parole coperte da `rects` (pagina non ruotata) senza ricomporre: le altre parole
+    restano esattamente dov'erano (Trova ed elimina con «Ricomponi il paragrafo» disattivato, TXT-13)."""
+    page = pdf[page_index]
+    frame = frame_matrix(page)
+    areas = [pymupdf.Rect(r) * frame for r in rects]
+    resolver = FontResolver(pdf)
+    composer = Composer(resolver)
+    removed = 0
+    touched: list[tuple[Line, list]] = []
+    for line in block.lines:
+        keep = []
+        hit = False
+        for w in line.words:
+            wr = pymupdf.Rect(w.x, line.bbox.y0, w.x1, line.bbox.y1)
+            covered = sum((wr & a).width for a in areas if wr.intersects(a))
+            if wr.width > 0 and covered >= 0.5 * wr.width:
+                hit = True
+                removed += 1
+            else:
+                keep.append(w)
+        if hit:
+            touched.append((line, keep))
+    if not touched:
+        return 0
+    remove_lines(page, [ln for ln, _k in touched])
+    writer = _Writer(page)
+    for line, keep in touched:
+        for w in keep:
+            x = w.x
+            for part, choice, width in composer.pieces(w.text, w.style):
+                writer.write_piece(Piece(x, part, w.style, choice, width), line.baseline,
+                                   render_mode=3 if block.invisible else 0)
+                x += width
+    return removed
+
+
 def _flushing(fn):
     import functools
 
@@ -951,5 +992,5 @@ def _flushing(fn):
 
 for _name in ("replace_block", "replace_invisible_block", "delete_block", "move_block", "resize_block",
               "restyle_block", "add_text", "paste_block", "convert_invisible_block", "align_blocks",
-              "distribute_blocks", "rotate_block", "restack_block"):
+              "distribute_blocks", "rotate_block", "restack_block", "delete_words_in_place"):
     globals()[_name] = _flushing(globals()[_name])

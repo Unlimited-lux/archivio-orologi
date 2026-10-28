@@ -175,4 +175,7 @@ EN: dict[str, str] = {
         "Page {n} looks like a scan and contains no editable text.\n\nRun OCR on the page now to make the text editable?",
     "OCR": "OCR",
     "Pagina non leggibile: il file è danneggiato in questo punto.": "Unreadable page: the file is damaged at this point.",
+    "Rientro 1ª riga": "First-line indent",
+    "Spazio dopo": "Space after",
+    "Spazio dopo ogni paragrafo del blocco": "Space after each paragraph of the block",
 }
