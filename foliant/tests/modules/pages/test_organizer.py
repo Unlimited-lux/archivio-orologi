@@ -156,9 +156,9 @@ def test_shortcuts_scoped_and_keys(pages_window, qtbot):
     window, view = pages_window
     c = ctrl(window)
     assert not c.act_delete.shortcuts() and not c.act_copy.shortcuts()
-    assert c.act_duplicate.shortcuts()
+    assert c.act_move_start.shortcuts()
     window.set_mode("leggi")
-    assert not c.act_duplicate.shortcuts()
+    assert not c.act_move_start.shortcuts()
     window.set_mode("pagine")
     grid = c.organizer.grid
     grid.select_pages([3])
