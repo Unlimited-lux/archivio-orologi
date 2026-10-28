@@ -161,3 +161,54 @@ def test_save_options_encryption(sample_pdf, tmp_path):
     doc.save(out)
     check = pymupdf.open(out)
     assert check.needs_pass and check.authenticate("a")
+
+
+def test_read_only_file_is_not_overwritten(sample_pdf):
+    import stat
+    os.chmod(sample_pdf, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    doc = Document.open(sample_pdf)
+    with doc.change("x") as pdf:
+        pdf.delete_page(0)
+    with pytest.raises(DocumentError):
+        doc.save()
+    assert pymupdf.open(sample_pdf).page_count == 3
+
+
+def test_save_without_changes_keeps_file_untouched(sample_pdf):
+    before = os.stat(sample_pdf).st_mtime_ns
+    doc = Document.open(sample_pdf)
+    doc.save()
+    assert os.stat(sample_pdf).st_mtime_ns == before
+
+
+def test_undo_restores_protection_settings(sample_pdf, tmp_path):
+    doc = Document.open(sample_pdf)
+    with doc.change("Proteggi"):
+        doc.save_options = {"encryption": pymupdf.PDF_ENCRYPT_AES_256, "user_pw": "a", "owner_pw": "b"}
+    assert doc.is_protected
+    doc.undo()
+    assert not doc.is_protected
+    doc.redo()
+    assert doc.is_protected
+
+
+def test_encrypted_passwords_and_permissions_preserved(tmp_path):
+    path = tmp_path / "riservato.pdf"
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Contratto")
+    perms = pymupdf.PDF_PERM_PRINT
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="cliente", owner_pw="notaio", permissions=perms)
+    for pw in ("cliente", "notaio"):
+        doc = Document.open(path, pw)
+        with doc.change("Aggiungi pagina") as pdf:
+            pdf.new_page()
+        out = tmp_path / f"salvato-{pw}.pdf"
+        doc.save(out)
+        check = pymupdf.open(out)
+        assert check.needs_pass
+        assert check.authenticate("cliente") == 2
+        check2 = pymupdf.open(out)
+        assert check2.authenticate("notaio") == 4
+        check3 = pymupdf.open(out)
+        check3.authenticate("cliente")
+        assert not check3.permissions & pymupdf.PDF_PERM_MODIFY
