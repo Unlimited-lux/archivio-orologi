@@ -17,7 +17,7 @@ from PySide6.QtCore import QByteArray, QMimeData, Qt, QUrl
 from PySide6.QtGui import QAction, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QToolButton
 
-from foliant.api import ENGINE_LOCK, Document, FoliantError, PasswordRequired, WrongPassword, _, add_translations, bind_icon
+from foliant.api import ENGINE_LOCK, Document, FoliantError, OperationCancelled, PasswordRequired, WrongPassword, _, add_translations, bind_icon
 
 from . import engine as E
 from .organizer import PAGES_MIME, Organizer
@@ -262,6 +262,8 @@ class PagesController:
         try:
             with document.change(label) as pdf:
                 result = fn(pdf)
+        except OperationCancelled:
+            return None   # annullata dall'utente (es. avviso di Firma): nessun messaggio in più
         except FoliantError as e:
             self.ctx.error(label, str(e))
             return None
@@ -765,6 +767,9 @@ def register(ctx) -> PagesController:
     ctx.documentChanged.connect(c.on_document_changed)
     ctx.documentClosed.connect(c.on_document_closed)
     ctx.add_view_menu_provider(c.view_menu)
+    access_changed = getattr(ctx, "documentAccessChanged", None)
+    if access_changed is not None:   # sblocco con la password dei permessi, blocco durante l'OCR
+        access_changed.connect(lambda _view: c.update_actions())
     if hasattr(ctx, "add_guard"):
         ctx.add_guard("save", c.save_guard)
         ctx.add_guard("save_as", c.save_guard)

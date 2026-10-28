@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .conftest import fast_theme
 import os
 
 import pymupdf
@@ -261,7 +262,7 @@ def test_dialog_cancel_changes_nothing(env, monkeypatch):
 @pytest.mark.parametrize("mode", ["light", "dark"])
 def test_dialog_screenshots(window, sample_pdf, mode):
     from foliant.ui import theme
-    theme.apply(QApplication.instance(), mode)
+    fast_theme(mode)
     try:
         view = window.open_path(sample_pdf)
         os.makedirs(SHOTS, exist_ok=True)
@@ -279,7 +280,7 @@ def test_dialog_screenshots(window, sample_pdf, mode):
             assert dlg.grab().save(f"{SHOTS}/{cls.__name__}-{mode}.png")
             dlg.close()
     finally:
-        theme.apply(QApplication.instance(), "light")
+        fast_theme("light")
 
 
 # ======================================================================== follow-up

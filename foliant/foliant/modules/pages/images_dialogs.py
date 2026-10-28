@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, _, icon, theme
 
 from . import images
@@ -367,6 +368,8 @@ def open_insert_images_dialog(ctx, view, selected: list[int], paths: list[str] |
             new, errors = images.insert_images(
                 pdf, opts["paths"], index, page_size=opts["page_size"], fit=opts["fit"], margin=opts["margin"],
                 landscape=opts["landscape"], recompress=opts["recompress"])
+    except OperationCancelled:
+        return False   # annullata dall'utente (es. avviso di Firma)
     except PageOpError as e:
         ctx.error(_("Impossibile inserire le immagini"), str(e))
         return False
@@ -632,6 +635,8 @@ def open_paste_dialog(ctx, view, selected: list[int]) -> bool:
         finally:
             with ENGINE_LOCK:
                 src.close()
+    except OperationCancelled:
+        return False   # annullata dall'utente (es. avviso di Firma)
     except Exception as e:
         ctx.error(_("Impossibile inserire dagli appunti"), str(e) or type(e).__name__)
         return False

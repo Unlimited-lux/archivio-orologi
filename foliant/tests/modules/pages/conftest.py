@@ -70,3 +70,12 @@ def _clear_clipboard(qapp):
     yield
     from PySide6.QtGui import QGuiApplication
     QGuiApplication.clipboard().clear()
+
+
+def fast_theme(mode: str) -> None:
+    """Tema chiaro/scuro per le catture dei dialoghi: imposta i colori del tema senza rifare
+    il foglio di stile dell'intera applicazione (con tutti i moduli caricati `theme.apply`
+    impiega minuti e supererebbe il timeout dei test)."""
+    from foliant.ui import theme
+    theme._dark = mode == "dark"
+    theme._mode = mode

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .conftest import fast_theme
 import pymupdf
 import pytest
 from PySide6.QtWidgets import QDialog
@@ -234,7 +235,7 @@ def test_dark_theme_construction(opened, qtbot):
 
     from foliant.ui import theme
     window, view = opened
-    theme.apply(QApplication.instance(), "dark")
+    fast_theme("dark")
     try:
         for cls in (sd.WatermarkDialog, sd.BackgroundDialog, sd.PageNumbersDialog, sd.BatesDialog,
                     sd.HeaderFooterDialog, sd.PageLabelsDialog, sd.RemoveStampsDialog):
@@ -244,7 +245,7 @@ def test_dark_theme_construction(opened, qtbot):
             assert not dlg.grab().isNull()
             dlg.close()
     finally:
-        theme.apply(QApplication.instance(), "light")
+        fast_theme("light")
 
 
 def test_translations_cover_ui_strings():

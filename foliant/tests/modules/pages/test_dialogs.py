@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .conftest import fast_theme
 import pymupdf
 import pytest
 from PySide6.QtWidgets import QDialog, QMessageBox
@@ -347,10 +348,10 @@ def test_dialog_screenshots(window, ten_pdf, tmp_path):
     from foliant.ui import theme
     view = window.open_path(ten_pdf)
     for mode in ("light", "dark"):
-        theme.apply(QApplication.instance(), mode)
+        fast_theme(mode)
         for dlg in (D.ExtractDialog(window, view.document, [0, 1]), D.SplitDialog(window, view.document),
                     D.InsertBlankDialog(window, view.document, [0]), D.MergeDialog(window, window.ctx, [])):
             dlg.show()
             assert dlg.grab().save(str(tmp_path / f"{type(dlg).__name__}_{mode}.png"))
             dlg.close()
-    theme.apply(QApplication.instance(), "light")
+    fast_theme("light")

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, Document, _, icon, theme
 
 from . import layout
@@ -583,6 +584,8 @@ def _qrect(r: pymupdf.Rect) -> QRectF:
 def _guard(ctx, title: str, fn) -> bool:
     try:
         return bool(fn())
+    except OperationCancelled:
+        return False   # annullata dall'utente (es. avviso di Firma)
     except PageOpError as e:
         ctx.error(title, str(e))
     except Exception as e:  # noqa: BLE001 - un errore del modulo non chiude l'applicazione

@@ -948,11 +948,18 @@ def extract_pages(pdf: pymupdf.Document, indices: Sequence[int], *, annots: bool
             raise PageOpError(_("La pagina {n} non esiste.").format(n=i + 1))
     copy = pymupdf.open(stream=pdf.tobytes(encryption=pymupdf.PDF_ENCRYPT_NONE), filetype="pdf")
     try:
+        toc = copy.get_toc(simple=False)
         if len(set(indices)) == len(indices):
             copy.select(indices)
             out = copy
         else:
             out = _subset(copy, indices)
+        # select() del motore elimina un ramo intero se il genitore punta a una pagina
+        # rimossa: ricostruiamo i segnalibri conservando i figli (promossi di livello).
+        try:
+            _set_toc_safe(out, _remapped_toc(toc, indices))
+        except Exception:
+            _set_toc_safe(out, [t[:3] for t in _remapped_toc(toc, indices)])
         prune_structure(out)
         rebuild_form_fields(out)
         if not annots:
@@ -1458,12 +1465,36 @@ def merge_files(paths: Sequence[str | os.PathLike | MergeEntry], *, bookmarks: b
 
 
 def _set_toc_safe(pdf: pymupdf.Document, toc: list[list]) -> None:
-    """Imposta i segnalibri correggendo salti di livello non ammessi dal motore."""
+    """Imposta i segnalibri correggendo salti di livello non ammessi dal motore
+    (i figli rimasti senza genitore vengono promossi). Accetta voci semplici o estese."""
     fixed: list[list] = []
     prev = 0
-    for lvl, title, page in toc:
+    for item in toc:
+        lvl, title, page = item[0], item[1], item[2]
         lvl = max(1, min(lvl, prev + 1))
-        fixed.append([lvl, title, page])
+        fixed.append([lvl, title, page] + list(item[3:4]))
         prev = lvl
-    if fixed:
-        pdf.set_toc(fixed)
+    pdf.set_toc(fixed)
+
+
+_TOC_STYLE_KEYS = ("color", "bold", "italic", "collapse", "zoom", "to")
+
+
+def _remapped_toc(toc: list[list], indices: Sequence[int]) -> list[list]:
+    """Segnalibri verso le pagine conservate, con i numeri di pagina nel nuovo documento;
+    stile (colore, grassetto, corsivo, zoom, punto) conservato."""
+    remap: dict[int, int] = {}
+    for pos, i in enumerate(indices):
+        remap.setdefault(i, pos)
+    out = []
+    for item in toc:
+        lvl, title, page = item[0], item[1], item[2]
+        if page - 1 not in remap:
+            continue
+        entry = [lvl, title, remap[page - 1] + 1]
+        if len(item) > 3 and isinstance(item[3], dict):
+            style = {k: v for k, v in item[3].items() if k in _TOC_STYLE_KEYS and v is not None}
+            style["kind"] = pymupdf.LINK_GOTO
+            entry.append(style)
+        out.append(entry)
+    return out

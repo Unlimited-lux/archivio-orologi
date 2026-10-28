@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .conftest import fast_theme
 import os
 
 import pymupdf
@@ -305,7 +306,7 @@ def test_export_dialog_resolution_too_high_uses_suggestion(window, sample_pdf, t
 @pytest.mark.parametrize("mode", ["light", "dark"])
 def test_dialog_screenshots(qtbot, tmp_path, mode):
     from foliant.ui import theme
-    theme.apply(QApplication.instance(), mode)
+    fast_theme(mode)
     try:
         os.makedirs(SHOTS, exist_ok=True)
         paths = [_jpeg(tmp_path / f"foto_{k}.jpg") for k in range(3)]
@@ -319,4 +320,4 @@ def test_dialog_screenshots(qtbot, tmp_path, mode):
             assert d.grab().save(f"{SHOTS}/images_{name}_{mode}.png")
             d.close()
     finally:
-        theme.apply(QApplication.instance(), "light")
+        fast_theme("light")

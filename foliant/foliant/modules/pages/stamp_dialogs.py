@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, _, icon, theme
 
 from . import stamp
@@ -1208,6 +1209,8 @@ def _open(dialog_cls: type[StampDialog], ctx: Context, view: DocumentView, selec
             return False
         try:
             result = dlg.apply()
+        except OperationCancelled:
+            return False   # annullata dall'utente (es. avviso di Firma)
         except PageOpError as e:
             ctx.error(_(dialog_cls.TITLE), str(e))
             return False
