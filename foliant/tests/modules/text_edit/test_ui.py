@@ -761,3 +761,34 @@ def test_second_window_closed_leaves_first_working(window, paragraphs_pdf, quiet
     assert "Nuovo" in view.document.pdf[0].get_text()
     fonts = open_fonts_dialog(ctx)
     fonts.close()
+
+
+def test_no_document_names_in_profile(window, paragraphs_pdf, quiet, qtbot, tmp_path):
+    """Riservatezza: modificare e salvare un documento non lascia nel profilo isolato né nelle
+    impostazioni del modulo il nome o la cartella del documento."""
+    import os
+    import shutil
+    folder = tmp_path / "zq7k-cartella"
+    folder.mkdir()
+    path = folder / "zq7k-documento.pdf"
+    shutil.copy(paragraphs_pdf, path)
+    view = open_in_edit_mode(window, str(path))
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "contratto")
+    c = block.bbox
+    click(qtbot, view, 0, (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    qtbot.keyClicks(ctrl.editor_for(view), "X")
+    qtbot.keyClick(ctrl.editor_for(view), Qt.Key.Key_Escape)
+    view.document.save(str(folder / "zq7k-documento-modificato.pdf"))
+    s = window.ctx.settings()
+    s.sync()
+    assert all("zq7k" not in str(s.value(k)) for k in s.allKeys() if k.startswith("text_edit"))
+    found = []
+    for var in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME"):
+        for base, _dirs, names in os.walk(os.environ.get(var) or os.devnull):
+            for n in names:
+                f = os.path.join(base, n)
+                with open(f, "rb") as fh:
+                    if "zq7k" in f or b"zq7k" in fh.read():
+                        found.append(f)
+    assert found == []

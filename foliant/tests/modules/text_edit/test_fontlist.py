@@ -121,6 +121,25 @@ def test_user_mapping_used_for_missing_font(tmp_path):
         fonts.set_user_mappings({})
 
 
+def test_mapping_without_subset_prefix(tmp_path):
+    """Riservatezza: le corrispondenze salvano solo il nome di famiglia, senza il prefisso del
+    sottoinsieme preso dal documento; le voci delle versioni precedenti si ripuliscono all'avvio."""
+    import json
+    path = tmp_path / "map.json"
+    try:
+        fontlist.save_mappings({"ABCDEF+Calibri": "DejaVu Sans"}, path)
+        assert json.loads(path.read_text(encoding="utf-8")) == {"Calibri": "DejaVu Sans"}
+        path.write_text(json.dumps({"QWERTY+Cambria": "DejaVu Serif", "Arial": "Liberation Sans"}), "utf-8")
+        assert fontlist.load_mappings(path) == {"Cambria": "DejaVu Serif", "Arial": "Liberation Sans"}
+        assert fontlist.forget_subset_prefixes(path)
+        assert "QWERTY" not in path.read_text(encoding="utf-8")
+        assert json.loads(path.read_text(encoding="utf-8")) == {"Cambria": "DejaVu Serif", "Arial": "Liberation Sans"}
+        assert not fontlist.forget_subset_prefixes(path)        # già pulito: nessuna riscrittura
+        assert not fontlist.forget_subset_prefixes(tmp_path / "assente.json")
+    finally:
+        fonts.set_user_mappings({})
+
+
 def test_fonts_dialog(window, paragraphs_pdf, monkeypatch, qtbot):
     from foliant.modules.text_edit import open_fonts_dialog
     from foliant.modules.text_edit.fontlist_ui import FontsDialog
