@@ -80,3 +80,14 @@ Il modulo offre `ctx.sign_controller.confirm_unsigned_required(view, "Stampa")`,
 l'utente annulla. Serve che il nucleo (Salva con nome) e i moduli che stampano o inviano per e-mail lo
 chiamino prima di procedere. In alternativa basta un aggancio generico
 `Context.add_before_output_hook(fn(view, azione) -> bool)`.
+
+## 7. Segnaposto «SIGN» di MuPDF sui campi firma vuoti (vista e stampa)
+
+Quando rende una pagina con le annotazioni (`get_pixmap(annots=True)`), MuPDF disegna una bandierina arancione
+«SIGN» sopra ogni campo firma non firmato e ignora l'aspetto `/AP` scritto nel file. Il campo creato da Foliant ha
+un `/AP` con sfondo grigio chiaro e bordo sottile. Il modulo non controlla il rendering della vista né la stampa.
+
+Proposta: un'opzione di rendering nel nucleo, ad esempio `render_page_image(..., skip_unsigned_signature_widgets=True)`.
+Implementazione possibile: rendere la pagina con `annots=False` e comporre le annotazioni una per una. Per i widget
+firma senza `/V` si usa il loro `/AP /N` come Form XObject, oppure non si disegnano affatto, almeno in stampa. Nella
+vista il pannello Firme e lo strumento di firma evidenziano già i campi vuoti, quindi lì basta l'aspetto del file.
