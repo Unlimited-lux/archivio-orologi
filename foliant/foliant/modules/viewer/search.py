@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, bind_icon, theme
+from foliant.i18n import pgettext
 
 from .engine import (
     PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_across_pages, find_in_page_text,
@@ -25,7 +26,8 @@ from .engine import (
 )
 
 TRANSLATIONS = {
-    "Cerca": "Find",
+    "risultati.csv": "results.csv",
+    "barra di ricerca\x04Cerca": "Find",
     "Cerca nel documento": "Find in document",
     "Cerca nel documento…": "Find in document…",
     "Risultato successivo": "Next result",
@@ -271,7 +273,7 @@ class ResultsPanel(QWidget):
 
 class SearchBar(QToolBar):
     def __init__(self, controller: "SearchController"):
-        super().__init__(_("Cerca"))
+        super().__init__(pgettext("barra di ricerca", "Cerca"))
         self.controller = controller
         self.setObjectName("searchbar")
         self.setMovable(False)
@@ -359,7 +361,7 @@ class SearchController(QObject):
         w.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.bar)
         self.bar.hide()
         self.panel = ResultsPanel(self)
-        ctx.add_sidebar_panel("search", _("Cerca"), "search", self.panel, order=30)
+        ctx.add_sidebar_panel("search", pgettext("barra di ricerca", "Cerca"), "search", self.panel, order=30)
 
         self.act_find = ctx.action(_("Cerca nel documento"), "search", self.open, shortcut=QKeySequence.StandardKey.Find)
         self.act_next = ctx.action(_("Risultato successivo"), "chevron-down", self.next, shortcut="F3")
@@ -665,7 +667,7 @@ class SearchController(QObject):
         if not self.hits or self.view is None:
             return None
         if path is None:
-            path = self.ctx.ask_save_path(_("Esporta risultati"), "risultati.csv", "CSV (*.csv)", ".csv")
+            path = self.ctx.ask_save_path(_("Esporta risultati"), _("risultati.csv"), "CSV (*.csv)", ".csv")
         if not path:
             return None
         import csv

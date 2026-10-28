@@ -11,6 +11,7 @@ from foliant.api import Context, Document, DocumentError, OperationCancelled, _,
 from . import archives_engine as A
 
 TRANSLATIONS = {
+    "PDF (*.pdf);;Tutti i file (*)": "PDF (*.pdf);;All files (*)",
     "Archivi": "Archives",
     "Comprimi in archivio ZIP…": "Compress into ZIP archive…",
     "Apri da archivio ZIP…": "Open from ZIP archive…",
@@ -61,7 +62,7 @@ class ArchivesController:
         return True
 
     def compress_dialog(self) -> None:
-        paths = self.ctx.ask_open_paths(_("Scegli i file da comprimere"), "PDF (*.pdf);;Tutti i file (*)")
+        paths = self.ctx.ask_open_paths(_("Scegli i file da comprimere"), _("PDF (*.pdf);;Tutti i file (*)"))
         if not paths:
             return
         target = self.ctx.ask_save_path(_("Salva archivio"), Path(paths[0]).stem + ".zip",

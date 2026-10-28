@@ -396,8 +396,7 @@ def install(ctx: Context) -> SessionController:
         "Il file «{name}» non esiste più.": "The file “{name}” no longer exists.",
         "Nessuna scheda chiusa da riaprire.": "No closed tab to reopen.",
         "Schermo intero": "Full screen",
-        "Il documento chiede di essere mostrato a schermo intero.":
-            "The document asks to be shown in full screen.",
+        "Il documento chiede di essere mostrato a schermo intero.": "The document asks to be shown full screen.",
         "File della sessione non più disponibili: {names}": "Session files no longer available: {names}",
     })
     controller = SessionController(ctx)

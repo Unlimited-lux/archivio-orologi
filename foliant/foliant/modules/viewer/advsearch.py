@@ -27,6 +27,7 @@ SCOPE_OPEN = "open"
 SCOPE_FOLDER = "folder"
 
 TRANSLATIONS = {
+    "ricerca.csv": "search.csv",
     "Ricerca avanzata…": "Advanced search…",
     "Ricerca avanzata": "Advanced search",
     "Vista": "View",
@@ -498,7 +499,7 @@ class AdvancedSearchController(QObject):
         if not self.hits:
             return None
         if path is None:
-            path = self.ctx.ask_save_path(_("Esporta risultati"), "ricerca.csv", "CSV (*.csv)", ".csv")
+            path = self.ctx.ask_save_path(_("Esporta risultati"), _("ricerca.csv"), "CSV (*.csv)", ".csv")
         if not path:
             return None
         data = eng.export_csv(self.hits, _kind_names(), [_("file"), _("pagina"), _("tipo"), _("estratto")])
