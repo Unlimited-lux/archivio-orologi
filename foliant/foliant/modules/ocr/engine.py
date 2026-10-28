@@ -47,7 +47,9 @@ from .preprocess import (
     PreprocessOptions, apply_point, clean_background, ink_color, invert, prepare, rotation_affine, serif_ratio, slant, stroke_width,
     warp,
 )
-from .tess import LOW_CONFIDENCE, Line, OcrCancelled, OcrError, Word, detect_orientation, recognize
+from .tess import (
+    LOW_CONFIDENCE, Line, OcrCancelled, OcrError, Word, detect_orientation, logical_lines, recognize,
+)
 
 SEARCHABLE = "searchable"
 EDITABLE = "editable"
@@ -200,11 +202,11 @@ class PageResult:
     def text(self) -> str:
         parts: list[str] = []
         prev_par = None
-        for ln in self.lines:
+        for ln, text in logical_lines(self.lines):
             key = (ln.block, ln.par)
             if prev_par is not None and key != prev_par:
                 parts.append("")
-            parts.append(ln.text)
+            parts.append(text)
             prev_par = key
         return unicodedata.normalize("NFC", "\n".join(parts))
 
