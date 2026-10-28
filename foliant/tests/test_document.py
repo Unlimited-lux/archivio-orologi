@@ -212,3 +212,35 @@ def test_encrypted_passwords_and_permissions_preserved(tmp_path):
         check3 = pymupdf.open(out)
         check3.authenticate("cliente")
         assert not check3.permissions & pymupdf.PDF_PERM_MODIFY
+
+
+def test_save_keeps_live_xrefs(tmp_path):
+    """Il salvataggio compatta il file ma non rinumera gli oggetti del documento aperto."""
+    d = pymupdf.open()
+    for i in range(5):
+        p = d.new_page()
+        p.insert_text((72, 72), f"P{i}")
+        p.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(10, 10, 50, 50), "uri": f"https://{i}.example"})
+    src = tmp_path / "x.pdf"
+    d.save(str(src))
+    doc = Document.open(src)
+    with doc.change("Elimina") as pdf:
+        pdf.delete_page(1)
+        pdf.delete_page(1)
+    before = [(pg.xref, [l["xref"] for l in pg.get_links()]) for pg in doc.pdf]
+    doc.save(tmp_path / "y.pdf")
+    after = [(pg.xref, [l["xref"] for l in pg.get_links()]) for pg in doc.pdf]
+    assert before == after
+    out = pymupdf.open(str(tmp_path / "y.pdf"))
+    assert out.page_count == 3 and out.xref_length() < 20       # il file salvato è compattato
+
+
+def test_unsupported_security_handler_named(tmp_path):
+    d = pymupdf.open()
+    d.new_page()
+    p = tmp_path / "a.pdf"
+    d.save(str(p), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="x", user_pw="y")
+    bad = tmp_path / "b.pdf"
+    bad.write_bytes(p.read_bytes().replace(b"/Standard", b"/FooSecure"))
+    with pytest.raises(DocumentError, match="FooSecure"):
+        Document.open(bad)

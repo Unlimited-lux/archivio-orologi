@@ -129,7 +129,7 @@ def test_view_menu_provider(window, sample_pdf, monkeypatch):
     view.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(int(r.center().x()), int(r.top() + 20)),
                                             view.viewport().mapToGlobal(QPoint(int(r.center().x()), int(r.top() + 20)))))
     assert seen == [0]
-    assert shown == [["Voce di prova"]]
+    assert len(shown) == 1 and "Voce di prova" in shown[0]      # anche i moduli possono aggiungere voci
 
 
 def test_central_widget_override(window, sample_pdf):
@@ -172,8 +172,12 @@ def test_no_duplicate_shortcuts(window):
     """Due azioni con la stessa scorciatoia si annullano a vicenda in Qt: non devono esistere."""
     from collections import defaultdict
     from PySide6.QtGui import QAction, QKeySequence
+    from PySide6.QtCore import Qt
+    local = (Qt.ShortcutContext.WidgetShortcut, Qt.ShortcutContext.WidgetWithChildrenShortcut)
     seen = defaultdict(list)
     for act in window.findChildren(QAction):
+        if act.shortcutContext() in local:      # valide solo nel proprio pannello: nessun conflitto
+            continue
         for seq in act.shortcuts():
             if not seq.isEmpty():
                 seen[seq.toString(QKeySequence.SequenceFormat.PortableText)].append(act.text() or "(senza nome)")

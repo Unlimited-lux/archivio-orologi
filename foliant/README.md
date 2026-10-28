@@ -28,7 +28,7 @@ python -m foliant                                  # avvio
 QT_QPA_PLATFORM=offscreen python -m pytest         # test (senza schermo)
 ```
 
-Dipendenze di sistema per test e OCR: `tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng
+Dipendenze di sistema per test e OCR: `tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng tesseract-ocr-osd
 libegl1 libgl1 libxkbcommon0 libxcb-cursor0 libfontconfig1 libdbus-1-3`.
 LibreOffice (facoltativo) per creare PDF da documenti Office.
 
