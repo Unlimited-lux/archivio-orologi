@@ -152,7 +152,7 @@ def test_restamping_replaces_existing_series(window, tmp_path, dialog_name):
         if dialog_name == "PageNumbersDialog":
             dlg.fmt.setCurrentText("Pagina {n} di {total}")
         elif dialog_name == "HeaderFooterDialog":
-            dlg.fields["footer_center"].setText("Pagina {n} di {total}")
+            dlg.fields["footer_center"].setPlainText("Pagina {n} di {total}")
         return dlg
     first = make()
     assert first.replace_box is not None and first.replace_box.isHidden()

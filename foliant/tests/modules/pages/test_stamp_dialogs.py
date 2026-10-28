@@ -149,14 +149,17 @@ def test_header_footer_dialog(opened, qtbot):
     window, view = opened
     dlg = sd.HeaderFooterDialog(window, view.document, [])
     qtbot.addWidget(dlg)
-    dlg.fields["header_left"].setText("{file}")
+    dlg.fields["header_left"].setPlainText("{file}")
     dlg.scope.set_mode("all")
     dlg.apply()
-    assert "esempio.pdf" in text_of(view, 2)
+    assert "esempio" in text_of(view, 2)
     assert "Pagina 3 di 3" in text_of(view, 2)
     for e in dlg.fields.values():
-        e.setText("")
+        e.setPlainText("")
     assert not dlg.ok_button.isEnabled()
+    dlg.fields["footer_center"].setPlainText("{sconosciuto}")
+    assert not dlg.ok_button.isEnabled()
+    assert "sconosciuto" in dlg.error.text()
 
 
 def test_background_dialog(opened, accept):
@@ -170,15 +173,19 @@ def test_remove_dialog(opened, accept, qtbot):
     window, view = opened
     with view.document.change("x") as pdf:
         stamp.add_watermark(pdf, text="TOGLIMI")
+        stamp.add_watermark(pdf, [1], text="ANCHE")
         stamp.add_page_numbers(pdf)
     dlg = sd.RemoveStampsDialog(window, view.document, [])
     qtbot.addWidget(dlg)
-    assert "(3)" in dlg.checks["watermark"].text()
-    assert not dlg.checks["bates"].isEnabled()
-    dlg.checks["numbers"].setChecked(False)
+    labels = [cb.text() for _s, cb in dlg.items]
+    assert len(labels) == 3  # elencate singolarmente
+    assert any("TOGLIMI" in t and "1-3" in t for t in labels) and any("ANCHE" in t for t in labels)
+    dlg.select_kind("numbers", False)
+    next(cb for s, cb in dlg.items if s["params"].get("text") == "ANCHE").setChecked(False)
     assert dlg.apply() == 3
     with ENGINE_LOCK:
-        assert stamp.list_watermarks(view.document.pdf) == {0: ["numbers"], 1: ["numbers"], 2: ["numbers"]}
+        assert stamp.list_watermarks(view.document.pdf) == {0: ["numbers"], 1: ["watermark", "numbers"],
+                                                            2: ["numbers"]}
     assert sd.open_remove_stamps_dialog(window.ctx, view, [])
     with ENGINE_LOCK:
         assert stamp.list_watermarks(view.document.pdf) == {}
@@ -262,11 +269,224 @@ def test_page_numbers_preview_skip_first(opened, qtbot):
     window, view = opened
     dlg = sd.PageNumbersDialog(window, view.document, [])
     qtbot.addWidget(dlg)
-    dlg.fmt.setEditText("{n}/{total}")
+    dlg.fmt.setEditText("{pagina}/{totale}")
     dlg.skip_first.setChecked(True)
     assert dlg.preview_index() == 1
     opts = dlg.preview_options(dlg.engine_options(), 1)
-    assert opts["fmt"] == "{n}/3" and opts["start"] == 2 and not opts["skip_first"]
+    assert opts["field_values"]["totale"] == "3" and opts["start"] == 2 and not opts["skip_first"]
     dlg.refresh_preview()
     assert "2" in dlg.preview_caption.text()
     assert not dlg.preview_label.pixmap().isNull()
+
+
+# ------------------------------------------------------------------ PAG-32/33/34/36/38
+
+def letterhead_file(tmp_path, pages=2) -> str:
+    d = pymupdf.open()
+    for i, col in enumerate([(1, 0, 0), (0, 0, 1)][:pages]):
+        p = d.new_page(width=595, height=842)
+        p.draw_rect(pymupdf.Rect(0, 0, 595, 80), color=None, fill=col)
+        p.insert_text((40, 60), f"CARTA {i + 1}", fontsize=20, color=(1, 1, 1))
+    path = tmp_path / "carta.pdf"
+    d.save(str(path))
+    return str(path)
+
+
+def test_unknown_placeholder_blocks_confirm(opened, qtbot):
+    window, view = opened
+    for cls, setter in ((sd.WatermarkDialog, lambda d: d.text.setText("{sconosciuto}")),
+                        (sd.PageNumbersDialog, lambda d: d.fmt.setEditText("Pag. {sconosciuto}"))):
+        dlg = cls(window, view.document, [])
+        qtbot.addWidget(dlg)
+        setter(dlg)
+        assert not dlg.ok_button.isEnabled()
+        assert "{sconosciuto}" in dlg.error.text()
+
+
+def test_field_menu_inserts_placeholder(opened, qtbot):
+    window, view = opened
+    dlg = sd.HeaderFooterDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    e = dlg.fields["header_center"]
+    e.setPlainText("Rif. ")
+    e.moveCursor(e.textCursor().MoveOperation.End)
+    dlg.field_button.insert("{titolo}")
+    assert e.toPlainText() == "Rif. {titolo}"
+    assert dlg.variants["default"]["header_center"] == "Rif. {titolo}"
+
+
+def test_background_letterhead_dialog(opened, qtbot, tmp_path):
+    window, view = opened
+    dlg = sd.BackgroundDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    dlg.kind_pdf.setChecked(True)
+    assert not dlg.ok_button.isEnabled()
+    dlg.source_pdf.set_path(letterhead_file(tmp_path))
+    assert dlg.first_rest.isEnabled()
+    dlg.first_rest.setChecked(True)
+    dlg.scope.set_mode("all")
+    dlg.visibility.set_value("screen")
+    assert dlg.ok_button.isEnabled()
+    dlg.refresh_preview()
+    assert not dlg.preview_label.pixmap().isNull()
+    dlg.apply()
+    with ENGINE_LOCK:
+        pdf = view.document.pdf
+        assert "CARTA 1" in pdf[0].get_text() and "CARTA 2" in pdf[2].get_text()
+        params = stamp.stamp_params(pdf, "background")
+    assert params["first_rest"] and params["visibility"] == "screen"
+
+
+def test_watermark_tile_offset_visibility_and_modify(opened, qtbot):
+    window, view = opened
+    dlg = sd.WatermarkDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    dlg.text.setText("RISERVATO")
+    dlg.tile.setChecked(True)
+    dlg.visibility.set_value("print")
+    dlg.offset_x.setValue(10)
+    opts = dlg.engine_options()
+    assert opts["tile"] and opts["visibility"] == "print" and opts["offset"][0] == pytest.approx(28.35, abs=0.01)
+    dlg.apply()
+    # «Modifica»: il dialogo riaperto elenca la filigrana e ne ricarica i parametri
+    dlg2 = sd.WatermarkDialog(window, view.document, [])
+    qtbot.addWidget(dlg2)
+    assert dlg2.edit_combo.count() == 2
+    dlg2.edit_combo.setCurrentIndex(1)
+    assert dlg2.text.text() == "RISERVATO" and dlg2.tile.isChecked()
+    assert dlg2.visibility.value() == "print"
+    dlg2.text.setText("COPIA")
+    dlg2.apply()
+    with ENGINE_LOCK:
+        stamps = stamp.list_stamps(view.document.pdf, "watermark")
+    assert [s["params"]["text"] for s in stamps] == ["COPIA"]
+
+
+def test_watermark_from_pdf_dialog(opened, qtbot, tmp_path):
+    window, view = opened
+    dlg = sd.WatermarkDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    dlg.kind_pdf.setChecked(True)
+    assert not dlg.ok_button.isEnabled()
+    dlg.source_pdf.set_path(letterhead_file(tmp_path), 1)
+    dlg.rotation.setValue(0)
+    assert dlg.ok_button.isEnabled()
+    dlg.apply()
+    assert "CARTA 2" in text_of(view, 0)
+
+
+def test_watermark_pdfa1_warning(window, qtbot, tmp_path):
+    d = pymupdf.open()
+    d.new_page()
+    d.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/'
+                       '02/22-rdf-syntax-ns#"><rdf:Description xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" '
+                       'pdfaid:part="1" pdfaid:conformance="B"/></rdf:RDF></x:xmpmeta>')
+    path = tmp_path / "pdfa.pdf"
+    d.save(str(path))
+    view = window.open_path(str(path))
+    dlg = sd.WatermarkDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    assert "PDF/A-1" in dlg.warning.text() and dlg.warning.isVisibleTo(dlg)
+    assert dlg.ok_button.isEnabled()  # avviso, non blocco
+    dlg.opacity.set_value(1.0)
+    assert not dlg.warning.isVisibleTo(dlg)
+
+
+def test_page_numbers_dialog_start_from_and_remove(opened, qtbot, accept, tmp_path):
+    window, view = opened
+    dlg = sd.PageNumbersDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    dlg.start_from.setValue(2)
+    dlg.mirror.setCurrentIndex(dlg.mirror.findData("outer"))
+    dlg.apply()
+    with ENGINE_LOCK:
+        pdf = view.document.pdf
+        foot = lambda i: [w[4] for w in pdf[i].get_text("words") if w[1] > 780]  # noqa: E731
+        assert foot(0) == [] and foot(1) == ["1"] and foot(2) == ["2"]
+    # riaperto: propone Modifica (parametri ricaricati) e Rimuovi
+    dlg2 = sd.PageNumbersDialog(window, view.document, [])
+    qtbot.addWidget(dlg2)
+    assert dlg2.start_from.value() == 2 and dlg2.mirror.currentData() == "outer"
+    dlg2.exclude.setText("99")
+    assert not dlg2.ok_button.isEnabled()
+    dlg2.exclude.setText("")
+    dlg2.request_remove()
+    assert dlg2.apply() == 2
+    with ENGINE_LOCK:
+        assert stamp.list_watermarks(view.document.pdf) == {}
+
+
+def test_header_footer_first_page_even_logo_and_templates(opened, qtbot, tmp_path):
+    window, view = opened
+    logo = tmp_path / "logo.png"
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20), 0)
+    pix.clear_with(80)
+    pix.save(str(logo))
+    dlg = sd.HeaderFooterDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    dlg.set_texts(header_center="Orologi Verdi S.r.l.\nVia Roma 1", footer_right="{pagina}/{totale}")
+    dlg.set_texts("first", footer_right="{pagina}/{totale}")  # prima pagina: niente intestazione
+    dlg.set_texts("even", header_left="Pari", footer_left="{pagina}/{totale}")
+    dlg.logo.set_path(str(logo))
+    dlg.opacity.set_value(0.8)
+    dlg.underline.setChecked(True)
+    dlg.scope.set_mode("all")
+    assert dlg.ok_button.isEnabled(), dlg.error.text()
+    dlg.save_template("Carta Verdi")
+    assert dlg.template_names() == ["Carta Verdi"]
+    dlg.apply()
+    with ENGINE_LOCK:
+        pdf = view.document.pdf
+        assert "Orologi Verdi" not in pdf[0].get_text() and "1/3" in pdf[0].get_text()
+        assert "Via Roma 1" in pdf[2].get_text() and "Pari" in pdf[1].get_text()
+        assert "Pari" not in pdf[2].get_text()
+    # il modello è nelle impostazioni dell'applicazione e si applica a un altro documento
+    assert "Carta Verdi" in window.ctx.settings().value(sd.TEMPLATES_KEY)
+    d = pymupdf.open()
+    for _i in range(3):
+        d.new_page(width=595, height=842).insert_text((72, 100), "Altro documento", fontsize=14)
+    d.save(str(tmp_path / "altro.pdf"))
+    other = window.open_path(str(tmp_path / "altro.pdf"))
+    dlg3 = sd.HeaderFooterDialog(window, other.document, [], ctx=window.ctx)
+    qtbot.addWidget(dlg3)
+    assert dlg3.load_template("Carta Verdi")
+    assert dlg3.logo.path() == str(logo) and dlg3.underline.isChecked()
+    dlg3.scope.set_mode("all")
+    dlg3.apply()
+    with ENGINE_LOCK:
+        a = view.document.pdf[2].search_for("Orologi Verdi S.r.l.")
+        b = other.document.pdf[2].search_for("Orologi Verdi S.r.l.")
+    assert a == b
+    dlg3.delete_template("Carta Verdi")
+    assert dlg3.template_names() == []
+
+
+def test_header_footer_modify_reopens_params(opened, qtbot):
+    window, view = opened
+    dlg = sd.HeaderFooterDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    dlg.set_texts(header_center="Relazione")
+    dlg.scope.set_mode("all")
+    dlg.apply()
+    dlg2 = sd.HeaderFooterDialog(window, view.document, [])
+    qtbot.addWidget(dlg2)
+    assert dlg2.fields["header_center"].toPlainText() == "Relazione"
+    assert dlg2.replace_box.isChecked() and dlg2.replace_box.isVisibleTo(dlg2)
+    dlg2.fields["header_center"].setPlainText("Bozza")
+    dlg2.scope.set_mode("all")
+    dlg2.apply()
+    for i in range(3):
+        t = text_of(view, i)
+        assert t.count("Bozza") == 1 and "Relazione" not in t
+
+
+def test_header_footer_preview_page_navigation(opened, qtbot):
+    window, view = opened
+    dlg = sd.HeaderFooterDialog(window, view.document, [])
+    qtbot.addWidget(dlg)
+    dlg.preview_page.setValue(3)
+    assert dlg.preview_index() == 2
+    opts = dlg.preview_options(dlg.engine_options(), 2)
+    assert opts["field_values"]["pagina"] == 3 and opts["field_values"]["totale"] == 3
+    dlg.refresh_preview()
+    assert "3" in dlg.preview_caption.text()

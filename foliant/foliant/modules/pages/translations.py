@@ -131,6 +131,10 @@ EN = {
     "Duplica": "Duplicate",
     "Organizza pagine": "Organize pages",
     "Pagina non leggibile": "Unreadable page",
+    "Pulizia guidata…": "Guided cleanup…",
+    "Pagine vuote e duplicate…": "Blank and duplicate pages…",
+    "Opuscolo…": "Booklet…",
+    "Filigrana di stampa a posizione fissa…": "Fixed-position print watermark…",
     "Numerazione Bates su più file…": "Bates numbering across files…",
     "Il documento dichiara la conformità PDF/A: le pagine inserite provengono da file non PDF/A e il risultato potrebbe non essere più conforme.":
         "The document declares PDF/A conformance: the inserted pages come from non-PDF/A files and the result may no longer conform.",

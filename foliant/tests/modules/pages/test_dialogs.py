@@ -409,3 +409,50 @@ def test_scan_review_rotate_delete_more_and_cancel(pages_window, monkeypatch):
                         else QDialog.DialogCode.Rejected)
     assert not D.open_scanner_dialog(window.ctx, view, [0])
     assert view.page_count == 10 and not view.document.can_undo
+
+
+def test_split_preview_colors_and_click_cuts(window, ten_pdf):
+    """PAG-20: le miniature sono colorate per parte e un clic aggiunge/toglie un punto di taglio."""
+    view = window.open_path(ten_pdf)
+    dlg = D.SplitDialog(window, view.document)
+    dlg.rbs["every"].setChecked(True)
+    dlg.every.setValue(5)
+    assert dlg.strip.item(0).background().color() != dlg.strip.item(5).background().color()
+    assert dlg.strip.item(5).toolTip() == "Parte 2"
+    dlg._toggle_cut(dlg.strip.item(2))          # nuovo taglio prima della pagina 3
+    assert dlg.rbs["ranges"].isChecked() and dlg.ranges.text() == "1-2; 3-5; 6-10"
+    assert "3 file" in dlg.preview.text()
+    dlg._toggle_cut(dlg.strip.item(5))          # toglie il taglio prima della pagina 6
+    assert dlg.ranges.text() == "1-2; 3-10"
+
+
+def test_merge_custom_metadata(window, accept, tmp_path):
+    """PAG-24: metadati del risultato dal primo file o personalizzati."""
+    a = tmp_path / "A.pdf"
+    d = pymupdf.open()
+    d.new_page()
+    d.set_metadata({"title": "Contratto", "author": "Verdi", "subject": "Rolex"})
+    d.save(str(a))
+    b = save_numbered(tmp_path / "B.pdf", 1, prefix="B")
+    accept(lambda dlg: (dlg.add_path(b), dlg.meta_title.setText("Dossier cliente")))
+    assert D.open_merge_dialog(window.ctx, paths=[str(a)])
+    with E.ENGINE_LOCK:
+        meta = window.current_view().document.pdf.metadata
+    assert meta["title"] == "Dossier cliente" and meta["author"] == "Verdi" and meta["subject"] == "Rolex"
+
+
+def test_dialog_defaults_follow_paper_and_unit_preferences(window, ten_pdf, monkeypatch):
+    """NFR-26: formato carta e unità predefiniti dalla preferenza dell'utente (Letter, pollici)."""
+    from foliant.modules.pages import layout_dialogs as L
+    view = window.open_path(ten_pdf)
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "Letter")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "in")
+    blank = D.InsertBlankDialog(window, view.document, [0])
+    assert blank.unit.currentData() == "in"
+    assert abs(blank.width.value() - 8.5) < 0.05 and abs(blank.height.value() - 11) < 0.05
+    assert L.NupDialog(window, view.document, [0]).sheet.currentData() == "Letter"
+    assert L.ResizeDialog(window, view.document, [0]).paper.currentData() == "Letter"
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "A4")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "mm")
+    blank = D.InsertBlankDialog(window, view.document, [0])
+    assert blank.unit.currentData() == "mm" and abs(blank.width.value() - 210) < 0.2
