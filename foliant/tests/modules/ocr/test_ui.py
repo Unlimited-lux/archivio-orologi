@@ -606,3 +606,19 @@ def test_pdf_cifrato_ocr_e_salvataggio(window, tmp_path, monkeypatch, mode):
         g = np.frombuffer(o[0].get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
         assert (g < 128).sum() > 100
         assert ("compravendita" in o[0].get_text()) == (mode == engine.SEARCHABLE)
+
+
+def test_profilo_con_lingua_non_installata(window, scan_two, monkeypatch, settings):
+    """bug_04: il tedesco richiesto da un profilo non viene tolto in silenzio; l'OCR non parte."""
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    dlg = dialogs.OcrDialog(window, page_count=2, current_page=0, detected=[0, 1], settings=None)
+    prof = dlg.profile()
+    prof["languages"] = ["ita", "deu"]
+    dlg.load_profile(prof)
+    assert dlg.options().languages == ["ita", "deu"]
+    assert "tedesco" in dlg.languages.warning.text()
+    asked = []
+    monkeypatch.setattr(ctl, "ask_missing", lambda missing: asked.append(missing) or None)
+    assert ctl.run(view, dlg.options(), [0], preview=False) is None
+    assert asked == [["deu"]] and not view.document.is_modified

@@ -63,9 +63,13 @@ class LanguageSelector(QWidget):
         self.list.blockSignals(True)
         self.list.clear()
         installed = languages.available_languages(refresh=True)
-        order = [c for c in selected if c in installed] + [c for c in installed if c not in selected]
+        # le lingue richieste ma non installate restano in elenco (mai tolte in silenzio, OCR-03)
+        order = list(dict.fromkeys(selected)) + [c for c in installed if c not in selected]
         for code in order:
-            item = QListWidgetItem(f"{languages.language_name(code)}  ({code})")
+            label = f"{languages.language_name(code)}  ({code})"
+            if code not in installed:
+                label += "  — " + _("non installata")
+            item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, code)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if code in selected else Qt.CheckState.Unchecked)
@@ -99,7 +103,11 @@ class LanguageSelector(QWidget):
 
     def _update(self) -> None:
         n = len(self.selected())
-        if n == 0:
+        missing = languages.missing_languages(self.selected())
+        if missing:
+            self.warning.setText(_("Lingue non installate: {l}.").format(
+                l=", ".join(languages.language_name(c) for c in missing)))
+        elif n == 0:
             self.warning.setText(_("Scegli almeno una lingua."))
         elif n > 3:
             self.warning.setText(_("Più di 3 lingue insieme rallentano il riconoscimento."))
