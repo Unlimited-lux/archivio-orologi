@@ -225,6 +225,7 @@ class OcrJob:
     result: object = None
     error: BaseException | None = None
     done: bool = False
+    locked: bool = False
 
 
 # =================================================================== strumento area
@@ -577,6 +578,7 @@ class OcrController(QObject):
         if job is not None:
             job.progress.cancel()          # il lavoro si ferma; il risultato non viene applicato
             job.bar = None                 # distrutta insieme alla vista
+            self._unlock(job)
         st = self.states.pop(view, None)
         if st is not None and st.timer is not None:
             st.timer.stop()
@@ -848,6 +850,11 @@ class OcrController(QObject):
             prints = engine.page_fingerprints(doc.pdf)
         job = OcrJob(view, opts, pages, preview, new_document, data, doc.version, prints, _pausable_progress())
         self.jobs[view] = job
+        # durante l'OCR il documento si consulta ma non si modifica (il risultato si applica alla fine)
+        if opts.mode != engine.TEXT_ONLY and not new_document and hasattr(doc, "set_locked"):
+            doc.set_locked(_("Riconoscimento del testo in corso: il documento si può consultare ma non "
+                             "modificare finché l'OCR non termina."))
+            job.locked = bool(getattr(doc, "locked", False))
 
         def work():
             try:
@@ -855,15 +862,29 @@ class OcrController(QObject):
             except BaseException as e:  # riportata all'interfaccia
                 job.error = e
             job.done = True
-        job.bar = JobBar(view, lambda: self.cancel_job(view), lambda: self.toggle_pause(view))
-        job.bar.place()
-        job.thread = threading.Thread(target=work, name="foliant-ocr-job", daemon=True)
-        job.timer = QTimer(self)
-        job.timer.setInterval(150)
-        job.timer.timeout.connect(lambda j=job: self._poll_job(j))
-        job.thread.start()
-        job.timer.start()
+        try:
+            job.bar = JobBar(view, lambda: self.cancel_job(view), lambda: self.toggle_pause(view))
+            job.bar.place()
+            job.thread = threading.Thread(target=work, name="foliant-ocr-job", daemon=True)
+            job.timer = QTimer(self)
+            job.timer.setInterval(150)
+            job.timer.timeout.connect(lambda j=job: self._poll_job(j))
+            job.thread.start()
+            job.timer.start()
+        except BaseException:
+            self.jobs.pop(view, None)
+            self._unlock(job)
+            raise
         return job
+
+    @staticmethod
+    def _unlock(job: "OcrJob") -> None:
+        if job.locked:
+            job.locked = False
+            try:
+                job.view.document.set_locked(None)
+            except Exception:
+                pass
 
     def _poll_job(self, job: "OcrJob") -> None:
         if job.bar is not None:
@@ -883,14 +904,21 @@ class OcrController(QObject):
                 pass
             job.bar = None
         self.jobs.pop(job.view, None)
-        self.finish_job(job)
+        was_locked = job.locked
+        self._unlock(job)
+        try:
+            self.finish_job(job, was_locked)
+        except Exception as e:  # nessun errore deve lasciare il documento bloccato o chiudere l'app
+            self.ctx.error(_("Riconoscimento non riuscito"), _("Errore imprevisto: {e}").format(e=e))
 
-    def finish_job(self, job: "OcrJob") -> engine.OcrResult | None:
+    def finish_job(self, job: "OcrJob", was_locked: bool = False) -> engine.OcrResult | None:
         view = job.view
         if view.document.closed or view not in self.ctx.views():
             return None
         changed: set[int] = set()
-        if job.opts.mode != engine.TEXT_ONLY and not job.new_document and view.document.version != job.version:
+        # documento bloccato durante l'OCR: non può essere cambiato, nessuna conferma da chiedere
+        if not was_locked and job.opts.mode != engine.TEXT_ONLY and not job.new_document and \
+                view.document.version != job.version:
             with ENGINE_LOCK:
                 now = engine.page_fingerprints(view.document.pdf)
             if len(now) != len(job.fingerprints):

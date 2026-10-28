@@ -725,21 +725,51 @@ def test_ocr_in_background_documento_consultabile(window, qtbot, scan_two):
     assert view.document.page_text(0).strip() == "" and view.document.page_text(1).strip() == ""
 
 
-def test_ocr_in_background_documento_modificato_nel_frattempo(window, qtbot, scan_two, monkeypatch):
+def test_ocr_in_background_documento_bloccato(window, qtbot, scan_two, monkeypatch):
+    """Durante l'OCR in background il documento è bloccato (consultabile, non modificabile);
+    alla fine si sblocca e il risultato si applica senza conferme."""
+    from foliant.api import OperationCancelled
     view = window.open_path(scan_two)
     ctl = ocr_controller()
     asked = []
     monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or True)
     ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
-    with view.document.change("ruota") as pdf:          # modifica mentre l'OCR lavora
+    assert view.document.locked and "Riconoscimento" in view.document.locked_reason
+    with pytest.raises(OperationCancelled):
+        with view.document.change("ruota") as pdf:
+            pdf[1].set_rotation(90)
+    _wait_job(qtbot, ctl, view)
+    assert not view.document.locked and not asked
+    assert "compravendita" in view.document.page_text(0) and view.document.page_text(1).strip()
+
+
+def test_ocr_in_background_sblocco_su_errore_e_annullamento(window, qtbot, scan_two, monkeypatch):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    errors = []
+    monkeypatch.setattr(ctl.ctx, "error", lambda t, m: errors.append(m))
+
+    def boom(*a, **k):
+        raise RuntimeError("guasto")
+    monkeypatch.setattr(engine, "recognize_document", boom)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    _wait_job(qtbot, ctl, view)
+    assert errors and not view.document.locked
+
+
+def test_ocr_in_background_documento_modificato_senza_blocco(window, qtbot, scan_two, monkeypatch):
+    """Ripiego senza blocco (nucleo che non lo offre): solo le pagine non cambiate ricevono il testo."""
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    asked = []
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or True)
+    monkeypatch.setattr(type(view.document), "set_locked", lambda self, reason: None)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    with view.document.change("ruota") as pdf:
         pdf[1].set_rotation(90)
     _wait_job(qtbot, ctl, view)
     assert asked and "2" in asked[0]
-    assert "compravendita" in view.document.page_text(0)
-    assert view.document.page_text(1).strip() == ""      # pagina cambiata: non toccata
-    from foliant.api import ENGINE_LOCK
-    with ENGINE_LOCK:
-        assert view.document.pdf[1].rotation == 90
+    assert "compravendita" in view.document.page_text(0) and view.document.page_text(1).strip() == ""
 
 
 def test_ocr_in_background_annullato_o_chiuso(window, qtbot, scan_two, monkeypatch):
