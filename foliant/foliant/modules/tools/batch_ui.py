@@ -184,6 +184,9 @@ class BatchWidget(QWidget):
         self.act_run = bar.addAction(_("Avvia"))
         bind_icon(self.act_run, "play")
         self.act_run.triggered.connect(lambda: self.run())
+        self.act_watch = bar.addAction(_("Cartelle monitorate"))
+        bind_icon(self.act_watch, "folder-sync")
+        self.act_watch.triggered.connect(self.show_watches)
         self.act_history = bar.addAction(_("Cronologia"))
         bind_icon(self.act_history, "history")
         self.act_history.triggered.connect(self._history_menu)
@@ -475,6 +478,15 @@ class BatchWidget(QWidget):
             settings.destination_mode, self.dest_folder).setChecked(True)
         be.discard_journal(self.journal_path())
         return True
+
+    def show_watches(self) -> "WatchDialog | None":
+        service = getattr(self.ctx.tools_module, "watch_service", None) if hasattr(self.ctx, "tools_module") else None
+        if service is None:
+            return None
+        dlg = WatchDialog(service, self)
+        dlg.show()
+        self._watch_dialog = dlg
+        return dlg
 
     def _history_menu(self) -> None:
         menu = QMenu(self)
@@ -924,6 +936,118 @@ class BatchWidget(QWidget):
             target = os.path.dirname(outputs[0]) if outputs else ""
         if target and os.path.isdir(target):
             QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+
+
+class WatchDialog(QWidget):
+    """Gestione delle cartelle monitorate (BAT-21)."""
+
+    def __init__(self, service, batch: "BatchWidget"):
+        super().__init__(batch, Qt.WindowType.Window)
+        from PySide6.QtCore import QTimer
+        self.service = service
+        self.batch = batch
+        self.setWindowTitle(_("Cartelle monitorate"))
+        self.resize(820, 360)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels([_("Cartella"), _("Operazioni"), _("Destinazione"), _("Stato")])
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.originals = QComboBox()
+        self.originals.addItem(_("Lascia gli originali al loro posto"), "keep")
+        self.originals.addItem(_("Sposta gli originali in «originali»"), "move")
+        self.stable = QSpinBox()
+        self.stable.setRange(0, 600)
+        self.stable.setValue(5)
+        self.stable.setSuffix(" s")
+        self.stable.setToolTip(_("Il file viene elaborato quando la sua dimensione non cambia per questo tempo"))
+        info = QLabel(_("Le operazioni sono quelle scelte nel pannello «Operazioni». I file in errore vanno nella "
+                        "sottocartella «errori»."))
+        info.setWordWrap(True)
+        buttons = QHBoxLayout()
+        for text, name, slot in ((_("Aggiungi cartella…"), "folder-plus", self.add_dialog),
+                                 (_("Attiva/disattiva"), "power", self.toggle_selected),
+                                 (_("Rimuovi"), "trash-2", self.remove_selected),
+                                 (_("Esporta rapporto"), "file-output", self.export_selected)):
+            b = QPushButton(text)
+            bind_icon(b, name)
+            b.clicked.connect(lambda _c=False, s=slot: s())
+            buttons.addWidget(b)
+        buttons.addStretch(1)
+        opts = QHBoxLayout()
+        opts.addWidget(self.originals)
+        opts.addWidget(QLabel(_("Attesa copia")))
+        opts.addWidget(self.stable)
+        opts.addStretch(1)
+        lay = QVBoxLayout(self)
+        lay.addWidget(info)
+        lay.addLayout(opts)
+        lay.addLayout(buttons)
+        lay.addWidget(self.table, 1)
+        self.timer = QTimer(self)
+        self.timer.setInterval(2000)
+        self.timer.timeout.connect(self.refresh)
+        self.timer.start()
+        self.refresh()
+
+    def refresh(self) -> None:
+        watchers = list(self.service.watchers.values())
+        self.table.setRowCount(len(watchers))
+        for r, w in enumerate(watchers):
+            for c, text in enumerate((w.cfg.folder, w.cfg.label(), w.cfg.destination, w.status_text())):
+                cell = QTableWidgetItem(text)
+                cell.setData(Qt.ItemDataRole.UserRole, w.cfg.id)
+                cell.setToolTip(text)
+                self.table.setItem(r, c, cell)
+
+    def add_watch(self, folder: str, destination: str) -> list[str]:
+        from .watch import WatchConfig
+        steps = [be.Step(s.action, dict(s.params)) for s in self.batch.steps]
+        exts = be.INPUT_EXTENSIONS + (be.CREATE_EXTENSIONS if any(s.action == "create_pdf" for s in steps) else ())
+        cfg = WatchConfig(folder=folder, steps=steps, destination=destination, extensions=exts,
+                          originals=self.originals.currentData(), stable_seconds=float(self.stable.value()),
+                          pattern=self.batch.pattern.text() or "{nome}", conflict=self.batch.conflict.currentData())
+        errors = self.service.add(cfg)
+        self.refresh()
+        return errors
+
+    def add_dialog(self) -> None:
+        ctx = self.batch.ctx
+        folder = ctx.ask_directory(_("Cartella da monitorare"))
+        if not folder:
+            return
+        dest = ctx.ask_directory(_("Cartella di destinazione"))
+        if not dest:
+            return
+        errors = self.add_watch(folder, dest)
+        if errors:
+            ctx.error(_("Configurazione non salvata"), "\n".join(errors))
+
+    def _selected_id(self) -> str | None:
+        item = self.table.item(self.table.currentRow(), 0) if self.table.currentRow() >= 0 else None
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def toggle_selected(self) -> None:
+        wid = self._selected_id()
+        if wid and wid in self.service.watchers:
+            self.service.set_enabled(wid, not self.service.watchers[wid].cfg.enabled)
+            self.refresh()
+
+    def remove_selected(self) -> None:
+        wid = self._selected_id()
+        if wid:
+            self.service.remove(wid)
+            self.refresh()
+
+    def export_selected(self) -> None:
+        wid = self._selected_id()
+        w = self.service.watchers.get(wid) if wid else None
+        if w is None:
+            return
+        path = self.batch.ctx.ask_save_path(_("Esporta rapporto"), "monitoraggio.csv", "CSV (*.csv)", ".csv")
+        if path:
+            atomic_write(path, w.report().to_csv().encode("utf-8"))
 
 
 class JobControlPanel(QWidget):

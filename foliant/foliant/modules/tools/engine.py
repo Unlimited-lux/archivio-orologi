@@ -356,6 +356,60 @@ def _build_actions() -> dict[str, ActionSpec]:
                    ("every", "Dopo ogni N pagine")]),
             Param("number", "Pagina / N", "int", 1, minimum=1),
         ]),
+        ActionSpec("rotate", "Ruota pagine", "ruotato", [
+            Param("degrees", "Rotazione", "choice", "90",
+                  [("90", "90° in senso orario"), ("180", "180°"), ("270", "90° in senso antiorario")]),
+            Param("pages", "Pagine (vuoto = tutte, «dispari», «pari», 1-3,5)", "pages", ""),
+        ]),
+        ActionSpec("delete_pages", "Elimina pagine", "ridotto", [
+            Param("mode", "Cosa eliminare", "choice", "range",
+                  [("range", "Intervallo di pagine"), ("blank", "Pagine bianche")]),
+            Param("pages", "Pagine (es. 1-3,5)", "pages", ""),
+        ]),
+        ActionSpec("extract_pages", "Estrai pagine", "estratto", [
+            Param("pages", "Pagine (es. 1-3,5)", "pages", "1"),
+        ]),
+        ActionSpec("split", "Dividi", "parte", [
+            Param("mode", "Modalità", "choice", "every",
+                  [("every", "Ogni N pagine"), ("bookmarks", "Per segnalibri di primo livello")]),
+            Param("every_n", "N pagine", "int", 1, minimum=1),
+        ], kind="multi"),
+        ActionSpec("flatten", "Appiattisci annotazioni e moduli", "appiattito", [
+            Param("annotations", "Annotazioni", "bool", True),
+            Param("widgets", "Campi modulo", "bool", True),
+        ]),
+        ActionSpec("sanitize", "Sanifica", "sanificato", [
+            Param("metadata", "Metadati e XMP", "bool", True),
+            Param("javascript", "JavaScript", "bool", True),
+            Param("embedded_files", "File incorporati", "bool", True),
+            Param("links", "Collegamenti", "bool", False),
+            Param("hidden_text", "Testo nascosto", "bool", True),
+        ]),
+        ActionSpec("metadata", "Imposta proprietà e metadati", "proprieta", [
+            Param("title", "Titolo ({nome} = nome del file)", "str", ""),
+            Param("author", "Autore", "str", ""),
+            Param("subject", "Oggetto", "str", ""),
+            Param("keywords", "Parole chiave", "str", ""),
+        ]),
+        ActionSpec("initial_view", "Imposta la vista iniziale", "vista", [
+            Param("layout", "Layout pagina", "choice", "SinglePage",
+                  [("SinglePage", "Pagina singola"), ("OneColumn", "Scorrimento continuo"),
+                   ("TwoPageLeft", "Due pagine"), ("TwoPageRight", "Due pagine con copertina")]),
+            Param("mode", "Pannello all'apertura", "choice", "UseNone",
+                  [("UseNone", "Nessuno"), ("UseOutlines", "Segnalibri"), ("UseThumbs", "Miniature"),
+                   ("FullScreen", "Schermo intero")]),
+        ]),
+        ActionSpec("redact", "Redigi per testo o schema", "redatto", [
+            Param("pattern", "Schema", "choice", "text",
+                  [("text", "Testo libero"), ("codice_fiscale", "Codice fiscale"), ("iban", "IBAN"),
+                   ("email", "Indirizzo e-mail")]),
+            Param("text", "Testo da redigere (uno per riga)", "text", ""),
+            Param("ignore_case", "Ignora maiuscole/minuscole", "bool", True),
+        ]),
+        ActionSpec("linearize", "Ottimizza per il web", "web", []),
+        ActionSpec("export_images", "Esporta tutte le immagini", "immagine", [
+            Param("min_size", "Dimensione minima (px)", "int", 16, minimum=1),
+        ], kind="multi"),
         ActionSpec("merge", "Unisci in un file", "unito", [
             Param("bookmarks", "Un segnalibro per file", "bool", True),
             Param("blank_after_odd", "Pagina bianca dopo i file con pagine dispari", "bool", False),
@@ -608,7 +662,7 @@ def validate_settings(items: list[QueueItem], settings: JobSettings) -> tuple[li
         params = step.merged_params()
         if spec.kind == "create" and i != 0:
             errors.append(_("«{a}» deve essere il primo passo della sequenza.").format(a=_(spec.label)))
-        if spec.kind in ("convert", "print") and i != len(settings.steps) - 1:
+        if spec.kind in ("convert", "print", "multi") and i != len(settings.steps) - 1:
             errors.append(_("«{a}» deve essere l'ultimo passo della sequenza.").format(a=_(spec.label)))
         if step.action == "protect":
             up, op = params.get("user_password") or "", params.get("owner_password") or ""
@@ -627,6 +681,9 @@ def validate_settings(items: list[QueueItem], settings: JobSettings) -> tuple[li
             if len(str(last)) > digits:
                 errors.append(_("Cifre insufficienti per la numerazione Bates: l'ultimo numero ({n}) richiede "
                                 "{d} cifre.").format(n=last, d=len(str(last))))
+        if step.action == "redact" and params.get("pattern", "text") == "text" \
+                and not str(params.get("text", "")).strip():
+            errors.append(_("Indica il testo da redigere."))
         if step.action == "watermark" and not str(params.get("text", "")).strip():
             errors.append(_("Il testo della filigrana è vuoto."))
     errors.extend(validate_pattern(settings.pattern) if not settings.replace_originals else [])
@@ -1201,6 +1258,7 @@ class _Ctx:
         self.total_files = total_files
         self.control = control
         self.warnings: list[str] = []
+        self.notes: list[str] = []   # informazioni sull'esito (non avvisi)
 
     def check(self) -> None:
         if self.control is not None:
@@ -1500,6 +1558,8 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
             raise BatchError("OCR-01", _("Nessuna pagina da riconoscere."), status="skipped")
         langs = [x for x in re.split(r"[+,\s]+", p.get("languages", "ita+eng")) if x]
         return fn(data, langs, mode, None, None), protection
+    if a in EXTRA_PDF_ACTIONS:
+        return EXTRA_PDF_ACTIONS[a](data, p, item, ctx), protection
     raise BatchError("GEN-02", _("Operazione non gestita: {a}").format(a=a))
 
 
@@ -1642,10 +1702,13 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                     _do_print(data, step, item, ctx, printer, protection)
                 elif spec.kind == "convert":
                     res.outputs = _do_convert(data, step, item, i, settings, started, res.pages, reserved, ctx)
+                elif spec.kind == "multi":
+                    res.outputs = _do_multi(data, step, item, i, settings, started, res.pages, reserved, ctx)
             if merge_index is not None:
                 merged_parts.append((i, Path(item.path).stem, data))
                 res.status = "ok"
-            elif any(ACTIONS[s.action].kind in ("print", "convert") for s in pre_steps if s.action in ACTIONS):
+            elif any(ACTIONS[s.action].kind in ("print", "convert", "multi") for s in pre_steps
+                     if s.action in ACTIONS):
                 res.status = "ok"
                 if res.outputs:
                     res.bytes_out = sum(os.path.getsize(o) for o in res.outputs if os.path.exists(o))
@@ -1675,7 +1738,9 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                 res.status = "ok"
             if ctx.warnings and res.status == "ok":
                 res.status = "warning"
-                res.message = "; ".join(ctx.warnings)
+                res.message = "; ".join(ctx.notes + ctx.warnings)
+            elif ctx.notes and res.status == "ok":
+                res.message = "; ".join(ctx.notes)
         except SkipFile:
             res.status, res.code = "cancelled", "USR-02"
             res.message = _("File annullato dall'utente.")
@@ -2039,6 +2104,314 @@ def _do_convert(data: bytes, step: Step, item: QueueItem, index: int, settings: 
 
 
 # =============================================================================
+# Operazioni aggiuntive (BAT-23)
+# =============================================================================
+REDACT_PATTERNS = {
+    "codice_fiscale": r"[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]",
+    "iban": r"IT\d{2}[A-Z]\d{10}[0-9A-Z]{12}",
+    "email": r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+",
+}
+
+
+def _x_rotate(data: bytes, p: dict, item, ctx) -> bytes:
+    deg = int(p.get("degrees", 90) or 90)
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            pages, oor = parse_pages(str(p.get("pages", "") or ""), doc.page_count)
+            if oor:
+                ctx.warnings.append(_("alcune pagine richieste non esistono"))
+            for n in pages:
+                page = doc[n]
+                page.set_rotation((page.rotation + deg) % 360)
+            return _save(doc)
+        finally:
+            doc.close()
+
+
+def _is_blank(page: pymupdf.Page) -> bool:
+    if page.get_text("text").strip() or page.get_images() or any(True for _a in page.annots()):
+        return False
+    try:
+        if page.get_drawings():
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _x_delete_pages(data: bytes, p: dict, item, ctx) -> bytes:
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            if p.get("mode", "range") == "blank":
+                pages = [n for n in range(doc.page_count) if _is_blank(doc[n])]
+                if not pages:
+                    raise BatchError("PAG-02", _("Saltato: nessuna pagina bianca."), status="skipped")
+            else:
+                spec = str(p.get("pages", "") or "").strip()
+                if not spec:
+                    raise BatchError("PAR-01", _("Indica le pagine da eliminare."))
+                pages, oor = parse_pages(spec, doc.page_count)
+                if oor:
+                    ctx.warnings.append(_("alcune pagine richieste non esistono"))
+            if len(set(pages)) >= doc.page_count:
+                raise BatchError("PAG-01", _("Il documento resterebbe senza pagine."))
+            doc.delete_pages(sorted(set(pages)))
+            ctx.notes.append(_("{n} pagine eliminate").format(n=len(set(pages))))
+            return _save(doc)
+        finally:
+            doc.close()
+
+
+def _x_extract_pages(data: bytes, p: dict, item, ctx) -> bytes:
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            pages, oor = parse_pages(str(p.get("pages", "") or ""), doc.page_count)
+            if not pages:
+                raise BatchError("PAG-03", _("Nessuna delle pagine richieste esiste in questo file."))
+            if oor:
+                ctx.warnings.append(_("alcune pagine richieste non esistono"))
+            doc.select(pages)
+            return _save(doc)
+        finally:
+            doc.close()
+
+
+def _x_flatten(data: bytes, p: dict, item, ctx) -> bytes:
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            if hasattr(doc, "bake"):
+                doc.bake(annots=bool(p.get("annotations", True)), widgets=bool(p.get("widgets", True)))
+            else:   # motore vecchio: riscrive le pagine come immagini vettoriali non è possibile
+                raise BatchError("DEP-03", _("Il motore PDF non supporta l'appiattimento."))
+            return _save(doc)
+        finally:
+            doc.close()
+
+
+def _x_sanitize(data: bytes, p: dict, item, ctx) -> bytes:
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            opts = dict(metadata=bool(p.get("metadata", True)), xml_metadata=bool(p.get("metadata", True)),
+                        javascript=bool(p.get("javascript", True)), embedded_files=bool(p.get("embedded_files", True)),
+                        attached_files=bool(p.get("embedded_files", True)), remove_links=bool(p.get("links", False)),
+                        hidden_text=bool(p.get("hidden_text", True)), reset_fields=False, reset_responses=False,
+                        clean_pages=True, redactions=False, thumbnails=True)
+            if hasattr(doc, "scrub"):
+                doc.scrub(**opts)
+            else:
+                if opts["metadata"]:
+                    doc.set_metadata({})
+                    doc.del_xml_metadata()
+            return _save(doc, garbage=4)
+        finally:
+            doc.close()
+
+
+def _xmp_escape(text: str) -> str:
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def build_xmp(title: str = "", author: str = "", subject: str = "", keywords: str = "") -> str:
+    def alt(tag, value):
+        return (f"<dc:{tag}><rdf:Alt><rdf:li xml:lang=\"x-default\">{_xmp_escape(value)}</rdf:li></rdf:Alt>"
+                f"</dc:{tag}>") if value else ""
+    creator = (f"<dc:creator><rdf:Seq><rdf:li>{_xmp_escape(author)}</rdf:li></rdf:Seq></dc:creator>"
+               if author else "")
+    kw = f"<pdf:Keywords>{_xmp_escape(keywords)}</pdf:Keywords>" if keywords else ""
+    return ('<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" '
+            'xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:xmp="http://ns.adobe.com/xap/1.0/">'
+            f'{alt("title", title)}{creator}{alt("description", subject)}{kw}'
+            '<xmp:CreatorTool>Foliant</xmp:CreatorTool>'
+            '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>')
+
+
+def _x_metadata(data: bytes, p: dict, item, ctx) -> bytes:
+    values = {"nome": Path(item.path).stem, "data": datetime.now().strftime("%d/%m/%Y")}
+    fields = {k: _expand(str(p.get(k, "") or ""), values) for k in ("title", "author", "subject", "keywords")}
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            meta = dict(doc.metadata or {})
+            for k, v in fields.items():
+                if v:
+                    meta[k] = v
+            meta = {k: v for k, v in meta.items() if k in ("title", "author", "subject", "keywords", "creator",
+                                                            "producer", "creationDate", "modDate") and v is not None}
+            doc.set_metadata(meta)
+            doc.set_xml_metadata(build_xmp(meta.get("title", ""), meta.get("author", ""), meta.get("subject", ""),
+                                           meta.get("keywords", "")))
+            return _save(doc)
+        finally:
+            doc.close()
+
+
+def _x_initial_view(data: bytes, p: dict, item, ctx) -> bytes:
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            doc.set_pagelayout(str(p.get("layout", "SinglePage")))
+            doc.set_pagemode(str(p.get("mode", "UseNone")))
+            return _save(doc)
+        finally:
+            doc.close()
+
+
+def _x_redact(data: bytes, p: dict, item, ctx) -> bytes:
+    kind = p.get("pattern", "text")
+    flags = re.IGNORECASE if p.get("ignore_case", True) else 0
+    if kind == "text":
+        terms = [t.strip() for t in str(p.get("text", "") or "").splitlines() if t.strip()]
+        if not terms:
+            raise BatchError("RED-02", _("Indica il testo da redigere."))
+        regex = re.compile("|".join(re.escape(t) for t in terms), flags)
+    else:
+        regex = re.compile(REDACT_PATTERNS[kind], flags if kind == "email" else 0)
+    count = 0
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            for page in doc:
+                found = []
+                # corrispondenze nelle singole parole
+                for w in page.get_text("words"):
+                    if regex.fullmatch(w[4]) or (kind != "text" and regex.search(w[4])):
+                        found.append(pymupdf.Rect(w[:4]))
+                # testo libero su più parole
+                if kind == "text":
+                    text = page.get_text("text")
+                    for m in {m.group(0) for m in regex.finditer(text)}:
+                        if " " in m.strip():
+                            found.extend(page.search_for(m))
+                for r in found:
+                    page.add_redact_annot(r, fill=(0, 0, 0))
+                if found:
+                    count += len(found)
+                    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS
+                                          if hasattr(pymupdf, "PDF_REDACT_IMAGE_PIXELS") else 2)
+                ctx.check()
+            if not count:
+                raise BatchError("RED-01", _("Saltato: nessuna corrispondenza."), status="skipped")
+            ctx.notes.append(_("{n} redazioni").format(n=count))
+            return _save(doc, garbage=4)
+        finally:
+            doc.close()
+
+
+def _x_linearize(data: bytes, p: dict, item, ctx) -> bytes:
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            try:
+                return doc.tobytes(garbage=4, deflate=True, linear=True)
+            except Exception:
+                ctx.warnings.append(_("linearizzazione non supportata dal motore: file solo ottimizzato"))
+                return doc.tobytes(garbage=4, deflate=True, clean=True)
+        finally:
+            doc.close()
+
+
+EXTRA_PDF_ACTIONS = {
+    "rotate": _x_rotate, "delete_pages": _x_delete_pages, "extract_pages": _x_extract_pages,
+    "flatten": _x_flatten, "sanitize": _x_sanitize, "metadata": _x_metadata, "initial_view": _x_initial_view,
+    "redact": _x_redact, "linearize": _x_linearize,
+}
+
+
+def _split_parts(data: bytes, p: dict) -> list[tuple[bytes, str]]:
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            n = doc.page_count
+            ranges: list[tuple[int, int]] = []
+            if p.get("mode", "every") == "bookmarks":
+                starts = sorted({e[2] - 1 for e in doc.get_toc() if e[0] == 1 and e[2] >= 1})
+                if not starts:
+                    raise BatchError("SPL-01", _("Il file non ha segnalibri di primo livello."), status="skipped")
+                if starts[0] != 0:
+                    starts.insert(0, 0)
+                ranges = [(a, (starts[k + 1] if k + 1 < len(starts) else n) - 1) for k, a in enumerate(starts)]
+            else:
+                step = max(1, int(p.get("every_n", 1) or 1))
+                ranges = [(a, min(a + step, n) - 1) for a in range(0, n, step)]
+            out = []
+            for a, b in ranges:
+                part = pymupdf.open()
+                part.insert_pdf(doc, from_page=a, to_page=b)
+                out.append((_save(part), ".pdf"))
+                part.close()
+            return out
+        finally:
+            doc.close()
+
+
+def _image_parts(data: bytes, p: dict) -> list[tuple[bytes, str]]:
+    minimum = int(p.get("min_size", 16) or 1)
+    out = []
+    seen = set()
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            for page in doc:
+                for img in page.get_images(full=True):
+                    xref = img[0]
+                    if xref in seen:
+                        continue
+                    seen.add(xref)
+                    try:
+                        pix = pymupdf.Pixmap(doc, xref)
+                        if pix.n - pix.alpha >= 4:
+                            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                        if pix.width >= minimum and pix.height >= minimum:
+                            out.append((pix.tobytes("png"), ".png"))
+                    except Exception:
+                        continue
+        finally:
+            doc.close()
+    if not out:
+        raise BatchError("IMG-02", _("Saltato: nessuna immagine nel file."), status="skipped")
+    return out
+
+
+def _do_multi(data: bytes, step: Step, item: QueueItem, index: int, settings: JobSettings, started: datetime,
+              pages: int, reserved: set[str], ctx: _Ctx) -> list[str]:
+    """Passi che producono più file per ingresso (dividi, esporta immagini)."""
+    p = step.merged_params()
+    parts = _split_parts(data, p) if step.action == "split" else _image_parts(data, p)
+    pattern = settings.pattern
+    if "{pagina" not in pattern and "{parte" not in pattern:
+        pattern += "_{parte:3}"
+    dest = _target_dir(item, settings)
+    outputs: list[str] = []
+    try:
+        for k, (blob, ext) in enumerate(parts):
+            ctx.check()
+            name = render_name(pattern, item.path, index, settings, started, pages,
+                               {"parte": k + 1, "pagina": k + 1}, ext)
+            target = _resolve_conflict(os.path.join(dest, name), settings, reserved)
+            if target is None:
+                raise BatchError("EXIST-01", _("Saltato: esiste già."), status="skipped")
+            reserved.add(target)
+            _write_output(target, blob)
+            outputs.append(target)
+        ctx.notes.append(_("{n} file prodotti").format(n=len(outputs)))
+        return outputs
+    except BaseException:
+        for o in outputs:
+            try:
+                os.unlink(o)
+            except OSError:
+                pass
+        raise
+
+
+# =============================================================================
 # Sequenze salvate (BAT-20)
 # =============================================================================
 def validate_sequence(steps: list[Step]) -> list[str]:
@@ -2047,7 +2420,7 @@ def validate_sequence(steps: list[Step]) -> list[str]:
         spec = ACTIONS.get(s.action)
         if spec is None:
             errors.append(_("Operazione sconosciuta: {a}").format(a=s.action))
-        elif spec.kind in ("convert", "print") and i != len(steps) - 1:
+        elif spec.kind in ("convert", "print", "multi") and i != len(steps) - 1:
             errors.append(_("«{a}» deve essere l'ultimo passo della sequenza.").format(a=_(spec.label)))
     return errors
 

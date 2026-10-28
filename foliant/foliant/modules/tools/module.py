@@ -10,9 +10,16 @@ from .translations import EN
 class ToolsModule:
     def __init__(self, ctx):
         from .compare_ui import CompareController
+        import os
+
+        from .watch import WatchService
         self.ctx = ctx
         self.compare = CompareController(ctx)
         self.batch = None
+        base = os.path.dirname(ctx.settings().fileName()) or os.path.expanduser("~/.config/Foliant")
+        self.watch_service = WatchService(os.path.join(base, "foliant-monitor.json"),
+                                          os.path.join(base, "foliant-monitor"))
+        self.watch_service.ensure_timer()
 
     # ---------------------------------------------------------------- confronto
     def start_compare(self, view=None):
