@@ -225,6 +225,8 @@ def test_link_handler_extension(window, sample_pdf):
     seen = []
     first = lambda view, link: (seen.append(("prima", link.get("uri"))), False)[1]
     last = lambda view, link: (seen.append(("ultima", link.get("uri"))), True)[1]
+    saved = list(tools.LINK_HANDLERS)        # il test verifica il meccanismo, senza i gestori dei moduli
+    tools.LINK_HANDLERS.clear()
     window.ctx.add_link_handler(last, priority=-1000)
     window.ctx.add_link_handler(first, priority=1000)
     window.ctx.add_link_handler(first, priority=1000)      # doppia registrazione ignorata
@@ -233,5 +235,4 @@ def test_link_handler_extension(window, sample_pdf):
         tools.follow_link(view, {"kind": 2, "uri": "https://example.org"})
         assert seen == [("prima", "https://example.org"), ("ultima", "https://example.org")]
     finally:
-        tools.remove_link_handler(first)
-        tools.remove_link_handler(last)
+        tools.LINK_HANDLERS[:] = saved
