@@ -655,3 +655,23 @@ def test_tagged_document_form_element(tmp_path):
     plain.new_page()
     z = E.create_field(plain, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "a")
     assert plain.xref_get_key(z, "StructParent")[0] == "null"
+
+
+def test_rich_text_value_kept_coherent():
+    import xml.etree.ElementTree as ET
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 300, 120), "nota", multiline=True)
+    fx = E._field_xref(pdf, x)
+    flags = int(pdf.xref_get_key(fx, "Ff")[1])
+    pdf.xref_set_key(fx, "Ff", str(flags | E.FF_RICH_TEXT))
+    pdf.xref_set_key(fx, "RV", "(<body><p><b>vecchio</b></p></body>)")
+    E.set_value(pdf, 0, x, "Riga <1> & co\rRiga 2")
+    rv = pdf.xref_get_key(fx, "RV")[1]
+    root = ET.fromstring(rv)
+    texts = [p.text for p in root.iter("{http://www.w3.org/1999/xhtml}p")]
+    assert texts == ["Riga <1> & co", "Riga 2"]
+    assert E.field_info(pdf, 0, x).value == "Riga <1> & co\rRiga 2"
+    plain = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 150, 300, 170), "semplice")
+    E.set_value(pdf, 0, plain, "x")
+    assert pdf.xref_get_key(E._field_xref(pdf, plain), "RV")[0] == "null"

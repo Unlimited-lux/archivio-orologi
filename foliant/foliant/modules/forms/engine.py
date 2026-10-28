@@ -61,6 +61,7 @@ FF_FILE_SELECT = 1 << 20
 FF_NO_SPELL = 1 << 22
 FF_DO_NOT_SCROLL = 1 << 23
 FF_IN_UNISON = 1 << 25
+FF_RICH_TEXT = 1 << 25  # stesso bit di RadiosInUnison: vale per i campi di testo
 AF_HIDDEN, AF_PRINT, AF_NOVIEW, AF_LOCKED = 2, 4, 32, 128
 
 # Stili del segno di caselle e opzioni: carattere del font simbolico standard (ZapfDingbats).
@@ -579,6 +580,9 @@ def set_value(pdf: pymupdf.Document, page: int, xref: int, value: Any) -> None:
         if flags & pymupdf.PDF_TX_FIELD_IS_PASSWORD:
             text = ""
         pdf.xref_set_key(fx, "V", ps.encode_string(text) if text else "null")
+        if flags & FF_RICH_TEXT or _inherited(pdf, w.xref, "RV")[0] != "null":
+            # testo formattato: il valore formattato segue quello semplice (stile del campo)
+            pdf.xref_set_key(fx, "RV", ps.encode_string(rich_value(text)) if text else "null")
         _regen_field(pdf, fx, page, w.xref)
     elif kind == CHECKBOX:
         on = _on_state(w)
@@ -686,6 +690,16 @@ def radio_siblings(pdf: pymupdf.Document, page: int, xref: int) -> list[tuple[in
     """Widget (pagina, xref) dello stesso gruppo di opzioni, nell'ordine dei campi."""
     fx = _field_xref(pdf, xref)
     return [(f.page, f.xref) for f in list_fields(pdf) if f.kind == RADIO and f.field_xref == fx]
+
+
+def rich_value(text: str) -> str:
+    """Valore formattato (/RV, XHTML) equivalente al testo semplice: un paragrafo per riga."""
+    from xml.sax.saxutils import escape
+    lines = text.replace("\r\n", "\r").replace("\n", "\r").split("\r")
+    body = "".join(f"<p>{escape(line)}</p>" for line in lines)
+    return ('<?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/" xfa:APIVersion="Acroform:2.7.0.0" '
+            f'xfa:spec="2.1">{body}</body>')
 
 
 def regenerate(pdf: pymupdf.Document, page: int, xref: int) -> None:
