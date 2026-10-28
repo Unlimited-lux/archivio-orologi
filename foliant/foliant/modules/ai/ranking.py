@@ -172,6 +172,30 @@ def to_csv(rows: list[RankRow], criteria: list[Criterion], sep: str = ",") -> st
     return buf.getvalue()
 
 
+def to_pdf(rows: list[RankRow], criteria: list[Criterion]) -> bytes:
+    """Rapporto PDF: criteri, classifica e motivazioni con le pagine, con l'avviso sulla decisione umana."""
+    from . import report_pdf
+    crit = report_pdf.Table(_("Criteri"), [_("Criterio"), _("Descrizione"), _("Peso"), _("Obbligatorio")],
+                            [[c.nome, c.descrizione, c.peso, _("sì") if c.obbligatorio else ""] for c in criteria])
+    table = report_pdf.Table(
+        _("Classifica"), [_("Posizione"), _("Documento")] + [f"{c.nome} (×{c.peso})" for c in criteria] +
+        [_("Totale")],
+        [[r.posizione or "—", f"{r.etichetta} · {r.titolo}"] +
+         [f"{r.scores[c.nome].punteggio:g}" if c.nome in r.scores else "" for c in criteria] +
+         [f"{r.totale:.2f}" if r.totale is not None else _("escluso: {m}").format(m=r.motivo)] for r in rows])
+    reasons = []
+    for r in rows:
+        for c in criteria:
+            ev = r.scores.get(c.nome)
+            if ev and ev.motivazione:
+                pages = ", ".join(str(p + 1) for p in ev.pagine)
+                reasons.append([f"{r.etichetta} · {r.titolo}", c.nome, f"{ev.punteggio:g}", ev.motivazione, pages])
+    why = report_pdf.Table(_("Motivazioni"), [_("Documento"), _("Criterio"), _("Punteggio"), _("Motivazione"),
+                                              _("Pagine")], reasons)
+    return report_pdf.render(_("Confronto e classifica"), [crit, table, why], [_(HUMAN_DECISION)],
+                             landscape=len(criteria) > 4)
+
+
 def criteria_to_json(criteria: list[Criterion]) -> str:
     return json.dumps([c.__dict__ for c in criteria], ensure_ascii=False, indent=1)
 

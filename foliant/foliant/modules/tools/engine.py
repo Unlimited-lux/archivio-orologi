@@ -70,6 +70,15 @@ def run_ocr(fn: Callable, data: bytes, languages: list[str], redo: bool = False)
     return fn(data, list(languages), "searchable", None, None)
 
 
+def _pdfa_function() -> Callable | None:
+    """`convert_to_pdfa(data, level) -> (byte, resoconto)` del modulo Converti (CNV-14)."""
+    try:
+        from foliant.modules.convert.pdfa import convert_to_pdfa
+    except Exception:
+        return None
+    return convert_to_pdfa
+
+
 def _convert_function() -> Callable | None:
     try:
         from foliant.modules.convert.engine import convert_pdf
@@ -292,6 +301,10 @@ def _build_actions() -> dict[str, ActionSpec]:
                    ("center", "Centra a dimensione reale")]),
             Param("margin", "Margine (mm)", "float", 0.0, minimum=0, maximum=100),
         ], kind="create"),
+        ActionSpec("pdfa", "Converti in PDF/A con verifica", "pdfa", [
+            Param("level", "Livello", "choice", "2b", [("1b", "PDF/A-1b"), ("2b", "PDF/A-2b"), ("3b", "PDF/A-3b")]),
+            Param("save_anyway", "Se la conformità non è raggiunta, salva comunque (con avviso)", "bool", False),
+        ]),
         ActionSpec("compress", "Comprimi", "compresso", [
             Param("level", "Livello", "choice", "medium",
                   [("low", "Leggera (qualità alta)"), ("medium", "Bilanciata"), ("high", "Massima")]),
@@ -483,6 +496,8 @@ def action_available(action_id: str) -> tuple[bool, str]:
         return False, _("Operazione sconosciuta: {a}").format(a=action_id)
     if action_id == "ocr" and _ocr_function() is None:
         return False, _("L'OCR non è disponibile: il modulo OCR non è installato.")
+    if action_id == "pdfa" and _pdfa_function() is None:
+        return False, _("La conversione in PDF/A non è disponibile: il modulo Converti non è installato.")
     if action_id == "convert" and _convert_function() is None:
         return False, _("La conversione non è disponibile: il modulo Converti non è installato.")
     return True, ""
@@ -1691,6 +1706,25 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         out, warns = insert_pages(data, p.get("file", ""), p.get("where", "start"), int(p.get("number", 1)))
         ctx.warnings.extend(warns)
         return out, protection
+    if a == "pdfa":
+        fn = _pdfa_function()
+        if fn is None:
+            raise BatchError("DEP-01", _("La conversione in PDF/A non è disponibile: il modulo Converti non è "
+                                         "installato."))
+        level = str(p.get("level", "2b"))
+        try:
+            out, info = fn(data, level)
+        except Exception as e:   # es. Ghostscript mancante: messaggio del modulo Converti
+            raise BatchError("PDFA-01", str(e)) from e
+        errors = list((info or {}).get("errors") or [])
+        if errors and not p.get("save_anyway"):
+            raise BatchError("PDFA-02", _("Conformità PDF/A-{l} non raggiunta: {e}").format(
+                l=level, e="; ".join(errors[:5])))
+        if errors:
+            ctx.warnings.append(_("conformità PDF/A-{l} non raggiunta: {e}").format(l=level, e="; ".join(errors[:5])))
+        else:
+            ctx.notes.append(_("verifica PDF/A-{l}: conforme").format(l=level))
+        return out, {}   # PDF/A non ammette la cifratura
     if a == "ocr":
         fn = _ocr_function()
         if fn is None:
@@ -1766,6 +1800,44 @@ def _write_output(path: str, data: bytes) -> None:
         raise BatchError("WRT-01", str(e)) from e
 
 
+def _compute_pdf(item: QueueItem, ctx: "_Ctx", steps, pre_steps, candidates, plan_i, csv_passwords):
+    """Lettura e passi PDF→PDF di un file (eseguibile in parallelo: non scrive su disco).
+
+    Restituisce (byte letti, PDF di partenza, risultato, protezione, pagine)."""
+    if getattr(ctx, "abort", False):
+        raise OperationCancelled()
+    try:
+        with open(item.path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        raise BatchError("FILE-01", _("File non trovato: è stato spostato o eliminato."))
+    except OSError as e:
+        raise BatchError("FILE-01", _("File non leggibile: {e}").format(e=e.strerror or e))
+    bytes_in = len(raw)
+    create = next((s for s in steps if s.action == "create_pdf"), None)
+    if not item.path.lower().endswith(".pdf") and item.path.lower().endswith(CREATE_EXTENSIONS):
+        if create is None:
+            raise BatchError("FMT-01", _("Formato non ammesso per l'operazione."), status="skipped")
+        raw = to_pdf_bytes(item.path, create.merged_params(), ctx.warnings)
+    data, protection, cand_no = _open_input(raw, item, candidates)
+    if cand_no and cand_no > (1 if item.password else 0) and any(s.action == "remove_password" for s in steps):
+        ctx.warnings.append(_("sbloccato con la candidata n. {n}").format(n=cand_no - (1 if item.password else 0)))
+    pages = _page_count(data)
+    for k, step in enumerate(pre_steps):
+        spec = ACTIONS[step.action]
+        if spec.kind != "pdf":
+            continue
+        try:
+            data, protection = _apply_step(step, data, item, ctx, plan_i, protection, csv_passwords)
+        except (BatchError, OperationCancelled, SkipFile):
+            raise
+        except Exception as e:
+            raise BatchError("GEN-01", _("Passo {k} ({a}) non riuscito: {e}").format(
+                k=k + 1, a=_(spec.label), e=e)) from e
+        ctx.check()
+    return bytes_in, raw, data, protection, pages
+
+
 def run_job(progress, items: list[QueueItem], settings: JobSettings, started: datetime | None = None,
             printer: str | None = None, control: JobControl | None = None,
             journal: str | None = None) -> JobReport:
@@ -1816,6 +1888,15 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
             progress.update(frac, text)
 
     write_journal(journal, report, items, settings, finished=False)
+    futures = ctxs = pool = None
+    parallel_ok = (settings.workers > 1 and merge_index is None and len(items) > 1
+                   and all(ACTIONS.get(s.action) and ACTIONS[s.action].kind in ("pdf", "create") for s in pre_steps))
+    if parallel_ok:
+        from concurrent.futures import ThreadPoolExecutor
+        ctxs = [_Ctx(progress, i, len(items), control) for i in range(len(items))]
+        pool = ThreadPoolExecutor(max_workers=settings.workers, thread_name_prefix="foliant-batch")
+        futures = [pool.submit(_compute_pdf, it, ctxs[k], steps, pre_steps, candidates, plan[k], csv_passwords)
+                   for k, it in enumerate(items)]
     for i, item in enumerate(items):
         res = report.results[i]
         if stop:
@@ -1824,46 +1905,51 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
         ctx = _Ctx(progress, i, len(items), control)
         try:
             update(i / n, _("File {i} di {n}: {name}").format(i=i + 1, n=len(items), name=item.name))
-            try:
-                with open(item.path, "rb") as f:
-                    raw = f.read()
-            except FileNotFoundError:
-                raise BatchError("FILE-01", _("File non trovato: è stato spostato o eliminato."))
-            except OSError as e:
-                raise BatchError("FILE-01", _("File non leggibile: {e}").format(e=e.strerror or e))
-            res.bytes_in = len(raw)
-            create = next((s for s in steps if s.action == "create_pdf"), None)
-            if not item.path.lower().endswith(".pdf") and item.path.lower().endswith(CREATE_EXTENSIONS):
-                if create is None:
-                    raise BatchError("FMT-01", _("Formato non ammesso per l'operazione."), status="skipped")
-                raw = to_pdf_bytes(item.path, create.merged_params(), ctx.warnings)
-            data, protection, cand_no = _open_input(raw, item, candidates)
-            if cand_no and cand_no > (1 if item.password else 0) and any(s.action == "remove_password"
-                                                                           for s in steps):
-                ctx.warnings.append(_("sbloccato con la candidata n. {n}").format(
-                    n=cand_no - (1 if item.password else 0)))
-            res.pages = _page_count(data)
-            for k, step in enumerate(pre_steps):
-                spec = ACTIONS.get(step.action)
-                if spec is None:
-                    raise BatchError("GEN-02", _("Operazione sconosciuta: {a}").format(a=step.action))
-                if spec.kind in ("pdf",):
-                    try:
-                        data, protection = _apply_step(step, data, item, ctx, plan[i], protection, csv_passwords)
-                    except (BatchError, OperationCancelled):
-                        raise
-                    except Exception as e:
-                        raise BatchError("GEN-01", _("Passo {k} ({a}) non riuscito: {e}").format(
-                            k=k + 1, a=_(spec.label), e=e)) from e
-                    ctx.check()
-                elif spec.kind == "create":
-                    pass   # conversione già fatta all'apertura
-                elif spec.kind == "print":
-                    _do_print(data, step, item, ctx, printer, protection)
-                elif spec.kind == "convert":
-                    res.outputs = _do_convert(data, step, item, i, settings, started, res.pages, reserved, ctx)
-                elif spec.kind == "multi":
-                    res.outputs = _do_multi(data, step, item, i, settings, started, res.pages, reserved, ctx)
+            if futures is not None:
+                # elaborazione parallela: qui si raccoglie il risultato, nell'ordine della coda
+                ctx = ctxs[i]
+                res.bytes_in, raw, data, protection, res.pages = futures[i].result()
+            else:
+                try:
+                    with open(item.path, "rb") as f:
+                        raw = f.read()
+                except FileNotFoundError:
+                    raise BatchError("FILE-01", _("File non trovato: è stato spostato o eliminato."))
+                except OSError as e:
+                    raise BatchError("FILE-01", _("File non leggibile: {e}").format(e=e.strerror or e))
+                res.bytes_in = len(raw)
+                create = next((s for s in steps if s.action == "create_pdf"), None)
+                if not item.path.lower().endswith(".pdf") and item.path.lower().endswith(CREATE_EXTENSIONS):
+                    if create is None:
+                        raise BatchError("FMT-01", _("Formato non ammesso per l'operazione."), status="skipped")
+                    raw = to_pdf_bytes(item.path, create.merged_params(), ctx.warnings)
+                data, protection, cand_no = _open_input(raw, item, candidates)
+                if cand_no and cand_no > (1 if item.password else 0) and any(s.action == "remove_password"
+                                                                               for s in steps):
+                    ctx.warnings.append(_("sbloccato con la candidata n. {n}").format(
+                        n=cand_no - (1 if item.password else 0)))
+                res.pages = _page_count(data)
+                for k, step in enumerate(pre_steps):
+                    spec = ACTIONS.get(step.action)
+                    if spec is None:
+                        raise BatchError("GEN-02", _("Operazione sconosciuta: {a}").format(a=step.action))
+                    if spec.kind in ("pdf",):
+                        try:
+                            data, protection = _apply_step(step, data, item, ctx, plan[i], protection, csv_passwords)
+                        except (BatchError, OperationCancelled):
+                            raise
+                        except Exception as e:
+                            raise BatchError("GEN-01", _("Passo {k} ({a}) non riuscito: {e}").format(
+                                k=k + 1, a=_(spec.label), e=e)) from e
+                        ctx.check()
+                    elif spec.kind == "create":
+                        pass   # conversione già fatta all'apertura
+                    elif spec.kind == "print":
+                        _do_print(data, step, item, ctx, printer, protection)
+                    elif spec.kind == "convert":
+                        res.outputs = _do_convert(data, step, item, i, settings, started, res.pages, reserved, ctx)
+                    elif spec.kind == "multi":
+                        res.outputs = _do_multi(data, step, item, i, settings, started, res.pages, reserved, ctx)
             if merge_index is not None:
                 merged_parts.append((i, Path(item.path).stem, data))
                 res.status = "ok"
@@ -1922,6 +2008,12 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                 stop = True
         res.duration_ms = int((time.monotonic() - t0) * 1000)
         write_journal(journal, report, items, settings, finished=False)
+    if pool is not None:   # file non ancora iniziati (annullamento o «fermati al primo errore»)
+        for f in futures:
+            f.cancel()
+        for c in ctxs:
+            c.abort = True
+        pool.shutdown(wait=True)
 
     if merge_index is not None and not report.cancelled:
         _finish_merge(report, items, merged_parts, steps[merge_index], post_steps, settings, started, plan,

@@ -877,8 +877,6 @@ class MainWindow(QMainWindow):
                                  .format(name=document.display_name),
                                  [(_("Salva con nome…"), lambda v=view: self.save_view(v, save_as=True))],
                                  level="info", priority=5)
-        if document.repaired:
-            self.statusBar().showMessage(_("Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto."), 15000)
         if document.locked_reason:
             self.statusBar().showMessage(_("Sola lettura: {reason}").format(reason=document.locked_reason), 15000)
         view.setFocus()
@@ -1102,9 +1100,16 @@ class MainWindow(QMainWindow):
             self._update_state()
 
     def _on_document_event(self, view: DocumentView, kind: str) -> None:
-        """Avvisi nella barra di stato per sola lettura logica e accesso completo."""
+        """Avvisi nella barra di stato per sola lettura logica e accesso completo; ai moduli
+        `ctx.documentAccessChanged` per ricalcolare i comandi che dipendono dai permessi."""
         doc = view.document
-        if doc.closed or view is not self.current_view():
+        if doc.closed:
+            return
+        if kind in (ACCESS, LOCK):
+            self.ctx.documentAccessChanged.emit(view)
+            if view is self.current_view():
+                self._update_state()
+        if view is not self.current_view():
             return
         if kind == LOCK and doc.locked_reason:
             self.statusBar().showMessage(_("Sola lettura: {reason}").format(reason=doc.locked_reason), 8000)
