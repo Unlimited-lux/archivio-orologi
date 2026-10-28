@@ -1002,3 +1002,16 @@ def test_legacy_marks_still_removed(tmp_path):
     out = be.add_watermark(legacy, "NUOVA", replace=True)
     t = pymupdf.open(stream=out, filetype="pdf").load_page(0).get_text()
     assert "NUOVA" in t and "VECCHIA" not in t
+
+
+def test_header_and_numbers_share_marking_and_dont_replace_each_other(tmp_path):
+    from foliant.modules.pages import stamp
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    data = be.add_header_footer(open(a, "rb").read(), {"top-left": "CONTRATTO {nome}"}, values={"nome": "X"})
+    data = be.add_page_numbers(data)
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    t = doc[0].get_text()
+    assert "CONTRATTO X" in t and "Pagina 1 di 2" in t      # i numeri non tolgono l'intestazione
+    assert sorted(stamp.list_watermarks(doc)[0]) == ["headerfooter", "numbers"]
+    assert stamp.remove_watermarks(doc, None, "all") == 4
+    assert "CONTRATTO" not in doc[0].get_text()

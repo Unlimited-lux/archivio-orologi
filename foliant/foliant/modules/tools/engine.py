@@ -926,7 +926,8 @@ def _stamp():
 
 
 _STAMP_KINDS = {"watermark": ("watermark",), "background": ("background",),
-                "header_footer": ("headerfooter", "numbers"), "bates": ("bates",)}
+                "header_footer": ("headerfooter", "numbers"), "bates": ("bates",),
+                "headerfooter_only": ("headerfooter",), "page_numbers": ("numbers",)}
 
 
 def _remove_stamps(doc: pymupdf.Document, kinds) -> int:
@@ -1141,9 +1142,12 @@ def add_header_footer(data: bytes, texts: dict[str, str], fontsize: float = 9, m
     with ENGINE_LOCK:
         doc = _open(data)
         try:
+            st = _stamp()
             if replace:
-                for page in doc:
-                    _remove_marks_page(doc, page, {kind})
+                _remove_stamps(doc, {"page_numbers" if kind == "page_numbers" else "headerfooter_only"})
+                if kind != "page_numbers":   # i vecchi numeri erano marcati come intestazioni
+                    for page in doc:
+                        _remove_marks_page(doc, page, {kind})
             n_pages = doc.page_count
             tot = total if total is not None else (first_number - 1 + (n_pages if count_skipped or not skip_first
                                                                        else n_pages - 1))
@@ -1160,14 +1164,32 @@ def add_header_footer(data: bytes, texts: dict[str, str], fontsize: float = 9, m
                 vals = dict(values or {})
                 vals.update({"pagina": number, "totale": tot,
                              "totale_coda": queue_total if queue_total is not None else tot})
+                placed: dict[str, str] = {}
                 for pos, text in texts.items():
                     if not text:
                         continue
                     where = pos
                     if mirror and (pno + 1) % 2 == 0:
                         where = pos.replace("left", "@").replace("right", "left").replace("@", "right")
-                    _place(page, _expand(text, vals), where, fontsize, margin, _rgb(color))
-                _mark_new_contents(doc, page, before, kind)
+                    placed[where] = _expand(text, vals)
+                if st is not None and placed:
+                    # marcatura comune con il modulo Pagine (PAG-36): rimovibile da entrambe le parti
+                    try:
+                        if kind == "page_numbers":
+                            for where, text in placed.items():
+                                st.add_page_numbers(doc, [pno], fmt=text, position=where, margin=margin,
+                                                    font_size=fontsize, color=_rgb(color))
+                        else:
+                            slots = {("header_" if w.startswith("top") else "footer_") + w.split("-")[1]: t
+                                     for w, t in placed.items()}
+                            st.add_header_footer(doc, [pno], margin=margin, font_size=fontsize,
+                                                 color=_rgb(color), **slots)
+                    except Exception as e:
+                        raise _stamp_error(e) from e
+                else:
+                    for where, text in placed.items():
+                        _place(page, text, where, fontsize, margin, _rgb(color))
+                    _mark_new_contents(doc, page, before, kind)
                 number += 1
             return _save(doc)
         finally:
@@ -1176,6 +1198,7 @@ def add_header_footer(data: bytes, texts: dict[str, str], fontsize: float = 9, m
 
 def add_page_numbers(data: bytes, text: str = "Pagina {pagina} di {totale}", position: str = "bottom-center",
                      fontsize: float = 10, margin_mm: float = 10.0, first_number: int = 1, **kw) -> bytes:
+    kw.setdefault("kind", "page_numbers")
     return add_header_footer(data, {position: text}, fontsize=fontsize, margin_mm=margin_mm,
                              first_number=first_number, **kw)
 
@@ -1627,7 +1650,8 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         return add_header_footer(data, {p.get("position", "bottom-center"): p.get("text", "")},
                                  float(p.get("fontsize", 10)), float(p.get("margin", 10.0)), "#000000", first,
                                  total, queue_total, False, bool(p.get("skip_first")),
-                                 bool(p.get("count_skipped", True)), True, values, check=ctx.check), protection
+                                 bool(p.get("count_skipped", True)), True, values, kind="page_numbers",
+                                 check=ctx.check), protection
     if a == "bates":
         out, _last = add_bates(data, int(plan.get("bates_start", p.get("start", 1))), p.get("prefix", ""),
                                int(p.get("digits", 6)), p.get("suffix", ""), p.get("position", "bottom-right"),
