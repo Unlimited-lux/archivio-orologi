@@ -1,0 +1,5 @@
+# Nessuna nuova dipendenza obbligatoria: il modulo usa PyMuPDF, PySide6, Pillow e numpy
+# già presenti in requirements.txt.
+# Facoltative:
+#   pillow-heif   — inserimento di immagini HEIC (PAG-08), se installato
+#   sane-utils    — pacchetto di sistema con `scanimage`, per l'acquisizione da scanner (PAG-10)
