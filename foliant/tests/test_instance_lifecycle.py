@@ -103,3 +103,29 @@ def test_closing_a_window_with_documents_returns_memory(qtbot, settings, sample_
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qtbot.wait(20)
     assert calls == [1]
+
+
+def test_instance_channel_is_always_in_a_private_folder(tmp_path, monkeypatch):
+    """Senza XDG_RUNTIME_DIR il canale non finisce nella /tmp condivisa (un altro utente potrebbe
+    occuparlo prima e ricevere i percorsi dei file): va nella cartella di runtime privata di Qt."""
+    import os
+    import stat
+
+    from foliant.ui import instance
+
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    name = instance.instance_name()
+    assert name and os.path.isabs(name)
+    folder = os.path.dirname(name)
+    assert os.stat(folder).st_uid == os.getuid() and not stat.S_IMODE(os.stat(folder).st_mode) & 0o077
+
+    shared = tmp_path / "condivisa"                 # cartella leggibile da tutti: non va usata
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(shared))
+    assert not instance.instance_name().startswith(str(shared))
+
+    private = tmp_path / "privata"
+    private.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(private))
+    assert instance.instance_name() == str(private / "foliant-instance")

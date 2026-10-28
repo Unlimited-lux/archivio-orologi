@@ -131,15 +131,16 @@ def main(argv: list[str] | None = None) -> int:
 
     # Istanza singola: se Foliant è già aperto gli si consegnano file e comandi e si esce.
     from .ui.instance import InstanceServer, instance_name, open_request, send_request
-    name = instance_name()
-    if send_request(name, options.request()):
+    name = instance_name()              # "" senza una cartella privata: ogni avvio fa da sé
+    if name and send_request(name, options.request()):
         return 0
-    server = InstanceServer(name, app)
-    # collegato prima di listen(): una richiesta che arriva mentre si aprono i file di questo avvio
-    # (domanda della password, avviso di errore: cicli di eventi annidati) non va persa
-    server.requestReceived.connect(lambda request: open_request(request, settings))
-    if not server.listen() and send_request(name, options.request()):
-        return 0                        # un'altra istanza è partita nel frattempo
+    if name:
+        server = InstanceServer(name, app)
+        # collegato prima di listen(): una richiesta che arriva mentre si aprono i file di questo
+        # avvio (domanda della password, avviso di errore: cicli di eventi annidati) non va persa
+        server.requestReceived.connect(lambda request: open_request(request, settings))
+        if not server.listen() and send_request(name, options.request()):
+            return 0                    # un'altra istanza è partita nel frattempo
 
     from .ui import theme
     from .ui.main_window import MainWindow, register_window
