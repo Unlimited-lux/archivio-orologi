@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -114,6 +115,14 @@ def protection_options(pdf: pymupdf.Document, password: str | None, auth_code: i
     return opts
 
 
+def _file_stamp(path) -> tuple | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
 def _security_handler(data: bytes) -> str | None:
     """Nome del gestore di sicurezza (/Encrypt /Filter) letto dai byte grezzi, se presente."""
     m = re.search(rb"/Encrypt\s+(\d+)\s+(\d+)\s+R", data)
@@ -191,6 +200,7 @@ class Document:
         self.path: Path | None = Path(path) if path else None
         self.password = password
         self._display_name = display_name
+        self.disk_stamp = _file_stamp(self.path) if self.path is not None else None
         self.lock = ENGINE_LOCK
         # Protezione del file all'apertura (vuoto se non cifrato) e opzioni di
         # salvataggio persistenti: per impostazione predefinita si mantiene la
@@ -317,7 +327,10 @@ class Document:
         if kind == CONTENT:
             self.version += 1
         for fn in list(self._listeners):
-            fn(self, kind)
+            try:
+                fn(self, kind)
+            except Exception:       # un osservatore difettoso non deve far fallire un'operazione riuscita
+                sys.excepthook(*sys.exc_info())
 
     # ---------------------------------------------------------------- modifiche
     @contextmanager
@@ -414,7 +427,7 @@ class Document:
             pymupdf.PDF_ENCRYPT_NONE, pymupdf.PDF_ENCRYPT_KEEP)
 
     def to_bytes(self, **options) -> bytes:
-        opts = {"garbage": 3, "deflate": True}
+        opts = {"garbage": 3, "deflate": True, "use_objstms": 1}   # flussi di oggetti: file più piccoli
         with self.lock:
             keep = (self.save_options == self.original_protection and self.original_protection
                     and (self._pdf.metadata or {}).get("encryption"))
@@ -461,7 +474,15 @@ class Document:
         atomic_write(target, data)
         self.path = target
         self._saved_state = self._state
+        self.disk_stamp = _file_stamp(target)
         self._notify(SAVED)
+
+    def disk_changed(self) -> bool:
+        """Il file su disco è cambiato (altro programma) dall'apertura o dall'ultimo salvataggio."""
+        if self.path is None or self.disk_stamp is None:
+            return False
+        now = _file_stamp(self.path)
+        return now is not None and now != self.disk_stamp
 
     def save_copy(self, path: str | os.PathLike, **options) -> None:
         """Salva una copia senza cambiare il file associato al documento."""

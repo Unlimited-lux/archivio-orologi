@@ -759,28 +759,39 @@ class MainWindow(QMainWindow):
             view.setFocus()
             QApplication.processEvents()
 
-    def close_view(self, view: DocumentView | None) -> bool:
+    def _ask_unsaved(self, docs: list) -> str | None:
+        """Un solo dialogo per uno o più documenti modificati: "save", "discard" o None (annulla)."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Modifiche non salvate"))
+        if len(docs) == 1:
+            box.setText(_("Salvare le modifiche a «{name}» prima di chiudere?").format(name=docs[0].display_name))
+            save = box.addButton(_("Salva"), QMessageBox.ButtonRole.AcceptRole)
+            discard = box.addButton(_("Non salvare"), QMessageBox.ButtonRole.DestructiveRole)
+        else:
+            box.setText(_("Questi documenti hanno modifiche non salvate:") + "\n\n"
+                        + "\n".join("• " + d.display_name for d in docs))
+            save = box.addButton(_("Salva tutti"), QMessageBox.ButtonRole.AcceptRole)
+            discard = box.addButton(_("Chiudi senza salvare"), QMessageBox.ButtonRole.DestructiveRole)
+        box.setInformativeText(_("Se non salvi, le modifiche andranno perse."))
+        box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(save)
+        box.exec()
+        clicked = box.clickedButton()
+        return "save" if clicked is save else "discard" if clicked is discard else None
+
+    def close_view(self, view: DocumentView | None, ask: bool = True) -> bool:
         if view is None:
             return True
         self.commit_pending_edits(view)
         doc = view.document
-        if doc.is_modified:
+        if doc.is_modified and ask:
             self.tabs.setCurrentWidget(view)
-            box = QMessageBox(self)
-            box.setIcon(QMessageBox.Icon.Warning)
-            box.setWindowTitle(_("Modifiche non salvate"))
-            box.setText(_("Salvare le modifiche a «{name}» prima di chiudere?").format(name=doc.display_name))
-            box.setInformativeText(_("Se non salvi, le modifiche andranno perse."))
-            save = box.addButton(_("Salva"), QMessageBox.ButtonRole.AcceptRole)
-            discard = box.addButton(_("Non salvare"), QMessageBox.ButtonRole.DestructiveRole)
-            box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
-            box.setDefaultButton(save)
-            box.exec()
-            clicked = box.clickedButton()
-            if clicked is save:
+            choice = self._ask_unsaved([doc])
+            if choice == "save":
                 if not self.save_view(view):
                     return False
-            elif clicked is not discard:
+            elif choice != "discard":
                 return False
         self.ctx.documentClosed.emit(view)
         if doc.path is not None:
@@ -802,6 +813,22 @@ class MainWindow(QMainWindow):
         self.commit_pending_edits(view)
         doc = view.document
         path = None
+        if not (save_as or doc.needs_save_as) and doc.disk_changed():
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle(_("File modificato da un altro programma"))
+            box.setText(_("«{name}» è stato modificato da un altro programma dopo l'apertura. "
+                          "Salvando lo sostituisci e quelle modifiche vanno perse.").format(name=doc.display_name))
+            overwrite = box.addButton(_("Sovrascrivi"), QMessageBox.ButtonRole.DestructiveRole)
+            other = box.addButton(_("Salva con nome…"), QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(other)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is other:
+                save_as = True
+            elif clicked is not overwrite:
+                return False
         if save_as or doc.needs_save_as:
             path = self.ctx.ask_save_path(_("Salva con nome"), doc.display_name, PDF_FILTER)
             if not path:
@@ -1046,10 +1073,23 @@ class MainWindow(QMainWindow):
                 m.button.setToolButtonStyle(style)
 
     def closeEvent(self, event) -> None:
-        for view in list(self.views()):
-            if not self.close_view(view):
+        views = list(self.views())
+        for view in views:
+            self.commit_pending_edits(view)
+        modified = [v for v in views if v.document.is_modified]
+        if modified:
+            # una sola domanda; nessuna scheda si chiude finché l'uscita non è confermata
+            choice = self._ask_unsaved([v.document for v in modified])
+            if choice is None:
                 event.ignore()
                 return
+            if choice == "save":
+                for view in modified:
+                    if not self.save_view(view):
+                        event.ignore()
+                        return
+        for view in views:
+            self.close_view(view, ask=False)
         self.settings.setValue("window/geometry", self.saveGeometry())
         if getattr(self, "_splitter_ready", False):
             self.settings.setValue("window/splitter", self.splitter.saveState())
