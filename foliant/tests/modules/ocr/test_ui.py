@@ -685,3 +685,162 @@ def test_pdf_solo_immagine(window, sample_pdf, monkeypatch):
     assert np.abs(before.astype(int) - after.astype(int)).mean() < 3
     view.document.undo()
     assert "Orologeria" in view.document.page_text(0)
+
+
+def test_dialogo_lingue_colonne_e_dimensioni(window, qtbot):
+    """Stato leggibile (colonna elastica + tooltip) e dimensioni sotto 1 MB non mostrate come «0 MB»."""
+    dlg = dialogs.LanguagesDialog(window)
+    dlg.resize(620, 520)
+    dlg.show()
+    qtbot.waitExposed(dlg)
+    t = dlg.table
+    from PySide6.QtWidgets import QHeaderView
+    assert t.horizontalHeader().sectionResizeMode(3) == QHeaderView.ResizeMode.Stretch
+    texts = [t.item(r, 3).text() for r in range(t.rowCount())]
+    assert all(t.item(r, 3).toolTip() == texts[r] for r in range(t.rowCount()))
+    assert not any(" 0 MB" in x for x in texts)
+    assert dialogs.size_label(0.4) == "< 1 MB" and dialogs.size_label(2.25) == "2.2 MB"
+    fm = t.fontMetrics()
+    longest = max(fm.horizontalAdvance(x) for x in texts)
+    assert t.columnWidth(3) + 40 >= longest or t.horizontalScrollBar().maximum() > 0
+
+
+def _wait_job(qtbot, ctl, view, timeout=120000):
+    qtbot.waitUntil(lambda: ctl.jobs.get(view) is None, timeout=timeout)
+
+
+def test_ocr_in_background_documento_consultabile(window, qtbot, scan_two):
+    """OCR-13: l'OCR lavora in background; durante il lavoro il documento si consulta e non cambia;
+    alla fine il risultato è un solo passo di annulla."""
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    job = ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    assert job is not None and job.bar.isVisible()
+    view.go_to_page(1)                                   # navigazione libera
+    assert not view.document.is_modified
+    assert ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0], preview=False) is None
+    _wait_job(qtbot, ctl, view)
+    assert "compravendita" in view.document.page_text(0) and view.document.page_text(1).strip()
+    view.document.undo()
+    assert view.document.page_text(0).strip() == "" and view.document.page_text(1).strip() == ""
+
+
+def test_ocr_in_background_documento_modificato_nel_frattempo(window, qtbot, scan_two, monkeypatch):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    asked = []
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or True)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    with view.document.change("ruota") as pdf:          # modifica mentre l'OCR lavora
+        pdf[1].set_rotation(90)
+    _wait_job(qtbot, ctl, view)
+    assert asked and "2" in asked[0]
+    assert "compravendita" in view.document.page_text(0)
+    assert view.document.page_text(1).strip() == ""      # pagina cambiata: non toccata
+    from foliant.api import ENGINE_LOCK
+    with ENGINE_LOCK:
+        assert view.document.pdf[1].rotation == 90
+
+
+def test_ocr_in_background_annullato_o_chiuso(window, qtbot, scan_two, monkeypatch):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    monkeypatch.setattr(ctl, "ask_keep_partial", lambda partial: False)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    ctl.jobs[view].bar.btn_cancel.click()
+    _wait_job(qtbot, ctl, view)
+    assert not view.document.is_modified
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    window.close_view(view)                              # chiusura durante il lavoro: nessun errore
+    qtbot.waitUntil(lambda: not ctl.jobs, timeout=120000)
+
+
+def test_menu_contestuale_riconosci_testo_nell_immagine(window, tmp_path, monkeypatch):
+    """OCR-11: su un PDF nativo con una schermata, il menu dell'immagine riconosce e aggiunge il testo
+    ricercabile solo lì; un Annulla ripristina."""
+    from PySide6.QtWidgets import QMenu
+    from foliant.api import PageEvent
+    import cv2
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 60), "Documento digitale con una schermata", fontsize=12)
+    img = scan_image(lines=FRASI[:2], dpi=200, size=(595, 120), top=40)
+    ok, buf = cv2.imencode(".png", img)
+    page.insert_image(pymupdf.Rect(40, 100, 555, 220), stream=buf.tobytes())
+    path = tmp_path / "nativo.pdf"
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    ctl = ocr_controller()
+    menu = QMenu()
+    pe = PageEvent(page=0, point=pymupdf.Point(200, 150), pos=QPointF(0, 0), button=Qt.MouseButton.RightButton,
+                   buttons=Qt.MouseButton.RightButton, modifiers=Qt.KeyboardModifier.NoModifier)
+    ctl.menu_provider(view, pe, menu)
+    acts = [a for a in menu.actions() if "immagine" in a.text()]
+    assert acts
+    def fake_exec(dlg):
+        dlg.action_buttons["Aggiungi come testo ricercabile"].click()
+        return 0
+    monkeypatch.setattr(dialogs.TextDialog, "exec", fake_exec)
+    acts[0].trigger()
+    text = view.document.page_text(0)
+    assert "compravendita" in text and text.count("Documento digitale") == 1
+    view.document.undo()
+    assert "compravendita" not in view.document.page_text(0)
+    menu2 = QMenu()
+    pe.point = pymupdf.Point(300, 400)
+    ctl.menu_provider(view, pe, menu2)
+    assert not menu2.actions()
+
+
+def test_riprendi_lotto_interrotto(window, tmp_path, monkeypatch):
+    """OCR-15: un lotto interrotto si riprende elaborando solo i file non completati."""
+    from foliant.api import OperationCancelled
+    from foliant.modules.ocr import batch
+    ctl = ocr_controller()
+    monkeypatch.setattr(dialogs.ReportDialog, "open", lambda d: None)
+    src = tmp_path / "lotto"
+    src.mkdir()
+    for n in range(3):
+        image_pdf(src / f"s{n}.pdf", [scan_image(lines=[f"Documento numero {n} del lotto"], dpi=120)], dpi=120)
+    real = batch.process_file
+    calls = []
+
+    def interrupt(item, *a, **k):
+        calls.append(os.path.basename(item.path))
+        if len(calls) == 2:
+            raise OperationCancelled()
+        return real(item, *a, **k)
+    monkeypatch.setattr(batch, "process_file", interrupt)
+    ctl.run_batch([str(src)], engine.SEARCHABLE, ["ita"])
+    assert (src / "s0_ocr.pdf").exists() and not (src / "s1_ocr.pdf").exists()
+    pending = ctl.pending_batch()
+    assert pending and [os.path.basename(f) for f in pending["files"]] == ["s1.pdf", "s2.pdf"]
+    assert ctl.actions["resume"].isEnabled()
+    monkeypatch.setattr(batch, "process_file", real)
+    items = ctl.resume_batch()
+    assert [os.path.basename(i.path) for i in items] == ["s1.pdf", "s2.pdf"]
+    assert (src / "s1_ocr.pdf").exists() and (src / "s2_ocr.pdf").exists() and not (src / "s0_ocr (2).pdf").exists()
+    assert ctl.pending_batch() is None and not ctl.actions["resume"].isEnabled()
+
+
+@pytest.mark.parametrize("keep", [True, False])
+def test_dati_di_revisione_nel_file(window, scan_two, tmp_path, monkeypatch, keep):
+    """OCR-12: con l'opzione attiva i sospetti non risolti ritornano dopo salvataggio e riapertura;
+    con l'opzione disattiva il file salvato non contiene dati di revisione."""
+    from foliant.modules.ocr import tess
+    monkeypatch.setattr(tess, "LOW_CONFIDENCE", 97.0)          # rende «sospette» molte parole
+    ctl = ocr_controller()
+    ctl.settings().setValue("ocr/keep_review", "true" if keep else "false")
+    view = window.open_path(scan_two)
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    before = sorted((w.text, round(r.x0)) for r, w in ctl.state(view).placed[0] if w.low)
+    assert before
+    out = tmp_path / "salvato.pdf"
+    view.document.save(str(out))
+    window.close_view(view)
+    with pymupdf.open(str(out)) as d:
+        has = d.xref_get_key(d[0].xref, "PieceInfo")[0] != "null"
+    assert has == keep
+    view2 = window.open_path(str(out))
+    after = sorted((w.text, round(r.x0)) for r, w in ctl.state(view2).placed.get(0, []) if w.low)
+    assert after == (before if keep else [])
