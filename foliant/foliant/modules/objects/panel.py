@@ -8,10 +8,24 @@ from PySide6.QtWidgets import (
     QCheckBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QSlider, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, theme
 
 from . import engine as E
 from .content import IMAGE, PATH
+
+
+def object_skew(obj) -> float:
+    """Inclinazione (gradi): scostamento dall'angolo retto tra i lati dell'oggetto."""
+    import math
+    q = obj.quad
+    ux, uy = q.ur.x - q.ul.x, q.ur.y - q.ul.y
+    vx, vy = q.ll.x - q.ul.x, q.ll.y - q.ul.y
+    nu, nv = math.hypot(ux, uy), math.hypot(vx, vy)
+    if nu == 0 or nv == 0:
+        return 0.0
+    cos = max(-1.0, min(1.0, (ux * vx + uy * vy) / (nu * nv)))
+    val = 90.0 - math.degrees(math.acos(cos))
+    return 0.0 if abs(val) < 0.05 else val
 
 
 def _spin(lo: float, hi: float, suffix: str = " pt", decimals: int = 2) -> QDoubleSpinBox:
@@ -50,12 +64,40 @@ class ObjectPanel(QWidget):
         self.opacity.setSuffix(" %")
         self.opacity.setKeyboardTracking(False)
         self.opacity.setSpecialValueText(_("misto"))
+        # punto di riferimento per X/Y e per il ridimensionamento (griglia 3×3)
+        from PySide6.QtWidgets import QButtonGroup, QGridLayout, QToolButton
+        self.ref = (0.0, 0.0)
+        refw = QWidget()
+        grid = QGridLayout(refw)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        self.ref_group = QButtonGroup(self)
+        self.ref_buttons = {}
+        for row in range(3):
+            for col in range(3):
+                b = QToolButton()
+                b.setCheckable(True)
+                b.setFixedSize(16, 16)
+                fx, fy = col / 2, row / 2
+                b.setToolTip(_("Punto di riferimento"))
+                b.setAccessibleName(_("Punto di riferimento {c},{r}").format(c=col + 1, r=row + 1))
+                b.clicked.connect(lambda _c=False, f=(fx, fy): self.set_reference(f))
+                self.ref_group.addButton(b)
+                self.ref_buttons[(fx, fy)] = b
+                grid.addWidget(b, row, col)
+        self.ref_buttons[(0.0, 0.0)].setChecked(True)
+        refw.setFixedSize(3 * 16 + 2 * 2, 3 * 16 + 2 * 2)
+        self._style_reference()
+        theme.on_change(self._style_reference)
+        form.addRow(_("Riferimento:"), refw)
         form.addRow("X:", self.x)
         form.addRow("Y:", self.y)
         form.addRow(_("Larghezza:"), self.w)
         form.addRow(_("Altezza:"), self.h)
         form.addRow("", self.lock)
         form.addRow(_("Angolo:"), self.angle)
+        self.skew = QLabel("0 °")
+        form.addRow(_("Inclinazione:"), self.skew)
         form.addRow(_("Opacità:"), self.opacity)
         lay.addLayout(form)
         self.details = QLabel()
@@ -69,6 +111,21 @@ class ObjectPanel(QWidget):
         self.h.editingFinished.connect(lambda: self._apply_size("h"))
         self.angle.editingFinished.connect(self._apply_angle)
         self.opacity.editingFinished.connect(self._apply_opacity)
+        self.refresh()
+
+    def _style_reference(self) -> None:
+        sheet = (f"QToolButton {{ border: 1px solid {theme.hex_color('border')}; border-radius: 3px;"
+                 f" background: {theme.hex_color('surface')}; }}"
+                 f"QToolButton:checked {{ background: {theme.hex_color('accent')};"
+                 f" border-color: {theme.hex_color('accent')}; }}")
+        for b in self.ref_buttons.values():
+            b.setStyleSheet(sheet)
+
+    def set_reference(self, ref: tuple) -> None:
+        self.ref = (float(ref[0]), float(ref[1]))
+        b = self.ref_buttons.get(self.ref)
+        if b is not None and not b.isChecked():
+            b.setChecked(True)
         self.refresh()
 
     def set_view(self, view) -> None:
@@ -102,12 +159,14 @@ class ObjectPanel(QWidget):
             else:
                 self.title.setText(_("{n} oggetti selezionati").format(n=len(objs)))
             r = self._view_rect(view, objs)
-            self.x.setValue(r.x0)
-            self.y.setValue(r.y0)
+            fx, fy = self.ref
+            self.x.setValue(r.x0 + fx * r.width)
+            self.y.setValue(r.y0 + fy * r.height)
             self.w.setValue(max(1, r.width))
             self.h.setValue(max(1, r.height))
             self.angle.setEnabled(len(objs) == 1)
             self.angle.setValue(E.object_angle(objs[0]) if len(objs) == 1 else 0)
+            self.skew.setText(f"{object_skew(objs[0]):.1f} °" if len(objs) == 1 else "—")
             alphas = {round(o.opacity * 100) for o in objs}
             self.opacity.setValue(next(iter(alphas)) if len(alphas) == 1 else -1)  # -1 = «misto»
             self.details.setText(self._details(view, objs))
@@ -169,7 +228,9 @@ class ObjectPanel(QWidget):
         if not objs:
             return
         r = self._view_rect(view, objs)
-        dx, dy = self.x.value() - r.x0, self.y.value() - r.y0
+        fx, fy = self.ref
+        dx = self.x.value() - (r.x0 + fx * r.width)
+        dy = self.y.value() - (r.y0 + fy * r.height)
         if abs(dx) < 1e-3 and abs(dy) < 1e-3:
             return
         self._translate_view(view, dx, dy)
@@ -196,7 +257,10 @@ class ObjectPanel(QWidget):
         if w < E.MIN_SIZE or h < E.MIN_SIZE:
             self.refresh()
             return
-        self._apply_rect(pymupdf.Rect(r.x0, r.y0, r.x0 + w, r.y0 + h))
+        fx, fy = self.ref
+        ax, ay = r.x0 + fx * r.width, r.y0 + fy * r.height   # il punto di riferimento resta fermo
+        x0, y0 = ax - fx * w, ay - fy * h
+        self._apply_rect(pymupdf.Rect(x0, y0, x0 + w, y0 + h))
 
     def _apply_angle(self) -> None:
         if self._updating:

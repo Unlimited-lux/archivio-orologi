@@ -441,3 +441,48 @@ def test_optimize_document_images(ui, tmp_path, monkeypatch):
     assert view.document.undo_label == "Ottimizza le immagini del documento"
     view.document.undo()
     assert objs(view, 0)[0].width == 600
+
+
+def test_panel_reference_point_and_skew(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 150, 120)]))
+    ui.c.set_selection(view, 0, [0])
+    panel = O._state["panel"]
+    panel.set_reference((1.0, 1.0))      # angolo in basso a destra
+    assert abs(panel.x.value() - 150) < 0.01 and abs(panel.y.value() - 120) < 0.01
+    panel.lock.setChecked(True)
+    panel.w.setValue(200)
+    panel.w.editingFinished.emit()
+    r = objs(view)[0].rect
+    assert abs(r.x1 - 150) < 0.01 and abs(r.y1 - 120) < 0.01 and abs(r.width - 200) < 0.01
+    panel.set_reference((0.5, 0.5))
+    panel.x.setValue(300)
+    panel.x.editingFinished.emit()
+    r = objs(view)[0].rect
+    assert abs((r.x0 + r.x1) / 2 - 300) < 0.01
+    assert panel.skew.text().startswith("0.0")
+    from foliant.modules.objects import advanced as A
+    with view.document.change("incl") as pdf:
+        A.apply_transform(pdf, 0, [0], skew_x=20)
+    ui.c.set_selection(view, 0, [0])
+    assert abs(abs(float(panel.skew.text().split()[0])) - 20) < 0.5
+    panel.set_reference((0.0, 0.0))
+
+
+def test_user_guides_snap_and_persist(ui, tmp_path):
+    path = make_doc(tmp_path / "g.pdf", images=[(300, 400, 350, 450)])
+    view = ui.open(path)
+    ui.c.smart_guides = True
+    ui.c.add_guide(view, "x", 100.0)
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                     vpos(view, 0, 320, 420))
+    drag(view, 0, (320, 420), (121.5, 520))
+    assert abs(objs(view)[0].rect.x0 - 100) < 0.01
+    view.flush_rendering()
+    assert not ui.window.grab().isNull()
+    # le guide si ritrovano riaprendo lo stesso file (preferenze locali, non nel PDF)
+    view._objects_guides = None
+    assert ui.c.guides(view)["x"] == [100.0]
+    assert view.document.undo_label == "Sposta oggetti"   # aggiungere guide non crea passi nel PDF
+    ui.c.clear_guides(view)
+    view._objects_guides = None
+    assert ui.c.guides(view)["x"] == []

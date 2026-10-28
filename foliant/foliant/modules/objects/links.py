@@ -368,19 +368,35 @@ def create_link(pdf: pymupdf.Document, page_index: int, rect: pymupdf.Rect, targ
 
 
 def link_xrefs(pdf: pymupdf.Document, page_index: int) -> list[int]:
-    page = pdf[page_index]
+    try:
+        page = pdf[page_index]
+    except Exception:
+        return []
     out = []
+    n = pdf.xref_length()
     for annot_xref in _annot_xrefs(pdf, page):
-        if pdf.xref_get_key(annot_xref, "Subtype")[1] == "/Link":
-            out.append(annot_xref)
+        if not 0 < annot_xref < n:
+            continue   # PDF danneggiato: riferimento fuori dalla tabella
+        try:
+            if pdf.xref_get_key(annot_xref, "Subtype")[1] == "/Link":
+                out.append(annot_xref)
+        except Exception:
+            continue
     return out
 
 
 def _annot_xrefs(pdf: pymupdf.Document, page: pymupdf.Page) -> list[int]:
-    typ, val = pdf.xref_get_key(page.xref, "Annots")
-    if typ == "xref":
-        val = pdf.xref_object(int(val.split()[0]), compressed=True)
-    elif typ != "array":
+    """xref delle annotazioni della pagina; [] se la pagina è danneggiata."""
+    try:
+        xref = page.xref
+        if not 0 < xref < pdf.xref_length():
+            return []
+        typ, val = pdf.xref_get_key(xref, "Annots")
+        if typ == "xref":
+            val = pdf.xref_object(int(val.split()[0]), compressed=True)
+        elif typ != "array":
+            return []
+    except Exception:
         return []
     return [int(x) for x in re.findall(r"(\d+)\s+0\s+R", val)]
 
@@ -540,6 +556,7 @@ def read_link(pdf: pymupdf.Document, page_index: int, xref: int) -> LinkInfo:
 
 
 def page_links(pdf: pymupdf.Document, page_index: int) -> list[LinkInfo]:
+    """Collegamenti della pagina (lista vuota se la pagina è danneggiata)."""
     out = []
     for x in link_xrefs(pdf, page_index):
         try:

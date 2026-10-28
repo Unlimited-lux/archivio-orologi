@@ -201,6 +201,11 @@ def register(ctx: Context) -> None:
     acts["grid_step"] = ctx.action(_("Passo della griglia…"), None, ask_step, requires_document=False)
     for key in ("grid", "grid_snap", "grid_step"):
         more.addAction(acts[key])
+    acts["guide_v"] = ctx.action(_("Aggiungi guida verticale…"), None, lambda: c.ask_add_guide(ctx.current_view(), "x"))
+    acts["guide_h"] = ctx.action(_("Aggiungi guida orizzontale…"), None, lambda: c.ask_add_guide(ctx.current_view(), "y"))
+    acts["guides_clear"] = ctx.action(_("Rimuovi le guide"), None, lambda: c.clear_guides(ctx.current_view()))
+    for key in ("guide_v", "guide_h", "guides_clear"):
+        more.addAction(acts[key])
     more.addSeparator()
     from . import extras
     capture_tool = extras.CaptureTool(ctx, c)
