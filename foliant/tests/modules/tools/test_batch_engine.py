@@ -381,7 +381,7 @@ def test_watermark_marked_and_removable(tmp_path):
     original = open(a, "rb").read()
     marked = be.add_page_numbers(be.add_watermark(original, "RISERVATO"))
     doc = pymupdf.open(stream=marked)
-    assert b"/Artifact" in b"".join(doc.xref_stream(x) for x in doc[0].get_contents())
+    assert b"/FolStamp_watermark_" in b"".join(doc.xref_stream(x) for x in doc[0].get_contents())
     doc.close()
     cleaned, n = be.remove_marks(marked, {"watermark"})
     assert n == 2
@@ -963,3 +963,42 @@ def test_merge_keeps_original_bookmarks_nested(tmp_path):
     toc = pymupdf.open(str(tmp_path / "out" / "Unione.pdf")).get_toc()
     assert toc == [[1, "contratto", 1], [2, "Premesse", 1], [2, "Clausole", 2], [3, "Pagamento", 3],
                    [1, "allegato", 4]]
+
+
+
+def test_watermark_shares_marking_with_pages_module(tmp_path):
+    """BAT-12 / PAG-36: le filigrane in blocco e quelle di Pagine si sostituiscono e si rimuovono a vicenda."""
+    from foliant.modules.pages import stamp
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    doc = pymupdf.open(a)
+    stamp.add_watermark(doc, None, text="UNLIMITED")
+    from_pages = doc.tobytes()
+    doc.close()
+    replaced = be.add_watermark(from_pages, "UNLIMITED", replace=True)
+    text = pymupdf.open(stream=replaced, filetype="pdf").load_page(0).get_text()
+    assert text.count("UNLIMITED") == 1
+    # filigrana messa in blocco, rimossa dal modulo Pagine
+    batch = be.add_watermark(open(a, "rb").read(), "RISERVATO")
+    doc = pymupdf.open(stream=batch, filetype="pdf")
+    assert stamp.list_watermarks(doc) == {0: ["watermark"], 1: ["watermark"]}
+    assert stamp.remove_watermarks(doc) == 2
+    assert "RISERVATO" not in doc[0].get_text()
+    # anche lo sfondo a colore e i Bates usano la marcatura comune
+    marked = be.add_bates(be.add_background(open(a, "rb").read(), color="#EEEEEE"), 1, "X-")[0]
+    doc = pymupdf.open(stream=marked, filetype="pdf")
+    assert sorted(stamp.list_watermarks(doc)[0]) == ["background", "bates"]
+
+
+def test_legacy_marks_still_removed(tmp_path):
+    """I file prodotti prima della marcatura comune restano ripulibili."""
+    a = mk(tmp_path / "in" / "a.pdf", pages=1)
+    with be.ENGINE_LOCK:
+        doc = pymupdf.open(a)
+        page = doc[0]
+        before = page.get_contents()
+        page.insert_text((72, 400), "VECCHIA", fontsize=40)
+        be._mark_new_contents(doc, page, before, "watermark")
+        legacy = doc.tobytes()
+    out = be.add_watermark(legacy, "NUOVA", replace=True)
+    t = pymupdf.open(stream=out, filetype="pdf").load_page(0).get_text()
+    assert "NUOVA" in t and "VECCHIA" not in t

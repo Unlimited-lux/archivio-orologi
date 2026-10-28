@@ -916,12 +916,40 @@ def _remove_marks_page(doc: pymupdf.Document, page: pymupdf.Page, kinds: set[str
     return removed
 
 
+def _stamp():
+    """Timbri del modulo Pagine (PAG-36): stessa marcatura per le operazioni singole e in blocco."""
+    try:
+        from foliant.modules.pages import stamp
+    except Exception:
+        return None
+    return stamp
+
+
+_STAMP_KINDS = {"watermark": ("watermark",), "background": ("background",),
+                "header_footer": ("headerfooter", "numbers"), "bates": ("bates",)}
+
+
+def _remove_stamps(doc: pymupdf.Document, kinds) -> int:
+    st = _stamp()
+    names = [k2 for k in kinds for k2 in _STAMP_KINDS.get(k, ())]
+    if st is None or not names:
+        return 0
+    try:
+        return st.remove_watermarks(doc, None, names)
+    except Exception:
+        return 0
+
+
+def _stamp_error(e: Exception) -> BatchError:
+    return BatchError("STM-01", str(e))
+
+
 def remove_marks(data: bytes, kinds: set[str] | list[str], check=None) -> tuple[bytes, int]:
     kinds = set(kinds)
     with ENGINE_LOCK:
         doc = _open(data)
         try:
-            n = 0
+            n = _remove_stamps(doc, kinds)
             for page in doc:
                 n += _remove_marks_page(doc, page, kinds)
             return (_save(doc) if n else data), n
@@ -995,13 +1023,29 @@ def _expand(text: str, values: dict) -> str:
 def add_watermark(data: bytes, text: str, fontsize: int = 60, opacity: int = 30, rotation: int = 45,
                   color: str = "#C00000", pages: str = "", replace: bool = True, name: str = "", check=None) -> bytes:
     text = _expand(text, {"nome": name})
+    st = _stamp()
     with ENGINE_LOCK:
         doc = _open(data)
         try:
+            selected, _oor = parse_pages(pages, doc.page_count)
+            if st is not None:
+                if replace:
+                    _remove_stamps(doc, {"watermark"})
+                    for page in doc:
+                        _remove_marks_page(doc, page, {"watermark"})
+                if selected and text.strip():
+                    if check:
+                        check()
+                    try:
+                        st.add_watermark(doc, selected, text=text, font_size=fontsize, color=_rgb(color),
+                                         opacity=max(0.01, min(1.0, opacity / 100.0)), rotation=rotation,
+                                         position="center")
+                    except Exception as e:
+                        raise _stamp_error(e) from e
+                return _save(doc)
             if replace:
                 for page in doc:
                     _remove_marks_page(doc, page, {"watermark"})
-            selected, _oor = parse_pages(pages, doc.page_count)
             for pno in selected:
                 if check:
                     check()
@@ -1009,8 +1053,6 @@ def add_watermark(data: bytes, text: str, fontsize: int = 60, opacity: int = 30,
                 before = page.get_contents()
                 r = page.rect   # pagina visualizzata (rotazione inclusa)
                 width = pymupdf.get_text_length(text, fontname="helv", fontsize=fontsize)
-                # posizioni calcolate sulla pagina visualizzata e riportate alle coordinate del motore,
-                # così la filigrana resta centrata e diritta anche sulle pagine ruotate
                 derot = page.derotation_matrix
                 center = pymupdf.Point(r.width / 2, r.height / 2) * derot
                 start = pymupdf.Point(r.width / 2 - width / 2, r.height / 2 + fontsize * 0.35) * derot
@@ -1036,9 +1078,18 @@ def add_background(data: bytes, color: str = "#FFF8E1", file: str = "", first_pa
         doc = _open(data)
         try:
             if replace:
+                _remove_stamps(doc, {"background"})
                 for page in doc:
                     _remove_marks_page(doc, page, {"background"})
             selected, _oor = parse_pages(pages, doc.page_count)
+            st = _stamp()
+            if src is None and st is not None:
+                if selected:
+                    try:
+                        st.add_background(doc, selected, color=_rgb(color))
+                    except Exception as e:
+                        raise _stamp_error(e) from e
+                return _save(doc)
             for k, pno in enumerate(selected):
                 if check:
                     check()
@@ -1141,8 +1192,19 @@ def add_bates(data: bytes, start: int = 1, prefix: str = "", digits: int = 6, su
     with ENGINE_LOCK:
         doc = _open(data)
         try:
+            _remove_stamps(doc, {"bates"})
             for page in doc:
                 _remove_marks_page(doc, page, {"bates"})
+            st = _stamp()
+            if st is not None and not box and doc.page_count:
+                if check:
+                    check()
+                try:
+                    st.add_bates(doc, None, prefix=prefix, suffix=suffix, start=start, digits=digits,
+                                 position=position, margin=margin, font_size=fontsize)
+                except Exception as e:
+                    raise _stamp_error(e) from e
+                return _save(doc), start + doc.page_count - 1
             n = start
             for page in doc:
                 if check:
