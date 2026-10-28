@@ -863,6 +863,51 @@ class Controller:
         elif act is not None:
             act.trigger()   # lo strumento chiede le sue conferme come nell'uso manuale
 
+    # ---------------------------------------------------------------- contratti (AI-28)
+    def open_contracts(self):
+        from foliant.api import Document
+
+        from .contracts_view import ContractsDialog
+        from .tasks_library import BUILTIN
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+        view = self.ctx.current_view()
+        doc = view.document if view is not None else None
+
+        def scope_factory():
+            if doc is None or doc.closed:
+                self.ctx.error(_("Contratti"), _("Apri il contratto da esaminare."))
+                return None
+            if not content.extraction_allowed(doc):
+                self.ctx.error(_("Contratti"), content.blocked_reason(doc.pdf))
+                return None
+            return engine.build_scope(doc.pdf, engine.DOCUMENT, cache=self.services.cache,
+                                      fingerprint=content.content_fingerprint(doc.pdf))
+
+        def go_to(page):
+            if view is not None and not doc.closed and 0 <= page < view.page_count:
+                view.go_to_page(page)
+
+        def prepare_comm(source_text):
+            # AI-31: comunicazione al cliente a partire dalle clausole critiche
+            task = next(t for t in BUILTIN if t.id == "customer-reply")
+            dlg.accept()
+            self.ctx.set_mode("ia")
+            if view is not None:
+                self.ctx.show_properties("ia")
+            panel.run_template(task, {"argomento": _("esito della revisione del contratto:") + "\n" + source_text},
+                               "document" if doc is not None else "none")
+
+        dlg = ContractsDialog(self._run, scope_factory, doc, ask_save_path=self.ctx.ask_save_path,
+                              open_document=lambda data: self.ctx.open_document(
+                                  Document.from_bytes(data, display_name=_("Contratto.pdf"))),
+                              go_to=go_to, prepare_comm=prepare_comm,
+                              confirm=lambda t, m: self.ctx.confirm(t, m), author=panel._author(),
+                              parent=self.ctx.window)
+        self.exec_dialog(dlg)
+        return dlg
+
     # ---------------------------------------------------------------- scheda prodotto (AI-30)
     def open_product_sheet(self):
         from foliant.api import Document
@@ -1195,6 +1240,7 @@ def register(ctx, *, provider_factory=None) -> Services:
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
     a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_contracts = act(_("Contratti"), "scale", lambda: controller.open_contracts(), requires=False)
     a_sheet = act(_("Scheda prodotto"), "tag", lambda: controller.open_product_sheet())
     a_rank = act(_("Confronta e classifica"), "list-ordered", lambda: controller.open_ranking(), requires=False)
     a_gfx = act(_("Genera elemento grafico"), "image-plus", lambda: controller.generate_graphic())
@@ -1218,7 +1264,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
                             a_section, a_sem, a_cmd, a_docx, a_sheet]
-    services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank]
+    services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank, a_contracts]
     services.local_actions = [a_pages, a_gfx]   # la generazione spiega da sé se manca il modello   # funziona anche senza profilo (controlli locali)
     for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
         mode.add_action(a)
@@ -1232,7 +1278,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     more.setAutoRaise(True)
     more_menu = QMenu(more)
-    for group in ((a_trpdf, a_out, a_extract, a_sheet, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_tasks, a_write, a_bib, a_cmd),
+    for group in ((a_trpdf, a_out, a_extract, a_sheet, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_contracts, a_tasks, a_write, a_bib, a_cmd),
                   (a_ops, a_log)):
         for a in group:
             more_menu.addAction(a)
