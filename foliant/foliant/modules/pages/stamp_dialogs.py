@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.i18n import pgettext
+from foliant.i18n import format_date
 from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, _, icon, theme
 
@@ -1582,6 +1583,8 @@ class HeaderFooterDialog(StampDialog):
         self.date_format = QComboBox()
         self.date_format.setEditable(True)
         today = _dt.date.today()
+        self.date_format.addItem(_("Come la lingua"))
+        self.date_format.setItemData(0, format_date(today), Qt.ItemDataRole.ToolTipRole)
         for fmt in self.DATE_FORMATS:
             self.date_format.addItem(fmt)
             self.date_format.setItemData(self.date_format.count() - 1, today.strftime(fmt),
@@ -1686,7 +1689,7 @@ class HeaderFooterDialog(StampDialog):
                          "first": dict(self.variants["first"]) if self.first_diff.isChecked() else None},
             "margin": self.margin.value() * MM, "font": self.font.currentData(),
             "font_size": self.font_size.value(), "color": list(self.color.color()),
-            "date_format": self.date_format.currentText() or None, "opacity": self.opacity.value(),
+            "date_format": self._date_format_value(), "opacity": self.opacity.value(),
             "underline": self.underline.isChecked(), "logo": self.logo.path() or None,
             "logo_position": self.logo_position.currentData(), "logo_height": self.logo_height.value() * MM,
             "visibility": self.visibility.value(),
@@ -1709,6 +1712,8 @@ class HeaderFooterDialog(StampDialog):
             self.color.set_color(p["color"])
         if p.get("date_format"):
             self.date_format.setEditText(p["date_format"])
+        else:
+            self.date_format.setCurrentIndex(0)
         if p.get("opacity"):
             self.opacity.set_value(p["opacity"])
         self.underline.setChecked(bool(p.get("underline")))
@@ -1785,9 +1790,17 @@ class HeaderFooterDialog(StampDialog):
             self.save_template(name)
 
     # -- comune --------------------------------------------------------------
+    def _date_format_value(self) -> str | None:
+        """None = formato della lingua (format_date del nucleo)."""
+        text = self.date_format.currentText()
+        return None if not text or text == _("Come la lingua") else text
+
     def _date_text(self) -> str | None:
+        fmt = self._date_format_value()
+        if fmt is None:
+            return format_date(_dt.date.today())
         try:
-            return _dt.date.today().strftime(self.date_format.currentText() or "%d/%m/%Y")
+            return _dt.date.today().strftime(fmt)
         except (ValueError, TypeError):
             return None
 
@@ -2083,6 +2096,7 @@ def open_page_labels_dialog(ctx: Context, view: DocumentView, selected: list[int
 
 
 TRANSLATIONS: dict[str, str] = {
+    "Come la lingua": "As the language",
     '(nessuno)': '(none)',
     'A schermo e in stampa': 'On screen and in print',
     'Adatta alla pagina': 'Fit to page',

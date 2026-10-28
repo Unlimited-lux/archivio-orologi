@@ -110,8 +110,10 @@ def validate_template(template: str, allowed: set[str] | None = None) -> str | N
 
 
 def format_date(fmt: str | None, when: _dt.datetime) -> str:
+    """Data nel formato indicato; senza formato quello della lingua (formatter comune del nucleo)."""
     if not fmt:
-        return when.strftime("%d/%m/%Y")
+        from foliant.i18n import format_date as locale_date
+        return locale_date(when)
     if fmt.upper() == "ISO":
         return when.isoformat(timespec="seconds")
     out = ""
@@ -159,7 +161,8 @@ def render_template(template: str, values: dict, *, now: _dt.datetime | None = N
                 break
         if isinstance(val, _dt.datetime):
             if fmt is None and ALIASES.get(names[0], names[0]) == "ora":
-                return val.strftime("%H:%M")
+                from foliant.i18n import format_date as locale_date
+                return locale_date(val, time=True).split(" ", 1)[1]
             return format_date(fmt, val)
         if val is None:
             return ""
