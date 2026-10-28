@@ -623,3 +623,22 @@ def test_keyboard_placement_and_arrows(window, qtbot, sample_pdf):
     qtbot.keyClick(view, Qt.Key.Key_Delete)
     with view.document.lock:
         assert g.placed_signatures(view.document.pdf, view.current_page) == []
+
+
+def test_robust_with_damaged_and_encrypted(window, monkeypatch, tmp_path, encrypted_pdf, id_a):
+    """Documenti cifrati o con firma danneggiata: nessun crash, esito chiaro."""
+    view = window.open_path(encrypted_pdf, "segreta")
+    assert view is not None
+    st = _ctl(window).state(view)
+    assert st.error == "" and st.statuses == []
+    from tests.conftest import make_pdf
+    data = digital.sign_pdf(Path(make_pdf(tmp_path / "d.pdf", pages=1)).read_bytes(), id_a[2],
+                            digital.SignOptions())
+    i = data.rfind(b"/Contents <")
+    broken = data[:i + 20] + b"ZZ" + data[i + 22:]        # CMS corrotto
+    p = tmp_path / "rotto.pdf"
+    p.write_bytes(broken)
+    view2 = window.open_path(str(p))
+    st2 = _ctl(window).state(view2)
+    assert st2.statuses and st2.statuses[0].status in ("non valida", "indeterminata") or st2.error
+    _panel(window).refresh()
