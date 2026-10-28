@@ -436,7 +436,13 @@ class Document:
             return False
         target = os.path.realpath(self.path)
         if os.path.exists(target):
-            return not os.access(target, os.W_OK)
+            # anche senza alcun bit di scrittura (chmod 444): l'utente l'ha voluto in sola
+            # lettura, pure se l'amministratore potrebbe scriverlo comunque
+            try:
+                no_write_bits = not os.stat(target).st_mode & 0o222
+            except OSError:
+                no_write_bits = False
+            return no_write_bits or not os.access(target, os.W_OK)
         return not os.access(os.path.dirname(target) or ".", os.W_OK)
 
     @property
