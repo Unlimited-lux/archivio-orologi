@@ -16,7 +16,7 @@ from foliant.api import ENGINE_LOCK, _
 from .common import check
 from .extract import (
     ImageItem, PageContent, Para, TableItem, classify_page, clean_xml_chars, layout_text, normalize_text,
-    ocr_textpage, SCANNED,
+    ocr_textpage, textpage_get, SCANNED,
 )
 from .export_office import _image_for_office, analyze_document
 
@@ -279,9 +279,8 @@ def write_xml(work: pymupdf.Document, path: str, job) -> None:
                 tp = None
                 if classify_page(page) == SCANNED and job.ocr != "never":
                     tp = ocr_textpage(page, job.language)
-                raw = page.get_text("rawdict", flags=pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP,
-                                    textpage=tp) if tp else page.get_text(
-                    "rawdict", flags=pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP)
+                raw = textpage_get(page, "rawdict", tp,
+                                   pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP)
                 annots = [(a.type[1], a.info.get("title", ""), a.info.get("modDate", ""), a.info.get("content", ""),
                            tuple(a.rect)) for a in page.annots()] if job.options.get("annotations", True) else []
                 rect, rot = page.rect, page.rotation

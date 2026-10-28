@@ -161,14 +161,62 @@ def ocr_languages(preferred: str | None = None) -> str:
     return "+".join(langs) or "eng"
 
 
+def detect_rotation(png: bytes) -> int:
+    """Rotazione (0, 90, 180, 270) che raddrizza la pagina, stimata da Tesseract (OSD)."""
+    import re
+    import subprocess
+    try:
+        res = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "0"], input=png, capture_output=True,
+                             timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    text = (res.stdout or b"").decode(errors="replace")
+    m = re.search(r"Rotate:\s*(\d+)", text)
+    conf = re.search(r"Orientation confidence:\s*([\d.]+)", text)
+    if not m or (conf and float(conf.group(1)) < 1.0):
+        return 0
+    return int(m.group(1)) % 360
+
+
+_OCR_HOLD: list = []   # documenti temporanei delle pagine raddrizzate (vivi finché serve la TextPage)
+
+
 def ocr_textpage(page: pymupdf.Page, language: str | None = None, dpi: int = 300):
-    """TextPage riconosciuta con OCR per una pagina scansionata (None se impossibile)."""
+    """TextPage riconosciuta con OCR per una pagina scansionata (None se impossibile).
+
+    Se la scansione è ruotata (90/180/270°) l'immagine viene raddrizzata prima
+    del riconoscimento; le coordinate restano quelle della pagina raddrizzata.
+    """
     if not ocr_available():
         return None
     try:
-        return page.get_textpage_ocr(flags=TEXT_FLAGS, language=ocr_languages(language), dpi=dpi, full=True)
+        lang = ocr_languages(language)
+        probe = page.get_pixmap(dpi=100, colorspace=pymupdf.csGRAY)
+        rotation = detect_rotation(probe.tobytes("png"))
+        if rotation:
+            from PIL import Image
+            pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
+            img = Image.frombytes("L", (pix.width, pix.height), pix.samples).rotate(-rotation, expand=True)
+            tmp = pymupdf.open()
+            w, h = img.width * 72 / dpi, img.height * 72 / dpi
+            tp_page = tmp.new_page(width=w, height=h)
+            import io
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            tp_page.insert_image(tp_page.rect, stream=buf.getvalue())
+            _OCR_HOLD[:] = [tmp, tp_page]
+            return tp_page.get_textpage_ocr(flags=TEXT_FLAGS, language=lang, dpi=dpi, full=True)
+        return page.get_textpage_ocr(flags=TEXT_FLAGS, language=lang, dpi=dpi, full=True)
     except Exception:
         return None
+
+
+def textpage_get(page: pymupdf.Page, kind: str, textpage=None, flags: int | None = None):
+    """Come `page.get_text(kind)`, ma accetta anche la TextPage OCR di una pagina raddrizzata."""
+    if textpage is None:
+        return page.get_text(kind, flags=flags) if flags is not None else page.get_text(kind)
+    return {"dict": textpage.extractDICT, "rawdict": textpage.extractRAWDICT, "words": textpage.extractWORDS,
+            "text": textpage.extractText}[kind]()
 
 
 # ------------------------------------------------------------- ordine lettura
@@ -342,8 +390,7 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
     if dehyphenate:
         flags |= getattr(pymupdf, "TEXT_DEHYPHENATE", 0) * 0   # gestita a mano (conserva gli stili)
     try:
-        data = page.get_text("dict", flags=flags, textpage=textpage) if textpage is not None \
-            else page.get_text("dict", flags=flags)
+        data = textpage_get(page, "dict", textpage, flags)
     except Exception:
         data = {"blocks": []}
     links = _page_links(page)
@@ -423,7 +470,7 @@ def page_plain_text(page: pymupdf.Page, *, mode: str = "reading", ocr: str = "au
 
 def layout_text(page: pymupdf.Page, textpage=None) -> str:
     """Riproduce l'impaginazione con spazi (colonne allineate)."""
-    words = page.get_text("words", textpage=textpage) if textpage is not None else page.get_text("words")
+    words = textpage_get(page, "words", textpage)
     if not words:
         return ""
     sizes = [(w[3] - w[1]) for w in words]

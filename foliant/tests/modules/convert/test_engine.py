@@ -693,3 +693,35 @@ def test_pdfa_2u(sample_pdf, tmp_path):
     data = open(result.paths[0], "rb").read()
     assert pdfa.verify_pdfa(data, "2u") == []
     assert "<pdfaid:conformance>U</pdfaid:conformance>" in pymupdf.open(stream=data).get_xml_metadata()
+
+
+def test_ocr_rotated_page_accuracy(tmp_path):
+    from foliant.modules.convert.extract import ocr_available
+    if not ocr_available():
+        pytest.skip("tesseract non installato")
+    import difflib
+    lines = ["Contratto di compravendita orologio", "Il venditore dichiara che il bene",
+             "e conforme alla descrizione fornita", "Prezzo concordato tremila euro"]
+    src = pymupdf.open()
+    sp = src.new_page()
+    for k, line in enumerate(lines):
+        sp.insert_text((60, 120 + k * 40), line, fontsize=20)
+    straight = sp.get_pixmap(dpi=300)
+    from PIL import Image
+    img = Image.frombytes("RGB", (straight.width, straight.height), straight.samples)
+    results = []
+    for angle in (0, 90):
+        rot = img.rotate(angle, expand=True)
+        doc = pymupdf.open()
+        p = doc.new_page(width=rot.width * 72 / 300, height=rot.height * 72 / 300)
+        import io
+        buf = io.BytesIO()
+        rot.save(buf, "PNG")
+        p.insert_image(p.rect, stream=buf.getvalue())
+        path = tmp_path / f"r{angle}.pdf"
+        doc.save(str(path))
+        text = open(convert_pdf(str(path), tmp_path / f"r{angle}.txt", "txt")[0], encoding="utf-8").read()
+        ref = " ".join(lines)
+        got = " ".join(text.split())
+        results.append(difflib.SequenceMatcher(None, ref, got).ratio())
+    assert results[0] >= 0.95 and abs(results[0] - results[1]) <= 0.01
