@@ -130,6 +130,30 @@ EN = {
     "Clic destro sulla pagina per i comandi contestuali.": "Right-click on the page for contextual commands.",
     "Nelle preferenze (Ctrl+virgola) scegli tema, lingua e nome dell'autore.":
         "In the preferences (Ctrl+comma) choose theme, language and author name.",
+    # servizi della finestra per i moduli: avvisi, attività, controlli, menu, preferenze
+    "1 altro avviso": "1 more notice",
+    "{n} altri avvisi": "{n} more notices",
+    "Chiudi l'avviso": "Close the notice",
+    "Errore in un avviso: {e}": "Error in a notice: {e}",
+    "Avvisi chiusi del documento": "Closed document notices",
+    "Altre attività in corso": "Other running tasks",
+    "Annulla «{t}» ({p})": "Cancel “{t}” ({p})",
+    "Completato: {t}": "Completed: {t}",
+    "Operazione annullata: {t}": "Operation cancelled: {t}",
+    "«{t}» non è riuscita: {e}": "“{t}” failed: {e}",
+    "Errore al termine di «{t}»: {e}": "Error at the end of “{t}”: {e}",
+    "Attività in corso": "Tasks in progress",
+    "Ci sono attività in corso:": "Some tasks are still running:",
+    "Puoi interromperle e uscire, oppure attendere che finiscano.": "You can stop them and quit, or wait for them to finish.",
+    "Interrompi ed esci": "Stop and quit",
+    "Attendi": "Wait",
+    "Errore in un controllo prima dell'operazione: {e}": "Error in a check before the operation: {e}",
+    "Chiudi scheda": "Close tab",
+    "Errore nel menu della scheda: {e}": "Error in the tab menu: {e}",
+    "Errore nella selezione delle pagine: {e}": "Error in the page selection: {e}",
+    "Errore nello strumento della modalità: {e}": "Error in the mode's tool: {e}",
+    "Generale": "General",
+    "Impossibile mostrare questa pagina: {e}": "This page cannot be shown: {e}",
 }
 
 add_translations("en", EN)

@@ -46,6 +46,10 @@ class _Snapshot:
     save_options: dict = field(default_factory=dict)
 
 
+# Impronta (mtime, dimensione) dell'ultima scrittura fatta da Foliant per ogni file.
+_OWN_WRITES: dict[str, tuple | None] = {}
+
+
 def atomic_write(target: str | os.PathLike, data: bytes) -> None:
     """Scrive `data` in `target` senza mai lasciare un file a metà."""
     target = Path(os.path.realpath(target))          # salva nel file vero, non sul collegamento
@@ -70,6 +74,7 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
         except OSError:
             pass
         os.replace(tmp, target)
+        _OWN_WRITES[str(target)] = _file_stamp(target)   # scrittura di Foliant: non è una modifica esterna
     except BaseException as e:
         try:
             os.unlink(tmp)
@@ -427,7 +432,7 @@ class Document:
             pymupdf.PDF_ENCRYPT_NONE, pymupdf.PDF_ENCRYPT_KEEP)
 
     def to_bytes(self, **options) -> bytes:
-        opts = {"garbage": 3, "deflate": True, "use_objstms": 1}   # flussi di oggetti: file più piccoli
+        opts = {"garbage": 3, "deflate": True}
         with self.lock:
             keep = (self.save_options == self.original_protection and self.original_protection
                     and (self._pdf.metadata or {}).get("encryption"))
@@ -470,7 +475,7 @@ class Document:
                 and self.save_options == self.original_protection and target.exists()):
             self._notify(SAVED)   # niente da scrivere: non invalidare firme né cifratura
             return
-        data = self.to_bytes(**options)
+        data = self.to_bytes(**{"use_objstms": 1, **options})     # flussi di oggetti: file più piccoli
         atomic_write(target, data)
         self.path = target
         self._saved_state = self._state
@@ -482,11 +487,16 @@ class Document:
         if self.path is None or self.disk_stamp is None:
             return False
         now = _file_stamp(self.path)
-        return now is not None and now != self.disk_stamp
+        if now is None or now == self.disk_stamp:
+            return False
+        if _OWN_WRITES.get(os.path.realpath(self.path)) == now:   # l'ha scritto Foliant (es. firma)
+            self.disk_stamp = now
+            return False
+        return True
 
     def save_copy(self, path: str | os.PathLike, **options) -> None:
         """Salva una copia senza cambiare il file associato al documento."""
-        atomic_write(Path(path), self.to_bytes(**options))
+        atomic_write(Path(path), self.to_bytes(**{"use_objstms": 1, **options}))
 
     def close(self) -> None:
         with self.lock:
