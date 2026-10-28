@@ -28,12 +28,29 @@ _TEMP_DIR: str | None = None
 
 
 def temp_dir() -> str:
-    """Cartella privata per i file temporanei (trascinamento, condivisione)."""
+    """Cartella privata per i file temporanei (trascinamento, condivisione).
+
+    Riservatezza: si cancella all'uscita; quelle rimaste da un arresto anomalo si
+    cancellano all'avvio successivo (`privacy.cleanup_temp_dirs`)."""
     global _TEMP_DIR
     if _TEMP_DIR is None or not os.path.isdir(_TEMP_DIR):
-        _TEMP_DIR = tempfile.mkdtemp(prefix="foliant-pagine-")
+        from .privacy import temp_prefix
+        _TEMP_DIR = tempfile.mkdtemp(prefix=temp_prefix())
         atexit.register(shutil.rmtree, _TEMP_DIR, True)
     return _TEMP_DIR
+
+
+def _privacy_cleanup(ctx) -> None:
+    """All'avvio: file temporanei rimasti e, una volta sola, percorsi nei modelli salvati."""
+    from . import privacy
+    try:
+        privacy.cleanup_temp_dirs(keep=_TEMP_DIR)
+    except Exception:
+        pass
+    try:
+        privacy.cleanup_legacy(ctx.settings())
+    except Exception:
+        pass
 
 
 def _optional(name: str):
@@ -810,6 +827,7 @@ def register(ctx) -> PagesController:
         tr = getattr(mod, "TRANSLATIONS", None) if mod else None
         if tr:
             add_translations("en", tr)
+    _privacy_cleanup(ctx)
     c = PagesController(ctx)
     ctx.pages_controller = c   # accesso per test e altri moduli
     mode = ctx.add_mode("pagine", _("Pagine"), "layout-grid", 40)
