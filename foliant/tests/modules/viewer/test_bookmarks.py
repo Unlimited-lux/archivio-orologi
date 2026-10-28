@@ -364,3 +364,21 @@ def test_bookmark_opening_web_address(viewer_window, tmp_path, monkeypatch):
     panel.follow(0)
     assert asked                    # passa dalla conferma dei collegamenti esterni del nucleo
     assert not panel.item(0).font(0).italic() or panel.items[0].bold   # non marcato come rotto
+
+
+def test_create_toc_page_links_account_for_inserted_page(viewer_window, tmp_path):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    before = view.page_count
+    n = panel.create_toc_page()
+    assert n == 1 and view.page_count == before + 1
+    with view.document.lock:
+        page = view.document.pdf[0]
+        links = page.get_links()
+        text = page.get_text()
+    # 8 voci: ogni riga è un collegamento alla pagina del segnalibro (spostata di una pagina)
+    assert [l["page"] for l in links] == [b.page for b in panel.items]
+    assert "Capitolo 3" in text and "\n9\n" in "\n" + text.replace(" ", "\n") + "\n"
+    # i segnalibri puntano ancora al contenuto giusto
+    assert [b.title for b in panel.items][0] == "Capitolo 1" and panel.items[0].page == 1
+    view.document.undo()
+    assert view.page_count == before
