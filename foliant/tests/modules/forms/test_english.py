@@ -257,3 +257,30 @@ def test_number_and_date_defaults_follow_language():
         assert fm.display(fm.Format(fm.NUMBER, 1), "1234.5")[0] == "1.234,5"
     finally:
         i18n.set_language(previous)
+
+
+def test_no_key_translated_twice_differently():
+    """Ogni chiave del modulo ha una sola traduzione: i significati diversi di una parola
+    (es. «Elenco» tipo di campo e nome predefinito) usano pgettext."""
+    import importlib
+
+    from foliant.modules.forms.i18n_en import EN
+    seen: dict[str, tuple[str, str]] = {key: (value, "i18n_en") for key, value in EN.items()}
+    clashes = []
+    for name in ("panel", "fields_panel", "formula", "batch", "xfa_convert"):
+        for key, value in importlib.import_module(f"foliant.modules.forms.{name}").TRANSLATIONS.items():
+            if key in seen and seen[key][0] != value:
+                clashes.append(f"{key!r}: {seen[key][0]!r} ({seen[key][1]}) / {value!r} ({name})")
+            seen.setdefault(key, (value, name))
+    assert not clashes, "\n".join(clashes)
+
+
+def test_list_kind_label_and_default_name():
+    previous = i18n.language()
+    forms.register_translations()
+    try:
+        i18n.set_language("en")
+        assert E.kind_label(E.LIST) == "List box"
+        assert E.default_base_name(E.LIST) == "List"
+    finally:
+        i18n.set_language(previous)

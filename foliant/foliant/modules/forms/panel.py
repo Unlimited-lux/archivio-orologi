@@ -172,7 +172,7 @@ TRANSLATIONS: dict[str, str] = {
     "Casella di controllo": "Check box",
     "Pulsante di opzione": "Radio button",
     "Elenco a discesa": "Drop-down list",
-    "Elenco": "List box",
+    "tipo di campo\x04Elenco": "List box",   # pgettext: il tipo di campo, non il nome predefinito
     "Pulsante": "Button",
     "Campo firma": "Signature field",
     "Spunta": "Check",

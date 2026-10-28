@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 import pymupdf
 
-from foliant.i18n import _
+from foliant.i18n import _, pgettext
 
 from . import formats as fm
 from . import formula as FX
@@ -88,7 +88,8 @@ class FormError(Exception):
 def kind_label(kind: str) -> str:
     return {
         TEXT: _("Campo di testo"), CHECKBOX: _("Casella di controllo"), RADIO: _("Pulsante di opzione"),
-        COMBO: _("Elenco a discesa"), LIST: _("Elenco"), BUTTON: _("Pulsante"), SIGNATURE: _("Campo firma"),
+        COMBO: _("Elenco a discesa"), LIST: pgettext("tipo di campo", "Elenco"), BUTTON: _("Pulsante"),
+        SIGNATURE: _("Campo firma"),
     }.get(kind, kind)
 
 
