@@ -599,3 +599,29 @@ def test_copy_paste_with_formatting_between_editors(window, paragraphs_pdf, quie
     plain = [r for r in runs if "semplice" in r.text][0]
     assert abs(plain.style.size - 12) < 0.05 and plain.style.color == src.style.color   # stile del punto
     ctrl.cancel_editor(view)
+
+
+def test_rotation_handle(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-08: trascinando la maniglia di rotazione il blocco ruota (Maiusc: passi di 15°)."""
+    import math
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "contratto")
+    tool = view.tool
+    tool.select(view, 0, block)
+    rh = tool._rotate_handle(view, block)
+    assert tool._handle_at(view, rh) == "rotate"
+    c = block.bbox
+    center = pymupdf.Point((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    target = pymupdf.Point(center.x - 80, center.y + 3)        # circa 90° in senso antiorario
+    vp = view.viewport()
+    shift = Qt.KeyboardModifier.ShiftModifier
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, rh.x, rh.y))
+    qtbot.mouseMove(vp, to_view(view, 0, target.x, target.y))
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, shift, to_view(view, 0, target.x, target.y))
+    with view.document.lock:
+        line = [ln for b in view.document.pdf[0].get_text("dict")["blocks"] for ln in b["lines"]
+                if "contratto" in "".join(s["text"] for s in ln["spans"])][0]
+    angle = -math.degrees(math.atan2(line["dir"][1], line["dir"][0]))
+    assert abs(angle - 90) <= 0.5
+    assert "contratto" in view.document.page_text(0, sort=False)

@@ -34,6 +34,7 @@ class _Drag:
 
 
 HANDLE_PX = 7
+ROTATE_OFFSET_PX = 18
 
 
 class EditTextTool(Tool):
@@ -93,7 +94,30 @@ class EditTextTool(Tool):
             return "resize-l"
         if abs(fpt.x - r.x1) <= m and abs(fpt.y - cy) <= max(m, r.height / 2):
             return "resize-r"
+        rh = self._rotate_handle(view, block)
+        if abs(fpt.x - rh.x) <= m * 1.5 and abs(fpt.y - rh.y) <= m * 1.5:
+            return "rotate"
         return None
+
+    def _rotate_handle(self, view, block: TextBlock) -> pymupdf.Point:
+        """Maniglia di rotazione sopra il centro del bordo superiore."""
+        z = max(view.zoom * 1.333, 0.05)
+        r = block.bbox
+        return pymupdf.Point((r.x0 + r.x1) / 2, r.y0 - ROTATE_OFFSET_PX / z)
+
+    @staticmethod
+    def rotation_angle(block: TextBlock, start: pymupdf.Point, current: pymupdf.Point, snap: bool) -> float:
+        """Angolo antiorario (gradi) tra le direzioni centro→inizio e centro→punto attuale."""
+        import math
+        r = block.bbox
+        c = pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+        a0 = math.atan2(start.y - c.y, start.x - c.x)
+        a1 = math.atan2(current.y - c.y, current.x - c.x)
+        deg = -math.degrees(a1 - a0)          # y verso il basso: antiorario = angolo negativo
+        deg = (deg + 180) % 360 - 180
+        if snap:
+            deg = round(deg / 15.0) * 15.0
+        return deg
 
     def select(self, view, page: int, block: TextBlock | None) -> None:
         self.selected = (page, block) if block is not None else None
@@ -186,7 +210,10 @@ class EditTextTool(Tool):
         else:
             page, fpt, block = hit
             self.hover = (page, block)
-            if self._handle_at(view, fpt):
+            handle = self._handle_at(view, fpt)
+            if handle == "rotate":
+                view.viewport().setCursor(Qt.CursorShape.CrossCursor)
+            elif handle:
                 view.viewport().setCursor(Qt.CursorShape.SizeHorCursor)
             elif not block.editable:
                 view.viewport().setCursor(Qt.CursorShape.ForbiddenCursor)
@@ -241,6 +268,13 @@ class EditTextTool(Tool):
         if drag.kind == "move-multi":
             if abs(dx) + abs(dy) >= 0.5 and drag.target_page == drag.page:
                 self.ctrl.move_selected(view, dx, dy)
+            return True
+        if drag.kind == "rotate":
+            deg = self.rotation_angle(drag.block, drag.start, drag.current,
+                                      bool(ev.modifiers & Qt.KeyboardModifier.ShiftModifier))
+            if abs(deg) >= 0.5:
+                self.select(view, drag.page, drag.block)
+                self.ctrl.rotate_selected(view, deg)
             return True
         if drag.kind == "move" and drag.inner and drag.target_page == drag.page and abs(dx) + abs(dy) < 0.5 \
                 and drag.block.editable:
@@ -425,6 +459,11 @@ class EditTextTool(Tool):
             for cx in (b.bbox.x0, b.bbox.x1):
                 c = pymupdf.Point(cx, (b.bbox.y0 + b.bbox.y1) / 2) * self.ctrl.unframe(page)
                 painter.drawRect(QRectF(c.x - hs / 2, c.y - hs / 2, hs, hs))
+            # maniglia di rotazione (Maiusc: passi di 15°)
+            top = pymupdf.Point((b.bbox.x0 + b.bbox.x1) / 2, b.bbox.y0) * self.ctrl.unframe(page)
+            rh = self._rotate_handle(view, b) * self.ctrl.unframe(page)
+            painter.drawLine(QPointF(top.x, top.y), QPointF(rh.x, rh.y))
+            painter.drawEllipse(QPointF(rh.x, rh.y), hs / 2, hs / 2)
         for p_index, b in self.multi:
             if p_index == page:
                 painter.setPen(QPen(accent, 1.5 / z))
@@ -460,6 +499,21 @@ class EditTextTool(Tool):
                 r = pymupdf.Rect(b.bbox.x0 + dx, b.bbox.y0 + dy, b.bbox.x1 + dx, b.bbox.y1 + dy)
                 painter.drawRect(frame_rect_to_page(self.ctrl, page, r))
             d = None
+        if d is not None and d.target_page == page:
+            r = pymupdf.Rect(d.block.bbox)
+            dx, dy = d.current.x - d.start.x, d.current.y - d.start.y
+            if d.kind == "rotate":
+                deg = self.rotation_angle(d.block, d.start, d.current, False)
+                c = pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+                corners = [pymupdf.Point(r.x0, r.y0), pymupdf.Point(r.x1, r.y0), pymupdf.Point(r.x1, r.y1),
+                           pymupdf.Point(r.x0, r.y1)]
+                rot = pymupdf.Matrix(-deg)
+                pts = [(c + (p - c) * rot) * self.ctrl.unframe(page) for p in corners]
+                from PySide6.QtGui import QPolygonF
+                painter.setPen(QPen(accent, 1.2 / z, Qt.PenStyle.DashLine))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPolygon(QPolygonF([QPointF(p.x, p.y) for p in pts]))
+                d = None
         if d is not None and d.target_page == page:
             r = pymupdf.Rect(d.block.bbox)
             dx, dy = d.current.x - d.start.x, d.current.y - d.start.y
