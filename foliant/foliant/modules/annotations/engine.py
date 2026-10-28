@@ -1139,8 +1139,18 @@ PAGE_UNITS = {"pt": 1.0, "mm": 72 / 25.4, "cm": 72 / 2.54, "in": 72.0}
 REAL_UNITS = ["mm", "cm", "m", "km", "in", "ft", "yd", "mi", "pt"]
 
 
+def _fmt_number(value: float, decimals: int | None = None) -> str:
+    """Numero nella lingua dell'interfaccia (NFR-26): «1.234,5» in italiano, «1,234.5» in inglese."""
+    try:
+        from foliant.i18n import format_number
+        return format_number(value, decimals)
+    except Exception:  # pragma: no cover - motore usato senza l'applicazione
+        txt = f"{value:g}" if decimals is None else f"{value:.{decimals}f}"
+        return txt.replace(".", ",")
+
+
 def _num(v: float) -> str:
-    return f"{v:g}".replace(".", ",")
+    return _fmt_number(v)
 
 
 def polyline_length(points: Sequence) -> float:
@@ -1159,7 +1169,7 @@ def polygon_area(points: Sequence) -> float:
 
 def format_measure(value: float, unit: str, square: bool = False) -> str:
     """Valore con due decimali e virgola decimale (lingua italiana)."""
-    txt = f"{value:.2f}".replace(".", ",")
+    txt = _fmt_number(value, 2)
     return f"{txt} {unit}²" if square else f"{txt} {unit}"
 
 
@@ -1191,7 +1201,7 @@ def measure_value(kind: str, points: Sequence, scale: Scale) -> str:
     if kind == ANGLE:
         if len(points) < 3:
             raise AnnotationError("Servono almeno 3 punti.")
-        return f"{angle_degrees(points):.1f}°".replace(".", ",")
+        return f"{_fmt_number(angle_degrees(points), 1)}°"
     if kind == DISTANCE:
         return format_measure(scale.length(polyline_length(points[:2])), scale.unit)
     if kind == PERIMETER:
