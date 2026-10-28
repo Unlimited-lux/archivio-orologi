@@ -255,7 +255,7 @@ def test_tab_order_selection(window, tmp_path):
     assert [f.name for f in E.navigation_order(again, 0)] == ["C", "A", "B"]
 
 
-def test_preview_fill_and_back(qtbot, window, form_pdf):
+def test_preview_fill_and_back(qtbot, window, form_pdf, monkeypatch):
     view = open_form(window, form_pdf)
     window.ctx.set_mode("moduli")
     m = module()
@@ -264,6 +264,7 @@ def test_preview_fill_and_back(qtbot, window, form_pdf):
     f = filler_of(view)
     assert f.editor is not None
     qtbot.keyClicks(f.editor, "Prova")
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)   # «Scartare i valori di prova?» → no
     m.toggle_preview(False)
     assert values(view)["nome"] == "Prova"
     assert filler_of(view).design
@@ -286,10 +287,24 @@ def test_preview_discard(qtbot, window, form_pdf, monkeypatch):
     m = module()
     m.toggle_preview(True)
     m.import_values({"nome": "a", "cognome": "b", "paese": "IT"}, view)
-    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda title, text: asked.append(text) or True)
     m.toggle_preview(False)
     assert values(view)["nome"] == "" and values(view)["paese"] == ""
+    assert asked == ["Scartare i valori di prova inseriti durante l'anteprima?"]
 
+
+def test_save_during_preview_asks_to_include_test_values(qtbot, window, form_pdf, monkeypatch, tmp_path):
+    """FRM-25: salvando in anteprima si chiede se includere i valori di prova."""
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    m.toggle_preview(True)
+    m.import_values({"nome": "prova"}, view)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)   # non includerli
+    out = tmp_path / "salvato.pdf"
+    assert window.ctx.run_guards("save", view, {"path": str(out)})
+    assert values(view)["nome"] == ""   # salvataggio senza i valori di prova
 
 def test_tab_numbers_overlay(window, form_pdf):
     view = open_form(window, form_pdf)
@@ -652,3 +667,21 @@ def test_detect_straightens_skewed_scan_on_request(window, tmp_path, monkeypatch
         assert abs(D.estimate_skew(view.document.pdf[0])) < 0.5
     assert seen and all(abs(c.angle) < 0.5 for c in seen)
     assert view.document.can_undo
+
+
+def test_script_button_reports_unavailable_action(window, tmp_path):
+    """FRM-18: un pulsante con script personalizzato non lo esegue e la barra lo indica."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "calcola", caption="Calcola")
+    pdf.xref_set_key(b, "A", "<</S/JavaScript/JS(app.alert('ciao'))>>")
+    t = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "sconto")
+    pdf.xref_set_key(t, "AA", "<</C<</S/JavaScript/JS(event.value = Math.random();)>>>>")
+    pdf.save(str(tmp_path / "js.pdf"))
+    view = open_form(window, tmp_path / "js.pdf")
+    f = filler_of(view)
+    f.state.refresh(force=True)
+    f.update_bar()
+    assert "calcoli personalizzati non eseguiti (sconto)" in f.text_of_bar()
+    f.click_field([i for i in f.state.fields if i.name == "calcola"][0])
+    assert "«calcola» non disponibile" in f.text_of_bar()

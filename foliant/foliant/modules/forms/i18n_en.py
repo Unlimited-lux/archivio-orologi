@@ -345,4 +345,11 @@ EN: dict[str, str] = {
     'Le pagine {l} sono inclinate di oltre 5°. Raddrizzarle prima del riconoscimento?':
         'Pages {l} are skewed by more than 5°. Straighten them before recognition?',
     'Raddrizza pagine': 'Straighten pages',
+    "Scartare i valori di prova inseriti durante l'anteprima?": 'Discard the test values entered during the preview?',
+    "Salvare nel file anche i valori di prova inseriti durante l'anteprima?":
+        'Also save the test values entered during the preview in the file?',
+    'calcoli personalizzati non eseguiti ({f}): calcoli non aggiornati':
+        'custom calculations not run ({f}): calculations not updated',
+    'azione del pulsante «{n}» non disponibile: contiene uno script, che Foliant non esegue':
+        'action of button “{n}” not available: it contains a script, which Foliant does not run',
 }

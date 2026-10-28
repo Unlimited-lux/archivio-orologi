@@ -319,6 +319,7 @@ class FormFiller(QObject):
         self._next_required_index = -1
         self._error_label: QLabel | None = None
         self._custom_warned = False
+        self.unavailable_action: str | None = None   # pulsante con script cliccato (FRM-18)
         self._pending_patch: set[str] | None = None
         self.banner_text = ""                 # testo dell'avviso del modulo (barra del nucleo, UX-14)
         self.banner_actions: list[str] = []    # etichette delle azioni dell'avviso
@@ -513,7 +514,12 @@ class FormFiller(QObject):
                     parts.append(tr_count(len(st.xfa_unmapped), _("{n} campo senza dati XML associati"),
                                           _("{n} campi senza dati XML associati")))
             if st.custom:
-                parts.append(_("script personalizzati non eseguiti: calcoli non aggiornati"))
+                names = list(dict.fromkeys(name for name, _ev in st.custom))
+                shown = ", ".join(names[:5]) + (" …" if len(names) > 5 else "")
+                parts.append(_("calcoli personalizzati non eseguiti ({f}): calcoli non aggiornati").format(f=shown))
+            if self.unavailable_action:
+                parts.append(_("azione del pulsante «{n}» non disponibile: contiene uno script, che Foliant "
+                               "non esegue").format(n=self.unavailable_action))
             text = ", ".join(parts)
         fill = st.xfa != "dynamic" and not st.blocked and not self.design
         actions: list[tuple] = []

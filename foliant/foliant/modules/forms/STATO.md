@@ -44,7 +44,7 @@ Test in `tests/modules/forms/` (file abbreviati: `engine` = `test_engine.py`, `f
 | FRM-35 Dati XML | P2 | fatto | data: `test_xfa_export_import_data` | |
 | FRM-36 Conversione XML | P2 | fatto | data: `test_convert_hybrid_creates_new_document`, `test_convert_dynamic_from_window`; xfa_convert: tutti | Nuovo documento, originale intatto. Dinamici: impaginazione di un sottoinsieme del modello (sottomoduli posizionati e a scorrimento, ripetuti secondo i dati, campi, testi, linee, riquadri, calcoli semplici); il resto è elencato nel rapporto. |
 
-Altre note: dopo la specifica v2 restano da allineare i testi che citano gli script (oggi «script personalizzati»), la conferma all'unione dei campi omonimi e all'uscita dall'anteprima.
+Allineamento alla specifica v2: la barra indica «calcoli personalizzati non eseguiti» con i campi interessati e, per un pulsante con script, che l'azione non è disponibile (design: `test_script_button_reports_unavailable_action`); all'uscita dall'anteprima «Scartare i valori di prova?» (sì = scartare) e salvando in anteprima si chiede se includerli (design: `test_preview_discard`, `test_save_during_preview_asks_to_include_test_values`); l'unione dei campi omonimi chiede conferma (`apply_properties`).
  richieste al nucleo in `CORE_REQUESTS.md`; nessuna nuova dipendenza (`DEPS.txt`);
 traduzioni inglesi in `i18n_en.py` e nelle costanti `TRANSLATIONS` di pannelli, formule ed
 elaborazione multipla.

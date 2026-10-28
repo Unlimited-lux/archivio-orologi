@@ -294,6 +294,15 @@ class FormsModule(QObject):
         if f.editor is not None and not f.commit_active():
             return False  # valore non valido nel campo aperto: il focus resta lì
         f.state.refresh()
+        start = getattr(self, "_preview_start", None)
+        if self.preview and start and start[0] == id(view.document):
+            steps = len(view.document._undo) - start[1]
+            # FRM-25: salvataggio durante l'anteprima → si chiede se includere i valori di prova
+            if steps > 0 and not self.ctx.confirm(_("Anteprima compilazione"), _(
+                    "Salvare nel file anche i valori di prova inseriti durante l'anteprima?")):
+                for _i in range(steps):
+                    view.document.undo()
+                f.state.refresh(force=True)
         if f.state.xfa == "hybrid" and f.state.xfa_unmapped:
             names = ", ".join(f.state.xfa_unmapped[:10])
             if not self.ctx.confirm(_("Dati XML del modulo"), _(
@@ -379,9 +388,10 @@ class FormsModule(QObject):
             self._preview_start = None
             if start and start[0] == id(doc):
                 steps = len(doc._undo) - start[1]
-                if steps > 0 and not self.ctx.confirm(
+                # FRM-25: «Scartare i valori di prova?», predefinito sì; «No» li mantiene
+                if steps > 0 and self.ctx.confirm(
                         _("Anteprima compilazione"),
-                        _("Mantenere i valori inseriti durante l'anteprima?")):
+                        _("Scartare i valori di prova inseriti durante l'anteprima?")):
                     for _i in range(steps):
                         doc.undo()
         f.design = self.design_active and not on
@@ -1294,7 +1304,9 @@ class FormsModule(QObject):
         elif kind == "submit":
             self.submit(filler, action)
         elif kind == "javascript":
-            self.ctx.status(_("Il pulsante esegue uno script personalizzato, non supportato."))
+            # FRM-18/NFR-17: lo script non viene eseguito; la barra del modulo lo indica
+            filler.unavailable_action = f.name
+            filler.update_bar()
         else:
             self.ctx.status(_("Il pulsante «{n}» non ha azioni.").format(n=f.name))
 
