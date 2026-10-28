@@ -18,15 +18,12 @@ ORDER = 30
 ALIGN_LABELS = (("left", "A sinistra"), ("hcenter", "Al centro"), ("right", "A destra"), ("top", "In alto"),
                 ("vcenter", "Al centro verticale"), ("bottom", "In basso"))
 
-_controller = None
-
-
-def controller():
-    return _controller
+def controller_for(ctx: Context):
+    """Controller del modulo per la finestra di `ctx` (uno per finestra: Ctrl+N apre più finestre)."""
+    return getattr(ctx, "text_edit", None)
 
 
 def register(ctx: Context) -> None:
-    global _controller
     from .controller import TextEditController
     from .ui_panel import TextPropertiesPanel
 
@@ -40,7 +37,6 @@ def register(ctx: Context) -> None:
     from . import fontlist, fonts
     fonts.set_user_mappings(fontlist.load_mappings())
     ctrl = TextEditController(ctx)
-    _controller = ctrl
     ctx.text_edit = ctrl  # accesso per i test e per altri moduli
     if hasattr(ctx, "add_pending_edit_hook"):     # Salva/Chiudi confermano l'editor aperto
         ctx.add_pending_edit_hook(lambda view: ctrl.commit_editor(view))
@@ -203,7 +199,7 @@ def open_find_dialog(ctx: Context):
     view = ctx.current_view()
     if view is None:
         return None
-    ctrl = _controller
+    ctrl = controller_for(ctx)
     if ctrl is not None:
         ctrl.commit_editor(view)
     try:
@@ -225,8 +221,9 @@ def open_fonts_dialog(ctx: Context):
     """Dialogo «Font del documento» (TXT-11)."""
     if ctx.current_view() is None:
         return None
-    if _controller is not None:
-        _controller.commit_editor(ctx.current_view())
+    ctrl = controller_for(ctx)
+    if ctrl is not None:
+        ctrl.commit_editor(ctx.current_view())
     from .fontlist_ui import FontsDialog
     dlg = FontsDialog(ctx, ctx.window)
     ctx._text_fonts_dialog = dlg

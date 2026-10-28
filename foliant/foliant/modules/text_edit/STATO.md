@@ -32,4 +32,6 @@ Test in `tests/modules/text_edit/` (circa 145 test, offscreen). File principali:
 | TXT-21 Scritture complesse | parziale | `test_hebrew_insert_word_keeps_number_order`, `test_arabic_letter_between_joined_letters` | Ebraico e arabo: direzione del paragrafo, ordine visivo con numeri e latino da sinistra a destra, ordine logico ricostruito in analisi, forme contestuali arabe e legatura lam-alef, allineamento a destra per le righe singole. Semplificazione di UAX #9 (niente incassature annidate). Non fatti: devanagari/thai (composizione complessa) e scrittura verticale CJK. |
 | TXT-22…25 IA | delegato | (modulo `ai`, AI-09) | La specifica v2 rimanda ad AI-09: riscrittura, correzione, espandi/condensa e tono sono nel modulo `ai`, che sostituisce il testo mantenendo carattere, corpo e colore. |
 
+Più finestre (Ctrl+N): un controller per finestra in `ctx.text_edit` (`controller_for(ctx)`), nessuno stato globale del modulo; il pannello ignora i cambi di tema dopo la chiusura della sua finestra (`test_ui.py::test_second_window_closed_leaves_first_working`). Restano condivisi tra le finestre solo la cache dei font Qt, il servizio ortografico e le corrispondenze dei font dell'utente.
+
 Dipendenze facoltative in `DEPS.txt` (pyspellchecker, fonttools). Richieste al nucleo in `CORE_REQUESTS.md`.

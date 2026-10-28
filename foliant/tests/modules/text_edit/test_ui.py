@@ -709,3 +709,39 @@ def test_no_ocr_proposal_for_small_image(window, tmp_path, quiet, qtbot):
     doc.save(str(path))
     open_in_edit_mode(window, str(path))
     assert not any("scansione" in m for _t, m in quiet["confirms"])
+
+
+def test_second_window_closed_leaves_first_working(window, paragraphs_pdf, quiet, qtbot, settings):
+    """Ctrl+N: il controller è per finestra; chiudere la seconda non rompe la prima."""
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.modules.text_edit import controller_for, open_find_dialog, open_fonts_dialog
+    from foliant.ui import theme
+    from foliant.ui.main_window import MainWindow
+
+    second = MainWindow(settings)
+    second.show()
+    assert controller_for(second.ctx) is not controller_for(window.ctx)
+    second.ctx.set_mode("modifica")
+    second.close()
+    second.deleteLater()
+    QApplication.processEvents()
+    QApplication.sendPostedEvents(None, 0)   # distrugge davvero i widget della seconda finestra
+    theme.apply(QApplication.instance(), "dark")
+    theme.apply(QApplication.instance(), "light")
+
+    ctx = window.ctx
+    view = window.open_path(paragraphs_pdf)
+    ctx.set_mode("modifica")
+    ctrl = controller_for(ctx)
+    assert ctrl is ctx.text_edit
+    block = [b for b in ctrl.blocks(view, 0) if "contratto" in b.text][0]
+    view.tool.select(view, 0, block)
+    ed = ctrl.open_editor(view, 0, block)
+    ed.textCursor().insertText("Nuovo ")
+    dlg = open_find_dialog(ctx)   # conferma l'editor di questa finestra, non di quella chiusa
+    assert dlg is not None
+    dlg.close()
+    assert "Nuovo" in view.document.pdf[0].get_text()
+    fonts = open_fonts_dialog(ctx)
+    fonts.close()
