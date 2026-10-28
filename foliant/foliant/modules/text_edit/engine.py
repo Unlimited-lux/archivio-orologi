@@ -76,8 +76,6 @@ def remove_lines(page: pymupdf.Page, lines: list[Line]) -> None:
     pending = []
     for annot in list(page.annots(types=[pymupdf.PDF_ANNOT_REDACT]) or []):
         pending.append((pymupdf.Rect(annot.rect), dict(annot.info), annot.colors))
-    for _r, _i, _c in pending:
-        pass
     if pending:
         xrefs = [a.xref for a in page.annots(types=[pymupdf.PDF_ANNOT_REDACT])]
         for xref in xrefs:
@@ -469,6 +467,8 @@ def resize_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, x0: f
 
 def restyle_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, **changes) -> EditResult:
     """Applica proprietà di carattere a tutto il blocco (font, size, color, bold, ...)."""
+    if ("bold" in changes or "italic" in changes or "font" in changes) and "font_xref" not in changes:
+        changes = dict(changes, font_xref=0)
     paragraphs = [[Run(r.text, r.style.with_(**changes)) for r in p] for p in block.paragraphs]
     return replace_block(pdf, page_index, block, paragraphs)
 

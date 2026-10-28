@@ -350,25 +350,27 @@ class FontResolver:
             not orig_name or family_of(orig_name) == family_of(style.font))
         if same_original and self.is_embedded(style.font_xref):
             choice = self.original(style.font_xref, sample)
-            if choice is not None:
+            if choice is not None and bool(choice.font.is_bold) == style.bold and \
+                    bool(choice.font.is_italic) == style.italic:
                 return choice
         alias = self._base14_alias(style)
         if alias and not (style.font_xref and self.is_embedded(style.font_xref)):
             return self._base14_choice(alias)
-        sf = find_system_font(style.font, style.bold, style.italic) or find_system_font(style.font)
+        sf = find_system_font(style.font, style.bold, style.italic)
+        fam = family_of(style.font)
+        if sf is None:
+            for f in system_fonts():
+                if normalize_font_name(f.family) == fam:
+                    choice = self._variant_from_families([f.family], style.bold, style.italic, KIND_SYSTEM)
+                    if choice is not None:
+                        return choice
+            sf = find_system_font(style.font)
         if sf is not None:
             choice = self._from_file(sf.file, KIND_SYSTEM, f"{sf.family} {sf.style}".strip(),
                                      sim_bold=style.bold and not sf.bold, sim_italic=style.italic and not sf.italic)
             if choice is not None:
                 return choice
-        fam = family_of(style.font)
         choice = None
-        for f in system_fonts():
-            if normalize_font_name(f.family) == fam:
-                choice = self._variant_from_families([f.family], style.bold, style.italic, KIND_SYSTEM)
-                break
-        if choice is not None:
-            return choice
         if alias:
             return self._base14_choice(alias)
         for prefix, families in _COMPATIBLE:

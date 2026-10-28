@@ -152,7 +152,28 @@ def extract_lines(page: pymupdf.Page) -> list[tuple[Line, bool]]:
             made = _make_line(raw_line, xrefs, frame)
             if made is not None:
                 out.append(made)
-    return out
+    return _merge_segments(out)
+
+
+def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
+    """Riunisce i segmenti della stessa riga separati da spazi larghi (testo giustificato)."""
+    horiz = [x for x in lines if _horizontal(x[0])]
+    others = [x for x in lines if not _horizontal(x[0])]
+    horiz.sort(key=lambda x: (round(x[0].baseline, 1), x[0].bbox.x0))
+    merged: list[tuple[Line, bool]] = []
+    for line, inv in horiz:
+        if merged:
+            prev, pinv = merged[-1]
+            size = max(prev.size, line.size)
+            gap = line.bbox.x0 - prev.bbox.x1
+            if (pinv == inv and abs(prev.baseline - line.baseline) < 0.3 and -0.5 <= gap <= 1.2 * size
+                    and 0.8 <= line.size / prev.size <= 1.25):
+                runs = merge_runs(prev.runs + [Run(" ", prev.runs[-1].style)] + line.runs)
+                merged[-1] = (Line(bbox=prev.bbox | line.bbox, origin=prev.origin, runs=runs, dir=prev.dir,
+                                   words=prev.words + line.words), inv)
+                continue
+        merged.append((line, inv))
+    return merged + others
 
 
 def _horizontal(line: Line) -> bool:

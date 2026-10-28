@@ -190,7 +190,8 @@ class Composer:
             while cur and cur[-1].space:
                 cur.pop()
             lines.append((cur, hyphen))
-            cur, cur_w = [a], a.width
+            cur, cur_w = [], 0.0
+            queue.insert(0, a)
         while cur and cur[-1].space:
             cur.pop()
         if cur or not lines:

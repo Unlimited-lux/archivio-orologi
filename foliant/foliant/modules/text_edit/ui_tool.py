@@ -180,6 +180,10 @@ class EditTextTool(Tool):
         drag, self.drag = self.drag, None
         if drag is None:
             return True
+        if ev.page is not None:
+            if drag.kind == "move" and ev.page != drag.page:
+                drag.target_page = ev.page
+            drag.current = ev.point * self.ctrl.frame(drag.target_page)
         dx = drag.current.x - drag.start.x
         dy = drag.current.y - drag.start.y
         if drag.kind == "move":
