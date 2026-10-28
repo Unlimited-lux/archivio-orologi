@@ -725,7 +725,7 @@ class ShapeTool(_DragTool):
             return   # clic senza trascinamento: nessuna forma
         if self.kind == engine.DISTANCE:
             xref = self.ctrl.apply(_("Misura distanza"), engine.create_measure, page, self.kind, pts,
-                                   self.style(), self.ctrl.scale_for(page), self.ctrl.author())
+                                   self.style(), self.ctrl.scale_for(page, pts[0], view), self.ctrl.author())
         else:
             label = {engine.RECT: _("Aggiungi rettangolo"), engine.ELLIPSE: _("Aggiungi ellisse"),
                      engine.LINE: _("Aggiungi linea"), engine.ARROW: _("Aggiungi freccia")}[self.kind]
@@ -745,7 +745,7 @@ class ShapeTool(_DragTool):
             painter.drawLine(QPointF(a.x, a.y), QPointF(b.x, b.y))
             if self.kind == engine.DISTANCE:
                 _paint_label(view, painter, b, engine.measure_value(engine.DISTANCE, [a, b],
-                                                                    self.ctrl.scale_for(page)))
+                                                                    self.ctrl.scale_for(page, a, view)))
         elif self.kind == engine.RECT:
             painter.drawRect(_qrect(pymupdf.Rect(a, b)))
         else:
@@ -852,7 +852,7 @@ class PolyTool(AnnotTool):
             return
         if self.kind in engine.MEASURE_KINDS:
             xref = self.ctrl.apply(_("Aggiungi misura"), engine.create_measure, page, self.kind, pts, self.style(),
-                                   self.ctrl.scale_for(page), self.ctrl.author())
+                                   self.ctrl.scale_for(page, pts[0], view), self.ctrl.author())
         else:
             label = {engine.POLYGON: _("Aggiungi poligono"), engine.POLYLINE: _("Aggiungi polilinea"),
                      engine.CLOUD: _("Aggiungi nuvola")}[self.kind]
@@ -879,7 +879,8 @@ class PolyTool(AnnotTool):
             painter.drawRect(QRectF(p.x - hs / 2, p.y - hs / 2, hs, hs))
         if self.kind in engine.MEASURE_KINDS and len(pts) >= 2:
             try:
-                _paint_label(view, painter, pts[-1], engine.measure_value(self.kind, pts, self.ctrl.scale_for(page)))
+                _paint_label(view, painter, pts[-1], engine.measure_value(self.kind, pts,
+                                                                             self.ctrl.scale_for(page, pts[0], view)))
             except engine.AnnotationError:
                 pass
 

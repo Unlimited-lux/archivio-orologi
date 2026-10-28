@@ -235,8 +235,18 @@ class Controller(QObject):
         where = _("tutte le pagine") if scale.all_pages or page is None else _("pagina {n}").format(n=page + 1)
         self.ctx.status(_("Scala: {s}").format(s=scale.text()) + f" ({where})", 10000)
 
-    def scale_for(self, page: int) -> engine.Scale:
-        return self.page_scales.get(page, self.scale)
+    def scale_for(self, page: int, point=None, view=None) -> engine.Scale:
+        """Scala di misura: calibrazione dell'utente, altrimenti l'area di misura /VP del documento
+        che contiene il punto, altrimenti la scala predefinita."""
+        if page in self.page_scales:
+            return self.page_scales[page]
+        if self.scale.calibrated or point is None:
+            return self.scale
+        try:
+            vp = self.read(engine.viewport_scale, page, point, view=view)
+        except Exception:
+            vp = None
+        return vp or self.scale
 
     # ------------------------------------------------------------------ documento
     def view(self) -> "DocumentView | None":

@@ -1066,3 +1066,18 @@ def test_ann03_minibar(comments, monkeypatch):
     assert module.ctrl.info(0, xref).color == (0, 0, 1)
     bar._delete()
     assert module.ctrl.info(0, xref) is None and not bar.isVisible()
+
+
+def test_ann30_document_viewport_scale(comments):
+    """ANN-30: dentro un'area /VP con scala del documento la misura usa quella scala senza calibrare."""
+    window, view, module = comments
+    with view.document.change("vp") as pdf:
+        pdf.xref_set_key(pdf[0].xref, "VP", "[<</Type/Viewport/BBox[100 100 500 500]/Measure<</Type/Measure"
+                                            "/Subtype/RL/R(1 pt = 0,5 m)/X[<</Type/NumberFormat/U(m)/C 0.5/D 100>>]"
+                                            "/D[<</Type/NumberFormat/U(m)/C 0.5/D 100>>]>>>>]")
+    module.activate(engine.DISTANCE)
+    drag(view, 0, (150, 500), (250, 500))           # dentro l'area (y PDF = 342)
+    drag(view, 0, (150, 100), (250, 100))           # fuori: scala predefinita (mm)
+    vals = sorted(i.contents for i in module.ctrl.annotations())
+    assert "50,00 m" in vals
+    assert any(v.endswith(" mm") for v in vals)

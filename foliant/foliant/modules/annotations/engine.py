@@ -1104,6 +1104,39 @@ def scale_of(pdf: pymupdf.Document, xref: int) -> Scale | None:
                  _unescape_pdf_string(r[1]) if r[0] == "string" else "", True)
 
 
+def viewport_scale(pdf: pymupdf.Document, page_no: int, point) -> Scale | None:
+    """Scala dell'area di misura /VP della pagina che contiene il punto (ISO 32000-2 §12.9):
+    si usa l'ultima area dell'elenco che contiene il punto."""
+    page = pdf[page_no]
+    k, v = pdf.xref_get_key(page.xref, "VP")
+    if k == "null":
+        return None
+    if k == "xref":
+        v = pdf.xref_object(int(v.split()[0]), compressed=True)
+    # riferimenti indiretti alle singole aree: si sostituiscono con il loro contenuto
+    v = re.sub(r"(\d+)\s+0\s+R", lambda m: pdf.xref_object(int(m.group(1)), compressed=True), v)
+    p = pymupdf.Point(point)
+    found = None
+    for part in v.split("/BBox")[1:]:
+        bm = re.match(r"\s*\[([^\]]*)\]", part)
+        if not bm:
+            continue
+        try:
+            bb = [float(x) for x in bm.group(1).split()]
+        except ValueError:
+            continue
+        if len(bb) != 4 or not from_pdf_rect(page, bb).contains(p):
+            continue
+        xm = re.search(r"/X\s*\[(.*?)\]", part, re.S)
+        src = xm.group(1) if xm else part
+        cm = re.search(r"/C\s+([\d.eE+-]+)", src)
+        um = re.search(r"/U\s*\(([^)]*)\)", src)
+        rm = re.search(r"/R\s*\(([^)]*)\)", part)
+        if cm:
+            found = Scale(um.group(1) if um else "", float(cm.group(1)), rm.group(1) if rm else "", True)
+    return found
+
+
 def update_measure(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     """Ricalcola il valore di una misura dalla sua geometria e dalla sua scala."""
     page = pdf[page_no]
