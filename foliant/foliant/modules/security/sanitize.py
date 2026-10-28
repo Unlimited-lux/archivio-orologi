@@ -99,16 +99,22 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000) -> ScanReport:
                 if kind == "string" and uri:
                     uris.add(uri)
     # collegamenti con indirizzo diretto (senza oggetto azione separato)
-    for page in pdf:
-        for link in page.get_links():
-            if link.get("kind") == pymupdf.LINK_URI and link.get("uri"):
-                uris.add(link["uri"])
-        for annot in page.annots():
-            if annot.type[0] == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
-                rep.embedded_files += 1
-            if annot.type[0] not in (pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_REDACT):
-                rep.comments += 1
-        rep.form_fields += sum(1 for _w in page.widgets())
+    from .redaction import iter_pages
+    for _i, page in iter_pages(pdf):
+        try:
+            for link in page.get_links():
+                if link.get("kind") == pymupdf.LINK_URI and link.get("uri"):
+                    uris.add(link["uri"])
+            # annot_xrefs è lineare (page.annots() è quadratico con migliaia di annotazioni)
+            for _x, kind, _id in page.annot_xrefs():
+                if kind == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
+                    rep.embedded_files += 1
+                if kind == pymupdf.PDF_ANNOT_WIDGET:
+                    rep.form_fields += 1
+                elif kind not in (pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_REDACT, pymupdf.PDF_ANNOT_POPUP):
+                    rep.comments += 1
+        except Exception:
+            continue   # pagina danneggiata: rapporto parziale
     rep.external_links = sorted(uris)
     rep.items.extend(("uri", "", u) for u in rep.external_links)
     try:
@@ -139,9 +145,9 @@ def _locations(pdf: pymupdf.Document) -> dict[int, str]:
     x = ref(cat, "OpenAction")
     if x:
         loc[x] = _("Apertura del documento")
-    for i in range(pdf.page_count):
+    from .redaction import iter_pages
+    for i, page in iter_pages(pdf):
         label = _("Pagina {n}").format(n=i + 1)
-        page = pdf[i]
         loc.setdefault(page.xref, label)
         for key in ("AA/O", "AA/C"):
             x = ref(page.xref, key)

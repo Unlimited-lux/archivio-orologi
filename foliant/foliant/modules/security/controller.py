@@ -733,13 +733,15 @@ class SecurityController:
             self.banners[view] = Banner(view)
         doc.add_listener(self._listener_for(view))
         try:
-            with ENGINE_LOCK:
-                rep = S.scan(doc.pdf)
-        except Exception:
-            rep = S.ScanReport()
-        self.scans[doc] = rep
-        self.show_open_notices(view, rep)
-        self.refresh_document_state(view)
+            try:
+                with ENGINE_LOCK:
+                    rep = S.scan(doc.pdf)
+            except Exception:
+                rep = S.ScanReport()
+            self.scans[doc] = rep
+            self.show_open_notices(view, rep)
+        finally:
+            self.refresh_document_state(view)
 
     def _listener_for(self, view):
         ref = weakref.ref(view)
