@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, page_pixmap
 
 from .common import check
 from .extract import (
@@ -515,7 +515,7 @@ def _write_epub(work: pymupdf.Document, job, z: zipfile.ZipFile) -> None:
     manifest.append(("css", "style.css", "text/css", ""))
     # copertina: pagina 1 resa come immagine
     with ENGINE_LOCK:
-        cover = work[0].get_pixmap(dpi=96).tobytes("png")
+        cover = page_pixmap(work, 0, hide_unsigned_signatures=True, dpi=96).tobytes("png")
     files["OEBPS/cover.png"] = cover
     manifest.append(("cover-image", "cover.png", "image/png", "cover-image"))
 
@@ -528,7 +528,7 @@ def _write_epub(work: pymupdf.Document, job, z: zipfile.ZipFile) -> None:
             with ENGINE_LOCK:
                 page = work[i]
                 pw, ph = int(page.rect.width), int(page.rect.height)
-                png = page.get_pixmap(dpi=job.options.get("dpi", 150)).tobytes("png")
+                png = page_pixmap(work, i, hide_unsigned_signatures=True, dpi=job.options.get("dpi", 150)).tobytes("png")
                 text = normalize_text(page.get_text("text"))
             img = f"page{i + 1:04}.png"
             z.writestr(f"OEBPS/{img}", png, compress_type=zipfile.ZIP_STORED)   # subito su disco
