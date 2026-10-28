@@ -5,6 +5,10 @@ Sistemi di coordinate:
   (le coordinate del motore per testo, annotazioni, disegno);
 - *viewport*: pixel logici del widget visibile.
 `page_transform(i)` converte pagina -> viewport; `view_to_page()` l'inverso.
+
+Resa: sotto `TILE_THRESHOLD` pixel ogni pagina visibile è un'unica immagine; oltre
+(zoom elevati, pagine enormi) si disegnano solo le tasselle visibili, `TILE_SIZE` pixel
+di lato, con la stessa matrice della resa intera e un ritaglio (`clip`).
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ from .tools import HandTool, PageEvent, SelectTextTool, TextSelection, Tool, cop
 
 PX_PER_PT = 96.0 / 72.0
 MAX_RENDER_PIXELS = 24_000_000
+TILE_THRESHOLD = 16_000_000      # pixel della resa intera oltre i quali la pagina va a tasselle
+TILE_SIZE = 1024                 # lato delle tasselle, in pixel del dispositivo
+PREVIEW_PIXELS = 4_000_000       # anteprima intera di una pagina a tasselle mai disegnata prima
 
 VIEW_CONTINUOUS = "continuous"   # pagine una sotto l'altra
 VIEW_SINGLE = "single"           # una pagina alla volta
@@ -36,7 +43,8 @@ VIEW_MODES = (VIEW_CONTINUOUS, VIEW_SINGLE, VIEW_FACING, VIEW_COVER)
 FIT_WIDTH = "width"
 FIT_PAGE = "page"
 
-ZOOM_STEPS = (0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0)
+ZOOM_STEPS = (0.01, 0.02, 0.05, 0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
+              4.0, 5.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0)
 
 
 class DocumentBridge(QObject):
@@ -96,9 +104,10 @@ class DocumentView(QAbstractScrollArea):
 
     GAP = 16.0
     MARGIN = 24.0
-    MIN_ZOOM = 0.1
-    MAX_ZOOM = 8.0
+    MIN_ZOOM = 0.01                  # VIS-10: 1%–6400%
+    MAX_ZOOM = 64.0
     CACHE_LIMIT = 320 * 1024 * 1024
+    TILE_CACHE_LIMIT = 256 * 1024 * 1024
 
     def __init__(self, document: Document, parent=None):
         super().__init__(parent)
@@ -113,11 +122,18 @@ class DocumentView(QAbstractScrollArea):
         self._rects: list[QRectF] = []
         self._content = QSizeF(0, 0)
         self._current = 0
+        # Pagine intere: (pagina, scala, rotazione, versione) -> immagine.
         self._cache: OrderedDict[tuple, QImage] = OrderedDict()
         self._cache_bytes = 0
         self._stale: dict[int, QImage] = {}
-        self._queue: list[int] = []
+        # Tasselle: (pagina, scala, rotazione, versione, colonna, riga) -> (immagine, dx, dy), con
+        # dx, dy = posizione rispetto all'angolo della pagina, in pixel della resa.
+        self._tiles: OrderedDict[tuple, tuple[QImage, float, float]] = OrderedDict()
+        self._tiles_bytes = 0
+        # Coda delle rese: chiavi di `_cache` (4 elementi) o di `_tiles` (6 elementi).
+        self._queue: list[tuple] = []
         self._failed: set[tuple] = set()
+        self._failed_pages: set[tuple[int, int]] = set()   # (pagina, versione) che il motore non riesce a disegnare
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render_step)
@@ -126,6 +142,8 @@ class DocumentView(QAbstractScrollArea):
         self._default_tool: Tool = SelectTextTool()
         self._tool: Tool | None = None
         self.hand_tool = HandTool()
+        # False: pagine disegnate senza annotazioni (solo a schermo, il file non cambia; ANN-39).
+        self.show_annotations = True
         # Disegni aggiuntivi dei moduli: callable(view, painter, page_index), painter in coordinate pagina.
         self.overlays: list = []
         # Voci del menu contestuale (tasto destro): callable(view, page_event, menu).
@@ -191,6 +209,8 @@ class DocumentView(QAbstractScrollArea):
         self._bridge.detach()
         self._cache.clear()
         self._stale.clear()
+        self._tiles.clear()
+        self._tiles_bytes = 0
 
     # ================================================================ strumenti
     def set_tool(self, tool: Tool | None) -> None:
@@ -498,13 +518,20 @@ class DocumentView(QAbstractScrollArea):
 
     def _invalidate_render(self, keep_stale: bool = False) -> None:
         self._failed.clear()
+        self._failed_pages.clear()
         self._cache.clear()
         self._cache_bytes = 0
         if not keep_stale:
             self._stale.clear()
+            self._tiles.clear()
+            self._tiles_bytes = 0
         else:
             keep = set(self.visible_pages(prefetch=self.viewport().height()))
             self._stale = {k: v for k, v in self._stale.items() if k in keep}
+            # le tasselle in vista restano come resa provvisoria finché non arrivano le nuove
+            key = self._scale_key()
+            for k in [k for k in self._tiles if k[0] not in keep or k[1] != key]:
+                self._tiles_bytes -= self._tiles.pop(k)[0].sizeInBytes()
         self.viewport().update()
 
     def words(self, index: int) -> list[tuple]:
@@ -561,10 +588,32 @@ class DocumentView(QAbstractScrollArea):
     def _schedule_visible(self) -> None:
         key = self._scale_key()
         ver = self.document.version
+        rot = self._view_rotation
+        vw, vh = self.viewport().width(), self.viewport().height()
         vis = self.visible_pages()
-        extra = [i for i in self.visible_pages(prefetch=self.viewport().height()) if i not in vis]
-        self._queue = [i for i in vis + extra if (i, key, self._view_rotation, ver) not in self._cache
-                       and (i, key, self._view_rotation, ver) not in self._failed]
+        extra = [i for i in self.visible_pages(prefetch=vh) if i not in vis]
+        if self._tiles and not any(self._tiled(i, key) for i in vis + extra):
+            self._tiles.clear()              # tornati a zoom normali: la memoria delle tasselle si libera
+            self._tiles_bytes = 0
+        view = QRectF(0, 0, vw, vh)
+        around = view.adjusted(-vw / 2, -vh, vw / 2, vh)   # anticipo: come per le pagine, più mezza vista di lato
+        now: list[tuple] = []                # ciò che si vede, poi ciò che sta per entrare in vista
+        later: list[tuple] = []
+        later_tiles: list[tuple] = []
+        for i in vis + extra:
+            target = now if i in vis else later
+            if not self._tiled(i, key):
+                target.append((i, key, rot, ver))
+                continue
+            if self._stale.get(i) is None:   # nessuna resa intera da mostrare sotto: prima un'anteprima
+                target.append((i, self._preview_scale(i), rot, ver))
+            shown = self._tiles_in(i, key, view) if i in vis else []
+            now += [(i, key, rot, ver) + t for t in shown]
+            later_tiles += [(i, key, rot, ver) + t for t in self._tiles_in(i, key, around) if t not in shown]
+        # le tasselle anticipate non devono far uscire dalla cache quelle visibili
+        budget = self.TILE_CACHE_LIMIT // (2 * TILE_SIZE * TILE_SIZE * 4) - sum(len(k) == 6 for k in now)
+        queue = now + later + later_tiles[:max(0, budget)]
+        self._queue = [k for k in queue if k not in self._cache and k not in self._tiles and k not in self._failed]
         if self._queue and not self._render_timer.isActive():
             self._render_timer.start(0)
 
@@ -574,16 +623,11 @@ class DocumentView(QAbstractScrollArea):
         if not ENGINE_LOCK.acquire(blocking=False):
             self._render_timer.start(40)
             return
+        key = self._queue.pop(0)
         try:
-            index = self._queue.pop(0)
-            key = (index, self._scale_key(), self._view_rotation, self.document.version)
-            if key not in self._cache and index < len(self._geoms):
-                img = self._render_page(index, key[1])
-                self._cache_put(key, img)
-                self._stale[index] = img
-        except Exception as e:  # una pagina danneggiata non deve bloccare la vista
-            self._failed.add(key)
-            self.status(f"Errore nel disegno di una pagina: {e}")
+            self._render_key(key)
+        except Exception:  # una pagina danneggiata non deve bloccare la vista
+            self._mark_failed(key)
         finally:
             ENGINE_LOCK.release()
         self.viewport().update()
@@ -591,18 +635,44 @@ class DocumentView(QAbstractScrollArea):
             self._render_timer.start(0)
 
     def flush_rendering(self) -> None:
-        """Disegna subito le pagine visibili in attesa (test, stampa, catture)."""
+        """Disegna subito le pagine (o le tasselle) visibili in attesa (test, stampa, catture)."""
         self._schedule_visible()
         while self._queue:
+            key = self._queue.pop(0)
             with ENGINE_LOCK:
-                index = self._queue.pop(0)
-                key = (index, self._scale_key(), self._view_rotation, self.document.version)
-                if key not in self._cache and index < len(self._geoms):
-                    img = self._render_page(index, key[1])
-                    self._cache_put(key, img)
-                    self._stale[index] = img
+                try:
+                    self._render_key(key)
+                except Exception:
+                    self._mark_failed(key)
         self._render_timer.stop()
         self.viewport().update()
+
+    def _mark_failed(self, key: tuple) -> None:
+        from ..i18n import _
+        self._failed.add(key)
+        page = (key[0], key[3])
+        if page not in self._failed_pages:
+            self._failed_pages.add(page)
+            self.status(_("Impossibile visualizzare la pagina {n}: il file è danneggiato.").format(n=key[0] + 1))
+
+    def _render_key(self, key: tuple) -> None:
+        """Esegue una voce della coda, tenendo ENGINE_LOCK: pagina intera (4 elementi) o tassella (6)."""
+        index = key[0]
+        if (index >= len(self._geoms) or key[2] != self._view_rotation or key[3] != self.document.version
+                or key in self._cache or key in self._tiles):
+            return
+        if len(key) == 4:
+            img = self._render_page(index, key[1])
+            self._cache_put(key, img)
+            self._stale[index] = img
+        else:
+            self._tile_put(key, self._render_tile(index, key[1], key[4], key[5]))
+
+    def _render_matrix(self, scale: float) -> pymupdf.Matrix:
+        mat = pymupdf.Matrix(scale, scale)
+        if self._view_rotation:
+            mat = mat.prerotate(self._view_rotation)
+        return mat
 
     def _render_page(self, index: int, scale: float) -> QImage:
         g = self._geoms[index]
@@ -610,10 +680,8 @@ class DocumentView(QAbstractScrollArea):
         if pixels > MAX_RENDER_PIXELS:
             scale *= math.sqrt(MAX_RENDER_PIXELS / pixels)
         page = self.document.pdf[index]
-        mat = pymupdf.Matrix(scale, scale)
-        if self._view_rotation:
-            mat = mat.prerotate(self._view_rotation)
-        pix = page.get_pixmap(matrix=mat, alpha=False, annots=True)
+        mat = self._render_matrix(scale)
+        pix = page.get_pixmap(matrix=mat, alpha=False, annots=self.show_annotations)
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
         return img
 
@@ -625,6 +693,79 @@ class DocumentView(QAbstractScrollArea):
             self._cache_bytes -= old.sizeInBytes()
             if self._stale.get(k[0]) is old:
                 del self._stale[k[0]]
+
+    # ---------------------------------------------------------------- tasselle
+    # Spazio della resa: i pixel dell'immagine che `get_pixmap(matrix=_render_matrix(scala))`
+    # produrrebbe per la pagina intera. Il motore disegna nel riquadro della pagina visualizzata
+    # (`page.rect`: /Rotate e /CropBox già applicati, origine sempre in (0, 0)); la matrice
+    # aggiunge zoom e rotazione della vista. Le tasselle sono una griglia fissa di questo spazio,
+    # quindi coincidono pixel per pixel con la resa intera e si riusano durante lo scorrimento.
+    def _tiled(self, index: int, scale: float) -> bool:
+        """True se la resa intera della pagina a questa scala supererebbe TILE_THRESHOLD pixel."""
+        g = self._geoms[index]
+        return g.width * g.height * scale * scale > TILE_THRESHOLD
+
+    def _preview_scale(self, index: int) -> float:
+        g = self._geoms[index]
+        return round(math.sqrt(PREVIEW_PIXELS / max(1.0, g.width * g.height)), 4)
+
+    def _render_origin(self, index: int, scale: float) -> tuple[float, float]:
+        """Angolo superiore sinistro della pagina nello spazio della resa.
+
+        La matrice ruota attorno all'origine: con la rotazione della vista l'immagine non
+        parte da (0, 0). Basta la geometria già nota, senza interrogare il motore."""
+        g = self._geoms[index]
+        w, h = (g.height, g.width) if self._view_rotation in (90, 270) else (g.width, g.height)
+        b = pymupdf.Rect(0, 0, w, h) * self._render_matrix(scale)
+        return b.x0, b.y0
+
+    def _tiles_in(self, index: int, scale: float, area: QRectF) -> list[tuple[int, int]]:
+        """Tasselle (colonna, riga) della pagina che coprono `area` (viewport), dal centro verso i bordi."""
+        r = self.page_rect(index)
+        a = area & r
+        if a.isEmpty():
+            return []
+        f = scale / self._scale()                 # pixel della resa per pixel logico
+        ox, oy = self._render_origin(index, scale)
+        gx, gy = math.floor(ox + 1e-3), math.floor(oy + 1e-3)   # origine della griglia, come fz_round_rect
+        x0 = ox - gx + (a.left() - r.left()) * f
+        x1 = ox - gx + (a.right() - r.left()) * f
+        y0 = oy - gy + (a.top() - r.top()) * f
+        y1 = oy - gy + (a.bottom() - r.top()) * f
+        c0, c1 = max(0, math.floor(x0 / TILE_SIZE + 1e-6)), math.ceil(x1 / TILE_SIZE - 1e-6) - 1
+        r0, r1 = max(0, math.floor(y0 / TILE_SIZE + 1e-6)), math.ceil(y1 / TILE_SIZE - 1e-6) - 1
+        cc, rc = (c0 + c1) / 2, (r0 + r1) / 2
+        tiles = [(c, row) for row in range(r0, r1 + 1) for c in range(c0, c1 + 1)]
+        tiles.sort(key=lambda t: (t[0] - cc) ** 2 + (t[1] - rc) ** 2)
+        return tiles
+
+    def _render_tile(self, index: int, scale: float, col: int, row: int) -> tuple[QImage, float, float]:
+        """Disegna una tassella con la matrice della resa intera e un ritaglio.
+
+        `clip` va espresso nel riquadro della pagina visualizzata (lo spazio in cui il motore
+        disegna, non le coordinate pagina non ruotate): è il rettangolo della tassella
+        riportato indietro con l'inversa della matrice di resa."""
+        mat = self._render_matrix(scale)
+        ox, oy = self._render_origin(index, scale)
+        x0 = math.floor(ox + 1e-3) + col * TILE_SIZE
+        y0 = math.floor(oy + 1e-3) + row * TILE_SIZE
+        clip = pymupdf.Rect(x0, y0, x0 + TILE_SIZE, y0 + TILE_SIZE) * ~mat
+        page = self.document.pdf[index]
+        pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False, annots=self.show_annotations)
+        if pix.width <= 0 or pix.height <= 0:
+            return QImage(), 0.0, 0.0
+        img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
+        return img, pix.x - ox, pix.y - oy
+
+    def _tile_put(self, key: tuple, tile: tuple[QImage, float, float]) -> None:
+        # la stessa tassella di una versione precedente (resa provvisoria) non serve più
+        for k in [k for k in self._tiles if k[:3] == key[:3] and k[4:] == key[4:]]:
+            self._tiles_bytes -= self._tiles.pop(k)[0].sizeInBytes()
+        self._tiles[key] = tile
+        self._tiles_bytes += tile[0].sizeInBytes()
+        while self._tiles_bytes > self.TILE_CACHE_LIMIT and len(self._tiles) > 1:
+            _k, old = self._tiles.popitem(last=False)     # la meno usata di recente
+            self._tiles_bytes -= old[0].sizeInBytes()
 
     def render_page_image(self, index: int, zoom: float = 1.0) -> QImage:
         """Immagine della pagina (per miniature, anteprime, stampa)."""
@@ -655,14 +796,20 @@ class DocumentView(QAbstractScrollArea):
             r = self.page_rect(i)
             p.fillRect(r.adjusted(1, 2, 2, 3), shadow)
             p.fillRect(r, QColor(255, 255, 255))
-            img = self._cache.get((i, key, self._view_rotation, ver))
-            if img is None:
-                missing = True
-                img = self._stale.get(i)
+            if (i, ver) in self._failed_pages:      # NFR-14: la pagina danneggiata lo dice, le altre restano visibili
+                self._paint_failed(p, r)
+                continue
+            if self._tiled(i, key):
+                missing = self._paint_tiles(p, i, r, key, ver) or missing
             else:
-                self._cache.move_to_end((i, key, self._view_rotation, ver))
-            if img is not None:
-                p.drawImage(r, img, QRectF(0, 0, img.width(), img.height()))
+                img = self._cache.get((i, key, self._view_rotation, ver))
+                if img is None:
+                    missing = True
+                    img = self._stale.get(i)
+                else:
+                    self._cache.move_to_end((i, key, self._view_rotation, ver))
+                if img is not None:
+                    p.drawImage(r, img, QRectF(0, 0, img.width(), img.height()))
             p.save()
             p.setClipRect(r)
             p.setWorldTransform(self.page_transform(i))
@@ -670,6 +817,60 @@ class DocumentView(QAbstractScrollArea):
             p.restore()
         if missing and not self._render_timer.isActive():
             self._schedule_visible()
+
+    def _paint_failed(self, p: QPainter, r: QRectF) -> None:
+        from ..i18n import _
+        p.save()
+        p.fillRect(r, QColor(246, 246, 246))
+        p.setPen(QColor(150, 150, 150))
+        p.drawRect(r.adjusted(0, 0, -1, -1))
+        p.setPen(QColor(90, 90, 90))
+        p.drawText(r.adjusted(12, 12, -12, -12), int(Qt.AlignmentFlag.AlignCenter) | int(Qt.TextFlag.TextWordWrap),
+                   _("Impossibile visualizzare questa pagina"))
+        p.restore()
+
+    def _paint_tiles(self, p: QPainter, index: int, r: QRectF, key: float, ver: int) -> bool:
+        """Pagina a tasselle: solo la parte visibile. Restituisce True se manca qualche tassella.
+
+        Finché una tassella manca, sotto resta la resa precedente: l'ultima immagine intera
+        (sfocata) e le tasselle ancora in cache di un altro zoom o della versione precedente."""
+        area = QRectF(self.viewport().rect()) & r
+        if area.isEmpty():
+            return False
+        rot = self._view_rotation
+        s = self._scale()
+        p.save()
+        p.setClipRect(area)
+        base = self._stale.get(index)
+        if base is not None and not base.isNull():
+            sx, sy = base.width() / r.width(), base.height() / r.height()
+            p.drawImage(area, base, QRectF((area.left() - r.left()) * sx, (area.top() - r.top()) * sy,
+                                           area.width() * sx, area.height() * sy))
+
+        def draw(k: tuple, tile: tuple[QImage, float, float]) -> None:
+            img, dx, dy = tile
+            f = k[1] / s                          # pixel della resa per pixel logico
+            target = QRectF(r.left() + dx / f, r.top() + dy / f, img.width() / f, img.height() / f)
+            if not img.isNull() and target.intersects(area):
+                p.drawImage(target, img, QRectF(img.rect()))
+
+        # rese provvisorie dalla peggiore alla migliore: prima le versioni precedenti, poi lo zoom più vicino
+        others = [(k, t) for k, t in self._tiles.items()
+                  if k[0] == index and k[2] == rot and (k[1] != key or k[3] != ver)]
+        others.sort(key=lambda kt: (kt[0][3] == ver, -abs(math.log(kt[0][1] / key))))
+        for k, t in others:
+            draw(k, t)
+        missing = False
+        for t in self._tiles_in(index, key, area):
+            k = (index, key, rot, ver) + t
+            tile = self._tiles.get(k)
+            if tile is None:
+                missing = True
+                continue
+            self._tiles.move_to_end(k)
+            draw(k, tile)
+        p.restore()
+        return missing
 
     def _paint_overlays(self, p: QPainter, index: int) -> None:
         hits = self.search_hits.get(index)

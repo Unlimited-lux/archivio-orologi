@@ -15,7 +15,7 @@ import re
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, page_pixmap
 
 from .common import ConversionError, check
 from .extract import (
@@ -679,7 +679,7 @@ def write_pptx(work: pymupdf.Document, path: str, job) -> None:
 
         if pc.ocr or "scansione-senza-ocr" in pc.warnings or "ocr-non-disponibile" in pc.warnings:
             with ENGINE_LOCK:
-                png = work[pi].get_pixmap(dpi=job.dpi).tobytes("png")
+                png = page_pixmap(work, pi, hide_unsigned_signatures=True, dpi=job.dpi).tobytes("png")
             slide.shapes.add_picture(io.BytesIO(png), *box((0, 0, pc.width, pc.height)))
             if not pc.ocr:
                 job.warn(_("Pagina {p} scansionata: inserita come immagine.").format(p=pc.index + 1))

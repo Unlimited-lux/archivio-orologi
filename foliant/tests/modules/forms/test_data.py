@@ -366,3 +366,34 @@ def test_collect_and_series_from_window(window, tmp_path, form_pdf):
     assert names == ["Rossi (2).pdf", "Rossi.pdf"]
     assert E.form_values(pymupdf.open(str(outdir / "Rossi (2).pdf")))["nome"] == "Luca"
     del report
+
+
+def test_export_name_tm(window, tmp_path, form_pdf):
+    view = open_form(window, form_pdf)
+    with view.document.change("tm") as pdf:
+        f = [x for x in E.list_fields(pdf) if x.name == "cognome"][0]
+        E.update_properties(pdf, 0, f.xref, export_name="surname")
+    module().import_values({"cognome": "Bianchi"}, view)
+    out = tmp_path / "d.json"
+    module().export_data(str(out), view=view)
+    data = json.loads(out.read_text())
+    assert data["surname"] == "Bianchi" and "cognome" not in data
+    blank = tmp_path / "b.pdf"
+    pdf = build_form()
+    g = [x for x in E.list_fields(pdf) if x.name == "cognome"][0]
+    E.update_properties(pdf, 0, g.xref, export_name="surname")
+    pdf.save(str(blank))
+    view2 = open_form(window, blank)
+    report = module().import_data(str(out), view=view2)
+    assert values(view2)["cognome"] == "Bianchi" and not report["unknown"]
+
+
+def test_xfa_unmapped_fields_reported(window, tmp_path):
+    make_xfa(tmp_path / "s.pdf", True)
+    pdf = pymupdf.open(str(tmp_path / "s.pdf"))
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 100, 250, 120), "form1.extra")
+    pdf.save(str(tmp_path / "s2.pdf"))
+    assert E.xfa_unmapped(pymupdf.open(str(tmp_path / "s2.pdf"))) == ["form1.extra"]
+    view = open_form(window, tmp_path / "s2.pdf")
+    bar = forms.instance().filler(view).text_of_bar()
+    assert "1 campo senza dati XML associati" in bar

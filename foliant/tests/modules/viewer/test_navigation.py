@@ -280,3 +280,20 @@ def test_gotor_blocked_by_higher_priority_handler(viewer_window, tmp_path, qtbot
     finally:
         from foliant.ui.tools import remove_link_handler
         remove_link_handler(guard)
+
+
+def test_back_returns_to_origin_document_tab(viewer_window, tmp_path, qtbot):
+    src = _gotor_source(tmp_path)
+    view = viewer_window.open_path(src)
+    nav = _nav(viewer_window)
+    with view.document.lock:
+        link = view.document.pdf[0].get_links()[0]
+    new = nav.open_remote(view, link)
+    assert viewer_window.current_view() is new
+    nav._refresh()
+    assert nav.act_back.isEnabled()
+    assert nav.back()
+    assert viewer_window.current_view() is view       # di nuovo sulla scheda d'origine
+    viewer_window.close_view(view)                    # scheda d'origine chiusa: voce saltata
+    viewer_window.tabs.setCurrentWidget(new)
+    assert not nav.back()

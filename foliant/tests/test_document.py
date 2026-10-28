@@ -244,3 +244,28 @@ def test_unsupported_security_handler_named(tmp_path):
     bad.write_bytes(p.read_bytes().replace(b"/Standard", b"/FooSecure"))
     with pytest.raises(DocumentError, match="FooSecure"):
         Document.open(bad)
+
+
+def test_listener_error_does_not_fail_save(sample_pdf, tmp_path, monkeypatch):
+    import sys
+    doc = Document.open(sample_pdf)
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *a: errors.append(a[1]))
+
+    def broken(document, kind):
+        raise RuntimeError("osservatore difettoso")
+    doc.add_listener(broken)
+    with doc.change("x") as pdf:
+        pdf.delete_page(0)
+    doc.save(tmp_path / "out.pdf")                   # non solleva
+    assert not doc.is_modified and errors
+    assert pymupdf.open(str(tmp_path / "out.pdf")).page_count == 2
+
+
+def test_saved_file_uses_object_streams(sample_pdf, tmp_path):
+    doc = Document.open(sample_pdf)
+    with doc.change("x") as pdf:
+        pdf[0].insert_text((72, 300), "nuovo")
+    out = tmp_path / "o.pdf"
+    doc.save(out)
+    assert b"/ObjStm" in out.read_bytes()

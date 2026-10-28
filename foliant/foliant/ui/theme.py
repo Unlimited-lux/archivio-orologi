@@ -209,6 +209,8 @@ QPushButton:default, QPushButton[primary="true"] {{ background: {h('accent')}; c
     border-color: {h('accent')}; }}
 QPushButton[primary="true"]:hover {{ background: {h('accent_hover')}; }}
 QPushButton:disabled {{ color: {h('text_muted')}; }}
+QPushButton:default:disabled, QPushButton[primary="true"]:disabled {{ background: {h('surface_alt')};
+    border-color: {h('border')}; color: {h('text_muted')}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {{
     background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px; padding: 3px 6px;
     color: {h('text')}; selection-background-color: {h('accent')}; selection-color: {h('accent_text')}; }}

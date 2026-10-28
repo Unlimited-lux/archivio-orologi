@@ -381,7 +381,7 @@ def test_watermark_marked_and_removable(tmp_path):
     original = open(a, "rb").read()
     marked = be.add_page_numbers(be.add_watermark(original, "RISERVATO"))
     doc = pymupdf.open(stream=marked)
-    assert b"/Artifact" in b"".join(doc.xref_stream(x) for x in doc[0].get_contents())
+    assert b"/FolStamp_watermark_" in b"".join(doc.xref_stream(x) for x in doc[0].get_contents())
     doc.close()
     cleaned, n = be.remove_marks(marked, {"watermark"})
     assert n == 2
@@ -570,7 +570,7 @@ def test_ocr_with_fake_engine(tmp_path, fake_engines):
     rep = be.run_job(None, items_for([scan, native]), job(tmp_path / "out", ("ocr", {"languages": "ita"})), STARTED)
     assert rep.results[0].status == "ok" and "OCR" in page_texts(rep.results[0].outputs[0])[0]
     assert rep.results[1].status == "skipped" and "Nessuna pagina" in rep.results[1].message
-    assert fake_engines["ocr"] == [(["ita"], "skip_text")]
+    assert fake_engines["ocr"] == [(["ita"], "searchable")]   # modalità del modulo OCR: testo invisibile
 
 
 def test_missing_engines_clear_message(monkeypatch, tmp_path):
@@ -963,3 +963,92 @@ def test_merge_keeps_original_bookmarks_nested(tmp_path):
     toc = pymupdf.open(str(tmp_path / "out" / "Unione.pdf")).get_toc()
     assert toc == [[1, "contratto", 1], [2, "Premesse", 1], [2, "Clausole", 2], [3, "Pagamento", 3],
                    [1, "allegato", 4]]
+
+
+
+def test_watermark_shares_marking_with_pages_module(tmp_path):
+    """BAT-12 / PAG-36: le filigrane in blocco e quelle di Pagine si sostituiscono e si rimuovono a vicenda."""
+    from foliant.modules.pages import stamp
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    doc = pymupdf.open(a)
+    stamp.add_watermark(doc, None, text="UNLIMITED")
+    from_pages = doc.tobytes()
+    doc.close()
+    replaced = be.add_watermark(from_pages, "UNLIMITED", replace=True)
+    text = pymupdf.open(stream=replaced, filetype="pdf").load_page(0).get_text()
+    assert text.count("UNLIMITED") == 1
+    # filigrana messa in blocco, rimossa dal modulo Pagine
+    batch = be.add_watermark(open(a, "rb").read(), "RISERVATO")
+    doc = pymupdf.open(stream=batch, filetype="pdf")
+    assert stamp.list_watermarks(doc) == {0: ["watermark"], 1: ["watermark"]}
+    assert stamp.remove_watermarks(doc) == 2
+    assert "RISERVATO" not in doc[0].get_text()
+    # anche lo sfondo a colore e i Bates usano la marcatura comune
+    marked = be.add_bates(be.add_background(open(a, "rb").read(), color="#EEEEEE"), 1, "X-")[0]
+    doc = pymupdf.open(stream=marked, filetype="pdf")
+    assert sorted(stamp.list_watermarks(doc)[0]) == ["background", "bates"]
+
+
+def test_legacy_marks_still_removed(tmp_path):
+    """I file prodotti prima della marcatura comune restano ripulibili."""
+    a = mk(tmp_path / "in" / "a.pdf", pages=1)
+    with be.ENGINE_LOCK:
+        doc = pymupdf.open(a)
+        page = doc[0]
+        before = page.get_contents()
+        page.insert_text((72, 400), "VECCHIA", fontsize=40)
+        be._mark_new_contents(doc, page, before, "watermark")
+        legacy = doc.tobytes()
+    out = be.add_watermark(legacy, "NUOVA", replace=True)
+    t = pymupdf.open(stream=out, filetype="pdf").load_page(0).get_text()
+    assert "NUOVA" in t and "VECCHIA" not in t
+
+
+def test_header_and_numbers_share_marking_and_dont_replace_each_other(tmp_path):
+    from foliant.modules.pages import stamp
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    data = be.add_header_footer(open(a, "rb").read(), {"top-left": "CONTRATTO {nome}"}, values={"nome": "X"})
+    data = be.add_page_numbers(data)
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    t = doc[0].get_text()
+    assert "CONTRATTO X" in t and "Pagina 1 di 2" in t      # i numeri non tolgono l'intestazione
+    assert sorted(stamp.list_watermarks(doc)[0]) == ["headerfooter", "numbers"]
+    assert stamp.remove_watermarks(doc, None, "all") == 4
+    assert "CONTRATTO" not in doc[0].get_text()
+
+
+def _scanned_letter(path, text):
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 120), text, fontsize=22)
+    img = src[0].get_pixmap(dpi=200).tobytes("png")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_image(page.rect, stream=img)
+    doc.save(str(path))
+    return str(path)
+
+
+def test_ocr_step_with_real_ocr_module(tmp_path):
+    """Integrazione con il vero modulo OCR (se tesseract è installato)."""
+    import shutil as _sh
+    if _sh.which("tesseract") is None or be._ocr_function() is None:
+        pytest.skip("OCR non disponibile")
+    src = _scanned_letter(tmp_path / "scansione.pdf", "Fattura numero 4521")
+    report = be.run_job(None, [be.analyze_file(src)], be.JobSettings(
+        steps=[be.Step("ocr", {"languages": "ita+eng"})], destination=str(tmp_path / "out")))
+    assert report.results[0].status in ("ok", "warning"), report.results[0].message
+    text = pymupdf.open(str(tmp_path / "out" / "scansione.pdf"))[0].get_text()
+    assert "4521" in text
+
+
+@pytest.mark.parametrize("fmt,ext,count", [("txt", ".txt", 1), ("png", ".png", 2), ("docx", ".docx", 1)])
+def test_convert_step_with_real_convert_module(tmp_path, fmt, ext, count):
+    """Integrazione con il vero modulo Converti."""
+    if be._convert_function() is None:
+        pytest.skip("modulo Converti non disponibile")
+    src = mk(tmp_path / "in" / "scheda.pdf", pages=2)
+    report = be.run_job(None, [be.analyze_file(src)], be.JobSettings(
+        steps=[be.Step("convert", {"format": fmt, "dpi": 72})], destination=str(tmp_path / "out")))
+    assert report.results[0].status in ("ok", "warning"), report.results[0].message
+    produced = sorted(os.listdir(tmp_path / "out"))
+    assert len(produced) == count and all(n.endswith(ext) for n in produced)

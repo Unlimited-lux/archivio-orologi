@@ -302,4 +302,10 @@ EN: dict[str, str] = {
     'Parte XML rimossa: restano i campi standard (Annulla per ripristinarla).': 'XML part removed: the standard fields remain (Undo to restore it).',
     'Il file XML non contiene campi («field» con attributo «name»).': 'The XML file contains no fields (“field” with a “name” attribute).',
     'Firma qui': 'Sign here',
+    'I caratteri di sistema sono disponibili solo per i campi di testo.': 'System fonts are only available for text fields.',
+    'Il carattere «{f}» non è installato.': 'The font “{f}” is not installed.',
+    'Analisi del modulo…': 'Analysing the form…',
+    '{n} campo senza dati XML associati': '{n} field without associated XML data',
+    '{n} campi senza dati XML associati': '{n} fields without associated XML data',
+    'Valori non salvati nei dati XML: {l}': 'Values not saved in the XML data: {l}',
 }

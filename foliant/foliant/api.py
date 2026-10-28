@@ -4,6 +4,7 @@
 """
 
 from .core import placement
+from .core.render import page_pixmap
 from .core.document import CLOSED, CONTENT, SAVED, Document, atomic_write
 from .core.engine import ENGINE_LOCK, try_engine
 from .core.errors import DocumentError, FoliantError, OperationCancelled, PasswordRequired, WrongPassword
@@ -21,6 +22,7 @@ from .ui.tools import (
 )
 
 __all__ = [
+    "page_pixmap",
     "placement", "CLOSED", "CONTENT", "SAVED", "Document", "atomic_write", "ENGINE_LOCK", "try_engine",
     "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
     "_", "add_translations", "language", "theme", "PDF_FILTER", "Context", "Mode",

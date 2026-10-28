@@ -198,6 +198,9 @@ TRANSLATIONS: dict[str, str] = {
         "Operators + − × ÷ and parentheses; names with spaces go in double quotes.",
     # pulsanti (FRM-18)
     "Didascalia": "Caption",
+    "uguale al nome": "same as the name",
+    "Nome usato nei dati esportati al posto del nome del campo": "Name used in exported data instead of the field name",
+    "Nome per l'esportazione": "Export name",
     "Alla pressione": "When pressed",
     "uguale alla didascalia": "same as the caption",
     "Campo immagine: in compilazione un clic permette di scegliere l'immagine.":
@@ -437,6 +440,20 @@ class FieldPropertiesPanel(QWidget):
         cb.setTristate(False)
         handler(st == Qt.CheckState.Checked)
 
+    @staticmethod
+    def _add_system_fonts(cb: QComboBox) -> None:
+        """Caratteri di sistema dopo i tre standard (incorporati come sottoinsieme nei campi di testo)."""
+        try:
+            from PySide6.QtGui import QFontDatabase
+            families = [f for f in QFontDatabase.families() if not f.startswith(".")]
+        except Exception:
+            families = []
+        if families:
+            cb.insertSeparator(cb.count())
+            for fam in sorted(set(families), key=str.casefold):
+                if fam not in E.FONTS:
+                    cb.addItem(fam, fam)
+
     def _combo(self, items: list[tuple[str, Any]], handler: Callable[[Any], None]) -> QComboBox:
         cb = QComboBox()
         for label, data in items:
@@ -487,6 +504,10 @@ class FieldPropertiesPanel(QWidget):
         self.tooltip_edit = self._line(lambda t: self._apply({"tooltip": t}))
         self.tooltip_edit.setToolTip(_("Descrizione mostrata al passaggio del mouse e letta dalle tecnologie assistive"))
         form.addRow(_("Suggerimento"), self.tooltip_edit)
+        self.export_name_edit = self._line(lambda t: self._apply({"export_name": t}))
+        self.export_name_edit.setPlaceholderText(_("uguale al nome"))
+        self.export_name_edit.setToolTip(_("Nome usato nei dati esportati al posto del nome del campo"))
+        form.addRow(_("Nome per l'esportazione"), self.export_name_edit)
         self.default_edit = self._line(lambda t: self._apply({"default": t or None}))
         form.addRow(_("Valore predefinito"), self.default_edit)
         self.default_check = self._check(_("Selezionato per impostazione predefinita"),
@@ -536,6 +557,8 @@ class FieldPropertiesPanel(QWidget):
     def _build_appearance(self) -> None:
         form = self._page("appearance", _("Aspetto"))
         self.font_combo = self._combo([(n, n) for n in E.FONTS], lambda v: self._apply({"font": v}))
+        self.font_combo.setMaxVisibleItems(20)
+        self._add_system_fonts(self.font_combo)
         form.addRow(_("Carattere"), self.font_combo)
         self.size_spin = self._spin(0, 96, lambda v: self._apply({"fontsize": float(v)}), _("Automatica"))
         form.addRow(_("Dimensione"), self.size_spin)
@@ -1549,6 +1572,7 @@ class FieldPropertiesPanel(QWidget):
         if single:
             self.name_edit.setText(self._fields[0].name)
         self._load_line(self.tooltip_edit, "tooltip")
+        self._load_line(self.export_name_edit, "export_name")
         show_edit = kind == E.TEXT
         show_check = kind == E.CHECKBOX
         show_combo = single and kind in (E.RADIO, E.COMBO, E.LIST)

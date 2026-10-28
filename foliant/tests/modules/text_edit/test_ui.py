@@ -491,3 +491,29 @@ def test_overlap_indicator(window, paragraphs_pdf, quiet, qtbot):
     ctrl.commit_editor(view)
     assert ctrl.overflow_marks(view)
     assert any("sovrappone" in m for m in quiet["status"])
+
+
+@pytest.mark.qt_no_exception_capture   # altri moduli possono segnalare il file danneggiato all'apertura
+def test_page_tree_cycle_does_not_break_edit_mode(window, tmp_path, quiet, qtbot):
+    """Albero delle pagine con un ciclo: entrare in Modifica non solleva eccezioni."""
+    doc = pymupdf.open()
+    for i in range(2):
+        doc.new_page().insert_text((72, 100), f"Pagina {i + 1}", fontsize=14)
+    pages = int(doc.xref_get_key(doc.pdf_catalog(), "Pages")[1].split()[0])
+    kids = doc.xref_get_key(pages, "Kids")[1]
+    doc.xref_set_key(pages, "Kids", kids.replace("]", f" {pages} 0 R]"))
+    doc.xref_set_key(pages, "Count", "3")
+    path = tmp_path / "ciclo.pdf"
+    doc.save(str(path), garbage=0)
+    doc.close()
+    try:
+        view = window.open_path(str(path))
+    except Exception:
+        pytest.skip("il motore non apre il file")
+    if view is None:
+        pytest.skip("il motore non apre il file")
+    ctrl = ctrl_of(window)
+    ctrl.check_page_has_text(view, view.page_count - 1)
+    ctrl.frame(view.page_count - 1, view)
+    window.ctx.set_mode("modifica")
+    assert window.ctx.current_mode() == "modifica"

@@ -979,3 +979,22 @@ def test_grid_tables_ignores_paragraphs():
               blk(60, 200, 100, "A"), blk(200, 200, 240, "B"), blk(60, 228, 100, "1"), blk(200, 228, 240, "2")]
     found = grid_tables(blocks)
     assert len(found) == 1 and found[0][1] == [["A", "B"], ["1", "2"]]
+
+
+def test_images_hide_unsigned_signature_placeholder(tmp_path):
+    """Il segnaposto disegnato dal motore sui campi firma vuoti non deve comparire nelle immagini."""
+    from PIL import Image
+    doc = pymupdf.open()
+    p = doc.new_page(width=300, height=200)
+    p.insert_text((20, 30), "Firma qui sotto", fontsize=12)
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_SIGNATURE
+    w.field_name = "Firma"
+    w.rect = pymupdf.Rect(20, 60, 280, 160)
+    p.add_widget(w)
+    path = _save(doc, tmp_path / "firma.pdf")
+    out = convert_pdf(path, tmp_path / "f.png", "png", dpi=72)[0]
+    img = Image.open(out).convert("RGB")
+    orange = sum(1 for r, g, b in img.getdata() if r > 200 and 80 < g < 200 and b < 80)
+    assert orange == 0
+    assert pymupdf.open(path)[0].first_widget is not None   # il file sorgente non cambia
