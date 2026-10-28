@@ -335,3 +335,17 @@ def test_generate_from_regex_with_levels(viewer_window, tmp_path, monkeypatch):
     monkeypatch.setattr(viewer_window.ctx, "error", lambda t, m: errors.append(m))
     assert not panel.generate("regex", pattern="(", replace=True)
     assert errors and "non valida" in errors[0]
+
+
+def test_empty_panel_layout_compact(viewer_window, sample_pdf):
+    view, panel = _open(viewer_window, sample_pdf)
+    viewer_window.resize(1200, 800)
+    from PySide6.QtWidgets import QApplication, QLabel, QToolButton
+    QApplication.processEvents()
+    title = [w for w in panel.findChildren(QLabel) if w.property("heading")][0]
+    assert title.geometry().top() < 40                       # titolo in alto anche senza albero
+    buttons = [b for b in panel.findChildren(QToolButton) if b.isVisible()]
+    assert len(buttons) <= 4                                  # azioni secondarie nel menu «…»
+    assert all(b.width() >= 24 for b in buttons)
+    menu_texts = [a.text() for a in panel.tools_button.menu().actions()]
+    assert "Sposta su" in menu_texts and "Espandi tutto" in menu_texts

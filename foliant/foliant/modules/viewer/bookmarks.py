@@ -7,7 +7,7 @@ di Annulla/Ripeti.
 from __future__ import annotations
 
 import pymupdf
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QBrush, QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QColorDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QToolButton, QTreeWidget,
@@ -176,19 +176,27 @@ class BookmarksPanel(QWidget):
                 act.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
                 self.addAction(act)
             self.actions[key] = act
+            if key not in ("add", "rename", "delete"):
+                continue      # azioni secondarie nel menu «…»
             btn = QToolButton(self)
             btn.setDefaultAction(act)
             btn.setAutoRaise(True)
+            btn.setIconSize(QSize(18, 18))
             bar.addWidget(btn)
-            if key in ("delete", "outdent"):
-                bar.addSpacing(6)
         bar.addStretch(1)
         self.tools_button = QToolButton(self)
         bind_icon(self.tools_button, "ellipsis")
         self.tools_button.setToolTip(_("Strumenti dei segnalibri"))
         self.tools_button.setAutoRaise(True)
         self.tools_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.tools_button.setIconSize(QSize(18, 18))
         tools = QMenu(self.tools_button)
+        for key in ("up", "down", "indent", "outdent"):
+            tools.addAction(self.actions[key])
+        tools.addSeparator()
+        tools.addAction(self.actions["expand"])
+        tools.addAction(self.actions["collapse"])
+        tools.addSeparator()
         tools.addAction(_("Esporta come testo…"), self.export_text)
         self.act_import = tools.addAction(_("Importa da testo…"), self.import_text)
         tools.addSeparator()
@@ -215,7 +223,7 @@ class BookmarksPanel(QWidget):
         self.empty.setProperty("muted", True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.empty.setContentsMargins(16, 16, 16, 16)
-        layout.addWidget(self.empty)
+        layout.addWidget(self.empty, 1)   # senza albero occupa lo spazio: il titolo resta in alto
 
         self.tree = BookmarkTree(self)
         self.tree.itemClicked.connect(self._on_clicked)
