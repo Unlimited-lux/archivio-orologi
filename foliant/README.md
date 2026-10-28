@@ -19,6 +19,12 @@ foliant documento.pdf
 Opzioni: `--default-pdf` imposta Foliant come lettore PDF predefinito.
 Disinstallazione: `./packaging/uninstall.sh`.
 
+Riga di comando: `foliant [--page N] [--new-window] file…` apre i file in schede, il primo alla
+pagina N (`-p N`; per un file qualsiasi anche `file.pdf#page=N`); le opzioni sconosciute sono
+segnalate e ignorate. Istanza singola: se Foliant è già aperto, il nuovo avvio consegna file e
+pagina alla finestra attiva (nuove schede, oppure la scheda del file se è già aperto) e termina;
+con `--new-window` si apre invece una nuova finestra (`foliant/ui/instance.py`).
+
 ## Uso quotidiano
 
 La barra in alto contiene le modalità; ognuna mostra i propri strumenti nella barra sotto.
@@ -82,6 +88,7 @@ foliant/
     theme.py        tema chiaro/scuro e colori
     icons.py        icone (nomi = file in resources/icons)
     home.py         schermata Home
+    instance.py     istanza singola: un secondo avvio consegna file e comandi alla finestra attiva
   modules/     funzioni, una cartella per area (scoperte automaticamente)
   api.py       tutto ciò che serve a un modulo
   i18n.py      traduzioni (sorgente italiano, catalogo inglese per modulo)

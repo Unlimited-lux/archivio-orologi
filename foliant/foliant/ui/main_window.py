@@ -928,6 +928,19 @@ class MainWindow(QMainWindow):
         self.remember_directory(path)
         return self.add_document(doc)
 
+    def open_files(self, files) -> list[DocumentView]:
+        """File della riga di comando o di un altro avvio: `(percorso, pagina da 1 o None)`;
+        un file già aperto ne attiva la scheda (NFR-31)."""
+        views = []
+        for path, page in files:
+            view = self.open_path(path)
+            if view is None:
+                continue
+            if page and view.page_count:
+                view.go_to_page(min(max(int(page), 1), view.page_count) - 1)
+            views.append(view)
+        return views
+
     def add_document(self, document: Document) -> DocumentView:
         view = DocumentView(document, self.tabs)
         view.menu_providers = self.view_menu_providers
