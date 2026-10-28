@@ -253,8 +253,7 @@ class NavigationController(QObject):
             if origin is None:
                 return False
             # cronologia esaurita: si torna alla scheda del documento d'origine (VIS-13)
-            self.ctx.window.docs_stack.setCurrentWidget(self.ctx.window.tabs)
-            self.ctx.window.tabs.setCurrentWidget(origin)
+            self.ctx.activate_view(origin)
             self._refresh()
             return True
         self._restore(view, target)

@@ -120,9 +120,7 @@ class SessionController(QObject):
         if not 0 <= index < self.tabs.count():
             return None
         view = self.tabs.widget(index)
-        self.ctx.set_central_widget(None)
-        self.window.docs_stack.setCurrentWidget(self.tabs)
-        self.tabs.setCurrentIndex(index)
+        self.ctx.activate_view(view)
         view.setFocus()
         return view
 
@@ -230,9 +228,7 @@ class SessionController(QObject):
 
     def _refresh_window(self, view: DocumentView) -> None:
         if view is self.ctx.current_view():
-            refresh = getattr(self.window, "_update_state", None)
-            if callable(refresh):
-                refresh()
+            self.ctx.refresh_state()
 
     def positions(self) -> dict[str, dict]:
         return engine.load_positions(self.settings().value(KEY_POSITIONS, ""))

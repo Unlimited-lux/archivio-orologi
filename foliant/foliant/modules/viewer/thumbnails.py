@@ -532,12 +532,7 @@ class ThumbnailsController:
         return [view.current_page] if view is not None else []
 
     def toggle(self) -> None:
-        w = self.ctx.window
-        toggle = getattr(w, "_toggle_sidebar_panel", None)
-        if toggle is not None:
-            toggle("thumbnails")
-        else:
-            self.ctx.show_sidebar_panel("thumbnails")
+        self.ctx.toggle_sidebar_panel("thumbnails")
 
 
 def install(ctx: Context) -> ThumbnailsController:

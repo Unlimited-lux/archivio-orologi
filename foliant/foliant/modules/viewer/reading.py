@@ -287,7 +287,8 @@ class ReadingController(QObject):
         w.statusBar().addPermanentWidget(self.indicator)
 
         # segnali
-        w.installEventFilter(self)
+        w.installEventFilter(self)          # solo per il ridimensionamento della barra minima
+        ctx.fullscreenChanged.connect(self._on_fullscreen_changed)
         ctx.currentViewChanged.connect(self._on_current_view)
         ctx.documentOpened.connect(self._on_document_opened)
         ctx.documentClosed.connect(self._on_document_closed)
@@ -394,6 +395,10 @@ class ReadingController(QObject):
         if self.window.isFullScreen():
             self.window.toggle_fullscreen()
         self._on_window_state()
+
+    def _on_fullscreen_changed(self, _full: bool) -> None:
+        self._on_window_state()
+        QTimer.singleShot(0, self._on_window_state)
 
     def _on_window_state(self) -> None:
         fs = self.window.isFullScreen()
@@ -681,10 +686,7 @@ class ReadingController(QObject):
     def eventFilter(self, obj, ev) -> bool:
         et = ev.type()
         if obj is self.window:
-            if et == QEvent.Type.WindowStateChange:
-                QTimer.singleShot(0, self._on_window_state)
-                self._on_window_state()
-            elif et == QEvent.Type.Resize:
+            if et == QEvent.Type.Resize:
                 self.bar.place()
             return False
         if et in (QEvent.Type.MouseMove, QEvent.Type.Enter, QEvent.Type.HoverMove):

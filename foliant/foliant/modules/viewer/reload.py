@@ -401,9 +401,8 @@ class ReloadController(QObject):
             new_index = tabs.indexOf(new_view)
             if old_index >= 0 and new_index >= 0 and new_index != old_index:
                 tabs.tabBar().moveTab(new_index, old_index)
-            # chiusura della vecchia vista senza richiesta di salvataggio
-            view.document._saved_state = view.document._state
-            window.close_view(view, ask=False)   # ricarica: non è una chiusura dell'utente (niente controlli)
+            # chiusura della vecchia vista: ricarica, non è una chiusura dell'utente (niente domande)
+            self.ctx.close_view(view, discard=True)
             # la scheda attiva resta quella di prima
             tabs.setCurrentWidget(new_view if previous is view or previous is None else previous)
         finally:
