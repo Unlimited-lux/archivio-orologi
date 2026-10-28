@@ -724,3 +724,6 @@ EN.update({
     "Documenti d'ufficio (DOCX, XLSX, PPTX), testo, Markdown, CSV, HTML": "Office documents (DOCX, XLSX, PPTX), text, Markdown, CSV, HTML",
     "_personalizzato": "_custom",
 })
+
+EN.update({"Impossibile ricreare la protezione del documento: il file non è stato salvato per non lasciarlo senza cifratura.":
+           "The document protection could not be recreated: the file was not saved so that it is not left unencrypted."})

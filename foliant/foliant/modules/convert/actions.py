@@ -675,6 +675,13 @@ class ConvertController:
             self.ctx.info(title, summary + "\n\n" + _("Le modifiche si applicano al file quando salvi; "
                                                       "puoi annullarle con Annulla."))
             return {"before": before, "after": after, "reduced": True}
+        if doc is not None:
+            # il nuovo file deve avere la stessa protezione del documento (metodo, permessi, password)
+            try:
+                out = self._protect_like(doc, out)
+            except FoliantError as e:
+                self.ctx.error(title, str(e))
+                return None
         stem = Path(name).stem
         folder = str(Path(path).parent) if path else self.window.last_directory()
         save = self.ctx.ask_save_path(title, os.path.join(folder, stem + suffix + ".pdf"), "PDF (*.pdf)")
@@ -691,6 +698,29 @@ class ConvertController:
             return None
         self.ctx.info(title, summary + "\n\n" + _("Salvato in: {p}").format(p=save))
         return {"before": before, "after": after, "reduced": True, "output": save}
+
+    @staticmethod
+    def _protect_like(doc: Document, data: bytes) -> bytes:
+        """Riapplica a `data` la protezione con cui il documento verrebbe salvato.
+
+        `doc.save_options` contiene metodo, permessi e password (password del
+        proprietario casuale se non nota: le restrizioni restano in vigore)."""
+        opts = dict(doc.save_options or {})
+        method = opts.get("encryption", pymupdf.PDF_ENCRYPT_NONE)
+        if method in (pymupdf.PDF_ENCRYPT_NONE, pymupdf.PDF_ENCRYPT_KEEP):
+            if doc.original_protection and method == pymupdf.PDF_ENCRYPT_KEEP:
+                raise ConversionError(_("Impossibile ricreare la protezione del documento: il file non è stato "
+                                        "salvato per non lasciarlo senza cifratura."))
+            return data
+        with ENGINE_LOCK:
+            pdf = pymupdf.open(stream=data, filetype="pdf")
+            try:
+                if pdf.needs_pass or (pdf.metadata or {}).get("encryption"):
+                    return data          # già cifrato dal motore di compressione
+                out = pdf.tobytes(garbage=3, deflate=True, **opts)
+            finally:
+                pdf.close()
+        return out
 
     def compress_files(self):
         """CNV-29 in blocco: tabella per file con totale risparmiato."""

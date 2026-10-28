@@ -567,3 +567,41 @@ def test_clipboard_after_windows_destroyed(qtbot, settings):
     finally:
         sys.excepthook = old
     assert not errors
+
+
+def test_compress_open_encrypted_keeps_protection(window, ctrl, tmp_path, monkeypatch, messages):
+    """Sicurezza: la copia compressa di un PDF aperto con la sola password utente resta cifrata
+    con gli stessi permessi (nessuna restrizione aggirata)."""
+    import io as _io
+    from PIL import Image
+    from PySide6.QtWidgets import QInputDialog
+    img = Image.effect_noise((900, 700), 60).convert("RGB")
+    buf = _io.BytesIO()
+    img.save(buf, "PNG")
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 60), "Riservato", fontsize=12)
+    p.insert_image(pymupdf.Rect(72, 80, 360, 300), stream=buf.getvalue())
+    path = tmp_path / "cifrato.pdf"
+    perms = pymupdf.PDF_PERM_PRINT
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="utente", owner_pw="capo",
+             permissions=perms)
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("utente", True))
+    window.open_path(str(path))
+
+    def fake_exec(d):
+        d.target.setCurrentIndex(d.target.findData("file"))
+        d.table.selectRow(3)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(CompressDialog, "exec", fake_exec)
+    out = tmp_path / "compresso.pdf"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    res = ctrl.compress()
+    assert res and res.get("output") == str(out)
+    result = pymupdf.open(str(out))
+    assert result.needs_pass
+    assert result.authenticate("utente")
+    assert "AES" in result.metadata["encryption"] and "256" in result.metadata["encryption"]
+    assert not result.permissions & pymupdf.PDF_PERM_COPY
+    assert not result.permissions & pymupdf.PDF_PERM_MODIFY
+    assert result.permissions & pymupdf.PDF_PERM_PRINT
