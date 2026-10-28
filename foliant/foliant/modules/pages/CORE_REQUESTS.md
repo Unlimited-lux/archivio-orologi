@@ -6,7 +6,7 @@
    (`PagesController.view_menu`: ruota, duplica, elimina, «Organizza pagine») ma **non lo registra**.
    Proposta: nel test controllare che la voce di prova sia *presente* (`in`), poi registrare il
    provider in `module.register()`.
-2. **Avviso al salvataggio per contenuto nascosto dal ritaglio (PAG-25) e salvataggio incrementale
+2. *(Risolta: il modulo usa `ctx.add_guard("save"/"save_as")`.)* **Avviso al salvataggio per contenuto nascosto dal ritaglio (PAG-25) e salvataggio incrementale
    dopo eliminazioni (PAG-03/11).** Serve un aggancio prima del salvataggio (es. segnale
    `Context.aboutToSave(view)` con possibilità di annullare). Nel frattempo l'avviso compare
    quando si applica il ritaglio (`layout.hidden_content_outside_crop`). Il nucleo salva già
@@ -19,6 +19,12 @@
    che modificano un documento. Il modulo la gestisce con una fixture autouse; proposta: segnare i
    documenti come salvati in `tests/conftest.py` prima di `qtbot.addWidget`, o usare un
    `request.addfinalizer` registrato prima di qtbot.
-5. **Permesso di assemblaggio e password del proprietario.** Dopo «Sblocca» il modulo salva la
+5. *(Risolta: il modulo usa `document.allows()` e `document.unlock()`.)* **Permesso di assemblaggio e password del proprietario.** Dopo «Sblocca» il modulo salva la
    password del proprietario in `Document.password`, così annulla/ripeti la riapplicano; sarebbe
    più pulito un metodo `Document.authenticate_owner(pw)` che aggiorni anche `save_options`.
+
+6. **Pagine selezionate (`set_selected_pages_provider`).** Il nucleo tiene un solo provider. Soluzione
+   adottata: entrando nella modalità Pagine il modulo registra un provider che restituisce la
+   selezione dell'organizzatore e, se vuota, delega al provider precedente (miniature del viewer);
+   uscendo ripristina il precedente. Il viewer non deve fare nulla; se in futuro più moduli
+   registrano provider temporanei, conviene una pila (`push_selected_pages_provider`/`pop…`).
