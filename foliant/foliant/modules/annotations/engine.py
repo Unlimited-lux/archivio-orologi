@@ -3561,6 +3561,9 @@ def _export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int]
                 attrs["file"] = fi.get("filename", "")
                 attrs["icon"] = "PushPin"
             content = info.get("content", "")
+            rich = _rich_body(get_rich_text(pdf, a.xref))
+            if rich:     # testo formattato (/RC) accanto al testo semplice
+                children.insert(0, f"<contents-richtext>{rich}</contents-richtext>")
             if content:
                 children.insert(0, f"<contents>{escape(content)}</contents>")
             attr_txt = " ".join(f"{k}={quoteattr(str(v))}" for k, v in attrs.items())
@@ -3687,11 +3690,39 @@ def _import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = Fa
         target = name_map.get((page_no, irt))
         if target is None or target[0] != page_no:
             continue
-        page = pdf[page_no]
-        annot = find_annot(page, xref)
-        if annot is not None:
-            annot.set_irt_xref(target[1])
+        pdf.xref_set_key(xref, "IRT", f"{target[1]} 0 R")
     return result
+
+
+def _rich_body(rich: str) -> str:
+    """Il <body> XHTML di /RC come XML ben formato (con lo spazio dei nomi XHTML), oppure ""."""
+    import xml.etree.ElementTree as ET
+    if not rich or "<body" not in rich:
+        return ""
+    m = re.search(r"<body.*</body>", rich, re.S)
+    if not m:
+        return ""
+    body = m.group(0)
+    if "xmlns=" not in body[:body.index(">")]:
+        body = body.replace("<body", '<body xmlns="http://www.w3.org/1999/xhtml"', 1)
+    try:
+        ET.fromstring(body)
+    except ET.ParseError:
+        return ""
+    return body
+
+
+def _el_rich(el) -> str:
+    """XHTML di <contents-richtext> (il <body> come testo XML), oppure ""."""
+    import xml.etree.ElementTree as ET
+    for child in el:
+        if child.tag.split("}")[-1] == "contents-richtext":
+            for body in child:
+                if body.tag.split("}")[-1] == "body":
+                    # spazio dei nomi XHTML come predefinito (senza prefisso), come lo scrivono i lettori
+                    ET.register_namespace("", "http://www.w3.org/1999/xhtml")
+                    return ET.tostring(body, encoding="unicode")
+    return ""
 
 
 def _el_text(el, name: str) -> str | None:
@@ -3841,24 +3872,26 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
             return None  # i dati del file non viaggiano nell'XFDF senza flusso incorporato
         else:
             return None
-    annot = find_annot(page, xref)
-    if annot is None:
-        return None
-    info = {}
-    if date:
-        info["creationDate"] = el.get("creationdate") or date
-        info["modDate"] = el.get("date") or date
-    if el.get("subject"):
-        info["subject"] = el.get("subject")
-    if info:
-        annot.set_info(**info)
-    flags = _parse_flags(el.get("flags"))
-    if flags != annot.flags:
-        annot.set_flags(flags)
-    if t != "Stamp":
-        annot.update()
-    else:
-        annot.update()
+    # date, soggetto e flag scritti direttamente nel dizionario: niente ricerca dell'annotazione
+    # (lineare nella pagina) né rigenerazione dell'aspetto per ogni elemento (D2)
+    # (_finish ha già scritto `date` in entrambe le date: si riscrive solo ciò che differisce)
+    if el.get("creationdate") and el.get("creationdate") != date:
+        pdf.xref_set_key(xref, "CreationDate", _pdf_string(el.get("creationdate")))
+    if el.get("date") and el.get("date") != date:
+        pdf.xref_set_key(xref, "M", _pdf_string(el.get("date")))
+    subject = el.get("subject")
+    if subject and pdf.xref_get_key(xref, "Subj")[1] != _pdf_string(subject):
+        pdf.xref_set_key(xref, "Subj", _pdf_string(subject))
+    flags = str(_parse_flags(el.get("flags")))
+    if pdf.xref_get_key(xref, "F")[1] != flags:
+        pdf.xref_set_key(xref, "F", flags)
+    rich = _el_rich(el)
+    if rich and t in ("Text", "FreeText", "Square", "Circle", "Line", "Polygon", "PolyLine", "Ink", "Highlight",
+                      "Underline", "StrikeOut", "Squiggly", "Caret"):
+        pdf.xref_set_key(xref, "RC", _pdf_string(rich))
+    if t == "FreeText":
+        refresh_freetext(pdf, page_no, xref)        # aspetto proprio: bordo colorato, testo formattato
+    elif t == "Stamp":
         refresh_stamp(pdf, page_no, xref)
     return xref
 
