@@ -505,6 +505,10 @@ class TextEditController(QObject):
             result = self._apply(view, _("Aggiungi testo"), lambda pdf: engine.add_text(
                 pdf, page, info["top_left"], paragraphs, width=info["width"], align=align,
                 leading=leading))
+            tools = self._tools.get(id(view))
+            if tools is not None and view.tool is tools[1] and not tools[1].sticky:
+                # alla conferma si torna a «Modifica testo» (TXT-06)
+                view.set_tool(tools[0])
             self.default_style = next((r.style for p in paragraphs for r in p if r.text.strip()),
                                       self.default_style).with_(font_xref=0)
             return result

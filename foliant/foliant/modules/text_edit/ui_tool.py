@@ -29,6 +29,8 @@ class _Drag:
     start: pymupdf.Point      # punto iniziale (riquadro di lavoro)
     current: pymupdf.Point
     target_page: int
+    inner: bool = False       # iniziato dentro il testo (non sul bordo): un clic senza trascinamento modifica
+    pos: object = None
 
 
 HANDLE_PX = 7
@@ -137,7 +139,8 @@ class EditTextTool(Tool):
                 return True
             if sel_block.bbox.contains(fpt) and (block is None or block is sel_block or
                                                  self._on_border(view, sel_block, fpt)):
-                self.drag = _Drag("move", page, sel_block, fpt, fpt, page)
+                self.drag = _Drag("move", page, sel_block, fpt, fpt, page,
+                                  inner=not self._on_border(view, sel_block, fpt), pos=ev.pos)
                 return True
         if block is None:
             self.select(view, page, None)
@@ -232,6 +235,12 @@ class EditTextTool(Tool):
         if drag.kind == "move-multi":
             if abs(dx) + abs(dy) >= 0.5 and drag.target_page == drag.page:
                 self.ctrl.move_selected(view, dx, dy)
+            return True
+        if drag.kind == "move" and drag.inner and drag.target_page == drag.page and abs(dx) + abs(dy) < 0.5 \
+                and drag.block.editable:
+            # clic senza trascinamento nel testo del blocco selezionato: si apre l'editor nel punto
+            self.select(view, drag.page, None)
+            self.ctrl.open_editor(view, drag.page, drag.block, click_pos=drag.pos)
             return True
         if drag.kind == "move":
             if drag.target_page != drag.page:

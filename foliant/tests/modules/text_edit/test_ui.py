@@ -277,17 +277,21 @@ def test_signed_document_warns_before_editing(window, tmp_path, quiet, qtbot):
     doc.xref_set_key(doc.pdf_catalog(), "AcroForm", f"{acro} 0 R")
     doc.save(str(path))
     doc.close()
+    quiet["answer"] = False
     view = open_in_edit_mode(window, str(path))
     ctrl = ctrl_of(window)
-    quiet["answer"] = False
+    # l'avviso compare entrando in Modifica, prima di qualsiasi modifica
+    assert quiet["confirms"] and "firme digitali" in quiet["confirms"][0][1]
+    assert not isinstance(view.tool, EditTextTool)
+    quiet["answer"] = True
+    window.ctx.set_mode("leggi")
+    window.ctx.set_mode("modifica")
+    assert isinstance(view.tool, EditTextTool)
     block = block_with(ctrl, view, "firmato")
     c = block.bbox
     click(qtbot, view, 0, (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
-    assert quiet["confirms"] and "firme digitali" in quiet["confirms"][0][1]
-    assert ctrl.editor_for(view) is None
-    quiet["answer"] = True
-    click(qtbot, view, 0, (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
     assert ctrl.editor_for(view) is not None
+    assert not view.document.is_modified
 
 
 def test_piece_info_preserved(window, tmp_path, quiet, qtbot):
@@ -406,3 +410,49 @@ def test_add_text_editor_wraps_at_page_edge(window, sample_pdf, quiet, qtbot):
     r = ed.content_rect_points()
     assert r.right() <= 595 + 1
     assert ed.document().begin().layout().lineCount() > 1
+
+
+def test_click_in_selected_block_opens_editor(window, paragraphs_pdf, quiet, qtbot):
+    """bug_05: dopo Esc il blocco è selezionato; un clic nel testo riapre l'editor."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "contratto")
+    c = block.bbox
+    click(qtbot, view, 0, (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    qtbot.keyClick(ctrl.editor_for(view), Qt.Key.Key_Escape)
+    assert view.tool.selected is not None
+    click(qtbot, view, 0, (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    assert ctrl.editor_for(view) is not None
+
+
+def test_second_document_gets_text_tool(window, paragraphs_pdf, sample_pdf, quiet):
+    """bug_04: aprendo un altro PDF in modalità Modifica lo strumento è già «Modifica testo»."""
+    open_in_edit_mode(window, paragraphs_pdf)
+    view2 = window.open_path(sample_pdf)
+    assert isinstance(view2.tool, EditTextTool)
+
+
+def test_protected_document_checked_on_entering_mode(window, tmp_path, quiet):
+    """bug_11: con modifica negata il messaggio compare entrando in Modifica, senza attivare lo strumento."""
+    path = tmp_path / "limitato.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Testo protetto", fontsize=14)
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="utente", owner_pw="proprietario",
+             permissions=int(pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_COPY))
+    doc.close()
+    view = window.open_path(str(path), "utente")
+    window.ctx.set_mode("modifica")
+    assert quiet["errors"]
+    assert not isinstance(view.tool, EditTextTool)
+
+
+def test_add_text_returns_to_edit_tool(window, sample_pdf, quiet, qtbot):
+    """bug_12: confermata la nuova casella si torna a «Modifica testo»."""
+    view = open_in_edit_mode(window, sample_pdf)
+    ctrl = ctrl_of(window)
+    ctrl.actions["add"].trigger()
+    click(qtbot, view, 0, 100, 600)
+    qtbot.keyClicks(ctrl.editor_for(view), "Nuovo")
+    qtbot.keyClick(ctrl.editor_for(view), Qt.Key.Key_Escape)
+    assert "Nuovo" in view.document.page_text(0)
+    assert isinstance(view.tool, EditTextTool)
