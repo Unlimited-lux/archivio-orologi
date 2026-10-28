@@ -40,11 +40,11 @@ class CollectionDialog(QDialog):
         row = QHBoxLayout()
         self.name = QLineEdit(self.coll.name)
         self.saved = QComboBox()
-        self.saved.addItem(_("Apri una raccolta salvata…"), "")
-        for c in self.store.load_all():
-            self.saved.addItem(c.name or c.id, c.id)
+        self.saved.setToolTip(_("Raccolte di questa sessione: non vengono salvate su disco."))
+        self._fill_saved()
         self.saved.currentIndexChanged.connect(self._open_saved)
-        save = QPushButton(_("Salva raccolta"))
+        save = QPushButton(_("Conserva raccolta"))
+        save.setToolTip(_("Conserva la raccolta fino alla chiusura di Foliant (nulla viene salvato su disco)."))
         bind_icon(save, "save")
         save.clicked.connect(self.save)
         row.addWidget(QLabel(_("Nome")))
@@ -172,11 +172,20 @@ class CollectionDialog(QDialog):
         if ref.get("verified") and ref.get("doc_key"):
             self.open_ref(ref["doc_key"], int(ref["page"]))
 
-    # ----------------------------------------------------------------- salvataggio
+    # ----------------------------------------------------------------- raccolte della sessione
+    def _fill_saved(self) -> None:
+        self.saved.blockSignals(True)
+        self.saved.clear()
+        self.saved.addItem(_("Apri una raccolta di questa sessione…"), "")
+        for c in self.store.load_all():
+            self.saved.addItem(c.name or c.id, c.id)
+        self.saved.blockSignals(False)
+
     def save(self) -> None:
         self.coll.name = self.name.text().strip() or self.coll.name
         self.store.save(self.coll)
-        self.notice.setText(_("Raccolta salvata."))
+        self.notice.setText(_("Raccolta conservata fino alla chiusura di Foliant."))
+        self._fill_saved()
 
     def load(self, coll: Collection) -> None:
         self.coll = coll

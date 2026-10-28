@@ -3,7 +3,8 @@
 Con un modello per vettori semantici (endpoint compatibile OpenAI, `/embeddings`)
 i passaggi sono ordinati per similarità; senza, l'app sceglie localmente i
 candidati e chiede al modello di chat di ordinarli (più richieste: lo si dichiara).
-I vettori restano nella cache locale, indicizzati per impronta del contenuto.
+I vettori restano in una cache in memoria per la sessione (mai su disco), indicizzati
+per impronta del contenuto.
 """
 
 from __future__ import annotations

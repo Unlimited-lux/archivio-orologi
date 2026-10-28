@@ -264,11 +264,14 @@ def test_collection_chat_and_reference(qtbot, window, ready, fake, text_pdf, tmp
     dlg.on_link(QUrl("page:1:0"))
     view = window.ctx.current_view()
     assert view.document.path.name == "B.pdf" and view.current_page == 1
-    # salvataggio e riapertura
+    # raccolta conservata per la sessione e riaperta
     dlg.save()
-    from foliant.modules.ai.collection import CollectionStore
-    loaded = CollectionStore().get(dlg.coll.id)
+    loaded = ready.collections.get(dlg.coll.id)
     assert loaded.conversations[-1].messages[-1].text == "Il prezzo è in [B › p. 2]."
+    from foliant.modules.ai.collection import CollectionStore
+    from foliant.modules.ai.config import data_dir
+    assert CollectionStore().get(dlg.coll.id) is None     # «riavvio»: nulla su disco
+    assert not (data_dir() / "raccolte").exists()
     dlg2 = ready.controller.open_collection()
     dlg2.load(loaded)
     dlg2.on_link(QUrl("page:1:0"))

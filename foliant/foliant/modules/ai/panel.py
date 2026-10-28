@@ -515,7 +515,7 @@ class AIPanel(QWidget):
             return self._general
         conv = self._convs.get(id(doc))
         if conv is None:
-            conv = Conversation(path=str(doc.path or ""))
+            conv = Conversation()
             self._convs[id(doc)] = conv
         return conv
 
@@ -940,8 +940,7 @@ class AIPanel(QWidget):
             conv.function = fn
         conv.fingerprint = scope.fingerprint or conv.fingerprint
         conv.profile, conv.model = profile.name, profile.model
-        if doc is not None and doc.path:
-            conv.path = str(doc.path)
+        # nessun percorso nella conversazione: la cronologia della sessione usa solo l'impronta in memoria
         label = dict((k, _(t)) for k, t, _i in FUNCTIONS).get(fn, fn)
         if fn == "task":
             label = self._task_args[0].name
@@ -1135,12 +1134,12 @@ class AIPanel(QWidget):
             self.status.setText(_("Interruzione…"))
 
     def _save_history(self, conv: Conversation | None) -> None:
+        """Conserva la conversazione nella cronologia della sessione (solo in memoria)."""
         if conv is None:
             return
         h = self.services.history()
-        if h.enabled and conv.messages and not h.save(conv):
-            self.status.setText(_("Impossibile salvare la cronologia (spazio su disco?): la conversazione resta "
-                                  "in memoria fino alla chiusura."))
+        if h.enabled and conv.messages:
+            h.save(conv)
 
     # ================================================================ resa
     def _render(self) -> None:
@@ -1602,7 +1601,7 @@ class AIPanel(QWidget):
             return
         doc = self.document()
         if doc is not None and self.scope_kind() != NONE:
-            self._convs[id(doc)] = Conversation(path=str(doc.path or ""))
+            self._convs[id(doc)] = Conversation()
         else:
             self._general = Conversation()
         self._last = None
@@ -1636,12 +1635,12 @@ class AIPanel(QWidget):
             fp = content.content_fingerprint(doc.pdf)
         except Exception:  # noqa: BLE001
             return
-        convs = self.services.history().for_document(fp, str(doc.path or ""))
+        convs = self.services.history().for_document(fp)
         if convs:
             self._resume_candidate = convs[0]
             self.status.setText("")
-            self._show_banner(_("C'è una conversazione precedente su questo documento: apri «Cronologia» per "
-                                "riprenderla."), "warning")
+            self._show_banner(_("C'è una conversazione precedente su questo documento in questa sessione: "
+                                "apri «Cronologia» per riprenderla."), "warning")
             self.resume_available = True
         else:
             self.resume_available = False

@@ -14,7 +14,8 @@ from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, _, add_tr
 
 from . import content, engine, history, translate_pdf
 from .chunking import IndexCache
-from .config import ProfileStore, SendLog
+from .collection import CollectionStore
+from .config import ProfileStore, SendLog, purge_legacy_data
 from .dialogs import InfoTextDialog, PreviewDialog, SendLogDialog, SettingsDialog, SettingsPage, language_combo
 from .engine import Gateway
 from .panel import AIPanel
@@ -69,8 +70,10 @@ class Services:
     def __init__(self, ctx, *, provider_factory=None):
         self.ctx = ctx
         self.store = ProfileStore(ctx.settings())
+        # regola di riservatezza: registro, indici, cronologia e raccolte restano in memoria per la sessione
         self.log = SendLog()
         self.cache = IndexCache()
+        self.collections = CollectionStore()
         self.provider_factory = provider_factory
         self.workers: list = []
         self.panel: AIPanel | None = None
@@ -100,14 +103,10 @@ class Services:
         return dlg.choice if code == QDialog.DialogCode.Accepted else "cancel"
 
     def history(self) -> history.HistoryStore:
-        enabled = self.store.option("history_enabled", True)
-        days = self.store.option("retention_days", 0)
+        """Cronologia della sessione (solo in memoria: sparisce alla chiusura di Foliant)."""
         if self._history is None:
             self._history = history.HistoryStore()
-        self._history.enabled = enabled
-        self._history.retention_days = days
-        self._history.encrypt = self.store.option("history_encrypt", False)
-        self._history.secrets = self.store.secrets
+        self._history.enabled = self.store.option("history_enabled", True)
         return self._history
 
     def register_worker(self, w) -> None:
@@ -248,7 +247,6 @@ class HistoryDialog(QDialog):
         self.function.currentIndexChanged.connect(self.reload)
         doc = services.ctx.current_document()
         self.fingerprint = content.content_fingerprint(doc.pdf) if doc is not None else ""
-        self.path = str(doc.path or "") if doc is not None else ""
         if doc is None:
             self.scope.setCurrentIndex(1)
         self.reload()
@@ -257,20 +255,17 @@ class HistoryDialog(QDialog):
         h = self.services.history()
         convs = h.search(self.search.text(), self.function.currentData() or "")
         if self.scope.currentData() == "doc":
-            convs = [c for c in convs if c.fingerprint == self.fingerprint or (self.path and c.path == self.path)]
+            convs = [c for c in convs if self.fingerprint and c.fingerprint == self.fingerprint]
         self.list.clear()
         for c in convs:
             item = QListWidgetItem(f"{c.title or _('Senza titolo')} — {c.updated.replace('T', ' ')} "
                                    f"({len(c.messages)})")
             item.setData(Qt.ItemDataRole.UserRole, c.id)
             self.list.addItem(item)
-        notes = []
-        if getattr(h, "locked", False):
-            notes.append(_("Alcune conversazioni sono cifrate e il portachiavi non è disponibile."))
-        if h.damaged:
-            notes.append(_("Alcuni file della cronologia erano danneggiati e sono stati isolati."))
+        notes = [_("La cronologia contiene solo le conversazioni di questa sessione e si cancella alla "
+                   "chiusura di Foliant: per conservarne una, esportala.")]
         if not h.enabled:
-            notes.append(_("La cronologia è disattivata: le nuove conversazioni non vengono salvate."))
+            notes.append(_("La cronologia è disattivata: le nuove conversazioni non vengono conservate."))
         self.notice.setText(" ".join(notes))
 
     def _selected(self):
@@ -319,7 +314,7 @@ class HistoryDialog(QDialog):
             self.reload()
 
     def delete_all(self) -> None:
-        if QMessageBox.question(self, _("Elimina tutto"), _("Eliminare tutte le conversazioni salvate?")) \
+        if QMessageBox.question(self, _("Elimina tutto"), _("Eliminare tutte le conversazioni della sessione?")) \
                 == QMessageBox.StandardButton.Yes:
             self.services.history().delete_all()
             self.reload()
@@ -860,7 +855,7 @@ class Controller:
             return self.ctx.ask_open_paths(_("Aggiungi documenti"))
 
         dlg = CollectionDialog(self.ctx, run_chat, open_ref, ask_paths, open_docs(), self.ctx.window,
-                               cache=self.services.cache)
+                               cache=self.services.cache, store=self.services.collections)
         self.exec_dialog(dlg)
         return dlg
 
@@ -1371,8 +1366,9 @@ def register(ctx, *, provider_factory=None) -> Services:
     controller = Controller(ctx, services)
     services.controller = controller
     try:
-        services.history().expire()
-    except OSError:
+        # una volta sola: cancella cronologia, indici, raccolte e registro salvati dalle versioni precedenti
+        purge_legacy_data(ctx.settings(), secrets=services.store.secrets)
+    except Exception:  # noqa: BLE001 - pulizia silenziosa: non deve impedire l'avvio
         pass
 
     panel = AIPanel(ctx, services)
