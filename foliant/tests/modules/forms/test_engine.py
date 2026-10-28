@@ -338,6 +338,34 @@ def test_number_format_display_and_canonical():
     assert k == 'AFNumber_Keystroke(2, 2, 0, 0, "€", false);'
 
 
+@pytest.mark.parametrize("separator,text,stored", [
+    (2, "12.500", "12500"), (2, "1.234", "1234"), (2, "1234,5", "1234.5"), (2, "12.500,00", "12500"),
+    (2, "1.234.567", "1234567"), (3, "12.500", "12500"), (3, "12,5", "12.5"),
+    (0, "12,500", "12500"), (0, "1,234.56", "1234.56"), (1, "12,500", "12500"), (4, "1'234.5", "1234.5"),
+])
+def test_number_input_follows_separator_style(separator, text, stored):
+    """FRM-08: l'input si legge con lo stile dei separatori del campo (il punto delle migliaia
+    di «12.500» con lo stile 1.234,56 non è un separatore decimale)."""
+    assert fm.normalize(fm.Format(fm.NUMBER, 2, separator, 0, "€", False), text) == stored
+
+
+def test_number_input_rejects_two_decimal_separators():
+    with pytest.raises(fm.FormatError):
+        fm.normalize(fm.Format(fm.NUMBER, 2, 2), "1,2,3")
+    with pytest.raises(fm.FormatError):
+        fm.normalize(fm.Format(fm.NUMBER, 2, 0), "1.2.3")
+
+
+def test_number_edit_text_round_trip():
+    """Il valore nell'editor usa il separatore decimale dello stile: confermarlo non lo cambia."""
+    for sep in range(5):
+        fmt = fm.Format(fm.NUMBER, 2, sep)
+        for stored in ("1234.5", "12500", "-0.25"):
+            assert fm.normalize(fmt, fm.edit_text(fmt, stored)) == stored
+    assert fm.edit_text(fm.Format(fm.NUMBER, 2, 2), "1234.5") == "1234,5"
+    assert fm.edit_text(fm.Format(fm.NUMBER, 2, 0), "1234.5") == "1234.5"
+
+
 def test_percent_input():
     info = E.FieldInfo(0, 0, 0, "p", E.TEXT, pymupdf.Rect(), fmt=fm.Format(fm.PERCENT, 2, 2))
     assert E.normalize_input(info, "25%") == "0.25"

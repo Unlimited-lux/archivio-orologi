@@ -752,7 +752,8 @@ class FormFiller(QObject):
         if isinstance(ed, _LineEdit):
             value = self.passwords.get(f.name, "") if f.password else (f.value or "")
             if f.fmt.type != fm.NONE and value:
-                shown = fm.display(f.fmt, value)[0] if f.fmt.type in (fm.DATE, fm.TIME, fm.SPECIAL) else value
+                shown = fm.display(f.fmt, value)[0] if f.fmt.type in (fm.DATE, fm.TIME, fm.SPECIAL) \
+                    else fm.edit_text(f.fmt, value)
                 value = shown if f.fmt.type != fm.SPECIAL else value
             ed.setText(value)
         elif isinstance(ed, _TextEdit):

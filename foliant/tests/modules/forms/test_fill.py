@@ -207,6 +207,39 @@ def test_number_filter_validation_and_calc(qtbot, window, tmp_path):
     assert f.active is not None and f.active.name == "A"  # il focus resta sul campo
 
 
+def test_thousands_point_with_comma_style(qtbot, window, tmp_path):
+    """FRM-08 (collaudo 4): con lo stile 1.234,56 «12.500» è dodicimilacinquecento, non 12,5."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    euro = fm.Format(fm.NUMBER, 2, 2, 0, "€", False)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "prezzo", fmt=euro)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 90, 250, 110), "spese", fmt=euro)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 130, 250, 150), "totale", fmt=euro,
+                   calc=E.Calculation("SUM", ["prezzo", "spese"]))
+    pdf.save(str(tmp_path / "prezzi.pdf"))
+    view = open_form(window, tmp_path / "prezzi.pdf")
+    f = filler_of(view)
+    click_field(qtbot, view, "prezzo")
+    qtbot.keyClicks(f.editor, "12.500")
+    qtbot.keyClick(f.editor, Qt.Key.Key_Tab)
+    assert f.active is not None and f.active.name == "spese"
+    qtbot.keyClicks(f.editor, "1234,5")
+    qtbot.keyClick(f.editor, Qt.Key.Key_Tab)
+    assert values(view)["prezzo"] == "12500" and values(view)["spese"] == "1234.5"
+    assert values(view)["totale"] == "13734.5"
+    # riaprire il campo e confermare senza modifiche non cambia il valore
+    click_field(qtbot, view, "spese")
+    assert f.editor.text() == "1234,5"
+    qtbot.keyClick(f.editor, Qt.Key.Key_Tab)
+    assert values(view)["spese"] == "1234.5"
+    out = tmp_path / "salvato.pdf"
+    view.document.save(out)
+    again = pymupdf.open(str(out))
+    assert {x.name: x.value for x in E.list_fields(again)}["prezzo"] == "12500"
+    text = again[0].get_text()
+    assert "12.500,00 €" in text and "13.734,50 €" in text
+
+
 def test_date_normalized_and_rejected(qtbot, window, tmp_path):
     view = open_form(window, _number_doc(tmp_path))
     click_field(qtbot, view, "D")
