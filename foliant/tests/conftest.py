@@ -14,6 +14,18 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolated_user_dirs(monkeypatch, tmp_path_factory):
+    """Ogni test ha cartelle utente proprie (dati, stato, configurazione, recupero): niente
+    file lasciati da altri test o da una sessione vera (es. il recupero dopo un arresto
+    anomalo, che mostrerebbe un avviso). La cache resta condivisa (fontconfig è lento)."""
+    base = tmp_path_factory.mktemp("utente")
+    for var, name in (("XDG_DATA_HOME", "dati"), ("XDG_STATE_HOME", "stato"),
+                      ("XDG_CONFIG_HOME", "config")):
+        monkeypatch.setenv(var, str(base / name))
+    monkeypatch.setenv("FOLIANT_RECOVERY_DIR", str(base / "recupero"))
+
+
+@pytest.fixture(autouse=True)
 def _no_blocking_dialogs(monkeypatch):
     """Rete di sicurezza: nei test nessuna finestra modale reale può bloccare la suite.
 
