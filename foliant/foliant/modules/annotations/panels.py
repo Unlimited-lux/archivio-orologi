@@ -599,8 +599,32 @@ class CommentsPanel(QWidget):
                 return False
         return True
 
+    def _display_tops(self, infos) -> dict[tuple[int, int], tuple[float, float]]:
+        """(pagina, xref) → angolo superiore sinistro nella pagina visualizzata (ANN-36: pagine ruotate)."""
+        out: dict[tuple[int, int], tuple[float, float]] = {}
+        view = self.view
+        if view is None or view.document.closed:
+            return out
+        from foliant.api import ENGINE_LOCK
+        matrices: dict[int, object] = {}
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            for i in infos:
+                if i.page not in matrices:
+                    page = pdf[i.page]
+                    matrices[i.page] = engine.display_matrix(page) if page.rotation else None
+        for i in infos:
+            m = matrices.get(i.page)
+            r = i.rect if m is None else (i.rect * m)
+            out[(i.page, i.xref)] = (r.y0, r.x0)
+        return out
+
     def _sorted(self, infos):
         key = self.sort.currentData() or "page"
+        tops = self._display_tops(infos)
+
+        def pos(i):
+            return tops.get((i.page, i.xref), (i.rect.y0, i.rect.x0))
         if key == "date_desc":
             return sorted(infos, key=lambda i: (engine.parse_pdf_date(i.modified or i.created) is None,
                                                 -(_ts(i.modified or i.created))))
@@ -608,12 +632,12 @@ class CommentsPanel(QWidget):
             return sorted(infos, key=lambda i: (engine.parse_pdf_date(i.modified or i.created) is None,
                                                 _ts(i.modified or i.created)))
         if key == "author":
-            return sorted(infos, key=lambda i: (_fold(i.author), i.page, i.rect.y0))
+            return sorted(infos, key=lambda i: (_fold(i.author), i.page, pos(i)))
         if key == "type":
-            return sorted(infos, key=lambda i: (_fold(_(i.label)), i.page, i.rect.y0))
+            return sorted(infos, key=lambda i: (_fold(_(i.label)), i.page, pos(i)))
         if key == "status":
-            return sorted(infos, key=lambda i: (i.status, i.page, i.rect.y0))
-        return sorted(infos, key=lambda i: (i.page, i.rect.y0, i.rect.x0))
+            return sorted(infos, key=lambda i: (i.status, i.page, pos(i)))
+        return sorted(infos, key=lambda i: (i.page, pos(i)))
 
     def rebuild(self) -> None:
         query = _fold(self.search.text().strip())

@@ -138,3 +138,22 @@ def test_note_roundtrip_on_rotated_page(fmt, rotation):
     a, = engine.list_annotations(pdf)
     assert engine._array(pdf, a.xref, "Rect") == pytest.approx(raw, abs=0.01)
     assert tuple(a.rect) == pytest.approx(tuple(shown), abs=0.01)
+
+
+def test_comments_sorted_top_down_on_rotated_page(window, tmp_path, monkeypatch):
+    """ANN-36: «Per pagina» segue l'ordine dall'alto in basso nella vista anche con /Rotate 90."""
+    from PySide6.QtCore import Qt
+    path = tmp_path / "ruotata.pdf"
+    d = pymupdf.open()
+    d.new_page(width=595, height=842).set_rotation(90)
+    rect = engine.create_shape(d, 0, engine.RECT, [(100, 600), (160, 640)], engine.Style(), "A")
+    ell = engine.create_shape(d, 0, engine.ELLIPSE, [(400, 100), (460, 140)], engine.Style(), "A")
+    d.save(str(path))
+    window.open_path(str(path))
+    module = window.ctx.annotations
+    window.set_mode("commenta")
+    panel = module.comments
+    panel.reload()
+    panel.sort.setCurrentIndex(panel.sort.findData("page"))
+    keys = [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()]
+    assert keys == [(0, rect), (0, ell)]          # il rettangolo è in alto nella vista

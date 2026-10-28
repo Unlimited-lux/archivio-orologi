@@ -282,6 +282,12 @@ def from_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float
     return x - mb.x0, mb.y1 - y
 
 
+def display_matrix(page: pymupdf.Page) -> pymupdf.Matrix:
+    """Coordinate standard → pagina visualizzata (ruotata come nella vista)."""
+    pl = _placement()
+    return pl.page_to_display_matrix(page) if pl is not None else page.rotation_matrix
+
+
 def to_pdf_rect(page: pymupdf.Page, r) -> tuple[float, float, float, float]:
     r = pymupdf.Rect(r)
     x0, y1 = to_pdf_point(page, r.x0, r.y0)
