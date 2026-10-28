@@ -198,6 +198,8 @@ TRANSLATIONS: dict[str, str] = {
         "Operators + − × ÷ and parentheses; names with spaces go in double quotes.",
     # pulsanti (FRM-18)
     "Didascalia": "Caption",
+    "Alla pressione": "When pressed",
+    "uguale alla didascalia": "same as the caption",
     "Campo immagine: in compilazione un clic permette di scegliere l'immagine.":
         "Image field: when filling in, a click lets you choose the image.",
     "Azione": "Action",
@@ -1278,6 +1280,9 @@ class FieldPropertiesPanel(QWidget):
         form = self._page("button", _("Pulsante"))
         self.caption_edit = self._line(lambda t: self._apply({"caption": t}))
         form.addRow(_("Didascalia"), self.caption_edit)
+        self.caption_down_edit = self._line(lambda t: self._apply({"caption_down": t}))
+        self.caption_down_edit.setPlaceholderText(_("uguale alla didascalia"))
+        form.addRow(_("Alla pressione"), self.caption_down_edit)
         self.image_note = self._note(_("Campo immagine: in compilazione un clic permette di scegliere l'immagine."))
         form.addRow(self.image_note)
         self.action_combo = self._combo(
@@ -1355,9 +1360,11 @@ class FieldPropertiesPanel(QWidget):
         form = self._button_form
         image = any(f.image for f in self._fields)
         form.setRowVisible(self.caption_edit, not image)
+        form.setRowVisible(self.caption_down_edit, not image)
         form.setRowVisible(self.image_note, image)
         if not image:
             self._load_line(self.caption_edit, "caption")
+            self._load_line(self.caption_down_edit, "caption_down")
         self._show_error(self.action_error, None)
         action, mixed = self._common("action")
         action = dict(action or {})
