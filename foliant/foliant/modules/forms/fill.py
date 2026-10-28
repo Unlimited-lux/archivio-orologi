@@ -49,6 +49,7 @@ class FormState:
         self.xfa = "none"
         self.blocked: str | None = None
         self.blocked_by_permissions = False   # sbloccabile con la password del proprietario
+        self.signature_locked: set[str] = set()   # campi bloccati da una firma apposta (FRM-20)
         self.custom: list[tuple[str, str]] = []
         self.xfa_unmapped: list[str] = []
 
@@ -60,6 +61,13 @@ class FormState:
             if doc.closed:
                 return
             pdf = doc.pdf
+            if pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null":
+                # nessun modulo: niente lettura dei campi a ogni modifica (documenti con molti commenti)
+                self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
+                self.blocked_by_permissions, self.signature_locked, self.xfa_unmapped = False, set(), []
+                self.version = doc.version
+                self.by_page = {}
+                return
             try:
                 self.fields = E.list_fields(pdf)
                 self.xfa = E.xfa_status(pdf)
@@ -70,13 +78,27 @@ class FormState:
                 else:
                     self.blocked = E.fill_blocked_reason(pdf, -1)  # resta il controllo della certificazione
                 self.custom = E.custom_scripts(pdf, self.fields)
+                self.signature_locked = self._signature_locks(pdf)
                 self.xfa_unmapped = E.xfa_unmapped(pdf) if self.xfa == "hybrid" else []
             except Exception:  # file danneggiato: nessun modulo utilizzabile
                 self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
         self.version = doc.version
+        self._mark_locked(self.fields)
         self.by_page = {}
         for f in self.fields:
             self.by_page.setdefault(f.page, []).append(f)
+
+    def _signature_locks(self, pdf) -> set[str]:
+        # solo se c'è una firma apposta: con migliaia di campi la lettura completa costa
+        if not any(f.kind == E.SIGNATURE and f.value for f in self.fields):
+            return set()
+        return E.signature_locked_names(pdf)
+
+    def _mark_locked(self, fields) -> None:
+        """I campi bloccati da una firma sono di sola lettura in compilazione."""
+        for f in fields:
+            if f.name in self.signature_locked and f.kind != E.SIGNATURE:
+                f.readonly = True
 
     def patch(self, names: set[str]) -> None:
         """Rilegge solo i campi con questi nomi (dopo una compilazione): con migliaia di campi
@@ -94,6 +116,7 @@ class FormState:
         if fresh is None or any(x is None for x in fresh) or not targets:
             self.refresh(force=True)
             return
+        self._mark_locked(fresh)
         by_key = {(f.page, f.xref): f for f in fresh}
         self.fields = [by_key.get((f.page, f.xref), f) for f in self.fields]
         self.by_page = {}
@@ -295,12 +318,15 @@ class FormFiller(QObject):
         self.original: Any = None
         self._committing = False
         self._closing = False
+        self._pressed: tuple[int, int] | None = None   # pulsante premuto in attesa del rilascio
+        self._hover: tuple[int, int] | None = None     # pulsante sotto il puntatore
         self.design = False             # modalità modifica modulo: niente compilazione
         self.bar_closed = False
         self.highlight = bool(ctx.settings().value(SETTING_HIGHLIGHT, False, type=bool))
         self._next_required_index = -1
         self._error_label: QLabel | None = None
         self._custom_warned = False
+        self.unavailable_action: str | None = None   # pulsante con script cliccato (FRM-18)
         self._pending_patch: set[str] | None = None
         self.banner_text = ""                 # testo dell'avviso del modulo (barra del nucleo, UX-14)
         self.banner_actions: list[str] = []    # etichette delle azioni dell'avviso
@@ -495,7 +521,12 @@ class FormFiller(QObject):
                     parts.append(tr_count(len(st.xfa_unmapped), _("{n} campo senza dati XML associati"),
                                           _("{n} campi senza dati XML associati")))
             if st.custom:
-                parts.append(_("script personalizzati non eseguiti: calcoli non aggiornati"))
+                names = list(dict.fromkeys(name for name, _ev in st.custom))
+                shown = ", ".join(names[:5]) + (" …" if len(names) > 5 else "")
+                parts.append(_("calcoli personalizzati non eseguiti ({f}): calcoli non aggiornati").format(f=shown))
+            if self.unavailable_action:
+                parts.append(_("azione del pulsante «{n}» non disponibile: contiene uno script, che Foliant "
+                               "non esegue").format(n=self.unavailable_action))
             text = ", ".join(parts)
         fill = st.xfa != "dynamic" and not st.blocked and not self.design
         actions: list[tuple] = []
@@ -628,12 +659,20 @@ class FormFiller(QObject):
                 return False
             if f.kind not in E.FILLABLE + (E.BUTTON, E.SIGNATURE):
                 return False
-            self.click_field(f)
+            self.click_field(f, release_later=True)
+            return True
+        if t == QEvent.Type.MouseButtonRelease and ev.button() == Qt.MouseButton.LeftButton and self._pressed:
+            pressed, self._pressed = self._pressed, None
+            hit = self.view.view_to_page(ev.position())
+            f = self.state.field_at(hit[0], hit[1]) if hit else None
+            if f is not None and (f.page, f.xref) == pressed and self._alive():
+                self.module.run_button(self, f, "U")   # rilascio sopra lo stesso pulsante
             return True
         if t == QEvent.Type.MouseMove and not ev.buttons():
             if self.fill_enabled():
                 hit = self.view.view_to_page(ev.position())
                 f = self.state.field_at(hit[0], hit[1]) if hit else None
+                self._hover_button(f if f is not None and f.kind == E.BUTTON and not f.readonly else None)
                 if f is not None and f.kind in E.FILLABLE + (E.BUTTON,) and not f.readonly:
                     cur = Qt.CursorShape.IBeamCursor if f.kind == E.TEXT else Qt.CursorShape.PointingHandCursor
                     self.view.viewport().setCursor(cur)
@@ -647,14 +686,19 @@ class FormFiller(QObject):
             return False
         return False
 
-    def click_field(self, f: E.FieldInfo) -> None:
+    def click_field(self, f: E.FieldInfo, release_later: bool = False) -> None:
+        """Clic su un campo. Sui pulsanti è pressione e rilascio; con `release_later` (mouse)
+        il rilascio arriva dopo, ed esegue /U solo se avviene sopra lo stesso pulsante."""
         if f.kind == E.SIGNATURE:
             self.commit_active()
             self.module.signature_clicked(self.view, f)
             return
         if f.readonly:
             self.commit_active()
-            self.ctx.status(_("Il campo «{n}» è in sola lettura.").format(n=f.name))
+            if f.name in self.state.signature_locked:
+                self.ctx.status(_("Il campo «{n}» è bloccato da una firma.").format(n=f.name))
+            else:
+                self.ctx.status(_("Il campo «{n}» è in sola lettura.").format(n=f.name))
             return
         if f.kind in (E.CHECKBOX, E.RADIO):
             self.activate(f)
@@ -662,7 +706,14 @@ class FormFiller(QObject):
             return
         if f.kind == E.BUTTON:
             self.activate(f)
-            self.press_button(f)
+            if f.image:   # campo immagine: il clic sceglie subito l'immagine (FRM-19)
+                self.module.run_button(self, f, "U")
+                return
+            self.module.run_button(self, f, "D")
+            if release_later:
+                self._pressed = (f.page, f.xref)   # il rilascio sopra lo stesso pulsante esegue /U
+            else:
+                self.module.run_button(self, f, "U")
             return
         self.activate(f)
 
@@ -672,9 +723,14 @@ class FormFiller(QObject):
         if self.active is not None and (self.active.page, self.active.xref) == (f.page, f.xref) and self.editor:
             self.editor.setFocus()
             return
+        previous = self.active
         if not self.commit_active():
             return
+        if previous is not None and previous.kind == E.BUTTON and (previous.page, previous.xref) != (f.page, f.xref):
+            self.module.run_button(self, previous, "Bl")
         self.active = f
+        if f.kind == E.BUTTON:
+            self.module.run_button(self, f, "Fo")
         self.view.ensure_visible(f.page, f.rect)
         self._create_editor(f)
         self.reposition()
@@ -1067,7 +1123,21 @@ class FormFiller(QObject):
 
     # ------------------------------------------------------------------ pulsanti
     def press_button(self, f: E.FieldInfo) -> None:
-        self.module.run_button(self, f)
+        """Pressione da tastiera (spazio o Invio): pressione e rilascio."""
+        self.module.run_button(self, f, "D")
+        self.module.run_button(self, f, "U")
+
+    def _hover_button(self, f: E.FieldInfo | None) -> None:
+        """Ingresso e uscita del puntatore dai pulsanti (azioni /E e /X)."""
+        key = (f.page, f.xref) if f is not None else None
+        if key == self._hover:
+            return
+        old = self.state.find(*self._hover) if self._hover else None
+        self._hover = key
+        if old is not None:
+            self.module.run_button(self, old, "X")
+        if f is not None:
+            self.module.run_button(self, f, "E")
 
     # ------------------------------------------------------------------ calendario e file
     def browse_file(self) -> None:

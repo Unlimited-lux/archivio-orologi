@@ -565,3 +565,133 @@ def test_system_fonts_listed(qtbot):
     from PySide6.QtGui import QFontDatabase
     if QFontDatabase.families():
         assert len([i for i in items if i]) > 3
+
+
+def test_button_icons_layout_and_rollover_applied(qtbot, tmp_path):
+    """FRM-18: disposizione, didascalia al passaggio e icone per stato dalla scheda Pulsante."""
+    from PIL import Image
+
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    img = tmp_path / "logo.png"
+    Image.new("RGB", (120, 80), (180, 20, 20)).save(img)
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 250, 100), "garanzia", caption="Garanzia")
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        panel.set_fields([E.field_info(pdf, p, x) for p, x in keys], ["garanzia"])
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.choose_icon_file = lambda: str(img)
+    panel.set_fields(E.list_fields(pdf), ["garanzia"])
+    assert panel.caption_down_edit.placeholderText() == "uguale alla didascalia"
+    panel.icon_rows["normal"][1].click()
+    assert E.field_info(pdf, 0, b).icons == ("normal",)
+    assert panel.icon_rows["normal"][0].text() == "impostata" and panel.icon_rows["down"][0].text() == "nessuna"
+    panel.layout_combo.setCurrentIndex(panel.layout_combo.findData("icon_left"))
+    assert E.field_info(pdf, 0, b).layout == "icon_left"
+    panel.caption_rollover_edit.setText("Apri")
+    panel.caption_rollover_edit.editingFinished.emit()
+    assert E.field_info(pdf, 0, b).caption_rollover == "Apri"
+    panel.icon_rows["normal"][2].click()
+    assert E.field_info(pdf, 0, b).icons == ()
+
+
+def test_button_event_applied(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 72), "stampa", caption="Stampa")
+    E.set_button_action(pdf, 0, b, {"type": "print"})
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.set_fields(E.list_fields(pdf), ["stampa"])
+    assert panel.event_combo.currentData() == "U"
+    panel.event_combo.setCurrentIndex(panel.event_combo.findData("E"))
+    assert E.button_action(pdf, b) == {"type": "print", "name": "Print", "event": "E"}
+    panel.set_fields(E.list_fields(pdf), ["stampa"])
+    assert panel.event_combo.currentData() == "E"
+
+
+def test_submit_action_applied(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 20, 150, 40), "modello")
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 72), "invia", caption="Invia")
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.set_fields([E.field_info(pdf, 0, b)], ["modello", "invia"])
+    panel.action_combo.setCurrentIndex(panel.action_combo.findData("submit"))
+    assert E.button_action(pdf, b) == {}   # manca ancora l'indirizzo
+    panel.action_uri.setText("ftp://x")
+    panel.action_uri.editingFinished.emit()
+    assert "mailto" in panel.action_error.text()
+    panel.submit_format.setCurrentIndex(panel.submit_format.findData("xfdf"))
+    panel.action_uri.setText("mailto:acquisti@esempio.test")
+    panel.action_uri.editingFinished.emit()
+    assert E.button_action(pdf, b) == {"type": "submit", "url": "mailto:acquisti@esempio.test", "format": "xfdf",
+                                       "fields": [], "empty": False}
+    panel.set_fields([E.field_info(pdf, 0, b)], ["modello", "invia"])
+    assert panel.action_combo.currentData() == "submit" and panel.action_uri.text() == "mailto:acquisti@esempio.test"
+
+
+def test_signature_constraints_applied(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.SIGNATURE, pymupdf.Rect(50, 50, 250, 100), "Firma")
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.set_fields([E.field_info(pdf, 0, x)], ["Firma"])
+    panel.sv_reasons.setText("Venditore; Acquirente")
+    panel.sv_reasons.editingFinished.emit()
+    panel.sv_certify.setCurrentIndex(panel.sv_certify.findData(2))
+    assert E.field_info(pdf, 0, x).sv == {"reasons": ["Venditore", "Acquirente"], "certify": 2}
+    panel.set_fields([E.field_info(pdf, 0, x)], ["Firma"])
+    assert panel.sv_reasons.text() == "Venditore; Acquirente" and panel.sv_certify.currentData() == 2
+
+
+def test_all_sections_reachable_in_narrow_panel(qtbot):
+    """C14: con un campo di testo, a 300 px tutte le sezioni (anche Validazione e Calcolo) si
+    raggiungono dalla tendina, senza scorrimento orizzontale."""
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "prezzo")
+    panel = FieldPropertiesPanel(lambda *a: True)
+    qtbot.addWidget(panel)
+    panel.set_fields([E.field_info(pdf, 0, x)], ["prezzo"])
+    panel.resize(300, 800)
+    panel.show()
+    qtbot.waitExposed(panel)
+    tabs = panel.tabs
+    visible = [tabs.tabText(i) for i in range(tabs.count()) if tabs.isTabVisible(i)]
+    choices = [tabs.chooser.itemText(i) for i in range(tabs.chooser.count())]
+    assert choices == visible and {"Validazione", "Calcolo"} <= set(choices)
+    assert panel.minimumSizeHint().width() <= 300 and tabs.chooser.width() <= 300
+    for i in range(tabs.chooser.count()):   # ogni sezione si apre dalla tendina
+        tabs.chooser.setCurrentIndex(i)
+        assert tabs.tabText(tabs.currentIndex()) == choices[i]

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 ORDER = 50
 
-_module = None
+import weakref
+
+# un FormsModule per finestra (Ctrl+N apre altre finestre nello stesso processo)
+_modules: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
 def register_translations() -> None:
@@ -34,13 +37,24 @@ def register_translations() -> None:
 
 
 def register(ctx) -> None:
-    global _module
     from .module import FormsModule
 
     register_translations()
-    _module = FormsModule(ctx)
-    _module.register()
+    module = FormsModule(ctx)
+    _modules[ctx] = module
+    module.register()
 
 
-def instance():
-    return _module
+def instance(ctx=None):
+    """Il modulo della finestra di `ctx`; senza, quello della finestra visibile più recente."""
+    if ctx is not None:
+        return _modules.get(ctx)
+    items = list(_modules.items())
+    for c, module in reversed(items):
+        win = getattr(c, "window", None)
+        try:
+            if win is not None and win.isVisible():
+                return module
+        except RuntimeError:   # finestra già distrutta
+            continue
+    return items[-1][1] if items else None

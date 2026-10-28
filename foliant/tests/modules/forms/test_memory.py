@@ -11,6 +11,7 @@ import gc
 import types
 import weakref
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
 
 from foliant.modules import forms
@@ -45,6 +46,7 @@ def _close(qtbot, window, form_pdf, interact):
     del view
     for _ in range(3):
         QApplication.processEvents()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)   # deleteLater del nucleo
         gc.collect()
     return refs
 
@@ -75,3 +77,75 @@ def test_closed_tab_not_kept_after_editing_and_design(qtbot, window, form_pdf):
     refs = _close(qtbot, window, form_pdf, interact)
     assert not _forms_holders(refs)
     assert not forms.instance().fillers
+
+
+def test_closed_tab_view_and_document_collected(qtbot, window, form_pdf):
+    """NFR-06: con i riferimenti rilasciati anche dal nucleo, vista e documento vengono raccolti."""
+    view_ref, doc_ref = _close(qtbot, window, form_pdf, lambda view: None)
+    assert view_ref() is None and doc_ref() is None
+
+
+def test_second_window_closed_first_still_works(qtbot, settings, window, form_pdf):
+    """Ctrl+N: un modulo per finestra; chiusa la seconda, la prima funziona senza errori."""
+    from foliant.ui.main_window import MainWindow
+    first = forms.instance(window.ctx)
+    second_win = MainWindow(settings)
+    qtbot.addWidget(second_win)
+    second = forms.instance(second_win.ctx)
+    assert second is not None and second is not first
+    v2 = open_form(second_win, form_pdf)
+    v2.document._saved_state = v2.document._state
+    second_win.close_view(v2)
+    second_win.close()
+    second_win.deleteLater()
+    QApplication.processEvents()
+    view = open_form(window, form_pdf)
+    assert forms.instance(window.ctx) is first
+    click_field(qtbot, view, "nome")
+    f = first.filler(view)
+    qtbot.keyClicks(f.editor, "Anna")
+    f.commit_active()
+    window.ctx.set_mode("moduli")
+    window.ctx.set_mode("leggi")
+    QApplication.processEvents()
+    from .test_fill import values
+    assert values(view)["nome"] == "Anna"
+
+
+def test_content_change_without_form_is_fast(window, tmp_path):
+    """Un documento con 300 commenti e nessun campo: la reazione del modulo alle modifiche è
+    immediata (nessuna lettura dei campi)."""
+    import time
+
+    import pymupdf
+    pdf = pymupdf.open()
+    for p in range(30):
+        pg = pdf.new_page()
+        for i in range(10):
+            pg.add_text_annot((50 + 40 * i, 50 + 10 * i), f"nota {p}.{i}")
+    pdf.save(str(tmp_path / "contratto.pdf"))
+    view = open_form(window, tmp_path / "contratto.pdf")
+    f = forms.instance().filler(view)
+    with view.document.change("nota") as d:
+        d[0].add_text_annot((300, 300), "nuova")
+    t = time.perf_counter()
+    f._on_content_changed()
+    assert time.perf_counter() - t < 0.02
+    assert not f.state.fields
+
+
+def test_signature_click_uses_request_signature(qtbot, window, tmp_path, monkeypatch):
+    """FRM-20: clic su un campo firma vuoto → ctx.request_signature con il campo preselezionato."""
+    import pymupdf
+
+    from foliant.modules.forms import engine as E
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.SIGNATURE, pymupdf.Rect(300, 80, 500, 130), "FirmaCliente")
+    pdf.save(str(tmp_path / "firma.pdf"))
+    view = open_form(window, tmp_path / "firma.pdf")
+    calls = []
+    monkeypatch.setattr(window.ctx, "request_signature", lambda v, name: calls.append((v, name)) or True,
+                        raising=False)
+    click_field(qtbot, view, "FirmaCliente")
+    assert calls == [(view, "FirmaCliente")]

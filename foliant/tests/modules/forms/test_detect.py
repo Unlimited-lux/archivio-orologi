@@ -428,3 +428,98 @@ def test_skewed_scan_3_degrees():
         assert any(math.hypot((c.rect.x0 + c.rect.x1) / 2 - ex,
                               (c.rect.y0 + c.rect.y1) / 2 - ey) <= 3
                    for c in checks), (checks, ex, ey)
+
+
+def _skewed_scan(angle: float, dpi: int = 200, extra=None) -> pymupdf.Document:
+    """Scansione simulata del modulo di prova, ruotata di `angle` gradi (antioraria)."""
+    import io
+
+    from PIL import Image
+    src, page = _doc()
+    for i, y in enumerate((120, 200, 280)):
+        page.insert_text((60, y - 2), f"Campo {i}:", fontsize=10)
+        page.draw_line((150, y), (400, y))
+    if extra is not None:
+        extra(page)
+    pix = page.get_pixmap(dpi=dpi)
+    im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    if angle:
+        im = im.rotate(angle, expand=False, fillcolor="white")
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    doc = pymupdf.open()
+    doc.new_page(width=595, height=842).insert_image(pymupdf.Rect(0, 0, 595, 842), stream=buf.getvalue())
+    return doc
+
+
+def test_scan_quality_and_straighten():
+    """FRM-27: inclinazione oltre 5° stimata e raddrizzata; dopo, le linee sono orizzontali."""
+    from foliant.modules.forms.detect import estimate_skew, scan_quality, straighten_page
+    doc = _skewed_scan(7)
+    q = scan_quality(doc, 0)
+    assert q["skew"] == pytest.approx(7, abs=0.5) and q["dpi"] == pytest.approx(200, abs=2)
+    straighten_page(doc, 0, q["skew"])
+    assert abs(estimate_skew(doc[0])) < 0.5
+    texts = [c for c in detect_page(doc, 0, raster=True) if c.kind == "text"]
+    assert len(texts) >= 3
+    for y in (120, 200, 280):   # i campi tornano sulle linee originali
+        assert any(abs(c.rect.y1 - (y - 1)) <= 3 and c.rect.x0 == pytest.approx(150, abs=4) for c in texts), y
+
+
+def test_low_resolution_reported():
+    from foliant.modules.forms.detect import scan_quality
+    assert scan_quality(_skewed_scan(0, dpi=100), 0)["dpi"] == pytest.approx(100, abs=2)
+
+
+def test_handwritten_boxes_proposed_with_note():
+    """Caselle già spuntate e riquadri con scrittura a mano: proposti con «contenuto presente»."""
+    def extra(page):
+        box = pymupdf.Rect(150, 360, 164, 374)
+        page.draw_rect(box)
+        page.draw_line(box.tl + (3, 3), box.br - (3, 3), width=1.5)   # «X» a mano
+        page.draw_line(box.bl + (3, -3), box.tr + (-3, 3), width=1.5)
+        empty = pymupdf.Rect(300, 360, 314, 374)
+        page.draw_rect(empty)
+        note = pymupdf.Rect(150, 420, 450, 470)
+        page.draw_rect(note)
+        page.draw_bezier((170, 450), (200, 430), (230, 460), (260, 440), width=1.2)   # scarabocchio
+    doc = _skewed_scan(0, extra=extra)
+    cands = detect_page(doc, 0, raster=True)
+    checks = sorted((c for c in cands if c.kind == "checkbox"), key=lambda c: c.rect.x0)
+    assert len(checks) == 2
+    assert checks[0].note == "contenuto presente" and checks[1].note == ""
+    boxed = [c for c in cands if c.kind == "text" and c.rect.y0 > 400]
+    assert boxed and boxed[0].note == "contenuto presente"
+
+
+def test_scan_300dpi_fifteen_fields():
+    """FRM-27: scansione a 300 dpi di un modulo con 15 campi annotati (righe, riquadri, caselle)
+    → almeno 12 proposti con il tipo giusto e intersezione/unione ≥ 0,5. Tipi e posizioni non
+    dipendono dall'OCR, che serve solo ai nomi."""
+    src, page = _doc()
+    truth = []
+    for i in range(6):                      # righe con etichetta: campo sopra la linea
+        y = 90 + 40 * i
+        page.insert_text((60, y - 2), f"Voce {i}:", fontsize=10)
+        page.draw_line((150, y), (420, y))
+        truth.append(("text", pymupdf.Rect(150, y - 18, 420, y - 1)))
+    for i in range(4):                      # riquadri di testo
+        r = pymupdf.Rect(60 + 130 * i, 360, 180 + 130 * i, 380)
+        page.draw_rect(r)
+        truth.append(("text", r))
+    for i in range(5):                      # caselle
+        r = pymupdf.Rect(60 + 90 * i, 430, 72 + 90 * i, 442)
+        page.draw_rect(r)
+        page.insert_text((r.x1 + 4, r.y1 - 2), "Sì", fontsize=10)
+        truth.append(("checkbox", r))
+    pix = page.get_pixmap(dpi=300)
+    doc = pymupdf.open()
+    doc.new_page(width=595, height=842).insert_image(pymupdf.Rect(0, 0, 595, 842), pixmap=pix)
+    cands = detect_page(doc, 0, raster=True)
+
+    def iou(a, b):
+        inter = abs(a & b)
+        return inter / (abs(a) + abs(b) - inter)
+
+    found = sum(any(c.kind == kind and iou(c.rect, r) >= 0.5 for c in cands) for kind, r in truth)
+    assert found >= 12, found

@@ -11,7 +11,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import QMenu, QToolButton
 
-from foliant.api import ENGINE_LOCK, OperationCancelled, _, bind_icon, icon
+from foliant.api import ENGINE_LOCK, OperationCancelled, _, bind_icon, follow_link, icon
 
 from . import detect as D
 from . import engine as E
@@ -217,6 +217,7 @@ class FormsModule(QObject):
                 self.panel = FieldPropertiesPanel(self.apply_properties, set_default=self.set_kind_defaults)
             except TypeError:
                 self.panel = FieldPropertiesPanel(self.apply_properties)
+            self.panel.choose_icon_file = self._choose_icon_file
             self.ctx.add_properties_panel("moduli", self.panel)
         try:
             from .fields_panel import FieldsPanel
@@ -225,6 +226,12 @@ class FormsModule(QObject):
         if FieldsPanel is not None:
             self.fields_panel = FieldsPanel(self)
             self.ctx.add_sidebar_panel("moduli-campi", _("Campi"), "text-cursor-input", self.fields_panel, 60)
+
+    def _choose_icon_file(self) -> str | None:
+        paths = self.ctx.ask_open_paths(
+            _("Scegli l'icona"), _("Immagini e PDF") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.pdf)",
+            multiple=False)
+        return paths[0] if paths else None
 
     # ================================================================ viste
     def _current_view(self):
@@ -287,6 +294,15 @@ class FormsModule(QObject):
         if f.editor is not None and not f.commit_active():
             return False  # valore non valido nel campo aperto: il focus resta lì
         f.state.refresh()
+        start = getattr(self, "_preview_start", None)
+        if self.preview and start and start[0] == id(view.document):
+            steps = len(view.document._undo) - start[1]
+            # FRM-25: salvataggio durante l'anteprima → si chiede se includere i valori di prova
+            if steps > 0 and not self.ctx.confirm(_("Anteprima compilazione"), _(
+                    "Salvare nel file anche i valori di prova inseriti durante l'anteprima?")):
+                for _i in range(steps):
+                    view.document.undo()
+                f.state.refresh(force=True)
         if f.state.xfa == "hybrid" and f.state.xfa_unmapped:
             names = ", ".join(f.state.xfa_unmapped[:10])
             if not self.ctx.confirm(_("Dati XML del modulo"), _(
@@ -372,9 +388,10 @@ class FormsModule(QObject):
             self._preview_start = None
             if start and start[0] == id(doc):
                 steps = len(doc._undo) - start[1]
-                if steps > 0 and not self.ctx.confirm(
+                # FRM-25: «Scartare i valori di prova?», predefinito sì; «No» li mantiene
+                if steps > 0 and self.ctx.confirm(
                         _("Anteprima compilazione"),
-                        _("Mantenere i valori inseriti durante l'anteprima?")):
+                        _("Scartare i valori di prova inseriti durante l'anteprima?")):
                     for _i in range(steps):
                         doc.undo()
         f.design = self.design_active and not on
@@ -1182,6 +1199,8 @@ class FormsModule(QObject):
                   "Eseguire prima l'OCR?").format(n=len(scanned))):
             self.ctx.set_mode("ocr")
             return
+        if scanned:
+            self._check_scan_quality(view, scanned)
 
         def work(progress):
             with ENGINE_LOCK:
@@ -1209,6 +1228,21 @@ class FormsModule(QObject):
             n = self.create_candidates(accepted, view)
             self.ctx.status(_("Campi creati: {n}").format(n=n))
 
+    def _check_scan_quality(self, view, pages: list[int]) -> None:
+        """FRM-27: avviso sotto i 150 dpi; oltre 5° di inclinazione si propone di raddrizzare."""
+        with ENGINE_LOCK:
+            quality = {p: D.scan_quality(view.document.pdf, p) for p in pages}
+        low = [p + 1 for p, q in quality.items() if 0 < q["dpi"] < 150]
+        if low:
+            self.ctx.notify(_("Scansione a bassa risoluzione (meno di 150 dpi) nelle pagine {l}: "
+                              "il riconoscimento può essere meno preciso.").format(l=", ".join(map(str, low))))
+        skewed = {p: q["skew"] for p, q in quality.items() if abs(q["skew"]) > 5}
+        if skewed and self.ctx.confirm(_("Riconosci campi"), _(
+                "Le pagine {l} sono inclinate di oltre 5°. Raddrizzarle prima del riconoscimento?").format(
+                l=", ".join(str(p + 1) for p in skewed))):
+            self._change(_("Raddrizza pagine"),
+                         lambda pdf: [D.straighten_page(pdf, p, a) for p, a in skewed.items()], view)
+
     def create_candidates(self, candidates: list, view=None) -> int:
         view = view or self._current_view()
 
@@ -1231,13 +1265,19 @@ class FormsModule(QObject):
         return self._change(_("Crea campi riconosciuti"), run, view) or 0
 
     # ================================================================ pulsanti e firme
-    def run_button(self, filler: FormFiller, f: E.FieldInfo) -> None:
+    def run_button(self, filler: FormFiller, f: E.FieldInfo, event: str = "U") -> None:
+        """Azioni del pulsante per un evento: U rilascio, D pressione, E/X ingresso e uscita del
+        puntatore, Fo/Bl focus (FRM-18)."""
         with ENGINE_LOCK:
             pdf = filler.document.pdf
             if E.is_image_field(pdf, f.xref):
-                action = {"type": "image"}
+                action = {"type": "image"} if event == "U" else {}
             else:
-                action = E.button_action(pdf, f.xref)
+                action = E.button_action(pdf, f.xref, event)
+                if not action and event == "U" and E.button_action(pdf, f.xref):
+                    return   # il pulsante agisce su un altro evento
+        if not action and event != "U":
+            return
         kind = action.get("type")
         if kind == "image":
             paths = self.ctx.ask_open_paths(_("Scegli un'immagine"), _("Immagini") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp)", multiple=False)
@@ -1248,9 +1288,8 @@ class FormsModule(QObject):
             names = action.get("fields")
             self.reset(names if names else None, filler.view)
         elif kind == "uri":
-            uri = action.get("uri", "")
-            if self.ctx.confirm(_("Collegamento esterno"), _("Il modulo vuole aprire questo indirizzo:\n\n{u}\n\nAprirlo?").format(u=uri)):
-                QDesktopServices.openUrl(QUrl(uri))
+            # conferma unica dell'applicazione per ciò che esce da Foliant (VIS-19)
+            follow_link(filler.view, {"kind": pymupdf.LINK_URI, "uri": action.get("uri", "")})
         elif kind == "goto":
             filler.view.go_to_page(action.get("page", 0))
         elif kind == "print":
@@ -1265,7 +1304,9 @@ class FormsModule(QObject):
         elif kind == "submit":
             self.submit(filler, action)
         elif kind == "javascript":
-            self.ctx.status(_("Il pulsante esegue uno script personalizzato, non supportato."))
+            # FRM-18/NFR-17: lo script non viene eseguito; la barra del modulo lo indica
+            filler.unavailable_action = f.name
+            filler.update_bar()
         else:
             self.ctx.status(_("Il pulsante «{n}» non ha azioni.").format(n=f.name))
 
@@ -1310,9 +1351,7 @@ class FormsModule(QObject):
                 u=url, d=data[:4000].decode("utf-8", "replace")))
             return False
         if url.lower().startswith("mailto:"):
-            QDesktopServices.openUrl(QUrl(url))
-            self.ctx.status(_("Allega al messaggio i dati esportati con «Esporta dati…»."))
-            return True
+            return self._submit_by_mail(view, url, data, action.get("format", "fdf"))
         if not url.lower().startswith(("http://", "https://")):
             self.ctx.error(_("Invia modulo"), _("Indirizzo di invio non valido: {u}").format(u=url))
             return False
@@ -1332,7 +1371,49 @@ class FormsModule(QObject):
         self.ctx.status(_("Modulo inviato (risposta {s}).").format(s=status))
         return True
 
+    def _submit_by_mail(self, view, url: str, data: bytes, fmt: str) -> bool:
+        """Invio a un indirizzo di posta: il programma di posta del sistema si apre con il file
+        dei dati allegato (FRM-18), dopo la conferma con destinazione e file."""
+        import tempfile
+        from pathlib import Path
+        from urllib.parse import unquote, urlsplit
+        address = unquote(urlsplit(url).path)
+        ext = {"xfdf": "xfdf", "pdf": "pdf", "html": "txt"}.get(fmt, "fdf")
+        stem = Path(view.document.display_name).stem or "modulo"
+        path = Path(tempfile.mkdtemp(prefix="foliant-invio-")) / f"{stem}_{_('dati')}.{ext}"
+        path.write_bytes(data)
+        if not self.ctx.confirm(_("Invia modulo"), _(
+                "Aprire il programma di posta per inviare a {a} il file «{f}» con i dati del modulo?").format(
+                a=address, f=path.name)):
+            return False
+        subject = _("Dati del modulo {n}").format(n=view.document.display_name)
+        if self.launch_mail(address, subject, str(path)):
+            self.ctx.status(_("Messaggio preparato con i dati allegati."))
+        else:
+            QDesktopServices.openUrl(QUrl(url))
+            self.ctx.notify(_("Allega al messaggio il file dei dati: {p}").format(p=path),
+                            [(_("Apri cartella"), lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent))))])
+        return True
+
+    def launch_mail(self, address: str, subject: str, attachment: str) -> bool:
+        """Apre il programma di posta con l'allegato (xdg-email). False se non disponibile."""
+        import shutil
+        import subprocess
+        exe = shutil.which("xdg-email")
+        if exe is None:
+            return False
+        try:
+            subprocess.Popen([exe, "--utf8", "--subject", subject, "--attach", attachment, address],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            return False
+        return True
+
     def signature_clicked(self, view, f: E.FieldInfo) -> None:
+        # FRM-20: il modulo Firma apre la procedura con il campo preselezionato
+        request = getattr(self.ctx, "request_signature", None)
+        if request is not None and request(view, f.name):
+            return
         if self.ctx.mode("firma") is not None:
             self.ctx.set_mode("firma")
         self.ctx.status(_("Campo firma «{n}»: usa la modalità Firma per firmare.").format(n=f.name))
