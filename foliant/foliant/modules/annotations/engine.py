@@ -246,12 +246,29 @@ def get_annot(page: pymupdf.Page, xref: int) -> pymupdf.Annot:
     return annot
 
 
+def _placement():
+    try:
+        from foliant.core import placement
+        return placement
+    except Exception:   # pragma: no cover - nucleo senza il modulo di posizionamento
+        return None
+
+
 def to_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
+    """Coordinate standard (area visibile, y verso il basso) → spazio utente PDF."""
+    pl = _placement()
+    if pl is not None:
+        p = pymupdf.Point(x, y) * pl.page_to_pdf_matrix(page)
+        return p.x, p.y
     mb = page.mediabox
     return x + mb.x0, mb.y1 - y
 
 
 def from_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
+    pl = _placement()
+    if pl is not None:
+        p = pymupdf.Point(x, y) * pl.pdf_to_page_matrix(page)
+        return p.x, p.y
     mb = page.mediabox
     return x - mb.x0, mb.y1 - y
 
@@ -356,7 +373,7 @@ def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequenc
     xref = _finish(annot, author, contents, kind=kind)
     if area:
         pdf.xref_set_key(xref, AREA_KEY, "true")
-        _fit_area_rect(pdf, page, xref)
+        _fit_area_rect(pdf, page, xref, quads[0].rect if len(quads) == 1 else None)
     if contents:
         ensure_popup(pdf, page_no, xref)
     return xref
@@ -365,8 +382,12 @@ def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequenc
 AREA_KEY = "FoliantArea"
 
 
-def _fit_area_rect(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
+def _fit_area_rect(pdf: pymupdf.Document, page: pymupdf.Page, xref: int, rect=None) -> None:
     """Evidenziazione ad area: /Rect coincide con il quadrilatero (ANN-11)."""
+    if rect is not None:
+        r = pymupdf.Rect(rect)
+        pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, r)))
+        return
     annot = get_annot(page, xref)
     v = annot.vertices or []
     if len(v) == 4:
@@ -1200,6 +1221,14 @@ ANGLE_KEY = "FoliantAngle"
 SIZE_KEY = "FoliantSize"
 
 
+def _std_rect(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> pymupdf.Rect:
+    """/Rect in coordinate standard letto dal dizionario (Annot.rect del motore sbaglia su alcuni ritagli)."""
+    raw = _array(pdf, xref, "Rect")
+    if raw and len(raw) == 4:
+        return from_pdf_rect(page, raw)
+    return pymupdf.Rect(get_annot(page, xref).rect)
+
+
 def _rotation(pdf: pymupdf.Document, xref: int) -> tuple[float, tuple[float, float] | None]:
     k, v = pdf.xref_get_key(xref, ANGLE_KEY)
     angle = float(v) if k in ("int", "real") else 0.0
@@ -1230,7 +1259,7 @@ def _apply_rotation(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> Non
         sx, sy = w / max(bbox[2] - bbox[0], 1e-6), h / max(bbox[3] - bbox[1], 1e-6)
         pdf.xref_set_key(ap, "Matrix", f"[{c * sx:.6f} {s_ * sx:.6f} {-s_ * sy:.6f} {c * sy:.6f} 0 0]")
     rw, rh = _rotated_box(w, h, angle)
-    r = annot.rect
+    r = _std_rect(pdf, page, xref)
     cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
     new = pymupdf.Rect(cx - rw / 2, cy - rh / 2, cx + rw / 2, cy + rh / 2)
     pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, new)))
@@ -1246,7 +1275,7 @@ def rotate_annot(pdf: pymupdf.Document, page_no: int, xref: int, degrees: float)
         raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
     angle, size = _rotation(pdf, xref)
     if size is None:
-        r = annot.rect
+        r = _std_rect(pdf, page, xref)
         size = (r.width, r.height)
         pdf.xref_set_key(xref, SIZE_KEY, f"[{size[0]:.3f} {size[1]:.3f}]")
     angle = (angle + degrees) % 360
