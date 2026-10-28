@@ -245,6 +245,7 @@ class FieldInfo:
     action: dict = field(default_factory=dict)  # azione al clic dei pulsanti
     image: bool = False          # campo immagine
     lock: dict = field(default_factory=dict)  # campi firma: {"action": "All|Include|Exclude", "fields": [...]}
+    sv: dict = field(default_factory=dict)    # campi firma: vincoli /SV {"reasons", "timestamp", "certify"}
     custom_scripts: list = field(default_factory=list)  # azioni personalizzate non eseguite
     maxlen: int = 0
     font: str = "Helvetica"
@@ -437,6 +438,7 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.highlight = {v: k for k, v in HIGHLIGHTS.items()}.get(h, "invert")
     if kind == SIGNATURE:
         info.lock = _read_lock(pdf, w.xref)
+        info.sv = read_sv(pdf, w.xref)
     if kind in (CHECKBOX, RADIO):
         ca = _value_of(*pdf.xref_get_key(w.xref, "MK/CA"))
         info.check_style = next((k for k, c in CHECK_STYLES.items() if c == ca), "check" if kind == CHECKBOX else "circle")
@@ -913,6 +915,61 @@ def _read_lock(pdf: pymupdf.Document, xref: int) -> dict:
     except ps.PdfSyntaxError:
         return {}
     return {"action": str(lock.get("Action", "")), "fields": [ps.text_of(n) or "" for n in lock.get("Fields", []) or []]}
+
+
+def read_sv(pdf: pymupdf.Document, xref: int) -> dict:
+    """Vincoli per chi firma (/SV del campo firma): motivi ammessi, marca temporale richiesta,
+    firma di certificazione richiesta (livello /MDP /P)."""
+    t, v = _inherited(pdf, xref, "SV")
+    if t == "xref":
+        v, t = pdf.xref_object(int(v.split()[0]), compressed=True), "dict"
+    if t != "dict":
+        return {}
+    try:
+        sv = ps.parse(v)
+    except ps.PdfSyntaxError:
+        return {}
+    out: dict = {}
+    reasons = [ps.text_of(r) or "" for r in sv.get("Reasons") or []]
+    if reasons:
+        out["reasons"] = [r for r in reasons if r]
+    ts = sv.get("TimeStamp")
+    if isinstance(ts, dict) and ps.text_of(ts.get("URL")):
+        out["timestamp"] = ps.text_of(ts.get("URL"))
+    mdp = sv.get("MDP")
+    if isinstance(mdp, dict) and mdp.get("P") in (1, 2, 3):
+        out["certify"] = int(mdp["P"])
+    return out
+
+
+def _sv_value(sv: dict) -> str | None:
+    """Dizionario /SV per i vincoli; None se non ce ne sono. I motivi elencati sono vincolanti
+    (/Ff bit 4), così come la marca temporale (/TimeStamp /Ff 1)."""
+    parts, ff = [], 0
+    reasons = [str(r).strip() for r in sv.get("reasons") or [] if str(r).strip()]
+    if reasons:
+        parts.append(f"/Reasons{ps.serialize(reasons)}")
+        ff |= 8
+    url = str(sv.get("timestamp") or "").strip()
+    if url:
+        parts.append(f"/TimeStamp<</URL{ps.encode_string(url)}/Ff 1>>")
+    level = int(sv.get("certify") or 0)
+    if level in (1, 2, 3):
+        parts.append(f"/MDP<</P {level}>>")
+    if not parts:
+        return None
+    return "<</Type/SV" + "".join(parts) + (f"/Ff {ff}" if ff else "") + ">>"
+
+
+def _rename_in_locks(pdf: pymupdf.Document, old: str, new: str) -> None:
+    """Campo rinominato: gli elenchi /Lock dei campi firma non ancora firmati lo seguono (FRM-20)."""
+    for f in list_fields(pdf):
+        if f.kind != SIGNATURE or is_signed(pdf, f.xref) or f.lock.get("action") not in ("Include", "Exclude"):
+            continue
+        names = [new + n[len(old):] if n == old or n.startswith(old + ".") else n for n in f.lock["fields"]]
+        if names != f.lock["fields"]:
+            pdf.xref_set_key(f.field_xref, "Lock", f"<</Type/SigFieldLock/Action/{f.lock['action']}"
+                                                   f"/Fields{ps.serialize(names)}>>")
 
 
 def signature_locked_names(pdf: pymupdf.Document) -> set[str]:
@@ -1927,6 +1984,7 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
             if new in others:
                 raise NameTaken(new, others[new] == kind)
             _rename_field(pdf, fx, info.name, new)
+            _rename_in_locks(pdf, info.name, new)
     t, v = _inherited(pdf, xref, "Ff")
     try:
         flags = int(v) if t == "int" else 0
@@ -2066,6 +2124,9 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
             pdf.xref_set_key(fx, "Lock", value)
         else:
             pdf.xref_set_key(fx, "Lock", "null")
+    if "sv" in props and kind == SIGNATURE:
+        value = _sv_value(props["sv"] or {})
+        pdf.xref_set_key(fx, "SV", value or "null")
     if "action" in props and kind == BUTTON:
         set_button_action(pdf, page, xref, props["action"])
     if "check_style" in props and kind in (CHECKBOX, RADIO):
@@ -2386,6 +2447,8 @@ def properties_of(f: FieldInfo) -> dict:
         props.update(options=list(f.options), multiselect=f.multiselect, editable=f.editable)
     if f.kind in (CHECKBOX, RADIO):
         props["export"] = f.export
+    if f.kind == SIGNATURE:
+        props.update(lock=dict(f.lock) if f.lock else None, sv=dict(f.sv))
     if f.kind == BUTTON and not f.image:
         props.update(caption=f.caption, caption_down=f.caption_down, caption_rollover=f.caption_rollover,
                      layout=f.layout, highlight=f.highlight)

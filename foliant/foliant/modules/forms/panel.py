@@ -31,6 +31,17 @@ from . import formats as fm
 from . import formula as FX
 
 TRANSLATIONS: dict[str, str] = {
+    "Vincoli per chi firma": "Signer constraints",
+    "qualunque motivo": "any reason",
+    "Motivi ammessi, separati da punto e virgola": "Allowed reasons, separated by semicolons",
+    "Motivi ammessi": "Allowed reasons",
+    "Indirizzo del server di marca temporale da usare obbligatoriamente": "Address of the time stamp server that must be used",
+    "Marca temporale": "Time stamp",
+    "Non richiesta": "Not required",
+    "Nessuna modifica consentita": "No changes allowed",
+    "Consenti compilazione e firme": "Allow form filling and signing",
+    "Consenti anche i commenti": "Also allow comments",
+    "Certificazione": "Certification",
     "Inversione dei colori": "Invert colors",
     "Contorno": "Outline",
     "Pressione": "Push",
@@ -365,6 +376,7 @@ class FieldPropertiesPanel(QWidget):
         self._loaded_formula: str | None = None
         self._loaded_action: dict | None = None
         self._loaded_lock: dict | None = None
+        self._loaded_sv: dict | None = None
         self._fields: list[E.FieldInfo] = []
         self._all_names: list[str] = []
         self._radio_exports: dict[str, list[str]] = {}
@@ -1579,7 +1591,38 @@ class FieldPropertiesPanel(QWidget):
         form.addRow(self.lock_fields)
         self.lock_error = self._error_label()
         form.addRow(self.lock_error)
+        form.addRow(self._note(_("Vincoli per chi firma")))
+        self.sv_reasons = self._line(lambda _t: self._on_sv_changed())
+        self.sv_reasons.setPlaceholderText(_("qualunque motivo"))
+        self.sv_reasons.setToolTip(_("Motivi ammessi, separati da punto e virgola"))
+        form.addRow(_("Motivi ammessi"), self.sv_reasons)
+        self.sv_timestamp = self._line(lambda _t: self._on_sv_changed())
+        self.sv_timestamp.setPlaceholderText(_("nessuna"))
+        self.sv_timestamp.setToolTip(_("Indirizzo del server di marca temporale da usare obbligatoriamente"))
+        form.addRow(_("Marca temporale"), self.sv_timestamp)
+        self.sv_certify = self._combo(
+            [(_("Non richiesta"), 0), (_("Nessuna modifica consentita"), 1), (_("Consenti compilazione e firme"), 2),
+             (_("Consenti anche i commenti"), 3)], lambda _v: self._on_sv_changed())
+        form.addRow(_("Certificazione"), self.sv_certify)
         self._signature_form = form
+
+    def current_sv(self) -> dict:
+        reasons = [r.strip() for r in self.sv_reasons.text().split(";") if r.strip()]
+        out: dict = {}
+        if reasons:
+            out["reasons"] = reasons
+        if self.sv_timestamp.text().strip():
+            out["timestamp"] = self.sv_timestamp.text().strip()
+        if self.sv_certify.currentData():
+            out["certify"] = int(self.sv_certify.currentData())
+        return out
+
+    def _on_sv_changed(self) -> None:
+        if self._loading or not self._fields:
+            return
+        sv = self.current_sv()
+        if sv != self._loaded_sv and self._apply({"sv": sv}):
+            self._loaded_sv = sv
 
     def current_lock(self) -> tuple[dict | None, str | None]:
         action = self.lock_combo.currentData()
@@ -1613,6 +1656,15 @@ class FieldPropertiesPanel(QWidget):
         self._fill_checklist(self.lock_fields, fields)
         self.lock_fields.setEnabled(mixed or action in ("Include", "Exclude"))
         self._show_error(self.lock_error, None)
+        sv, mixed_sv = self._common("sv")
+        sv = dict(sv or {})
+        self._loaded_sv = None if mixed_sv else sv
+        self._load_line(self.sv_reasons, value="; ".join(sv.get("reasons") or []), mixed=mixed_sv)
+        self._load_line(self.sv_timestamp, value=sv.get("timestamp") or "", mixed=mixed_sv)
+        if not mixed_sv:
+            self.sv_reasons.setPlaceholderText(_("qualunque motivo"))
+            self.sv_timestamp.setPlaceholderText(_("nessuna"))
+        self._load_combo(self.sv_certify, int(sv.get("certify") or 0), mixed_sv)
 
     # ------------------------------------------------------------ applicazione
     def _label(self) -> str:

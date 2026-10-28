@@ -309,6 +309,7 @@ def _field_info(r: _Reader, E, page: int, xref: int, w: dict, names: set[str] | 
     elif kind == E.SIGNATURE:
         info.value = "firmato" if inh("V") is not None else ""
         info.lock = E._read_lock(r.pdf, xref) if inh("Lock") is not None else {}
+        info.sv = E.read_sv(r.pdf, xref) if inh("SV") is not None else {}
     return info
 
 

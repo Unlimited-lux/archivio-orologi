@@ -338,4 +338,5 @@ EN: dict[str, str] = {
     'Allega al messaggio il file dei dati: {p}': 'Attach the data file to the message: {p}',
     'Apri cartella': 'Open folder',
     'Comportamento al clic non valido.': 'Invalid click behavior.',
+    'Il campo «{n}» è bloccato da una firma.': 'The field “{n}” is locked by a signature.',
 }

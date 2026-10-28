@@ -49,6 +49,7 @@ class FormState:
         self.xfa = "none"
         self.blocked: str | None = None
         self.blocked_by_permissions = False   # sbloccabile con la password del proprietario
+        self.signature_locked: set[str] = set()   # campi bloccati da una firma apposta (FRM-20)
         self.custom: list[tuple[str, str]] = []
         self.xfa_unmapped: list[str] = []
 
@@ -70,13 +71,27 @@ class FormState:
                 else:
                     self.blocked = E.fill_blocked_reason(pdf, -1)  # resta il controllo della certificazione
                 self.custom = E.custom_scripts(pdf, self.fields)
+                self.signature_locked = self._signature_locks(pdf)
                 self.xfa_unmapped = E.xfa_unmapped(pdf) if self.xfa == "hybrid" else []
             except Exception:  # file danneggiato: nessun modulo utilizzabile
                 self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
         self.version = doc.version
+        self._mark_locked(self.fields)
         self.by_page = {}
         for f in self.fields:
             self.by_page.setdefault(f.page, []).append(f)
+
+    def _signature_locks(self, pdf) -> set[str]:
+        # solo se c'è una firma apposta: con migliaia di campi la lettura completa costa
+        if not any(f.kind == E.SIGNATURE and f.value for f in self.fields):
+            return set()
+        return E.signature_locked_names(pdf)
+
+    def _mark_locked(self, fields) -> None:
+        """I campi bloccati da una firma sono di sola lettura in compilazione."""
+        for f in fields:
+            if f.name in self.signature_locked and f.kind != E.SIGNATURE:
+                f.readonly = True
 
     def patch(self, names: set[str]) -> None:
         """Rilegge solo i campi con questi nomi (dopo una compilazione): con migliaia di campi
@@ -94,6 +109,7 @@ class FormState:
         if fresh is None or any(x is None for x in fresh) or not targets:
             self.refresh(force=True)
             return
+        self._mark_locked(fresh)
         by_key = {(f.page, f.xref): f for f in fresh}
         self.fields = [by_key.get((f.page, f.xref), f) for f in self.fields]
         self.by_page = {}
@@ -666,7 +682,10 @@ class FormFiller(QObject):
             return
         if f.readonly:
             self.commit_active()
-            self.ctx.status(_("Il campo «{n}» è in sola lettura.").format(n=f.name))
+            if f.name in self.state.signature_locked:
+                self.ctx.status(_("Il campo «{n}» è bloccato da una firma.").format(n=f.name))
+            else:
+                self.ctx.status(_("Il campo «{n}» è in sola lettura.").format(n=f.name))
             return
         if f.kind in (E.CHECKBOX, E.RADIO):
             self.activate(f)

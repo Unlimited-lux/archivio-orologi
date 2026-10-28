@@ -650,3 +650,25 @@ def test_submit_action_applied(qtbot):
                                        "fields": [], "empty": False}
     panel.set_fields([E.field_info(pdf, 0, b)], ["modello", "invia"])
     assert panel.action_combo.currentData() == "submit" and panel.action_uri.text() == "mailto:acquisti@esempio.test"
+
+
+def test_signature_constraints_applied(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.SIGNATURE, pymupdf.Rect(50, 50, 250, 100), "Firma")
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.set_fields([E.field_info(pdf, 0, x)], ["Firma"])
+    panel.sv_reasons.setText("Venditore; Acquirente")
+    panel.sv_reasons.editingFinished.emit()
+    panel.sv_certify.setCurrentIndex(panel.sv_certify.findData(2))
+    assert E.field_info(pdf, 0, x).sv == {"reasons": ["Venditore", "Acquirente"], "certify": 2}
+    panel.set_fields([E.field_info(pdf, 0, x)], ["Firma"])
+    assert panel.sv_reasons.text() == "Venditore; Acquirente" and panel.sv_certify.currentData() == 2
