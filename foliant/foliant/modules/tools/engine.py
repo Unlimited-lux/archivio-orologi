@@ -362,6 +362,9 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("fontsize", "Dimensione (pt)", "int", 9, minimum=4, maximum=72),
             Param("margin", "Margine (mm)", "float", 8.0, minimum=0, maximum=100),
             Param("box", "Riquadro bianco dietro il numero (scansioni)", "bool", False),
+            Param("font", "Font", "choice", "helv",
+                  [("helv", "Helvetica"), ("hebo", "Helvetica grassetto"), ("tiro", "Times"),
+                   ("tibo", "Times grassetto"), ("cour", "Courier"), ("cobo", "Courier grassetto")]),
         ]),
         ActionSpec("remove_marks", "Rimuovi filigrane, sfondi, intestazioni e Bates", "pulito", [
             Param("watermark", "Filigrane", "bool", True),
@@ -1229,7 +1232,7 @@ def bates_label(n: int, prefix: str = "", digits: int = 6, suffix: str = "") -> 
 
 def add_bates(data: bytes, start: int = 1, prefix: str = "", digits: int = 6, suffix: str = "",
               position: str = "bottom-right", fontsize: float = 9, margin_mm: float = 8.0,
-              check=None, box: bool = False) -> tuple[bytes, int]:
+              check=None, box: bool = False, font: str = "helv") -> tuple[bytes, int]:
     """Numera le pagine; restituisce (dati, ultimo_numero)."""
     margin = margin_mm * 72 / 25.4
     with ENGINE_LOCK:
@@ -1244,7 +1247,7 @@ def add_bates(data: bytes, start: int = 1, prefix: str = "", digits: int = 6, su
                     check()
                 try:
                     st.add_bates(doc, None, prefix=prefix, suffix=suffix, start=start, digits=digits,
-                                 position=position, margin=margin, font_size=fontsize)
+                                 position=position, margin=margin, font_size=fontsize, font=font or "helv")
                 except Exception as e:
                     raise _stamp_error(e) from e
                 return _save(doc), start + doc.page_count - 1
@@ -1676,7 +1679,7 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         out, _last = add_bates(data, int(plan.get("bates_start", p.get("start", 1))), p.get("prefix", ""),
                                int(p.get("digits", 6)), p.get("suffix", ""), p.get("position", "bottom-right"),
                                float(p.get("fontsize", 9)), float(p.get("margin", 8.0)), check=ctx.check,
-                               box=bool(p.get("box", False)))
+                               box=bool(p.get("box", False)), font=p.get("font", "helv"))
         return out, protection
     if a == "remove_marks":
         kinds = {k for k in MARK_KINDS if p.get(k)}

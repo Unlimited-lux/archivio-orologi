@@ -114,6 +114,7 @@ class CompareOptions:
     compare_structure: bool = True  # pagine spostate/ruotate, immagini, annotazioni, campi (CMP-09)
     match_pages_by_content: bool = True   # abbina anche pagine riordinate (pagine spostate)
     preset: str = ""                # "", "text", "presentation", "drawing", "scan" (CMP-12)
+    uncertain_threshold: float = 70.0   # affidabilità OCR sotto cui una parola è «incerta»
     ocr_languages: str = "ita+eng"
 
     def criteria(self) -> list[str]:
@@ -196,6 +197,7 @@ class Difference:
     id: int = 0
     status: str = ""
     note: str = ""
+    uncertain: bool = False          # tocca parole OCR a bassa affidabilità (CMP-12)
 
     # ---------------------------------------------------------------- utilità
     def pages(self, side: str) -> list[int]:
@@ -1113,18 +1115,63 @@ def _ocr_function():
     return ocr_pdf_bytes
 
 
-def _ocr_in_memory(doc: pymupdf.Document, options: CompareOptions, progress) -> pymupdf.Document:
-    """Riconoscimento del testo temporaneo (preset Scansione): i file non cambiano."""
+def _ocr_in_memory(doc: pymupdf.Document, options: CompareOptions, progress
+                   ) -> tuple[pymupdf.Document, dict[int, list[tuple]], int, int]:
+    """Riconoscimento del testo temporaneo (preset Scansione): i file non cambiano.
+
+    Restituisce (documento con testo, riquadri delle parole incerte per pagina,
+    parole riconosciute, parole incerte)."""
     fn = _ocr_function()
+    langs = [x for x in re.split(r"[+,\s]+", options.ocr_languages or "ita+eng") if x]
+    try:
+        from foliant.modules.ocr import engine as ocr
+        real = fn is ocr.ocr_pdf_bytes
+    except Exception:
+        real = False
+    if real:
+        # riconoscimento con l'affidabilità di ogni parola (CMP-12: differenze «incerte»)
+        opts = ocr.OcrOptions(languages=langs, mode=ocr.SEARCHABLE)
+        result = ocr.recognize_document(doc, opts, None, None)
+        low: dict[int, list[tuple]] = {}
+        total = uncertain = 0
+        threshold = options.uncertain_threshold
+        for res in result.recognized:
+            with ENGINE_LOCK:
+                derot = doc[res.index].derotation_matrix
+            for w in res.words:
+                total += 1
+                if w.conf < threshold:
+                    uncertain += 1
+                    r = res.word_rect_display(w) * derot
+                    r.normalize()
+                    low.setdefault(res.index, []).append((r.x0, r.y0, r.x1, r.y1))
+        with ENGINE_LOCK:
+            ocr.apply_result(doc, result, ocr.SEARCHABLE)
+        return doc, low, total, uncertain
     with ENGINE_LOCK:
         plain = doc.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE)
     from .engine import run_ocr
-    langs = [x for x in re.split(r"[+,\s]+", options.ocr_languages or "ita+eng") if x]
     data = run_ocr(fn, plain, langs)
     with ENGINE_LOCK:
         new = pymupdf.open(stream=data, filetype="pdf")
         doc.close()
-    return new
+    return new, {}, 0, 0
+
+
+def _overlaps(rect: tuple, boxes: list[tuple]) -> bool:
+    return any(min(rect[2], b[2]) > max(rect[0], b[0]) and min(rect[3], b[3]) > max(rect[1], b[1]) for b in boxes)
+
+
+def mark_uncertain(result: "CompareResult", low_a: dict, low_b: dict) -> int:
+    """Marca «incerte» le differenze che toccano parole riconosciute con bassa affidabilità."""
+    n = 0
+    for d in result.differences:
+        hit = any(_overlaps(r[1:], low_a.get(r[0], [])) for r in d.rects_a) or \
+            any(_overlaps(r[1:], low_b.get(r[0], [])) for r in d.rects_b)
+        if hit:
+            d.uncertain = True
+            n += 1
+    return n
 
 
 def run_compare(progress, side_a: SideInput, side_b: SideInput, options: CompareOptions | None = None) -> CompareResult:
@@ -1138,6 +1185,7 @@ def run_compare(progress, side_a: SideInput, side_b: SideInput, options: Compare
         doc_a.close()
         raise
     notes = []
+    ocr_stats = None
     try:
         if options.preset == "scan" and sha256(side_a.data) != sha256(side_b.data):
             if _ocr_function() is None:
@@ -1146,11 +1194,16 @@ def run_compare(progress, side_a: SideInput, side_b: SideInput, options: Compare
                 options = CompareOptions.from_dict({**options.to_dict(), "mode": MODE_VISUAL})
             else:
                 progress.update(0.0, _("Riconoscimento del testo di A…"))
-                doc_a = _ocr_in_memory(doc_a, options, progress)
+                doc_a, low_a, tot_a, unc_a = _ocr_in_memory(doc_a, options, progress)
                 progress.update(0.0, _("Riconoscimento del testo di B…"))
-                doc_b = _ocr_in_memory(doc_b, options, progress)
+                doc_b, low_b, tot_b, unc_b = _ocr_in_memory(doc_b, options, progress)
+                ocr_stats = (low_a, low_b, tot_a + tot_b, unc_a + unc_b)
         result = _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, rep_b, options)
         result.warnings[:0] = notes
+        if ocr_stats is not None and ocr_stats[2]:
+            mark_uncertain(result, ocr_stats[0], ocr_stats[1])
+            result.warnings.append(_("Parole riconosciute con bassa affidabilità: {p}%").format(
+                p=f"{100 * ocr_stats[3] / ocr_stats[2]:.1f}".replace(".", ",")))
         return result
     finally:
         with ENGINE_LOCK:

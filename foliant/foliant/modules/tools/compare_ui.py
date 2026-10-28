@@ -470,6 +470,7 @@ class DiffModel(QAbstractListModel):
         self.visible: list[ce.Difference] = []
         self.kinds = set(ce.KINDS)
         self.statuses: set[str] | None = None   # None = tutti gli stati
+        self.only_uncertain = False
         self.search = ""
         self.order = "a"
 
@@ -482,6 +483,7 @@ class DiffModel(QAbstractListModel):
         q = self.search.casefold().strip()
         vis = [d for d in self.all if d.kind in self.kinds
                and (self.statuses is None or d.status in self.statuses)
+               and (not self.only_uncertain or d.uncertain)
                and (not q or q in (d.text_a + " " + d.text_b + " " + d.detail + " " + d.note).casefold())]
         if self.order == "b":
             vis.sort(key=lambda d: (d.locations("b")[0][0] if d.locations("b") else 0,
@@ -499,6 +501,8 @@ class DiffModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             pages = _("A p. {a} · B p. {b}").format(a=d.page_label("a"), b=d.page_label("b"))
             head = f"{d.id}. {ce.kind_label(d.kind)} — {pages}"
+            if d.uncertain:
+                head += " · " + _("incerta")
             if d.status:
                 head += f" · {ce.status_label(d.status)}"
             if d.note:
@@ -557,6 +561,9 @@ class DiffPanel(QWidget):
             self.status_filter.addItem(ce.status_label(st, plural=True).capitalize(), st)
         self.status_filter.currentIndexChanged.connect(self._status_filter_changed)
         self.status_counts = QLabel()
+        self.uncertain_only = QCheckBox(_("Solo differenze incerte (OCR)"))
+        self.uncertain_only.setVisible(False)
+        self.uncertain_only.toggled.connect(self._uncertain_changed)
         self.list = QListView()
         self.list.setModel(self.model)
         self.list.setUniformItemSizes(True)
@@ -600,6 +607,7 @@ class DiffPanel(QWidget):
         row.addWidget(self.status_filter, 1)
         lay.addLayout(row)
         lay.addWidget(self.status_counts)
+        lay.addWidget(self.uncertain_only)
         lay.addLayout(nav)
         lay.addWidget(self.list, 1)
         lay.addWidget(self.empty, 1)
@@ -616,6 +624,9 @@ class DiffPanel(QWidget):
             n = sum(1 for d in result.differences if d.kind == kind)
             cb.setText(f"{ce.kind_label(kind, plural=True).capitalize()} ({n})")
         self.summary.setText(result.summary())
+        n_unc = sum(1 for d in result.differences if d.uncertain)
+        self.uncertain_only.setVisible(n_unc > 0)
+        self.uncertain_only.setText(_("Solo differenze incerte (OCR): {n}").format(n=n_unc))
         warn = "\n".join("⚠ " + w for w in result.warnings)
         self.message.setText(warn)
         self.message.setVisible(bool(warn))
@@ -646,6 +657,12 @@ class DiffPanel(QWidget):
 
     def _search_changed(self, text: str) -> None:
         self.model.search = text
+        self.model.refilter()
+        self._update_state()
+        self.filtersChanged.emit()
+
+    def _uncertain_changed(self, on: bool) -> None:
+        self.model.only_uncertain = on
         self.model.refilter()
         self._update_state()
         self.filtersChanged.emit()
