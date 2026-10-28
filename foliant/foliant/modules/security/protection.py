@@ -9,13 +9,11 @@ annulla/ripeti, quindi anche la protezione si annulla e si ripete.
 from __future__ import annotations
 
 import secrets
-import weakref
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, Document, _
+from foliant.api import Document, _
 
 # ------------------------------------------------------------------ costanti
 
@@ -238,140 +236,42 @@ def settings_from_document(document: Document) -> ProtectionSettings:
                               method=i.method or AES256)
 
 
-# ------------------------------------------------- password del proprietario
+# ------------------------------------------------- accesso (API del nucleo)
+#
+# Il nucleo conosce l'esito dell'autenticazione (`document.access`), i permessi
+# effettivi (`document.permissions`/`allows`), la cifratura del file
+# (`document.encryption_info`) e lo sblocco con la password dei permessi
+# (`document.unlock`): qui restano solo nomi comodi per il modulo.
 
-
-def original_restricted(document: Document) -> bool:
-    orig = document.original_protection
-    if not orig:
-        return False
-    return (int(orig.get("permissions", -1)) & ALL_BITS) != ALL_BITS
-
-
-_unlocked: "weakref.WeakSet[Document]" = weakref.WeakSet()
-_open_descriptions: "weakref.WeakKeyDictionary[Document, str]" = weakref.WeakKeyDictionary()
-_encrypt_dicts: "weakref.WeakKeyDictionary[Document, str]" = weakref.WeakKeyDictionary()
-
-
-def remember_open_state(document: Document) -> None:
-    """Annota la cifratura del file all'apertura (il nucleo non la conserva)."""
-    if document in _open_descriptions:
-        return
-    try:
-        with ENGINE_LOCK:
-            pdf = document.pdf
-            desc = (pdf.metadata or {}).get("encryption") or ""
-            _encrypt_dicts[document] = _encrypt_dict(pdf) if desc else ""
-    except Exception:
-        desc = ""
-    _open_descriptions[document] = desc
-
-
-def _encrypt_dict(pdf: pymupdf.Document) -> str:
-    try:
-        kind, val = pdf.xref_get_key(-1, "Encrypt")
-        if kind == "xref":
-            return pdf.xref_object(int(val.split()[0]), compressed=True)
-        return val if kind == "dict" else ""
-    except Exception:
-        return ""
-
-
-def open_encryption_details(document: Document) -> dict:
-    """Versione (/V), revisione (/R), lunghezza della chiave e cifratura dei metadati all'apertura."""
-    import re
-    raw = _encrypt_dicts.get(document, "")
-    out: dict = {}
-    for key in ("V", "R", "Length"):
-        m = re.search(rf"/{key}\s+(\d+)", raw)
-        if m:
-            out[key] = int(m.group(1))
-    m = re.search(r"/EncryptMetadata\s*(true|false)", raw)
-    out["encrypt_metadata"] = (m.group(1) == "true") if m else True
-    return out
-
-
-def open_description(document: Document) -> str:
-    """Descrizione della cifratura del file aperto (es. «Standard V5 R6 256-bit AES»)."""
-    desc = _open_descriptions.get(document)
-    if desc is None:
-        remember_open_state(document)
-        desc = _open_descriptions.get(document, "")
-    return desc
-
-
-def unlock(document: Document, password: str) -> bool:
-    """«Sblocca…»: con la password dei permessi corretta si ottiene l'accesso completo."""
-    if owner_known(document):
-        return True
-    if verify_owner_password(document, password):
-        _unlocked.add(document)
-        # la password dei permessi ora è nota: al salvataggio si mantiene quella vera
-        # invece di quella casuale generata dal nucleo
-        orig_owner = document.original_protection.get("owner_pw")
-        if document.save_options.get("owner_pw") == orig_owner:
-            document.save_options["owner_pw"] = password
-        document.original_protection["owner_pw"] = password
-        # i moduli che leggono i permessi dal motore (stampa, copia) li vedono completi
-        try:
-            with ENGINE_LOCK:
-                document.pdf.authenticate(password)
-        except Exception:
-            pass
-        return True
-    return False
-
-
-def grant_full_access(document: Document) -> None:
-    _unlocked.add(document)
+ACCESS_USER = "user"
 
 
 def owner_known(document: Document) -> bool:
-    """True se il documento è stato aperto con diritti completi (o non era protetto)."""
-    if document in _unlocked:
-        return True
-    orig = document.original_protection
-    if not orig or not original_restricted(document):
-        return True
-    return bool(document.password) and orig.get("owner_pw") == document.password
+    """True con accesso completo: file non cifrato o aperto dal proprietario."""
+    return getattr(document, "access", "none") != ACCESS_USER
+
+
+def needs_owner_password(document: Document) -> bool:
+    """Con accesso utente, per cambiare o togliere la protezione serve la password dei permessi."""
+    return not owner_known(document)
 
 
 def allowed_now(document: Document) -> set[str]:
-    """Permessi effettivi nella sessione (tutti con accesso completo)."""
-    if owner_known(document):
-        return set(PERM_BITS) | {"print"}
-    perms = int(document.original_protection.get("permissions", -1))
-    out = {k for k, bit in PERM_BITS.items() if perms & bit}
-    if perms & pymupdf.PDF_PERM_PRINT:
+    """Permessi effettivi nella sessione, con i nomi del modulo («modify», «copy», …, «print»)."""
+    out = {k for k, bit in PERM_BITS.items() if document.allows(bit)}
+    if document.allows(pymupdf.PDF_PERM_PRINT):
         out.add("print")
     return out
 
 
-def needs_owner_password(document: Document) -> bool:
-    """Per cambiare o togliere la protezione di un file con permessi limitati
-    aperto senza la password dei permessi, serve conoscerla."""
-    return not owner_known(document)
+def unlock(document: Document, password: str) -> bool:
+    """«Sblocca…»: accesso completo con la password dei permessi (verificata dal nucleo)."""
+    return bool(document.unlock(password))
 
 
-def verify_owner_password(document: Document, password: str) -> bool:
-    """Verifica la password dei permessi sul file originale su disco."""
-    if not password:
-        return False
-    if document.path is None or not Path(document.path).exists():
-        return False
-    try:
-        data = Path(document.path).read_bytes()
-    except OSError:
-        return False
-    with ENGINE_LOCK:
-        try:
-            pdf = pymupdf.open(stream=data, filetype="pdf")
-        except Exception:
-            return False
-        try:
-            return bool(pdf.authenticate(password) & 4)
-        finally:
-            pdf.close()
+def encryption(document: Document) -> dict:
+    """Cifratura del file all'apertura (`document.encryption_info`; {} se non cifrato)."""
+    return dict(getattr(document, "encryption_info", {}) or {})
 
 
 def _set_options(document: Document, options: dict, label: str) -> None:
@@ -387,7 +287,6 @@ def apply_protection(document: Document, settings: ProtectionSettings) -> None:
         document.save_options = dict(opts)
         if settings.method == AES256:
             _declare_aes256(pdf)
-    grant_full_access(document)
 
 
 def _declare_aes256(pdf: pymupdf.Document) -> None:
@@ -401,7 +300,6 @@ def _declare_aes256(pdf: pymupdf.Document) -> None:
 def remove_protection(document: Document) -> None:
     """Toglie ogni protezione: il file verrà salvato senza cifratura (annullabile)."""
     _set_options(document, {"encryption": pymupdf.PDF_ENCRYPT_NONE}, _("Rimuovi protezione"))
-    grant_full_access(document)
 
 
 def restore_original(document: Document) -> None:

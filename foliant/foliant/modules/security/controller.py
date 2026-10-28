@@ -20,7 +20,7 @@ from . import patterns as PT
 from . import protection as P
 from . import redaction as R
 from . import sanitize as S
-from .widgets import Banner, Notice, PreviewOverlay, RedactAreaTool, RedactionPanel
+from .widgets import Notice, NoticeBoard, PreviewOverlay, RedactAreaTool, RedactionPanel
 
 PANEL_ID = "security-redactions"
 CODES_KEY = "security/overlay_codes"
@@ -51,6 +51,33 @@ def confirm(parent, title: str, text: str, action: str) -> bool:
     box.setEscapeButton(cancel)
     box.exec()
     return box.clickedButton() is ok
+
+
+def ask_unapplied(parent, n: int) -> str:
+    """«apply», «keep» o «cancel» per il salvataggio con segni non applicati."""
+    box = QMessageBox(QMessageBox.Icon.Warning, _("Segni di redazione non applicati"),
+                      _("Il documento contiene {n} segni di redazione non applicati: il contenuto sotto i segni "
+                        "non è ancora stato rimosso.").format(n=n), parent=parent)
+    apply = box.addButton(_("Applica ora"), QMessageBox.ButtonRole.AcceptRole)
+    keep = box.addButton(_("Continua con i segni"), QMessageBox.ButtonRole.DestructiveRole)
+    cancel = box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel)
+    box.exec()
+    clicked = box.clickedButton()
+    return "apply" if clicked is apply else "keep" if clicked is keep else "cancel"
+
+
+def ask_trust_scope(parent) -> str | None:
+    """«document», «folder» o None (annulla)."""
+    box = QMessageBox(QMessageBox.Icon.Question, _("Considera attendibile"),
+                      _("Gli avvisi sui contenuti attivi non verranno più mostrati per:"), parent=parent)
+    doc = box.addButton(_("Questo documento"), QMessageBox.ButtonRole.AcceptRole)
+    folder = box.addButton(_("Tutti i documenti di questa cartella"), QMessageBox.ButtonRole.AcceptRole)
+    cancel = box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel)
+    box.exec()
+    clicked = box.clickedButton()
+    return "document" if clicked is doc else "folder" if clicked is folder else None
 
 
 def run_dialog(dialog) -> bool:
@@ -183,12 +210,8 @@ class SecurityController:
         if not P.unlock(document, pw):
             self.ctx.error(_("Password non corretta"), _("La password dei permessi non è corretta."))
             return False
+        # il nucleo notifica ACCESS: gli altri moduli (stampa, copia) ricalcolano i comandi
         self.ctx.status(_("Accesso completo"))
-        self.refresh_document_state(self.view())
-        # bug_03: gli altri moduli (stampa, copia) ricalcolano i comandi consentiti
-        view = next((v for v in self.ctx.views() if v.document is document), None)
-        if view is not None:
-            self.ctx.documentChanged.emit(view)
         return True
 
     # ------------------------------------------------------------ protezione
@@ -586,6 +609,15 @@ class SecurityController:
             text += "\n\n" + _("Le firme digitali del documento risulteranno non valide.")
         if not confirm(self.parent, title, text, _("Applica")):
             return False
+        if not self._apply(view, all_marks, targets, outside):
+            return False
+        self.offer_save_redacted(view)
+        return True
+
+    def _apply(self, view, all_marks: list[R.Mark], targets: list[R.Mark], outside: list) -> bool:
+        """Applica i segni scelti (già confermati) in un solo passo annullabile."""
+        doc = view.document
+        pages = sorted({m.page for m in targets})
         keep = {(m.page, m.xref) for m in all_marks} - {(m.page, m.xref) for m in targets}
         try:
             with doc.change(_("Applica redazioni")) as pdf:
@@ -602,8 +634,22 @@ class SecurityController:
         if outside:
             self.pending_outside.pop(doc, None)
         self.ctx.status(_("Redazioni applicate: {n} aree su {p} pagine").format(n=report.marks, p=report.pages))
-        self.offer_save_redacted(view)
         return True
+
+    def save_guard(self, view, info: dict) -> bool:
+        """Prima di salvare (SEC-19): con segni non applicati chiede se applicarli ora."""
+        if view is None:
+            return True
+        doc = view.document
+        with ENGINE_LOCK:
+            marks = R.marks(doc.pdf)
+        outside = self.pending_outside.get(doc, [])
+        if not marks and not outside:
+            return True
+        choice = ask_unapplied(self.parent, len(marks) + len(outside))
+        if choice == "apply":
+            return self.require_modify(doc) and self._apply(view, marks, marks, outside)
+        return choice == "keep"
 
     def offer_save_redacted(self, view) -> None:
         self.offer_save_copy(view, "_redatto", _("Salvare il documento redatto?"))
@@ -726,22 +772,41 @@ class SecurityController:
     # ----------------------------------------------------- stato e avvisi
     def on_document_opened(self, view) -> None:
         doc = view.document
-        P.remember_open_state(doc)
         if self.preview not in view.overlays:
             view.overlays.append(self.preview)
         if view not in self.banners:
-            self.banners[view] = Banner(view)
+            self.banners[view] = NoticeBoard(self.ctx, view)
         doc.add_listener(self._listener_for(view))
-        try:
+        self.refresh_document_state(view)
+        # analisi fuori dal thread dell'interfaccia: il documento è subito utilizzabile e gli
+        # avvisi compaiono quando finisce (con FOLIANT_SYNC_TASKS=1 gira subito)
+        ref = weakref.ref(view)
+
+        def work(progress):
+            return S.scan(doc.pdf)        # prende il lock del motore a blocchi
+
+        def done(rep):
+            v = ref()
+            if v is None or v.document.closed:
+                return
+            self.scans[v.document] = rep
             try:
-                with ENGINE_LOCK:
-                    rep = S.scan(doc.pdf)
+                self.show_open_notices(v, rep)
+            finally:
+                self.refresh_document_state(v)
+
+        def failed(_exc):
+            done(S.ScanReport())
+
+        try:
+            self.ctx.run_task(_("Analisi dei contenuti attivi…"), work, modal=False, cancellable=False,
+                              on_done=done, on_error=failed)
+        except TypeError:                 # nucleo senza attività non modali
+            try:
+                rep = work(None)
             except Exception:
                 rep = S.ScanReport()
-            self.scans[doc] = rep
-            self.show_open_notices(view, rep)
-        finally:
-            self.refresh_document_state(view)
+            done(rep)
 
     def _listener_for(self, view):
         ref = weakref.ref(view)
@@ -750,26 +815,14 @@ class SecurityController:
             v = ref()
             if v is None:
                 return
-            if kind == SAVED:
-                self._after_save(v)
-            elif kind == CONTENT:
+            if kind in (CONTENT, "access", SAVED):
                 self.refresh_document_state(v)
         return listener
 
-    def _after_save(self, view) -> None:
-        with ENGINE_LOCK:
-            n = len(R.marks(view.document.pdf))
-        if n:
-            self.banner(view).set_notice(Notice(
-                "unapplied-saved", 0,
-                _("Il file salvato contiene {n} segni di redazione non applicati: il contenuto sotto i segni "
-                  "non è stato rimosso.").format(n=n),
-                [(_("Applica ora"), lambda: self.apply_redactions(None))], "danger"))
-
-    def banner(self, view) -> Banner:
+    def banner(self, view) -> NoticeBoard:
         b = self.banners.get(view)
         if b is None:
-            b = self.banners[view] = Banner(view)
+            b = self.banners[view] = NoticeBoard(self.ctx, view)
         return b
 
     def show_open_notices(self, view, rep: S.ScanReport) -> None:
@@ -794,10 +847,7 @@ class SecurityController:
                 text += " " + _("Gli script sono disattivati.")
             banner.set_notice(Notice("active", 0, text, [
                 (_("Dettagli"), lambda: self.show_active_details(view)),
-                (_("Considera attendibile"), [
-                    (_("Questo documento"), lambda: self.trust_document(view)),
-                    (_("Tutti i documenti di questa cartella"), lambda: self.trust_document(view, folder=True)),
-                ]),
+                (_("Considera attendibile…"), lambda: self.trust_dialog(view)),
             ]))
         with ENGINE_LOCK:
             n = len(R.marks(doc.pdf))
@@ -877,6 +927,11 @@ class SecurityController:
             s.setValue(self.TRUST_KEY, json.dumps(trusted))
         self.banner(view).remove_notice("active")
         self.ctx.status(_("Documento considerato attendibile"))
+
+    def trust_dialog(self, view) -> None:
+        scope = ask_trust_scope(self.parent)
+        if scope in ("document", "folder"):
+            self.trust_document(view, folder=scope == "folder")
 
     def revoke_trust(self) -> None:
         s = self.settings()
@@ -1026,22 +1081,23 @@ def redact_outside(pdf: pymupdf.Document, matches: list[PT.Match], replacement: 
 # -------------------------------------------------------------- rapporti
 
 
+_METHOD_TEXT = {"AES-256": "AES, chiave a 256 bit", "AES-128": "AES, chiave a 128 bit",
+                "RC4-128": "RC4, chiave a 128 bit", "RC4-40": "RC4, chiave a 40 bit"}
+
+
 def security_rows(doc) -> list[tuple[str, list[str]]]:
-    """Righe della finestra «Proprietà di sicurezza» (SEC-03)."""
+    """Righe del riepilogo «Protezione» (SEC-03), dalla cifratura letta dal nucleo."""
     i = P.info(doc)
-    desc = P.open_description(doc)
+    enc = P.encryption(doc)
     rows: list[tuple[str, list[str]]] = []
-    if not i.protected and not doc.original_protection:
+    if not i.protected and not enc:
         rows.append((_("Nessuna protezione"), [_("Tutti i permessi sono consentiti.")]))
     else:
-        algo = desc or ""
-        method = {P.AES256: _("AES, chiave a 256 bit"), P.AES128: _("AES, chiave a 128 bit"),
-                  P.RC4: _("RC4, chiave a 128 bit")}
         details = []
-        if desc:
-            details.append(_("All'apertura: {d}").format(d=desc))
-            enc = P.open_encryption_details(doc)
-            if "V" in enc or "R" in enc:
+        if enc:
+            if enc.get("description"):
+                details.append(_("All'apertura: {d}").format(d=enc["description"]))
+            if enc.get("V") or enc.get("R"):
                 details.append(_("Versione {v}, revisione {r}").format(v=enc.get("V", "?"), r=enc.get("R", "?")))
             if not enc.get("encrypt_metadata", True):
                 details.append(_("Metadati non cifrati"))
@@ -1049,16 +1105,22 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
                 s=_("sì") if doc.original_protection.get("user_pw") else _("no")))
         details.append(_("Al salvataggio: {d}").format(d=P.describe(doc)))
         head = _("Protezione con password")
-        if doc.save_options.get("encryption") == pymupdf.PDF_ENCRYPT_RC4_40 or (
-                "RC4" in algo.upper() and "40" in algo and i.method in (None, P.RC4)
-                and doc.save_options == doc.original_protection):
-            head += " — " + _("RC4, chiave a 40 bit")          # bug_04
-        elif i.method:
-            head += " — " + method[i.method]
+        if i.changed and i.method:
+            method = {P.AES256: "AES-256", P.AES128: "AES-128", P.RC4: "RC4-128"}[i.method]
+            if doc.save_options.get("encryption") == pymupdf.PDF_ENCRYPT_RC4_40:
+                method = "RC4-40"
+        else:
+            method = enc.get("method", "")
+        if method in _METHOD_TEXT:
+            head += " — " + _(_METHOD_TEXT[method])
+        elif method:
+            head += " — " + method
         rows.append((head, details))
-        enc = P.open_encryption_details(doc)
-        weak = ("RC4" in algo.upper()) or enc.get("R") == 5 or i.method == P.RC4
-        if not weak and (i.method == P.AES128 or ("AES" in algo.upper() and "128" in algo)):
+        if enc.get("perms_tampered"):
+            rows.append((_("Permessi del documento alterati"),
+                         [_("/P e /Perms non coincidono: valgono i permessi più restrittivi.")]))
+        weak = method.startswith("RC4") or (method == "AES-256" and enc.get("R") == 5 and not i.changed)
+        if not weak and method == "AES-128":
             rows.append((_("Metodo superato in PDF 2.0"),
                          [_("AES a 128 bit è deprecato in PDF 2.0: aggiorna ad AES-256.")]))
         if weak:
@@ -1068,7 +1130,7 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
     rows.append((_("Accesso: completo") if P.owner_known(doc) else _("Accesso: limitato"), []))
     perms = int(doc.save_options.get("permissions", -1)) if i.protected else -1
     if not P.owner_known(doc):
-        perms = int(doc.original_protection.get("permissions", -1))
+        perms = int(doc.permissions)      # effettivi (con /Perms), dal nucleo
     short = {"modify": _("Modificare il contenuto"), "copy": _("Copiare testo e immagini"),
              "annotate": _("Aggiungere commenti"), "form": _("Compilare i moduli"),
              "accessibility": _("Estrarre il testo per l'accessibilità"),
