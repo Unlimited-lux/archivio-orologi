@@ -570,3 +570,32 @@ def test_drag_snaps_to_other_block_edge(window, paragraphs_pdf, quiet, qtbot):
     qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, alt, to_view(view, 0, start.x + 2, start.y + 30))
     moved2 = block_with(ctrl, view, "contratto")
     assert moved2.bbox.x0 > 72.8                     # con Alt nessun aggancio
+
+
+def test_copy_paste_with_formatting_between_editors(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-18: copiato da un riquadro, incollato in un altro con font, corpo e colore di origine;
+    Ctrl+Maiusc+V incolla testo semplice con lo stile del punto d'inserimento."""
+    from PySide6.QtGui import QGuiApplication
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    src = block_with(ctrl, view, "contratto")
+    ed = ctrl.open_editor(view, 0, src)
+    cur = ed.textCursor()
+    cur.setPosition(3)
+    cur.setPosition(12, QTextCursor.MoveMode.KeepAnchor)     # «contratto»
+    ed.setTextCursor(cur)
+    ed.copy()
+    ctrl.commit_editor(view)
+    dst = block_with(ctrl, view, "Lorem")
+    ed2 = ctrl.open_editor(view, 0, dst)
+    ed2.moveCursor(QTextCursor.MoveOperation.End)
+    ed2.paste()
+    runs = [r for p in ed2.paragraphs() for r in p]
+    pasted = [r for r in runs if "contratto" in r.text][0]
+    assert abs(pasted.style.size - 12) < 0.05 and pasted.style.color == src.style.color
+    QGuiApplication.clipboard().setText(" semplice")
+    qtbot.keyClick(ed2, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    runs = [r for p in ed2.paragraphs() for r in p]
+    plain = [r for r in runs if "semplice" in r.text][0]
+    assert abs(plain.style.size - 12) < 0.05 and plain.style.color == src.style.color   # stile del punto
+    ctrl.cancel_editor(view)

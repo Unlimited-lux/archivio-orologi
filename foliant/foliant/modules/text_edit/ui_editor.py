@@ -24,6 +24,7 @@ from .model import (
 )
 
 STYLE_PROP = QTextFormat.Property.UserProperty + 17
+MIME_RUNS = "application/x-foliant-text-runs"
 
 _QT_ALIGN = {
     ALIGN_LEFT: Qt.AlignmentFlag.AlignLeft,
@@ -469,7 +470,10 @@ class InlineEditor(QTextEdit):
         if ev.key() == Qt.Key.Key_Escape:
             self.escapePressed.emit()
             return
-        if ev.matches(QKeySequence.StandardKey.Paste) and ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+        mods = ev.modifiers()
+        if ev.key() == Qt.Key.Key_V and mods & Qt.KeyboardModifier.ControlModifier \
+                and mods & Qt.KeyboardModifier.ShiftModifier:
+            # Ctrl+Maiusc+V: testo semplice con lo stile del punto d'inserimento (TXT-18)
             self.insertPlainText(self._clipboard_text())
             return
         super().keyPressEvent(ev)
@@ -479,8 +483,60 @@ class InlineEditor(QTextEdit):
         from PySide6.QtGui import QGuiApplication
         return QGuiApplication.clipboard().text()
 
+    def createMimeDataFromSelection(self):
+        """Copia: testo semplice, HTML e un formato interno con i run e i loro stili (TXT-18)."""
+        mime = super().createMimeDataFromSelection()
+        try:
+            import json
+            cursor = self.textCursor()
+            start, end = cursor.selectionStart(), cursor.selectionEnd()
+            paras: list[list[dict]] = [[]]
+            block = self.document().findBlock(start)
+            first = True
+            while block.isValid() and block.position() <= end:
+                if not first:
+                    paras.append([])
+                first = False
+                it = block.begin()
+                while not it.atEnd():
+                    frag = it.fragment()
+                    a, b = frag.position(), frag.position() + frag.length()
+                    lo, hi = max(a, start), min(b, end)
+                    if lo < hi:
+                        st = self._style_of(frag.charFormat())
+                        paras[-1].append({"text": frag.text()[lo - a:hi - a], "style": {
+                            "font": st.font, "size": st.size, "color": list(st.color), "bold": st.bold,
+                            "italic": st.italic, "underline": st.underline, "strike": st.strike,
+                            "char_spacing": st.char_spacing, "rise": st.rise, "serif": st.serif, "mono": st.mono,
+                            "font_xref": 0}})
+                    it += 1
+                block = block.next()
+            mime.setData(MIME_RUNS, json.dumps(paras).encode("utf-8"))
+        except Exception:
+            pass
+        return mime
+
     def insertFromMimeData(self, source) -> None:
-        # incolla come testo con lo stile del punto d'inserimento
+        # dall'editor: con la formattazione di origine; da altre applicazioni: testo con lo stile
+        # del punto d'inserimento
+        if source.hasFormat(MIME_RUNS):
+            try:
+                import json
+                paras = json.loads(bytes(source.data(MIME_RUNS)).decode("utf-8"))
+                cursor = self.textCursor()
+                cursor.beginEditBlock()
+                for i, para in enumerate(paras):
+                    if i:
+                        cursor.insertBlock(self.block_format(False))
+                    for run in para:
+                        sd = dict(run["style"])
+                        sd["color"] = tuple(sd.get("color", (0, 0, 0)))
+                        cursor.insertText(run["text"], self.char_format(Style(**sd)))
+                cursor.endEditBlock()
+                self.setTextCursor(cursor)
+                return
+            except Exception:
+                pass
         if source.hasText():
             self.insertPlainText(source.text())
 
