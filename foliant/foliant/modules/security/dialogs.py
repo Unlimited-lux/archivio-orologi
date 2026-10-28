@@ -103,7 +103,6 @@ class ProtectDialog(QDialog):
                  parent=None):
         super().__init__(parent)
         self.setWindowTitle(_("Proteggi con password"))
-        self.setMinimumWidth(520)
         self._already = already_protected
         self._had_open = has_open_password
         lay = QVBoxLayout(self)
@@ -145,6 +144,7 @@ class ProtectDialog(QDialog):
         self.perm_boxes: dict[str, QCheckBox] = {}
         for n, (key, label) in enumerate(P.permission_labels().items()):
             cb = QCheckBox(label)
+            cb.setToolTip(label)
             self.perm_boxes[key] = cb
             grid.addWidget(cb, n // 2, n % 2)
         v2.addLayout(grid)

@@ -7,7 +7,7 @@ di Annulla/Ripeti.
 from __future__ import annotations
 
 import pymupdf
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QBrush, QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QColorDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QToolButton, QTreeWidget,
@@ -45,6 +45,10 @@ TRANSLATIONS = {
     "Sposta segnalibro": "Move bookmark",
     "Modifica segnalibro": "Edit bookmark",
     "Imposta destinazione sulla vista corrente": "Set destination to current view",
+    "Apri un indirizzo web…": "Open a web address…",
+    "Crea pagina di sommario": "Create table of contents page",
+    "Sommario": "Contents",
+    "Indirizzo da aprire:": "Address to open:",
     "Grassetto": "Bold",
     "Corsivo": "Italic",
     "Colore…": "Colour…",
@@ -176,19 +180,27 @@ class BookmarksPanel(QWidget):
                 act.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
                 self.addAction(act)
             self.actions[key] = act
+            if key not in ("add", "rename", "delete"):
+                continue      # azioni secondarie nel menu «…»
             btn = QToolButton(self)
             btn.setDefaultAction(act)
             btn.setAutoRaise(True)
+            btn.setIconSize(QSize(18, 18))
             bar.addWidget(btn)
-            if key in ("delete", "outdent"):
-                bar.addSpacing(6)
         bar.addStretch(1)
         self.tools_button = QToolButton(self)
         bind_icon(self.tools_button, "ellipsis")
         self.tools_button.setToolTip(_("Strumenti dei segnalibri"))
         self.tools_button.setAutoRaise(True)
         self.tools_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.tools_button.setIconSize(QSize(18, 18))
         tools = QMenu(self.tools_button)
+        for key in ("up", "down", "indent", "outdent"):
+            tools.addAction(self.actions[key])
+        tools.addSeparator()
+        tools.addAction(self.actions["expand"])
+        tools.addAction(self.actions["collapse"])
+        tools.addSeparator()
         tools.addAction(_("Esporta come testo…"), self.export_text)
         self.act_import = tools.addAction(_("Importa da testo…"), self.import_text)
         tools.addSeparator()
@@ -197,6 +209,7 @@ class BookmarksPanel(QWidget):
         self.act_gen_regex = tools.addAction(_("Genera da un'espressione regolare…"), lambda: self.generate("regex"))
         tools.addSeparator()
         tools.addAction(_("Verifica segnalibri"), self.verify)
+        self.act_toc_page = tools.addAction(_("Crea pagina di sommario"), self.create_toc_page)
         self.tools_button.setMenu(tools)
         bar.addWidget(self.tools_button)
         layout.addLayout(bar)
@@ -215,7 +228,7 @@ class BookmarksPanel(QWidget):
         self.empty.setProperty("muted", True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.empty.setContentsMargins(16, 16, 16, 16)
-        layout.addWidget(self.empty)
+        layout.addWidget(self.empty, 1)   # senza albero occupa lo spazio: il titolo resta in alto
 
         self.tree = BookmarkTree(self)
         self.tree.itemClicked.connect(self._on_clicked)
@@ -354,7 +367,8 @@ class BookmarksPanel(QWidget):
             else:
                 act.setEnabled(has_view and self.editable and sel is not None)
         for act in (getattr(self, "act_import", None), getattr(self, "act_gen_headings", None),
-                    getattr(self, "act_gen_every", None), getattr(self, "act_gen_regex", None)):
+                    getattr(self, "act_gen_every", None), getattr(self, "act_gen_regex", None),
+                    getattr(self, "act_toc_page", None)):
             if act is not None:
                 act.setEnabled(has_view and self.editable)
         tip = None if self.editable or not has_view else _("Il documento non consente modifiche: segnalibri in sola lettura.")
@@ -587,6 +601,43 @@ class BookmarksPanel(QWidget):
         b.dest.pop("uri", None)
         return self._apply(_("Modifica segnalibro"), new_items, index)
 
+    def create_toc_page(self) -> int:
+        """Pagine di sommario cliccabili in testa al documento (annullabile)."""
+        view = self.view
+        if view is None or not self.editable or not self.items:
+            return 0
+        items = [E.Bookmark(b.level, b.title, b.page, dict(b.dest)) for b in self.items]
+        try:
+            with view.document.change(_("Crea pagina di sommario")) as pdf:
+                n = E.insert_toc_pages(pdf, items, _("Sommario"))
+        except Exception as e:
+            self.ctx.error(_("Crea pagina di sommario"), str(e))
+            return 0
+        if n:
+            view.go_to_page(0)
+        return n
+
+    def set_uri(self, index: int, uri: str) -> bool:
+        """Il segnalibro apre un indirizzo web (con la conferma dei collegamenti del nucleo)."""
+        uri = uri.strip()
+        if not uri:
+            return False
+        if "://" not in uri and not uri.startswith("mailto:"):
+            uri = "https://" + uri
+        new_items = [E.Bookmark(b.level, b.title, b.page, dict(b.dest)) for b in self.items]
+        b = new_items[index]
+        b.dest = {k: v for k, v in b.dest.items() if k in ("bold", "italic", "color", "collapse")}
+        b.dest.update({"kind": pymupdf.LINK_URI, "uri": uri})
+        b.page = -1
+        return self._apply(_("Modifica segnalibro"), new_items, index)
+
+    def ask_uri(self, index: int) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        current = self.items[index].dest.get("uri", "")
+        uri, ok = QInputDialog.getText(self, _("Apri un indirizzo web…"), _("Indirizzo da aprire:"), text=current)
+        if ok and uri.strip():
+            self.set_uri(index, uri)
+
     def set_style(self, index: int, bold: bool | None = None, italic: bool | None = None,
                   color: tuple | None | bool = False) -> bool:
         new_items = [E.Bookmark(b.level, b.title, b.page, dict(b.dest)) for b in self.items]
@@ -613,6 +664,7 @@ class BookmarksPanel(QWidget):
                 menu.addSeparator()
                 menu.addAction(self.actions["rename"])
                 menu.addAction(_("Imposta destinazione sulla vista corrente"), lambda: self.set_destination_here(i))
+                menu.addAction(_("Apri un indirizzo web…"), lambda: self.ask_uri(i))
                 b = self.items[i]
                 a = menu.addAction(_("Grassetto"), lambda: self.set_style(i, bold=not b.bold))
                 a.setCheckable(True)

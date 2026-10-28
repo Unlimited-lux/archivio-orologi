@@ -322,3 +322,61 @@ def test_save_commits_pending_editor(window, sample_pdf):
         window.ctx.pending_edit_hooks.remove(hook)
     assert calls == [view]
     assert "confermato" in pymupdf.open(sample_pdf)[0].get_text()
+
+
+def test_quit_asks_once_and_cancel_closes_nothing(window, sample_pdf, tmp_path, monkeypatch):
+    import shutil
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"t{i}.pdf"
+        shutil.copy(sample_pdf, p)
+        paths.append(p)
+    views = [window.open_path(p) for p in paths]
+    for v in views:
+        with v.document.change("x") as pdf:
+            pdf[0].set_rotation(90)
+    asked = []
+    monkeypatch.setattr(window, "_ask_unsaved", lambda docs: (asked.append([d.display_name for d in docs]), None)[1])
+    from PySide6.QtGui import QCloseEvent
+    ev = QCloseEvent()
+    window.closeEvent(ev)
+    assert not ev.isAccepted()
+    assert asked == [["t0.pdf", "t1.pdf", "t2.pdf"]]          # una sola domanda con l'elenco
+    assert len(list(window.views())) == 3                     # annulla: nessuna scheda chiusa
+    for v in views:
+        v.document._saved_state = v.document._state
+
+
+def test_save_warns_when_file_changed_on_disk(window, sample_pdf, monkeypatch):
+    import os
+    from PySide6.QtWidgets import QMessageBox
+    view = window.open_path(sample_pdf)
+    with view.document.change("x") as pdf:
+        pdf.delete_page(0)
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 72), "ESTERNO")
+    d.save(sample_pdf + ".tmp")
+    os.replace(sample_pdf + ".tmp", sample_pdf)               # un altro programma sostituisce il file
+    seen = []
+
+    def cancel(box):
+        seen.append(box.text())
+        return 0                                              # nessun pulsante: annulla
+    monkeypatch.setattr(QMessageBox, "exec", cancel)
+    assert not window.save_view(view)
+    assert seen and "altro programma" in seen[0]
+    assert "ESTERNO" in pymupdf.open(sample_pdf)[0].get_text()   # file esterno intatto
+    view.document._saved_state = view.document._state
+
+
+def test_shortcuts_dialog_lists_all_modes_in_italian(window):
+    from foliant.ui.dialogs import ShortcutsDialog, collect_shortcuts
+    m = window.ctx.add_mode("prova_sc", "Prova scorciatoie", "star", 996)
+    window.ctx.action("Azione di prova", None, lambda: None, shortcut="Ctrl+Shift+Home", mode="prova_sc")
+    window.set_mode("leggi")
+    rows = collect_shortcuts(window)
+    assert ("Azione di prova", "Ctrl+Maiusc+Inizio", "Prova scorciatoie") in rows
+    sd = ShortcutsDialog(window)
+    assert sd.table.columnCount() == 3
+    sd.filter.setText("prova scorciatoie")
+    assert sd.table.rowCount() >= 1

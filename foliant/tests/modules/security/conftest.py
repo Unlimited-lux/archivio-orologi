@@ -92,3 +92,31 @@ def layered_pdf(tmp_path):
     doc.save(str(path))
     doc.close()
     return str(path)
+
+
+@pytest.fixture
+def cyclic_pdf(tmp_path):
+    """Albero delle pagine ciclico, script all'apertura, /Launch, sola password del proprietario."""
+    path = tmp_path / "ciclo.pdf"
+    doc = pymupdf.open()
+    for n in range(2):
+        doc.new_page().insert_text((72, 100), f"Pagina {n + 1}", fontsize=12)
+    js = doc.get_new_xref()
+    doc.update_object(js, "<< /Type /Action /S /JavaScript /JS (app.alert\\(1\\);) >>")
+    launch = doc.get_new_xref()
+    doc.update_object(launch, "<< /Type /Action /S /Launch /F (calc.exe) >>")
+    cat = doc.pdf_catalog()
+    doc.xref_set_key(cat, "OpenAction", f"{js} 0 R")
+    doc.xref_set_key(cat, "AA", f"<< /WC {launch} 0 R >>")
+    plain = tmp_path / "ciclo-chiaro.pdf"
+    doc.save(str(plain))
+    doc.close()
+    doc = pymupdf.open(str(plain))
+    root = int(doc.xref_get_key(doc.pdf_catalog(), "Pages")[1].split()[0])
+    kids = doc.xref_get_key(root, "Kids")[1].strip("[] ")
+    doc.xref_set_key(root, "Kids", f"[{kids} {root} 0 R]")
+    doc.xref_set_key(root, "Count", "3")
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="capo",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    doc.close()
+    return str(path)

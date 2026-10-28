@@ -78,9 +78,14 @@ def register(ctx: Context) -> None:
     act_image = ctx.action(_("Converti in PDF solo immagine"), "image", controller.to_image_only,
                            tooltip=_("Rende ogni pagina un'immagine, senza testo estraibile"))
     controller.actions["image_only"] = act_image
-    for a in (menu_run, act_remove, act_image, act_batch, act_langs, act_detect):
+    act_resume = ctx.action(_("Riprendi lotto"), "rotate-ccw", controller.resume_batch, requires_document=False,
+                            tooltip=_("Elabora i file rimasti di un OCR in blocco interrotto"))
+    act_resume.setEnabled(controller.pending_batch() is not None)
+    controller.actions["resume"] = act_resume
+    for a in (menu_run, act_remove, act_image, act_batch, act_resume, act_langs, act_detect):
         ctx.add_menu_action(a, _("OCR"))
 
+    ctx.add_view_menu_provider(controller.menu_provider)
     controller.review_panel = ReviewPanel(controller)
     ctx.add_properties_panel("ocr-review", controller.review_panel)
     ctx.add_home_action(_("OCR di un PDF scannerizzato"), "scan-text", _home_ocr(ctx, controller),

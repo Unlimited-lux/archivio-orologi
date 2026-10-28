@@ -733,13 +733,15 @@ class SecurityController:
             self.banners[view] = Banner(view)
         doc.add_listener(self._listener_for(view))
         try:
-            with ENGINE_LOCK:
-                rep = S.scan(doc.pdf)
-        except Exception:
-            rep = S.ScanReport()
-        self.scans[doc] = rep
-        self.show_open_notices(view, rep)
-        self.refresh_document_state(view)
+            try:
+                with ENGINE_LOCK:
+                    rep = S.scan(doc.pdf)
+            except Exception:
+                rep = S.ScanReport()
+            self.scans[doc] = rep
+            self.show_open_notices(view, rep)
+        finally:
+            self.refresh_document_state(view)
 
     def _listener_for(self, view):
         ref = weakref.ref(view)
@@ -1101,6 +1103,8 @@ def inspection_rows(rep: S.ScanReport, extra: dict) -> list[tuple[str, list[str]
     rows: list[tuple[str, list[str]]] = []
     if extra.get("metadata"):
         rows.append((_("Metadati"), extra["metadata"]))
+    if extra.get("image_metadata"):
+        rows.append((_("Immagini con metadati (EXIF, posizione GPS…): {n}").format(n=extra["image_metadata"]), []))
     rows.extend(active_rows(rep))
     if rep.hidden_layers:
         rows.append((_("Livelli nascosti: {n}").format(n=rep.hidden_layers), extra.get("layers", [])))

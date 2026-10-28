@@ -868,3 +868,52 @@ def test_bug03_unlock_notifies_and_grants_engine_permissions(window, sec, tmp_pa
     assert view in seen
     with view.document.lock:
         assert view.document.pdf.permissions & pymupdf.PDF_PERM_COPY
+
+
+def test_cyclic_page_tree_open_and_save(window, sec, cyclic_pdf, tmp_path, monkeypatch):
+    import sys
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *a: errors.append(a))
+    view = window.open_path(cyclic_pdf)
+    if view is None:
+        pytest.skip("il nucleo non apre questo file")
+    banner = sec.banners[view]
+    keys = [n.key for n in banner.notices]
+    assert "active" in keys and "restricted" in keys
+    active = next(n for n in banner.notices if n.key == "active")
+    assert "script (1)" in active.text and "avvio di programmi (1)" in active.text
+    with view.document.lock:
+        assert R.marks(view.document.pdf) == []
+    with view.document.change("Commento") as pdf:
+        pdf[0].add_text_annot((100, 100), "nota")
+    view.document.save(tmp_path / "ciclo-salvato.pdf")
+    assert not errors
+
+
+def test_many_annotations_scan_is_fast(tmp_path):
+    import time
+    from foliant.modules.security import sanitize as S
+    path = tmp_path / "molte.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    for n in range(2000):
+        page.add_text_annot((10 + n % 50 * 10, 10 + n // 50 * 10), f"n{n}")
+    src.save(str(path))
+    pdf = pymupdf.open(path)
+    t = time.perf_counter()
+    rep = S.scan(pdf)
+    assert time.perf_counter() - t < 1.5
+    assert rep.comments == 2000
+    t = time.perf_counter()
+    assert R.marks(pdf) == [] and not R.has_marks(pdf)
+    assert time.perf_counter() - t < 0.5
+
+
+def test_protect_dialog_not_truncated(qtbot):
+    dlg = D.ProtectDialog(P.ProtectionSettings(), already_protected=False, has_open_password=False)
+    qtbot.addWidget(dlg)
+    dlg.show()
+    dlg.adjustSize()
+    assert dlg.width() >= dlg.minimumSizeHint().width()
+    cb = dlg.perm_boxes["assemble"]
+    assert cb.width() >= cb.sizeHint().width()

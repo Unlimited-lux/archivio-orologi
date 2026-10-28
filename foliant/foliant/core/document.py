@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -45,6 +46,10 @@ class _Snapshot:
     save_options: dict = field(default_factory=dict)
 
 
+# Impronta (mtime, dimensione) dell'ultima scrittura fatta da Foliant per ogni file.
+_OWN_WRITES: dict[str, tuple | None] = {}
+
+
 def atomic_write(target: str | os.PathLike, data: bytes) -> None:
     """Scrive `data` in `target` senza mai lasciare un file a metà."""
     target = Path(os.path.realpath(target))          # salva nel file vero, non sul collegamento
@@ -69,6 +74,7 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
         except OSError:
             pass
         os.replace(tmp, target)
+        _OWN_WRITES[str(target)] = _file_stamp(target)   # scrittura di Foliant: non è una modifica esterna
     except BaseException as e:
         try:
             os.unlink(tmp)
@@ -112,6 +118,14 @@ def protection_options(pdf: pymupdf.Document, password: str | None, auth_code: i
         opts["user_pw"] = ""
         opts["owner_pw"] = secrets.token_urlsafe(24)
     return opts
+
+
+def _file_stamp(path) -> tuple | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def _security_handler(data: bytes) -> str | None:
@@ -191,6 +205,7 @@ class Document:
         self.path: Path | None = Path(path) if path else None
         self.password = password
         self._display_name = display_name
+        self.disk_stamp = _file_stamp(self.path) if self.path is not None else None
         self.lock = ENGINE_LOCK
         # Protezione del file all'apertura (vuoto se non cifrato) e opzioni di
         # salvataggio persistenti: per impostazione predefinita si mantiene la
@@ -317,7 +332,10 @@ class Document:
         if kind == CONTENT:
             self.version += 1
         for fn in list(self._listeners):
-            fn(self, kind)
+            try:
+                fn(self, kind)
+            except Exception:       # un osservatore difettoso non deve far fallire un'operazione riuscita
+                sys.excepthook(*sys.exc_info())
 
     # ---------------------------------------------------------------- modifiche
     @contextmanager
@@ -457,15 +475,28 @@ class Document:
                 and self.save_options == self.original_protection and target.exists()):
             self._notify(SAVED)   # niente da scrivere: non invalidare firme né cifratura
             return
-        data = self.to_bytes(**options)
+        data = self.to_bytes(**{"use_objstms": 1, **options})     # flussi di oggetti: file più piccoli
         atomic_write(target, data)
         self.path = target
         self._saved_state = self._state
+        self.disk_stamp = _file_stamp(target)
         self._notify(SAVED)
+
+    def disk_changed(self) -> bool:
+        """Il file su disco è cambiato (altro programma) dall'apertura o dall'ultimo salvataggio."""
+        if self.path is None or self.disk_stamp is None:
+            return False
+        now = _file_stamp(self.path)
+        if now is None or now == self.disk_stamp:
+            return False
+        if _OWN_WRITES.get(os.path.realpath(self.path)) == now:   # l'ha scritto Foliant (es. firma)
+            self.disk_stamp = now
+            return False
+        return True
 
     def save_copy(self, path: str | os.PathLike, **options) -> None:
         """Salva una copia senza cambiare il file associato al documento."""
-        atomic_write(Path(path), self.to_bytes(**options))
+        atomic_write(Path(path), self.to_bytes(**{"use_objstms": 1, **options}))
 
     def close(self) -> None:
         with self.lock:

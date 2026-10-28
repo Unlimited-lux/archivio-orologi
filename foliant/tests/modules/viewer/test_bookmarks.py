@@ -335,3 +335,50 @@ def test_generate_from_regex_with_levels(viewer_window, tmp_path, monkeypatch):
     monkeypatch.setattr(viewer_window.ctx, "error", lambda t, m: errors.append(m))
     assert not panel.generate("regex", pattern="(", replace=True)
     assert errors and "non valida" in errors[0]
+
+
+def test_empty_panel_layout_compact(viewer_window, sample_pdf):
+    view, panel = _open(viewer_window, sample_pdf)
+    viewer_window.resize(1200, 800)
+    from PySide6.QtWidgets import QApplication, QLabel, QToolButton
+    QApplication.processEvents()
+    title = [w for w in panel.findChildren(QLabel) if w.property("heading")][0]
+    assert title.geometry().top() < 40                       # titolo in alto anche senza albero
+    buttons = [b for b in panel.findChildren(QToolButton) if b.isVisible()]
+    assert len(buttons) <= 4                                  # azioni secondarie nel menu «…»
+    assert all(b.width() >= 24 for b in buttons)
+    menu_texts = [a.text() for a in panel.tools_button.menu().actions()]
+    assert "Sposta su" in menu_texts and "Espandi tutto" in menu_texts
+
+
+def test_bookmark_opening_web_address(viewer_window, tmp_path, monkeypatch):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    assert panel.set_uri(0, "www.esempio.it")
+    out = tmp_path / "uri.pdf"
+    view.document.save(out)
+    toc = pymupdf.open(str(out)).get_toc(simple=False)
+    assert toc[0][3]["uri"] == "https://www.esempio.it"
+    asked = []
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.No)
+    panel.follow(0)
+    assert asked                    # passa dalla conferma dei collegamenti esterni del nucleo
+    assert not panel.item(0).font(0).italic() or panel.items[0].bold   # non marcato come rotto
+
+
+def test_create_toc_page_links_account_for_inserted_page(viewer_window, tmp_path):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    before = view.page_count
+    n = panel.create_toc_page()
+    assert n == 1 and view.page_count == before + 1
+    with view.document.lock:
+        page = view.document.pdf[0]
+        links = page.get_links()
+        text = page.get_text()
+    # 8 voci: ogni riga è un collegamento alla pagina del segnalibro (spostata di una pagina)
+    assert [l["page"] for l in links] == [b.page for b in panel.items]
+    assert "Capitolo 3" in text and "\n9\n" in "\n" + text.replace(" ", "\n") + "\n"
+    # i segnalibri puntano ancora al contenuto giusto
+    assert [b.title for b in panel.items][0] == "Capitolo 1" and panel.items[0].page == 1
+    view.document.undo()
+    assert view.page_count == before

@@ -757,3 +757,57 @@ EN.update({
     "«{n}» supera 100 MB: il portfolio sarà molto grande.": "“{n}” exceeds 100 MB: the portfolio will be very large.",
     "«{n}» è protetto: per aprirlo servirà la sua password.": "“{n}” is protected: its password will be needed to open it.",
 })
+
+# Finestre del portfolio (CNV-34)
+EN.update({
+    "(nuovo)": "(new)",
+    "Aggiungi o rimuovi i file del portfolio aperto": "Add or remove files of the open portfolio",
+    "Applica": "Apply",
+    "Cartella per i nuovi file": "Folder for new files",
+    "Colonna personalizzata": "Custom column",
+    "Copertina (PDF)": "Cover (PDF)",
+    "Copertina «{n}» non utilizzabile: generata automaticamente.": "Cover “{n}” cannot be used: generated automatically.",
+    "Copertina": "Cover",
+    "Crescente": "Ascending",
+    "Data": "Date",
+    "Decrescente": "Descending",
+    "Elenco": "List",
+    "File mostrato all'apertura": "File shown on opening",
+    "File non leggibile: {e}": "Unreadable file: {e}",
+    "Generata automaticamente": "Generated automatically",
+    "Modifica portfolio": "Edit portfolio",
+    "Modifica portfolio…": "Edit portfolio…",
+    "Numero": "Number",
+    "Ordinamento": "Sort order",
+    "Portfolio aggiornato: puoi annullare con Annulla.": "Portfolio updated: you can undo it.",
+    "Testo": "Text",
+    "Vista all'apertura": "View on opening",
+    "es. Cliente (vuoto = nessuna)": "e.g. Customer (empty = none)",
+    "Miniature": "Thumbnails",
+    "Nessuno": "None",
+})
+
+# PDF/X (CNV-15)
+EN.update({
+    "PDF/X-3": "PDF/X-3",
+    "Colori convertiti in CMYK con il profilo della condizione di stampa: i colori possono variare.":
+        "Colors converted to CMYK with the printing condition profile: colors may change.",
+    "Conformità PDF/X non raggiunta: {e}": "PDF/X conformance not reached: {e}",
+    "Ghostscript non è riuscito a convertire il documento in PDF/X. {d}": "Ghostscript could not convert the document to PDF/X. {d}",
+    "La conversione in PDF/X richiede Ghostscript, che non è installato. Installalo (ad esempio con «sudo apt install ghostscript») e riprova.":
+        "PDF/X conversion requires Ghostscript, which is not installed. Install it (e.g. “sudo apt install ghostscript”) and try again.",
+    "Manca GTS_PDFXVersion «PDF/X-3» nel dizionario Info.": "GTS_PDFXVersion “PDF/X-3” is missing from the Info dictionary.",
+    "Manca l'OutputIntent /GTS_PDFX con il profilo della condizione di stampa.": "The /GTS_PDFX OutputIntent with the printing condition profile is missing.",
+    "Non è stato trovato un profilo colore CMYK per la condizione di stampa.": "No CMYK color profile was found for the printing condition.",
+    "Pagine senza TrimBox: {p}.": "Pages without TrimBox: {p}.",
+    "Profilo PDF/X non supportato: «{l}». È disponibile PDF/X-3.": "Unsupported PDF/X profile: “{l}”. PDF/X-3 is available.",
+    "Trasparenze non ammesse in PDF/X-3.": "Transparency is not allowed in PDF/X-3.",
+    "TrimBox impostato uguale al CropBox su {n} pagine.": "TrimBox set equal to the CropBox on {n} pages.",
+})
+
+EN.update({
+    "Cattura {n}": "Capture {n}",
+    "Trascina per tenere solo un'area; senza selezione si usa tutta la cattura.":
+        "Drag to keep only an area; without a selection the whole capture is used.",
+    "Aggiungi un'altra cattura": "Add another capture",
+})

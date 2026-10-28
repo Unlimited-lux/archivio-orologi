@@ -515,10 +515,24 @@ class CommentsPanel(QWidget):
     # ------------------------------------------------------------------ dati
     def set_view(self, view) -> None:
         self.view = view
-        self.reload()
+        self._refresh_when_visible()
 
     def _on_doc_changed(self, view) -> None:
         if view is self.view:
+            self._refresh_when_visible()
+
+    def _refresh_when_visible(self) -> None:
+        """Ricarica subito se il pannello è visibile, altrimenti alla prossima apertura."""
+        if self.isVisible():
+            self._dirty = False
+            self._timer.start()
+        else:
+            self._dirty = True
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if getattr(self, "_dirty", False):
+            self._dirty = False
             self._timer.start()
 
     CHUNK = 30   # pagine lette per passo: la prima schermata compare subito anche con migliaia di commenti

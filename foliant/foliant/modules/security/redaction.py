@@ -130,13 +130,33 @@ def mark_whole_pages(pdf: pymupdf.Document, pages: Iterable[int], style: MarkSty
     return n
 
 
+def iter_pages(pdf: pymupdf.Document, pages: Iterable[int] | None = None):
+    """(indice, pagina) delle pagine caricabili: una pagina danneggiata (es. albero
+    delle pagine ciclico) viene saltata invece di interrompere l'operazione."""
+    for i in (range(pdf.page_count) if pages is None else pages):
+        try:
+            page = pdf[i]
+        except Exception:
+            continue
+        yield i, page
+
+
+def _redact_xrefs(page: pymupdf.Page) -> list[int]:
+    # annot_xrefs è lineare; page.annots() costa in modo quadratico con molte annotazioni
+    try:
+        return [x[0] for x in page.annot_xrefs() if x[1] == pymupdf.PDF_ANNOT_REDACT]
+    except Exception:
+        return []
+
+
 def marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[Mark]:
     """Segni di redazione presenti (anche quelli creati da altri programmi)."""
     out: list[Mark] = []
-    indices = range(pdf.page_count) if pages is None else pages
-    for i in indices:
-        page = pdf[i]
-        for annot in page.annots(types=[pymupdf.PDF_ANNOT_REDACT]):
+    for i, page in iter_pages(pdf, pages):
+        for xref in _redact_xrefs(page):
+            annot = page.load_annot(xref)
+            if annot is None:
+                continue
             info = annot.info or {}
             out.append(Mark(i, annot.xref, pymupdf.Rect(annot.rect), info.get("content", ""),
                             info.get("subject", "") or "area"))
@@ -144,10 +164,7 @@ def marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[Mar
 
 
 def has_marks(pdf: pymupdf.Document) -> bool:
-    for page in pdf:
-        if page.first_annot is not None and any(True for _a in page.annots(types=[pymupdf.PDF_ANNOT_REDACT])):
-            return True
-    return False
+    return any(_redact_xrefs(page) for _i, page in iter_pages(pdf))
 
 
 def remove_mark(pdf: pymupdf.Document, page_index: int, xref: int) -> bool:
@@ -161,9 +178,8 @@ def remove_mark(pdf: pymupdf.Document, page_index: int, xref: int) -> bool:
 
 def clear_marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
     n = 0
-    for i in (range(pdf.page_count) if pages is None else pages):
-        page = pdf[i]
-        for xref in [a.xref for a in page.annots(types=[pymupdf.PDF_ANNOT_REDACT])]:
+    for i, page in iter_pages(pdf, pages):
+        for xref in _redact_xrefs(page):
             if remove_mark(pdf, i, xref):
                 n += 1
     return n
@@ -193,8 +209,11 @@ def apply(pdf: pymupdf.Document, options: ApplyOptions | None = None, pages: Ite
     for n, i in enumerate(indices):
         if progress is not None:
             progress(n / max(1, len(indices)), _("Pagina {n} di {t}").format(n=n + 1, t=len(indices)))
-        page = pdf[i]
-        redacts = list(page.annots(types=[pymupdf.PDF_ANNOT_REDACT]))
+        try:
+            page = pdf[i]
+        except Exception:
+            continue
+        redacts = [a for a in (page.load_annot(x) for x in _redact_xrefs(page)) if a is not None]
         if not redacts:
             continue
         rects = [pymupdf.Rect(a.rect) for a in redacts]

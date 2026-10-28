@@ -450,14 +450,27 @@ def test_batch_parallel(tmp_path):
 
 
 def test_screen_capture(window, ctrl, monkeypatch, messages):
+    from PySide6.QtCore import QRect
     from PySide6.QtGui import QPixmap, QScreen
+    from foliant.modules.convert.create_dialogs import CaptureDialog
     pm = QPixmap(800, 600)
     pm.fill()
     monkeypatch.setattr(QScreen, "grabWindow", lambda self, *a: pm)
+    steps = iter([CaptureDialog.ANOTHER, QDialog.DialogCode.Accepted])
+
+    def fake_exec(d):
+        code = next(steps)
+        if code == CaptureDialog.ANOTHER:
+            d.preview.set_selection(QRect(100, 50, 300, 200))     # area ritagliata
+        return code
+    monkeypatch.setattr(CaptureDialog, "exec", fake_exec)
     view = ctrl.create_from_screen(delay_s=0)
     with pymupdf.open(stream=view.document.to_bytes()) as d:
-        info = d[0].get_images(full=True)[0]
-        assert (info[2], info[3]) == (800, 600) and d.xref_get_key(info[0], "Filter")[1] == "/FlateDecode"
+        assert d.page_count == 2
+        sizes = [(img[2], img[3]) for p in d for img in p.get_images(full=True)]
+        assert sizes == [(300, 200), (800, 600)]
+        info = d[1].get_images(full=True)[0]
+        assert d.xref_get_key(info[0], "Filter")[1] == "/FlateDecode"
     monkeypatch.setattr(QScreen, "grabWindow", lambda self, *a: QPixmap())
     n = len(window.views())
     assert ctrl.create_from_screen(delay_s=0) is None
@@ -608,13 +621,100 @@ def test_compress_open_encrypted_keeps_protection(window, ctrl, tmp_path, monkey
 
 
 def test_create_portfolio_ui(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
-    from PySide6.QtWidgets import QInputDialog
-    (tmp_path / "b").mkdir()
-    other = tmp_path / "b" / "nota.txt"
+    from foliant.modules.convert.portfolio_dialog import COL_CUSTOM, COL_DESC, COL_FOLDER, PortfolioDialog
+    other = tmp_path / "nota.txt"
     other.write_text("ciao", encoding="utf-8")
-    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Pratica 42", True))
+
+    def fake_exec(d):
+        d.title.setText("Pratica 42")
+        d.table.item(0, COL_FOLDER).setText("Contratti")
+        d.table.item(1, COL_FOLDER).setText("Note")
+        d.table.item(1, COL_DESC).setText("Appunto del cliente")
+        d.custom_name.setText("Cliente")
+        d.table.item(0, COL_CUSTOM).setText("Rossi")
+        d.table.item(1, COL_CUSTOM).setText("Bianchi")
+        d.view.setCurrentIndex(d.view.findData("thumbnails"))
+        d.sort.setCurrentIndex(d.sort.findData("custom"))
+        d.initial.setCurrentIndex(d.initial.findData(1))
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(PortfolioDialog, "exec", fake_exec)
     view = ctrl.create_portfolio([sample_pdf, str(other)])
     with pymupdf.open(stream=view.document.to_bytes()) as d:
-        assert d.embfile_count() == 2 and "Pratica 42" in d[0].get_text()
-        assert d.xref_get_key(d.pdf_catalog(), "Collection")[0] == "xref"
+        assert d.embfile_count() == 2 and "Pratica 42" in d[0].get_text() and "Appunto del cliente" in d[0].get_text()
+        cx = int(d.xref_get_key(d.pdf_catalog(), "Collection")[1].split()[0])
+        assert d.xref_get_key(cx, "View")[1] == "/T"
+        assert d.xref_get_key(cx, "Sort/S")[1] == "/Cliente"
+        assert d.xref_get_key(cx, "Schema/Cliente/Subtype")[1] == "/S"
+        assert d.xref_get_key(cx, "D")[1] == "<2>nota.txt"
+        assert sorted(d.embfile_names()) == ["<1>esempio.pdf", "<2>nota.txt"]
     assert view.document.display_name == "Pratica 42.pdf"
+
+
+def test_images_as_image_size_ignores_margin(window, ctrl, tmp_path, monkeypatch, messages):
+    """«Come l'immagine»: il campo Margini è disattivato e non deve aggiungere una cornice."""
+    from PIL import Image
+    path = tmp_path / "foto.png"
+    Image.new("RGB", (384, 288), (20, 60, 200)).save(path, dpi=(72, 72))
+
+    def fake_exec(d):
+        d.size_box.setCurrentIndex(d.size_box.findData(None))
+        assert not d.margin.isEnabled()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ImagesDialog, "exec", fake_exec)
+    view = ctrl.create_from_images([str(path)])
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert abs(d[0].rect.width - 384) < 0.5 and abs(d[0].rect.height - 288) < 0.5
+
+
+def test_compress_document_reduction_survives_save(window, ctrl, tmp_path, monkeypatch, messages):
+    """«Applica al documento aperto»: la riduzione annunciata è quella del file salvato."""
+    import os
+    doc = pymupdf.open()
+    for i in range(40):
+        p = doc.new_page()
+        for k in range(30):
+            p.insert_text((50, 50 + k * 20), f"Pagina {i} riga {k} del catalogo orologi usati", fontsize=10)
+    path = tmp_path / "quaranta.pdf"
+    doc.save(str(path), garbage=0, deflate=True)       # senza flussi di oggetti
+    view = window.open_path(str(path))
+
+    def fake_exec(d):
+        d.table.selectRow(0)                            # senza perdita
+        d.target.setCurrentIndex(d.target.findData("document"))
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(CompressDialog, "exec", fake_exec)
+    res = ctrl.compress()
+    before = os.path.getsize(path)
+    assert res["reduced"], messages["info"]
+    if res["reduced"]:
+        assert window.save_view(view)
+        saved = os.path.getsize(path)
+        assert saved == res["after"] and saved < before
+    else:
+        assert not view.document.is_modified and os.path.getsize(path) == before
+
+
+def test_export_uses_thumbnail_selection(window, ctrl, twenty_pages, tmp_path, monkeypatch, messages):
+    view = window.open_path(twenty_pages)
+
+    class FakeThumbs:
+        def __init__(self, v):
+            self.view = v
+
+        def selected_pages(self):
+            return [1, 4, 6]
+
+    monkeypatch.setitem(window._sidebar, "thumbnails", ("Miniature", "x", FakeThumbs(view), 10, None))
+
+    def fake_exec(dlg):
+        assert dlg.selected == [1, 4, 6]
+        dlg.folder_edit.setText(str(tmp_path))
+        dlg.format_box.setCurrentIndex(dlg.format_box.findData("txt"))
+        dlg.range_edit.setText("selezionate")
+        dlg.validate()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ExportDialog, "exec", fake_exec)
+    result = ctrl.export()
+    text = open(result.paths[0], encoding="utf-8").read()
+    nums = [int(line.split()[-1]) for line in text.replace("\f", "\n").splitlines() if line.startswith("Pagina")]
+    assert nums == [2, 5, 7]

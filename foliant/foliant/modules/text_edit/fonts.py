@@ -463,12 +463,15 @@ class FontResolver:
             pass
         return out
 
-    def split(self, text: str, style: Style) -> list[tuple[str, FontChoice]]:
+    def split(self, text: str, style: Style, primary: FontChoice | None = None) -> list[tuple[str, FontChoice]]:
         """Divide il testo in pezzi, ciascuno con un font che ne copre tutti i caratteri.
 
+        `primary`: font principale già scelto per lo stile (lo stesso per tutto il paragrafo,
+        così spazi e parole sono misurati con lo stesso font).
         Solleva `UncoveredCharacter` se un carattere non è coperto da alcun font.
         """
-        primary = self.primary(style, sample=text)
+        if primary is None:
+            primary = self.primary(style, sample=text)
         pieces: list[tuple[str, FontChoice]] = []
         fallbacks: list[FontChoice] | None = None
         for ch in text:
