@@ -48,6 +48,7 @@ class FormState:
         self.by_page: dict[int, list[E.FieldInfo]] = {}
         self.xfa = "none"
         self.blocked: str | None = None
+        self.blocked_by_permissions = False   # sbloccabile con la password del proprietario
         self.custom: list[tuple[str, str]] = []
         self.xfa_unmapped: list[str] = []
 
@@ -63,7 +64,8 @@ class FormState:
                 self.fields = E.list_fields(pdf)
                 self.xfa = E.xfa_status(pdf)
                 # permessi effettivi della sessione: dopo «Sblocca…» (document.unlock) tutto è consentito
-                if not doc.allows(pymupdf.PDF_PERM_FORM):
+                self.blocked_by_permissions = not doc.allows(pymupdf.PDF_PERM_FORM)
+                if self.blocked_by_permissions:
                     self.blocked = _("I permessi del documento non consentono la compilazione dei moduli.")
                 else:
                     self.blocked = E.fill_blocked_reason(pdf, -1)  # resta il controllo della certificazione
@@ -506,7 +508,7 @@ class FormFiller(QObject):
             actions.append((_("Importa/Esporta dati"), self.data_requested))
         if st.xfa != "dynamic" and not self.design and not st.blocked:
             actions.append((_("Modifica modulo"), self.design_requested))
-        if st.blocked and "permessi" in (st.blocked or ""):
+        if st.blocked and st.blocked_by_permissions:
             actions.insert(0, (_("Inserisci password del proprietario"), self.ask_owner_password))
         self._show_banner(text, actions, level)
 

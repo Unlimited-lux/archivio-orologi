@@ -1550,11 +1550,62 @@ def fill_blocked_reason(pdf: pymupdf.Document, permissions: int | None = None) -
     if permissions is not None or pdf.is_encrypted or (pdf.metadata or {}).get("encryption"):
         if not (perms & pymupdf.PDF_PERM_FORM) and not (perms & pymupdf.PDF_PERM_ANNOTATE):
             return _("I permessi del documento non consentono la compilazione dei moduli.")
+    cert = certification_info(pdf)
+    if cert is not None and cert["level"] == 1:
+        who = cert["signer"] or _("firmatario sconosciuto")
+        if cert["field"]:
+            return _("Il documento è certificato da {who} (campo firma «{field}») e non consente modifiche.").format(
+                who=who, field=cert["field"])
+        return _("Il documento è certificato da {who} e non consente modifiche.").format(who=who)
+    return None
+
+
+def certification_info(pdf: pymupdf.Document) -> dict | None:
+    """Firma di certificazione (/Perms /DocMDP): livello delle modifiche ammesse (1 nessuna,
+    2 compilazione e firme, 3 anche commenti), campo firma e nome del firmatario."""
     t, v = pdf.xref_get_key(pdf.pdf_catalog(), "Perms/DocMDP")
-    if t == "xref":
-        p = pdf.xref_get_key(int(v.split()[0]), "Reference")
-        if p[0] != "null" and "/P 1" in pdf.xref_object(int(v.split()[0]), compressed=True).replace(" ", " "):
-            return _("Il documento è certificato e non consente modifiche.")
+    if t != "xref":
+        return None
+    sx = int(v.split()[0])
+    level = 2
+    t, ref = pdf.xref_get_key(sx, "Reference")
+    if t != "null":
+        text = ref
+        for r in re.findall(r"(\d+) 0 R", ref):   # riferimenti indiretti (TransformParams compresi)
+            text += pdf.xref_object(int(r), compressed=True)
+            for r2 in re.findall(r"(\d+) 0 R", pdf.xref_object(int(r), compressed=True)):
+                text += pdf.xref_object(int(r2), compressed=True)
+        m = re.search(r"/TransformMethod\s*/DocMDP.*?/P\s*(\d)", text, re.S) or \
+            re.search(r"/TransformParams.*?/P\s*(\d)", text, re.S)
+        if m:
+            level = int(m.group(1))
+    signer = _value_of(*pdf.xref_get_key(sx, "Name")) or _signer_common_name(pdf, sx)
+    field = None
+    for f in list_fields(pdf):
+        if f.kind == SIGNATURE and pdf.xref_get_key(f.field_xref, "V")[1].split()[:1] == [str(sx)]:
+            field = f.name
+            break
+    return {"level": level, "signer": signer or None, "field": field, "xref": sx}
+
+
+def _signer_common_name(pdf: pymupdf.Document, sig_xref: int) -> str | None:
+    """Nome comune del certificato del firmatario nel contenitore CMS (/Contents)."""
+    m = re.search(r"/Contents\s*<([0-9A-Fa-f\s]+)>", pdf.xref_object(sig_xref, compressed=True))
+    if not m:
+        return None
+    try:
+        from asn1crypto import cms
+        raw = bytes.fromhex(re.sub(r"\s", "", m.group(1)))
+        signed = cms.ContentInfo.load(raw, strict=False)["content"]   # /Contents ha zeri di riempimento
+        sid = signed["signer_infos"][0]["sid"]
+        for c in signed["certificates"]:
+            cert = c.chosen
+            if sid.name == "issuer_and_serial_number" and \
+                    cert.serial_number != sid.chosen["serial_number"].native:
+                continue
+            return cert.subject.native.get("common_name")
+    except Exception:
+        return None
     return None
 
 
