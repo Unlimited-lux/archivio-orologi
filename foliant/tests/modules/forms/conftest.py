@@ -43,3 +43,25 @@ def form():
 
 def reopen(pdf: pymupdf.Document) -> pymupdf.Document:
     return pymupdf.open("pdf", pdf.tobytes(garbage=3, deflate=True))
+
+
+@pytest.fixture(autouse=True)
+def no_modal_boxes(monkeypatch):
+    """Nessuna finestra modale nei test: le risposte sono registrate in `calls`."""
+    from PySide6.QtWidgets import QMessageBox
+    calls = []
+
+    def fake(kind):
+        def _f(parent, title, text, *a, **k):
+            calls.append((kind, title, text))
+            if kind == "question":
+                return QMessageBox.StandardButton.Yes
+            return QMessageBox.StandardButton.Ok
+        return _f
+
+    for kind in ("question", "warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, kind, staticmethod(fake(kind)))
+    # finestra «Salvare le modifiche?» alla chiusura: nessun pulsante scelto (chiusura rimandata
+    # alla fixture `window`, che chiude le viste senza chiedere)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: calls.append(("exec", self.windowTitle(), self.text())) or 0)
+    return calls

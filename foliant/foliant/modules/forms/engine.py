@@ -1911,15 +1911,8 @@ def tab_mode(pdf: pymupdf.Document, page: int) -> str:
 
 # ====================================================================== appiattimento e XFA
 def flatten(pdf: pymupdf.Document) -> int:
-    """Trasforma i campi in contenuto fisso della pagina. Restituisce il numero di campi."""
-    n = sum(1 for i in range(pdf.page_count) for _w in pdf[i].widgets())
-    if not n:
-        return 0
-    pdf.bake(annots=False, widgets=True)
-    cat = pdf.pdf_catalog()
-    if pdf.xref_get_key(cat, "AcroForm")[0] != "null":
-        pdf.xref_set_key(cat, "AcroForm", "null")
-    return n
+    """Appiattisce tutti i campi (vedi flatten_pages)."""
+    return flatten_pages(pdf, None)
 
 
 def xfa_status(pdf: pymupdf.Document) -> str:
@@ -2072,3 +2065,314 @@ def remove_xfa(pdf: pymupdf.Document) -> bool:
         return False
     pdf.xref_set_key(cat, "AcroForm/XFA", "null")
     return True
+
+
+# ====================================================================== pulsanti e immagini
+def _set_path(pdf: pymupdf.Document, xref: int, path: str, value: str) -> None:
+    """Come xref_set_key ma risolve i riferimenti indiretti lungo il percorso."""
+    parts = path.split("/")
+    x = xref
+    for i, key in enumerate(parts[:-1]):
+        t, v = pdf.xref_get_key(x, key)
+        if t == "xref":
+            x = int(v.split()[0])
+            continue
+        rest = "/".join(parts[i:])
+        pdf.xref_set_key(x, rest, value)
+        return
+    pdf.xref_set_key(x, parts[-1], value)
+
+
+def mark_image_field(pdf: pymupdf.Document, page: int, xref: int) -> None:
+    """Campo immagine: pulsante che mostra solo l'icona (/MK /TP 1)."""
+    pdf.xref_set_key(xref, "MK/TP", "1")
+    pdf.xref_set_key(xref, "MK/IF", "<</SW/A/S/P/A[0.5 0.5]>>")
+
+
+def is_image_field(pdf: pymupdf.Document, xref: int) -> bool:
+    return (_inherited(pdf, xref, "FT")[1] == "/Btn" and pdf.xref_get_key(xref, "MK/TP") == ("int", "1"))
+
+
+def set_button_image(pdf: pymupdf.Document, page: int, xref: int, image: str | bytes, dpi: int = 200) -> None:
+    """Inserisce un'immagine nel campo immagine: proporzionale, centrata, ridotta alla
+    risoluzione utile (`dpi`) così che il file non cresca inutilmente."""
+    import io
+
+    from PIL import Image
+
+    info = field_info(pdf, page, xref)
+    w, h = info.rect.width, info.rect.height
+    try:
+        img = Image.open(io.BytesIO(image) if isinstance(image, bytes) else image)
+        img.load()
+    except Exception as e:
+        raise FormError(_("Impossibile leggere l'immagine: {e}").format(e=e)) from e
+    alpha = img.mode in ("RGBA", "LA", "P") and ("transparency" in img.info or img.mode in ("RGBA", "LA"))
+    img = img.convert("RGBA" if alpha else "RGB")
+    max_px = (max(1, int(w / 72 * dpi)), max(1, int(h / 72 * dpi)))
+    img.thumbnail(max_px, Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    if alpha:
+        img.save(buf, "PNG", optimize=True)
+    else:
+        img.save(buf, "JPEG", quality=88)
+    scale = min(w / img.width, h / img.height)
+    iw, ih = img.width * scale, img.height * scale
+    ox, oy = (w - iw) / 2, (h - ih) / 2
+    # immagine come XObject: inserita in una pagina provvisoria, poi riusata
+    tmp = pdf.new_page(width=max(w, 10), height=max(h, 10))
+    tmp.insert_image(pymupdf.Rect(0, 0, iw, ih), stream=buf.getvalue())
+    img_xref = tmp.get_images(full=True)[0][0]
+    pdf.delete_page(tmp.number)
+    bg = info.fill_color
+    ops = []
+    if bg:
+        ops.append(f"{_n(bg[0])} {_n(bg[1])} {_n(bg[2])} rg 0 0 {_n(w)} {_n(h)} re f")
+    ops.append(f"q {_n(iw)} 0 0 {_n(ih)} {_n(ox)} {_n(oy)} cm /Img Do Q")
+    form = pdf.get_new_xref()
+    pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]"
+                            f"/Resources<</XObject<</Img {img_xref} 0 R>>>>>>")
+    pdf.update_stream(form, "\n".join(ops).encode())
+    pdf.xref_set_key(xref, "AP", f"<</N {form} 0 R>>")
+    pdf.xref_set_key(xref, "MK/I", f"{form} 0 R")
+
+
+def button_action(pdf: pymupdf.Document, xref: int) -> dict:
+    """Azione al clic di un pulsante, come dizionario semplice."""
+    t, v = pdf.xref_get_key(xref, "A")
+    if t == "null":
+        t, v = pdf.xref_get_key(xref, "AA/U")
+    if t == "xref":
+        v = pdf.xref_object(int(v.split()[0]), compressed=True)
+        t = "dict"
+    if t != "dict":
+        return {}
+    try:
+        a = ps.parse(v)
+    except ps.PdfSyntaxError:
+        return {}
+    kind = str(a.get("S", ""))
+
+    def names(items):
+        out = []
+        for it in items or []:
+            if isinstance(it, ps.Ref):
+                out.append(_full_name(pdf, it[0]))
+            else:
+                out.append(ps.text_of(it) or "")
+        return [n for n in out if n]
+
+    if kind == "ResetForm":
+        flags = a.get("Flags", 0) or 0
+        fields = names(a.get("Fields"))
+        if fields and flags & 1:  # escludi i campi elencati
+            fields = [n for n in dict.fromkeys(f.name for f in list_fields(pdf)) if n not in fields]
+        return {"type": "reset", "fields": fields}
+    if kind == "URI":
+        return {"type": "uri", "uri": ps.text_of(a.get("URI")) or ""}
+    if kind == "Named":
+        return {"type": "print" if str(a.get("N")) == "Print" else "named", "name": str(a.get("N"))}
+    if kind == "GoTo":
+        dest = a.get("D")
+        if isinstance(dest, list) and dest and isinstance(dest[0], ps.Ref):
+            for i in range(pdf.page_count):
+                if pdf.page_xref(i) == dest[0][0]:
+                    return {"type": "goto", "page": i}
+        return {"type": "goto", "page": 0}
+    if kind == "Hide":
+        target = a.get("T")
+        items = target if isinstance(target, list) else [target]
+        return {"type": "hide", "fields": names(items), "hide": a.get("H", True) is not False}
+    if kind == "ImportData":
+        return {"type": "import"}
+    if kind == "SubmitForm":
+        return {"type": "submit", "url": ps.text_of(a.get("F")) if not isinstance(a.get("F"), dict) else ""}
+    if kind == "JavaScript":
+        return {"type": "javascript"}
+    return {"type": kind.lower()} if kind else {}
+
+
+def set_button_action(pdf: pymupdf.Document, page: int, xref: int, action: dict | None) -> None:
+    kind = (action or {}).get("type")
+    if not kind:
+        pdf.xref_set_key(xref, "A", "null")
+        return
+    if kind == "reset":
+        fields = action.get("fields") or []
+        value = "<</S/ResetForm" + (f"/Fields{ps.serialize(list(fields))}" if fields else "") + ">>"
+    elif kind == "uri":
+        value = f"<</S/URI/URI{ps.encode_string(action.get('uri', ''))}>>"
+    elif kind == "print":
+        value = "<</S/Named/N/Print>>"
+    elif kind == "goto":
+        value = f"<</S/GoTo/D[{pdf.page_xref(int(action.get('page', 0)))} 0 R/Fit]>>"
+    elif kind == "hide":
+        value = f"<</S/Hide/T{ps.serialize(list(action.get('fields') or []))}/H {'true' if action.get('hide', True) else 'false'}>>"
+    elif kind == "import":
+        value = "<</S/ImportData/F()>>"
+    else:
+        raise FormError(_("Azione non supportata."))
+    pdf.xref_set_key(xref, "A", value)
+
+
+def _full_name(pdf: pymupdf.Document, xref: int) -> str:
+    parts = []
+    seen = set()
+    x = xref
+    while x and x not in seen:
+        seen.add(x)
+        t = _value_of(*pdf.xref_get_key(x, "T"))
+        if t:
+            parts.insert(0, t)
+        x = _parent_node(pdf, x) or 0
+    return ".".join(parts)
+
+
+def hide_fields(pdf: pymupdf.Document, names: list[str], hide: bool = True) -> int:
+    n = 0
+    for f in list_fields(pdf):
+        if f.name in names:
+            af = _annot_flags(pdf, f.xref)
+            af = (af | AF_HIDDEN) if hide else (af & ~AF_HIDDEN)
+            pdf.xref_set_key(f.xref, "F", str(af))
+            n += 1
+    return n
+
+
+def copy_field_to_page(pdf: pymupdf.Document, page: int, xref: int, target: int, shared: bool) -> int:
+    """Copia un campo su un'altra pagina, con valore condiviso (stesso campo) o indipendente."""
+    f = field_info(pdf, page, xref)
+    if not shared:
+        return duplicate_field(pdf, page, xref, 0, 0, target_page=target)
+    props = properties_of(f)
+    props.pop("export", None)
+    new = create_field(pdf, target, f.kind, f.rect, unique_name(pdf, f.name + "_copia"), **props)
+    merge_into(pdf, target, new, f.name)
+    return new
+
+
+def is_signed(pdf: pymupdf.Document, xref: int) -> bool:
+    return _inherited(pdf, xref, "FT")[1] == "/Sig" and _inherited(pdf, xref, "V")[0] != "null"
+
+
+def _resources_xref(pdf: pymupdf.Document, page_xref: int) -> int:
+    t, v = pdf.xref_get_key(page_xref, "Resources")
+    if t == "xref":
+        return int(v.split()[0])
+    if t == "null":
+        it, iv = _inherited(pdf, page_xref, "Resources")
+        body = pdf.xref_object(int(iv.split()[0]), compressed=True) if it == "xref" else (iv if it == "dict" else "<<>>")
+    else:
+        body = v
+    x = pdf.get_new_xref()
+    pdf.update_object(x, body)
+    pdf.xref_set_key(page_xref, "Resources", f"{x} 0 R")
+    return x
+
+
+def _ap_matrix(pdf: pymupdf.Document, ap: int, rect_pdf: pymupdf.Rect) -> pymupdf.Matrix:
+    """Matrice che porta il riquadro dell'aspetto sul /Rect del widget (algoritmo standard)."""
+    try:
+        bbox = pymupdf.Rect(ps.parse(pdf.xref_get_key(ap, "BBox")[1]))
+    except Exception:
+        bbox = pymupdf.Rect(0, 0, rect_pdf.width, rect_pdf.height)
+    t, v = pdf.xref_get_key(ap, "Matrix")
+    mat = pymupdf.Matrix(*ps.parse(v)) if t == "array" else pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+    tb = pymupdf.Rect(bbox.quad.transform(mat).rect)
+    if tb.width <= 0 or tb.height <= 0:
+        return pymupdf.Matrix(1, 0, 0, 1, rect_pdf.x0, rect_pdf.y0)
+    sx, sy = rect_pdf.width / tb.width, rect_pdf.height / tb.height
+    return pymupdf.Matrix(sx, 0, 0, sy, rect_pdf.x0 - tb.x0 * sx, rect_pdf.y0 - tb.y0 * sy)
+
+
+def flatten_pages(pdf: pymupdf.Document, pages: list[int] | None = None, keep_signed: bool = True) -> int:
+    """Appiattisce i campi delle pagine indicate (tutte se None): l'aspetto diventa contenuto
+    della pagina, i widget e i campi vengono rimossi. I campi nascosti scompaiono; i campi
+    firma firmati restano campi se `keep_signed`."""
+    targets = range(pdf.page_count) if pages is None else [p for p in pages if 0 <= p < pdf.page_count]
+    count = 0
+    for pno in targets:
+        pg = pdf[pno]
+        widgets = [w for w in pg.widgets()]
+        if not widgets:
+            continue
+        pg.wrap_contents()
+        res = None
+        ops = []
+        to_delete = []
+        for w in widgets:
+            if keep_signed and is_signed(pdf, w.xref):
+                continue
+            to_delete.append(w.xref)
+            af = _annot_flags(pdf, w.xref)
+            if af & (AF_HIDDEN | AF_NOVIEW) and not af & AF_PRINT:
+                continue
+            if af & AF_HIDDEN:
+                continue
+            t, v = pdf.xref_get_key(w.xref, "AP/N")
+            ap = None
+            if t == "xref":
+                ap = int(v.split()[0])
+            elif t == "dict":
+                state = _value_of(*pdf.xref_get_key(w.xref, "AS")) or OFF
+                try:
+                    states = ps.parse(v)
+                except ps.PdfSyntaxError:
+                    states = {}
+                ref = states.get(state)
+                ap = ref[0] if isinstance(ref, ps.Ref) else None
+            if not ap:
+                continue
+            try:
+                rect = pymupdf.Rect(ps.parse(pdf.xref_get_key(w.xref, "Rect")[1])).normalize()
+            except Exception:
+                continue
+            if res is None:
+                res = _resources_xref(pdf, pg.xref)
+            name = f"FlW{w.xref}"
+            _set_path(pdf, res, f"XObject/{name}", f"{ap} 0 R")
+            m = _ap_matrix(pdf, ap, rect)
+            ops.append(f"q {_n(m.a)} {_n(m.b)} {_n(m.c)} {_n(m.d)} {_n(m.e)} {_n(m.f)} cm /{name} Do Q")
+        if ops:
+            sx = pdf.get_new_xref()
+            pdf.update_object(sx, "<<>>")
+            pdf.update_stream(sx, ("\n".join(ops) + "\n").encode())
+            t, v = pdf.xref_get_key(pg.xref, "Contents")
+            if t == "array":
+                arr = v[:-1] + f" {sx} 0 R]"
+            elif t == "xref":
+                arr = f"[{v} {sx} 0 R]"
+            else:
+                arr = f"[{sx} 0 R]"
+            pdf.xref_set_key(pg.xref, "Contents", arr)
+        for x in to_delete:
+            fx = _field_xref(pdf, x)
+            try:
+                pg.delete_widget(find_widget(pdf, pno, x))
+            except FormError:
+                continue
+            if fx != x:
+                kids = [k for k in _widgets_of_field(pdf, fx) if k != x]
+                if kids:
+                    pdf.xref_set_key(fx, "Kids", ps.serialize([ps.Ref(k) for k in kids]))
+                else:
+                    _remove_from_acroform(pdf, fx)
+                    _prune_empty_parents(pdf, fx)
+            count += 1
+    if not any(True for i in range(pdf.page_count) for _w in pdf[i].widgets()):
+        cat = pdf.pdf_catalog()
+        if pdf.xref_get_key(cat, "AcroForm")[0] != "null":
+            pdf.xref_set_key(cat, "AcroForm", "null")
+    else:
+        _set_calc_order(pdf)
+    return count
+
+
+def _prune_empty_parents(pdf: pymupdf.Document, fx: int) -> None:
+    parent = _parent_node(pdf, fx)
+    while parent is not None:
+        if _children(pdf, parent):
+            return
+        nxt = _parent_node(pdf, parent)
+        _remove_from_acroform(pdf, parent)
+        parent = nxt

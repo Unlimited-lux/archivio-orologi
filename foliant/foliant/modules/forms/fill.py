@@ -1,0 +1,966 @@
+"""Compilazione dei moduli direttamente sulla pagina.
+
+Un `FormFiller` per ogni vista documento:
+- intercetta i clic sulla vista (con lo strumento di selezione o la mano) e
+  apre sopra il widget del PDF un editor Qt posizionato con `view.page_to_view`;
+- Tab / Maiusc+Tab percorrono i campi secondo l'ordine di tabulazione;
+- disegna l'evidenziazione dei campi come livello della vista (mai salvato);
+- mostra la barra del modulo in cima alla vista.
+
+Ogni conferma è un passo di annulla/ripeti (`document.change`).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Callable
+
+import pymupdf
+from PySide6.QtCore import QDate, QEvent, QObject, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QValidator
+from PySide6.QtWidgets import (
+    QCalendarWidget, QComboBox, QCompleter, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QAbstractItemView, QPlainTextEdit, QToolButton, QWidget, QMenu, QWidgetAction,
+)
+
+from foliant.api import ENGINE_LOCK, HandTool, SelectTextTool, _, bind_icon, theme
+
+from . import engine as E
+from . import formats as fm
+
+if TYPE_CHECKING:
+    from foliant.api import Context, DocumentView
+
+SETTING_HIGHLIGHT = "forms/highlight"
+
+
+def tr_count(n: int, one: str, many: str) -> str:
+    return (one if n == 1 else many).format(n=n)
+
+
+# ====================================================================== stato del modulo
+class FormState:
+    """Informazioni sul modulo del documento, ricalcolate quando cambia la versione."""
+
+    def __init__(self, view: "DocumentView"):
+        self.view = view
+        self.version = -1
+        self.fields: list[E.FieldInfo] = []
+        self.by_page: dict[int, list[E.FieldInfo]] = {}
+        self.xfa = "none"
+        self.blocked: str | None = None
+        self.custom: list[tuple[str, str]] = []
+
+    def refresh(self, force: bool = False) -> None:
+        doc = self.view.document
+        if not force and self.version == doc.version:
+            return
+        with ENGINE_LOCK:
+            if doc.closed:
+                return
+            pdf = doc.pdf
+            try:
+                self.fields = E.list_fields(pdf)
+                self.xfa = E.xfa_status(pdf)
+                self.blocked = E.fill_blocked_reason(pdf)
+                self.custom = E.custom_scripts(pdf)
+            except Exception:  # file danneggiato: nessun modulo utilizzabile
+                self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
+        self.version = doc.version
+        self.by_page = {}
+        for f in self.fields:
+            self.by_page.setdefault(f.page, []).append(f)
+
+    @property
+    def has_form(self) -> bool:
+        return bool(self.fields) or self.xfa != "none"
+
+    def fillable(self) -> list[E.FieldInfo]:
+        return [f for f in self.fields if f.kind in E.FILLABLE + (E.BUTTON,) and not f.readonly
+                and not f.hidden and f.visibility != "print"]
+
+    def required_empty(self, passwords: dict[str, str]) -> list[E.FieldInfo]:
+        out, seen = [], set()
+        groups: dict[str, list[E.FieldInfo]] = {}
+        for f in self.fields:
+            groups.setdefault(f.name, []).append(f)
+        for f in self.fields:
+            if not f.required or f.kind not in E.FILLABLE or f.name in seen:
+                continue
+            seen.add(f.name)
+            if f.password and passwords.get(f.name):
+                continue
+            if all(E.export_value(g) in ("", E.OFF, [], None) for g in groups[f.name]):
+                out.append(f)
+        return out
+
+    def field_at(self, page: int, point: pymupdf.Point) -> E.FieldInfo | None:
+        hit = None
+        for f in self.by_page.get(page, []):
+            if f.hidden or f.visibility == "print":
+                continue
+            if pymupdf.Rect(f.rect).contains(point):
+                hit = f
+        return hit
+
+    def find(self, page: int, xref: int) -> E.FieldInfo | None:
+        return next((f for f in self.by_page.get(page, []) if f.xref == xref), None)
+
+
+# ====================================================================== editor
+class _TabMixin:
+    """Tab e Maiusc+Tab vanno al campo successivo/precedente (Qt li intercetta prima di keyPressEvent)."""
+
+    def event(self, ev):
+        if ev.type() == QEvent.Type.KeyPress and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            if self.owner.handle_editor_key(ev):
+                return True
+        return super().event(ev)
+
+
+class _FormatValidator(QValidator):
+    """Filtro di battitura del formato del campo (es. solo cifre nei numeri)."""
+
+    def __init__(self, fmt: fm.Format, parent=None):
+        super().__init__(parent)
+        self.fmt = fmt
+
+    def validate(self, text, pos):
+        filtered = fm.filter_input(self.fmt, text)
+        if filtered == text:
+            return QValidator.State.Acceptable, text, pos
+        return QValidator.State.Invalid, text, pos
+
+    def fixup(self, text):
+        return fm.filter_input(self.fmt, text)
+
+
+class _LineEdit(_TabMixin, QLineEdit):
+    def __init__(self, owner: "FormFiller", parent):
+        super().__init__(parent)
+        self.owner = owner
+
+    def keyPressEvent(self, ev):
+        if self.owner.handle_editor_key(ev):
+            return
+        super().keyPressEvent(ev)
+
+    def insertFromMimeData(self, source):  # pragma: no cover - QLineEdit non lo usa
+        super().insertFromMimeData(source)
+
+    def focusOutEvent(self, ev):
+        super().focusOutEvent(ev)
+        self.owner.editor_focus_out(self)
+
+
+class _TextEdit(_TabMixin, QPlainTextEdit):
+    def __init__(self, owner: "FormFiller", parent):
+        super().__init__(parent)
+        self.owner = owner
+        self.maxlen = 0
+        self.setTabChangesFocus(True)
+        self.textChanged.connect(self._limit)
+
+    def _limit(self):
+        if self.maxlen and len(self.toPlainText()) > self.maxlen:
+            cur = self.textCursor()
+            self.blockSignals(True)
+            self.setPlainText(self.toPlainText()[: self.maxlen])
+            self.blockSignals(False)
+            cur.movePosition(cur.MoveOperation.End)
+            self.setTextCursor(cur)
+
+    def keyPressEvent(self, ev):
+        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not ev.modifiers():
+            super().keyPressEvent(ev)
+            return
+        if self.owner.handle_editor_key(ev):
+            return
+        super().keyPressEvent(ev)
+
+    def focusOutEvent(self, ev):
+        super().focusOutEvent(ev)
+        self.owner.editor_focus_out(self)
+
+
+class _KeyCatcher(_TabMixin, QWidget):
+    """Riceve la tastiera per caselle, opzioni e pulsanti (nessun testo da modificare)."""
+
+    def __init__(self, owner: "FormFiller", parent):
+        super().__init__(parent)
+        self.owner = owner
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def keyPressEvent(self, ev):
+        if self.owner.handle_editor_key(ev):
+            return
+        super().keyPressEvent(ev)
+
+    def mousePressEvent(self, ev):
+        self.owner.activate_click()
+
+    def paintEvent(self, ev):
+        pass
+
+
+class _Combo(_TabMixin, QComboBox):
+    def __init__(self, owner: "FormFiller", parent):
+        super().__init__(parent)
+        self.owner = owner
+
+    def keyPressEvent(self, ev):
+        if ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab, Qt.Key.Key_Escape):
+            if self.owner.handle_editor_key(ev):
+                return
+        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.owner.handle_editor_key(ev):
+            return
+        super().keyPressEvent(ev)
+
+    def focusOutEvent(self, ev):
+        super().focusOutEvent(ev)
+        if not self.view().isVisible():
+            self.owner.editor_focus_out(self)
+
+
+class _List(_TabMixin, QListWidget):
+    def __init__(self, owner: "FormFiller", parent):
+        super().__init__(parent)
+        self.owner = owner
+
+    def keyPressEvent(self, ev):
+        if ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab, Qt.Key.Key_Escape, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self.owner.handle_editor_key(ev):
+                return
+        super().keyPressEvent(ev)
+
+    def focusOutEvent(self, ev):
+        super().focusOutEvent(ev)
+        self.owner.editor_focus_out(self)
+
+
+# ====================================================================== barra del modulo
+class FormBar(QFrame):
+    """Barra informativa non modale in cima alla vista."""
+
+    def __init__(self, filler: "FormFiller"):
+        super().__init__(filler.view)
+        self.filler = filler
+        self.setObjectName("formsBar")
+        self.setAutoFillBackground(True)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 4, 6, 4)
+        lay.setSpacing(6)
+        self.icon = QLabel(self)
+        lay.addWidget(self.icon)
+        self.label = QLabel(self)
+        self.label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        lay.addWidget(self.label, 1)
+        self.buttons: dict[str, QToolButton] = {}
+        for key, text, icon_name, slot in (
+            ("highlight", _("Evidenzia campi"), "highlighter", filler.toggle_highlight),
+            ("next", _("Campo obbligatorio successivo"), "arrow-down-to-line", filler.next_required),
+            ("reset", _("Reimposta"), "rotate-ccw", filler.reset_requested),
+            ("data", _("Importa/Esporta dati"), "arrow-down-up", filler.data_requested),
+            ("design", _("Modifica modulo"), "square-pen", filler.design_requested),
+        ):
+            b = QToolButton(self)
+            b.setText(text)
+            b.setToolTip(text)
+            b.setAutoRaise(True)
+            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            bind_icon(b, icon_name)
+            b.clicked.connect(lambda _c=False, s=slot: s())
+            lay.addWidget(b)
+            self.buttons[key] = b
+        self.buttons["highlight"].setCheckable(True)
+        self.close_button = QToolButton(self)
+        self.close_button.setAutoRaise(True)
+        self.close_button.setToolTip(_("Chiudi"))
+        bind_icon(self.close_button, "x")
+        self.close_button.clicked.connect(filler.close_bar)
+        lay.addWidget(self.close_button)
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        self.setStyleSheet(
+            f"QFrame#formsBar {{ background: {theme.hex_color('accent_soft')}; "
+            f"border-bottom: 1px solid {theme.hex_color('border')}; }}"
+            f"QFrame#formsBar QLabel {{ color: {theme.hex_color('text')}; }}")
+
+
+# ====================================================================== controllore
+class FormFiller(QObject):
+    """Compilazione dei campi su una vista."""
+
+    changed = Signal()            # campi/valori cambiati (per pannelli e barra)
+    designRequested = Signal()
+    resetRequested = Signal()
+    dataRequested = Signal()
+
+    def __init__(self, ctx: "Context", view: "DocumentView", module):
+        super().__init__(view)
+        self.ctx = ctx
+        self.view = view
+        self.module = module
+        self.state = FormState(view)
+        self.passwords: dict[str, str] = {}
+        self.active: E.FieldInfo | None = None
+        self.editor: QWidget | None = None
+        self.original: Any = None
+        self._committing = False
+        self._closing = False
+        self.design = False             # modalità modifica modulo: niente compilazione
+        self.bar_closed = False
+        self.highlight = bool(ctx.settings().value(SETTING_HIGHLIGHT, False, type=bool))
+        self._next_required_index = -1
+        self._error_label: QLabel | None = None
+        self._custom_warned = False
+        self.bar = FormBar(self)
+        self.bar.hide()
+        self._bar_height = 0
+        view.viewport().installEventFilter(self)
+        view.installEventFilter(self)
+        view.overlays.append(self.paint_overlay)
+        view.verticalScrollBar().valueChanged.connect(self.reposition)
+        view.horizontalScrollBar().valueChanged.connect(self.reposition)
+        view.layoutChanged.connect(self.reposition)
+        view.contentChanged.connect(self._on_content_changed)
+        theme.on_change(self._on_theme)
+        self.state.refresh(force=True)
+        self.update_bar()
+
+    # ------------------------------------------------------------------ utilità
+    @property
+    def document(self):
+        return self.view.document
+
+    def fill_enabled(self) -> bool:
+        if self.design or self.state.blocked:
+            return False
+        return isinstance(self.view.tool, (SelectTextTool, HandTool))
+
+    def _on_theme(self) -> None:
+        try:
+            self.bar.apply_theme()
+            self.view.viewport().update()
+        except RuntimeError:
+            pass
+
+    def _on_content_changed(self) -> None:
+        self.state.refresh()
+        if self.active is not None and not self._committing:
+            again = self.state.find(self.active.page, self.active.xref)
+            if again is None:
+                self.close_editor(commit=False)
+            else:
+                self.active = again
+                if not self.editor or not self.editor.hasFocus():
+                    self._load_editor_value()
+        self.update_bar()
+        self.changed.emit()
+
+    def dispose(self) -> None:
+        self.close_editor(commit=False)
+        try:
+            self.view.overlays.remove(self.paint_overlay)
+        except ValueError:
+            pass
+
+    # ------------------------------------------------------------------ barra
+    def update_bar(self) -> None:
+        st = self.state
+        st.refresh()
+        if not st.has_form or self.bar_closed:
+            self._set_bar_visible(False)
+            return
+        self.bar.icon.setPixmap(bind_pixmap("triangle-alert" if (st.xfa == "dynamic" or st.blocked) else "text-cursor-input"))
+        n = len({f.name for f in st.fields})
+        req = len(st.required_empty(self.passwords))
+        if st.xfa == "dynamic":
+            text = _("Modulo XML dinamico: Foliant non può mostrarne il contenuto né compilarlo. "
+                     "I dati XML si possono esportare e il file viene salvato senza alterarli.")
+        elif st.blocked:
+            text = _("Modulo non compilabile: {reason}").format(reason=st.blocked)
+        else:
+            parts = [tr_count(n, _("{n} campo"), _("{n} campi"))]
+            parts.append(tr_count(req, _("{n} obbligatorio da compilare"), _("{n} obbligatori da compilare"))
+                         if req else _("nessun campo obbligatorio da compilare"))
+            if st.xfa == "hybrid":
+                parts.append(_("modulo XML statico: i dati XML vengono aggiornati"))
+            if st.custom:
+                parts.append(_("script personalizzati non eseguiti: calcoli non aggiornati"))
+            text = ", ".join(parts)
+        self.bar.label.setText(text)
+        self.bar.label.setToolTip("\n".join(f"{n}: {ev}" for n, ev in st.custom) if st.custom else "")
+        fill = st.xfa != "dynamic" and not st.blocked
+        self.bar.buttons["highlight"].setVisible(fill)
+        self.bar.buttons["highlight"].setChecked(self.highlight)
+        self.bar.buttons["next"].setVisible(fill)
+        self.bar.buttons["next"].setEnabled(req > 0)
+        self.bar.buttons["reset"].setVisible(fill)
+        self.bar.buttons["design"].setVisible(st.xfa != "dynamic" and not self.design)
+        self._set_bar_visible(True)
+
+    def _set_bar_visible(self, visible: bool) -> None:
+        h = self.bar.sizeHint().height() if visible else 0
+        if visible:
+            self.bar.show()
+        else:
+            self.bar.hide()
+        if h != self._bar_height:
+            self._bar_height = h
+            self.view.setViewportMargins(0, h, 0, 0)
+        self._place_bar()
+
+    def _place_bar(self) -> None:
+        if self.bar.isVisible():
+            vp = self.view.viewport().geometry()
+            self.bar.setGeometry(vp.x(), vp.y() - self._bar_height, vp.width(), self._bar_height)
+
+    def close_bar(self) -> None:
+        self.bar_closed = True
+        self._set_bar_visible(False)
+
+    def text_of_bar(self) -> str:
+        return self.bar.label.text()
+
+    # ------------------------------------------------------------------ comandi della barra
+    def toggle_highlight(self, on: bool | None = None) -> None:
+        self.highlight = (not self.highlight) if on is None else bool(on)
+        self.ctx.settings().setValue(SETTING_HIGHLIGHT, self.highlight)
+        self.bar.buttons["highlight"].setChecked(self.highlight)
+        self.module.highlight_changed(self.highlight)
+        self.view.viewport().update()
+
+    def set_highlight(self, on: bool) -> None:
+        self.highlight = on
+        self.bar.buttons["highlight"].setChecked(on)
+        self.view.viewport().update()
+
+    def next_required(self) -> E.FieldInfo | None:
+        self.commit_active()
+        empty = self.state.required_empty(self.passwords)
+        if not empty:
+            self.ctx.status(_("Nessun campo obbligatorio da compilare."))
+            return None
+        stops = [f for f in self.navigation_stops() if f.name in {e.name for e in empty}]
+        if not stops:
+            stops = empty
+        names = []
+        unique = []
+        for f in stops:
+            if f.name not in names:
+                names.append(f.name)
+                unique.append(f)
+        self._next_required_index = (self._next_required_index + 1) % len(unique)
+        target = unique[self._next_required_index]
+        self.activate(target)
+        return target
+
+    def reset_requested(self) -> None:
+        self.resetRequested.emit()
+
+    def data_requested(self) -> None:
+        self.dataRequested.emit()
+
+    def design_requested(self) -> None:
+        self.designRequested.emit()
+
+    # ------------------------------------------------------------------ eventi della vista
+    def eventFilter(self, obj, ev) -> bool:
+        t = ev.type()
+        if obj is self.view:
+            if t == QEvent.Type.Resize:
+                QTimer.singleShot(0, self._place_bar)
+                QTimer.singleShot(0, self.reposition)
+            return False
+        if t == QEvent.Type.MouseButtonPress and ev.button() == Qt.MouseButton.LeftButton:
+            if not self.fill_enabled():
+                return False
+            hit = self.view.view_to_page(ev.position())
+            if hit is None:
+                self.commit_active()
+                return False
+            self.state.refresh()
+            f = self.state.field_at(hit[0], hit[1])
+            if f is None:
+                self.commit_active()
+                return False
+            if f.kind not in E.FILLABLE + (E.BUTTON, E.SIGNATURE):
+                return False
+            self.click_field(f)
+            return True
+        if t == QEvent.Type.MouseMove and not ev.buttons():
+            if self.fill_enabled():
+                hit = self.view.view_to_page(ev.position())
+                f = self.state.field_at(hit[0], hit[1]) if hit else None
+                if f is not None and f.kind in E.FILLABLE + (E.BUTTON,) and not f.readonly:
+                    cur = Qt.CursorShape.IBeamCursor if f.kind == E.TEXT else Qt.CursorShape.PointingHandCursor
+                    self.view.viewport().setCursor(cur)
+                    if f.tooltip:
+                        self.view.viewport().setToolTip(f.tooltip)
+                    return False
+                self.view.viewport().setToolTip("")
+                self.view.viewport().setCursor(self.view.tool.cursor)
+            return False
+        if t == QEvent.Type.KeyPress and obj is self.view.viewport():
+            return False
+        return False
+
+    def click_field(self, f: E.FieldInfo) -> None:
+        if f.kind == E.SIGNATURE:
+            self.commit_active()
+            self.module.signature_clicked(self.view, f)
+            return
+        if f.readonly:
+            self.commit_active()
+            self.ctx.status(_("Il campo «{n}» è in sola lettura.").format(n=f.name))
+            return
+        if f.kind in (E.CHECKBOX, E.RADIO):
+            self.activate(f)
+            self.toggle_active()
+            return
+        if f.kind == E.BUTTON:
+            self.activate(f)
+            self.press_button(f)
+            return
+        self.activate(f)
+
+    # ------------------------------------------------------------------ attivazione
+    def activate(self, f: E.FieldInfo) -> None:
+        """Porta il focus sul campo `f` e ne apre l'editor."""
+        if self.active is not None and (self.active.page, self.active.xref) == (f.page, f.xref) and self.editor:
+            self.editor.setFocus()
+            return
+        if not self.commit_active():
+            return
+        self.active = f
+        self.view.ensure_visible(f.page, f.rect)
+        self._create_editor(f)
+        self.reposition()
+        self.view.viewport().update()
+        self.changed.emit()
+
+    def _create_editor(self, f: E.FieldInfo) -> None:
+        vp = self.view.viewport()
+        ed: QWidget
+        if f.kind == E.TEXT and (f.multiline and not f.comb):
+            ed = _TextEdit(self, vp)
+            ed.maxlen = f.maxlen
+            ed.setFrameShape(QFrame.Shape.NoFrame)
+        elif f.kind == E.TEXT:
+            ed = _LineEdit(self, vp)
+            ed.setFrame(False)
+            if f.maxlen:
+                ed.setMaxLength(f.maxlen)
+            if f.password:
+                ed.setEchoMode(QLineEdit.EchoMode.Password)
+            if f.fmt.type != fm.NONE:
+                ed.setValidator(_FormatValidator(f.fmt, ed))
+            ed.setAlignment({E.ALIGN_CENTER: Qt.AlignmentFlag.AlignHCenter,
+                             E.ALIGN_RIGHT: Qt.AlignmentFlag.AlignRight}.get(f.align, Qt.AlignmentFlag.AlignLeft)
+                            | Qt.AlignmentFlag.AlignVCenter)
+            if f.fmt.type in (fm.DATE,):
+                act = ed.addAction(self.module.icon("calendar"), QLineEdit.ActionPosition.TrailingPosition)
+                act.setToolTip(_("Scegli una data"))
+                act.triggered.connect(self.open_calendar)
+        elif f.kind == E.COMBO:
+            ed = _Combo(self, vp)
+            ed.setEditable(f.editable)
+            for e_, d in zip(f.exports, f.options):
+                ed.addItem(d, e_)
+            if f.editable:
+                comp = QCompleter([*f.options], ed)
+                comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                ed.setCompleter(comp)
+            ed.activated.connect(lambda _i: self._combo_activated())
+        elif f.kind == E.LIST:
+            ed = _List(self, vp)
+            ed.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection if f.multiselect
+                                else QAbstractItemView.SelectionMode.SingleSelection)
+            for d in f.options:
+                ed.addItem(d)
+            if f.commit_on_change:
+                ed.itemSelectionChanged.connect(lambda: self.commit_active(keep=True))
+        else:
+            ed = _KeyCatcher(self, vp)
+        ed.setObjectName("formsEditor")
+        self.editor = ed
+        self._style_editor(f, ed)
+        self._load_editor_value()
+        self.original = self._editor_value()
+        ed.show()
+        ed.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _style_editor(self, f: E.FieldInfo, ed: QWidget) -> None:
+        if isinstance(ed, _KeyCatcher):
+            return
+        scale = self._scale(f)
+        size = f.fontsize or max(4.0, min(12.0, f.rect.height * 0.7)) if not f.multiline else (f.fontsize or 10)
+        font = QFont({"Times": "Serif", "Courier": "Monospace"}.get(f.font, "Sans Serif"))
+        font.setPixelSize(max(6, int(round(size * scale))))
+        ed.setFont(font)
+        r, g, b = (list(f.text_color) + [0, 0, 0])[:3]
+        bg = f.fill_color or (1, 1, 1)
+        ed.setStyleSheet(
+            f"#formsEditor {{ color: rgb({int(r * 255)},{int(g * 255)},{int(b * 255)}); "
+            f"background: rgb({int(bg[0] * 255)},{int(bg[1] * 255)},{int(bg[2] * 255)}); "
+            f"border: 2px solid {theme.hex_color('accent')}; padding: 0px; }}")
+
+    def _scale(self, f: E.FieldInfo) -> float:
+        r = self.view.page_to_view(f.page, f.rect)
+        return r.height() / max(1.0, f.rect.height) if f.rect.height else 1.0
+
+    def reposition(self, *_args) -> None:
+        if self.active is None or self.editor is None:
+            return
+        try:
+            r = self.view.page_to_view(self.active.page, self.active.rect)
+        except (IndexError, RuntimeError):
+            return
+        if isinstance(self.editor, _List):
+            r = r.adjusted(0, 0, 0, max(0.0, 60 - r.height()))
+        self.editor.setGeometry(r.toAlignedRect())
+
+    def _load_editor_value(self) -> None:
+        f, ed = self.active, self.editor
+        if f is None or ed is None:
+            return
+        if isinstance(ed, _LineEdit):
+            value = self.passwords.get(f.name, "") if f.password else (f.value or "")
+            if f.fmt.type != fm.NONE and value:
+                shown = fm.display(f.fmt, value)[0] if f.fmt.type in (fm.DATE, fm.TIME, fm.SPECIAL) else value
+                value = shown if f.fmt.type != fm.SPECIAL else value
+            ed.setText(value)
+        elif isinstance(ed, _TextEdit):
+            ed.setPlainText((f.value or "").replace("\r", "\n"))
+        elif isinstance(ed, _Combo):
+            idx = ed.findData(f.value)
+            if idx >= 0:
+                ed.setCurrentIndex(idx)
+            elif f.editable:
+                ed.setEditText(f.value or "")
+            else:
+                ed.setCurrentIndex(-1)
+                if f.value:
+                    ed.setPlaceholderText(f.value)
+        elif isinstance(ed, _List):
+            values = f.value if isinstance(f.value, list) else ([f.value] if f.value else [])
+            ed.blockSignals(True)
+            for i, e_ in enumerate(f.exports):
+                ed.item(i).setSelected(e_ in values)
+            ed.blockSignals(False)
+
+    def _editor_value(self) -> Any:
+        f, ed = self.active, self.editor
+        if isinstance(ed, _LineEdit):
+            return ed.text()
+        if isinstance(ed, _TextEdit):
+            return ed.toPlainText()
+        if isinstance(ed, _Combo):
+            text = ed.currentText()
+            idx = ed.findText(text)
+            if idx >= 0:
+                return ed.itemData(idx)
+            return text if f and f.editable else (f.value if f else "")
+        if isinstance(ed, _List):
+            sel = sorted(ed.row(i) for i in ed.selectedItems())
+            vals = [f.exports[i] for i in sel]
+            return vals if f.multiselect else (vals[0] if vals else "")
+        return None
+
+    # ------------------------------------------------------------------ conferma
+    def commit_active(self, keep: bool = False) -> bool:
+        """Conferma il valore dell'editor. False se il valore non è valido (il focus resta)."""
+        f, ed = self.active, self.editor
+        if f is None or ed is None or self._committing:
+            return True
+        value = self._editor_value()
+        ok = True
+        if f.kind in (E.TEXT, E.COMBO, E.LIST) and value != self.original:
+            ok = self.apply_value(f, value)
+        if ok and not keep:
+            self.close_editor(commit=False)
+        elif ok:
+            self.original = self._editor_value()
+        return ok
+
+    def apply_value(self, f: E.FieldInfo, value: Any) -> bool:
+        """Valida, memorizza e ricalcola. Restituisce False (con messaggio) se non valido."""
+        if f.kind == E.TEXT:
+            try:
+                stored = E.normalize_input(f, value)
+            except E.FormError as e:
+                self.show_error(f, str(e))
+                self._restore_original()
+                return False
+            err = E.validate(f, stored)
+            if err and not (not str(stored).strip() and f.required):
+                self.show_error(f, err)
+                self._restore_original()
+                return False
+            if f.password:
+                self.passwords[f.name] = stored
+                self.update_bar()
+                return True
+            value = stored
+        self._committing = True
+        try:
+            with self.document.change(_("Compila «{n}»").format(n=f.name)) as pdf:
+                E.prepare_for_edit(pdf)
+                E.set_value(pdf, f.page, f.xref, value)
+                E.recalculate(pdf)
+                if E.xfa_status(pdf) == "hybrid":
+                    E.sync_xfa_from_fields(pdf)
+        except E.FormError as e:
+            self.show_error(f, str(e))
+            return False
+        except Exception as e:  # mai chiudere l'applicazione per un campo
+            self.show_error(f, _("Impossibile memorizzare il valore: {e}").format(e=e))
+            return False
+        finally:
+            self._committing = False
+        self.state.refresh()
+        if self.active is not None:
+            self.active = self.state.find(self.active.page, self.active.xref) or self.active
+        self.update_bar()
+        self.changed.emit()
+        return True
+
+    def _restore_original(self) -> None:
+        ed = self.editor
+        if isinstance(ed, _LineEdit):
+            ed.setText(self.original or "")
+            ed.selectAll()
+        elif isinstance(ed, _TextEdit):
+            ed.setPlainText(self.original or "")
+
+    def cancel_active(self) -> None:
+        self._restore_original()
+        self.close_editor(commit=False)
+
+    def close_editor(self, commit: bool = True) -> None:
+        if commit and not self.commit_active():
+            return
+        ed, self.editor = self.editor, None
+        self.active = None
+        if ed is not None:
+            self._closing = True
+            try:
+                ed.hide()
+                ed.deleteLater()
+            finally:
+                self._closing = False
+            self.view.setFocus()
+        self.view.viewport().update()
+        self.changed.emit()
+
+    def editor_focus_out(self, ed: QWidget) -> None:
+        if self._closing or self._committing or ed is not self.editor:
+            return
+        # il focus è andato altrove (clic fuori dal campo, altra finestra): conferma
+        QTimer.singleShot(0, lambda: self._focus_out_commit(ed))
+
+    def _focus_out_commit(self, ed) -> None:
+        if ed is not self.editor or self.editor is None:
+            return
+        from PySide6.QtWidgets import QApplication
+        w = QApplication.focusWidget()
+        if w is not None and (w is ed or ed.isAncestorOf(w) or isinstance(w, QCalendarWidget)):
+            return
+        if isinstance(w, QWidget) and w.window() is not ed.window():
+            return  # popup del selettore o altra finestra
+        self.commit_active()
+
+    def show_error(self, f: E.FieldInfo, message: str) -> None:
+        """Messaggio non modale vicino al campo (e nella barra di stato)."""
+        self.ctx.status(message, 8000)
+        if self._error_label is None:
+            self._error_label = QLabel(self.view.viewport())
+            self._error_label.setObjectName("formsError")
+            self._error_label.setWordWrap(True)
+        lab = self._error_label
+        lab.setStyleSheet(f"#formsError {{ background: {theme.hex_color('danger')}; color: white; "
+                          "padding: 4px 8px; border-radius: 4px; }")
+        lab.setText(message)
+        lab.adjustSize()
+        r = self.view.page_to_view(f.page, f.rect)
+        lab.move(int(r.left()), int(r.bottom()) + 4)
+        lab.show()
+        lab.raise_()
+        self.last_error = message
+        QTimer.singleShot(5000, lab.hide)
+
+    last_error: str | None = None
+
+    # ------------------------------------------------------------------ tastiera
+    def handle_editor_key(self, ev) -> bool:
+        key = ev.key()
+        mods = ev.modifiers()
+        f = self.active
+        if f is None:
+            return False
+        if key == Qt.Key.Key_Escape:
+            self.cancel_active()
+            return True
+        if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            back = key == Qt.Key.Key_Backtab or bool(mods & Qt.KeyboardModifier.ShiftModifier)
+            self.focus_next(back)
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if f.kind == E.BUTTON:
+                self.press_button(f)
+                return True
+            if f.kind in (E.TEXT, E.COMBO, E.LIST):
+                self.commit_active(keep=True)
+                return True
+        if f.kind in (E.CHECKBOX, E.RADIO, E.BUTTON) and key == Qt.Key.Key_Space:
+            if f.kind == E.BUTTON:
+                self.press_button(f)
+            else:
+                self.toggle_active()
+            return True
+        if f.kind == E.RADIO and key in (Qt.Key.Key_Down, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Left):
+            self.move_in_group(1 if key in (Qt.Key.Key_Down, Qt.Key.Key_Right) else -1)
+            return True
+        if (f.kind == E.TEXT and f.fmt.type == fm.DATE and key == Qt.Key.Key_Down
+                and mods & Qt.KeyboardModifier.AltModifier):
+            self.open_calendar()
+            return True
+        return False
+
+    def navigation_stops(self) -> list[E.FieldInfo]:
+        """Tappe di Tab nell'ordine del documento (salta nascosti e sola lettura)."""
+        stops: list[E.FieldInfo] = []
+        with ENGINE_LOCK:
+            pdf = self.document.pdf
+            pages = sorted(self.state.by_page)
+            for p in pages:
+                for f in E.navigation_order(pdf, p):
+                    if f.kind in E.FILLABLE + (E.BUTTON,) and not f.readonly and not f.hidden \
+                            and f.visibility != "print":
+                        stops.append(f)
+        return stops
+
+    def focus_next(self, back: bool = False) -> E.FieldInfo | None:
+        current = self.active
+        if not self.commit_active():
+            return None
+        stops = self.navigation_stops()
+        if not stops:
+            return None
+        idx = -1
+        if current is not None:
+            idx = next((i for i, s in enumerate(stops) if (s.page, s.xref) == (current.page, current.xref)), -1)
+        nxt = stops[(idx + (-1 if back else 1)) % len(stops)] if idx >= 0 else stops[-1 if back else 0]
+        self.activate(nxt)
+        return nxt
+
+    def toggle_active(self) -> None:
+        f = self.active
+        if f is None or f.readonly:
+            return
+        try:
+            with self.document.change(_("Compila «{n}»").format(n=f.name)) as pdf:
+                E.prepare_for_edit(pdf)
+                E.toggle(pdf, f.page, f.xref)
+                E.recalculate(pdf)
+                if E.xfa_status(pdf) == "hybrid":
+                    E.sync_xfa_from_fields(pdf)
+        except E.FormError as e:
+            self.show_error(f, str(e))
+            return
+        self.state.refresh()
+        self.active = self.state.find(f.page, f.xref) or f
+        self.update_bar()
+        self.view.viewport().update()
+        self.changed.emit()
+
+    def move_in_group(self, step: int) -> None:
+        f = self.active
+        with ENGINE_LOCK:
+            sib = E.radio_siblings(self.document.pdf, f.page, f.xref)
+        if len(sib) < 2:
+            return
+        i = sib.index((f.page, f.xref)) if (f.page, f.xref) in sib else 0
+        page, xref = sib[(i + step) % len(sib)]
+        target = self.state.find(page, xref)
+        if target is None:
+            return
+        self.activate(target)
+        if target.value != target.export:
+            self.toggle_active()
+
+    def activate_click(self) -> None:
+        if self.active and self.active.kind in (E.CHECKBOX, E.RADIO):
+            self.toggle_active()
+        elif self.active and self.active.kind == E.BUTTON:
+            self.press_button(self.active)
+
+    def _combo_activated(self) -> None:
+        f = self.active
+        if f is not None and f.commit_on_change:
+            self.commit_active(keep=True)
+
+    # ------------------------------------------------------------------ pulsanti
+    def press_button(self, f: E.FieldInfo) -> None:
+        self.module.run_button(self, f)
+
+    # ------------------------------------------------------------------ calendario
+    def open_calendar(self) -> None:
+        f, ed = self.active, self.editor
+        if f is None or not isinstance(ed, QLineEdit):
+            return
+        cal = QCalendarWidget()
+        d = fm.parse_date(ed.text(), f.fmt.pattern)
+        if d:
+            cal.setSelectedDate(QDate(d.year, d.month, d.day))
+        menu = QMenu(ed)
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(cal)
+        menu.addAction(wa)
+
+        def chosen(qd: QDate):
+            from datetime import date
+            ed.setText(fm.format_date(date(qd.year(), qd.month(), qd.day()), f.fmt.pattern))
+            menu.close()
+            self.commit_active(keep=True)
+
+        cal.clicked.connect(chosen)
+        cal.activated.connect(chosen)
+        self.calendar = cal
+        self.module.exec_popup(menu, ed.mapToGlobal(ed.rect().bottomLeft()))
+
+    # ------------------------------------------------------------------ disegno
+    def paint_overlay(self, view, p: QPainter, page: int) -> None:
+        self.state.refresh()
+        fields = self.state.by_page.get(page, [])
+        if not fields:
+            return
+        if self.design:
+            self.module.paint_design(view, p, page, fields)
+            return
+        if self.highlight and not self.state.blocked:
+            hl = QColor(theme.color("accent"))
+            hl.setAlpha(46)
+            req = QColor(theme.color("danger"))
+            for f in fields:
+                if f.kind not in E.FILLABLE + (E.BUTTON,) or f.readonly or f.hidden or f.visibility == "print":
+                    continue
+                r = QRectF(f.rect.x0, f.rect.y0, f.rect.width, f.rect.height)
+                p.fillRect(r, hl)
+                if f.required:
+                    p.setPen(QPen(req, 1.2))
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.drawRect(r)
+        a = self.active
+        if a is not None and a.page == page and a.kind in (E.CHECKBOX, E.RADIO, E.BUTTON):
+            pen = QPen(theme.color("accent"), 1.6)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(QRectF(a.rect.x0 - 1.5, a.rect.y0 - 1.5, a.rect.width + 3, a.rect.height + 3))
+
+
+def bind_pixmap(name: str):
+    from foliant.api import icon
+    return icon(name).pixmap(18, 18)
