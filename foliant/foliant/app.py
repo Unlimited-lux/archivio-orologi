@@ -13,6 +13,18 @@ from .core import engine
 from .i18n import detect_language, set_language
 
 
+def install_qt_translations(app: QApplication) -> None:
+    """Testi standard di Qt (Sì/No, Chiudi, Annulla, nomi dei tasti) nella lingua dell'interfaccia."""
+    from PySide6.QtCore import QLibraryInfo, QTranslator
+
+    from .i18n import language
+    folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+    for name in ("qtbase", "qt"):
+        tr = QTranslator(app)
+        if tr.load(f"{name}_{language()}", folder):
+            app.installTranslator(tr)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
@@ -23,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv)
     settings = QSettings()
     set_language(settings.value("language") or detect_language())
+    install_qt_translations(app)
 
     from .ui import theme
     from .ui.main_window import MainWindow

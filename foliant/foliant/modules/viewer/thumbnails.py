@@ -84,9 +84,17 @@ class ThumbnailDelegate(QStyledItemDelegate):
         return QRectF(x, y, iw, ih)
 
     def paint(self, painter: QPainter, option, index) -> None:
+        painter.save()
+        try:
+            self._paint(painter, option, index)
+        except Exception:
+            self.panel.failed.add(index.row())   # nessuna eccezione verso Qt a ogni disegno
+        finally:
+            painter.restore()
+
+    def _paint(self, painter: QPainter, option, index) -> None:
         row = index.row()
         panel = self.panel
-        painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
@@ -130,7 +138,6 @@ class ThumbnailDelegate(QStyledItemDelegate):
         f.setBold(current)
         painter.setFont(f)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, panel.label(row))
-        painter.restore()
         if img is None and row not in panel.failed:
             panel.request(row)
 
@@ -335,8 +342,13 @@ class ThumbnailPanel(QWidget):
         if g is None and self.view is not None and not self.view.document.closed:
             with try_engine() as ok:
                 if ok and row < self.view.document.pdf.page_count:
-                    pg = page_geometry(self.view.document.pdf[row], 0)
-                    g = (pg.width, pg.height, pg.matrix)
+                    try:
+                        pg = page_geometry(self.view.document.pdf[row], 0)
+                        g = (pg.width, pg.height, pg.matrix)
+                    except Exception:
+                        # pagina non leggibile: formato di ripiego e segnaposto
+                        g = (595.0, 842.0, pymupdf.Matrix(1, 0, 0, 1, 0, 0))
+                        self.failed.add(row)
                     self._geom[row] = g
         return g
 

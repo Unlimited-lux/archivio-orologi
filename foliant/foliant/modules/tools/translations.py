@@ -759,4 +759,9 @@ EN: dict[str, str] = {
     "Solo questa pagina": "This page only",
     "durata {s} s": "duration {s} s",
     "Riquadro bianco dietro il numero (scansioni)": "White box behind the number (scans)",
+    "Chiedi ogni volta": "Ask every time",
+    "File già esistente": "File already exists",
+    "«{f}» esiste già nella destinazione.": "“{f}” already exists at the destination.",
+    "Applica a tutti i conflitti": "Apply to all conflicts",
+    "Rinomina": "Rename",
 }

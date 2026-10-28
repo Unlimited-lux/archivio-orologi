@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from ..i18n import _
+from ..i18n import _, language
 
 
 def author_name(settings: QSettings) -> str:
@@ -76,35 +76,67 @@ class PreferencesDialog(QDialog):
         s.setValue("view/zoom", self.zoom.currentData())
 
 
-def collect_shortcuts(window: QWidget) -> list[tuple[str, str]]:
-    """(azione, scorciatoia) di tutte le azioni con scorciatoia nella finestra."""
-    rows: dict[tuple[str, str], None] = {}
+# Nomi dei tasti come sulla tastiera italiana (UX-18).
+_KEY_NAMES_IT = {
+    "Shift": "Maiusc", "Return": "Invio", "Enter": "Invio", "Del": "Canc", "Ins": "Ins",
+    "Home": "Inizio", "End": "Fine", "PgUp": "Pag su", "PgDown": "Pag giù", "Left": "Sinistra",
+    "Right": "Destra", "Up": "Su", "Down": "Giù", "Space": "Spazio", "Backspace": "Backspace",
+    "Print": "Stampa",
+}
+
+
+def key_text(seq: QKeySequence) -> str:
+    """Scorciatoia leggibile nella lingua dell'interfaccia (in italiano: Maiusc, Invio, Pag su…)."""
+    text = seq.toString(QKeySequence.SequenceFormat.PortableText)
+    if language() != "it":
+        return seq.toString(QKeySequence.SequenceFormat.NativeText)
+    out = []
+    for chord in text.split(", "):
+        keys = chord.split("+")
+        if chord.endswith("++"):                       # il tasto «+» stesso
+            keys = chord[:-2].split("+") + ["+"]
+        out.append("+".join(_KEY_NAMES_IT.get(k, k) for k in keys if k != ""))
+    return ", ".join(out)
+
+
+def collect_shortcuts(window: QWidget) -> list[tuple[str, str, str]]:
+    """(azione, scorciatoia, modalità) di tutte le scorciatoie, comprese quelle valide solo in una modalità."""
+    rows: dict[tuple[str, str, str], None] = {}
+    scoped = {id(a): (seqs, m) for a, seqs, m in getattr(window, "_mode_shortcuts", [])}
+    modes = getattr(window, "modes", {})
     for act in window.findChildren(QAction):
         text = act.text().replace("&", "").strip()
-        for seq in act.shortcuts():
-            if seq.isEmpty() or not text:
-                continue
-            rows[(text, seq.toString(QKeySequence.SequenceFormat.NativeText))] = None
-    return sorted(rows, key=lambda r: r[0].lower())
+        if not text:
+            continue
+        if id(act) in scoped:
+            seqs, mode_id = scoped[id(act)]
+            mode = modes.get(mode_id)
+            where = mode.title if mode is not None else mode_id
+        else:
+            seqs, where = act.shortcuts(), _("Tutte")
+        for seq in seqs:
+            if not seq.isEmpty():
+                rows[(text, key_text(seq), where)] = None
+    return sorted(rows, key=lambda r: (r[2] != _("Tutte"), r[2].lower(), r[0].lower()))
 
 
 class ShortcutsDialog(QDialog):
     def __init__(self, window: QWidget):
         super().__init__(window)
         self.setWindowTitle(_("Scorciatoie da tastiera"))
-        self.resize(560, 620)
+        self.resize(700, 620)
         self.filter = QLineEdit(self)
         self.filter.setPlaceholderText(_("Cerca un comando o un tasto…"))
         self.table = QTableWidget(self)
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels([_("Comando"), _("Scorciatoia")])
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels([_("Comando"), _("Scorciatoia"), _("Modalità")])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().hide()
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.rows = collect_shortcuts(window) + [
-            (_("Pagina successiva / precedente"), "N / P"),
-            (_("Scorri di una schermata"), _("Spazio / Maiusc+Spazio")),
-            (_("Torna a Seleziona testo"), "Esc"),
+            (_("Pagina successiva / precedente"), "N / P", _("Tutte")),
+            (_("Scorri di una schermata"), _("Spazio / Maiusc+Spazio"), _("Tutte")),
+            (_("Torna a Seleziona testo"), "Esc", _("Tutte")),
         ]
         self.filter.textChanged.connect(self._fill)
         lay = QVBoxLayout(self)
@@ -114,11 +146,11 @@ class ShortcutsDialog(QDialog):
 
     def _fill(self, text: str) -> None:
         t = text.lower().strip()
-        rows = [r for r in self.rows if not t or t in r[0].lower() or t in r[1].lower()]
+        rows = [r for r in self.rows if not t or any(t in c.lower() for c in r)]
         self.table.setRowCount(len(rows))
-        for i, (name, keys) in enumerate(rows):
-            self.table.setItem(i, 0, QTableWidgetItem(name))
-            self.table.setItem(i, 1, QTableWidgetItem(keys))
+        for i, row in enumerate(rows):
+            for col, value in enumerate(row):
+                self.table.setItem(i, col, QTableWidgetItem(value))
 
 
 HELP_HTML = """

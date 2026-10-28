@@ -274,3 +274,28 @@ def test_encrypted_reload_keeps_password(viewer_window, ctl, tmp_path, qtbot, mo
     assert not asked
     assert "Z pagina 1" in _text(viewer_window.current_view(), 0)
     assert view is not viewer_window.current_view()
+
+
+def test_changed_notice_visible_outside_document_view(viewer_window, tmp_path, qtbot):
+    from foliant.modules.viewer import reload as R
+    window = viewer_window
+    ctl = window.ctx.viewer_parts.get("reload") or R.install(window.ctx)
+    path = tmp_path / "conflitto.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "originale")
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    with view.document.change("Modifica") as pdf:
+        pdf[0].insert_text((72, 200), "modifica locale")
+    ctl._show_bar(view, R.BAR_CHANGED)
+    # un'altra modalità copre la vista: l'avviso resta nella barra di stato e sulla scheda
+    from PySide6.QtWidgets import QLabel
+    window.ctx.set_central_widget(QLabel("altra modalità"))
+    assert ctl.notice.isVisible()
+    assert "altra applicazione" in ctl.notice.text()
+    assert not window.tabs.tabIcon(window.tabs.indexOf(view)).isNull()
+    ctl.notice.click()
+    assert window.ctx.central_widget() is None
+    ctl.ignore(view)
+    assert not ctl.notice.isVisible()
+    assert window.tabs.tabIcon(window.tabs.indexOf(view)).isNull()

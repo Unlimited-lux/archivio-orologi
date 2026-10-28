@@ -51,6 +51,25 @@ def _ocr_function() -> Callable | None:
     return ocr_pdf_bytes
 
 
+def run_ocr(fn: Callable, data: bytes, languages: list[str], redo: bool = False) -> bytes:
+    """Chiama `ocr_pdf_bytes` del modulo OCR in modalità «ricercabile» (aspetto invariato).
+
+    `redo`: rifà anche il livello OCR delle pagine che hanno già testo invisibile."""
+    import inspect
+    try:
+        accepts_options = "options" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        accepts_options = False
+    if accepts_options:
+        try:
+            from foliant.modules.ocr.engine import REPLACE, SKIP, OcrOptions
+            opts = OcrOptions(languages=list(languages), existing_text=REPLACE if redo else SKIP)
+            return fn(data, list(languages), "searchable", None, None, options=opts)
+        except ImportError:
+            pass
+    return fn(data, list(languages), "searchable", None, None)
+
+
 def _convert_function() -> Callable | None:
     try:
         from foliant.modules.convert.engine import convert_pdf
@@ -528,6 +547,7 @@ class JobSettings:
     error_policy: str = "continue"
     passwords: list[str] = field(default_factory=list)
     workers: int = 1
+    conflict_choices: dict = field(default_factory=dict)   # «chiedi ogni volta»: percorso -> scelta
 
     def to_dict(self) -> dict:
         """Impostazioni senza segreti (per giornale e rapporto)."""
@@ -916,12 +936,41 @@ def _remove_marks_page(doc: pymupdf.Document, page: pymupdf.Page, kinds: set[str
     return removed
 
 
+def _stamp():
+    """Timbri del modulo Pagine (PAG-36): stessa marcatura per le operazioni singole e in blocco."""
+    try:
+        from foliant.modules.pages import stamp
+    except Exception:
+        return None
+    return stamp
+
+
+_STAMP_KINDS = {"watermark": ("watermark",), "background": ("background",),
+                "header_footer": ("headerfooter", "numbers"), "bates": ("bates",),
+                "headerfooter_only": ("headerfooter",), "page_numbers": ("numbers",)}
+
+
+def _remove_stamps(doc: pymupdf.Document, kinds) -> int:
+    st = _stamp()
+    names = [k2 for k in kinds for k2 in _STAMP_KINDS.get(k, ())]
+    if st is None or not names:
+        return 0
+    try:
+        return st.remove_watermarks(doc, None, names)
+    except Exception:
+        return 0
+
+
+def _stamp_error(e: Exception) -> BatchError:
+    return BatchError("STM-01", str(e))
+
+
 def remove_marks(data: bytes, kinds: set[str] | list[str], check=None) -> tuple[bytes, int]:
     kinds = set(kinds)
     with ENGINE_LOCK:
         doc = _open(data)
         try:
-            n = 0
+            n = _remove_stamps(doc, kinds)
             for page in doc:
                 n += _remove_marks_page(doc, page, kinds)
             return (_save(doc) if n else data), n
@@ -995,13 +1044,29 @@ def _expand(text: str, values: dict) -> str:
 def add_watermark(data: bytes, text: str, fontsize: int = 60, opacity: int = 30, rotation: int = 45,
                   color: str = "#C00000", pages: str = "", replace: bool = True, name: str = "", check=None) -> bytes:
     text = _expand(text, {"nome": name})
+    st = _stamp()
     with ENGINE_LOCK:
         doc = _open(data)
         try:
+            selected, _oor = parse_pages(pages, doc.page_count)
+            if st is not None:
+                if replace:
+                    _remove_stamps(doc, {"watermark"})
+                    for page in doc:
+                        _remove_marks_page(doc, page, {"watermark"})
+                if selected and text.strip():
+                    if check:
+                        check()
+                    try:
+                        st.add_watermark(doc, selected, text=text, font_size=fontsize, color=_rgb(color),
+                                         opacity=max(0.01, min(1.0, opacity / 100.0)), rotation=rotation,
+                                         position="center")
+                    except Exception as e:
+                        raise _stamp_error(e) from e
+                return _save(doc)
             if replace:
                 for page in doc:
                     _remove_marks_page(doc, page, {"watermark"})
-            selected, _oor = parse_pages(pages, doc.page_count)
             for pno in selected:
                 if check:
                     check()
@@ -1009,8 +1074,6 @@ def add_watermark(data: bytes, text: str, fontsize: int = 60, opacity: int = 30,
                 before = page.get_contents()
                 r = page.rect   # pagina visualizzata (rotazione inclusa)
                 width = pymupdf.get_text_length(text, fontname="helv", fontsize=fontsize)
-                # posizioni calcolate sulla pagina visualizzata e riportate alle coordinate del motore,
-                # così la filigrana resta centrata e diritta anche sulle pagine ruotate
                 derot = page.derotation_matrix
                 center = pymupdf.Point(r.width / 2, r.height / 2) * derot
                 start = pymupdf.Point(r.width / 2 - width / 2, r.height / 2 + fontsize * 0.35) * derot
@@ -1036,9 +1099,18 @@ def add_background(data: bytes, color: str = "#FFF8E1", file: str = "", first_pa
         doc = _open(data)
         try:
             if replace:
+                _remove_stamps(doc, {"background"})
                 for page in doc:
                     _remove_marks_page(doc, page, {"background"})
             selected, _oor = parse_pages(pages, doc.page_count)
+            st = _stamp()
+            if src is None and st is not None:
+                if selected:
+                    try:
+                        st.add_background(doc, selected, color=_rgb(color))
+                    except Exception as e:
+                        raise _stamp_error(e) from e
+                return _save(doc)
             for k, pno in enumerate(selected):
                 if check:
                     check()
@@ -1090,9 +1162,12 @@ def add_header_footer(data: bytes, texts: dict[str, str], fontsize: float = 9, m
     with ENGINE_LOCK:
         doc = _open(data)
         try:
+            st = _stamp()
             if replace:
-                for page in doc:
-                    _remove_marks_page(doc, page, {kind})
+                _remove_stamps(doc, {"page_numbers" if kind == "page_numbers" else "headerfooter_only"})
+                if kind != "page_numbers":   # i vecchi numeri erano marcati come intestazioni
+                    for page in doc:
+                        _remove_marks_page(doc, page, {kind})
             n_pages = doc.page_count
             tot = total if total is not None else (first_number - 1 + (n_pages if count_skipped or not skip_first
                                                                        else n_pages - 1))
@@ -1109,14 +1184,32 @@ def add_header_footer(data: bytes, texts: dict[str, str], fontsize: float = 9, m
                 vals = dict(values or {})
                 vals.update({"pagina": number, "totale": tot,
                              "totale_coda": queue_total if queue_total is not None else tot})
+                placed: dict[str, str] = {}
                 for pos, text in texts.items():
                     if not text:
                         continue
                     where = pos
                     if mirror and (pno + 1) % 2 == 0:
                         where = pos.replace("left", "@").replace("right", "left").replace("@", "right")
-                    _place(page, _expand(text, vals), where, fontsize, margin, _rgb(color))
-                _mark_new_contents(doc, page, before, kind)
+                    placed[where] = _expand(text, vals)
+                if st is not None and placed:
+                    # marcatura comune con il modulo Pagine (PAG-36): rimovibile da entrambe le parti
+                    try:
+                        if kind == "page_numbers":
+                            for where, text in placed.items():
+                                st.add_page_numbers(doc, [pno], fmt=text, position=where, margin=margin,
+                                                    font_size=fontsize, color=_rgb(color))
+                        else:
+                            slots = {("header_" if w.startswith("top") else "footer_") + w.split("-")[1]: t
+                                     for w, t in placed.items()}
+                            st.add_header_footer(doc, [pno], margin=margin, font_size=fontsize,
+                                                 color=_rgb(color), **slots)
+                    except Exception as e:
+                        raise _stamp_error(e) from e
+                else:
+                    for where, text in placed.items():
+                        _place(page, text, where, fontsize, margin, _rgb(color))
+                    _mark_new_contents(doc, page, before, kind)
                 number += 1
             return _save(doc)
         finally:
@@ -1125,6 +1218,7 @@ def add_header_footer(data: bytes, texts: dict[str, str], fontsize: float = 9, m
 
 def add_page_numbers(data: bytes, text: str = "Pagina {pagina} di {totale}", position: str = "bottom-center",
                      fontsize: float = 10, margin_mm: float = 10.0, first_number: int = 1, **kw) -> bytes:
+    kw.setdefault("kind", "page_numbers")
     return add_header_footer(data, {position: text}, fontsize=fontsize, margin_mm=margin_mm,
                              first_number=first_number, **kw)
 
@@ -1141,8 +1235,19 @@ def add_bates(data: bytes, start: int = 1, prefix: str = "", digits: int = 6, su
     with ENGINE_LOCK:
         doc = _open(data)
         try:
+            _remove_stamps(doc, {"bates"})
             for page in doc:
                 _remove_marks_page(doc, page, {"bates"})
+            st = _stamp()
+            if st is not None and not box and doc.page_count:
+                if check:
+                    check()
+                try:
+                    st.add_bates(doc, None, prefix=prefix, suffix=suffix, start=start, digits=digits,
+                                 position=position, margin=margin, font_size=fontsize)
+                except Exception as e:
+                    raise _stamp_error(e) from e
+                return _save(doc), start + doc.page_count - 1
             n = start
             for page in doc:
                 if check:
@@ -1565,7 +1670,8 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         return add_header_footer(data, {p.get("position", "bottom-center"): p.get("text", "")},
                                  float(p.get("fontsize", 10)), float(p.get("margin", 10.0)), "#000000", first,
                                  total, queue_total, False, bool(p.get("skip_first")),
-                                 bool(p.get("count_skipped", True)), True, values, check=ctx.check), protection
+                                 bool(p.get("count_skipped", True)), True, values, kind="page_numbers",
+                                 check=ctx.check), protection
     if a == "bates":
         out, _last = add_bates(data, int(plan.get("bates_start", p.get("start", 1))), p.get("prefix", ""),
                                int(p.get("digits", 6)), p.get("suffix", ""), p.get("position", "bottom-right"),
@@ -1590,7 +1696,7 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         if mode == "skip_text" and _has_text_everywhere(data):
             raise BatchError("OCR-01", _("Nessuna pagina da riconoscere."), status="skipped")
         langs = [x for x in re.split(r"[+,\s]+", p.get("languages", "ita+eng")) if x]
-        return fn(data, langs, mode, None, None), protection
+        return run_ocr(fn, data, langs, redo=(mode == "all")), protection
     if a in EXTRA_PDF_ACTIONS:
         return EXTRA_PDF_ACTIONS[a](data, p, item, ctx), protection
     raise BatchError("GEN-02", _("Operazione non gestita: {a}").format(a=a))
@@ -1612,7 +1718,10 @@ def _target_dir(item: QueueItem, settings: JobSettings) -> str:
 
 def _resolve_conflict(path: str, settings: JobSettings, reserved: set[str]) -> str | None:
     """Percorso finale secondo la politica, o None se il file va saltato."""
-    if settings.conflict == "overwrite":
+    policy = settings.conflict_choices.get(path, settings.conflict)
+    if policy == "ask":            # nessuna risposta registrata: come «rinomina»
+        policy = "rename"
+    if policy == "overwrite":
         if path in reserved:
             pass
         else:
@@ -1620,7 +1729,7 @@ def _resolve_conflict(path: str, settings: JobSettings, reserved: set[str]) -> s
     exists = os.path.exists(path) or path in reserved
     if not exists:
         return path
-    if settings.conflict == "skip":
+    if policy == "skip":
         return None
     stem, ext = os.path.splitext(path)
     n = 1
@@ -1629,6 +1738,21 @@ def _resolve_conflict(path: str, settings: JobSettings, reserved: set[str]) -> s
         if not os.path.exists(cand) and cand not in reserved:
             return cand
         n += 1
+
+
+def planned_conflicts(items: list[QueueItem], settings: JobSettings, started: datetime) -> list[tuple[str, str]]:
+    """Per «chiedi ogni volta»: (ingresso, uscita già esistente) dei file da un PDF a un PDF."""
+    if settings.replace_originals or any(ACTIONS.get(s.action) and ACTIONS[s.action].kind != "pdf"
+                                         for s in settings.steps if s.enabled):
+        return []
+    plan = _bates_plan(items, settings)
+    out = []
+    for i, item in enumerate(items):
+        name = render_name(settings.pattern, item.path, i, settings, started, item.pages, plan[i])
+        target = os.path.join(_target_dir(item, settings), name)
+        if os.path.exists(target):
+            out.append((item.path, target))
+    return out
 
 
 def _write_output(path: str, data: bytes) -> None:
@@ -2474,22 +2598,47 @@ def _sequence_filename(name: str) -> str:
 SEQUENCE_VERSION = 1
 
 
-def sequence_data(name: str, steps: list[Step], description: str = "") -> dict:
-    return {"format": "foliant-sequence", "version": SEQUENCE_VERSION, "name": name, "description": description,
+OUTPUT_KEYS = ("destination_mode", "destination", "subfolder", "keep_structure", "pattern", "counter_start",
+               "conflict", "error_policy")
+
+
+def output_of(settings: JobSettings) -> dict:
+    """Uscita del lavoro da salvare nella sequenza (senza segreti)."""
+    return {k: getattr(settings, k) for k in OUTPUT_KEYS}
+
+
+def sequence_data(name: str, steps: list[Step], description: str = "", output: dict | None = None) -> dict:
+    data = {"format": "foliant-sequence", "version": SEQUENCE_VERSION, "name": name, "description": description,
             "created": datetime.now().isoformat(timespec="seconds"), "steps": [s.to_dict() for s in steps]}
+    if output:
+        data["output"] = {k: v for k, v in output.items() if k in OUTPUT_KEYS}
+    return data
 
 
-def save_sequence(directory: str, name: str, steps: list[Step], description: str = "") -> str:
+def save_sequence(directory: str, name: str, steps: list[Step], description: str = "",
+                  output: dict | None = None) -> str:
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, _sequence_filename(name))
-    atomic_write(path, json.dumps(sequence_data(name, steps, description), ensure_ascii=False,
+    atomic_write(path, json.dumps(sequence_data(name, steps, description, output), ensure_ascii=False,
                                   indent=2).encode("utf-8"))
     return path
 
 
-def export_sequence(path: str, name: str, steps: list[Step], description: str = "") -> None:
-    atomic_write(path, json.dumps(sequence_data(name, steps, description), ensure_ascii=False,
+def export_sequence(path: str, name: str, steps: list[Step], description: str = "",
+                    output: dict | None = None) -> None:
+    atomic_write(path, json.dumps(sequence_data(name, steps, description, output), ensure_ascii=False,
                                   indent=2).encode("utf-8"))
+
+
+def sequence_output(path: str) -> dict | None:
+    """Uscita salvata nella sequenza, se presente."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    out = data.get("output") if isinstance(data, dict) else None
+    return {k: v for k, v in out.items() if k in OUTPUT_KEYS} if isinstance(out, dict) else None
 
 
 def import_sequence(path: str, directory: str) -> tuple[str, list[str]]:
@@ -2516,7 +2665,8 @@ def import_sequence(path: str, directory: str) -> tuple[str, list[str]]:
                 s.params[k] = ""
                 if _("Le password contenute nel file sono state ignorate.") not in warnings:
                     warnings.append(_("Le password contenute nel file sono state ignorate."))
-    return save_sequence(directory, name, steps, str(data.get("description", ""))), warnings
+    return save_sequence(directory, name, steps, str(data.get("description", "")),
+                         data.get("output") if isinstance(data.get("output"), dict) else None), warnings
 
 
 def load_sequence(path: str) -> tuple[str, list[Step]]:

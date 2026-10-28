@@ -177,7 +177,11 @@ def check_document(pdf: pymupdf.Document, doc_path=None) -> list[LinkRow]:
         names = {}
     rows: list[LinkRow] = []
     for i in range(pdf.page_count):
-        for lk in L.page_links(pdf, i):
+        try:
+            page_links = L.page_links(pdf, i)
+        except Exception:
+            continue   # pagina danneggiata: si salta
+        for lk in page_links:
             t = lk.target
             if t.kind == L.OTHER:
                 _named_from_dest(pdf, lk.xref, t)

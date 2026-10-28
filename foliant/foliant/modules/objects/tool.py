@@ -401,7 +401,9 @@ class ObjectTool(Tool):
                 parsed = self.c.parsed(view, d["page"], quiet=True)
                 if parsed is not None:
                     if "targets" not in d:
-                        d["targets"] = E.snap_targets(parsed, set(self.c.selection), page_rect, r)
+                        xs, ys = E.snap_targets(parsed, set(self.c.selection), page_rect, r)
+                        g = self.c.guides(view)
+                        d["targets"] = (xs + list(g["x"]), ys + list(g["y"]))
                     xs, ys = d["targets"]
                     tol = 5.0 / view_scale(view, d["page"])
                     dx, dy, gx, gy = E.snap_delta(r, dx, dy, xs, ys, tol)

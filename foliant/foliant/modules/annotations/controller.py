@@ -691,6 +691,19 @@ class Controller(QObject):
         self._on_document_changed(view)
         view.viewport().update()
 
+    def hit(self, view, page: int, point, tolerance: float) -> int | None:
+        """Annotazione sotto il punto; i riquadri della pagina sono in cache per versione del documento."""
+        key = (id(view), view.document.version, getattr(self, "_saves", 0))
+        cache = getattr(self, "_rect_cache", None)
+        if cache is None or cache[0] != key:
+            cache = (key, {})
+            self._rect_cache = cache
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            if page not in cache[1]:
+                cache[1][page] = engine.annot_rects(pdf, page)
+            return engine.annot_at(pdf, page, point, tolerance, cache[1][page])
+
     def popups(self, view, page: int) -> list:
         key = (id(view), view.document.version, getattr(self, "_saves", 0))
         cache = getattr(self, "_popup_cache", None)

@@ -67,3 +67,31 @@ def test_embedded_einvoice_read_locally(window, tmp_path):
     assert rec["numero"].value == "42" and rec["totale"].value == 122.0
     assert len(rec["righe"]) == 1 and not dlg.result.checks
     assert fake.requests == []
+
+
+def test_three_invoice_files_csv_with_source(window, tmp_path):
+    import csv
+    import io
+    import json
+
+    import pymupdf
+    from .conftest import FakeProvider, make_active_profile
+    fake = FakeProvider()
+    services = window.ctx.ai_services
+    services.provider_factory = lambda p: fake
+    make_active_profile(services.store)
+    paths = []
+    for n in range(3):
+        doc = pymupdf.open()
+        doc.new_page().insert_text((72, 100), f"Fattura {n + 1} totale 10{n},00", fontsize=12)
+        path = tmp_path / f"fattura-cliente-{n + 1}.pdf"
+        doc.save(str(path))
+        paths.append(str(path))
+    fake.default = lambda req: json.dumps({"records": [{"numero": req.messages[-1].content.split("Fattura ")[1][0],
+                                                        "totale": "100,00", "_page": 1}]})
+    services.controller.exec_dialog = lambda dlg: 0
+    dlg = services.controller.extract_invoice_files(paths)
+    data = list(csv.reader(io.StringIO(extract.to_csv_summary(dlg.result))))
+    assert data[0][0] == "file" and len(data) == 4
+    assert [r[0] for r in data[1:]] == [f"fattura-cliente-{n + 1}.pdf" for n in range(3)]
+    assert "fattura-cliente" not in fake.all_text()

@@ -55,7 +55,7 @@ def output_for(path: str, fmt: str, out_dir: str | None, root: str | None = None
     """Percorso di uscita: accanto all'originale o nella cartella scelta (con sottocartelle)."""
     src = Path(path)
     ext = FORMATS[fmt][0]
-    stem = src.stem + ("_pdfa" if fmt.startswith("pdfa") else "")
+    stem = src.stem + ("_pdfa" if fmt.startswith("pdfa") else "_pdfx" if fmt.startswith("pdfx") else "")
     if not out_dir:
         return str(src.with_name(stem + ext))
     target = Path(out_dir)

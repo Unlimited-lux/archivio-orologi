@@ -154,8 +154,11 @@ BUILTIN = [
        params=[Param("numero", "number", "5"), Param("tipo", "choice", "multiple choice",
                                                     ["multiple choice", "true/false", "open"])],
        output="questions"),
-    _b("math", "Soluzione guidata di esercizi", "Studio", "Passaggi spiegati uno per uno.",
-       "Solve the exercise step by step, explaining each step: {selezione}. Answer in {lingua}.", scope="any"),
+    _b("math", "Problemi di matematica", "Studio", "Tutti i passaggi numerati e il risultato finale evidenziato.",
+       "Solve the problem showing every step: {selezione}. Answer in {lingua}.", scope="any", output="steps"),
+    _b("homework", "Aiuto per i compiti", "Studio", "Spiegazione passo per passo, non il solo risultato.",
+       "Explain step by step how to solve the exercise, explaining the reasoning of each step rather than "
+       "giving only the final answer: {selezione}. Answer in {lingua}.", scope="any", output="steps"),
     _b("study", "Supporto allo studio", "Studio", "Concetti chiave, definizioni, domande di ripasso.",
        "Prepare study notes: key concepts, definitions, and 5 review questions, citing pages. Answer in {lingua}."),
     _b("business-plan", "Piano d'impresa", "Comunicazione", "Struttura di un piano d'impresa.",
@@ -168,6 +171,73 @@ BUILTIN = [
        "From the content produce: 5 video titles, a description, 10 keywords and a {durata}-minute script. "
        "Answer in {lingua}.", params=[Param("durata", "number", "3")]),
 ]
+
+
+STEPS_RULE = (" Number every step (1., 2., …) and finish with one line that starts with «Risultato:» "
+              "followed by the final result.")
+NUMERIC_CHECK = {"techdoc", "financial", "cashflow"}   # valori numerici da verificare nel documento
+
+
+def apply_steps(text: str) -> str:
+    """Passaggi numerati 1…n e risultato finale evidenziato a parte."""
+    import re as _re
+    steps: list[str] = []
+    result = ""
+    for line in text.splitlines():
+        t = line.strip()
+        if not t:
+            continue
+        m = _re.match(r"^(?:\*\*)?(?:risultato(?: finale)?|result|final answer)\s*:?\s*(?:\*\*)?\s*:?\s*(.*)$", t, _re.I)
+        if m:
+            result = m.group(1).strip().strip("*").strip()
+            continue
+        m = _re.match(r"^(?:#{1,6}\s*)?(?:\d+[.)]|[-*•]|(?:passaggio|step)\s*\d+\s*[:.)-]?)\s*(.*)$", t, _re.I)
+        if m and m.group(1):
+            steps.append(m.group(1).strip())
+        elif steps:
+            steps[-1] += " " + t
+        else:
+            steps.append(t)
+    out = [f"{n}. {st}" for n, st in enumerate(steps, 1)]
+    out.append("")
+    out.append("**" + _("Risultato") + ":** " + (result or "_" + _("da completare") + "_"))
+    return "\n".join(out)
+
+
+_NUM_RE = None
+
+
+def mark_unverified_numbers(text: str, source_text: str) -> tuple[str, int]:
+    """Aggiunge «(non verificato)» ai valori numerici che non si ritrovano nel documento."""
+    import re as _re
+
+    from . import extract
+    global _NUM_RE
+    if _NUM_RE is None:
+        _NUM_RE = _re.compile(r"(?<![\w.,])\d[\d.,' ]*\d(?:\s?(?:%|[A-Za-zµ°€$]{1,4}\b))?|(?<![\w.,])\d(?:\s?(?:%|[A-Za-zµ°€$]{1,4}\b))?")
+
+    def num(tok: str):
+        digits = _re.match(r"[\d.,' ]+", tok)
+        return extract.parse_number(digits.group(0).strip()) if digits else None
+
+    known = set()
+    for m in _NUM_RE.finditer(source_text):
+        v = num(m.group(0))
+        if v is not None:
+            known.add(round(v, 2))
+    # i riferimenti di pagina non sono valori da verificare
+    masked = _re.sub(r"\[[^\]]*\]", lambda m: "\x00" * len(m.group(0)), text)
+    out, last, count = [], 0, 0
+    for m in _NUM_RE.finditer(masked):
+        v = num(m.group(0))
+        if v is None or round(v, 2) in known or (abs(v) < 10 and "." not in m.group(0) and "," not in m.group(0)):
+            continue
+        out.append(text[last:m.end()])
+        out.append(" (" + _("non verificato") + ")")
+        last = m.end()
+        count += 1
+    out.append(text[last:])
+    return "".join(out), count
 
 
 # Sezioni fisse dei modelli predefiniti (AI-20 v2): mostrate nell'ordine del modello.
@@ -295,6 +365,8 @@ def run_task(job: engine.Job, task: TaskTemplate, values: dict, scope: engine.Sc
         raise FoliantError(_("Questa attività richiede un modello che accetti immagini."))
     system = engine._system(prompts.BASE, job.language) + " " + prompts.CITE + " " + \
         build_instructions(task, values, scope, job.language)
+    if task.output == "steps":
+        system += STEPS_RULE
     if task.id in SECTIONS:
         system += " Use exactly these Markdown headings (## …), in this order: " + \
             "; ".join(SECTIONS[task.id]) + "."
@@ -313,6 +385,11 @@ def run_task(job: engine.Job, task: TaskTemplate, values: dict, scope: engine.Sc
     data = None
     if task.id in SECTIONS:
         text = apply_sections(text, SECTIONS[task.id])
+    if task.output == "steps":
+        text = apply_steps(text)
+    if task.id in NUMERIC_CHECK:
+        source = engine.scope_text(scope)
+        text, missing = mark_unverified_numbers(text, source)
     if task.output == "questions":
         try:
             data = parse_quiz(text)

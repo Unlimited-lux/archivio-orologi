@@ -149,7 +149,10 @@ class Context(QObject):
         if shortcut:
             act.setShortcut(QKeySequence(shortcut))
             self._w.addAction(act)
-        act.setToolTip(tooltip or (f"{text} ({QKeySequence(shortcut).toString(QKeySequence.SequenceFormat.NativeText)})" if shortcut else text))
+        if not tooltip and shortcut:
+            from .dialogs import key_text
+            tooltip = f"{text} ({key_text(QKeySequence(shortcut))})"
+        act.setToolTip(tooltip or text)
         act.setCheckable(checkable)
         if requires_document:
             self._w.register_document_action(act)

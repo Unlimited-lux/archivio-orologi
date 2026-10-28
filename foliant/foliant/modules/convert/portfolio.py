@@ -21,12 +21,14 @@ def _s(text: str) -> str:
 
 def create_portfolio(entries: list[dict], *, title: str = "Portfolio", view: str = "list",
                      columns: list[tuple[str, str, str]] | None = None, sort: tuple[str, bool] | None = None,
-                     initial: str | None = None, progress=None) -> tuple[bytes, list[str]]:
+                     initial: str | int | None = None, cover_pdf: str | None = None,
+                     progress=None) -> tuple[bytes, list[str]]:
     """Crea il portfolio e restituisce (byte, avvisi).
 
     `entries`: [{"path", "folder" (facoltativa), "name", "description", "values": {chiave: valore}}].
     `columns`: colonne personalizzate [(chiave, etichetta, "text"|"number"|"date")].
-    `view`: "list" o "thumbnails". `sort`: (chiave, crescente). `initial`: nome del file da mostrare.
+    `view`: "list" o "thumbnails". `sort`: (chiave, crescente). `initial`: nome del file o indice della voce da mostrare.
+    `cover_pdf`: PDF da usare come copertina (altrimenti copertina generata con l'elenco dei file).
     """
     if not entries:
         raise ConversionError(_("Nessun file da inserire nel portfolio."))
@@ -44,17 +46,28 @@ def create_portfolio(entries: list[dict], *, title: str = "Portfolio", view: str
             warnings.append(_("«{n}» supera 100 MB: il portfolio sarà molto grande.").format(n=Path(e["path"]).name))
         if data[:5] == b"%PDF-" and b"/Encrypt" in data[-4096:]:
             warnings.append(_("«{n}» è protetto: per aprirlo servirà la sua password.").format(n=Path(e["path"]).name))
-        files.append((e, data))
+        files.append((dict(e, _index=k), data))
     if not files:
         raise ConversionError(_("Nessuno dei file scelti è leggibile."))
     folders = sorted({(e.get("folder") or "").strip() for e, _d in files} - {""})
     folder_id = {name: i + 1 for i, name in enumerate(folders)}
     with ENGINE_LOCK:
         doc = pymupdf.open()
-        _cover(doc, title, files)
+        if cover_pdf:
+            try:
+                with pymupdf.open(cover_pdf) as cover:
+                    if cover.needs_pass:
+                        raise ValueError("cifrato")
+                    doc.insert_pdf(cover)
+            except Exception:
+                warnings.append(_("Copertina «{n}» non utilizzabile: generata automaticamente.").format(
+                    n=Path(cover_pdf).name))
+        if doc.page_count == 0:
+            _cover(doc, title, files)
         used: set[str] = set()
         names: list[str] = []
         specs: list[tuple[str, int]] = []
+        by_index: dict[int, str] = {}
         for k, (e, data) in enumerate(files):
             check(progress, 0.6 + 0.35 * k / len(files), _("Inserimento dei file…"))
             display = e.get("name") or Path(e["path"]).name
@@ -67,6 +80,7 @@ def create_portfolio(entries: list[dict], *, title: str = "Portfolio", view: str
                 key = (f"<{folder_id[folder]}>" if folder else "") + f"{stem} ({n}){ext}"
             used.add(key.lower())
             names.append(key)
+            by_index[e["_index"]] = key
             mtime = dt.datetime.fromtimestamp(os.path.getmtime(e["path"])).strftime("D:%Y%m%d%H%M%S")
             stream = doc.get_new_xref()
             doc.update_object(stream, f"<</Type/EmbeddedFile/Params <</Size {len(data)}/ModDate {_s(mtime)}>>>>")
@@ -90,7 +104,7 @@ def create_portfolio(entries: list[dict], *, title: str = "Portfolio", view: str
         coll = [f"/Type/Collection/Schema <<{' '.join(schema)}>>", f"/View/{'T' if view == 'thumbnails' else 'D'}"]
         if sort:
             coll.append(f"/Sort <</Type/CollectionSort/S/{sort[0]}/A {'true' if sort[1] else 'false'}>>")
-        first = initial if initial in names else None
+        first = by_index.get(initial) if isinstance(initial, int) else (initial if initial in names else None)
         if first:
             coll.append(f"/D {_s(first)}")
         if folders:
@@ -154,3 +168,94 @@ def _size(n: int) -> str:
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}".replace(".", ",")
         n /= 1024
     return ""
+
+
+# ------------------------------------------------------------------ modifica
+def is_portfolio(pdf: pymupdf.Document) -> bool:
+    try:
+        return pdf.xref_get_key(pdf.pdf_catalog(), "Collection")[0] != "null"
+    except Exception:
+        return False
+
+
+def folder_map(pdf: pymupdf.Document) -> dict[str, int]:
+    """{nome cartella: ID} dalle cartelle di `/Collection /Folders` (tutti i livelli)."""
+    out: dict[str, int] = {}
+    kind, val = pdf.xref_get_key(pdf.pdf_catalog(), "Collection/Folders")
+    if kind != "xref":
+        return out
+    seen: set[int] = set()
+    stack = [int(val.split()[0])]
+    while stack:
+        x = stack.pop()
+        if x in seen:
+            continue
+        seen.add(x)
+        name = pdf.xref_get_key(x, "Name")
+        fid = pdf.xref_get_key(x, "ID")
+        if name[0] == "string" and name[1] and fid[0] == "int":
+            out[name[1]] = int(fid[1])
+        for key in ("Child", "Next"):
+            k, v = pdf.xref_get_key(x, key)
+            if k == "xref":
+                stack.append(int(v.split()[0]))
+    return out
+
+
+def _ensure_collection(pdf: pymupdf.Document) -> int:
+    kind, val = pdf.xref_get_key(pdf.pdf_catalog(), "Collection")
+    if kind == "xref":
+        return int(val.split()[0])
+    cx = pdf.get_new_xref()
+    pdf.update_object(cx, "<</Type/Collection/View/D>>")
+    pdf.xref_set_key(pdf.pdf_catalog(), "Collection", f"{cx} 0 R")
+    return cx
+
+
+def _add_folder(pdf: pymupdf.Document, name: str, existing: dict[str, int]) -> int:
+    cx = _ensure_collection(pdf)
+    new_id = max(existing.values(), default=0) + 1
+    kind, val = pdf.xref_get_key(cx, "Folders")
+    if kind != "xref":
+        root = pdf.get_new_xref()
+        pdf.update_object(root, f"<</Type/Folder/ID 0/Name {_s('')}>>")
+        pdf.xref_set_key(cx, "Folders", f"{root} 0 R")
+    else:
+        root = int(val.split()[0])
+    x = pdf.get_new_xref()
+    k, child = pdf.xref_get_key(root, "Child")
+    nxt = f"/Next {child}" if k == "xref" else ""
+    pdf.update_object(x, f"<</Type/Folder/ID {new_id}/Name {_s(name)}/Parent {root} 0 R{nxt}>>")
+    pdf.xref_set_key(root, "Child", f"{x} 0 R")
+    existing[name] = new_id
+    return new_id
+
+
+def add_files(pdf: pymupdf.Document, entries: list[dict]) -> list[str]:
+    """Aggiunge file al portfolio aperto (da chiamare dentro `document.change()`). Restituisce i nomi."""
+    folders = folder_map(pdf)
+    _ensure_collection(pdf)
+    used = {n.lower() for n in pdf.embfile_names()}
+    added = []
+    for e in entries:
+        data = Path(e["path"]).read_bytes()
+        display = e.get("name") or Path(e["path"]).name
+        folder = (e.get("folder") or "").strip()
+        prefix = ""
+        if folder:
+            fid = folders.get(folder) or _add_folder(pdf, folder, folders)
+            prefix = f"<{fid}>"
+        key, n = prefix + display, 1
+        while key.lower() in used:
+            n += 1
+            stem, ext = os.path.splitext(display)
+            key = f"{prefix}{stem} ({n}){ext}"
+        used.add(key.lower())
+        pdf.embfile_add(key, data, filename=display, ufilename=display, desc=e.get("description") or "")
+        added.append(key)
+    return added
+
+
+def remove_files(pdf: pymupdf.Document, names: list[str]) -> None:
+    for name in names:
+        pdf.embfile_del(name)

@@ -358,3 +358,27 @@ def test_options_dialog_validation(viewer_window, long_pdf):
     o = dlg.result_options
     assert o.pages == [2, 1, 0, 29] and o.scaling == ACTUAL_SIZE and not o.annotations and o.copies == 2
     assert not dlg.layers.isVisible()   # nessun livello nel documento
+
+
+def test_empty_signature_field_not_printed(tmp_path):
+    import pymupdf
+    from foliant.api import Document
+    from foliant.modules.viewer.printing_engine import render_page
+    path = tmp_path / "firma.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_SIGNATURE
+    w.field_name = "Firma"
+    w.rect = pymupdf.Rect(100, 100, 300, 160)
+    page.add_widget(w)
+    doc.save(str(path))
+    d = Document.open(path)
+    img = render_page(d.pdf, 0, 72, True)
+
+    def orange(c):
+        return c.red() > 200 and 80 < c.green() < 200 and c.blue() < 80
+
+    pixels = [img.pixelColor(x, y) for x in range(100, 300, 4) for y in range(100, 160, 4)]
+    assert not any(orange(c) for c in pixels)
+    assert not d.is_modified

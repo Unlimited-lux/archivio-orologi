@@ -183,6 +183,8 @@ class FormsModule(QObject):
         ctx.documentClosed.connect(self._detach)
         ctx.modeChanged.connect(lambda _m: self._sync_tools())
         ctx.add_view_menu_provider(self.context_menu)
+        if hasattr(ctx, "add_pending_edit_hook"):
+            ctx.add_pending_edit_hook(self.commit_pending)
         self._install_panels()
         for view in ctx.views():
             self._attach(view)
@@ -260,6 +262,12 @@ class FormsModule(QObject):
                 keys = {(x.page, x.xref) for x in f.state.fields}
                 self.selection = [k for k in self.selection if k in keys]
         self._refresh_panels()
+
+    def commit_pending(self, view) -> None:
+        """Prima di salvare o chiudere: conferma il valore del campo in compilazione."""
+        f = self.fillers.get(id(view))
+        if f is not None and f.view is view and f.editor is not None:
+            f.commit_active()
 
     def document_saved(self, view) -> None:
         """Dopo un salvataggio gli identificativi dei widget possono cambiare: si riseleziona per posizione."""
@@ -406,6 +414,8 @@ class FormsModule(QObject):
         if view is None:
             return []
         f = self.filler(view)
+        if not self.selection or f.state.version < 0:
+            return []
         f.state.refresh()
         out = []
         for page, xref in self.selection:
@@ -421,7 +431,8 @@ class FormsModule(QObject):
             radios: dict[str, list[str]] = {}
             if view is not None:
                 st = self.filler(view).state
-                st.refresh()
+                if st.version >= 0:
+                    st.refresh()
                 names = list(dict.fromkeys(f.name for f in st.fields))
                 for f in st.fields:
                     if f.kind == E.RADIO and f.export:
@@ -741,7 +752,9 @@ class FormsModule(QObject):
             fields = E.list_fields(pdf)
             values = E.form_values(pdf)
         skip = {f.name for f in fields if f.password or f.no_export}
-        return {k: v for k, v in values.items() if k not in skip}
+        tm = {f.name: f.export_name for f in fields if f.export_name}
+        # FRM-11: il nome per l'esportazione (/TM), se presente, sostituisce il nome del campo
+        return {tm.get(k, k): v for k, v in values.items() if k not in skip}
 
     def export_data(self, path: str, fmt: str | None = None, view=None) -> int:
         view = view or self.ctx.current_view()
@@ -779,8 +792,13 @@ class FormsModule(QObject):
             by_name = {}
             for f in E.list_fields(pdf):
                 by_name.setdefault(f.name, f)
+            for f in list(by_name.values()):
+                if f.export_name:
+                    by_name.setdefault(f.export_name, f)
             for name, value in values.items():
                 f = by_name.get(name)
+                if f is not None:
+                    name = f.name
                 if f is None or f.kind not in E.FILLABLE:
                     report["unknown"].append(name)
                     continue

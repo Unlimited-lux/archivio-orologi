@@ -174,4 +174,5 @@ EN: dict[str, str] = {
     "La pagina {n} sembra una scansione e non contiene testo modificabile.\n\nEseguire ora l'OCR della pagina per rendere il testo modificabile?":
         "Page {n} looks like a scan and contains no editable text.\n\nRun OCR on the page now to make the text editable?",
     "OCR": "OCR",
+    "Pagina non leggibile: il file è danneggiato in questo punto.": "Unreadable page: the file is damaged at this point.",
 }

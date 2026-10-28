@@ -195,10 +195,12 @@ def print_layer_states(pdf: pymupdf.Document) -> dict[int, bool]:
 
 def render_page(pdf: pymupdf.Document, index: int, dpi: int, annotations: bool) -> QImage:
     """Immagine della pagina (con /Rotate del documento, mai la rotazione della vista)."""
+    from foliant.api import page_pixmap
     with ENGINE_LOCK:
-        page = pdf[index]
         zoom = dpi / 72.0
-        pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False, annots=annotations)
+        # senza il segnaposto dei campi firma vuoti: non esiste nel file e non va su carta
+        pix = page_pixmap(pdf, index, hide_unsigned_signatures=True,
+                          matrix=pymupdf.Matrix(zoom, zoom), alpha=False, annots=annotations)
         return QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
 
 

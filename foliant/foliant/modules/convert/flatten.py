@@ -12,7 +12,7 @@ import re
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, page_pixmap
 
 from .common import ConversionError, check, parse_page_range
 
@@ -326,7 +326,7 @@ def rasterize_pages(pdf: pymupdf.Document, pages: list[int], dpi: int, ocr: bool
         page = pdf[i]
         rot = page.rotation
         page.set_rotation(0)
-        pix = page.get_pixmap(dpi=dpi, annots=True)
+        pix = page_pixmap(pdf, i, hide_unsigned_signatures=True, dpi=dpi, annots=True)
         src = None
         if use_ocr:
             src = pymupdf.open(stream=pix.pdfocr_tobytes(language=ocr_languages(language)), filetype="pdf")

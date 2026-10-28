@@ -198,3 +198,33 @@ def test_flatten(tmp_path):
 def test_format_pdf_date():
     assert S.format_pdf_date("D:20240312101500+01'00'") == "12/03/2024 10:15"
     assert S.pdf_date_to_iso("D:20240312101500+01'00'") == "2024-03-12T10:15:00+01:00"
+
+
+def test_exif_removed_render_identical(tmp_path):
+    import io
+
+    from PIL import Image
+    img = Image.new("RGB", (40, 30), (200, 50, 50))
+    exif = Image.Exif()
+    exif[0x010F] = "Fotocamera-GPS-45N"
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", exif=exif.tobytes())
+    path = tmp_path / "foto.pdf"
+    src = pymupdf.open()
+    src.new_page().insert_image(pymupdf.Rect(10, 10, 110, 85), stream=buf.getvalue())
+    src.save(str(path))
+    before = pymupdf.open(path)[0].get_pixmap().samples
+    assert S.inspect_extra(pymupdf.open(path))["image_metadata"] == 1
+    doc = Document.open(path)
+    with doc.change("Ripulisci") as pdf:
+        S.sanitize(pdf, {"metadata": True})
+    out = tmp_path / "foto-ripulita.pdf"
+    doc.save(out)
+    data = out.read_bytes()
+    assert b"Exif" not in data and b"Fotocamera-GPS" not in data
+    assert pymupdf.open(out)[0].get_pixmap().samples == before
+    doc.close()
+
+
+def test_strip_jpeg_metadata_rejects_non_jpeg():
+    assert S.strip_jpeg_metadata(b"not a jpeg") == b"not a jpeg"
