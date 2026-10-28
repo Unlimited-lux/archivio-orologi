@@ -55,15 +55,63 @@ class PageText:
         return any(b is not None for b in self.boxes)
 
 
+WIDE_BLOCK = 0.6      # blocco più largo di questa frazione del testo: attraversa le colonne
+
+
+def reading_order(blocks: list[dict]) -> list[dict]:
+    """Blocchi di testo in ordine di lettura, anche su più colonne.
+
+    I blocchi stretti che si sovrappongono in orizzontale formano una colonna; le colonne
+    si leggono da sinistra a destra e i blocchi di ciascuna dall'alto in basso. I blocchi
+    larghi (titoli a tutta pagina) separano fasce lette una dopo l'altra. Una pagina a una
+    colonna resta ordinata dall'alto in basso. (L'ordinamento di PyMuPDF con sort=True usa
+    il bordo inferiore e poi x: su due colonne di altezza diversa mescola le colonne.)"""
+    items = [b for b in blocks if b.get("bbox")]
+    if len(items) < 2:
+        return list(blocks)
+    left = min(b["bbox"][0] for b in items)
+    right = max(b["bbox"][2] for b in items)
+    span = max(1e-6, right - left)
+    wide = sorted((b for b in items if b["bbox"][2] - b["bbox"][0] > WIDE_BLOCK * span),
+                  key=lambda b: b["bbox"][1])
+    narrow = [b for b in items if b["bbox"][2] - b["bbox"][0] <= WIDE_BLOCK * span]
+    out: list[dict] = []
+    edges = [b["bbox"][1] for b in wide] + [float("inf")]
+    start = float("-inf")
+    for k, edge in enumerate(edges):
+        band = [b for b in narrow if start <= (b["bbox"][1] + b["bbox"][3]) / 2 < edge]
+        columns: list[list[dict]] = []
+        end = float("-inf")
+        for b in sorted(band, key=lambda b: b["bbox"][0]):
+            if not columns or b["bbox"][0] >= end - 1:
+                columns.append([])
+                end = b["bbox"][2]
+            else:
+                end = max(end, b["bbox"][2])
+            columns[-1].append(b)
+        for col in columns:
+            out.extend(sorted(col, key=lambda b: (b["bbox"][1], b["bbox"][0])))
+        if k < len(wide):
+            out.append(wide[k])
+            start = edge
+    return out
+
+
+def page_blocks(page: pymupdf.Page, kind: str = "dict", flags: int | None = None) -> list[dict]:
+    """Blocchi di `page.get_text(kind)` in ordine di lettura (vedi `reading_order`)."""
+    data = page.get_text(kind, flags=flags) if flags is not None else page.get_text(kind)
+    return reading_order(data.get("blocks", []))
+
+
 def extract_page_text(page: pymupdf.Page) -> PageText:
     """Testo della pagina carattere per carattere; le parole sillabate a fine
     riga ("infor-" + "mazione") sono ricomposte togliendo il trattino."""
     flags = pymupdf.TEXT_PRESERVE_LIGATURES | pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP
-    raw = page.get_text("rawdict", flags=flags, sort=True)
+    blocks = page_blocks(page, "rawdict", flags)
     pt = PageText()
     chars: list[str] = []
     line_no = 0
-    for block in raw.get("blocks", []):
+    for block in blocks:
         if block.get("type", 0) != 0:
             continue
         for line in block.get("lines", []):
@@ -652,10 +700,10 @@ def outline_from_headings(pdf: pymupdf.Document, max_levels: int = 3, progress=N
         if progress is not None:
             progress(i / max(1, count))
         try:
-            data = pdf[i].get_text("dict", sort=True)
+            blocks = page_blocks(pdf[i])
         except Exception:
             continue
-        for block in data.get("blocks", []):
+        for block in blocks:
             if block.get("type", 0) != 0:
                 continue
             for line in block.get("lines", []):
@@ -716,10 +764,10 @@ def outline_from_regex(pdf: pymupdf.Document, pattern: str, case_sensitive: bool
         if progress is not None:
             progress(i / max(1, pdf.page_count))
         try:
-            data = pdf[i].get_text("dict", sort=True)
+            blocks = page_blocks(pdf[i])
         except Exception:
             continue
-        for block in data.get("blocks", []):
+        for block in blocks:
             for line in block.get("lines", []):
                 text = " ".join(s.get("text", "").strip() for s in line.get("spans", [])).strip()
                 if not text or len(text) > 200:

@@ -136,7 +136,11 @@ def ruota(ctx, gradi):
    un `QPainter` già trasformato: si disegna direttamente in punti. Conversioni:
    `view.page_transform(i)`, `view.page_to_view(i, rect)`, `view.view_to_page(pos)`.
 6. **Testi** in italiano dentro `_()`; traduzioni inglesi con `add_translations("en", {...})`
-   in `register()`.
+   in `register()`. Ogni modulo ha il proprio catalogo: `_()` nel codice di
+   `foliant.modules.<nome>` usa prima le voci di quel modulo, poi quelle del nucleo, poi quelle
+   degli altri moduli. Le parole con più significati nello stesso modulo usano
+   `pgettext("contesto", "Annulla")` con la voce `"contesto\x04Annulla"`. Inglese americano
+   («Color», «Canceled»).
 7. **Icone** con `icon("nome")` o `bind_icon(azione, "nome")` (nomi dei file in
    `foliant/resources/icons`). **Colori** con `theme.color("accent")` ecc., mai valori fissi.
 8. **Errori**: messaggi chiari per l'utente (`ctx.error(titolo, testo)`); un errore di un

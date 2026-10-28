@@ -15,7 +15,7 @@ from foliant.api import ENGINE_LOCK, Tool, _, atomic_write, theme
 
 from . import capture as CAP
 from . import extract as X
-from .dialogs import parse_range
+from .dialogs import button_box, parse_range
 from .tool import view_scale
 
 
@@ -43,7 +43,7 @@ class ExtractDialog(QDialog):
         lay.addRow(_("Dimensione minima:"), self.min_size)
         lay.addRow("", self.inline)
         lay.addRow("", self.dedup)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb = button_box()
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
