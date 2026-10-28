@@ -157,6 +157,7 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Riconosci il testo delle pagine scannerizzate (OCR)": "Recognize the text of scanned pages (OCR)",
     "Pagine acquisite": "Scanned pages",
     "Ruota": "Rotate",
     "Acquisisci ancora": "Scan more",
@@ -885,6 +886,8 @@ class SplitDialog(BaseDialog):
         self.layout_.addWidget(self.collect)
         self.top_only = QCheckBox(_("Cerca il testo solo nel quarto superiore della pagina"))
         self.layout_.addWidget(self.top_only)
+        self.use_ocr = QCheckBox(_("Riconosci il testo delle pagine scannerizzate (OCR)"))
+        self.layout_.addWidget(self.use_ocr)
         form = QFormLayout()
         self.template_field = TemplateField(_("{nome}_parte{n}"), Path(document.display_name).stem)
         self.template = self.template_field.edit
@@ -954,7 +957,8 @@ class SplitDialog(BaseDialog):
                 if not self.pattern.text():
                     raise E.RangeError(_("Indica almeno un intervallo."))
                 return E.split_document(pdf, "separators", pattern=self.pattern.text(),
-                                        top_fraction=0.25 if self.top_only.isChecked() else None)
+                                        top_fraction=0.25 if self.top_only.isChecked() else None,
+                                        ocr=self.use_ocr.isChecked())
         raise E.PageOpError("")
 
     def _update(self, *_a) -> None:
@@ -963,6 +967,11 @@ class SplitDialog(BaseDialog):
         m = self.method()
         self.collect.setEnabled(m == "ranges")
         self.top_only.setEnabled(m == "text")
+        self.use_ocr.setEnabled(m == "text")
+        if m == "text" and self.use_ocr.isChecked():
+            self.preview.setText("")   # OCR costoso: eseguito alla conferma
+            self.set_error(None if self.pattern.text() else _("Indica almeno un intervallo."))
+            return
         part = _("{nome}_parte{n}")
         defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
         if self.template.text() in (part, "{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):

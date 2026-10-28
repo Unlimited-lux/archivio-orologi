@@ -1292,8 +1292,21 @@ def page_is_blank(page: pymupdf.Page, tolerance: float = 0.005) -> bool:
     return dark / len(samples) <= tolerance
 
 
+def _page_text(page: pymupdf.Page, clip=None, ocr: bool = False) -> str:
+    """Testo della pagina; con `ocr` le pagine senza testo (scansioni) passano dal riconoscimento."""
+    text = page.get_text("text", clip=clip)
+    if text.strip() or not ocr:
+        return text
+    try:
+        tp = page.get_textpage_ocr(language="ita+eng", dpi=200, full=True)
+        return page.get_text("text", clip=clip, textpage=tp)
+    except Exception:   # Tesseract assente o lingua mancante: si prosegue senza OCR
+        return text
+
+
 def plan_separators(pdf: pymupdf.Document, *, blank: bool = True, pattern: str | None = None,
-                    discard: bool = True, tolerance: float = 0.005, top_fraction: float | None = None) -> SplitPlan:
+                    discard: bool = True, tolerance: float = 0.005, top_fraction: float | None = None,
+                    ocr: bool = False) -> SplitPlan:
     """Divide sulle pagine vuote o sulle pagine che contengono un testo/espressione (PAG-23)."""
     n = pdf.page_count
     parts: list[SplitPart] = []
@@ -1310,7 +1323,7 @@ def plan_separators(pdf: pymupdf.Document, *, blank: bool = True, pattern: str |
             if top_fraction:
                 r = page.rect
                 clip = pymupdf.Rect(r.x0, r.y0, r.x1, r.y0 + r.height * top_fraction) * page.derotation_matrix
-            m = rx.search(page.get_text("text", clip=clip))
+            m = rx.search(_page_text(page, clip, ocr))
             if m or current is None:
                 fields = {}
                 if m:
@@ -1392,7 +1405,7 @@ def split_document(pdf: pymupdf.Document, method: str = "every", value=None, **o
     if method == "separators":
         return plan_separators(pdf, blank=options.get("blank", True), pattern=options.get("pattern"),
                                discard=options.get("discard", True), tolerance=options.get("tolerance", 0.005),
-                               top_fraction=options.get("top_fraction"))
+                               top_fraction=options.get("top_fraction"), ocr=options.get("ocr", False))
     raise PageOpError(_("Metodo di divisione sconosciuto."))
 
 
