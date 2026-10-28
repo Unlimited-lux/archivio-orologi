@@ -127,6 +127,7 @@ class _ViewState:
         self.labels_version = -1
         self.last_goto: int = -1
         self.focus: tuple[int, int] | None = None   # (pagina, indice del collegamento)
+        self.origin = None   # weakref alla vista da cui un collegamento ha aperto questo documento
 
 
 class NavigationController(QObject):
@@ -248,9 +249,26 @@ class NavigationController(QObject):
         st = self.state(view)
         target = st.history.back(current_position(view))
         if target is None:
-            return False
+            origin = self._origin(view)
+            if origin is None:
+                return False
+            # cronologia esaurita: si torna alla scheda del documento d'origine (VIS-13)
+            self.ctx.window.docs_stack.setCurrentWidget(self.ctx.window.tabs)
+            self.ctx.window.tabs.setCurrentWidget(origin)
+            self._refresh()
+            return True
         self._restore(view, target)
         return True
+
+    def _origin(self, view: DocumentView) -> DocumentView | None:
+        ref = self.state(view).origin
+        origin = ref() if ref is not None else None
+        try:
+            if origin is not None and origin in self.ctx.views() and not origin.document.closed:
+                return origin
+        except RuntimeError:
+            pass
+        return None
 
     def forward(self) -> bool:
         view = self.ctx.current_view()
@@ -325,7 +343,7 @@ class NavigationController(QObject):
             self.label_box.hide()
             return
         st = self.state(view)
-        self.act_back.setEnabled(st.history.can_back)
+        self.act_back.setEnabled(st.history.can_back or self._origin(view) is not None)
         self.act_forward.setEnabled(st.history.can_forward)
         # comandi di pagina coerenti con la posizione (VIS-12)
         first = view.current_page <= 0
@@ -548,6 +566,8 @@ class NavigationController(QObject):
             self.ctx.error(_("Destinazione non trovata"), _("File collegato non trovato: {p}").format(p=target))
             return None
         new = self.ctx.open_path(str(target))
+        if new is not None and new is not view:
+            self.state(new).origin = weakref.ref(view)
         if new is None:
             return None
         page = link.get("page", -1)
