@@ -16,43 +16,43 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 LIGHT: dict[str, str | tuple] = {
-    "accent": "#0E7C7B",
-    "accent_hover": "#0B6766",
-    "accent_soft": "#D7EFEE",
+    "accent": "#0F7C78",
+    "accent_hover": "#0B6865",
+    "accent_soft": "#E0F1EF",
     "accent_text": "#FFFFFF",
-    "secondary": "#E8A33D",
-    "window": "#F4F5F7",
+    "secondary": "#E59A2F",
+    "window": "#F7F7F5",
     "surface": "#FFFFFF",
-    "surface_alt": "#EDEFF2",
-    "border": "#D9DDE3",
-    "text": "#1B212A",
-    "text_muted": "#5E6776",
-    "canvas": "#E4E7EB",
+    "surface_alt": "#EFEFEC",
+    "border": "#E3E3DE",
+    "text": "#1C2125",
+    "text_muted": "#585F65",
+    "canvas": "#E7E7E3",
     "page_shadow": (0, 0, 0, 38),
-    "danger": "#C2410C",
-    "success": "#15803D",
-    "warning": "#B45309",
-    "selection": (14, 124, 123, 70),
+    "danger": "#C2453A",
+    "success": "#2E7D4F",
+    "warning": "#B7791F",
+    "selection": (15, 124, 120, 70),
 }
 
 DARK: dict[str, str | tuple] = {
-    "accent": "#2BB3B0",
-    "accent_hover": "#3CC6C3",
-    "accent_soft": "#173A3A",
-    "accent_text": "#0B1414",
-    "secondary": "#F0B45A",
-    "window": "#15181D",
-    "surface": "#1D2128",
-    "surface_alt": "#252A32",
-    "border": "#323843",
-    "text": "#E6E9EE",
-    "text_muted": "#9AA3B1",
-    "canvas": "#0F1216",
+    "accent": "#3CB9B0",
+    "accent_hover": "#52C9C0",
+    "accent_soft": "#1D3B3A",
+    "accent_text": "#0E1A19",
+    "secondary": "#F2B45A",
+    "window": "#1D2023",
+    "surface": "#25292C",
+    "surface_alt": "#2E3337",
+    "border": "#363B40",
+    "text": "#ECEEEF",
+    "text_muted": "#A9AFB4",
+    "canvas": "#151719",
     "page_shadow": (0, 0, 0, 120),
-    "danger": "#F97316",
-    "success": "#4ADE80",
-    "warning": "#FBBF24",
-    "selection": (43, 179, 176, 90),
+    "danger": "#EC7A6F",
+    "success": "#5FC98A",
+    "warning": "#F2B45A",
+    "selection": (60, 185, 176, 90),
 }
 
 _dark = False
@@ -142,12 +142,15 @@ _ICONS = Path(__file__).resolve().parent.parent / "resources" / "icons"
 
 def _asset(name: str, color: str) -> str:
     """Icona colorata scritta su disco (i fogli di stile Qt richiedono un file)."""
-    folder = Path(tempfile.gettempdir()) / f"foliant-theme-{os.getuid()}"
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "foliant" / "theme"
     target = folder / f"{name}-{color.lstrip('#')}.svg"
-    if not target.exists():
-        svg = (_ICONS / f"{name}.svg").read_text(encoding="utf-8").replace("currentColor", color)
-        target.write_text(svg, encoding="utf-8")
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            svg = (_ICONS / f"{name}.svg").read_text(encoding="utf-8").replace("currentColor", color)
+            target.write_text(svg, encoding="utf-8")
+    except OSError:
+        return (_ICONS / f"{name}.svg").as_posix()   # icona non colorata, ma l'app parte
     return target.as_posix()
 
 
@@ -161,6 +164,7 @@ def stylesheet(t: dict) -> str:
     close_icon = _asset("x", h("text_muted"))
     close_hover = _asset("x", h("text"))
     arrow = _asset("chevron-down", h("text_muted"))
+    arrow_up = _asset("chevron-up", h("text_muted"))
     return f"""
 QMainWindow, QDialog {{ background: {h('window')}; }}
 QTabBar::close-button {{ image: url({close_icon}); subcontrol-position: right; margin: 2px; width: 14px; height: 14px; }}
@@ -168,6 +172,15 @@ QTabBar::close-button:hover {{ image: url({close_hover}); background: {h('surfac
 QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox::down-arrow {{ image: url({arrow}); width: 14px; height: 14px; }}
 QSpinBox#pageSpin {{ padding: 2px 4px; }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 18px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right;
+    width: 16px; border: none; border-left: 1px solid {h('border')}; border-top-right-radius: 6px; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right;
+    width: 16px; border: none; border-left: 1px solid {h('border')}; border-bottom-right-radius: 6px; }}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {h('surface_alt')}; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({arrow_up}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({arrow}); width: 10px; height: 10px; }}
 QToolBar#header {{ background: {h('surface')}; border: none; border-bottom: 1px solid {h('border')};
     padding: 4px 8px; spacing: 4px; }}
 QToolBar#contextbar {{ background: {h('surface')}; border: none; border-bottom: 1px solid {h('border')};
@@ -180,6 +193,8 @@ QToolButton:checked {{ background: {h('accent_soft')}; color: {h('accent')}; }}
 QToolButton[modeButton="true"] {{ padding: 5px 10px; font-weight: 500; }}
 QToolButton[modeButton="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; }}
 QToolButton::menu-indicator {{ image: none; }}
+QToolButton[homeAction="true"] {{ border: 1px solid {h('border')}; border-radius: 10px; background: {h('surface')}; }}
+QToolButton[homeAction="true"]:hover {{ border-color: {h('accent')}; }}
 QPushButton {{ background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px;
     padding: 6px 14px; color: {h('text')}; }}
 QPushButton:hover {{ background: {h('surface_alt')}; }}
