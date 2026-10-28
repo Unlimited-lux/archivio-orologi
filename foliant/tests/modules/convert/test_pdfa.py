@@ -192,3 +192,31 @@ def test_cancel_kills_gs_and_cleans(tmp_path, monkeypatch):
     with pytest.raises(OperationCancelled):
         pdfa.convert_file_to_pdfa(src, tmp_path / "out.pdf", "2b", progress=Cancel())
     assert sorted(os.listdir(tmp_path)) == ["x.pdf"]
+
+
+@pytest.mark.skipif(shutil.which("gs") is None, reason="Ghostscript non installato")
+def test_pdfx3_rgb_document(tmp_path):
+    """PDF/X-3: OutputIntent GTS_PDFX con profilo CMYK, TrimBox su ogni pagina, GTS_PDFXVersion, testo conservato."""
+    import re
+    from foliant.modules.convert.engine import convert_pdf
+    from foliant.modules.convert.pdfx import verify_pdfx
+    doc = pymupdf.open()
+    for i in range(2):
+        p = doc.new_page()
+        p.insert_text((72, 100), f"Scheda tecnica {i + 1}", fontsize=16)
+        p.draw_rect(pymupdf.Rect(72, 130, 300, 220), fill=(0.9, 0.1, 0.1))
+    src = tmp_path / "rgb.pdf"
+    doc.save(str(src))
+    out = convert_pdf(str(src), tmp_path / "x.pdf", "pdfx-3")[0]
+    data = open(out, "rb").read()
+    assert verify_pdfx(data) == []
+    res = pymupdf.open(out)
+    for page in res:
+        assert res.xref_get_key(page.xref, "TrimBox")[0] == "array"
+        assert "Scheda tecnica" in page.get_text()
+    oi = res.xref_get_key(res.pdf_catalog(), "OutputIntents")[1]
+    ref = int(re.search(r"(\d+) 0 R", oi).group(1))
+    assert res.xref_get_key(ref, "S")[1] == "/GTS_PDFX"
+    profile = int(res.xref_get_key(ref, "DestOutputProfile")[1].split()[0])
+    assert res.xref_get_key(profile, "N")[1] == "4"
+    assert out.endswith("x.pdf")
