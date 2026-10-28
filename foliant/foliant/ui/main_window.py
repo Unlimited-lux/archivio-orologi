@@ -13,7 +13,7 @@ from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QToolBar, QToolButton,
+    QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -23,7 +23,7 @@ from ..core.errors import DocumentError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import theme
 from .banners import Banner, BannerBar, DocumentTabs
-from .context import PDF_FILTER, Context, Mode
+from .context import PDF_FILTER, Context, Mode, ToolBar
 from .document_view import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView
 from .home import HomeScreen
 from .icons import app_icon, bind_icon
@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
     # ================================================================== UI base
     def _build_ui(self) -> None:
         # Barra in alto
-        self.header = QToolBar(_("Barra principale"), self)
+        self.header = ToolBar(_("Barra principale"), self)
         self.header.setObjectName("header")
         self.header.setMovable(False)
         self.header.setFloatable(False)
@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         side_layout = QHBoxLayout(self.sidebar)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(0)
-        self.sidebar_strip = QToolBar(self.sidebar)
+        self.sidebar_strip = ToolBar(self.sidebar)
         self.sidebar_strip.setOrientation(Qt.Orientation.Vertical)
         self.sidebar_strip.setIconSize(QSize(20, 20))
         self.sidebar_group = QActionGroup(self)
@@ -573,7 +573,7 @@ class MainWindow(QMainWindow):
     def add_mode(self, mode_id: str, title: str, icon_name: str, order: int = 100) -> Mode:
         if mode_id in self.modes:
             return self.modes[mode_id]
-        toolbar = QToolBar(title, self)
+        toolbar = ToolBar(title, self)
         toolbar.setObjectName("contextbar")
         toolbar.setIconSize(QSize(20, 20))
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
