@@ -284,6 +284,63 @@ def find_tables(page: pymupdf.Page, strategy: str | None = None):
         return page.find_tables(**kwargs)
 
 
+def image_backed(page: pymupdf.Page) -> bool:
+    """Pagina il cui contenuto è un'immagine a tutta pagina (scansione, anche con testo OCR)."""
+    try:
+        area = abs(page.rect)
+        return any(abs(pymupdf.Rect(i["bbox"]) & page.rect) >= 0.8 * area for i in page.get_image_info())
+    except Exception:
+        return False
+
+
+def grid_tables(blocks: list[dict], min_rows: int = 2, min_cols: int = 2, tol: float = 10.0) -> list[tuple]:
+    """Tabelle ricostruite dall'allineamento dei blocchi di testo (celle separate, senza linee).
+
+    Restituisce [(bbox, righe, blocchi usati)]: sequenze di righe consecutive con lo
+    stesso numero di celle allineate in colonna sugli stessi bordi sinistri."""
+    items = []
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        text = " ".join(normalize_text(sp.get("text", "")) for ln in b.get("lines", []) for sp in ln.get("spans", []))
+        text = " ".join(text.split())
+        if text:
+            x0, y0, x1, y1 = b["bbox"]
+            items.append({"bbox": (x0, y0, x1, y1), "cy": (y0 + y1) / 2, "text": text, "block": b})
+    rows: list[list[dict]] = []
+    for it in sorted(items, key=lambda i: (i["cy"], i["bbox"][0])):
+        h = it["bbox"][3] - it["bbox"][1]
+        if rows and abs(rows[-1][0]["cy"] - it["cy"]) <= max(3.0, h * 0.45):
+            rows[-1].append(it)
+        else:
+            rows.append([it])
+    for r in rows:
+        r.sort(key=lambda i: i["bbox"][0])
+    found = []
+    k = 0
+    while k < len(rows):
+        first = rows[k]
+        if len(first) < min_cols:
+            k += 1
+            continue
+        cols = [i["bbox"][0] for i in first]
+        run = [first]
+        j = k + 1
+        while j < len(rows) and len(rows[j]) == len(cols) and all(
+                abs(i["bbox"][0] - c) <= tol for i, c in zip(rows[j], cols)):
+            run.append(rows[j])
+            j += 1
+        if len(run) >= min_rows:
+            used = [i for r in run for i in r]
+            bbox = (min(i["bbox"][0] for i in used), min(i["bbox"][1] for i in used),
+                    max(i["bbox"][2] for i in used), max(i["bbox"][3] for i in used))
+            found.append((bbox, [[i["text"] for i in r] for r in run], [i["block"] for i in used]))
+            k = j
+        else:
+            k += 1
+    return found
+
+
 def table_rows(page: pymupdf.Page, table, words: list | None = None) -> list[list[str | None]]:
     """Testo delle celle di una tabella ricavato dalle parole della pagina.
 
@@ -439,6 +496,10 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
         except Exception:
             pass
 
+    if tables and not table_items and textpage is None and image_backed(page):
+        # scansione con testo riconosciuto: tabelle dalle celle allineate
+        for bbox, rows, _used in grid_tables(data.get("blocks", [])):
+            table_items.append(TableItem(rows=rows, bbox=bbox))
     boxes: list[tuple[tuple, object]] = [(t.bbox, t) for t in table_items]
     for block in data.get("blocks", []):
         bbox = tuple(block.get("bbox", (0, 0, 0, 0)))

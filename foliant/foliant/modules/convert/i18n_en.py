@@ -733,3 +733,6 @@ EN.update({
         "The OCR module did not return a document: using basic recognition.",
     "OCR non riuscito ({e}): uso il riconoscimento di base.": "OCR failed ({e}): using basic recognition.",
 })
+
+EN.update({"Pagine scansionate: il layout «Testo scorrevole» ricostruisce meglio paragrafi e tabelle.":
+           "Scanned pages: the “Reflowable text” layout rebuilds paragraphs and tables better."})

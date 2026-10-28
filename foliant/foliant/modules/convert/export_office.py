@@ -19,7 +19,8 @@ from foliant.api import ENGINE_LOCK, _
 
 from .common import ConversionError, check
 from .extract import (
-    TEXT_FLAGS, ImageItem, Para, TableItem, analyze_page, assign_headings, find_tables, normalize_text,
+    TEXT_FLAGS, ImageItem, Para, TableItem, analyze_page, assign_headings, find_tables, image_backed,
+    normalize_text,
     table_rows,
 )
 
@@ -293,6 +294,9 @@ def write_docx_faithful(work: pymupdf.Document, path: str, job) -> None:
 
     with ENGINE_LOCK:
         data = job.ocr_document_bytes(work)
+        scanned = any(image_backed(work[i]) for i in range(work.page_count))
+    if scanned:
+        job.warn(_("Pagine scansionate: il layout «Testo scorrevole» ricostruisce meglio paragrafi e tabelle."))
     cv = Converter(stream=data)
     try:
         settings = cv.default_settings
@@ -421,6 +425,12 @@ def collect_tables(work: pymupdf.Document, job, strategy: str = "lines") -> list
                     tabs = find_tables(page, "text")
             except Exception:
                 tabs = None
+            if (not tabs or not tabs.tables) and image_backed(page):
+                from .extract import grid_tables
+                for t_i, (_bbox, rows, _used) in enumerate(grid_tables(
+                        page.get_text("dict", flags=TEXT_FLAGS).get("blocks", []))):
+                    found.append((job.source_index(i), rows, t_i + 1))
+                continue
             words = page.get_text("words", flags=TEXT_FLAGS) if tabs and tabs.tables else []
             for t_i, t in enumerate(tabs.tables if tabs else []):
                 rows = table_rows(page, t, words)

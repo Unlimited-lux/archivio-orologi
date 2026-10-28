@@ -930,3 +930,52 @@ def test_scan_to_docx_uses_ocr_module_both_layouts(scanned_mixed, tmp_path, monk
         assert found / len(words.split()) >= 0.95, (layout, text)
         assert result.ocr_pages == [3]
     assert calls[0] == (["ita", "eng"], "editable", [2])
+
+
+def _scanned_quote(tmp_path):
+    font = dict(fontname="dejavu", fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    src = pymupdf.open()
+    p = src.new_page()
+    p.insert_text((60, 80), "Preventivo di riparazione", fontsize=20, **font)
+    p.insert_text((60, 130), "Il cliente consegna un orologio automatico per la revisione.", fontsize=12, **font)
+    rows = [["Articolo", "Quantità", "Prezzo"], ["Cinturino", "4", "120,00 €"], ["Vetro", "2", "85,50 €"],
+            ["Corona", "3", "40,00 €"]]
+    for r, row in enumerate(rows):
+        for c, v in enumerate(row):
+            rect = pymupdf.Rect(60 + c * 150, 230 + r * 28, 210 + c * 150, 258 + r * 28)
+            p.draw_rect(rect, color=(0, 0, 0), width=1)
+            p.insert_text((rect.x0 + 6, rect.y1 - 9), v, fontsize=12, **font)
+    pix = p.get_pixmap(dpi=300)
+    doc = pymupdf.open()
+    q = doc.new_page()
+    q.insert_image(q.rect, stream=pix.tobytes("png"))
+    return _save(doc, tmp_path / "scan.pdf"), rows
+
+
+def test_scan_table_to_docx_and_xlsx_with_real_ocr(tmp_path):
+    """Scansione con tabella → DOCX (tabella nativa) e XLSX (celle tipizzate) con il modulo OCR vero."""
+    from foliant.modules.convert.engine import foliant_ocr_module
+    from foliant.modules.convert.extract import ocr_available
+    if foliant_ocr_module() is None or not ocr_available():
+        pytest.skip("modulo OCR o tesseract non disponibili")
+    import docx
+    from openpyxl import load_workbook
+    path, rows = _scanned_quote(tmp_path)
+    d = docx.Document(convert_pdf(path, tmp_path / "s.docx", "docx", language="ita+eng")[0])
+    assert "Preventivo di riparazione" in " ".join(p.text for p in d.paragraphs)
+    assert [[c.text for c in r.cells] for r in d.tables[0].rows] == rows
+    ws = load_workbook(convert_pdf(path, tmp_path / "s.xlsx", "xlsx", language="ita+eng")[0]).active
+    values = [[c.value for c in r] for r in ws.iter_rows()]
+    assert values[0] == rows[0] and values[1] == ["Cinturino", 4, 120] and values[2][2] == 85.5
+
+
+def test_grid_tables_ignores_paragraphs():
+    from foliant.modules.convert.extract import grid_tables
+
+    def blk(x0, y0, x1, text):
+        return {"type": 0, "bbox": (x0, y0, x1, y0 + 14),
+                "lines": [{"spans": [{"text": text}]}]}
+    blocks = [blk(60, 100, 500, "Un paragrafo lungo"), blk(60, 130, 500, "Un altro paragrafo"),
+              blk(60, 200, 100, "A"), blk(200, 200, 240, "B"), blk(60, 228, 100, "1"), blk(200, 228, 240, "2")]
+    found = grid_tables(blocks)
+    assert len(found) == 1 and found[0][1] == [["A", "B"], ["1", "2"]]
