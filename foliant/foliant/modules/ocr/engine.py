@@ -27,6 +27,7 @@ import math
 import os
 import re
 import threading
+import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -128,6 +129,9 @@ class OcrOptions:
     psm: int = 3
     apply_to_page: bool = False  # ricercabile: applica rotazione e raddrizzamento anche alla pagina visibile
     keep_original: bool = False  # modificabile: conserva la scansione come livello nascosto (OCG)
+    clean_page: bool = False     # ricercabile: la pulizia sostituisce anche l'immagine visibile (OCR-09)
+    zones: list = field(default_factory=list)   # zone manuali (layout.Zone), uguali per tutte le pagine
+    auto_tables: bool = True     # riconoscimento automatico delle tabelle con bordi (OCR-10)
 
     def worker_count(self) -> int:
         if self.workers > 0:
@@ -173,6 +177,7 @@ class PageResult:
     notes: list[str] = field(default_factory=list)
     placed: list[tuple] = field(default_factory=list)    # dopo l'applicazione: (Rect pagina, Word)
     existing_text: str = ""               # pagine saltate perché già con testo: testo estraibile
+    tables: list = field(default_factory=list)   # layout.Table rilevate (pixel elaborati)
     remove_layer: bool = False            # togliere il livello OCR invisibile esistente
     original: bytes | None = None         # scansione originale (per il livello nascosto)
     offset: tuple[float, float] = (0.0, 0.0)   # OCR di un'area: origine dell'area sulla pagina (punti)
@@ -401,6 +406,14 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
     res.size = prep.size
     res.rotation = prep.rotation
     res.skew = prep.skew
+    if opts.zones or opts.auto_tables:
+        from .layout import apply_layout
+
+        def zone_ocr(crop, langs):
+            return recognize(crop, langs, dpi=int(round(res.zoom * 72)), psm=6, cancelled=cancelled,
+                             timeout=opts.timeout)
+        lines, res.tables = apply_layout(lines, prep.gray, (img.shape[1], img.shape[0]), prep.affine,
+                                         list(opts.zones), zone_ocr, opts.auto_tables)
     if res.mixed:
         existing = [pymupdf.Rect(r) for kind, r in res.patches if kind == "text"]
         res.patches = []
@@ -433,6 +446,11 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
                 res.original = _encode_background(img)
     elif opts.mode == SEARCHABLE and res.rasterize:
         res.background = _encode_background(img)
+    elif opts.mode == SEARCHABLE and opts.clean_page and not res.mixed:
+        # immagine della pagina pulita (rumore, contrasto, bordi) con la stessa geometria
+        from .preprocess import enhance, to_gray
+        res.background = _encode_background(enhance(to_gray(img), opts.preprocess))
+        res.rasterize = True
     return res
 
 
@@ -447,7 +465,7 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
     if opts.mode not in MODES:
         raise ValueError(f"modalità OCR sconosciuta: {opts.mode}")
     from .languages import check_languages
-    check_languages(opts.languages)
+    check_languages(list(opts.languages) + [c for z in opts.zones for c in z.languages if c not in opts.languages])
     with ENGINE_LOCK:
         count = pdf.page_count
     indices = list(range(count)) if pages is None else [i for i in pages if 0 <= i < count]
@@ -463,6 +481,10 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
             cancel_event.set()
             return True
         return False
+
+    def paused() -> bool:
+        fn = getattr(progress, "is_paused", None)
+        return bool(fn()) if callable(fn) else False
 
     def report(done: int, text: str) -> None:
         if progress is not None:
@@ -492,6 +514,11 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
             exhausted = False
             while pending or not exhausted:
                 while not exhausted and len(pending) < workers * 2:
+                    # pausa (OCR-13): nessuna nuova pagina finché dura; le pagine in corso terminano
+                    while paused() and not cancelled():
+                        time.sleep(0.1)
+                        if not pending:
+                            report(done, _("In pausa: {d} di {t} pagine riconosciute.").format(d=done, t=len(indices)))
                     try:
                         index = next(it)
                     except StopIteration:

@@ -24,10 +24,13 @@ class PreprocessOptions:
     denoise: bool = True         # rimozione del rumore granulare
     contrast: bool = True        # miglioramento del contrasto se basso
     max_skew: float = 15.0       # inclinazione massima cercata (gradi)
+    borders: bool = True         # rimozione dei bordi neri di scansione
+    perspective: bool = True     # foto di documenti: raddrizzamento della prospettiva
 
     def as_dict(self) -> dict:
         return {"deskew": self.deskew, "auto_rotate": self.auto_rotate, "denoise": self.denoise,
-                "contrast": self.contrast, "max_skew": self.max_skew}
+                "contrast": self.contrast, "max_skew": self.max_skew, "borders": self.borders,
+                "perspective": self.perspective}
 
 
 @dataclass
@@ -145,10 +148,17 @@ def compose(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def invert(m: np.ndarray) -> np.ndarray:
+    m = np.asarray(m, np.float64)
+    if m.shape == (3, 3):          # omografia (correzione di prospettiva)
+        return np.linalg.inv(m)
     return cv2.invertAffineTransform(m)
 
 
 def apply_point(m: np.ndarray, x: float, y: float) -> tuple[float, float]:
+    m = np.asarray(m, np.float64)
+    if m.shape == (3, 3):
+        d = m[2, 0] * x + m[2, 1] * y + m[2, 2]
+        return ((m[0, 0] * x + m[0, 1] * y + m[0, 2]) / d, (m[1, 0] * x + m[1, 1] * y + m[1, 2]) / d)
     return (m[0, 0] * x + m[0, 1] * y + m[0, 2], m[1, 0] * x + m[1, 1] * y + m[1, 2])
 
 
@@ -157,14 +167,36 @@ def warp(img: np.ndarray, m: np.ndarray, size: tuple[int, int], border=None) -> 
         border = paper_color(img)
     if img.ndim == 3 and len(border) == 1:
         border = border * img.shape[2]
+    if np.asarray(m).shape == (3, 3):
+        return cv2.warpPerspective(img, np.asarray(m, np.float64), size, flags=cv2.INTER_LINEAR,
+                                   borderMode=cv2.BORDER_CONSTANT, borderValue=tuple(int(c) for c in border))
     if np.allclose(m, [[1, 0, 0], [0, 1, 0]]) and size == (img.shape[1], img.shape[0]):
         return img
     return cv2.warpAffine(img, m, size, flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
                           borderValue=tuple(int(c) for c in border))
 
 
-def enhance(gray: np.ndarray, opts: PreprocessOptions) -> np.ndarray:
+def remove_borders(gray: np.ndarray) -> np.ndarray:
+    """Toglie i bordi neri della scansione: zone scure grandi che toccano il margine dell'immagine."""
+    h, w = gray.shape[:2]
+    dark = (gray < 90).astype(np.uint8)
+    if not dark.any():
+        return gray
+    n, labels, stats, _c = cv2.connectedComponentsWithStats(dark, 4)
     out = gray
+    for i in range(1, n):
+        x, y, ww, hh, area = stats[i]
+        touches = x == 0 or y == 0 or x + ww >= w or y + hh >= h
+        large = ww >= 0.3 * w or hh >= 0.3 * h
+        if touches and large and area >= 0.4 * min(ww, hh) * max(ww, hh) * 0.1:
+            if out is gray:
+                out = gray.copy()
+            out[labels == i] = 255
+    return out
+
+
+def enhance(gray: np.ndarray, opts: PreprocessOptions) -> np.ndarray:
+    out = remove_borders(gray) if opts.borders else gray
     if opts.denoise:
         # il filtro mediano elimina il rumore «sale e pepe» senza sfumare i bordi
         out = cv2.medianBlur(out, 3)
@@ -187,7 +219,16 @@ def prepare(img: np.ndarray, opts: PreprocessOptions, osd_rotation: int = 0) -> 
     quarter = (osd_rotation // 90) % 4 if opts.auto_rotate else 0
     m, size = rotation_affine(w, h, quarter, 0.0)
     base = warp(gray, m, size, (255,))
-    angle = estimate_skew(base, opts.max_skew) if opts.deskew else 0.0
+    if opts.perspective:
+        found = find_document_quad(base)
+        if found is not None:
+            hm, out_size = found
+            total = hm @ np.vstack([m, [0, 0, 1]])
+            out = enhance(warp(gray, total, out_size, (255,)), opts)
+            return Prepared(gray=out, affine=total, rotation=quarter * 90, skew=0.0, size=out_size,
+                            notes=["perspective"])
+    probe = remove_borders(base) if opts.borders else base
+    angle = estimate_skew(probe, opts.max_skew) if opts.deskew else 0.0
     if angle:
         m, size = rotation_affine(w, h, quarter, angle)
         base = warp(gray, m, size)
@@ -333,3 +374,50 @@ def serif_ratio(gray: np.ndarray, box, baseline: float, x_height: float) -> floa
     foot = float(bw[max(0, b - 2):max(0, b)].sum())
     mid = float(bw[max(0, b - xh - 1):max(1, b - xh + 1)].sum())
     return foot / max(1.0, mid)
+
+
+def _order_quad(pts: np.ndarray) -> np.ndarray:
+    pts = pts.reshape(4, 2).astype(np.float64)
+    s_ = pts.sum(axis=1)
+    d = np.diff(pts, axis=1).ravel()
+    return np.array([pts[np.argmin(s_)], pts[np.argmin(d)], pts[np.argmax(s_)], pts[np.argmax(d)]])
+
+
+def find_document_quad(gray: np.ndarray):
+    """Foto di un documento: il foglio è un quadrilatero chiaro su uno sfondo più scuro.
+
+    Restituisce (omografia 3x3 «immagine → foglio raddrizzato», dimensioni) oppure None (scansione
+    normale: il foglio occupa già l'immagine, oppure la forma trovata non è un foglio).
+    """
+    h, w = gray.shape[:2]
+    scale = min(1.0, 800.0 / max(h, w))
+    small = cv2.resize(gray, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
+    blur = cv2.GaussianBlur(small, (5, 5), 0)
+    _t, bw = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    contours, _hier = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    c = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(c)
+    total = small.shape[0] * small.shape[1]
+    if not 0.2 * total <= area <= 0.95 * total:
+        return None
+    approx = cv2.approxPolyDP(c, 0.02 * cv2.arcLength(c, True), True)
+    if len(approx) != 4 or not cv2.isContourConvex(approx):
+        return None
+    mask = np.zeros_like(small)
+    cv2.drawContours(mask, [approx], -1, 255, -1)
+    inside = float(small[mask > 0].mean())
+    outside = float(small[mask == 0].mean()) if (mask == 0).any() else 255.0
+    if inside - outside < 40:          # sfondo non più scuro del foglio: non è una foto di documento
+        return None
+    quad = _order_quad(approx) / scale
+    tl, tr, br, bl = quad
+    width = int(max(np.linalg.norm(tr - tl), np.linalg.norm(br - bl)))
+    height = int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr)))
+    if width < 100 or height < 100:
+        return None
+    dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], np.float64)
+    hm = cv2.getPerspectiveTransform(quad.astype(np.float32), dst.astype(np.float32)).astype(np.float64)
+    return hm, (width, height)

@@ -454,3 +454,58 @@ def test_modificabile_contenuto_memorizzato_di_lato(rot):
         seen = engine.ocr_page_text(ref[0], clip=r + (-4, -4, 4, 4), languages=["ita"],
                                     preprocess=PreprocessOptions(auto_rotate=False))
         assert "compravendita" in seen
+
+
+def test_bordi_neri_e_pulizia_applicata_alla_pagina(tmp_path):
+    """OCR-09: bordi neri di scansione rimossi per il riconoscimento; con l'opzione l'immagine visibile
+    viene sostituita mantenendo posizione e dimensioni."""
+    import numpy as np
+    img = scan_image(dpi=200, noise=0.03)
+    img[:, :60] = 0
+    img[:45, :] = 0
+    data = open(image_pdf(tmp_path / "b.pdf", [img], dpi=200), "rb").read()
+    out = engine.ocr_pdf_bytes(data, ["ita"], "searchable",
+                               options=engine.OcrOptions(clean_page=True))
+    with pymupdf.open(stream=data) as a, pymupdf.open(stream=out) as b:
+        assert engine.char_accuracy(b[0].get_text(), EXPECTED) >= 0.95
+        ia, ib = a[0].get_image_info()[0], b[0].get_image_info()[0]
+        from .conftest import iou
+        assert iou(ia["bbox"], ib["bbox"]) >= 0.99
+        g = np.frombuffer(b[0].get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
+        g0 = np.frombuffer(a[0].get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
+        assert (g < 60).sum() < (g0 < 60).sum() * 0.5          # bordi neri e rumore tolti dall'immagine
+
+
+def _photo(img, dpi=200):
+    """Foglio fotografato in prospettiva su un tavolo scuro."""
+    import cv2
+    import numpy as np
+    h, w = img.shape[:2]
+    canvas = np.full((int(h * 1.25), int(w * 1.3), 3), (70, 60, 50), np.uint8)
+    H, W = canvas.shape[:2]
+    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    dst = np.float32([[W * 0.12, H * 0.08], [W * 0.86, H * 0.12], [W * 0.92, H * 0.93], [W * 0.07, H * 0.88]])
+    m = cv2.getPerspectiveTransform(src, dst)
+    warped = cv2.warpPerspective(img, m, (W, H), borderMode=cv2.BORDER_TRANSPARENT, dst=canvas.copy())
+    return warped
+
+
+def test_foto_in_prospettiva(tmp_path):
+    """OCR-09: documento fotografato in prospettiva: raddrizzato e riconosciuto (testo e modificabile)."""
+    from foliant.modules.ocr import preprocess
+    photo = _photo(scan_image(lines=FRASI[:4], dpi=200))
+    assert preprocess.find_document_quad(preprocess.to_gray(photo)) is not None
+    assert preprocess.find_document_quad(preprocess.to_gray(scan_image(dpi=150))) is None   # scansione normale
+    data = open(image_pdf(tmp_path / "foto.pdf", [photo], dpi=200), "rb").read()
+    expected = "\n".join(FRASI[:4])
+    with pymupdf.open(stream=data) as pdf:
+        res = engine.recognize_document(pdf, engine.OcrOptions(languages=["ita"])).pages[0]
+    assert engine.char_accuracy(res.text, expected) >= 0.9
+    with pymupdf.open(stream=engine.ocr_pdf_bytes(data, ["ita"], "searchable")) as d:
+        r = d[0].search_for("compravendita")
+        assert r                                                   # livello ricercabile sulla foto
+    with pymupdf.open(stream=engine.ocr_pdf_bytes(data, ["ita"], "editable")) as d:
+        assert engine.char_accuracy(d[0].get_text(), expected) >= 0.9
+        for b in d[0].get_text("dict")["blocks"]:
+            for ln in b.get("lines", []):
+                assert abs(ln["dir"][1]) < 0.01                    # righe orizzontali
