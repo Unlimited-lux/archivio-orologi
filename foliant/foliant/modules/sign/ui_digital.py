@@ -178,20 +178,40 @@ class DigitalSignDialog(QDialog):
         self.create_id.clicked.connect(self._create_id)
         self.password.editingFinished.connect(self._preview)
 
+    def allowed_issuers(self) -> set[str] | None:
+        issuers = getattr(self.field, "allowed_issuers", None)
+        return {c.subject_dn for c in issuers} if issuers else None
+
     def _reload_ids(self, select_path: str | None = None) -> None:
         self.id_combo.clear()
+        allowed = self.allowed_issuers()
         for e in self.store.IDRegistry().list():
-            label = e.alias + (_(" (file non trovato)") if e.missing else "")
+            refused = allowed is not None and not self._issuer_allowed(e)
+            label = e.alias + (_(" (file non trovato)") if e.missing else "") + \
+                (_(" (non ammesso dal campo)") if refused else "")
             self.id_combo.addItem(label, e.path)
-            if e.missing:
+            if e.missing or refused:
                 self.id_combo.model().item(self.id_combo.count() - 1).setEnabled(False)
-            if (select_path and e.path == select_path) or (not select_path and e.default and not e.missing):
+            elif (select_path and e.path == select_path) or (not select_path and e.default):
                 self.id_combo.setCurrentIndex(self.id_combo.count() - 1)
+        if allowed:
+            self.cert_info.setText(_("Questo campo accetta solo certificati emessi da: {who}").format(
+                who="; ".join(sorted(c.subject for c in self.field.allowed_issuers))))
         if self.id_combo.count() == 0 and not select_path:
             self.id_combo.setPlaceholderText(_("Nessun ID digitale: usa «Sfoglia…» o «Crea…»"))
         if select_path and self.id_combo.findData(select_path) < 0:
             self.id_combo.addItem(Path(select_path).name, select_path)
             self.id_combo.setCurrentIndex(self.id_combo.count() - 1)
+
+    def _issuer_allowed(self, entry_or_info) -> bool:
+        issuers = getattr(self.field, "allowed_issuers", None)
+        if not issuers:
+            return True
+        names = {c.subject for c in issuers} | {c.subject_dn for c in issuers}
+        fps = {c.sha256 for c in issuers}
+        issuer = getattr(entry_or_info, "issuer_dn", None) or getattr(entry_or_info, "issuer", "")
+        fp = getattr(entry_or_info, "fingerprint", None) or getattr(entry_or_info, "sha256", "")
+        return issuer in names or getattr(entry_or_info, "issuer", "") in names or fp in fps
 
     def _create_id(self) -> None:
         dlg = SelfSignedDialog(self, self.c)
@@ -248,6 +268,9 @@ class DigitalSignDialog(QDialog):
             self.error.setText(str(e))
             return
         self._show_info(did)
+        if not self._issuer_allowed(did.info):
+            self.error.setText(_("Il campo non accetta certificati emessi da «{who}».").format(who=did.info.issuer))
+            return
         try:
             warnings = self.digital.check_usable(did, allow_expired=self.allow_expired.isChecked())
         except self.digital.CertificateNotUsable as e:
@@ -356,6 +379,17 @@ class FieldDialog(QDialog):
         form.addRow(_("Server marca temporale:"), self.tsa)
         self.tsa_required = QCheckBox(_("Marca temporale obbligatoria"))
         form.addRow("", self.tsa_required)
+        self.reasons = QLineEdit()
+        self.reasons.setPlaceholderText(_("motivi separati da punto e virgola (facoltativo)"))
+        form.addRow(_("Motivi ammessi:"), self.reasons)
+        irow = QHBoxLayout()
+        self.issuer_label = QLabel(_("Qualsiasi"))
+        irow.addWidget(self.issuer_label, 1)
+        b_issuer = QPushButton(_("Scegli certificato…"))
+        b_issuer.clicked.connect(self._choose_issuer)
+        irow.addWidget(b_issuer)
+        form.addRow(_("Emittente ammesso:"), irow)
+        self.issuers: list = []
         self.lock_action = QComboBox()
         for key, label in [(None, _("Nessun campo")), ("All", _("Tutti i campi")),
                            ("Include", _("Solo i campi indicati")), ("Exclude", _("Tutti tranne quelli indicati"))]:
@@ -375,6 +409,23 @@ class FieldDialog(QDialog):
         box.accepted.connect(self._accept)
         box.rejected.connect(self.reject)
         lay.addWidget(box)
+
+    def _choose_issuer(self) -> None:
+        path, _f = QFileDialog.getOpenFileName(self, _("Certificato dell'emittente ammesso"), "", _(CERT_FILTER))
+        if not path:
+            return
+        from . import store
+        try:
+            ders = store._parse_certificates(Path(path).read_bytes())
+            from .digital import cert_info_from_der
+            self.issuers = [cert_info_from_der(d) for d in ders]
+        except Exception as e:
+            self.error.setText(str(e) or _("Certificato non leggibile."))
+            return
+        self.issuer_label.setText(", ".join(c.subject for c in self.issuers) or _("Qualsiasi"))
+
+    def allowed_reasons(self) -> list[str] | None:
+        return [r.strip() for r in self.reasons.text().split(";") if r.strip()] or None
 
     def lock_spec(self) -> tuple[str, list[str] | None]:
         action = self.lock_action.currentData()
@@ -405,6 +456,7 @@ class SelfSignedDialog(QDialog):
         self.created_path: str | None = None
         self.info = None
         self.setWindowTitle(_("Crea ID digitale autofirmato"))
+        self.setMinimumWidth(560)
         lay = QVBoxLayout(self)
         note = QLabel(_("Un ID autofirmato va bene per uso interno o per prova: gli altri non lo "
                         "riconosceranno automaticamente finché non considerano attendibile il tuo certificato."))
@@ -882,6 +934,13 @@ TRANSLATIONS_EN = {
                                  "Key usage: {k}\nSHA-256: {h}\nSHA-1: {h1}",
     "Ripeti su più pagine": "Repeat on several pages",
     "nomi dei campi separati da virgola": "field names separated by commas",
+    " (non ammesso dal campo)": " (not allowed by the field)",
+    "Questo campo accetta solo certificati emessi da: {who}": "This field only accepts certificates issued by: {who}",
+    "Il campo non accetta certificati emessi da «{who}».": "The field does not accept certificates issued by “{who}”.",
+    "motivi separati da punto e virgola (facoltativo)": "reasons separated by semicolons (optional)",
+    "Motivi ammessi:": "Allowed reasons:", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
+    "Emittente ammesso:": "Allowed issuer:", "Certificato dell'emittente ammesso": "Certificate of the allowed issuer",
+    "Certificato non leggibile.": "Unreadable certificate.",
     "Questi campi del modulo non potranno più essere modificati senza invalidare la firma.":
         "These form fields can no longer be changed without invalidating the signature.",
     "Blocca campi dopo la firma:": "Lock fields after signing:", "Nessun campo": "No fields",

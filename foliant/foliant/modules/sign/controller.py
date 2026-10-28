@@ -653,7 +653,8 @@ class SignController(QObject):
                 data, dlg.name.text().strip() or _("Firma"), page, tuple(rect), required=dlg.required.isChecked(),
                 tooltip=dlg.tooltip.text().strip(), timestamp_url=dlg.tsa.text().strip() or None,
                 timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
-                lock_action=lock_action)
+                lock_action=lock_action, allowed_reasons=dlg.allowed_reasons(),
+                allowed_issuers=dlg.issuers or None)
         except digital.SignError as e:
             self.ctx.error(_("Campo firma"), str(e))
             return

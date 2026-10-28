@@ -571,3 +571,34 @@ def test_settings_disable_auto_verify(window, monkeypatch, sample_pdf, tmp_path,
     view = window.open_path(str(p))
     assert _ctl(window).state(view).statuses == []
     window.settings.setValue("sign/auto_verify", "true")
+
+
+def test_field_constraints_filter_ids_and_reasons(window, qtbot, tmp_path, id_a, id_b):
+    """SIG-19/20: campo che ammette solo l'emittente di B e due motivi → solo l'ID conforme è selezionabile."""
+    from foliant.modules.sign.ui_digital import DigitalSignDialog
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "vincoli.pdf", pages=1)).read_bytes()
+    data, name = digital.add_signature_field(data, "Cliente", 0, (300, 700, 500, 760),
+                                             allowed_reasons=["Accetto", "Rifiuto"], allowed_issuers=[id_b[1]])
+    field = digital.signature_fields(data)[0]
+    assert field.allowed_reasons == ["Accetto", "Rifiuto"]
+    assert [c.sha256 for c in field.allowed_issuers] == [id_b[1].sha256]
+    store.IDRegistry().add(id_a[0], id_a[1])
+    store.IDRegistry().add(id_b[0], id_b[1])
+    path = tmp_path / "vincoli2.pdf"
+    path.write_bytes(data)
+    window.open_path(str(path))
+    dlg = DigitalSignDialog(window, _ctl(window), field=field)
+    qtbot.addWidget(dlg)
+    model = dlg.id_combo.model()
+    enabled = [dlg.id_combo.itemText(i) for i in range(dlg.id_combo.count()) if model.item(i).isEnabled()]
+    assert enabled == ["Lucia Bianchi"]
+    assert [dlg.reason.itemText(i) for i in range(dlg.reason.count())] == ["Accetto", "Rifiuto"]
+    assert not dlg.reason.isEditable()
+    dlg._reload_ids(str(id_a[0]))          # forzando l'ID non conforme la firma è rifiutata
+    dlg.id_combo.setCurrentIndex(dlg.id_combo.findData(str(Path(id_a[0]).resolve())))
+    dlg.password.setText(PASSWORD)
+    dlg._accept()
+    assert dlg.digital_id is None and "non accetta" in dlg.error.text()
+    out = digital.sign_pdf(data, id_b[2], digital.SignOptions(field_name="Cliente", reason="Accetto"))
+    assert digital.verify_pdf(out, trusted=[id_b[1]])[0].status == "valida"

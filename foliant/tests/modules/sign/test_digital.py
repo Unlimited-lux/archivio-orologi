@@ -477,3 +477,15 @@ def test_no_secrets_in_digital_id_repr(id_a):
 def test_translations_cover_format_keys():
     for k, v in d.TRANSLATIONS_EN.items():
         assert set(re.findall(r"{(\w+)}", k)) == set(re.findall(r"{(\w+)}", v)), k
+
+
+def test_field_constraints_enforced(pdf_bytes, id_a, id_b):
+    from foliant.modules.sign import digital
+    data, _n = digital.add_signature_field(pdf_bytes, "Cliente", 0, (300, 700, 500, 760),
+                                           allowed_reasons=["Accetto"], allowed_issuers=[id_b[1]])
+    with pytest.raises(digital.SigningNotAllowed, match="motivi"):
+        digital.sign_pdf(data, id_b[2], digital.SignOptions(field_name="Cliente", reason="Altro"))
+    with pytest.raises(digital.SigningNotAllowed, match="emessi"):
+        digital.sign_pdf(data, id_a[2], digital.SignOptions(field_name="Cliente", reason="Accetto"))
+    out = digital.sign_pdf(data, id_b[2], digital.SignOptions(field_name="Cliente", reason="Accetto"))
+    assert out.startswith(data)

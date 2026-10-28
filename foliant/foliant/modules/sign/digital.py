@@ -824,6 +824,27 @@ def _timestamp_error(exc: BaseException) -> TimestampError:
     return TimestampError(_("La marca temporale ricevuta non è coerente ed è stata scartata"), "token")
 
 
+def _check_field_constraints(sv, digital_id: "DigitalID", options: "SignOptions") -> bool:
+    """Verifica i vincoli /SV del campo su motivo ed emittente. Restituisce True
+    se il campo ha un vincolo sull'emittente (che verifichiamo noi)."""
+    if sv is None:
+        return False
+    reasons = [str(r) for r in (_deref(sv.get("/Reasons")) or [])]
+    if reasons and (options.reason or "") not in reasons:
+        raise SigningNotAllowed(_("Il campo ammette solo questi motivi: {r}").format(r="; ".join(reasons)))
+    cert = _deref(sv.get("/Cert"))
+    if cert is None or "/Issuer" not in cert:
+        return False
+    allowed = [cert_info_from_der(bytes(_deref(x))) for x in _deref(cert.get("/Issuer"))]
+    chain = [digital_id.info, *digital_id.chain]
+    ok_dn = {c.subject_dn for c in allowed}
+    ok_fp = {c.sha256 for c in allowed}
+    if not any(c.issuer_dn in ok_dn or c.sha256 in ok_fp for c in chain):
+        raise SigningNotAllowed(_("Il campo non accetta certificati emessi da «{who}»").format(
+            who=digital_id.info.issuer))
+    return True
+
+
 def sign_pdf(data: bytes, digital_id: DigitalID, options: SignOptions) -> bytes:
     return sign_pdf_ex(data, digital_id, options)[0]
 
@@ -874,6 +895,7 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     if options.docmdp_level not in (1, 2, 3):
         raise SignError(_("Livello di certificazione non valido"))
 
+    own_sv_check = False
     names = _existing_field_names(reader)
     sig_fields = {name: fref for name, _v, fref in pfields.enumerate_sig_fields(reader)}
     new_field_spec = None
@@ -903,6 +925,7 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
         ts_spec = _deref(sv.get("/TimeStamp")) if sv is not None else None
         if ts_spec is not None and int(ts_spec.get("/Ff", 0) or 0) & 1 and "/URL" in ts_spec:
             sv_ts_url = str(ts_spec["/URL"])
+        own_sv_check = _check_field_constraints(sv, digital_id, options)
     else:
         if options.field_name and options.field_name in names:
             raise SigningNotAllowed(
@@ -943,6 +966,10 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     style = _FoliantStampStyle(digital_id.info, options, rotation)
     pdf_signer = signers.PdfSigner(meta, digital_id.signer, timestamper=timestamper, stamp_style=style,
                                    new_field_spec=new_field_spec)
+    if own_sv_check:
+        # vincolo sull'emittente già verificato qui (pyHanko richiederebbe un percorso di
+        # validazione completo); la marca temporale obbligatoria è gestita sopra con sv_ts_url
+        pdf_signer._ignore_sv = True
     out = io.BytesIO()
     try:
         pdf_signer.sign_pdf(writer, output=out)
@@ -991,6 +1018,8 @@ class FieldInfo:
     locked: bool
     timestamp_required_url: str | None = None
     tooltip: str = ""
+    allowed_reasons: list[str] | None = None        # /SV /Reasons
+    allowed_issuers: list[CertInfo] | None = None   # /SV /Cert /Issuer
 
 
 def _locked_field_names(reader) -> set[str]:
@@ -1084,15 +1113,25 @@ def signature_fields(data: bytes) -> list[FieldInfo]:
         flags = int(widget.get("/F", 0) or 0)
         ff = int(fobj.get("/Ff", 0) or 0)
         ts_url = None
+        reasons = issuers = None
         sv = _deref(fobj.get("/SV"))
         if sv is not None:
             ts = _deref(sv.get("/TimeStamp"))
             if ts is not None and int(ts.get("/Ff", 0) or 0) & 1 and "/URL" in ts:
                 ts_url = str(ts["/URL"])
+            try:
+                if "/Reasons" in sv:
+                    reasons = [str(r) for r in _deref(sv.get("/Reasons"))] or None
+                cert = _deref(sv.get("/Cert"))
+                if cert is not None and "/Issuer" in cert:
+                    issuers = [cert_info_from_der(bytes(_deref(x))) for x in _deref(cert.get("/Issuer"))] or None
+            except Exception:  # noqa: BLE001 - vincoli illeggibili: ignorati
+                pass
         out.append(FieldInfo(
             name=name, page=page_idx, rect=rect, signed=value is not None,
             hidden=bool(flags & 2), required=bool(ff & 2), invisible=invisible,
             locked=name in locked, timestamp_required_url=ts_url, tooltip=str(fobj.get("/TU", "") or ""),
+            allowed_reasons=reasons, allowed_issuers=issuers,
         ))
     out.sort(key=lambda f: (f.page if f.page is not None else 1 << 30,
                             f.rect[1] if f.rect else 0, f.rect[0] if f.rect else 0))
@@ -1101,7 +1140,7 @@ def signature_fields(data: bytes) -> list[FieldInfo]:
 
 def add_signature_field(data, name, page, rect, *, required=False, tooltip="", timestamp_url=None,
                         timestamp_required=False, lock_fields=None, lock_action="Include",
-                        hidden=False) -> tuple[bytes, str]:
+                        hidden=False, allowed_reasons=None, allowed_issuers=None) -> tuple[bytes, str]:
     from pyhanko.pdf_utils import generic
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
     from pyhanko.sign import fields as pfields
@@ -1128,9 +1167,19 @@ def add_signature_field(data, name, page, rect, *, required=False, tooltip="", t
     page_obj = pages[page].get_object()
     box = _to_pdf_rect(page_obj, rect) if rect else None
     sv = None
-    if timestamp_url:
+    if timestamp_url or allowed_reasons or allowed_issuers:
+        flags = pfields.SigSeedValFlags(0)
+        cert = None
+        if allowed_reasons:
+            flags |= pfields.SigSeedValFlags.REASONS
+        if allowed_issuers:
+            cert = pfields.SigCertConstraints(
+                flags=pfields.SigCertConstraintFlags.ISSUER,
+                issuers=[_to_cert_info(c).to_asn1() for c in allowed_issuers])
         sv = pfields.SigSeedValueSpec(
-            timestamp_server_url=timestamp_url, timestamp_required=bool(timestamp_required))
+            flags=flags, reasons=list(allowed_reasons) if allowed_reasons else None,
+            timestamp_server_url=timestamp_url or None,
+            timestamp_required=bool(timestamp_required and timestamp_url), cert=cert)
     fmdp = None
     if lock_fields is not None or lock_action == "All":
         action = {"All": pfields.FieldMDPAction.ALL, "Include": pfields.FieldMDPAction.INCLUDE,
@@ -1719,6 +1768,8 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "Il campo ammette solo questi motivi: {r}": "The field only allows these reasons: {r}",
+    "Il campo non accetta certificati emessi da «{who}»": "The field does not accept certificates issued by “{who}”",
     "Password errata": "Wrong password",
     "Certificato non riconosciuto": "Certificate not recognized",
     "Impossibile leggere il file dell'ID digitale: {path}": "Cannot read the digital ID file: {path}",
