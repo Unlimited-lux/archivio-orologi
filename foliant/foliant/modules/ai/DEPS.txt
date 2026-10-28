@@ -1,0 +1,5 @@
+# Modulo ai: nessuna nuova dipendenza pip oltre a requirements.txt.
+# Usa: anthropic (SDK del fornitore Anthropic), keyring (portachiavi di sistema).
+# Facoltative di sistema: tesseract-ocr con le lingue ita/eng (OCR prima dell'invio, AI-15).
+# Portachiavi: su Ubuntu/GNOME serve un servizio Secret Service attivo (gnome-keyring);
+# senza, la chiave si può usare solo per la sessione corrente.
