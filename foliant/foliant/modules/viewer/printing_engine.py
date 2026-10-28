@@ -18,7 +18,6 @@ from PySide6.QtGui import QImage, QPagedPaintDevice, QPainter
 
 from foliant.api import ENGINE_LOCK, _
 
-from .properties_engine import document_security
 
 DEFAULT_MAX_DPI = 300
 LOW_QUALITY_DPI = 150
@@ -89,9 +88,7 @@ def print_capability(permissions: int) -> PrintCapability:
 
 
 def document_print_capability(document) -> PrintCapability:
-    with ENGINE_LOCK:
-        perms = document_security(document).permissions
-    return print_capability(perms)
+    return print_capability(document.permissions)   # permessi effettivi del nucleo
 
 
 def effective_dpi(device_dpi: int, max_dpi: int) -> int:

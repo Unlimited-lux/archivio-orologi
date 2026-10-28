@@ -142,6 +142,8 @@ class RecoveryController(QObject):
         self.directory = engine.recovery_dir()
         self.pid_alive = engine.pid_alive
         self.dialog: RecoveryDialog | None = None
+        self.notification = None          # avviso non bloccante del nucleo (ctx.notify)
+        self.pending: list = []           # copie proposte all'avvio
         self._ids: dict[Document, str] = {}
         self._saved_version: dict[Document, int] = {}
         self._inflight: set[Document] = set()
@@ -288,7 +290,25 @@ class RecoveryController(QObject):
             return None
         if not entries:
             return None
-        self.dialog = RecoveryDialog(self, entries, self.ctx.window)
+        self.pending = list(entries)
+        n = len(entries)
+        text = (_("Foliant non è stato chiuso correttamente: c'è 1 documento con modifiche recuperabili.") if n == 1
+                else _("Foliant non è stato chiuso correttamente: ci sono {n} documenti con modifiche recuperabili.")
+                .format(n=n))
+        self.notification = self.ctx.notify(text, [
+            (_("Ripristina"), lambda: self.restore_entries(self.pending)),
+            (_("Scegli…"), self.open_dialog),
+            (_("Scarta"), lambda: self.discard_entries(self.pending)),
+        ], duration_ms=0)
+        return self.notification
+
+    def open_dialog(self) -> RecoveryDialog | None:
+        """Finestra (non modale) con l'elenco delle copie, per scegliere quali ripristinare."""
+        if not self.pending:
+            return None
+        if self.dialog is not None and self.dialog.isVisible():
+            return self.dialog
+        self.dialog = RecoveryDialog(self, self.pending, self.ctx.window)
         self.dialog.show()
         self.dialog.raise_()
         return self.dialog
@@ -351,6 +371,11 @@ class RecoveryController(QObject):
 
 def install(ctx: Context) -> RecoveryController:
     add_translations("en", {
+        "Foliant non è stato chiuso correttamente: c'è 1 documento con modifiche recuperabili.":
+            "Foliant was not closed properly: 1 document has recoverable changes.",
+        "Foliant non è stato chiuso correttamente: ci sono {n} documenti con modifiche recuperabili.":
+            "Foliant was not closed properly: {n} documents have recoverable changes.",
+        "Scegli…": "Choose…",
         "Recupero documenti": "Document recovery",
         "Foliant non è stato chiuso correttamente": "Foliant was not closed properly",
         "Sono state trovate copie di recupero di documenti con modifiche non salvate. "

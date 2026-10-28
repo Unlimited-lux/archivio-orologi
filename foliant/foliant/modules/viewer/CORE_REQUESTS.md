@@ -3,6 +3,17 @@
 Ogni richiesta ha già una soluzione locale nel modulo; quando il nucleo la offrirà
 la soluzione locale si può togliere.
 
+**Aggiornamento (base 3d69387): soddisfatte e adottate**, soluzioni locali tolte —
+2 (`view.refresh_rendering`), 3 (`document.allows/permissions`), 4 (stato dei comandi di
+pagina e `ctx.refresh_state`), 5 (`ctx.toggle_sidebar_panel`), 6 (`ctx.activate_view`),
+7 (`ctx.notify`, `ctx.show_banner`), 9 (`ctx.fullscreenChanged`), 17 in parte
+(`ctx.replace_recent`/`remove_recent`), 18 (`ctx.close_view(view, discard=True)`), oltre a
+`ctx.set_selected_pages_provider` e `ctx.add_tab_menu_provider`.
+**Ancora aperte:** 1 (segnale di salto), 8 (area per barre di modulo: la ricerca usa ancora
+una barra nell'area inferiore), 13 (limiti dello zoom), 14 (registrazione del generatore di
+miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomina:
+`window._update_tab_title`), 17 (recenti non disponibili nella Home).
+
 1. **Segnale di salto nella vista** (`DocumentView.aboutToJump(page)` o simile).
    Oggi `navigation.py` avvolge `go_to_page`, `next_page` e `previous_page` di ogni vista
    per registrare la cronologia Indietro/Avanti (VIS-13).

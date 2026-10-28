@@ -234,19 +234,15 @@ class FilesController:
         for view in self.views_for(old):
             view.document.path = Path(new)
             w._update_tab_title(view)
-        items = w.recent_files()
-        if old in items:
-            w.settings.setValue("recent", F.replace_in_list(items, old, new))
-            w._refresh_recent()
+        if old in self.ctx.recent_files():
+            self.ctx.replace_recent(old, new)
         self.update_actions()
 
     def _forget(self, path: str) -> None:
-        w = self.ctx.window
         for view in self.views_for(path):
-            doc = view.document
-            doc._saved_state = doc._state  # modifiche già scartate dall'utente: nessuna richiesta
-            w.close_view(view, ask=False)   # file eliminato o spostato: niente controlli né domande
-        w._forget_recent(path)
+            # modifiche già scartate dall'utente; file eliminato o spostato: niente domande
+            self.ctx.close_view(view, discard=True)
+        self.ctx.remove_recent(path)
         self.update_actions()
 
     def _move_with_conflicts(self, src: str, dst: str) -> str | None:
@@ -419,7 +415,7 @@ class FilesController:
             (_("Mostra nella cartella"), "folder-open", lambda: self.reveal_path(path)),
             (_("Copia percorso"), "clipboard-copy", lambda: self.copy_path(path)),
             None,
-            (_("Rimuovi dall'elenco"), "x", lambda: self.ctx.window._forget_recent(path)),
+            (_("Rimuovi dall'elenco"), "x", lambda: self.ctx.remove_recent(path)),
         )
         for entry in entries:
             if entry is None:
