@@ -575,13 +575,66 @@ class Controller:
         self.exec_dialog(dlg)
         return dlg
 
+    def extract_invoice_files(self, paths: list[str] | None = None):
+        """Fatture da più PDF: un record per fattura con il file d'origine (AI-29)."""
+        from foliant.api import Document, DocumentError
+
+        from . import extract
+        from .extract_view import ExtractDialog
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+        paths = paths if paths is not None else self.ctx.ask_open_paths(_("Fatture da elaborare"))
+        if not paths:
+            return None
+        named, problems = [], []
+        gateway = self.services.gateway()
+        language = panel._answer_language()
+        for path in paths:
+            name = os.path.basename(path)
+            try:
+                doc = Document.open(path)
+            except DocumentError as e:
+                problems.append(f"{name}: {e}")
+                continue
+            try:
+                if not content.extraction_allowed(doc):
+                    problems.append(f"{name}: " + _("estrazione del contenuto non consentita"))
+                    continue
+                scope = engine.build_scope(doc.pdf, engine.DOCUMENT)
+                local = extract.embedded_einvoices(doc.pdf)
+                if local:
+                    res = extract.build_result("invoice", local, scope)
+                else:
+                    res = self.ctx.run_task(_("Estrazione da {f}…").format(f=name), lambda progress, sc=scope:
+                                            extract.extract_data(self._job(progress, gateway, language), sc,
+                                                                 "invoice"))
+                named.append((name, res))
+            except OperationCancelled:
+                return None
+            except Exception as e:  # noqa: BLE001 - un file non leggibile non ferma gli altri
+                from .providers import AIError
+                problems.append(f"{name}: " + (e.user_message() if isinstance(e, AIError) else str(e)))
+            finally:
+                doc.close()
+        if not named:
+            self.ctx.error(_("Estrai dati"), "\n".join(problems) or _("Nessun dato trovato."))
+            return None
+        result = extract.merge_results(named)
+        result.checks.extend(problems)
+        dlg = ExtractDialog(result, self.ctx.ask_save_path, self.ctx.window, source_name=result.source)
+        self.exec_dialog(dlg)
+        return dlg
+
     def choose_extraction(self):
         from PySide6.QtWidgets import QInputDialog
-        kinds = [(_("Tabelle"), "tables"), (_("Fattura o ricevuta"), "invoice")]
+        kinds = [(_("Tabelle"), "tables"), (_("Fattura o ricevuta"), "invoice"),
+                 (_("Fatture da più file"), "invoice-files")]
         label, ok = QInputDialog.getItem(self.ctx.window, _("Estrai dati"), _("Tipo di dati:"),
                                          [k[0] for k in kinds], 0, False)
         if ok:
-            return self.extract_data(dict(kinds)[label])
+            kind = dict(kinds)[label]
+            return self.extract_invoice_files() if kind == "invoice-files" else self.extract_data(kind)
         return None
 
     # ---------------------------------------------------------------- ricerca per significato (AI-21)
@@ -809,6 +862,84 @@ class Controller:
             act(proposal.params)
         elif act is not None:
             act.trigger()   # lo strumento chiede le sue conferme come nell'uso manuale
+
+    # ---------------------------------------------------------------- contratti (AI-28)
+    def open_contracts(self):
+        from foliant.api import Document
+
+        from .contracts_view import ContractsDialog
+        from .tasks_library import BUILTIN
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+        view = self.ctx.current_view()
+        doc = view.document if view is not None else None
+
+        def scope_factory():
+            if doc is None or doc.closed:
+                self.ctx.error(_("Contratti"), _("Apri il contratto da esaminare."))
+                return None
+            if not content.extraction_allowed(doc):
+                self.ctx.error(_("Contratti"), content.blocked_reason(doc.pdf))
+                return None
+            return engine.build_scope(doc.pdf, engine.DOCUMENT, cache=self.services.cache,
+                                      fingerprint=content.content_fingerprint(doc.pdf))
+
+        def go_to(page):
+            if view is not None and not doc.closed and 0 <= page < view.page_count:
+                view.go_to_page(page)
+
+        def prepare_comm(source_text):
+            # AI-31: comunicazione al cliente a partire dalle clausole critiche
+            task = next(t for t in BUILTIN if t.id == "customer-reply")
+            dlg.accept()
+            self.ctx.set_mode("ia")
+            if view is not None:
+                self.ctx.show_properties("ia")
+            panel.run_template(task, {"argomento": _("esito della revisione del contratto:") + "\n" + source_text},
+                               "document" if doc is not None else "none")
+
+        dlg = ContractsDialog(self._run, scope_factory, doc, ask_save_path=self.ctx.ask_save_path,
+                              open_document=lambda data: self.ctx.open_document(
+                                  Document.from_bytes(data, display_name=_("Contratto.pdf"))),
+                              go_to=go_to, prepare_comm=prepare_comm,
+                              confirm=lambda t, m: self.ctx.confirm(t, m), author=panel._author(),
+                              parent=self.ctx.window)
+        self.exec_dialog(dlg)
+        return dlg
+
+    # ---------------------------------------------------------------- scheda prodotto (AI-30)
+    def open_product_sheet(self):
+        from foliant.api import Document
+
+        from . import product_sheet
+        from .product_sheet_view import ProductSheetDialog
+        view = self._ready_view()
+        if view is None:
+            return None
+        doc = view.document
+        panel = self.services.panel
+
+        def generate(language, tone, length):
+            kind = panel.scope_kind()
+            pages = None
+            if kind == engine.PAGES:
+                try:
+                    pages = content.parse_page_range(panel.pages_edit.text(), doc.page_count)
+                except ValueError as e:
+                    self.ctx.error(_("Scheda prodotto"), str(e))
+                    return None
+            scope = engine.build_scope(doc.pdf, engine.PAGES if pages else engine.DOCUMENT, pages=pages,
+                                       cache=self.services.cache, fingerprint=content.content_fingerprint(doc.pdf))
+            return self._run(_("Scheda prodotto…"), lambda job: product_sheet.make_product_sheet(
+                job, scope, language, tone, length))
+
+        def open_document(data):
+            self.ctx.open_document(Document.from_bytes(data, display_name=_("Scheda prodotto.pdf")))
+
+        dlg = ProductSheetDialog(generate, self.ctx.ask_save_path, open_document, self.ctx.window)
+        self.exec_dialog(dlg)
+        return dlg
 
     # ---------------------------------------------------------------- confronto e classifica (AI-32)
     def open_ranking(self):
@@ -1109,6 +1240,8 @@ def register(ctx, *, provider_factory=None) -> Services:
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
     a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_contracts = act(_("Contratti"), "scale", lambda: controller.open_contracts(), requires=False)
+    a_sheet = act(_("Scheda prodotto"), "tag", lambda: controller.open_product_sheet())
     a_rank = act(_("Confronta e classifica"), "list-ordered", lambda: controller.open_ranking(), requires=False)
     a_gfx = act(_("Genera elemento grafico"), "image-plus", lambda: controller.generate_graphic())
     a_docx = act(_("Converti in Word con l'IA"), "file-text", lambda: controller.convert_to_docx())
@@ -1130,8 +1263,8 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_log = act(_("Registro degli invii"), "list", lambda: services.show_log(), requires=False)
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
-                            a_section, a_sem, a_cmd, a_docx]
-    services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank]
+                            a_section, a_sem, a_cmd, a_docx, a_sheet]
+    services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank, a_contracts]
     services.local_actions = [a_pages, a_gfx]   # la generazione spiega da sé se manca il modello   # funziona anche senza profilo (controlli locali)
     for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
         mode.add_action(a)
@@ -1145,7 +1278,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     more.setAutoRaise(True)
     more_menu = QMenu(more)
-    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_tasks, a_write, a_bib, a_cmd),
+    for group in ((a_trpdf, a_out, a_extract, a_sheet, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_contracts, a_tasks, a_write, a_bib, a_cmd),
                   (a_ops, a_log)):
         for a in group:
             more_menu.addAction(a)
