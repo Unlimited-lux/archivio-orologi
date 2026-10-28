@@ -107,7 +107,8 @@ def apply(app: QApplication, requested: str = "system") -> None:
     if _applied == (_mode, _dark, id(app)):
         return              # tema invariato: ristilizzare tutti i widget è costoso e inutile
     _applied = (_mode, _dark, id(app))
-    app.setStyle("Fusion")
+    if app.style().name().lower() != "fusion":   # reimpostarlo ripolirebbe tutti i widget
+        app.setStyle("Fusion")
     t = tokens()
     pal = QPalette()
 

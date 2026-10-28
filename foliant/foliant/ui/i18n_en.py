@@ -106,6 +106,7 @@ EN = {
     "Torna a Seleziona testo": "Back to Select text",
     "Chiudi": "Close",
     "(sola lettura)": "(read-only)",
+    "«{name}» è in sola lettura: puoi modificarlo e salvarlo con «Salva con nome».": "“{name}” is read-only: you can edit it and save it with “Save as”.",
     "Il documento non consente la copia del contenuto.": "The document does not allow copying its content.",
     "Guida rapida di Foliant": "Foliant quick guide",
     "Apri un PDF dalla Home o trascinandolo nella finestra. La barra in alto contiene le modalità di lavoro: ogni modalità mostra i propri strumenti nella barra sottostante.":

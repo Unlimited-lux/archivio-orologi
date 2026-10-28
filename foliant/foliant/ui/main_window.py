@@ -561,6 +561,7 @@ class MainWindow(QMainWindow):
                 if v.tool is not v._default_tool:
                     v.set_tool(None)
             self.act_select.setChecked(True)
+            self.properties.hide()      # il pannello della modalità precedente non resta aperto
         mode.entered.emit()
         self.ctx.modeChanged.emit(mode_id)
 
@@ -732,6 +733,9 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(index)
         self.ctx.documentOpened.emit(view)
         self._on_current_changed()
+        if document.read_only:
+            self.statusBar().showMessage(_("«{name}» è in sola lettura: puoi modificarlo e salvarlo con «Salva con nome».")
+                                         .format(name=document.display_name), 15000)
         view.setFocus()
         return view
 

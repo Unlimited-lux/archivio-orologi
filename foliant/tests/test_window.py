@@ -284,6 +284,7 @@ def test_read_only_file_saves_as(window, sample_pdf, tmp_path, monkeypatch):
                         lambda p, mode: False if (mode == os.W_OK and os.path.realpath(p) == ro) else real_access(p, mode))
     view = window.open_path(sample_pdf)
     assert view.document.read_only and "sola lettura" in window.windowTitle()
+    assert "Salva con nome" in window.statusBar().currentMessage()
     with view.document.change("x") as pdf:
         pdf.delete_page(0)
     target = str(tmp_path / "copia.pdf")
@@ -291,3 +292,15 @@ def test_read_only_file_saves_as(window, sample_pdf, tmp_path, monkeypatch):
     assert window.save_view(view)
     assert pymupdf.open(target).page_count == 2
     assert pymupdf.open(sample_pdf).page_count == 3          # l'originale non è stato toccato
+
+
+def test_mode_switch_hides_previous_properties_panel(window, sample_pdf):
+    from PySide6.QtWidgets import QLabel
+    window.open_path(sample_pdf)
+    m = window.ctx.add_mode("prova_pannello", "Prova", "star", 995)
+    m.entered.connect(lambda: window.ctx.show_properties("prova_pannello"))
+    window.ctx.add_properties_panel("prova_pannello", QLabel("pannello"))
+    window.set_mode("prova_pannello")
+    assert window.properties.isVisible()
+    window.set_mode("leggi")
+    assert not window.properties.isVisible()
