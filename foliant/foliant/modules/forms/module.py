@@ -572,7 +572,18 @@ class FormsModule(QObject):
             self.activate_select_tool() if self.design_active else None
         return xref
 
+    def _signed_keys(self, view, keys) -> set:
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            return {(p, x) for p, x in keys if E.is_signed(pdf, x)}
+
     def move_fields(self, view, changes, label: str) -> None:
+        signed = self._signed_keys(view, [(p, x) for p, x, _r in changes])
+        if signed:
+            self.ctx.error(_("Moduli"), _("I campi firma già firmati non si possono spostare né ridimensionare."))
+            changes = [c for c in changes if (c[0], c[1]) not in signed]
+            if not changes:
+                return
         self._change(label, lambda pdf: E.move_fields(pdf, [(p, x, E.clamp_rect(pdf, p, r)) for p, x, r in changes]), view)
 
     def nudge_selected(self, dx: float, dy: float) -> None:
@@ -587,6 +598,13 @@ class FormsModule(QObject):
         sel = self.selected_fields()
         if not sel:
             return
+        view = self.ctx.current_view()
+        signed = self._signed_keys(view, [(f.page, f.xref) for f in sel])
+        if signed:
+            self.ctx.error(_("Moduli"), _("I campi firma già firmati non si possono eliminare."))
+            sel = [f for f in sel if (f.page, f.xref) not in signed]
+            if not sel:
+                return
 
         def run(pdf):
             for f in sel:
@@ -1106,12 +1124,74 @@ class FormsModule(QObject):
             self._change(_("Mostra/nascondi campi"),
                          lambda pdf: E.hide_fields(pdf, action.get("fields", []), action.get("hide", True)), filler.view)
         elif kind == "submit":
-            self.ctx.info(_("Invia modulo"), _("L'invio del modulo a un indirizzo esterno non è disponibile: "
-                                                "esporta i dati e inviali separatamente."))
+            self.submit(filler, action)
         elif kind == "javascript":
             self.ctx.status(_("Il pulsante esegue uno script personalizzato, non supportato."))
         else:
             self.ctx.status(_("Il pulsante «{n}» non ha azioni.").format(n=f.name))
+
+    def submission_data(self, view, action: dict) -> tuple[bytes, str]:
+        """(dati, tipo MIME) da inviare secondo il formato dell'azione."""
+        values = self.values_for_export(view)
+        if action.get("fields"):
+            values = {k: v for k, v in values.items() if k in action["fields"]}
+        if not action.get("empty"):
+            values = {k: v for k, v in values.items() if v not in ("", [], None)}
+        fmt = action.get("format", "fdf")
+        if fmt == "xfdf":
+            return X.export_xfdf(values, view.document.display_name), "application/vnd.adobe.xfdf"
+        if fmt == "pdf":
+            return view.document.to_bytes(), "application/pdf"
+        if fmt == "html":
+            from urllib.parse import urlencode
+            flat = {k: ("; ".join(v) if isinstance(v, list) else v) for k, v in values.items()}
+            return urlencode(flat).encode(), "application/x-www-form-urlencoded"
+        with ENGINE_LOCK:
+            buttons = {f.name for f in E.list_fields(view.document.pdf) if f.kind in (E.CHECKBOX, E.RADIO)}
+        return X.export_fdf(values, view.document.display_name, buttons), "application/vnd.fdf"
+
+    def post(self, url: str, data: bytes, mime: str) -> int:
+        """Invio HTTP (in un thread di attività). Restituisce il codice di stato."""
+        import urllib.request
+        req = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": mime})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status
+
+    def submit(self, filler: FormFiller, action: dict) -> bool:
+        view = filler.view
+        url = action.get("url", "")
+        missing = filler.state.required_empty(filler.passwords)
+        if missing:
+            self.ctx.error(_("Invia modulo"), _("Invio bloccato: compila i campi obbligatori ({n}).").format(
+                n=", ".join(dict.fromkeys(f.name for f in missing))))
+            return False
+        data, mime = self.submission_data(view, action)
+        if self.design_active and self.preview:
+            self.ctx.info(_("Invia modulo"), _("Anteprima: nessun invio. Verrebbero inviati a {u}:\n\n{d}").format(
+                u=url, d=data[:4000].decode("utf-8", "replace")))
+            return False
+        if url.lower().startswith("mailto:"):
+            QDesktopServices.openUrl(QUrl(url))
+            self.ctx.status(_("Allega al messaggio i dati esportati con «Esporta dati…»."))
+            return True
+        if not url.lower().startswith(("http://", "https://")):
+            self.ctx.error(_("Invia modulo"), _("Indirizzo di invio non valido: {u}").format(u=url))
+            return False
+        text = _("Inviare i dati del modulo a:\n\n{u}").format(u=url)
+        if not url.lower().startswith("https://"):
+            text += "\n\n" + _("Attenzione: l'indirizzo non è cifrato (non HTTPS), i dati viaggeranno in chiaro.")
+        if not self.ctx.confirm(_("Invia modulo"), text):
+            return False
+        try:
+            status = self.ctx.run_task(_("Invio del modulo"), lambda progress: self.post(url, data, mime))
+        except OperationCancelled:
+            return False
+        except Exception as e:
+            if self.ctx.confirm(_("Invia modulo"), _("Invio non riuscito: {e}\n\nSalvare i dati in un file da inviare in seguito?").format(e=e)):
+                self.export_data_dialog()
+            return False
+        self.ctx.status(_("Modulo inviato (risposta {s}).").format(s=status))
+        return True
 
     def signature_clicked(self, view, f: E.FieldInfo) -> None:
         if self.ctx.mode("firma") is not None:

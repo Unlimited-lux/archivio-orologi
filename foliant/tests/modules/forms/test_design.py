@@ -401,3 +401,66 @@ def test_kind_defaults_applied(window, blank_view):
     with view.document.lock:
         f = E.field_info(view.document.pdf, 0, x)
     assert f.font == "Courier" and f.fontsize == 14 and f.name == "Testo1"
+
+
+def test_signed_field_cannot_move(window, tmp_path, no_modal_boxes):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    s = E.create_field(pdf, 0, E.SIGNATURE, pymupdf.Rect(50, 50, 200, 90), "firma")
+    pdf.xref_set_key(E._field_xref(pdf, s), "V", "<<>>")
+    pdf.save(str(tmp_path / "s.pdf"))
+    view = open_form(window, tmp_path / "s.pdf")
+    window.ctx.set_mode("moduli")
+    f = fields(view)[0]
+    module().set_selection([(0, f.xref)])
+    module().nudge_selected(10, 0)
+    assert fields(view)[0].rect == f.rect
+    assert any("firmati" in c[2] for c in no_modal_boxes)
+
+
+def test_save_warns_required_empty(window, form_pdf, tmp_path):
+    view = open_form(window, form_pdf)
+    module().import_values({"cognome": "x"}, view)
+    view.document.save(tmp_path / "bozza.pdf")
+    assert (tmp_path / "bozza.pdf").exists()
+    assert filler_of(view).last_warning == "nome"
+
+
+def _submit_doc(tmp_path, required=False):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "A", required=required)
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 90, 200, 110), "B")
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "invia")
+    E.set_button_action(pdf, 0, b, {"type": "submit", "url": "https://esempio.test/ricevi", "format": "xfdf"})
+    pdf.save(str(tmp_path / "sub.pdf"))
+    return tmp_path / "sub.pdf"
+
+
+def test_submit_xfdf(window, tmp_path, monkeypatch, no_modal_boxes):
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    m.import_values({"A": "uno", "B": "due"}, view)
+    sent = {}
+    monkeypatch.setattr(m, "post", lambda url, data, mime: sent.update(url=url, data=data, mime=mime) or 200)
+    f = filler_of(view)
+    f.state.refresh(force=True)
+    f.click_field([i for i in f.state.fields if i.name == "invia"][0])
+    assert sent["url"] == "https://esempio.test/ricevi"
+    from foliant.modules.forms import interchange as X
+    assert X.parse_xfdf(sent["data"]) == {"A": "uno", "B": "due"}
+
+
+def test_submit_blocked_and_preview(window, tmp_path, monkeypatch, no_modal_boxes):
+    view = open_form(window, _submit_doc(tmp_path, required=True))
+    m = module()
+    calls = []
+    monkeypatch.setattr(m, "post", lambda *a: calls.append(a) or 200)
+    f = filler_of(view)
+    action = {"type": "submit", "url": "https://esempio.test/ricevi", "format": "xfdf"}
+    assert not m.submit(f, action) and not calls
+    m.import_values({"A": "x"}, view)
+    window.ctx.set_mode("moduli")
+    m.toggle_preview(True)
+    assert not m.submit(filler_of(view), action) and not calls
+    assert any("Anteprima" in c[2] for c in no_modal_boxes)

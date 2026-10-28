@@ -2387,7 +2387,16 @@ def button_action(pdf: pymupdf.Document, xref: int) -> dict:
     if kind == "ImportData":
         return {"type": "import"}
     if kind == "SubmitForm":
-        return {"type": "submit", "url": ps.text_of(a.get("F")) if not isinstance(a.get("F"), dict) else ""}
+        target = a.get("F")
+        if isinstance(target, dict):
+            target = target.get("F") or target.get("UF")
+        flags = int(a.get("Flags", 0) or 0)
+        fmt = "xfdf" if flags & 32 else ("html" if flags & 4 else ("pdf" if flags & 256 else "fdf"))
+        fields = names(a.get("Fields"))
+        if fields and flags & 1:
+            fields = [n for n in dict.fromkeys(f.name for f in list_fields(pdf)) if n not in fields]
+        return {"type": "submit", "url": ps.text_of(target) or "", "format": fmt, "fields": fields,
+                "empty": bool(flags & 2)}
     if kind == "JavaScript":
         return {"type": "javascript"}
     return {"type": kind.lower()} if kind else {}
@@ -2411,6 +2420,13 @@ def set_button_action(pdf: pymupdf.Document, page: int, xref: int, action: dict 
         value = f"<</S/Hide/T{ps.serialize(list(action.get('fields') or []))}/H {'true' if action.get('hide', True) else 'false'}>>"
     elif kind == "import":
         value = "<</S/ImportData/F()>>"
+    elif kind == "submit":
+        flags = {"xfdf": 32, "html": 4, "pdf": 256}.get(action.get("format", "fdf"), 0)
+        if action.get("empty"):
+            flags |= 2
+        fields = action.get("fields") or []
+        value = (f"<</S/SubmitForm/F<</FS/URL/F{ps.encode_string(action.get('url', ''))}>>/Flags {flags}"
+                 + (f"/Fields{ps.serialize(list(fields))}" if fields else "") + ">>")
     else:
         raise FormError(_("Azione non supportata."))
     pdf.xref_set_key(xref, "A", value)

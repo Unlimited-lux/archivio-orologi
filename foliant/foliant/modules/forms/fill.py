@@ -416,7 +416,16 @@ class FormFiller(QObject):
             else:
                 self.active = again
         self.module.document_saved(self.view)
+        missing = self.state.required_empty(self.passwords)
+        if missing:
+            # FRM-15: avviso non bloccante (si può salvare una bozza)
+            names = ", ".join(dict.fromkeys(f.name for f in missing))
+            self.ctx.status(_("Salvato con campi obbligatori vuoti: {n}").format(n=names), 10000)
+            self.last_warning = names
+        self.update_bar()
         self.changed.emit()
+
+    last_warning: str | None = None
 
     def dispose(self) -> None:
         try:
