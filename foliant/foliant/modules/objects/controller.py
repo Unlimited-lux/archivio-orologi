@@ -709,7 +709,7 @@ class ObjectsController(QObject):
         base = os.path.splitext(view.document.display_name)[0]
         n = sum(1 for x in (self.parsed(view, self.sel_page).objects[:o.index + 1]) if x.kind == IMAGE)
         name = f"{base}_p{self.sel_page + 1}_img{n}.{orig.ext}"
-        filters = f"Originale (*.{orig.ext});;PNG (*.png);;JPEG (*.jpg *.jpeg);;" + _("Come appare") + " (*.png)"
+        filters = f"Originale (*.{orig.ext});;PNG (*.png);;JPEG (*.jpg *.jpeg)"
         path = self.ctx.ask_save_path(_("Salva immagine come"), name, filters, default_suffix="." + orig.ext)
         if not path:
             return
@@ -722,6 +722,31 @@ class ObjectsController(QObject):
                     data = E.extract_image(view.document.pdf, o, "png").data
                 else:
                     data = orig.data
+            from foliant.api import atomic_write
+            atomic_write(path, data)
+        except Exception as e:
+            self.ctx.error(_("Salva immagine"), _("Impossibile salvare l'immagine: {e}").format(e=e))
+            return
+        self.status(_("Immagine salvata in {p}").format(p=path))
+
+    def save_image_as_shown(self, view) -> None:
+        """Salva l'immagine come appare (ritaglio, rotazione, capovolgimento, opacità applicati)."""
+        objs = self.selected_objects(view)
+        if len(objs) != 1 or objs[0].kind != IMAGE:
+            self.status(_("Seleziona una sola immagine."))
+            return
+        if not self._extract_allowed(view):
+            self.ctx.error(_("Salva immagine"), _("Il documento non consente di estrarre il contenuto."))
+            return
+        o = objs[0]
+        base = os.path.splitext(view.document.display_name)[0]
+        name = f"{base}_p{self.sel_page + 1}_img{o.index + 1}.png"
+        path = self.ctx.ask_save_path(_("Salva immagine come appare"), name, "PNG (*.png)", default_suffix=".png")
+        if not path:
+            return
+        try:
+            with ENGINE_LOCK:
+                data = E.render_as_shown(view.document.pdf, self.sel_page, o)
             from foliant.api import atomic_write
             atomic_write(path, data)
         except Exception as e:

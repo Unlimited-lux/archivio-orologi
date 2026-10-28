@@ -69,6 +69,7 @@ def register(ctx: Context) -> None:
     sel_action("replace_clip", _("Sostituisci con gli appunti"), "clipboard-paste", c.replace_with_clipboard)
     sel_action("save_image", _("Salva immagine come…"), "image-down", c.save_image)
     sel_action("copy_image", _("Copia immagine"), "copy", c.copy_image)
+    sel_action("save_shown", _("Salva immagine come appare…"), "image-down", c.save_image_as_shown)
     sel_action("delete", _("Elimina"), "trash-2", c.delete)
     sel_action("copy", _("Copia"), "copy", c.copy)
     sel_action("cut", _("Taglia"), "scissors", c.cut)
@@ -138,7 +139,7 @@ def register(ctx: Context) -> None:
     add_opacity_widget(ctx, c, mode)
     more = QMenu(ctx.window)
     for key in ("paste", "paste_in_place", "duplicate", "move_page", "replicate", "similar", "crop_reset",
-                "crop_apply", "replace_clip", "save_image", "copy_image", "make_link"):
+                "crop_apply", "replace_clip", "save_image", "save_shown", "copy_image", "make_link"):
         more.addAction(acts[key])
     ratio_menu = more.addMenu(_("Proporzioni del ritaglio"))
     from PySide6.QtGui import QActionGroup
@@ -304,11 +305,13 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
                 "al_bottom", "make_link", "replicate", "transform", "reset_tf"):
         if key in acts:
             acts[key].setEnabled(has_doc and n > 0)
-    for key in ("crop", "crop_reset", "crop_apply", "replace", "replace_clip", "save_image", "copy_image"):
+    for key in ("crop", "crop_reset", "crop_apply", "replace", "replace_clip", "save_image", "save_shown",
+                "copy_image"):
         if key in acts:
             acts[key].setEnabled(has_doc and single_image)
     if single_image and not c.extract_allowed(view):
         acts["save_image"].setEnabled(False)
+        acts["save_shown"].setEnabled(False)
         acts["copy_image"].setEnabled(False)
     if single_image:
         w = objs[0].wrapper
@@ -377,7 +380,7 @@ def _context_menu(ctx: Context, c: ObjectsController, view, pe, menu: QMenu) -> 
         order.addAction(acts[key])
     if len(objs) == 1 and objs[0].kind == IMAGE:
         menu.addSeparator()
-        for key in ("crop", "crop_reset", "replace", "replace_clip", "save_image", "copy_image"):
+        for key in ("crop", "crop_reset", "replace", "replace_clip", "save_image", "save_shown", "copy_image"):
             menu.addAction(acts[key])
     menu.addSeparator()
     menu.addAction(acts["make_link"])

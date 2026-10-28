@@ -390,4 +390,6 @@ EN = {
     "Proporzioni del ritaglio": "Crop aspect ratio",
     "Libere": "Free",
     "Originali": "Original",
+    "Salva immagine come appare": "Save image as shown",
+    "Salva immagine come appare…": "Save image as shown…",
 }

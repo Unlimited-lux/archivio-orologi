@@ -34,7 +34,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-24 Tracciati vettoriali | P1 | fatto | eng; ui (riquadro, Canc) | «Seleziona simili». |
 | OBJ-25 Stile dei tracciati | P2 | fatto | adv: test_restyle_cmyk_fill_red, test_restyle_width_and_dash_and_no_fill | |
 | OBJ-26 Scomporre / raggruppare | P2 | fatto | adv: test_decompose_form_same_render, test_decompose_transparency_group_needs_confirmation, test_group_move_and_ungroup | Modalità isolamento non fatta. |
-| OBJ-27 Estrarre l'immagine | P0 | fatto | ui: test_save_image_original_jpeg, test_copy_image_puts_png_on_clipboard; ui2: test_permission_denied_blocks_changes; eng | «Come appare» solo nel motore (`render_as_shown`). |
+| OBJ-27 Estrarre l'immagine | P0 | fatto | ui: test_save_image_original_jpeg, test_copy_image_puts_png_on_clipboard; ui2: test_permission_denied_blocks_changes; eng | «Salva immagine come appare…» (ritaglio, rotazione, opacità applicati): ui2 test_save_image_as_shown_cropped_rotated. |
 | OBJ-28 Estrarre tutte le immagini | P1 | fatto | ext; ui2: test_extract_all_flow, test_extract_all_no_images | |
 | OBJ-29 Cattura area | P1 | non fatto qui | cap (logica) | Nella specifica v2 è del visualizzatore (VIS-29): lo strumento non è esposto nell'interfaccia. |
 | OBJ-30 Copia/taglia/incolla/duplica | P0 | fatto | ui: copy/paste tra pagine e documenti, scostamento +10, duplica, taglia; clip | Ctrl+D e Ctrl+Maiusc+V tolti (specifica v2): «Duplica» e «Incolla in posizione» nel menu. Strutture taggate non aggiornate. |

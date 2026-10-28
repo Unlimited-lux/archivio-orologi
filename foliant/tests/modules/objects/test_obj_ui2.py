@@ -397,3 +397,20 @@ def test_ratio_helpers():
     assert (r.x0, r.width, r.height) == (35, 90, 90)
     r = ratio_from_handle(pymupdf.Rect(0, 0, 160, 50), 4, 16 / 9)
     assert abs(r.width / r.height - 16 / 9) < 1e-6 and r.x0 == 0 and r.y0 == 0
+
+
+def test_save_image_as_shown_cropped_rotated(ui, tmp_path, monkeypatch):
+    from PIL import Image as PImage
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(100, 200, 300, 300)]))
+    ui.c.set_selection(view, 0, [0])
+    with view.document.change("prep") as pdf:
+        E.set_crop(pdf, 0, 0, (0, 0, 0.25, 1))
+        E.rotate(pdf, 0, [0], 90)
+    ui.c.set_selection(view, 0, [0])
+    out = tmp_path / "vista.png"
+    monkeypatch.setattr(ui.ctx, "ask_save_path", lambda *a, **k: str(out))
+    O._state["actions"]["save_shown"].trigger()
+    im = PImage.open(out)
+    o = objs(view)[0]
+    assert abs(im.width / im.height - o.rect.width / o.rect.height) < 0.05
+    assert im.width > im.height   # quarto sinistro (50×100 pt) ruotato di 90°: orizzontale
