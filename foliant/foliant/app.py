@@ -121,8 +121,15 @@ def main(argv: list[str] | None = None) -> int:
         parse_args(argv[1:])            # stampa l'aiuto o la versione e termina, senza interfaccia
         return 0
     engine.configure()
+    from .ui import privacy
+    privacy.prepare()                   # dialoghi di file di Qt: niente cronologia del desktop
     app = QApplication(argv)
     settings = QSettings()
+    # riservatezza: nessun nome o percorso di file su disco tra un avvio e l'altro; si cancellano
+    # (una volta sola) quelli lasciati dalle versioni precedenti e i dialoghi di file non lasciano
+    # cronologia in QtProject.conf
+    privacy.cleanup_legacy(settings)
+    privacy.install(app)
     set_language(settings.value("language") or detect_language())
     install_qt_translations(app)
     options = parse_args(app.arguments()[1:])      # senza le opzioni di Qt (-platform, -style…)

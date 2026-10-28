@@ -102,9 +102,11 @@ def encrypted_pdf(tmp_path):
 
 
 @pytest.fixture
-def settings(tmp_path):
+def settings(tmp_path_factory):
+    """Impostazioni del test in una cartella propria: la finestra vi scrive subito (segno della
+    pulizia dei dati delle versioni precedenti), senza mescolarsi ai file del test in tmp_path."""
     from PySide6.QtCore import QSettings
-    s = QSettings(str(tmp_path / "foliant-test.ini"), QSettings.Format.IniFormat)
+    s = QSettings(str(tmp_path_factory.mktemp("impostazioni") / "foliant-test.ini"), QSettings.Format.IniFormat)
     return s
 
 

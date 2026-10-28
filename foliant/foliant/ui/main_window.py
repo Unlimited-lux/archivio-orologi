@@ -23,7 +23,7 @@ from .. import APP_NAME, __version__
 from ..core.document import ACCESS, CONTENT, LOCK, Document, write_error
 from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
-from . import theme
+from . import privacy, theme
 from .banners import Banner, BannerBar, DocumentTabs
 from .context import PDF_FILTER, Context, Mode, ToolBar
 from .document_view import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView
@@ -151,6 +151,10 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
         self.settings = settings or QSettings()
+        # dati con nomi o percorsi di file lasciati dalle versioni precedenti; dialoghi di file
+        # che non lasciano cronologia (idempotenti: main() li ha già chiamati)
+        privacy.cleanup_legacy(self.settings)
+        privacy.install(QApplication.instance())
         self.ctx = Context(self)
         self.modes: dict[str, Mode] = {}
         self.current_mode_id: str | None = None

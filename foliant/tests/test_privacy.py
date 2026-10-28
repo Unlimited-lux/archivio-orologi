@@ -44,3 +44,160 @@ def test_table_detection_still_works_without_layout_analysis():
             page.insert_text((x + 5, y + 20), f"R{r}C{c}", fontsize=10)
     tables = page.find_tables().tables
     assert tables and tables[0].row_count == 4 and tables[0].col_count == 3
+
+
+# ====================================================================== nomi e percorsi dei file
+# Regola del committente: nessun nome, percorso o cartella dei file aperti o salvati resta su
+# disco tra un avvio e l'altro (vedi foliant/ui/privacy.py e tests/test_no_file_traces.py).
+def _qt_file_dialog_group() -> dict:
+    from foliant.ui.privacy import file_dialog_state
+    return file_dialog_state()
+
+
+def _set_qt_file_dialog_group(values: dict) -> None:
+    from PySide6.QtCore import QSettings
+    s = QSettings(QSettings.Scope.UserScope, "QtProject")
+    s.remove("FileDialog")
+    s.beginGroup("FileDialog")
+    for k, v in values.items():
+        s.setValue(k, v)
+    s.endGroup()
+    s.sync()
+
+
+def test_file_dialogs_are_not_native(window):
+    from PySide6.QtCore import QCoreApplication, Qt
+    assert QCoreApplication.testAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
+
+
+def test_file_dialog_leaves_no_history_and_keeps_other_apps(window, tmp_path):
+    """Il QFileDialog di Qt, distrutto, scrive le cartelle visitate in QtProject.conf: il nucleo
+    rimette subito il gruppo com'era, compresi i valori di un'altra applicazione."""
+    from PySide6.QtCore import QEvent, QSettings
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    before = _qt_file_dialog_group()
+    _set_qt_file_dialog_group({"history": ["file:///altra/app"], "lastVisited": "file:///altra/app"})
+    try:
+        folder = tmp_path / "zq7 cartella segreta"
+        folder.mkdir()
+        dialog = QFileDialog(window, "Apri", str(folder))
+        dialog.show()
+        dialog.setDirectory(str(folder))
+        dialog.done(0)
+        dialog.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        path = QSettings(QSettings.Scope.UserScope, "QtProject").fileName()
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        assert "zq7" not in text and "altra/app" in text
+        state = _qt_file_dialog_group()
+        assert state.get("lastVisited") == "file:///altra/app"
+        assert state.get("history") in (["file:///altra/app"], "file:///altra/app")
+    finally:
+        _set_qt_file_dialog_group(before)
+
+
+def test_legacy_settings_are_removed(tmp_path, qtbot):
+    from PySide6.QtCore import QSettings
+
+    from foliant.ui import privacy
+    from foliant.ui.main_window import MainWindow
+    s = QSettings(str(tmp_path / "vecchie.ini"), QSettings.Format.IniFormat)
+    s.setValue("recent", ["/home/u/zq7 vecchio.pdf"])
+    s.setValue("recentPinned", ["/home/u/zq7 vecchio.pdf"])
+    s.setValue("lastDirectory", "/home/u/zq7")
+    s.setValue("view/guides/0123456789abcdef0123456789abcdef01234567", "[[\"h\", 10, null]]")
+    s.setValue("theme", "dark")                                  # preferenza generale: resta
+    win = MainWindow(s, load_modules=False)
+    qtbot.addWidget(win)
+    keys = s.allKeys()
+    assert not [k for k in keys if k.startswith(("recent", "lastDirectory", "view/guides"))]
+    assert s.value("theme") == "dark" and int(s.value(privacy.CLEANUP_KEY)) == privacy.CLEANUP_VERSION
+    assert win.recent_files() == [] and win.last_directory() != "/home/u/zq7"
+    # le chiavi di Foliant si tolgono a ogni avvio; i file condivisi una volta sola
+    s.setValue("recent", ["/home/u/zq7 altro.pdf"])
+    assert privacy.cleanup_legacy(s) is False
+    assert not s.contains("recent")
+
+
+def test_legacy_shared_files_cleaned_once(tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+
+    from foliant.ui import privacy
+    before = _qt_file_dialog_group()
+    _set_qt_file_dialog_group({"history": ["file:///home/u/zq7"], "lastVisited": "file:///home/u/zq7",
+                               "viewMode": "Detail"})
+    data = tmp_path / "dati"
+    (data / "RecentDocuments").mkdir(parents=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(data))
+    (data / "RecentDocuments" / "zq7.pdf.desktop").write_text(
+        "[Desktop Entry]\nURL[$e]=file:///home/u/zq7.pdf\nX-KDE-LastOpenedWith=foliant\n", encoding="utf-8")
+    (data / "RecentDocuments" / "altro.txt.desktop").write_text(
+        "[Desktop Entry]\nURL[$e]=file:///home/u/altro.txt\nX-KDE-LastOpenedWith=kate\n", encoding="utf-8")
+    try:
+        s = QSettings(str(tmp_path / "f.ini"), QSettings.Format.IniFormat)
+        assert privacy.cleanup_legacy(s) is True
+        state = _qt_file_dialog_group()
+        assert "history" not in state and "lastVisited" not in state and state.get("viewMode") == "Detail"
+        assert sorted(p.name for p in (data / "RecentDocuments").iterdir()) == ["altro.txt.desktop"]
+        _set_qt_file_dialog_group({"history": ["file:///altra/app"]})
+        assert privacy.cleanup_legacy(s) is False                  # una volta sola
+        assert _qt_file_dialog_group().get("history") in (["file:///altra/app"], "file:///altra/app")
+    finally:
+        _set_qt_file_dialog_group(before)
+
+
+XBEL = """<?xml version="1.0" encoding="UTF-8"?>
+<xbel version="1.0"
+      xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"
+      xmlns:mime="http://www.freedesktop.org/standards/shared-mime-info"
+>
+  <bookmark href="file:///home/u/zq7-solo.pdf" added="2026-01-01T00:00:00Z" modified="2026-01-01T00:00:00Z" visited="2026-01-01T00:00:00Z">
+    <info>
+      <metadata owner="http://freedesktop.org">
+        <mime:mime-type type="application/pdf"/>
+        <bookmark:applications>
+          <bookmark:application name="Foliant" exec="&apos;foliant %u&apos;" modified="2026-01-01T00:00:00Z" count="1"/>
+        </bookmark:applications>
+      </metadata>
+    </info>
+  </bookmark>
+  <bookmark href="file:///home/u/condiviso.pdf" added="2026-01-01T00:00:00Z" modified="2026-01-01T00:00:00Z" visited="2026-01-01T00:00:00Z">
+    <info>
+      <metadata owner="http://freedesktop.org">
+        <mime:mime-type type="application/pdf"/>
+        <bookmark:applications>
+          <bookmark:application name="foliant" exec="&apos;foliant %u&apos;" modified="2026-01-01T00:00:00Z" count="1"/>
+          <bookmark:application name="Evince" exec="&apos;evince %u&apos;" modified="2026-01-01T00:00:00Z" count="2"/>
+        </bookmark:applications>
+      </metadata>
+    </info>
+  </bookmark>
+  <bookmark href="file:///home/u/altro.txt" added="2026-01-01T00:00:00Z" modified="2026-01-01T00:00:00Z" visited="2026-01-01T00:00:00Z">
+    <info>
+      <metadata owner="http://freedesktop.org">
+        <mime:mime-type type="text/plain"/>
+        <bookmark:applications>
+          <bookmark:application name="gedit" exec="&apos;gedit %u&apos;" modified="2026-01-01T00:00:00Z" count="1"/>
+        </bookmark:applications>
+      </metadata>
+    </info>
+  </bookmark>
+</xbel>
+"""
+
+
+def test_recently_used_keeps_other_applications(tmp_path):
+    import xml.dom.minidom
+
+    from foliant.ui.privacy import clean_recently_used
+    path = tmp_path / "recently-used.xbel"
+    path.write_text(XBEL, encoding="utf-8")
+    assert clean_recently_used(path) is True
+    text = path.read_text(encoding="utf-8")
+    xml.dom.minidom.parseString(text)                              # ancora XML valido
+    assert "zq7-solo" not in text and "foliant" not in text.lower()
+    assert "condiviso.pdf" in text and "evince" in text            # aperto anche da Evince: resta per lui
+    assert "altro.txt" in text and "gedit" in text
+    assert clean_recently_used(path) is False                      # nulla da fare
+    assert clean_recently_used(tmp_path / "manca.xbel") is False
