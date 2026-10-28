@@ -288,6 +288,8 @@ class ActionSpec:
             value = p.default
             if p.type == "str" and isinstance(value, str) and value and p.key not in _UNTRANSLATED_DEFAULTS:
                 value = _(value)
+            if p.key == "page_size" and value == "a4":
+                value = default_page_size()   # A4 o Letter secondo preferenze e impostazioni locali (NFR-26)
             out[p.key] = value
         return out
 
@@ -1670,6 +1672,16 @@ class _Ctx:
 PAGE_SIZES = {"a4": (595.28, 841.89), "letter": (612.0, 792.0)}
 
 
+def default_page_size() -> str:
+    """«a4» o «letter»: formato carta delle preferenze, altrimenti delle impostazioni locali."""
+    try:
+        from foliant.api import locale_defaults
+        value = locale_defaults.paper_size().lower()
+    except Exception:
+        return "a4"
+    return value if value in PAGE_SIZES else "a4"
+
+
 def _office_command(src: str, outdir: str) -> list[str] | None:
     """Comando di conversione dei documenti Office (sostituibile nei test)."""
     exe = shutil.which("soffice") or shutil.which("libreoffice")
@@ -1678,7 +1690,7 @@ def _office_command(src: str, outdir: str) -> list[str] | None:
     return [exe, "--headless", "--convert-to", "pdf", "--outdir", outdir, src]
 
 
-def image_to_pdf(path: str, page_size: str = "a4", fit: str = "fit", margin_mm: float = 0.0,
+def image_to_pdf(path: str, page_size: str | None = None, fit: str = "fit", margin_mm: float = 0.0,
                  warnings: list | None = None) -> bytes:
     """Immagine (anche TIFF multipagina) -> PDF, con orientamento EXIF applicato."""
     from PIL import Image, ImageOps, ImageSequence
@@ -1711,7 +1723,7 @@ def image_to_pdf(path: str, page_size: str = "a4", fit: str = "fit", margin_mm: 
             if page_size == "original":
                 pw, ph = w_pt + 2 * margin, h_pt + 2 * margin
             else:
-                pw, ph = PAGE_SIZES.get(page_size, PAGE_SIZES["a4"])
+                pw, ph = PAGE_SIZES.get(page_size or default_page_size(), PAGE_SIZES["a4"])
                 if w_pt > h_pt:
                     pw, ph = ph, pw
             page = out.new_page(width=pw, height=ph)
@@ -1734,7 +1746,7 @@ def to_pdf_bytes(path: str, params: dict, warnings: list | None = None) -> bytes
     """Converte un file non PDF in PDF (BAT-07)."""
     low = path.lower()
     if low.endswith(IMAGE_EXTENSIONS):
-        return image_to_pdf(path, params.get("page_size", "a4"), params.get("fit", "fit"),
+        return image_to_pdf(path, params.get("page_size") or default_page_size(), params.get("fit", "fit"),
                             float(params.get("margin", 0.0) or 0.0), warnings)
     if low.endswith(TEXT_EXTENSIONS):
         with ENGINE_LOCK:

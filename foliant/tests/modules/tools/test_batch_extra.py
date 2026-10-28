@@ -270,3 +270,21 @@ def test_compress_can_be_cancelled_between_images():
             raise OperationCancelled()
     with pytest.raises(OperationCancelled):
         be.compress_pdf(data, "medium", check=check)
+
+
+def test_create_pdf_page_size_follows_locale(tmp_path, monkeypatch):
+    """NFR-26: Crea PDF propone il formato carta locale (Letter negli Stati Uniti)."""
+    from PIL import Image
+    from foliant.api import locale_defaults
+    img = tmp_path / "foto.png"
+    Image.new("RGB", (400, 300), (120, 90, 60)).save(img)
+    monkeypatch.setattr(locale_defaults, "paper_size", lambda settings=None: "Letter")
+    assert be.Step("create_pdf").merged_params()["page_size"] == "letter"
+    rep = be.run_job(None, [be.analyze_file(str(img))], be.JobSettings(steps=[be.Step("create_pdf")],
+                                                                       destination=str(tmp_path / "o")))
+    page = pymupdf.open(rep.results[0].outputs[0])[0]
+    assert sorted((round(page.rect.width), round(page.rect.height))) == [612, 792]   # orientata come la foto
+    monkeypatch.setattr(locale_defaults, "paper_size", lambda settings=None: "A4")
+    assert be.Step("create_pdf").merged_params()["page_size"] == "a4"
+    # una scelta esplicita salvata in una sequenza resta valida
+    assert be.Step("create_pdf", {"page_size": "letter"}).merged_params()["page_size"] == "letter"
