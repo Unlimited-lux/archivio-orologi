@@ -757,3 +757,32 @@ EN.update({
     "«{n}» supera 100 MB: il portfolio sarà molto grande.": "“{n}” exceeds 100 MB: the portfolio will be very large.",
     "«{n}» è protetto: per aprirlo servirà la sua password.": "“{n}” is protected: its password will be needed to open it.",
 })
+
+# Finestre del portfolio (CNV-34)
+EN.update({
+    "(nuovo)": "(new)",
+    "Aggiungi o rimuovi i file del portfolio aperto": "Add or remove files of the open portfolio",
+    "Applica": "Apply",
+    "Cartella per i nuovi file": "Folder for new files",
+    "Colonna personalizzata": "Custom column",
+    "Copertina (PDF)": "Cover (PDF)",
+    "Copertina «{n}» non utilizzabile: generata automaticamente.": "Cover “{n}” cannot be used: generated automatically.",
+    "Copertina": "Cover",
+    "Crescente": "Ascending",
+    "Data": "Date",
+    "Decrescente": "Descending",
+    "Elenco": "List",
+    "File mostrato all'apertura": "File shown on opening",
+    "File non leggibile: {e}": "Unreadable file: {e}",
+    "Generata automaticamente": "Generated automatically",
+    "Modifica portfolio": "Edit portfolio",
+    "Modifica portfolio…": "Edit portfolio…",
+    "Numero": "Number",
+    "Ordinamento": "Sort order",
+    "Portfolio aggiornato: puoi annullare con Annulla.": "Portfolio updated: you can undo it.",
+    "Testo": "Text",
+    "Vista all'apertura": "View on opening",
+    "es. Cliente (vuoto = nessuna)": "e.g. Customer (empty = none)",
+    "Miniature": "Thumbnails",
+    "Nessuno": "None",
+})

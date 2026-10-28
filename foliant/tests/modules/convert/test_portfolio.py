@@ -63,3 +63,59 @@ def test_portfolio_duplicates_and_list_view(tmp_path):
     assert sorted(doc.embfile_names()) == ["doc (2).pdf", "doc.pdf"]
     cx = int(doc.xref_get_key(doc.pdf_catalog(), "Collection")[1].split()[0])
     assert doc.xref_get_key(cx, "View")[1] == "/D" and doc.xref_get_key(cx, "D")[1] == "doc.pdf"
+
+
+def _foreign_portfolio(tmp_path):
+    """Portfolio «di un altro programma»: allegati con filespec in linea e /Collection minima."""
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Copertina esterna", fontsize=14)
+    doc.embfile_add("listino.csv", b"marca;prezzo\nA;1\n", desc="Listino")
+    doc.embfile_add("foto.bin", bytes(range(256)) * 10)
+    cx = doc.get_new_xref()
+    doc.update_object(cx, "<</Type/Collection/View/D>>")
+    doc.xref_set_key(doc.pdf_catalog(), "Collection", f"{cx} 0 R")
+    path = tmp_path / "esterno.pdf"
+    doc.save(str(path))
+    return str(path)
+
+
+def test_edit_foreign_portfolio_undo_and_save(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+    from foliant.modules.convert.portfolio_dialog import EditPortfolioDialog
+    path = _foreign_portfolio(tmp_path)
+    before = {n: pymupdf.open(path).embfile_get(n) for n in pymupdf.open(path).embfile_names()}
+    new = tmp_path / "nuovo.txt"
+    new.write_text("aggiunto", encoding="utf-8")
+    view = window.open_path(path)
+    ctrl = window.ctx.convert_controller
+
+    def fake_exec(d):
+        d.folder.setEditText("Documenti")
+        d.add_paths([str(new)])
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(EditPortfolioDialog, "exec", fake_exec)
+    names = ctrl.edit_portfolio()
+    assert names == ["<1>nuovo.txt"]
+    with view.document.lock:
+        assert "<1>nuovo.txt" in view.document.pdf.embfile_names()
+    assert view.document.undo()
+    with view.document.lock:
+        assert "<1>nuovo.txt" not in view.document.pdf.embfile_names()
+    ctrl.edit_portfolio()
+    assert window.save_view(view)
+    saved = pymupdf.open(path)
+    assert saved.embfile_get("<1>nuovo.txt") == b"aggiunto"
+    for n, data in before.items():
+        assert saved.embfile_get(n) == data
+    cx = int(saved.xref_get_key(saved.pdf_catalog(), "Collection")[1].split()[0])
+    assert saved.xref_get_key(cx, "Folders")[0] == "xref"
+
+
+def test_remove_from_portfolio(tmp_path):
+    from foliant.modules.convert.portfolio import add_files, remove_files
+    doc = pymupdf.open(_foreign_portfolio(tmp_path))
+    remove_files(doc, ["foto.bin"])
+    assert doc.embfile_names() == ["listino.csv"]
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    assert add_files(doc, [{"path": str(f)}, {"path": str(f)}]) == ["a.txt", "a (2).txt"]

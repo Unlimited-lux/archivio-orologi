@@ -70,12 +70,15 @@ def register(ctx) -> None:
     act_blank = ctx.action(_("PDF vuoto…"), "file", lambda: c.create_blank(), requires_document=False)
     act_portfolio = ctx.action(_("Crea portfolio…"), "folder-archive", lambda: c.create_portfolio(),
                                requires_document=False)
+    act_edit_portfolio = ctx.action(_("Modifica portfolio…"), "folder-pen", lambda: c.edit_portfolio(),
+                                    tooltip=_("Aggiungi o rimuovi i file del portfolio aperto"))
     act_batch_create = ctx.action(_("Crea in blocco…"), "files", lambda: c.batch_create(), requires_document=False)
     for a in (act_from_file, act_from_images, act_from_url, act_clipboard, act_scanner, act_photos, act_screen,
               act_blank):
         create_menu.addAction(a)
     create_menu.addSeparator()
     create_menu.addAction(act_portfolio)
+    create_menu.addAction(act_edit_portfolio)
     create_menu.addAction(act_batch_create)
     create_btn = QToolButton()
     create_btn.setText(_("Crea PDF"))

@@ -538,28 +538,65 @@ class ConvertController:
         return res[0] if ok and res else data
 
     def create_portfolio(self, paths: list[str] | None = None):
-        """CNV-34: portfolio PDF con i file allegati intatti; cartelle dalle cartelle di origine."""
+        """CNV-34: portfolio PDF con i file allegati intatti, cartelle, colonne e copertina."""
         from .portfolio import create_portfolio
+        from .portfolio_dialog import PortfolioDialog
+
+        def ask_files():
+            return self.ctx.ask_open_paths(_("Scegli i file del portfolio"), _("Tutti i file (*)"))
+
         if paths is None:
-            paths = self.ctx.ask_open_paths(_("Scegli i file del portfolio"), _("Tutti i file (*)"))
+            paths = ask_files()
         if not paths:
             return None
-        title, ok = QInputDialog.getText(self.window, _("Crea portfolio"), _("Titolo del portfolio:"),
-                                         text=_("Portfolio"))
-        if not ok:
+        dlg = PortfolioDialog(self.window, paths, ask_files=ask_files,
+                              ask_cover=lambda: self.ctx.ask_open_paths(_("Copertina"), "PDF (*.pdf)", multiple=False))
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
-        parents = {str(Path(p).parent) for p in paths}
-        entries = [{"path": p, "folder": Path(p).parent.name if len(parents) > 1 else ""} for p in paths]
-        name = title.strip() or _("Portfolio")
+        entries, opts = dlg.values()
         ok, res = self._run(_("Creazione del portfolio…"),
-                            lambda progress: create_portfolio(entries, title=name, progress=progress))
+                            lambda progress: create_portfolio(entries, progress=progress, **opts))
         if not ok:
             return None
         data, warnings = res
-        view = self.open_created(data, (title.strip() or _("Portfolio")) + ".pdf")
+        view = self.open_created(data, opts["title"] + ".pdf")
         if warnings:
             self.ctx.info(_("Crea portfolio"), "\n".join(warnings[:15]))
         return view
+
+    def edit_portfolio(self):
+        """CNV-34: aggiunge o rimuove file del portfolio aperto (anche creato da altri programmi)."""
+        from . import portfolio
+        from .portfolio_dialog import EditPortfolioDialog
+        view = self.ctx.current_view()
+        if view is None:
+            return None
+        doc = view.document
+        with ENGINE_LOCK:
+            files = []
+            for name in doc.pdf.embfile_names():
+                info = doc.pdf.embfile_info(name)
+                files.append((name, int(info.get("size") or 0), info.get("description") or ""))
+            folders = sorted(portfolio.folder_map(doc.pdf))
+        dlg = EditPortfolioDialog(self.window, files, folders,
+                                  ask_files=lambda: self.ctx.ask_open_paths(_("Aggiungi file"), _("Tutti i file (*)")))
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        added, removed = dlg.changes()
+        if not added and not removed:
+            return []
+        try:
+            with doc.change(_("Modifica portfolio")) as pdf:
+                portfolio.remove_files(pdf, removed)
+                names = portfolio.add_files(pdf, added)
+        except OSError as e:
+            self.ctx.error(_("Modifica portfolio"), _("File non leggibile: {e}").format(e=e.strerror or e))
+            return None
+        except Exception as e:
+            self.ctx.error(_("Modifica portfolio"), _("Errore imprevisto: {e}").format(e=e))
+            return None
+        self.ctx.status(_("Portfolio aggiornato: puoi annullare con Annulla."), 6000)
+        return names
 
     def create_blank(self):
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""
