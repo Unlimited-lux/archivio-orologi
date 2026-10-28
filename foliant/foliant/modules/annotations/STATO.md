@@ -15,10 +15,10 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-02 | P0 | fatto | test_ann02_author_subject_dates, test_ann02_non_latin_author_utf16, test_ann02_empty_author_restores_account_name, test_ann02_tolerant_dates | Autore predefinito = nome completo dell'account; conferma al primo uso (messaggio); «Nome autore…» nel menu Commenti. |
 | ANN-03 | P0 | parziale | test_ann03_* (8), test_ann20_drag_vertex | Selezione (clic, Maiusc/Ctrl, rettangolo), spostamento (trascinamento, frecce 1/10 pt, vincolo al riquadro), maniglie di ridimensionamento (proporzionale per i timbri o con Maiusc), vertici di linee/poligoni/richiami, primo piano/sfondo, Canc, bloccate, rotazione dei timbri (menu contestuale; test_ann03_rotate_stamp). Mancano rotazione di forme e caselle, allinea/distribuisci, mini-barra. |
 | ANN-04 | P0 | fatto | test_ann04_* (5) | Pannello proprietà: colore, riempimento/nessuno, opacità, spessore 0–12 a passi 0,25, tratteggio, nuvola, estremità, testo (dimensione, colore, allineamento), icona note; un passo di annullamento per selezione multipla. Colori recenti/esadecimale libero tramite «Altro colore…». |
-| ANN-05 | P0 | parziale | test_ann05_comment_on_highlight_has_popup, test_ann05_rich_text_bold, test_ann05_long_comment_preserved | /Contents, /Popup collegata, /RC con grassetto/corsivo/sottolineato/colore, suggerimento al passaggio. La popup si apre come finestra di modifica (doppio clic), non come riquadro sulla pagina; /Open non gestito. |
+| ANN-05 | P0 | fatto | test_ann05_comment_on_highlight_has_popup, test_ann05_rich_text_bold, test_ann05_long_comment_preserved, test_ann05_popup_left_open_is_saved | /Contents, /Popup collegata, /RC (grassetto, corsivo, sottolineato, colore), suggerimento al passaggio. Doppio clic apre l'editor del commento (intestazione autore/data); «Apri/chiudi finestra del commento» mostra la popup sulla pagina e salva /Open. La popup sulla pagina non si trascina né si ridimensiona. |
 | ANN-06 | P0 | fatto | test_ann06_undo_redo_sequence, test_ann06_undo_after_save_marks_modified, test_ann23_undo_restores_inklist, test_ann41_42_export_import_ui | Tutto tramite `document.change()` (cronologia del nucleo). |
 | ANN-07 | P1 | parziale | test_ann07_copy_paste_other_page, test_ann07_cut_paste_keeps_identity, test_ann07_duplicate_same_page_offset | Ctrl+C/X/V/D nello stesso documento; non tra documenti né da immagini negli appunti. Il taglia non sposta le risposte. |
-| ANN-08 | P1 | parziale | (test_ann14_note_icon_and_color usa lo stile per strumento) | Stile per strumento ricordato tra le sessioni, «Imposta come predefinito», «Mantieni strumento». Mancano stili preferiti con nome ed esportazione. |
+| ANN-08 | P1 | fatto | test_ann08_default_style_survives_restart, test_ann08_keep_tool_three_rects, test_styles_corrupted_profile_falls_back | Stile per strumento persistente, «Imposta come predefinito», preferiti con nome (pannello proprietà), esporta/importa stili (JSON con versione), «Mantieni strumento». |
 | ANN-09 | P1 | fatto | test_ann09_flags, test_ann09_locked_contents, test_ann03_locked_not_moved_or_deleted | Bloccata, Contenuto bloccato, Sola lettura, Stampa; Print attivo sui nuovi, NoZoom/NoRotate su note e allegati. |
 | ANN-10 | P0 | parziale | test_ann10_* (5) | Trascinamento o selezione + comando/menu contestuale; quadrilateri per riga; fusione moltiplicativa; pagina senza testo → area con avviso OCR. Selezione su più pagine non disponibile (CORE_REQUESTS 3). |
 | ANN-11 | P1 | fatto | test_ann11_area_highlight, test_ann10_image_page_area_highlight | Strumento «Evidenzia area» o Alt+trascinamento; /Rect = quadrilatero, ridimensionabile. |
@@ -37,7 +37,7 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-24 | P1 | fatto | test_ann24_25_stamp_tools, test_preset_stamp | 20 timbri originali, /Name standard o personalizzato, aspetto vettoriale. |
 | ANN-25 | P1 | fatto | test_ann24_25_stamp_tools, test_ann25_counter_never_decrements, test_fill_template, test_dynamic_stamp_frozen_value | Segnaposto {autore} {data} {ora} {file} {pagina} {contatore}; contatore persistente. Editor di modelli personalizzati non fatto. |
 | ANN-26 | P1 | parziale | test_ann26_custom_stamp_library, test_image_stamp | Timbri da immagine salvati nella libreria «Personalizzati» (persistente). Mancano timbri da pagina PDF/area e importa/esporta libreria. |
-| ANN-27 | P2 | non fatto | | |
+| ANN-27 | P2 | parziale | test_ann27_sticker | Sei adesivi vettoriali originali (spunta, croce, stella, attenzione, informazione, freccia), ruotabili; nessuna categoria né adesivi personalizzati. |
 | ANN-28 | P2 | non fatto | | |
 | ANN-29 | P1 | fatto | test_ann29_attachment_tool, test_attachment_round_trip | Doppio clic → solo «Salva allegato con nome» (nessuna esecuzione). Vincoli PDF/A non verificati. |
 | ANN-30 | P1 | parziale | test_ann30_calibrate_tool, test_scale_calibrate | Scala per rapporto o calibrazione; /Measure. Mancano scala per singola pagina, /VP del documento, indicazione in barra di stato. |
@@ -53,7 +53,7 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-40 | P1 | parziale | test_ann40_flatten_from_ui, test_flatten_* | Tutto il documento o pagina corrente, non stampabili esclusi, annullabile. Manca l'ambito «selezione/filtrate». |
 | ANN-41 | P1 | fatto | test_ann41_42_export_import_ui, test_export_xfdf_*, test_export_fdf | XFDF (con aspetto dei timbri) e FDF. |
 | ANN-42 | P1 | fatto | test_ann41_42_export_import_ui, test_ann42_import_from_pdf_and_malformed, test_xfdf_* | XFDF, FDF, PDF; duplicati saltati; un passo di annullamento. |
-| ANN-43 | P1 | parziale | test_ann43_summary_files, test_summary_* | PDF «solo elenco», CSV (riga per risposta), testo, HTML. Mancano i layout con la pagina e i connettori. |
+| ANN-43 | P1 | fatto | test_ann43_summary_files, test_ann43_page_layout_numbers, test_summary_* | PDF «solo elenco» o «pagine con commenti numerati» (marcatori e connettori), CSV (riga per risposta con padre), testo, HTML. Manca l'anteprima/stampa diretta. |
 | ANN-44 | P2 | non fatto | | |
 
 ## Verifica visiva

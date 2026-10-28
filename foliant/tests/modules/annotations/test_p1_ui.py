@@ -577,3 +577,166 @@ def test_ann16_autofit_height(comments, tmp_path):
     assert h2 > h1 + 50
     doc = saved(window, view, tmp_path)
     assert "Sei" in doc[0].get_text()
+
+
+def test_ann05_popup_left_open_is_saved(comments, tmp_path):
+    """ANN-05: una popup lasciata aperta resta aperta dopo salvataggio e riapertura (/Open true)."""
+    window, view, module = comments
+    xref = module.ctrl.apply("n", engine.create_note, 0, (300, 300), "Aperta", engine.Style(), "A")
+    assert module.ctrl.toggle_popup(0, xref)
+    view.flush_rendering()
+    assert module.ctrl.popups(view, 0) and module.ctrl.popups(view, 0)[0][3] == "Aperta"
+    doc = saved(window, view, tmp_path)
+    note, = annots(doc, 0, "Text")
+    assert note.is_open
+    assert key_of(doc, note.popup_xref, "Open")[1] == "true"
+    qtbot_wait = __import__("PySide6.QtWidgets", fromlist=["QApplication"]).QApplication.processEvents
+    qtbot_wait()
+    with view.document.lock:
+        xref = [a.xref for a in view.document.pdf[0].annots() if a.type[1] == "Text"][0]   # rinumerati
+    assert module.ctrl.toggle_popup(0, xref), module.messages
+    assert module.ctrl.popups(view, 0) == [], module.messages
+
+
+def test_selection_reset_after_save(comments, tmp_path, qtbot):
+    """Dopo il salvataggio (xref rinumerati) selezione e pannello restano coerenti."""
+    window, view, module = comments
+    a = _rect(module)
+    module.ctrl.apply("n", engine.create_note, 0, (400, 300), "dopo", engine.Style(), "A")
+    module.ctrl.select([(0, a)], view)
+    view.document.save(str(tmp_path / "x.pdf"))
+    qtbot.wait(20)
+    assert module.ctrl.selection == []
+    module.comments.reload()
+    for it in module.comments.items():
+        assert module.ctrl.info(*it.data(0, Qt.ItemDataRole.UserRole)) is not None
+
+
+def test_ann43_page_layout_numbers(comments):
+    """ANN-43: layout con la pagina: numeri dei marcatori identici a quelli delle voci."""
+    window, view, module = comments
+    _populate(module)
+    with view.document.lock:
+        data = engine.summary_pdf(view.document.pdf, "doc.pdf", "page")
+    out = pymupdf.open(stream=data, filetype="pdf")
+    assert out.page_count == 3        # una pagina per ogni pagina con commenti
+    texts = [p.get_text() for p in out]
+    assert "1. Evidenziazione" in texts[0] and "2. Nota" in texts[1] and "3. Nota" in texts[2]
+    for i, t in enumerate(texts, start=1):
+        assert str(i) in t.split()
+
+
+def test_ann08_default_style_survives_restart(comments, tmp_path, monkeypatch):
+    """ANN-08: evidenziatore predefinito verde, dopo il riavvio /C è il verde; preferiti esportati e importati."""
+    window, view, module = comments
+    st = module.ctrl.style_for(engine.HIGHLIGHT)
+    st.color = (0, 1, 0)
+    module.ctrl.set_style_for(engine.HIGHLIGHT, st)
+    from foliant.modules.annotations.controller import Controller
+    fresh = Controller(window.ctx)            # nuova sessione con le stesse preferenze
+    assert fresh.style_for(engine.HIGHLIGHT).color == (0, 1, 0)
+    module.ctrl.add_favorite(engine.HIGHLIGHT, "Evidenziatore verde 40%",
+                             engine.Style(color=(0, 1, 0), opacity=0.4))
+    out = tmp_path / "stili.json"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    from foliant.modules.annotations import ui_actions as ua
+    assert ua.export_styles(module.ctrl) == str(out)
+    window.ctx.settings().remove("annotations/favorites")
+    assert module.ctrl.favorites() == []
+    assert ua.import_styles(module.ctrl, str(out)) == 1
+    assert module.ctrl.use_favorite(engine.HIGHLIGHT, "Evidenziatore verde 40%")
+    assert module.ctrl.style_for(engine.HIGHLIGHT).opacity == 0.4
+
+
+def test_ann08_keep_tool_three_rects(comments):
+    """ANN-08: con «Mantieni strumento» tre rettangoli consecutivi."""
+    window, view, module = comments
+    module.ctrl.keep_tool = True
+    module.activate(engine.RECT)
+    for x in (100, 200, 300):
+        drag(view, 0, (x, 400), (x + 60, 460))
+    assert sum(1 for i in module.ctrl.annotations() if i.kind == engine.RECT) == 3
+
+
+def test_styles_corrupted_profile_falls_back(comments):
+    """ANN-08: profilo corrotto → valori di fabbrica senza errori."""
+    window, view, module = comments
+    window.ctx.settings().setValue("annotations/styles", "{non json")
+    from foliant.modules.annotations.controller import FACTORY_STYLES, Controller
+    assert Controller(window.ctx).style_for(engine.RECT).color == FACTORY_STYLES[engine.RECT].color
+
+
+def test_ann27_sticker(comments, tmp_path):
+    """ANN-27: adesivo apposto → /Stamp con /AP /N non vuoto e /Subj «Adesivo», tipo «Adesivo» nel pannello."""
+    window, view, module = comments
+    module.use_sticker("spunta")
+    click(view, 0, 300, 400)
+    infos = module.ctrl.annotations()
+    assert infos[0].label == "Adesivo"
+    module.ctrl.move(10, 0, [(0, infos[0].xref)])
+    doc = saved(window, view, tmp_path)
+    st, = annots(doc, 0, "Stamp")
+    assert st.info["subject"] == "Adesivo"
+    ap = int(key_of(doc, st.xref, "AP/N")[1].split()[0])
+    assert b" l " in doc.xref_stream(ap)          # grafica vettoriale
+    pix = doc[0].get_pixmap(clip=st.rect)
+    assert any(pix.pixel(x, y)[1] > 120 and pix.pixel(x, y)[0] < 100
+               for x in range(pix.width) for y in range(pix.height))
+
+
+def test_ann35_color_and_replies_filters(comments):
+    window, view, module = comments
+    a, b, c = _populate(module)
+    module.ctrl.set_style([(1, b)], color=(0, 0, 1))
+    module.ctrl.reply(2, c, "ok")
+    panel = module.comments
+    panel.reload()
+    panel.set_filter("colors", {"#0000FF"})
+    assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(1, b)]
+    panel.set_filter("colors", set())
+    panel.set_filter("replies", {"with"})
+    keys = [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()]
+    assert keys[0] == (2, c) and len(keys) == 2   # commento e la sua risposta
+
+
+def test_ann38_history_menu(comments, monkeypatch):
+    """ANN-38: «Accettato» poi «Completato»: stato visibile Completato, cronologia con entrambi."""
+    from PySide6.QtWidgets import QMenu
+    from foliant.modules.annotations.panels import build_annotation_menu
+    window, view, module = comments
+    a, b, c = _populate(module)
+    module.ctrl.set_status(0, a, engine.STATE_ACCEPTED)
+    module.ctrl.set_status(0, a, engine.STATE_COMPLETED)
+    assert module.ctrl.info(0, a).status == engine.STATE_COMPLETED
+    shown = []
+    monkeypatch.setattr(dialogs, "show_text", lambda p, t, text: shown.append(text))
+    menu = QMenu()
+    build_annotation_menu(module.ctrl, menu, 0, a)
+    [x for x in menu.actions() if x.text() == "Cronologia degli stati…"][0].trigger()
+    assert shown and shown[0].index("Accettato") < shown[0].index("Completato")
+
+
+def test_ann40_flatten_selection(comments):
+    """ANN-40: appiattendo 2 annotazioni su 4 le altre 2 restano modificabili."""
+    window, view, module = comments
+    xs = [_rect(module, (100 + 100 * i, 400), (180 + 100 * i, 480)) for i in range(4)]
+    module.ctrl.select([(0, xs[0]), (0, xs[1])], view)
+    assert ui_actions.flatten(module.ctrl, selection=True) == 2
+    left = {i.xref for i in module.ctrl.annotations()}
+    assert left == {xs[2], xs[3]}
+
+
+def test_ann29_pdfa1_blocks_attachments(comments, tmp_path, monkeypatch):
+    """ANN-29: su un documento PDF/A-1b l'allegato è impedito con un messaggio sul profilo."""
+    window, view, module = comments
+    with view.document.change("pdfa") as pdf:
+        pdf.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                             '<rdf:Description xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="1" '
+                             'pdfaid:conformance="B"/></rdf:RDF></x:xmpmeta>')
+    src = tmp_path / "a.txt"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(dialogs, "ask_open_file", lambda *a, **k: str(src))
+    module.activate(engine.ATTACHMENT)
+    click(view, 0, 100, 100)
+    assert module.ctrl.annotations() == []
+    assert any("PDF/A-1" in m[2] for m in module.messages)

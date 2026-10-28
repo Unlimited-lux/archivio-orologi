@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QMenu, QToolButton
 
-from foliant.api import Context, _, add_translations, bind_icon
+from foliant.api import SAVED, Context, _, add_translations, bind_icon
 
 from . import engine, ui_actions
 from .controller import Controller
@@ -14,7 +14,7 @@ from .i18n_en import EN
 from .panels import CommentsPanel, PropertiesPanel, build_annotation_menu
 from .tools import (
     AttachmentTool, CalibrateTool, CalloutTool, CaretTool, EraserTool, InkTool, NoteTool, PolyTool, ReplaceTool, SelectAnnotTool,
-    ShapeTool, StampTool, TextBoxTool, TextMarkupTool, TypewriterTool, paint_selection,
+    ShapeTool, StampTool, TextBoxTool, TextMarkupTool, TypewriterTool, paint_popups, paint_selection,
 )
 
 ORDER = 20
@@ -210,6 +210,9 @@ class AnnotationsModule:
         for label, template, color in engine.DYNAMIC_STAMPS:
             dyn.addAction(_(template), lambda _c=False, t=label, tpl=template, c=color:
                           self.use_stamp(engine.StampSpec(_(t), c), template=_(tpl)))
+        stickers = menu.addMenu(_("Adesivi"))
+        for key, (label, _ops) in engine.STICKERS.items():
+            stickers.addAction(_(label), lambda _c=False, k=key: self.use_sticker(k))
         self.custom_menu = menu.addMenu(_("Personalizzati"))
         self.custom_menu.aboutToShow.connect(self._fill_custom_stamps)
         menu.addSeparator()
@@ -245,6 +248,8 @@ class AnnotationsModule:
         menu.addAction(_("Appiattisci annotazioni della pagina…"), lambda: ui_actions.flatten(self.ctrl, True))
         menu.addSeparator()
         menu.addAction(_("Nome autore…"), self._ask_author)
+        menu.addAction(_("Esporta stili…"), lambda: ui_actions.export_styles(self.ctrl))
+        menu.addAction(_("Importa stili…"), lambda: ui_actions.import_styles(self.ctrl))
         keep = menu.addAction(_("Mantieni strumento"))
         keep.setCheckable(True)
         keep.setChecked(self.ctrl.keep_tool)
@@ -272,6 +277,12 @@ class AnnotationsModule:
                   name: str = "") -> None:
         tool: StampTool = self.tools[engine.STAMP]
         tool.spec, tool.template, tool.image, tool.name = spec, template, image, name
+        tool.sticker = ""
+        self.activate(engine.STAMP)
+
+    def use_sticker(self, key: str) -> None:
+        tool: StampTool = self.tools[engine.STAMP]
+        tool.sticker = key
         self.activate(engine.STAMP)
 
     def _image_stamp(self) -> None:
@@ -336,12 +347,28 @@ class AnnotationsModule:
     def _attach_view(self, view) -> None:
         overlay = getattr(self, "_overlay", None)
         if overlay is None:
-            self._overlay = overlay = lambda v, painter, page: paint_selection(self.ctrl, v, painter, page)
+            def overlay(v, painter, page):
+                paint_popups(self.ctrl, v, painter, page)
+                paint_selection(self.ctrl, v, painter, page)
+            self._overlay = overlay
         if overlay not in view.overlays:
             view.overlays.append(overlay)
         if not getattr(view, "_annotations_connected", False):
             view._annotations_connected = True
             view.toolChanged.connect(self._sync_actions)
+
+            def on_doc_event(_doc, kind, v=view):
+                if kind == SAVED:
+                    # il salvataggio compatta il documento in memoria: gli xref cambiano
+                    QTimer.singleShot(0, lambda: self._after_save(v))
+
+            view.document.add_listener(on_doc_event)
+
+    def _after_save(self, view) -> None:
+        self.ctrl.after_save(view)
+        if self.comments.view is view:
+            self.comments.reload()
+        self.properties.refresh()
 
     def _on_view_changed(self, view) -> None:
         if view is not None:

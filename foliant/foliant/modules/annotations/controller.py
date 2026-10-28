@@ -123,6 +123,65 @@ class Controller(QObject):
         data = {"version": STYLES_VERSION, "styles": {k: asdict(v) for k, v in self._styles.items()}}
         self.ctx.settings().setValue("annotations/styles", json.dumps(data))
 
+    # ------------------------------------------------------------------ stili preferiti (ANN-08)
+    def favorites(self, kind: str | None = None) -> list[dict]:
+        raw = self.ctx.settings().value("annotations/favorites", "")
+        try:
+            data = json.loads(str(raw)) if raw else []
+            data = [d for d in data if isinstance(d, dict) and d.get("name") and d.get("kind")]
+        except Exception:
+            data = []
+        return [d for d in data if kind is None or d["kind"] == kind]
+
+    def _save_favorites(self, items: list[dict]) -> None:
+        self.ctx.settings().setValue("annotations/favorites", json.dumps(items))
+
+    def add_favorite(self, kind: str, name: str, style: Style | None = None) -> None:
+        name = name.strip()
+        if not name:
+            return
+        items = [d for d in self.favorites() if not (d["kind"] == kind and d["name"] == name)]
+        items.append({"kind": kind, "name": name, "style": asdict(style or self.style_for(kind))})
+        self._save_favorites(items)
+        self.stylesChanged.emit(kind)
+
+    def use_favorite(self, kind: str, name: str) -> bool:
+        for d in self.favorites(kind):
+            if d["name"] == name:
+                self.set_style_for(kind, _style_from_dict(d.get("style", {}), self.style_for(kind)))
+                return True
+        return False
+
+    def export_styles(self) -> str:
+        data = {"version": STYLES_VERSION, "styles": {k: asdict(v) for k, v in self._styles.items()},
+                "favorites": self.favorites()}
+        return json.dumps(data, indent=2, ensure_ascii=False)
+
+    def import_styles(self, text: str, replace: bool = True) -> int:
+        """Importa stili e preferiti; stessi nomi: sostituiti (`replace`) o rinominati."""
+        data = json.loads(text)
+        if not isinstance(data, dict) or int(data.get("version", 0)) > STYLES_VERSION:
+            raise AnnotationError("File di stili non valido o di una versione successiva.")
+        for kind, values in data.get("styles", {}).items():
+            if kind in self._styles:
+                self._styles[kind] = _style_from_dict(values, self._styles[kind])
+        self._save_styles()
+        items = self.favorites()
+        n = 0
+        for fav in data.get("favorites", []):
+            if not isinstance(fav, dict) or not fav.get("name") or not fav.get("kind"):
+                continue
+            same = [d for d in items if d["kind"] == fav["kind"] and d["name"] == fav["name"]]
+            if same and replace:
+                items.remove(same[0])
+            elif same:
+                fav = dict(fav, name=fav["name"] + " (2)")
+            items.append(fav)
+            n += 1
+        self._save_favorites(items)
+        self.stylesChanged.emit("")
+        return n
+
     def set_tool_kind(self, kind: str) -> None:
         self.tool_kind = kind
         self.toolKindChanged.emit(kind)
@@ -526,6 +585,38 @@ class Controller(QObject):
             self.clipboard = clip
 
     # ------------------------------------------------------------------ visibilità (ANN-39)
+    def after_save(self, view) -> None:
+        """Dopo il salvataggio gli xref in memoria sono rinumerati: si azzerano i riferimenti."""
+        self._saves = getattr(self, "_saves", 0) + 1
+        if self._sel_view is view:
+            self.clear_selection()
+        if self.clipboard and self.clipboard.get("view") is view:
+            self.clipboard = None
+        view.viewport().update()
+
+    def popups(self, view, page: int) -> list:
+        key = (id(view), view.document.version, getattr(self, "_saves", 0))
+        cache = getattr(self, "_popup_cache", None)
+        if cache is None or cache[0] != key:
+            cache = (key, {})
+            self._popup_cache = cache
+        if page not in cache[1]:
+            from foliant.api import try_engine
+            with try_engine() as ok:
+                if not ok:
+                    return []
+                cache[1][page] = engine.open_popups(view.document.pdf, page)
+        return cache[1][page]
+
+    def toggle_popup(self, page: int, xref: int) -> bool:
+        view = self.view()
+        with ENGINE_LOCK:
+            p = view.document.pdf[page]
+            a = engine.find_annot(p, xref)
+            is_open = bool(a and a.popup_xref and a.is_open)
+        return bool(self.apply(_("Finestra del commento"),
+                               lambda pdf: engine.set_popup_open(pdf, page, xref, not is_open) or True))
+
     def reveal_after_create(self, view) -> None:
         if self.annotations_hidden(view):
             self.set_annotations_hidden(False, view)

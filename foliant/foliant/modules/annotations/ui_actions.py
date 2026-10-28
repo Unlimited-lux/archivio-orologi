@@ -187,11 +187,14 @@ def export_summary(ctrl: "Controller", fmt: str | None = None) -> str | None:
         ctrl.ctx.info(_("Riepilogo commenti"), _("Il documento non contiene commenti."))
         return None
     if fmt is None:
-        labels = [_("PDF"), _("CSV (foglio di calcolo)"), _("Testo semplice"), _("Pagina HTML")]
+        labels = [_("PDF: solo elenco"), _("PDF: pagine con commenti numerati"), _("CSV (foglio di calcolo)"),
+                  _("Testo semplice"), _("Pagina HTML")]
         idx = dialogs.ask_item(view, _("Riepilogo commenti"), _("Formato:"), labels, 0)
         if idx is None:
             return None
-        fmt = SUMMARY_FORMATS[idx][0]
+        fmt = ["pdf", "pdf-page", "csv", "txt", "html"][idx]
+    layout = "page" if fmt == "pdf-page" else "list"
+    fmt = "pdf" if fmt == "pdf-page" else fmt
     file_filter = _(dict(SUMMARY_FORMATS)[fmt])
     path = ctrl.ctx.ask_save_path(_("Riepilogo commenti"), _stem(ctrl) + " - " + _("commenti") + "." + fmt,
                                   file_filter, default_suffix="." + fmt)
@@ -201,7 +204,7 @@ def export_summary(ctrl: "Controller", fmt: str | None = None) -> str | None:
     with ENGINE_LOCK:
         pdf = view.document.pdf
         if fmt == "pdf":
-            data = engine.summary_pdf(pdf, title)
+            data = engine.summary_pdf(pdf, title, layout)
         elif fmt == "csv":
             data = engine.summary_csv(pdf).encode("utf-8-sig")
         elif fmt == "html":
@@ -217,7 +220,7 @@ def export_summary(ctrl: "Controller", fmt: str | None = None) -> str | None:
     return path
 
 
-def flatten(ctrl: "Controller", current_page_only: bool = False) -> int:
+def flatten(ctrl: "Controller", current_page_only: bool = False, selection: bool = False) -> int:
     view = ctrl.view()
     if view is None:
         return 0
@@ -229,7 +232,10 @@ def flatten(ctrl: "Controller", current_page_only: bool = False) -> int:
                               "non saranno più modificabili. Continuare?")):
         return 0
     pages = [view.current_page] if current_page_only else None
-    n = ctrl.apply(_("Appiattisci annotazioni"), engine.flatten, pages) or 0
+    only = list(ctrl.selection) if selection else None
+    if selection and not only:
+        return 0
+    n = ctrl.apply(_("Appiattisci annotazioni"), engine.flatten, pages, only) or 0
     ctrl.clear_selection()
     ctrl.ctx.status(_("Annotazioni appiattite: {n}").format(n=n))
     return n
@@ -290,3 +296,31 @@ def set_scale(ctrl: "Controller") -> engine.Scale | None:
         ctrl.page_scales.clear()
         ctrl.ctx.status(_("Scala: {s}").format(s=scale.text()))
     return scale
+
+
+def export_styles(ctrl: "Controller") -> str | None:
+    path = ctrl.ctx.ask_save_path(_("Esporta stili"), "stili-commenti.json", "JSON (*.json)", default_suffix=".json")
+    if not path:
+        return None
+    try:
+        atomic_write(path, ctrl.export_styles().encode("utf-8"))
+    except Exception as e:
+        ctrl.ctx.error(_("Esporta stili"), str(e))
+        return None
+    return path
+
+
+def import_styles(ctrl: "Controller", path: str | None = None) -> int:
+    if path is None:
+        paths = ctrl.ctx.ask_open_paths(_("Importa stili"), "JSON (*.json)", multiple=False)
+        path = paths[0] if paths else None
+    if not path:
+        return 0
+    try:
+        with open(path, encoding="utf-8") as f:
+            n = ctrl.import_styles(f.read())
+    except (OSError, ValueError, engine.AnnotationError) as e:
+        ctrl.ctx.error(_("Importa stili"), _("Impossibile importare gli stili: {e}").format(e=_(str(e))))
+        return 0
+    ctrl.ctx.status(_("Stili importati."))
+    return n

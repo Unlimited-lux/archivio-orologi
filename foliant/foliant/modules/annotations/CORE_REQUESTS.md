@@ -15,9 +15,12 @@
    per evidenziare una selezione che attraversa due pagine servirebbe una selezione multipagina
    (elenco di `TextSelection`). *Soluzione locale:* un'evidenziazione per pagina, una alla volta.
 
-4. **Identità stabile degli oggetti dopo il salvataggio.** Il salvataggio con `garbage=3`
-   rinumera gli oggetti nel file su disco (non in memoria): va bene per il modulo, ma conviene
-   documentarlo nel README per chi confronta gli xref dopo una riapertura.
+4. **Identità stabile degli oggetti dopo il salvataggio.** `Document.to_bytes()` con `garbage=3`
+   compatta anche il documento **in memoria**: dopo ogni salvataggio gli xref cambiano, quindi
+   i riferimenti (pagina, xref) tenuti dai moduli diventano invalidi. Proposta: serializzare una
+   copia (`pymupdf.open(stream=snapshot)`) o usare `garbage=0` sul documento vivo, oppure
+   documentarlo nel README e notificare `SAVED` come evento che invalida i riferimenti.
+   *Soluzione locale:* alla notifica `SAVED` il modulo azzera selezione e appunti e ricarica l'elenco.
 
 5. **Messaggi temporanei nella barra di stato dai test.** `ctx.status` va bene; nessuna modifica.
 

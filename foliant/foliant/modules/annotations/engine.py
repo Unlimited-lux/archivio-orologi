@@ -396,6 +396,28 @@ def marked_text(page: pymupdf.Page, annot: pymupdf.Annot) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
+def open_popups(pdf: pymupdf.Document, page_no: int) -> list[tuple[pymupdf.Rect, str, str, str]]:
+    """Popup aperte della pagina: (riquadro, autore, data, testo)."""
+    page = pdf[page_no]
+    out = []
+    for a in page.annots():
+        if a.type[0] in NON_COMMENT_TYPES or a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+            continue
+        try:
+            if not a.popup_xref or not a.is_open:
+                continue
+            info = a.info or {}
+            out.append((pymupdf.Rect(a.popup_rect), info.get("title", ""),
+                        format_date(info.get("modDate") or info.get("creationDate")), info.get("content", "")))
+        except Exception:
+            continue
+    return out
+
+
+def set_popup_open(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool) -> None:
+    ensure_popup(pdf, page_no, xref, open_)
+
+
 def ensure_popup(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool | None = None) -> None:
     """Crea (se manca) la finestra popup collegata all'annotazione (ANN-05)."""
     page = pdf[page_no]
@@ -404,7 +426,8 @@ def ensure_popup(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool | N
             annot.type[0] in NON_COMMENT_TYPES:
         return
     if not annot.popup_xref:
-        r = annot.rect
+        raw = _array(pdf, xref, "Rect")
+        r = from_pdf_rect(page, raw) if raw and len(raw) == 4 else annot.rect
         pr = page.rect if not page.rotation else pymupdf.Rect(0, 0, page.mediabox.width, page.mediabox.height)
         x0 = min(r.x1 + 8, pr.x1 - 200)
         y0 = max(pr.y0, min(r.y0, pr.y1 - 120))
@@ -1198,6 +1221,59 @@ def refresh_stamp(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     _write_stamp_ap(pdf, annot, spec, annot.opacity if annot.opacity >= 0 else 1.0)
 
 
+# ------------------------------------------------------------------ adesivi (ANN-27)
+STICKER_KEY = "FoliantSticker"
+STICKERS = {
+    "spunta": ("Spunta verde", "0.10 0.62 0.25 RG 12 w 1 J 1 j 18 50 m 40 26 l 84 76 l S"),
+    "croce": ("Croce rossa", "0.82 0.12 0.12 RG 12 w 1 J 24 24 m 76 76 l S 76 24 m 24 76 l S"),
+    "stella": ("Stella", "0.98 0.78 0.10 rg 0.85 0.5 0.05 RG 3 w 1 j 50 94 m 61 63 l 94 63 l 67 43 l 78 10 l "
+                         "50 30 l 22 10 l 33 43 l 6 63 l 39 63 l h B"),
+    "attenzione": ("Attenzione", "0.95 0.55 0.05 rg 50 96 m 96 12 l 4 12 l h f 1 1 1 rg 45 40 10 38 re f "
+                                 "45 20 10 10 re f"),
+    "info": ("Informazione", "0.15 0.4 0.85 rg 50 50 m 50 50 l h 50 94 m 74.3 94 94 74.3 94 50 c 94 25.7 74.3 6 50 6 c "
+                             "25.7 6 6 25.7 6 50 c 6 74.3 25.7 94 50 94 c f 1 1 1 rg 44 18 12 40 re f 44 66 12 12 re f"),
+    "freccia": ("Freccia", "0.15 0.4 0.85 rg 6 38 m 56 38 l 56 14 l 94 50 l 56 86 l 56 62 l 6 62 l h f"),
+}
+
+
+def _sticker_ap(pdf: pymupdf.Document, xref: int, name: str, opacity: float) -> None:
+    ops = STICKERS[name][1]
+    ap = pdf.get_new_xref()
+    pdf.update_object(ap, "<</Type/XObject/Subtype/Form/BBox[0 0 100 100]/Matrix[1 0 0 1 0 0]"
+                          f"/Resources<</ExtGState<</GS0<</Type/ExtGState/CA {opacity:.3f}/ca {opacity:.3f}>>>>>>>>")
+    pdf.update_stream(ap, ("/GS0 gs " + ops).encode("latin-1"))
+    pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+
+
+def create_sticker(pdf: pymupdf.Document, page_no: int, point, name: str, style: Style,
+                   author: str | None = None, size: float = 36.0) -> int:
+    """Adesivo grafico vettoriale (non dipende da caratteri emoji)."""
+    if name not in STICKERS:
+        raise AnnotationError("Adesivo sconosciuto.")
+    page = pdf[page_no]
+    p = pymupdf.Point(point)
+    rect = pymupdf.Rect(p.x - size / 2, p.y - size / 2, p.x + size / 2, p.y + size / 2)
+    with unrotated(page):
+        annot = page.add_stamp_annot(rect, 0)
+    xref = _finish(annot, author, STICKERS[name][0], subject="Adesivo", kind=STAMP)
+    pdf.xref_set_key(xref, "Name", "/FoliantAdesivo" + name.title())
+    pdf.xref_set_key(xref, STICKER_KEY, "/" + name)
+    _sticker_ap(pdf, xref, name, max(0.0, min(1.0, style.opacity)))
+    pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, rect)))
+    return xref
+
+
+def refresh_sticker(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
+    k, v = pdf.xref_get_key(xref, STICKER_KEY)
+    if k != "name" or v.lstrip("/") not in STICKERS:
+        return
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    _sticker_ap(pdf, xref, v.lstrip("/"), annot.opacity if annot.opacity >= 0 else 1.0)
+    if _rotation(pdf, xref)[1] is not None:
+        _apply_rotation(pdf, page, xref)
+
+
 def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes, style: Style,
                        author: str | None = None, max_side: float = 160.0, name: str = "") -> int:
     page = pdf[page_no]
@@ -1225,6 +1301,8 @@ MAX_ATTACHMENT = 200 * 1024 * 1024
 
 def create_attachment(pdf: pymupdf.Document, page_no: int, point, data: bytes, filename: str,
                       style: Style, author: str | None = None, description: str = "") -> int:
+    if pdfa_part(pdf) == "1":
+        raise AnnotationError("Il documento è PDF/A-1: il profilo non ammette file allegati.")
     if len(data) > MAX_ATTACHMENT:
         raise AnnotationError("Il file è troppo grande per essere allegato (massimo 200 MB).")
     page = pdf[page_no]
@@ -1233,6 +1311,16 @@ def create_attachment(pdf: pymupdf.Document, page_no: int, point, data: bytes, f
     annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[ATTACHMENT]))
     annot.set_flags(pymupdf.PDF_ANNOT_IS_PRINT | pymupdf.PDF_ANNOT_IS_NO_ZOOM | pymupdf.PDF_ANNOT_IS_NO_ROTATE)
     return _finish(annot, author, description or filename, kind=ATTACHMENT)
+
+
+def pdfa_part(pdf: pymupdf.Document) -> str:
+    """Parte PDF/A dichiarata nei metadati XMP ("1", "2", "3") oppure ""."""
+    try:
+        xmp = pdf.get_xml_metadata() or ""
+    except Exception:
+        return ""
+    m = re.search(r"pdfaid:part\s*=\s*[\"'](\d)|<pdfaid:part>\s*(\d)", xmp)
+    return (m.group(1) or m.group(2)) if m else ""
 
 
 def attachment_data(pdf: pymupdf.Document, page_no: int, xref: int) -> tuple[str, bytes]:
@@ -1294,6 +1382,8 @@ class AnnotInfo:
     def label(self) -> str:
         if self.kind == REPLACE:
             return SUBJECTS[REPLACE] if self.contents else "Cancellazione"
+        if self.kind == STAMP and self.subject == "Adesivo":
+            return "Adesivo"
         if self.kind in (CALLOUT, ARROW, CLOUD, DISTANCE, PERIMETER, AREA, TYPEWRITER):
             return SUBJECTS[self.kind]
         return TYPE_LABELS.get(self.type, self.type)
@@ -1512,6 +1602,13 @@ def set_style(pdf: pymupdf.Document, page_no: int, xref: int, *, color=..., fill
         touch(page.load_annot(xref))
         refresh_stamp(pdf, page_no, xref)
         return
+    if t == pymupdf.PDF_ANNOT_STAMP and pdf.xref_get_key(xref, STICKER_KEY)[0] == "name":
+        if opacity is not None:
+            annot.set_opacity(max(0.0, min(1.0, float(opacity))))
+        touch(annot)
+        annot.update()
+        refresh_sticker(pdf, page_no, xref)
+        return
     if t == pymupdf.PDF_ANNOT_FREE_TEXT:
         _set_freetext_style(pdf, page, annot, color=color, fill=fill, opacity=opacity, width=width, dash=dash,
                             fontsize=fontsize, text_color=text_color)
@@ -1717,6 +1814,8 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         _dirty_update(annot)
         if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
             refresh_stamp(pdf, page_no, xref)
+        elif t == pymupdf.PDF_ANNOT_STAMP and pdf.xref_get_key(xref, STICKER_KEY)[0] == "name":
+            refresh_sticker(pdf, page_no, xref)
         elif base is not None:
             _apply_rotation(pdf, page, xref)
         if t == pymupdf.PDF_ANNOT_FREE_TEXT:
@@ -2064,20 +2163,26 @@ def _densify(points: list[pymupdf.Point], step: float) -> list[tuple[pymupdf.Poi
 
 
 # ------------------------------------------------------------------ appiattimento
-def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
+def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
+            only: Iterable[tuple[int, int]] | None = None) -> int:
     """Rende le annotazioni parte del contenuto della pagina (non più modificabili).
 
     Con `pages` si appiattiscono solo quelle pagine. I campi modulo restano."""
+    selected = set(only) if only is not None else None
+    if selected is not None:
+        pages = {p for p, _x in selected}
     targets = set(pages) if pages is not None else set(range(pdf.page_count))
     count = 0
     for i in targets:
         page = pdf[i]
-        count += sum(1 for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES)
+        count += sum(1 for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES
+                     and (selected is None or (i, a.xref) in selected))
     if not count:
         return 0
     # si nascondono temporaneamente le annotazioni da non appiattire: quelle delle altre
     # pagine e quelle non stampabili (che restano annotazioni)
     saved: dict[int, tuple[str, str]] = {}
+    partial: dict[int, list[int]] = {}     # pagine appiattite in parte: xref da rimettere
     _strip_hidden(pdf, targets)
     try:
         for i in range(pdf.page_count):
@@ -2091,15 +2196,27 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
                     if a.type[0] in NON_COMMENT_TYPES or a.flags & pymupdf.PDF_ANNOT_IS_PRINT
                     or a.type[0] == pymupdf.PDF_ANNOT_POPUP]
             noprint = [a.xref for a in page.annots() if a.xref not in keep]
+            if selected is not None:
+                # solo le annotazioni scelte (e le loro popup); le altre restano annotazioni
+                chosen = {x for p, x in selected if p == i}
+                popups = {a.popup_xref for a in page.annots() if a.xref in chosen and a.popup_xref}
+                noprint = [a.xref for a in page.annots()
+                           if a.xref not in chosen and a.xref not in popups
+                           and a.type[0] not in (pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK)
+                           or (a.xref in chosen and a.xref not in keep)]
             if noprint:
-                count -= len(noprint)
-                saved[xref] = pdf.xref_get_key(xref, "Annots")
+                count -= len([x for x in noprint if selected is None or (i, x) in selected])
+                partial[xref] = noprint
                 _, _k, refs = _annots_array(pdf, page)
                 pdf.xref_set_key(xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in refs if x not in noprint) + "]")
         pdf.bake(annots=True, widgets=False)
     finally:
         for xref, (kind, value) in saved.items():
             pdf.xref_set_key(xref, "Annots", value if kind != "null" else "null")
+        for xref, keep_refs in partial.items():
+            k, v = pdf.xref_get_key(xref, "Annots")
+            now = [int(x) for x in re.findall(r"(\d+)\s+0\s+R", v)] if k == "array" else []
+            pdf.xref_set_key(xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in keep_refs + now) + "]")
     return count
 
 
@@ -2657,29 +2774,114 @@ def summary_csv(pdf: pymupdf.Document) -> str:
     return buf.getvalue()
 
 
-def summary_pdf(pdf: pymupdf.Document, title: str = "") -> bytes:
-    """Riepilogo dei commenti come nuovo PDF (testo semplice impaginato)."""
-    text = summary_text(pdf, title)
+_UNICODE_FONTS = ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                  "/usr/share/fonts/dejavu/DejaVuSans.ttf")
+
+
+def _summary_font() -> tuple[str, str | None]:
+    import os
+    for path in _UNICODE_FONTS:
+        if os.path.exists(path):
+            return "fol", path
+    return "helv", None
+
+
+def _wrap_chars(line: str, max_chars: int) -> list[str]:
+    out = []
+    while len(line) > max_chars:
+        cut = line.rfind(" ", 0, max_chars)
+        cut = cut if cut > 20 else max_chars
+        out.append(line[:cut])
+        line = "      " + line[cut:].lstrip()
+    out.append(line)
+    return out
+
+
+def summary_pdf(pdf: pymupdf.Document, title: str = "", layout: str = "list") -> bytes:
+    """Riepilogo dei commenti come nuovo PDF (l'originale non cambia).
+
+    layout="list": solo elenco; layout="page": per ogni pagina con commenti, l'immagine della
+    pagina con marcatori numerati e accanto l'elenco numerato degli stessi commenti."""
+    fontname, fontfile = _summary_font()
     out = pymupdf.open()
-    lines = text.splitlines()
+
+    def text_at(page, xy, txt, size, color=(0, 0, 0)):
+        kw = {"fontname": fontname, "fontsize": size, "color": color}
+        if fontfile:
+            kw["fontfile"] = fontfile
+        try:
+            page.insert_text(xy, txt, **kw)
+        except Exception:
+            page.insert_text(xy, txt.encode("latin-1", "replace").decode("latin-1"), fontname="helv",
+                             fontsize=size, color=color)
+
+    if layout == "page":
+        rows = list_annotations(pdf)
+        n = 0
+        by_page: dict[int, list] = {}
+        for a in rows:
+            by_page.setdefault(a.page, []).append(a)
+        if not by_page:
+            p = out.new_page(width=842, height=595)
+            text_at(p, (40, 60), "Nessun commento.", 12)
+        for page_no in sorted(by_page):
+            src = pdf[page_no]
+            W, H = 842, 595
+            dst = out.new_page(width=W, height=H)
+            text_at(dst, (30, 28), f"{title} — Pagina {page_no + 1}" if title else f"Pagina {page_no + 1}", 11)
+            pix = src.get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5), annots=True)
+            box = pymupdf.Rect(30, 40, 30 + (H - 70) * src.rect.width / max(src.rect.height, 1), H - 30)
+            if box.width > W * 0.55:
+                k = (W * 0.55) / box.width
+                box = pymupdf.Rect(box.x0, box.y0, box.x0 + box.width * k, box.y0 + box.height * k)
+            dst.insert_image(box, pixmap=pix)
+            dst.draw_rect(box, color=(0.6, 0.6, 0.6), width=0.5)
+            sx = box.width / src.rect.width
+            sy = box.height / src.rect.height
+            m = src.rotation_matrix
+            y = 60.0
+            x_list = box.x1 + 30
+            for a in by_page[page_no]:
+                n += 1
+                r = a.rect * m
+                cx = box.x0 + r.x0 * sx
+                cy = box.y0 + r.y0 * sy
+                # marcatore numerato sulla pagina e connettore verso la voce
+                dst.draw_circle((cx, cy), 7, color=(0.8, 0.1, 0.1), fill=(1, 1, 1), width=1)
+                text_at(dst, (cx - (3 if n < 10 else 5.5), cy + 3), str(n), 7, (0.8, 0.1, 0.1))
+                dst.draw_line((cx + 7, cy), (x_list - 4, y - 3), color=(0.8, 0.5, 0.5), width=0.4)
+                head = f"{n}. {a.label} — {a.author or '(autore sconosciuto)'} · {format_date(a.modified or a.created)}"
+                lines = _wrap_chars(head, 60)
+                if a.marked_text:
+                    lines += _wrap_chars(f"«{a.marked_text}»", 60)
+                if a.contents:
+                    for ln in a.contents.splitlines()[:6]:
+                        lines += _wrap_chars(ln, 60)
+                for r_ in a.replies:
+                    lines += _wrap_chars(f"↳ {r_.author}: {r_.contents}", 60)
+                for i, ln in enumerate(lines):
+                    if y > H - 30:
+                        break
+                    text_at(dst, (x_list, y), ln, 8.5 if i else 9, (0, 0, 0))
+                    y += 12
+                y += 6
+        data = out.tobytes(garbage=3, deflate=True)
+        out.close()
+        return data
+
+    text = summary_text(pdf, title)
     width, height, margin, size = 595, 842, 50, 10
     lh = size * 1.45
-    max_chars = 95
     wrapped: list[str] = []
-    for line in lines:
-        while len(line) > max_chars:
-            cut = line.rfind(" ", 0, max_chars)
-            cut = cut if cut > 20 else max_chars
-            wrapped.append(line[:cut])
-            line = "      " + line[cut:].lstrip()
-        wrapped.append(line)
+    for line in text.splitlines():
+        wrapped.extend(_wrap_chars(line, 95))
     page = None
     y = 0.0
     for line in wrapped:
         if page is None or y > height - margin:
             page = out.new_page(width=width, height=height)
             y = margin + size
-        page.insert_text((margin, y), line, fontsize=size, fontname="helv")
+        text_at(page, (margin, y), line, size)
         y += lh
     data = out.tobytes(garbage=3, deflate=True)
     out.close()

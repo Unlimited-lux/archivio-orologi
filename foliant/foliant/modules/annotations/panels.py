@@ -199,6 +199,21 @@ class PropertiesPanel(QWidget):
         self.default_btn = QPushButton(_("Imposta come predefinito"))
         self.default_btn.clicked.connect(self._make_default)
         lay.addWidget(self.default_btn)
+        fav_row = QHBoxLayout()
+        self.favorites = QComboBox()
+        self.favorites.setToolTip(_("Stili preferiti"))
+        self.favorites.activated.connect(self._use_favorite)
+        self.save_fav = QToolButton()
+        bind_icon(self.save_fav, "star")
+        self.save_fav.setToolTip(_("Salva come stile preferito…"))
+        self.save_fav.clicked.connect(self._save_favorite)
+        fav_row.addWidget(self.favorites, 1)
+        fav_row.addWidget(self.save_fav)
+        self.fav_box = QWidget()
+        self.fav_box.setLayout(fav_row)
+        fav_row.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.fav_box)
+        ctrl.stylesChanged.connect(lambda _k: self._fill_favorites())
         lay.addStretch(1)
         ctrl.selectionChanged.connect(self.refresh)
         ctrl.toolKindChanged.connect(lambda _k: self.refresh())
@@ -272,6 +287,7 @@ class PropertiesPanel(QWidget):
                 self.read_only.setChecked(all(i.flags & engine.FLAG_READ_ONLY for i in infos))
                 self.locked_contents.setChecked(all(i.flags & engine.FLAG_LOCKED_CONTENTS for i in infos))
                 self.default_btn.setVisible(len(kinds) == 1)
+                self.fav_box.setVisible(False)
             else:
                 kind = self.ctrl.tool_kind
                 if not kind:
@@ -279,6 +295,7 @@ class PropertiesPanel(QWidget):
                     self.subtitle.setText(_("Seleziona un'annotazione o uno strumento di commento."))
                     self._show(set())
                     self.default_btn.setVisible(False)
+                    self.fav_box.setVisible(False)
                     return
                 st = self.ctrl.style_for(kind)
                 self.title.setText(_("Strumento: {t}").format(t=_(engine.SUBJECTS.get(kind, _("Gomma") if
@@ -299,8 +316,36 @@ class PropertiesPanel(QWidget):
                 idx = self.icon_combo.findData(st.icon)
                 self.icon_combo.setCurrentIndex(max(0, idx))
                 self.default_btn.setVisible(False)
+                self._fill_favorites()
         finally:
             self._loading = False
+
+    def _fill_favorites(self) -> None:
+        kind = self.ctrl.tool_kind
+        show = bool(kind) and not self.ctrl.selection and kind != "eraser"
+        self.fav_box.setVisible(show)
+        if not show:
+            return
+        self.favorites.blockSignals(True)
+        self.favorites.clear()
+        self.favorites.addItem(_("Stili preferiti…"))
+        for d in self.ctrl.favorites(kind):
+            self.favorites.addItem(d["name"])
+        self.favorites.blockSignals(False)
+
+    def _use_favorite(self, index: int) -> None:
+        if index <= 0:
+            return
+        self.ctrl.use_favorite(self.ctrl.tool_kind, self.favorites.itemText(index))
+        self.refresh()
+
+    def _save_favorite(self) -> None:
+        kind = self.ctrl.tool_kind
+        if not kind:
+            return
+        name = dialogs.ask_text(self, _("Stile preferito"), _("Nome dello stile:"), "")
+        if name and name.strip():
+            self.ctrl.add_favorite(kind, name)
 
     @staticmethod
     def _border_color(info):
@@ -459,7 +504,7 @@ class CommentsPanel(QWidget):
         self.count = QLabel("")
         self.count.setStyleSheet(f"color:{theme.hex_color('text_muted')}")
         lay.addWidget(self.count)
-        self.filters = {"types": set(), "authors": set(), "status": set()}
+        self.filters = {"types": set(), "authors": set(), "status": set(), "colors": set(), "replies": set()}
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(50)
@@ -493,6 +538,10 @@ class CommentsPanel(QWidget):
         if f["authors"] and info.author.strip() not in f["authors"]:
             return False
         if f["status"] and info.status not in f["status"]:
+            return False
+        if f["colors"] and engine.color_to_hex(info.color) not in f["colors"]:
+            return False
+        if f["replies"] and ("with" if info.replies else "without") not in f["replies"]:
             return False
         if query:
             hay = " ".join([info.contents, info.marked_text, info.author] + [r.contents for r in info.replies])
@@ -631,6 +680,20 @@ class CommentsPanel(QWidget):
                 a.setCheckable(True)
                 a.setChecked(a_name in self.filters["authors"])
                 a.toggled.connect(lambda on, k=a_name: self._toggle_filter("authors", k, on))
+        colors = sorted({engine.color_to_hex(i.color) for i in self._infos if i.color})
+        if colors:
+            sub = m.addMenu(_("Colore"))
+            for c in colors:
+                a = sub.addAction(swatch(engine.hex_to_color(c)), c)
+                a.setCheckable(True)
+                a.setChecked(c in self.filters["colors"])
+                a.toggled.connect(lambda on, k=c: self._toggle_filter("colors", k, on))
+        sub = m.addMenu(_("Risposte"))
+        for key, label in (("with", "Con risposte"), ("without", "Senza risposte")):
+            a = sub.addAction(_(label))
+            a.setCheckable(True)
+            a.setChecked(key in self.filters["replies"])
+            a.toggled.connect(lambda on, k=key: self._toggle_filter("replies", k, on))
         sub = m.addMenu(_("Stato"))
         for st, label in STATE_LABELS.items():
             a = sub.addAction(_(label))
@@ -778,6 +841,8 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int)
     if info.kind == engine.ATTACHMENT:
         menu.addAction(_("Salva allegato con nome…"), lambda: ui_actions.save_attachment(ctrl, page, xref))
     menu.addAction(_("Modifica commento…"), lambda: ctrl.edit_text(page, xref))
+    if info.kind not in (engine.FREETEXT, engine.CALLOUT, engine.TYPEWRITER) and not info.irt:
+        menu.addAction(_("Apri/chiudi finestra del commento"), lambda: ctrl.toggle_popup(page, xref))
     if not info.irt:
         menu.addAction(_("Rispondi…"), lambda: ctrl.reply(page, xref))
         status = menu.addMenu(_("Imposta stato"))
@@ -786,6 +851,13 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int)
             a.setCheckable(True)
             a.setChecked(info.status == st)
             a.triggered.connect(lambda _c=False, s=st: ctrl.set_status(page, xref, s))
+        if info.history:
+            def show_history():
+                lines = [f"{engine.format_date(h.created)} — {h.author}: "
+                         f"{_(STATE_LABELS.get(h.state, h.state)) if h.state_model.lower() != 'marked' else h.state}"
+                         for h in info.history]
+                dialogs.show_text(ctrl.view(), _("Cronologia degli stati"), "\n".join(lines))
+            menu.addAction(_("Cronologia degli stati…"), show_history)
         mark = menu.addAction(_("Segno di spunta"))
         mark.setCheckable(True)
         mark.setChecked(info.marked)
@@ -813,5 +885,8 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int)
         menu.addAction(_("Porta in primo piano"), lambda: ctrl.restack(True, [(page, xref)]))
         menu.addAction(_("Porta sullo sfondo"), lambda: ctrl.restack(False, [(page, xref)]))
         menu.addAction(_("Proprietà"), lambda: (ctrl.select([(page, xref)]), ctrl.ctx.show_properties("annotations")))
+    if not info.irt:
+        menu.addAction(_("Appiattisci selezione…"),
+                       lambda: ui_actions.flatten(ctrl, selection=True))
     menu.addSeparator()
     menu.addAction(_("Elimina"), lambda: ctrl.delete([(page, xref)]))

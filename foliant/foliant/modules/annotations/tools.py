@@ -406,6 +406,38 @@ def _resized(r: pymupdf.Rect, handle: int, d: pymupdf.Point, keep_ratio: bool = 
     return new
 
 
+def paint_popups(ctrl: "Controller", view, painter: QPainter, page: int) -> None:
+    """Livello di disegno: finestre popup aperte (ANN-05), solo nella vista."""
+    if ctrl.annotations_hidden(view):
+        return
+    try:
+        popups = ctrl.popups(view, page)
+    except Exception:
+        return
+    if not popups:
+        return
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    for rect, author, date, text in popups:
+        r = _qrect(rect)
+        painter.setPen(_cosmetic(QColor(160, 130, 20), 1))
+        painter.setBrush(QColor(255, 248, 196))
+        painter.drawRect(r)
+        f = painter.font()
+        f.setPointSizeF(7.5)
+        f.setBold(True)
+        painter.setFont(f)
+        painter.setPen(QColor(60, 50, 10))
+        head = QRectF(r.x() + 4, r.y() + 2, r.width() - 8, 12)
+        painter.drawText(head, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                         f"{author} · {date}" if date else author)
+        f.setBold(False)
+        painter.setFont(f)
+        painter.setPen(QColor(30, 30, 30))
+        body = QRectF(r.x() + 4, r.y() + 16, r.width() - 8, r.height() - 18)
+        painter.drawText(body, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop) | int(Qt.TextFlag.TextWordWrap),
+                         text)
+
+
 def paint_selection(ctrl: "Controller", view, painter: QPainter, page: int) -> None:
     """Livello di disegno: riquadro e maniglie delle annotazioni selezionate."""
     if ctrl.selection_view() is not view or not ctrl.selection:
@@ -1006,6 +1038,7 @@ class StampTool(AnnotTool):
         self.image = image
         self.template = template
         self.name = name
+        self.sticker = ""
 
     def press(self, view, ev):
         return ev.button == Qt.MouseButton.LeftButton and ev.page is not None
@@ -1014,7 +1047,10 @@ class StampTool(AnnotTool):
         if ev.button != Qt.MouseButton.LeftButton or ev.page is None:
             return False
         page, point = ev.page, ev.point
-        if self.image is not None:
+        if getattr(self, "sticker", None):
+            xref = self.ctrl.apply(_("Aggiungi adesivo"), engine.create_sticker, page, point, self.sticker,
+                                   self.style(), self.ctrl.author())
+        elif self.image is not None:
             xref = self.ctrl.apply(_("Aggiungi timbro"), engine.create_image_stamp, page, point, self.image,
                                    self.style(), self.ctrl.author(), 160.0, self.name)
         else:
