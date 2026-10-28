@@ -11,10 +11,10 @@ from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
-    QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
-from ..i18n import _
+from ..i18n import _, format_date
 from . import theme
 from .icons import RESOURCES, _pixmap, bind_icon, icon
 
@@ -151,6 +151,8 @@ class HomeScreen(QScrollArea):
         lay.addWidget(self.actions_label)
         self.actions_grid = QGridLayout()
         self.actions_grid.setSpacing(10)
+        for col in range(4):                    # colonne uguali anche con l'ultima riga incompleta
+            self.actions_grid.setColumnStretch(col, 1)
         lay.addLayout(self.actions_grid)
         self.actions_label.hide()
 
@@ -200,7 +202,7 @@ class HomeScreen(QScrollArea):
             pinned = p in self._pinned
             if exists:
                 try:
-                    when = dt.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M")
+                    when = format_date(dt.datetime.fromtimestamp(os.path.getmtime(p)), time=True)
                 except OSError:
                     when = ""
             else:
@@ -279,6 +281,7 @@ class HomeScreen(QScrollArea):
             btn.setIconSize(QSize(26, 26))
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             btn.setMinimumSize(QSize(150, 86))
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.setProperty("homeAction", True)          # stile nel foglio globale (segue il tema)
             btn.clicked.connect(lambda _c=False, f=cb: f())
             self.actions_grid.addWidget(btn, n // 4, n % 4)
