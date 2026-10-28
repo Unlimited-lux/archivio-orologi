@@ -24,13 +24,16 @@ Test: `tests/modules/ocr/` (engine, criteri, ui, languages, textexport).
 | OCR-15 In blocco | P1 | fatto (manca «riprendi lotto») | test_ui: ocr_in_blocco | cartelle, TIFF/immagini, già ricercabili saltati, protetti/danneggiati in errore, suffisso numerico, sovrascrittura con .bak, CSV |
 | OCR-16 Conversione Office | P1 | non fatto | — | modulo convert: può usare `ocr_page_text` / `recognize_document` |
 | OCR-17 PDF/A, PDF/UA | P1 | non fatto | — | |
-| OCR-18 Rimozione livello OCR | P1 | parziale | test_ui: rimuovi_livello_ocr | rimozione del livello; manca «PDF solo immagine» |
+| OCR-18 Rimozione livello OCR / PDF solo immagine | P1 | fatto | test_ui: rimuovi_livello_ocr, pdf_solo_immagine | rimozione del livello invisibile; conversione in sole immagini con conferma, un passo di annulla |
 | OCR-19 Immagine compressa | P2 | non fatto | — | |
 | OCR-20 Integrazione | P1 | parziale | — | API per gli altri moduli, `ctx.ocr`, proposta al clic in Modifica/Selezione |
 
 Note finali:
 - Nucleo aggiornato unito (07:50 UTC); suite completa verde, nessuna scorciatoia registrata dal modulo.
 - Pagine con /Rotate e CropBox spostato: verificate con `test_criteri.py::test_rilettura_pagine_ruotate_e_ritagliate`.
+- Pagine con /Rotate e contenuto memorizzato di lato (anche ritagliate), modalità modificabile: verificate con
+  `test_criteri.py::test_modificabile_contenuto_memorizzato_di_lato`.
+- Base con tutti i moduli unita alle 08:59 UTC.
 - Stile del testo modificabile: grassetto relativo alla pagina; le grazie si assegnano solo con misura netta
   (nel dubbio senza grazie), quindi i testi con grazie sottili possono uscire senza grazie.
 - Correzioni del collaudo (08:00–08:20 UTC): bug_07, bug_01/02, bug_04, bug_05, bug_08, tabelle e stile.

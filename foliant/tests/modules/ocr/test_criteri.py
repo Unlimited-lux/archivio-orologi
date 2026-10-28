@@ -427,3 +427,30 @@ def test_modificabile_tabella_e_stile_sans(tmp_path):
         body = [sp for b in p.get_text("dict")["blocks"] if b["type"] == 0 for ln in b["lines"]
                 for sp in ln["spans"] if "venditore" in sp["text"]][0]
         assert "Bold" not in body["font"]
+
+
+@pytest.mark.parametrize("rot", [90, 180, 270])
+def test_modificabile_contenuto_memorizzato_di_lato(rot):
+    """Pagina con /Rotate il cui contenuto è memorizzato ruotato (appare diritto): in modalità modificabile
+    il testo ricostruito cade sulle parole della pagina visualizzata."""
+    import cv2
+    from foliant.modules.ocr.preprocess import PreprocessOptions
+    img = scan_image(lines=FRASI[:3], dpi=200)
+    ok, buf = cv2.imencode(".png", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+    d = pymupdf.open()
+    w, h = (842, 595) if rot in (90, 270) else (595, 842)
+    p = d.new_page(width=w, height=h)
+    p.set_rotation(rot)
+    p.insert_image(p.rect * p.derotation_matrix, stream=buf.tobytes(), rotate=rot, keep_proportion=False)
+    mb = p.mediabox
+    p.set_cropbox(pymupdf.Rect(mb.x0 + 20, mb.y0 + 30, mb.x1 - 25, mb.y1 - 15))
+    src = d.tobytes()
+    with pymupdf.open(stream=engine.ocr_pdf_bytes(src, ["ita"], "editable")) as out, \
+            pymupdf.open(stream=src) as ref:
+        q = out[0]
+        assert q.rotation == rot
+        assert engine.char_accuracy(q.get_text(), "\n".join(FRASI[:3])) >= 0.9
+        r = q.search_for("compravendita")[0] * q.rotation_matrix
+        seen = engine.ocr_page_text(ref[0], clip=r + (-4, -4, 4, 4), languages=["ita"],
+                                    preprocess=PreprocessOptions(auto_rotate=False))
+        assert "compravendita" in seen

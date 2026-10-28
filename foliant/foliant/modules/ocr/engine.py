@@ -576,6 +576,33 @@ def recognize_area(pdf: pymupdf.Document, index: int, clip: pymupdf.Rect, opts: 
     return _process(res, img, sub, cancelled or (lambda: False))
 
 
+def rasterize_pages(pdf: pymupdf.Document, pages: list[int] | None = None, dpi: int = 200) -> int:
+    """Converte le pagine in sole immagini (OCR-18): niente testo estraibile, aspetto conservato.
+
+    Il contenuto della pagina è sostituito dalla sua resa; annotazioni e campi modulo restano.
+    Da chiamare dentro `document.change()`."""
+    n = 0
+    for i in (range(pdf.page_count) if pages is None else pages):
+        page = pdf[i]
+        pix = page.get_pixmap(dpi=dpi, annots=False, alpha=False)
+        _clear_page_content(page)
+        placement.insert_image(page, placement.page_rect(page), pixmap=pix, keep_proportion=False, upright=True)
+        _drop_unused_images(page)
+        _drop_unused_fonts(page)
+        n += 1
+    return n
+
+
+def _drop_unused_fonts(page: pymupdf.Page) -> None:
+    doc = page.parent
+    try:
+        kind, val = doc.xref_get_key(page.xref, "Resources")
+        target, prefix = (int(val.split()[0]), "") if kind == "xref" else (page.xref, "Resources/")
+        doc.xref_set_key(target, prefix + "Font", "null")
+    except Exception:
+        pass
+
+
 def remove_ocr_layer(pdf: pymupdf.Document, pages: list[int] | None = None) -> int:
     """Rimuove il livello di testo invisibile dalle pagine (OCR-18). Restituisce le pagine modificate."""
     n = 0

@@ -328,4 +328,10 @@ EN = {
     'Avvia OCR': 'Start OCR',
     'La pagina {n} ha solo testo invisibile riconosciuto da un OCR: per modificarlo rendila modificabile.': 'Page {n} only has invisible text from an OCR: make it editable to edit that text.',
     'Avvisi:': 'Warnings:',
+    'PDF solo immagine': 'Image-only PDF',
+    'Tutte le pagine diventeranno immagini: il testo non sarà più selezionabile né ricercabile. Annotazioni e campi modulo restano. Continuare?': 'All pages will become images: text will no longer be selectable or searchable. Annotations and form fields are kept. Continue?',
+    'Converti in PDF solo immagine': 'Convert to image-only PDF',
+    'Conversione non riuscita': 'Conversion failed',
+    '{n} pagine convertite in immagine.': '{n} pages converted to images.',
+    "Rende ogni pagina un'immagine, senza testo estraibile": 'Turns every page into an image, without extractable text',
 }
