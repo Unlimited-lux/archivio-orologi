@@ -1218,7 +1218,7 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
     """
     if kind == DATE_KIND:
         kind = TEXT
-        props.setdefault("fmt", Format(fm.DATE, pattern="dd/mm/yyyy"))
+        props.setdefault("fmt", Format(fm.DATE))
         name = name or default_name(pdf, DATE_KIND)
     if kind not in _TYPE_OF_KIND:
         raise FormError(_("Tipo di campo sconosciuto."))
