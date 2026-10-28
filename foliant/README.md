@@ -23,7 +23,13 @@ Riga di comando: `foliant [--page N] [--new-window] file…` apre i file in sche
 pagina N (`-p N`; per un file qualsiasi anche `file.pdf#page=N`); le opzioni sconosciute sono
 segnalate e ignorate. Istanza singola: se Foliant è già aperto, il nuovo avvio consegna file e
 pagina alla finestra attiva (nuove schede, oppure la scheda del file se è già aperto) e termina;
-con `--new-window` si apre invece una nuova finestra (`foliant/ui/instance.py`).
+con `--new-window` si apre invece una nuova finestra (`foliant/ui/instance.py`). `--create` apre
+«Crea PDF da file» e `--merge` il dialogo «Unisci file»: sono le azioni rapide della voce nel menu
+delle applicazioni (`packaging/foliant.desktop`: Nuova finestra, Crea PDF da file…, Unisci file…).
+Eseguono il comando registrato da un modulo con `ctx.add_command("create-pdf" | "merge", fn)`;
+finché nessun modulo lo registra, il nucleo usa l'azione rapida della Home con lo stesso scopo
+(«Crea PDF da file», «Unisci PDF») e, se manca anche quella, mostra la Home.
+L'installazione copia anche l'icona simbolica monocromatica (`foliant-symbolic.svg`, colore del tema).
 
 ## Uso quotidiano
 
@@ -214,6 +220,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `action(testo, icona, slot, shortcut=, checkable=, requires_document=)` | crea un'azione (disattivata senza documento) |
 | `add_menu_action(azione, sezione)` | voce nel menu principale ☰ |
 | `add_home_action(titolo, icona, callback, descrizione, order)` | azione rapida nella Home |
+| `add_command(nome, fn)` | comando per la riga di comando e le azioni del file .desktop: `"create-pdf"` (`foliant --create`), `"merge"` (`foliant --merge`); senza, il nucleo usa l'azione rapida della Home «Crea PDF da file» / «Unisci PDF» |
 | `add_sidebar_panel(id, titolo, icona, widget, order)` / `show_sidebar_panel(id)` / `toggle_sidebar_panel(id)` | pannello sinistro (`widget.set_view(view)` chiamato a ogni cambio documento); `toggle` lo nasconde se è già quello visibile |
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |

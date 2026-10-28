@@ -150,6 +150,9 @@ def open_request(request: dict, settings, window=None):
     if window is None:
         window = open_window(settings)
     window.open_files(request.get("files") or [])
+    command = request.get("command")
+    if command:
+        QTimer.singleShot(0, window, lambda: window.run_command(command))   # dopo la risposta e la finestra
     if window.isMinimized():
         window.showNormal()
     window.raise_()

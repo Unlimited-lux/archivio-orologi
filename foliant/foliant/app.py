@@ -40,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-p", "--page", type=int, metavar="N", help=_("apre il primo file alla pagina N"))
     parser.add_argument("--new-window", action="store_true",
                         help=_("apre una nuova finestra anche se Foliant è già in esecuzione"))
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--create", dest="command", action="store_const", const="create-pdf",
+                       help=_("apre «Crea PDF da file»"))
+    group.add_argument("--merge", dest="command", action="store_const", const="merge",
+                       help=_("apre «Unisci file»"))
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
     return parser
 
@@ -71,7 +76,7 @@ def parse_args(args: list[str], cwd: str | None = None) -> Options:
     files = [_target(a, cwd) for a in ns.files]
     if ns.page is not None and files and files[0][1] is None:
         files[0] = (files[0][0], ns.page)
-    return Options(files=files, new_window=ns.new_window, unknown=list(unknown))
+    return Options(files=files, new_window=ns.new_window, command=ns.command, unknown=list(unknown))
 
 
 def install_qt_translations(app: QApplication) -> None:

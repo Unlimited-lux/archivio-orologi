@@ -330,6 +330,12 @@ class Context(QObject):
         """Aggiunge una voce al menu principale (☰), raggruppata per sezione."""
         self._w.add_menu_action(action, section)
 
+    def add_command(self, name: str, fn: Callable[[], Any]) -> None:
+        """Comando con nome per la riga di comando e le azioni del file .desktop: «create-pdf»
+        (`foliant --create`) e «merge» (`foliant --merge`). Senza, il nucleo usa l'azione
+        rapida della Home «Crea PDF da file» / «Unisci PDF»."""
+        self._w.add_command(name, fn)
+
     def add_home_action(self, title: str, icon_name: str, callback: Callable[[], Any],
                         description: str = "", order: int = 100) -> None:
         """Aggiunge un'azione rapida alla schermata Home."""

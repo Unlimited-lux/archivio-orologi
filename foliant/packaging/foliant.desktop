@@ -10,6 +10,23 @@ Icon=foliant
 Terminal=false
 Categories=Office;Viewer;Graphics;
 MimeType=application/pdf;image/png;image/jpeg;image/tiff;
-Keywords=pdf;editor;ocr;firma;sign;annotate;convert;
+Keywords=pdf;modifica;editor;firma;ocr;modulo;moduli;unisci;converti;annota;commenti;
+Keywords[en]=pdf;edit;editor;sign;signature;ocr;form;merge;convert;annotate;comment;
+Actions=new-window;create-pdf;merge;
 StartupWMClass=foliant
 StartupNotify=true
+
+[Desktop Action new-window]
+Name=Nuova finestra
+Name[en]=New Window
+Exec=@EXEC@ --new-window
+
+[Desktop Action create-pdf]
+Name=Crea PDF da file…
+Name[en]=Create PDF from File…
+Exec=@EXEC@ --create
+
+[Desktop Action merge]
+Name=Unisci file…
+Name[en]=Merge Files…
+Exec=@EXEC@ --merge

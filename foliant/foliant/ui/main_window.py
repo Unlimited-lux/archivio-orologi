@@ -32,6 +32,9 @@ from .tasks import BackgroundTask, TaskManager, TaskStatusWidget
 
 MAX_RECENT = 15
 READ_ONLY_BANNER = "nucleo.sola_lettura"     # avviso dei file senza permesso di scrittura
+# Comandi con nome della riga di comando e delle azioni del file .desktop (NFR-32): se nessun modulo
+# li registra con ctx.add_command, si usa l'azione rapida della Home con questo titolo.
+HOME_COMMANDS = {"create-pdf": "Crea PDF da file", "merge": "Unisci PDF"}
 
 
 class PageField(QLineEdit):
@@ -129,6 +132,7 @@ class MainWindow(QMainWindow):
         # Scorciatoie valide solo in una modalità: (azione, scorciatoie, id modalità)
         self._mode_shortcuts: list[tuple[QAction, list, str]] = []
         self.module_results: list[tuple[str, Exception | None]] = []
+        self._commands: dict[str, Callable] = {}          # ctx.add_command
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
         self.setAcceptDrops(True)
@@ -927,6 +931,27 @@ class MainWindow(QMainWindow):
             self._add_recent(str(doc.path))
         self.remember_directory(path)
         return self.add_document(doc)
+
+    def add_command(self, name: str, fn: Callable) -> None:
+        self._commands[name] = fn
+
+    def run_command(self, name: str) -> bool:
+        """Comando con nome (`foliant --create`, `--merge`, azioni del file .desktop): quello
+        registrato da un modulo, altrimenti l'azione rapida della Home; se manca, mostra la Home."""
+        fn = self._commands.get(name)
+        if fn is None and name in HOME_COMMANDS:
+            title = HOME_COMMANDS[name]
+            fn = self.home.action_callback(title, _(title))
+        if fn is None:
+            self.show_home()
+            self.statusBar().showMessage(_("Comando non disponibile: {name}").format(name=name), 8000)
+            return False
+        try:
+            fn()
+        except Exception as e:          # un modulo difettoso non chiude l'applicazione
+            logging.getLogger(__name__).exception("comando %s", name)
+            self.statusBar().showMessage(_("Errore imprevisto: {e}").format(e=e), 8000)
+        return True
 
     def open_files(self, files) -> list[DocumentView]:
         """File della riga di comando o di un altro avvio: `(percorso, pagina da 1 o None)`;
