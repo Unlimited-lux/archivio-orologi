@@ -36,7 +36,7 @@ ITALIAN = re.compile(
 # testi uguali nelle due lingue ammessi: testi standard di Qt (tradotti dal traduttore Qt
 # caricato all'avvio dell'applicazione), parole identiche in inglese, dati del documento
 SAME_OK = {"Cancel", "OK", "Scroll Left", "Scroll Right", "Press shortcut", "File", "file", "Font", "Quote", "PDF",
-           "Zoom", "{n} dpi"}
+           "Layout", "Zoom", "Schema", "{n} dpi"}
 
 
 def _pdf(path) -> str:

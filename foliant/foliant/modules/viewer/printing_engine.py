@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pymupdf
 from PySide6.QtCore import QRectF
@@ -134,6 +134,10 @@ class PrintOptions:
     auto_rotate: bool = True
     layers: str = LAYERS_PRINT
     max_dpi: int = DEFAULT_MAX_DPI
+    duplex: str = ""        # preferenza del documento (/ViewerPreferences /Duplex), "" = stampante
+    layout: str = "normal"  # LAYOUT_NORMAL, LAYOUT_BOOKLET o LAYOUT_POSTER (VIS-44)
+    booklet_rtl: bool = False          # opuscolo rilegato a destra
+    poster_overlap_mm: float = 10.0    # sovrapposizione tra i fogli del poster
 
     def sequence(self) -> list[int]:
         n = max(1, int(self.copies))
@@ -143,6 +147,112 @@ class PrintOptions:
 
 
 # ------------------------------------------------------------------ rendering
+# ------------------------------------------------------------- opuscolo e poster (VIS-44)
+LAYOUT_NORMAL = "normal"
+LAYOUT_BOOKLET = "booklet"
+LAYOUT_POSTER = "poster"
+MM = 72 / 25.4
+
+
+def bake_for_imposition(pdf: pymupdf.Document, annotations: bool) -> None:
+    """L'imposizione copia il contenuto delle pagine, non le annotazioni: sulla copia di stampa
+    si tolgono quelle che non vanno su carta (`not_printed`) e le altre diventano contenuto."""
+    for i in range(pdf.page_count):
+        page = pdf[i]
+        for xref in not_printed(pdf, i, annotations):
+            try:
+                annot = page.load_annot(xref)
+            except Exception:
+                annot = None
+            if annot is not None:
+                page.delete_annot(annot)
+    try:
+        pdf.bake(annots=True, widgets=True)
+    except Exception:
+        pass
+
+
+def booklet_sides(count: int, rtl: bool = False) -> list[tuple[int | None, int | None]]:
+    """Facciate di un opuscolo per `count` pagine: coppie (sinistra, destra) di indici 0-based
+    nell'ordine di stampa fronte/retro; None = pagina bianca aggiunta (multipli di 4).
+    Con 8 pagine: (8,1), (2,7), (6,3), (4,5) in numeri da 1."""
+    if count <= 0:
+        return []
+    total = -(-count // 4) * 4
+    sides = []
+    for k in range(total // 4):
+        front = (total - 1 - 2 * k, 2 * k)
+        back = (2 * k + 1, total - 2 - 2 * k)
+        for left, right in (front, back):
+            if rtl:
+                left, right = right, left
+            sides.append((left if left < count else None, right if right < count else None))
+    return sides
+
+
+def impose_booklet(pdf: pymupdf.Document, pages: list[int], rtl: bool = False) -> pymupdf.Document:
+    """Documento con le facciate dell'opuscolo: ogni facciata è un foglio orizzontale con due
+    pagine affiancate, ciascuna adattata alla propria metà (ENGINE_LOCK richiesto)."""
+    width = max(pdf[i].rect.width for i in pages)
+    height = max(pdf[i].rect.height for i in pages)
+    out = pymupdf.open()
+    for left, right in booklet_sides(len(pages), rtl):
+        sheet = out.new_page(width=2 * width, height=height)
+        for slot, pos in ((left, 0), (right, 1)):
+            if slot is None:
+                continue
+            sheet.show_pdf_page(pymupdf.Rect(pos * width, 0, (pos + 1) * width, height), pdf, pages[slot],
+                                keep_proportion=True)
+    return out
+
+
+def poster_tiles(page_w: float, page_h: float, paper_w: float, paper_h: float,
+                 overlap: float) -> list[pymupdf.Rect]:
+    """Riquadri della pagina (in punti) stampati su ciascun foglio, a scala 1: fogli adiacenti
+    condividono una fascia larga `overlap`. Pagina già più piccola del foglio → un solo foglio."""
+    if page_w <= paper_w and page_h <= paper_h:
+        return [pymupdf.Rect(0, 0, page_w, page_h)]
+    overlap = max(0.0, min(overlap, paper_w / 2, paper_h / 2))
+
+    def starts(total: float, size: float) -> list[float]:
+        if total <= size:
+            return [0.0]
+        step = size - overlap
+        n = -(-(total - overlap) // step)
+        return [min(i * step, total - size) for i in range(int(n))]
+    return [pymupdf.Rect(x, y, min(x + paper_w, page_w), min(y + paper_h, page_h))
+            for y in starts(page_h, paper_h) for x in starts(page_w, paper_w)]
+
+
+def impose_poster(pdf: pymupdf.Document, pages: list[int], paper_w: float, paper_h: float,
+                  overlap_mm: float = 10.0) -> pymupdf.Document:
+    """Documento con i fogli del poster (scala 100%), con i segni di taglio sul bordo della
+    fascia di sovrapposizione (ENGINE_LOCK richiesto)."""
+    overlap = overlap_mm * MM
+    out = pymupdf.open()
+    for index in pages:
+        rect = pdf[index].rect
+        tiles = poster_tiles(rect.width, rect.height, paper_w, paper_h, overlap)
+        for tile in tiles:
+            sheet = out.new_page(width=paper_w, height=paper_h)
+            target = pymupdf.Rect(0, 0, tile.width, tile.height)
+            sheet.show_pdf_page(target, pdf, index, clip=tile)
+            if len(tiles) > 1:
+                shape = sheet.new_shape()
+                mark = 4 * MM
+                if tile.x0 > 0:                          # fascia condivisa con il foglio a sinistra
+                    x = overlap
+                    for y in (0, target.height - mark):
+                        shape.draw_line((x, y), (x, y + mark))
+                if tile.y0 > 0:
+                    y = overlap
+                    for x in (0, target.width - mark):
+                        shape.draw_line((x, y), (x + mark, y))
+                shape.finish(color=(0, 0, 0), width=0.3)
+                shape.commit()
+    return out
+
+
 def _print_copy(document, layers_mode: str) -> pymupdf.Document:
     """Copia di lavoro del documento, con lo stato dei livelli da stampare.
 
@@ -231,6 +341,22 @@ def print_document(document, device: QPagedPaintDevice, options: PrintOptions, p
         raise RangeError(_("Nessuna pagina da stampare."))
     work = _print_copy(document, options.layers)
     painter = QPainter()
+    if options.layout in (LAYOUT_BOOKLET, LAYOUT_POSTER):
+        paint0 = device.pageLayout().paintRectPoints()
+        with ENGINE_LOCK:
+            bake_for_imposition(work, options.annotations)
+            if options.layout == LAYOUT_BOOKLET:
+                imposed = impose_booklet(work, list(options.pages), options.booklet_rtl)
+            else:
+                imposed = impose_poster(work, list(options.pages), paint0.width(), paint0.height(),
+                                        options.poster_overlap_mm)
+            work.close()
+        work = imposed
+        sheets = list(range(work.page_count))
+        n_copies = max(1, int(options.copies))
+        sequence = sheets * n_copies if options.collate else [s for s in sheets for _i in range(n_copies)]
+        options = replace(options, scaling=FIT_PAGE if options.layout == LAYOUT_BOOKLET else ACTUAL_SIZE,
+                          auto_rotate=options.layout == LAYOUT_BOOKLET)
     try:
         if not painter.begin(device):
             raise RuntimeError(_("Impossibile avviare la stampa sul dispositivo scelto."))

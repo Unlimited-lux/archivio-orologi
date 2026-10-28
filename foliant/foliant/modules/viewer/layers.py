@@ -11,20 +11,48 @@ from __future__ import annotations
 
 import weakref
 
+import pymupdf
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QRadioButton, QStackedWidget, QToolButton, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QCheckBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QRadioButton, QStackedWidget,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from foliant.api import ENGINE_LOCK, _, add_translations, bind_icon
 
 from . import layers_engine as engine
+from . import layers_manage as manage
 from .layers_engine import Layer
 
 ROLE_LAYER = Qt.ItemDataRole.UserRole
 
 EN = {
+    "Nuovo livello…": "New layer…",
+    "Nuovo livello": "New layer",
+    "Appiattisci livelli…": "Flatten layers…",
+    "Appiattisci livelli": "Flatten layers",
+    "Rinomina…": "Rename…",
+    "Rinomina livello": "Rename layer",
+    "Visibile all'apertura": "Visible when opened",
+    "Visibilità all'apertura": "Visibility when opened",
+    "Bloccato": "Locked",
+    "Blocca livello": "Lock layer",
+    "Sblocca livello": "Unlock layer",
+    "Unisci in": "Merge into",
+    "Unisci livelli": "Merge layers",
+    "Elimina livello…": "Delete layer…",
+    "Elimina livello": "Delete layer",
+    "Nome del livello:": "Layer name:",
+    "Eliminare il livello «{name}»? Cosa fare del suo contenuto?":
+        "Delete the layer “{name}”? What should happen to its content?",
+    "Sposta nel contenuto di base": "Move to the base content",
+    "Elimina il contenuto": "Delete the content",
+    "Annulla": "Cancel",
+    "I livelli visibili diventano contenuto di base e quelli nascosti vengono rimossi. "
+    "Puoi annullare con Annulla.":
+        "Visible layers become base content and hidden ones are removed. You can undo it with Undo.",
+    "Alcuni livelli sono bloccati: verranno appiattiti anche loro.":
+        "Some layers are locked: they will be flattened too.",
     "Altre azioni": "More actions",
     "Livelli": "Layers",
     "Filtra per nome": "Filter by name",
@@ -141,13 +169,161 @@ class LayersPanel(QWidget):
         menu.addSeparator()
         a = menu.addAction(_("Salva visibilità come predefinita"), self.save_as_default)
         bind_icon(a, "save")
+        menu.addSeparator()
+        editable = self.can_manage()
+        a = menu.addAction(_("Nuovo livello…"), self.new_layer)
+        bind_icon(a, "plus")
+        a.setEnabled(editable)
+        a = menu.addAction(_("Appiattisci livelli…"), self.flatten)
+        bind_icon(a, "layers-2")
+        a.setEnabled(editable and bool(self._ocg_map()))
+
+    def build_layer_menu(self, menu: QMenu, layer: Layer) -> None:
+        """Voci di gestione di un livello (VIS-21)."""
+        xref = self._ocg_map().get(layer.number)
+        editable = self.can_manage() and xref is not None
+        a = menu.addAction(_("Rinomina…"), lambda: self.rename(layer))
+        bind_icon(a, "pencil")
+        a.setEnabled(editable)
+        a = menu.addAction(_("Visibile all'apertura"))
+        a.setCheckable(True)
+        a.setChecked(xref is not None and self._read(lambda pdf: manage.default_visible(pdf, xref), True))
+        a.toggled.connect(lambda on: self.set_default_visible(layer, on))
+        a.setEnabled(editable)
+        a = menu.addAction(_("Bloccato"))
+        a.setCheckable(True)
+        a.setChecked(layer.locked)
+        a.toggled.connect(lambda on: self.set_locked(layer, on))
+        a.setEnabled(editable)
+        others = [x for x in self.layers() if not x.is_label and x.number != layer.number]
+        merge = menu.addMenu(_("Unisci in"))
+        merge.setEnabled(editable and bool(others))
+        for other in others:
+            merge.addAction(other.text, lambda o=other: self.merge_into(layer, o))
+        menu.addSeparator()
+        a = menu.addAction(_("Elimina livello…"), lambda: self.delete_layer(layer))
+        bind_icon(a, "trash-2")
+        a.setEnabled(editable)
+        menu.addSeparator()
 
     def _context_menu(self, pos) -> None:
         if self.view is None:
             return
         menu = QMenu(self)
+        item = self.tree.itemAt(pos)
+        layer = item.data(0, ROLE_LAYER) if item is not None else None
+        if layer is not None and not layer.is_label:
+            self.build_layer_menu(menu, layer)
         self._fill_menu(menu)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    # ------------------------------------------------------------- gestione (VIS-21)
+    def can_manage(self) -> bool:
+        doc = self.document
+        return doc is not None and not doc.closed and doc.allows(pymupdf.PDF_PERM_MODIFY)
+
+    def _ocg_map(self) -> dict[int, int]:
+        """Numero del livello d'interfaccia -> xref dell'OCG."""
+        return self._read(engine._ocg_xrefs_by_layer, {}) or {}
+
+    def _manage(self, label: str, fn) -> bool:
+        doc = self.document
+        if not self.can_manage():
+            return False
+        try:
+            with doc.change(label) as pdf:
+                fn(pdf)
+                # MuPDF tiene in memoria la descrizione dei livelli letta all'apertura (con i
+                # nomi): dopo la modifica il documento interno si ricrea dai byte, nello stesso
+                # passo annullabile, così elenco e visibilità sono quelli nuovi.
+                doc.replace_with(pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_KEEP),
+                                 label)
+        except Exception as e:  # noqa: BLE001
+            self.ctx.error(label, str(e))
+            return False
+        st = self._read(engine.state, {}) or {}       # la numerazione dei livelli può cambiare
+        self._initial[self.view] = dict(st)
+        self._session[self.view] = dict(st)
+        self._refresh_view(self.view)
+        self.rebuild()
+        return True
+
+    def ask_name(self, title: str, text: str = "") -> str | None:
+        name, ok = QInputDialog.getText(self, title, _("Nome del livello:"), text=text)
+        return name.strip() if ok and name.strip() else None
+
+    def new_layer(self, name: str | None = None) -> bool:
+        name = name or self.ask_name(_("Nuovo livello"))
+        if not name:
+            return False
+        return self._manage(_("Nuovo livello"), lambda pdf: manage.add_layer(pdf, name))
+
+    def rename(self, layer: Layer, name: str | None = None) -> bool:
+        xref = self._ocg_map().get(layer.number)
+        name = name or self.ask_name(_("Rinomina livello"), layer.text)
+        if xref is None or not name:
+            return False
+        return self._manage(_("Rinomina livello"), lambda pdf: manage.rename_layer(pdf, xref, name))
+
+    def set_default_visible(self, layer: Layer, visible: bool) -> bool:
+        xref = self._ocg_map().get(layer.number)
+        if xref is None:
+            return False
+        return self._manage(_("Visibilità all'apertura"), lambda pdf: manage.set_default_visible(pdf, xref, visible))
+
+    def set_locked(self, layer: Layer, locked: bool) -> bool:
+        xref = self._ocg_map().get(layer.number)
+        if xref is None:
+            return False
+        return self._manage(_("Blocca livello") if locked else _("Sblocca livello"),
+                            lambda pdf: manage.set_locked(pdf, xref, locked))
+
+    def merge_into(self, layer: Layer, target: Layer) -> bool:
+        m = self._ocg_map()
+        src, dst = m.get(layer.number), m.get(target.number)
+        if src is None or dst is None or src == dst:
+            return False
+        return self._manage(_("Unisci livelli"), lambda pdf: manage.merge_layers(pdf, [src], dst))
+
+    def ask_delete_mode(self, layer: Layer) -> str | None:
+        """«keep» (sposta nel contenuto di base), «remove» o None (sostituibile nei test)."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(_("Elimina livello"))
+        box.setText(_("Eliminare il livello «{name}»? Cosa fare del suo contenuto?").format(name=layer.text))
+        keep = box.addButton(_("Sposta nel contenuto di base"), QMessageBox.ButtonRole.AcceptRole)
+        remove = box.addButton(_("Elimina il contenuto"), QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        return "keep" if clicked is keep else "remove" if clicked is remove else None
+
+    def delete_layer(self, layer: Layer, mode: str | None = None) -> bool:
+        xref = self._ocg_map().get(layer.number)
+        if xref is None:
+            return False
+        mode = mode or self.ask_delete_mode(layer)
+        if mode not in ("keep", "remove"):
+            return False
+        return self._manage(_("Elimina livello"),
+                            lambda pdf: manage.delete_layer(pdf, xref, keep_content=mode == "keep"))
+
+    def flatten(self, confirm: bool = True) -> bool:
+        """Appiattisce i livelli secondo la visibilità corrente: i visibili diventano contenuto di
+        base, i nascosti sono rimossi."""
+        m = self._ocg_map()
+        if not m:
+            return False
+        current = {layer.number: layer.on for layer in self.layers() if not layer.is_label}
+        locked = any(layer.locked for layer in self.layers())
+        text = _("I livelli visibili diventano contenuto di base e quelli nascosti vengono rimossi. "
+                 "Puoi annullare con Annulla.")
+        if locked:
+            text += "\n\n" + _("Alcuni livelli sono bloccati: verranno appiattiti anche loro.")
+        if confirm and not self.ctx.confirm(_("Appiattisci livelli"), text):
+            return False
+        visible = {xref: current.get(n, True) for n, xref in m.items()}
+        return self._manage(_("Appiattisci livelli"), lambda pdf: manage.flatten(pdf, visible))
 
     # ------------------------------------------------------------- documento
     @property

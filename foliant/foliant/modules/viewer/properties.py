@@ -18,6 +18,8 @@ from .properties_engine import (
 LARGE_DOCUMENT_PAGES = 100   # oltre: raccolta dei font in un'attività con avanzamento
 
 EN = {
+    "Metadati avanzati…": "Advanced metadata…",
+    "Modifica opzioni di apertura…": "Edit opening options…",
     "Informazioni sul documento…": "Document information…",
     "Informazioni su «{name}»": "Information about “{name}”",
     "Contenuto": "Content",
@@ -150,7 +152,8 @@ def _form_page(rows: list[tuple[str, str]], parent: QWidget, coloured: dict[str,
 
 
 class PropertiesDialog(QDialog):
-    def __init__(self, info: DocumentInfo, title: str, parent: QWidget | None = None):
+    def __init__(self, info: DocumentInfo, title: str, parent: QWidget | None = None, on_edit_opening=None,
+                 on_edit_metadata=None):
         super().__init__(parent)
         self.setObjectName("documentPropertiesDialog")
         self.setWindowTitle(title)
@@ -183,6 +186,17 @@ class PropertiesDialog(QDialog):
         buttons = QDialogButtonBox(self)
         self.copy_button = buttons.addButton(_("Copia negli appunti"), QDialogButtonBox.ButtonRole.ActionRole)
         bind_icon(self.copy_button, "clipboard-copy")
+        self.opening_button = None
+        self.metadata_button = None
+        if on_edit_metadata is not None:         # VIS-41: dalla scheda Contenuto
+            self.metadata_button = buttons.addButton(_("Metadati avanzati…"), QDialogButtonBox.ButtonRole.ActionRole)
+            bind_icon(self.metadata_button, "tags")
+            self.metadata_button.clicked.connect(lambda: on_edit_metadata())
+        if on_edit_opening is not None:          # VIS-42: dalla scheda Apertura
+            self.opening_button = buttons.addButton(_("Modifica opzioni di apertura…"),
+                                                    QDialogButtonBox.ButtonRole.ActionRole)
+            bind_icon(self.opening_button, "settings-2")
+            self.opening_button.clicked.connect(lambda: on_edit_opening())
         close = buttons.addButton(_("Chiudi"), QDialogButtonBox.ButtonRole.RejectRole)
         close.setDefault(True)
         self.copy_button.clicked.connect(self.copy_to_clipboard)
@@ -261,7 +275,11 @@ class PropertiesController:
             self.dialog.close()
             self.dialog.deleteLater()
         title = _("Informazioni su «{name}»").format(name=view.document.display_name)
-        self.dialog = PropertiesDialog(info, title, self.ctx.window)
+        parts = getattr(self.ctx, "viewer_parts", {})
+        opener, meta = parts.get("openoptions"), parts.get("xmp")
+        self.dialog = PropertiesDialog(info, title, self.ctx.window,
+                                       on_edit_opening=(lambda v=view: opener.open_dialog(v)) if opener else None,
+                                       on_edit_metadata=(lambda v=view: meta.open_dialog(v)) if meta else None)
         self.dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.dialog.show()
         return self.dialog

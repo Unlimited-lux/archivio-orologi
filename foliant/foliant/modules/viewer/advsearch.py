@@ -20,13 +20,34 @@ from PySide6.QtWidgets import (
 from foliant.api import ENGINE_LOCK, Context, OperationCancelled, _, add_translations, atomic_write, bind_icon, theme
 
 from . import advsearch_engine as eng
+from . import fulltext
 from .advsearch_engine import AdvHit, AdvOptions, AdvSummary
 
 SCOPE_CURRENT = "current"
 SCOPE_OPEN = "open"
 SCOPE_FOLDER = "folder"
+SCOPE_INDEX = "index"
 
 TRANSLATIONS = {
+    "cambiato dopo l'indicizzazione": "changed after indexing",
+    "Indice": "Index",
+    "Crea un indice da una cartella…": "Create an index from a folder…",
+    "Aggiorna l'indice (solo i file cambiati)": "Update the index (changed files only)",
+    "Elimina l'indice": "Delete the index",
+    "Crea un indice da una cartella per cercare in modo immediato.":
+        "Create an index from a folder for instant searches.",
+    "Ricerca nell'indice…": "Searching the index…",
+    "Creazione dell'indice…": "Creating the index…",
+    "Aggiornamento dell'indice…": "Updating the index…",
+    "Eliminare l'indice «{name}»? I file indicizzati non vengono toccati.":
+        "Delete the index “{name}”? The indexed files are not touched.",
+    "Indice: {a} file aggiunti, {u} aggiornati, {r} tolti, {k} invariati.":
+        "Index: {a} files added, {u} updated, {r} removed, {k} unchanged.",
+    "Non indicizzati: {l}": "Not indexed: {l}",
+    "{n} file cambiati o eliminati dopo l'indicizzazione: aggiorna l'indice.":
+        "{n} files changed or deleted after indexing: update the index.",
+    "Allegati PDF": "PDF attachments",
+    "Allegato «{name}»": "Attachment “{name}”",
     "ricerca.csv": "search.csv",
     "Ricerca avanzata…": "Advanced search…",
     "Ricerca avanzata": "Advanced search",
@@ -133,6 +154,7 @@ class AdvancedSearchPanel(QDialog):
         self.scope.addItem(_("Documento corrente"), SCOPE_CURRENT)
         self.scope.addItem(_("Documenti aperti"), SCOPE_OPEN)
         self.scope.addItem(_("Cartella"), SCOPE_FOLDER)
+        self.scope.addItem(_("Indice"), SCOPE_INDEX)
         self.scope.currentIndexChanged.connect(self._scope_changed)
         form.addRow(_("Ambito"), self.scope)
         folder_row = QHBoxLayout()
@@ -155,6 +177,28 @@ class AdvancedSearchPanel(QDialog):
         fb.addLayout(folder_row)
         fb.addWidget(self.recursive)
         form.addRow("", self.folder_box)
+        # indici full-text (VIS-25)
+        self.index_box = QWidget(self)
+        ib = QHBoxLayout(self.index_box)
+        ib.setContentsMargins(0, 0, 0, 0)
+        ib.setSpacing(4)
+        self.index_combo = QComboBox(self.index_box)
+        self.index_combo.setMinimumWidth(160)
+        ib.addWidget(self.index_combo, 1)
+        for attr, icon_name, tip, slot in (
+                ("index_new", "plus", _("Crea un indice da una cartella…"), lambda: controller.create_index_dialog()),
+                ("index_update", "refresh-cw", _("Aggiorna l'indice (solo i file cambiati)"),
+                 lambda: controller.update_index()),
+                ("index_delete", "trash-2", _("Elimina l'indice"), lambda: controller.delete_index())):
+            b = QToolButton(self.index_box)
+            bind_icon(b, icon_name)
+            b.setToolTip(tip)
+            b.setAccessibleName(tip)
+            b.setAutoRaise(True)
+            b.clicked.connect(slot)
+            setattr(self, attr, b)
+            ib.addWidget(b)
+        form.addRow("", self.index_box)
         self.mode = QComboBox(self)
         self.mode.addItem(_("Frase esatta"), eng.PHRASE)
         self.mode.addItem(_("Tutte le parole (stessa pagina)"), eng.ALL_WORDS)
@@ -180,7 +224,8 @@ class AdvancedSearchPanel(QDialog):
         self.inc_bookmarks = QCheckBox(_("Segnalibri"), self)
         self.inc_fields = QCheckBox(_("Campi modulo"), self)
         self.inc_metadata = QCheckBox(_("Metadati"), self)
-        for cb in (self.inc_comments, self.inc_bookmarks, self.inc_fields, self.inc_metadata):
+        self.inc_attachments = QCheckBox(_("Allegati PDF"), self)
+        for cb in (self.inc_comments, self.inc_bookmarks, self.inc_fields, self.inc_metadata, self.inc_attachments):
             inc.addWidget(cb)
         inc.addStretch(1)
         form.addRow(_("Includi"), inc)
@@ -221,6 +266,9 @@ class AdvancedSearchPanel(QDialog):
 
     def _scope_changed(self, *_a) -> None:
         self.folder_box.setVisible(self.scope.currentData() == SCOPE_FOLDER)
+        self.index_box.setVisible(self.scope.currentData() == SCOPE_INDEX)
+        if self.scope.currentData() == SCOPE_INDEX:
+            self.controller.refresh_indexes()
 
     def set_error(self, message: str | None) -> None:
         if message:
@@ -259,8 +307,12 @@ class AdvancedSearchPanel(QDialog):
                     tag = kinds.get(h.kind, h.kind)
                     if h.label:
                         tag += f" · {h.label}"
+                    if h.attachment:
+                        tag = _("Allegato «{name}»").format(name=h.attachment) + " · " + tag
+                    if h.stale:
+                        tag = _("cambiato dopo l'indicizzazione") + " · " + tag
                     child = QTreeWidgetItem(pitem)
-                    prefix = "" if h.kind == eng.KIND_TEXT else \
+                    prefix = "" if h.kind == eng.KIND_TEXT and not h.attachment and not h.stale else \
                         f"<span style='color:{muted}'>[{html.escape(tag)}]</span> "
                     child.setText(0, prefix + "…" + html.escape(h.before) + "<b>" + html.escape(h.found) + "</b>"
                                   + html.escape(h.after) + "…")
@@ -315,13 +367,14 @@ class AdvancedSearchController(QObject):
         return AdvOptions(query=p.field.text(), mode=p.mode.currentData(), case_sensitive=p.opt_case.isChecked(),
                           whole_word=p.opt_word.isChecked(), ignore_accents=p.opt_accents.isChecked(),
                           comments=p.inc_comments.isChecked(), bookmarks=p.inc_bookmarks.isChecked(),
-                          fields=p.inc_fields.isChecked(), metadata=p.inc_metadata.isChecked())
+                          fields=p.inc_fields.isChecked(), metadata=p.inc_metadata.isChecked(),
+                          attachments=p.inc_attachments.isChecked())
 
     def configure(self, query: str | None = None, *, scope: str | None = None, mode: str | None = None,
                   case_sensitive: bool | None = None, whole_word: bool | None = None,
                   ignore_accents: bool | None = None, comments: bool | None = None, bookmarks: bool | None = None,
                   fields: bool | None = None, metadata: bool | None = None, folder: str | None = None,
-                  recursive: bool | None = None) -> None:
+                  recursive: bool | None = None, attachments: bool | None = None) -> None:
         p = self.ensure_panel()
         if query is not None:
             p.field.setText(query)
@@ -331,7 +384,7 @@ class AdvancedSearchController(QObject):
             p.mode.setCurrentIndex(p.mode.findData(mode))
         for cb, value in ((p.opt_case, case_sensitive), (p.opt_word, whole_word), (p.opt_accents, ignore_accents),
                           (p.inc_comments, comments), (p.inc_bookmarks, bookmarks), (p.inc_fields, fields),
-                          (p.inc_metadata, metadata), (p.recursive, recursive)):
+                          (p.inc_metadata, metadata), (p.recursive, recursive), (p.inc_attachments, attachments)):
             if value is not None:
                 cb.setChecked(value)
         if folder is not None:
@@ -342,6 +395,79 @@ class AdvancedSearchController(QObject):
         p = self.ensure_panel()
         p.folder_label.setText(folder or _("Nessuna cartella scelta"))
         p.folder_label.setToolTip(folder or "")
+
+    # ------------------------------------------------------------- indici (VIS-25)
+    def refresh_indexes(self, select: str | None = None) -> list[str]:
+        p = self.ensure_panel()
+        names = fulltext.list_indexes()
+        current = select or p.index_combo.currentData()
+        p.index_combo.blockSignals(True)
+        p.index_combo.clear()
+        for name in names:
+            folder = fulltext.FullTextIndex(name).settings().get("folder", "")
+            p.index_combo.addItem(name, name)
+            p.index_combo.setItemData(p.index_combo.count() - 1, folder, Qt.ItemDataRole.ToolTipRole)
+        if current in names:
+            p.index_combo.setCurrentIndex(names.index(current))
+        p.index_combo.blockSignals(False)
+        has = bool(names)
+        p.index_update.setEnabled(has)
+        p.index_delete.setEnabled(has)
+        return names
+
+    def current_index(self) -> fulltext.FullTextIndex | None:
+        name = self.ensure_panel().index_combo.currentData()
+        return fulltext.FullTextIndex(name) if name else None
+
+    def create_index(self, folder: str, name: str | None = None, recursive: bool = True) -> fulltext.IndexStats | None:
+        index = fulltext.FullTextIndex(name or os.path.basename(os.path.normpath(folder)))
+        try:
+            stats = self.ctx.run_task(_("Creazione dell'indice…"), index.build, folder, recursive)
+        except OperationCancelled:
+            index.delete()
+            return None
+        self.refresh_indexes(index.name)
+        p = self.ensure_panel()
+        p.scope.setCurrentIndex(p.scope.findData(SCOPE_INDEX))
+        self._set_summary(self._describe_stats(stats))
+        return stats
+
+    def create_index_dialog(self) -> fulltext.IndexStats | None:
+        folder = self.ctx.ask_directory(_("Crea un indice da una cartella…"))
+        if not folder:
+            return None
+        return self.create_index(folder, recursive=self.ensure_panel().recursive.isChecked())
+
+    def update_index(self) -> fulltext.IndexStats | None:
+        index = self.current_index()
+        if index is None:
+            return None
+        try:
+            stats = self.ctx.run_task(_("Aggiornamento dell'indice…"), index.update)
+        except OperationCancelled:
+            return None
+        self._set_summary(self._describe_stats(stats))
+        return stats
+
+    def delete_index(self, confirm: bool = True) -> bool:
+        index = self.current_index()
+        if index is None:
+            return False
+        if confirm and not self.ctx.confirm(_("Elimina l'indice"), _("Eliminare l'indice «{name}»? I file indicizzati "
+                                                                     "non vengono toccati.").format(name=index.name)):
+            return False
+        index.delete()
+        self.refresh_indexes()
+        return True
+
+    def _describe_stats(self, s: fulltext.IndexStats) -> str:
+        text = _("Indice: {a} file aggiunti, {u} aggiornati, {r} tolti, {k} invariati.").format(
+            a=s.added, u=s.updated, r=s.removed, k=s.unchanged)
+        if s.skipped:
+            reasons = {"encrypted": _("cifrato"), "damaged": _("danneggiato")}
+            listing = ", ".join(f"{os.path.basename(p)} ({reasons.get(r, r)})" for p, r in s.skipped)
+            text += "\n" + _("Non indicizzati: {l}").format(l=listing)
+        return text
 
     def choose_folder(self) -> str | None:
         folder = self.ctx.ask_directory(_("Scegli la cartella…"))
@@ -377,7 +503,14 @@ class AdvancedSearchController(QObject):
         self.summary = None
         self._docs = {}
         try:
-            if scope == SCOPE_FOLDER:
+            if scope == SCOPE_INDEX:
+                index = self.current_index()
+                if index is None:
+                    self._set_summary(_("Crea un indice da una cartella per cercare in modo immediato."))
+                    return
+                hits, summary = self.ctx.run_task(_("Ricerca nell'indice…"), index.search, opts,
+                                                  page_timeout=self.page_timeout)
+            elif scope == SCOPE_FOLDER:
                 if not self.folder and not self.choose_folder():
                     self._set_summary(_("Scegli una cartella in cui cercare."))
                     return
@@ -431,6 +564,9 @@ class AdvancedSearchController(QObject):
                             _("{n} file saltati: {l}").format(n=len(s.skipped), l=listing))
         if s.timed_out:
             text += "\n" + _("{n} pagine interrotte per tempo scaduto").format(n=len(s.timed_out))
+        if s.stale:
+            text += "\n" + _("{n} file cambiati o eliminati dopo l'indicizzazione: aggiorna l'indice.").format(
+                n=len(s.stale))
         if s.truncated:
             text += "\n" + _("Risultati limitati ai primi {n}.").format(n=eng.MAX_RESULTS)
         return text
@@ -474,6 +610,10 @@ class AdvancedSearchController(QObject):
                 return None
         else:
             self._activate(view)
+        if hit.attachment:                     # occorrenza in un PDF allegato: si apre in una scheda
+            view = self._open_attachment(view, hit.attachment)
+            if view is None:
+                return None
         if hit.page < 0:
             return view
         page = min(hit.page, view.document.page_count - 1)
@@ -483,8 +623,15 @@ class AdvancedSearchController(QObject):
                 nav.record_jump(view)
             except Exception:
                 pass
-        if hit.rects:
-            rects = [pymupdf.Rect(r) for r in hit.rects]
+        rects_found = hit.rects
+        if not rects_found and hit.kind == eng.KIND_TEXT and hit.found:   # indice: posizioni al clic
+            from .engine import SearchOptions, extract_page_text, find_in_page_text
+            with ENGINE_LOCK:
+                pt = extract_page_text(view.document.pdf[page])
+            found = find_in_page_text(pt, hit.found, SearchOptions(case_sensitive=True))
+            rects_found = [tuple(r) for r in found[0]] if found else []
+        if rects_found:
+            rects = [pymupdf.Rect(r) for r in rects_found]
             view.set_search_hits({page: rects}, (page, 0))
             area = pymupdf.Rect(rects[0])
             for r in rects[1:]:
@@ -494,6 +641,17 @@ class AdvancedSearchController(QObject):
             view.set_search_hits({}, None)
             view.go_to_page(page)
         return view
+
+    def _open_attachment(self, view, name: str):
+        panel = getattr(self.ctx, "viewer_parts", {}).get("attachments")
+        if panel is None:
+            return None
+        panel.set_view(view)
+        att = next((a for a in panel.items() if a.key == name), None)
+        if att is None:
+            return None
+        opened = panel.open_item(att)
+        return opened if hasattr(opened, "document") else None
 
     # ------------------------------------------------------------- esportazione
     def export_csv(self, path: str | None = None) -> str | None:

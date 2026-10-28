@@ -154,3 +154,11 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     Proposta: `ctx.provide(name, fn)` / `ctx.service(name)` (per esempio
     `"text.find_replace": fn(query, options)`), così il viewer aggiunge «Sostituisci…» alla barra
     di ricerca solo quando il servizio c'è, e Ctrl+H vale anche in Leggi.
+
+25. **Titolo del documento al posto del nome del file** (VIS-42/VIS-05, `/ViewerPreferences
+    /DisplayDocTitle`): con l'opzione attiva e un titolo nei metadati, scheda e barra del titolo
+    devono mostrare il titolo. `Document.display_name` deriva dal percorso e `_update_tab_title`
+    / `_update_state` lo usano direttamente; proposta: `Document.title_for_display` (titolo se
+    `/DisplayDocTitle` è vero e il titolo non è vuoto, altrimenti `display_name`) usato da scheda
+    e finestra, lasciando `display_name` per i nomi di file. Il viewer scrive già l'opzione nel
+    documento («Opzioni di apertura…»).
