@@ -42,6 +42,7 @@ def register(ctx) -> None:
     add_translations("en", EN)
     c = ConvertController(ctx)
     ctx.convert_controller = c   # per test e altri moduli
+    ctx.documentOpened.connect(c.on_document_opened)
 
     mode = ctx.add_mode("converti", _("Converti"), "file-output", 70)
     act_export = ctx.action(_("Esporta come…"), "file-output", lambda: c.export(), requires_document=False,

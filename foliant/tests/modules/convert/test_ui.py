@@ -714,3 +714,21 @@ def test_export_uses_thumbnail_selection(window, ctrl, twenty_pages, tmp_path, m
     text = open(result.paths[0], encoding="utf-8").read()
     nums = [int(line.split()[-1]) for line in text.replace("\f", "\n").splitlines() if line.startswith("Pagina")]
     assert nums == [2, 5, 7]
+
+
+def test_repaired_document_banner_and_copy(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
+    data = bytearray(open(sample_pdf, "rb").read())
+    i = data.rfind(b"startxref")
+    data[i + 10:i + 14] = b"9999"
+    bad = tmp_path / "rotto.pdf"
+    bad.write_bytes(bytes(data))
+    view = window.open_path(str(bad))
+    assert view.document.repaired
+    assert "riparato" in window.ctx.banners(view)
+    out = tmp_path / "rotto_riparato.pdf"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    assert ctrl.save_repaired_copy(view) == str(out)
+    fixed = pymupdf.open(str(out))
+    assert fixed.page_count == 3 and not getattr(fixed, "is_repaired", False)
+    assert "riparato" not in window.ctx.banners(view)
+    assert open(bad, "rb").read() == bytes(data)

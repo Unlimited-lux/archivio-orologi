@@ -9,5 +9,5 @@
    sostituire l'azione `act_new` con quella del modulo. Nel frattempo la voce è nel menu ☰ › Converti
    e nel menu «Crea PDF» della modalità Converti.
 3. ~~Selezione delle miniature~~: adottato `ctx.selected_pages(view)` del nucleo. Nessuna richiesta aperta.
-4. ~~Barra «File danneggiato, riparato in memoria»~~ (CNV-32, punto 1): ora la mostra il modulo viewer
-   (`integrity.py`, VIS-07) con «Ripara e salva con nome…». Nessuna richiesta aperta.
+4. ~~Barra «File danneggiato, riparato in memoria»~~ (CNV-32): adottati `document.repaired` e
+   `ctx.show_banner(view, "riparato", …)` con «Salva copia riparata». Nessuna richiesta aperta.

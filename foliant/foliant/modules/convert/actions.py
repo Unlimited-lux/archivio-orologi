@@ -93,6 +93,37 @@ class ConvertController:
             return False
         return True
 
+    # ============================================================ CNV-32
+    def on_document_opened(self, view) -> None:
+        """Avviso sopra le pagine se il motore ha dovuto riparare il file all'apertura."""
+        if view is None or not getattr(view.document, "repaired", False):
+            return
+        self.ctx.show_banner(view, "riparato", _("Il file era danneggiato ed è stato riparato in memoria."),
+                             [(_("Salva copia riparata"), lambda v=view: self.save_repaired_copy(v))],
+                             level="warning", priority=30)
+
+    def save_repaired_copy(self, view):
+        """Salva una copia completamente riscritta (struttura valida) senza toccare l'originale."""
+        doc = view.document
+        stem = Path(doc.display_name).stem
+        folder = str(doc.path.parent) if doc.path else self.window.last_directory()
+        path = self.ctx.ask_save_path(_("Salva copia riparata"), os.path.join(folder, stem + "_riparato.pdf"),
+                                      "PDF (*.pdf)")
+        if not path:
+            return None
+        if doc.path is not None and os.path.abspath(path) == os.path.abspath(doc.path):
+            self.ctx.error(_("Salva copia riparata"), _("Scegli un nome diverso dall'originale."))
+            return None
+        try:
+            doc.save_copy(path)
+        except FoliantError as e:
+            self.ctx.error(_("Salva copia riparata"), str(e))
+            return None
+        self.ctx.hide_banner(view, "riparato")
+        self.ctx.notify(_("Copia riparata salvata: {n}").format(n=Path(path).name),
+                        [(_("Apri"), lambda p=path: self.ctx.open_path(p))])
+        return path
+
     def selected_pages(self) -> list[int]:
         """Pagine selezionate nelle miniature (API del nucleo); vuoto se non c'è una selezione multipla."""
         view = self.ctx.current_view()
