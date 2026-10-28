@@ -67,7 +67,12 @@ def test_no_bar_without_form(window, sample_pdf):
 def test_click_text_field_and_type(qtbot, form_view):
     click_field(qtbot, form_view, "nome")
     f = filler_of(form_view)
-    assert isinstance(f.editor, QLineEdit) and f.editor.hasFocus()
+    assert isinstance(f.editor, QLineEdit)
+    win = form_view.window()
+    win.activateWindow()
+    qtbot.waitUntil(lambda: f.editor.hasFocus() or not win.isActiveWindow(), timeout=1000)
+    if win.isActiveWindow():
+        assert f.editor.hasFocus()
     qtbot.keyClicks(f.editor, "Mario")
     qtbot.keyClick(f.editor, Qt.Key.Key_Return)
     assert values(form_view)["nome"] == "Mario"

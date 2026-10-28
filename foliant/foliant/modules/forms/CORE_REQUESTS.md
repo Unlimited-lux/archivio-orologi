@@ -17,8 +17,8 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
 3. **Icone legate al tema e finestre chiuse.** `icons._bound` e `theme._listeners` crescono con
    ogni finestra creata (le finestre chiuse non vengono distrutte), e ogni `theme.apply()` rilegge
    tutte le icone: nei test la creazione delle finestre diventa via via più lenta.
-   *Locale:* la fixture `free_windows` dei test del modulo distrugge le finestre; la barra del
-   modulo segue il tema con `changeEvent` invece di `theme.on_change`.
+   *Risolto nel nucleo* (il tema non si riapplica se non cambia): la fixture locale che distruggeva
+   le finestre è stata tolta. La barra del modulo segue il tema con `changeEvent`.
    *Proposta:* `deleteLater()` delle finestre chiuse e rimozione dei listener.
 
 4. **Prima del salvataggio.** Manca un aggancio «prima di salvare» (es. `document.add_listener`

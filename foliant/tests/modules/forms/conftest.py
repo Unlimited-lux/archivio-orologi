@@ -65,25 +65,3 @@ def no_modal_boxes(monkeypatch):
     # alla fixture `window`, che chiude le viste senza chiedere)
     monkeypatch.setattr(QMessageBox, "exec", lambda self: calls.append(("exec", self.windowTitle(), self.text())) or 0)
     return calls
-
-
-@pytest.fixture(autouse=True)
-def free_windows():
-    """Dopo ogni test distrugge le finestre principali: le icone legate al tema restano poche
-    e la creazione delle finestre successive non rallenta."""
-    yield
-    import gc
-
-    from PySide6.QtCore import QCoreApplication, QEvent
-    from PySide6.QtWidgets import QApplication
-
-    from foliant.ui.main_window import MainWindow
-    for w in QApplication.topLevelWidgets():
-        if isinstance(w, MainWindow):
-            for view in list(w.views()):
-                view.document._saved_state = view.document._state
-                w.close_view(view)
-            w.hide()
-            w.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    gc.collect()
