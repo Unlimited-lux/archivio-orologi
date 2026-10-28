@@ -56,7 +56,7 @@ def to_gray(img: np.ndarray) -> np.ndarray:
 def ocr_gray(img: np.ndarray) -> np.ndarray:
     """Grigio per il riconoscimento: i timbri colorati che coprono il testo nero si attenuano.
 
-    Un timbro rosso o blu sopra una riga la rende illeggibile in scala di grigi (il rosso pieno
+    Un timbro o una firma a colori sopra una riga la rende illeggibile in scala di grigi (il rosso pieno
     diventa grigio scuro come l'inchiostro). Nei pixel colorati di un timbro che si sovrappone a
     testo neutro si usa il canale più chiaro, dove l'inchiostro colorato quasi scompare e il nero
     resta nero. Il testo stampato a colori lontano dal testo nero (titoli, loghi) resta intatto."""
@@ -72,6 +72,10 @@ def ocr_gray(img: np.ndarray) -> np.ndarray:
     neutral_ink = ((chroma < 40) & (hi < 110)).astype(np.uint8)
     n, labels, stats, _c = cv2.connectedComponentsWithStats(cv2.dilate(colored, np.ones((9, 9), np.uint8)))
     out = gray.copy()
+    paper = int(np.percentile(gray, 90))
+    # nel canale più chiaro un inchiostro colorato scuro (penna blu) resta grigio medio: diventa carta;
+    # resta scuro solo dove sotto c'è il nero della stampa
+    lifted = np.where(hi > paper * 0.5, np.maximum(hi, paper), hi).astype(np.uint8)
     stamps: list[tuple[int, int, int, int]] = []
     # dal più grande: le parti di un timbro (cornice, lettere) cadono dentro la sagoma già trovata
     for i in sorted(range(1, n), key=lambda k: -int(stats[k][2] * stats[k][3])):
@@ -84,7 +88,7 @@ def ocr_gray(img: np.ndarray) -> np.ndarray:
             continue
         stamps.append((x, y, w, h))
         sel = (labels[y:y + h, x:x + w] == i) & (colored[y:y + h, x:x + w] > 0)
-        out[y:y + h, x:x + w][sel] = hi[y:y + h, x:x + w][sel]
+        out[y:y + h, x:x + w][sel] = lifted[y:y + h, x:x + w][sel]
     return out
 
 
@@ -239,7 +243,8 @@ def enhance(gray: np.ndarray, opts: PreprocessOptions) -> np.ndarray:
         # fondo non uniforme (luce radente, ombre, carta ingiallita a chiazze): si normalizza lo sfondo
         bg = cv2.medianBlur(cv2.resize(out, (max(1, out.shape[1] // 8), max(1, out.shape[0] // 8))), 5)
         bg = cv2.resize(bg, (out.shape[1], out.shape[0]), interpolation=cv2.INTER_LINEAR)
-        if float(np.std(bg)) > 12:
+        # misura relativa: in una foto buia anche un'ombra forte ha poca escursione assoluta
+        if float(np.std(bg)) > 0.05 * max(1.0, float(np.mean(bg))):
             out = cv2.divide(out, np.maximum(bg, 1), scale=255)
         # contrasto basso (testo sbiadito): inchiostro e carta stimati con Otsu, non con i percentili
         # (su una pagina con poco testo il 1° percentile è già un grigio del bordo delle lettere)

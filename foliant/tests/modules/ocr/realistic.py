@@ -206,7 +206,7 @@ def passport_mrz():
                            "Data di nascita / Date of birth: 12 MAR 1975", "Numero / No.: YA1234567"]):
         page.insert_text((150, 40 + i * 24), t, fontname="S", fontsize=11)
         expected += _words(t)
-    mrz = ["P<ITAROSSI<<MARIO<<<<<<<<<<<<<<<<<<<<<<<<<<", "YA12345674ITA7503127M3103128<<<<<<<<<<<<<<02"]
+    mrz = ["P<ITAROSSI<<MARIO<<<<<<<<<<<<<<<<<<<<<<<<<<<", "YA12345676ITA7503120M3103120<<<<<<<<<<<<<<04"]
     for i, t in enumerate(mrz):
         page.insert_text((20, 290 + i * 22), t, fontname="M", fontsize=12.5)
         expected.append(t)
@@ -295,5 +295,25 @@ def skewed_gray_scan():
     return cv2.cvtColor(cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE), cv2.COLOR_GRAY2RGB), 150, expected
 
 
-HARD2 = {"fattura_fotografata": invoice_phone_photo, "fattura_storta_150": skewed_gray_scan}
+def id_card_portrait_dark(seed: int = 6):
+    """Carta d'identità fotografata col telefono in verticale (ruotata di 90°) in una stanza buia."""
+    img, dpi, expected = id_card_photo(seed)
+    dark = np.clip(img.astype(np.float32) * 0.45 + 10, 0, 255).astype(np.uint8)
+    return np.ascontiguousarray(np.rot90(dark)), dpi, expected
+
+
+def signature_over_text(seed: int = 7):
+    """Contratto con firma a penna blu che attraversa le righe del testo."""
+    rng = np.random.default_rng(seed)
+    img, dpi, expected = invoice(300)
+    z = dpi / 72
+    ink = np.full_like(img, 255)
+    xs = np.linspace(330 * z, 520 * z, 200)
+    ys = 352 * z + 14 * z * np.sin(xs / (9 * z)) + rng.normal(0, 1.2, xs.size)
+    pts = np.stack([xs, ys], axis=1).astype(np.int32)
+    cv2.polylines(ink, [pts], False, (30, 50, 170), max(2, int(1.3 * z)), cv2.LINE_AA)
+    return (img.astype(np.uint16) * ink // 255).astype(np.uint8), dpi, expected
+
+
+HARD2 = {"carta_verticale_buia": id_card_portrait_dark, "firma_blu_sul_testo": signature_over_text, "fattura_fotografata": invoice_phone_photo, "fattura_storta_150": skewed_gray_scan}
 

@@ -51,12 +51,14 @@ Percentuale di parole attese ritrovate (lingue ita+eng, impostazioni predefinite
 | Garanzia con timbro e firma | 1.000 | 1.000 |
 | Ricevuta 150 dpi in grigi | 1.000 | 1.000 |
 | Carta d'identità fotografata da lontano, luce non uniforme | 0.857 | 1.000 |
-| Passaporto con zona MRZ | 0.179 | 0.964 |
+| Passaporto con zona MRZ | 0.179 | 1.000 |
 | Testo piccolo 150 dpi in grigi (JPEG) | 0.681 | 1.000 |
 | Timbro rosso sopra il testo (IBAN coperto) | 0.964 | 1.000 |
 | Scontrino termico sbiadito | 1.000 | 1.000 |
 | Fattura A4 fotografata col telefono (prospettiva, ombra) | 1.000 | 1.000 |
 | Fattura scansionata storta 6°, 150 dpi grigi | 1.000 | 1.000 |
+| Carta d'identità fotografata in verticale in una stanza buia | 0.071 | 1.000 |
+| Firma a penna blu che attraversa importi e IBAN | 0.964 | 1.000 |
 
 Miglioramenti:
 1. Pre-elaborazione adattiva: normalizzazione dello sfondo solo con illuminazione davvero non uniforme;
@@ -69,3 +71,10 @@ Miglioramenti:
 4. Layout delle tabelle nel testo (copia, TXT, «Solo testo»): una riga per riga di tabella con le colonne
    separate da tabulazioni (incollabile in un foglio di calcolo), anche da foto o scansione storta;
    prima ogni cella era un paragrafo a sé.
+5. Righe MRZ (passaporti TD3, carte d'identità TD1, `mrz.py`): correzione per tipo di campo (O/0, I/1,
+   S/5, B/8), riempitivo «<<<<» riportato alla lunghezza giusta; cifre di controllo ICAO verificate e,
+   se non tornano, parole segnalate come incerte nella revisione.
+6. Foto buie: l'illuminazione non uniforme si misura in proporzione alla luminosità del fondo.
+   Foto in verticale: se l'OSD sulla foto intera è incerto, si riprova sul documento ritagliato in
+   prospettiva; le proposte poco sicure si accettano solo se la pagina ruotata si legge meglio.
+7. Firme e timbri a colori sopra il testo: l'inchiostro colorato diventa carta, il nero sotto resta.

@@ -395,4 +395,7 @@ EN = {
     'risoluzione effettiva: {d} dpi': 'effective resolution: {d} dpi',
     'Originale': 'Original',
     'Immagine di lavoro': 'Working image',
+    'Accetta tutte le parole uguali a questa (Ctrl+Maiusc+Invio)': 'Accept all words identical to this one (Ctrl+Shift+Enter)',
+    'Aggiungi la parola al dizionario utente: non sarà più segnalata (Ctrl+D)':
+        'Add the word to the user dictionary: it will no longer be flagged (Ctrl+D)',
 }

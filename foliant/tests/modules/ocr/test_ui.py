@@ -1053,3 +1053,53 @@ def test_anteprima_preelaborazione(window, tmp_path, monkeypatch):
     assert "inclinazione corretta: -4.0°" in shown["info"] or "inclinazione corretta: -3.9°" in shown["info"] \
         or "inclinazione corretta: -4.1°" in shown["info"], shown["info"]
     assert shown["images"] == [460, 460]
+
+
+def test_due_finestre_chiusa_la_seconda_la_prima_funziona(window, qtbot, scan_two):
+    """Ctrl+N: ogni finestra ha il proprio controller; chiudere la seconda non lascia nella prima
+    riferimenti a widget distrutti («already deleted»)."""
+    from PySide6.QtWidgets import QApplication
+
+    from foliant.modules import ocr
+    first = window.ctx.ocr
+    second_win = window.new_window()
+    second = second_win.ctx.ocr
+    assert second is not first and second.review_panel is not first.review_panel
+    second_win.close()
+    second_win.deleteLater()
+    qtbot.waitUntil(lambda: second not in ocr._live, timeout=3000)
+    QApplication.processEvents()
+    assert ocr.controller is first
+    view = window.open_path(scan_two)
+    first.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    first.actions["review"].setChecked(True)
+    window.tabs.setCurrentWidget(view)
+    first.review_panel.set_view(view)
+    first.review_panel.refresh()
+    first.actions["review"].setChecked(False)
+
+
+@pytest.mark.parametrize("lang", ["it", "en"])
+def test_pannello_parole_incerte_pulsanti_non_tagliati(window, qtbot, scan_two, lang):
+    from PySide6.QtWidgets import QPushButton
+
+    from foliant import i18n
+    old = i18n.language()
+    i18n.set_language(lang)
+    try:
+        panel = ui.ReviewPanel(window.ctx.ocr)
+        qtbot.addWidget(panel)
+        panel.setFixedWidth(260)           # larghezza minima del pannello delle proprietà
+        view = window.open_path(scan_two)
+        window.ctx.ocr.actions["review"].setChecked(True)
+        panel.set_view(view)
+        panel.show()
+        qtbot.waitUntil(panel.isVisible, timeout=2000)
+        buttons = [b for b in panel.findChildren(QPushButton) if b.isVisible()]
+        assert len(buttons) >= 4
+        for b in buttons:
+            assert b.sizeHint().width() - b.width() <= 3, (b.text(), b.sizeHint().width(), b.width())
+    finally:
+        window.ctx.ocr.actions["review"].setChecked(False)
+        if old is not None:
+            i18n.set_language(old)
