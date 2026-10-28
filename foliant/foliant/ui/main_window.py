@@ -356,6 +356,20 @@ class MainWindow(QMainWindow):
         if 0 <= index < len(ordered):
             self.set_mode(ordered[index].id)
 
+    def _apply_initial_splitter_sizes(self) -> None:
+        """Larghezze iniziali: pannello laterale e proprietà compatti, documento al centro."""
+        if getattr(self, "_splitter_ready", False):
+            return
+        state = self.settings.value("window/splitter")
+        if state is not None and self.splitter.restoreState(state):
+            self._splitter_ready = True
+            return
+        total = max(800, self.splitter.width())
+        side = 280 if self.sidebar.isVisible() else 0
+        props = 300 if self.properties.isVisible() else 0
+        self.splitter.setSizes([side, max(400, total - side - props), props])
+        self._splitter_ready = True
+
     def toggle_sidebar(self) -> None:
         if self.sidebar.isVisible():
             self.sidebar.hide()
@@ -604,7 +618,12 @@ class MainWindow(QMainWindow):
         if widget is None:
             return
         self.properties.setCurrentWidget(widget)
-        self.properties.show()
+        if not self.properties.isVisible():
+            self.properties.show()
+            sizes = self.splitter.sizes()
+            if len(sizes) == 3 and sizes[2] < 240:
+                take = 300 - sizes[2]
+                self.splitter.setSizes([sizes[0], max(400, sizes[1] - take), 300])
 
     def hide_properties(self) -> None:
         self.properties.hide()
@@ -830,7 +849,9 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     self.statusBar().showMessage(_("Errore in un pannello: {e}").format(e=e), 8000)
         if view is not None and self._sidebar:
-            self.sidebar.show()
+            if not self.sidebar.isVisible():
+                self.sidebar.show()
+                self._apply_initial_splitter_sizes()
         elif view is None:
             self.sidebar.hide()
             self.properties.hide()
@@ -986,4 +1007,6 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.settings.setValue("window/geometry", self.saveGeometry())
+        if getattr(self, "_splitter_ready", False):
+            self.settings.setValue("window/splitter", self.splitter.saveState())
         event.accept()

@@ -66,8 +66,15 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
 - 🔄 12 moduli in sessioni parallele (viewer, annotations, text_edit, objects, pages, forms,
   ocr, convert, security, sign, tools, ai): alle 03:20 UTC tutti avevano già pushato
   (~80.000 righe, ~1.350 test); unione senza conflitti.
-- 🔄 Difetto del motore PDF su pagine ruotate/ritagliate (posizione dei contenuti inseriti):
-  misurato, `core/placement.py` in preparazione, sessioni interessate avvisate.
+- ✅ Difetto del motore PDF su pagine ruotate/ritagliate: misurato su 120 geometrie,
+  compensato in `core/placement.py` (posizionamento esatto), collegamenti cliccabili sulle
+  pagine ruotate; le 7 sessioni interessate lo adottano.
+- ✅ Integrazione: 12 moduli uniti senza conflitti, tutti caricati, 11 modalità operative.
+  Trovati e segnalati: scorciatoie duplicate (risolte con scorciatoie per modalità nel
+  nucleo), bug degli appunti nel modulo Converti, messaggio di stato persistente di Pagine,
+  etichetta OCR da rinominare; corretti nel nucleo larghezza pannelli e campi numerici.
+- 🔄 Collaudo end-to-end sulla build integrata: 12 collaudatori + verificatori; i bug
+  confermati vanno direttamente alle sessioni.
 
 ## Log
 - 28/10 00:57 — Fase 0: struttura, subagent, `.gitignore`.
@@ -80,3 +87,7 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
 - 28/10 03:16 — Revisione del nucleo: 24 correzioni applicate e verificate.
 - 28/10 03:20 — Prima integrazione: 12 moduli uniti senza conflitti.
 - 28/10 03:35 — Rete di sicurezza nei test (nessun blocco per finestre modali, timeout).
+- 28/10 04:05 — Scorciatoie limitate alla modalità; gestori dei collegamenti con priorità.
+- 28/10 04:10 — Avviato il collaudo end-to-end (3 workflow, 12 aree).
+- 28/10 04:15 — `placement.py` nel nucleo (4.974 casi verificati con la matrice completa).
+- 28/10 04:25 — Controllo grafico della build integrata in tutte le modalità.

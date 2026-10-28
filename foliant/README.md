@@ -129,6 +129,28 @@ Così due modalità possono usare lo stesso tasto senza conflitti. Per i tasti c
 dentro un widget (es. Canc in un elenco) usa una scorciatoia del widget
 (`Qt.ShortcutContext.WidgetWithChildrenShortcut`) o `keyPressEvent`, non un'azione globale.
 
+### Inserire contenuti nella pagina: `placement`
+
+Le funzioni di inserimento del motore PDF (`draw_*`, `insert_image`, `insert_htmlbox`,
+`TextWriter`, `show_pdf_page`, `insert_link` e, con CropBox più grande del MediaBox, anche
+`insert_text`/`insert_textbox`) spostano il contenuto sulle pagine ruotate o con
+CropBox/MediaBox non allineati, e `page.get_links()` restituisce coordinate ruotate. Usare
+sempre `foliant.api.placement`, che lavora nelle coordinate standard (quelle di `get_text`,
+`get_drawings`, annotazioni) e compensa lo scarto in modo esatto:
+
+```python
+from foliant.api import placement as pl
+pl.insert_text(page, (72, 100), "Pagina 1 di 3", fontsize=9, upright=True)
+pl.insert_htmlbox(page, rect, "<b>Nota</b>", upright=True)
+pl.insert_image(page, rect, filename="firma.png", upright=True)
+pl.draw_rect(page, rect, fill=(1, 1, 1), color=None)
+pl.get_links(page)                       # from/to in coordinate standard
+pl.page_to_display_matrix(page)          # standard -> pagina visualizzata
+```
+
+`upright=True` raddrizza il contenuto nel verso in cui l'utente vede la pagina. Test di
+riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACEMENT=1`).
+
 ### API del contesto (`foliant/ui/context.py`)
 
 | Metodo | Uso |

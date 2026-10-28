@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPolygonF, QTransform
 from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSlider, QFrame, QMenu
 
+from ..core import placement
 from ..core.document import CLOSED, CONTENT, Document
 from ..core.engine import ENGINE_LOCK
 from . import theme
@@ -73,7 +74,12 @@ def _extra_rotation(w: float, h: float, deg: int) -> tuple[pymupdf.Matrix, float
 
 
 def page_geometry(page: pymupdf.Page, view_rotation: int = 0) -> PageGeometry:
-    m = page.rotation_matrix   # coordinate del motore: già relative all'angolo del cropbox
+    # Coordinate del motore (testo, annotazioni) -> pagina visualizzata. La matrice del motore
+    # sbaglia quando il CropBox è più grande del MediaBox: placement la calcola dai riquadri.
+    try:
+        m = placement.page_to_display_matrix(page)
+    except Exception:
+        m = page.rotation_matrix
     w, h = page.rect.width, page.rect.height
     extra, w2, h2 = _extra_rotation(w, h, view_rotation % 360)
     return PageGeometry(w2, h2, m * extra)
@@ -280,7 +286,8 @@ class DocumentView(QAbstractScrollArea):
         self._content = QSizeF(content_w, total_h)
         vw, vh = self.viewport().width(), self.viewport().height()
         hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
-        hbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(content_w - vw)))))
+        # tolleranza di 1 px: con «adatta larghezza» gli arrotondamenti non devono creare una barra inutile
+        hbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(content_w - vw - 1.0)))))
         hbar.setPageStep(vw)
         hbar.setSingleStep(24)
         vbar.setRange(0, max(0, min(2**31 - 1, int(math.ceil(total_h - vh)))))
@@ -502,9 +509,14 @@ class DocumentView(QAbstractScrollArea):
         return None
 
     def links(self, index: int) -> list[dict]:
+        """Collegamenti della pagina con `from`/`to` in coordinate pagina standard."""
         if index not in self._links:
             with ENGINE_LOCK:
-                self._links[index] = self.document.pdf[index].get_links()
+                page = self.document.pdf[index]
+                try:
+                    self._links[index] = placement.get_links(page)
+                except Exception:      # geometria non gestibile: valori del motore
+                    self._links[index] = page.get_links()
         return self._links[index]
 
     def link_at(self, index: int, point: pymupdf.Point) -> dict | None:
