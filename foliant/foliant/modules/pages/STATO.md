@@ -68,13 +68,13 @@ layout_dialogs, images, images_dialogs). Funzioni del motore riusabili dagli alt
 | PAG-36 Filigrane | P1 | parziale | test_stamp: watermark_*, remove_*, update_watermark_replaces | testo/immagine, opacità, rotazione, 9 ancoraggi, sopra/sotto, modifica e rimozione con rendering identico; mancano mosaico, visibilità solo stampa/schermo, sorgente da pagina PDF |
 | PAG-37 Filigrana a posizione fissa | P2 | non fatto | — | |
 | PAG-38 Sfondi | P1 | parziale | test_stamp: background_* | colore e immagine, rimozione; mancano carta intestata da PDF con alternanza e visibilità schermo/stampa |
-| PAG-39 Etichette di pagina | P1 | parziale | test_stamp: page_labels_*; test_engine: labels_interpretation | definizione, anteprima, rimozione, voce per l'indice 0; manca l'ancoraggio degli intervalli dopo inserimenti/eliminazioni |
-| PAG-40 Pagine vuote e duplicate | P1 | parziale | test_engine: split_separators_and_text (rilevazione pagine vuote) | rilevazione pagine vuote nel motore (`page_is_blank`); manca lo strumento dedicato con duplicati (lavoro del subagente interrotto, non incluso) |
+| PAG-39 Etichette di pagina | P1 | fatto | test_stamp: page_labels_*; test_engine: labels_interpretation, labels_anchored_after_insert_and_delete, labels_follow_moved_page | definizione, anteprima, rimozione, voce per l'indice 0; intervalli ancorati alla pagina che li apre dopo inserimenti, eliminazioni, spostamenti, duplicazioni e sostituzioni |
+| PAG-40 Pagine vuote e duplicate | P1 | parziale | test_detect; test_organizer: find_blank_and_duplicates_selects_and_deletes | `detect.py`: pagine vuote (soglia d'inchiostro, artefatti di paginazione esclusi) e duplicate (identiche o simili); comando «Trova pagine vuote e duplicate…» in background che seleziona le pagine con il motivo e propone l'eliminazione annullabile; manca il dialogo con soglie regolabili e anteprime affiancate |
 | PAG-41 Pulizia guidata | P1 | non fatto | — | |
 
 Nota: alle 04:30 UTC i tre subagenti si sono fermati per il limite di spesa e la sessione è rimasta
-inattiva fino alle 07:47; il loro lavoro incompleto (Bates su più file, rilevazione duplicati, pulizia)
-non è stato incluso perché non verificato.
+inattiva fino alle 07:47; il loro lavoro incompleto (Bates su più file, pulizia guidata)
+non è stato incluso perché non verificato; il motore di rilevazione (PAG-40), già testato, è stato recuperato.
 
 ## Funzioni richieste oltre la sezione 2 (filigrane, numeri, intestazioni, etichette)
 | Funzione | Stato | Test |

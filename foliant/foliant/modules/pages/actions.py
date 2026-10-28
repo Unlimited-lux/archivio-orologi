@@ -116,6 +116,8 @@ def build_actions(ctx, c, mode) -> None:
     c.act_paste = act(_("Incolla pagine dopo"), "clipboard-paste", lambda: c.paste_pages(False),
                       key=QKeySequence.StandardKey.Paste)
     c.act_paste_before = act(_("Incolla pagine prima"), "clipboard-paste", lambda: c.paste_pages(True))
+    c.act_detect = act(_("Trova pagine vuote e duplicate…"), "scan-search", lambda: c.find_blank_and_duplicates(),
+                       structural_op=False)
     c.act_share = act(_("Invia per posta"), "mail", lambda: c.share("mail"), structural_op=False)
     c.act_share_save = act(_("Salva una copia delle pagine…"), "share-2", lambda: c.share("save"),
                            structural_op=False)
@@ -178,7 +180,7 @@ def build_actions(ctx, c, mode) -> None:
         c.act_numbers, c.act_bates, c.act_header, None, c.act_watermark, c.act_background, c.act_remove_stamps,
         None, c.act_labels]))
     mode.add_widget(menu_button(_("Altro"), "ellipsis", [
-        c.act_copy, c.act_cut, c.act_paste, c.act_paste_before, None, c.act_extract_images, c.act_share,
+        c.act_copy, c.act_cut, c.act_paste, c.act_paste_before, None, c.act_detect, c.act_extract_images, c.act_share,
         c.act_share_save, None, c.act_select_all, c.act_select_odd, c.act_select_even, c.act_select_portrait,
         c.act_select_landscape, c.act_select_range]))
     mode.add_action(c.act_unlock)

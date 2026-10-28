@@ -41,6 +41,62 @@ PAPER_SIZES: dict[str, tuple[float, float]] = {
 }
 
 
+_LABEL_DEPTH: dict[int, int] = {}
+
+
+def keeps_labels(fn):
+    """Le etichette di pagina restano ancorate alla pagina che apre ogni intervallo (PAG-39)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(pdf, *args, **kwargs):
+        key = id(pdf)
+        depth = _LABEL_DEPTH.get(key, 0)
+        if depth:
+            return fn(pdf, *args, **kwargs)
+        try:
+            rules = pdf.get_page_labels()
+        except Exception:
+            rules = []
+        if not rules:
+            return fn(pdf, *args, **kwargs)
+        old = [pdf[i].xref for i in range(pdf.page_count)]
+        _LABEL_DEPTH[key] = 1
+        try:
+            result = fn(pdf, *args, **kwargs)
+        finally:
+            _LABEL_DEPTH.pop(key, None)
+        _reanchor_labels(pdf, rules, old)
+        return result
+    return wrapper
+
+
+def _reanchor_labels(pdf, rules: list[dict], old_xrefs: list[int]) -> None:
+    pos = {pdf[i].xref: i for i in range(pdf.page_count)}
+    new_rules: dict[int, dict] = {}
+    for r in sorted(rules, key=lambda r: r.get("startpage", 0)):
+        start = r.get("startpage", 0)
+        if start == 0:
+            target = 0
+        else:
+            target = None
+            for x in old_xrefs[start:]:
+                if x in pos:
+                    target = pos[x]
+                    break
+            if target is None:
+                continue
+        rule = dict(r)
+        rule["startpage"] = target
+        new_rules[target] = rule
+    if 0 not in new_rules:
+        new_rules[0] = {"startpage": 0, "style": "D", "prefix": "", "firstpagenum": 1}
+    try:
+        pdf.set_page_labels([new_rules[k] for k in sorted(new_rules)])
+    except Exception:
+        pass
+
+
 class PageOpError(FoliantError):
     """Operazione di pagina non eseguibile: il messaggio è per l'utente."""
 
@@ -196,6 +252,7 @@ def move_order(page_count: int, indices: Iterable[int], dest: int) -> list[int]:
     return rest[:pos] + moving + rest[pos:]
 
 
+@keeps_labels
 def reorder(pdf: pymupdf.Document, order: Sequence[int]) -> bool:
     """Applica una permutazione delle pagine. False se l'ordine non cambia.
 
@@ -209,6 +266,7 @@ def reorder(pdf: pymupdf.Document, order: Sequence[int]) -> bool:
     return True
 
 
+@keeps_labels
 def move_pages(pdf: pymupdf.Document, indices: Iterable[int], dest: int) -> list[int]:
     """Sposta le pagine prima di `dest`; restituisce i nuovi indici delle pagine spostate."""
     moving = sorted(set(indices))
@@ -268,6 +326,7 @@ def check_page_size(width: float, height: float) -> None:
         raise PageOpError(_("Il formato è troppo grande: il massimo è 200 pollici (14.400 pt) per lato."))
 
 
+@keeps_labels
 def insert_blank_pages(pdf: pymupdf.Document, at: int, count: int = 1, size: tuple[float, float] | None = None,
                        landscape: bool | None = None, like: int | None = None) -> list[int]:
     """Inserisce `count` pagine vuote prima della posizione `at`.
@@ -392,6 +451,7 @@ def _insert_runs(dst: pymupdf.Document, src: pymupdf.Document, indices: Sequence
     return pos - start_at
 
 
+@keeps_labels
 def insert_pdf_pages(pdf: pymupdf.Document, src: pymupdf.Document, at: int, src_indices: Sequence[int] | None = None,
                      *, interleave: int = 0, reverse: bool = False, annots: bool = True,
                      widgets: bool = True, bookmark_title: str | None = None) -> list[int]:
@@ -489,6 +549,7 @@ def merge_alternate(path_a: str, path_b: str, *, reverse_b: bool = False, passwo
         b.close()
 
 
+@keeps_labels
 def delete_pages(pdf: pymupdf.Document, indices: Iterable[int]) -> int:
     """Elimina le pagine (PAG-11). Deve restarne almeno una.
 
@@ -763,6 +824,7 @@ def _fullcopy(pdf: pymupdf.Document, src: int, before: int) -> None:
     pdf.fullcopy_page(src, -1 if before >= pdf.page_count else before)
 
 
+@keeps_labels
 def duplicate_pages(pdf: pymupdf.Document, indices: Iterable[int], copies: int = 1, where: str = "after",
                     keep_field_names: bool = False) -> list[int]:
     """Duplica le pagine (PAG-15). `where`: "after" (dopo ciascuna pagina),
@@ -912,6 +974,7 @@ def extract_pages(pdf: pymupdf.Document, indices: Sequence[int], *, annots: bool
         copy.close()
 
 
+@keeps_labels
 def replace_pages(pdf: pymupdf.Document, indices: Sequence[int], src: pymupdf.Document,
                   src_indices: Sequence[int], keep_annots: str = "original") -> list[int]:
     """Sostituisce le pagine `indices` (contigue o no, in ordine) con `src_indices` (PAG-19).

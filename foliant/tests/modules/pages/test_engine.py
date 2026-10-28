@@ -610,3 +610,23 @@ def test_split_text_top_area_only():
         p.insert_text((72, 700), "rif. Fattura n. 99")
     plan = E.split_document(doc, "separators", pattern=r"Fattura n\. (\d+)", top_fraction=0.25)
     assert [p.fields["match1"] for p in plan.parts] == ["0", "1", "2"]
+
+
+def test_labels_anchored_after_insert_and_delete():
+    doc = numbered_pdf(10)
+    doc.set_page_labels([{"startpage": 0, "style": "r"}, {"startpage": 3, "style": "D", "firstpagenum": 1}])
+    assert E.page_labels(doc)[:5] == ["i", "ii", "iii", "1", "2"]
+    E.insert_blank_pages(doc, 0, 2)
+    labels = E.page_labels(doc)
+    assert labels[5] == "1" and page_texts(doc)[5] == "P4"
+    E.delete_pages(doc, [5])          # elimina la pagina che apre l'intervallo
+    assert E.page_labels(doc)[5] == "1" and page_texts(doc)[5] == "P5"
+    assert doc.get_page_labels()[0]["startpage"] == 0
+
+
+def test_labels_follow_moved_page():
+    doc = numbered_pdf(6)
+    doc.set_page_labels([{"startpage": 0, "style": "D"}, {"startpage": 4, "style": "A"}])
+    E.move_pages(doc, [4], 1)
+    labels = E.page_labels(doc)
+    assert page_texts(doc)[1] == "P5" and labels[1] == "A"

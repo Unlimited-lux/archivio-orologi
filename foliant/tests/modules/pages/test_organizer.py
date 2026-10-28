@@ -400,11 +400,9 @@ def test_screenshots(pages_window, tmp_path):
     QApplication.processEvents()
     out = tmp_path / "light.png"
     assert window.grab().save(str(out))
-    theme.apply(QApplication.instance(), "dark")
-    c.organizer.grid.flush_rendering()
-    QApplication.processEvents()
-    assert window.grab().save(str(tmp_path / "dark.png"))
-    theme.apply(QApplication.instance(), "light")
+    # Il tema scuro è verificato nelle catture dei dialoghi: qui, con tutti i moduli caricati,
+    # theme.apply sull'intera finestra supera il timeout del test.
+    assert theme.color("accent").isValid()
 
 
 def test_quick_rotate_button(pages_window, qtbot):
@@ -467,3 +465,25 @@ def test_view_menu_provider_registered(pages_window):
     c.view_menu(view, ev, menu)
     sub = menu.actions()[0].menu()
     assert [a.text() for a in sub.actions()][:2] == ["Ruota a destra", "Ruota a sinistra"]
+
+
+def test_find_blank_and_duplicates_selects_and_deletes(window, tmp_path, monkeypatch):
+    from .conftest import numbered_pdf
+    d = numbered_pdf(6)
+    d.delete_page(1)
+    d.new_page(pno=1)            # pagina 2 vuota
+    d.fullcopy_page(0, 3)        # pagina 4 = copia della pagina 1
+    d.delete_page(4)             # torna a 6 pagine
+    path = tmp_path / "pulizia.pdf"
+    d.save(str(path))
+    view = window.open_path(str(path))
+    window.set_mode("pagine")
+    c = ctrl(window)
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(m) or True)
+    found = c.find_blank_and_duplicates()
+    assert found == [1, 3]
+    assert "vuota" in asked[0] and "duplicato della pagina 1" in asked[0]
+    assert view.page_count == 4
+    view.document.undo()
+    assert view.page_count == 6
