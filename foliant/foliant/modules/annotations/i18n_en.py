@@ -196,7 +196,21 @@ EN.update({
     # testi scritti nei documenti (riepiloghi, misure, stati)
     "Valore": "Value", "Valore formattato": "Formatted value", "Unità": "Unit", "Scala": "Scale", "Data": "Date",
     "Testo": "Text", "Testo marcato": "Marked text", "N.": "No.", "Risposta a": "Reply to", "Risposta": "Reply",
-    "Nessun commento.": "No comments.", "Annotazione": "Annotation",
+    "Nessun commento.": "No comments.",
+    # adesivi (ANN-27) e generazione con IA (ANN-28)
+    "Spunte e croci": "Checks and crosses", "Simboli di stato": "Status symbols", "Frecce": "Arrows",
+    "Faccine e gesti": "Faces and gestures", "Stelle e cuori": "Stars and hearts",
+    "Punto esclamativo": "Exclamation mark", "Punto interrogativo": "Question mark", "Divieto": "Prohibited",
+    "In corso": "In progress", "Freccia a sinistra": "Left arrow", "Freccia in alto": "Up arrow",
+    "Freccia in basso": "Down arrow", "Faccina sorridente": "Smiling face", "Faccina triste": "Sad face",
+    "Pollice in su": "Thumbs up", "Pollice in giù": "Thumbs down", "Cuore": "Heart",
+    "Nessun adesivo personalizzato: aggiungi immagini con «Timbro › Da immagine…»":
+        "No custom stickers: add images with “Stamp › From image…”",
+    "Genera con IA…": "Generate with AI…", "Genera con IA": "Generate with AI", "Timbro immagine": "Image stamp",
+    "Generazione di immagini non disponibile: configura un fornitore nelle impostazioni dell'assistente IA. "
+    "Gli altri strumenti restano utilizzabili.":
+        "Image generation is not available: set up a provider in the AI assistant settings. "
+        "The other tools remain available.", "Annotazione": "Annotation",
     "Documento PDF/A-1: l'opacità delle annotazioni è stata portata al 100%.":
         "PDF/A-1 document: annotation opacity was set to 100%.", "1 commento": "1 comment", "{state} impostato da {who}": "{state} set by {who}",
     "Riepilogo commenti — {title}": "Comment summary — {title}",

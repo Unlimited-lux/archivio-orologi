@@ -214,10 +214,18 @@ class AnnotationsModule:
         self.dyn_menu = menu.addMenu(_("Dinamici"))
         self.dyn_menu.aboutToShow.connect(self._fill_dynamic)
         stickers = menu.addMenu(_("Adesivi"))
-        for key, (label, _ops) in engine.STICKERS.items():
-            stickers.addAction(_(label), lambda _c=False, k=key: self.use_sticker(k))
+        for category, keys in engine.STICKER_CATEGORIES:
+            sub = stickers.addMenu(_(category))
+            for key in keys:
+                sub.addAction(_(engine.STICKERS[key][0]), lambda _c=False, k=key: self.use_sticker(k))
+        self.custom_stickers_menu = stickers.addMenu(_("Personalizzati"))
+        self.custom_stickers_menu.aboutToShow.connect(self._fill_custom_stickers)
+        self.ai_sticker_action = stickers.addAction(_("Genera con IA…"), lambda: self.generate_with_ai("sticker"))
+        stickers.aboutToShow.connect(self._sync_ai_actions)
         self.custom_menu = menu.addMenu(_("Personalizzati"))
         self.custom_menu.aboutToShow.connect(self._fill_custom_stamps)
+        self.ai_stamp_action = menu.addAction(_("Genera con IA…"), lambda: self.generate_with_ai("stamp"))
+        menu.aboutToShow.connect(self._sync_ai_actions)
         menu.addSeparator()
         menu.addAction(_("Da immagine…"), self._image_stamp)
         menu.addAction(_("Da pagina PDF…"), self._page_stamp)
@@ -285,6 +293,7 @@ class AnnotationsModule:
         tool: StampTool = self.tools[engine.STAMP]
         tool.spec, tool.template, tool.image, tool.name = spec, template, image, name
         tool.sticker = ""
+        tool.as_sticker = False
         tool.page_source = None
         tool.snapshot = False
         self.activate(engine.STAMP)
@@ -362,6 +371,80 @@ class AnnotationsModule:
         tool.sticker = key
         tool.page_source = None
         self.activate(engine.STAMP)
+
+    def use_custom_sticker(self, image: bytes, name: str) -> None:
+        """Adesivo personalizzato dalla libreria (ANN-27): immagine con /Subj «Adesivo»."""
+        self.use_stamp(None, image=image, name=name)
+        self.tools[engine.STAMP].as_sticker = True
+
+    def _fill_custom_stickers(self) -> None:
+        import base64
+        m = self.custom_stickers_menu
+        m.clear()
+        stamps = self.ctrl.custom_stamps()
+        if not stamps:
+            a = m.addAction(_("Nessun adesivo personalizzato: aggiungi immagini con «Timbro › Da immagine…»"))
+            a.setEnabled(False)
+            return
+        for d in stamps:
+            data = base64.b64decode(d["png"])
+            m.addAction(d["name"], lambda _c=False, img=data, n=d["name"]: self.use_custom_sticker(img, n))
+
+    # ------------------------------------------------------------------ IA (ANN-28)
+    def _ai_services(self):
+        """Servizi del modulo IA se presente e con «Funzioni IA» attive (AI-01), altrimenti None."""
+        services = getattr(self.ctx, "ai_services", None)
+        store = getattr(services, "store", None)
+        try:
+            return services if store is not None and store.enabled() else None
+        except Exception:
+            return None
+
+    def _sync_ai_actions(self) -> None:
+        visible = self._ai_services() is not None
+        for act in (self.ai_stamp_action, self.ai_sticker_action):
+            act.setVisible(visible)
+
+    def generate_with_ai(self, kind: str) -> bytes | None:
+        """«Genera con IA…»: descrizione e stile al fornitore di immagini del modulo IA (AI-25), poi la
+        proposta scelta si appone con un clic e resta nella libreria «Personalizzati»."""
+        services = self._ai_services()
+        if services is None:
+            return None
+        title = _("Genera con IA")
+        profile = services.store.active()
+        if profile is None:
+            self.ctx.error(title, _("Generazione di immagini non disponibile: configura un fornitore "
+                                    "nelle impostazioni dell'assistente IA. Gli altri strumenti restano utilizzabili."))
+            return None
+        if not getattr(profile, "consent", True):     # informativa prima di qualsiasi invio (AI-02)
+            panel = getattr(services, "panel", None)
+            if panel is None or not panel.ask_consent(profile):
+                return None
+            profile.consent = True
+            services.store.save(profile)
+        from foliant.api import OperationCancelled
+        from foliant.modules.ai.graphics_view import GenerateGraphicDialog
+
+        def run(task_title, fn):
+            try:
+                return self.ctx.run_task(task_title, lambda progress: fn(progress=progress))
+            except OperationCancelled:
+                return None
+
+        dlg = GenerateGraphicDialog(profile, lambda: services.store.provider_for(profile), run, self.ctx.window,
+                                    kind=kind)
+        services.controller.exec_dialog(dlg)
+        png = getattr(dlg, "chosen_png", None)
+        if not png:
+            return None
+        name = (dlg.last_prompt or title)[:60]
+        self.ctrl.add_custom_stamp(name, png, origin="ia")
+        if dlg.kind == "sticker":
+            self.use_custom_sticker(png, name)
+        else:
+            self.use_stamp(None, image=png, name=name)
+        return png
 
     def _image_stamp(self) -> None:
         res = ui_actions.choose_image_stamp(self.ctrl)

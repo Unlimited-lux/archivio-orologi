@@ -1558,6 +1558,57 @@ STICKERS = {
 }
 
 
+def _circle(cx: float, cy: float, r: float) -> str:
+    """Cerchio come quattro curve di Bézier (operatori PDF)."""
+    k = 0.5523 * r
+    return (f"{cx + r} {cy} m {cx + r} {cy + k} {cx + k} {cy + r} {cx} {cy + r} c "
+            f"{cx - k} {cy + r} {cx - r} {cy + k} {cx - r} {cy} c {cx - r} {cy - k} {cx - k} {cy - r} {cx} {cy - r} c "
+            f"{cx + k} {cy - r} {cx + r} {cy - k} {cx + r} {cy} c h ")
+
+
+_THUMB = ("0.98 0.78 0.35 rg 0.55 0.35 0.1 RG 3 w 1 j 1 J 28 10 m 74 10 l 82 10 88 16 88 24 c 88 52 l "
+          "88 58 84 62 78 62 c 56 62 l 60 86 l 60 92 54 96 50 94 c 44 92 l 34 64 l 28 62 l h B "
+          "10 10 18 52 re B")
+STICKERS.update({
+    "completato": ("Completato", "0.10 0.62 0.25 rg " + _circle(50, 50, 44) + "f 1 1 1 RG 10 w 1 J 1 j "
+                                 "28 50 m 44 34 l 74 66 l S"),
+    "esclamativo": ("Punto esclamativo", "0.85 0.15 0.15 rg " + _circle(50, 50, 44) + "f 1 1 1 rg 44 40 12 40 re f "
+                                         "44 18 12 12 re f"),
+    "domanda": ("Punto interrogativo", "0.15 0.4 0.85 rg " + _circle(50, 50, 44) + "f 1 1 1 RG 10 w 1 J "
+                                       "34 64 m 34 76 42 82 50 82 c 60 82 66 76 66 66 c 66 54 50 52 50 40 c 50 36 l S "
+                                       "1 1 1 rg 45 16 10 10 re f"),
+    "divieto": ("Divieto", "0.85 0.12 0.12 RG 10 w " + _circle(50, 50, 40) + "S 22 22 m 78 78 l S"),
+    "in_corso": ("In corso", "0.95 0.6 0.1 rg " + _circle(50, 50, 44) + "f 1 1 1 RG 8 w 1 J 50 50 m 50 78 l S "
+                             "50 50 m 70 40 l S"),
+    "freccia_sinistra": ("Freccia a sinistra", "0.15 0.4 0.85 rg 94 38 m 44 38 l 44 14 l 6 50 l 44 86 l 44 62 l "
+                                               "94 62 l h f"),
+    "freccia_su": ("Freccia in alto", "0.15 0.4 0.85 rg 38 6 m 38 56 l 14 56 l 50 94 l 86 56 l 62 56 l 62 6 l h f"),
+    "freccia_giu": ("Freccia in basso", "0.15 0.4 0.85 rg 38 94 m 38 44 l 14 44 l 50 6 l 86 44 l 62 44 l "
+                                        "62 94 l h f"),
+    "faccina": ("Faccina sorridente", "0.99 0.82 0.2 rg 0.75 0.5 0.05 RG 3 w " + _circle(50, 50, 44) + "B "
+                                      "0.25 0.15 0.05 rg " + _circle(35, 62, 6) + "f " + _circle(65, 62, 6) + "f "
+                                      "0.25 0.15 0.05 RG 5 w 1 J 28 38 m 38 22 62 22 72 38 c S"),
+    "faccina_triste": ("Faccina triste", "0.99 0.82 0.2 rg 0.75 0.5 0.05 RG 3 w " + _circle(50, 50, 44) + "B "
+                                         "0.25 0.15 0.05 rg " + _circle(35, 62, 6) + "f " + _circle(65, 62, 6) + "f "
+                                         "0.25 0.15 0.05 RG 5 w 1 J 28 26 m 38 42 62 42 72 26 c S"),
+    "pollice_su": ("Pollice in su", _THUMB),
+    "pollice_giu": ("Pollice in giù", "q 1 0 0 -1 0 100 cm " + _THUMB + " Q"),
+    "cuore": ("Cuore", "0.88 0.15 0.3 rg 50 14 m 20 38 6 54 6 70 c 6 84 16 94 30 94 c 40 94 46 88 50 80 c "
+                       "54 88 60 94 70 94 c 84 94 94 84 94 70 c 94 54 80 38 50 14 c h f"),
+})
+
+# categorie della tavolozza degli adesivi (ANN-27)
+STICKER_CATEGORIES = [
+    ("Spunte e croci", ["spunta", "croce", "completato"]),
+    ("Simboli di stato", ["attenzione", "info", "esclamativo", "domanda", "divieto", "in_corso"]),
+    ("Frecce", ["freccia", "freccia_sinistra", "freccia_su", "freccia_giu"]),
+    ("Faccine e gesti", ["faccina", "faccina_triste", "pollice_su", "pollice_giu"]),
+    ("Stelle e cuori", ["stella", "cuore"]),
+]
+STICKER_SUBJECT = "Adesivo"
+STICKER_MIN = 8.0       # lato minimo di un adesivo ridimensionato (pt)
+
+
 def _sticker_ap(pdf: pymupdf.Document, xref: int, name: str, opacity: float) -> None:
     ops = STICKERS[name][1]
     ap = pdf.get_new_xref()
@@ -1577,13 +1628,20 @@ def create_sticker(pdf: pymupdf.Document, page_no: int, point, name: str, style:
     rect = pymupdf.Rect(p.x - size / 2, p.y - size / 2, p.x + size / 2, p.y + size / 2)
     with unrotated(page):
         annot = page.add_stamp_annot(rect, 0)
-    xref = _finish(annot, author, STICKERS[name][0], subject="Adesivo", kind=STAMP)
-    pdf.xref_set_key(xref, "Name", "/FoliantAdesivo" + name.title())
+    xref = _finish(annot, author, _(STICKERS[name][0]), subject=STICKER_SUBJECT, kind=STAMP)
+    pdf.xref_set_key(xref, "Name", "/FoliantAdesivo" + name.title().replace("_", ""))
     pdf.xref_set_key(xref, STICKER_KEY, "/" + name)
     _sticker_ap(pdf, xref, name, max(0.0, min(1.0, style.opacity)))
     pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, rect)))
     _upright(pdf, page, xref)
     return xref
+
+
+def is_sticker(pdf: pymupdf.Document, xref: int) -> bool:
+    if pdf.xref_get_key(xref, STICKER_KEY)[0] == "name":
+        return True
+    k, v = pdf.xref_get_key(xref, "Subj")
+    return k == "string" and v in (STICKER_SUBJECT, _(STICKER_SUBJECT))
 
 
 def refresh_sticker(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
@@ -1649,7 +1707,8 @@ def create_page_stamp(pdf: pymupdf.Document, page_no: int, point, src: pymupdf.D
 
 def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes, style: Style,
                        author: str | None = None, max_side: float = 160.0, name: str = "",
-                       intent: str = "StampImage") -> int:
+                       intent: str = "StampImage", sticker: bool = False) -> int:
+    """Timbro da immagine; con `sticker` è un adesivo personalizzato (/Subj «Adesivo», ANN-27)."""
     page = pdf[page_no]
     try:
         pix = pymupdf.Pixmap(image)
@@ -1664,7 +1723,8 @@ def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes,
     with unrotated(page):
         annot = page.add_stamp_annot(rect, image)
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
-    xref = _finish(annot, author, name or "Timbro immagine", kind=STAMP)
+    xref = _finish(annot, author, name or _("Timbro immagine"), kind=STAMP,
+                   subject=STICKER_SUBJECT if sticker else None)
     pdf.xref_set_key(xref, "IT", "/" + intent)
     _upright(pdf, page, xref)
     return xref
@@ -1962,8 +2022,8 @@ class AnnotInfo:
     def label(self) -> str:
         if self.kind == REPLACE:
             return SUBJECTS[REPLACE] if self.contents else "Cancellazione"
-        if self.kind == STAMP and self.subject in ("Adesivo", _("Adesivo")):
-            return "Adesivo"
+        if self.kind == STAMP and self.subject in (STICKER_SUBJECT, _(STICKER_SUBJECT)):
+            return STICKER_SUBJECT
         if self.kind in (CALLOUT, ARROW, CLOUD, DISTANCE, PERIMETER, AREA, TYPEWRITER):
             return SUBJECTS[self.kind]
         return TYPE_LABELS.get(self.type, self.type)
@@ -2443,6 +2503,10 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         old = g["rect"]
         if old.width <= 0 or old.height <= 0:
             raise AnnotationError("Annotazione non valida.")
+        if t == pymupdf.PDF_ANNOT_STAMP and is_sticker(pdf, xref) and min(new_rect.width, new_rect.height) < STICKER_MIN:
+            k = STICKER_MIN / max(min(new_rect.width, new_rect.height), 0.01)   # minimo 8 pt, in proporzione
+            new_rect = pymupdf.Rect(new_rect.x0, new_rect.y0, new_rect.x0 + new_rect.width * k,
+                                    new_rect.y0 + new_rect.height * k)
         _angle, base = _rotation(pdf, xref)
         if base is not None:
             k = new_rect.width / old.width

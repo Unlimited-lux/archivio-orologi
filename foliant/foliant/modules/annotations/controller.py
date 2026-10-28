@@ -234,10 +234,14 @@ class Controller(QObject):
         except Exception:
             return []
 
-    def add_custom_stamp(self, name: str, image: bytes) -> None:
+    def add_custom_stamp(self, name: str, image: bytes, origin: str = "") -> None:
+        """Voce della libreria «Personalizzati»; `origin` «ia» per le immagini generate (ANN-28)."""
         import base64
         stamps = [d for d in self.custom_stamps() if d["name"] != name]
-        stamps.append({"name": name, "png": base64.b64encode(image).decode("ascii")})
+        entry = {"name": name, "png": base64.b64encode(image).decode("ascii")}
+        if origin:
+            entry["origin"] = origin
+        stamps.append(entry)
         self.ctx.settings().setValue("annotations/custom_stamps", json.dumps(stamps))
 
     def remove_custom_stamp(self, name: str) -> None:

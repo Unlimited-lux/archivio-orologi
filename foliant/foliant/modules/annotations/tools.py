@@ -1065,6 +1065,7 @@ class StampTool(AnnotTool):
         self.template = template
         self.name = name
         self.sticker = ""
+        self.as_sticker = False      # immagine apposta come adesivo personalizzato (ANN-27)
 
     def press(self, view, ev):
         return ev.button == Qt.MouseButton.LeftButton and ev.page is not None
@@ -1090,8 +1091,9 @@ class StampTool(AnnotTool):
                                    self.style(), self.ctrl.author())
         elif self.image is not None:
             xref = self.ctrl.apply(_("Aggiungi timbro"), engine.create_image_stamp, page, point, self.image,
-                                   self.style(), self.ctrl.author(), 160.0, self.name,
-                                   "StampSnapshot" if getattr(self, "snapshot", False) else "StampImage")
+                                   self.style(), self.ctrl.author(), 72.0 if self.as_sticker else 160.0, self.name,
+                                   "StampSnapshot" if getattr(self, "snapshot", False) else "StampImage",
+                                   self.as_sticker)
         else:
             spec = self.spec or engine.StampSpec(_("Approvato"), name="Approved")
             if self.template:
