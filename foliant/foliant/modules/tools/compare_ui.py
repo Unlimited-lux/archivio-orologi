@@ -1014,7 +1014,7 @@ class OverlayWidget(QWidget):
     def __init__(self, session: "CompareWidget"):
         super().__init__(session)
         self.session = session
-        self.offsets: dict[tuple[int, int], tuple[float, float]] = {}   # mm
+        self.offsets: dict[tuple[int, int], tuple] = {}   # (dx mm, dy mm, rotazione °, scala %)
         self.pair_combo = QComboBox()
         self.pair_combo.currentIndexChanged.connect(self.refresh)
         self.opacity_a = QSlider(Qt.Orientation.Horizontal)
@@ -1043,6 +1043,21 @@ class OverlayWidget(QWidget):
             s.setDecimals(1)
             s.setSuffix(" mm")
             s.valueChanged.connect(self._offset_changed)
+        self.angle = QDoubleSpinBox()
+        self.angle.setRange(-10, 10)
+        self.angle.setSingleStep(0.1)
+        self.angle.setDecimals(1)
+        self.angle.setSuffix("°")
+        self.angle.setToolTip(_("Rotazione fine di B"))
+        self.scale = QDoubleSpinBox()
+        self.scale.setRange(50, 200)
+        self.scale.setSingleStep(0.5)
+        self.scale.setDecimals(1)
+        self.scale.setValue(100)
+        self.scale.setSuffix(" %")
+        self.scale.setToolTip(_("Scala di B"))
+        for s in (self.angle, self.scale):
+            s.valueChanged.connect(self._offset_changed)
         self.reset_button = QToolButton()
         self.reset_button.setToolTip(_("Reimposta allineamento"))
         bind_icon(self.reset_button, "rotate-ccw")
@@ -1064,7 +1079,8 @@ class OverlayWidget(QWidget):
         bar = QToolBar()
         bar.setIconSize(QSize(18, 18))
         for w in (QLabel(_("Pagine")), self.pair_combo, QLabel(" A"), self.opacity_a, QLabel(" B"), self.opacity_b,
-                  self.which, self.alternate, QLabel(_("Sposta B")), self.dx, self.dy, self.reset_button,
+                  self.which, self.alternate, QLabel(_("Sposta B")), self.dx, self.dy, self.angle, self.scale,
+                  self.reset_button,
                   self.boxes, self.scheme):
             bar.addWidget(w)
         self.bar = bar
@@ -1108,7 +1124,10 @@ class OverlayWidget(QWidget):
     def _offset_changed(self) -> None:
         pair = self.current_pair()
         if None not in pair:
-            self.offsets[pair] = (self.dx.value(), self.dy.value())
+            value = (self.dx.value(), self.dy.value())
+            if abs(self.angle.value()) > 1e-9 or abs(self.scale.value() - 100) > 1e-9:
+                value += (self.angle.value(), self.scale.value())
+            self.offsets[pair] = value
         self.refresh()
 
     def nudge(self, dx_mm: float, dy_mm: float) -> None:
@@ -1118,9 +1137,9 @@ class OverlayWidget(QWidget):
     def reset_alignment(self) -> None:
         pair = self.current_pair()
         self.offsets.pop(pair, None)
-        for s in (self.dx, self.dy):
+        for s, v in ((self.dx, 0.0), (self.dy, 0.0), (self.angle, 0.0), (self.scale, 100.0)):
             s.blockSignals(True)
-            s.setValue(0.0)
+            s.setValue(v)
             s.blockSignals(False)
         self.refresh()
 
@@ -1155,11 +1174,12 @@ class OverlayWidget(QWidget):
             img_b, scale = (None, ref[1])
             import numpy as np
             return np.full_like(ref[0], 255), scale
-        dx, dy = self.offsets.get((pa, pb), (0.0, 0.0)) if None not in (pa, pb) else (0.0, 0.0)
+        off = self.offsets.get((pa, pb), ()) if None not in (pa, pb) else ()
+        dx, dy, angle, pct = (tuple(off) + (0.0, 0.0, 0.0, 100.0)[len(off):])[:4]
         shift = (int(round(dx * MM * scale)), int(round(dy * MM * scale)))
         ca, cb = COLOR_SCHEMES[self.scheme.currentData()]
         out = ce.overlay_composite(img_a, img_b, self.opacity_a.value() / 100.0, self.opacity_b.value() / 100.0,
-                                   ca, cb, shift_b=shift)
+                                   ca, cb, shift_b=shift, angle_b=angle, scale_b=pct / 100.0)
         return out, scale
 
     def refresh(self) -> None:
@@ -1167,11 +1187,13 @@ class OverlayWidget(QWidget):
             return
         pa, pb = self.current_pair()
         pair = (pa, pb)
-        for s, v in zip((self.dx, self.dy), self.offsets.get(pair, (0.0, 0.0))):
+        off = tuple(self.offsets.get(pair, ()))
+        values = (off + (0.0, 0.0, 0.0, 100.0)[len(off):])[:4]
+        for s, v in zip((self.dx, self.dy, self.angle, self.scale), values):
             s.blockSignals(True)
             s.setValue(v)
             s.blockSignals(False)
-        for w in (self.dx, self.dy, self.reset_button):
+        for w in (self.dx, self.dy, self.angle, self.scale, self.reset_button):
             w.setEnabled(None not in pair)
         try:
             arr, scale = self.composite()

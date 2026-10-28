@@ -556,4 +556,7 @@ EN: dict[str, str] = {
     "Un file per cartella": "One file per folder",
     "Un unico file": "A single file",
     "file omessi dall'unione: {f}": "files left out of the merge: {f}",
+    "Rotazione fine di B": "Fine rotation of B",
+    "Scala di B": "Scale of B",
+    "Spazio insufficiente nella destinazione: servono circa {n} MB.": "Not enough space at the destination: about {n} MB are needed.",
 }

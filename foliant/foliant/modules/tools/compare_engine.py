@@ -1617,9 +1617,28 @@ def recompute_pair(result: CompareResult, data_a: bytes, data_b: bytes, pa: int,
 # =============================================================================
 # Vista sovrapposta
 # =============================================================================
+def transform_image(img: np.ndarray, angle: float = 0.0, scale: float = 1.0) -> np.ndarray:
+    """Rotazione fine (gradi, antiorario) e scala attorno all'angolo in alto a sinistra;
+    le aree scoperte restano bianche."""
+    if abs(angle) < 1e-6 and abs(scale - 1.0) < 1e-6:
+        return img
+    import math
+
+    from PIL import Image
+    h, w = img.shape[:2]
+    a = math.radians(angle)
+    cos, sin = math.cos(a) / scale, math.sin(a) / scale
+    # trasformazione inversa (uscita -> ingresso) per PIL
+    data = (cos, sin, 0.0, -sin, cos, 0.0)
+    out = Image.fromarray(img).transform((w, h), Image.Transform.AFFINE, data, resample=Image.Resampling.BILINEAR,
+                                         fillcolor=(255, 255, 255))
+    return np.asarray(out).copy()
+
+
 def overlay_composite(img_a: np.ndarray | None, img_b: np.ndarray | None, opacity_a: float = 1.0,
                       opacity_b: float = 1.0, color_a=(220, 38, 38), color_b=(37, 99, 235),
-                      common=(40, 40, 40), shift_b: tuple[int, int] = (0, 0)) -> np.ndarray:
+                      common=(40, 40, 40), shift_b: tuple[int, int] = (0, 0), angle_b: float = 0.0,
+                      scale_b: float = 1.0) -> np.ndarray:
     """Sovrapposizione: parti comuni in grigio scuro, solo A nel colore di A,
     solo B nel colore di B. Le immagini sono RGB uint8 con la stessa scala."""
     if img_a is None and img_b is None:
@@ -1638,6 +1657,8 @@ def overlay_composite(img_a: np.ndarray | None, img_b: np.ndarray | None, opacit
         return d * float(opacity)
 
     da = darkness(img_a, opacity_a)
+    if img_b is not None:
+        img_b = transform_image(img_b, angle_b, scale_b)
     db = darkness(img_b, opacity_b, shift_b)
     both = np.minimum(da, db)
     only_a = da - both
@@ -1669,13 +1690,15 @@ def session_to_dict(result: CompareResult, offsets: dict | None = None, view_sta
 
 
 def parse_offsets(data: dict) -> dict:
+    """Allineamenti manuali salvati: (pa, pb) -> (dx, dy[, rotazione, scala])."""
     out = {}
     for k, v in (data.get("offsets") or {}).items():
+        values = tuple(float(x) for x in v)
         if ":" in k:
             a, b = k.split(":", 1)
-            out[(int(a), int(b))] = (float(v[0]), float(v[1]))
+            out[(int(a), int(b))] = values
         else:
-            out[k] = (float(v[0]), float(v[1]))
+            out[k] = values
     return out
 
 

@@ -248,6 +248,15 @@ def test_overlay_view_and_session_roundtrip(window, pdf_builder, tmp_path, qtbot
     w2 = controller(window).open_session(path)
     assert w2 is not None and w2 is not w
     assert abs(w2.overlay.offsets[(0, 0)][0] - 3.1) < 1e-9
+    w2.overlay.angle.setValue(1.5)
+    w2.overlay.scale.setValue(98.0)
+    assert w2.overlay.offsets[(0, 0)][2:] == (1.5, 98.0)
+    arr, _s = w2.overlay.composite()
+    assert arr is not None
+    path2 = w2.save_session(str(tmp_path / "sessione2.foliantcmp"))
+    w3 = controller(window).open_session(path2)
+    assert w3.overlay.offsets[(0, 0)][2:] == (1.5, 98.0)
+    assert abs(w3.overlay.angle.value() - 1.5) < 1e-9
     assert w2.layout_mode() == "overlay"
     w2.overlay.reset_alignment()
     assert (0, 0) not in w2.overlay.offsets

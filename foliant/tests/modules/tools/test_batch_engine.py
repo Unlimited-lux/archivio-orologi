@@ -858,3 +858,14 @@ def test_merge_omit_failed_file(tmp_path):
     assert os.listdir(out) == ["Unione.pdf"]
     assert pymupdf.open(str(out / "Unione.pdf")).page_count == 2
     assert omit.results[0].status == "warning" and "rotto.pdf" in omit.results[0].message
+
+
+def test_not_enough_space_blocks_start(tmp_path, monkeypatch):
+    items = _queue(tmp_path, 2)
+    settings = be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "out"))
+    assert not be.validate_settings(items, settings)[0]
+    import collections
+    Usage = collections.namedtuple("Usage", "total used free")
+    monkeypatch.setattr(be.shutil, "disk_usage", lambda p: Usage(100, 100, 10))
+    errors, _w = be.validate_settings(items, settings)
+    assert any("Spazio insufficiente" in e for e in errors)

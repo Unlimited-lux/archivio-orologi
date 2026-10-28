@@ -581,6 +581,17 @@ def _candidates(text: str) -> list[str]:
     return [line for line in (text or "").splitlines() if line != ""]
 
 
+def estimated_output_size(items: list[QueueItem], settings: JobSettings) -> int:
+    """Stima prudente dello spazio necessario per i risultati."""
+    factor = 1.3
+    for s in settings.steps:
+        if s.action == "convert":
+            factor = 8.0 if s.merged_params().get("format") in ("png", "jpg", "jpeg", "tiff") else 3.0
+        elif s.action in ("ocr", "create_pdf"):
+            factor = max(factor, 2.0)
+    return int(sum(it.size for it in items) * factor)
+
+
 def validate_settings(items: list[QueueItem], settings: JobSettings) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -632,6 +643,15 @@ def validate_settings(items: list[QueueItem], settings: JobSettings) -> tuple[li
                 probe = os.path.dirname(probe)
             if probe and not os.access(probe, os.W_OK):
                 errors.append(_("La cartella di destinazione non è scrivibile."))
+            elif probe:
+                need = estimated_output_size(items, settings)
+                try:
+                    free = shutil.disk_usage(probe).free
+                except OSError:
+                    free = None
+                if free is not None and need > free:
+                    errors.append(_("Spazio insufficiente nella destinazione: servono circa {n} MB.").format(
+                        n=max(1, need // (1024 * 1024))))
     if len(items) > 1 and not any(k in settings.pattern for k in ("{nome", "{contatore", "{bates")) \
             and not any(s.action == "merge" for s in settings.steps) and not settings.replace_originals:
         warnings.append(_("Il modello produce nomi non univoci: aggiungi {contatore} oppure i conflitti saranno "

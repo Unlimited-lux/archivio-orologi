@@ -568,3 +568,12 @@ def test_scan_preset_without_ocr_falls_back(tmp_path, monkeypatch):
     assert any("OCR non disponibile" in w for w in r.warnings)
     assert r.options.mode == ce.MODE_VISUAL
     assert any(d.kind == ce.VISUAL for d in r.differences)
+
+
+def test_transform_image_rotation_and_scale():
+    img = _img(lambda im: im.__setitem__((slice(10, 20), slice(10, 20)), 0))
+    assert ce.transform_image(img) is img
+    half = ce.transform_image(img, 0.0, 0.5)
+    assert (half[5:10, 5:10] < 128).all() and (half[15:20, 15:20] == 255).all()
+    rot = ce.transform_image(img, 5.0)
+    assert rot.shape == img.shape and (rot != img).any()
