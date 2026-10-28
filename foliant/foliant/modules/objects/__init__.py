@@ -79,6 +79,8 @@ def register(ctx: Context) -> None:
     sel_action("adjust", _("Regola immagine…"), "sliders-horizontal", c.adjust_image)
     sel_action("optimize", _("Ottimizza immagini…"), "shrink", c.optimize_images)
     sel_action("path_style", _("Stile del tracciato…"), "palette", c.path_style)
+    sel_action("external", _("Modifica con…"), "external-link", c.edit_external)
+    acts["external_stop"] = ctx.action(_("Termina modifica esterna"), "x", c.stop_external)
     sel_action("replicate", _("Replica su pagine…"), "copy", c.replicate)
     sel_action("transform", _("Trasforma…"), "scaling", c.transform_dialog)
     sel_action("reset_tf", _("Reimposta trasformazione"), "rotate-ccw-square", c.reset_transform)
@@ -139,7 +141,7 @@ def register(ctx: Context) -> None:
                 "crop_apply", "replace_clip", "save_image", "copy_image", "make_link"):
         more.addAction(acts[key])
     more.addSeparator()
-    for key in ("adjust", "optimize", "path_style", "transform", "reset_tf", "group", "decompose"):
+    for key in ("adjust", "external", "external_stop", "optimize", "path_style", "transform", "reset_tf", "group", "decompose"):
         more.addAction(acts[key])
     guides = ctx.action(_("Guide intelligenti"), None, None, checkable=True, requires_document=False)
     guides.setChecked(str(ctx.settings().value("objects/smart_guides", "true")).lower() != "false")
@@ -314,6 +316,7 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
     acts["similar"].setEnabled(n == 1 and objs[0].kind == PATH)
     acts["group"].setEnabled(n >= 2)
     acts["adjust"].setEnabled(single_image)
+    acts["external"].setEnabled(single_image)
     acts["optimize"].setEnabled(any(o.kind == IMAGE for o in objs))
     acts["path_style"].setEnabled(any(o.kind == PATH for o in objs))
     acts["decompose"].setEnabled(n == 1 and objs[0].kind == "composto")

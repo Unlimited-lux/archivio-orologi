@@ -381,4 +381,10 @@ EN = {
     "Passo della griglia": "Grid spacing",
     "Passo della griglia…": "Grid spacing…",
     "Passo (mm):": "Spacing (mm):",
+    "Modifica con…": "Edit with…",
+    "Termina modifica esterna": "Stop external editing",
+    "Nessuna applicazione disponibile per aprire le immagini.": "No application available to open images.",
+    "Modifica esterna avviata: salva il file nell'editor per aggiornare il documento.": "External editing started: save the file in the editor to update the document.",
+    "Il file temporaneo è stato eliminato o rinominato: la modifica esterna è terminata.": "The temporary file was deleted or renamed: external editing has ended.",
+    "Modifica esterna dell'immagine": "External image edit",
 }

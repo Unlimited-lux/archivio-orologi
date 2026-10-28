@@ -241,3 +241,28 @@ def test_grid_snap(ui, tmp_path):
     finally:
         ui.c.grid_on = False
         ui.c.smart_guides = True
+
+
+def test_external_edit_roundtrip(ui, tmp_path, monkeypatch):
+    import os
+    from foliant.modules.objects import external as XT
+    launched = []
+    monkeypatch.setattr(XT, "launch", lambda p: launched.append(p) or True)
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 250, 170)]))
+    ui.c.set_selection(view, 0, [0])
+    with O.ENGINE_LOCK:
+        before = view.document.pdf[0].get_pixmap(dpi=40).samples
+    sess = ui.c.edit_external(view)
+    assert sess is not None and launched and os.path.exists(launched[0])
+    assert oct(os.stat(sess.dir).st_mode)[-3:] == "700"
+    with open(launched[0], "wb") as f:
+        f.write(png_bytes(200, 100, (0, 255, 0)))
+    assert sess.reimport()
+    with O.ENGINE_LOCK:
+        assert view.document.pdf[0].get_pixmap(dpi=40).samples != before
+    view.document.undo()
+    with O.ENGINE_LOCK:
+        assert view.document.pdf[0].get_pixmap(dpi=40).samples == before
+    d = sess.dir
+    ui.c.stop_external()
+    assert not os.path.exists(d)

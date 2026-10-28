@@ -49,6 +49,8 @@ class ObjectsController(QObject):
         self.grid_snap = True
         self.grid_step_mm = 10.0
         ctx.documentChanged.connect(self._on_document_changed)
+        ctx.documentClosed.connect(lambda v: self.stop_external()
+                                   if getattr(self, "external", None) is not None and self.external.view is v else None)
         ctx.currentViewChanged.connect(self._on_view_changed)
 
     # ================================================================ stato
@@ -333,6 +335,25 @@ class ObjectsController(QObject):
         while y <= r.y1:
             painter.drawLine(QPointF(r.x0, y), QPointF(r.x1, y))
             y += step
+
+    def edit_external(self, view):
+        from . import external as X
+        objs = self.selected_objects(view)
+        if len(objs) != 1 or objs[0].kind != IMAGE:
+            self.status(_("Seleziona una sola immagine."))
+            return None
+        self.stop_external()
+        sess = X.ExternalEdit(self, view, self.sel_page, objs[0].index)
+        if sess.start():
+            self.external = sess
+            return sess
+        return None
+
+    def stop_external(self) -> None:
+        sess = getattr(self, "external", None)
+        if sess is not None:
+            sess.stop()
+            self.external = None
 
     # ---------------------------------------------------------------- avanzate
     def replicate(self, view) -> None:
