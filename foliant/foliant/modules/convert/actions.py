@@ -52,6 +52,7 @@ class ConvertController:
         self.last_result = None
         self.last_batch = None
         self.scanner_backend = None   # None = SANE (scanimage); i test usano un dispositivo simulato
+        self.camera_backend = None    # None = webcam tramite OpenCV; i test usano una fotocamera simulata
 
     # ============================================================ utilità
     @property
@@ -628,12 +629,14 @@ class ConvertController:
         """CNV-26: foto di documenti con bordi rilevati, prospettiva corretta e filtri."""
         from . import photo
         from .create_dialogs import IMAGE_FILTER_EXT, PhotosDialog
+        def ask():
+            return self.ctx.ask_open_paths(_("Scegli le foto dei documenti"),
+                                           _("Immagini ({ext})").format(ext=IMAGE_FILTER_EXT + " *.heic"))
         if paths is None:
-            paths = self.ctx.ask_open_paths(_("Scegli le foto dei documenti"),
-                                            _("Immagini ({ext})").format(ext=IMAGE_FILTER_EXT + " *.heic"))
+            paths = ask()
         if not paths:
             return None
-        dlg = PhotosDialog(self.window, paths, paper=self.ctx.paper_size())
+        dlg = PhotosDialog(self.window, paths, paper=self.ctx.paper_size(), ask_more=ask)
         if not dlg.items:
             self.ctx.error(_("Crea PDF da foto"), _("Nessuna delle foto selezionate è leggibile."))
             return None
@@ -644,10 +647,43 @@ class ConvertController:
         if not ok:
             return None
         data, warnings = res
+        if dlg.wants_ocr():
+            data = self._with_ocr(data)
         view = self.open_created(data, _("Documento") + ".pdf")
         if warnings:
             self._notify_warnings(_("Crea PDF da foto"), "\n".join(warnings[:15]))
         return view
+
+    def create_from_camera(self):
+        """CNV-26: pagine scattate con la webcam, poi angoli, prospettiva, filtro e OCR facoltativo
+        come per le foto importate. Senza fotocamera (o senza permesso) propone l'importazione."""
+        import tempfile
+
+        from PIL import Image
+
+        from .camera import CvCamera
+        from .create_dialogs import CameraDialog
+        backend = self.camera_backend or CvCamera()
+        try:
+            devices = backend.list_devices()
+        except Exception:
+            devices = []
+        if not devices:
+            if self.ctx.confirm(_("Crea PDF da fotocamera"), _(
+                    "Nessuna fotocamera disponibile (non collegata o accesso negato: l'utente deve poter usare i "
+                    "dispositivi video). Vuoi importare invece le foto dei documenti scattate con il telefono?")):
+                return self.create_from_photos()
+            return None
+        dlg = CameraDialog(self.window, backend, devices)
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.frames:
+            return None
+        with tempfile.TemporaryDirectory(prefix="foliant-camera-") as tmp:
+            paths = []
+            for k, frame in enumerate(dlg.frames):
+                path = os.path.join(tmp, _("Scatto {n}").format(n=k + 1) + ".png")
+                Image.fromarray(frame).save(path, "PNG")
+                paths.append(path)
+            return self.create_from_photos(paths)
 
     def create_from_screen(self, delay_s: int | None = None):
         """CNV-25: catture dello schermo (intere o ritagliate) in pagine PDF senza perdita."""

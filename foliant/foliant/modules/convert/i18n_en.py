@@ -876,3 +876,19 @@ EN.update({"Aggiungi le pagine delle note": "Add notes pages", "Commenti come an
 
 # CNV-17: Esporta come › Più file…
 EN.update({"Più file…": "Multiple files…", "Converti molti PDF in questo formato": "Convert many PDFs to this format"})
+
+# CNV-26: fotocamera
+EN.update({"Da fotocamera…": "From camera…", "Scatta le pagine con la webcam": "Shoot the pages with the webcam",
+           "Crea PDF da fotocamera": "Create PDF from camera", "Fotocamera": "Camera", "Fotocamera {n}": "Camera {n}",
+           "Scatta": "Shoot", "Fine": "Done", "Aggiungi foto…": "Add photos…", "Scatto {n}": "Shot {n}",
+           "Trascina gli angoli per correggere il bordo del foglio.": "Drag the corners to fix the sheet edge.",
+           "Pagine scattate: {n}. Inquadra il foglio intero su uno sfondo scuro; dopo «Fine» potrai regolare gli "
+           "angoli.": "Pages shot: {n}. Frame the whole sheet on a dark background; after “Done” you can adjust the "
+                      "corners.",
+           "Impossibile aprire la fotocamera: è usata da un altro programma oppure l'accesso è negato (permessi del "
+           "dispositivo).": "Cannot open the camera: another program is using it or access is denied (device "
+                            "permissions).",
+           "Nessuna fotocamera disponibile (non collegata o accesso negato: l'utente deve poter usare i dispositivi "
+           "video). Vuoi importare invece le foto dei documenti scattate con il telefono?":
+               "No camera available (not connected or access denied: the user must be allowed to use video "
+               "devices). Do you want to import photos of the documents taken with your phone instead?"})

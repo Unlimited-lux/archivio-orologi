@@ -1005,3 +1005,114 @@ def test_local_paper_size_and_unit(window, ctrl, tmp_path, monkeypatch, messages
     view = ctrl.create_from_files([str(txt)])[0]
     with pymupdf.open(stream=view.document.to_bytes()) as d:
         assert (round(d[0].rect.width), round(d[0].rect.height)) == (612, 792)
+
+
+def _camera_frame():
+    import cv2
+    import numpy as np
+
+    from tests.modules.convert.test_photo import _sheet
+    sheet = _sheet()
+    h, w = sheet.shape[:2]
+    corners = np.array([[380, 220], [1240, 300], [1300, 1560], [300, 1500]], dtype="float32")
+    m = cv2.getPerspectiveTransform(np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype="float32"),
+                                    corners)
+    bg = np.full((1800, 1600, 3), (60, 90, 70), np.uint8)
+    mask = cv2.warpPerspective(np.full((h, w), 255, np.uint8), m, (1600, 1800))
+    bg[mask > 0] = cv2.warpPerspective(sheet, m, (1600, 1800))[mask > 0]
+    return bg
+
+
+def test_create_from_camera_two_shots(window, ctrl, monkeypatch, messages):
+    """CNV-26: due scatti dalla webcam (simulata) → foto con angoli rilevati → PDF di 2 pagine A4."""
+    from foliant.modules.convert.create_dialogs import CameraDialog, PhotosDialog
+    frame = _camera_frame()
+    log = []
+
+    class FakeCamera:
+        def list_devices(self):
+            return [(0, "Webcam simulata")]
+
+        def open(self, index):
+            log.append(("open", index))
+
+        def read(self):
+            return frame
+
+        def close(self):
+            log.append("close")
+
+    ctrl.camera_backend = FakeCamera()
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "A4")
+
+    def cam_exec(dlg):
+        assert not dlg.done_button.isEnabled()
+        dlg.shoot()
+        dlg.shoot()
+        assert "2" in dlg.status.text() and dlg.done_button.isEnabled()
+        dlg.done(QDialog.DialogCode.Accepted)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(CameraDialog, "exec", cam_exec)
+    seen = {}
+
+    def photos_exec(dlg):
+        seen["found"] = [it["found"] for it in dlg.items]
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(PhotosDialog, "exec", photos_exec)
+    view = ctrl.create_from_camera()
+    assert seen["found"] == [True, True]
+    assert log[0] == ("open", 0) and log[-1] == "close"
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert d.page_count == 2 and abs(d[0].rect.width - 595) < 2
+
+
+def test_create_from_camera_without_device_offers_import(window, ctrl, monkeypatch, messages):
+    class NoCamera:
+        def list_devices(self):
+            return []
+    ctrl.camera_backend = NoCamera()
+    called = []
+    monkeypatch.setattr(ctrl, "create_from_photos", lambda paths=None: called.append(paths) or "importa")
+    assert ctrl.create_from_camera() == "importa" and called == [None]
+    assert "fotocamera" in messages["confirm"][0][1].lower()
+
+
+def test_camera_open_error_disables_shot(window):
+    from foliant.modules.convert.camera import CameraError
+    from foliant.modules.convert.create_dialogs import CameraDialog
+
+    class Busy:
+        def open(self, index):
+            raise CameraError("occupata")
+
+        def read(self):
+            return None
+
+        def close(self):
+            pass
+    dlg = CameraDialog(window, Busy(), [(0, "Webcam")])
+    assert not dlg.shot_button.isEnabled() and "occupata" in dlg.view.text()
+    dlg.reject()
+
+
+def test_cv_camera_lists_no_devices_here():
+    from foliant.modules.convert.camera import CvCamera
+    cam = CvCamera()
+    assert isinstance(cam.list_devices(), list)
+    assert cam.read() is None
+    cam.close()
+
+
+def test_photos_ocr_option(window, ctrl, tmp_path, monkeypatch, messages):
+    from foliant.modules.convert.create_dialogs import PhotosDialog
+    from PIL import Image
+    path = tmp_path / "garanzia.png"
+    Image.fromarray(_camera_frame()).save(path)
+    ocr = []
+    monkeypatch.setattr(ctrl, "_with_ocr", lambda data: ocr.append(len(data)) or data)
+
+    def photos_exec(dlg):
+        dlg.ocr.setChecked(True)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(PhotosDialog, "exec", photos_exec)
+    assert ctrl.create_from_photos([str(path)]) is not None and len(ocr) == 1

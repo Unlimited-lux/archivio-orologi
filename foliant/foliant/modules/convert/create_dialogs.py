@@ -692,25 +692,23 @@ class CornerEditor(QLabel):
 class PhotosDialog(QDialog):
     """Foto di documenti: angoli rilevati e regolabili, filtro e formato (CNV-26)."""
 
-    def __init__(self, parent, paths: list[str], *, paper: str = "A4"):
+    def __init__(self, parent, paths: list[str], *, paper: str = "A4", ask_more=None):
         super().__init__(parent)
-        from .photo import detect_corners, load_image
+        from PySide6.QtWidgets import QCheckBox
         self.setWindowTitle(_("Crea PDF da foto di documenti"))
         self.resize(820, 600)
         self.items: list[dict] = []
-        for p in paths:
-            try:
-                rgb = load_image(p)
-            except Exception:
-                continue
-            corners, found = detect_corners(rgb)
-            self.items.append({"path": p, "rgb": rgb, "corners": corners, "found": found})
+        self._ask_more = ask_more
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
         self.list = QListWidget()
-        for it in self.items:
-            self.list.addItem(Path(it["path"]).name + ("" if it["found"] else "  " + _("(bordi da regolare)")))
         left.addWidget(self.list, 1)
+        self.add_button = QPushButton(_("Aggiungi foto…"))
+        bind_icon(self.add_button, "image-plus")
+        self.add_button.setAutoDefault(False)
+        self.add_button.setVisible(ask_more is not None)
+        self.add_button.clicked.connect(self._add_more)
+        left.addWidget(self.add_button)
         form = QFormLayout()
         self.filter = _combo([(_("Documento a colori"), "color"), (_("Originale"), "original"),
                               (_("Scala di grigi"), "gray"), (_("Bianco e nero"), "bw"), (_("Lavagna"), "whiteboard")])
@@ -719,8 +717,9 @@ class PhotosDialog(QDialog):
                             (_("Documento d'identità"), "id"), (_("Come rilevato"), None)], paper)
         form.addRow(_("Formato"), self.size)
         left.addLayout(form)
-        hint = QLabel(_("Trascina gli angoli per correggere il bordo del foglio. Fotocamera non disponibile: "
-                        "importa le foto scattate con il telefono."))
+        self.ocr = QCheckBox(_("Rendi il testo ricercabile (OCR)"))
+        left.addWidget(self.ocr)
+        hint = QLabel(_("Trascina gli angoli per correggere il bordo del foglio."))
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
         left.addWidget(hint)
@@ -735,8 +734,30 @@ class PhotosDialog(QDialog):
         lay.addWidget(self.editor, 2)
         self._current = -1
         self.list.currentRowChanged.connect(self._select)
-        if self.items:
+        self.add_paths(paths)
+
+    def add_paths(self, paths: list[str]) -> int:
+        """Aggiunge foto (angoli rilevati subito); restituisce quante sono leggibili."""
+        from .photo import detect_corners, load_image
+        added = 0
+        for p in paths:
+            try:
+                rgb = load_image(p)
+            except Exception:
+                continue
+            corners, found = detect_corners(rgb)
+            self.items.append({"path": p, "rgb": rgb, "corners": corners, "found": found})
+            self.list.addItem(Path(p).name + ("" if found else "  " + _("(bordi da regolare)")))
+            added += 1
+        if added and self.list.currentRow() < 0:
             self.list.setCurrentRow(0)
+        return added
+
+    def _add_more(self) -> None:
+        if self._ask_more is not None:
+            paths = self._ask_more()
+            if paths:
+                self.add_paths(paths)
 
     def _store(self) -> None:
         if 0 <= self._current < len(self.items):
@@ -755,6 +776,9 @@ class PhotosDialog(QDialog):
         self._store()
         return ([{"path": it["path"], "corners": it["corners"]} for it in self.items],
                 {"page_size": self.size.currentData(), "filter_name": self.filter.currentData()})
+
+    def wants_ocr(self) -> bool:
+        return self.ocr.isChecked()
 
 
 class CropLabel(QLabel):
@@ -931,3 +955,91 @@ class OfficeOptionsDialog(QDialog):
         if self._settings is not None:
             self._settings.setValue(self.KEY, json.dumps(self.values()))
         self.accept()
+
+
+class CameraDialog(QDialog):
+    """Anteprima della webcam con «Scatta» per ogni pagina (CNV-26). `frames` raccoglie gli scatti."""
+
+    def __init__(self, parent, backend, devices: list[tuple[int, str]]):
+        super().__init__(parent)
+        from PySide6.QtCore import QTimer
+        self.setWindowTitle(_("Crea PDF da fotocamera"))
+        self.resize(760, 560)
+        self.backend = backend
+        self.frames: list = []
+        self._last = None
+        lay = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(_("Fotocamera")))
+        self.device = QComboBox()
+        for index, label in devices:
+            self.device.addItem(label, index)
+        row.addWidget(self.device, 1)
+        lay.addLayout(row)
+        self.view = QLabel()
+        self.view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.view.setMinimumSize(480, 360)
+        lay.addWidget(self.view, 1)
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.done_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.done_button.setText(_("Fine"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        self.shot_button = buttons.addButton(_("Scatta"), QDialogButtonBox.ButtonRole.ActionRole)
+        bind_icon(self.shot_button, "camera")
+        self.shot_button.clicked.connect(self.shoot)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.timer = QTimer(self)
+        self.timer.setInterval(66)
+        self.timer.timeout.connect(self.refresh)
+        self.device.currentIndexChanged.connect(lambda _i: self._open())
+        self._open()
+        self._update_status()
+
+    def _open(self) -> None:
+        self.timer.stop()
+        try:
+            self.backend.open(self.device.currentData())
+        except Exception as e:
+            self._last = None
+            self.view.setText(str(e))
+            self.shot_button.setEnabled(False)
+            return
+        self.shot_button.setEnabled(True)
+        self.timer.start()
+        self.refresh()
+
+    def refresh(self) -> None:
+        frame = self.backend.read()
+        if frame is None:
+            return
+        from PySide6.QtGui import QImage
+        self._last = frame
+        h, w = frame.shape[:2]
+        img = QImage(frame.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
+        self.view.setPixmap(QPixmap.fromImage(img).scaled(self.view.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                          Qt.TransformationMode.SmoothTransformation))
+
+    def shoot(self) -> None:
+        if self._last is None:
+            self.refresh()
+        if self._last is not None:
+            self.frames.append(self._last.copy())
+        self._update_status()
+
+    def _update_status(self) -> None:
+        self.status.setText(_("Pagine scattate: {n}. Inquadra il foglio intero su uno sfondo scuro; dopo «Fine» "
+                              "potrai regolare gli angoli.").format(n=len(self.frames)))
+        self.done_button.setEnabled(bool(self.frames))
+
+    def done(self, code) -> None:   # chiude la fotocamera in ogni caso
+        self.timer.stop()
+        try:
+            self.backend.close()
+        except Exception:
+            pass
+        super().done(code)
