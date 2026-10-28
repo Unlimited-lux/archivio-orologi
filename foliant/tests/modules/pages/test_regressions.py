@@ -166,3 +166,22 @@ def test_restamping_replaces_existing_series(window, tmp_path, dialog_name):
             text = pdf[i].get_text()
             assert "di 5" not in text
             assert sum(1 for k in kinds.get(i, []) if k == cls.REPLACE_KIND) == 1
+
+
+def test_page_numbers_pag33_criteria():
+    """PAG-33: dalla pagina 2 con numero 1; posizione speculare; stili romani/lettere."""
+    from foliant.modules.pages import stamp
+    doc = numbered_pdf(10)
+    stamp.add_page_numbers(doc, range(1, 10), fmt="{pagina}", start=1, position="bottom-center")
+    assert "1" not in doc[0].get_text().split()[1:]
+    assert doc[1].get_text().split()[-1] == "1" and doc[9].get_text().split()[-1] == "9"
+    doc = numbered_pdf(4)
+    stamp.add_page_numbers(doc, None, fmt="{n}", position="bottom-center", mirror="outer")
+    w = doc[0].rect.width
+    for i in range(4):
+        x = [b for b in doc[i].get_text("words") if b[4] == str(i + 1) and b[1] > 700][0][0]
+        assert (x > w / 2) == (i % 2 == 0)      # dispari (pagine 1, 3) a destra
+    doc = numbered_pdf(3)
+    stamp.add_page_numbers(doc, None, fmt="- {n} -", style="r")
+    assert "- iii -" in doc[2].get_text()
+    assert stamp.format_number(27, "A") == "AA" and stamp.format_number(4, "R") == "IV"

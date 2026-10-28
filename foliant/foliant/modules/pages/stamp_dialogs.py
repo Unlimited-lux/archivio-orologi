@@ -820,7 +820,17 @@ class PageNumbersDialog(StampDialog):
         self.fmt.setCurrentIndex(0)
         self.start = _spin(0, 999999, 1)
         self.skip_first = QCheckBox(_("Non numerare la prima pagina (ma contala)"))
+        self.num_style = QComboBox()
+        for key, text in (("D", "1, 2, 3"), ("r", "i, ii, iii"), ("R", "I, II, III"), ("a", "a, b, c"),
+                          ("A", "A, B, C")):
+            self.num_style.addItem(text, key)
+        self.mirror = QComboBox()
+        for key, text in (("none", _("Nessuna")), ("outer", _("Lato esterno (dispari a destra)")),
+                          ("inner", _("Lato interno (dispari a sinistra)"))):
+            self.mirror.addItem(text, key)
         f.addRow(_("Formato:"), self.fmt)
+        f.addRow(_("Stile:"), self.num_style)
+        f.addRow(_("Fronte/retro:"), self.mirror)
         f.addRow("", _hint(_("{n} numero, {total} ultimo numero, {label} etichetta di pagina")))
         f.addRow(_("Inizia da:"), self.start)
         f.addRow("", self.skip_first)
@@ -834,7 +844,7 @@ class PageNumbersDialog(StampDialog):
         lf.addRow(_("Margine:"), self.margin)
         self.font, self.font_size, self.color = _text_style_rows(lf)
         self.form.addWidget(look)
-        self.connect_changed(self.fmt.currentTextChanged, self.start.valueChanged, self.skip_first.toggled,
+        self.connect_changed(self.fmt.currentTextChanged, self.start.valueChanged, self.skip_first.toggled, self.num_style.currentIndexChanged, self.mirror.currentIndexChanged,
                              self.position.changed, self.margin.valueChanged, self.font.currentIndexChanged,
                              self.font_size.valueChanged, self.color.changed)
 
@@ -853,6 +863,7 @@ class PageNumbersDialog(StampDialog):
             "margin": self.margin.value() * MM, "font": self.font.currentData(),
             "font_size": self.font_size.value(), "color": self.color.color(),
             "skip_first": self.skip_first.isChecked(),
+            "style": self.num_style.currentData(), "mirror": self.mirror.currentData(),
         }
 
     def preview_index(self) -> int:
@@ -1262,6 +1273,14 @@ def open_page_labels_dialog(ctx: Context, view: DocumentView, selected: list[int
 
 
 TRANSLATIONS: dict[str, str] = {
+    "Nessuna": "None",
+    "Lato esterno (dispari a destra)": "Outer side (odd on the right)",
+    "Lato interno (dispari a sinistra)": "Inner side (odd on the left)",
+    "Stile:": "Style:",
+    "Fronte/retro:": "Double-sided:",
+    "Sostituisci i numeri di pagina già presenti": "Replace existing page numbers",
+    "Sostituisci la numerazione Bates già presente": "Replace existing Bates numbering",
+    "Sostituisci intestazioni e piè di pagina già presenti": "Replace existing headers and footers",
     '1, 2, 3': '1, 2, 3',
     'A, B, C': 'A, B, C',
     'I, II, III': 'I, II, III',
