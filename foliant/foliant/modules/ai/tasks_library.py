@@ -114,7 +114,7 @@ BUILTIN = [
                                                             ["e-commerce", "marketplace", "social"])]),
     _b("customer-reply", "Comunicazione al cliente", "Comunicazione",
        "Risposta o comunicazione al cliente basata sul documento.",
-       "Write a {tono} message to the customer about: {argomento}. Base facts only on the content and cite pages "
+       "Write a {tono} message to the customer about: {argomento}. Never invent recipient data: use placeholders in square brackets such as [nome del cliente]. Base facts only on the content and cite pages "
        "[p. N] in a separate note for the operator (not in the message). Answer in {lingua}.", scope="any",
        params=[Param("argomento", "text", ""), Param("tono", "choice", "cordiale",
                                                      ["cordiale", "formale", "professionale"])]),
@@ -283,6 +283,10 @@ def run_task(job: engine.Job, task: TaskTemplate, values: dict, scope: engine.Sc
     if task.sensitive:
         text = text.rstrip() + "\n\n> " + _(DISCLAIMER)
         flags.append(_("non sostituisce il parere di un professionista"))
+    from .render import placeholders as _placeholders
+    todo = _placeholders(text)
+    if todo:
+        flags.append(_("da completare: {p}").format(p=", ".join(f"[{t}]" for t in todo)))
     refs, rflags = engine._ref_flags(text, scope)
     return engine.Answer(text, engine._status(r), refs, flags, data=data)
 

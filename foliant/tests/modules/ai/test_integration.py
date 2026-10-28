@@ -419,3 +419,17 @@ def test_chat_shortcut_scoped_to_ai_mode(window, sample_pdf):
     assert act.shortcut().isEmpty()
     window.ctx.set_mode("ia")
     assert act.shortcut() == QKeySequence("Ctrl+Shift+A")
+
+
+def test_customer_message_placeholders_highlighted(qtbot, window, ready, fake, sample_pdf):
+    from foliant.modules.ai import render
+    window.open_path(sample_pdf)
+    fake.responses = ["Gentile [nome del cliente], la consegna è prevista [p. 1]."]
+    task = next(t for t in tasks_library.BUILTIN if t.id == "customer-reply")
+    ready.panel.run_template(task, {"argomento": "consegna", "tono": "cordiale"}, "document")
+    wait_done(qtbot, ready.panel)
+    msg = ready.panel.conversation().messages[-1]
+    assert any("[nome del cliente]" in f for f in msg.flags)
+    out = render.render_markdown(msg.text)
+    assert out.placeholders == ["nome del cliente"] and "da completare" in out.html
+    assert "placeholders in square brackets" in fake.requests[0].system
