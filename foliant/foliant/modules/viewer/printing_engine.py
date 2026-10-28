@@ -134,6 +134,7 @@ class PrintOptions:
     auto_rotate: bool = True
     layers: str = LAYERS_PRINT
     max_dpi: int = DEFAULT_MAX_DPI
+    duplex: str = ""        # preferenza del documento (/ViewerPreferences /Duplex), "" = stampante
 
     def sequence(self) -> list[int]:
         n = max(1, int(self.copies))

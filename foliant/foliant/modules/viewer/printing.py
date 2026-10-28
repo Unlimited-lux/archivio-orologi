@@ -29,6 +29,10 @@ except ImportError:  # pragma: no cover - dipende dall'installazione
     HAVE_PRINT_SUPPORT = False
 
 EN = {
+    "solo fronte": "one-sided",
+    "fronte/retro sul lato corto": "two-sided on the short edge",
+    "fronte/retro sul lato lungo": "two-sided on the long edge",
+    "Il documento chiede la stampa {mode}.": "The document asks for {mode} printing.",
     "Stampa…": "Print…",
     "File": "File",
     "Stampa": "Print",
@@ -152,6 +156,13 @@ class PrintOptionsDialog(QDialog):
         self.layers_label.setVisible(has_layers)
         root.addWidget(opt_box)
 
+        self.duplex = ""
+        self.duplex_note = QLabel(self)
+        self.duplex_note.setWordWrap(True)
+        self.duplex_note.setProperty("muted", True)
+        self.duplex_note.hide()
+        root.addWidget(self.duplex_note)
+
         self.note = QLabel(quality_note, self)
         self.note.setWordWrap(True)
         self.note.setStyleSheet(f"color: {theme.hex_color('warning')};")
@@ -166,6 +177,22 @@ class PrintOptionsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
         self.setMinimumWidth(400)
+
+    def apply_document_preferences(self, prefs) -> None:
+        """Preselezione dalle preferenze di stampa del documento (VIS-42): scala, copie,
+        fronte/retro (passato al dialogo di stampa del sistema)."""
+        if prefs is None:
+            return
+        if prefs.print_scaling_none:
+            self.rb_actual.setChecked(True)
+        if prefs.num_copies > 1:
+            self.copies.setValue(prefs.num_copies)
+        self.duplex = prefs.duplex
+        if prefs.duplex:
+            labels = {"Simplex": _("solo fronte"), "DuplexFlipShortEdge": _("fronte/retro sul lato corto"),
+                      "DuplexFlipLongEdge": _("fronte/retro sul lato lungo")}
+            self.duplex_note.setText(_("Il documento chiede la stampa {mode}.").format(mode=labels[prefs.duplex]))
+            self.duplex_note.show()
 
     def options(self) -> PrintOptions:
         """Opzioni scelte; solleva RangeError se l'intervallo non è valido."""
@@ -183,6 +210,7 @@ class PrintOptionsDialog(QDialog):
             annotations=self.annotations.isChecked(),
             auto_rotate=self.auto_rotate.isChecked(),
             layers=self.layers.currentData() or LAYERS_PRINT,
+            duplex=self.duplex,
         )
 
     def accept(self) -> None:
@@ -237,8 +265,16 @@ class PrintController:
                 has_layers = bool(view.document.pdf.get_ocgs())
             except Exception:
                 has_layers = False
-        return PrintOptionsDialog(self.ctx.window, view.page_count, view.current_page, has_layers,
-                                  cap.reason if cap.allowed else "")
+        dlg = PrintOptionsDialog(self.ctx.window, view.page_count, view.current_page, has_layers,
+                                 cap.reason if cap.allowed else "")
+        from .session_engine import read_open_options
+        try:
+            with ENGINE_LOCK:
+                prefs = read_open_options(view.document.pdf)
+        except Exception:  # noqa: BLE001
+            prefs = None
+        dlg.apply_document_preferences(prefs)
+        return dlg
 
     def ask_printer(self, view, options: PrintOptions):
         """Dialogo di stampa del sistema. Restituisce il dispositivo o None."""
@@ -252,6 +288,11 @@ class PrintController:
         printer.setDocName(view.document.display_name)
         printer.setCopyCount(options.copies)
         printer.setCollateCopies(options.collate)
+        duplex = {"Simplex": QPrinter.DuplexMode.DuplexNone,
+                  "DuplexFlipShortEdge": QPrinter.DuplexMode.DuplexShortSide,
+                  "DuplexFlipLongEdge": QPrinter.DuplexMode.DuplexLongSide}.get(options.duplex)
+        if duplex is not None:
+            printer.setDuplex(duplex)
         first = options.pages[0] if options.pages else 0
         with ENGINE_LOCK:  # orientamento del documento, non della vista (VIS-11)
             rect = view.document.pdf[first].rect

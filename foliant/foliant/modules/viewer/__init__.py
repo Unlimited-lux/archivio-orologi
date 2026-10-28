@@ -32,6 +32,7 @@ PARTS = (
     "tools",          # zoom area, istantanea
     "zoomfit",        # adatta all'altezza e al contenuto
     "session",        # posizione per file, vista iniziale, schede, sessione
+    "openoptions",    # opzioni di apertura scritte nel documento
     "recovery",       # salvataggio automatico e recupero dopo crash
     "reload",         # ripristina e ricarica
     "archives",       # archivi ZIP

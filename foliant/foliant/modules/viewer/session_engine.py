@@ -266,3 +266,146 @@ def read_initial_view(pdf: pymupdf.Document) -> InitialView:
         except Exception:  # noqa: BLE001
             pass
     return result
+
+
+# ================================================================ opzioni di apertura (VIS-42)
+LAYOUT_NAMES = {VIEW_SINGLE: "SinglePage", VIEW_CONTINUOUS: "OneColumn", VIEW_FACING: "TwoColumnLeft",
+                VIEW_COVER: "TwoColumnRight"}
+PANEL_NAMES = {"": "UseNone", "bookmarks": "UseOutlines", "thumbnails": "UseThumbs",
+               "attachments": "UseAttachments", "layers": "UseOC"}
+DUPLEX = ("", "Simplex", "DuplexFlipShortEdge", "DuplexFlipLongEdge")
+_BOOL_PREFS = (("hide_toolbar", "HideToolbar"), ("hide_menubar", "HideMenubar"),
+               ("hide_window_ui", "HideWindowUI"), ("fit_window", "FitWindow"),
+               ("center_window", "CenterWindow"), ("display_title", "DisplayDocTitle"),
+               ("pick_tray", "PickTrayByPDFSize"))
+
+
+@dataclass
+class OpenOptions:
+    """Come il documento si presenta in qualunque lettore: scritto nel catalogo."""
+    page: int = 0                      # pagina iniziale (0-based)
+    fit: str | None = None             # FIT_WIDTH, FIT_PAGE o None (zoom)
+    zoom: float | None = None          # fattore (1.0 = 100%); None = invariato
+    layout: str | None = None          # VIEW_*; None = predefinito del lettore
+    panel: str = ""                    # "", "bookmarks", "thumbnails", "attachments", "layers"
+    fullscreen: bool = False
+    hide_toolbar: bool = False
+    hide_menubar: bool = False
+    hide_window_ui: bool = False
+    fit_window: bool = False
+    center_window: bool = False
+    display_title: bool = False
+    pick_tray: bool = False
+    direction_rtl: bool = False
+    print_scaling_none: bool = False   # /PrintScaling /None (stampa a dimensione reale)
+    duplex: str = ""                   # uno di DUPLEX
+    num_copies: int = 1
+
+
+def _bool_key(pdf: pymupdf.Document, xref: int, key: str) -> bool:
+    try:
+        kind, value = pdf.xref_get_key(xref, key)
+    except Exception:  # noqa: BLE001
+        return False
+    return kind == "bool" and value == "true"
+
+
+def read_open_options(pdf: pymupdf.Document) -> OpenOptions:
+    """Opzioni di apertura attuali del documento (da chiamare con ENGINE_LOCK)."""
+    o = OpenOptions()
+    initial = read_initial_view(pdf)
+    o.page = initial.page or 0
+    o.fit, o.zoom = initial.fit, initial.zoom
+    o.layout = initial.mode
+    o.panel = initial.panel or ""
+    o.fullscreen = initial.fullscreen
+    try:
+        cat = pdf.pdf_catalog()
+    except Exception:  # noqa: BLE001
+        return o
+    for attr, key in _BOOL_PREFS:
+        setattr(o, attr, _bool_key(pdf, cat, "ViewerPreferences/" + key))
+    try:
+        o.direction_rtl = _name(pdf.xref_get_key(cat, "ViewerPreferences/Direction")) == "R2L"
+        o.print_scaling_none = _name(pdf.xref_get_key(cat, "ViewerPreferences/PrintScaling")) == "None"
+        duplex = _name(pdf.xref_get_key(cat, "ViewerPreferences/Duplex")) or ""
+        o.duplex = duplex if duplex in DUPLEX else ""
+        kind, value = pdf.xref_get_key(cat, "ViewerPreferences/NumCopies")
+        if kind == "int":
+            o.num_copies = max(1, min(999, int(value)))
+    except Exception:  # noqa: BLE001
+        pass
+    return o
+
+
+def open_action_is_script(pdf: pymupdf.Document) -> bool:
+    """`/OpenAction` è un'azione diversa da una destinazione (JavaScript, avvio di file…):
+    va segnalata prima di sostituirla (mai eseguita, NFR-17)."""
+    try:
+        cat = pdf.pdf_catalog()
+        kind, value = pdf.xref_get_key(cat, "OpenAction")
+    except Exception:  # noqa: BLE001
+        return False
+    if kind == "xref":
+        value = pdf.xref_object(int(value.split()[0]), compressed=True)
+    elif kind not in ("dict",):
+        return False
+    m = re.search(r"/S\s*/(\w+)", value)
+    return bool(m and m.group(1) != "GoTo")
+
+
+def write_open_options(pdf: pymupdf.Document, o: OpenOptions) -> None:
+    """Scrive le opzioni nel catalogo (dentro `Document.change()`)."""
+    if not 0 <= o.page < pdf.page_count:
+        raise ValueError(f"pagina iniziale fuori intervallo: {o.page + 1}")
+    cat = pdf.pdf_catalog()
+    page_ref = f"{pdf.page_xref(o.page)} 0 R"
+    if o.fit == FIT_WIDTH:
+        dest = f"[{page_ref} /FitH null]"
+    elif o.fit == FIT_PAGE:
+        dest = f"[{page_ref} /Fit]"
+    elif o.zoom:
+        dest = f"[{page_ref} /XYZ null null {o.zoom:g}]"
+    else:
+        dest = f"[{page_ref} /XYZ null null 0]"
+    pdf.xref_set_key(cat, "OpenAction", dest)
+    pdf.xref_set_key(cat, "PageLayout", "/" + LAYOUT_NAMES[o.layout] if o.layout in LAYOUT_NAMES else "null")
+    mode = "FullScreen" if o.fullscreen else PANEL_NAMES.get(o.panel or "", "UseNone")
+    pdf.xref_set_key(cat, "PageMode", "/" + mode)
+    vp: list[str] = []
+    for attr, key in _BOOL_PREFS:
+        if getattr(o, attr):
+            vp.append(f"/{key} true")
+    if o.fullscreen:
+        vp.append(f"/NonFullScreenPageMode /{PANEL_NAMES.get(o.panel or '', 'UseNone')}")
+    if o.direction_rtl:
+        vp.append("/Direction /R2L")
+    if o.print_scaling_none:
+        vp.append("/PrintScaling /None")
+    if o.duplex in DUPLEX[1:]:
+        vp.append(f"/Duplex /{o.duplex}")
+    if o.num_copies > 1:
+        vp.append(f"/NumCopies {int(o.num_copies)}")
+    pdf.xref_set_key(cat, "ViewerPreferences", "<<" + " ".join(vp) + ">>" if vp else "null")
+
+
+def describe_open_options(o: OpenOptions, page_label: str, tr) -> str:
+    """Riepilogo testuale dell'effetto delle opzioni (`tr` = funzione di traduzione)."""
+    if o.fit == FIT_WIDTH:
+        zoom = tr("adattata in larghezza")
+    elif o.fit == FIT_PAGE:
+        zoom = tr("adattata alla finestra")
+    elif o.zoom:
+        zoom = tr("zoom {z}%").format(z=round(o.zoom * 100))
+    else:
+        zoom = tr("con lo zoom del lettore")
+    parts = [tr("Si apre a pagina {p}, {zoom}").format(p=page_label, zoom=zoom)]
+    panels = {"bookmarks": tr("con i segnalibri visibili"), "thumbnails": tr("con le miniature visibili"),
+              "attachments": tr("con gli allegati visibili"), "layers": tr("con i livelli visibili")}
+    if o.panel in panels:
+        parts.append(panels[o.panel])
+    if o.fullscreen:
+        parts.append(tr("a schermo intero"))
+    if o.display_title:
+        parts.append(tr("mostrando il titolo del documento"))
+    return ", ".join(parts) + "."
