@@ -73,8 +73,12 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
   Trovati e segnalati: scorciatoie duplicate (risolte con scorciatoie per modalità nel
   nucleo), bug degli appunti nel modulo Converti, messaggio di stato persistente di Pagine,
   etichetta OCR da rinominare; corretti nel nucleo larghezza pannelli e campi numerici.
-- 🔄 Collaudo end-to-end sulla build integrata: 12 collaudatori + verificatori; i bug
-  confermati vanno direttamente alle sessioni.
+- 🔄 Collaudo end-to-end sulla build integrata. Alle 04:30 il limite di spesa ha fermato
+  collaudatori e 9 sessioni su 12; ripartiti alle 07:45. Gli script di riproduzione già
+  scritti sono stati rieseguiti sull'ultima build: **56 bug confermati** (Pagine 7, Proteggi 11,
+  Modifica testo 11, OCR 6, Oggetti 5, Firma 2, scorciatoie duplicate tra Visualizzazione,
+  Pagine e Moduli), 4 risultati già corretti. Inviati alle sessioni con priorità (perdita di
+  dati e redazione prima). In corso il collaudo di Commenti, Moduli e Converti.
 
 ## Log
 - 28/10 00:57 — Fase 0: struttura, subagent, `.gitignore`.
@@ -91,3 +95,8 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
 - 28/10 04:10 — Avviato il collaudo end-to-end (3 workflow, 12 aree).
 - 28/10 04:15 — `placement.py` nel nucleo (4.974 casi verificati con la matrice completa).
 - 28/10 04:25 — Controllo grafico della build integrata in tutte le modalità.
+- 28/10 04:30 — Limite di spesa raggiunto: collaudo e 9 sessioni fermi.
+- 28/10 07:45 — Ripartenza: sessioni riavviate, calendario finale (push entro 08:20, correzioni
+  entro 08:35, integrazione finale entro 09:00 UTC).
+- 28/10 07:50 — Nucleo: le azioni disattivate da un modulo (permessi) non vengono più
+  riattivate al cambio documento. 56 bug confermati inviati alle sessioni.
