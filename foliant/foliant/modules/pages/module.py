@@ -165,6 +165,23 @@ class PagesController:
             except Exception:
                 return False
 
+    def is_certified_locked(self, document: Document) -> bool:
+        """Certificazione (DocMDP) che non consente modifiche (/P 1)."""
+        with ENGINE_LOCK:
+            pdf = document.pdf
+            try:
+                kind, perms = pdf.xref_get_key(pdf.pdf_catalog(), "Perms")
+                if kind == "null":
+                    return False
+                import re as _re
+                m = _re.search(r"/DocMDP\s+(\d+)\s+0\s+R", perms)
+                if not m:
+                    return False
+                obj = pdf.xref_object(int(m.group(1)), compressed=True)
+                return bool(_re.search(r"/P\s+1\b", obj))
+            except Exception:
+                return False
+
     def confirm_structural(self, document: Document) -> bool:
         """Permesso di assemblaggio e avviso firme (PAG-03)."""
         with ENGINE_LOCK:
@@ -175,6 +192,13 @@ class PagesController:
                              "Sbloccalo con la password del proprietario."))
             return False
         key = id(document)
+        if key not in self._signed_ack and self.is_certified_locked(document):
+            if not self.ctx.confirm(_("Documento certificato"),
+                                    _("Il documento è certificato e il suo autore non consente modifiche. "
+                                      "Procedendo la certificazione non sarà più valida. Vuoi davvero "
+                                      "modificarlo?")):
+                return False
+            self._signed_ack.add(key)
         if key not in self._signed_ack and self.is_signed(document):
             if not self.ctx.confirm(_("Documento firmato"),
                                     _("Il documento contiene firme digitali: questa modifica le renderà non "

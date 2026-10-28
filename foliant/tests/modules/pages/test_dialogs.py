@@ -106,6 +106,18 @@ def test_insert_file_dialog(pages_window, accept, tmp_path):
     assert texts(view)[:4] == ["P1", "B2", "B3", "P2"]
 
 
+def test_insert_file_preview_thumbnails(window, ten_pdf, tmp_path):
+    view = window.open_path(ten_pdf)
+    b = save_numbered(tmp_path / "B.pdf", 3, prefix="B")
+    dlg = D.InsertFileDialog(window, window.ctx, view.document, [0])
+    assert dlg.set_path(b)
+    assert dlg.preview.count() == 3
+    dlg.src_range.setText("2")
+    assert dlg.preview.count() == 1 and dlg.preview.item(0).text() == "2"
+    rep = D.ReplaceDialog(window, window.ctx, view.document, [3, 4])
+    assert rep.old_preview.count() == 2
+
+
 def test_insert_file_wrong_password_no_change(pages_window, accept, tmp_path, monkeypatch):
     window, view = pages_window
     from PySide6.QtWidgets import QInputDialog

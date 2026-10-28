@@ -156,6 +156,7 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Attuali:": "Current:",
     "Alimentatore automatico (più pagine)": "Automatic feeder (multiple pages)",
     "Scarta le pagine vuote": "Discard blank pages",
     "Tutte le pagine acquisite erano vuote.": "All scanned pages were blank.",
@@ -477,6 +478,43 @@ def open_insert_blank_dialog(ctx, view, selected: list[int]) -> bool:
 # PAG-07 — inserisci da file
 # =========================================================================
 
+def thumbnail_strip(parent=None) -> "QListWidget":
+    from PySide6.QtCore import QSize
+    from PySide6.QtWidgets import QListView, QListWidget
+    w = QListWidget(parent)
+    w.setViewMode(QListView.ViewMode.IconMode)
+    w.setFlow(QListView.Flow.LeftToRight)
+    w.setWrapping(False)
+    w.setIconSize(QSize(72, 96))
+    w.setFixedHeight(140)
+    w.setMovement(QListView.Movement.Static)
+    w.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+    return w
+
+
+MAX_PREVIEW = 40
+
+
+def fill_strip(strip, pdf: pymupdf.Document, indices: list[int]) -> None:
+    """Miniature delle pagine indicate (al massimo MAX_PREVIEW)."""
+    from PySide6.QtGui import QIcon, QImage, QPixmap
+    from PySide6.QtWidgets import QListWidgetItem
+    strip.clear()
+    with ENGINE_LOCK:
+        for i in indices[:MAX_PREVIEW]:
+            try:
+                page = pdf[i]
+                zoom = 96 / max(page.rect.width, page.rect.height, 1)
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
+                img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
+                item = QListWidgetItem(QIcon(QPixmap.fromImage(img)), str(i + 1))
+            except Exception:
+                item = QListWidgetItem(str(i + 1))
+            strip.addItem(item)
+    if len(indices) > MAX_PREVIEW:
+        strip.addItem(QListWidgetItem(f"+{len(indices) - MAX_PREVIEW}"))
+
+
 class InsertFileDialog(BaseDialog):
     def __init__(self, parent, ctx, document: Document, selected: list[int]):
         super().__init__(parent, _("Inserisci da file"), _("Inserisci"))
@@ -500,6 +538,8 @@ class InsertFileDialog(BaseDialog):
         self.src_range.setPlaceholderText(_("tutte"))
         form.addRow(_("Pagine del file:"), self.src_range)
         self.layout_.addLayout(form)
+        self.preview = thumbnail_strip(self)
+        self.layout_.addWidget(self.preview)
         self.position = PositionBox(self)
         self.layout_.addWidget(self.position)
         alt = QHBoxLayout()
@@ -556,8 +596,9 @@ class InsertFileDialog(BaseDialog):
             self.set_error(_("Scegli un file."))
             return
         try:
-            self.source_pages()
+            pages = self.source_pages()
             self.set_error(None)
+            fill_strip(self.preview, self.source, pages)
         except E.RangeError as e:
             self.set_error(str(e))
 
@@ -1258,6 +1299,8 @@ class ReplaceDialog(InsertFileDialog):
         self.target = QLineEdit(E.format_ranges(selected))
         form = QFormLayout()
         form.addRow(_("Pagine da sostituire:"), self.target)
+        self.old_preview = thumbnail_strip(self)
+        form.addRow(_("Attuali:"), self.old_preview)
         self.keep = QComboBox()
         for key, text in (("original", _("Delle pagine originali")), ("source", _("Della sorgente")),
                           ("both", _("Entrambe"))):
@@ -1271,10 +1314,11 @@ class ReplaceDialog(InsertFileDialog):
         if not hasattr(self, "target"):
             return super()._update()
         try:
-            E.parse_ranges(self.target.text(), pdf_count(self.document))
+            targets = E.parse_ranges(self.target.text(), pdf_count(self.document))
         except E.RangeError as e:
             self.set_error(str(e))
             return
+        fill_strip(self.old_preview, self.document.pdf, targets)
         super()._update()
 
     def options(self) -> dict:

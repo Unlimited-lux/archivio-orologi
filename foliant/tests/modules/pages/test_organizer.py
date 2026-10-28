@@ -402,3 +402,19 @@ def test_plus_button_inserts_blank(pages_window, qtbot):
 def texts_at(view, i):
     with E.ENGINE_LOCK:
         return view.document.pdf[i].get_text().strip()
+
+
+def test_certified_document_blocking_confirm(pages_window, monkeypatch):
+    window, view = pages_window
+    c = ctrl(window)
+    with view.document.change("certifica") as pdf:
+        sig = pdf.get_new_xref()
+        pdf.update_object(sig, "<</Type/Sig/Reference[<</TransformMethod/DocMDP/TransformParams<</P 1>>>>]/P 1>>")
+        pdf.xref_set_key(pdf.pdf_catalog(), "Perms", f"<</DocMDP {sig} 0 R>>")
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(t) or False)
+    c.organizer.grid.select_pages([0])
+    c.act_rotate_right.trigger()
+    assert asked == ["Documento certificato"]
+    with E.ENGINE_LOCK:
+        assert view.document.pdf[0].rotation == 0

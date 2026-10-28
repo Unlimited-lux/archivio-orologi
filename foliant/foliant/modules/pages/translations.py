@@ -130,6 +130,9 @@ EN = {
     "Pagine (es. 1-3, 8-):": "Pages (e.g. 1-3, 8-):",
     "Duplica": "Duplicate",
     "Organizza pagine": "Organize pages",
+    "Documento certificato": "Certified document",
+    "Il documento è certificato e il suo autore non consente modifiche. Procedendo la certificazione non sarà più valida. Vuoi davvero modificarlo?":
+        "The document is certified and its author does not allow changes. Proceeding will invalidate the certification. Do you really want to modify it?",
     "Inserisci pagina vuota": "Insert blank page",
     # motore
     "Indica almeno una pagina.": "Enter at least one page.",
