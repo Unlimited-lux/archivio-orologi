@@ -431,3 +431,18 @@ def test_uncertain_filter(qtbot):
     assert "incerta" in panel.model.data(panel.model.index(0))
     panel.uncertain_only.setChecked(True)
     assert panel.model.visible == [diffs[0]]
+
+
+def test_tab_menu_compare_with(window, pdf_builder, monkeypatch):
+    from PySide6.QtWidgets import QMenu
+    view = window.open_path(pdf_builder([page_lines(1)]))
+    module = window.ctx.tools_module
+    assert module.tab_menu in window.tab_menu_providers
+    called = []
+    monkeypatch.setattr(module, "start_compare", lambda v=None: called.append(v))
+    menu = QMenu()
+    for provider in window.tab_menu_providers:
+        provider(view, menu)
+    act = next(a for a in menu.actions() if a.text() == "Confronta con…")
+    act.trigger()
+    assert called == [view]
