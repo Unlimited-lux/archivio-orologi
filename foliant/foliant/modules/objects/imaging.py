@@ -41,8 +41,10 @@ def _key(pdf: pymupdf.Document, xref: int, key: str) -> tuple[str, str]:
 
 
 def _parse(text: str):
-    val, _i, _k = _read_value(text.encode("latin-1"), 0)
-    return _fold(val)
+    """Valore PDF da testo (anche «n 0 R»)."""
+    val, _i, _k = _read_value(b"[" + text.encode("latin-1") + b"]", 0)
+    val = _fold(val)
+    return val[0] if isinstance(val, list) and val else None
 
 
 def _fold(v):
@@ -299,6 +301,17 @@ def _apply_write(pdf: pymupdf.Document, w: _Write) -> int:
     return xref
 
 
+def _mask_write(marr: np.ndarray, size: tuple[int, int] | None = None, xref: int = NEW_MASK) -> _Write:
+    """Scrittura di una maschera alfa in scala di grigi (eventualmente ricampionata)."""
+    from PIL import Image
+    im = _to_image(marr)
+    if size is not None and size != im.size:
+        im = im.resize(size, Image.LANCZOS)
+    raw, filt, parms = _encode_flate(im)
+    return _Write(xref, f"<</Type/XObject/Subtype/Image/Width {im.width}/Height {im.height}"
+                        f"/ColorSpace/DeviceGray/BitsPerComponent 8>>", raw, filt, parms)
+
+
 def _image_dict(pdf: pymupdf.Document, info: _Info, w: int, h: int, cs_text: str,
                 smask_ref: str | None = None) -> str:
     parts = ["/Type/XObject/Subtype/Image", f"/Width {w}/Height {h}", f"/ColorSpace {cs_text}",
@@ -330,18 +343,14 @@ def _apply_all(pdf: pymupdf.Document, writes: list[_Write]) -> int:
     """Esegue le scritture pianificate; restituisce l'xref dell'ultima."""
     xref = mask = 0
     for w in writes:
-        text = w.dict_text
-        if w.xref == NEW_MASK:
-            w = _Write(0, text, w.raw, w.filt, w.parms, w.overrides)
-        elif _MASK_REF in text:
-            text = text.replace(_MASK_REF, f"{mask} 0 R")
-            w = _Write(w.xref, text, w.raw, w.filt, w.parms, w.overrides)
-        xref = _apply_write(pdf, w)
+        is_mask = w.xref == NEW_MASK
+        target = 0 if is_mask else w.xref
+        text = w.dict_text.replace(_MASK_REF, f"{mask} 0 R") if _MASK_REF in w.dict_text else w.dict_text
+        xref = _apply_write(pdf, _Write(target, text, w.raw, w.filt, w.parms))
         for k, v in w.overrides.items():
             pdf.xref_set_key(xref, k, "null" if v is None else v)
-        if w.dict_text is text and False:
-            pass
-        mask = xref if writes and w.xref == 0 and "/DeviceGray/BitsPerComponent 8>>" in text and w is not writes[-1] else mask
+        if is_mask:
+            mask = xref
     return xref
 
 
@@ -388,29 +397,22 @@ def _adjust_plan(pdf: pymupdf.Document, info: _Info, brightness, contrast, satur
     if cs.kind == "other":
         raise ObjectError("Lo spazio colore dell'immagine (Lab, Separation, DeviceN o simile) "
                           "non consente le regolazioni.")
-    arr, alpha, converted = _pixels(pdf, info.xref)
     only_invert = invert and not (brightness or contrast or saturation or grayscale)
-    native_cmyk = cs.kind == "cmyk" and only_invert and not _is_lossy(info)
-    writes: list[_Write] = []
-    smask_ref = None
-    if alpha is not None and not info.smask:
-        # chiave di colore (/Mask [..]): diventa una maschera alfa che resta invariata
-        mraw, mf, mp = _encode_flate(_to_image(alpha[:, :, None]))
-        mask_xref = pdf.get_new_xref()
-        pdf.update_object(mask_xref, "<<>>")  # solo riserva del numero; contenuto scritto dopo
-        writes.append(_Write(mask_xref, f"<</Type/XObject/Subtype/Image/Width {alpha.shape[1]}"
-                                        f"/Height {alpha.shape[0]}/ColorSpace/DeviceGray/BitsPerComponent 8>>",
-                             mraw, mf, mp))
-        smask_ref = f"{mask_xref} 0 R"
-    if native_cmyk:
+    if cs.kind == "cmyk" and only_invert and not _is_lossy(info) and info.mask[0] != "array":
+        # inversione nello spazio nativo CMYK, senza perdita
         pix = pymupdf.Pixmap(pdf, info.xref)
         if pix.alpha:
             pix = pymupdf.Pixmap(pix, 0)
         raw = bytes(255 - np.frombuffer(pix.samples, dtype=np.uint8))
-        import zlib
-        dict_text = _image_dict(pdf, info, pix.width, pix.height, cs.text, smask_ref)
-        writes.append(_Write(target, dict_text, zlib.compress(raw, 9), "/FlateDecode"))
-        return writes
+        dict_text = _image_dict(pdf, info, pix.width, pix.height, cs.text)
+        return [_Write(target, dict_text, zlib.compress(raw, 9), "/FlateDecode")]
+    arr, alpha, converted = _pixels(pdf, info.xref)
+    writes: list[_Write] = []
+    smask_ref = None
+    if alpha is not None and not info.smask:
+        # chiave di colore (/Mask [..]): diventa una maschera alfa che resta invariata
+        writes.append(_mask_write(alpha[:, :, None]))
+        smask_ref = _MASK_REF
     out = _adjust_array(arr, brightness, contrast, saturation, grayscale, invert)
     if out.shape[-1] == 1:
         cs_text = cs.text if cs.kind == "gray" and not converted else "/DeviceGray"
@@ -446,14 +448,9 @@ def adjust_image(pdf: pymupdf.Document, page_index: int, index: int, brightness:
         raise ObjectError("Le immagini in linea non si possono regolare.")
     info = _info(pdf, o.xref)
     # Il calcolo avviene tutto qui: le eventuali eccezioni arrivano prima di qualunque scrittura.
-    # (L'unica eccezione è la riserva di un numero xref per una nuova maschera, innocua.)
     target = o.xref if all_occurrences else 0
     writes = _adjust_plan(pdf, info, brightness, contrast, saturation, grayscale, invert, jpeg_quality, target)
-    new_xref = 0
-    for w in writes:
-        x = _apply(pdf, w)
-        if w is writes[-1]:
-            new_xref = x
+    new_xref = _apply_all(pdf, writes)
     if all_occurrences:
         return [o.index]
     page = pdf[page_index]
@@ -560,14 +557,10 @@ def _optimize_plan(pdf: pymupdf.Document, page_index: int, indices, max_ppi: flo
         new_mask_len = mask_len if info.smask not in done_masks else 0
         smask_ref = None
         if alpha is not None and not info.smask:
-            a_im = _to_image(alpha[:, :, None])
-            if (nw, nh) != (W, H):
-                a_im = a_im.resize((nw, nh), Image.LANCZOS)
-            mraw, mf, mp = _encode_flate(a_im)
-            img_writes.append(_Write(-1, f"<</Type/XObject/Subtype/Image/Width {nw}/Height {nh}"
-                                         f"/ColorSpace/DeviceGray/BitsPerComponent 8>>", mraw, mf, mp))
-            new_mask_len = len(mraw)
-            smask_ref = "NEWMASK"
+            mw_ = _mask_write(alpha[:, :, None], (nw, nh))
+            img_writes.append(mw_)
+            new_mask_len = len(mw_.raw)
+            smask_ref = _MASK_REF
         elif info.smask and (nw, nh) != (W, H) and info.smask not in done_masks:
             try:
                 mpix = pymupdf.Pixmap(pdf, info.smask)
@@ -579,15 +572,10 @@ def _optimize_plan(pdf: pymupdf.Document, page_index: int, indices, max_ppi: flo
             except Exception:
                 marr = None
             if marr is not None:
-                mw = max(1, round(mpix.width * nw / W))
-                mh = max(1, round(mpix.height * nh / H))
-                m_im = _to_image(marr)
-                if (mw, mh) != (mpix.width, mpix.height):
-                    m_im = m_im.resize((mw, mh), Image.LANCZOS)
-                mraw, mf, mp = _encode_flate(m_im)
-                img_writes.append(_Write(info.smask, f"<</Type/XObject/Subtype/Image/Width {mw}/Height {mh}"
-                                                     f"/ColorSpace/DeviceGray/BitsPerComponent 8>>", mraw, mf, mp))
-                new_mask_len = len(mraw)
+                size = (max(1, round(mpix.width * nw / W)), max(1, round(mpix.height * nh / H)))
+                mw_ = _mask_write(marr, size, info.smask)
+                img_writes.append(mw_)
+                new_mask_len = len(mw_.raw)
         new_total = len(raw) + new_mask_len
         if new_total >= orig:
             kept.extend(idxs)
@@ -613,16 +601,8 @@ def optimize_images(pdf: pymupdf.Document, page_index: int, indices, max_ppi: fl
     Restituisce {"changed", "changed_indices", "kept", "skipped", "before", "after"}."""
     plan = _optimize_plan(pdf, page_index, indices, max_ppi, mode, quality, grayscale)
     writes = plan.pop("_writes")
-    new_mask = 0
-    for w in writes:
-        if w.xref == -1:            # nuova maschera alfa (da chiave di colore)
-            w.xref = 0
-            new_mask = _apply(pdf, w)
-            continue
-        if "NEWMASK" in w.dict_text:
-            w.dict_text = w.dict_text.replace("NEWMASK", f"{new_mask} 0 R")
-            new_mask = 0
-        _apply(pdf, w)
+    if writes:
+        _apply_all(pdf, writes)
     return plan
 
 

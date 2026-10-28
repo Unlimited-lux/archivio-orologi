@@ -176,6 +176,23 @@ def register(ctx: Context) -> None:
     mode.add_widget(btn2)
     ctx.add_menu_action(acts["detect_urls"], "Strumenti")
     ctx.add_view_menu_provider(lambda view, pe, menu: _context_menu(ctx, c, view, pe, menu))
+    from .linkpanel import LinkCheckPanel
+    lpanel = LinkCheckPanel(ctx)
+
+    def on_link_activate(page, xref):
+        view = ctx.current_view()
+        if view is None:
+            return
+        if ctx.current_mode() != "modifica":
+            ctx.set_mode("modifica")
+        view.set_tool(c.link_tool)
+        c.link_tool.selection = [xref]
+        c.link_tool.page = page
+        view.viewport().update()
+    lpanel.on_activate = on_link_activate
+    ctx.add_sidebar_panel("collegamenti", _("Collegamenti"), "link", lpanel, order=60)
+    ctx.documentChanged.connect(lambda v: lpanel.refresh() if v is ctx.current_view() and lpanel.isVisible() else None)
+    _state["link_panel"] = lpanel
     panel = ObjectPanel(ctx, c)
     ctx.add_properties_panel("oggetti", panel)
     _state["panel"] = panel

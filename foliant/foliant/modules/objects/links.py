@@ -482,7 +482,13 @@ def read_link(pdf: pymupdf.Document, page_index: int, xref: int) -> LinkInfo:
             t.kind, t.raw = OTHER, a
     else:
         typ, d = pdf.xref_get_key(xref, "Dest")
-        if typ != "null":
+        if typ == "string":
+            t.kind = NAMED
+            t.name = d
+        elif typ == "name":
+            t.kind = NAMED
+            t.name = d.lstrip("/")
+        elif typ != "null":
             _parse_dest(pdf, d, t)
         else:
             t.kind = OTHER
