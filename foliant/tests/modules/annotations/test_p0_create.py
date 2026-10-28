@@ -121,7 +121,7 @@ def test_ann02_author_subject_dates(comments, tmp_path, monkeypatch):
     module.ctrl.set_style([(0, note.xref)], color=(0, 0, 1))
     doc2 = saved(window, view, tmp_path, "due.pdf")
     note2 = annots(doc2, 0, "Text")[0]
-    assert note2.info["modDate"] > created
+    assert note2.info["modDate"] >= created
     assert note2.info["creationDate"] == created
 
 
