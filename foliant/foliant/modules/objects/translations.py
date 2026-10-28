@@ -394,4 +394,8 @@ EN = {
     "Salva immagine come appare…": "Save image as shown…",
     "Ottimizza le immagini del documento": "Optimize document images",
     "Ottimizza le immagini del documento…": "Optimize document images…",
+    "Punto di riferimento": "Reference point",
+    "Punto di riferimento {c},{r}": "Reference point {c},{r}",
+    "Riferimento:": "Reference:",
+    "Inclinazione:": "Skew:",
 }
