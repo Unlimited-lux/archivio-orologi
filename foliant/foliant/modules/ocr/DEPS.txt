@@ -1,0 +1,4 @@
+# Dipendenze del modulo OCR
+# pip (già in requirements.txt): opencv-python-headless, numpy, PyMuPDF
+# sistema (Ubuntu): tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng tesseract-ocr-osd
+#   fonts-liberation (o fonts-liberation2) e fonts-dejavu-core per il testo modificabile
