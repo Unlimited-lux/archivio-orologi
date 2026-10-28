@@ -7,7 +7,9 @@ così i test le sostituiscono con monkeypatch.
 from __future__ import annotations
 
 import json
+import os
 import weakref
+from contextlib import contextmanager
 from pathlib import Path
 
 import pymupdf
@@ -97,8 +99,58 @@ class SecurityController:
         self.banners: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
         self.pending_outside: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # doc → [termini]
         self.scans: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+        self._labels: set[str] = set()
+        self._indexes: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+        self._mark_pages: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+        self._pending: "weakref.WeakSet" = weakref.WeakSet()
         self.panel = RedactionPanel(self)
         self._load_style()
+
+    # ------------------------------------------------- segni: indice e cache
+    @contextmanager
+    def _change(self, document, label: str, **kw):
+        """`document.change()` del modulo: annota l'etichetta (per riconoscere annulla/ripeti
+        delle proprie modifiche) e invalida l'indice dei segni."""
+        self._labels.add(label)
+        try:
+            with document.change(label, **kw) as pdf:
+                yield pdf
+        finally:
+            self._forget_marks(document)
+
+    def _forget_marks(self, document) -> None:
+        index = self._indexes.get(document)
+        if index is not None:
+            index.clear()
+        self._mark_pages.pop(document, None)
+
+    def marked_pages(self, document) -> dict[int, list[int]]:
+        """Pagine → xref dei segni, calcolato una sola volta per versione del documento."""
+        if document is None or document.closed:
+            return {}
+        cached = self._mark_pages.get(document)
+        if cached is not None and cached[0] == document.version:
+            return cached[1]
+        if document.undo_label in self._labels or document.redo_label in self._labels:
+            index = self._indexes.get(document)
+            if index is not None:
+                index.clear()        # annulla/ripeti di una modifica del modulo
+        index = self._indexes.setdefault(document, R.RedactIndex())
+        with ENGINE_LOCK:
+            pages = index.pages(document.pdf)
+        self._mark_pages[document] = (document.version, pages)
+        return pages
+
+    def has_marks(self, document) -> bool:
+        return bool(self.marked_pages(document))
+
+    def marks_of(self, document) -> list[R.Mark]:
+        """Segni con i dettagli, caricando solo le pagine che ne hanno."""
+        pages = self.marked_pages(document)
+        if not pages:
+            return []
+        with ENGINE_LOCK:
+            return R.marks(document.pdf, sorted(pages))
 
     # ------------------------------------------------------------ utilità
     @property
@@ -246,7 +298,7 @@ class SecurityController:
             self.ctx.error(_("Protezione non applicata"), str(e))
             return False
         if _declares_pdfa(doc):
-            with doc.change(_("Rimuovi dichiarazione PDF/A")) as pdf:
+            with self._change(doc, _("Rimuovi dichiarazione PDF/A")) as pdf:
                 S.drop_conformance(pdf)
         self.ctx.status(_("Protezione impostata: verrà applicata al salvataggio."))
         self.refresh_document_state(self.view())
@@ -343,7 +395,7 @@ class SecurityController:
         if doc is None:
             return
         try:
-            with doc.change(_("Segna area per redazione")) as pdf:
+            with self._change(doc, _("Segna area per redazione")) as pdf:
                 if R.add_mark(pdf, page, rect, self.style, "area") is None:
                     raise _Nothing()
         except _Nothing:
@@ -360,7 +412,7 @@ class SecurityController:
             pass
 
     def _move_mark(self, doc, page: int, xref: int, rect: pymupdf.Rect) -> None:
-        with doc.change(_("Sposta segno di redazione")) as pdf:
+        with self._change(doc, _("Sposta segno di redazione")) as pdf:
             p = pdf[page]
             box = R.page_box(p)
             rect = pymupdf.Rect(rect)
@@ -386,7 +438,7 @@ class SecurityController:
         if not self.require_modify(view.document):
             return 0
         rects = merge_line_rects([PT._tight(pymupdf.Rect(r)) for r in sel.rects])
-        with view.document.change(_("Segna testo per redazione")) as pdf:
+        with self._change(view.document, _("Segna testo per redazione")) as pdf:
             n = R.add_marks(pdf, ((sel.page, r, None) for r in rects), self.style, "selezione")
         view.clear_text_selection()
         self.ctx.show_properties(PANEL_ID)
@@ -396,7 +448,7 @@ class SecurityController:
         if not matches:
             return 0
         n = 0
-        with document.change(_("Segna per redazione")) as pdf:
+        with self._change(document, _("Segna per redazione")) as pdf:
             for m in matches:
                 if m.page < 0:
                     continue
@@ -481,7 +533,7 @@ class SecurityController:
             return 0
         style = R.MarkStyle(**{**self.style.__dict__})
         style.overlay_text = dlg.overlay.text().strip() if dlg.overlay is not None else style.overlay_text
-        with view.document.change(_("Segna pagine per redazione")) as pdf:
+        with self._change(view.document, _("Segna pagine per redazione")) as pdf:
             n = R.mark_whole_pages(pdf, pages, style)
         self.ctx.show_properties(PANEL_ID)
         return n
@@ -504,7 +556,7 @@ class SecurityController:
             return 0
 
     def _repeat_mark_on(self, document, page: int, xref: int, pages: list[int]) -> int:
-        with document.change(_("Ripeti segno su più pagine")) as pdf:
+        with self._change(document, _("Ripeti segno su più pagine")) as pdf:
             src = pdf[page]
             annot = src.load_annot(xref)
             if annot is None:
@@ -522,7 +574,7 @@ class SecurityController:
         doc = self.document()
         if doc is None or not marks:
             return 0
-        with doc.change(_("Rimuovi segni di redazione")) as pdf:
+        with self._change(doc, _("Rimuovi segni di redazione")) as pdf:
             n = sum(1 for m in marks if R.remove_mark(pdf, m.page, m.xref))
         return n
 
@@ -556,7 +608,7 @@ class SecurityController:
             path = paths[0]
         try:
             data = Path(path).read_text("utf-8")
-            with doc.change(_("Importa segni di redazione")) as pdf:
+            with self._change(doc, _("Importa segni di redazione")) as pdf:
                 n = R.import_xfdf(pdf, data, self.style)
         except (OSError, ValueError) as e:
             self.ctx.error(_("Importazione non riuscita"), str(e))
@@ -620,7 +672,7 @@ class SecurityController:
         pages = sorted({m.page for m in targets})
         keep = {(m.page, m.xref) for m in all_marks} - {(m.page, m.xref) for m in targets}
         try:
-            with doc.change(_("Applica redazioni"), kind="redaction") as pdf:
+            with self._change(doc, _("Applica redazioni"), kind="redaction") as pdf:
                 # i segni non scelti vengono messi da parte e ricreati dopo
                 saved = _detach_marks(pdf, keep)
                 report = R.apply(pdf, self.apply_options, pages)
@@ -641,8 +693,7 @@ class SecurityController:
         if view is None:
             return True
         doc = view.document
-        with ENGINE_LOCK:
-            marks = R.marks(doc.pdf)
+        marks = self.marks_of(doc)
         outside = self.pending_outside.get(doc, [])
         if not marks and not outside:
             return True
@@ -721,7 +772,7 @@ class SecurityController:
         if not any(options.get(k) for k in S.SANITIZE_KEYS):
             return False
         try:
-            with doc.change(_("Rimuovi dati nascosti"), kind="redaction") as pdf:
+            with self._change(doc, _("Rimuovi dati nascosti"), kind="redaction") as pdf:
                 result = S.sanitize(pdf, options)
         except Exception as e:
             self.ctx.error(_("Rimozione dei dati nascosti non riuscita"),
@@ -753,7 +804,7 @@ class SecurityController:
         new = dlg.values()
         if all(new[k] == values.get(k, "") for k in new):
             return False
-        with doc.change(_("Modifica metadati")) as pdf:
+        with self._change(doc, _("Modifica metadati")) as pdf:
             S.write_metadata(pdf, new)
         self.ctx.status(_("Metadati aggiornati"))
         return True
@@ -766,7 +817,7 @@ class SecurityController:
                        _("Commenti e campi compilati diventeranno parte fissa delle pagine e non saranno più "
                          "modificabili. Le annotazioni nascoste vengono eliminate."), _("Appiattisci")):
             return False
-        with doc.change(_("Appiattisci"), kind="redaction") as pdf:
+        with self._change(doc, _("Appiattisci"), kind="redaction") as pdf:
             S.flatten(pdf)
         self.ctx.status(_("Documento appiattito"))
         return True
@@ -818,8 +869,29 @@ class SecurityController:
             if v is None:
                 return
             if kind in (CONTENT, "access", SAVED):
-                self.refresh_document_state(v)
+                self.schedule_refresh(v)
+        self._listeners = getattr(self, "_listeners", weakref.WeakKeyDictionary())
+        self._listeners[view] = listener
         return listener
+
+    def schedule_refresh(self, view) -> None:
+        """Aggiorna stato e azioni una sola volta per le modifiche ravvicinate (e solo per la
+        vista corrente; le altre si aggiornano quando diventano correnti)."""
+        if os.environ.get("FOLIANT_SYNC_TASKS") == "1":
+            self.refresh_document_state(view)
+            return
+        first = not self._pending
+        self._pending.add(view)
+        if first:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._flush_refresh)
+
+    def _flush_refresh(self) -> None:
+        views = list(self._pending)
+        self._pending.clear()
+        for v in views:
+            if not v.document.closed:
+                self.refresh_document_state(v)
 
     def banner(self, view) -> NoticeBoard:
         b = self.banners.get(view)
@@ -851,8 +923,7 @@ class SecurityController:
                 (_("Dettagli"), lambda: self.show_active_details(view)),
                 (_("Considera attendibile…"), lambda: self.trust_dialog(view)),
             ]))
-        with ENGINE_LOCK:
-            n = len(R.marks(doc.pdf))
+        n = len(self.marks_of(doc))
         if n:
             banner.set_notice(Notice("unapplied", 1,
                                      _("Il documento contiene {n} segni di redazione non applicati.").format(n=n),

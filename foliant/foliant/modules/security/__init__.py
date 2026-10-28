@@ -106,7 +106,6 @@ def register(ctx: Context) -> None:
 
     ctx.documentOpened.connect(c.on_document_opened)
     ctx.currentViewChanged.connect(on_view)
-    ctx.documentChanged.connect(lambda v: update_status(v) if v is ctx.current_view() else None)
     ctx.add_view_menu_provider(lambda view, ev, menu: _context_menu(c, view, ev, menu))
     links.install(ctx)
     ctx.add_guard("save", c.save_guard)        # SEC-19: segni non applicati prima di salvare
@@ -118,11 +117,10 @@ def _update_actions(c: SecurityController, view) -> None:
     doc = view.document if view is not None else None
     has_marks = False
     if doc is not None and not doc.closed:
-        with ENGINE_LOCK:
-            try:
-                has_marks = R.has_marks(doc.pdf)
-            except Exception:
-                has_marks = False
+        try:
+            has_marks = c.has_marks(doc)         # in cache per versione del documento
+        except Exception:
+            has_marks = False
     apply = c.actions["apply"]
     apply.setEnabled(doc is not None and (has_marks or bool(c.pending_outside.get(doc))))
     apply.setToolTip(_("Applica redazioni") if apply.isEnabled()
@@ -137,8 +135,10 @@ def _context_menu(c: SecurityController, view, ev, menu) -> None:
     if sel is not None and sel.rects:
         a = menu.addAction(_("Contrassegna per redazione"))
         a.triggered.connect(c.mark_selection)
-    with ENGINE_LOCK:
-        hit = [m for m in R.marks(view.document.pdf, [ev.page]) if m.rect.contains(ev.point)]
+    hit = []
+    if ev.page in c.marked_pages(view.document):
+        with ENGINE_LOCK:
+            hit = [m for m in R.marks(view.document.pdf, [ev.page]) if m.rect.contains(ev.point)]
     if hit:
         m = hit[0]
         menu.addSeparator()
@@ -153,6 +153,6 @@ def _context_menu(c: SecurityController, view, ev, menu) -> None:
 def _mark_page(c: SecurityController, view, page: int) -> None:
     if not c.require_modify(view.document):
         return
-    with view.document.change(_("Segna pagina per redazione")) as pdf:
+    with c._change(view.document, _("Segna pagina per redazione")) as pdf:
         R.mark_whole_pages(pdf, [page], c.style)
     c.show_panel()
