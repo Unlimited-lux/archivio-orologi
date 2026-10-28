@@ -981,4 +981,6 @@ EN: dict[str, str] = {
     'Documento Word (*.docx)': 'Word document (*.docx)',
     'Documento salvato in {p}': 'Document saved to {p}',
     'Analisi della struttura…': 'Analyzing structure…',
+    "La chiave del profilo «{n}» non è disponibile: sblocca il portachiavi oppure reinseriscila nelle impostazioni.":
+        "The key of profile “{n}” is not available: unlock the keyring or enter it again in the settings.",
 }

@@ -37,7 +37,10 @@ class Services:
         self.embedder = None      # funzione vettori simulabile nei test
 
     def gateway(self) -> Gateway:
-        return Gateway(self.store, self.log, provider_factory=self.provider_factory)
+        """Da chiamare nel thread dell'interfaccia: il profilo viene fissato qui."""
+        gw = Gateway(self.store, self.log, provider_factory=self.provider_factory)
+        gw.fixed_profile = self.store.active()
+        return gw
 
     def history(self) -> history.HistoryStore:
         enabled = self.store.option("history_enabled", True)
@@ -64,10 +67,11 @@ class Services:
     def refresh(self) -> None:
         if self.panel is not None:
             self.panel.refresh_state()
+        configured = self.store.active(check_key=False) is not None   # il portachiavi si apre al primo uso
         for a in getattr(self, "doc_actions", []):
-            a.setEnabled(self.store.active() is not None and self.ctx.current_view() is not None)
+            a.setEnabled(configured and self.ctx.current_view() is not None)
         for a in getattr(self, "profile_actions", []):
-            a.setEnabled(self.store.active() is not None)
+            a.setEnabled(configured)
         for a in getattr(self, "local_actions", []):
             a.setEnabled(self.ctx.current_view() is not None)
 
@@ -362,9 +366,10 @@ class Controller:
         return report
 
     # ---------------------------------------------------------------- utilità comuni
-    def _job(self, progress):
-        return engine.Job(self.services.gateway(), cancel=_CancelBridge(progress),
-                          language=self.services.panel._answer_language() if self.services.panel else "it")
+    def _job(self, progress, gateway=None, language=None):
+        if language is None:
+            language = self.services.panel._answer_language() if self.services.panel else "it"
+        return engine.Job(gateway or self.services.gateway(), cancel=_CancelBridge(progress), language=language)
 
     def _run(self, title, fn):
         """Esegue `fn(job)` con avanzamento; None se annullato o in errore (già segnalato)."""
@@ -373,8 +378,10 @@ class Controller:
                 _("Verrà inviato: ") + title, _("Contenuto richiesto dall'operazione «{t}», secondo l'ambito "
                                                 "scelto.").format(t=title.rstrip("…"))):
             return None
+        gateway = self.services.gateway()
+        language = panel._answer_language() if panel is not None else "it"
         try:
-            return self.ctx.run_task(title, lambda progress: fn(self._job(progress)))
+            return self.ctx.run_task(title, lambda progress: fn(self._job(progress, gateway, language)))
         except OperationCancelled:
             self.ctx.status(_("Operazione annullata."))
         except engine.ConsentRequired:
@@ -533,9 +540,11 @@ class Controller:
         except ValueError as e:
             self.ctx.error(_("Estrai dati"), str(e))
             return None
+        gateway = self.services.gateway()
+        language = panel._answer_language()
         try:
             result = self.ctx.run_task(_("Estrazione dei dati…"), lambda progress: extract.extract_data(
-                self._job(progress), scope, kind, fields, source_name=doc.display_name))
+                self._job(progress, gateway, language), scope, kind, fields, source_name=doc.display_name))
         except OperationCancelled:
             return None
         except extract.ExtractError as e:

@@ -313,14 +313,18 @@ class ProfileStore:
     def set_enabled(self, value: bool) -> None:
         self.settings.setValue("ai/enabled", bool(value))
 
-    def active(self) -> Profile | None:
-        """Profilo utilizzabile: attivo, verificato e con la chiave (se richiesta)."""
+    def active(self, check_key: bool = True) -> Profile | None:
+        """Profilo utilizzabile: attivo, verificato e con la chiave (se richiesta).
+
+        Con `check_key=False` il portachiavi non viene interrogato (all'avvio non si chiede
+        lo sblocco: avviene al primo uso dell'assistente).
+        """
         if not self.enabled():
             return None
         p = self.get(self.active_id())
         if p is None or not p.verified:
             return None
-        if p.requires_key and not self.secrets.get(p.id):
+        if check_key and p.requires_key and not self.secrets.get(p.id):
             return None
         return p
 

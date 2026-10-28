@@ -469,8 +469,14 @@ class AIPanel(QWidget):
     def store(self):
         return self.services.store
 
+    _key_checked = False
+
     def profile(self) -> Profile | None:
-        return self.store.active()
+        # il portachiavi si interroga solo quando il pannello è in uso, non all'avvio
+        if self.isVisible() or self._key_checked:
+            self._key_checked = True
+            return self.store.active()
+        return self.store.active(check_key=False)
 
     def set_view(self, view) -> None:
         if self.standalone:
@@ -718,8 +724,14 @@ class AIPanel(QWidget):
         return out
 
     def _ensure_ready(self) -> Profile | None:
+        self._key_checked = True
         profile = self.profile()
         if profile is None:
+            pending = self.store.active(check_key=False)
+            if pending is not None:
+                self.show_error(_("Assistente IA"), _("La chiave del profilo «{n}» non è disponibile: sblocca il "
+                                                     "portachiavi oppure reinseriscila nelle impostazioni.")
+                                .format(n=pending.name))
             self.open_settings()
             return None
         if not profile.consent:

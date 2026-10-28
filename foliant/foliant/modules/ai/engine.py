@@ -53,9 +53,11 @@ class Gateway:
         self._lock = threading.Lock()
         self.active_requests = 0
         self.max_parallel = 2
+        # profilo risolto nel thread dell'interfaccia (le impostazioni non si leggono dai thread)
+        self.fixed_profile: Profile | None = None
 
     def profile(self) -> Profile:
-        p = self.store.active()
+        p = self.fixed_profile or self.store.active()
         if p is None:
             raise NotConfigured()
         return p

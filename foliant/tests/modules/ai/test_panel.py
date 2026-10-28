@@ -978,3 +978,16 @@ def test_collection_does_not_send_file_names(window, ready, fake, text_pdf):
     dlg.add_paths([a])
     dlg.ask("Domanda")
     assert "contratto-rossi" not in fake.all_text()
+
+
+def test_keyring_not_queried_at_startup(window, settings, monkeypatch):
+    from foliant.modules.ai.config import SecretStore
+    calls = []
+    orig = SecretStore.get
+    monkeypatch.setattr(SecretStore, "get", lambda self, pid: calls.append(pid) or orig(self, pid))
+    services = window.ctx.ai_services
+    make_active_profile(services.store)
+    services.store.secrets._cache.clear()
+    calls.clear()
+    services.refresh()
+    assert calls == []
