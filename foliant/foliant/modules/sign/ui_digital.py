@@ -158,7 +158,7 @@ class DigitalSignDialog(QDialog):
         self.tsa.addItem(_("Nessuna marca temporale"), None)
         cfg = store.TSAConfig()
         for s in cfg.list():
-            self.tsa.addItem(f"{s.name} — {s.url}", (s.url, s.timeout, s.user))
+            self.tsa.addItem(f"{s.name} — {s.url}", (s.url, s.timeout, s.user, s.client_cert))
             if s.default:
                 self.tsa.setCurrentIndex(self.tsa.count() - 1)
         req_url = getattr(field, "timestamp_required_url", None)
@@ -333,7 +333,7 @@ class DigitalSignDialog(QDialog):
             reason=self.reason.currentText().strip(), location=self.location.text().strip(),
             contact=self.contact.text().strip(), appearance=appearance,
             timestamp_url=tsa[0] if tsa else None, timestamp_timeout=float(tsa[1]) if tsa else 15.0,
-            timestamp_auth=self.tsa_auth(tsa),
+            timestamp_auth=self.tsa_auth(tsa), timestamp_client_cert=self.tsa_client_cert(tsa),
             certify=self.certify, docmdp_level=int(self.level.currentData()),
             allow_expired=self.allow_expired.isChecked(),
             lock_fields=[f.strip() for f in self.lock.text().split(",") if f.strip()] or None)
@@ -356,6 +356,19 @@ class DigitalSignDialog(QDialog):
             if not ok:
                 return None
         return (tsa[2], pw)
+
+    def tsa_client_cert(self, tsa) -> tuple[str, str] | None:
+        """Certificato client della TSA: password dal portachiavi, altrimenti chiesta (mai salvata su file)."""
+        if not tsa or len(tsa) < 4 or not tsa[3]:
+            return None
+        pw = self.store.tsa_client_password(tsa[0])
+        if pw is None:
+            from PySide6.QtWidgets import QInputDialog
+            pw, ok = QInputDialog.getText(self, _("Server marca temporale"), _(
+                "Password del certificato client {f}:").format(f=Path(tsa[3]).name), QLineEdit.EchoMode.Password)
+            if not ok:
+                return None
+        return (tsa[3], pw)
 
     def current_profile(self, name: str = ""):
         return self.store.AppearanceProfile(
@@ -853,7 +866,8 @@ class IDsDialog(QDialog):
             self.trusted.addItem(it)
         self.tsas.clear()
         for s in self.store.TSAConfig().list():
-            it = QListWidgetItem(f"{s.name} — {s.url}" + ("  ★" if s.default else ""))
+            it = QListWidgetItem(f"{s.name} — {s.url}" + ("  🔑" if s.client_cert else "")
+                                 + ("  ★" if s.default else ""))
             it.setData(Qt.ItemDataRole.UserRole, s)
             self.tsas.addItem(it)
 
@@ -950,7 +964,28 @@ class IDsDialog(QDialog):
                 QMessageBox.information(self, _("Server marca temporale"), _(
                     "Il portachiavi del sistema non è disponibile: la password non viene salvata e sarà "
                     "chiesta a ogni firma."))
-        self._run(lambda: self.store.TSAConfig().add(name, url, user=user))
+        client = ""
+        if url.strip().startswith("https://") and QMessageBox.question(
+                self, _("Server marca temporale"), _("Il server richiede un certificato client?"),
+                defaultButton=QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            client, _f = QFileDialog.getOpenFileName(self, _("Certificato client"), "",
+                                                     _("Certificato con chiave (*.p12 *.pfx *.pem)"))
+            if not client:
+                return
+            pw, ok = QInputDialog.getText(self, _("Server marca temporale"), _("Password del certificato client:"),
+                                          QLineEdit.EchoMode.Password)
+            if not ok:
+                return
+            try:
+                self.digital.tsa_ssl_context(client, pw)
+            except self.digital.SignError as e:
+                QMessageBox.warning(self, _("Server marca temporale"), str(e))
+                return
+            if pw and not self.store.store_tsa_client_password(url.strip(), pw):
+                QMessageBox.information(self, _("Server marca temporale"), _(
+                    "Il portachiavi del sistema non è disponibile: la password non viene salvata e sarà "
+                    "chiesta a ogni firma."))
+        self._run(lambda: self.store.TSAConfig().add(name, url, user=user, client_cert=client))
 
     def _default_tsa(self) -> None:
         s = self._cur(self.tsas)
@@ -1088,6 +1123,10 @@ class RepeatDialog(QDialog):
 
 
 TRANSLATIONS_EN = {
+    "Password del certificato client {f}:": "Password of client certificate {f}:",
+    "Il server richiede un certificato client?": "Does the server require a client certificate?",
+    "Certificato client": "Client certificate", "Certificato con chiave (*.p12 *.pfx *.pem)":
+        "Certificate with key (*.p12 *.pfx *.pem)", "Password del certificato client:": "Client certificate password:",
     "Questo campo accetta solo certificati con una di queste policy: {oids}":
         "This field only accepts certificates with one of these policies: {oids}",
     "OID separati da virgola, es. 1.3.76.16.6 (facoltativo)": "comma-separated OIDs, e.g. 1.3.76.16.6 (optional)",

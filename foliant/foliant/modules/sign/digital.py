@@ -885,6 +885,7 @@ class SignOptions:
     timestamp_url: str | None = None
     timestamp_timeout: float = 15.0
     timestamp_auth: tuple[str, str] | None = None    # (utente, password) per la TSA; mai salvati
+    timestamp_client_cert: tuple[str, str] | None = None   # (file .p12/.pem, password) per la TSA; mai salvati
     timestamper: object | None = None
     certify: bool = False
     docmdp_level: int = 2
@@ -892,6 +893,71 @@ class SignOptions:
     md_algorithm: str = "sha256"
     allow_expired: bool = False
     password: str | None = None    # password del documento cifrato (mai salvata)
+
+
+TSA_CAFILE: str | None = None   # certificati di CA per il TLS della TSA (None: archivio predefinito)
+
+
+def tsa_ssl_context(path: str, password: str | None):
+    """Contesto TLS con il certificato client per la TSA (SIG-10). Accetta .p12/.pfx oppure un .pem con
+    certificato e chiave. La chiave non viene mai scritta in chiaro: per il PKCS#12 si passa a `ssl`
+    un PEM cifrato con una password casuale, in una cartella privata cancellata subito dopo."""
+    import shutil
+    import ssl
+
+    try:
+        if TSA_CAFILE:
+            ctx = ssl.create_default_context(cafile=TSA_CAFILE)
+        else:
+            try:
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
+            except ImportError:
+                ctx = ssl.create_default_context()
+        raw = Path(path).read_bytes()
+        pw = password.encode() if password else None
+        if Path(path).suffix.lower() in (".p12", ".pfx") or not raw.lstrip().startswith(b"-----"):
+            key, cert, extra = c_pkcs12.load_key_and_certificates(raw, pw)
+            if key is None or cert is None:
+                raise ValueError("no key")
+            token = secrets.token_hex(24).encode()
+            tmp = tempfile.mkdtemp(prefix="foliant-tsa-")
+            try:
+                chain = cert.public_bytes(serialization.Encoding.PEM) + b"".join(
+                    c.public_bytes(serialization.Encoding.PEM) for c in extra or [])
+                Path(tmp, "c.pem").write_bytes(chain)
+                Path(tmp, "k.pem").write_bytes(key.private_bytes(
+                    serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                    serialization.BestAvailableEncryption(token)))
+                ctx.load_cert_chain(str(Path(tmp, "c.pem")), str(Path(tmp, "k.pem")), password=token)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            ctx.load_cert_chain(str(path), password=pw or (lambda: b""))
+    except (OSError, ValueError, TypeError, ssl.SSLError) as exc:
+        raise SignError(_("Certificato client per la marca temporale non leggibile o password errata")) from exc
+    return ctx
+
+
+def _client_cert_timestamper(base):
+    """HTTPTimeStamper che usa un contesto TLS proprio (certificato client)."""
+    from contextlib import asynccontextmanager
+
+    import aiohttp
+
+    class ClientCertTimeStamper(base):
+        def __init__(self, url, *, ssl_context, **kw):
+            super().__init__(url, **kw)
+            self._ssl_context = ssl_context
+
+        @asynccontextmanager
+        async def _acquire_session(self):
+            session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self._ssl_context))
+            try:
+                yield session
+            finally:
+                await session.close()
+    return ClientCertTimeStamper
 
 
 def _timestamp_error(exc: BaseException) -> TimestampError:
@@ -1069,8 +1135,13 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     timestamper = options.timestamper
     ts_url = options.timestamp_url or sv_ts_url
     if timestamper is None and ts_url:
-        timestamper = HTTPTimeStamper(ts_url, timeout=options.timestamp_timeout,
-                                      auth=tuple(options.timestamp_auth) if options.timestamp_auth else None)
+        auth = tuple(options.timestamp_auth) if options.timestamp_auth else None
+        if options.timestamp_client_cert:
+            ctx = tsa_ssl_context(*options.timestamp_client_cert)
+            timestamper = _client_cert_timestamper(HTTPTimeStamper)(
+                ts_url, timeout=options.timestamp_timeout, auth=auth, ssl_context=ctx)
+        else:
+            timestamper = HTTPTimeStamper(ts_url, timeout=options.timestamp_timeout, auth=auth)
     style = _FoliantStampStyle(digital_id.info, options, rotation)
     pdf_signer = signers.PdfSigner(meta, digital_id.signer, timestamper=timestamper, stamp_style=style,
                                    new_field_spec=new_field_spec)
@@ -2045,6 +2116,8 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "Certificato client per la marca temporale non leggibile o password errata":
+        "Client certificate for the timestamp server unreadable or wrong password",
     "Il certificato non ha la policy richiesta dal campo ({oids})":
         "The certificate does not have the policy required by the field ({oids})",
     "Il campo richiede un certificato con una di queste policy: {oids}":
