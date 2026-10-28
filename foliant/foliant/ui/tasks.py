@@ -24,8 +24,9 @@ from typing import Any, Callable
 from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
 
+from ..core.engine import ENGINE_LOCK
 from ..core.errors import OperationCancelled
-from ..i18n import _
+from ..i18n import _, pgettext
 
 
 class Progress:
@@ -57,6 +58,9 @@ class Progress:
 
 def run_task(parent: QWidget | None, title: str, fn: Callable[..., Any], *args,
              cancellable: bool = True, **kwargs) -> Any:
+    if ENGINE_LOCK._is_owned():
+        raise RuntimeError("run_task chiamato tenendo ENGINE_LOCK (es. dentro document.change()): "
+                           "il lavoro non potrebbe mai acquisire il lock")
     progress = Progress()
     app = QApplication.instance()
     if app is None or os.environ.get("FOLIANT_SYNC_TASKS") == "1":
@@ -71,7 +75,7 @@ def run_task(parent: QWidget | None, title: str, fn: Callable[..., Any], *args,
             result["error"] = e
 
     thread = threading.Thread(target=work, name="foliant-task", daemon=True)
-    dialog = QProgressDialog(title, _("Annulla") if cancellable else "", 0, 1000, parent)
+    dialog = QProgressDialog(title, pgettext("pulsante", "Annulla") if cancellable else "", 0, 1000, parent)
     if not cancellable:
         dialog.setCancelButton(None)
     dialog.setWindowTitle(title)
@@ -89,8 +93,11 @@ def run_task(parent: QWidget | None, title: str, fn: Callable[..., Any], *args,
         if progress.text:
             dialog.setLabelText(progress.text)
         if dialog.wasCanceled() and not progress.cancelled:
-            progress.cancel()
-            dialog.setLabelText(_("Annullamento in corso…"))
+            if cancellable:
+                progress.cancel()
+                dialog.setLabelText(_("Annullamento in corso…"))
+            else:
+                dialog.reset(); dialog.show()      # non annullabile: la finestra resta
         if not thread.is_alive():
             timer.stop()
             loop.quit()
@@ -99,6 +106,11 @@ def run_task(parent: QWidget | None, title: str, fn: Callable[..., Any], *args,
     thread.start()
     timer.start()
     loop.exec()
+    if thread.is_alive():          # ciclo eventi interrotto (uscita dall'app): non è un successo
+        progress.cancel()
+        dialog.close()
+        dialog.deleteLater()
+        raise OperationCancelled()
     dialog.close()
     dialog.deleteLater()
     if "error" in result:

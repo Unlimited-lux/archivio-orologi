@@ -29,6 +29,8 @@ def detect_language() -> str:
 def set_language(lang: str) -> None:
     global _language
     _language = lang if lang in ("it", "en") else "it"
+    if _language == "en":
+        from .ui import i18n_en  # noqa: F401  (registra le traduzioni del nucleo)
 
 
 def language() -> str:
@@ -37,6 +39,14 @@ def language() -> str:
 
 def add_translations(lang: str, mapping: dict[str, str]) -> None:
     _catalogs.setdefault(lang, {}).update(mapping)
+
+
+def pgettext(context: str, text: str) -> str:
+    """Come `_()` ma con un contesto, per parole italiane con più significati (es. «Annulla»)."""
+    if _language == "it":
+        return text
+    catalog = _catalogs.get(_language, {})
+    return catalog.get(f"{context}\x04{text}", catalog.get(text, text))
 
 
 def _(text: str) -> str:
