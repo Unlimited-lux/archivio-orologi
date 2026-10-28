@@ -94,3 +94,27 @@ def test_core_interface_has_no_italian_text_in_english(english, qtbot, settings,
     found = _italian(texts)
     view.document._saved_state = view.document._state
     assert not found, found
+
+
+def test_each_module_keeps_its_own_translations(english):
+    """La stessa parola italiana tradotta in modo diverso da due moduli: ognuno vede la propria;
+    il nucleo vede la sua; l'ordine di registrazione non conta."""
+    from foliant import i18n
+
+    def run(module_name: str, code: str):
+        scope = {"__name__": module_name, "add_translations": i18n.add_translations,
+                 "_": i18n._, "pgettext": i18n.pgettext}
+        exec(code, scope)
+        return scope
+
+    run("foliant.modules.prova_a.ui", 'add_translations("en", {"Valuta di prova": "Currency"})')
+    run("foliant.modules.prova_b.ui", 'add_translations("en", {"Valuta di prova": "Evaluate", "Voce solo del modulo B di prova": "Only B"})')
+    a = run("foliant.modules.prova_a.dialogs", 'r = _("Valuta di prova"); s = _("Voce solo del modulo B di prova")')
+    b = run("foliant.modules.prova_b.panel", 'r = _("Valuta di prova")')
+    assert a["r"] == "Currency" and b["r"] == "Evaluate"
+    assert a["s"] == "Only B"                       # voci degli altri moduli come ripiego
+    assert i18n._("Valuta di prova") == "Currency"  # fuori dai moduli: il primo registrato
+    run("foliant.modules.prova_a.ui", 'add_translations("en", {"Annulla": "Cancel-A"})')
+    core = run("foliant.ui.prova", 'r = _("Annulla")')
+    assert core["r"] == "Undo"                      # il nucleo non viene sovrascritto dai moduli
+    assert run("foliant.modules.prova_a.x", 'r = _("Annulla")')["r"] == "Cancel-A"
