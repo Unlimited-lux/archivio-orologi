@@ -643,3 +643,15 @@ def test_adjust_dialog_live_preview(ui, tmp_path):
     dlg.gray.setChecked(False)
     dlg.sliders["brightness"].setValue(50)
     assert dlg._preview_arr.mean() > before.mean()
+
+
+def test_percent_without_space(ui):
+    from PySide6.QtWidgets import QAbstractSpinBox, QLabel
+    from foliant.modules.objects import dialogs as D
+    assert O._state["panel"].opacity.suffix() == "%"
+    labels = [w.text() for w in ui.window.findChildren(QLabel) if w.text().endswith("%")]
+    assert "100%" in labels and not any(t.endswith(" %") for t in labels)
+    dlg = D.TransformDialog(None) if hasattr(D, "TransformDialog") else None
+    if dlg is not None:
+        sfx = [s.suffix() for s in dlg.findChildren(QAbstractSpinBox) if hasattr(s, "suffix") and "%" in s.suffix()]
+        assert sfx and all(s == "%" for s in sfx)
