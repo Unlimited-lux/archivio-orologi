@@ -46,6 +46,7 @@ class ObjectsController(QObject):
         self._link_cache: dict = {}
         self._paste_counts: dict = {}
         self._signed_ok: set = set()
+        self._pdfa_warned: set = set()
         self._pending: set = set()
         self._parsedReady.connect(self._on_parsed_ready)
         self.smart_guides = True
@@ -231,6 +232,18 @@ class ObjectsController(QObject):
             self.ctx.error(_("Modifica"), _("Il documento non consente modifiche al contenuto. "
                                             "Aprilo con la password del proprietario per modificarlo."))
             return False
+        with ENGINE_LOCK:
+            xfa = E.has_dynamic_xfa(doc.pdf)
+            part = E.pdfa_part(doc.pdf)
+        if xfa:
+            self.ctx.error(_("Modifica"), _("Il documento è un modulo XFA dinamico: il contenuto mostrato viene "
+                                            "generato dal modulo, quindi la modifica degli oggetti non è disponibile."))
+            return False
+        if part and id(doc) not in self._pdfa_warned:
+            self._pdfa_warned.add(id(doc))
+            self.ctx.info(_("Documento PDF/A"), _("Il documento dichiara la conformità PDF/A-{p}: alcune modifiche "
+                                                  "(per esempio la trasparenza) possono violare il profilo.")
+                          .format(p=part))
         return True
 
     def run_change(self, view, label: str, fn: Callable, *args, kind: str = "content"):

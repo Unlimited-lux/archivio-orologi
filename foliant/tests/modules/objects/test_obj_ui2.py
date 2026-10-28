@@ -308,7 +308,7 @@ def test_background_parse(ui, tmp_path, monkeypatch, qtbot):
     ui.c._cache.clear()
     assert ui.c.parsed(view, 0, quiet=True, background=True) is None
     qtbot.waitUntil(lambda: ui.c.parsed(view, 0, quiet=True, background=True) is not None, timeout=5000)
-    assert len(ui.c.parsed(view, 0).objects) == 1
+    assert [o.kind for o in ui.c.parsed(view, 0).objects] == ["immagine", "testo"]
 
 
 def test_context_menu_full_on_selected_object(ui, tmp_path):
@@ -524,3 +524,29 @@ def test_actions_follow_document_access_changes(ui, tmp_path, monkeypatch):
     monkeypatch.setattr(type(ui.c), "extract_allowed", lambda self, v: True)
     ui.ctx.documentAccessChanged.emit(view)
     assert O._state["actions"]["save_image"].isEnabled()
+
+
+def test_pdfa_warning_once_and_xfa_blocked(ui, tmp_path):
+    path = tmp_path / "pdfa.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_image(pymupdf.Rect(50, 70, 250, 170), stream=png_bytes(20, 10))
+    doc.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                         '<rdf:Description xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="1" '
+                         'pdfaid:conformance="B"/></rdf:RDF></x:xmpmeta>')
+    doc.save(str(path))
+    view = ui.open(str(path))
+    ui.c.set_selection(view, 0, [0])
+    ui.c.translate(view, 5, 0)
+    ui.c.translate(view, 5, 0)
+    warns = [m for t, m in ui.errors if "PDF/A-1" in m]
+    assert len(warns) == 1 and abs(objs(view)[0].rect.x0 - 60) < 0.01
+    path2 = tmp_path / "xfa.pdf"
+    d2 = pymupdf.open()
+    d2.new_page().insert_image(pymupdf.Rect(50, 70, 250, 170), stream=png_bytes(20, 10))
+    d2.xref_set_key(d2.pdf_catalog(), "NeedsRendering", "true")
+    d2.save(str(path2))
+    v2 = ui.open(str(path2))
+    ui.c.set_selection(v2, 0, [0])
+    ui.c.translate(v2, 5, 0)
+    assert not v2.document.can_undo
+    assert any("XFA" in m for _t, m in ui.errors)

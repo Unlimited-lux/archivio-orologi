@@ -17,12 +17,12 @@ from foliant.api import ENGINE_LOCK, _, theme
 
 from . import engine as E
 from . import links as L
-from .content import FORM, IMAGE, PATH, SHADING
+from .content import FORM, IMAGE, PATH, SHADING, TEXT
 
 IMAGE_FILTER_TEXT = "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.svg *.jp2 *.tga *.pnm *.ppm *.pgm *.pbm *.ico"
 
 _session_style = L.LinkStyle()
-_filter_kinds = {IMAGE, PATH, FORM, SHADING}
+_filter_kinds = {IMAGE, PATH, FORM, SHADING, TEXT}
 
 
 def button_box() -> QDialogButtonBox:
@@ -39,7 +39,7 @@ def select_filter() -> set:
 
 def set_select_filter(kinds: set) -> None:
     global _filter_kinds
-    _filter_kinds = set(kinds) or {IMAGE, PATH, FORM, SHADING}
+    _filter_kinds = set(kinds) or {IMAGE, PATH, FORM, SHADING, TEXT}
 
 
 def remember_style(style: L.LinkStyle) -> None:

@@ -323,6 +323,8 @@ IMAGE = "immagine"
 PATH = "tracciato"
 FORM = "composto"
 SHADING = "sfumatura"
+TEXT = "testo"
+TEXT_STATE = ("Tf", "Tc", "Tw", "Tz", "TL", "Ts", "Tr")
 
 PAINT_OPS = {"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"}
 PATH_OPS = {"m", "l", "c", "v", "y", "h", "re"}
@@ -351,7 +353,7 @@ class GState:
 
     def state_bytes(self) -> bytes:
         parts = list(self.gs)
-        for key in ("w", "J", "j", "M", "d", "ri", "i", "CS", "SC", "cs", "sc"):
+        for key in ("w", "J", "j", "M", "d", "ri", "i", "CS", "SC", "cs", "sc") + TEXT_STATE:
             if key in self.ops:
                 parts.append(self.ops[key])
         return b"\n".join(parts)
@@ -390,6 +392,7 @@ class PageObject:
     stroke_color: tuple | None = None
     fill_color: tuple | None = None
     op_range: tuple = (0, 0)         # indici del primo e dell'ultimo operatore
+    text_invisible: bool = False     # blocco di testo invisibile (modo di resa 3)
 
     @property
     def span(self) -> tuple[int, int]:
@@ -620,6 +623,7 @@ def parse_page(doc: pymupdf.Document, page: pymupdf.Page, data: bytes | None = N
     start_pt = None
     clip_pending = False
     in_text = 0
+    bt = None
 
     def use(cat: str, name) -> None:
         names_used.setdefault(cat, set()).add(str(name))
@@ -679,11 +683,22 @@ def parse_page(doc: pymupdf.Document, page: pymupdf.Page, data: bytes | None = N
             if CA is not None:
                 st.stroke_alpha = CA
         elif name == "BT":
+            if in_text == 0:
+                bt = (idx, op.start, st.copy())
             in_text += 1
         elif name == "ET":
             in_text = max(0, in_text - 1)
-        elif name == "Tf" and o:
-            use("Font", o[0])
+            if in_text == 0 and bt is not None:
+                bidx, bstart, bstate = bt
+                obj = PageObject(len(objects), TEXT, bstart, op.end, pymupdf.Matrix(bstate.ctm),
+                                 pymupdf.Rect().quad, pymupdf.Rect(), bstate)
+                obj.op_range = (bidx, idx)
+                objects.append(obj)
+                bt = None
+        elif name in TEXT_STATE:
+            st.ops[name] = data[op.start:op.end]
+            if name == "Tf" and o:
+                use("Font", o[0])
         elif name in ("BDC", "DP") and len(o) >= 2 and isinstance(o[1], Name):
             use("Properties", o[1])
         elif name in PATH_OPS:
@@ -796,10 +811,55 @@ def parse_page(doc: pymupdf.Document, page: pymupdf.Page, data: bytes | None = N
                              r, st.copy(), name=str(o[0]))
             obj.op_range = (idx, idx)
             objects.append(obj)
+    if any(o.kind == TEXT for o in objects):
+        _text_geometry(doc, page, data, objects)
+        objects = [o for o in objects if o.kind != TEXT or not o.rect.is_empty]
+        for k, o in enumerate(objects):
+            o.index = k
     for obj in objects:
         obj.wrapper = _find_wrapper(data, ops, obj, P)
         obj.hidden = obj.opacity <= 0 or obj.rect.is_empty
+        if obj.kind == TEXT and obj.text_invisible:
+            obj.hidden = True   # testo invisibile (es. livello OCR): raggiungibile con Alt+clic o riquadro
     return ParsedPage(data, ops, objects, pymupdf.Matrix(st.ctm), P, names_used)
+
+
+def _text_geometry(doc: pymupdf.Document, page: pymupdf.Page, data: bytes, objects: list) -> None:
+    """Riquadri dei blocchi di testo: ogni blocco viene reso da solo in una copia della pagina."""
+    texts = [o for o in objects if o.kind == TEXT]
+    try:
+        tmp = pymupdf.open()
+        tmp.insert_pdf(doc, from_page=page.number, to_page=page.number, links=False, annots=False)
+        x = tmp.get_new_xref()
+        tmp.update_object(x, "<<>>")
+        tmp.update_stream(x, b"", new=True)
+        tmp.xref_set_key(tmp[0].xref, "Contents", f"{x} 0 R")
+        tp = tmp[0]
+    except Exception:
+        return
+    try:
+        for o in texts:
+            st = o.state
+            head = b"\n".join(v for k, v in st.ops.items() if k in TEXT_STATE)
+            body = b"q " + fmt_matrix(st.ctm) + b"\n" + head + b"\n" + data[o.start:o.end] + b"\nQ"
+            try:
+                tmp.update_stream(x, body)
+                spans = tp.get_texttrace()
+            except Exception:
+                continue
+            r = None
+            for sp in spans:
+                b = pymupdf.Rect(sp["bbox"])
+                if b.is_empty and b.width <= 0:
+                    continue
+                r = b if r is None else r | b
+            if r is not None:
+                rr = r & pymupdf.Rect(-1e5, -1e5, 1e5, 1e5)
+                o.rect = _clip_rect(rr, st.clip)
+                o.quad = rr.quad
+                o.text_invisible = all(sp.get("type") == 3 for sp in spans)
+    finally:
+        tmp.close()
 
 
 def _clip_rect(r: pymupdf.Rect, clip: pymupdf.Rect | None) -> pymupdf.Rect:

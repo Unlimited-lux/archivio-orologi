@@ -26,19 +26,26 @@ def png_bytes(w, h, color=(200, 30, 30), mode="RGB", dpi=None):
 
 
 def make_doc(path, images=((50, 70, 250, 170),), pages=2, colors=None, paths=()):
+    """PDF di prova: sulla pagina 1 immagini e tracciati sono i primi oggetti (indici 0, 1, …);
+    l'intestazione «Pagina N» è un blocco di testo disegnato per ultimo."""
     doc = pymupdf.open()
-    for i in range(pages):
-        page = doc.new_page()
-        page.insert_text((72, 40), f"Pagina {i + 1}", fontsize=12)
+    for _i in range(pages):
+        doc.new_page()
     page = doc[0]
     for k, r in enumerate(images):
         col = (colors[k] if colors else (40 + 60 * k, 90, 160))
         page.insert_image(pymupdf.Rect(r), stream=png_bytes(200, 100, col), keep_proportion=False)
     for r in paths:
         page.draw_rect(pymupdf.Rect(r), color=(1, 0, 0), fill=(1, 1, 0), width=2)
+    for i in range(pages):
+        doc[i].insert_text((72, 40), f"Pagina {i + 1}", fontsize=12)
     doc.save(str(path))
     doc.close()
     return str(path)
+
+
+def objs_no_text(view, page=0):
+    return [o for o in objs(view, page) if o.kind != "testo"]
 
 
 @pytest.fixture
@@ -76,9 +83,11 @@ def vpos(view, page, x, y) -> QPoint:
     return QPoint(round(p.x()), round(p.y()))
 
 
-def objs(view, page=0):
+def objs(view, page=0, text=False):
+    """Oggetti della pagina; i blocchi di testo solo con `text=True` (le intestazioni di prova)."""
     with O.ENGINE_LOCK:
-        return E.objects(view.document.pdf, page).objects
+        out = E.objects(view.document.pdf, page).objects
+    return out if text else [o for o in out if o.kind != "testo"]
 
 
 def click(view, page, x, y, mods=Qt.KeyboardModifier.NoModifier):
@@ -167,7 +176,7 @@ def test_ctrl_a_with_filter_and_tab_cycle(ui, tmp_path):
     finally:
         D.set_select_filter(set())
     QTest.keyClick(view, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-    assert len(ui.c.selection) == 5
+    assert len(ui.c.selection) == 6   # 2 immagini, 3 tracciati e il blocco di testo «Pagina 1»
     ui.c.clear_selection(view)
     QTest.keyClick(view, Qt.Key.Key_Tab)
     assert ui.c.selection == [0]
@@ -185,7 +194,8 @@ def test_selection_on_other_page_replaces(ui, tmp_path):
     view.go_to_page(1)
     QGuiApplication.processEvents()
     click(view, 1, 100, 100)
-    assert ui.c.sel_page == 1 and ui.c.selection == [0]
+    img = [o.index for o in objs(view, 1, text=True) if o.kind == "immagine"][0]
+    assert ui.c.sel_page == 1 and ui.c.selection == [img]
 
 
 # ------------------------------------------------------------------ OBJ-08
@@ -497,8 +507,9 @@ def test_reorder_front_shortcut(ui, tmp_path):
     assert ui.c.selection == [0]
     QTest.keyClick(view, Qt.Key.Key_BracketRight,
                    Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
-    assert ui.c.selection == [2]
-    assert abs(objs(view)[2].rect.x0 - 50) < 0.01
+    top = len(objs(view, text=True)) - 1          # in primo piano: ultimo nell'ordine di disegno
+    assert ui.c.selection == [top]
+    assert abs(objs(view, text=True)[top].rect.x0 - 50) < 0.01
 
 
 def test_opacity_slider_single_step(ui, tmp_path):
