@@ -77,6 +77,7 @@ class BookmarkTree(QTreeWidget):
         self.setEditTriggers(QAbstractItemView.EditTrigger.EditKeyPressed)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setExpandsOnDoubleClick(False)
+        self.setStyleSheet("QTreeWidget::item { padding: 3px 2px; }")
 
     def dropEvent(self, event) -> None:
         src = self.currentItem()
