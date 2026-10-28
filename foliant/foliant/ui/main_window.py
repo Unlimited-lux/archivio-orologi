@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 from collections import OrderedDict
 from pathlib import Path
@@ -237,7 +238,10 @@ class MainWindow(QMainWindow):
         self.act_save_copy = a(_("Salva una copia…"), "copy", lambda: self.save_copy(), requires_document=True)
         self.act_close = a(_("Chiudi documento"), "x", lambda: self.close_view(self.current_view()),
                            QKeySequence.StandardKey.Close, requires_document=True)
-        self.act_quit = a(_("Esci"), "log-out", self.close, QKeySequence.StandardKey.Quit)
+        self.act_quit = a(_("Esci"), "log-out", self.close, "Ctrl+Q")
+        # UX-18: tasti espliciti, non quelli della piattaforma (fuori da GNOME/KDE Close è solo
+        # Ctrl+F4 e Quit non ha tasti)
+        self.act_close.setShortcuts([QKeySequence("Ctrl+W"), QKeySequence("Ctrl+F4")])
         self.act_undo = a(_("Annulla"), "undo-2", self.undo, QKeySequence.StandardKey.Undo, requires_document=True)
         self.act_redo = a(_("Ripeti"), "redo-2", self.redo, QKeySequence.StandardKey.Redo, requires_document=True)
         self.act_redo.setShortcuts([QKeySequence("Ctrl+Shift+Z"), QKeySequence("Ctrl+Y")])
@@ -825,6 +829,13 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, _("Password errata"), _("La password non è corretta. Riprova."))
             except DocumentError as e:
                 QMessageBox.warning(self, _("Impossibile aprire il file"), f"{Path(path).name}\n\n{e}")
+                self._forget_recent(path)
+                return None
+            except Exception as e:          # errore imprevisto del motore: un file non ferma gli altri
+                logging.getLogger(__name__).exception("apertura di %s", path)
+                QMessageBox.warning(self, _("Impossibile aprire il file"),
+                                    f"{Path(path).name}\n\n" + _("Il file non è un PDF valido oppure è danneggiato.")
+                                    + f"\n({type(e).__name__})")
                 self._forget_recent(path)
                 return None
             password, ok = QInputDialog.getText(

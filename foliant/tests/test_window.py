@@ -511,3 +511,36 @@ def test_qt_key_names_follow_the_interface_language(qapp):
             qapp.removeTranslator(tr)
         qapp._foliant_translators = []
         set_language(previous)
+
+
+def test_close_and_quit_shortcuts_are_explicit(window):
+    """UX-18: Ctrl+W chiude la scheda e Ctrl+Q esce su ogni piattaforma (non solo GNOME/KDE)."""
+    assert "Ctrl+W" in [s.toString() for s in window.act_close.shortcuts()]
+    assert window.act_quit.shortcut().toString() == "Ctrl+Q"
+
+
+def test_damaged_page_tree_is_reported_and_next_files_open(window, tmp_path, monkeypatch):
+    """Un PDF il cui albero delle pagine non si può contare dà un messaggio chiaro (NFR-13) e
+    non ferma l'apertura degli altri file della stessa selezione."""
+    import pytest
+    from PySide6.QtWidgets import QMessageBox
+    from foliant.core.document import Document
+    from foliant.core.errors import DocumentError
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "Rotto")
+    data = d.tobytes(no_new_id=True).replace(b"/Count 1", b"/Count -5", 1)
+    broken = tmp_path / "rotto.pdf"
+    broken.write_bytes(data)
+    good = tmp_path / "buono.pdf"
+    g = pymupdf.open()
+    g.new_page()
+    g.new_page()
+    g.save(good)
+    with pytest.raises(DocumentError):
+        Document.open(broken)
+    warnings_seen = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: warnings_seen.append(a[1:3])))
+    for p in (broken, good):
+        window.open_path(str(p))
+    assert warnings_seen and warnings_seen[0][0] == "Impossibile aprire il file" and "rotto.pdf" in warnings_seen[0][1]
+    assert [v.document.display_name for v in window.views()] == ["buono.pdf"]
