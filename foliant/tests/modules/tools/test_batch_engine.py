@@ -616,3 +616,80 @@ def test_step_failure_reports_step(tmp_path, monkeypatch):
     rep = be.run_job(None, items_for([a]), job(dest, ("watermark", {}), ("compress", {})), STARTED)
     assert rep.results[0].status == "error" and "Passo 2 (Comprimi)" in rep.results[0].message
     assert not dest.exists() or os.listdir(dest) == []
+
+
+# ----------------------------------------------------------------- BAT-07
+def _jpeg(path, size=(300, 200), dpi=(150, 150), orientation=None):
+    from PIL import Image
+    img = Image.new("RGB", size, (200, 30, 30))
+    for x in range(size[0] // 3):
+        for y in range(10):
+            img.putpixel((x, y), (0, 0, 0))
+    exif = None
+    if orientation:
+        exif = Image.Exif()
+        exif[0x0112] = orientation
+    img.save(path, "JPEG", dpi=dpi, **({"exif": exif} if exif else {}))
+    return str(path)
+
+
+def test_create_pdf_original_size(tmp_path):
+    src = tmp_path / "foto"
+    src.mkdir()
+    paths = [_jpeg(src / f"f{i}.jpg") for i in range(3)]
+    out = tmp_path / "out"
+    items = [be.analyze_file(p) for p in paths]
+    settings = be.JobSettings(steps=[be.Step("create_pdf", {"page_size": "original"})], destination=str(out))
+    errors, _w = be.validate_settings(items, settings)
+    assert not errors
+    report = be.run_job(None, items, settings)
+    assert report.counts()["ok"] == 3
+    for p in sorted(out.iterdir()):
+        doc = pymupdf.open(str(p))
+        assert doc.page_count == 1
+        assert abs(doc[0].rect.width - 300 * 72 / 150) <= 1 and abs(doc[0].rect.height - 200 * 72 / 150) <= 1
+
+
+def test_create_pdf_exif_and_tiff(tmp_path):
+    from PIL import Image
+    rotated = _jpeg(tmp_path / "ruotata.jpg", orientation=6)    # 90° in senso orario
+    frames = [Image.new("RGB", (100, 140), c) for c in ((255, 0, 0), (0, 255, 0), (0, 0, 255), (9, 9, 9))]
+    tiff = tmp_path / "multi.tif"
+    frames[0].save(tiff, save_all=True, append_images=frames[1:])
+    data = be.image_to_pdf(rotated, "original")
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    assert doc[0].rect.height > doc[0].rect.width     # 300x200 ruotata -> verticale
+    assert pymupdf.open(stream=be.image_to_pdf(str(tiff)), filetype="pdf").page_count == 4
+
+
+def test_create_single_pdf_with_bookmarks_and_office_errors(tmp_path, monkeypatch):
+    a = _jpeg(tmp_path / "a.jpg")
+    txt = tmp_path / "b.txt"
+    txt.write_text("Nota di consegna\nOrologio revisionato", encoding="utf-8")
+    docx = tmp_path / "c.docx"
+    docx.write_bytes(b"non un vero docx")
+    monkeypatch.setattr(be, "_office_command", lambda src, outdir: None)
+    items = [be.analyze_file(p) for p in (a, str(txt), str(docx))]
+    out = tmp_path / "out"
+    settings = be.JobSettings(steps=[be.Step("create_pdf"), be.Step("merge", {"name": "Raccolta"})],
+                              destination=str(out))
+    _e, warnings = be.validate_settings(items, settings)
+    assert any("LibreOffice" in w for w in warnings)
+    report = be.run_job(None, items, settings)
+    by = {os.path.basename(r.input): r for r in report.results}
+    assert by["c.docx"].status == "error" and by["c.docx"].code == "DEP-02"
+    # unione: con un file in errore si applica la politica di BAT-17
+    single = be.JobSettings(steps=[be.Step("create_pdf"), be.Step("merge", {"name": "Raccolta"})],
+                            destination=str(tmp_path / "out2"))
+    report = be.run_job(None, items[:2], single)
+    merged = tmp_path / "out2" / "Raccolta.pdf"
+    doc = pymupdf.open(str(merged))
+    assert [t[1] for t in doc.get_toc() if t[0] == 1] == ["a", "b"]
+    assert "Nota di consegna" in doc[1].get_text()
+
+
+def test_create_step_must_be_first(tmp_path):
+    items = [be.QueueItem(path=str(tmp_path / "x.png"))]
+    settings = be.JobSettings(steps=[be.Step("compress"), be.Step("create_pdf")], destination=str(tmp_path))
+    errors, _w = be.validate_settings(items, settings)
+    assert any("primo passo" in e for e in errors)

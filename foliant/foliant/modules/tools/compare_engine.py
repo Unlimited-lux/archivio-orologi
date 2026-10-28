@@ -99,12 +99,20 @@ class CompareOptions:
     exclusions: list = field(default_factory=list)   # [pagina o -1, x0, y0, x1, y1] in punti
     compare_structure: bool = True  # pagine spostate/ruotate, immagini, annotazioni, campi (CMP-09)
     match_pages_by_content: bool = True   # abbina anche pagine riordinate (pagine spostate)
+    preset: str = ""                # "", "text", "presentation", "drawing", "scan" (CMP-12)
+    ocr_languages: str = "ita+eng"
 
     def criteria(self) -> list[str]:
         """Descrizione leggibile dei criteri applicati."""
         modes = {MODE_AUTO: _("Automatico"), MODE_TEXT: _("Solo testo"), MODE_VISUAL: _("Solo visivo")}
         sens = {"high": _("Alta"), "medium": _("Media"), "low": _("Bassa")}
         out = [_("Tipo di confronto: {m}").format(m=modes.get(self.mode, self.mode))]
+        presets = {"text": _("Testo"), "presentation": _("Presentazione"), "drawing": _("Disegno tecnico"),
+                   "scan": _("Scansione")}
+        if self.preset in presets:
+            out.append(_("Preset: {p}").format(p=presets[self.preset]))
+            if self.preset == "scan":
+                out.append(_("Riconoscimento del testo in memoria: {l}").format(l=self.ocr_languages))
         if self.mode != MODE_VISUAL:
             if self.ignore_case:
                 out.append(_("Ignora maiuscole/minuscole"))
@@ -1076,6 +1084,26 @@ class _NoProgress:
         pass
 
 
+def _ocr_function():
+    try:
+        from foliant.modules.ocr.engine import ocr_pdf_bytes
+    except Exception:
+        return None
+    return ocr_pdf_bytes
+
+
+def _ocr_in_memory(doc: pymupdf.Document, options: CompareOptions, progress) -> pymupdf.Document:
+    """Riconoscimento del testo temporaneo (preset Scansione): i file non cambiano."""
+    fn = _ocr_function()
+    with ENGINE_LOCK:
+        plain = doc.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE)
+    data = fn(plain, options.ocr_languages, "all", None, None)
+    with ENGINE_LOCK:
+        new = pymupdf.open(stream=data, filetype="pdf")
+        doc.close()
+    return new
+
+
 def run_compare(progress, side_a: SideInput, side_b: SideInput, options: CompareOptions | None = None) -> CompareResult:
     """Confronta A e B. `progress` come in `ctx.run_task` (può essere None)."""
     options = options or CompareOptions()
@@ -1086,8 +1114,21 @@ def run_compare(progress, side_a: SideInput, side_b: SideInput, options: Compare
     except Exception:
         doc_a.close()
         raise
+    notes = []
     try:
-        return _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, rep_b, options)
+        if options.preset == "scan" and sha256(side_a.data) != sha256(side_b.data):
+            if _ocr_function() is None:
+                notes.append(_("OCR non disponibile (modulo OCR non installato): eseguito solo il confronto "
+                               "visivo."))
+                options = CompareOptions.from_dict({**options.to_dict(), "mode": MODE_VISUAL})
+            else:
+                progress.update(0.0, _("Riconoscimento del testo di A…"))
+                doc_a = _ocr_in_memory(doc_a, options, progress)
+                progress.update(0.0, _("Riconoscimento del testo di B…"))
+                doc_b = _ocr_in_memory(doc_b, options, progress)
+        result = _compare(progress, doc_a, doc_b, side_a, side_b, allow_a, allow_b, rep_a, rep_b, options)
+        result.warnings[:0] = notes
+        return result
     finally:
         with ENGINE_LOCK:
             doc_a.close()

@@ -290,9 +290,10 @@ class SidePicker(QGroupBox):
 
 
 PRESETS = {
-    "text": dict(mode=ce.MODE_AUTO, sensitivity="medium", dpi=150, auto_align=True),
-    "drawing": dict(mode=ce.MODE_VISUAL, sensitivity="high", dpi=200, auto_align=False),
-    "scan": dict(mode=ce.MODE_VISUAL, sensitivity="low", dpi=150, auto_align=True),
+    "text": dict(preset="text", mode=ce.MODE_TEXT, match_pages_by_content=True),
+    "presentation": dict(preset="presentation", mode=ce.MODE_AUTO, match_pages_by_content=True, dpi=100),
+    "drawing": dict(preset="drawing", mode=ce.MODE_VISUAL, sensitivity="high", dpi=200, auto_align=False),
+    "scan": dict(preset="scan", mode=ce.MODE_AUTO, sensitivity="low", dpi=150, auto_align=True),
 }
 
 
@@ -326,7 +327,8 @@ class CompareSetupDialog(QDialog):
             mode_box.addWidget(b)
         self.preset = QComboBox()
         self.preset.addItem(_("Preset…"), None)
-        self.preset.addItem(_("Documento di testo"), "text")
+        self.preset.addItem(_("Testo"), "text")
+        self.preset.addItem(_("Presentazione"), "presentation")
         self.preset.addItem(_("Disegno tecnico"), "drawing")
         self.preset.addItem(_("Scansione"), "scan")
         self.preset.currentIndexChanged.connect(self._apply_preset)
@@ -410,6 +412,8 @@ class CompareSetupDialog(QDialog):
             for k, v in PRESETS[key].items():
                 setattr(opts, k, v)
             self.set_options(opts)
+            if key == "scan" and ce._ocr_function() is None:
+                self.ctx.status(_("OCR non disponibile: le scansioni saranno confrontate solo visivamente."))
 
     def set_options(self, o: ce.CompareOptions) -> None:
         self.mode_buttons.get(o.mode, self.mode_buttons[ce.MODE_AUTO]).setChecked(True)
@@ -424,6 +428,8 @@ class CompareSetupDialog(QDialog):
         self.sensitivity.setCurrentIndex(max(0, self.sensitivity.findData(o.sensitivity)))
         self.dpi.setValue(o.dpi)
         self._exclusions = list(o.exclusions)
+        self._extra = {"preset": o.preset, "ocr_languages": o.ocr_languages,
+                       "match_pages_by_content": o.match_pages_by_content, "compare_structure": o.compare_structure}
 
     def options(self) -> ce.CompareOptions:
         mode = next(m for m, b in self.mode_buttons.items() if b.isChecked())
@@ -433,7 +439,7 @@ class CompareSetupDialog(QDialog):
             dpi=self.dpi.value(), sensitivity=self.sensitivity.currentData(),
             auto_align=self.auto_align.isChecked(), include_annotations=not self.ignore_annots.isChecked(),
             ignore_headers_footers=self.ignore_hf.isChecked(), ignore_page_numbers=self.ignore_numbers.isChecked(),
-            exclusions=list(getattr(self, "_exclusions", [])))
+            exclusions=list(getattr(self, "_exclusions", [])), **getattr(self, "_extra", {}))
 
     def swap(self) -> None:
         sa, sb = self.side_a.state(), self.side_b.state()

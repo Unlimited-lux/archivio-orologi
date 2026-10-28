@@ -60,8 +60,10 @@ def test_setup_proposes_active_document_and_swaps(window, pdf_builder):
     dlg.ignore_case.setChecked(True)
     o = dlg.options()
     assert o.mode == ce.MODE_TEXT and o.ignore_case
-    dlg.preset.setCurrentIndex(3)   # scansione
-    assert dlg.options().mode == ce.MODE_VISUAL and dlg.options().sensitivity == "low"
+    dlg.preset.setCurrentIndex(dlg.preset.findData("scan"))
+    assert dlg.options().preset == "scan" and dlg.options().sensitivity == "low"
+    dlg.preset.setCurrentIndex(dlg.preset.findData("drawing"))
+    assert dlg.options().mode == ce.MODE_VISUAL and dlg.options().sensitivity == "high"
     dlg.close()
     del vb
 

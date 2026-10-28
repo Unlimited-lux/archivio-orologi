@@ -31,6 +31,10 @@ import pymupdf
 from foliant.api import ENGINE_LOCK, DocumentError, OperationCancelled, _, atomic_write
 
 INPUT_EXTENSIONS = (".pdf",)
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp")
+TEXT_EXTENSIONS = (".txt", ".md")
+OFFICE_EXTENSIONS = (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".doc", ".xls", ".ppt", ".rtf")
+CREATE_EXTENSIONS = IMAGE_EXTENSIONS + TEXT_EXTENSIONS + OFFICE_EXTENSIONS
 MAX_CANDIDATES = 20
 MARK_KEY = "/FoliantMark"
 MARK_KINDS = ("watermark", "background", "header_footer", "bates")
@@ -142,6 +146,8 @@ def analyze_file(path: str) -> QueueItem:
     except OSError as e:
         item.error = _("non leggibile: {e}").format(e=e.strerror or e)
         return item
+    if path.lower().endswith(CREATE_EXTENSIONS):
+        return item   # verrà convertito in PDF (BAT-07)
     with ENGINE_LOCK:
         try:
             doc = pymupdf.open(stream=data, filetype="pdf")
@@ -259,6 +265,14 @@ POSITIONS = [("top-left", "In alto a sinistra"), ("top-center", "In alto al cent
 def _build_actions() -> dict[str, ActionSpec]:
     pos = [(k, v) for k, v in POSITIONS]
     actions = [
+        ActionSpec("create_pdf", "Crea PDF da altri formati", "pdf", [
+            Param("page_size", "Formato pagina (immagini)", "choice", "a4",
+                  [("a4", "A4"), ("letter", "Letter"), ("original", "Dimensione originale")]),
+            Param("fit", "Adattamento", "choice", "fit",
+                  [("fit", "Adatta mantenendo le proporzioni"), ("fill", "Riempi la pagina"),
+                   ("center", "Centra a dimensione reale")]),
+            Param("margin", "Margine (mm)", "float", 0.0, minimum=0, maximum=100),
+        ], kind="create"),
         ActionSpec("compress", "Comprimi", "compresso", [
             Param("level", "Livello", "choice", "medium",
                   [("low", "Leggera (qualità alta)"), ("medium", "Bilanciata"), ("high", "Massima")]),
@@ -574,6 +588,8 @@ def validate_settings(items: list[QueueItem], settings: JobSettings) -> tuple[li
             continue
         spec = ACTIONS[step.action]
         params = step.merged_params()
+        if spec.kind == "create" and i != 0:
+            errors.append(_("«{a}» deve essere il primo passo della sequenza.").format(a=_(spec.label)))
         if spec.kind in ("convert", "print") and i != len(settings.steps) - 1:
             errors.append(_("«{a}» deve essere l'ultimo passo della sequenza.").format(a=_(spec.label)))
         if step.action == "protect":
@@ -613,6 +629,14 @@ def validate_settings(items: list[QueueItem], settings: JobSettings) -> tuple[li
             and not any(s.action == "merge" for s in settings.steps) and not settings.replace_originals:
         warnings.append(_("Il modello produce nomi non univoci: aggiungi {contatore} oppure i conflitti saranno "
                           "risolti secondo la politica scelta."))
+    others = [it for it in items if not it.path.lower().endswith(".pdf")]
+    if others and not any(s.action == "create_pdf" for s in settings.steps):
+        warnings.append(_("{n} file non PDF saranno saltati: aggiungi «Crea PDF da altri formati».").format(
+            n=len(others)))
+    office = [it for it in items if it.path.lower().endswith(OFFICE_EXTENSIONS)]
+    if office and any(s.action == "create_pdf" for s in settings.steps) and _office_command("x", "y") is None:
+        warnings.append(_("{n} documenti Office non convertibili: LibreOffice non è installato.").format(
+            n=len(office)))
     signed = sum(1 for it in items if it.signed)
     if signed:
         warnings.append(_("{n} file firmati: le firme non saranno più valide.").format(n=signed))
@@ -1117,6 +1141,101 @@ class _Ctx:
             self.progress.check() if hasattr(self.progress, "check") else self.progress.update()
 
 
+PAGE_SIZES = {"a4": (595.28, 841.89), "letter": (612.0, 792.0)}
+
+
+def _office_command(src: str, outdir: str) -> list[str] | None:
+    """Comando di conversione dei documenti Office (sostituibile nei test)."""
+    exe = shutil.which("soffice") or shutil.which("libreoffice")
+    if not exe:
+        return None
+    return [exe, "--headless", "--convert-to", "pdf", "--outdir", outdir, src]
+
+
+def image_to_pdf(path: str, page_size: str = "a4", fit: str = "fit", margin_mm: float = 0.0,
+                 warnings: list | None = None) -> bytes:
+    """Immagine (anche TIFF multipagina) -> PDF, con orientamento EXIF applicato."""
+    from PIL import Image, ImageOps, ImageSequence
+    try:
+        img = Image.open(path)
+    except Exception as e:
+        raise BatchError("IMG-01", _("Immagine non leggibile: {e}").format(e=e)) from e
+    frames = []
+    if path.lower().endswith(".gif"):
+        frames = [img.copy()]
+        if getattr(img, "n_frames", 1) > 1 and warnings is not None:
+            warnings.append(_("GIF animata: usato solo il primo fotogramma"))
+    else:
+        frames = [f.copy() for f in ImageSequence.Iterator(img)]
+    margin = margin_mm * 72 / 25.4
+    with ENGINE_LOCK:
+        out = pymupdf.open()
+        for frame in frames:
+            frame = ImageOps.exif_transpose(frame)
+            dpi = frame.info.get("dpi", (96, 96))
+            try:
+                dx, dy = float(dpi[0]) or 96.0, float(dpi[1]) or 96.0
+            except Exception:
+                dx = dy = 96.0
+            if frame.mode in ("CMYK", "P", "LA", "I;16", "I", "F", "1", "L") and frame.mode != "L":
+                frame = frame.convert("RGB")
+            buf = io.BytesIO()
+            frame.save(buf, format="PNG")
+            w_pt, h_pt = frame.width * 72.0 / dx, frame.height * 72.0 / dy
+            if page_size == "original":
+                pw, ph = w_pt + 2 * margin, h_pt + 2 * margin
+            else:
+                pw, ph = PAGE_SIZES.get(page_size, PAGE_SIZES["a4"])
+                if w_pt > h_pt:
+                    pw, ph = ph, pw
+            page = out.new_page(width=pw, height=ph)
+            area = pymupdf.Rect(margin, margin, pw - margin, ph - margin)
+            if fit == "fill" and page_size != "original":
+                target, keep = area, False
+            elif fit == "center" and page_size != "original":
+                x0 = area.x0 + (area.width - w_pt) / 2
+                y0 = area.y0 + (area.height - h_pt) / 2
+                target, keep = pymupdf.Rect(x0, y0, x0 + w_pt, y0 + h_pt), True
+            else:
+                target, keep = area, True
+            page.insert_image(target, stream=buf.getvalue(), keep_proportion=keep)
+        data = out.tobytes(garbage=3, deflate=True)
+        out.close()
+    return data
+
+
+def to_pdf_bytes(path: str, params: dict, warnings: list | None = None) -> bytes:
+    """Converte un file non PDF in PDF (BAT-07)."""
+    low = path.lower()
+    if low.endswith(IMAGE_EXTENSIONS):
+        return image_to_pdf(path, params.get("page_size", "a4"), params.get("fit", "fit"),
+                            float(params.get("margin", 0.0) or 0.0), warnings)
+    if low.endswith(TEXT_EXTENSIONS):
+        with ENGINE_LOCK:
+            try:
+                src = pymupdf.open(path, filetype="txt")
+                data = src.convert_to_pdf()
+                src.close()
+            except Exception as e:
+                raise BatchError("FMT-02", _("Testo non convertibile: {e}").format(e=e)) from e
+        return data
+    if low.endswith(OFFICE_EXTENSIONS):
+        with tempfile.TemporaryDirectory(prefix="foliant-office-") as tmp:
+            cmd = _office_command(path, tmp)
+            if cmd is None:
+                raise BatchError("DEP-02", _("Motore di conversione dei documenti non disponibile (LibreOffice)."))
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+            except Exception as e:
+                raise BatchError("FMT-03", _("Documento non convertibile (forse protetto da password).")) from e
+            out = os.path.join(tmp, Path(path).stem + ".pdf")
+            if not os.path.exists(out):
+                raise BatchError("FMT-03", _("Documento non convertibile (forse protetto da password)."))
+            with open(out, "rb") as f:
+                return f.read()
+    raise BatchError("FMT-01", _("Formato non ammesso per l'operazione."))
+
+
 def _open_input(data: bytes, item: QueueItem, candidates: list[str]) -> tuple[bytes, dict, int | None]:
     """Apre il file; restituisce (dati in chiaro, opzioni di cifratura originali, n. candidata)."""
     with ENGINE_LOCK:
@@ -1418,6 +1537,11 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
             except OSError as e:
                 raise BatchError("FILE-01", _("File non leggibile: {e}").format(e=e.strerror or e))
             res.bytes_in = len(raw)
+            create = next((s for s in steps if s.action == "create_pdf"), None)
+            if not item.path.lower().endswith(".pdf") and item.path.lower().endswith(CREATE_EXTENSIONS):
+                if create is None:
+                    raise BatchError("FMT-01", _("Formato non ammesso per l'operazione."), status="skipped")
+                raw = to_pdf_bytes(item.path, create.merged_params(), ctx.warnings)
             data, protection, cand_no = _open_input(raw, item, candidates)
             if cand_no and cand_no > (1 if item.password else 0) and any(s.action == "remove_password"
                                                                            for s in steps):
@@ -1437,6 +1561,8 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                         raise BatchError("GEN-01", _("Passo {k} ({a}) non riuscito: {e}").format(
                             k=k + 1, a=_(spec.label), e=e)) from e
                     ctx.check()
+                elif spec.kind == "create":
+                    pass   # conversione già fatta all'apertura
                 elif spec.kind == "print":
                     _do_print(data, step, item, ctx, printer, protection)
                 elif spec.kind == "convert":

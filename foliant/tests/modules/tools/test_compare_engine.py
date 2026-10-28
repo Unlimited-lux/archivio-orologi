@@ -517,3 +517,54 @@ def test_rotation_only(tmp_path, pdf_builder):
     doc.save(str(b))
     r = run(a, b, dpi=72)
     assert [(d.kind, d.subtype) for d in r.differences] == [(ce.PAGE, "rotation")]
+
+
+# ----------------------------------------------------------------- CMP-12
+def _letter_scan(tmp_path, name, amount):
+    """Scansione (solo immagine) di una lettera; il testo «vero» è nel campo subject
+    perché l'OCR simulato possa «riconoscerlo»."""
+    src = pymupdf.open()
+    p = src.new_page()
+    p.insert_text((72, 100), f"Importo dovuto: {amount} euro", fontsize=16)
+    img = p.get_pixmap(dpi=100).tobytes("png")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_image(page.rect, stream=img)
+    doc.set_metadata({"subject": f"Importo dovuto: {amount} euro"})
+    path = tmp_path / name
+    doc.save(str(path))
+    return str(path)
+
+
+def _fake_ocr(data, languages, mode, pages=None, progress=None):
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    text = (doc.metadata or {}).get("subject", "")
+    for page in doc:
+        page.insert_text((72, 100), text, fontsize=16, render_mode=3)
+    out = doc.tobytes()
+    doc.close()
+    return out
+
+
+def test_scan_preset_uses_ocr_in_memory(tmp_path, monkeypatch):
+    import hashlib
+    monkeypatch.setattr(ce, "_ocr_function", lambda: _fake_ocr)
+    a = _letter_scan(tmp_path, "a.pdf", "1250")
+    b = _letter_scan(tmp_path, "b.pdf", "1350")
+    before = (hashlib.sha256(read(a)).hexdigest(), hashlib.sha256(read(b)).hexdigest())
+    r = run(a, b, preset="scan", sensitivity="low")
+    mods = [d for d in r.differences if d.kind == ce.MODIFIED]
+    assert len(mods) == 1 and mods[0].text_a == "1250" and mods[0].text_b == "1350"
+    assert not [d for d in r.differences if d.kind == ce.VISUAL]
+    assert (hashlib.sha256(read(a)).hexdigest(), hashlib.sha256(read(b)).hexdigest()) == before
+    assert run(a, a, preset="scan").differences == []
+
+
+def test_scan_preset_without_ocr_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(ce, "_ocr_function", lambda: None)
+    a = _letter_scan(tmp_path, "a.pdf", "1250")
+    b = _letter_scan(tmp_path, "b.pdf", "1350")
+    r = run(a, b, preset="scan")
+    assert any("OCR non disponibile" in w for w in r.warnings)
+    assert r.options.mode == ce.MODE_VISUAL
+    assert any(d.kind == ce.VISUAL for d in r.differences)

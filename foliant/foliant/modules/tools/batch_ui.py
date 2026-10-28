@@ -441,7 +441,11 @@ class BatchWidget(QWidget):
 
     def add_paths(self, paths: list[str]) -> tuple[int, list[tuple[str, str]]]:
         """Aggiunge file e cartelle; restituisce (aggiunti, ignorati)."""
-        new, ignored = be.collect_inputs(paths, self.recursive.isChecked(), existing=[i.path for i in self.items])
+        exts = be.INPUT_EXTENSIONS
+        if any(s.action == "create_pdf" for s in self.steps):
+            exts = be.INPUT_EXTENSIONS + be.CREATE_EXTENSIONS
+        new, ignored = be.collect_inputs(paths, self.recursive.isChecked(), exts,
+                                         existing=[i.path for i in self.items])
         for p in paths:
             if os.path.isdir(p):
                 self.input_roots.append(os.path.realpath(p))
