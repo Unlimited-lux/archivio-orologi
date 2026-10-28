@@ -116,13 +116,17 @@ class InlineEditor(QTextEdit):
         self.setAutoFillBackground(True)
         self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self._load(spec.paragraphs)
-        self.document().contentsChanged.connect(self._fit)
+        # ricalcolo differito: cambiare il ritorno a capo durante l'inserimento del testo non è sicuro
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.timeout.connect(self._fit)
+        self.document().contentsChanged.connect(self._fit_timer.start)
         view.horizontalScrollBar().valueChanged.connect(self.reposition)
         view.verticalScrollBar().valueChanged.connect(self.reposition)
         view.zoomChanged.connect(self._on_zoom)
         self.document().setModified(False)
         self.document().clearUndoRedoStacks()
-        self.reposition()
+        self._fit()
 
     # ------------------------------------------------------------ scala
     @property
@@ -162,6 +166,8 @@ class InlineEditor(QTextEdit):
         fmt.setFontItalic(style.italic)
         fmt.setFontUnderline(style.underline)
         fmt.setFontStrikeOut(style.strike)
+        fmt.setFontHintingPreference(QFont.HintingPreference.PreferNoHinting)
+        fmt.setFontKerning(False)
         if style.char_spacing:
             fmt.setFontLetterSpacingType(QFont.SpacingType.AbsoluteSpacing)
             fmt.setFontLetterSpacing(style.char_spacing * self.scale)
@@ -356,7 +362,9 @@ class InlineEditor(QTextEdit):
     def content_rect_points(self) -> QRectF:
         """Area occupata dal testo (punti, riquadro di lavoro)."""
         s = self.scale
-        ideal = self.document().idealWidth() if self.spec.auto_width else self.spec.width * s
+        wrap = getattr(self, "_wrap_px", None)
+        ideal = self.document().idealWidth() if (self.spec.auto_width and wrap is None) else (
+            wrap if wrap is not None else self.spec.width * s)
         h = self.document().size().height()
         asc = self._first_ascent()
         top = self.spec.first_baseline - asc / s
@@ -367,14 +375,48 @@ class InlineEditor(QTextEdit):
             x0 = self.spec.x0 + self.spec.width / 2 - ideal / (2 * s)
         return QRectF(x0, top, ideal / s, h / s)
 
+    def _limit_points(self) -> float:
+        """Larghezza disponibile fino al bordo dell'area visibile (blocchi a larghezza automatica)."""
+        try:
+            pw, _ph = self.view.page_size(self.spec.page)
+        except Exception:
+            return 1e6
+        if self.align == ALIGN_RIGHT:
+            return max(1.0, self.spec.x0 + self.spec.width)
+        if self.align == ALIGN_CENTER:
+            c = self.spec.x0 + self.spec.width / 2
+            return max(1.0, 2 * min(c, pw - c))
+        return max(1.0, pw - self.spec.x0)
+
     def _fit(self) -> None:
+        if getattr(self, "_fitting", False):
+            return
+        self._fitting = True
+        try:
+            self._do_fit()
+        except RuntimeError:
+            pass   # vista già chiusa
+        finally:
+            self._fitting = False
+
+    def _do_fit(self) -> None:
         s = self.scale
+        self._wrap_px = None
         if self.spec.auto_width:
             self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+            limit = self._limit_points() * s
+            if self.document().idealWidth() > limit:
+                # come nel PDF: a capo al bordo dell'area visibile
+                self._wrap_px = limit
+                self.setLineWrapMode(QTextEdit.LineWrapMode.FixedPixelWidth)
+                self.setLineWrapColumnOrWidth(max(4, int(limit)))
         else:
+            # stessa tolleranza dell'impaginazione del PDF (arrotondamenti delle larghezze)
+            px = self.spec.width * s
+            px += max(0.3, 0.03 * self.spec.width) * s + 2
+            self._wrap_px = px
             self.setLineWrapMode(QTextEdit.LineWrapMode.FixedPixelWidth)
-            self.setLineWrapColumnOrWidth(max(4, round(self.spec.width * s)))
-        self.document().adjustSize() if self.spec.auto_width else None
+            self.setLineWrapColumnOrWidth(max(4, int(px + 0.999)))
         self.reposition()
 
     def reposition(self) -> None:
@@ -395,6 +437,8 @@ class InlineEditor(QTextEdit):
         w = max(vr.width(), text_rect.width() + left_pad) + 2
         h = max(vr.height(), text_rect.height() + top_pad) + 2
         self.setGeometry(round(vr.left()), round(vr.top()), round(w + 1), round(h + 1))
+        self.verticalScrollBar().setValue(0)
+        self.horizontalScrollBar().setValue(0)
 
     def _on_zoom(self, _zoom: float) -> None:
         new = self.view.zoom * PX_PER_PT

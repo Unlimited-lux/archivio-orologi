@@ -382,3 +382,27 @@ def test_screenshot(window, paragraphs_pdf, quiet, qtbot, tmp_path, mode):
     img.save(str(tmp_path / f"text_edit_{mode}.png"))
     ctrl.commit_editor(view)
     theme.apply(QApplication.instance(), "light")
+
+
+def test_editor_keeps_original_line_breaks(window, paragraphs_pdf, quiet, qtbot):
+    """bug_02: il riquadro di un paragrafo di 4 righe mostra 4 righe, tutte visibili."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    view.set_zoom(1.0)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "Lorem")
+    ed = ctrl.open_editor(view, 0, block)
+    layout = ed.document().begin().layout()
+    assert layout.lineCount() == 4
+    assert ed.document().size().height() <= ed.viewport().height() + 1
+
+
+def test_add_text_editor_wraps_at_page_edge(window, sample_pdf, quiet, qtbot):
+    """bug_07: la casella a larghezza automatica va a capo al bordo della pagina anche nell'editor."""
+    view = open_in_edit_mode(window, sample_pdf)
+    ctrl = ctrl_of(window)
+    ed = ctrl.open_new_text(view, 0, pymupdf.Point(545, 300), None)
+    ed.insertPlainText("Questa frase e lunga abbastanza da superare il bordo destro della pagina")
+    qtbot.wait(30)
+    r = ed.content_rect_points()
+    assert r.right() <= 595 + 1
+    assert ed.document().begin().layout().lineCount() > 1
