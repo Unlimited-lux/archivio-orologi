@@ -703,3 +703,53 @@ def test_dialogo_lingue_colonne_e_dimensioni(window, qtbot):
     fm = t.fontMetrics()
     longest = max(fm.horizontalAdvance(x) for x in texts)
     assert t.columnWidth(3) + 40 >= longest or t.horizontalScrollBar().maximum() > 0
+
+
+def _wait_job(qtbot, ctl, view, timeout=120000):
+    qtbot.waitUntil(lambda: ctl.jobs.get(view) is None, timeout=timeout)
+
+
+def test_ocr_in_background_documento_consultabile(window, qtbot, scan_two):
+    """OCR-13: l'OCR lavora in background; durante il lavoro il documento si consulta e non cambia;
+    alla fine il risultato è un solo passo di annulla."""
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    job = ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    assert job is not None and job.bar.isVisible()
+    view.go_to_page(1)                                   # navigazione libera
+    assert not view.document.is_modified
+    assert ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0], preview=False) is None
+    _wait_job(qtbot, ctl, view)
+    assert "compravendita" in view.document.page_text(0) and view.document.page_text(1).strip()
+    view.document.undo()
+    assert view.document.page_text(0).strip() == "" and view.document.page_text(1).strip() == ""
+
+
+def test_ocr_in_background_documento_modificato_nel_frattempo(window, qtbot, scan_two, monkeypatch):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    asked = []
+    monkeypatch.setattr(ctl.ctx, "confirm", lambda t, m: asked.append(m) or True)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    with view.document.change("ruota") as pdf:          # modifica mentre l'OCR lavora
+        pdf[1].set_rotation(90)
+    _wait_job(qtbot, ctl, view)
+    assert asked and "2" in asked[0]
+    assert "compravendita" in view.document.page_text(0)
+    assert view.document.page_text(1).strip() == ""      # pagina cambiata: non toccata
+    from foliant.api import ENGINE_LOCK
+    with ENGINE_LOCK:
+        assert view.document.pdf[1].rotation == 90
+
+
+def test_ocr_in_background_annullato_o_chiuso(window, qtbot, scan_two, monkeypatch):
+    view = window.open_path(scan_two)
+    ctl = ocr_controller()
+    monkeypatch.setattr(ctl, "ask_keep_partial", lambda partial: False)
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    ctl.jobs[view].bar.btn_cancel.click()
+    _wait_job(qtbot, ctl, view)
+    assert not view.document.is_modified
+    ctl.run_background(view, engine.OcrOptions(languages=["ita"]), [0, 1], preview=False)
+    window.close_view(view)                              # chiusura durante il lavoro: nessun errore
+    qtbot.waitUntil(lambda: not ctl.jobs, timeout=120000)

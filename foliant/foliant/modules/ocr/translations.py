@@ -335,4 +335,9 @@ EN = {
     '{n} pagine convertite in immagine.': '{n} pages converted to images.',
     "Rende ogni pagina un'immagine, senza testo estraibile": 'Turns every page into an image, without extractable text',
     '< 1 MB': '< 1 MB',
+    'Il riconoscimento di questo documento è già in corso.': 'Recognition of this document is already in progress.',
+    'Riconoscimento non applicato': 'Recognition not applied',
+    "Durante il riconoscimento sono state aggiunte o tolte pagine: il testo riconosciuto non può essere collocato con sicurezza. Esegui di nuovo l'OCR.": 'Pages were added or removed during recognition: the recognized text cannot be placed safely. Run OCR again.',
+    'Documento modificato': 'Document modified',
+    'Durante il riconoscimento sono cambiate le pagine {p}. Applicare il testo riconosciuto solo alle altre pagine?': 'Pages {p} changed during recognition. Apply the recognized text only to the other pages?',
 }

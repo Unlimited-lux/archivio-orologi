@@ -539,6 +539,24 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
     return result
 
 
+def page_fingerprints(pdf: pymupdf.Document) -> list[str]:
+    """Impronta di ogni pagina (contenuto, risorse, rotazione, riquadri): serve a capire quali pagine
+    sono cambiate mentre l'OCR lavorava in background. Da chiamare con ENGINE_LOCK."""
+    import hashlib
+    out = []
+    for page in pdf:
+        h = hashlib.sha1()
+        for xref in page.get_contents():
+            h.update(pdf.xref_stream(xref) or b"")
+        h.update(f"{page.rotation}|{tuple(page.rect)}|{tuple(page.mediabox)}".encode())
+        try:
+            h.update(pdf.xref_object(page.xref, compressed=True).encode())
+        except Exception:
+            pass
+        out.append(h.hexdigest())
+    return out
+
+
 def document_copy_bytes(pdf: pymupdf.Document) -> bytes:
     """Copia non cifrata del documento aperto, senza alterarlo (da chiamare con ENGINE_LOCK).
 

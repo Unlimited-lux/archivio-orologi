@@ -158,6 +158,72 @@ class ProposalBar(QFrame):
         return False
 
 
+# =================================================================== OCR in background
+class JobBar(QFrame):
+    """Avanzamento dell'OCR in background, in cima alla vista: il documento resta consultabile."""
+
+    def __init__(self, view, on_cancel):
+        from PySide6.QtWidgets import QProgressBar
+        super().__init__(view)
+        self.setObjectName("ocrJobBar")
+        self.view = view
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 8, 6)
+        ic = QLabel(self)
+        ic.setPixmap(icon("scan-text").pixmap(18, 18))
+        lay.addWidget(ic)
+        self.label = QLabel(_("Riconoscimento del testo…"), self)
+        lay.addWidget(self.label, 1)
+        self.bar = QProgressBar(self)
+        self.bar.setRange(0, 1000)
+        self.bar.setFixedWidth(180)
+        lay.addWidget(self.bar)
+        self.btn_cancel = QPushButton(_("Annulla"), self)
+        self.btn_cancel.clicked.connect(on_cancel)
+        lay.addWidget(self.btn_cancel)
+        self.setStyleSheet(
+            f"#ocrJobBar {{ background: {theme.hex_color('surface')}; border: 1px solid {theme.hex_color('border')};"
+            f" border-radius: 8px; }} #ocrJobBar QLabel {{ color: {theme.hex_color('text')}; border: none; }}")
+        view.installEventFilter(self)
+
+    def update_progress(self, fraction: float, text: str) -> None:
+        self.bar.setValue(int(fraction * 1000))
+        if text:
+            self.label.setText(text)
+
+    def place(self) -> None:
+        vp = self.view.viewport().geometry()
+        self.setFixedWidth(max(240, vp.width() - 24))
+        self.adjustSize()
+        self.move(vp.x() + 12, vp.y() + vp.height() - self.height() - 10)
+        self.show()
+        self.raise_()
+
+    def eventFilter(self, obj, ev) -> bool:
+        if obj is self.view and ev.type() == QEvent.Type.Resize and self.isVisible():
+            self.place()
+        return False
+
+
+@dataclass
+class OcrJob:
+    view: object
+    opts: engine.OcrOptions
+    pages: list[int]
+    preview: bool
+    new_document: bool
+    data: bytes
+    version: int
+    fingerprints: list[str]
+    progress: object
+    bar: JobBar | None = None
+    thread: object = None
+    timer: QTimer | None = None
+    result: object = None
+    error: BaseException | None = None
+    done: bool = False
+
+
 # =================================================================== strumento area
 class AreaOcrTool(Tool):
     """Trascina un rettangolo sulla pagina per riconoscerne il testo."""
@@ -395,11 +461,22 @@ class ReviewPanel(QWidget):
 
 
 # =================================================================== controller
+def _recognize_copy(data: bytes, opts: engine.OcrOptions, pages: list[int], progress) -> engine.OcrResult:
+    with ENGINE_LOCK:
+        pdf = pymupdf.open(stream=data, filetype="pdf")
+    try:
+        return engine.recognize_document(pdf, opts, pages, progress)
+    finally:
+        with ENGINE_LOCK:
+            pdf.close()
+
+
 class OcrController(QObject):
     def __init__(self, ctx: Context):
         super().__init__(ctx)
         self.ctx = ctx
         self.states: dict = weakref.WeakKeyDictionary()
+        self.jobs: dict = {}
         self.current_word = None
         self.highlight = True
         self.area_tool = AreaOcrTool(self.ocr_area)
@@ -476,6 +553,10 @@ class OcrController(QObject):
         del st
 
     def on_closed(self, view) -> None:
+        job = self.jobs.get(view)
+        if job is not None:
+            job.progress.cancel()          # il lavoro si ferma; il risultato non viene applicato
+            job.bar = None                 # distrutta insieme alla vista
         st = self.states.pop(view, None)
         if st is not None and st.timer is not None:
             st.timer.stop()
@@ -667,18 +748,19 @@ class OcrController(QObject):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.settings().setValue("ocr/mode", dlg.mode())
-        self.run(view, dlg.options(), dlg.selected_pages(), preview=dlg.preview, new_document=dlg.new_document)
+        self.run_background(view, dlg.options(), dlg.selected_pages(), preview=dlg.preview,
+                            new_document=dlg.new_document)
 
-    def run(self, view, opts: engine.OcrOptions, pages: list[int], preview: bool = True,
-            new_document: bool = False) -> engine.OcrResult | None:
+    def _prepare(self, view, opts: engine.OcrOptions, pages: list[int], new_document: bool) -> bool:
+        """Controlli prima dell'avvio (lingue, permessi, Forza OCR, firme). False = non avviare."""
         doc = view.document
         missing = languages.missing_languages(opts.languages)
         if missing:
             opts.languages = self._resolve_missing(opts.languages, missing)
             if not opts.languages:
-                return None
+                return False
         if not self._check_permissions(view, opts.mode, new_document):
-            return None
+            return False
         if opts.existing_text == engine.FORCE and opts.mode != engine.TEXT_ONLY:
             st = self.state(view)
             with ENGINE_LOCK:
@@ -690,41 +772,142 @@ class OcrController(QObject):
                     "Le pagine con testo ({p}) saranno convertite in immagine e riconosciute di nuovo: si perde la "
                     "nitidezza vettoriale e il file può crescere. Annotazioni e campi modulo restano. "
                     "Continuare?").format(p=engine.format_pages(with_text))):
-                return None
+                return False
         if opts.mode != engine.TEXT_ONLY and not new_document and self._is_signed(view):
             if not self.ctx.confirm(_("Documento firmato"), _(
                     "Il documento è firmato digitalmente. Il riconoscimento del testo ne modifica il contenuto: "
                     "le firme risulteranno non più valide per le modifiche successive. Continuare?")):
-                return None
+                return False
+        return True
+
+    def run(self, view, opts: engine.OcrOptions, pages: list[int], preview: bool = True,
+            new_document: bool = False) -> engine.OcrResult | None:
+        """OCR con finestra di avanzamento (modale). Vedi `run_background` per l'esecuzione non modale."""
+        if not self._prepare(view, opts, pages, new_document):
+            return None
+        doc = view.document
         with ENGINE_LOCK:
             data = engine.document_copy_bytes(doc.pdf)
 
         def work(progress):
-            with ENGINE_LOCK:
-                pdf = pymupdf.open(stream=data, filetype="pdf")
-            try:
-                return engine.recognize_document(pdf, opts, pages, progress)
-            finally:
-                with ENGINE_LOCK:
-                    pdf.close()
+            return _recognize_copy(data, opts, pages, progress)
         try:
             result = self.ctx.run_task(_("Riconoscimento del testo…"), work)
-        except engine.OcrInterrupted as e:
-            partial = e.partial
-            if opts.mode == engine.TEXT_ONLY or not partial.recognized or not self.ask_keep_partial(partial):
+        except BaseException as e:  # gestita come nell'esecuzione in background
+            return self._complete(view, opts, None, e, data, preview, new_document)
+        return self._complete(view, opts, result, None, data, preview, new_document)
+
+    def run_background(self, view, opts: engine.OcrOptions, pages: list[int], preview: bool = True,
+                       new_document: bool = False) -> "OcrJob | None":
+        """OCR non modale (OCR-13): il riconoscimento lavora su una copia in un thread, la vista mostra
+        avanzamento e Annulla e il documento resta consultabile. Alla fine il risultato si applica in un
+        solo passo; se nel frattempo il documento è cambiato, solo alle pagine rimaste identiche."""
+        import threading
+
+        from foliant.api import Progress
+        if self.jobs.get(view) is not None:
+            self.ctx.info(_("Riconoscimento del testo"), _("Il riconoscimento di questo documento è già in corso."))
+            return None
+        if not self._prepare(view, opts, pages, new_document):
+            return None
+        doc = view.document
+        with ENGINE_LOCK:
+            data = engine.document_copy_bytes(doc.pdf)
+            prints = engine.page_fingerprints(doc.pdf)
+        job = OcrJob(view, opts, pages, preview, new_document, data, doc.version, prints, Progress())
+        self.jobs[view] = job
+
+        def work():
+            try:
+                job.result = _recognize_copy(data, opts, pages, job.progress)
+            except BaseException as e:  # riportata all'interfaccia
+                job.error = e
+            job.done = True
+        job.bar = JobBar(view, lambda: job.progress.cancel())
+        job.bar.place()
+        job.thread = threading.Thread(target=work, name="foliant-ocr-job", daemon=True)
+        job.timer = QTimer(self)
+        job.timer.setInterval(150)
+        job.timer.timeout.connect(lambda j=job: self._poll_job(j))
+        job.thread.start()
+        job.timer.start()
+        return job
+
+    def _poll_job(self, job: "OcrJob") -> None:
+        if job.bar is not None:
+            text = job.progress.text or _("Riconoscimento del testo…")
+            try:
+                job.bar.update_progress(job.progress.fraction, text)
+            except RuntimeError:
+                job.bar = None
+        if not job.done:
+            return
+        job.timer.stop()
+        if job.bar is not None:
+            try:
+                job.bar.hide()
+                job.bar.deleteLater()
+            except RuntimeError:
+                pass
+            job.bar = None
+        self.jobs.pop(job.view, None)
+        self.finish_job(job)
+
+    def finish_job(self, job: "OcrJob") -> engine.OcrResult | None:
+        view = job.view
+        if view.document.closed or view not in self.ctx.views():
+            return None
+        changed: set[int] = set()
+        if job.opts.mode != engine.TEXT_ONLY and not job.new_document and view.document.version != job.version:
+            with ENGINE_LOCK:
+                now = engine.page_fingerprints(view.document.pdf)
+            if len(now) != len(job.fingerprints):
+                self.ctx.error(_("Riconoscimento non applicato"), _(
+                    "Durante il riconoscimento sono state aggiunte o tolte pagine: il testo riconosciuto non può "
+                    "essere collocato con sicurezza. Esegui di nuovo l'OCR."))
+                return None
+            changed = {i for i, (a, b) in enumerate(zip(job.fingerprints, now)) if a != b}
+            touched = sorted(changed & set(job.pages))
+            if touched and not self.ctx.confirm(_("Documento modificato"), _(
+                    "Durante il riconoscimento sono cambiate le pagine {p}. Applicare il testo riconosciuto "
+                    "solo alle altre pagine?").format(p=engine.format_pages(touched))):
+                self.ctx.status(_("OCR non applicato."))
+                return None
+        if job.error is not None and isinstance(job.error, engine.OcrInterrupted) and changed:
+            job.error.partial.pages = [p for p in job.error.partial.pages if p.index not in changed]
+        return self._complete(view, job.opts, job.result, job.error, job.data, job.preview, job.new_document,
+                              changed)
+
+    def cancel_job(self, view) -> None:
+        job = self.jobs.get(view)
+        if job is not None:
+            job.progress.cancel()
+
+    def _complete(self, view, opts, result, error, data: bytes, preview: bool, new_document: bool,
+                  changed_pages: set[int] | None = None) -> engine.OcrResult | None:
+        """Esito del riconoscimento: errori, pagine completate, revisione e applicazione."""
+        if error is not None:
+            try:
+                raise error
+            except engine.OcrInterrupted as e:
+                partial = e.partial
+                if opts.mode == engine.TEXT_ONLY or not partial.recognized or not self.ask_keep_partial(partial):
+                    self.ctx.status(_("Riconoscimento annullato: il documento non è stato modificato."))
+                    return None
+                result = partial
+                preview = False
+            except OperationCancelled:
                 self.ctx.status(_("Riconoscimento annullato: il documento non è stato modificato."))
                 return None
-            result = partial
-            preview = False
-        except OperationCancelled:
-            self.ctx.status(_("Riconoscimento annullato: il documento non è stato modificato."))
-            return None
-        except (OcrError, languages.LanguagePackError) as e:
-            self.ctx.error(_("Riconoscimento non riuscito"), str(e))
-            return None
-        except Exception as e:
-            self.ctx.error(_("Riconoscimento non riuscito"), _("Errore imprevisto: {e}").format(e=e))
-            return None
+            except (OcrError, languages.LanguagePackError) as e:
+                self.ctx.error(_("Riconoscimento non riuscito"), str(e))
+                return None
+            except Exception as e:
+                self.ctx.error(_("Riconoscimento non riuscito"), _("Errore imprevisto: {e}").format(e=e))
+                return None
+
+        if changed_pages:
+            result.pages = [p for p in result.pages if p.index not in changed_pages]
         if not result.recognized:
             msg = _("Nessuna pagina riconosciuta.")
             if result.failed:
