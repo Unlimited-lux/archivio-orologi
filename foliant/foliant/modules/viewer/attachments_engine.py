@@ -92,6 +92,79 @@ def _ref(value: str) -> int:
         return 0
 
 
+# ------------------------------------------------------------------ portfolio
+@dataclass
+class Folder:
+    id: int
+    name: str
+    parent: int | None = None
+
+
+@dataclass
+class Collection:
+    """Portfolio PDF (`/Collection`): documento iniziale e cartelle."""
+    initial: str | None = None                      # chiave nel name tree (`/D`)
+    view: str = "D"                                 # /View: D (dettagli), T (riquadri), H (nascosto)
+    root: int | None = None                         # id della cartella radice
+    folders: dict[int, Folder] | None = None
+
+    def folder_of(self, key: str) -> int | None:
+        """Cartella di un file: i nomi nel name tree di un portfolio con cartelle iniziano con
+        «<id>»; senza prefisso il file è nella radice."""
+        m = re.match(r"<(\d+)>", key or "")
+        if m and self.folders and int(m.group(1)) in self.folders:
+            return int(m.group(1))
+        return self.root
+
+    def path_of(self, folder: int | None) -> list[Folder]:
+        """Cartelle dalla radice (esclusa) fino a `folder`."""
+        out: list[Folder] = []
+        seen: set[int] = set()
+        while folder is not None and self.folders and folder in self.folders and folder != self.root \
+                and folder not in seen:
+            seen.add(folder)
+            f = self.folders[folder]
+            out.append(f)
+            folder = f.parent
+        return list(reversed(out))
+
+
+def read_collection(pdf: pymupdf.Document) -> Collection | None:
+    """Il portfolio del documento, oppure None se non è una collezione."""
+    try:
+        kind, value = pdf.xref_get_key(pdf.pdf_catalog(), "Collection")
+    except Exception:
+        return None
+    if kind != "xref":
+        return None
+    cx = _ref(value)
+    col = Collection(initial=_key(pdf, cx, "D") or None, view=_key(pdf, cx, "View") or "D")
+    kind, value = pdf.xref_get_key(cx, "Folders")
+    if kind == "xref":
+        folders: dict[int, Folder] = {}
+        seen: set[int] = set()
+
+        def walk(xref: int, parent: int | None, depth: int) -> None:
+            while xref and xref not in seen and depth < 64 and len(seen) < 10000:
+                seen.add(xref)
+                try:
+                    fid = int(_key(pdf, xref, "ID") or "-1")
+                except ValueError:
+                    fid = -1
+                if fid >= 0:
+                    folders[fid] = Folder(fid, _key(pdf, xref, "Name"), parent)
+                    if col.root is None and parent is None:
+                        col.root = fid
+                    child_kind, child = pdf.xref_get_key(xref, "Child")
+                    if child_kind == "xref":
+                        walk(_ref(child), fid, depth + 1)
+                nxt_kind, nxt = pdf.xref_get_key(xref, "Next")
+                xref = _ref(nxt) if nxt_kind == "xref" else 0
+        walk(_ref(value), None, 0)
+        col.folders = folders
+    return col
+
+
 def _page_attachment(pdf: pymupdf.Document, page_index: int, annot) -> Attachment:
     info = annot.file_info or {}
     xref = annot.xref
