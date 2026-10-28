@@ -288,6 +288,9 @@ class TextEditController(QObject):
             text = "; ".join(_("«{o}» sostituito con «{s}» per {n} caratteri").format(
                 o=s.original, s=s.substitute, n=s.chars) for s in subs)
             self.ctx.status(_("Font sostitutivo: {t}").format(t=text), 10000)
+        if getattr(result, "orphans", 0):
+            self.ctx.status(_("{n} annotazioni non trovano più il loro testo e restano al loro posto (orfane).")
+                            .format(n=result.orphans), 10000)
         marks = []
         if getattr(result, "overflow", False):
             marks.append((self._last_page, pymupdf.Rect(result.bbox)))

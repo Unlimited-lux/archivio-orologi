@@ -162,4 +162,6 @@ EN: dict[str, str] = {
     'In alto': 'Top',
     'Al centro verticale': 'Middle',
     'In basso': 'Bottom',
+    "{n} annotazioni non trovano più il loro testo e restano al loro posto (orfane).":
+        "{n} annotations no longer find their text and stay in place (orphaned).",
 }

@@ -652,3 +652,53 @@ def test_twenty_operations_undo_redo(paragraphs_pdf, tmp_path):
     with d.lock:
         assert d.pdf[0].get_text() == final_text
         assert pixels(d.pdf[0], dpi=72) == final_pix
+
+
+# ---------------------------------------------------------------- TXT-20
+def test_highlight_follows_moved_word(paragraphs_pdf, tmp_path):
+    d = Document.open(paragraphs_pdf)
+    with d.change("Evidenzia") as pdf:
+        quads = pdf[0].search_for("scade", quads=True)
+        pdf[0].add_highlight_annot(quads)
+    with d.lock:
+        block = [b for b in blocks_of(d.pdf) if "contratto" in b.text][0]
+    with d.change("Modifica") as pdf:
+        res = engine.replace_block(pdf, 0, block, replace_text(block, "Il contratto", "Il nuovo contratto"))
+    assert res.orphans == 0
+    with d.lock:
+        page = d.pdf[0]
+        target = page.search_for("scade")[0]
+        annots = list(page.annots())
+        assert len(annots) == 1
+        r = pymupdf.Quad(annots[0].vertices[:4]).rect
+        assert abs(r.x0 - target.x0) <= 0.5 and abs(r.x1 - target.x1) <= 0.5
+
+
+def test_link_follows_moved_block(tmp_path):
+    doc, page = new_doc_with_font()
+    page.insert_text((72, 700), "Visita il sito", fontname="F1", fontsize=12)
+    r = page.search_for("sito")[0]
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": r, "uri": "https://example.org"})
+    d = Document.open(save(doc, tmp_path / "link.pdf"))
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+    with d.change("Sposta") as pdf:
+        engine.move_block(pdf, 0, block, 50, -100)
+    with d.lock:
+        links = d.pdf[0].get_links()
+        new = d.pdf[0].search_for("sito")[0]
+    assert len(links) == 1
+    assert abs(links[0]["from"].x0 - new.x0) <= 0.5 and abs(links[0]["from"].y0 - new.y0) <= 1
+
+
+def test_deleted_text_leaves_orphan_annotation(paragraphs_pdf):
+    d = Document.open(paragraphs_pdf)
+    with d.change("Evidenzia") as pdf:
+        pdf[0].add_highlight_annot(pdf[0].search_for("2024", quads=True))
+    with d.lock:
+        block = [b for b in blocks_of(d.pdf) if "contratto" in b.text][0]
+    with d.change("Modifica") as pdf:
+        res = engine.replace_block(pdf, 0, block, replace_text(block, " nel 2024", ""))
+    assert res.orphans == 1
+    with d.lock:
+        assert len(list(d.pdf[0].annots())) == 1

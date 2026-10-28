@@ -43,6 +43,7 @@ class EditResult:
     overflow: bool = False
     lines_written: int = 0
     lines_kept: int = 0
+    orphans: int = 0                      # annotazioni il cui testo non esiste più
 
 
 # ====================================================================== utilità
@@ -71,7 +72,7 @@ def _lkey(line: Line) -> tuple:
     return (round(line.baseline, 1), round(line.bbox.x0, 1), line.text)
 
 
-def remove_lines(page: pymupdf.Page, lines: list[Line]) -> None:
+def remove_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | None = None) -> None:
     """Rimuove i glifi delle righe indicate, senza toccare immagini, grafica, annotazioni e altro testo.
 
     La redazione toglie ogni glifo che tocca l'area: le righe di altri blocchi sovrapposte
@@ -80,7 +81,7 @@ def remove_lines(page: pymupdf.Page, lines: list[Line]) -> None:
         return
     targets = {_lkey(ln) for ln in lines}
     before = extract_lines(page)
-    _redact_lines(page, lines)
+    _redact_lines(page, lines, relocated_links)
     after = extract_lines(page)
     after_keys = {_lkey(ln) for ln, _inv in after}
     before_keys = {_lkey(ln) for ln, _inv in before}
@@ -108,7 +109,7 @@ def remove_lines(page: pymupdf.Page, lines: list[Line]) -> None:
                 x += width
 
 
-def _redact_lines(page: pymupdf.Page, lines: list[Line]) -> None:
+def _redact_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | None = None) -> None:
     unframe = unframe_matrix(page)
     # le redazioni già presenti (segnate dall'utente) non devono essere applicate ora
     pending = []
@@ -131,6 +132,8 @@ def _redact_lines(page: pymupdf.Page, lines: list[Line]) -> None:
     # i collegamenti non vanno persi con la rimozione del testo
     after = page.get_links()
     for link in links_before:
+        if relocated_links and any(_same_link(link, other) for other in relocated_links):
+            continue   # verrà reinserito nella nuova posizione del testo
         if not any(_same_link(link, other) for other in after):
             clean = {k: v for k, v in link.items() if k not in ("xref", "id")}
             try:
@@ -149,6 +152,77 @@ def _redact_lines(page: pymupdf.Page, lines: list[Line]) -> None:
 def _same_link(a: dict, b: dict) -> bool:
     return (pymupdf.Rect(a.get("from")) == pymupdf.Rect(b.get("from")) and a.get("kind") == b.get("kind")
             and a.get("uri") == b.get("uri") and a.get("page") == b.get("page"))
+
+
+# ====================================================================== annotazioni ancorate (TXT-20)
+_MARKUP = {pymupdf.PDF_ANNOT_HIGHLIGHT: "add_highlight_annot", pymupdf.PDF_ANNOT_UNDERLINE: "add_underline_annot",
+           pymupdf.PDF_ANNOT_STRIKE_OUT: "add_strikeout_annot", pymupdf.PDF_ANNOT_SQUIGGLY: "add_squiggly_annot"}
+
+
+def _quad_rects(annot) -> list[pymupdf.Rect]:
+    v = annot.vertices or []
+    return [pymupdf.Quad(v[i:i + 4]).rect for i in range(0, len(v) - 3, 4)]
+
+
+def collect_anchors(page: pymupdf.Page, bbox: pymupdf.Rect) -> list[dict]:
+    """Evidenziazioni (e simili) e collegamenti che coprono testo del riquadro (coordinate di lavoro)."""
+    area = pymupdf.Rect(bbox) * unframe_matrix(page)
+    out = []
+    for annot in page.annots(types=list(_MARKUP)) or []:
+        if not annot.rect.intersects(area):
+            continue
+        text = " ".join(page.get_textbox(r + (-0.5, -0.5, 0.5, 0.5)).strip() for r in _quad_rects(annot)).strip()
+        if text:
+            out.append({"kind": "annot", "xref": annot.xref, "type": annot.type[0], "text": text})
+    for link in page.get_links():
+        r = pymupdf.Rect(link["from"])
+        if r.intersects(area):
+            text = page.get_textbox(r + (-0.5, -0.5, 0.5, 0.5)).strip()
+            if text:
+                out.append({"kind": "link", "link": link, "text": text})
+    return out
+
+
+def reanchor(page: pymupdf.Page, anchors: list[dict], bbox: pymupdf.Rect) -> int:
+    """Riallinea le annotazioni al testo nella nuova posizione; restituisce quante sono rimaste orfane."""
+    if not anchors:
+        return 0
+    area = (pymupdf.Rect(bbox) * unframe_matrix(page)) + (-2, -2, 2, 2)
+    orphans = 0
+    for a in anchors:
+        hits = page.search_for(a["text"], clip=area, quads=True)
+        if not hits:
+            orphans += 1
+            if a["kind"] == "link":
+                page.insert_link({k: v for k, v in a["link"].items() if k not in ("xref", "id")})
+            continue
+        if a["kind"] == "annot":
+            old = page.load_annot(a["xref"])
+            if old is None:
+                continue
+            if all(any(abs(q.rect.x0 - r.x0) < 0.5 and abs(q.rect.y0 - r.y0) < 0.5 for r in _quad_rects(old))
+                   for q in hits):
+                continue
+            info, colors, opacity = dict(old.info), old.colors, old.opacity
+            new = getattr(page, _MARKUP[a["type"]])(hits)
+            try:
+                new.set_info(info)
+                new.set_colors(stroke=colors.get("stroke"))
+                if opacity is not None and 0 <= opacity < 1:
+                    new.set_opacity(opacity)
+                new.update()
+            except Exception:
+                pass
+            page.delete_annot(old)
+        else:
+            link = a["link"]
+            new_rect = hits[0].rect
+            for q in hits[1:]:
+                new_rect |= q.rect
+            clean = {k: v for k, v in link.items() if k not in ("xref", "id")}
+            clean["from"] = new_rect
+            page.insert_link(clean)
+    return orphans
 
 
 class _Writer:
@@ -338,14 +412,17 @@ def replace_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, para
     to_write = [pl for i, pl in enumerate(lay.lines) if i not in kept_new]
     if not to_remove and not to_write:
         return EditResult(bbox=block.bbox, changed=False, lines_kept=len(kept_orig))
-    remove_lines(page, to_remove)
+    anchors = collect_anchors(page, block.bbox)
+    remove_lines(page, to_remove, [a["link"] for a in anchors if a["kind"] == "link"])
     writer = _Writer(page)
     for pl in to_write:
         writer.write_line(pl)
     bbox = lay.bbox
+    orphans = reanchor(page, anchors, bbox | block.bbox) if anchors else 0
     area = visible_area(page)
     return EditResult(bbox=bbox, substitutions=_substitutions(resolver, paragraphs), changed=True,
-                      overflow=not area.contains(bbox), lines_written=len(to_write), lines_kept=len(kept_orig))
+                      overflow=not area.contains(bbox), lines_written=len(to_write), lines_kept=len(kept_orig),
+                      orphans=orphans)
 
 
 def _replace_rotated(page, composer, resolver, block, paragraphs, dx, dy) -> EditResult:
@@ -473,7 +550,8 @@ def move_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, dx: flo
             for p in pl.pieces:
                 writer.write_piece(p, pl.baseline, render_mode=3)
         return EditResult(bbox=moved, changed=True)
-    remove_lines(src, block.lines)
+    anchors = collect_anchors(src, block.bbox) if dst_index == page_index else []
+    remove_lines(src, block.lines, [a["link"] for a in anchors if a["kind"] == "link"])
     writer = _Writer(dst)
     if block.rotated:
         line = block.lines[0]
@@ -487,7 +565,8 @@ def move_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, dx: flo
         for pl in lines:
             writer.write_line(pl)
     subs = _substitutions(resolver, block.paragraphs)
-    return EditResult(bbox=moved, substitutions=subs, changed=True)
+    orphans = reanchor(dst, anchors, moved) if anchors else 0
+    return EditResult(bbox=moved, substitutions=subs, changed=True, orphans=orphans)
 
 
 def resize_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, x0: float, width: float) -> EditResult:
