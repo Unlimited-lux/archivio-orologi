@@ -235,6 +235,7 @@ class FieldInfo:
     check_style: str = "check"   # stile del segno di caselle e opzioni
     rotation: int = 0            # rotazione del contenuto (/MK /R)
     caption: str = ""            # didascalia dei pulsanti
+    caption_down: str = ""       # didascalia durante la pressione (/MK /AC)
     action: dict = field(default_factory=dict)  # azione al clic dei pulsanti
     image: bool = False          # campo immagine
     lock: dict = field(default_factory=dict)  # campi firma: {"action": "All|Include|Exclude", "fields": [...]}
@@ -419,6 +420,7 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.rotation = 0
     if kind == BUTTON:
         info.caption = _value_of(*pdf.xref_get_key(w.xref, "MK/CA")) or ""
+        info.caption_down = _value_of(*pdf.xref_get_key(w.xref, "MK/AC")) or ""
         info.image = pdf.xref_get_key(w.xref, "MK/TP") == ("int", "1")
         info.action = button_action(pdf, w.xref)
     if kind == SIGNATURE:
@@ -1246,6 +1248,24 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
     return xref
 
 
+def _button_down_appearance(pdf: pymupdf.Document, page: int, xref: int) -> None:
+    """Aspetto «premuto» (/AP /D) con la didascalia di pressione (/MK /AC), se diversa."""
+    down = _value_of(*pdf.xref_get_key(xref, "MK/AC"))
+    if not down:
+        return
+    normal = pdf.xref_get_key(xref, "MK/CA")
+    pdf.xref_set_key(xref, "MK/CA", ps.encode_string(down))
+    try:
+        regenerate(pdf, page, xref)
+        t, v = pdf.xref_get_key(xref, "AP/N")
+        down_ref = v if t == "xref" else None
+    finally:
+        pdf.xref_set_key(xref, "MK/CA", ps.encode_string(normal[1]) if normal[0] == "string" else "null")
+    regenerate(pdf, page, xref)
+    if down_ref:
+        pdf.xref_set_key(xref, "AP/D", down_ref)
+
+
 def blank_signature_appearance(pdf: pymupdf.Document, page: int, xref: int) -> None:
     """Aspetto di un campo firma non firmato: solo sfondo e bordo del campo, nessun contenuto
     (l'indicatore «firma qui» è disegnato dall'interfaccia, non nel file)."""
@@ -1731,6 +1751,9 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
             pdf.xref_set_key(xref, "Q", q)
     if "caption" in props and kind == BUTTON:
         pdf.xref_set_key(xref, "MK/CA", ps.encode_string(str(props["caption"])))
+    if "caption_down" in props and kind == BUTTON:
+        down = str(props["caption_down"] or "")
+        pdf.xref_set_key(xref, "MK/AC", ps.encode_string(down) if down else "null")
     if "default" in props:
         _set_default(pdf, fx, kind, props["default"], info)
     if "export" in props and kind in (CHECKBOX, RADIO) and props["export"]:
@@ -1746,6 +1769,8 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         if r.width < 4 or r.height < 4:
             raise FormError(_("Il campo è troppo piccolo."))
         _set_rect(pdf, page, xref, r)
+    if kind == BUTTON and not info.image and pdf.xref_get_key(xref, "MK/TP") != ("int", "1"):
+        _button_down_appearance(pdf, page, xref)
     if kind == SIGNATURE:
         if not is_signed(pdf, xref):
             blank_signature_appearance(pdf, page, xref)

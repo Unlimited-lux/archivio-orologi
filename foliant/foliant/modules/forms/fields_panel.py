@@ -146,7 +146,9 @@ class FieldsPanel(QWidget):
         hdr = self.tree.header()
         hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(COL_KIND, QHeaderView.ResizeMode.ResizeToContents)
+        # il tipo è già indicato dall'icona: colonna stretta (testo abbreviato), il nome ha la precedenza
+        hdr.setSectionResizeMode(COL_KIND, QHeaderView.ResizeMode.Interactive)
+        hdr.resizeSection(COL_KIND, 78)
         hdr.setSectionResizeMode(COL_PAGE, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.itemClicked.connect(self._on_clicked)
         self.tree.itemActivated.connect(self._on_clicked)

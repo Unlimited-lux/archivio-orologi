@@ -592,3 +592,17 @@ def test_unicode_value_embedded_font():
     assert any("/FontFile" in o for o in fonts)  # carattere incorporato
     assert len(data) - before < 200_000  # sottoinsieme, non il carattere intero
     assert again.page_count == 1
+
+
+def test_button_distinct_down_caption():
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 72), "invia", caption="Invia")
+    E.update_properties(pdf, 0, b, caption_down="Invio…")
+    again = reopen(pdf)
+    f = one(again, "invia")
+    assert f.caption == "Invia" and f.caption_down == "Invio…"
+    n = int(again.xref_get_key(f.xref, "AP/N")[1].split()[0])
+    d = int(again.xref_get_key(f.xref, "AP/D")[1].split()[0])
+    assert n != d and again.xref_stream(n) != again.xref_stream(d)
+    assert b"Invia" in again.xref_stream(n)
