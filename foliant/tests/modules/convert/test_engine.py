@@ -1126,3 +1126,122 @@ def test_txt_5000_pages_memory(tmp_path):
     peak_mb, feeds = (int(v) for v in res.stdout.split())
     assert peak_mb < 2048
     assert feeds == 4999
+
+
+def _char_accuracy(ref: str, got: str) -> float:
+    """1 − distanza di edit sui caratteri / lunghezza del riferimento (definizione della specifica)."""
+    prev = list(range(len(got) + 1))
+    for i, a in enumerate(ref, 1):
+        cur = [i]
+        for j, b in enumerate(got, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a != b)))
+        prev = cur
+    return 1 - prev[-1] / max(1, len(ref))
+
+
+def _scan_of(lines: list[str], tmp_path, dpi: int = 300, name: str = "scan.pdf") -> str:
+    font = dict(fontname="dejavu", fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
+    src = pymupdf.open()
+    sp = src.new_page()
+    for k, line in enumerate(lines):
+        sp.insert_text((60, 90 + k * 26), line, fontsize=12, **font)
+    pix = sp.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    return _save(doc, tmp_path / name)
+
+
+CONTRACT_LINES = [
+    "Contratto di compravendita di orologio usato",
+    "Il venditore cede all'acquirente un cronografo automatico",
+    "con cassa in acciaio, quadrante nero e bracciale originale.",
+    "Il prezzo concordato è di quattromila euro, già versati.",
+    "Il venditore dichiara la provenienza lecita del bene e",
+    "garantisce il funzionamento per dodici mesi dalla consegna.",
+]
+
+
+def test_ocr_docx_accuracy_and_confidence_report(tmp_path):
+    """CNV-02: scansione a 300 dpi in italiano → DOCX con accuratezza per carattere ≥ 98%;
+    il report indica pagine, lingue e confidenza media."""
+    from foliant.modules.convert.engine import foliant_ocr_module
+    from foliant.modules.convert.extract import ocr_available
+    if foliant_ocr_module() is None or not ocr_available():
+        pytest.skip("modulo OCR o tesseract non disponibili")
+    import docx
+    path = _scan_of(CONTRACT_LINES, tmp_path)
+    res = run_conversion(path, tmp_path / "c.docx", "docx", language="ita")
+    got = " ".join(" ".join(p.text for p in docx.Document(res.paths[0]).paragraphs).split())
+    ref = " ".join(CONTRACT_LINES)
+    assert _char_accuracy(ref, got) >= 0.98, got
+    ocr = res.details["ocr"]
+    assert res.ocr_pages == [1] and ocr["languages"] == ["ita"]
+    assert ocr["mean_confidence"] is not None and ocr["mean_confidence"] > 80
+    report = res.report_text()
+    assert "Confidenza media OCR" in report and "Lingue OCR: ita" in report
+
+
+def test_ocr_illegible_page_flagged(tmp_path):
+    """Pagina illeggibile (scarabocchi): resta l'immagine e la pagina è segnalata nel report."""
+    from foliant.modules.convert.engine import foliant_ocr_module
+    from foliant.modules.convert.extract import ocr_available
+    if foliant_ocr_module() is None or not ocr_available():
+        pytest.skip("modulo OCR o tesseract non disponibili")
+    import random
+
+    from PIL import Image, ImageDraw
+    rnd = random.Random(4)
+    img = Image.new("L", (2480, 3508), 255)
+    d = ImageDraw.Draw(img)
+    for _k in range(300):
+        x, y = rnd.randrange(200, 2200), rnd.randrange(200, 3200)
+        d.line([(x, y), (x + rnd.randrange(-60, 60), y + rnd.randrange(-40, 40)),
+                (x + rnd.randrange(-60, 60), y + rnd.randrange(-40, 40))], fill=0, width=4)
+    import io
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_image(p.rect, stream=buf.getvalue())
+    path = _save(doc, tmp_path / "scarabocchi.pdf")
+    res = run_conversion(path, tmp_path / "s.txt", "txt", language="ita")
+    assert any("Pagina 1" in w and ("poco leggibile" in w or "non riuscito" in w) for w in res.warnings), res.warnings
+
+
+def test_undecodable_font_area_recognized_with_ocr(tmp_path):
+    """CNV-02: testo nativo con font senza /ToUnicode → OCR della sola area, con avviso;
+    il testo decodificabile della stessa pagina resta quello estratto."""
+    from foliant.modules.convert.extract import ocr_available
+    if not ocr_available():
+        pytest.skip("tesseract non installato")
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Garanzia internazionale valida", fontsize=16, fontname="dv",
+                  fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    p.insert_text((72, 200), "Testo normale leggibile", fontsize=12)
+    for xref, *_rest in p.get_fonts():
+        if doc.xref_get_key(xref, "ToUnicode")[0] == "xref":
+            doc.xref_set_key(xref, "ToUnicode", "null")
+    path = _save(doc, tmp_path / "senza_unicode.pdf")
+    assert "Garanzia" not in pymupdf.open(path)[0].get_text()
+    res = run_conversion(path, tmp_path / "u.txt", "txt", language="ita")
+    text = open(res.paths[0], encoding="utf-8").read()
+    assert "Garanzia internazionale valida" in text and "Testo normale leggibile" in text
+    assert any("non decodificabile" in w for w in res.warnings)
+    assert res.ocr_pages == [1]
+    # con OCR «mai» non si riconosce nulla
+    res = run_conversion(path, tmp_path / "n.txt", "txt", ocr="never")
+    assert "Garanzia" not in open(res.paths[0], encoding="utf-8").read()
+
+
+def test_ocr_low_resolution_scan_warns(tmp_path):
+    """Scansione sotto 150 dpi: OCR comunque eseguito e avviso di accuratezza ridotta nel report."""
+    from foliant.modules.convert.engine import foliant_ocr_module
+    from foliant.modules.convert.extract import ocr_available
+    if foliant_ocr_module() is None or not ocr_available():
+        pytest.skip("modulo OCR o tesseract non disponibili")
+    path = _scan_of(CONTRACT_LINES[:2], tmp_path, dpi=100, name="bassa.pdf")
+    res = run_conversion(path, tmp_path / "b.txt", "txt", language="ita")
+    assert res.ocr_pages == [1]
+    assert any("Pagina 1" in w and "isoluzione" in w for w in res.warnings), res.warnings

@@ -109,6 +109,7 @@ class PageContent:
     items: list = field(default_factory=list)
     ocr: bool = False
     warnings: list[str] = field(default_factory=list)
+    ocr_areas: int = 0            # aree di testo non decodificabile riconosciute con OCR
 
     def text(self, table_sep: str = "\t") -> str:
         parts = []
@@ -509,6 +510,66 @@ def _line_angle(lines: list) -> int:
     return votes.most_common(1)[0][0] if votes else 0
 
 
+def _undecodable_fonts(page: pymupdf.Page) -> set[str]:
+    """Nomi (normalizzati) dei font composti a codifica Identity senza /ToUnicode: il loro testo
+    estratto è una sequenza di codici di glifo, non di caratteri."""
+    doc = page.parent
+    bad: set[str] = set()
+    try:
+        for xref, _ext, ftype, basefont, _name, enc in page.get_fonts():
+            if ftype == "Type0" and enc.startswith("Identity") and \
+                    doc.xref_get_key(xref, "ToUnicode")[0] in ("null", "none"):
+                bad.add(re.sub(r"[^a-z0-9]", "", basefont.split("+")[-1].lower()))
+    except Exception:
+        pass
+    return bad
+
+
+def _garbled(para: Para, bad: set[str]) -> bool:
+    """Paragrafo il cui testo non è decodificabile: caratteri di controllo, U+FFFD o dell'area
+    privata, oppure scritto con un font senza mappatura Unicode."""
+    text = para.text
+    if len(text.strip()) < 3:
+        return False
+    odd = sum(1 for ch in text if ch == "\ufffd" or "\ue000" <= ch <= "\uf8ff"
+              or (ord(ch) < 32 and ch not in "\t\n\r"))
+    if odd >= max(1, 0.05 * len(text)):
+        return True
+    if not bad:
+        return False
+    in_bad = sum(len(sp.text) for sp in para.spans
+                 if any(b.startswith(re.sub(r"[^a-z0-9]", "", sp.font.lower())) for b in bad if sp.font))
+    return in_bad >= 0.5 * len(text)
+
+
+def ocr_area_text(page: pymupdf.Page, bbox, language: str | None = None) -> str:
+    """Testo riconosciuto in un'area della pagina (coordinate della pagina non ruotata)."""
+    if not ocr_available():
+        return ""
+    rect = pymupdf.Rect(bbox) * page.rotation_matrix   # coordinate della pagina visualizzata
+    rect = (rect + (-2, -2, 2, 2)) & page.rect
+    if rect.is_empty:
+        return ""
+    langs = ocr_languages(language)
+    try:
+        from foliant.modules.ocr.engine import ocr_page_text  # type: ignore
+    except Exception:
+        ocr_page_text = None
+    try:
+        if ocr_page_text is not None:
+            text = ocr_page_text(page, languages=langs.split("+"), clip=rect)
+        else:
+            pix = page.get_pixmap(dpi=300, clip=rect)
+            tmp = pymupdf.open(stream=pix.pdfocr_tobytes(language=langs), filetype="pdf")
+            try:
+                text = tmp[0].get_text()
+            finally:
+                tmp.close()
+    except Exception:
+        return ""
+    return normalize_text(" ".join(text.split()))
+
+
 def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None = None,
                  images: bool = True, tables: bool = True, dehyphenate: bool = True) -> PageContent:
     """Contenuto della pagina in ordine di lettura (paragrafi, tabelle, immagini)."""
@@ -550,6 +611,7 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
         for bbox, rows, _used in grid_tables(data.get("blocks", [])):
             table_items.append(TableItem(rows=rows, bbox=bbox))
     boxes: list[tuple[tuple, object]] = [(t.bbox, t) for t in table_items]
+    bad_fonts = _undecodable_fonts(page) if textpage is None and ocr != "never" else set()
     for block in data.get("blocks", []):
         bbox = tuple(block.get("bbox", (0, 0, 0, 0)))
         if any(_inside(bbox, t.bbox) for t in table_items):
@@ -566,6 +628,15 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
                                           height=block.get("height", 0), bbox=bbox)))
         elif block.get("type") == 0:
             para = _block_to_para(block, links, dehyphenate)
+            if para is not None and textpage is None and ocr != "never" and _garbled(para, bad_fonts):
+                # testo nativo non decodificabile (font senza /ToUnicode): OCR della sola area
+                fixed = ocr_area_text(page, bbox, language)
+                if fixed:
+                    first = para.spans[0]
+                    para.spans = [Span(fixed, first.size, first.font, first.bold, first.italic, first.color)]
+                    content.ocr_areas += 1
+                elif "testo-non-decodificabile" not in content.warnings:
+                    content.warnings.append("testo-non-decodificabile")
             if para is not None:
                 boxes.append((bbox, para))
     if page.rotation and textpage is None:

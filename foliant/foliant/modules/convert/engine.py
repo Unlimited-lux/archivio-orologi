@@ -92,6 +92,11 @@ class ConversionResult:
         lines = [_("Pagine convertite: {n}").format(n=len(self.pages))]
         if self.ocr_pages:
             lines.append(_("Pagine riconosciute con OCR: {p}").format(p=", ".join(map(str, self.ocr_pages))))
+            ocr = self.details.get("ocr") or {}
+            if ocr.get("languages"):
+                lines.append(_("Lingue OCR: {l}").format(l=", ".join(ocr["languages"])))
+            if ocr.get("mean_confidence") is not None:
+                lines.append(_("Confidenza media OCR: {c:.0f}%").format(c=ocr["mean_confidence"]))
         for p in self.paths:
             lines.append(_("File creato: {p}").format(p=p))
         if self.warnings:
@@ -110,6 +115,9 @@ def foliant_ocr_module():
     if fn is None:
         return None
     return fn, getattr(ocr_engine, "EDITABLE", "editable")
+
+
+ILLEGIBLE_CONFIDENCE = 50.0   # sotto questa confidenza media la pagina è segnalata come poco leggibile
 
 
 class Job:
@@ -143,6 +151,14 @@ class Job:
             self.warn(_("Pagina {p} scansionata: OCR disattivato, il testo non è stato riconosciuto.").format(p=p))
         if "ocr-non-disponibile" in pc.warnings:
             self.warn(_("Pagina {p} scansionata: OCR non disponibile (installa tesseract-ocr).").format(p=p))
+        if pc.ocr_areas:
+            self.warn(_("Pagina {p}: testo non decodificabile (font senza mappatura Unicode) riconosciuto con "
+                        "OCR in {n} aree: controlla il risultato.").format(p=p, n=pc.ocr_areas))
+            if p not in self.result.ocr_pages:
+                self.result.ocr_pages.append(p)
+        if "testo-non-decodificabile" in pc.warnings:
+            self.warn(_("Pagina {p}: parte del testo non è decodificabile e non è stato possibile "
+                        "riconoscerla con l'OCR.").format(p=p))
 
     # ------------------------------------------------------------------ OCR
     def ocr_document_bytes(self, work: pymupdf.Document) -> bytes:
@@ -165,13 +181,16 @@ class Job:
             try:
                 ENGINE_LOCK.release()   # il modulo OCR prende il lock da sé, pagina per pagina
                 try:
-                    out = ocr_pdf_bytes(data, langs, editable, pages=scanned, progress=self.progress)
+                    out = self._foliant_ocr(data, langs, scanned)
+                    if out is None:
+                        out = ocr_pdf_bytes(data, langs, editable, pages=scanned, progress=self.progress)
                 finally:
                     ENGINE_LOCK.acquire()
                 if isinstance(out, tuple):
                     out = out[0]
                 if isinstance(out, (bytes, bytearray)) and out:
-                    self.result.ocr_pages.extend(self.source_index(i) + 1 for i in scanned)
+                    if "ocr" not in self.result.details:   # ocr_pdf_bytes: nessun dettaglio per pagina
+                        self.result.ocr_pages.extend(self.source_index(i) + 1 for i in scanned)
                     return bytes(out)
                 self.warn(_("Il modulo OCR non ha restituito un documento: uso il riconoscimento di base."))
             except OperationCancelled:
@@ -189,8 +208,57 @@ class Job:
         finally:
             doc.close()
 
+    def _foliant_ocr(self, data: bytes, langs: list[str], scanned: list[int]) -> bytes | None:
+        """OCR con il modulo di Foliant raccogliendo il dettaglio per il report (confidenza media,
+        pagine illeggibili, avvisi di risoluzione). None se il modulo non espone queste funzioni:
+        si usa allora `ocr_pdf_bytes`. Da chiamare senza ENGINE_LOCK."""
+        try:
+            from foliant.modules.ocr import engine as oe  # type: ignore
+            recognize, apply, options = oe.recognize_document, oe.apply_result, oe.OcrOptions
+        except (ImportError, AttributeError):
+            return None
+        from foliant.modules.ocr.languages import check_languages  # type: ignore
+        opts = options()
+        opts.languages = list(langs)
+        opts.mode = getattr(oe, "EDITABLE", "editable")
+        check_languages(opts.languages)
+        with ENGINE_LOCK:
+            pdf = pymupdf.open(stream=data, filetype="pdf")
+        try:
+            result = recognize(pdf, opts, scanned, self.progress)
+            with ENGINE_LOCK:
+                apply(pdf, result, opts.mode)
+                out = pdf.tobytes(garbage=3, deflate=True)
+        finally:
+            with ENGINE_LOCK:
+                pdf.close()
+        per_page = {}
+        for pr in result.pages:
+            n = self.source_index(pr.index) + 1
+            if pr.status == "failed":
+                self.warn(_("Pagina {p}: OCR non riuscito, la pagina resta un'immagine ({m}).").format(
+                    p=n, m=pr.message or "?"))
+                continue
+            if pr.status != "ok":
+                continue
+            words = [w for ln in pr.lines for w in ln.words]
+            conf = sum(w.conf for w in words) / len(words) if words else 0.0
+            per_page[n] = round(conf, 1)
+            self.result.ocr_pages.append(n)
+            if not words or conf < ILLEGIBLE_CONFIDENCE:
+                self.warn(_("Pagina {p}: testo poco leggibile (scrittura a mano o scansione illeggibile), "
+                            "confidenza {c:.0f}%: controlla il risultato.").format(p=n, c=conf))
+        for note in result.notes():
+            self.warn(note)
+        all_words = [w for pr in result.pages if pr.status == "ok" for ln in pr.lines for w in ln.words]
+        self.result.details["ocr"] = {
+            "languages": list(langs), "pages": per_page,
+            "mean_confidence": round(sum(w.conf for w in all_words) / len(all_words), 1) if all_words else None}
+        return out
+
     def _ocr_pages(self, doc: pymupdf.Document, scanned: list[int]) -> bytes:
         lang = ocr_languages(self.language)
+        self.result.details.setdefault("ocr", {"languages": lang.split("+"), "pages": {}, "mean_confidence": None})
         for k, i in enumerate(scanned):
             check(self.progress, 0.1 * k / len(scanned), _("OCR della pagina {p}").format(p=self.source_index(i) + 1))
             try:

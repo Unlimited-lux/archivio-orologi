@@ -842,3 +842,17 @@ EN.update({"Impostazioni personalizzate": "Custom settings", "Anteprima non rius
            "Importa preset": "Import preset", "Certificati e garanzie a colori": "Certificates and warranties in color",
            "Documenti in bianco e nero (fatture, contratti)": "Black and white documents (invoices, contracts)",
            "Bozza veloce in grigio": "Quick draft in grayscale", "Formato carta": "Paper size"})
+
+# CNV-02: dettaglio dell'OCR nel report
+EN.update({"Lingue OCR: {l}": "OCR languages: {l}", "Confidenza media OCR: {c:.0f}%": "Mean OCR confidence: {c:.0f}%",
+           "Pagina {p}: OCR non riuscito, la pagina resta un'immagine ({m}).":
+               "Page {p}: OCR failed, the page stays an image ({m}).",
+           "Pagina {p}: testo poco leggibile (scrittura a mano o scansione illeggibile), confidenza {c:.0f}%: "
+           "controlla il risultato.":
+               "Page {p}: hard-to-read text (handwriting or illegible scan), confidence {c:.0f}%: check the result.",
+           "Pagina {p}: testo non decodificabile (font senza mappatura Unicode) riconosciuto con OCR in {n} aree: "
+           "controlla il risultato.":
+               "Page {p}: undecodable text (font without Unicode mapping) recognized with OCR in {n} areas: "
+               "check the result.",
+           "Pagina {p}: parte del testo non è decodificabile e non è stato possibile riconoscerla con l'OCR.":
+               "Page {p}: part of the text cannot be decoded and could not be recognized with OCR."})
