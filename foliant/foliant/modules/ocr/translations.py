@@ -346,4 +346,5 @@ EN = {
     'OCR in blocco interrotto: i file completati restano, nessun file parziale. «Riprendi lotto» elabora i file rimasti.': 'Batch OCR interrupted: completed files are kept, no partial files. "Resume batch" processes the remaining files.',
     'Elabora i file rimasti di un OCR in blocco interrotto': 'Process the remaining files of an interrupted batch OCR',
     'Conserva nel file i dati di revisione (parole incerte)': 'Keep review data (uncertain words) in the file',
+    "Applica la pulizia anche all'immagine della pagina (PDF ricercabile)": 'Also apply the cleanup to the page image (searchable PDF)',
 }

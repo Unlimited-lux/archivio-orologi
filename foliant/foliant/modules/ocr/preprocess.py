@@ -24,10 +24,11 @@ class PreprocessOptions:
     denoise: bool = True         # rimozione del rumore granulare
     contrast: bool = True        # miglioramento del contrasto se basso
     max_skew: float = 15.0       # inclinazione massima cercata (gradi)
+    borders: bool = True         # rimozione dei bordi neri di scansione
 
     def as_dict(self) -> dict:
         return {"deskew": self.deskew, "auto_rotate": self.auto_rotate, "denoise": self.denoise,
-                "contrast": self.contrast, "max_skew": self.max_skew}
+                "contrast": self.contrast, "max_skew": self.max_skew, "borders": self.borders}
 
 
 @dataclass
@@ -163,8 +164,27 @@ def warp(img: np.ndarray, m: np.ndarray, size: tuple[int, int], border=None) -> 
                           borderValue=tuple(int(c) for c in border))
 
 
-def enhance(gray: np.ndarray, opts: PreprocessOptions) -> np.ndarray:
+def remove_borders(gray: np.ndarray) -> np.ndarray:
+    """Toglie i bordi neri della scansione: zone scure grandi che toccano il margine dell'immagine."""
+    h, w = gray.shape[:2]
+    dark = (gray < 90).astype(np.uint8)
+    if not dark.any():
+        return gray
+    n, labels, stats, _c = cv2.connectedComponentsWithStats(dark, 4)
     out = gray
+    for i in range(1, n):
+        x, y, ww, hh, area = stats[i]
+        touches = x == 0 or y == 0 or x + ww >= w or y + hh >= h
+        large = ww >= 0.3 * w or hh >= 0.3 * h
+        if touches and large and area >= 0.4 * min(ww, hh) * max(ww, hh) * 0.1:
+            if out is gray:
+                out = gray.copy()
+            out[labels == i] = 255
+    return out
+
+
+def enhance(gray: np.ndarray, opts: PreprocessOptions) -> np.ndarray:
+    out = remove_borders(gray) if opts.borders else gray
     if opts.denoise:
         # il filtro mediano elimina il rumore «sale e pepe» senza sfumare i bordi
         out = cv2.medianBlur(out, 3)
@@ -187,7 +207,8 @@ def prepare(img: np.ndarray, opts: PreprocessOptions, osd_rotation: int = 0) -> 
     quarter = (osd_rotation // 90) % 4 if opts.auto_rotate else 0
     m, size = rotation_affine(w, h, quarter, 0.0)
     base = warp(gray, m, size, (255,))
-    angle = estimate_skew(base, opts.max_skew) if opts.deskew else 0.0
+    probe = remove_borders(base) if opts.borders else base
+    angle = estimate_skew(probe, opts.max_skew) if opts.deskew else 0.0
     if angle:
         m, size = rotation_affine(w, h, quarter, angle)
         base = warp(gray, m, size)

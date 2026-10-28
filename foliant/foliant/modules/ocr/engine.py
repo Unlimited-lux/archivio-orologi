@@ -128,6 +128,7 @@ class OcrOptions:
     psm: int = 3
     apply_to_page: bool = False  # ricercabile: applica rotazione e raddrizzamento anche alla pagina visibile
     keep_original: bool = False  # modificabile: conserva la scansione come livello nascosto (OCG)
+    clean_page: bool = False     # ricercabile: la pulizia sostituisce anche l'immagine visibile (OCR-09)
 
     def worker_count(self) -> int:
         if self.workers > 0:
@@ -433,6 +434,11 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
                 res.original = _encode_background(img)
     elif opts.mode == SEARCHABLE and res.rasterize:
         res.background = _encode_background(img)
+    elif opts.mode == SEARCHABLE and opts.clean_page and not res.mixed:
+        # immagine della pagina pulita (rumore, contrasto, bordi) con la stessa geometria
+        from .preprocess import enhance, to_gray
+        res.background = _encode_background(enhance(to_gray(img), opts.preprocess))
+        res.rasterize = True
     return res
 
 

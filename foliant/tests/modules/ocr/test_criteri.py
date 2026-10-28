@@ -454,3 +454,23 @@ def test_modificabile_contenuto_memorizzato_di_lato(rot):
         seen = engine.ocr_page_text(ref[0], clip=r + (-4, -4, 4, 4), languages=["ita"],
                                     preprocess=PreprocessOptions(auto_rotate=False))
         assert "compravendita" in seen
+
+
+def test_bordi_neri_e_pulizia_applicata_alla_pagina(tmp_path):
+    """OCR-09: bordi neri di scansione rimossi per il riconoscimento; con l'opzione l'immagine visibile
+    viene sostituita mantenendo posizione e dimensioni."""
+    import numpy as np
+    img = scan_image(dpi=200, noise=0.03)
+    img[:, :60] = 0
+    img[:45, :] = 0
+    data = open(image_pdf(tmp_path / "b.pdf", [img], dpi=200), "rb").read()
+    out = engine.ocr_pdf_bytes(data, ["ita"], "searchable",
+                               options=engine.OcrOptions(clean_page=True))
+    with pymupdf.open(stream=data) as a, pymupdf.open(stream=out) as b:
+        assert engine.char_accuracy(b[0].get_text(), EXPECTED) >= 0.95
+        ia, ib = a[0].get_image_info()[0], b[0].get_image_info()[0]
+        from .conftest import iou
+        assert iou(ia["bbox"], ib["bbox"]) >= 0.99
+        g = np.frombuffer(b[0].get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
+        g0 = np.frombuffer(a[0].get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
+        assert (g < 60).sum() < (g0 < 60).sum() * 0.5          # bordi neri e rumore tolti dall'immagine

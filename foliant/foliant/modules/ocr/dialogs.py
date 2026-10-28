@@ -228,6 +228,9 @@ class OcrDialog(QDialog):
         self.cb_apply_page = QCheckBox(_("Raddrizza e ruota anche la pagina visibile (PDF ricercabile)"))
         self.cb_apply_page.setChecked(str(get("apply_to_page", "false")).lower() in ("true", "1"))
         lay.addWidget(self.cb_apply_page)
+        self.cb_clean_page = QCheckBox(_("Applica la pulizia anche all'immagine della pagina (PDF ricercabile)"))
+        self.cb_clean_page.setChecked(str(get("clean_page", "false")).lower() in ("true", "1"))
+        lay.addWidget(self.cb_clean_page)
         self.cb_keep = QCheckBox(_("Conserva la scansione originale come livello nascosto (PDF modificabile)"))
         self.cb_keep.setChecked(str(get("keep_original", "false")).lower() in ("true", "1"))
         lay.addWidget(self.cb_keep)
@@ -278,6 +281,7 @@ class OcrDialog(QDialog):
         self.font.setEnabled(editable)
         self.cb_preview.setEnabled(not text)
         self.cb_apply_page.setEnabled(self.rb_searchable.isChecked())
+        self.cb_clean_page.setEnabled(self.rb_searchable.isChecked())
         self.cb_keep.setEnabled(editable)
         self.destination.setEnabled(not text)
         self.validate()
@@ -333,7 +337,7 @@ class OcrDialog(QDialog):
         o = self.options()
         return {"format": "foliant-ocr-profile", "version": 1, "mode": o.mode, "languages": o.languages,
                 "dpi": self.dpi.currentData(), "existing_text": o.existing_text, "font": o.font,
-                "preprocess": o.preprocess.as_dict(), "apply_to_page": o.apply_to_page, "keep_original": o.keep_original,
+                "preprocess": o.preprocess.as_dict(), "apply_to_page": o.apply_to_page, "keep_original": o.keep_original, "clean_page": o.clean_page,
                 "destination": self.destination.currentData(), "preview": self.cb_preview.isChecked()}
 
     def load_profile(self, data: dict) -> None:
@@ -357,6 +361,7 @@ class OcrDialog(QDialog):
                 cb.setChecked(bool(pre[key]))
         self.cb_apply_page.setChecked(bool(data.get("apply_to_page", False)))
         self.cb_keep.setChecked(bool(data.get("keep_original", False)))
+        self.cb_clean_page.setChecked(bool(data.get("clean_page", False)))
         self.cb_preview.setChecked(bool(data.get("preview", True)))
         self.validate()
 
@@ -408,6 +413,7 @@ class OcrDialog(QDialog):
             languages=self.languages.selected(), mode=self.mode(), dpi=int(self.dpi.currentData()) or 300,
             apply_to_page=self.cb_apply_page.isChecked() and self.mode() == engine.SEARCHABLE,
             keep_original=self.cb_keep.isChecked() and self.mode() == engine.EDITABLE,
+            clean_page=self.cb_clean_page.isChecked() and self.mode() == engine.SEARCHABLE,
             preprocess=PreprocessOptions(deskew=self.cb_deskew.isChecked(), auto_rotate=self.cb_rotate.isChecked(),
                                          denoise=self.cb_denoise.isChecked(),
                                          contrast=self.cb_contrast.isChecked()),
@@ -432,6 +438,7 @@ class OcrDialog(QDialog):
             s.setValue("ocr/destination", self.destination.currentData())
             s.setValue("ocr/apply_to_page", "true" if self.cb_apply_page.isChecked() else "false")
             s.setValue("ocr/keep_original", "true" if self.cb_keep.isChecked() else "false")
+            s.setValue("ocr/clean_page", "true" if self.cb_clean_page.isChecked() else "false")
             s.setValue("ocr/keep_review", "true" if self.cb_keep_review.isChecked() else "false")
             s.setValue("ocr/font", o.font)
             s.setValue("ocr/existing", o.existing_text)
