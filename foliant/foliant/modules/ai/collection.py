@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import copy
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,7 +10,6 @@ from pathlib import Path
 from foliant.api import Document, DocumentError, FoliantError, _
 
 from . import chunking, content, engine, prompts
-from .config import data_dir, write_private
 from .engine import Answer, Conversation
 from .providers import ChatRequest, Message
 from .render import PageSpace, find_refs
@@ -81,7 +80,7 @@ class Collection:
         return c
 
     def check(self, open_documents: dict[str, Document] | None = None) -> list[str]:
-        """Segnala documenti spostati o modificati dopo il salvataggio."""
+        """Segnala documenti spostati o modificati da quando la raccolta è stata conservata."""
         notes = []
         for m in self.members:
             doc = (open_documents or {}).get(m.path)
@@ -104,33 +103,25 @@ class Collection:
 
 
 class CollectionStore:
+    """Raccolte conservate in memoria fino alla chiusura di Foliant.
+
+    Regola di riservatezza: i percorsi dei documenti di una raccolta non vengono mai scritti
+    su disco. `directory` è accettato per compatibilità e ignorato.
+    """
+
     def __init__(self, directory: Path | None = None):
-        self._dir = directory
+        self._items: dict[str, Collection] = {}
 
-    @property
-    def directory(self) -> Path:
-        return self._dir or data_dir() / "raccolte"
-
-    def save(self, coll: Collection) -> Path:
-        path = self.directory / f"{coll.id}.json"
-        write_private(path, json.dumps(coll.to_dict(), ensure_ascii=False, indent=1))
-        return path
+    def save(self, coll: Collection) -> None:
+        self._items.pop(coll.id, None)
+        self._items[coll.id] = copy.deepcopy(coll)
 
     def load_all(self) -> list[Collection]:
-        out = []
-        try:
-            files = sorted(self.directory.glob("*.json"))
-        except OSError:
-            return out
-        for f in files:
-            try:
-                out.append(Collection.from_dict(json.loads(f.read_text(encoding="utf-8"))))
-            except (OSError, ValueError, KeyError, TypeError):
-                continue
-        return out
+        return [copy.deepcopy(c) for c in self._items.values()]
 
     def get(self, coll_id: str) -> Collection | None:
-        return next((c for c in self.load_all() if c.id == coll_id), None)
+        c = self._items.get(coll_id)
+        return copy.deepcopy(c) if c is not None else None
 
 
 def short_names(members: list[Member]) -> dict[str, str]:

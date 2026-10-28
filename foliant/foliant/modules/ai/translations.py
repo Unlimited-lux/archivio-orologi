@@ -167,12 +167,11 @@ EN: dict[str, str] = {
     "Informativa del fornitore": "Provider privacy policy",
     "Informativa del fornitore: {u}": "Provider privacy policy: {u}",
     "Chiedi conferma prima di ogni invio": "Ask for confirmation before each send",
-    "Conserva la cronologia delle conversazioni": "Keep conversation history",
-    "Elimina automaticamente dopo": "Delete automatically after",
+    "Tieni la cronologia delle conversazioni durante la sessione": "Keep conversation history during the session",
+    "La cronologia, il registro degli invii e le raccolte non vengono salvati su disco e si cancellano alla "
+    "chiusura di Foliant.":
+        "History, the send log and collections are not saved to disk and are cleared when Foliant closes.",
     "mai": "never",
-    "30 giorni": "30 days",
-    "90 giorni": "90 days",
-    "365 giorni": "365 days",
     "Verificato": "Verified",
     "Non verificato": "Not verified",
     "non verificato": "not verified",
@@ -201,6 +200,8 @@ EN: dict[str, str] = {
     "Esporta…": "Export…",
     "Esporta registro": "Export log",
     "Cancella registro": "Clear log",
+    "Contiene solo gli invii di questa sessione e non viene salvato su disco.":
+        "It only lists this session's requests and is not saved to disk.",
     "Il registro non contiene il contenuto inviato, solo i dati dell'invio.":
         "The log does not contain the sent content, only details of each send.",
     "Data e ora": "Date and time",
@@ -349,8 +350,6 @@ EN: dict[str, str] = {
     "Seleziona un'area della pagina con «Seleziona area» o scegli un'immagine.":
         "Select a page area with “Select area” or choose an image.",
     "L'area è troppo piccola (meno di 16×16 pixel).": "The area is too small (less than 16×16 pixels).",
-    "Impossibile salvare la cronologia (spazio su disco?): la conversazione resta in memoria fino alla chiusura.":
-        "Could not save history (disk full?): the conversation stays in memory until closed.",
     "Riassunto": "Summary",
     "Salva risposta": "Save response",
     "Markdown (*.md);;Testo (*.txt)": "Markdown (*.md);;Text (*.txt)",
@@ -359,8 +358,8 @@ EN: dict[str, str] = {
     "Il testo nel punto selezionato è cambiato: la proposta è obsoleta.":
         "The text at the selected location has changed: the proposal is out of date.",
     "Testo sostituito.": "Text replaced.",
-    "C'è una conversazione precedente su questo documento: apri «Cronologia» per riprenderla.":
-        "There is an earlier conversation about this document: open “History” to resume it.",
+    "C'è una conversazione precedente su questo documento in questa sessione: apri «Cronologia» per riprenderla.":
+        "There is an earlier conversation about this document in this session: open “History” to resume it.",
     "Informativa non accettata: nessun dato è stato inviato.": "Notice not accepted: no data was sent.",
     "Questa funzione richiede un documento o un testo.": "This feature requires a document or text.",
     "Seleziona del testo nel documento.": "Select some text in the document.",
@@ -502,11 +501,13 @@ EN: dict[str, str] = {
     "Elimina quelle del documento": "Delete this document's",
     "Elimina tutto": "Delete all",
     "Esporta conversazione": "Export conversation",
-    "Alcuni file della cronologia erano danneggiati e sono stati isolati.":
-        "Some history files were damaged and have been quarantined.",
-    "La cronologia è disattivata: le nuove conversazioni non vengono salvate.":
-        "History is turned off: new conversations are not saved.",
-    "Eliminare tutte le conversazioni salvate?": "Delete all saved conversations?",
+    "La cronologia contiene solo le conversazioni di questa sessione e si cancella alla chiusura di Foliant: "
+    "per conservarne una, esportala.":
+        "History only holds this session's conversations and is cleared when Foliant closes: "
+        "to keep one, export it.",
+    "La cronologia è disattivata: le nuove conversazioni non vengono conservate.":
+        "History is turned off: new conversations are not kept.",
+    "Eliminare tutte le conversazioni della sessione?": "Delete all conversations of this session?",
     "Chiedi all'IA su quest'immagine": "Ask AI about this image",
 
     # ---------------------------------------------------------------- lingue
@@ -789,15 +790,19 @@ EN: dict[str, str] = {
 
     # più documenti (AI-13)
     "Chat su più documenti": "Chat across documents",
-    "Apri una raccolta salvata…": "Open a saved collection…",
-    "Salva raccolta": "Save collection",
+    "Apri una raccolta di questa sessione…": "Open a collection from this session…",
+    "Conserva raccolta": "Keep collection",
+    "Raccolte di questa sessione: non vengono salvate su disco.":
+        "Collections of this session: they are not saved to disk.",
+    "Conserva la raccolta fino alla chiusura di Foliant (nulla viene salvato su disco).":
+        "Keep the collection until Foliant closes (nothing is saved to disk).",
     "Aggiungi le schede aperte": "Add open tabs",
     "Aggiungi file…": "Add files…",
     "Rimuovi": "Remove",
     "Domanda sulla raccolta…": "Question about the collection…",
     "Riassumi la raccolta": "Summarize collection",
     "Confronta": "Compare",
-    "Raccolta salvata.": "Collection saved.",
+    "Raccolta conservata fino alla chiusura di Foliant.": "Collection kept until Foliant closes.",
     "Raccolta": "Collection",
     "Aggiungi almeno un documento utilizzabile.": "Add at least one usable document.",
     "Riassumi la raccolta nel suo insieme.": "Summarize the collection as a whole.",
@@ -846,7 +851,6 @@ EN: dict[str, str] = {
     "facoltativo, per generare immagini": "optional, for image generation",
     "Modello per immagini": "Image model",
     "Il testo sembra già in {l}. Tradurre comunque?": "The text already seems to be in {l}. Translate anyway?",
-    "Cifra la cronologia (chiave nel portachiavi)": "Encrypt history (key stored in the keyring)",
     # ricerca bibliografica (AI-26)
     'Ricerca bibliografica': 'Literature search',
     'Nessun servizio bibliografico configurato': 'No bibliographic service configured',
@@ -973,7 +977,6 @@ EN: dict[str, str] = {
     'Inserisci come nuova pagina': 'Insert as new page',
     "Il documento è cambiato durante l'operazione: il testo riconosciuto non è stato salvato.": 'The document changed during the operation: the recognized text was not saved.',
     'Indirizzo non consentito: {u}': 'Address not allowed: {u}',
-    'Alcune conversazioni sono cifrate e il portachiavi non è disponibile.': 'Some conversations are encrypted and the keyring is not available.',
     "Contenuto richiesto dall'operazione «{t}», secondo l'ambito scelto.": 'Content required by the “{t}” operation, according to the chosen scope.',
     'Genera elemento grafico': 'Generate graphic element',
     "Converti in Word con l'IA": 'Convert to Word with AI',
