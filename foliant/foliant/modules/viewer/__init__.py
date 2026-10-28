@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 
 from foliant.api import Context
 
@@ -35,7 +36,11 @@ PARTS = (
 
 def register(ctx: Context) -> None:
     ctx.viewer_parts = {}
+    # Per lo sviluppo: FOLIANT_VIEWER_PARTS="thumbnails,bookmarks" carica solo quelle parti.
+    only = {p.strip() for p in os.environ.get("FOLIANT_VIEWER_PARTS", "").split(",") if p.strip()}
     for name in PARTS:
+        if only and name not in only:
+            continue
         try:
             mod = importlib.import_module(f"{__name__}.{name}")
         except ModuleNotFoundError as e:

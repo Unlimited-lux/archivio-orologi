@@ -13,6 +13,14 @@ def _isolated_state(tmp_path, monkeypatch):
     monkeypatch.setenv("FOLIANT_RECOVERY_DIR", str(tmp_path / "recovery"))
 
 
+@pytest.fixture(autouse=True)
+def _no_blocking_close_prompt(monkeypatch):
+    """La chiusura della finestra a fine test non deve aprire la richiesta modale
+    «Salvare le modifiche?» (la fixture `window` poi chiude i documenti senza salvare)."""
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+
+
 @pytest.fixture
 def viewer_window(window):
     """Finestra con il modulo viewer caricato."""
