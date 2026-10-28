@@ -94,21 +94,15 @@ class ConvertController:
         return True
 
     def selected_pages(self) -> list[int]:
-        """Pagine selezionate nel pannello miniature (vuoto se nessuna o pannello assente).
-
-        Il nucleo non espone ancora un'API pubblica (vedi CORE_REQUESTS.md): si usa il pannello
-        registrato con id «thumbnails» se offre `selected_pages()`."""
+        """Pagine selezionate nelle miniature (API del nucleo); vuoto se non c'è una selezione multipla."""
+        view = self.ctx.current_view()
+        if view is None:
+            return []
         try:
-            entry = getattr(self.window, "_sidebar", {}).get("thumbnails")
-            panel = entry[2] if entry else None
-            if panel is None or not hasattr(panel, "selected_pages"):
-                return []
-            if getattr(panel, "view", self.ctx.current_view()) is not self.ctx.current_view():
-                return []
-            pages = [int(p) for p in panel.selected_pages()]
-            return pages if len(pages) > 1 else []
+            pages = self.ctx.selected_pages(view)
         except Exception:
             return []
+        return pages if len(pages) > 1 else []
 
     def open_created(self, data: bytes, name: str, modified: bool = True):
         doc = Document.from_bytes(data, display_name=name, modified=modified)
