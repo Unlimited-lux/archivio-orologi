@@ -603,6 +603,38 @@ def strip_jpeg_metadata(data: bytes) -> tuple[bytes, int]:
     return data, orient
 
 
+MAX_PIXELS = 100_000_000
+
+
+def image_pixels(data: bytes) -> int:
+    """Numero di pixel di un'immagine (0 se non leggibile), senza decodificarla tutta."""
+    try:
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(io.BytesIO(data)) as im:
+            return im.size[0] * im.size[1]
+    except Exception:
+        return 0
+
+
+def downsample(data: bytes, max_pixels: int = MAX_PIXELS) -> bytes:
+    """Riduce l'immagine sotto `max_pixels` mantenendo le proporzioni (PNG, o JPEG se lo era)."""
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(io.BytesIO(data)) as im:
+        w, h = im.size
+        if w * h <= max_pixels:
+            return data
+        f = (max_pixels / (w * h)) ** 0.5
+        fmt = "JPEG" if (im.format or "").upper() == "JPEG" else "PNG"
+        small = im.resize((max(1, int(w * f)), max(1, int(h * f))), Image.Resampling.LANCZOS)
+        if fmt == "JPEG" and small.mode not in ("RGB", "L", "CMYK"):
+            small = small.convert("RGB")
+        buf = io.BytesIO()
+        small.save(buf, fmt, **({"quality": 90} if fmt == "JPEG" else {}), dpi=im.info.get("dpi", (96, 96)))
+        return buf.getvalue()
+
+
 def prepare_image(data: bytes) -> tuple[bytes, int]:
     """Valida un'immagine e la prepara all'inserimento. Restituisce (dati, orientamento EXIF)."""
     if not data:

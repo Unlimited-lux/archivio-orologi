@@ -299,6 +299,14 @@ class ObjectsController(QObject):
         self._apply(view, _("Capovolgi oggetti"), E.flip, horizontal)
 
     def set_opacity(self, view, alpha: float) -> None:
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            part = E.pdfa_part(view.document.pdf)
+        if part == "1" and alpha < 1 and not self.ctx.confirm(
+                _("Documento PDF/A-1"), _("Il documento dichiara la conformità PDF/A-1, che non ammette la "
+                                          "trasparenza: con questa opacità il file non sarà più conforme. Continuare?")):
+            return
         self._apply(view, _("Opacità"), E.set_opacity, alpha)
 
     def delete(self, view) -> None:
@@ -751,6 +759,11 @@ class ObjectsController(QObject):
             page = view.current_page
         if center is None and rect is None:
             center = self.visible_center(view, page)
+        big = [k for k, d in enumerate(images) if E.image_pixels(d) > E.MAX_PIXELS]
+        if big and self.ctx.confirm(_("Immagine molto grande"),
+                                    _("L'immagine supera i 100 megapixel e appesantirebbe molto il documento. "
+                                      "Ridurla a 100 megapixel prima di inserirla?")):
+            images = [E.downsample(d, E.MAX_PIXELS) if k in big else d for k, d in enumerate(images)]
         label = _("Inserisci immagine") if len(images) == 1 else _("Inserisci immagini")
         result = self.run_change(view, label, E.insert_images, page, images, center, rect)
         if result:
