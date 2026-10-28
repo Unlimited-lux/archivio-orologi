@@ -231,7 +231,8 @@ def flatten(ctrl: "Controller", current_page_only: bool = False, selection: bool
     only = list(ctrl.selection) if selection else None
     if selection and not only:
         return 0
-    n = ctrl.apply(_("Appiattisci annotazioni"), engine.flatten, pages, only) or 0
+    n = ctrl.apply(_("Appiattisci annotazioni"), engine.flatten, pages, only,
+                 change_kind="content") or 0
     ctrl.clear_selection()
     ctrl.ctx.status(_("Annotazioni appiattite: {n}").format(n=n) + " — " + _("Annulla per ripristinarle."))
     return n
