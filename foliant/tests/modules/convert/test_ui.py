@@ -373,3 +373,22 @@ def test_translations_cover_ui_strings():
                 if node.args[0].value not in EN:
                     missing.add(node.args[0].value)
     assert not missing, sorted(missing)[:20]
+
+
+def test_flatten_ui_undoable(window, ctrl, tmp_path, monkeypatch, messages):
+    from foliant.modules.convert.optimize_dialogs import FlattenDialog
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Testo", fontsize=12)
+    p.add_highlight_annot(pymupdf.Rect(70, 88, 120, 104))
+    path = tmp_path / "ann.pdf"
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    monkeypatch.setattr(FlattenDialog, "exec", lambda d: QDialog.DialogCode.Accepted)
+    ctrl.flatten()
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert list(d[0].annots()) == []
+    assert view.document.undo()
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert len(list(d[0].annots())) == 1
+    assert len(list(pymupdf.open(str(path))[0].annots())) == 1

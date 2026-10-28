@@ -578,6 +578,35 @@ class ConvertController:
         return self._apply_optimized(out, len(data), doc, name, path, target, _("Ottimizzazione avanzata"),
                                      suffix=_("_ottimizzato"))
 
+    def flatten(self):
+        """CNV-33: appiattisce annotazioni, campi, livelli e ritaglio del documento attivo (annullabile)."""
+        from .flatten import flatten_pdf_bytes
+        from .optimize_dialogs import FlattenDialog
+        view = self.ctx.current_view()
+        if view is None:
+            return None
+        doc = view.document
+        dlg = FlattenDialog(self.window, doc.page_count)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        values = dlg.values()
+        with ENGINE_LOCK:
+            signed = any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and w.field_value
+                         for p in doc.pdf for w in (p.widgets() or []))
+        if signed and values["forms"] and not self.ctx.confirm(
+                _("Documento firmato"), _("Le firme appiattite non saranno più verificabili. Continuare?")):
+            return None
+        data = self._document_bytes(doc)
+        ok, res = self._run(_("Appiattimento in corso…"), flatten_pdf_bytes, data, **values)
+        if not ok:
+            return None
+        out, report = res
+        doc.replace_with(out, _("Appiattisci"))
+        self.ctx.status(_("Documento appiattito. Puoi annullare con Annulla finché non salvi."), 8000)
+        if report.get("warnings"):
+            self.ctx.info(_("Appiattisci"), "\n".join(report["warnings"]))
+        return report
+
     def repair(self):
         """CNV-32: ripara uno o più PDF danneggiati salvando una copia «_riparato»."""
         from . import optimize

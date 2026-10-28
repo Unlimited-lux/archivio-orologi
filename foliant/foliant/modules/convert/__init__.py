@@ -75,12 +75,14 @@ def register(ctx) -> None:
                                    requires_document=False)
     act_advanced = ctx.action(_("Ottimizzazione avanzata…"), "sliders-horizontal", lambda: c.optimize_advanced(),
                               requires_document=False)
+    act_flatten = ctx.action(_("Appiattisci…"), "layers", lambda: c.flatten(),
+                             tooltip=_("Rendi fissi annotazioni, campi, livelli e ritaglio"))
     act_repair = ctx.action(_("Ripara PDF…"), "wrench", lambda: c.repair(), requires_document=False)
     act_batch = ctx.action(_("Converti più file…"), "folder-output", lambda: c.batch_convert(),
                            requires_document=False)
     mode.add_action(act_compress)
     more_menu = QMenu(ctx.window)
-    for a in (act_advanced, act_compress_many, act_repair, act_batch, act_batch_create):
+    for a in (act_advanced, act_flatten, act_compress_many, act_repair, act_batch, act_batch_create):
         more_menu.addAction(a)
     more_btn = QToolButton()
     more_btn.setText(_("Altri strumenti"))
@@ -108,5 +110,5 @@ def register(ctx) -> None:
     c.actions = {"export": act_export, "from_file": act_from_file, "from_images": act_from_images,
                  "from_url": act_from_url, "clipboard": act_clipboard, "blank": act_blank,
                  "compress": act_compress, "compress_many": act_compress_many, "advanced": act_advanced,
-                 "repair": act_repair, "batch": act_batch, "batch_create": act_batch_create}
+                 "repair": act_repair, "flatten": act_flatten, "batch": act_batch, "batch_create": act_batch_create}
     c.create_button = create_btn

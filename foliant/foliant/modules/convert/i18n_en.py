@@ -564,3 +564,29 @@ EN: dict[str, str] = {
     "Altri strumenti": "More tools",
     "Ottimizzazione avanzata, riparazione e operazioni su più file": "Advanced optimization, repair and multi-file operations",
 }
+
+# Appiattisci (CNV-33)
+EN.update({
+    "Annotazioni e commenti (i collegamenti restano attivi)": "Annotations and comments (links stay active)",
+    "Appiattimento in corso…": "Flattening…",
+    "Appiattimento…": "Flattening…",
+    "Appiattisci": "Flatten",
+    "Appiattisci…": "Flatten…",
+    "Campi modulo compilati e firme": "Filled form fields and signatures",
+    "Documento appiattito. Puoi annullare con Annulla finché non salvi.": "Document flattened. You can undo it until you save.",
+    "Elementi da rendere parte fissa della pagina": "Elements to make a fixed part of the page",
+    "Il documento non consente modifiche: serve la password del proprietario.": "The document does not allow changes: the owner password is required.",
+    "Il modulo XFA dinamico non è appiattibile: resta solo il modulo standard.": "The dynamic XFA form cannot be flattened: only the standard form is kept.",
+    "Il testo di {n} note è andato perso: resta solo l'icona.": "The text of {n} notes was lost: only the icon remains.",
+    "Le firme appiattite non saranno più verificabili. Continuare?": "Flattened signatures can no longer be verified. Continue?",
+    "Le firme appiattite non sono più verificabili.": "Flattened signatures can no longer be verified.",
+    "Le pagine rasterizzate aumentano la dimensione del file.": "Rasterized pages increase the file size.",
+    "Livelli (nello stato visibile corrente)": "Layers (in the current visibility state)",
+    "Mantieni il testo ricercabile con l'OCR": "Keep the text searchable with OCR",
+    "OCR non disponibile: il testo delle pagine rasterizzate non sarà ricercabile.": "OCR not available: the text of rasterized pages will not be searchable.",
+    "Rasterizza le pagine (testo non selezionabile senza OCR)": "Rasterize pages (text not selectable without OCR)",
+    "Rasterizzazione pagina {p}": "Rasterizing page {p}",
+    "Rendi fissi annotazioni, campi, livelli e ritaglio": "Make annotations, fields, layers and crop permanent",
+    "Ritaglio delle pagine (reso definitivo)": "Page crop (made permanent)",
+    "Tutte (es. 1-3, 7)": "All (e.g. 1-3, 7)",
+})

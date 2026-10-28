@@ -206,3 +206,73 @@ class AdvancedDialog(QDialog):
         out.update(image_ppi=self.image_ppi.value() or None, image_threshold_ppi=self.threshold.value() or None,
                    jpeg_quality=self.quality.value(), grayscale=self.grayscale.isChecked())
         return out
+
+
+class FlattenDialog(QDialog):
+    """Scelta degli elementi da appiattire (CNV-33)."""
+
+    def __init__(self, parent, page_count: int):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QLineEdit
+        self.setWindowTitle(_("Appiattisci"))
+        self.setMinimumWidth(460)
+        self.page_count = page_count
+        lay = QVBoxLayout(self)
+        box = QGroupBox(_("Elementi da rendere parte fissa della pagina"))
+        g = QVBoxLayout(box)
+        self.checks: dict[str, QCheckBox] = {}
+        for key, label, default in (("annotations", _("Annotazioni e commenti (i collegamenti restano attivi)"), True),
+                                    ("forms", _("Campi modulo compilati e firme"), True),
+                                    ("layers", _("Livelli (nello stato visibile corrente)"), True),
+                                    ("crop", _("Ritaglio delle pagine (reso definitivo)"), False),
+                                    ("rasterize", _("Rasterizza le pagine (testo non selezionabile senza OCR)"), False)):
+            cb = QCheckBox(label)
+            cb.setChecked(default)
+            self.checks[key] = cb
+            g.addWidget(cb)
+        lay.addWidget(box)
+        form = QFormLayout()
+        self.pages = QLineEdit()
+        self.pages.setPlaceholderText(_("Tutte (es. 1-3, 7)"))
+        form.addRow(_("Pagine"), self.pages)
+        self.dpi = QSpinBox()
+        self.dpi.setRange(72, 600)
+        self.dpi.setValue(200)
+        self.dpi.setSuffix(" dpi")
+        form.addRow(_("Risoluzione"), self.dpi)
+        self.ocr = QCheckBox(_("Mantieni il testo ricercabile con l'OCR"))
+        self.ocr.setChecked(True)
+        form.addRow("", self.ocr)
+        lay.addLayout(form)
+        self.error = QLabel()
+        self.error.setStyleSheet(f"color: {theme.hex_color('danger')};")
+        self.error.setVisible(False)
+        lay.addWidget(self.error)
+        self.checks["rasterize"].toggled.connect(self._update)
+        self._update()
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Appiattisci"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def _update(self) -> None:
+        on = self.checks["rasterize"].isChecked()
+        self.dpi.setEnabled(on)
+        self.ocr.setEnabled(on)
+
+    def accept(self) -> None:
+        from .common import RangeError, parse_page_range
+        try:
+            parse_page_range(self.pages.text(), self.page_count)
+        except RangeError as e:
+            self.error.setText(str(e))
+            self.error.setVisible(True)
+            return
+        super().accept()
+
+    def values(self) -> dict:
+        out = {k: cb.isChecked() for k, cb in self.checks.items()}
+        out.update(pages=self.pages.text(), dpi=self.dpi.value(), ocr=self.ocr.isChecked())
+        return out
