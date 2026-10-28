@@ -34,6 +34,7 @@ _COMB_MIN = 3             # caselle minime di un pettine
 _COMB_CELL = (4.0, 30.0)  # larghezza/altezza ammesse di una casella (pt)
 _COMB_GAP = 2.5           # spazio massimo tra caselle adiacenti
 _CHECK_GLYPHS = "☐□❑◻"
+_SKEW_RANGE = (0.3, 10.0)  # inclinazione corretta (gradi, valore assoluto)
 _UNDERSCORES = re.compile(r"_{4,}")
 _LABEL_NOISE = re.compile(r"_{2,}|[" + _CHECK_GLYPHS + "]")
 
@@ -49,6 +50,7 @@ class Candidate:
     multiline: bool = False
     source: str = ""
     comb: int = 0          # caselle del pettine (0 = non è un pettine)
+    angle: float = 0.0     # inclinazione stimata della scansione (gradi)
 
 
 class _Word(NamedTuple):
@@ -484,8 +486,33 @@ def _from_raster(page: int, pg: pymupdf.Page) -> list[Candidate]:
         return []
     derot = pg.derotation_matrix
 
+    # Inclinazione: ruota l'immagine per raddrizzarla e poi riporta i
+    # rettangoli trovati nelle coordinate della scansione originale.
+    angle = _skew_angle(ink, int(_MIN_LINE * zoom))
+    back = None
+    if _SKEW_RANGE[0] <= abs(angle) <= _SKEW_RANGE[1]:
+        h_px, w_px = img.shape
+        rot = cv2.getRotationMatrix2D((w_px / 2, h_px / 2), -angle, 1.0)
+        img = cv2.warpAffine(img, rot, (w_px, h_px), flags=cv2.INTER_LINEAR,
+                             borderMode=cv2.BORDER_CONSTANT, borderValue=255)
+        _, ink = cv2.threshold(img, 0, 255,
+                               cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+        back = cv2.invertAffineTransform(rot)
+    else:
+        angle = 0.0
+
     def to_pt(x0: float, y0: float, x1: float, y1: float) -> pymupdf.Rect:
         # pixel della pagina visualizzata -> punti della pagina non ruotata
+        if back is not None:
+            # I campi PDF sono allineati agli assi: la migliore
+            # approssimazione di un riquadro inclinato è il rettangolo con
+            # le dimensioni originali centrato sul centro riportato nella
+            # scansione (cioè sulla linea inclinata), non il suo ingombro.
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            ox = back[0][0] * cx + back[0][1] * cy + back[0][2]
+            oy = back[1][0] * cx + back[1][1] * cy + back[1][2]
+            hw, hh = (x1 - x0) / 2, (y1 - y0) / 2
+            x0, y0, x1, y1 = ox - hw, oy - hh, ox + hw, oy + hh
         r = pymupdf.Rect(x0 / zoom, y0 / zoom, x1 / zoom, y1 / zoom)
         return (r * derot).normalize()
 
@@ -567,9 +594,33 @@ def _from_raster(page: int, pg: pymupdf.Page) -> list[Candidate]:
                   for o in hlines if o is not hl]
         rr = _field_above(scaled, [], others,
                           [r / zoom for r in box_rects])
-        out.append(Candidate(page, (rr * derot).normalize(), TEXT, "",
+        out.append(Candidate(page, to_pt(*(rr * zoom)), TEXT, "",
                              False, "raster"))
+    for c in out:
+        c.angle = angle
     return out
+
+
+def _skew_angle(ink, min_len: int) -> float:
+    """Inclinazione della scansione in gradi (positiva = antioraria), come
+    mediana degli angoli dei tratti lunghi quasi orizzontali."""
+    import cv2
+    import numpy as np
+
+    segs = cv2.HoughLinesP(ink, 1, np.pi / 1800, threshold=min_len // 2,
+                           minLineLength=min_len, maxLineGap=4)
+    if segs is None:
+        return 0.0
+    angles = []
+    for x0, y0, x1, y1 in np.asarray(segs).reshape(-1, 4).tolist():
+        a = float(np.degrees(np.arctan2(y0 - y1, x1 - x0)))  # y verso il basso
+        if a > 90:
+            a -= 180
+        elif a < -90:
+            a += 180
+        if abs(a) <= 15:
+            angles.append(a)
+    return float(np.median(angles)) if angles else 0.0
 
 
 def _iou_px(a: tuple, b: tuple) -> float:

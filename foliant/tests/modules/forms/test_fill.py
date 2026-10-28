@@ -507,20 +507,40 @@ def _big_form(path, pages=50, per_page=100):
     pdf.save(str(path))
 
 
-def test_large_form_bar_fast_and_commit_fast(qtbot, window, tmp_path):
+@pytest.mark.parametrize("pages,per_page", [(50, 100), (1, 5000)])
+def test_large_form_bar_fast_and_commit_fast(qtbot, window, tmp_path, pages, per_page):
     import time
     path = tmp_path / "grande.pdf"
-    _big_form(path)
+    _big_form(path, pages=pages, per_page=per_page)
+    t0 = time.time()
     view = window.ctx.open_path(str(path))
     f = filler_of(view)
     # barra subito, analisi completa rimandata a dopo l'apertura (non la blocca)
     assert f.bar.isVisible() and f.state.version < 0 and "Analisi" in f.text_of_bar()
     QApplication.processEvents()
-    assert f.state.fields and "5000 campi" in f.text_of_bar() and "50 obbligatori" in f.text_of_bar()
-    info = [x for x in f.state.fields if x.name == "c3_7"][0]
+    opened = time.time() - t0
+    assert f.state.fields and "5000 campi" in f.text_of_bar()
+    assert f"{pages} obbligatori" in f.text_of_bar() or "1 obbligatorio" in f.text_of_bar()
+    assert opened < 6.0  # apertura completa con analisi (lineare nel numero di campi)
+    info = [x for x in f.state.fields if x.name == "c0_37"][0]
     f.activate(info)
     f.editor.setText("veloce")
     t = time.time()
     f.commit_active()
-    assert time.time() - t < 1.5
-    assert [x for x in f.state.fields if x.name == "c3_7"][0].value == "veloce"
+    assert time.time() - t < 0.5
+    assert [x for x in f.state.fields if x.name == "c0_37"][0].value == "veloce"
+
+
+def test_deferred_callbacks_after_window_destroyed(qtbot, settings, form_pdf):
+    """Regressione: i callback differiti del modulo non toccano oggetti già distrutti."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from foliant.ui.main_window import MainWindow
+    win = MainWindow(settings)
+    win.show()
+    view = win.ctx.open_path(form_pdf)  # l'analisi iniziale è in coda, non ancora eseguita
+    assert view is not None
+    view.document._saved_state = view.document._state
+    win.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()  # nessuna eccezione dai timer del modulo

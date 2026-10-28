@@ -78,15 +78,16 @@ class FormState:
         """Rilegge solo i campi con questi nomi (dopo una compilazione): con migliaia di campi
         rileggere tutto a ogni valore sarebbe troppo lento."""
         doc = self.view.document
-        pages = sorted({f.page for f in self.fields if f.name in names})
+        from .scan import widget_info
+        targets = [f for f in self.fields if f.name in names]
         with ENGINE_LOCK:
             if doc.closed:
                 return
             try:
-                fresh = E.fields_named(doc.pdf, names, pages)
+                fresh = [widget_info(doc.pdf, f.page, f.xref) for f in targets]
             except Exception:
                 fresh = None
-        if fresh is None or len(fresh) != sum(1 for f in self.fields if f.name in names):
+        if fresh is None or any(x is None for x in fresh) or not targets:
             self.refresh(force=True)
             return
         by_key = {(f.page, f.xref): f for f in fresh}
@@ -389,13 +390,19 @@ class FormFiller(QObject):
             for b in self.bar.buttons.values():
                 b.hide()
             self._set_bar_visible(True)
-        QTimer.singleShot(0, self._initial_analysis)
+        QTimer.singleShot(0, self, self._initial_analysis)  # legato al filler: annullato se la vista sparisce
+
+    def _alive(self) -> bool:
+        """False se vista o barra sono già state distrutte (callback differiti tardivi)."""
+        import shiboken6
+        try:
+            return (shiboken6.isValid(self) and shiboken6.isValid(self.view) and shiboken6.isValid(self.bar)
+                    and not self.document.closed)
+        except RuntimeError:
+            return False
 
     def _initial_analysis(self) -> None:
-        try:
-            if self.document.closed:
-                return
-        except RuntimeError:
+        if not self._alive():
             return
         self.state.refresh(force=True)
         self.update_bar()
@@ -554,6 +561,8 @@ class FormFiller(QObject):
         self._place_bar()
 
     def _place_bar(self) -> None:
+        if not self._alive():
+            return
         if self.bar.isVisible():
             vp = self.view.viewport().geometry()
             self.bar.setGeometry(vp.x(), vp.y() - self._bar_height, vp.width(), self._bar_height)
@@ -641,8 +650,8 @@ class FormFiller(QObject):
         t = ev.type()
         if obj is self.view:
             if t == QEvent.Type.Resize:
-                QTimer.singleShot(0, self._place_bar)
-                QTimer.singleShot(0, self.reposition)
+                QTimer.singleShot(0, self, self._place_bar)
+                QTimer.singleShot(0, self, self.reposition)
             return False
         if t == QEvent.Type.MouseButtonPress and ev.button() == Qt.MouseButton.LeftButton:
             if not self.fill_enabled():
@@ -793,6 +802,8 @@ class FormFiller(QObject):
         return r.height() / max(1.0, f.rect.height) if f.rect.height else 1.0
 
     def reposition(self, *_args) -> None:
+        if not self._alive():
+            return
         if self.active is None or self.editor is None:
             return
         try:
@@ -942,7 +953,7 @@ class FormFiller(QObject):
         if self._closing or self._committing or ed is not self.editor:
             return
         # il focus è andato altrove (clic fuori dal campo, altra finestra): conferma
-        QTimer.singleShot(0, lambda: self._focus_out_commit(ed))
+        QTimer.singleShot(0, self, lambda: self._focus_out_commit(ed))
 
     def _focus_out_commit(self, ed) -> None:
         if ed is not self.editor or self.editor is None:
@@ -972,7 +983,7 @@ class FormFiller(QObject):
         lab.show()
         lab.raise_()
         self.last_error = message
-        QTimer.singleShot(5000, lab.hide)
+        QTimer.singleShot(5000, lab, lab.hide)
 
     last_error: str | None = None
 
