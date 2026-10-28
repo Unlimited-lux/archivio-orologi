@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from foliant.api import (
     ENGINE_LOCK, FIT_PAGE, FIT_WIDTH, Document, DocumentError, DocumentView, OperationCancelled, PasswordRequired,
-    SelectTextTool, WrongPassword, _, atomic_write, bind_icon, icon, theme,
+    SelectTextTool, Tool, WrongPassword, _, atomic_write, bind_icon, icon, theme,
 )
 
 from . import compare_engine as ce
@@ -29,18 +29,23 @@ SESSION_FILTER = "Sessione di confronto (*.foliantcmp)"
 MM = ce.MM
 
 
-def kind_color(kind: str) -> QColor:
-    return {
-        ce.ADDED: theme.color("success"),
-        ce.DELETED: theme.color("danger"),
-        ce.MODIFIED: theme.color("warning"),
-        ce.FORMAT: theme.color("secondary"),
-        ce.VISUAL: theme.color("accent"),
-        ce.PAGE: theme.color("text_muted"),
-        ce.IMAGE: theme.color("accent_hover"),
-        ce.ANNOTATION: theme.color("text"),
-        ce.FIELD: theme.color("accent").darker(140) if not theme.is_dark() else theme.color("accent").lighter(140),
-    }[kind]
+_KIND_TOKENS = {ce.ADDED: "success", ce.DELETED: "danger", ce.MODIFIED: "warning", ce.FORMAT: "secondary",
+                ce.VISUAL: "accent", ce.PAGE: "text_muted", ce.IMAGE: "accent_hover", ce.ANNOTATION: "text",
+                ce.FIELD: "accent"}
+
+
+def kind_color(kind: str, on_page: bool = False) -> QColor:
+    """Colore di un tipo di differenza. Sulle pagine (sempre bianche) si usano i
+    valori del tema chiaro, leggibili anche quando l'interfaccia è scura."""
+    token = _KIND_TOKENS[kind]
+    if on_page:
+        value = theme.LIGHT[token]
+        c = QColor(*value) if isinstance(value, tuple) else QColor(value)
+    else:
+        c = theme.color(token)
+    if kind == ce.FIELD:
+        c = c.darker(140) if (on_page or not theme.is_dark()) else c.lighter(140)
+    return c
 
 
 KIND_ICONS = {ce.ADDED: "circle-plus", ce.DELETED: "circle-minus", ce.MODIFIED: "replace",
@@ -849,6 +854,70 @@ class DiffPickTool(SelectTextTool):
         return super().press(view, ev)
 
 
+class ExclusionTool(Tool):
+    """Disegna un'area rettangolare da escludere dal confronto (CMP-08)."""
+
+    id = "compare-exclusion"
+    cursor = Qt.CursorShape.CrossCursor
+
+    def __init__(self, pane: "ComparePane"):
+        self.pane = pane
+        self.start = None
+        self.current = None
+
+    def press(self, view, ev):
+        if ev.page is None or ev.point is None:
+            return False
+        self.start = (ev.page, ev.point)
+        self.current = ev.point
+        return True
+
+    def move(self, view, ev):
+        if self.start is None:
+            return False
+        self.current = view.clamp_to_page(self.start[0], ev.pos)
+        view.viewport().update()
+        return True
+
+    def release(self, view, ev):
+        if self.start is None:
+            return False
+        page, a = self.start
+        b = view.clamp_to_page(page, ev.pos)
+        self.start = None
+        view.viewport().update()
+        rect = pymupdf.Rect(min(a.x, b.x), min(a.y, b.y), max(a.x, b.x), max(a.y, b.y))
+        if rect.width >= 3 and rect.height >= 3:
+            self.pane.area_drawn.emit(page, rect)
+        return True
+
+    def paint(self, view, painter, page):
+        if self.start is None or self.start[0] != page or self.current is None:
+            return
+        a, b = self.start[1], self.current
+        pen = QPen(theme.color("danger"), 1.2)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        fill = QColor(theme.color("danger"))
+        fill.setAlpha(40)
+        painter.setBrush(fill)
+        painter.drawRect(QRectF(min(a.x, b.x), min(a.y, b.y), abs(b.x - a.x), abs(b.y - a.y)))
+
+
+def ask_exclusion_scope(parent) -> str | None:
+    """«page» (solo questa pagina), «all» (tutte le pagine) o None (sostituibile nei test)."""
+    from PySide6.QtWidgets import QMessageBox
+    box = QMessageBox(parent)
+    box.setWindowTitle(_("Area di esclusione"))
+    box.setText(_("Escludere l'area disegnata dal confronto?"))
+    page = box.addButton(_("Solo questa pagina"), QMessageBox.ButtonRole.AcceptRole)
+    every = box.addButton(_("Tutte le pagine"), QMessageBox.ButtonRole.AcceptRole)
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    box.exec()
+    clicked = box.clickedButton()
+    return "page" if clicked is page else ("all" if clicked is every else None)
+
+
 class DiffMap(QWidget):
     """Mappa delle differenze accanto alla barra di scorrimento."""
 
@@ -899,6 +968,7 @@ class ComparePane(QWidget):
     """Un lato della vista affiancata: intestazione, vista documento e mappa."""
 
     picked = Signal(object)
+    area_drawn = Signal(int, object)     # pagina, pymupdf.Rect
 
     def __init__(self, side: str, document: Document, title: str, parent=None):
         super().__init__(parent)
@@ -908,7 +978,9 @@ class ComparePane(QWidget):
         self.selected: ce.Difference | None = None
         self.view = DocumentView(document, self)
         self.view.overlays.append(self._paint)
-        self.view.set_tool(DiffPickTool(self))
+        self.pick_tool = DiffPickTool(self)
+        self.exclusion_tool = ExclusionTool(self)
+        self.view.set_tool(self.pick_tool)
         self.header = QLabel(title)
         self.header.setObjectName("compareHeader")
         self.header.setContentsMargins(8, 4, 8, 4)
@@ -943,7 +1015,7 @@ class ComparePane(QWidget):
             locs = [loc for loc in d.locations(self.side) if loc[0] == page]
             if not locs:
                 continue
-            c = kind_color(d.kind)
+            c = kind_color(d.kind, on_page=True)
             selected = d is self.selected
             width = 2.2 if selected else 1.2
             point = (d.kind == ce.ADDED and self.side == "a") or (d.kind == ce.DELETED and self.side == "b")
@@ -1277,7 +1349,7 @@ class OverlayWidget(QWidget):
                 for loc in d.locations("a"):
                     if loc[0] == pa:
                         boxes.append((QRectF(loc[1] * scale, loc[2] * scale, (loc[3] - loc[1]) * scale,
-                                             (loc[4] - loc[2]) * scale), kind_color(d.kind)))
+                                             (loc[4] - loc[2]) * scale), kind_color(d.kind, on_page=True)))
         self.canvas.px_per_mm = MM * scale
         self.canvas.set_image(_to_qimage(arr), boxes, label)
 
@@ -1333,6 +1405,8 @@ class CompareWidget(QWidget):
         self._action(_("Esporta B annotato"), "message-square-text", self.export_annotated, text_only=False)
         self._action(_("Salva sessione"), "save", self.save_session, text_only=False)
         self._action(_("Abbina pagine…"), "link-2", self.manual_pair, text_only=False)
+        self.act_exclude = self._action(_("Escludi un'area"), "square-dashed", self._toggle_exclusion,
+                                        checkable=True, text_only=False)
         self.toolbar.addSeparator()
         self._action(_("Chiudi confronto"), "x", self.close_session)
 
@@ -1365,6 +1439,7 @@ class CompareWidget(QWidget):
         for pane in (self.pane_a, self.pane_b):
             pane.picked.connect(self._picked)
             pane.map.clicked.connect(self._picked)
+            pane.area_drawn.connect(lambda page, rect, p=pane: self._area_drawn(p, page, rect))
         self.pane_a.view.verticalScrollBar().valueChanged.connect(lambda _v: self._sync_from(self.pane_a))
         self.pane_b.view.verticalScrollBar().valueChanged.connect(lambda _v: self._sync_from(self.pane_b))
         self.pane_a.view.zoomChanged.connect(lambda z: self._sync_zoom(self.pane_a, z))
@@ -1507,6 +1582,49 @@ class CompareWidget(QWidget):
             loc = d.locations("a")
             if loc:
                 self.overlay.show_page_a(loc[0][0])
+
+    # ---------------------------------------------------------------- esclusioni (CMP-08)
+    def _toggle_exclusion(self) -> None:
+        on = self.act_exclude.isChecked()
+        for pane in (self.pane_a, self.pane_b):
+            pane.view.set_tool(pane.exclusion_tool if on else pane.pick_tool)
+        if on:
+            self.ctx.status(_("Disegna con il mouse l'area da escludere dal confronto."))
+
+    def _area_drawn(self, pane: "ComparePane", page: int, rect) -> None:
+        scope = ask_exclusion_scope(self)
+        self.act_exclude.setChecked(False)
+        self._toggle_exclusion()
+        if scope is None:
+            return
+        if pane.side == "b":   # le esclusioni valgono per le pagine abbinate di entrambi i lati
+            page = self.result.partner_a(page) if self.result.partner_a(page) is not None else page
+        self.add_exclusion(page if scope == "page" else -1, rect)
+
+    def add_exclusion(self, page: int, rect) -> "CompareWidget | None":
+        """Aggiunge un'area di esclusione e ricalcola il confronto."""
+        opts = ce.CompareOptions.from_dict(self.result.options.to_dict())
+        opts.exclusions = list(opts.exclusions) + [[int(page), float(rect.x0), float(rect.y0), float(rect.x1),
+                                                     float(rect.y1)]]
+        return self.recompute(opts)
+
+    def recompute(self, options: ce.CompareOptions) -> "CompareWidget | None":
+        controller = getattr(self.ctx, "tools_module", None)
+        controller = controller.compare if controller is not None else None
+        if controller is None:
+            return None
+        ra = self.result.side_a.pages
+        rb = self.result.side_b.pages
+        ia = ce.SideInput(self.source_a.data, self.source_a.label, self.source_a.path, self.source_a.password,
+                          (ra[0], ra[-1]) if ra else None, self.source_a.unsaved)
+        ib = ce.SideInput(self.source_b.data, self.source_b.label, self.source_b.path, self.source_b.password,
+                          (rb[0], rb[-1]) if rb else None, self.source_b.unsaved)
+        state = self.session_data()
+        widget = controller.run(ia, ib, self.source_a, self.source_b, options)
+        if widget is not None:
+            state["options"] = options.to_dict()
+            widget.restore_view_state(state)
+        return widget
 
     # ---------------------------------------------------------------- comandi
     def manual_pair(self) -> None:

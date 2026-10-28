@@ -753,4 +753,9 @@ EN: dict[str, str] = {
     "Sequenza non importata": "Sequence not imported",
     "passi completati: {p}": "steps completed: {p}",
     "{n} (copia)": "{n} (copy)",
+    "Area di esclusione": "Exclusion area",
+    "Disegna con il mouse l'area da escludere dal confronto.": "Draw with the mouse the area to exclude from the comparison.",
+    "Escludere l'area disegnata dal confronto?": "Exclude the drawn area from the comparison?",
+    "Escludi un'area": "Exclude an area",
+    "Solo questa pagina": "This page only",
 }

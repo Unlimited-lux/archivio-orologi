@@ -396,3 +396,24 @@ def test_twenty_thousand_differences_list(qtbot):
     panel.filters[ce.DELETED].setChecked(False)
     assert time.monotonic() - t < 1.0
     assert panel.counter.text() == "Visibili 10000 di 20000"
+
+
+def test_draw_exclusion_area_and_recompute(window, pdf_builder, monkeypatch):
+    def stamp(date):
+        def extra(page, i):
+            page.insert_text((420, 760), f"Stampato il {date}", fontsize=9)
+        return extra
+    a = pdf_builder([page_lines(1), page_lines(2)], extra=stamp("27/10"))
+    b = pdf_builder([page_lines(1), page_lines(2)], extra=stamp("28/10"))
+    w = start(window, a, b, mode=ce.MODE_TEXT)
+    assert len(w.result.differences) == 2
+    w.act_exclude.trigger()
+    assert isinstance(w.pane_a.view.tool, cu.ExclusionTool)
+    monkeypatch.setattr(cu, "ask_exclusion_scope", lambda parent: "all")
+    w.pane_a.area_drawn.emit(0, pymupdf.Rect(400, 740, 590, 780))
+    w2 = controller(window).widget
+    assert w2 is not w
+    assert w2.result.differences == []
+    assert w2.result.options.exclusions == [[-1, 400.0, 740.0, 590.0, 780.0]]
+    assert "Aree escluse: 1" in w2.panel.empty.text()
+    assert not isinstance(w2.pane_a.view.tool, cu.ExclusionTool)
