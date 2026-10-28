@@ -111,6 +111,27 @@ def remove_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | 
 
 def _redact_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | None = None) -> None:
     unframe = unframe_matrix(page)
+    rects = []
+    for line in lines:
+        band = _band(line) * unframe
+        if band.is_empty:
+            band = pymupdf.Rect(line.bbox) * unframe
+        rects.append(band)
+    _redact_rects(page, rects, relocated_links)
+
+
+def remove_areas(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> None:
+    """Rimuove i glifi che toccano le aree indicate (pagina non ruotata), lasciando fermo il resto
+    del testo (Trova ed elimina senza ricomposizione, TXT-13)."""
+    bands = []
+    for r in rects:
+        r = pymupdf.Rect(r)
+        h, w = r.height, r.width
+        bands.append(pymupdf.Rect(r.x0 + min(0.3, w / 4), r.y0 + h * 0.4, r.x1 - min(0.3, w / 4), r.y0 + h * 0.6))
+    _redact_rects(page, bands)
+
+
+def _redact_rects(page: pymupdf.Page, rects: list[pymupdf.Rect], relocated_links: list | None = None) -> None:
     # le redazioni già presenti (segnate dall'utente) non devono essere applicate ora
     pending = []
     for annot in list(page.annots(types=[pymupdf.PDF_ANNOT_REDACT]) or []):
@@ -122,10 +143,7 @@ def _redact_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list |
             if a is not None:
                 page.delete_annot(a)
     links_before = page.get_links()
-    for line in lines:
-        band = _band(line) * unframe
-        if band.is_empty:
-            band = pymupdf.Rect(line.bbox) * unframe
+    for band in rects:
         page.add_redact_annot(band, fill=False)
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                           text=pymupdf.PDF_REDACT_TEXT_REMOVE)

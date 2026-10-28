@@ -68,7 +68,7 @@ def register(ctx: Context) -> None:
     act_add = ctx.action(_("Aggiungi testo"), "type", use_add_tool, checkable=True,
                          tooltip=_("Aggiungi una casella di testo: clic per una riga, trascina per un riquadro"))
     act_find = ctx.action(_("Trova e sostituisci"), "replace", lambda: open_find_dialog(ctx),
-                          shortcut="Ctrl+H")
+                          shortcut="Ctrl+H", mode="modifica")
     mode.add_action(act_edit)
     mode.add_action(act_add)
     act_fonts = ctx.action(_("Font del documento"), "type-outline", lambda: open_fonts_dialog(ctx))
@@ -92,7 +92,7 @@ def register(ctx: Context) -> None:
         dlg.recheck()
 
     act_spell = ctx.action(_("Controlla ortografia del documento"), "spell-check", open_spell_dialog,
-                           shortcut="F7")
+                           shortcut="F7", mode="modifica")
     mode.add_action(act_find)
     mode.add_action(act_spell)
     mode.add_action(act_fonts)
