@@ -599,3 +599,25 @@ def test_button_icons_layout_and_rollover_applied(qtbot, tmp_path):
     assert E.field_info(pdf, 0, b).caption_rollover == "Apri"
     panel.icon_rows["normal"][2].click()
     assert E.field_info(pdf, 0, b).icons == ()
+
+
+def test_button_event_applied(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 72), "stampa", caption="Stampa")
+    E.set_button_action(pdf, 0, b, {"type": "print"})
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.set_fields(E.list_fields(pdf), ["stampa"])
+    assert panel.event_combo.currentData() == "U"
+    panel.event_combo.setCurrentIndex(panel.event_combo.findData("E"))
+    assert E.button_action(pdf, b) == {"type": "print", "name": "Print", "event": "E"}
+    panel.set_fields(E.list_fields(pdf), ["stampa"])
+    assert panel.event_combo.currentData() == "E"

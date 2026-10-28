@@ -2842,11 +2842,36 @@ def set_button_image(pdf: pymupdf.Document, page: int, xref: int, image: str | b
     pdf.xref_set_key(xref, "MK/I", f"{form} 0 R")
 
 
-def button_action(pdf: pymupdf.Document, xref: int) -> dict:
-    """Azione al clic di un pulsante, come dizionario semplice."""
-    t, v = pdf.xref_get_key(xref, "A")
-    if t == "null":
-        t, v = pdf.xref_get_key(xref, "AA/U")
+# Eventi delle azioni dei pulsanti: rilascio (/A o /AA /U), pressione, ingresso e uscita del puntatore,
+# focus e perdita del focus.
+BUTTON_EVENTS = ("U", "D", "E", "X", "Fo", "Bl")
+
+
+def _event_action(pdf: pymupdf.Document, xref: int, event: str) -> tuple[str, str]:
+    if event == "U":
+        t, v = pdf.xref_get_key(xref, "A")
+        if t != "null":
+            return t, v
+    return pdf.xref_get_key(xref, f"AA/{event}")
+
+
+def button_action(pdf: pymupdf.Document, xref: int, event: str | None = None) -> dict:
+    """Azione di un pulsante come dizionario semplice, con l'evento che la avvia («event»).
+    Senza `event`: la prima azione presente, a partire dal rilascio."""
+    if event is None:
+        for ev in BUTTON_EVENTS:
+            a = button_action(pdf, xref, ev)
+            if a:
+                return a
+        return {}
+    a = _button_action_at(pdf, xref, event)
+    if a and event != "U":
+        a["event"] = event
+    return a
+
+
+def _button_action_at(pdf: pymupdf.Document, xref: int, event: str) -> dict:
+    t, v = _event_action(pdf, xref, event)
     if t == "xref":
         v = pdf.xref_object(int(v.split()[0]), compressed=True)
         t = "dict"
@@ -2907,9 +2932,18 @@ def button_action(pdf: pymupdf.Document, xref: int) -> dict:
 
 
 def set_button_action(pdf: pymupdf.Document, page: int, xref: int, action: dict | None) -> None:
+    """Imposta l'azione del pulsante sull'evento indicato in `action["event"]` (predefinito il
+    rilascio) e toglie le azioni predefinite degli altri eventi; gli script restano."""
     kind = (action or {}).get("type")
+    event = (action or {}).get("event") or "U"
+    if event not in BUTTON_EVENTS:
+        raise FormError(_("Evento del pulsante non valido."))
+    for ev in BUTTON_EVENTS:
+        t, v = _event_action(pdf, xref, ev)
+        if t != "null" and "/JavaScript" not in (v if t != "xref" else pdf.xref_object(int(v.split()[0]))):
+            pdf.xref_set_key(xref, "A" if ev == "U" and pdf.xref_get_key(xref, "A")[0] != "null" else f"AA/{ev}",
+                             "null")
     if not kind:
-        pdf.xref_set_key(xref, "A", "null")
         return
     if kind == "reset":
         fields = action.get("fields") or []
@@ -2933,7 +2967,7 @@ def set_button_action(pdf: pymupdf.Document, page: int, xref: int, action: dict 
                  + (f"/Fields{ps.serialize(list(fields))}" if fields else "") + ">>")
     else:
         raise FormError(_("Azione non supportata."))
-    pdf.xref_set_key(xref, "A", value)
+    pdf.xref_set_key(xref, "A" if event == "U" else f"AA/{event}", value)
 
 
 def _full_name(pdf: pymupdf.Document, xref: int) -> str:

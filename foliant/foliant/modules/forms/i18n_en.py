@@ -329,4 +329,5 @@ EN: dict[str, str] = {
     'Immagini e PDF': 'Images and PDF',
     'Disposizione del pulsante non valida.': 'Invalid button layout.',
     "Pagina inesistente nel PDF dell'icona.": 'The page does not exist in the icon PDF.',
+    'Evento del pulsante non valido.': 'Invalid button event.',
 }

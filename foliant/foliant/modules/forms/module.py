@@ -11,7 +11,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import QMenu, QToolButton
 
-from foliant.api import ENGINE_LOCK, OperationCancelled, _, bind_icon, icon
+from foliant.api import ENGINE_LOCK, OperationCancelled, _, bind_icon, follow_link, icon
 
 from . import detect as D
 from . import engine as E
@@ -1238,13 +1238,19 @@ class FormsModule(QObject):
         return self._change(_("Crea campi riconosciuti"), run, view) or 0
 
     # ================================================================ pulsanti e firme
-    def run_button(self, filler: FormFiller, f: E.FieldInfo) -> None:
+    def run_button(self, filler: FormFiller, f: E.FieldInfo, event: str = "U") -> None:
+        """Azioni del pulsante per un evento: U rilascio, D pressione, E/X ingresso e uscita del
+        puntatore, Fo/Bl focus (FRM-18)."""
         with ENGINE_LOCK:
             pdf = filler.document.pdf
             if E.is_image_field(pdf, f.xref):
-                action = {"type": "image"}
+                action = {"type": "image"} if event == "U" else {}
             else:
-                action = E.button_action(pdf, f.xref)
+                action = E.button_action(pdf, f.xref, event)
+                if not action and event == "U" and E.button_action(pdf, f.xref):
+                    return   # il pulsante agisce su un altro evento
+        if not action and event != "U":
+            return
         kind = action.get("type")
         if kind == "image":
             paths = self.ctx.ask_open_paths(_("Scegli un'immagine"), _("Immagini") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp)", multiple=False)
@@ -1255,9 +1261,8 @@ class FormsModule(QObject):
             names = action.get("fields")
             self.reset(names if names else None, filler.view)
         elif kind == "uri":
-            uri = action.get("uri", "")
-            if self.ctx.confirm(_("Collegamento esterno"), _("Il modulo vuole aprire questo indirizzo:\n\n{u}\n\nAprirlo?").format(u=uri)):
-                QDesktopServices.openUrl(QUrl(uri))
+            # conferma unica dell'applicazione per ciò che esce da Foliant (VIS-19)
+            follow_link(filler.view, {"kind": pymupdf.LINK_URI, "uri": action.get("uri", "")})
         elif kind == "goto":
             filler.view.go_to_page(action.get("page", 0))
         elif kind == "print":

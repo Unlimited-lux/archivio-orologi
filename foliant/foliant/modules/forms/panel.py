@@ -31,6 +31,13 @@ from . import formats as fm
 from . import formula as FX
 
 TRANSLATIONS: dict[str, str] = {
+    "Rilascio del pulsante": "Button release",
+    "Pressione del pulsante": "Button press",
+    "Ingresso del puntatore": "Mouse enter",
+    "Uscita del puntatore": "Mouse exit",
+    "Ricezione del focus": "On focus",
+    "Perdita del focus": "On blur",
+    "Quando": "When",
     "Al passaggio del puntatore": "On mouse over",
     "Solo testo": "Text only",
     "Solo icona": "Icon only",
@@ -1360,6 +1367,12 @@ class FieldPropertiesPanel(QWidget):
              (_("Stampa"), "print"), (_("Vai a pagina"), "goto"), (_("Mostra o nascondi campi"), "hide"),
              (_("Importa dati"), "import")], lambda _v: self._on_action_changed())
         form.addRow(_("Azione"), self.action_combo)
+        self.event_combo = self._combo(
+            [(_("Rilascio del pulsante"), "U"), (_("Pressione del pulsante"), "D"),
+             (_("Ingresso del puntatore"), "E"), (_("Uscita del puntatore"), "X"),
+             (_("Ricezione del focus"), "Fo"), (_("Perdita del focus"), "Bl")],
+            lambda _v: self._on_action_changed())
+        form.addRow(_("Quando"), self.event_combo)
         self.action_uri = QLineEdit()
         self.action_uri.setPlaceholderText("https://")
         self.action_uri.textChanged.connect(lambda _t: self._update_uri_warning())
@@ -1402,6 +1415,7 @@ class FieldPropertiesPanel(QWidget):
         form.setRowVisible(self.action_hide, t == "hide")
         form.setRowVisible(self.action_fields, t in ("reset", "hide"))
         form.setRowVisible(self.reset_note, t == "reset")
+        form.setRowVisible(self.event_combo, bool(t) and t != "?")
         self._update_uri_warning()
 
     def _update_uri_warning(self) -> None:
@@ -1411,6 +1425,13 @@ class FieldPropertiesPanel(QWidget):
 
     def current_action(self) -> tuple[dict | None, str | None]:
         """(azione, errore) dagli editor della scheda Pulsante; azione None = nessuna."""
+        action, err = self._current_action()
+        event = self.event_combo.currentData() or "U"
+        if action is not None and event != "U":
+            action["event"] = event
+        return action, err
+
+    def _current_action(self) -> tuple[dict | None, str | None]:
         t = self.action_combo.currentData()
         if not t:
             return None, None
@@ -1476,12 +1497,20 @@ class FieldPropertiesPanel(QWidget):
         self.action_uri.setText(str(action.get("uri") or "") if t == "uri" else "")
         self.action_page.setValue(int(action.get("page") or 0) + 1 if t == "goto" else 1)
         self.action_hide.setCurrentIndex(self.action_hide.findData(bool(action.get("hide", True))))
+        self.event_combo.setCurrentIndex(max(0, self.event_combo.findData(action.get("event") or "U")))
         self._fill_checklist(self.action_fields, list(action.get("fields") or []) if t in ("reset", "hide") else [])
         self._update_action_ui()
 
-    @staticmethod
-    def _normal_action(action: dict) -> dict:
+    @classmethod
+    def _normal_action(cls, action: dict) -> dict:
         """Azione letta dal documento nella stessa forma prodotta da `current_action`."""
+        out = cls._normal_action_body(action)
+        if action.get("event") and action.get("event") != "U":
+            out["event"] = action["event"]
+        return out
+
+    @staticmethod
+    def _normal_action_body(action: dict) -> dict:
         t = action.get("type")
         if t == "reset":
             return {"type": t, "fields": list(action.get("fields") or [])}

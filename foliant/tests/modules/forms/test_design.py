@@ -524,3 +524,66 @@ def test_signature_field_blank_appearance(window, tmp_path, rotation):
     assert f.kind == E.SIGNATURE and f.value == ""
     ap = int(again.xref_get_key(f.xref, "AP/N")[1].split()[0])
     assert b"Tj" not in again.xref_stream(ap) and b"Do" not in again.xref_stream(ap)
+
+
+def _events_doc(window, tmp_path, event):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "A")
+    E.set_value(pdf, 0, x, "vA")
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "azzera", caption="Azzera")
+    E.set_button_action(pdf, 0, b, {"type": "reset", "fields": ["A"], "event": event})
+    pdf.save(str(tmp_path / f"ev_{event}.pdf"))
+    return open_form(window, tmp_path / f"ev_{event}.pdf")
+
+
+def _button_pos(view, name):
+    from PySide6.QtWidgets import QApplication
+    f = filler_of(view)
+    f.state.refresh(force=True)
+    info = [i for i in f.state.fields if i.name == name][0]
+    view.ensure_visible(info.page, info.rect)
+    QApplication.processEvents()
+    return view.page_to_view(info.page, info.rect).center().toPoint()
+
+
+def test_button_release_runs_only_over_the_button(qtbot, window, tmp_path):
+    """Rilascio (/U): l'azione parte solo se il pulsante viene rilasciato sopra di sé."""
+    view = _events_doc(window, tmp_path, "U")
+    pos = _button_pos(view, "azzera")
+    vp = view.viewport()
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=pos)
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, pos=pos + QPoint(0, 200))   # rilascio altrove
+    assert values(view)["A"] == "vA"
+    qtbot.mouseClick(vp, Qt.MouseButton.LeftButton, pos=pos)
+    assert values(view)["A"] == ""
+
+
+def test_button_press_and_mouse_enter_events(qtbot, window, tmp_path):
+    view = _events_doc(window, tmp_path, "D")
+    pos = _button_pos(view, "azzera")
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=pos)   # basta la pressione
+    assert values(view)["A"] == ""
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=pos)
+    view2 = _events_doc(window, tmp_path, "E")
+    pos = _button_pos(view2, "azzera")
+    qtbot.mouseMove(view2.viewport(), pos=pos + QPoint(0, 200))
+    assert values(view2)["A"] == "vA"
+    qtbot.mouseMove(view2.viewport(), pos=pos)   # ingresso del puntatore
+    assert values(view2)["A"] == ""
+
+
+def test_button_uri_uses_application_confirmation(window, tmp_path, monkeypatch):
+    """L'indirizzo web passa per la conferma unica dell'applicazione (VIS-19)."""
+    from foliant.modules.forms import module as M
+    seen = []
+    monkeypatch.setattr(M, "follow_link", lambda view, link: seen.append(link))
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "sito", caption="Sito")
+    E.set_button_action(pdf, 0, b, {"type": "uri", "uri": "https://example.com/garanzia"})
+    pdf.save(str(tmp_path / "uri.pdf"))
+    view = open_form(window, tmp_path / "uri.pdf")
+    f = filler_of(view)
+    f.click_field([i for i in f.state.fields if i.name == "sito"][0])
+    assert seen == [{"kind": pymupdf.LINK_URI, "uri": "https://example.com/garanzia"}]

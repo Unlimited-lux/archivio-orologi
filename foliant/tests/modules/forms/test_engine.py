@@ -836,3 +836,21 @@ def test_image_field_keeps_image_after_property_change():
     assert E.is_image_field(pdf, x)
     E.update_properties(pdf, 0, x, tooltip="Foto dell'orologio")
     assert b"Do" in _ap(pdf, x, "N") and E.field_info(pdf, 0, x).image
+
+
+def test_button_action_events():
+    """FRM-18: l'azione si può legare a un evento diverso dal rilascio; gli script restano."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 80), "b", caption="b")
+    pdf.xref_set_key(x, "AA/Fo", "<</S/JavaScript/JS(app.alert(1))>>")
+    E.set_button_action(pdf, 0, x, {"type": "print", "event": "E"})
+    assert pdf.xref_get_key(x, "A")[0] == "null" and pdf.xref_get_key(x, "AA/E/S") == ("name", "/Named")
+    assert E.button_action(pdf, x) == {"type": "print", "name": "Print", "event": "E"}
+    assert E.button_action(pdf, x, "U") == {} and E.button_action(pdf, x, "E")["type"] == "print"
+    E.set_button_action(pdf, 0, x, {"type": "reset"})
+    assert E.button_action(pdf, x) == {"type": "reset", "fields": []}
+    assert E.button_action(pdf, x, "E") == {}
+    assert pdf.xref_get_key(x, "AA/Fo/S") == ("name", "/JavaScript")   # script non toccato
+    with pytest.raises(E.FormError):
+        E.set_button_action(pdf, 0, x, {"type": "reset", "event": "Z"})
