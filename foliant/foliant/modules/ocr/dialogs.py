@@ -571,7 +571,7 @@ class LanguagesDialog(QDialog):
             else:
                 size = " · " + size_label(info.size_mb) if info and info.size_mb else ""
                 state = _("non installata") + size
-            values = [languages.language_name(code), code, info.script if info else "", state]
+            values = [languages.language_name(code), code, _(info.script) if info else "", state]
             for c, v in enumerate(values):
                 item = QTableWidgetItem(v)
                 item.setData(Qt.ItemDataRole.UserRole, code)
