@@ -123,6 +123,8 @@ class AnnotationsModule:
         mode.entered.connect(self._on_enter)
         mode.left.connect(self._on_leave)
 
+        from . import spellcheck
+        spellcheck.use_settings(ctx.settings())
         self.properties = PropertiesPanel(self.ctrl)
         ctx.add_properties_panel("annotations", self.properties)
         self.comments = CommentsPanel(self.ctrl)

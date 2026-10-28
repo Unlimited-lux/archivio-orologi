@@ -54,7 +54,7 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-41 | P1 | fatto | test_ann41_42_export_import_ui, test_export_xfdf_*, test_export_fdf, test_fdf_keeps_replies_and_status, test_freetext_roundtrip_*, test_note_roundtrip_* | XFDF (con aspetto dei timbri) e FDF. FDF con risposte e stati; casella di testo con colore del bordo e /Rect esatti; /Rect del file esportato tal quale. |
 | ANN-42 | P1 | fatto | test_ann41_42_export_import_ui, test_ann42_import_from_pdf_and_malformed, test_xfdf_* | XFDF, FDF, PDF; duplicati saltati; un passo di annullamento. |
 | ANN-43 | P1 | fatto | test_ann43_summary_files, test_ann43_page_layout_numbers, test_summary_* | PDF «solo elenco» o «pagine con commenti numerati» (marcatori e connettori), CSV (riga per risposta con padre), testo, HTML. Manca l'anteprima/stampa diretta. |
-| ANN-44 | P2 | non fatto | | |
+| ANN-44 | P2 | fatto | test_misspelled_word_flagged_with_suggestion, test_personal_dictionary_shared_between_documents, test_toggle_and_language_without_dictionary, test_saved_appearance_identical_with_and_without_check | Sottolineatura ondulata delle parole sconosciute in editor del commento (note, caselle, richiami) e testi su più righe (risposte, commenti di testo, inserimenti); menu con correzioni, «Aggiungi al dizionario», «Ignora», lingua del testo e interruttore. Dizionari e dizionario personale del servizio condiviso del modulo text_edit (pyspellchecker, DEPS.txt); lingua senza dizionario → controllo spento con indicazione; nulla nel PDF. |
 
 ## Verifica visiva
 Catture offscreen nei temi chiaro e scuro (barra strumenti compatta a icone, pannello proprietà,
