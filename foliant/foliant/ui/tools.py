@@ -79,8 +79,13 @@ class Tool:
         pass
 
 
-def _nearest_word(words: list[tuple], pt: pymupdf.Point) -> int | None:
+# Distanza massima (pt) entro cui un estremo del trascinamento «aggancia» la parola più vicina.
+SNAP_DISTANCE = 36
+
+
+def _nearest_word(words: list[tuple], pt: pymupdf.Point, max_dist: float | None = None) -> int | None:
     best, best_d = None, None
+    limit = None if max_dist is None else max_dist * max_dist
     for idx, w in enumerate(words):
         r = pymupdf.Rect(w[:4])
         if r.contains(pt):
@@ -88,6 +93,8 @@ def _nearest_word(words: list[tuple], pt: pymupdf.Point) -> int | None:
         dx = max(r.x0 - pt.x, 0, pt.x - r.x1)
         dy = max(r.y0 - pt.y, 0, pt.y - r.y1)
         d = dx * dx + dy * dy * 4  # privilegia la stessa riga
+        if limit is not None and dx * dx + dy * dy > limit:
+            continue
         if best_d is None or d < best_d:
             best, best_d = idx, d
     return best
@@ -191,8 +198,20 @@ class SelectTextTool(Tool):
             return True
         self._moved = True
         words = view.words(page)
-        a = _nearest_word(words, start)
-        b = _nearest_word(words, end)
+        a = _nearest_word(words, start, SNAP_DISTANCE)
+        b = _nearest_word(words, end, SNAP_DISTANCE)
+        if a is None and b is None:
+            # trascinamento lontano dal testo: solo le parole dentro il riquadro tracciato
+            box = pymupdf.Rect(start, end).normalize()
+            inside = [i for i, w in enumerate(words) if box.intersects(pymupdf.Rect(w[:4]))]
+            if not inside:
+                view.clear_text_selection()
+                return True
+            a, b = inside[0], inside[-1]
+        if a is None:
+            a = _nearest_word(words, start)
+        if b is None:
+            b = _nearest_word(words, end)
         if a is None or b is None:
             return True
         lo, hi = min(a, b), max(a, b)
