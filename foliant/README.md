@@ -19,6 +19,18 @@ foliant documento.pdf
 Opzioni: `--default-pdf` imposta Foliant come lettore PDF predefinito.
 Disinstallazione: `./packaging/uninstall.sh`.
 
+Riga di comando: `foliant [--page N] [--new-window] file…` apre i file in schede, il primo alla
+pagina N (`-p N`; per un file qualsiasi anche `file.pdf#page=N`); le opzioni sconosciute sono
+segnalate e ignorate. Istanza singola: se Foliant è già aperto, il nuovo avvio consegna file e
+pagina alla finestra attiva (nuove schede, oppure la scheda del file se è già aperto) e termina;
+con `--new-window` si apre invece una nuova finestra (`foliant/ui/instance.py`). `--create` apre
+«Crea PDF da file» e `--merge` il dialogo «Unisci file»: sono le azioni rapide della voce nel menu
+delle applicazioni (`packaging/foliant.desktop`: Nuova finestra, Crea PDF da file…, Unisci file…).
+Eseguono il comando registrato da un modulo con `ctx.add_command("create-pdf" | "merge", fn)`;
+finché nessun modulo lo registra, il nucleo usa l'azione rapida della Home con lo stesso scopo
+(«Crea PDF da file», «Unisci PDF») e, se manca anche quella, mostra la Home.
+L'installazione copia anche l'icona simbolica monocromatica (`foliant-symbolic.svg`, colore del tema).
+
 ## Uso quotidiano
 
 La barra in alto contiene le modalità; ognuna mostra i propri strumenti nella barra sotto.
@@ -82,6 +94,7 @@ foliant/
     theme.py        tema chiaro/scuro e colori
     icons.py        icone (nomi = file in resources/icons)
     home.py         schermata Home
+    instance.py     istanza singola: un secondo avvio consegna file e comandi alla finestra attiva
   modules/     funzioni, una cartella per area (scoperte automaticamente)
   api.py       tutto ciò che serve a un modulo
   i18n.py      traduzioni (sorgente italiano, catalogo inglese per modulo)
@@ -148,14 +161,19 @@ def ruota(ctx, gradi):
 8. **Errori**: messaggi chiari per l'utente (`ctx.error(titolo, testo)`); un errore di un
    modulo non deve mai chiudere l'applicazione.
 9. **Originalità**: nessun testo, icona o risorsa copiati da prodotti commerciali.
+10. **Più finestre**: «Nuova finestra» (Ctrl+N) crea un'altra `MainWindow` nello stesso processo e
+   `register(ctx)` viene chiamata di nuovo con il suo `Context`. Lo stato del modulo va tenuto
+   nel controller legato a quel `ctx`, non in variabili globali del modulo, che l'ultima
+   finestra aperta sovrascriverebbe.
 
 ### Scorciatoie da tastiera
 
 La tabella UX-18 della specifica è l'unica autorità. Il nucleo registra: Ctrl+O, Ctrl+T (Home),
-Ctrl+N, Ctrl+S, Ctrl+Maiusc+S, Ctrl+W, Ctrl+Maiusc+T, Ctrl+Q, Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
+Ctrl+N (Nuova finestra; «Nuovo documento» non ha scorciatoia), Ctrl+S, Ctrl+Maiusc+S, Ctrl+W,
+Ctrl+Maiusc+T, Ctrl+Q (Esci: chiude tutte le finestre), Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
 Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
 N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
-Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
+Maiusc+F9, F10, Maiusc+F10 / Menu (menu contestuale del widget con il fuoco), F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
 Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
 duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
 «Righelli» (menu ☰ › Vista) non ha scorciatoia: UX-18 riserva Ctrl+R ai righelli e Ctrl+Maiusc++/-
@@ -205,6 +223,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `action(testo, icona, slot, shortcut=, checkable=, requires_document=)` | crea un'azione (disattivata senza documento) |
 | `add_menu_action(azione, sezione)` | voce nel menu principale ☰ |
 | `add_home_action(titolo, icona, callback, descrizione, order)` | azione rapida nella Home |
+| `add_command(nome, fn)` | comando per la riga di comando e le azioni del file .desktop: `"create-pdf"` (`foliant --create`), `"merge"` (`foliant --merge`); senza, il nucleo usa l'azione rapida della Home «Crea PDF da file» / «Unisci PDF» |
 | `add_sidebar_panel(id, titolo, icona, widget, order)` / `show_sidebar_panel(id)` / `toggle_sidebar_panel(id)` | pannello sinistro (`widget.set_view(view)` chiamato a ogni cambio documento); `toggle` lo nasconde se è già quello visibile |
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |

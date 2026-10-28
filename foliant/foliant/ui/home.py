@@ -116,6 +116,13 @@ class HomeScreen(QScrollArea):
         self.recent.setVisible(bool(paths))
         self.empty_recent.setVisible(not paths)
 
+    def action_callback(self, *titles: str) -> Callable | None:
+        """Funzione dell'azione rapida con uno di questi titoli (None se non c'è)."""
+        for _o, title, _i, callback, _d in self._actions:
+            if title in titles:
+                return callback
+        return None
+
     def add_action(self, title: str, icon_name: str, callback: Callable, description: str = "",
                    order: int = 100) -> None:
         self._actions.append((order, title, icon_name, callback, description))
