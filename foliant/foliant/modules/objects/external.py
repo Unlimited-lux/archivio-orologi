@@ -35,6 +35,8 @@ class ExternalEdit(QObject):
         self.index = index
         self.dir = tempfile.mkdtemp(prefix="foliant-img-")
         os.chmod(self.dir, 0o700)
+        import atexit
+        atexit.register(shutil.rmtree, self.dir, True)   # riservatezza: nessuna copia resta dopo l'uscita
         self.path = ""
         self.watcher = QFileSystemWatcher(self)
         self.timer = QTimer(self)

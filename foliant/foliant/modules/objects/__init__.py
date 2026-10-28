@@ -52,6 +52,7 @@ def register(ctx: Context) -> None:
     ctx.window.destroyed.connect(lambda *_a, k=key: _forget_ctx(k))
     st["controller"] = c
     st["ctx"] = ctx
+    c.purge_old_guides()
     mode = ctx.add_mode("modifica", _("Modifica"), "pencil-line", 30)
     acts: dict = {}
     st["actions"] = acts
@@ -544,7 +545,6 @@ def _install_drop(ctx: Context, c: ObjectsController, view) -> None:
     view.viewport().installEventFilter(f)
     view.toolChanged.connect(lambda _t: _sync_tool_buttons(ctx))
     view.overlays.append(c.paint_grid)
-    c.migrate_guides(view)
 
 
 

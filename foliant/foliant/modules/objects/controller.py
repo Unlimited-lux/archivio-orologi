@@ -395,31 +395,13 @@ class ObjectsController(QObject):
         self.set_selection(view, self.sel_page, E.similar_paths(parsed, objs[0].index))
 
     # ---------------------------------------------------------------- guide (nucleo, VIS-39)
-    def _old_guides_key(self, view) -> str | None:
-        p = view.document.path if view is not None else None
-        if not p:
-            return None
-        import hashlib
-        return "objects/guides/" + hashlib.sha1(str(os.path.abspath(str(p))).encode()).hexdigest()
-
-    def migrate_guides(self, view) -> None:
-        """Porta nelle guide del nucleo quelle salvate dalle versioni precedenti del modulo."""
-        key = self._old_guides_key(view)
-        if not key:
-            return
-        st = self.ctx.settings()
-        raw = st.value(key, "")
-        if not raw:
-            return
-        import json
+    def purge_old_guides(self) -> None:
+        """Riservatezza: elimina le guide che le versioni precedenti salvavano per documento
+        (chiave derivata dal percorso del file). Le guide restano solo in memoria (nucleo)."""
         try:
-            data = json.loads(str(raw))
-            for axis in ("x", "y"):
-                for v in data.get(axis, []):
-                    view.add_guide(axis, float(v))
-        except (ValueError, TypeError, AttributeError):
+            self.ctx.settings().remove("objects/guides")
+        except Exception:
             pass
-        st.remove(key)
 
     def guides(self, view, page: int | None = None) -> dict:
         """Guide valide per la pagina, in coordinate pagina: {"x": [...], "y": [...]}."""
