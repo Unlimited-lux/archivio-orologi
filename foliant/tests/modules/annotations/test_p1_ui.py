@@ -937,3 +937,28 @@ def test_ann26_library_export_import(comments, tmp_path, monkeypatch):
     bad.write_text('{"version": 1, "stamps": [{"name": "x", "png": "AAAA"}]}')
     assert ui_actions.import_stamp_library(module.ctrl, str(bad)) == 0
     assert [d["name"] for d in module.ctrl.custom_stamps()] == ["logo"]
+
+
+def test_ann03_rotate_shapes_and_textbox(comments, tmp_path):
+    """ANN-03: rettangolo, ellisse e casella di testo ruotati di 30° restano ruotati dopo modifiche e salvataggio."""
+    import math
+    window, view, module = comments
+    r = module.ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(100, 100), (300, 160)],
+                          engine.Style(color=(1, 0, 0), width=2), "A")
+    t = module.ctrl.apply("t", engine.create_freetext, 0, (300, 500, 500, 560), "Ruotata",
+                          engine.Style(fontsize=14, width=1, color=(1, 0, 0)), "A")
+    assert module.ctrl.rotate(30, [(0, r), (0, t)])
+    module.ctrl.set_style([(0, r)], color=(0, 0, 1))          # il motore rigenera l'aspetto
+    module.ctrl.apply("c", engine.set_contents, 0, t, "Ruotata due")
+    module.ctrl.move(10, 0, [(0, r)])
+    doc = saved(window, view, tmp_path)
+    sq, = annots(doc, 0, "Square")
+    ap = int(key_of(doc, sq.xref, "AP/N")[1].split()[0])
+    m = [float(v) for v in key_of(doc, ap, "Matrix")[1].strip("[]").split()]
+    assert abs(m[1] / m[0] - math.tan(math.radians(30))) < 0.01
+    exp_h = 200 * math.sin(math.radians(30)) + 60 * math.cos(math.radians(30))
+    assert abs(sq.rect.height - exp_h) < 3
+    ft, = annots(doc, 0, "FreeText")
+    ap2 = int(key_of(doc, ft.xref, "AP/N")[1].split()[0])
+    assert key_of(doc, ap2, "Matrix")[1] != "[1 0 0 1 0 0]"
+    assert "Ruotata due" in doc[0].get_text()

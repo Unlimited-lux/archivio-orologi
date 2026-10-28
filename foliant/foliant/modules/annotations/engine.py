@@ -622,6 +622,8 @@ def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     rc = pdf.xref_get_key(xref, "RC")
     try:
         _refresh_freetext(pdf, page, page_no, xref)
+        if not page.rotation % 360:
+            keep_rotation(pdf, page_no, xref)
     finally:
         if rc[0] == "string" and pdf.xref_get_key(xref, "RC")[0] != "string":
             pdf.xref_set_key(xref, "RC", pymupdf.get_pdf_str(rc[1]))
@@ -705,6 +707,13 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
     align = int(q[1]) if q[0] == "int" else 0
     rect = pymupdf.Rect(annot.rect)
     inner = _freetext_inner(page, annot)
+    _ang, base = _rotation(pdf, xref)
+    if base is not None and not rot:
+        # casella ruotata: si disegna alla dimensione originale, la rotazione è nella /Matrix
+        c = _std_rect(pdf, page, xref)
+        cx, cy = (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2
+        rect = pymupdf.Rect(cx - base[0] / 2, cy - base[1] / 2, cx + base[0] / 2, cy + base[1] / 2)
+        inner = pymupdf.Rect(rect)
     real_rect = None
     if rot:
         # pagina ruotata: si disegna nell'orientamento della vista e si ruota l'aspetto (/Matrix)
@@ -757,7 +766,7 @@ def _refresh_freetext(pdf: pymupdf.Document, page: pymupdf.Page, page_no: int, x
             text.replace("\n", "").strip():
         runs = []          # /RC discordante da /Contents: si usa /Contents
     lines = _wrap(text, avail, size) if not runs else _wrap_runs(runs, avail, size)
-    if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts and not rot:
+    if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts and not rot and base is None:
         need = 2 * pad + size * 1.2 * len(lines) + size * 0.2
         if need > inner.height + 0.5:
             # adattamento automatico: si allunga la casella verso il basso e si ridisegna
@@ -1292,12 +1301,24 @@ def _apply_rotation(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> Non
     pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, new)))
 
 
+ROTATABLE = (pymupdf.PDF_ANNOT_STAMP, pymupdf.PDF_ANNOT_SQUARE, pymupdf.PDF_ANNOT_CIRCLE,
+             pymupdf.PDF_ANNOT_FREE_TEXT)
+
+
+def keep_rotation(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
+    """Dopo una rigenerazione dell'aspetto da parte del motore, riapplica la rotazione salvata."""
+    if _rotation(pdf, xref)[1] is not None:
+        _apply_rotation(pdf, pdf[page_no], xref)
+
+
 def rotate_annot(pdf: pymupdf.Document, page_no: int, xref: int, degrees: float) -> None:
     """Ruota timbri (vettoriali e immagine) di `degrees` gradi in senso antiorario (ANN-03)."""
     page = pdf[page_no]
     annot = get_annot(page, xref)
-    if annot.type[0] != pymupdf.PDF_ANNOT_STAMP:
-        raise AnnotationError("Si possono ruotare solo i timbri.")
+    t = annot.type[0]
+    if t not in ROTATABLE or (t == pymupdf.PDF_ANNOT_FREE_TEXT and (
+            page.rotation % 360 or _intent(pdf, xref) == "FreeTextCallout")):
+        raise AnnotationError("Si possono ruotare timbri, rettangoli, ellissi e caselle di testo.")
     if annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
         raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
     angle, size = _rotation(pdf, xref)
@@ -1855,8 +1876,13 @@ def annot_at(pdf: pymupdf.Document, page_no: int, point, tolerance: float = 4.0,
 
 
 # ------------------------------------------------------------------ modifica
-def set_style(pdf: pymupdf.Document, page_no: int, xref: int, *, color=..., fill=..., opacity=None,
-              width=None, dash=None, cloud=None, fontsize=None, text_color=...) -> None:
+def set_style(pdf: pymupdf.Document, page_no: int, xref: int, **props) -> None:
+    _set_style(pdf, page_no, xref, **props)
+    keep_rotation(pdf, page_no, xref)
+
+
+def _set_style(pdf: pymupdf.Document, page_no: int, xref: int, *, color=..., fill=..., opacity=None,
+               width=None, dash=None, cloud=None, fontsize=None, text_color=...) -> None:
     page = pdf[page_no]
     annot = get_annot(page, xref)
     t = annot.type[0]
@@ -2308,6 +2334,7 @@ def set_flag(pdf: pymupdf.Document, page_no: int, xref: int, flag: int, on: bool
     annot.set_flags(flags)
     touch(annot)
     annot.update()
+    keep_rotation(pdf, page_no, xref)
 
 
 def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: int, dx: float = 0.0,

@@ -938,7 +938,7 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int,
     text = info.contents or info.marked_text
     if text:
         menu.addAction(_("Copia testo"), lambda: copy_text_to_clipboard(text))
-    if info.kind == engine.STAMP:
+    if info.kind in (engine.STAMP, engine.RECT, engine.ELLIPSE, engine.FREETEXT):
         rot = menu.addMenu(_("Ruota"))
         rot.addAction(_("90° in senso orario"), lambda: ctrl.rotate(-90, [(page, xref)]))
         rot.addAction(_("90° in senso antiorario"), lambda: ctrl.rotate(90, [(page, xref)]))

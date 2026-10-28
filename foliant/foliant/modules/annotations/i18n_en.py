@@ -146,7 +146,8 @@ EN: dict[str, str] = {
         "Annotations can only be pasted into the same document.",
     "Le annotazioni erano nascoste: sono di nuovo visibili.": "Annotations were hidden: they are visible again.",
     "Sola lettura": "Read only", "Contenuto bloccato": "Locked contents", "Cancellazione": "Deletion",
-    "Sostituzione": "Replacement", "Esporta libreria timbri": "Export stamp library",
+    "Sostituzione": "Replacement", "Si possono ruotare timbri, rettangoli, ellissi e caselle di testo.":
+        "Only stamps, rectangles, ellipses and text boxes can be rotated.", "Esporta libreria timbri": "Export stamp library",
     "Importa libreria timbri": "Import stamp library", "Esporta libreria timbri…": "Export stamp library…",
     "Importa libreria timbri…": "Import stamp library…", "versione non supportata": "unsupported version",
     "File non valido: la libreria non è cambiata ({e}).": "Invalid file: the library is unchanged ({e}).",
