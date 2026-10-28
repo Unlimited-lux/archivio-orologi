@@ -1097,6 +1097,18 @@ def snap_delta(rect: pymupdf.Rect, dx: float, dy: float, xs: list[float], ys: li
     return dx, dy, gx, gy
 
 
+MM = 72.0 / 25.4
+
+
+def snap_to_grid(rect: pymupdf.Rect, dx: float, dy: float, step: float) -> tuple[float, float]:
+    """Porta l'angolo superiore sinistro del riquadro spostato sull'intersezione più vicina."""
+    if step <= 0:
+        return dx, dy
+    x = rect.x0 + dx
+    y = rect.y0 + dy
+    return dx + round(x / step) * step - x, dy + round(y / step) * step - y
+
+
 # ================================================================ tracciati simili
 def similar_paths(parsed: ParsedPage, index: int) -> list[int]:
     ref = parsed.objects[index]

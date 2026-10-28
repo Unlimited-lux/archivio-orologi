@@ -151,6 +151,42 @@ def register(ctx: Context) -> None:
     guides.toggled.connect(set_guides)
     acts["guides"] = guides
     more.addAction(guides)
+    st = ctx.settings()
+    grid = ctx.action(_("Griglia"), "grid-3x3", None, checkable=True, requires_document=False)
+    grid.setChecked(str(st.value("objects/grid", "false")).lower() == "true")
+    snap = ctx.action(_("Aggancia alla griglia"), None, None, checkable=True, requires_document=False)
+    snap.setChecked(str(st.value("objects/grid_snap", "true")).lower() != "false")
+    try:
+        c.grid_step_mm = float(st.value("objects/grid_step_mm", 10.0))
+    except (TypeError, ValueError):
+        c.grid_step_mm = 10.0
+    c.grid_on, c.grid_snap = grid.isChecked(), snap.isChecked()
+
+    def set_grid(on):
+        c.grid_on = on
+        st.setValue("objects/grid", "true" if on else "false")
+        v = ctx.current_view()
+        if v is not None:
+            v.viewport().update()
+
+    def set_snap(on):
+        c.grid_snap = on
+        st.setValue("objects/grid_snap", "true" if on else "false")
+
+    def ask_step():
+        from PySide6.QtWidgets import QInputDialog
+        val, ok = QInputDialog.getDouble(ctx.window, _("Passo della griglia"), _("Passo (mm):"),
+                                         c.grid_step_mm, 1, 200, 1)
+        if ok:
+            c.grid_step_mm = val
+            st.setValue("objects/grid_step_mm", val)
+            set_grid(c.grid_on)
+    grid.toggled.connect(set_grid)
+    snap.toggled.connect(set_snap)
+    acts["grid"], acts["grid_snap"] = grid, snap
+    acts["grid_step"] = ctx.action(_("Passo della griglia…"), None, ask_step, requires_document=False)
+    for key in ("grid", "grid_snap", "grid_step"):
+        more.addAction(acts[key])
     more.addSeparator()
     from . import extras
     capture_tool = extras.CaptureTool(ctx, c)
@@ -430,6 +466,7 @@ def _install_drop(ctx: Context, c: ObjectsController, view) -> None:
     view.viewport().setAcceptDrops(True)
     view.viewport().installEventFilter(f)
     view.toolChanged.connect(lambda _t: _sync_tool_buttons(ctx))
+    view.overlays.append(c.paint_grid)
     view._objects_tab = _TabFilter(c, view)
     view.installEventFilter(view._objects_tab)
 

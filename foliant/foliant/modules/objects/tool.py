@@ -371,6 +371,8 @@ class ObjectTool(Tool):
                     tol = 5.0 / view_scale(view, d["page"])
                     dx, dy, gx, gy = E.snap_delta(r, dx, dy, xs, ys, tol)
                     d["guides"] = (gx, gy)
+            if self.c.grid_on and self.c.grid_snap and not (d["mods"] & Qt.KeyboardModifier.AltModifier):
+                dx, dy = E.snap_to_grid(r, dx, dy, self.c.grid_step_mm * E.MM)
             dx, dy = E.clamp_translation(r, page_rect, dx, dy)
         return dx, dy
 

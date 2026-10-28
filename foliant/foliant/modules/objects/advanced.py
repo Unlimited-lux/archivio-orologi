@@ -344,3 +344,31 @@ def restyle_paths(pdf: pymupdf.Document, page_index: int, indices, stroke=None, 
     data, _ = apply_edits(parsed.data, edits)
     write_content(pdf, page, data)
     return [o.index for o in objs]
+
+
+# ================================================================ OBJ-07 (SVG)
+def insert_svg(pdf: pymupdf.Document, page_index: int, data: bytes, center: pymupdf.Point | None = None) -> list[int]:
+    """Inserisce un SVG come grafica vettoriale (oggetto composto), centrato nel punto."""
+    try:
+        svg = pymupdf.open(stream=data, filetype="svg")
+        src = pymupdf.open("pdf", svg.convert_to_pdf())
+    except Exception as e:
+        raise ObjectError("Il file SVG non è valido o è danneggiato.") from e
+    try:
+        sp = src[0]
+        w, h = sp.rect.width, sp.rect.height
+        if w <= 0 or h <= 0:
+            w, h = 300 * 0.75, 150 * 0.75
+        page = pdf[page_index]
+        vw, vh = page.rect.width, page.rect.height
+        s = min(1.0, 0.9 * vw / w, 0.9 * vh / h)
+        w, h = w * s, h * s
+        if center is None:
+            center = pymupdf.Point(page.cropbox.width / 2, page.cropbox.height / 2)
+        rect = pymupdf.Rect(center.x - w / 2, center.y - h / 2, center.x + w / 2, center.y + h / 2)
+        before = len(parse_page(pdf, page).objects)
+        page.show_pdf_page(rect, src, 0, overlay=True)
+        after = parse_page(pdf, pdf[page_index]).objects
+        return [o.index for o in after[before:]]
+    finally:
+        src.close()

@@ -176,3 +176,33 @@ def test_restyle_width_and_dash_and_no_fill():
     a = doc[0].get_pixmap(dpi=72).samples
     b = rp.get_pixmap(dpi=72).samples
     assert sum(1 for x, y in zip(a, b) if abs(x - y) > 1) < len(a) * 0.002
+
+
+SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+<rect x="10" y="10" width="80" height="80" fill="red"/><circle cx="150" cy="50" r="40" fill="blue"/></svg>"""
+
+
+def test_insert_svg_vector_no_image():
+    doc = pymupdf.open()
+    doc.new_page()
+    idx = A.insert_svg(doc, 0, SVG, pymupdf.Point(300, 400))
+    objs = E.objects(doc, 0).objects
+    assert len(idx) == 1 and objs[idx[0]].kind == FORM
+    r = objs[idx[0]].quad.rect
+    assert abs((r.x0 + r.x1) / 2 - 300) < 1 and abs((r.y0 + r.y1) / 2 - 400) < 1
+    data = doc.tobytes(garbage=3)
+    assert count_images(data) == 0
+    for _k in range(4):
+        forms = [o.index for o in E.objects(doc, 0).objects if o.kind == FORM]
+        if not forms:
+            break
+        A.decompose(doc, 0, forms[0], force=True)
+    paths = [o for o in E.objects(doc, 0).objects if o.kind == PATH]
+    assert len(paths) == 2
+
+
+def test_insert_bad_svg():
+    doc = pymupdf.open()
+    doc.new_page()
+    with pytest.raises(E.ObjectError):
+        A.insert_svg(doc, 0, b"<svg nonvalido", None)

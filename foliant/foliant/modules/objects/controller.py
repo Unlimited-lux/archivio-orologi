@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from foliant.api import Context, DocumentView
 
 IMAGE_FILTER = "Immagini (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp);;Tutti i file (*)"
-IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".pnm", ".ppm", ".pgm", ".pbm",
+IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".pnm", ".ppm", ".pgm", ".pbm",
               ".tga", ".ico", ".jp2", ".jpx", ".j2k")
 
 _last_payload: C.Payload | None = None       # copia locale degli appunti interni
@@ -45,6 +45,9 @@ class ObjectsController(QObject):
         self._paste_counts: dict = {}
         self._signed_ok: set = set()
         self.smart_guides = True
+        self.grid_on = False
+        self.grid_snap = True
+        self.grid_step_mm = 10.0
         ctx.documentChanged.connect(self._on_document_changed)
         ctx.currentViewChanged.connect(self._on_view_changed)
 
@@ -305,6 +308,32 @@ class ObjectsController(QObject):
         parsed = self.parsed(view, self.sel_page)
         self.set_selection(view, self.sel_page, E.similar_paths(parsed, objs[0].index))
 
+    def paint_grid(self, view, painter, page: int) -> None:
+        """Livello di disegno della griglia (solo in modalità Modifica, non scritta nel PDF)."""
+        if not self.grid_on or self.ctx.current_mode() != "modifica":
+            return
+        from PySide6.QtGui import QPen
+        from foliant.api import theme
+        from .tool import view_scale
+        step = self.grid_step_mm * E.MM
+        if step <= 0:
+            return
+        r = self.page_rect(view, page)
+        s = view_scale(view, page)
+        if step * s < 4:
+            return
+        c = theme.color("accent")
+        c.setAlpha(45)
+        painter.setPen(QPen(c, 1 / s))
+        x = 0.0
+        while x <= r.x1:
+            painter.drawLine(QPointF(x, r.y0), QPointF(x, r.y1))
+            x += step
+        y = 0.0
+        while y <= r.y1:
+            painter.drawLine(QPointF(r.x0, y), QPointF(r.x1, y))
+            y += step
+
     # ---------------------------------------------------------------- avanzate
     def replicate(self, view) -> None:
         from . import advanced as A
@@ -467,6 +496,35 @@ class ObjectsController(QObject):
     # ---------------------------------------------------------------- immagini
     def insert_image_files(self, view, paths: list[str], page: int | None = None,
                            center: pymupdf.Point | None = None, rect: pymupdf.Rect | None = None) -> list[int] | None:
+        svgs = [p for p in paths if p.lower().endswith(".svg")]
+        if svgs:
+            from . import advanced as A
+            if page is None:
+                page = view.current_page
+            if center is None:
+                center = self.visible_center(view, page)
+            datas = []
+            for p in svgs:
+                try:
+                    with open(p, "rb") as f:
+                        datas.append(f.read())
+                except OSError as e:
+                    self.ctx.error(_("Aggiungi immagine"), str(e))
+                    return None
+
+            def fn(pdf):
+                out = []
+                for k, d in enumerate(datas):
+                    c = pymupdf.Point(center.x + E.CASCADE * k, center.y + E.CASCADE * k)
+                    out += A.insert_svg(pdf, page, d, c)
+                return out
+            res = self.run_change(view, _("Inserisci immagine"), fn)
+            if res:
+                self.ensure_tool(view)
+                self.set_selection(view, page, res)
+            paths = [p for p in paths if p not in svgs]
+            if not paths:
+                return res
         images = []
         skipped = []
         for p in paths:

@@ -223,3 +223,21 @@ def test_image_tools_actions(ui, tmp_path, monkeypatch):
     monkeypatch.setattr(D, "ask_path_style", lambda parent, obj: dict(stroke=(0, 0, 1), fill=None, width=4, dash=None))
     O._state["actions"]["path_style"].trigger()
     assert abs(objs(view)[1].state.line_width - 4) < 1e-6
+
+
+def test_grid_snap(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(53, 77, 103, 127)]))
+    ui.c.grid_on, ui.c.grid_snap, ui.c.grid_step_mm = True, True, 10.0
+    ui.c.smart_guides = False
+    try:
+        QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                         vpos(view, 0, 70, 100))
+        drag(view, 0, (70, 100), (130, 160))
+        r = objs(view)[0].rect
+        step = 10 * 72 / 25.4
+        assert abs(r.x0 / step - round(r.x0 / step)) < 1e-3 and abs(r.y0 / step - round(r.y0 / step)) < 1e-3
+        view.flush_rendering()
+        assert not ui.window.grab().isNull()
+    finally:
+        ui.c.grid_on = False
+        ui.c.smart_guides = True

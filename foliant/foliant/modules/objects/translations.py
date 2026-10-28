@@ -375,4 +375,10 @@ EN = {
     'es. 4 2 (vuoto = continuo)': 'e.g. 4 2 (empty = solid)',
     '{n} collegamenti, {p} con problemi': '{n} links, {p} with problems',
     'Il documento non consente modifiche al contenuto. Aprilo con la password del proprietario per modificarlo.': 'The document does not allow content changes. Open it with the owner password to edit it.',
+    "Il file SVG non è valido o è danneggiato.": "The SVG file is not valid or is damaged.",
+    "Griglia": "Grid",
+    "Aggancia alla griglia": "Snap to grid",
+    "Passo della griglia": "Grid spacing",
+    "Passo della griglia…": "Grid spacing…",
+    "Passo (mm):": "Spacing (mm):",
 }
