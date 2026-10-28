@@ -106,7 +106,7 @@ class _FakeDialog:
 def test_protect_flow(window, sec, sample_pdf, tmp_path, monkeypatch):
     view = window.open_path(sample_pdf)
     monkeypatch.setattr(C, "ask_protection",
-                        lambda parent, doc: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
+                        lambda parent, doc, **k: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
     assert sec.protect()
     out = tmp_path / "protetto.pdf"
     view.document.save(out)
@@ -175,7 +175,7 @@ def test_change_keeps_open_password(window, sec, tmp_path, sample_pdf, monkeypat
     view = window.open_path(str(first), "vecchia-1")
     s = P.ProtectionSettings(open_password="", permissions_password="Capo-1234", restrict=True,
                              allowed={"copy"})
-    monkeypatch.setattr(C, "ask_protection", lambda parent, doc: _FakeDialog(s, keep_open=True))
+    monkeypatch.setattr(C, "ask_protection", lambda parent, doc, **k: _FakeDialog(s, keep_open=True))
     assert sec.protect()
     view.document.save()
     pdf = pymupdf.open(first)
@@ -875,7 +875,7 @@ def test_trusted_folder(window, sec, active_pdf, tmp_path, monkeypatch):
 def test_protect_undo_save_unencrypted(window, sec, sample_pdf, tmp_path, monkeypatch):
     view = window.open_path(sample_pdf)
     monkeypatch.setattr(C, "ask_protection",
-                        lambda parent, doc: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
+                        lambda parent, doc, **k: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
     assert sec.protect()
     view.document.undo()
     out = tmp_path / "annullato.pdf"

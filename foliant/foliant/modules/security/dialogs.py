@@ -100,8 +100,9 @@ class ProtectDialog(QDialog):
     """Password di apertura, password dei permessi, restrizioni e cifratura."""
 
     def __init__(self, current: P.ProtectionSettings, *, already_protected: bool, has_open_password: bool,
-                 parent=None):
+                 parent=None, save_policy: Callable[[str, P.ProtectionSettings], None] | None = None):
         super().__init__(parent)
+        self._save_policy = save_policy
         self.setWindowTitle(_("Proteggi con password"))
         self._already = already_protected
         self._had_open = has_open_password
@@ -176,6 +177,12 @@ class ProtectDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         self.buttons.accepted.connect(self._accept)
         self.buttons.rejected.connect(self.reject)
+        self.policy_button = None
+        if save_policy is not None:
+            self.policy_button = self.buttons.addButton(_("Salva come policy…"),
+                                                        QDialogButtonBox.ButtonRole.ActionRole)
+            self.policy_button.setToolTip(_("Conserva permessi e opzioni con un nome, senza le password"))
+            self.policy_button.clicked.connect(self._ask_policy_name)
         lay.addWidget(self.buttons)
 
         # stato iniziale
@@ -291,6 +298,24 @@ class ProtectDialog(QDialog):
     def keep_permissions_password(self) -> bool:
         return self._keep_perm()
 
+    def save_as_policy(self, name: str) -> bool:
+        if not self.require_open.isChecked() and not self.restrict.isChecked():
+            self.error.setText(_("Imposta una password di apertura oppure limita almeno un permesso."))
+            return False
+        try:
+            self._save_policy(name, self.settings())
+        except ValueError as e:
+            self.error.setText(str(e))
+            return False
+        self.error.setText("")
+        self.perm_note.setText(_("Policy «{n}» salvata.").format(n=name.strip()))
+        return True
+
+    def _ask_policy_name(self) -> None:
+        name, ok = QInputDialog.getText(self, _("Salva come policy"), _("Nome della policy:"))
+        if ok:
+            self.save_as_policy(name)
+
     def _accept(self) -> None:
         if self._problem():
             return
@@ -301,6 +326,190 @@ class ProtectDialog(QDialog):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self.accept()
+
+
+# ------------------------------------------------------------------ policy
+
+
+class PolicyPasswordDialog(QDialog):
+    """Password richieste da una policy al momento dell'applicazione."""
+
+    def __init__(self, policy, parent=None):
+        super().__init__(parent)
+        self.policy = policy
+        self.setWindowTitle(_("Applica la policy «{n}»").format(n=policy.name))
+        lay = QVBoxLayout(self)
+        lay.addWidget(_note(policy.describe()))
+        form = QFormLayout()
+        self.open_pw = self.open_pw2 = self.perm_pw = self.perm_pw2 = None
+        if policy.open_password:
+            self.open_pw, self.open_pw2 = PasswordField(), PasswordField()
+            form.addRow(_("Password di apertura:"), self.open_pw)
+            form.addRow(_("Conferma:"), self.open_pw2)
+        if policy.restrict:
+            self.perm_pw, self.perm_pw2 = PasswordField(), PasswordField()
+            form.addRow(_("Password dei permessi:"), self.perm_pw)
+            form.addRow(_("Conferma:"), self.perm_pw2)
+        lay.addLayout(form)
+        self.error = _note("", "danger")
+        lay.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Applica"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def passwords(self) -> tuple[str, str]:
+        return (self.open_pw.text() if self.open_pw else "", self.perm_pw.text() if self.perm_pw else "")
+
+    def problem(self) -> str:
+        if self.open_pw and self.open_pw.text() != self.open_pw2.text():
+            return _("Le password non coincidono")
+        if self.perm_pw and self.perm_pw.text() != self.perm_pw2.text():
+            return _("Le password dei permessi non coincidono")
+        try:
+            self.policy.settings(*self.passwords()).validate()
+        except P.ProtectionError as e:
+            return str(e)
+        return ""
+
+    def _accept(self) -> None:
+        problem = self.problem()
+        self.error.setText(problem)
+        if not problem:
+            self.accept()
+
+
+class PolicyDialog(QDialog):
+    """Gestione delle policy: applica, applica a più file, rinomina, duplica, elimina,
+    importa, esporta."""
+
+    APPLY, BATCH = 1, 2
+
+    def __init__(self, store, has_document: bool, parent=None):
+        super().__init__(parent)
+        self.store = store
+        self.choice = 0
+        self.setWindowTitle(_("Policy di protezione"))
+        self.resize(560, 360)
+        lay = QHBoxLayout(self)
+        left = QVBoxLayout()
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels([_("Policy"), _("Impostazioni")])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setColumnWidth(0, 150)
+        self.tree.itemSelectionChanged.connect(self._update)
+        left.addWidget(self.tree, 1)
+        self.detail = _note("", "text")          # descrizione completa della policy scelta
+        left.addWidget(self.detail)
+        self.notice = _note("")
+        left.addWidget(self.notice)
+        lay.addLayout(left, 1)
+        col = QVBoxLayout()
+        self.apply_button = QPushButton(_("Applica al documento"))
+        self.apply_button.setEnabled(has_document)
+        self.batch_button = QPushButton(_("Applica a più file…"))
+        self._has_document = has_document
+        self.apply_button.clicked.connect(lambda: self._finish(self.APPLY))
+        self.batch_button.clicked.connect(lambda: self._finish(self.BATCH))
+        self.buttons_needing_selection = [self.apply_button, self.batch_button]
+        for text, slot, needs in ((_("Rinomina…"), self._rename, True), (_("Duplica"), self._duplicate, True),
+                                  (_("Elimina"), self._remove, True), (_("Importa…"), self._import, False),
+                                  (_("Esporta…"), self._export, False)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            if needs:
+                self.buttons_needing_selection.append(b)
+            setattr(self, "button_" + slot.__name__.strip("_"), b)
+        for b in (self.apply_button, self.batch_button):
+            col.addWidget(b)
+        col.addSpacing(12)
+        for name in ("rename", "duplicate", "remove", "import", "export"):
+            col.addWidget(getattr(self, "button_" + name))
+        col.addStretch(1)
+        close = QPushButton(_("Chiudi"))
+        close.clicked.connect(self.reject)
+        col.addWidget(close)
+        lay.addLayout(col)
+        self.reload()
+
+    def reload(self, select: str | None = None) -> None:
+        self.tree.clear()
+        for name in self.store.names():
+            item = QTreeWidgetItem(self.tree, [name, self.store.get(name).describe()])
+            item.setToolTip(1, item.text(1))
+            if name == select:
+                self.tree.setCurrentItem(item)
+        if select is None and self.tree.topLevelItemCount():
+            self.tree.setCurrentItem(self.tree.topLevelItem(0))
+        if not self.tree.topLevelItemCount():
+            self.notice.setText(_("Nessuna policy salvata: configura la protezione in «Password e permessi» e "
+                                  "scegli «Salva come policy…»."))
+        self._update()
+
+    def current(self) -> str | None:
+        item = self.tree.currentItem()
+        return item.text(0) if item is not None else None
+
+    def _update(self) -> None:
+        on = self.current() is not None
+        self.detail.setText(self.store.get(self.current()).describe() if on else "")
+        for b in self.buttons_needing_selection:
+            b.setEnabled(on and (b is not self.apply_button or self._has_document))
+
+    def _finish(self, choice: int) -> None:
+        if self.current() is not None:
+            self.choice = choice
+            self.accept()
+
+    def rename(self, new: str) -> bool:
+        try:
+            self.store.rename(self.current(), new)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return False
+        self.reload(new.strip())
+        return True
+
+    def _rename(self) -> None:
+        name, ok = QInputDialog.getText(self, _("Rinomina policy"), _("Nuovo nome:"), text=self.current() or "")
+        if ok:
+            self.rename(name)
+
+    def _duplicate(self) -> None:
+        self.reload(self.store.duplicate(self.current()))
+
+    def _remove(self) -> None:
+        self.store.remove(self.current())
+        self.reload()
+
+    def import_from(self, path: str) -> None:
+        try:
+            done, notes = self.store.import_file(path)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return
+        self.reload(done[0] if done else None)
+        self.notice.setText("\n".join([_("{n} policy importate").format(n=len(done))] + notes))
+
+    def _import(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa policy"), "", _("Policy (*.json);;Tutti i file (*)"))
+        if path:
+            self.import_from(path)
+
+    def _export(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        if not self.store.names():
+            self.notice.setText(_("Non ci sono policy da esportare."))
+            return
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta policy"), "policy.json", _("Policy (*.json)"))
+        if path:
+            try:
+                self.store.export(path)
+            except OSError as e:
+                self.notice.setText(_("Impossibile scrivere il file: {e}").format(e=e.strerror))
 
 
 # -------------------------------------------------------- password singola

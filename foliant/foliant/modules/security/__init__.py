@@ -56,10 +56,16 @@ def register(ctx: Context) -> None:
         "flatten": act(_("Appiattisci"), "layers", c.flatten),
     }
     from PySide6.QtGui import QAction
-    for key in ("remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages", "text",
-                "highlights"):
+    from PySide6.QtWidgets import QMenu
+    # Policy di protezione (SEC-12): nel menu Proteggi un sottomenu con una voce per policy
+    c.actions["policies"] = act(_("Policy di protezione"), "shield-plus", c.manage_policies,
+                                requires_document=False)
+    c.policy_menu = QMenu(ctx.window)
+    c.policy_menu.aboutToShow.connect(lambda: c.fill_policy_menu(c.policy_menu))
+    for key in ("policies", "remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages",
+                "text", "highlights"):
         c.actions[key].setPriority(QAction.Priority.LowPriority)   # solo icona nella barra
-    groups = [("protect", "remove", "properties"),
+    groups = [("protect", "policies", "remove", "properties"),
               ("area", "text", "find", "patterns", "pages", "highlights", "style", "panel", "apply"),
               ("inspect", "sanitize", "metadata", "flatten")]
     for n, group in enumerate(groups):
@@ -69,6 +75,9 @@ def register(ctx: Context) -> None:
             mode.add_action(c.actions[key])
     for key in ("protect", "remove", "sanitize", "metadata"):
         ctx.add_menu_action(c.actions[key], _("Proteggi"))
+    menu_policy = ctx.action(_("Policy di protezione"), "shield-plus", c.manage_policies, requires_document=False)
+    menu_policy.setMenu(c.policy_menu)
+    ctx.add_menu_action(menu_policy, _("Proteggi"))
     revoke = ctx.action(_("Revoca documenti attendibili"), "shield-x", c.revoke_trust, requires_document=False)
     ctx.add_menu_action(revoke, _("Proteggi"))
 

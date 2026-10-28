@@ -46,3 +46,13 @@ di memoria e tempo.
 PyMuPDF non permette di scrivere `/EncryptMetadata false`. Servirebbe un
 post-processo del file salvato (riscrittura del dizionario /Encrypt e di /Perms
 per R6) nel nucleo di salvataggio o una versione del motore che lo supporti.
+
+## 9. Azioni dell'elaborazione in blocco (SEC-12, BAT-*)
+
+SEC-12 chiede che le policy di protezione compaiano «tra le azioni dell'elaborazione
+in blocco». L'elaborazione in blocco attuale (`modules/convert/batch.py`) fa solo
+conversioni e non accetta azioni di altri moduli. Proposta: `ctx.add_batch_action(id,
+label, run(path, out, options), options_widget=None)`, dove `run` lavora su un file
+alla volta in un thread di lavoro. Per ora il modulo security offre un proprio comando,
+«Policy di protezione › Applica a più file…» (`SecurityController.apply_policy_to_files`).
+Con il registro basterebbe iscrivere `policies.protect_file`.

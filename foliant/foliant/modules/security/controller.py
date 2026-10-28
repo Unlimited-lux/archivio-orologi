@@ -19,6 +19,7 @@ from foliant.api import CONTENT, ENGINE_LOCK, SAVED, Context, DocumentError, _
 
 from . import dialogs as D
 from . import patterns as PT
+from . import policies as POL
 from . import protection as P
 from . import redaction as R
 from . import sanitize as S
@@ -36,11 +37,26 @@ def default_codes() -> list[str]:
 # ------------------------------------------------- dialoghi (sostituibili)
 
 
-def ask_protection(parent, document) -> D.ProtectDialog | None:
+def ask_protection(parent, document, save_policy=None) -> D.ProtectDialog | None:
     i = P.info(document)
     dlg = D.ProtectDialog(P.settings_from_document(document), already_protected=i.protected,
-                          has_open_password=i.has_open_password, parent=parent)
+                          has_open_password=i.has_open_password, parent=parent, save_policy=save_policy)
     return dlg if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_policy_passwords(parent, policy) -> tuple[str, str] | None:
+    dlg = D.PolicyPasswordDialog(policy, parent)
+    return dlg.passwords() if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def choose_files(parent) -> tuple[list[str], str | None] | None:
+    """File PDF da proteggere e cartella di destinazione (None = accanto agli originali)."""
+    from PySide6.QtWidgets import QFileDialog
+    files, _f = QFileDialog.getOpenFileNames(parent, _("Scegli i PDF da proteggere"), "", _("PDF (*.pdf)"))
+    if not files:
+        return None
+    out = QFileDialog.getExistingDirectory(parent, _("Cartella per le copie protette"))
+    return files, out or None
 
 
 def ask_password(parent, title: str, text: str) -> str | None:
@@ -286,7 +302,7 @@ class SecurityController:
         if warnings and not confirm(self.parent, _("Proteggere comunque il documento?"), "\n\n".join(warnings),
                                     _("Continua")):
             return False
-        dlg = ask_protection(self.parent, doc)
+        dlg = ask_protection(self.parent, doc, save_policy=self.save_policy)
         if dlg is None:
             return False
         settings = dlg.settings()
@@ -306,6 +322,109 @@ class SecurityController:
         self.ctx.status(_("Protezione impostata: verrà applicata al salvataggio."))
         self.refresh_document_state(self.view())
         return True
+
+    # ------------------------------------------------------------ policy
+    def policy_store(self) -> POL.PolicyStore:
+        return POL.PolicyStore(self.settings())
+
+    def save_policy(self, name: str, settings: P.ProtectionSettings) -> None:
+        self.policy_store().add(POL.Policy.from_settings(name, settings))
+
+    def manage_policies(self) -> bool:
+        doc = self.document()
+        dlg = D.PolicyDialog(self.policy_store(), doc is not None, self.parent)
+        if not run_dialog(dlg):
+            return False
+        name = dlg.current()
+        if dlg.choice == D.PolicyDialog.APPLY:
+            return self.apply_policy(name)
+        if dlg.choice == D.PolicyDialog.BATCH:
+            return bool(self.apply_policy_to_files(name))
+        return False
+
+    def apply_policy(self, name: str) -> bool:
+        """Applica la policy al documento corrente (le password si chiedono ora)."""
+        doc = self.document()
+        policy = self.policy_store().get(name)
+        if doc is None or policy is None:
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        warnings = []
+        if self._has_signatures(doc):
+            warnings.append(_("Il documento contiene firme digitali: la cifratura riscrive il file e le firme "
+                              "risulteranno non valide."))
+        if _declares_pdfa(doc):
+            warnings.append(_("Il documento dichiara la conformità PDF/A o PDF/X: la cifratura la fa decadere "
+                              "e la dichiarazione verrà rimossa."))
+        if warnings and not confirm(self.parent, _("Proteggere comunque il documento?"), "\n\n".join(warnings),
+                                    _("Continua")):
+            return False
+        pw = ask_policy_passwords(self.parent, policy)
+        if pw is None:
+            return False
+        try:
+            P.apply_protection(doc, policy.settings(*pw))
+        except P.ProtectionError as e:
+            self.ctx.error(_("Protezione non applicata"), str(e))
+            return False
+        if _declares_pdfa(doc):
+            with self._change(doc, _("Rimuovi dichiarazione PDF/A")) as pdf:
+                S.drop_conformance(pdf)
+        self.ctx.status(_("Policy «{n}» impostata: verrà applicata al salvataggio.").format(n=name))
+        self.refresh_document_state(self.view())
+        return True
+
+    def apply_policy_to_files(self, name: str, files: list[str] | None = None,
+                              out_dir: str | None = None) -> list[tuple[str, str]]:
+        """Elaborazione in blocco: salva una copia protetta di ogni file. Restituisce
+        [(file, errore)] per quelli non riusciti."""
+        policy = self.policy_store().get(name)
+        if policy is None:
+            return []
+        if files is None:
+            chosen = choose_files(self.parent)
+            if chosen is None:
+                return []
+            files, out_dir = chosen
+        pw = ask_policy_passwords(self.parent, policy)
+        if pw is None:
+            return []
+        settings = policy.settings(*pw)
+
+        def work(progress):
+            failed, done = [], 0
+            for k, path in enumerate(files):
+                progress.update(k / max(1, len(files)), os.path.basename(path))
+                try:
+                    POL.protect_file(path, POL.protected_name(path, out_dir), settings)
+                    done += 1
+                except Exception as e:
+                    failed.append((path, str(e)))
+            return done, failed
+
+        done, failed = self.ctx.run_task(_("Protezione dei file…"), work)
+        text = _("{n} file protetti con la policy «{p}».").format(n=done, p=name)
+        if failed:
+            text += "\n\n" + "\n".join(f"{os.path.basename(f)}: {e}" for f, e in failed)
+            self.ctx.error(_("Policy di protezione"), text)
+        else:
+            self.ctx.status(text)
+        return failed
+
+    def fill_policy_menu(self, menu) -> None:
+        """Sottomenu Proteggi › Policy: una voce per policy e la gestione."""
+        menu.clear()
+        store = self.policy_store()
+        has_doc = self.document() is not None
+        for name in store.names():
+            a = menu.addAction(name)
+            a.setToolTip(store.get(name).describe())
+            a.setEnabled(has_doc)
+            a.triggered.connect(lambda _c=False, n=name: self.apply_policy(n))
+        if store.names():
+            menu.addSeparator()
+        menu.addAction(_("Gestisci policy…")).triggered.connect(self.manage_policies)
 
     def remove_protection(self) -> bool:
         doc = self.document()
