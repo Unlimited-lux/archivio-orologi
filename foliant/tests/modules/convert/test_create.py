@@ -627,3 +627,24 @@ def test_cancel_images(tmp_path):
 
 def test_shutil_reference():
     assert HAS_SOFFICE == (shutil.which("soffice") is not None or create.soffice_path() is not None)
+
+
+def test_add_ocr_layer_keeps_images(tmp_path):
+    import io as _io
+    from foliant.modules.convert.extract import add_ocr_layer, ocr_available
+    if not ocr_available():
+        pytest.skip("tesseract non installato")
+    src = pymupdf.open()
+    sp = src.new_page()
+    sp.insert_text((60, 150), "Ricevuta di acquisto", fontsize=30)
+    png = sp.get_pixmap(dpi=200).tobytes("png")
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_image(p.rect, stream=png)
+    xref = p.get_images()[0][0]
+    raw = doc.xref_stream(xref)
+    out, pages = add_ocr_layer(doc.tobytes(), "ita")
+    res = pymupdf.open(stream=out)
+    assert pages == [1] and "Ricevuta" in res[0].get_text()
+    imgs = res[0].get_images(full=True)
+    assert len(imgs) == 1 and res.xref_stream(imgs[0][0]) == raw

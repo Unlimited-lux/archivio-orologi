@@ -95,6 +95,9 @@ class ImagesDialog(QDialog):
         self.ppi.setValue(200)
         self.ppi.setSuffix(" ppi")
         form.addRow(_("Risoluzione massima"), self.ppi)
+        from PySide6.QtWidgets import QCheckBox
+        self.ocr = QCheckBox(_("Rendi il testo ricercabile (OCR)"))
+        form.addRow("", self.ocr)
         self.quality_box.currentIndexChanged.connect(lambda: self.ppi.setEnabled(self.quality_box.currentData() != "original"))
         self.ppi.setEnabled(False)
         self.size_box.currentIndexChanged.connect(self._size_changed)
@@ -366,12 +369,13 @@ class ScannerDialog(QDialog):
         self.straighten.setChecked(True)
         self.crop = QCheckBox(_("Ritaglia automaticamente i bordi"))
         self.crop.setChecked(True)
+        self.ocr = QCheckBox(_("Rendi il testo ricercabile (OCR)"))
         self.remove_blank = QCheckBox(_("Rimuovi le pagine vuote"))
         self.manual_duplex = QCheckBox(_("Fronte/retro manuale (acquisisci prima i fronti, poi i retro)"))
         self.id_card = QCheckBox(_("Documento d'identità: fronte e retro sulla stessa pagina A4"))
         self.insert = QCheckBox(_("Inserisci nel documento aperto dopo la pagina corrente"))
         self.insert.setVisible(has_document)
-        for cb in (self.straighten, self.crop, self.remove_blank, self.manual_duplex, self.id_card, self.insert):
+        for cb in (self.straighten, self.crop, self.ocr, self.remove_blank, self.manual_duplex, self.id_card, self.insert):
             lay.addWidget(cb)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)

@@ -709,3 +709,9 @@ EN.update({"Indice": "Index", "Precedente": "Previous", "Successiva": "Next",
 
 EN.update({"Raddrizza automaticamente": "Straighten automatically",
            "Ritaglia automaticamente i bordi": "Crop borders automatically"})
+
+EN.update({"Rendi il testo ricercabile (OCR)": "Make the text searchable (OCR)",
+           "OCR non disponibile": "OCR not available",
+           "Il riconoscimento del testo richiede Tesseract (sudo apt install tesseract-ocr tesseract-ocr-ita).":
+               "Text recognition requires Tesseract (sudo apt install tesseract-ocr tesseract-ocr-ita).",
+           "Riconoscimento del testo…": "Recognizing text…"})

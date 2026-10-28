@@ -566,3 +566,50 @@ def repeated_furniture(pages: list[PageContent]) -> set[int]:
             where.setdefault(key, []).append(it)
     limit = max(2, int(len(pages) * 0.5))
     return {id(it) for key, n in counts.items() if n >= limit for it in where[key]}
+
+
+def add_ocr_layer(data: bytes, language: str | None = None, progress=None, dpi: int = 300) -> tuple[bytes, list[int]]:
+    """Aggiunge un livello di testo invisibile (OCR) alle pagine senza testo, lasciando le
+    immagini originali intatte. Restituisce (byte, pagine riconosciute in base 1)."""
+    from foliant.api import ENGINE_LOCK, _
+
+    from .common import check
+    if not ocr_available():
+        return data, []
+    done: list[int] = []
+    with ENGINE_LOCK:
+        doc = pymupdf.open(stream=data, filetype="pdf")
+    try:
+        n = doc.page_count
+        for i in range(n):
+            check(progress, i / max(1, n), _("OCR della pagina {p}").format(p=i + 1))
+            with ENGINE_LOCK:
+                page = doc[i]
+                if page.get_text("text").strip():
+                    continue
+                rot = page.rotation
+                page.set_rotation(0)
+                pix = page.get_pixmap(dpi=dpi)
+            ocr_bytes = pix.pdfocr_tobytes(language=ocr_languages(language))
+            with ENGINE_LOCK:
+                ocr = pymupdf.open(stream=ocr_bytes, filetype="pdf")
+                try:
+                    # resta solo il testo invisibile: via il disegno dell'immagine e la sua risorsa
+                    op = ocr[0]
+                    content = re.sub(rb"/[^\s/]+\s+Do\b", b"", op.read_contents())
+                    xrefs = op.get_contents()
+                    ocr.update_stream(xrefs[0], content)
+                    for x in xrefs[1:]:
+                        ocr.update_stream(x, b"")
+                    ocr.xref_set_key(op.xref, "Resources/XObject", "<<>>")
+                    page.show_pdf_page(page.rect, ocr, 0, overlay=True)
+                finally:
+                    ocr.close()
+                page.set_rotation(rot)
+            done.append(i + 1)
+        with ENGINE_LOCK:
+            out = doc.tobytes(garbage=3, deflate=True)
+    finally:
+        with ENGINE_LOCK:
+            doc.close()
+    return out, done

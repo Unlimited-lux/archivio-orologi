@@ -299,6 +299,8 @@ class ConvertController:
         if not ok:
             return None
         data, warnings = res
+        if dlg.ocr.isChecked():
+            data = self._with_ocr(data)
         name = (Path(files[0]).stem if len(files) == 1 else _("Immagini")) + ".pdf"
         view = self.open_created(data, name)
         if warnings:
@@ -460,6 +462,8 @@ class ConvertController:
             ok, data = self._run(_("Creazione del PDF…"), scanner.pages_to_pdf, pages, settings)
             if not ok:
                 return None
+        if dlg.ocr.isChecked():
+            data = self._with_ocr(data)
         if dlg.insert.isChecked() and view is not None:
             at = view.current_page + 1
             with ENGINE_LOCK:
@@ -518,6 +522,16 @@ class ConvertController:
                              "di cattura del desktop, copia l'immagine e scegli «Crea › Dagli appunti»."))
             return None
         return self.open_created(screen_image_pdf(pixmap.toImage()), _("Cattura schermo") + ".pdf")
+
+    def _with_ocr(self, data: bytes) -> bytes:
+        """Livello di testo OCR invisibile (immagini intatte); se l'OCR non c'è, lo segnala."""
+        from .extract import add_ocr_layer, ocr_available
+        if not ocr_available():
+            self.ctx.info(_("OCR non disponibile"), _("Il riconoscimento del testo richiede Tesseract "
+                                                      "(sudo apt install tesseract-ocr tesseract-ocr-ita)."))
+            return data
+        ok, res = self._run(_("Riconoscimento del testo…"), add_ocr_layer, data)
+        return res[0] if ok and res else data
 
     def create_blank(self):
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""
