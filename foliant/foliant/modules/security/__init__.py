@@ -6,6 +6,7 @@ Logica pura in `protection.py`, `redaction.py`, `patterns.py`, `sanitize.py`,
 
 from __future__ import annotations
 
+import pymupdf
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QToolButton
 
@@ -44,6 +45,7 @@ def register(ctx: Context) -> None:
         "find": act(_("Trova e segna"), "text-search", lambda: c.find_and_mark("terms")),
         "patterns": act(_("Trova dati personali"), "scan-search", lambda: c.find_and_mark("patterns")),
         "pages": act(_("Segna pagine"), "file-x", c.mark_pages),
+        "highlights": act(_("Converti evidenziazioni in segni"), "highlighter", lambda: c.convert_highlights()),
         "style": act(_("Impostazioni di redazione"), "palette", c.redaction_settings, requires_document=False),
         "panel": act(_("Elenco redazioni"), "list-checks", c.show_panel),
         "apply": act(_("Applica redazioni"), "check-check", lambda: c.apply_redactions(None),
@@ -54,10 +56,11 @@ def register(ctx: Context) -> None:
         "flatten": act(_("Appiattisci"), "layers", c.flatten),
     }
     from PySide6.QtGui import QAction
-    for key in ("remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages", "text"):
+    for key in ("remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages", "text",
+                "highlights"):
         c.actions[key].setPriority(QAction.Priority.LowPriority)   # solo icona nella barra
     groups = [("protect", "remove", "properties"),
-              ("area", "text", "find", "patterns", "pages", "style", "panel", "apply"),
+              ("area", "text", "find", "patterns", "pages", "highlights", "style", "panel", "apply"),
               ("inspect", "sanitize", "metadata", "flatten")]
     for n, group in enumerate(groups):
         if n:
@@ -110,6 +113,7 @@ def register(ctx: Context) -> None:
     links.install(ctx)
     ctx.add_guard("save", c.save_guard)        # SEC-19: segni non applicati prima di salvare
     ctx.add_guard("save_as", c.save_guard)
+    ctx.add_guard("print", c.save_guard)       # anche prima di stampare (moduli che usano run_guards)
     _update_actions(c, None)
 
 
@@ -121,8 +125,18 @@ def _update_actions(c: SecurityController, view) -> None:
             has_marks = c.has_marks(doc)         # in cache per versione del documento
         except Exception:
             has_marks = False
+    # SEC-02: senza permesso di modifica i comandi che cambiano il contenuto sono disattivati
+    # (la barra «Documento con restrizioni» offre «Sblocca…»)
+    can_modify = doc is None or doc.closed or doc.allows(pymupdf.PDF_PERM_MODIFY)
+    for key in ("area", "text", "find", "patterns", "pages", "highlights", "sanitize", "flatten"):
+        a = c.actions[key]
+        base = a.property("security_tip") or a.toolTip()
+        a.setProperty("security_tip", base)
+        a.setEnabled(doc is not None and can_modify)
+        a.setToolTip(base if can_modify else _("{cmd}: il documento non consente modifiche. Usa «Sblocca…» con "
+                                                 "la password dei permessi.").format(cmd=a.text()))
     apply = c.actions["apply"]
-    apply.setEnabled(doc is not None and (has_marks or bool(c.pending_outside.get(doc))))
+    apply.setEnabled(doc is not None and can_modify and (has_marks or bool(c.pending_outside.get(doc))))
     apply.setToolTip(_("Applica redazioni") if apply.isEnabled()
                      else _("Nessuna area contrassegnata per la redazione"))
     c.actions["remove"].setEnabled(doc is not None and doc.is_protected)
@@ -146,6 +160,16 @@ def _context_menu(c: SecurityController, view, ev, menu) -> None:
         if not m.whole_page:
             menu.addAction(_("Ripeti su più pagine…")).triggered.connect(lambda: c.repeat_mark(m.page, m.xref))
         menu.addAction(_("Applica questo segno")).triggered.connect(lambda: c.apply_redactions([m]))
+    with ENGINE_LOCK:
+        try:
+            page = view.document.pdf[ev.page]
+            highlights = [x for x, kind, _id in page.annot_xrefs() if kind == pymupdf.PDF_ANNOT_HIGHLIGHT
+                          and page.load_annot(x) is not None and page.load_annot(x).rect.contains(ev.point)]
+        except Exception:
+            highlights = []
+    if highlights:
+        menu.addAction(_("Converti in segni di redazione")).triggered.connect(
+            lambda: c.convert_highlights(view.document, set(highlights)))
     if c.ctx.current_mode() == "proteggi":
         menu.addAction(_("Oscura questa pagina")).triggered.connect(lambda: _mark_page(c, view, ev.page))
 
