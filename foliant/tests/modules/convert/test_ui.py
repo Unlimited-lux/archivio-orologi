@@ -782,3 +782,41 @@ def test_export_allowed_after_owner_unlock(window, ctrl, tmp_path, monkeypatch, 
     _accept_export(monkeypatch, tmp_path / "out", "txt")
     result = ctrl.export()
     assert result is not None and "Riservato" in open(result.paths[0], encoding="utf-8").read()
+
+
+@pytest.mark.parametrize("policy", ["overwrite", "rename"])
+def test_batch_password_second_pass_keeps_unique_names(window, ctrl, tmp_path, monkeypatch, messages, policy):
+    """Seconda passata sui file protetti: le uscite pianificate per tutto il lotto vengono riusate."""
+    from PySide6.QtWidgets import QInputDialog
+    from foliant.modules.convert import batch_dialog
+    from foliant.modules.convert.batch_dialog import BatchDialog
+    (tmp_path / "in" / "a").mkdir(parents=True)
+    (tmp_path / "in" / "b").mkdir(parents=True)
+    a = pymupdf.open()
+    a.new_page().insert_text((72, 100), "DOCUMENTO A", fontsize=12)
+    a.save(str(tmp_path / "in" / "a" / "doc.pdf"))
+    b = pymupdf.open()
+    b.new_page().insert_text((72, 100), "DOCUMENTO B", fontsize=12)
+    b.save(str(tmp_path / "in" / "b" / "doc.pdf"), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="u",
+           owner_pw="o")
+    out = tmp_path / "out"
+
+    def fake_exec(d):
+        d.add_paths([str(tmp_path / "in")])
+        d.format_box.setCurrentIndex(d.format_box.findData("txt"))
+        d.dest_box.setCurrentIndex(1)
+        d.folder_edit.setText(str(out))
+        d.keep.setChecked(False)
+        d.policy_box.setCurrentIndex(d.policy_box.findData(policy))
+        d.workers.setValue(1)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(BatchDialog, "exec", fake_exec)
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("u", True))
+    monkeypatch.setattr(batch_dialog, "show_batch_report", lambda c, items: None)
+    items = ctrl.batch_convert()
+    assert [i.status for i in items] == ["completato", "completato"]
+    outputs = [i.outputs[0] for i in items]
+    assert len(set(outputs)) == 2
+    contents = {os.path.basename(p): open(p, encoding="utf-8").read() for p in outputs}
+    assert "DOCUMENTO A" in contents["doc.txt"] and "DOCUMENTO B" in contents["doc (2).txt"]
+    assert sorted(os.listdir(out)) == ["doc (2).txt", "doc.txt"]
