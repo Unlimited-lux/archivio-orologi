@@ -446,3 +446,22 @@ def test_tab_menu_compare_with(window, pdf_builder, monkeypatch):
     act = next(a for a in menu.actions() if a.text() == "Confronta con…")
     act.trigger()
     assert called == [view]
+
+
+def test_comparison_runs_without_blocking_window(window, pdf_builder, monkeypatch):
+    """CMP-01 flusso 5: il confronto non apre finestre modali e la finestra resta usabile."""
+    from PySide6.QtWidgets import QApplication
+    monkeypatch.delenv("FOLIANT_SYNC_TASKS", raising=False)
+    a = pdf_builder([page_lines(i) for i in range(1, 30)])
+    b = pdf_builder([page_lines(i) for i in range(2, 31)])
+    sa, sb = cu.Source.from_file(a), cu.Source.from_file(b)
+    shown = []
+    ctl = controller(window)
+    ret = ctl.run(ce.SideInput(sa.data, "a"), ce.SideInput(sb.data, "b"), sa, sb, ce.CompareOptions(dpi=100),
+                  then=shown.append)
+    assert ret is None and ctl.task is not None
+    assert QApplication.activeModalWidget() is None
+    assert ctl.task.wait(60000)
+    QApplication.processEvents()
+    assert shown and shown[0] is ctl.widget
+    assert window.ctx.central_widget() is ctl.widget

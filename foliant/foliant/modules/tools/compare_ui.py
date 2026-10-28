@@ -1637,11 +1637,9 @@ class CompareWidget(QWidget):
         ib = ce.SideInput(self.source_b.data, self.source_b.label, self.source_b.path, self.source_b.password,
                           (rb[0], rb[-1]) if rb else None, self.source_b.unsaved)
         state = self.session_data()
-        widget = controller.run(ia, ib, self.source_a, self.source_b, options)
-        if widget is not None:
-            state["options"] = options.to_dict()
-            widget.restore_view_state(state)
-        return widget
+        state["options"] = options.to_dict()
+        return controller.run(ia, ib, self.source_a, self.source_b, options,
+                              then=lambda w: w.restore_view_state(state))
 
     # ---------------------------------------------------------------- comandi
     def manual_pair(self) -> None:
@@ -1808,6 +1806,7 @@ class CompareController:
     def __init__(self, ctx):
         self.ctx = ctx
         self.widget: CompareWidget | None = None
+        self.task = None   # confronto in corso (BackgroundTask)
         self.last_options = ce.CompareOptions()
 
     def start(self, view: DocumentView | None = None) -> CompareWidget | None:
@@ -1821,19 +1820,34 @@ class CompareController:
         return self.run(ia, ib, sa, sb, self.last_options)
 
     def run(self, ia: ce.SideInput, ib: ce.SideInput, sa: Source, sb: Source,
-            options: ce.CompareOptions) -> CompareWidget | None:
-        try:
-            result = self.ctx.run_task(_("Confronto in corso…"), ce.run_compare, ia, ib, options)
-        except OperationCancelled:
-            self.ctx.status(_("Confronto annullato."))
+            options: ce.CompareOptions, then=None) -> CompareWidget | None:
+        """Avvia il confronto senza bloccare la finestra (avanzamento e Annulla nella barra di
+        stato). Al termine mostra la sessione e chiama `then(widget)`. Restituisce il widget se il
+        confronto è già finito (es. attività sincrone nei test), altrimenti None."""
+        if self.task is not None and not self.task.done:
+            self.ctx.notify(_("Un confronto è già in corso."))
             return None
-        except DocumentError as e:
-            self.ctx.error(_("Confronto non riuscito"), str(e))
-            return None
-        except Exception as e:  # nessun errore deve chiudere l'applicazione
-            self.ctx.error(_("Confronto non riuscito"), _("Errore imprevisto: {e}").format(e=e))
-            return None
-        return self.show(result, sa, sb)
+        box: dict = {}
+
+        def done(result) -> None:
+            self.task = None
+            widget = self.show(result, sa, sb)
+            box["widget"] = widget
+            if then is not None:
+                then(widget)
+
+        def failed(e: BaseException) -> None:
+            self.task = None
+            if isinstance(e, OperationCancelled):
+                self.ctx.notify(_("Confronto annullato."))
+            elif isinstance(e, DocumentError):
+                self.ctx.error(_("Confronto non riuscito"), str(e))
+            else:   # nessun errore deve chiudere l'applicazione
+                self.ctx.error(_("Confronto non riuscito"), _("Errore imprevisto: {e}").format(e=e))
+
+        self.task = self.ctx.run_task(_("Confronto in corso…"), ce.run_compare, ia, ib, options, modal=False,
+                                      on_done=done, on_error=failed)
+        return box.get("widget")
 
     def show(self, result: ce.CompareResult, sa: Source, sb: Source) -> CompareWidget:
         self.close()
@@ -1900,7 +1914,4 @@ class CompareController:
         (sa, ra), (sb, rb) = sources
         ia = ce.SideInput(sa.data, sa.label, sa.path, sa.password, tuple(ra) if ra else None)
         ib = ce.SideInput(sb.data, sb.label, sb.path, sb.password, tuple(rb) if rb else None)
-        widget = self.run(ia, ib, sa, sb, options)
-        if widget is not None:
-            widget.restore_view_state(data)
-        return widget
+        return self.run(ia, ib, sa, sb, options, then=lambda w: w.restore_view_state(data))

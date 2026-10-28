@@ -196,8 +196,7 @@ class RevisionsDialog(QDialog):
         sb, ib = self._source(rb)
         controller = self.ctx.tools_module.compare
         widget = controller.run(ia, ib, sa, sb, ce.CompareOptions.from_dict(controller.last_options.to_dict()))
-        if widget is not None:
-            self.accept()
+        self.accept()   # il confronto prosegue senza bloccare la finestra
         return widget
 
     def compare_signed(self):

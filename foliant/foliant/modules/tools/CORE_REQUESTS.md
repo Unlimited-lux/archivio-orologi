@@ -14,7 +14,7 @@
 3. **Sottocomando da riga di comando (BAT-22).** Il modulo offre `python -m foliant.modules.tools.cli`;
    per avere `foliant batch …` servirebbe che `foliant/__main__.py` inoltri gli argomenti che
    iniziano con `batch` a `foliant.modules.tools.cli.main(argv[1:])` prima di creare la QApplication.
-4. **Attività non modali (CMP-01 flusso 5, BAT-04).** `ctx.run_task` mostra una finestra modale:
+4. **[RISOLTO: `run_task(modal=False)`, adottato] Attività non modali (CMP-01 flusso 5, BAT-04).** `ctx.run_task` mostra una finestra modale:
    la specifica chiede che l'applicazione resti utilizzabile durante il confronto e i lavori in
    blocco. Proposta: `ctx.run_task(..., modal=False, on_done=callback)` con un indicatore nella
    barra di stato. Soluzione attuale: finestra modale con Annulla; per i lavori in blocco una

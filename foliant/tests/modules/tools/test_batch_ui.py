@@ -362,3 +362,19 @@ def test_conflict_ask_each_time(batch, folder, tmp_path, monkeypatch):
     assert len(asked) == 1 and (out / "alfa (1).pdf").exists()
     monkeypatch.setattr(bu, "ask_conflict", lambda parent, target: None)
     assert batch.run(confirm=False) is None
+
+
+def test_batch_runs_without_blocking_window(batch, folder, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    monkeypatch.delenv("FOLIANT_SYNC_TASKS", raising=False)
+    batch.add_paths([str(folder)])
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "out"))
+    assert batch.run(confirm=False) is None
+    task = batch.task
+    assert task is not None and not batch.act_run.isEnabled()
+    assert QApplication.activeModalWidget() is None
+    assert task.wait(60000)
+    QApplication.processEvents()
+    assert batch.report is not None and batch.report.counts()["ok"] == 5
+    assert batch.act_run.isEnabled() and batch.task is None

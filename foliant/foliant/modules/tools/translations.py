@@ -776,4 +776,7 @@ EN: dict[str, str] = {
     "Courier": "Courier",
     "Courier grassetto": "Courier bold",
     "Confronta con…": "Compare with…",
+    "Un confronto è già in corso.": "A comparison is already running.",
+    "Un'elaborazione in blocco è già in corso.": "A batch job is already running.",
+    "Mostra": "Show",
 }

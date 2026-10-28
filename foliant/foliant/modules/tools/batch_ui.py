@@ -195,6 +195,7 @@ class BatchWidget(QWidget):
         self.items: list[be.QueueItem] = []
         self.steps: list[be.Step] = []
         self.report: be.JobReport | None = None
+        self.task = None   # lavoro in corso (BackgroundTask)
         self.csv_semicolon = False
         self.input_roots: list[str] = []
         self.last_ignored: list[tuple[str, str]] = []
@@ -951,31 +952,49 @@ class BatchWidget(QWidget):
                     if remember:
                         apply_all = choice
                 settings.conflict_choices[target] = choice
+        if self.task is not None and not self.task.done:
+            self.ctx.notify(_("Un'elaborazione in blocco è già in corso."))
+            return None
         control = be.JobControl()
         panel = JobControlPanel(control, self)
         panel.show()
-        try:
-            report = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, list(self.items), settings,
-                                       started, None, control, self.journal_path())
-        except Exception as e:   # il motore non dovrebbe sollevare: sicurezza in più
-            self.ctx.error(_("Elaborazione non riuscita"), str(e))
-            return None
-        finally:
+        items = list(self.items)
+        box: dict = {}
+
+        def cleanup() -> None:
             control.resume()
             panel.close()
             panel.deleteLater()
+            self.task = None
+            self.act_run.setEnabled(True)
+
+        def done(report) -> None:
+            cleanup()
+            box["report"] = self._finish_run(report, settings, items)
+
+        def failed(e: BaseException) -> None:   # il motore non dovrebbe sollevare: sicurezza in più
+            cleanup()
+            self.ctx.error(_("Elaborazione non riuscita"), str(e))
+
+        self.act_run.setEnabled(False)
+        # la finestra resta utilizzabile: avanzamento e Annulla nella barra di stato
+        self.task = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, items, settings, started, None,
+                                      control, self.journal_path(), modal=False, on_done=done, on_error=failed)
+        return box.get("report")
+
+    def _finish_run(self, report: be.JobReport, settings: be.JobSettings, items: list) -> be.JobReport:
         try:
             be.save_history(self.history_dir(), report)
-            be.record_bates_series(settings, list(self.items), report, self._base_dir())
+            be.record_bates_series(settings, items, report, self._base_dir())
         except Exception:
             pass
-        self.last_items = list(self.items)
+        self.last_items = items
         self.report = report
         self.last_settings = settings
         self._fill_report()
         self._refresh_queue()
         self.report_box.show()
-        self.ctx.status(report.summary(), 10000)
+        self.ctx.notify(report.summary(), [(_("Mostra"), lambda: self.ctx.set_central_widget(self))])
         if self.open_folder.isChecked():
             self.open_destination()
         return report
