@@ -457,6 +457,45 @@ def test_owner_password_unlocks(qtbot, window, tmp_path, no_modal_boxes):
     assert not f.state.blocked  # resta sbloccato dopo la modifica
 
 
+def _restricted_form(tmp_path):
+    """AES-256, password utente vuota, proprietario «capo», solo stampa e accessibilità."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "Cliente")
+    path = tmp_path / "limitato.pdf"
+    pdf.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="capo", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_ACCESSIBILITY)
+    return path
+
+
+def test_unlock_from_security_makes_form_fillable(qtbot, window, tmp_path, no_modal_boxes):
+    """SEC-02: «Sblocca…» del nucleo (document.unlock) rende il modulo compilabile e aggiorna l'avviso."""
+    view = open_form(window, _restricted_form(tmp_path))
+    f = filler_of(view)
+    assert f.state.blocked and "Inserisci password del proprietario" in f.banner_actions
+    assert view.document.unlock("capo")
+    assert view.document.access == "owner"
+    assert not f.state.blocked
+    assert "Inserisci password del proprietario" not in f.banner_actions
+    click_field(qtbot, view, "Cliente")
+    assert f.editor is not None
+    qtbot.keyClicks(f.editor, "Rossi")
+    f.commit_active()
+    assert values(view)["Cliente"] == "Rossi"
+
+
+def test_unlock_from_forms_unlocks_document(qtbot, window, tmp_path, no_modal_boxes):
+    """Il pulsante del modulo sblocca tramite il nucleo: l'accesso completo vale per tutta l'app."""
+    view = open_form(window, _restricted_form(tmp_path))
+    f = filler_of(view)
+    assert view.document.access == "user"
+    assert f.unlock_with_owner_password("capo")
+    assert view.document.access == "owner"
+    assert view.document.allows(pymupdf.PDF_PERM_MODIFY)
+    assert not f.state.blocked
+    assert "security-restricted" not in window.ctx.banners(view)
+
+
 def test_do_not_scroll_rejects_overflow(qtbot, window, tmp_path):
     pdf = pymupdf.open()
     pdf.new_page()
