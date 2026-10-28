@@ -821,3 +821,26 @@ def test_riprendi_lotto_interrotto(window, tmp_path, monkeypatch):
     assert [os.path.basename(i.path) for i in items] == ["s1.pdf", "s2.pdf"]
     assert (src / "s1_ocr.pdf").exists() and (src / "s2_ocr.pdf").exists() and not (src / "s0_ocr (2).pdf").exists()
     assert ctl.pending_batch() is None and not ctl.actions["resume"].isEnabled()
+
+
+@pytest.mark.parametrize("keep", [True, False])
+def test_dati_di_revisione_nel_file(window, scan_two, tmp_path, monkeypatch, keep):
+    """OCR-12: con l'opzione attiva i sospetti non risolti ritornano dopo salvataggio e riapertura;
+    con l'opzione disattiva il file salvato non contiene dati di revisione."""
+    from foliant.modules.ocr import tess
+    monkeypatch.setattr(tess, "LOW_CONFIDENCE", 97.0)          # rende «sospette» molte parole
+    ctl = ocr_controller()
+    ctl.settings().setValue("ocr/keep_review", "true" if keep else "false")
+    view = window.open_path(scan_two)
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    before = sorted((w.text, round(r.x0)) for r, w in ctl.state(view).placed[0] if w.low)
+    assert before
+    out = tmp_path / "salvato.pdf"
+    view.document.save(str(out))
+    window.close_view(view)
+    with pymupdf.open(str(out)) as d:
+        has = d.xref_get_key(d[0].xref, "PieceInfo")[0] != "null"
+    assert has == keep
+    view2 = window.open_path(str(out))
+    after = sorted((w.text, round(r.x0)) for r, w in ctl.state(view2).placed.get(0, []) if w.low)
+    assert after == (before if keep else [])

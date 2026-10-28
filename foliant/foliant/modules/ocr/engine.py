@@ -557,6 +557,53 @@ def page_fingerprints(pdf: pymupdf.Document) -> list[str]:
     return out
 
 
+REVIEW_KEY = "PieceInfo/FoliantOCR"
+
+
+def store_review_data(page: pymupdf.Page, placed: list) -> None:
+    """Salva le parole sospette della pagina come dati privati (/PieceInfo, ISO 32000 §14.5).
+
+    `placed` = [(Rect, Word)]; si conservano solo le parole sotto la soglia di affidabilità."""
+    import datetime
+    import json
+    doc = page.parent
+    items = [[round(r.x0, 2), round(r.y0, 2), round(r.x1, 2), round(r.y1, 2), w.text, round(w.conf, 1)]
+             for r, w in placed if w.low]
+    if not items:
+        clear_review_data(page)
+        return
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("D:%Y%m%d%H%M%SZ")
+    data = pymupdf.get_pdf_str(json.dumps(items, ensure_ascii=False))
+    doc.xref_set_key(page.xref, "PieceInfo", f"<< /FoliantOCR << /LastModified ({stamp}) /Private {data} >> >>")
+
+
+def load_review_data(page: pymupdf.Page) -> list:
+    """Parole sospette salvate nella pagina: [(Rect, Word)] (vuoto se assenti o illeggibili)."""
+    import json
+    doc = page.parent
+    try:
+        kind, val = doc.xref_get_key(page.xref, REVIEW_KEY + "/Private")
+    except Exception:
+        return []
+    if kind != "string":
+        return []
+    try:
+        items = json.loads(val)
+        return [(pymupdf.Rect(x0, y0, x1, y1), Word(text, (0, 0, 0, 0), conf))
+                for x0, y0, x1, y1, text, conf in items]
+    except (ValueError, TypeError):
+        return []
+
+
+def clear_review_data(page: pymupdf.Page) -> None:
+    doc = page.parent
+    try:
+        if doc.xref_get_key(page.xref, REVIEW_KEY)[0] != "null":
+            doc.xref_set_key(page.xref, REVIEW_KEY, "null")
+    except Exception:
+        pass
+
+
 def document_copy_bytes(pdf: pymupdf.Document) -> bytes:
     """Copia non cifrata del documento aperto, senza alterarlo (da chiamare con ENGINE_LOCK).
 

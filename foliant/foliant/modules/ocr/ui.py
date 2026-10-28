@@ -545,8 +545,25 @@ class OcrController(QObject):
             self.states[view] = st
         return st
 
+    def keep_review_data(self) -> bool:
+        return str(self.settings().value("ocr/keep_review", "false")).lower() in ("true", "1")
+
+    def _load_review(self, view) -> None:
+        """Riprende la revisione salvata nel file (dati privati delle pagine)."""
+        st = self.state(view)
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            for i in range(pdf.page_count):
+                saved = engine.load_review_data(pdf[i])
+                if saved:
+                    st.placed[i] = saved
+
     def on_opened(self, view) -> None:
         st = self.state(view)
+        try:
+            self._load_review(view)
+        except Exception:
+            pass
         view.overlays.append(self._paint_overlay)
         view.viewport().installEventFilter(self)
         self.start_analysis(view)
@@ -1002,6 +1019,9 @@ class OcrController(QObject):
                 pdf = pymupdf.open(stream=data, filetype="pdf")
                 try:
                     engine.apply_result(pdf, result)
+                    if self.keep_review_data():
+                        for res in result.recognized:
+                            engine.store_review_data(pdf[res.index], res.placed)
                     out = pdf.tobytes(garbage=3, deflate=True)
                 finally:
                     pdf.close()
@@ -1024,8 +1044,14 @@ class OcrController(QObject):
     def apply(self, view, result: engine.OcrResult) -> None:
         label = _("Rendi modificabile (OCR)") if result.options.mode == engine.EDITABLE else _("Riconoscimento testo (OCR)")
         try:
+            keep = self.keep_review_data()
             with view.document.change(label) as pdf:
                 engine.apply_result(pdf, result)
+                for res in result.recognized:
+                    if keep:
+                        engine.store_review_data(pdf[res.index], res.placed)
+                    else:
+                        engine.clear_review_data(pdf[res.index])
         except Exception as e:
             self.ctx.error(_("Riconoscimento non riuscito"),
                            _("Impossibile applicare il testo riconosciuto: {e}").format(e=e))
@@ -1262,6 +1288,11 @@ class OcrController(QObject):
             with view.document.change(_("Correggi parola OCR")) as pdf:
                 if not engine.replace_word(pdf[page], rect, new_text, family):
                     raise OcrError(_("Nel punto indicato non c'è più testo da correggere."))
+                st = self.states.get(view)
+                if st is not None and page in st.placed and \
+                        pdf.xref_get_key(pdf[page].xref, engine.REVIEW_KEY)[0] != "null":
+                    rest = [(r, w) for r, w in st.placed[page] if w is not word]
+                    engine.store_review_data(pdf[page], rest)
         except Exception as e:
             self.ctx.error(_("Correzione non riuscita"), str(e))
             return False

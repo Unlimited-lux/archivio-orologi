@@ -232,6 +232,9 @@ class OcrDialog(QDialog):
         self.cb_keep.setChecked(str(get("keep_original", "false")).lower() in ("true", "1"))
         lay.addWidget(self.cb_keep)
 
+        self.cb_keep_review = QCheckBox(_("Conserva nel file i dati di revisione (parole incerte)"))
+        self.cb_keep_review.setChecked(str(get("keep_review", "false")).lower() in ("true", "1"))
+        lay.addWidget(self.cb_keep_review)
         self.cb_preview = QCheckBox(_("Mostra l'anteprima e le parole incerte prima di applicare"))
         self.cb_preview.setChecked(str(get("preview", "true")).lower() in ("true", "1"))
         lay.addWidget(self.cb_preview)
@@ -429,6 +432,7 @@ class OcrDialog(QDialog):
             s.setValue("ocr/destination", self.destination.currentData())
             s.setValue("ocr/apply_to_page", "true" if self.cb_apply_page.isChecked() else "false")
             s.setValue("ocr/keep_original", "true" if self.cb_keep.isChecked() else "false")
+            s.setValue("ocr/keep_review", "true" if self.cb_keep_review.isChecked() else "false")
             s.setValue("ocr/font", o.font)
             s.setValue("ocr/existing", o.existing_text)
             for k, v in o.preprocess.as_dict().items():
