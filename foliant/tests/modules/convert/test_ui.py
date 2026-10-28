@@ -618,3 +618,19 @@ def test_create_portfolio_ui(window, ctrl, sample_pdf, tmp_path, monkeypatch, me
         assert d.embfile_count() == 2 and "Pratica 42" in d[0].get_text()
         assert d.xref_get_key(d.pdf_catalog(), "Collection")[0] == "xref"
     assert view.document.display_name == "Pratica 42.pdf"
+
+
+def test_images_as_image_size_ignores_margin(window, ctrl, tmp_path, monkeypatch, messages):
+    """«Come l'immagine»: il campo Margini è disattivato e non deve aggiungere una cornice."""
+    from PIL import Image
+    path = tmp_path / "foto.png"
+    Image.new("RGB", (384, 288), (20, 60, 200)).save(path, dpi=(72, 72))
+
+    def fake_exec(d):
+        d.size_box.setCurrentIndex(d.size_box.findData(None))
+        assert not d.margin.isEnabled()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ImagesDialog, "exec", fake_exec)
+    view = ctrl.create_from_images([str(path)])
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert abs(d[0].rect.width - 384) < 0.5 and abs(d[0].rect.height - 288) < 0.5

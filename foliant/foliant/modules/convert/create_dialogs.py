@@ -195,7 +195,8 @@ class ImagesDialog(QDialog):
             "page_size": self.size_box.currentData(),
             "orientation": self.orient_box.currentData(),
             "fit": self.fit_box.currentData(),
-            "margin_pt": self.margin.value() * 72 / 25.4,
+            # «Come l'immagine»: pagina della dimensione esatta dell'immagine, senza margini
+            "margin_pt": 0.0 if self.size_box.currentData() is None else self.margin.value() * 72 / 25.4,
             "quality": self.quality_box.currentData(),
             "max_ppi": self.ppi.value() if self.quality_box.currentData() != "original" else None,
             "rotations": rotations or None,
