@@ -91,8 +91,12 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000) -> ScanReport:
                 rep.submit_forms += 1
                 rep.items.append(("submit", where, _target(obj)))
             if _RX_URI.search(obj):
-                uri = _uri_of(obj)
-                if uri:
+                # stringa decodificata dal motore (niente escape PDF grezzi, bug_10)
+                try:
+                    kind, uri = pdf.xref_get_key(xref, "URI")
+                except Exception:
+                    kind, uri = "null", ""
+                if kind == "string" and uri:
                     uris.add(uri)
     # collegamenti con indirizzo diretto (senza oggetto azione separato)
     for page in pdf:

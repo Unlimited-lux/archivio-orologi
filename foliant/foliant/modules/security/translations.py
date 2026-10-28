@@ -495,4 +495,7 @@ EN: dict[str, str] = {
     'Salvare il documento ripulito?': 'Save the cleaned document?',
     'Stampare': 'Print',
     'Stampare, solo a bassa risoluzione': 'Print, low resolution only',
+    "Stato": "Status",
+    "Da applicare": "To be applied",
+    "RC4, chiave a 40 bit": "RC4, 40-bit key",
 }

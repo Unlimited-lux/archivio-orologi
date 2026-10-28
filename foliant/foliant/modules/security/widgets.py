@@ -57,9 +57,10 @@ class RedactionPanel(QWidget):
         head.addWidget(self.count)
         lay.addLayout(head)
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels([_("Segno"), _("Origine")])
+        self.tree.setHeaderLabels([_("Segno"), _("Origine"), _("Stato")])
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.tree.itemClicked.connect(self._go)
         lay.addWidget(self.tree, 1)
@@ -137,12 +138,12 @@ class RedactionPanel(QWidget):
         for n, m in enumerate(self.marks):
             parent = pages.get(m.page)
             if parent is None:
-                parent = QTreeWidgetItem(self.tree, [_("Pagina {n}").format(n=m.page + 1), ""])
+                parent = QTreeWidgetItem(self.tree, [_("Pagina {n}").format(n=m.page + 1), "", ""])
                 parent.setData(0, Qt.ItemDataRole.UserRole, -1 - m.page)
                 parent.setExpanded(True)
                 pages[m.page] = parent
             text = m.text or _("(nessun testo)")
-            item = QTreeWidgetItem(parent, [text, source_label(m.source)])
+            item = QTreeWidgetItem(parent, [text, source_label(m.source), _("Da applicare")])
             item.setToolTip(0, text)
             item.setData(0, Qt.ItemDataRole.UserRole, n)
         for page, parent in pages.items():

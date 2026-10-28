@@ -1043,7 +1043,11 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
                 s=_("sì") if doc.original_protection.get("user_pw") else _("no")))
         details.append(_("Al salvataggio: {d}").format(d=P.describe(doc)))
         head = _("Protezione con password")
-        if i.method:
+        if doc.save_options.get("encryption") == pymupdf.PDF_ENCRYPT_RC4_40 or (
+                "RC4" in algo.upper() and "40" in algo and i.method in (None, P.RC4)
+                and doc.save_options == doc.original_protection):
+            head += " — " + _("RC4, chiave a 40 bit")          # bug_04
+        elif i.method:
             head += " — " + method[i.method]
         rows.append((head, details))
         enc = P.open_encryption_details(doc)

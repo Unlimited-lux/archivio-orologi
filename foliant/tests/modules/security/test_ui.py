@@ -283,6 +283,7 @@ def test_area_tool_marks_and_moves(window, sec, sample_pdf):
         marks = R.marks(doc.pdf)
     assert len(marks) == 1 and "Pagina 1" in marks[0].text
     assert sec.panel.count.text() == "1"
+    assert sec.panel.tree.topLevelItem(0).child(0).text(2) == "Da applicare"   # bug_11
     assert sec.actions["apply"].isEnabled()
     # testo ancora presente prima dell'applicazione
     assert "Pagina 1" in doc.page_text(0)
@@ -612,7 +613,7 @@ def test_link_homograph_warning():
 def test_core_link_hook_installed(window, sec):
     from foliant.ui import tools
     entries = [(p, h) for p, _s, h in tools.LINK_HANDLERS if h is L.handler]
-    assert L._installed and entries == [(-100, L.handler)]
+    assert L._installed and entries == [(1000, L.handler)]
 
 
 def test_internal_links_delegated(window, sec, sample_pdf):
@@ -814,3 +815,43 @@ def test_protect_undo_save_unencrypted(window, sec, sample_pdf, tmp_path, monkey
     out2 = tmp_path / "ripetuto.pdf"
     view.document.save(out2)
     assert pymupdf.open(out2).needs_pass
+
+
+def test_bug04_rc4_40_label(window, sec, tmp_path):
+    path = tmp_path / "rc440.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_RC4_40, user_pw="", owner_pw="o", permissions=-1)
+    view = window.open_path(str(path))
+    heads = [h for h, _l in C.security_rows(view.document)]
+    assert any("RC4, chiave a 40 bit" in h for h in heads)
+    assert not any("128" in h for h in heads)
+
+
+def test_bug10_uri_details_decoded(tmp_path):
+    from foliant.modules.security import sanitize as S
+    path = tmp_path / "uri.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    uris = ["https://esempio.it/a", "https://аpple.com/login", "javascript:alert(1)", "mailto:a@b.it", "http://x.it"]
+    for n, u in enumerate(uris):
+        page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(10, 10 + 20 * n, 100, 25 + 20 * n), "uri": u})
+    src.save(str(path))
+    rep = S.scan(pymupdf.open(path))
+    assert sorted(rep.external_links) == sorted(uris)
+    rows = dict(C.active_rows(rep))
+    assert len(rows["Collegamenti esterni (5)"]) == 5
+
+
+def test_bug09_gotor_refused_is_handled(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    opened = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    monkeypatch.setattr(window, "open_path", lambda *a, **k: opened.append(a))
+    assert L.handler(view, {"kind": pymupdf.LINK_GOTOR, "file": "altro.pdf"}) is True
+    assert L.handler(view, {"kind": pymupdf.LINK_GOTOR, "file": "note.txt"}) is True
+    assert opened == []
+    from foliant.ui import tools
+    prio = max(p for p, _s, h in tools.LINK_HANDLERS if h is L.handler)
+    assert prio >= max([p for p, _s, h in tools.LINK_HANDLERS if h is not L.handler] or [prio])

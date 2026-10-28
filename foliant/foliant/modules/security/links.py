@@ -240,7 +240,8 @@ def handler(view, link: dict) -> bool:
 
 
 def install(ctx) -> None:
-    """Registra il gestore come ultima istanza prima del comportamento del nucleo."""
+    """Registra il gestore con priorità alta: deve poter bloccare i collegamenti esterni
+    prima di qualunque altro gestore (bug_09); i collegamenti interni restano agli altri."""
     global _installed
-    ctx.add_link_handler(handler, priority=-100)
+    ctx.add_link_handler(handler, priority=1000)
     _installed = True

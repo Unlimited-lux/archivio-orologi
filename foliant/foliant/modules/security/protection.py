@@ -222,7 +222,10 @@ def describe(document: Document) -> str:
     parts = []
     parts.append(_("password di apertura") if i.has_open_password else _("nessuna password di apertura"))
     parts.append(_("permessi limitati") if i.restricted else _("tutti i permessi"))
-    parts.append(method_labels().get(i.method or "", ""))
+    if document.save_options.get("encryption") == pymupdf.PDF_ENCRYPT_RC4_40:
+        parts.append(_("RC4, chiave a 40 bit"))
+    else:
+        parts.append(method_labels().get(i.method or "", ""))
     return ", ".join(p for p in parts if p)
 
 
