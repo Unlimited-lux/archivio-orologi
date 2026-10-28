@@ -481,3 +481,38 @@ def test_bug06_following_text_keeps_position(tmp_path, font, margin):
     assert abs(after["ultima"] - before["ultima"]) < 0.01
     assert abs(after["Prima"] - before["Prima"]) < 0.01
     doc.close()
+
+
+def test_ocr_scan_redaction_covers_full_glyph_height(tmp_path):
+    """Scansione con testo OCR invisibile: il riquadro copre tutta l'altezza della parola
+    nell'immagine (nessuna riga di pixel dei glifi resta visibile)."""
+    path = tmp_path / "scansione.pdf"
+    src = pymupdf.open()
+    page = src.new_page(width=612, height=396)
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 1700, 1100), False)
+    pix.set_rect(pix.irect, (255, 255, 255))
+    # «glifi» scuri nell'immagine dove si trova la parola (y 255,6–271,1 pt)
+    s = 1700 / 612
+    pix.set_rect(pymupdf.IRect(int(130 * s), int(255.6 * s), int(248 * s), int(271.1 * s)), (20, 20, 20))
+    page.insert_image(page.rect, pixmap=pix)
+    # testo OCR invisibile con il riquadro dei glifi uguale alla parola nell'immagine
+    tw = pymupdf.TextWriter(page.rect)
+    font = pymupdf.Font("helv")
+    size = 15.5 / (font.ascender - font.descender)
+    tw.append((130, 255.6 + font.ascender * size), "CA12345XY", font=font, fontsize=size)
+    tw.write_text(page, render_mode=3)
+    src.save(str(path))
+    doc = Document.open(path)
+    with doc.change("Redigi", kind="redaction") as pdf:
+        matches = PT.find(pdf, [PT.term_pattern("CA12345XY")])
+        assert len(matches) == 1
+        r = matches[0].rects[0]
+        assert r.y0 <= 255.7 and r.y1 >= 271.0          # niente riduzione per il testo OCR
+        R.add_marks(pdf, ((m.page, x, m.text) for m in matches for x in m.rects), R.MarkStyle(), "ricerca")
+        R.apply(pdf)
+        # tutta l'altezza dei glifi (a meno di un bordo di antialiasing di 0,2 pt)
+        out = pdf[0].get_pixmap(dpi=200, clip=pymupdf.Rect(r.x0 + 0.2, 255.8, r.x1 - 0.2, 270.9))
+    light = [(x, y) for x in range(0, out.width, 7) for y in range(out.height) if out.pixel(x, y)[0] >= 40]
+    assert not light, (len(light), light[:5], out.width, out.height, r)      # tutta l'area è coperta dal riempimento nero (nessun pixel chiaro di sfondo)
+    assert "CA12345XY" not in doc.page_text(0)
+    doc.close()

@@ -27,7 +27,10 @@ from .widgets import Notice, NoticeBoard, PreviewOverlay, RedactAreaTool, Redact
 PANEL_ID = "security-redactions"
 CODES_KEY = "security/overlay_codes"
 STYLE_KEY = "security/style"
-DEFAULT_CODES = ["OMISSIS", "[omissis]", "Art. 9 GDPR – dato sanitario", "Dato personale", "Pagina omessa"]
+def default_codes() -> list[str]:
+    """Insieme di codici predefinito, nella lingua dell'interfaccia (NFR-25)."""
+    return [_("OMISSIS"), _("[omissis]"), _("Art. 9 GDPR – dato sanitario"), _("Dato personale"),
+            _("Pagina omessa")]
 
 
 # ------------------------------------------------- dialoghi (sostituibili)
@@ -201,9 +204,9 @@ class SecurityController:
         s = self.settings()
         raw = s.value(CODES_KEY, "") if s is not None else ""
         try:
-            codes = json.loads(raw) if raw else list(DEFAULT_CODES)
+            codes = json.loads(raw) if raw else default_codes()
         except ValueError:
-            codes = list(DEFAULT_CODES)
+            codes = default_codes()
         return [str(c) for c in codes if str(c).strip()]
 
     def set_codes(self, codes: list[str]) -> None:
@@ -437,7 +440,9 @@ class SecurityController:
             return 0
         if not self.require_modify(view.document):
             return 0
-        rects = merge_line_rects([PT._tight(pymupdf.Rect(r)) for r in sel.rects])
+        with ENGINE_LOCK:
+            clipped = PT.clip_to_lines(view.document.pdf[sel.page], [pymupdf.Rect(r) for r in sel.rects])
+        rects = merge_line_rects(clipped)
         with self._change(view.document, _("Segna testo per redazione")) as pdf:
             n = R.add_marks(pdf, ((sel.page, r, None) for r in rects), self.style, "selezione")
         view.clear_text_selection()

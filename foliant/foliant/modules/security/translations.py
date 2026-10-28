@@ -507,4 +507,9 @@ EN: dict[str, str] = {
     'Il documento contiene {n} segni di redazione non applicati: il contenuto sotto i segni non è ancora stato rimosso.': 'The document contains {n} unapplied redaction marks: the content under the marks has not been removed yet.',
     'Continua con i segni': 'Keep the marks',
     "Analisi dei contenuti attivi…": "Checking active content…",
+    'OMISSIS': 'REDACTED',
+    '[omissis]': '[redacted]',
+    'Art. 9 GDPR – dato sanitario': 'Art. 9 GDPR – health data',
+    'Dato personale': 'Personal data',
+    'Pagina omessa': 'Page omitted',
 }
