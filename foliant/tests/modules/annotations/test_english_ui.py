@@ -222,3 +222,22 @@ def test_dynamic_stamp_english_placeholders():
     assert text == "Protocol no. 007 of 28/10/2026, Anna, p. 1 at 09:05"
     assert engine.unknown_placeholders("{author} {date} {counter} {nome}") == []
     assert engine.fill_template("No. {counter}", when=when) == "No. {counter}"
+
+
+@pytest.mark.parametrize("lang, date, time", [("it", "28/10/2026", "14:05"), ("en", "10/28/2026", "2:05 PM")])
+def test_dates_follow_language(lang, date, time):
+    """NFR-26: data e ora dei timbri dinamici e dei commenti secondo la lingua (anno a 4 cifre)."""
+    from datetime import datetime
+
+    from foliant import i18n
+    when = datetime(2026, 10, 28, 14, 5)
+    i18n.set_language(lang)
+    try:
+        assert engine.fill_template(_tr("Ricevuto il {data} alle {ora}"), when=when) in (
+            f"Ricevuto il {date} alle {time}", f"Received on {date} at {time}")
+        assert engine.dynamic_subtitle("{data}", "Anna", when) == date
+        assert engine.format_date("D:20261028140500") == f"{date} {time}"
+        assert engine.local_time(datetime(2026, 1, 1, 0, 7)) == ("12:07 AM" if lang == "en" else "00:07")
+        assert engine.fill_template("{data}", when=when, date_format="%Y-%m-%d") == "2026-10-28"  # modello scelto
+    finally:
+        i18n.set_language("it")

@@ -161,13 +161,33 @@ def parse_pdf_date(value: str | None) -> datetime | None:
     return dt
 
 
+def _english() -> bool:
+    try:
+        from foliant import i18n
+        return i18n.language() == "en"
+    except Exception:  # pragma: no cover - motore usato senza l'applicazione
+        return False
+
+
+def local_date(when: datetime) -> str:
+    """Data nella lingua dell'interfaccia (anno a 4 cifre): 28/10/2026 o 10/28/2026 (NFR-26)."""
+    return when.strftime("%m/%d/%Y" if _english() else "%d/%m/%Y")
+
+
+def local_time(when: datetime) -> str:
+    """Ora nella lingua dell'interfaccia: 14:05 o 2:05 PM."""
+    if _english():
+        return f"{when.hour % 12 or 12}:{when.minute:02d} {'AM' if when.hour < 12 else 'PM'}"
+    return when.strftime("%H:%M")
+
+
 def format_date(value: str | None) -> str:
     dt = parse_pdf_date(value)
     if dt is None:
         return ""
     if dt.tzinfo is not None:
         dt = dt.astimezone()
-    return dt.strftime("%d/%m/%Y %H:%M")
+    return f"{local_date(dt)} {local_time(dt)}"
 
 
 # ----------------------------------------------------------------- stile
@@ -1250,11 +1270,14 @@ DYNAMIC_STAMPS = [
 
 
 def fill_template(template: str, *, author: str = "", when: datetime | None = None, filename: str = "",
-                  page: int | None = None, date_format: str = "%d/%m/%Y", counter: int | None = None) -> str:
+                  page: int | None = None, date_format: str | None = None, counter: int | None = None) -> str:
+    """Compila un modello di timbro dinamico; data e ora nel formato della lingua dell'interfaccia,
+    salvo un `date_format` esplicito (strftime)."""
     when = when or datetime.now()
-    values = {"{autore}": author or "", "{nome}": author or "", "{data}": when.strftime(date_format),
+    date = when.strftime(date_format) if date_format else local_date(when)
+    values = {"{autore}": author or "", "{nome}": author or "", "{data}": date,
               "{contatore}": f"{counter:03d}" if counter is not None else "{contatore}",
-              "{ora}": when.strftime("%H:%M"), "{file}": filename,
+              "{ora}": local_time(when), "{file}": filename,
               "{pagina}": str(page + 1) if page is not None else ""}
     if counter is None:         # senza contatore il segnaposto resta, con il nome della lingua del modello
         values.pop("{contatore}")
