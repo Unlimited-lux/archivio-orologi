@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import os
 from dataclasses import dataclass, field
 
 import pymupdf
@@ -1317,8 +1316,8 @@ class AIPanel(QWidget):
         return doc
 
     def _author(self) -> str:
-        v = self.ctx.settings().value("author", "") or self.ctx.settings().value("preferences/author", "")
-        return str(v) if v else (os.environ.get("USER") or _("Assistente IA"))
+        # preferenza «Nome autore» del nucleo (altrimenti l'utente di sistema)
+        return self.ctx.author_name() or _("Assistente IA")
 
     def _safe(self, title: str, fn) -> None:
         try:

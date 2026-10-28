@@ -3,10 +3,8 @@
 1. **Conferma alla chiusura con operazioni in corso (AI-17).** *Risolta* (base 3d69387):
    guardiani `close_document` e `quit` registrati con `ctx.add_guard`.
 
-2. **Preferenza «nome autore» (UX, Preferenze › Documenti).** Le note inserite
-   dall'assistente usano come autore il nome configurato. Il modulo legge
-   `settings.value("author")` o `"preferences/author"`, con il nome dell'account di
-   sistema come ripiego: sarebbe utile una chiave condivisa documentata nel README.
+2. **Preferenza «nome autore».** *Risolta:* note, caselle di testo, sostituzioni e commenti
+   della revisione usano `ctx.author_name()`.
 
 3. **Pagina Preferenze › Assistente IA.** *Risolta:* `ctx.add_preferences_page` con
    `dialogs.SettingsPage`; il comando «Impostazioni dell'Assistente IA» apre le Preferenze su

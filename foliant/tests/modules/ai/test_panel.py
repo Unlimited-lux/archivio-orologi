@@ -287,6 +287,7 @@ def test_selection_fixed_at_send(qtbot, window, ready, fake, sample_pdf):
 
 def test_insert_note_single_undo(qtbot, window, ready, fake, sample_pdf):
     view = window.open_path(sample_pdf)
+    window.settings.setValue("author", "Laura Neri")    # preferenza «Nome autore» del nucleo
     fake.responses = ["Risposta da annotare"]
     panel = ready.panel
     panel.send("domanda")
@@ -296,6 +297,7 @@ def test_insert_note_single_undo(qtbot, window, ready, fake, sample_pdf):
     annots = annots_of(doc, view.current_page)
     assert annots and annots[0][0]["content"] == "Risposta da annotare"
     assert annots[0][0]["subject"] == "Assistente IA"
+    assert annots[0][0]["title"] == "Laura Neri" == window.ctx.author_name()
     doc.undo()
     assert not annots_of(doc, view.current_page)
 
