@@ -628,3 +628,27 @@ def test_valid_certificate_with_timestamp_still_valid(pdf_bytes, id_a, tsa):
     out = d.sign_pdf(pdf_bytes, id_a[2], d.SignOptions(timestamper=tsa[0]))
     st = d.verify_pdf(out, trusted=[id_a[1], tsa[1]])[0]
     assert st.status == "valida", st.reasons
+
+
+@pytest.mark.parametrize("perms,password,allowed", [
+    (pymupdf.PDF_PERM_PRINT, "utente", False),
+    (pymupdf.PDF_PERM_PRINT, "proprietario", True),
+    (pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_FORM, "utente", True),
+    (pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_ANNOTATE, "utente", True),
+])
+def test_encrypted_permissions_checked_before_signing(id_a, perms, password, allowed):
+    """SIG-08: PDF cifrato → si firma solo con i permessi di firma/compilazione o da proprietario."""
+    doc = pymupdf.open()
+    doc.new_page()
+    data = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="utente", owner_pw="proprietario",
+                       permissions=perms)
+    opts = d.SignOptions(password=password)
+    if allowed:
+        out = d.sign_pdf(data, id_a[2], opts)
+        assert out.startswith(data)
+        assert d.verify_pdf(out, trusted=[id_a[1]], password=password)[0].status == "valida"
+    else:
+        with pytest.raises(d.SigningNotAllowed, match="proprietario"):
+            d.sign_pdf(data, id_a[2], opts)
+        with pytest.raises(d.SigningNotAllowed, match="proprietario"):
+            d.add_signature_field(data, "Campo", 0, (10, 10, 100, 40), password=password)
