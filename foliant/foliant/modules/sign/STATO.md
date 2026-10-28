@@ -36,8 +36,8 @@ Test in `tests/modules/sign/`; i nomi dei test qui sotto omettono il prefisso `t
 | SIG-21 Avviso di invalidazione | P0 | parziale | incremental: tutti (object stream, annulla/ripeti, cifratura, metadati, immagine sostituita); ui: `save_incremental_even_without_auto_verify`, `undo_redo_after_incremental_save`, `signed_document_edit_warning`, `signed_document_annotation_saved_incrementally`, `graphic_signature_on_signed_doc`, `certified_no_changes_blocks_graphic` | **Salvataggio incrementale locale** (`incremental.py`): per i documenti firmati «Salva» e «Salva una copia» accodano solo le modifiche, quindi un commento salvato lascia la firma «Valida» con modifiche consentite. Le modifiche al contenuto mostrano la finestra a tre scelte; «Copia senza firme» apre una copia senza valori di firma. Il salvataggio incrementale si attiva appena si apre un file che contiene `/ByteRange`, prima della verifica completa. Limiti (vedi CORE_REQUESTS): l'avviso arriva subito *dopo* la modifica (rimandato al ciclo degli eventi, così la `change()` del modulo chiamante termina prima), che viene annullata se l'utente sceglie «Annulla»; gli strumenti degli altri moduli non vengono disattivati con certificazione «nessuna modifica». |
 | SIG-22 PAdES LT/LTA | P2 | non fatto | — | B-LT/B-LTA solo riconosciuti in verifica, in modo approssimativo. |
 | SIG-23 Smart card PKCS#11 | P2 | non fatto | — | |
-| SIG-24 Richiesta firme | P2 | non fatto | — | Il connettore a servizi di firma remoti è fuori ambito per decisione dell'orchestratore. |
-| SIG-25 Criteri organizzativi | P2 | non fatto | — | |
+| SIG-24 Richiesta firme | — | fuori ambito | — | Fuori ambito nella specifica v2 (0.2). |
+| SIG-25 Criteri organizzativi | — | fuori ambito | — | Fuori ambito nella specifica v2 (0.2). |
 
 ## Note generali
 
@@ -49,8 +49,8 @@ Test in `tests/modules/sign/`; i nomi dei test qui sotto omettono il prefisso `t
   impronte.
 - Durante la verifica pyHanko scrive nel log avvisi tecnici (catena non attendibile, differenze fra le
   revisioni): contengono il soggetto del certificato, mai segreti.
-- Posizionamento: la conversione fra coordinate del motore e spazio PDF si calcola da /CropBox e
-  /MediaBox (`graphic.page_to_pdf_matrix`), perché `page.transformation_matrix` del motore è errata sulle
+- Posizionamento: la conversione fra coordinate del motore e spazio PDF usa `core/placement.py`
+  (`graphic.page_to_pdf_matrix`), perché `page.transformation_matrix` del motore è errata sulle
   pagine ruotate con CropBox spostato. Test di rilettura su pagine ruotate e ritagliate: firma grafica,
   firma incorporata e aspetto della firma digitale (`digital: visible_appearance_in_box_on_rotated_cropped_page`).
 - Cartella dati: `QStandardPaths` (GenericDataLocation)/foliant, permessi 0700.

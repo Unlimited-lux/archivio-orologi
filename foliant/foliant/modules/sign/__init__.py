@@ -20,7 +20,8 @@ def _translations() -> dict:
         "Firme salvate": "Saved signatures", "Gestisci libreria…": "Manage library…",
         "Firma digitale": "Digital signature", "Firma invisibile": "Invisible signature",
         "Certifica": "Certify", "Campo firma": "Signature field", "Verifica firme": "Verify signatures",
-        "ID digitali…": "Digital IDs…", "Crea ID autofirmato…": "Create self-signed ID…", "Firme": "Signatures",
+        "ID digitali…": "Digital IDs…",
+        "Gestisci firme e identità digitali…": "Manage signatures and digital identities…", "Crea ID autofirmato…": "Create self-signed ID…", "Firme": "Signatures",
         "Libreria vuota": "Empty library", "Modifica firma": "Edit signature",
         "Crea una firma disegnata, digitata o da immagine": "Create a drawn, typed or image signature",
         "Firma il documento con un certificato": "Sign the document with a certificate",
@@ -108,7 +109,8 @@ def register(ctx: Context) -> None:
         mode.add_action(a)
     mode.add_separator()
     act_verify = ctx.action(_("Verifica firme"), "shield-check", lambda: _verify(ctx, c))
-    act_ids = ctx.action(_("ID digitali…"), "key-round", c.manage_ids, requires_document=False)
+    act_ids = ctx.action(_("Gestisci firme e identità digitali…"), "key-round", c.manage_ids,
+                         requires_document=False)
     act_self = ctx.action(_("Crea ID autofirmato…"), "badge-plus", c.create_self_signed, requires_document=False)
     for a in (act_verify, act_ids):
         mode.add_action(a)
