@@ -88,6 +88,9 @@ def _words(text: str) -> list[str]:
 
 
 def _problems(it_texts, en_texts) -> list[str]:
+    from PySide6.QtGui import QFontDatabase
+    # nomi di font, codici, dati della macchina: non sono testi dell'interfaccia
+    system = set(QFontDatabase.families())
     problems = []
     en_set = {t for _w, t in en_texts}
     for where, text in en_texts:
@@ -95,7 +98,7 @@ def _problems(it_texts, en_texts) -> list[str]:
         if bad:
             problems.append(f"{where}: «{text}» contiene parole italiane {bad}")
     for where, text in it_texts:
-        if text in en_set:
+        if text in en_set and text not in system:
             words = [p for w in _words(text) if w not in ALLOWED_WORDS for p in w.split("-")
                      if len(p) >= 3 and p not in ALLOWED_WORDS and not p.isdigit()]
             if words:
@@ -252,3 +255,11 @@ def test_catalog_uses_american_english():
                          r"finalis\w*|normalis\w*|synchronis\w*|analys(e|ed|es|ing))\b", re.I)
     bad = sorted({m.group(0) for v in _translations().values() for m in british.finditer(v)})
     assert not bad, bad
+
+
+def test_font_names_are_not_interface_texts(qapp):
+    """I nomi dei font installati (es. «Z003 [urw]» con Ghostscript) dipendono dalla macchina."""
+    from PySide6.QtGui import QFontDatabase
+    font = QFontDatabase.families()[0]
+    texts = [("QListWidget.item", font), ("QLabel", "Zzz qwerty")]
+    assert _problems(texts, texts) == ["QLabel: «Zzz qwerty» identico nelle due lingue"]

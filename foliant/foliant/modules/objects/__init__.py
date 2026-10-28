@@ -255,6 +255,7 @@ def register(ctx: Context) -> None:
         ctx.documentAccessChanged.connect(lambda v: _update_actions(ctx, c) if v is ctx.current_view() else None)
     ctx.currentViewChanged.connect(lambda v: (_install_drop(ctx, c, v), _update_actions(ctx, c)))
     ctx.documentOpened.connect(lambda v: _install_drop(ctx, c, v))
+    ctx.documentClosed.connect(lambda v: _release_view(ctx, c, v))
     mode.entered.connect(lambda: _on_mode_entered(ctx, c))
     mode.left.connect(lambda: _on_mode_left(ctx, c))
     _update_actions(ctx, c)
@@ -409,9 +410,14 @@ class _DropFilter(QObject):
 
     def __init__(self, ctx: Context, c: ObjectsController, view):
         super().__init__(view)
+        import weakref
         self.ctx = ctx
         self.c = c
-        self.view = view
+        self._view = weakref.ref(view)   # debole: la vista chiusa deve poter essere liberata
+
+    @property
+    def view(self):
+        return self._view()
 
     @staticmethod
     def image_paths(mime) -> tuple[list[str], list[str]]:
@@ -432,6 +438,8 @@ class _DropFilter(QObject):
                 return True
             return False
         if t == QEvent.Type.Drop:
+            if self.view is None:
+                return False
             mime = ev.mimeData()
             imgs, other = self.image_paths(mime)
             if not imgs and not mime.hasImage():
@@ -459,6 +467,26 @@ class _DropFilter(QObject):
             ev.acceptProposedAction()
             return True
         return False
+
+
+def _release_view(ctx: Context, c: ObjectsController, view) -> None:
+    """Scheda chiusa: nessun oggetto del modulo deve trattenere la vista (NFR-06)."""
+    f = getattr(view, "_objects_drop", None)
+    if f is not None:
+        try:
+            view.viewport().removeEventFilter(f)
+        except RuntimeError:
+            pass
+        view._objects_drop = None
+    try:
+        view.overlays.remove(c.paint_grid)
+    except (ValueError, AttributeError):
+        pass
+    c.release_view(view)
+    for key in ("panel", "link_panel"):
+        p = _state.get(key)
+        if p is not None and getattr(p, "view", None) is view:
+            p.set_view(None)
 
 
 def _install_drop(ctx: Context, c: ObjectsController, view) -> None:

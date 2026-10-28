@@ -157,6 +157,12 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Pagine acquisite": "Scanned pages",
+    "Ruota": "Rotate",
+    "Acquisisci ancora": "Scan more",
+    "Inserisci campo": "Insert field",
+    "Esempio: {f}": "Example: {f}",
+    "Capitolo": "Chapter",
     "{nome}_parte{n}": "{nome}_part{n}",
     "Fattura n\\. (\\d+)": "Invoice no\\. (\\d+)",
     "Il documento ha una sola pagina: non c'è nulla da dividere.": "The document has only one page: there is nothing to split.",
@@ -307,6 +313,56 @@ class PageScope(QGroupBox):
 
     def pages(self) -> list[int]:
         return list(self._pages)
+
+
+class TemplateField(QWidget):
+    """Modello di nome file con menu «Inserisci campo» e anteprima del risultato (PAG-32)."""
+
+    changed = Signal()
+
+    def __init__(self, text: str, base_name: str = "doc", parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QMenu, QToolButton
+        from . import fields as F
+        self.base_name = base_name
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.edit = QLineEdit(text)
+        self.button = QToolButton()
+        self.button.setText(_("Inserisci campo"))
+        self.button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.button)
+        for code, label in F.MENU:
+            act = menu.addAction(f"{_(label)}  {code}")
+            act.triggered.connect(lambda _c=False, code=code: self.insert(code))
+        self.button.setMenu(menu)
+        row.addWidget(self.edit, 1)
+        row.addWidget(self.button)
+        lay.addLayout(row)
+        self.example = QLabel()
+        self.example.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
+        lay.addWidget(self.example)
+        self.edit.textChanged.connect(self._update)
+        self._update()
+
+    def insert(self, code: str) -> None:
+        self.edit.insert(code)
+        self.edit.setFocus()
+
+    def error(self) -> str | None:
+        from . import fields as F
+        return F.validate_template(self.edit.text())
+
+    def _update(self, *_a) -> None:
+        err = self.error()
+        if err:
+            self.example.setText("")
+        else:
+            name = E.render_name(self.edit.text() or "{nome}", nome=self.base_name, n=1, pagina=1, inizio=1,
+                                 fine=1, intervallo="1", segnalibro=_("Capitolo"), match1="101")
+            self.example.setText(_("Esempio: {f}").format(f=name + ".pdf"))
+        self.changed.emit()
 
 
 class BaseDialog(QDialog):
@@ -643,6 +699,9 @@ def open_insert_file_dialog(ctx, view, selected: list[int], path: str | None = N
                                                     reverse=o["reverse"], annots=o["annots"], widgets=o["widgets"],
                                                     bookmark_title=o["bookmark_title"]),
                      select=lambda r: r)
+        c = getattr(ctx, "pages_controller", None)
+        if res is not None and c is not None:
+            c.warn_pdfa(view, [src])
         return res is not None
     finally:
         if dlg.source is not None:
@@ -670,9 +729,11 @@ class ExtractDialog(BaseDialog):
             rb.toggled.connect(self._update)
         self.layout_.addWidget(box)
         form = QFormLayout()
-        self.template = QLineEdit("{nome}_p{pagina}")
+        self.template_field = TemplateField("{nome}_p{pagina}", Path(document.display_name).stem)
+        self.template = self.template_field.edit
         self.template.setToolTip(_("Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}"))
-        form.addRow(_("Nome dei file:"), self.template)
+        self.template_field.changed.connect(lambda: self._update())
+        form.addRow(_("Nome dei file:"), self.template_field)
         self.layout_.addLayout(form)
         self.delete_after = QCheckBox(_("Elimina le pagine dal documento dopo l'estrazione"))
         self.open_result = QCheckBox(_("Apri il risultato"))
@@ -687,8 +748,13 @@ class ExtractDialog(BaseDialog):
         return "single" if self.rb_single.isChecked() else "each" if self.rb_each.isChecked() else "ranges"
 
     def _update(self, *_a) -> None:
-        self.template.setEnabled(self.mode() != "single")
+        if not hasattr(self, "template_field"):
+            return
+        self.template_field.setEnabled(self.mode() != "single")
         self.open_result.setEnabled(self.mode() == "single")
+        if self.mode() != "single" and self.template_field.error():
+            self.set_error(self.template_field.error())
+            return
         if self.mode() == "ranges":
             text = self.scope.range_edit.text()
             try:
@@ -820,9 +886,10 @@ class SplitDialog(BaseDialog):
         self.top_only = QCheckBox(_("Cerca il testo solo nel quarto superiore della pagina"))
         self.layout_.addWidget(self.top_only)
         form = QFormLayout()
-        self.template = QLineEdit(_("{nome}_parte{n}"))
+        self.template_field = TemplateField(_("{nome}_parte{n}"), Path(document.display_name).stem)
+        self.template = self.template_field.edit
         self.template.setToolTip(_("Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}"))
-        form.addRow(_("Nome dei file:"), self.template)
+        form.addRow(_("Nome dei file:"), self.template_field)
         self.layout_.addLayout(form)
         self.overwrite = QCheckBox(_("Sovrascrivi i file esistenti"))
         self.layout_.addWidget(self.overwrite)
@@ -846,6 +913,7 @@ class SplitDialog(BaseDialog):
             w.textChanged.connect(self._update)
         self.collect.toggled.connect(self._update)
         self.top_only.toggled.connect(self._update)
+        self.template_field.changed.connect(self._update)
         self._update()
 
     def method(self) -> str:
@@ -899,6 +967,10 @@ class SplitDialog(BaseDialog):
         defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
         if self.template.text() in (part, "{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
             self.template.setText(defaults.get(m, part))
+        if self.template_field.error():
+            self.preview.setText("")
+            self.set_error(self.template_field.error())
+            return
         if m in ("size", "blank"):
             self.preview.setText("")   # calcolo costoso: eseguito alla conferma
             self.set_error(None)
@@ -1415,7 +1487,8 @@ def scanned_to_pdf(images: list[bytes], dpi: int, discard_blank: bool = False) -
 
     Con `discard_blank` le facciate vuote (es. retri bianchi) vengono scartate."""
     out = pymupdf.open()
-    for data in images:
+    for item in images:
+        data, rotation = item if isinstance(item, tuple) else (item, 0)
         if discard_blank:
             tmp = pymupdf.open()
             pix = pymupdf.Pixmap(data)
@@ -1429,6 +1502,8 @@ def scanned_to_pdf(images: list[bytes], dpi: int, discard_blank: bool = False) -
         w, h = pix.width * 72.0 / dpi, pix.height * 72.0 / dpi
         page = out.new_page(width=w, height=h)
         page.insert_image(page.rect, stream=data)
+        if rotation % 360:
+            page.set_rotation(rotation % 360)
     return out
 
 
@@ -1479,6 +1554,77 @@ class ScannerDialog(BaseDialog):
             settings.setValue(f"pages/scan_{key}", o[key])
 
 
+class ScanReviewDialog(BaseDialog):
+    """Facciate acquisite in anteprima: ruota, elimina, acquisisci ancora, poi inserisci (PAG-10)."""
+
+    def __init__(self, parent, images: list[bytes], scan_more=None):
+        super().__init__(parent, _("Pagine acquisite"), _("Inserisci"))
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QListView, QListWidget
+        self.pages: list[list] = [[d, 0] for d in images]
+        self.scan_more = scan_more
+        self.list = QListWidget()
+        self.list.setViewMode(QListView.ViewMode.IconMode)
+        self.list.setIconSize(QSize(110, 150))
+        self.list.setMovement(QListView.Movement.Static)
+        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.list.setMinimumSize(520, 300)
+        self.layout_.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        for text, ic, slot in ((_("Ruota"), "rotate-cw", self.rotate), (_("Elimina"), "trash-2", self.remove),
+                               (_("Acquisisci ancora"), "scan", self.more)):
+            b = QPushButton(icon(ic), text)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        self.more_button = row.itemAt(2).widget()
+        self.more_button.setEnabled(scan_more is not None)
+        row.addStretch(1)
+        self.layout_.addLayout(row)
+        self.finish_layout()
+        self.refresh()
+
+    def refresh(self) -> None:
+        from PySide6.QtGui import QIcon, QImage, QPixmap, QTransform
+        from PySide6.QtWidgets import QListWidgetItem
+        self.list.clear()
+        for n, (data, rot) in enumerate(self.pages, 1):
+            img = QImage.fromData(data)
+            if not img.isNull():
+                img = img.scaled(220, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                if rot:
+                    img = img.transformed(QTransform().rotate(rot))
+            self.list.addItem(QListWidgetItem(QIcon(QPixmap.fromImage(img)), str(n)))
+        self.set_error(None if self.pages else _("Nessuna pagina da inserire."))
+
+    def selected_rows(self) -> list[int]:
+        rows = sorted({i.row() for i in self.list.selectedIndexes()})
+        return rows or ([len(self.pages) - 1] if self.pages else [])
+
+    def rotate(self) -> None:
+        for r in self.selected_rows():
+            self.pages[r][1] = (self.pages[r][1] + 90) % 360
+        self.refresh()
+
+    def remove(self) -> None:
+        for r in reversed(self.selected_rows()):
+            del self.pages[r]
+        self.refresh()
+
+    def more(self) -> None:
+        if self.scan_more is None:
+            return
+        try:
+            new = self.scan_more()
+        except FoliantError as e:   # dispositivo scollegato: le pagine già acquisite restano
+            self.set_note(str(e))
+            return
+        self.pages += [[d, 0] for d in new or []]
+        self.refresh()
+
+    def result_pages(self) -> list[tuple[bytes, int]]:
+        return [(d, r) for d, r in self.pages]
+
+
 def open_scanner_dialog(ctx, view, selected: list[int]) -> bool:
     devices = list_scanners()
     if not devices:
@@ -1490,14 +1636,19 @@ def open_scanner_dialog(ctx, view, selected: list[int]) -> bool:
         return False
     dlg.save_preset(ctx.settings())
     o = dlg.options()
+    def acquire():
+        return ctx.run_task(_("Acquisizione in corso…"),
+                            lambda progress: scan_pages(o["device"], o["dpi"], o["mode"], batch=o["batch"]))
     try:
-        images = ctx.run_task(_("Acquisizione in corso…"),
-                              lambda progress: scan_pages(o["device"], o["dpi"], o["mode"], batch=o["batch"]))
+        images = acquire()
     except FoliantError as e:
         ctx.error(_("Acquisizione da scanner"), str(e))
         return False
+    review = ScanReviewDialog(ctx.window, images, scan_more=acquire)
+    if not _exec(review) or not review.pages:
+        return False   # annullamento: documento invariato
     at = dlg.position.index(selected, view.page_count)
-    src = scanned_to_pdf(images, o["dpi"], o["discard"])
+    src = scanned_to_pdf(review.result_pages(), o["dpi"], o["discard"])
     if src.page_count == 0:
         src.close()
         ctx.info(_("Acquisizione da scanner"), _("Tutte le pagine acquisite erano vuote."))
