@@ -196,7 +196,9 @@ EN.update({
     # testi scritti nei documenti (riepiloghi, misure, stati)
     "Valore": "Value", "Valore formattato": "Formatted value", "Unità": "Unit", "Scala": "Scale", "Data": "Date",
     "Testo": "Text", "Testo marcato": "Marked text", "N.": "No.", "Risposta a": "Reply to", "Risposta": "Reply",
-    "Nessun commento.": "No comments.",
+    "Nessun commento.": "No comments.", "Esportazione dei commenti…": "Exporting comments…",
+    "Lettura dei commenti…": "Reading comments…", "Preparazione del riepilogo…": "Preparing the summary…",
+    "Esportazione delle misure…": "Exporting measurements…",
     # aggancio e mirino delle misure (ANN-33)
     "estremo": "endpoint", "punto medio": "midpoint", "intersezione": "intersection", "tracciato": "path",
     "annotazione": "annotation", "Aggancio": "Snap", "Estremi": "Endpoints", "Punti medi": "Midpoints",

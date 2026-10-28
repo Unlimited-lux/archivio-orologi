@@ -46,6 +46,25 @@ def save_attachment(ctrl: "Controller", page: int, xref: int) -> str | None:
     return path
 
 
+class _Cancelled(Exception):
+    pass
+
+
+def _background(ctrl: "Controller", title: str, fn):
+    """Lettura lunga del documento in background (`ctx.run_task`) tenendo ENGINE_LOCK.
+    Solleva `_Cancelled` se l'utente annulla."""
+    from foliant.api import OperationCancelled
+
+    def work(progress):
+        with ENGINE_LOCK:
+            return fn()
+
+    try:
+        return ctrl.ctx.run_task(title, work)
+    except OperationCancelled as e:
+        raise _Cancelled() from e
+
+
 def export_comments(ctrl: "Controller", fmt: str = "xfdf", items: list[tuple[int, int]] | None = None) -> str | None:
     view = ctrl.view()
     if view is None:
@@ -60,12 +79,13 @@ def export_comments(ctrl: "Controller", fmt: str = "xfdf", items: list[tuple[int
     if not path:
         return None
     name = view.document.display_name
-    with ENGINE_LOCK:
-        pdf = view.document.pdf
-        if fmt == "xfdf":
-            data = engine.export_xfdf(pdf, name).encode("utf-8")
-        else:
-            data = engine.export_fdf(pdf, name)
+    pdf = view.document.pdf
+    try:
+        data = _background(ctrl, _("Esportazione dei commenti…"),
+                           lambda: engine.export_xfdf(pdf, name).encode("utf-8") if fmt == "xfdf"
+                           else engine.export_fdf(pdf, name))
+    except _Cancelled:
+        return None
     try:
         atomic_write(path, data)
     except Exception as e:
@@ -84,9 +104,12 @@ def import_comments(ctrl: "Controller", paths: list[str] | None = None) -> engin
     if not paths:
         return None
     sources: list[tuple[str, str]] = []
-    for path in paths:
+    for path in paths:      # lettura e conversione dei file (FDF, PDF) in background
         try:
-            sources.append((path, read_comment_source(path)))
+            sources.append((path, _background(ctrl, _("Lettura dei commenti…"),
+                                              lambda p=path: read_comment_source(p))))
+        except _Cancelled:
+            return None
         except engine.AnnotationError as e:
             ctrl.ctx.error(_("Importa commenti"), f"{os.path.basename(path)}: {_(str(e))}")
             return None
@@ -210,16 +233,21 @@ def export_summary(ctrl: "Controller", fmt: str | None = None) -> str | None:
     if not path:
         return None
     title = view.document.display_name
-    with ENGINE_LOCK:
-        pdf = view.document.pdf
+    pdf = view.document.pdf
+
+    def build():
         if fmt == "pdf":
-            data = engine.summary_pdf(pdf, title, layout)
-        elif fmt == "csv":
-            data = engine.summary_csv(pdf).encode("utf-8-sig")
-        elif fmt == "html":
-            data = engine.summary_html(pdf, title).encode("utf-8")
-        else:
-            data = engine.summary_text(pdf, title).encode("utf-8")
+            return engine.summary_pdf(pdf, title, layout)
+        if fmt == "csv":
+            return engine.summary_csv(pdf).encode("utf-8-sig")
+        if fmt == "html":
+            return engine.summary_html(pdf, title).encode("utf-8")
+        return engine.summary_text(pdf, title).encode("utf-8")
+
+    try:
+        data = _background(ctrl, _("Preparazione del riepilogo…"), build)
+    except _Cancelled:
+        return None
     try:
         atomic_write(path, data)
     except Exception as e:
@@ -290,8 +318,11 @@ def export_measures(ctrl: "Controller", sep: str | None = None) -> str | None:
                                   default_suffix=".csv")
     if not path:
         return None
-    with ENGINE_LOCK:
-        data = engine.measures_csv(view.document.pdf, sep).encode("utf-8")
+    pdf = view.document.pdf
+    try:
+        data = _background(ctrl, _("Esportazione delle misure…"), lambda: engine.measures_csv(pdf, sep).encode("utf-8"))
+    except _Cancelled:
+        return None
     try:
         atomic_write(path, data)
     except Exception as e:

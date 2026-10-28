@@ -71,3 +71,8 @@ elenco commenti con risposte e stato, maniglie di selezione e vertici).
   nei documenti (soggetto, stato, timbri, riepiloghi TXT/CSV/HTML/PDF, CSV delle misure), che seguono la lingua
   dell'interfaccia. I modelli dei timbri dinamici accettano anche i segnaposto inglesi
   ({author} {name} {date} {time} {file} {page} {counter}).
+- Documenti grandi (test_large_document.py): contratto di 30 pagine con 300 commenti, risposte e stati.
+  Pannello, ordinamenti, ricerca, esportazione e reimportazione XFDF/FDF (risposte e stati conservati),
+  cinque riepiloghi e salvataggio entro limiti larghi. Esportazioni, riepiloghi e lettura dei file da
+  importare passano da `ctx.run_task`; durante importazione ed esportazione le matrici di `placement`
+  sono calcolate una volta per pagina (importazione da 2,1 a 1,4 s su questo documento).

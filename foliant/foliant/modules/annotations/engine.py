@@ -302,20 +302,52 @@ def _placement():
         return None
 
 
+_MATRIX_CACHE: dict | None = None
+
+
+@contextmanager
+def bulk_geometry() -> Iterator[None]:
+    """Durante un'operazione su molte annotazioni (importazione, esportazione) le matrici di
+    `placement` sono calcolate una volta per pagina e rotazione invece che a ogni punto."""
+    global _MATRIX_CACHE
+    outer = _MATRIX_CACHE is not None
+    if not outer:
+        _MATRIX_CACHE = {}
+    try:
+        yield
+    finally:
+        if not outer:
+            _MATRIX_CACHE = None
+
+
+def _page_matrix(page: pymupdf.Page, to_pdf: bool):
+    pl = _placement()
+    if pl is None:
+        return None
+    if _MATRIX_CACHE is None:
+        return pl.page_to_pdf_matrix(page) if to_pdf else pl.pdf_to_page_matrix(page)
+    key = (id(page.parent), page.number, page.rotation, to_pdf)
+    m = _MATRIX_CACHE.get(key)
+    if m is None:
+        m = pl.page_to_pdf_matrix(page) if to_pdf else pl.pdf_to_page_matrix(page)
+        _MATRIX_CACHE[key] = m
+    return m
+
+
 def to_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
     """Coordinate standard (area visibile, y verso il basso) → spazio utente PDF."""
-    pl = _placement()
-    if pl is not None:
-        p = pymupdf.Point(x, y) * pl.page_to_pdf_matrix(page)
+    m = _page_matrix(page, True)
+    if m is not None:
+        p = pymupdf.Point(x, y) * m
         return p.x, p.y
     mb = page.mediabox
     return x + mb.x0, mb.y1 - y
 
 
 def from_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
-    pl = _placement()
-    if pl is not None:
-        p = pymupdf.Point(x, y) * pl.pdf_to_page_matrix(page)
+    m = _page_matrix(page, False)
+    if m is not None:
+        p = pymupdf.Point(x, y) * m
         return p.x, p.y
     mb = page.mediabox
     return x - mb.x0, mb.y1 - y
@@ -2362,6 +2394,11 @@ def page_annotations(pdf: pymupdf.Document, page_no: int) -> list[AnnotInfo]:
 
 def list_annotations(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[AnnotInfo]:
     """Commenti principali con risposte e stato (le risposte non compaiono in cima)."""
+    with bulk_geometry():
+        return _list_annotations(pdf, pages)
+
+
+def _list_annotations(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[AnnotInfo]:
     result: list[AnnotInfo] = []
     for page_no in (pages if pages is not None else range(pdf.page_count)):
         items = page_annotations(pdf, page_no)
@@ -3386,6 +3423,11 @@ def _export_rect(pdf: pymupdf.Document, page: pymupdf.Page, a: pymupdf.Annot) ->
 
 def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] | None = None) -> str:
     """Esporta i commenti in XFDF (XML standard di interscambio delle annotazioni)."""
+    with bulk_geometry():
+        return _export_xfdf(pdf, filename, pages)
+
+
+def _export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] | None = None) -> str:
     from xml.sax.saxutils import escape, quoteattr
 
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', f'<xfdf xmlns="{XFDF_NS}" xml:space="preserve">', "<annots>"]
@@ -3579,6 +3621,11 @@ def import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = Fal
     """Importa commenti da XFDF. Con `replace` elimina prima i commenti esistenti.
 
     I commenti già presenti con lo stesso nome (/NM) non vengono duplicati."""
+    with bulk_geometry():
+        return _import_xfdf(pdf, data, replace=replace)
+
+
+def _import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = False) -> ImportResult:
     import xml.etree.ElementTree as ET
 
     try:
