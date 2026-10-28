@@ -285,24 +285,15 @@ class SettingsPage(QWidget):
         self.confirm_each = QCheckBox(_("Chiedi conferma prima di ogni invio"))
         self.confirm_each.setChecked(store.option("confirm_each", False))
         self.confirm_each.toggled.connect(lambda v: store.set_option("confirm_each", v))
-        self.history_on = QCheckBox(_("Conserva la cronologia delle conversazioni"))
+        self.history_on = QCheckBox(_("Tieni la cronologia delle conversazioni durante la sessione"))
         self.history_on.setChecked(store.option("history_enabled", True))
         self.history_on.toggled.connect(lambda v: store.set_option("history_enabled", v))
-        self.history_encrypt = QCheckBox(_("Cifra la cronologia (chiave nel portachiavi)"))
-        self.history_encrypt.setChecked(store.option("history_encrypt", False))
-        self.history_encrypt.setEnabled(store.secrets.available())
-        self.history_encrypt.toggled.connect(lambda v: store.set_option("history_encrypt", v))
-        self.retention = QComboBox()
-        for days, text in ((0, _("mai")), (30, _("30 giorni")), (90, _("90 giorni")), (365, _("365 giorni"))):
-            self.retention.addItem(text, days)
-        idx = self.retention.findData(store.option("retention_days", 0))
-        self.retention.setCurrentIndex(max(0, idx))
-        self.retention.currentIndexChanged.connect(lambda _i: store.set_option("retention_days",
-                                                                               self.retention.currentData()))
+        history_note = _muted(_("La cronologia, il registro degli invii e le raccolte non vengono salvati su "
+                                "disco e si cancellano alla chiusura di Foliant."))
+        history_note.setWordWrap(True)
         ol.addRow(self.confirm_each)
         ol.addRow(self.history_on)
-        ol.addRow(self.history_encrypt)
-        ol.addRow(_("Elimina automaticamente dopo"), self.retention)
+        ol.addRow(history_note)
         outer.addWidget(opts)
         # i testi lunghi non si tagliano: pulsanti e caselle mai più stretti del necessario
         for w in self.findChildren(QPushButton) + self.findChildren(QCheckBox):
@@ -609,7 +600,8 @@ class SendLogDialog(QDialog):
         self.setWindowTitle(_("Registro degli invii"))
         self.resize(820, 420)
         lay = QVBoxLayout(self)
-        lay.addWidget(_muted(_("Il registro non contiene il contenuto inviato, solo i dati dell'invio.")))
+        lay.addWidget(_muted(_("Il registro non contiene il contenuto inviato, solo i dati dell'invio.") + " " +
+                             _("Contiene solo gli invii di questa sessione e non viene salvato su disco.")))
         self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels([_("Data e ora"), _("Profilo"), _("Dominio"), _("Modello"),
                                               _("Funzione"), _("Pagine"), _("Caratteri"), _("Immagini"), _("Esito")])

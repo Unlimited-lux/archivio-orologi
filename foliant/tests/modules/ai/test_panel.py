@@ -229,7 +229,10 @@ def test_send_log_entry_after_summary(qtbot, window, ready, fake, sample_pdf):
     wait_done(qtbot, panel)
     e = ready.log.entries()[-1]
     assert e["function"] == "summary" and e["pages"] == [2, 3] and e["chars"] > 0 and e["outcome"] == "ok"
-    assert "Orologeria" not in ready.log.path.read_text()
+    assert "document" not in e
+    # registro della sessione: nessun file del registro su disco
+    from foliant.modules.ai.config import data_dir
+    assert not (data_dir() / "registro-invii.jsonl").exists()
 
 
 def test_confirm_each_send(qtbot, window, ready, fake, sample_pdf):
@@ -673,61 +676,63 @@ def test_ui_responsive_during_answer(qtbot, window, ready, fake, sample_pdf):
 
 
 # ------------------------------------------------------------------ AI-18
-def test_history_persisted_and_reopened(qtbot, window, ready, fake, sample_pdf, tmp_path):
+def test_history_kept_only_in_session(qtbot, window, ready, fake, sample_pdf, tmp_path):
+    from foliant.modules.ai.config import data_dir
     view = window.open_path(sample_pdf)
     fake.responses = ["Vedi [p. 2]"]
     panel = ready.panel
     panel.send("Dove?")
     wait_done(qtbot, panel)
     conv_id = panel.conversation().id
+    assert panel.conversation().path == ""            # nessun percorso nella conversazione
     fp = content.content_fingerprint(view.document.pdf)
-    # «riavvio»: nuovo archivio, documento rinominato
-    store = history.HistoryStore()
-    convs = store.for_document(fp)
+    # nella stessa sessione la conversazione si ritrova (anche se il file è rinominato)
+    convs = ready.history().for_document(fp)
     assert [c.id for c in convs] == [conv_id]
     assert convs[0].messages[-1].refs[0]["page"] == 1
     import shutil
     renamed = tmp_path / "rinominato.pdf"
     shutil.copy(sample_pdf, renamed)
-    from foliant.api import Document
-    d2 = Document.open(str(renamed))
-    assert store.for_document(content.content_fingerprint(d2.pdf))[0].id == conv_id
     window.close_view(view)
     view2 = window.open_path(str(renamed))
     assert panel.resume_available
     assert panel.resume_last()
     assert len(panel.conversation().messages) == 2
     assert view2 is not None
+    # «riavvio»: un nuovo archivio non trova nulla e su disco non c'è alcuna cronologia
+    assert history.HistoryStore().for_document(fp) == []
+    assert history.HistoryStore().load_all() == []
+    assert not (data_dir() / "cronologia").exists()
 
 
-def test_history_disabled_writes_nothing(qtbot, window, ready, fake, sample_pdf):
+def test_history_disabled_keeps_nothing(qtbot, window, ready, fake, sample_pdf):
+    from foliant.modules.ai.config import data_dir
     ready.store.set_option("history_enabled", False)
     window.open_path(sample_pdf)
     panel = ready.panel
     panel.send("x")
     wait_done(qtbot, panel)
-    assert not ready.history().directory.exists() or not list(ready.history().directory.iterdir())
+    assert ready.history().load_all() == []
+    assert not (data_dir() / "cronologia").exists()
 
 
-def test_history_delete_all_and_expiry(tmp_path):
-    import datetime as dt
+def test_history_in_memory_rename_delete_all(tmp_path):
+    from foliant.modules.ai.config import data_dir
     from foliant.modules.ai.engine import ChatMessage, Conversation
-    h = history.HistoryStore(retention_days=30)
-    old = Conversation(title="vecchia", messages=[ChatMessage("user", "testo segreto vecchio")])
-    new = Conversation(title="nuova", messages=[ChatMessage("user", "testo recente")])
-    h.save(old)
-    h.save(new)
-    data = json.loads(h._path(old.id).read_text())
-    data["updated"] = (dt.datetime.now() - dt.timedelta(days=31)).isoformat(timespec="seconds")
-    h._path(old.id).write_text(json.dumps(data))
-    assert h.expire() == 1
+    h = history.HistoryStore(directory=tmp_path / "ignorata", retention_days=30, encrypt=True)
+    old = Conversation(title="vecchia", fingerprint="f1", messages=[ChatMessage("user", "testo segreto vecchio")])
+    new = Conversation(title="nuova", fingerprint="f2", messages=[ChatMessage("user", "testo recente")])
+    assert h.save(old) and h.save(new)
+    assert h.expire() == 0
+    assert {c.id for c in h.load_all()} == {old.id, new.id}
+    assert [c.id for c in h.search("recente")] == [new.id]
+    h.rename(new.id, "rinominata")
+    assert h.get(new.id).title == "rinominata"
+    h.delete_document("f1")
     assert [c.id for c in h.load_all()] == [new.id]
-    (h.directory / "rotto.json").write_text("{non json")
-    assert len(h.load_all()) == 1 and h.damaged
     h.delete_all()
-    for f in h.directory.iterdir():
-        assert "testo recente" not in f.read_text(errors="ignore")
-    assert oct(os.stat(h.directory).st_mode & 0o777) == "0o700"
+    assert h.load_all() == []
+    assert not (tmp_path / "ignorata").exists() and not (data_dir() / "cronologia").exists()
 
 
 def test_history_export(tmp_path):
@@ -948,15 +953,14 @@ def test_translate_warns_when_already_target_language(window, ready, fake, tmp_p
     assert asked and "già" in asked[0] and fake.requests == []
 
 
-def test_history_encrypted_with_keyring_key(memory_keyring):
+def test_history_never_touches_keyring(memory_keyring):
     from foliant.modules.ai.engine import ChatMessage, Conversation
     h = history.HistoryStore(encrypt=True)
     c = Conversation(title="segreta", messages=[ChatMessage("user", "testo riservato IBAN")])
     assert h.save(c)
-    raw = h._path(c.id).read_text()
-    assert "IBAN" not in raw and raw.startswith(history.ENC_PREFIX)
-    assert ("foliant-ai", "history-key") in memory_keyring.store
-    assert history.HistoryStore().get(c.id).messages[0].text == "testo riservato IBAN"
+    assert ("foliant-ai", "history-key") not in memory_keyring.store
+    assert h.get(c.id).messages[0].text == "testo riservato IBAN"
+    assert history.HistoryStore().get(c.id) is None
 
 
 # ------------------------------------------------------------------ regressioni dalla revisione
@@ -1012,20 +1016,6 @@ def test_rewrite_keeps_other_redaction_marks(qtbot, window, ready, fake, tmp_pat
     d = view.document
     assert "IBAN-123" in d.page_text(0)          # marcatura non applicata
     assert [i for i, r in annots_of(d, 0)] and len(annots_of(d, 0)) == 1
-
-
-def test_locked_history_not_isolated(memory_keyring):
-    from foliant.modules.ai.engine import ChatMessage, Conversation
-    h = history.HistoryStore(encrypt=True)
-    c = Conversation(messages=[ChatMessage("user", "x")])
-    h.save(c)
-    memory_keyring.store.clear()
-    store2 = history.HistoryStore()
-    store2.secrets = None
-    from foliant.modules.ai.config import SecretStore
-    store2.secrets = SecretStore()
-    assert store2.load_all() == [] and store2.locked and not store2.damaged
-    assert h._path(c.id).exists()
 
 
 def test_collection_does_not_send_file_names(window, ready, fake, text_pdf):
