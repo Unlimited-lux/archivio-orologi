@@ -42,7 +42,7 @@ def test_fallback_literals_and_empty():
     assert F.render_template("{{x}} {nome}", {"nome": "a"}) == "{x} a"
     assert F.validate_template("{{x}}") is None
     assert F.validate_template("{pagina") is not None
-    assert E.render_name("{titolo}", titolo="") == "senza_nome"
+    assert E.render_name("{titolo}", titolo="") == "senza_nome"   # in italiano; in inglese «untitled»
 
 
 def test_document_and_page_values():
