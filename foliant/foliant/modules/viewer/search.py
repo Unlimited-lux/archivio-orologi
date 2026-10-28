@@ -368,8 +368,15 @@ class SearchController(QObject):
         ctx.add_sidebar_panel("search", pgettext("barra di ricerca", "Cerca"), "search", self.panel, order=30)
 
         self.act_find = ctx.action(_("Cerca nel documento"), "search", self.open, shortcut=QKeySequence.StandardKey.Find)
+        # UX-18: F3 / Ctrl+G successivo, Maiusc+F3 / Ctrl+Maiusc+G precedente
         self.act_next = ctx.action(_("Risultato successivo"), "chevron-down", self.next, shortcut="F3")
         self.act_prev = ctx.action(_("Risultato precedente"), "chevron-up", self.previous, shortcut="Shift+F3")
+        self.act_next.setShortcuts([QKeySequence("F3"), QKeySequence("Ctrl+G")])
+        self.act_prev.setShortcuts([QKeySequence("Shift+F3"), QKeySequence("Ctrl+Shift+G")])
+        from foliant.ui.dialogs import key_text
+        for act in (self.act_next, self.act_prev):
+            keys = ", ".join(key_text(s) for s in act.shortcuts())
+            act.setToolTip(f"{act.text()} ({keys})")
         mode = ctx.mode("leggi")
         if mode is not None:
             mode.add_separator()

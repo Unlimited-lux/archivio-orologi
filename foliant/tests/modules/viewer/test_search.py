@@ -297,3 +297,26 @@ def test_snippet_from_indices_matches_and_is_linear():
         return (time.perf_counter() - t) / len(hits)
     small, large = min(cost(1) for _i in range(3)), min(cost(8) for _i in range(3))
     assert large < small * 4          # lineare: il costo per occorrenza non cresce con la pagina (prima ×8)
+
+
+def test_ux18_ctrl_g_moves_between_results(viewer_window, tmp_path, qtbot):
+    """UX-18: Ctrl+G / Ctrl+Maiusc+G = occorrenza successiva / precedente (come F3 / Maiusc+F3);
+    «Vai a pagina» non usa Ctrl+G (Ctrl+L è il campo pagina del nucleo)."""
+    from PySide6.QtGui import QAction, QKeySequence
+    view = viewer_window.open_path(_pdf(tmp_path, [["Rolex Rolex"], ["Rolex"]]))
+    ctl = _ctl(viewer_window)
+    owners = [a for a in viewer_window.findChildren(QAction)
+              if any(s == QKeySequence("Ctrl+G") for s in a.shortcuts())]
+    assert owners == [ctl.act_next]
+    assert QKeySequence("Ctrl+Shift+G") in ctl.act_prev.shortcuts()
+    assert viewer_window.ctx.viewer_parts["navigation"].act_goto.shortcut().isEmpty()
+    assert "Ctrl+G" in ctl.act_next.toolTip() and "F3" in ctl.act_next.toolTip()
+    ctl.search("rolex")
+    ctl.finish()
+    assert ctl.current == 0
+    viewer_window.activateWindow()
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_G, Qt.KeyboardModifier.ControlModifier)
+    assert ctl.current == 1
+    qtbot.keyClick(view, Qt.Key.Key_G, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    assert ctl.current == 0
