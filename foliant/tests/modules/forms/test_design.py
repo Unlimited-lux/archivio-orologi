@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pymupdf
 import pytest
 from PySide6.QtCore import QPoint, Qt
@@ -587,3 +589,42 @@ def test_button_uri_uses_application_confirmation(window, tmp_path, monkeypatch)
     f = filler_of(view)
     f.click_field([i for i in f.state.fields if i.name == "sito"][0])
     assert seen == [{"kind": pymupdf.LINK_URI, "uri": "https://example.com/garanzia"}]
+
+
+def test_submit_by_mail_attaches_data(window, tmp_path, monkeypatch, no_modal_boxes):
+    """FRM-18: invio a un indirizzo di posta → programma di posta con il file dei dati allegato."""
+    from foliant.modules.forms import interchange as X
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    m.import_values({"A": "Rolex Submariner", "B": "12500"}, view)
+    mails = []
+    monkeypatch.setattr(m, "launch_mail", lambda addr, subject, path: mails.append((addr, subject, path)) or True)
+    f = filler_of(view)
+    action = {"type": "submit", "url": "mailto:acquisti@esempio.test", "format": "xfdf"}
+    assert m.submit(f, action)
+    (addr, subject, path), = mails
+    assert addr == "acquisti@esempio.test" and "sub.pdf" in subject and path.endswith(".xfdf")
+    assert X.parse_xfdf(Path(path).read_bytes()) == {"A": "Rolex Submariner", "B": "12500"}
+    assert any("acquisti@esempio.test" in c[2] for c in no_modal_boxes)   # conferma con destinazione
+
+
+def test_submit_by_mail_without_mail_helper(window, tmp_path, monkeypatch, no_modal_boxes):
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    opened, notes = [], []
+    monkeypatch.setattr(m, "launch_mail", lambda *a: False)
+    monkeypatch.setattr("foliant.modules.forms.module.QDesktopServices.openUrl", lambda url: opened.append(url))
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), *a, **k: notes.append(text))
+    assert m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test", "format": "fdf"})
+    assert opened and opened[0].toString() == "mailto:a@b.test"
+    assert notes and ".fdf" in notes[0]
+
+
+def test_submit_by_mail_cancelled(window, tmp_path, monkeypatch):
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    mails = []
+    monkeypatch.setattr(m, "launch_mail", lambda *a: mails.append(a) or True)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a, **k: False)
+    assert not m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test"})
+    assert not mails

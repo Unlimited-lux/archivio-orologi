@@ -330,4 +330,12 @@ EN: dict[str, str] = {
     'Disposizione del pulsante non valida.': 'Invalid button layout.',
     "Pagina inesistente nel PDF dell'icona.": 'The page does not exist in the icon PDF.',
     'Evento del pulsante non valido.': 'Invalid button event.',
+    'dati': 'data',
+    'Aprire il programma di posta per inviare a {a} il file «{f}» con i dati del modulo?':
+        'Open the mail program to send the file “{f}” with the form data to {a}?',
+    'Dati del modulo {n}': 'Form data {n}',
+    'Messaggio preparato con i dati allegati.': 'Message prepared with the data attached.',
+    'Allega al messaggio il file dei dati: {p}': 'Attach the data file to the message: {p}',
+    'Apri cartella': 'Open folder',
+    'Comportamento al clic non valido.': 'Invalid click behavior.',
 }

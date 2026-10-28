@@ -241,6 +241,7 @@ class FieldInfo:
     caption_rollover: str = ""   # didascalia al passaggio del puntatore (/MK /RC)
     layout: str = "text"         # disposizione di icona e didascalia (BUTTON_LAYOUTS)
     icons: tuple = ()            # stati con un'icona: "normal", "rollover", "down"
+    highlight: str = "invert"    # comportamento al clic (/H): none, invert, outline, push
     action: dict = field(default_factory=dict)  # azione al clic dei pulsanti
     image: bool = False          # campo immagine
     lock: dict = field(default_factory=dict)  # campi firma: {"action": "All|Include|Exclude", "fields": [...]}
@@ -432,6 +433,8 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.caption_rollover = _value_of(*pdf.xref_get_key(w.xref, "MK/RC")) or ""
         info.layout = button_layout(pdf, w.xref)
         info.icons = tuple(button_icons(pdf, w.xref))
+        h = _value_of(*pdf.xref_get_key(w.xref, "H")) or "I"
+        info.highlight = {v: k for k, v in HIGHLIGHTS.items()}.get(h, "invert")
     if kind == SIGNATURE:
         info.lock = _read_lock(pdf, w.xref)
     if kind in (CHECKBOX, RADIO):
@@ -1320,6 +1323,8 @@ def _button_down_appearance(pdf: pymupdf.Document, page: int, xref: int) -> None
 # ---------------------------------------------------------------- pulsanti: aspetti per stato (FRM-18)
 # Disposizione di icona e didascalia (/MK /TP 0-6).
 BUTTON_LAYOUTS = ("text", "icon", "icon_above", "icon_below", "icon_left", "icon_right", "overlay")
+# Comportamento al clic dei pulsanti (/H): nessuno, inversione, contorno, pressione.
+HIGHLIGHTS = {"none": "N", "invert": "I", "outline": "O", "push": "P"}
 # Icone per stato: normale, passaggio del puntatore, pressione (/MK /I, /RI, /IX).
 ICON_KEYS = {"normal": "I", "rollover": "RI", "down": "IX"}
 _STD_FONTS = {"Helv": "helv", "TiRo": "tiro", "Cour": "cour"}
@@ -1530,7 +1535,8 @@ def button_appearances(pdf: pymupdf.Document, page: int, xref: int) -> None:
                                  layout, False)
     ap["D"] = _button_stream(pdf, info, xref, down or normal, icons.get("down", icons.get("normal")), layout, True)
     pdf.xref_set_key(xref, "AP", "<<" + "".join(f"/{k} {v} 0 R" for k, v in ap.items()) + ">>")
-    pdf.xref_set_key(xref, "H", "/P")   # pressione: si mostra /D
+    if pdf.xref_get_key(xref, "H")[0] == "null":
+        pdf.xref_set_key(xref, "H", "/P")   # pressione: si mostra /D
 
 
 def set_button_icon(pdf: pymupdf.Document, page: int, xref: int, state: str, source: str | bytes | None,
@@ -2117,6 +2123,10 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
     if "caption_rollover" in props and kind == BUTTON:
         roll = str(props["caption_rollover"] or "")
         pdf.xref_set_key(xref, "MK/RC", ps.encode_string(roll) if roll else "null")
+    if "highlight" in props and kind == BUTTON:
+        if props["highlight"] not in HIGHLIGHTS:
+            raise FormError(_("Comportamento al clic non valido."))
+        pdf.xref_set_key(xref, "H", "/" + HIGHLIGHTS[props["highlight"]])
     if "layout" in props and kind == BUTTON:
         layout = props["layout"] or "text"
         if layout not in BUTTON_LAYOUTS:
@@ -2378,7 +2388,7 @@ def properties_of(f: FieldInfo) -> dict:
         props["export"] = f.export
     if f.kind == BUTTON and not f.image:
         props.update(caption=f.caption, caption_down=f.caption_down, caption_rollover=f.caption_rollover,
-                     layout=f.layout)
+                     layout=f.layout, highlight=f.highlight)
         if f.action:
             props["action"] = dict(f.action)
     return props

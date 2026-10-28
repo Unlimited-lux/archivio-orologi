@@ -621,3 +621,32 @@ def test_button_event_applied(qtbot):
     assert E.button_action(pdf, b) == {"type": "print", "name": "Print", "event": "E"}
     panel.set_fields(E.list_fields(pdf), ["stampa"])
     assert panel.event_combo.currentData() == "E"
+
+
+def test_submit_action_applied(qtbot):
+    from foliant.modules.forms.panel import FieldPropertiesPanel
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 20, 150, 40), "modello")
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 72), "invia", caption="Invia")
+
+    def apply(keys, props, label):
+        for page, xref in keys:
+            E.update_properties(pdf, page, xref, **props)
+        return True
+
+    panel = FieldPropertiesPanel(apply)
+    qtbot.addWidget(panel)
+    panel.set_fields([E.field_info(pdf, 0, b)], ["modello", "invia"])
+    panel.action_combo.setCurrentIndex(panel.action_combo.findData("submit"))
+    assert E.button_action(pdf, b) == {}   # manca ancora l'indirizzo
+    panel.action_uri.setText("ftp://x")
+    panel.action_uri.editingFinished.emit()
+    assert "mailto" in panel.action_error.text()
+    panel.submit_format.setCurrentIndex(panel.submit_format.findData("xfdf"))
+    panel.action_uri.setText("mailto:acquisti@esempio.test")
+    panel.action_uri.editingFinished.emit()
+    assert E.button_action(pdf, b) == {"type": "submit", "url": "mailto:acquisti@esempio.test", "format": "xfdf",
+                                       "fields": [], "empty": False}
+    panel.set_fields([E.field_info(pdf, 0, b)], ["modello", "invia"])
+    assert panel.action_combo.currentData() == "submit" and panel.action_uri.text() == "mailto:acquisti@esempio.test"

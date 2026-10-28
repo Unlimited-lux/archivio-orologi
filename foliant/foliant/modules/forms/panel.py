@@ -31,6 +31,17 @@ from . import formats as fm
 from . import formula as FX
 
 TRANSLATIONS: dict[str, str] = {
+    "Inversione dei colori": "Invert colors",
+    "Contorno": "Outline",
+    "Pressione": "Push",
+    "Al clic": "On click",
+    "Invia modulo": "Submit form",
+    "Formato dei dati": "Data format",
+    "Invia anche i campi vuoti": "Also send empty fields",
+    "Nessun campo scelto: si inviano tutti i campi. Con un indirizzo mailto: si apre il programma di posta con i dati allegati.":
+        "No field chosen: all fields are sent. With a mailto: address the mail program opens with the data attached.",
+    "https:// o mailto:": "https:// or mailto:",
+    "Indirizzo non valido: usa https://, http:// o mailto:.": "Invalid address: use https://, http:// or mailto:.",
     "Rilascio del pulsante": "Button release",
     "Pressione del pulsante": "Button press",
     "Ingresso del puntatore": "Mouse enter",
@@ -262,7 +273,7 @@ SetDefault = Callable[[str, dict], None]
 _ROTATIONS = (0, 90, 180, 270)
 _APPEARANCE_KEYS = ("font", "fontsize", "text_color", "fill_color", "border_color", "border_width",
                     "border_style", "align")
-_ACTION_TYPES = (None, "reset", "uri", "print", "goto", "hide", "import")
+_ACTION_TYPES = (None, "reset", "uri", "print", "goto", "hide", "import", "submit")
 _PLAIN_NAME = re.compile(r"[^\W\d][\w.]*")
 
 _TEXT_LIKE = (E.TEXT, E.COMBO, E.LIST)
@@ -1340,6 +1351,10 @@ class FieldPropertiesPanel(QWidget):
              (_("Icona a destra del testo"), "icon_right"), (_("Testo sopra l'icona"), "overlay")],
             lambda v: self._apply({"layout": v}))
         form.addRow(_("Disposizione"), self.layout_combo)
+        self.highlight_combo = self._combo(
+            [(_("Nessuno"), "none"), (_("Inversione dei colori"), "invert"), (_("Contorno"), "outline"),
+             (_("Pressione"), "push")], lambda v: self._apply({"highlight": v}))
+        form.addRow(_("Al clic"), self.highlight_combo)
         self.icon_rows: dict[str, tuple[QLabel, QToolButton, QToolButton]] = {}
         for state, label in (("normal", _("Icona")), ("rollover", _("Icona al passaggio")),
                              ("down", _("Icona alla pressione"))):
@@ -1365,7 +1380,7 @@ class FieldPropertiesPanel(QWidget):
         self.action_combo = self._combo(
             [(_("Nessuna"), None), (_("Reimposta campi"), "reset"), (_("Apri indirizzo web"), "uri"),
              (_("Stampa"), "print"), (_("Vai a pagina"), "goto"), (_("Mostra o nascondi campi"), "hide"),
-             (_("Importa dati"), "import")], lambda _v: self._on_action_changed())
+             (_("Importa dati"), "import"), (_("Invia modulo"), "submit")], lambda _v: self._on_action_changed())
         form.addRow(_("Azione"), self.action_combo)
         self.event_combo = self._combo(
             [(_("Rilascio del pulsante"), "U"), (_("Pressione del pulsante"), "D"),
@@ -1380,6 +1395,15 @@ class FieldPropertiesPanel(QWidget):
         form.addRow(_("Indirizzo"), self.action_uri)
         self.uri_warning = self._error_label()
         form.addRow(self.uri_warning)
+        self.submit_format = self._combo([("FDF", "fdf"), ("XFDF", "xfdf"), ("HTML", "html"), ("PDF", "pdf")],
+                                         lambda _v: self._on_action_changed())
+        form.addRow(_("Formato dei dati"), self.submit_format)
+        self.submit_empty = QCheckBox(_("Invia anche i campi vuoti"))
+        self.submit_empty.toggled.connect(lambda _c: None if self._loading else self._on_action_changed())
+        form.addRow(self.submit_empty)
+        self.submit_note = self._note(_("Nessun campo scelto: si inviano tutti i campi. Con un indirizzo "
+                                        "mailto: si apre il programma di posta con i dati allegati."))
+        form.addRow(self.submit_note)
         self.action_page = self._spin(1, 99999, lambda _v: self._on_action_changed())
         form.addRow(_("Pagina"), self.action_page)
         self.action_hide = self._combo([(_("Nascondi"), True), (_("Mostra"), False)],
@@ -1409,18 +1433,22 @@ class FieldPropertiesPanel(QWidget):
     def _update_action_ui(self) -> None:
         t = self.action_combo.currentData() if self.action_combo.currentIndex() >= 0 else "?"
         form = self._button_form
-        form.setRowVisible(self.action_uri, t == "uri")
-        form.setRowVisible(self.uri_warning, t == "uri")
+        form.setRowVisible(self.action_uri, t in ("uri", "submit"))
+        form.setRowVisible(self.uri_warning, t in ("uri", "submit"))
+        form.setRowVisible(self.submit_format, t == "submit")
+        form.setRowVisible(self.submit_empty, t == "submit")
+        form.setRowVisible(self.submit_note, t == "submit")
+        self.action_uri.setPlaceholderText(_("https:// o mailto:") if t == "submit" else "https://")
         form.setRowVisible(self.action_page, t == "goto")
         form.setRowVisible(self.action_hide, t == "hide")
-        form.setRowVisible(self.action_fields, t in ("reset", "hide"))
+        form.setRowVisible(self.action_fields, t in ("reset", "hide", "submit"))
         form.setRowVisible(self.reset_note, t == "reset")
         form.setRowVisible(self.event_combo, bool(t) and t != "?")
         self._update_uri_warning()
 
     def _update_uri_warning(self) -> None:
         uri = self.action_uri.text().strip()
-        insecure = bool(uri) and not uri.lower().startswith("https://")
+        insecure = bool(uri) and not uri.lower().startswith(("https://", "mailto:"))
         self._show_error(self.uri_warning, _("L'indirizzo non è cifrato (non HTTPS)") if insecure else None)
 
     def current_action(self) -> tuple[dict | None, str | None]:
@@ -1442,6 +1470,14 @@ class FieldPropertiesPanel(QWidget):
             return ({"type": "uri", "uri": uri}, None) if uri else (None, "")
         if t == "goto":
             return {"type": "goto", "page": self.action_page.value() - 1}, None
+        if t == "submit":
+            url = self.action_uri.text().strip()
+            if not url:
+                return None, ""
+            if not url.lower().startswith(("https://", "http://", "mailto:")):
+                return None, _("Indirizzo non valido: usa https://, http:// o mailto:.")
+            return {"type": "submit", "url": url, "format": self.submit_format.currentData() or "fdf",
+                    "fields": self._checked(self.action_fields), "empty": self.submit_empty.isChecked()}, None
         if t == "hide":
             names = self._checked(self.action_fields)
             if not names:
@@ -1467,6 +1503,7 @@ class FieldPropertiesPanel(QWidget):
         form.setRowVisible(self.caption_down_edit, not image)
         form.setRowVisible(self.caption_rollover_edit, not image)
         form.setRowVisible(self.layout_combo, not image)
+        form.setRowVisible(self.highlight_combo, not image)
         for status, _c, _r in self.icon_rows.values():
             form.setRowVisible(status.parentWidget(), not image)
         form.setRowVisible(self.image_note, image)
@@ -1480,6 +1517,8 @@ class FieldPropertiesPanel(QWidget):
                 self.caption_rollover_edit.setPlaceholderText(_("uguale alla didascalia"))
             layout, mixed = self._common("layout")
             self._load_combo(self.layout_combo, layout, mixed)
+            hl, mixed = self._common("highlight")
+            self._load_combo(self.highlight_combo, hl, mixed)
             for state, (status, _choose, remove) in self.icon_rows.items():
                 have = [state in f.icons for f in self._fields]
                 status.setText(_("misto") if len(set(have)) > 1 else (_("impostata") if have[0] else _("nessuna")))
@@ -1494,11 +1533,15 @@ class FieldPropertiesPanel(QWidget):
         self._load_combo(self.action_combo, t, mixed or not known)
         if not mixed and not known:
             self.action_combo.setPlaceholderText(_("Altra azione (non modificabile qui)"))
-        self.action_uri.setText(str(action.get("uri") or "") if t == "uri" else "")
+        self.action_uri.setText(str(action.get("uri") or "") if t == "uri" else
+                                (str(action.get("url") or "") if t == "submit" else ""))
+        self.submit_format.setCurrentIndex(max(0, self.submit_format.findData(action.get("format") or "fdf")))
+        self.submit_empty.setChecked(bool(action.get("empty")))
         self.action_page.setValue(int(action.get("page") or 0) + 1 if t == "goto" else 1)
         self.action_hide.setCurrentIndex(self.action_hide.findData(bool(action.get("hide", True))))
         self.event_combo.setCurrentIndex(max(0, self.event_combo.findData(action.get("event") or "U")))
-        self._fill_checklist(self.action_fields, list(action.get("fields") or []) if t in ("reset", "hide") else [])
+        self._fill_checklist(self.action_fields,
+                             list(action.get("fields") or []) if t in ("reset", "hide", "submit") else [])
         self._update_action_ui()
 
     @classmethod
@@ -1518,6 +1561,9 @@ class FieldPropertiesPanel(QWidget):
             return {"type": t, "uri": str(action.get("uri") or "")}
         if t == "goto":
             return {"type": t, "page": int(action.get("page") or 0)}
+        if t == "submit":
+            return {"type": t, "url": str(action.get("url") or ""), "format": action.get("format") or "fdf",
+                    "fields": list(action.get("fields") or []), "empty": bool(action.get("empty"))}
         if t == "hide":
             return {"type": t, "fields": list(action.get("fields") or []), "hide": bool(action.get("hide", True))}
         return {"type": t}

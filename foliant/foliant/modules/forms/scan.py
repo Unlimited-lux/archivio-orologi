@@ -304,6 +304,8 @@ def _field_info(r: _Reader, E, page: int, xref: int, w: dict, names: set[str] | 
         info.caption_rollover = _text(mk.get("RC")) if mk.get("RC") is not None else ""
         info.layout = E.BUTTON_LAYOUTS[tp] if 0 <= tp < len(E.BUTTON_LAYOUTS) else "text"
         info.icons = tuple(state for state, key in E.ICON_KEYS.items() if mk.get(key) is not None)
+        h = str(w.get("H") or "I").lstrip("/")
+        info.highlight = {v: k for k, v in E.HIGHLIGHTS.items()}.get(h, "invert")
     elif kind == E.SIGNATURE:
         info.value = "firmato" if inh("V") is not None else ""
         info.lock = E._read_lock(r.pdf, xref) if inh("Lock") is not None else {}

@@ -1322,9 +1322,7 @@ class FormsModule(QObject):
                 u=url, d=data[:4000].decode("utf-8", "replace")))
             return False
         if url.lower().startswith("mailto:"):
-            QDesktopServices.openUrl(QUrl(url))
-            self.ctx.status(_("Allega al messaggio i dati esportati con «Esporta dati…»."))
-            return True
+            return self._submit_by_mail(view, url, data, action.get("format", "fdf"))
         if not url.lower().startswith(("http://", "https://")):
             self.ctx.error(_("Invia modulo"), _("Indirizzo di invio non valido: {u}").format(u=url))
             return False
@@ -1342,6 +1340,44 @@ class FormsModule(QObject):
                 self.export_data_dialog()
             return False
         self.ctx.status(_("Modulo inviato (risposta {s}).").format(s=status))
+        return True
+
+    def _submit_by_mail(self, view, url: str, data: bytes, fmt: str) -> bool:
+        """Invio a un indirizzo di posta: il programma di posta del sistema si apre con il file
+        dei dati allegato (FRM-18), dopo la conferma con destinazione e file."""
+        import tempfile
+        from pathlib import Path
+        from urllib.parse import unquote, urlsplit
+        address = unquote(urlsplit(url).path)
+        ext = {"xfdf": "xfdf", "pdf": "pdf", "html": "txt"}.get(fmt, "fdf")
+        stem = Path(view.document.display_name).stem or "modulo"
+        path = Path(tempfile.mkdtemp(prefix="foliant-invio-")) / f"{stem}_{_('dati')}.{ext}"
+        path.write_bytes(data)
+        if not self.ctx.confirm(_("Invia modulo"), _(
+                "Aprire il programma di posta per inviare a {a} il file «{f}» con i dati del modulo?").format(
+                a=address, f=path.name)):
+            return False
+        subject = _("Dati del modulo {n}").format(n=view.document.display_name)
+        if self.launch_mail(address, subject, str(path)):
+            self.ctx.status(_("Messaggio preparato con i dati allegati."))
+        else:
+            QDesktopServices.openUrl(QUrl(url))
+            self.ctx.notify(_("Allega al messaggio il file dei dati: {p}").format(p=path),
+                            [(_("Apri cartella"), lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent))))])
+        return True
+
+    def launch_mail(self, address: str, subject: str, attachment: str) -> bool:
+        """Apre il programma di posta con l'allegato (xdg-email). False se non disponibile."""
+        import shutil
+        import subprocess
+        exe = shutil.which("xdg-email")
+        if exe is None:
+            return False
+        try:
+            subprocess.Popen([exe, "--utf8", "--subject", subject, "--attach", attachment, address],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            return False
         return True
 
     def signature_clicked(self, view, f: E.FieldInfo) -> None:

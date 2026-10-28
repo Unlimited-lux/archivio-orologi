@@ -792,7 +792,10 @@ def test_button_state_appearances_and_icons():
     icon_n = again.xref_get_key(f.xref, "MK/I")[1]
     icon_d = again.xref_get_key(f.xref, "MK/IX")[1]
     assert icon_n != icon_d
-    assert again.xref_get_key(f.xref, "H") == ("name", "/P")
+    assert again.xref_get_key(f.xref, "H") == ("name", "/P") and f.highlight == "push"
+    E.update_properties(pdf, 0, x, highlight="outline")
+    assert pdf.xref_get_key(x, "H") == ("name", "/O") and E.field_info(pdf, 0, x).highlight == "outline"
+    assert E.list_fields(pdf)[0].highlight == "outline"   # lettura veloce (scan.py)
     # il lettore di prova disegna l'icona normale (rossa) a sinistra e la didascalia
     pix = again[0].get_pixmap(clip=pymupdf.Rect(50, 50, 250, 110))
     assert pix.pixel(20, 30)[0] > 150 and pix.pixel(20, 30)[2] < 80
