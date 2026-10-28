@@ -144,9 +144,8 @@ def test_protect_dialog_validation(qtbot):
     s = dlg.settings()
     assert s.restrict and s.permissions_password == "Capo-9999!"
     # livello di compatibilità: avviso
-    dlg.method.setCurrentIndex(dlg.method.findData(P.RC4))
-    assert "debole" in dlg.method_note.text()
-    assert dlg.perm_boxes["accessibility"].isEnabled()
+    # SEC-06 (v2): la nuova protezione usa solo AES-256
+    assert dlg.method.count() == 1 and dlg.method.currentData() == P.AES256 and not dlg.method.isEnabled()
 
 
 def test_protect_dialog_empty_password_disabled(qtbot):
@@ -246,15 +245,17 @@ def test_security_properties_rows(window, sec, tmp_path):
         flat.append(head)
         flat.extend(lines)
     joined = "\n".join(flat)
-    assert "AES 256 bit" in joined and "Stampa: bassa risoluzione" in joined
-    assert "Copia: non consentita" in joined and "Accesso: limitato" in joined
+    rows = dict(C.security_rows(view.document))
+    assert "AES, chiave a 256 bit" in joined and "Accesso: limitato" in joined
+    assert "Stampare, solo a bassa risoluzione" in rows["Azioni consentite"]
+    assert "Copiare testo e immagini" in rows["Azioni non consentite"]
 
 
 def test_security_properties_unprotected(window, sec, sample_pdf):
     view = window.open_path(sample_pdf)
     rows = C.security_rows(view.document)
     assert rows[0][0] == "Nessuna protezione"
-    assert all("non consentita" not in line for _h, lines in rows for line in lines)
+    assert dict(rows)["Azioni non consentite"] == []
 
 
 def test_rc4_marked_weak(window, sec, tmp_path):
@@ -630,7 +631,11 @@ def test_internal_links_delegated(window, sec, sample_pdf):
 def test_sanitize_flow(window, sec, active_pdf, tmp_path, monkeypatch):
     view = window.open_path(active_pdf)
     monkeypatch.setattr(C, "run_dialog", lambda dlg: True)
+    names = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda title, name, *a: names.append(name) or None)
     assert sec.sanitize()
+    assert names == ["attivo_ripulito.pdf"]
     out = tmp_path / "sanificato.pdf"
     view.document.save(out)
     from foliant.modules.security import sanitize as S

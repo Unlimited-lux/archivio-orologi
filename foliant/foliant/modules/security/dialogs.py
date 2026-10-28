@@ -156,11 +156,12 @@ class ProtectDialog(QDialog):
         # --- cifratura
         g3 = QGroupBox(_("Cifratura"))
         f3 = QFormLayout(g3)
+        # SEC-06: la nuova protezione usa sempre AES a 256 bit (i metodi più vecchi
+        # si leggono e si conservano solo se il file non viene protetto di nuovo)
         self.method = QComboBox()
-        minimum = {P.AES256: "PDF 2.0 / 1.7 ext. 8", P.AES128: "PDF 1.6", P.RC4: "PDF 1.4"}
-        for key, label in P.method_labels().items():
-            self.method.addItem(f"{label} — {minimum[key]}", key)
-        f3.addRow(_("Livello di cifratura:"), self.method)
+        self.method.addItem(_("AES, chiave a 256 bit"), P.AES256)
+        self.method.setEnabled(False)
+        f3.addRow(_("Metodo:"), self.method)
         self.method_note = _note("", "warning")
         f3.addRow(self.method_note)
         lay.addWidget(g3)
@@ -183,7 +184,6 @@ class ProtectDialog(QDialog):
         for key, cb in self.perm_boxes.items():
             cb.setChecked(key in current.allowed or not current.restrict)
         self.print_combo.setCurrentIndex(max(0, self.print_combo.findData(current.print_level)))
-        self.method.setCurrentIndex(max(0, self.method.findData(current.method)))
 
         for w in (self.open_pw, self.open_pw2, self.perm_pw, self.perm_pw2):
             w.changed.connect(self._update)

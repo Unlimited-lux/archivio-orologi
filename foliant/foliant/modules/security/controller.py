@@ -249,7 +249,7 @@ class SecurityController:
         if doc is None:
             return
         rows = security_rows(doc)
-        weak = any(head == _("Protezione debole") for head, _d in rows)
+        weak = any(head in (_("Protezione debole"), _("Metodo superato in PDF 2.0")) for head, _d in rows)
         action = (_("Aggiorna ad AES-256") if weak else
                   _("Modifica protezione…") if doc.is_protected else _("Proteggi…"))
         dlg = D.ReportDialog(_("Proprietà di sicurezza"), "", rows, self.parent, action=action)
@@ -602,13 +602,18 @@ class SecurityController:
         return True
 
     def offer_save_redacted(self, view) -> None:
-        doc = view.document
-        stem = Path(doc.display_name).stem
-        if not self.ctx.confirm(_("Salvare il documento redatto?"),
-                                _("Salva ora una copia con nome «{n}_redatto.pdf»: l'originale resta intatto.")
-                                .format(n=stem)):
+        self.offer_save_copy(view, "_redatto", _("Salvare il documento redatto?"))
+
+    def offer_save_copy(self, view, suffix: str, question: str) -> None:
+        """Propone «Salva con nome» con il suffisso indicato (es. contratto_ripulito.pdf)."""
+        if view is None:
             return
-        path = self.ctx.ask_save_path(_("Salva documento redatto"), f"{stem}_redatto.pdf")
+        doc = view.document
+        name = f"{Path(doc.display_name).stem}{suffix}.pdf"
+        if not self.ctx.confirm(question, _("Salva ora una copia con nome «{n}»: l'originale resta intatto.")
+                                .format(n=name)):
+            return
+        path = self.ctx.ask_save_path(question.rstrip("?"), name)
         if not path:
             return
         try:
@@ -674,6 +679,7 @@ class SecurityController:
         done = ", ".join(labels[k].split(" (")[0].lower() for k in result.done if k in labels)
         self.ctx.status(_("Dati nascosti rimossi: {d}").format(d=done or _("nulla da rimuovere")))
         self.refresh_document_state(self.view())
+        self.offer_save_copy(self.view(), "_ripulito", _("Salvare il documento ripulito?"))
         return True
 
     def edit_metadata(self) -> bool:
@@ -1023,7 +1029,8 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
         rows.append((_("Nessuna protezione"), [_("Tutti i permessi sono consentiti.")]))
     else:
         algo = desc or ""
-        method = {P.AES256: _("AES 256 bit"), P.AES128: _("AES 128 bit"), P.RC4: _("RC4 128 bit")}
+        method = {P.AES256: _("AES, chiave a 256 bit"), P.AES128: _("AES, chiave a 128 bit"),
+                  P.RC4: _("RC4, chiave a 128 bit")}
         details = []
         if desc:
             details.append(_("All'apertura: {d}").format(d=desc))
@@ -1041,6 +1048,9 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
         rows.append((head, details))
         enc = P.open_encryption_details(doc)
         weak = ("RC4" in algo.upper()) or enc.get("R") == 5 or i.method == P.RC4
+        if not weak and (i.method == P.AES128 or ("AES" in algo.upper() and "128" in algo)):
+            rows.append((_("Metodo superato in PDF 2.0"),
+                         [_("AES a 128 bit è deprecato in PDF 2.0: aggiorna ad AES-256.")]))
         if weak:
             rows.append((_("Protezione debole"),
                          [_("L'algoritmo RC4 o AES-256 revisione 5 non è più considerato sicuro: aggiorna ad "
@@ -1049,21 +1059,21 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
     perms = int(doc.save_options.get("permissions", -1)) if i.protected else -1
     if not P.owner_known(doc):
         perms = int(doc.original_protection.get("permissions", -1))
-    labels = P.permission_labels()
-    lines = []
+    short = {"modify": _("Modificare il contenuto"), "copy": _("Copiare testo e immagini"),
+             "annotate": _("Aggiungere commenti"), "form": _("Compilare i moduli"),
+             "accessibility": _("Estrarre il testo per l'accessibilità"),
+             "assemble": _("Inserire, ruotare ed eliminare pagine")}
+    allowed, denied = [], []
     if not perms & pymupdf.PDF_PERM_PRINT:
-        lines.append(_("Stampa: non consentita"))
+        denied.append(_("Stampare"))
     elif not perms & pymupdf.PDF_PERM_PRINT_HQ:
-        lines.append(_("Stampa: bassa risoluzione"))
+        allowed.append(_("Stampare, solo a bassa risoluzione"))
     else:
-        lines.append(_("Stampa: consentita"))
-    short = {"modify": _("Modifica"), "copy": _("Copia"), "annotate": _("Commenti"), "form": _("Compilazione"),
-             "accessibility": _("Accessibilità"), "assemble": _("Assemblaggio")}
+        allowed.append(_("Stampare"))
     for key, bit in P.PERM_BITS.items():
-        state = _("consentita") if perms & bit else _("non consentita")
-        lines.append(f"{short[key]}: {state}")
-    del labels
-    rows.append((_("Permessi"), lines))
+        (allowed if perms & bit else denied).append(short[key])
+    rows.append((_("Azioni consentite"), allowed))
+    rows.append((_("Azioni non consentite"), denied))
     return rows
 
 
