@@ -893,6 +893,8 @@ class SignOptions:
     md_algorithm: str = "sha256"
     allow_expired: bool = False
     password: str | None = None    # password del documento cifrato (mai salvata)
+    pades_level: str = ""          # "", "B-B", "B-T", "B-LT", "B-LTA" (SIG-22; "" = B-T se c'è una TSA)
+    validation_roots: list | None = None   # certificati attendibili per raccogliere i dati di verifica
 
 
 TSA_CAFILE: str | None = None   # certificati di CA per il TLS della TSA (None: archivio predefinito)
@@ -1164,7 +1166,105 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     for w in style.warnings:
         if w not in warnings:
             warnings.append(w)
+    if options.pades_level in ("B-LT", "B-LTA"):
+        # SIG-22: dati di verifica in una revisione successiva, poi (B-LTA) la marca di documento.
+        # Se qualcosa non si ottiene il documento resta al livello raggiunto, con il motivo.
+        if timestamper is None:
+            warnings.append(_("Livello {lvl} non raggiunto: serve un server di marca temporale.").format(
+                lvl=options.pades_level))
+            return result, warnings
+        result, more = add_validation_info_pdf(result, trusted=options.validation_roots or (),
+                                               password=options.password)
+        warnings += more
+        if more:
+            return result, warnings + [_("Livello raggiunto: B-T.")]
+        if options.pades_level == "B-LTA":
+            try:
+                result = add_document_timestamp(result, timestamper, trusted=options.validation_roots or (),
+                                                password=options.password)
+            except TimestampError as e:
+                warnings.append(_("Marca temporale del documento non ottenuta ({e}): il documento resta a livello "
+                                  "B-LT; puoi aggiungerla più tardi dal pannello Firme.").format(e=e))
     return result, warnings
+
+
+def _collection_context(trusted, extra_roots=(), allow_fetching: bool = True):
+    from pyhanko_certvalidator import ValidationContext
+    roots = [asn1_x509.Certificate.load(d) for d in _trusted_der(trusted)] + list(extra_roots)
+    return ValidationContext(trust_roots=roots, allow_fetching=allow_fetching, revocation_mode="hard-fail")
+
+
+def add_validation_info_pdf(data: bytes, *, trusted=(), password: str | None = None,
+                            allow_fetching: bool = True) -> tuple[bytes, list[str]]:
+    """SIG-22 «Aggiungi informazioni di verifica»: per ogni firma raccoglie catena e risposte di revoca
+    (OCSP o CRL) e le aggiunge in /DSS con una revisione incrementale. Restituisce (byte, avvisi): una firma
+    per cui i dati non si ottengono resta com'è e produce un avviso con il motivo."""
+    from pyhanko.pdf_utils.reader import PdfFileReader
+    from pyhanko.sign.validation import add_validation_info
+
+    data = bytes(data)
+    warnings: list[str] = []
+    reader = PdfFileReader(io.BytesIO(data), strict=False)
+    if reader.encrypted:
+        _decrypt_with(reader, password)
+    count = len(reader.embedded_signatures)
+    for i in range(count):
+        reader = PdfFileReader(io.BytesIO(data), strict=False)
+        if reader.encrypted:
+            _decrypt_with(reader, password)
+        emb = reader.embedded_signatures[i]
+        name = emb.field_name
+        # un certificato autofirmato è la radice di sé stesso: non ha revoca da raccogliere
+        own = [emb.signer_cert] if emb.signer_cert.self_issued else []
+        try:
+            out = add_validation_info(emb, _collection_context(trusted, own), output=io.BytesIO())
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(_("Dati di verifica non ottenuti per «{name}»: {e}").format(
+                name=name, e=str(exc) or type(exc).__name__))
+            continue
+        new = out.getvalue()
+        if not new.startswith(data):
+            raise SignError(_("Firma non riuscita: il salvataggio non è incrementale"))
+        data = new
+    return data, warnings
+
+
+def add_document_timestamp(data: bytes, timestamper=None, *, url: str | None = None, timeout: float = 15.0,
+                           trusted=(), password: str | None = None) -> bytes:
+    """SIG-22 «Aggiungi marca temporale al documento» (/DocTimeStamp, ETSI.RFC3161) in una revisione
+    incrementale, con i dati di verifica della TSA quando si ottengono."""
+    from pyhanko.sign import signers
+    from pyhanko.sign.timestamps import HTTPTimeStamper
+
+    if timestamper is None:
+        if not url:
+            raise SignError(_("Nessun server di marca temporale configurato."))
+        timestamper = HTTPTimeStamper(url, timeout=timeout)
+    data = bytes(data)
+
+    def stamp(vc):
+        writer = _open_writer(data, password)
+        out = io.BytesIO()
+        signers.PdfTimeStamper(timestamper).timestamp_pdf(writer, "sha256", validation_context=vc, output=out)
+        return out.getvalue()
+
+    try:
+        try:
+            result = stamp(_collection_context(trusted, allow_fetching=True))
+        except Exception as exc:  # noqa: BLE001 - catena della TSA non verificabile: marca senza DSS
+            if _is_timestamp_failure(exc):
+                raise
+            result = stamp(None)
+    except SignError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if _is_timestamp_failure(exc):
+            raise _timestamp_error(exc) from exc
+        raise SignError(_("Marca temporale del documento non riuscita: {e}").format(
+            e=str(exc) or type(exc).__name__)) from exc
+    if not result.startswith(data):
+        raise SignError(_("Firma non riuscita: il salvataggio non è incrementale"))
+    return result
 
 
 def _is_timestamp_failure(exc: BaseException) -> bool:
@@ -1764,6 +1864,9 @@ def _trusted_der(trusted) -> list[bytes]:
     return out
 
 
+ARCHIVE_RENEWAL_DAYS = 90     # preavviso per il rinnovo della marca d'archivio (SIG-22)
+
+
 def _embedded_signature_class(base):
     """EmbeddedPdfSignature che nasconde a pyHanko il vincolo /SV /Cert /OID (non supportato:
     solleverebbe NotImplementedError); la policy la controlla `_verify_one`."""
@@ -1854,6 +1957,15 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
             st.reasons.append(_("Il certificato non ha la policy richiesta dal campo ({oids})").format(
                 oids=", ".join(wanted)))
     results.sort(key=lambda s: s.revision_end)
+    # SIG-22: il certificato della TSA dell'ultima marca d'archivio sta per scadere → rinnovo
+    archive = [s for s in results if s.kind == "marca temporale del documento" and s.signer_cert is not None]
+    if archive:
+        last = archive[-1]
+        left = last.signer_cert.not_after - datetime.now(timezone.utc)
+        if left < timedelta(days=ARCHIVE_RENEWAL_DAYS):
+            last.reasons.append(_("Il certificato della TSA scade il {date}: aggiungi una nuova marca temporale al "
+                                  "documento per prolungare la verificabilità delle firme").format(
+                date=_fmt_date(last.signer_cert.not_after)))
     return results
 
 
@@ -2136,6 +2248,18 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "Il certificato della TSA scade il {date}: aggiungi una nuova marca temporale al documento per prolungare la "
+    "verificabilità delle firme": "The TSA certificate expires on {date}: add a new document timestamp to extend "
+                                  "the verifiability of the signatures",
+    "Livello {lvl} non raggiunto: serve un server di marca temporale.":
+        "Level {lvl} not reached: a timestamp server is required.",
+    "Livello raggiunto: B-T.": "Level reached: B-T.",
+    "Marca temporale del documento non ottenuta ({e}): il documento resta a livello B-LT; puoi aggiungerla più "
+    "tardi dal pannello Firme.": "Document timestamp not obtained ({e}): the document stays at level B-LT; you can "
+                                 "add it later from the Signatures panel.",
+    "Dati di verifica non ottenuti per «{name}»: {e}": "Validation data not obtained for “{name}”: {e}",
+    "Nessun server di marca temporale configurato.": "No timestamp server configured.",
+    "Marca temporale del documento non riuscita: {e}": "Document timestamp failed: {e}",
     "campo bloccato modificato: «{name}»": "locked field changed: “{name}”",
     "tutte le {n} firme sono valide": "all {n} signatures are valid",
     "Certificato client per la marca temporale non leggibile o password errata":

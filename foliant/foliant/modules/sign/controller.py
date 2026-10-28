@@ -954,6 +954,84 @@ class SignController(QObject):
             self.verify(new_view, force=True)
         return new_view
 
+    def trusted_certificates(self) -> list:
+        """Certificati attendibili dell'utente (più quelli di sistema se abilitati)."""
+        from . import store
+        trusted = store.TrustStore().certificates()
+        if str(self.ctx.settings().value("sign/system_certs", "false")).lower() == "true":
+            trusted = trusted + store.system_certificates()
+        return trusted
+
+    def add_long_term(self, view, what: str) -> bool:
+        """SIG-22 dal pannello: «dss» = «Aggiungi informazioni di verifica», «ts» = «Aggiungi marca
+        temporale al documento». Revisione incrementale sullo stesso file: le firme restano valide."""
+        from . import digital, store
+        title = _("Aggiungi informazioni di verifica") if what == "dss" else _("Aggiungi marca temporale al documento")
+        doc = view.document
+        if not self._ensure_saved(view) or not doc.path:
+            return False
+        timestamper = None
+        if what == "ts":
+            srv = store.TSAConfig().default()
+            if srv is None:
+                self.ctx.error(title, _("Configura un server di marca temporale in «ID digitali…» › Server marca "
+                                        "temporale."))
+                return False
+            from pyhanko.sign.timestamps import HTTPTimeStamper
+            auth = None
+            if srv.user:
+                pw = store.tsa_password(srv.url)
+                if pw is None:
+                    pw, ok = QInputDialog.getText(self.ctx.window, title, _("Password per «{u}» su {url}:").format(
+                        u=srv.user, url=srv.url), QLineEdit.EchoMode.Password)
+                    if not ok:
+                        return False
+                auth = (srv.user, pw)
+            if srv.client_cert:
+                pw = store.tsa_client_password(srv.url)
+                if pw is None:
+                    pw, ok = QInputDialog.getText(self.ctx.window, title, _(
+                        "Password del certificato client {f}:").format(f=Path(srv.client_cert).name),
+                        QLineEdit.EchoMode.Password)
+                    if not ok:
+                        return False
+                timestamper = digital._client_cert_timestamper(HTTPTimeStamper)(
+                    srv.url, timeout=srv.timeout, auth=auth, ssl_context=digital.tsa_ssl_context(srv.client_cert, pw))
+            else:
+                timestamper = HTTPTimeStamper(srv.url, timeout=srv.timeout, auth=auth)
+        try:
+            data = Path(doc.path).read_bytes()
+        except OSError as e:
+            self.ctx.error(title, str(e.strerror or e))
+            return False
+        trusted = self.trusted_certificates()
+        password = doc.password
+        try:
+            if what == "dss":
+                out, warnings = self.ctx.run_task(title, lambda progress: digital.add_validation_info_pdf(
+                    data, trusted=trusted, password=password), cancellable=False)
+            else:
+                out = self.ctx.run_task(title, lambda progress: digital.add_document_timestamp(
+                    data, timestamper, trusted=trusted, password=password), cancellable=False)
+                warnings = []
+        except digital.SignError as e:
+            self.ctx.error(title, str(e))
+            return False
+        if out == data:
+            self.ctx.info(title, "\n".join(warnings) or _("Nessun dato da aggiungere."))
+            return False
+        try:
+            atomic_write(doc.path, out)
+        except DocumentError as e:
+            self.ctx.error(title, str(e))
+            return False
+        self._reopen(view, doc.path)
+        if warnings:
+            self.ctx.info(title, "\n".join(warnings))
+        else:
+            self.ctx.status(_("{what}: fatto.").format(what=title), 6000)
+        return True
+
     def _go_to_next_unsigned(self, view, data: bytes) -> None:
         """SIG-20: dopo la firma di un campo si passa al successivo ancora da firmare."""
         from . import digital
@@ -1139,6 +1217,13 @@ class SignController(QObject):
 
 
 TRANSLATIONS_EN = {
+    "Aggiungi informazioni di verifica": "Add validation information",
+    "Aggiungi marca temporale al documento": "Add document timestamp",
+    "Configura un server di marca temporale in «ID digitali…» › Server marca temporale.":
+        "Configure a timestamp server in “Digital IDs…” › Timestamp servers.",
+    "Password per «{u}» su {url}:": "Password for “{u}” on {url}:",
+    "Password del certificato client {f}:": "Password of client certificate {f}:",
+    "Nessun dato da aggiungere.": "No data to add.", "{what}: fatto.": "{what}: done.",
     "Sincronizzazione sospesa: serve la passphrase della cartella.":
         "Sync suspended: the folder passphrase is needed.",
     "Sincronizzazione sospesa": "Sync suspended", "Sincronizzazione sospesa: {e}": "Sync suspended: {e}",

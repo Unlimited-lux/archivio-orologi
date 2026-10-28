@@ -168,6 +168,16 @@ class DigitalSignDialog(QDialog):
             self.tsa.addItem(req_url, (req_url, 15.0))
             self.tsa.setToolTip(_("Il campo richiede una marca temporale da questo server."))
         form.addRow(_("Marca temporale:"), self.tsa)
+        # SIG-22: livello PAdES (B-T predefinito se c'è una TSA, altrimenti B-B)
+        self.pades = QComboBox()
+        self.pades.setAccessibleName(_("Livello PAdES"))
+        for lvl, label in [("B-B", _("B-B — firma di base")), ("B-T", _("B-T — con marca temporale")),
+                           ("B-LT", _("B-LT — con dati di verifica (lungo termine)")),
+                           ("B-LTA", _("B-LTA — con marca temporale del documento (archivio)"))]:
+            self.pades.addItem(label, lvl)
+        form.addRow(_("Livello:"), self.pades)
+        self.tsa.currentIndexChanged.connect(lambda _i: self._update_pades())
+        self._update_pades()
         self.level = QComboBox()
         for lvl, label in LEVELS:
             self.level.addItem(_(label), lvl)
@@ -361,6 +371,9 @@ class DigitalSignDialog(QDialog):
             contact=self.contact.text().strip(), appearance=appearance,
             timestamp_url=tsa[0] if tsa else None, timestamp_timeout=float(tsa[1]) if tsa else 15.0,
             timestamp_auth=self.tsa_auth(tsa), timestamp_client_cert=self.tsa_client_cert(tsa),
+            pades_level=self.pades.currentData() if tsa else "B-B",
+            validation_roots=self.c.trusted_certificates()
+            if self.pades.currentData() in ("B-LT", "B-LTA") else None,
             certify=self.certify, docmdp_level=int(self.level.currentData()),
             allow_expired=self.allow_expired.isChecked(),
             lock_fields=[f.strip() for f in self.lock.text().split(",") if f.strip()] or None)
@@ -383,6 +396,18 @@ class DigitalSignDialog(QDialog):
             if not ok:
                 return None
         return (tsa[2], pw)
+
+    def _update_pades(self) -> None:
+        has_tsa = self.tsa.currentData() is not None
+        model = self.pades.model()
+        for i in range(1, self.pades.count()):
+            model.item(i).setEnabled(has_tsa)
+        if not has_tsa:
+            self.pades.setCurrentIndex(0)
+        elif self.pades.currentIndex() == 0:
+            self.pades.setCurrentIndex(1)
+        self.pades.setToolTip("" if has_tsa else _("I livelli B-T, B-LT e B-LTA richiedono un server di marca "
+                                                   "temporale."))
 
     def tsa_client_cert(self, tsa) -> tuple[str, str] | None:
         """Certificato client della TSA: password dal portachiavi, altrimenti chiesta (mai salvata su file)."""
@@ -1173,6 +1198,12 @@ class SignPreferences(QWidget):
 
 
 TRANSLATIONS_EN = {
+    "Livello PAdES": "PAdES level", "Livello:": "Level:", "B-B — firma di base": "B-B — basic signature",
+    "B-T — con marca temporale": "B-T — with timestamp",
+    "B-LT — con dati di verifica (lungo termine)": "B-LT — with validation data (long term)",
+    "B-LTA — con marca temporale del documento (archivio)": "B-LTA — with document timestamp (archival)",
+    "I livelli B-T, B-LT e B-LTA richiedono un server di marca temporale.":
+        "Levels B-T, B-LT and B-LTA require a timestamp server.",
     "Firme grafiche al salvataggio": "Graphic signatures on save",
     "Firme grafiche al salvataggio:": "Graphic signatures on save:",
     "Mantieni come annotazioni (modificabili)": "Keep as annotations (editable)",
