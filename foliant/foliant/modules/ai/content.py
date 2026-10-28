@@ -199,6 +199,16 @@ def extract_page(pdf: pymupdf.Document, index: int, *, include_comments: bool = 
     return PageText(index, page_label(pdf, index), text, excluded)
 
 
+def view_selections(view) -> list:
+    """Selezione di testo della vista, una per pagina (`view.text_selections`)."""
+    if view is None:
+        return []
+    sels = getattr(view, "text_selections", None)
+    if sels is None:
+        sels = [view.text_selection] if view.text_selection is not None else []
+    return [s for s in sels if s is not None]
+
+
 def selection_text(pdf: pymupdf.Document, page: int, rects: list[pymupdf.Rect]) -> str:
     """Testo di una selezione, applicando le stesse esclusioni delle pagine."""
     words, _excluded = safe_words(pdf, page)

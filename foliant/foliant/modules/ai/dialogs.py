@@ -141,16 +141,21 @@ class TextlessDialog(QDialog):
 
 
 # =================================================================== impostazioni
-class SettingsDialog(QDialog):
-    """Impostazioni › Assistente IA (AI-01, AI-02, AI-18)."""
+class SettingsPage(QWidget):
+    """Preferenze › Assistente IA (AI-01, AI-02, AI-18): pagina delle Preferenze e corpo di `SettingsDialog`.
+
+    Le opzioni si applicano subito; le modifiche al profilo con «Salva profilo» oppure con `apply()`
+    (pulsante «Salva» delle Preferenze).
+    """
 
     def __init__(self, store: ProfileStore, parent=None, *, verify=None):
         super().__init__(parent)
         self.store = store
         self._verify_fn = verify          # funzione (profile, key) -> list[str], simulabile nei test
-        self.setWindowTitle(_("Impostazioni dell'Assistente IA"))
-        self.resize(820, 600)
+        self._loading = False
+        self._dirty = False
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
         self.enabled = QCheckBox(_("Funzioni IA"))
         self.enabled.setChecked(store.enabled())
         self.enabled.toggled.connect(store.set_enabled)
@@ -288,12 +293,30 @@ class SettingsDialog(QDialog):
         ol.addRow(self.history_encrypt)
         ol.addRow(_("Elimina automaticamente dopo"), self.retention)
         outer.addWidget(opts)
-        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        close.rejected.connect(self.reject)
-        outer.addWidget(close)
         self._current: Profile | None = None
         self._models_verified: list[str] = []
+        for w in (self.name, self.base_url, self.key, self.embed_model, self.image_model, self.privacy):
+            w.textChanged.connect(self._mark_dirty)
+        for w in (self.provider, self.protocol, self.period):
+            w.currentIndexChanged.connect(self._mark_dirty)
+        self.model.currentTextChanged.connect(self._mark_dirty)
+        for w in (self.context, self.max_out, self.limit):
+            w.valueChanged.connect(self._mark_dirty)
+        self.images.toggled.connect(self._mark_dirty)
         self.refresh()
+
+    def _mark_dirty(self, *_a) -> None:
+        if not self._loading:
+            self._dirty = True
+
+    @property
+    def dirty(self) -> bool:
+        """Modifiche al profilo non ancora salvate."""
+        return self._dirty and self._current is not None
+
+    def apply(self) -> bool:
+        """«Salva» delle Preferenze: salva le modifiche al profilo in corso (le opzioni sono già salvate)."""
+        return self.save_profile() if self.dirty else True
 
     # ----------------------------------------------------------------- elenco
     def refresh(self, select: str | None = None) -> None:
@@ -313,6 +336,14 @@ class SettingsDialog(QDialog):
         self._load_current()
 
     def _load_current(self, *_a) -> None:
+        self._loading = True
+        try:
+            self._load_profile()
+        finally:
+            self._loading = False
+            self._dirty = False
+
+    def _load_profile(self) -> None:
         item = self.list.currentItem()
         p = self.store.get(item.data(Qt.ItemDataRole.UserRole)) if item else None
         self._current = p
@@ -517,6 +548,41 @@ class SettingsDialog(QDialog):
         if self.store.active_id() == p.id:
             self.store.set_active(None)
         self.refresh(select=p.id)
+
+
+class SettingsDialog(QDialog):
+    """«Impostazioni dell'Assistente IA» in una finestra propria (stessa pagina delle Preferenze)."""
+
+    def __init__(self, store: ProfileStore, parent=None, *, verify=None):
+        super().__init__(parent)
+        self.setWindowTitle(_("Impostazioni dell'Assistente IA"))
+        self.resize(820, 600)
+        lay = QVBoxLayout(self)
+        self.page = SettingsPage(store, self, verify=verify)
+        lay.addWidget(self.page, 1)
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(self.reject)
+        lay.addWidget(close)
+
+    def reject(self) -> None:
+        if self.page.dirty and QMessageBox.question(
+                self, _("Profilo modificato"), _("Salvare le modifiche al profilo?")) == \
+                QMessageBox.StandardButton.Yes and not self.page.save_profile():
+            return
+        super().reject()
+
+    def __getattr__(self, name):
+        page = self.__dict__.get("page")
+        if page is None:
+            raise AttributeError(name)
+        return getattr(page, name)
+
+    def __setattr__(self, name, value):
+        page = self.__dict__.get("page")
+        if page is not None and not hasattr(type(self), name) and hasattr(page, name):
+            setattr(page, name, value)      # es. `ask_consent` simulato nei test
+        else:
+            super().__setattr__(name, value)
 
 
 # =================================================================== registro invii
