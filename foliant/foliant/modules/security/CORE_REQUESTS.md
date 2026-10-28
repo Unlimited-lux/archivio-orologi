@@ -56,3 +56,15 @@ label, run(path, out, options), options_widget=None)`, dove `run` lavora su un f
 alla volta in un thread di lavoro. Per ora il modulo security offre un proprio comando,
 «Policy di protezione › Applica a più file…» (`SecurityController.apply_policy_to_files`).
 Con il registro basterebbe iscrivere `policies.protect_file`.
+
+## 10. Pagina «Sicurezza e riservatezza» delle Preferenze (SEC-32, UX-17)
+
+La specifica colloca le impostazioni del blocco in Preferenze › Sicurezza e
+riservatezza. Il modulo ha già la pagina (`applock.LockPreferences`, con `apply()`),
+ma `tests/test_window_services.py::test_preferences_pages_and_author_name` si aspetta
+che le pagine siano esattamente quelle aggiunte dal test: con una pagina in più del
+modulo, il test fallisce. Proposta: nel test confrontare solo le pagine aggiunte
+(per esempio `[...][-2:]`) oppure creare la finestra senza moduli. Dopo la modifica, in
+`security/__init__.py` basta
+`ctx.add_preferences_page(_("Sicurezza e riservatezza"), lambda parent=None: LockPreferences(c.applock, parent))`.
+Per ora la stessa pagina si apre da Proteggi › Blocco dell'applicazione….

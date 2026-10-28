@@ -323,6 +323,23 @@ class SecurityController:
         self.refresh_document_state(self.view())
         return True
 
+    # ------------------------------------------------------ blocco (SEC-32)
+    def lock_app(self) -> bool:
+        lock = getattr(self, "applock", None)
+        if lock is None:
+            return False
+        if not lock.configured:
+            self.lock_settings()
+            if not lock.configured:
+                return False
+        return lock.lock()
+
+    def lock_settings(self) -> bool:
+        """Impostazioni del blocco (SEC-32): codice, inattività, blocco all'avvio."""
+        from .applock import LockDialog
+        lock = getattr(self, "applock", None)
+        return lock is not None and run_dialog(LockDialog(lock, self.parent))
+
     # ------------------------------------------------------------ policy
     def policy_store(self) -> POL.PolicyStore:
         return POL.PolicyStore(self.settings())

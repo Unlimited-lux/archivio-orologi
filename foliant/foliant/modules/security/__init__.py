@@ -80,6 +80,17 @@ def register(ctx: Context) -> None:
     ctx.add_menu_action(menu_policy, _("Proteggi"))
     revoke = ctx.action(_("Revoca documenti attendibili"), "shield-x", c.revoke_trust, requires_document=False)
     ctx.add_menu_action(revoke, _("Proteggi"))
+    # Blocco dell'applicazione (SEC-32)
+    from .applock import AppLock, LockPreferences
+    c.applock = AppLock(lambda: c.settings(), ctx.window)
+    lock_now = ctx.action(_("Blocca Foliant"), "lock-keyhole", c.lock_app, requires_document=False)
+    c.actions["lock"] = lock_now
+    ctx.add_menu_action(lock_now, _("Proteggi"))
+    lock_settings = ctx.action(_("Blocco dell'applicazione…"), "shield", c.lock_settings, requires_document=False)
+    c.actions["lock_settings"] = lock_settings
+    ctx.add_menu_action(lock_settings, _("Proteggi"))
+    # la pagina «Sicurezza e riservatezza» delle Preferenze attende CORE_REQUESTS §10
+    c.lock_preferences = LockPreferences
 
     ctx.add_properties_panel(PANEL_ID, c.panel)
     mode.entered.connect(lambda: ctx.show_properties(PANEL_ID) if ctx.current_view() else None)
@@ -123,6 +134,7 @@ def register(ctx: Context) -> None:
     ctx.add_guard("save", c.save_guard)        # SEC-19: segni non applicati prima di salvare
     ctx.add_guard("save_as", c.save_guard)
     ctx.add_guard("print", c.save_guard)       # anche prima di stampare (moduli che usano run_guards)
+    c.applock.start()                          # blocco all'avvio, prima dei file passati da riga di comando
     _update_actions(c, None)
 
 
