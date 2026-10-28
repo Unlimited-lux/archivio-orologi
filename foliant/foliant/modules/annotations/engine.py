@@ -1244,7 +1244,7 @@ def _rotated_box(w: float, h: float, angle: float) -> tuple[float, float]:
 def _apply_rotation(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
     """Ruota l'aspetto (/Matrix del Form XObject) e adatta /Rect all'ingombro ruotato."""
     angle, size = _rotation(pdf, xref)
-    annot = get_annot(page, xref)
+    get_annot(page, xref)
     k, v = pdf.xref_get_key(xref, "AP/N")
     if k != "xref" or size is None:
         return
@@ -2390,7 +2390,7 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
     Con `pages` si appiattiscono solo quelle pagine. I campi modulo restano."""
     selected = set(only) if only is not None else None
     if selected is not None:
-        pages = {p for p, _x in selected}
+        return _flatten_selected(pdf, selected)
     targets = set(pages) if pages is not None else set(range(pdf.page_count))
     count = 0
     for i in targets:
@@ -2411,6 +2411,7 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
             if i not in targets:
                 saved[xref] = pdf.xref_get_key(xref, "Annots")
                 pdf.xref_set_key(xref, "Annots", "null")
+                page = pdf.reload_page(page)
                 continue
             keep = [a.xref for a in page.annots()
                     if a.type[0] in NON_COMMENT_TYPES or a.flags & pymupdf.PDF_ANNOT_IS_PRINT
@@ -2429,6 +2430,11 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
                 partial[xref] = noprint
                 _, _k, refs = _annots_array(pdf, page)
                 pdf.xref_set_key(xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in refs if x not in noprint) + "]")
+                page = pdf.reload_page(page)   # il motore rilegge l'elenco delle annotazioni
+        # nessuna pagina deve restare aperta: il motore userebbe l'elenco di annotazioni in memoria
+        page = None
+        import gc
+        gc.collect()
         pdf.bake(annots=True, widgets=False)
     finally:
         for xref, (kind, value) in saved.items():
@@ -2437,6 +2443,48 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
             k, v = pdf.xref_get_key(xref, "Annots")
             now = [int(x) for x in re.findall(r"(\d+)\s+0\s+R", v)] if k == "array" else []
             pdf.xref_set_key(xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in keep_refs + now) + "]")
+    return count
+
+
+def _flatten_selected(pdf: pymupdf.Document, selected: set[tuple[int, int]]) -> int:
+    """Appiattisce solo le annotazioni scelte: si cuociono in una copia che contiene soltanto
+    quelle (senza il contenuto della pagina) e il risultato si sovrappone alla pagina."""
+    from foliant.core import placement
+
+    pages = sorted({p for p, _x in selected})
+    tmp = pymupdf.open(stream=pdf.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_NONE), filetype="pdf")
+    count = 0
+    try:
+        for page_no in range(tmp.page_count):
+            tp = tmp[page_no]
+            chosen = {x for p, x in selected if p == page_no}
+            keep = set()
+            for a in tp.annots():
+                if a.xref in chosen and a.flags & pymupdf.PDF_ANNOT_IS_PRINT and not a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+                    keep.add(a.xref)
+            for x in [a.xref for a in tp.annots() if a.xref not in keep
+                      and a.type[0] not in (pymupdf.PDF_ANNOT_WIDGET,)]:
+                a = find_annot(tp, x)
+                if a is not None:
+                    tp.delete_annot(a)
+            count += len(keep)
+            if page_no in pages:
+                for cx in tp.get_contents():
+                    tmp.update_stream(cx, b" ")
+        if not count:
+            return 0
+        tmp.bake(annots=True, widgets=False)
+        for page_no in pages:
+            page = pdf[page_no]
+            placement.show_pdf_page(page, placement.page_rect(page), tmp, page_no, keep_proportion=False,
+                                    overlay=True, as_displayed=False)
+            done = {x for p, x in selected if p == page_no}
+            for x in list(done):
+                a = find_annot(page, x)
+                if a is not None and a.flags & pymupdf.PDF_ANNOT_IS_PRINT:
+                    delete_annot(pdf, page_no, x, force=True)
+    finally:
+        tmp.close()
     return count
 
 

@@ -155,7 +155,7 @@ EN: dict[str, str] = {
     "Seleziona almeno due annotazioni sulla stessa pagina.": "Select at least two annotations on the same page.",
     "Per distribuire servono almeno tre annotazioni.": "At least three annotations are needed to distribute.",
     "Il documento è PDF/A-1: il profilo non ammette file allegati.":
-        "The document is PDF/A-1: the profile does not allow attached files.", "Appiattisci selezione…": "Flatten selection…", "Risposte": "Replies", "Con risposte": "With replies",
+        "The document is PDF/A-1: the profile does not allow attached files.", "Appiattisci selezione…": "Flatten selection…", "Appiattisci selezione": "Flatten selection", "Risposte": "Replies", "Con risposte": "With replies",
     "Senza risposte": "Without replies", "Cronologia degli stati": "Status history",
     "Cronologia degli stati…": "Status history…", "Adesivi": "Stickers", "Adesivo": "Sticker",
     "Aggiungi adesivo": "Add sticker", "Spunta verde": "Green check", "Croce rossa": "Red cross",
