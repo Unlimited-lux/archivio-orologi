@@ -57,6 +57,7 @@ def register(ctx: Context) -> None:
         "envelope": act(_("Cifra solo gli allegati"), "file-lock", c.save_envelope),
         "new_envelope": act(_("Crea busta di sicurezza"), "mail-plus", lambda: c.create_envelope(),
                             requires_document=False),
+        "vault": act(_("Spazio protetto"), "vault", c.manage_vault, requires_document=False),
     }
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QMenu
@@ -76,7 +77,7 @@ def register(ctx: Context) -> None:
             mode.add_separator()
         for key in group:
             mode.add_action(c.actions[key])
-    for key in ("protect", "remove", "envelope", "new_envelope", "sanitize", "metadata"):
+    for key in ("protect", "remove", "envelope", "new_envelope", "vault", "sanitize", "metadata"):
         ctx.add_menu_action(c.actions[key], _("Proteggi"))
     menu_policy = ctx.action(_("Policy di protezione"), "shield-plus", c.manage_policies, requires_document=False)
     menu_policy.setMenu(c.policy_menu)
@@ -137,6 +138,13 @@ def register(ctx: Context) -> None:
     ctx.add_guard("save", c.save_guard)        # SEC-19: segni non applicati prima di salvare
     ctx.add_guard("save_as", c.save_guard)
     ctx.add_guard("print", c.save_guard)       # anche prima di stampare (moduli che usano run_guards)
+    # spazio protetto (SEC-31): i suoi documenti si salvano cifrati al suo interno
+    ctx.add_guard("save", c.vault_save_guard)
+    ctx.add_guard("save_as", c.vault_save_guard)
+    ctx.add_guard("close_document", c.vault_close_guard)
+    ctx.add_guard("quit", c.vault_quit_guard)
+    c.applock.suspend_hooks.append(
+        lambda: c.lock_vault(auto=True) if getattr(c, "_vault", None) is not None and c._vault.unlocked else None)
     c.applock.start()                          # blocco all'avvio, prima dei file passati da riga di comando
     _update_actions(c, None)
 

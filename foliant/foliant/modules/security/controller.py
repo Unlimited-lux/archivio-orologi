@@ -62,6 +62,31 @@ def choose_envelope_files(parent) -> list[str]:
     return files
 
 
+def ask_vault_unsaved(parent, names: list[str]) -> str | None:
+    """«save», «discard» o None (annulla) per documenti dello spazio protetto modificati."""
+    box = QMessageBox(QMessageBox.Icon.Question, _("Modifiche non salvate"),
+                      _("Salvare nello spazio protetto le modifiche a:") + "\n\n" +
+                      "\n".join("• " + n for n in names), parent=parent)
+    save = box.addButton(_("Salva nello spazio protetto"), QMessageBox.ButtonRole.AcceptRole)
+    discard = box.addButton(_("Non salvare"), QMessageBox.ButtonRole.DestructiveRole)
+    box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(save)
+    box.exec()
+    clicked = box.clickedButton()
+    return "save" if clicked is save else "discard" if clicked is discard else None
+
+
+def choose_vault_files(parent) -> list[str]:
+    from PySide6.QtWidgets import QFileDialog
+    files, _f = QFileDialog.getOpenFileNames(parent, _("Aggiungi allo spazio protetto"), "", _("PDF (*.pdf)"))
+    return files
+
+
+def ask_new_vault_passphrase(parent) -> str | None:
+    dlg = D.PasswordPairDialog(_("Nuova passphrase"), _("Scegli la nuova passphrase dello spazio protetto."), parent)
+    return dlg.pw.text() if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
 def choose_files(parent) -> tuple[list[str], str | None] | None:
     """File PDF da proteggere e cartella di destinazione (None = accanto agli originali)."""
     from PySide6.QtWidgets import QFileDialog
@@ -135,6 +160,7 @@ class SecurityController:
         self._indexes: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
         self._mark_pages: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
         self._pending: "weakref.WeakSet" = weakref.WeakSet()
+        self.vault_docs: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # doc → id nello spazio
         self.panel = RedactionPanel(self)
         self._load_style()
 
@@ -412,6 +438,276 @@ class SecurityController:
             return False
         self.ctx.status(_("Busta di sicurezza salvata: {n}").format(n=os.path.basename(path)))
         return True
+
+    # ------------------------------------------------- spazio protetto (SEC-31)
+    VAULT_FOLDER_KEY = "security/vault/folder"
+    VAULT_MINUTES_KEY = "security/vault/minutes"
+
+    def vault(self):
+        from . import vault as V
+        folder = None
+        s = self.settings()
+        if s is not None:
+            folder = s.value(self.VAULT_FOLDER_KEY, "") or None
+        if folder is None:
+            from PySide6.QtCore import QStandardPaths
+            base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+            folder = os.path.join(base, "spazio-protetto")
+        current = getattr(self, "_vault", None)
+        if current is None or str(current.folder) != str(folder):
+            if current is not None:
+                current.lock()
+            self._vault = V.Vault(folder)
+        return self._vault
+
+    def vault_minutes(self) -> int:
+        s = self.settings()
+        try:
+            return int(s.value(self.VAULT_MINUTES_KEY, 5)) if s is not None else 5
+        except (TypeError, ValueError):
+            return 5
+
+    def set_vault_minutes(self, minutes: int) -> None:
+        s = self.settings()
+        if s is not None:
+            s.setValue(self.VAULT_MINUTES_KEY, int(minutes))
+        self._arm_vault_timer()
+
+    def _arm_vault_timer(self, ms: int | None = None) -> None:
+        from .applock import IdleWatcher
+        if getattr(self, "vault_idle", None) is None:
+            self.vault_idle = IdleWatcher(lambda: self.lock_vault(auto=True), self.ctx.window)
+        if self.vault().unlocked:
+            self.vault_idle.start(ms if ms is not None else self.vault_minutes() * 60_000)
+        else:
+            self.vault_idle.stop()
+
+    def manage_vault(self) -> bool:
+        """Proteggi › Spazio protetto: crea, sblocca e gestisce i documenti custoditi."""
+        from . import vault_ui as VU
+        v = self.vault()
+        if not v.exists:
+            if not run_dialog(VU.SetupDialog(v, self.parent)):
+                if v.exists and not v.unlocked:
+                    return False
+                if not v.exists:
+                    return False
+        elif not v.unlocked and not self.unlock_vault():
+            return False
+        self._arm_vault_timer()
+        run_dialog(VU.VaultDialog(self, self.parent))
+        return True
+
+    def unlock_vault(self) -> bool:
+        from . import vault_ui as VU
+        v = self.vault()
+        dlg = VU.UnlockDialog(v, self.parent)
+        if not run_dialog(dlg):
+            return False
+        if dlg.recovered:
+            self.ctx.info(_("Spazio protetto"), _("Hai sbloccato con la chiave di recupero: scegli ora una nuova "
+                                                  "passphrase."))
+            self.change_vault_passphrase()
+        self._arm_vault_timer()
+        return v.unlocked
+
+    def change_vault_passphrase(self) -> bool:
+        pw = ask_new_vault_passphrase(self.parent)
+        if pw is None:
+            return False
+        try:
+            self.vault().set_passphrase(pw)
+        except Exception as e:
+            self.ctx.error(_("Spazio protetto"), str(e))
+            return False
+        return True
+
+    def open_from_vault(self, oid: str):
+        from foliant.core.document import Document
+        from . import vault as V
+        v = self.vault()
+        try:
+            data = v.read(oid)
+            doc = Document.from_bytes(data, display_name=v.name(oid))
+        except V.VaultTampered as e:
+            self.ctx.error(_("Documento alterato"), _("«{n}» non si apre: {e}").format(n=v.name(oid), e=e))
+            return None
+        except Exception as e:
+            self.ctx.error(_("Spazio protetto"), str(e))
+            return None
+        self.vault_docs[doc] = oid
+        return self.ctx.open_document(doc)
+
+    def can_move_to_vault(self) -> bool:
+        doc = self.document()
+        return doc is not None and doc not in self.vault_docs
+
+    def vault_add_files(self, paths: list[str] | None = None) -> int:
+        paths = paths if paths is not None else choose_vault_files(self.parent)
+        n = 0
+        for path in paths or []:
+            try:
+                with open(path, "rb") as f:
+                    self.vault().add(os.path.basename(path), f.read())
+                n += 1
+            except OSError as e:
+                self.ctx.error(_("Spazio protetto"), _("Impossibile leggere il file: {e}").format(e=e.strerror))
+        if n:
+            self.ctx.status(_("{n} documenti aggiunti allo spazio protetto").format(n=n))
+        return n
+
+    def move_to_vault(self, delete_original: bool | None = None) -> bool:
+        """Sposta il documento aperto nello spazio (con le modifiche non salvate) e lo
+        riapre da lì; a richiesta elimina il file originale."""
+        view = self.view()
+        if view is None or view.document in self.vault_docs:
+            return False
+        doc = view.document
+        with ENGINE_LOCK:
+            data = doc.save_bytes(None, incremental=False) if doc.path is None else \
+                doc.save_bytes(doc.path, incremental=False)
+        oid = self.vault().add(doc.display_name, data)
+        original = doc.path
+        if delete_original is None and original is not None:
+            delete_original = confirm(
+                self.parent, _("Eliminare il file originale?"),
+                _("Il documento è ora nello spazio protetto. Il file originale «{n}» resta sul disco in chiaro: "
+                  "eliminarlo? Sulle unità a stato solido la cancellazione sicura non è garantita.")
+                .format(n=os.path.basename(str(original))), _("Elimina l'originale"))
+        self.ctx.close_view(view, discard=True)
+        if delete_original and original is not None:
+            try:
+                os.unlink(original)
+            except OSError as e:
+                self.ctx.error(_("Spazio protetto"), _("L'originale non è stato eliminato: {e}").format(e=e.strerror))
+        self.open_from_vault(oid)
+        return True
+
+    def vault_export(self, oid: str | None, path: str | None = None) -> bool:
+        from . import vault as V
+        if not oid:
+            return False
+        v = self.vault()
+        if path is None:
+            if not confirm(self.parent, _("Esportare una copia in chiaro?"),
+                           _("La copia esportata non è cifrata e resta leggibile da chiunque abbia accesso al "
+                             "disco."), _("Esporta")):
+                return False
+            path = self.ctx.ask_save_path(_("Esporta dallo spazio protetto"), v.name(oid))
+            if not path:
+                return False
+        try:
+            data = v.read(oid)
+            with open(path, "wb") as f:
+                f.write(data)
+        except (V.VaultError, OSError) as e:
+            self.ctx.error(_("Spazio protetto"), str(e))
+            return False
+        self.ctx.status(_("Copia in chiaro esportata: {n}").format(n=os.path.basename(path)))
+        return True
+
+    def vault_remove(self, oid: str | None) -> bool:
+        if not oid:
+            return False
+        v = self.vault()
+        if not confirm(self.parent, _("Eliminare dallo spazio protetto?"),
+                       _("«{n}» verrà eliminato definitivamente.").format(n=v.name(oid)), _("Elimina")):
+            return False
+        for doc, other in list(self.vault_docs.items()):
+            if other == oid:
+                view = next((w for w in self.ctx.views() if w.document is doc), None)
+                if view is not None:
+                    self.ctx.close_view(view, discard=True)
+                self.vault_docs.pop(doc, None)
+        v.remove(oid)
+        return True
+
+    def _store_in_vault(self, doc) -> bool:
+        from foliant.core import document as CD
+        oid = self.vault_docs.get(doc)
+        if oid is None:
+            return False
+        with ENGINE_LOCK:
+            data = doc.save_bytes(None, incremental=False)
+        self.vault().write(oid, data)
+        # il documento risulta salvato (CORE_REQUESTS §12: manca un `mark_saved()` pubblico)
+        if hasattr(doc, "mark_saved"):
+            doc.mark_saved()
+        else:
+            doc._saved_state = doc._state
+            doc._notify(CD.SAVED)
+        return True
+
+    def vault_save_guard(self, view, info: dict) -> bool:
+        """Salva nello spazio protetto i documenti che vengono da lì: nessuna copia in chiaro
+        sul disco, salvo la richiesta esplicita di salvarne una copia."""
+        if view is None or view.document not in self.vault_docs:
+            return True
+        if info.get("copy"):
+            return confirm(self.parent, _("Salvare una copia in chiaro?"),
+                           _("La copia sarà fuori dallo spazio protetto e non cifrata."), _("Salva la copia"))
+        if not self.vault().unlocked:
+            self.ctx.error(_("Spazio protetto"), _("Lo spazio protetto è bloccato."))
+            return False
+        try:
+            self._store_in_vault(view.document)
+        except Exception as e:
+            self.ctx.error(_("Salvataggio non riuscito"), str(e))
+            return False
+        self.ctx.status(_("Salvato nello spazio protetto: {n}").format(n=view.document.display_name))
+        return False                  # il salvataggio su disco del nucleo non serve
+
+    def _vault_unsaved(self, docs) -> list:
+        return [d for d in docs if d in self.vault_docs and d.is_modified]
+
+    def _settle_vault_docs(self, docs) -> bool:
+        """Modifiche non salvate di documenti dello spazio: salvate lì o scartate, su scelta."""
+        docs = self._vault_unsaved(docs)
+        if not docs:
+            return True
+        choice = ask_vault_unsaved(self.parent, [d.display_name for d in docs])
+        if choice is None:
+            return False
+        from foliant.core import document as CD
+        for doc in docs:
+            if choice == "save":
+                try:
+                    self._store_in_vault(doc)
+                except Exception as e:
+                    self.ctx.error(_("Salvataggio non riuscito"), str(e))
+                    return False
+            else:                                   # scartate: la chiusura non deve chiedere di nuovo
+                doc._saved_state = doc._state
+                doc._notify(CD.SAVED)
+        return True
+
+    def vault_close_guard(self, view, info: dict) -> bool:
+        return view is None or self._settle_vault_docs([view.document])
+
+    def vault_quit_guard(self, view, info: dict) -> bool:
+        return self._settle_vault_docs([v.document for v in info.get("views", [])])
+
+    def lock_vault(self, auto: bool = False) -> None:
+        """Blocca lo spazio: salva al suo interno le modifiche, chiude i documenti e toglie
+        la chiave dalla memoria."""
+        v = getattr(self, "_vault", None)
+        for doc in list(self.vault_docs):
+            view = next((w for w in self.ctx.views() if w.document is doc), None)
+            try:
+                if doc.is_modified and v is not None and v.unlocked:
+                    self._store_in_vault(doc)
+            except Exception:
+                pass
+            if view is not None:
+                self.ctx.close_view(view, discard=True)
+            self.vault_docs.pop(doc, None)
+        if v is not None:
+            v.lock()
+        if getattr(self, "vault_idle", None) is not None:
+            self.vault_idle.stop()
+        import gc
+        gc.collect()
+        self.ctx.status(_("Spazio protetto bloccato per inattività") if auto else _("Spazio protetto bloccato"))
 
     # ------------------------------------------------------------ policy
     def policy_store(self) -> POL.PolicyStore:

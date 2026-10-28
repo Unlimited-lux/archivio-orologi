@@ -86,3 +86,23 @@ Per ora la stessa pagina si apre da Proteggi › Blocco dell'applicazione….
   ISO/TS 32003 (`use_gcm=True`). MuPDF 1.28 apre i file con MAC (senza verificarlo) e
   rifiuta quelli GCM («unknown encryption version»). L'apertura e la verifica dell'integrità
   sono del nucleo.
+
+## 12. Documenti senza file su disco salvati da un modulo (SEC-31)
+
+I documenti dello spazio protetto si aprono con `Document.from_bytes` (senza percorso) e
+si salvano cifrati dal modulo tramite la guardia `save`/`save_as`, che restituisce False
+per evitare il salvataggio su disco. Mancano due cose:
+- un `Document.mark_saved()` pubblico. Il modulo ora scrive `doc._saved_state` e chiama
+  `doc._notify(SAVED)`;
+- nella guardia, distinguere «Salva» da «Salva con nome» per i documenti senza
+  percorso (`info` è identico, `{"path": None, "copy": False}`), per offrire con
+  «Salva con nome» l'esportazione in chiaro.
+
+In alternativa basterebbe un «salvataggio personalizzato» del documento
+(`document.save_target = callable(bytes)`), usato da `save_view` al posto della
+scrittura su file.
+
+Nota per il modulo Annotazioni: `_after_save` (programmato con `QTimer.singleShot(0)`
+su SAVED) chiama `view.viewport()` senza verificare che la vista esista ancora. Se la
+finestra viene distrutta prima che il timer scatti, compare «Internal C++ object
+(DocumentView) already deleted». Basta un `shiboken6.isValid(view)`.
