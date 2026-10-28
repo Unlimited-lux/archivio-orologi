@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations
 
 TRANSLATIONS = {
-    "Il file era danneggiato ed è stato ricostruito.": "The file was damaged and has been rebuilt.",
+    "Il file era danneggiato ed è stato riparato in memoria.": "The file was damaged and has been repaired in memory.",
     "Ripara e salva con nome…": "Repair and save as…",
     "Chiudi l'avviso": "Close notice",
     "Funzioni del documento non supportate: {f}": "Document features not supported: {f}",
@@ -46,7 +46,9 @@ class IntegrityController(QObject):
     """Avvisi del documento (barre del nucleo, `ctx.show_banner`): file ricostruito con
     «Ripara e salva con nome»; funzioni del documento non supportate."""
 
-    BANNER_REPAIRED = "viewer.repaired"
+    # Stessa chiave dell'avviso del modulo di conversione (CNV-32): un solo avviso per il
+    # file riparato; se l'ha già mostrato un altro modulo non lo si duplica.
+    BANNER_REPAIRED = "riparato"
     BANNER_UNSUPPORTED = "viewer.unsupported"
 
     def __init__(self, ctx: Context):
@@ -62,8 +64,8 @@ class IntegrityController(QObject):
             repaired = bool(getattr(document, "repaired", False) or getattr(pdf, "is_repaired", False))
             features = unsupported_features(pdf)
         ids = []
-        if repaired:
-            self.ctx.show_banner(view, self.BANNER_REPAIRED, _("Il file era danneggiato ed è stato ricostruito."),
+        if repaired and self.BANNER_REPAIRED not in self.ctx.banners(view):
+            self.ctx.show_banner(view, self.BANNER_REPAIRED, _("Il file era danneggiato ed è stato riparato in memoria."),
                                  [(_("Ripara e salva con nome…"), lambda v=view: self.repair(v))],
                                  level="warning", priority=10)
             ids.append(self.BANNER_REPAIRED)

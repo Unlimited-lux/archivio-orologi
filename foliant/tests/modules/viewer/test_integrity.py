@@ -22,14 +22,25 @@ def test_rebuilt_file_shows_bar_and_repair(viewer_window, tmp_path, monkeypatch)
     ctl = viewer_window.ctx.viewer_parts["integrity"]
     assert ctl.BANNER_REPAIRED in viewer_window.ctx.banners(view)     # barra di avviso del nucleo
     bar = viewer_window.tabs.page(view).banners
-    assert "ricostruito" in bar.text_label.text() and bar.isVisible()
-    out = tmp_path / "riparato.pdf"
+    assert "danneggiato" in bar.text_label.text() and bar.isVisible()
+    out = tmp_path / "copia_riparata.pdf"
     monkeypatch.setattr(viewer_window.ctx, "ask_save_path", lambda *a, **k: str(out))
-    [b for b in bar.action_buttons if "Ripara" in b.text()][0].click()
+    [b for b in bar.action_buttons if "ripara" in b.text().lower()][0].click()
     assert out.exists()
     reopened = pymupdf.open(str(out))
     assert not reopened.is_repaired and reopened.page_count == 3
     assert ctl.BANNER_REPAIRED not in viewer_window.ctx.banners(view)
+
+
+def test_repaired_file_shows_a_single_banner(viewer_window, tmp_path):
+    """Viewer e conversione segnalano lo stesso fatto: un solo avviso, testo unico."""
+    view = viewer_window.open_path(_broken_pdf(tmp_path))
+    ids = viewer_window.ctx.banners(view)
+    assert ids.count("riparato") == 1
+    assert not [i for i in ids if i != "riparato" and ("repair" in i or "ripar" in i)]
+    bar = viewer_window.tabs.page(view).banners
+    texts = [b.text() for b in bar.action_buttons]
+    assert len([t for t in texts if "ripara" in t.lower()]) == 1
 
 
 def test_healthy_file_has_no_bar(viewer_window, sample_pdf):
