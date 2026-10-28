@@ -211,8 +211,11 @@ class TaskManager(QObject):
         super().__init__(parent)
         self.tasks: list[BackgroundTask] = []
         # report: errori senza on_error (la finestra usa ctx.notify); status: esiti brevi
-        self.report = report or (lambda text: logging.getLogger("foliant").warning(text))
-        self.status = status or self.report
+        # Senza finestra il testo non va nel registro: può contenere nomi di file, e lo stderr
+        # può finire nel giornale di sistema (riservatezza, vedi ui/privacy.py).
+        self.report = report or (lambda text: logging.getLogger("foliant").warning(
+            "attività in background non riuscita (dettagli omessi)"))
+        self.status = status or (lambda text: None)
         self._timer = QTimer(self)
         self._timer.setInterval(80)
         self._timer.timeout.connect(self.poll)
