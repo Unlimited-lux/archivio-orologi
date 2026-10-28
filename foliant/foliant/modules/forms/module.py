@@ -1410,6 +1410,10 @@ class FormsModule(QObject):
         return True
 
     def signature_clicked(self, view, f: E.FieldInfo) -> None:
+        # FRM-20: il modulo Firma apre la procedura con il campo preselezionato
+        request = getattr(self.ctx, "request_signature", None)
+        if request is not None and request(view, f.name):
+            return
         if self.ctx.mode("firma") is not None:
             self.ctx.set_mode("firma")
         self.ctx.status(_("Campo firma «{n}»: usa la modalità Firma per firmare.").format(n=f.name))

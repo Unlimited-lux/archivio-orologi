@@ -61,6 +61,13 @@ class FormState:
             if doc.closed:
                 return
             pdf = doc.pdf
+            if pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null":
+                # nessun modulo: niente lettura dei campi a ogni modifica (documenti con molti commenti)
+                self.fields, self.xfa, self.blocked, self.custom = [], "none", None, []
+                self.blocked_by_permissions, self.signature_locked, self.xfa_unmapped = False, set(), []
+                self.version = doc.version
+                self.by_page = {}
+                return
             try:
                 self.fields = E.list_fields(pdf)
                 self.xfa = E.xfa_status(pdf)
