@@ -55,6 +55,9 @@ class Gateway:
         self.max_parallel = 2
         # profilo risolto nel thread dell'interfaccia (le impostazioni non si leggono dai thread)
         self.fixed_profile: Profile | None = None
+        # «Chiedi conferma prima di ogni invio»: `before_send(request, function) -> bool` mostra l'anteprima
+        # integrale della richiesta reale; False = invio annullato, nessun dato inviato
+        self.before_send: Callable[[ChatRequest, str], bool] | None = None
 
     def profile(self) -> Profile:
         p = self.fixed_profile or self.store.active()
@@ -92,6 +95,8 @@ class Gateway:
         if not profile.consent:
             raise ConsentRequired(profile)
         provider = self.provider(profile)
+        if self.before_send is not None and not self.before_send(request, function):
+            raise OperationCancelled(_("Invio annullato: nessun dato è stato inviato."))
         attempt = 0
         while True:
             if cancel is not None and cancel.is_set():
