@@ -1176,3 +1176,31 @@ def test_compress_does_not_discard_other_steps(tmp_path, workers):
     rep = be.run_job(None, items[:1], be.JobSettings(steps=steps[1:], destination=str(tmp_path / "o2"),
                                                      workers=workers))
     assert pymupdf.open(rep.results[0].outputs[0]).needs_pass
+
+
+def test_defaults_and_names_in_english(tmp_path):
+    """NFR-25: in inglese le operazioni in blocco scrivono testi e nomi in inglese."""
+    from foliant.i18n import set_language
+    from foliant.modules.tools.translations import EN
+    from foliant.api import add_translations
+    add_translations("en", EN)
+    a = mk(tmp_path / "in" / "contratto.pdf", pages=3)
+    set_language("en")
+    try:
+        item = be.analyze_file(a)
+        for action, expected in (("watermark", "CONFIDENTIAL"), ("page_numbers", "Page 1 of 3"),
+                                 ("header_footer", "Page 1 of 3")):
+            settings = be.JobSettings(steps=[be.Step(action)], destination_mode="same")
+            settings.pattern = be.default_pattern(settings)
+            rep = be.run_job(None, [item], settings)
+            out = rep.results[0].outputs[0]
+            assert expected in pymupdf.open(out)[0].get_text()
+            assert "RISERVATO" not in pymupdf.open(out)[0].get_text()
+            assert "Pagina" not in pymupdf.open(out)[0].get_text()
+        assert be.default_pattern(be.JobSettings(steps=[be.Step("watermark")], destination_mode="same")) \
+            == "{nome}_watermark"
+        assert be.Step("merge").merged_params()["name"] == "Merged"
+        assert be.Step("ocr").merged_params()["languages"] == "ita+eng"
+    finally:
+        set_language("it")
+    assert be.Step("watermark").merged_params()["text"] == "RISERVATO"

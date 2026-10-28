@@ -270,6 +270,9 @@ class Param:
     secret: bool = False
 
 
+_UNTRANSLATED_DEFAULTS = {"languages"}   # codici tecnici, non testi
+
+
 @dataclass
 class ActionSpec:
     id: str
@@ -279,7 +282,14 @@ class ActionSpec:
     kind: str = "pdf"
 
     def defaults(self) -> dict:
-        return {p.key: p.default for p in self.params}
+        """Valori predefiniti; i testi predefiniti (es. «RISERVATO») nella lingua dell'interfaccia."""
+        out = {}
+        for p in self.params:
+            value = p.default
+            if p.type == "str" and isinstance(value, str) and value and p.key not in _UNTRANSLATED_DEFAULTS:
+                value = _(value)
+            out[p.key] = value
+        return out
 
     def secret_keys(self) -> set[str]:
         return {p.key for p in self.params if p.secret}
@@ -1234,8 +1244,10 @@ def add_header_footer(data: bytes, texts: dict[str, str], fontsize: float = 9, m
             doc.close()
 
 
-def add_page_numbers(data: bytes, text: str = "Pagina {pagina} di {totale}", position: str = "bottom-center",
+def add_page_numbers(data: bytes, text: str | None = None, position: str = "bottom-center",
                      fontsize: float = 10, margin_mm: float = 10.0, first_number: int = 1, **kw) -> bytes:
+    if text is None:
+        text = _("Pagina {pagina} di {totale}")
     kw.setdefault("kind", "page_numbers")
     return add_header_footer(data, {position: text}, fontsize=fontsize, margin_mm=margin_mm,
                              first_number=first_number, **kw)
@@ -2157,7 +2169,7 @@ def report_pdf(report: JobReport) -> bytes:
 
 def _merge_groups(items, parts, p: dict) -> list[tuple[str, str, list[tuple[int, str, bytes]]]]:
     """Gruppi da unire: (cartella di riferimento, nome, parti)."""
-    name = p.get("name") or "Unione"
+    name = p.get("name") or _("Unione")
     mode = p.get("group", "all")
     if mode == "folder":
         groups: dict[str, list] = {}
