@@ -355,6 +355,14 @@ class FormFiller(QObject):
             return
         with ENGINE_LOCK:
             needed = E.needs_appearances(doc.pdf) or E.orphan_count(doc.pdf) > 0
+            from_xml = E.fields_from_xfa(doc.pdf) if self.state.xfa == "hybrid" else {}
+        if from_xml:
+            # FRM-34: se dati XML e campi divergono, prevalgono i dati XML
+            try:
+                with doc.change(_("Allinea i campi ai dati XML")) as pdf:
+                    E.apply_values(pdf, from_xml)
+            except Exception:
+                pass
         if not needed:
             return
         try:
@@ -619,6 +627,10 @@ class FormFiller(QObject):
                 act = ed.addAction(self.module.icon("calendar"), QLineEdit.ActionPosition.TrailingPosition)
                 act.setToolTip(_("Scegli una data"))
                 act.triggered.connect(self.open_calendar)
+            if f.file_select:
+                act = ed.addAction(self.module.icon("folder-open"), QLineEdit.ActionPosition.TrailingPosition)
+                act.setToolTip(_("Sfoglia…"))
+                act.triggered.connect(self.browse_file)
         elif f.kind == E.COMBO:
             ed = _Combo(self, vp)
             ed.setEditable(f.editable)
@@ -961,10 +973,23 @@ class FormFiller(QObject):
     def press_button(self, f: E.FieldInfo) -> None:
         self.module.run_button(self, f)
 
-    # ------------------------------------------------------------------ calendario
+    # ------------------------------------------------------------------ calendario e file
+    def browse_file(self) -> None:
+        """Campo di selezione file: si memorizza il percorso scelto, non il contenuto."""
+        ed = self.editor
+        if not isinstance(ed, QLineEdit):
+            return
+        paths = self.ctx.ask_open_paths(_("Scegli un file"), _("Tutti i file") + " (*)", multiple=False)
+        if paths:
+            ed.setText(paths[0])
+            self.commit_active(keep=True)
+
     def open_calendar(self) -> None:
         f, ed = self.active, self.editor
         if f is None or not isinstance(ed, QLineEdit):
+            return
+        if not fm.pattern_has_day(f.fmt.pattern):
+            self.open_month_picker()
             return
         cal = QCalendarWidget()
         d = fm.parse_date(ed.text(), f.fmt.pattern)
@@ -984,6 +1009,42 @@ class FormFiller(QObject):
         cal.clicked.connect(chosen)
         cal.activated.connect(chosen)
         self.calendar = cal
+        self.module.exec_popup(menu, ed.mapToGlobal(ed.rect().bottomLeft()))
+
+    def open_month_picker(self) -> None:
+        """Modelli senza giorno (es. mm/aaaa): si scelgono solo mese e anno."""
+        from datetime import date
+
+        from PySide6.QtWidgets import QSpinBox
+        f, ed = self.active, self.editor
+        d = fm.parse_date(ed.text(), f.fmt.pattern) or date.today()
+        menu = QMenu(ed)
+        box = QWidget(menu)
+        lay = QHBoxLayout(box)
+        month = QComboBox(box)
+        for i in range(12):
+            month.addItem(fm.format_date(date(2000, i + 1, 1), "mmmm"))
+        month.setCurrentIndex(d.month - 1)
+        year = QSpinBox(box)
+        year.setRange(1900, 2200)
+        year.setValue(d.year)
+        ok = QToolButton(box)
+        ok.setText(_("OK"))
+        lay.addWidget(month)
+        lay.addWidget(year)
+        lay.addWidget(ok)
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(box)
+        menu.addAction(wa)
+
+        def chosen():
+            ed.setText(fm.format_date(date(year.value(), month.currentIndex() + 1, 1), f.fmt.pattern))
+            menu.close()
+            self.commit_active(keep=True)
+
+        ok.clicked.connect(chosen)
+        self.month_picker = (month, year, chosen)
+        self.calendar = None
         self.module.exec_popup(menu, ed.mapToGlobal(ed.rect().bottomLeft()))
 
     # ------------------------------------------------------------------ disegno

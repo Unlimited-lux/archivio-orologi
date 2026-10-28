@@ -395,3 +395,33 @@ def test_reset_skips_signature_locked():
     E.reset_form(pdf)
     vals = E.form_values(pdf)
     assert vals["nome"] == "Bloccato" and vals["cognome"] == ""
+
+
+def test_month_year_picker(qtbot, window, tmp_path, monkeypatch):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "M", fmt=fm.Format(fm.DATE, pattern="mm/yyyy"))
+    pdf.save(str(tmp_path / "my.pdf"))
+    view = open_form(window, tmp_path / "my.pdf")
+    monkeypatch.setattr(forms.instance(), "exec_popup", lambda menu, pos: None)
+    click_field(qtbot, view, "M")
+    f = filler_of(view)
+    f.open_calendar()
+    assert f.calendar is None  # niente calendario dei giorni
+    month, year, chosen = f.month_picker
+    month.setCurrentIndex(2)
+    year.setValue(2027)
+    chosen()
+    assert values(view)["M"] == "03/2027"
+
+
+def test_file_select_stores_path(qtbot, window, tmp_path, monkeypatch):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "allegato", file_select=True)
+    pdf.save(str(tmp_path / "fs.pdf"))
+    view = open_form(window, tmp_path / "fs.pdf")
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: ["/home/utente/documento.txt"])
+    click_field(qtbot, view, "allegato")
+    filler_of(view).browse_file()
+    assert values(view)["allegato"] == "/home/utente/documento.txt"

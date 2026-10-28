@@ -143,9 +143,11 @@ class FormsModule(QObject):
         self.act_recalc = ctx.action(_("Ricalcola"), "calculator", self.recalculate)
         self.act_check = ctx.action(_("Verifica modulo"), "list-checks", self.check_form)
         self.act_xfa = ctx.action(_("Converti in modulo standard"), "file-check", self.convert_xfa)
+        self.act_xfa_export = ctx.action(_("Esporta dati XML…"), "file-output", self.export_xfa_dialog)
+        self.act_xfa_import = ctx.action(_("Importa dati XML…"), "file-input", self.import_xfa_dialog)
         data_menu = QMenu(_("Dati"), ctx.window)
         for a in (self.act_import, self.act_export, None, self.act_reset, self.act_recalc, self.act_check,
-                  None, self.act_flatten, self.act_xfa):
+                  None, self.act_flatten, None, self.act_xfa_export, self.act_xfa_import, self.act_xfa):
             if a is None:
                 data_menu.addSeparator()
             else:
@@ -842,6 +844,38 @@ class FormsModule(QObject):
             return
         if self.ctx.confirm(_("Moduli XML"), _("Rimuovere la parte XML e mantenere solo i campi standard?")):
             self._change(_("Converti in modulo standard"), E.remove_xfa, view)
+
+    def export_xfa_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        base = os.path.splitext(view.document.display_name)[0]
+        path = self.ctx.ask_save_path(_("Esporta dati XML"), base + ".xml", "XML (*.xml)", ".xml")
+        if not path:
+            return
+        try:
+            with ENGINE_LOCK:
+                data = E.export_xfa_data(view.document.pdf)
+            from foliant.api import atomic_write
+            atomic_write(path, data)
+        except Exception as e:
+            self.ctx.error(_("Esporta dati XML"), str(e))
+            return
+        self.ctx.status(_("Dati XML esportati."))
+
+    def import_xfa(self, path: str, view=None) -> bool:
+        view = view or self.ctx.current_view()
+        with open(path, "rb") as fh:
+            data = fh.read()
+        return bool(self._change(_("Importa dati XML"), lambda pdf: E.import_xfa_data(pdf, data) or True, view))
+
+    def import_xfa_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        paths = self.ctx.ask_open_paths(_("Importa dati XML"), "XML (*.xml)", multiple=False)
+        if paths:
+            self.import_xfa(paths[0])
 
     # ================================================================ rilevamento
     def detect_fields(self) -> None:

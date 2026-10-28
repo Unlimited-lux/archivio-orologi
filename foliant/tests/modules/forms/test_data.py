@@ -292,3 +292,53 @@ def test_detect_and_create_subset_single_undo(window, tmp_path, monkeypatch):
     assert [f.name for f in fs] == ["Nome"]
     view.document.undo()
     assert E.list_fields(view.document.pdf) == []
+
+
+def test_xfa_data_wins_on_open_and_iso_dates(window, tmp_path):
+    from foliant.modules.forms import formats as fm
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "form1.nome")
+    E.set_value(pdf, 0, x, "Y")
+    E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 90, 250, 110), "form1.data", fmt=fm.Format(fm.DATE, pattern="dd/mm/yyyy"))
+    xs = []
+    ds = (b'<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data>'
+          b'<form1><nome>X</nome><data></data></form1></xfa:data></xfa:datasets>')
+    for body in (TEMPLATE, ds):
+        n = pdf.get_new_xref()
+        pdf.update_object(n, "<<>>")
+        pdf.update_stream(n, body)
+        xs.append(n)
+    pdf.xref_set_key(pdf.pdf_catalog(), "AcroForm/XFA", f"[(template) {xs[0]} 0 R (datasets) {xs[1]} 0 R]")
+    pdf.save(str(tmp_path / "x.pdf"))
+    view = open_form(window, tmp_path / "x.pdf")
+    from PySide6.QtWidgets import QApplication
+    QApplication.processEvents()
+    assert values(view)["form1.nome"] == "X"
+    module().import_values({"form1.data": "05/03/2026"}, view)
+    with view.document.lock:
+        assert E.xfa_data(view.document.pdf)["form1.data"] == "2026-03-05"
+
+
+def test_xfa_export_import_data(window, tmp_path):
+    make_xfa(tmp_path / "d.pdf", False)
+    view = open_form(window, tmp_path / "d.pdf")
+    with view.document.lock:
+        data = E.export_xfa_data(view.document.pdf)
+    root = ET.fromstring(data)
+    assert root.tag.endswith("}data") and root.find("form1/nome").text == "X"
+    new = data.replace(b">X<", b">Nuovo<")
+    p = tmp_path / "dati.xml"
+    p.write_bytes(new)
+    module().import_xfa(str(p), view)
+    out = tmp_path / "d2.pdf"
+    view.document.save(out)
+    again = pymupdf.open(str(out))
+    assert E.xfa_data(again)["form1.nome"] == "Nuovo"
+    packets = dict((n, again.xref_stream(x)) for n, x in E._xfa_packets(again))
+    assert packets["template"] == TEMPLATE
+    bad = tmp_path / "bad.xml"
+    bad.write_bytes(b"<a>\n<b></a>")
+    with pytest.raises(E.FormError) as exc:
+        E.import_xfa_data(again, bad.read_bytes())
+    assert "riga 2" in str(exc.value)

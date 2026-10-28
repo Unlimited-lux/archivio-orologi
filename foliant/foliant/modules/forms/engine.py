@@ -56,6 +56,7 @@ FF_NO_EXPORT = 1 << 2
 FF_NO_TOGGLE_OFF = 1 << 14
 FF_RADIO = 1 << 15
 FF_PUSHBUTTON = 1 << 16
+FF_FILE_SELECT = 1 << 20
 FF_NO_SPELL = 1 << 22
 FF_DO_NOT_SCROLL = 1 << 23
 FF_IN_UNISON = 1 << 25
@@ -224,6 +225,7 @@ class FieldInfo:
     no_toggle_off: bool = False  # gruppo di opzioni: una scelta sempre presente
     in_unison: bool = False      # opzioni con lo stesso valore attivate insieme
     do_not_scroll: bool = False
+    file_select: bool = False
     no_spell: bool = False
     no_export: bool = False
     hidden: bool = False         # widget nascosto (flag Hidden)
@@ -393,6 +395,7 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
     info.no_toggle_off = kind == RADIO and bool(flags & FF_NO_TOGGLE_OFF)
     info.in_unison = kind == RADIO and bool(flags & FF_IN_UNISON)
     info.do_not_scroll = kind == TEXT and bool(flags & FF_DO_NOT_SCROLL)
+    info.file_select = kind == TEXT and bool(flags & FF_FILE_SELECT)
     info.no_spell = kind in (TEXT, COMBO) and bool(flags & FF_NO_SPELL)
     aflags = _annot_flags(pdf, w.xref)
     info.hidden = bool(aflags & AF_HIDDEN)
@@ -1544,6 +1547,8 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
     if kind == TEXT:
         if "do_not_scroll" in props:
             flag(FF_DO_NOT_SCROLL, bool(props["do_not_scroll"]))
+        if "file_select" in props:
+            flag(FF_FILE_SELECT, bool(props["file_select"]))
     if kind in (TEXT, COMBO) and "no_spell" in props:
         flag(FF_NO_SPELL, bool(props["no_spell"]))
     if "no_export" in props:
@@ -2065,26 +2070,115 @@ def set_xfa_data(pdf: pymupdf.Document, values: dict[str, str]) -> int:
     return changed
 
 
-def sync_xfa_from_fields(pdf: pymupdf.Document) -> int:
-    """Nei moduli ibridi copia i valori AcroForm nei dati XFA (per nome finale del campo)."""
+def _leaf(name: str) -> str:
+    return re.sub(r"\[\d+\]", "", name.rsplit(".", 1)[-1])
+
+
+def _xfa_map(pdf: pymupdf.Document) -> tuple[dict[str, str], dict[str, FieldInfo]]:
+    """(percorso XML per nome di campo, campo per nome) dei campi associabili ai dati XML."""
     data = xfa_data(pdf)
-    if not data:
-        return 0
     by_leaf: dict[str, str] = {}
     for path in data:
-        leaf = re.sub(r"\[\d+\]", "", path.rsplit(".", 1)[-1])
-        by_leaf.setdefault(leaf, path)
-    updates = {}
-    for name, value in form_values(pdf).items():
-        leaf = re.sub(r"\[\d+\]", "", name.rsplit(".", 1)[-1])
-        path = by_leaf.get(leaf)
+        by_leaf.setdefault(_leaf(path), path)
+    paths, fields = {}, {}
+    for f in list_fields(pdf):
+        if f.kind not in FILLABLE or f.name in paths:
+            continue
+        path = by_leaf.get(_leaf(f.name))
         if path is not None:
-            if isinstance(value, list):
-                value = "\n".join(value)
-            if value == OFF:
-                value = "0"
-            updates[path] = value
+            paths[f.name] = path
+            fields[f.name] = f
+    return paths, fields
+
+
+def sync_xfa_from_fields(pdf: pymupdf.Document) -> int:
+    """Nei moduli XML statici copia i valori dei campi nei dati XML (date e ore in forma ISO)."""
+    paths, fields = _xfa_map(pdf)
+    if not paths:
+        return 0
+    values = form_values(pdf)
+    updates = {}
+    for name, path in paths.items():
+        value = values.get(name, "")
+        f = fields[name]
+        if isinstance(value, list):
+            value = "\n".join(value)
+        if f.kind in (CHECKBOX, RADIO) and value == OFF:
+            value = "0" if f.kind == CHECKBOX else ""
+        elif f.kind == CHECKBOX:
+            value = "1"
+        if f.kind == TEXT and value:
+            value = fm.to_iso(f.fmt, value)
+        updates[path] = value
     return set_xfa_data(pdf, updates)
+
+
+def fields_from_xfa(pdf: pymupdf.Document) -> dict[str, Any]:
+    """Valori dei dati XML diversi da quelli dei campi (all'apertura prevalgono i dati XML)."""
+    paths, fields = _xfa_map(pdf)
+    data = xfa_data(pdf)
+    out: dict[str, Any] = {}
+    for name, path in paths.items():
+        f = fields[name]
+        raw = data.get(path, "")
+        if f.kind == TEXT and f.fmt.type in (fm.DATE, fm.TIME) and raw:
+            try:
+                raw = fm.normalize(f.fmt, raw)
+            except fm.FormatError:
+                pass
+        if f.kind == CHECKBOX:
+            value: Any = (f.export or "Yes") if raw.strip() in ("1", "true", f.export or "Yes") else OFF
+        elif f.kind == RADIO:
+            value = raw or OFF
+        else:
+            value = raw
+        if export_value(f) != value and not (f.kind in (TEXT, COMBO) and not raw and not f.value):
+            out[name] = value
+    return out
+
+
+def export_xfa_data(pdf: pymupdf.Document) -> bytes:
+    """Nodo dei dati del pacchetto XML (xfa:data) come documento XML."""
+    import xml.etree.ElementTree as ET
+    found = _datasets(pdf)
+    if not found:
+        raise FormError(_("Il documento non contiene dati XML."))
+    data = next((el for el in found[1].iter() if _local(el.tag) == "data"), None)
+    if data is None:
+        raise FormError(_("Il documento non contiene dati XML."))
+    ET.register_namespace("xfa", "http://www.xfa.org/schema/xfa-data/1.0/")
+    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(data, encoding="utf-8")
+
+
+def import_xfa_data(pdf: pymupdf.Document, xml_bytes: bytes) -> None:
+    """Sostituisce il nodo dei dati del pacchetto XML; gli altri pacchetti restano identici."""
+    import xml.etree.ElementTree as ET
+    try:
+        new = ET.fromstring(xml_bytes)
+    except ET.ParseError as e:
+        line, col = e.position
+        raise FormError(_("Il file XML non è ben formato (riga {l}, colonna {c}).").format(l=line, c=col + 1)) from e
+    found = _datasets(pdf)
+    if not found:
+        raise FormError(_("Il documento non contiene dati XML."))
+    xref, root, name = found
+    if _local(new.tag) != "data":
+        wrapper = ET.Element("{http://www.xfa.org/schema/xfa-data/1.0/}data")
+        wrapper.append(new)
+        new = wrapper
+    old = next((el for el in root if _local(el.tag) == "data"), None)
+    if old is not None:
+        idx = list(root).index(old)
+        root.remove(old)
+        root.insert(idx, new)
+    else:
+        root.insert(0, new)
+    ET.register_namespace("xfa", "http://www.xfa.org/schema/xfa-data/1.0/")
+    body = ET.tostring(root, encoding="utf-8")
+    if not name:
+        old_stream = pdf.xref_stream(xref)
+        body = re.sub(rb"<xfa:datasets.*?</xfa:datasets>", lambda _m: body, old_stream, count=1, flags=re.S)
+    pdf.update_stream(xref, body)
 
 
 def remove_xfa(pdf: pymupdf.Document) -> bool:
