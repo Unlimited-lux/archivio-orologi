@@ -50,52 +50,21 @@ class ViewState:
 
 
 # =================================================================== barra proposta
-class ProposalBar(QFrame):
-    """Barra informativa non bloccante in cima alla vista del documento."""
+class ProposalBar:
+    """Proposta di OCR nella barra degli avvisi del documento (UX-14, `ctx.show_banner`)."""
+
+    BANNER_ID = "ocr-proposal"
 
     def __init__(self, view, controller: "OcrController"):
-        super().__init__(view)
-        self.setObjectName("ocrProposalBar")
         self.view = view
         self.controller = controller
         self.page: int | None = None   # proposta legata a una singola pagina
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 8, 6)
-        lay.setSpacing(8)
-        self.icon = QLabel(self)
-        self.icon.setPixmap(icon("scan-text").pixmap(18, 18))
-        lay.addWidget(self.icon)
-        self.label = QLabel(self)
-        self.label.setWordWrap(True)
-        lay.addWidget(self.label, 1)
-        self.btn_run = QPushButton(_("Esegui OCR"), self)
-        self.btn_run.setObjectName("ocrRun")
-        self.btn_all = QPushButton(_("Tutte le pagine rilevate"), self)
-        self.btn_details = QPushButton(_("Dettagli"), self)
-        self.btn_later = QPushButton(_("Non ora"), self)
-        self.btn_never = QPushButton(_("Non chiedere più per questo documento"), self)
-        for b in (self.btn_run, self.btn_all, self.btn_details, self.btn_later, self.btn_never):
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            lay.addWidget(b)
-        self.btn_run.clicked.connect(self._run)
-        self.btn_all.clicked.connect(lambda: controller.open_dialog(view, pages=controller.state(view).detected,
-                                                                    mode=engine.EDITABLE))
-        self.btn_details.clicked.connect(lambda: controller.show_details(view))
-        self.btn_later.clicked.connect(lambda: controller.dismiss(view))
-        self.btn_never.clicked.connect(lambda: controller.never_ask(view))
-        self.apply_theme()
-        view.installEventFilter(self)
-        self.hide()
+        self.text = ""
+        self.actions: list[tuple] = []
 
-    def apply_theme(self) -> None:
-        t = theme
-        self.setStyleSheet(
-            f"#ocrProposalBar {{ background: {t.hex_color('accent_soft')}; border: 1px solid {t.hex_color('border')};"
-            f" border-radius: 8px; }}"
-            f"#ocrProposalBar QLabel {{ color: {t.hex_color('text')}; background: transparent; border: none; }}"
-            f"#ocrProposalBar QPushButton {{ padding: 4px 10px; }}"
-            f"#ocrProposalBar QPushButton#ocrRun {{ background: {t.hex_color('accent')};"
-            f" color: {t.hex_color('accent_text')}; border: none; border-radius: 6px; }}")
+    def _show(self, priority: int) -> None:
+        self.controller.ctx.show_banner(self.view, self.BANNER_ID, self.text, self.actions, level="info",
+                                        priority=priority, on_close=lambda: self.controller.dismiss(self.view))
 
     def show_document(self, count: int, missing: list[str], restricted: bool, low_res: bool,
                       unextractable: bool = False) -> None:
@@ -112,50 +81,57 @@ class ProposalBar(QFrame):
                 l=", ".join(languages.language_name(c) for c in missing))
         if restricted:
             text += " " + _("Il documento non consente modifiche: servirà la password del proprietario.")
-        self.label.setText(text)
-        self.btn_run.setText(_("Esegui OCR"))
-        self.btn_all.hide()
-        self.btn_details.show()
-        self.btn_never.show()
-        self._reveal()
+        c, v = self.controller, self.view
+        self.text = text
+        self.actions = [(_("Esegui OCR"), self.run, True), (_("Dettagli"), lambda: c.show_details(v), False),
+                        (_("Non ora"), lambda: c.dismiss(v), False),
+                        (_("Non chiedere più per questo documento"), lambda: c.never_ask(v), False)]
+        self._show(10)
 
     def show_page(self, page: int, others: int, ocr_layer: bool = False) -> None:
         self.page = page
         if ocr_layer:
-            self.label.setText(_("La pagina {n} ha solo testo invisibile riconosciuto da un OCR: per modificarlo "
-                                 "rendila modificabile.").format(n=page + 1))
+            self.text = _("La pagina {n} ha solo testo invisibile riconosciuto da un OCR: per modificarlo "
+                          "rendila modificabile.").format(n=page + 1)
         else:
-            self.label.setText(_("La pagina {n} è un'immagine: il testo non si può selezionare né modificare. "
-                                 "Vuoi renderla modificabile con l'OCR?").format(n=page + 1))
-        self.btn_run.setText(_("Rendi modificabile questa pagina"))
-        self.btn_all.setVisible(others > 1)
-        self.btn_details.hide()
-        self.btn_never.hide()
-        self._reveal()
+            self.text = _("La pagina {n} è un'immagine: il testo non si può selezionare né modificare. "
+                          "Vuoi renderla modificabile con l'OCR?").format(n=page + 1)
+        c, v = self.controller, self.view
+        self.actions = [(_("Rendi modificabile questa pagina"), self.run, True)]
+        if others > 1:
+            self.actions.append((_("Tutte le pagine rilevate"),
+                                 lambda: c.open_dialog(v, pages=c.state(v).detected, mode=engine.EDITABLE), False))
+        self.actions.append((_("Non ora"), lambda: c.dismiss(v), False))
+        self._show(20)
 
-    def _reveal(self) -> None:
-        self._place()
-        self.show()
-        self.raise_()
-
-    def _run(self) -> None:
+    def run(self) -> None:
         if self.page is not None:
             self.controller.open_dialog(self.view, pages=[self.page], mode=engine.EDITABLE)
         else:
             self.controller.open_dialog(self.view, pages=self.controller.state(self.view).detected)
 
-    def _place(self) -> None:
-        vp = self.view.viewport().geometry()
-        margin = 12
-        w = max(200, vp.width() - 2 * margin)
-        self.setFixedWidth(w)
-        self.adjustSize()
-        self.move(vp.x() + margin, vp.y() + 8)
+    def trigger(self, label: str) -> None:
+        """Esegue l'azione con l'etichetta data (come un clic sul pulsante)."""
+        for act in self.actions:
+            if act[0] == label:
+                act[1]()
+                return
+        raise KeyError(label)
 
-    def eventFilter(self, obj, ev) -> bool:
-        if obj is self.view and ev.type() == QEvent.Type.Resize and self.isVisible():
-            self._place()
-        return False
+    def hide(self) -> None:
+        try:
+            self.controller.ctx.hide_banner(self.view, self.BANNER_ID)
+        except RuntimeError:
+            pass
+
+    def isVisible(self) -> bool:
+        try:
+            return self.BANNER_ID in self.controller.ctx.banners(self.view)
+        except RuntimeError:
+            return False
+
+    def apply_theme(self) -> None:
+        pass
 
 
 # =================================================================== OCR in background

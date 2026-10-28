@@ -63,7 +63,7 @@ def test_proposta_pagine_3_e_7(window, qtbot, ten_pages, monkeypatch):
     wait_analysis(qtbot, view)
     bar = ctl.state(view).bar
     assert ctl.state(view).detected == [2, 6]
-    assert "(2)" in bar.label.text()
+    assert "(2)" in bar.text
     seen = {}
 
     def fake_exec(dlg):
@@ -71,9 +71,9 @@ def test_proposta_pagine_3_e_7(window, qtbot, ten_pages, monkeypatch):
         seen["text"] = dlg.pages.currentText()
         return QDialog.DialogCode.Rejected
     monkeypatch.setattr(dialogs.OcrDialog, "exec", fake_exec)
-    bar.btn_run.click()
+    bar.trigger("Esegui OCR")
     assert seen["pages"] == [2, 6] and "3, 7" in seen["text"]
-    bar.btn_later.click()
+    bar.trigger("Non ora")
     assert not bar.isVisible()
 
 
@@ -100,7 +100,7 @@ def test_rilevamento_disattivato_e_non_chiedere_piu(window, qtbot, scan_two):
     ctl.actions["detect"].setChecked(True)
     ctl.start_analysis(view)
     qtbot.waitUntil(lambda: ctl.state(view).bar is not None and ctl.state(view).bar.isVisible(), timeout=3000)
-    ctl.state(view).bar.btn_never.click()
+    ctl.state(view).bar.trigger("Non chiedere più per questo documento")
     view.document._saved_state = view.document._state
     window.close_view(view)
     view = window.open_path(scan_two)
@@ -120,7 +120,7 @@ def test_proposta_al_clic_su_pagina_immagine(window, qtbot, scan_two):
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=r.center().toPoint())
     bar = ctl.state(view).bar
     assert bar.isVisible() and bar.page == 0
-    assert "modificabile" in bar.btn_run.text()
+    assert bar.actions[0][0] == "Rendi modificabile questa pagina"
 
 
 def test_ocr_modificabile_annulla_e_file_intatto(window, qtbot, scan_two):
@@ -641,7 +641,7 @@ def test_proposta_su_livello_ocr_con_strumento_modifica(window, qtbot, scan_two,
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=view.page_rect(0).center().toPoint())
     bar = ctl.state(view).bar
     assert bar is not None and bar.isVisible() and bar.page == 0
-    assert "invisibile" in bar.label.text()
+    assert "invisibile" in bar.text
     view.set_tool(None)
 
 
