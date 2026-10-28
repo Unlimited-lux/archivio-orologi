@@ -104,6 +104,10 @@ class LinkCheckPanel(QWidget):
         self.filter.addItem(_("Tutti"), "all")
         self.filter.addItem(_("Solo problemi"), "problems")
         for w in (self.refresh_btn, self.online_btn, self.export_btn):
+            # solo icona: la barra laterale può essere stretta
+            w.setToolTip(w.text())
+            w.setAccessibleName(w.text())
+            w.setText("")
             bar.addWidget(w)
         bar.addStretch(1)
         bar.addWidget(self.filter)
