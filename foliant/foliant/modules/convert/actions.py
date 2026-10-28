@@ -1086,8 +1086,10 @@ class ConvertController:
                 passwords[it.path] = pw
         if passwords:
             options = {k: v for k, v in options.items() if k != "workers"}
+            planned = {it.path: it.target for it in locked if it.path in passwords and it.target}
             ok, retried = self._run(_("Conversione in blocco…"), batch_convert, list(passwords), fmt,
-                                    out_dir=out_dir, keep_structure=keep, root=root, passwords=passwords, **options)
+                                    out_dir=out_dir, keep_structure=keep, root=root, passwords=passwords,
+                                    planned=planned, **options)
             if ok:
                 by_path = {r.path: r for r in retried}
                 items = [by_path.get(it.path, it) for it in items]

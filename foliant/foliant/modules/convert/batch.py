@@ -18,6 +18,7 @@ OK, WARNINGS, ERROR, SKIPPED = "completato", "con avvisi", "errore", "saltato"
 class BatchItem:
     path: str
     status: str = "in attesa"
+    target: str = ""            # uscita pianificata per questo file (unica nel lotto)
     outputs: list[str] = field(default_factory=list)
     message: str = ""
 
@@ -156,8 +157,11 @@ def _batch_parallel(items, outputs, fmt, progress, workers, passwords, options):
 
 def batch_convert(files: list[str], fmt: str, *, out_dir: str | None = None, keep_structure: bool = False,
                   root: str | None = None, passwords: dict[str, str] | None = None, progress=None,
-                  workers: int = 1, **options) -> list[BatchItem]:
+                  workers: int = 1, planned: dict[str, str] | None = None, **options) -> list[BatchItem]:
     """Converte i file uno dopo l'altro; un errore su un file non ferma gli altri.
+
+    `planned` ({file: uscita}) riusa le uscite già pianificate per l'intero lotto (seconda
+    passata sui file sbloccati con la password): i nomi restano unici nel lotto.
 
     I file cifrati senza password nota sono saltati e segnalati. Con
     l'annullamento i file già completati restano, quello in corso è scartato.
@@ -168,6 +172,10 @@ def batch_convert(files: list[str], fmt: str, *, out_dir: str | None = None, kee
     items = [BatchItem(p) for p in files]
     n = len(items)
     outputs = plan_outputs(files, fmt, out_dir, root, keep_structure)
+    if planned:
+        outputs = [planned.get(f, o) for f, o in zip(files, outputs)]
+    for item, out in zip(items, outputs):
+        item.target = out
     if workers > 1 and n > 1:
         return _batch_parallel(items, outputs, fmt, progress, workers, passwords, options)
 
