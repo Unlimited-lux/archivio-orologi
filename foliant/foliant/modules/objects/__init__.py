@@ -459,23 +459,6 @@ class _DropFilter(QObject):
         return False
 
 
-class _TabFilter(QObject):
-    """Tab e Maiusc+Tab scorrono gli oggetti invece di spostare il fuoco."""
-
-    def __init__(self, c: ObjectsController, view):
-        super().__init__(view)
-        self.c = c
-        self.view = view
-
-    def eventFilter(self, obj, ev) -> bool:
-        if ev.type() == QEvent.Type.KeyPress and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) \
-                and self.view.tool is self.c.object_tool:
-            self.c.object_tool.key(self.view, ev)
-            self.view.viewport().update()
-            return True
-        return False
-
-
 def _install_drop(ctx: Context, c: ObjectsController, view) -> None:
     if view is None or getattr(view, "_objects_drop", None) is not None:
         return
@@ -485,8 +468,8 @@ def _install_drop(ctx: Context, c: ObjectsController, view) -> None:
     view.viewport().installEventFilter(f)
     view.toolChanged.connect(lambda _t: _sync_tool_buttons(ctx))
     view.overlays.append(c.paint_grid)
-    view._objects_tab = _TabFilter(c, view)
-    view.installEventFilter(view._objects_tab)
+    c.migrate_guides(view)
+
 
 
 __all__ = ["register", "controller", "ORDER", "pymupdf", "ENGINE_LOCK"]

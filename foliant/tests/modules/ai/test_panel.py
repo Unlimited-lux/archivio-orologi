@@ -89,6 +89,28 @@ def test_key_never_written_to_files(qtbot, window, ai, fake, sample_pdf, tmp_pat
                 assert b"chiave-di-prova-123" not in fh.read(), f
 
 
+def test_preferences_page_saves_profile(window, ai, monkeypatch):
+    from foliant.ui.dialogs import PreferencesDialog
+    from foliant.modules.ai.dialogs import SettingsPage
+    make_active_profile(ai.store)
+    pid = ai.store.active_id()
+    dlg = PreferencesDialog(window.settings, window, pages=window.preference_pages())
+    assert dlg.show_page("Assistente IA")
+    page = next(w for w in dlg.module_pages if isinstance(w, SettingsPage))
+    assert not page.dirty                     # caricare il profilo non conta come modifica
+    page.name.setText("Profilo dalle preferenze")
+    assert page.dirty
+    dlg.apply()                               # «Salva» delle Preferenze
+    assert ai.store.get(pid).name == "Profilo dalle preferenze"
+    assert not page.dirty
+    # il comando «Impostazioni» del modulo apre la stessa pagina delle Preferenze
+    shown = []
+    monkeypatch.setattr(window.ctx, "show_preferences", lambda page=None: shown.append(page))
+    ai.open_settings()
+    assert shown == ["Assistente IA"]
+    dlg.deleteLater()
+
+
 def test_verify_models_and_auth_failure(window, ai):
     from foliant.modules.ai.dialogs import SettingsDialog
     dlg = SettingsDialog(ai.store, window, verify=lambda p, k: ["m1", "m2", "m3"])
@@ -265,6 +287,7 @@ def test_selection_fixed_at_send(qtbot, window, ready, fake, sample_pdf):
 
 def test_insert_note_single_undo(qtbot, window, ready, fake, sample_pdf):
     view = window.open_path(sample_pdf)
+    window.settings.setValue("author", "Laura Neri")    # preferenza «Nome autore» del nucleo
     fake.responses = ["Risposta da annotare"]
     panel = ready.panel
     panel.send("domanda")
@@ -274,6 +297,7 @@ def test_insert_note_single_undo(qtbot, window, ready, fake, sample_pdf):
     annots = annots_of(doc, view.current_page)
     assert annots and annots[0][0]["content"] == "Risposta da annotare"
     assert annots[0][0]["subject"] == "Assistente IA"
+    assert annots[0][0]["title"] == "Laura Neri" == window.ctx.author_name()
     doc.undo()
     assert not annots_of(doc, view.current_page)
 
@@ -1014,3 +1038,46 @@ def test_status_after_interruption(qtbot, window, ready, fake, sample_pdf):
     panel.stop()
     wait_done(qtbot, panel)
     assert panel.status.text() in ("Operazione interrotta.", "Operation interrupted.")
+
+
+# ------------------------------------------------------------------ menu contestuale, selezione su più pagine
+def test_context_menu_ask_with_multipage_selection(qtbot, window, ready, fake, text_pdf):
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QMenu
+    view = window.open_path(text_pdf(3))
+    sels = []
+    for page in (0, 1):
+        words = [w for w in view.words(page) if w[4].startswith("parola")]
+        sels.append(selection_from_words(page, words))
+    view.set_text_selections(sels)
+    assert len(view.text_selections) == 2
+    menu = QMenu(window)
+    for provider in window.view_menu_providers:
+        provider(view, SimpleNamespace(page=None, point=None), menu)
+    ask = next(a for a in menu.actions() if a.text() == "Chiedi all'assistente")
+    assert ask.isEnabled()
+    ask.trigger()
+    panel = ready.panel
+    assert window.ctx.current_mode() == "ia" and panel.scope_kind() == "selection"
+    fake.responses = ["Risposta [p. 2]"]
+    panel.send("Che cosa dicono?")
+    wait_done(qtbot, panel)
+    sent = fake.all_text()
+    assert "parola1" in sent and "parola2" in sent and "parola3" not in sent
+    assert "[p. 1]" in sent and "[p. 2]" in sent
+    menu.deleteLater()
+
+
+def test_rewrite_multipage_selection_not_replaceable(qtbot, window, ready, fake, text_pdf):
+    view = window.open_path(text_pdf(2))
+    view.set_text_selections([selection_from_words(p, [w for w in view.words(p) if w[4].startswith("parola")])
+                              for p in (0, 1)])
+    fake.responses = ["testo nuovo"]
+    panel = ready.panel
+    panel.set_function("rewrite")
+    panel.set_scope("selection")
+    panel.send()
+    wait_done(qtbot, panel)
+    assert not panel.accept_btn.isEnabled()
+    assert "una pagina alla volta" in panel.replace_reason.text()

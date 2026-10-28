@@ -775,4 +775,5 @@ EN: dict[str, str] = {
     "Times grassetto": "Times bold",
     "Courier": "Courier",
     "Courier grassetto": "Courier bold",
+    "Confronta con…": "Compare with…",
 }

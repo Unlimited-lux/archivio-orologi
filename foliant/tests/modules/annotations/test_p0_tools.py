@@ -555,3 +555,19 @@ def test_ann34_double_click_edits_and_context_menu(comments, monkeypatch):
     texts = [a.text() for a in menu.actions()]
     assert "Rispondi…" in texts and "Elimina" in texts and "Imposta stato" in texts
     assert press and release   # helper importati
+
+
+def test_ann10_multipage_selection(comments, tmp_path):
+    """ANN-10/12: selezione da fine pagina 2 a inizio pagina 3 → un /Highlight per pagina, un solo Annulla."""
+    from foliant.api import selection_from_words
+    window, view, module = comments
+    w1 = [w for w in view.words(1) if w[4] in ("termine", "di", "consegna")]
+    w2 = [w for w in view.words(2) if w[4] in ("Lorem", "ipsum")]
+    view.set_text_selections([selection_from_words(1, w1), selection_from_words(2, w2)])
+    module.tools[engine.HIGHLIGHT].apply_selection(view)
+    infos = module.ctrl.annotations()
+    assert sorted(i.page for i in infos) == [1, 2]
+    texts = " ".join(i.marked_text for i in sorted(infos, key=lambda i: i.page))
+    assert texts == "termine di consegna Lorem ipsum"
+    view.document.undo()
+    assert module.ctrl.annotations() == []

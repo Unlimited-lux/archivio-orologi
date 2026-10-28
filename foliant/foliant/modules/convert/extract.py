@@ -293,20 +293,39 @@ def image_backed(page: pymupdf.Page) -> bool:
         return False
 
 
+def _cell_item(spans: list[dict], block: dict) -> dict:
+    x0 = min(sp["bbox"][0] for sp in spans)
+    y0 = min(sp["bbox"][1] for sp in spans)
+    x1 = max(sp["bbox"][2] for sp in spans)
+    y1 = max(sp["bbox"][3] for sp in spans)
+    text = " ".join(" ".join(normalize_text(sp["text"]).split()) for sp in spans)
+    return {"bbox": (x0, y0, x1, y1), "cy": (y0 + y1) / 2, "text": text, "block": block}
+
+
 def grid_tables(blocks: list[dict], min_rows: int = 2, min_cols: int = 2, tol: float = 10.0) -> list[tuple]:
     """Tabelle ricostruite dall'allineamento dei blocchi di testo (celle separate, senza linee).
 
     Restituisce [(bbox, righe, blocchi usati)]: sequenze di righe consecutive con lo
     stesso numero di celle allineate in colonna sugli stessi bordi sinistri."""
+    # celle: segmenti di testo di una riga separati da uno spazio ampio (indipendente da come
+    # l'OCR raggruppa righe e blocchi)
     items = []
     for b in blocks:
         if b.get("type") != 0:
             continue
-        text = " ".join(normalize_text(sp.get("text", "")) for ln in b.get("lines", []) for sp in ln.get("spans", []))
-        text = " ".join(text.split())
-        if text:
-            x0, y0, x1, y1 = b["bbox"]
-            items.append({"bbox": (x0, y0, x1, y1), "cy": (y0 + y1) / 2, "text": text, "block": b})
+        for ln in b.get("lines", []):
+            spans = sorted((sp for sp in ln.get("spans", []) if sp.get("text", "").strip() and sp.get("bbox")),
+                           key=lambda sp: sp["bbox"][0])
+            cell: list[dict] = []
+            for sp in spans:
+                if cell:
+                    gap = sp["bbox"][0] - cell[-1]["bbox"][2]
+                    if gap > max(6.0, 0.9 * float(sp.get("size", 10))):
+                        items.append(_cell_item(cell, b))
+                        cell = []
+                cell.append(sp)
+            if cell:
+                items.append(_cell_item(cell, b))
     rows: list[list[dict]] = []
     for it in sorted(items, key=lambda i: (i["cy"], i["bbox"][0])):
         h = it["bbox"][3] - it["bbox"][1]
@@ -323,11 +342,23 @@ def grid_tables(blocks: list[dict], min_rows: int = 2, min_cols: int = 2, tol: f
         if len(first) < min_cols:
             k += 1
             continue
-        cols = [i["bbox"][0] for i in first]
+        # colonne: intervalli orizzontali delle celle della prima riga; una cella appartiene alla
+        # colonna se ne condivide il bordo sinistro o se si sovrappone all'intervallo
+        cols = [[i["bbox"][0], i["bbox"][2]] for i in first]
+
+        def fits(cell, col) -> bool:
+            x0, x1 = cell["bbox"][0], cell["bbox"][2]
+            return abs(x0 - col[0]) <= tol or (max(x0, col[0]) < min(x1, col[1]) + tol)
+
+        def separated(row) -> bool:      # celle in colonne distinte e nello stesso ordine
+            return all(fits(c, col) for c, col in zip(row, cols)) and \
+                all(row[n]["bbox"][0] >= cols[n - 1][1] - tol for n in range(1, len(row)))
+
         run = [first]
         j = k + 1
-        while j < len(rows) and len(rows[j]) == len(cols) and all(
-                abs(i["bbox"][0] - c) <= tol for i, c in zip(rows[j], cols)):
+        while j < len(rows) and len(rows[j]) == len(cols) and separated(rows[j]):
+            for c, col in zip(rows[j], cols):
+                col[0], col[1] = min(col[0], c["bbox"][0]), max(col[1], c["bbox"][2])
             run.append(rows[j])
             j += 1
         if len(run) >= min_rows:

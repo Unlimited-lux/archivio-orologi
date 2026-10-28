@@ -284,7 +284,7 @@ def test_read_only_file_saves_as(window, sample_pdf, tmp_path, monkeypatch):
                         lambda p, mode: False if (mode == os.W_OK and os.path.realpath(p) == ro) else real_access(p, mode))
     view = window.open_path(sample_pdf)
     assert view.document.read_only and "sola lettura" in window.windowTitle()
-    assert "Salva con nome" in window.statusBar().currentMessage()
+    assert "nucleo.sola_lettura" in window.ctx.banners(view)     # avviso con «Salva con nome…»
     with view.document.change("x") as pdf:
         pdf.delete_page(0)
     target = str(tmp_path / "copia.pdf")
@@ -292,6 +292,27 @@ def test_read_only_file_saves_as(window, sample_pdf, tmp_path, monkeypatch):
     assert window.save_view(view)
     assert pymupdf.open(target).page_count == 2
     assert pymupdf.open(sample_pdf).page_count == 3          # l'originale non è stato toccato
+    assert "nucleo.sola_lettura" not in window.ctx.banners(view)   # ora il file è scrivibile
+
+
+def test_file_without_write_bits_is_read_only(tmp_path):
+    """chmod 444: sola lettura anche per chi potrebbe scrivere comunque (amministratore)."""
+    import os
+    from foliant.core.document import Document
+    path = tmp_path / "ro.pdf"
+    pdf = pymupdf.open()
+    pdf.new_page()
+    pdf.save(path)
+    os.chmod(path, 0o444)
+    try:
+        doc = Document.open(path)
+        assert doc.read_only and doc.needs_save_as
+        doc.close()
+    finally:
+        os.chmod(path, 0o644)
+    doc = Document.open(path)
+    assert not doc.read_only
+    doc.close()
 
 
 def test_mode_switch_hides_previous_properties_panel(window, sample_pdf):

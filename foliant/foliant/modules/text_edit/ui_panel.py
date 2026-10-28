@@ -120,6 +120,15 @@ class TextPropertiesPanel(QWidget):
         self.spacing.editingFinished.connect(self._spacing_chosen)
         grid.addWidget(self.spacing, row, 1)
         row += 1
+        grid.addWidget(QLabel(_("Rientro sinistro")), row, 0)
+        self.left_indent = QDoubleSpinBox()
+        self.left_indent.setRange(-300.0, 300.0)
+        self.left_indent.setDecimals(1)
+        self.left_indent.setSuffix(" pt")
+        self.left_indent.setToolTip(_("Sposta il bordo sinistro del paragrafo (il bordo destro resta fermo)"))
+        self.left_indent.editingFinished.connect(self._left_indent_chosen)
+        grid.addWidget(self.left_indent, row, 1)
+        row += 1
         grid.addWidget(QLabel(_("Rientro 1ª riga")), row, 0)
         self.indent = QDoubleSpinBox()
         self.indent.setRange(0.0, 300.0)
@@ -304,6 +313,7 @@ class TextPropertiesPanel(QWidget):
                 btn.setChecked(True)
         with QSignalBlocker(self.spacing):
             self.spacing.setValue(max(0.5, min(5.0, leading / size if size else 1.2)))
+        self.left_indent.setEnabled(kind == "block")
         with QSignalBlocker(self.indent):
             self.indent.setValue(obj.indent if kind == "editor" else obj[1].indent if kind == "block" else 0.0)
         with QSignalBlocker(self.space_after):
@@ -376,6 +386,19 @@ class TextPropertiesPanel(QWidget):
             obj.set_leading(new)
         elif kind == "block":
             self.ctrl.reformat_selected(self.view, leading=new)
+        self.refresh()
+
+    def _left_indent_chosen(self) -> None:
+        """Rientro sinistro relativo: il riquadro si restringe (o allarga) da sinistra e il testo rifluisce."""
+        value = round(self.left_indent.value(), 1)
+        kind, obj = self._target()
+        if kind == "block" and abs(value) >= 0.05:
+            page, block = obj
+            width = block.width - value
+            if width >= 4:
+                self.ctrl.resize_block(self.view, page, block, block.x0 + value, width)
+        with QSignalBlocker(self.left_indent):
+            self.left_indent.setValue(0.0)
         self.refresh()
 
     def _indent_chosen(self) -> None:

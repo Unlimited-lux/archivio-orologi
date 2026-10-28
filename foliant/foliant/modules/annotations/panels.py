@@ -778,15 +778,17 @@ class CommentsPanel(QWidget):
         if self.view is None:
             return
         from .visibility import set_view_filter
-        keep = None
+        excluded = None
         if self.apply_to_page and self._filter_active():
-            keep = {}
+            excluded = {}
             query = _fold(self.search.text().strip())
             for info in self._infos:
-                if self._matches(info, query):
-                    keep.setdefault(info.page, set()).add(info.xref)
-        if keep != getattr(self.view, "_annot_keep", None):
-            set_view_filter(self.view, keep, hidden=self.ctrl.annotations_hidden(self.view))
+                if not self._matches(info, query):
+                    hide = excluded.setdefault(info.page, set())
+                    hide.add(info.xref)
+                    hide.update(r.xref for r in info.replies)
+        if excluded != getattr(self.view, "_annot_excluded", None):
+            set_view_filter(self.view, excluded)
 
     def _filter_active(self) -> bool:
         return any(self.filters.values()) or bool(self.search.text().strip())

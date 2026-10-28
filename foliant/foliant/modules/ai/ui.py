@@ -15,7 +15,7 @@ from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, _, add_tr
 from . import content, engine, history, translate_pdf
 from .chunking import IndexCache
 from .config import ProfileStore, SendLog
-from .dialogs import InfoTextDialog, SendLogDialog, SettingsDialog, language_combo
+from .dialogs import InfoTextDialog, SendLogDialog, SettingsDialog, SettingsPage, language_combo
 from .engine import Gateway
 from .panel import AIPanel
 from .translations import EN
@@ -79,9 +79,18 @@ class Services:
             a.setEnabled(self.ctx.current_view() is not None)
 
     # ---------------------------------------------------------------- dialoghi
+    def settings_page(self, parent=None):
+        """Pagina «Assistente IA» delle Preferenze (creata a ogni apertura)."""
+        from PySide6.QtCore import QTimer
+        page = SettingsPage(self.store, parent)
+        page.destroyed.connect(lambda *_a: QTimer.singleShot(0, self.refresh))
+        return page
+
     def open_settings(self, parent=None) -> None:
-        dlg = SettingsDialog(self.store, parent or self.ctx.window)
-        dlg.exec()
+        if hasattr(self.ctx, "show_preferences"):
+            self.ctx.show_preferences(_("Assistente IA"))
+        else:
+            SettingsDialog(self.store, parent or self.ctx.window).exec()
         self.refresh()
 
     def show_log(self, parent=None) -> None:
@@ -415,7 +424,7 @@ class Controller:
         view = self.ctx.current_view()
         panel = self.services.panel
         dlg = TasksDialog(TaskStore(), self.ctx.window, has_document=view is not None,
-                          has_selection=bool(view and view.text_selection),
+                          has_selection=bool(content.view_selections(view)),
                           ask_save_path=self.ctx.ask_save_path,
                           ask_open_path=lambda: (self.ctx.ask_open_paths(_("Importa attività"), "JSON (*.json)",
                                                                          multiple=False) or [None])[0],
@@ -531,8 +540,8 @@ class Controller:
         doc = view.document
         kind_scope = panel.scope_kind()
         try:
-            if kind_scope == engine.SELECTION and view.text_selection:
-                scope = engine.build_scope(doc.pdf, engine.SELECTION, selection=view.text_selection)
+            if kind_scope == engine.SELECTION and content.view_selections(view):
+                scope = engine.build_scope(doc.pdf, engine.SELECTION, selection=content.view_selections(view))
             elif kind_scope == engine.PAGES:
                 scope = engine.build_scope(doc.pdf, engine.PAGES, pages=content.parse_page_range(
                     panel.pages_edit.text(), doc.page_count), cache=self.services.cache,
@@ -842,7 +851,7 @@ class Controller:
         if view is None or panel is None or not panel._ensure_ready():
             return None
         catalog = self.tool_catalog()
-        sel_pages = [view.text_selection.page] if view.text_selection else []
+        sel_pages = [x.page for x in content.view_selections(view)]
 
         def propose(q):
             return self._run(_("Ricerca dello strumento…"), lambda job: commands.propose(
@@ -1295,6 +1304,7 @@ def register(ctx, *, provider_factory=None) -> Services:
         pages_mode.add_action(a_pages)
     ctx.add_menu_action(a_set, _("Assistente IA"))
     ctx.add_menu_action(a_trpdf, _("Assistente IA"))
+    ctx.add_preferences_page(_("Assistente IA"), services.settings_page, 110)
     ctx.add_home_action(_("Assistente IA"), "sparkles", lambda: GeneralChatDialog(ctx, services, ctx.window).exec(),
                         _("Chat generale con il fornitore configurato"), 110)
 
@@ -1302,7 +1312,7 @@ def register(ctx, *, provider_factory=None) -> Services:
         if not services.store.enabled():
             return
         import pymupdf
-        sel = view.text_selection is not None and bool(view.selected_text().strip())
+        sel = bool(content.view_selections(view)) and bool(view.selected_text().strip())
         hit = None
         if pe.page is not None and pe.point is not None:
             with ENGINE_LOCK:
@@ -1310,11 +1320,17 @@ def register(ctx, *, provider_factory=None) -> Services:
             hit = next((pymupdf.Rect(i["bbox"]) for i in infos if pymupdf.Rect(i["bbox"]).contains(pe.point)), None)
         if not sel and hit is None:
             return
-        sub = menu.addMenu(_("Assistente IA"))
-        bind_icon(sub.menuAction(), "sparkles")
         enabled = services.store.active() is not None and content.extraction_allowed(view.document)
         if sel:
-            for key, text in (("chat", "Chiedi"), ("summary", "Riassumi"), ("translate", "Traduci"),
+            # voce principale: la selezione (anche su più pagine) diventa il contesto della domanda
+            ask = menu.addAction(_("Chiedi all'assistente"))
+            bind_icon(ask, "sparkles")
+            ask.setEnabled(enabled)
+            ask.triggered.connect(lambda _c=False: selection_action("chat"))
+        sub = menu.addMenu(_("Assistente IA"))
+        bind_icon(sub.menuAction(), "sparkles")
+        if sel:
+            for key, text in (("summary", "Riassumi"), ("translate", "Traduci"),
                               ("explain", "Spiega"), ("rewrite", "Correggi"), ("rewrite-improve", "Riscrivi")):
                 a = sub.addAction(_(text))
                 a.setEnabled(enabled)
@@ -1358,6 +1374,29 @@ def register(ctx, *, provider_factory=None) -> Services:
 
     ctx.currentViewChanged.connect(on_view)
     ctx.documentClosed.connect(on_closed)
+
+    def close_guard(view, info) -> bool:
+        # AI-17: conferma prima di chiudere una scheda (o uscire) con operazioni dell'assistente in corso
+        if info.get("event") == "quit":
+            running = services.running()
+        else:
+            running = services.running(view.document) if view is not None else []
+        if not running:
+            return True
+        names = ", ".join(sorted({w.function or _("risposta") for w in running}))
+        question = (_("L'assistente sta ancora lavorando ({f}). Uscire e annullare le operazioni?")
+                    if info.get("event") == "quit" else
+                    _("L'assistente sta ancora lavorando su questo documento ({f}). "
+                      "Chiudere e annullare le operazioni?"))
+        if not ctx.confirm(_("Operazioni in corso"), question.format(f=names)):
+            return False
+        for w in running:
+            w.cancel()
+        return True
+
+    ctx.add_guard("close_document", close_guard)
+    ctx.add_guard("quit", close_guard)
+    services.close_guard = close_guard
     ctx.documentChanged.connect(panel.on_document_changed)
     services.refresh()
     return services

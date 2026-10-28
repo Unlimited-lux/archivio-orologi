@@ -30,7 +30,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-20 Ordine di sovrapposizione | P1 | fatto | ui: test_reorder_front_shortcut; eng | |
 | OBJ-21 Allineare | P1 | fatto | ui: test_arrange_actions; eng | Riferimento «Oggetto chiave» solo nel motore. |
 | OBJ-22 Distribuire | P1 | fatto | eng | |
-| OBJ-23 Guide e griglia | P1 | parziale | ui2: test_smart_guides_snap_to_other_object, test_snap_delta_pure, test_grid_snap, test_user_guides_snap_and_persist | Guide intelligenti (Alt sospende), griglia con passo e aggancio, guide dell'utente aggiunte da menu e salvate per documento nelle preferenze. Mancano i righelli (richiedono widget nel nucleo) e il trascinamento delle guide. |
+| OBJ-23 Guide e griglia | P1 | fatto | ui2: test_smart_guides_snap_to_other_object, test_snap_delta_pure, test_grid_snap, test_user_guides_snap_and_persist | Guide intelligenti (Alt sospende), griglia con passo e aggancio, guide del nucleo (VIS-39: righelli, trascinamento, salvate per documento) usate per disegno e aggancio tramite `page_guide_lines`; «Aggiungi guida…» da menu; migrazione delle guide salvate dal modulo (ui2: test_old_guides_migrated_to_core). |
 | OBJ-24 Tracciati vettoriali | P1 | fatto | eng; ui (riquadro, Canc) | «Seleziona simili». |
 | OBJ-25 Stile dei tracciati | P2 | fatto | adv: test_restyle_cmyk_fill_red, test_restyle_width_and_dash_and_no_fill | |
 | OBJ-26 Scomporre / raggruppare | P2 | fatto | adv: test_decompose_form_same_render, test_decompose_transparency_group_needs_confirmation, test_group_move_and_ungroup | Modalità isolamento non fatta. |
@@ -41,7 +41,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-31 Spostare tra pagine | P1 | fatto | ui: test_move_to_page_and_undo; clip | Anche trascinando su un'altra pagina. |
 | OBJ-32 Replicare su più pagine | P2 | fatto | adv: test_replicate_logo_all_pages_single_data, test_replicate_skips_different_size | |
 | OBJ-33 Creare collegamento | P0 | fatto | ui: test_link_tool_creates_link, test_link_tool_cancel_dialog_no_change; lnk; geo | Elementi di struttura /Link non creati. |
-| OBJ-34 Collegamento dal testo | P1 | fatto | ui: test_create_link_from_text_selection; lnk | Selezione su più pagine: la selezione del nucleo è per pagina. |
+| OBJ-34 Collegamento dal testo | P1 | fatto | ui: test_create_link_from_text_selection; ui2: test_link_from_multiline_multipage_selection; lnk | Un quadrilatero per riga; selezione su più pagine (`view.text_selections`) → un collegamento per pagina con la stessa destinazione, un solo passo annullabile. |
 | OBJ-35 Destinazione web/e-mail | P0 | fatto | lnk (normalizzazione, punycode, javascript rifiutato, mailto) | |
 | OBJ-36 Pagina interna / con nome | P0 | fatto | ui: test_link_double_click_edits_to_page; lnk | Creazione di nuove destinazioni con nome non fatta. |
 | OBJ-37 File esterno | P1 | fatto | lnk; ui2: test_decide_rules | GoToR con percorso relativo; /Launch mai eseguito. |

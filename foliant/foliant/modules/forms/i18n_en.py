@@ -314,4 +314,10 @@ EN: dict[str, str] = {
     'Conversione non riuscita: {e}': 'Conversion failed: {e}',
     'Rapporto di conversione': 'Conversion report',
     'Creato «{n}» con un modulo standard.': 'Created “{n}” with a standard form.',
+    'Nascondi evidenziazione': 'Hide highlighting',
+    'Dati XML del modulo': 'Form XML data',
+    "Questi campi non hanno dati XML associati e i loro valori non saranno salvati nei dati XML del modulo: {n}.\n\nSalvare comunque?": 'These fields have no associated XML data and their values will not be saved in the form XML data: {n}.\n\nSave anyway?',
+    'Campi obbligatori vuoti: {n}': 'Empty required fields: {n}',
+    'Vai al campo': 'Go to the field',
+    'Modifica non consentita.': 'Change not allowed.',
 }

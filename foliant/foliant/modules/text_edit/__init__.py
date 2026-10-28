@@ -120,21 +120,18 @@ def register(ctx: Context) -> None:
     ctx.documentOpened.connect(connect_view)
     ctx.currentViewChanged.connect(lambda v: sync_actions())
 
-    def entered() -> None:
-        view = ctx.current_view()
-        if view is None:
-            return
-        # attiva la modifica del testo se nessun altro strumento della modalità è attivo
-        if view.tool is view._default_tool:
-            if not ctrl.ensure_editable(view):
-                return      # permessi negati: il motivo è già stato mostrato (TXT-20)
-            use_edit_tool()
-        ctx.show_properties("text_edit")
+    def default_tool(view):
+        # strumento predefinito della modalità condivisa, attivato dal nucleo entrando in Modifica e
+        # sui documenti aperti mentre è attiva; None se i permessi negano la modifica (TXT-20)
+        if view is None or not ctrl.ensure_editable(view):
+            return None
+        return ctrl.edit_tool(view)
 
-    def view_changed(view) -> None:
-        # un documento aperto (o scelto) mentre si è in Modifica riceve lo strumento di modifica
-        if view is not None and ctx.current_mode() == "modifica":
-            entered()
+    mode.set_default_tool(default_tool)
+
+    def entered() -> None:
+        if ctx.current_view() is not None:
+            ctx.show_properties("text_edit")
 
     def left() -> None:
         for view in ctx.views():
@@ -142,7 +139,6 @@ def register(ctx: Context) -> None:
         ctx.hide_properties()
 
     mode.entered.connect(entered)
-    ctx.currentViewChanged.connect(view_changed)
     mode.left.connect(left)
 
     def view_menu(view, pe, menu) -> None:

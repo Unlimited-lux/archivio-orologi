@@ -1089,4 +1089,11 @@ EN: dict[str, str] = {
     'Apri il contratto da esaminare.': 'Open the contract to review.',
     'esito della revisione del contratto:': 'outcome of the contract review:',
     'Contratto.pdf': 'Contract.pdf',
+    "L'assistente sta ancora lavorando ({f}). Uscire e annullare le operazioni?": 'The assistant is still working ({f}). Quit and cancel the operations?',
+    "L'assistente sta ancora lavorando su questo documento ({f}). Chiudere e annullare le operazioni?": 'The assistant is still working on this document ({f}). Close and cancel the operations?',
+    'risposta': 'answer',
+    'Profilo modificato': 'Profile modified',
+    'Salvare le modifiche al profilo?': 'Save the changes to the profile?',
+    'La sostituzione nel documento funziona su una pagina alla volta: seleziona il testo di una sola pagina.': 'Replacing in the document works one page at a time: select text on a single page.',
+    "Chiedi all'assistente": 'Ask the assistant',
 }

@@ -1,8 +1,7 @@
 # Richieste al nucleo (modulo text_edit)
 
-1. **Strumento predefinito della modalità condivisa «modifica».** Entrando nella modalità il modulo
-   attiva «Modifica testo» solo se è attivo lo strumento predefinito; se anche `objects` fa lo stesso,
-   vince chi è collegato per ultimo. Servirebbe un modo per dichiarare lo strumento predefinito della modalità.
+1. ~~Strumento predefinito della modalità condivisa «modifica».~~ Risolto dal nucleo: il modulo usa
+   `mode.set_default_tool(factory)`; la factory restituisce None se i permessi negano la modifica.
 2. **Chiusura della finestra nei test.** pytest-qt chiude la finestra prima dei finalizzatori dei fixture:
    con un documento modificato appariva la richiesta di salvataggio modale. Nei nostri test `close_view`
    è sostituito per marcare il documento salvato; la rete di sicurezza del nucleo ora copre il caso.

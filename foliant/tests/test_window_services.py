@@ -514,20 +514,20 @@ def test_tab_menu_provider(window, sample_pdf, monkeypatch):
 
     def provider(v, menu):
         seen.append(v)
-        menu.addAction("Confronta con…")
+        menu.addAction("Voce di prova del test")
     ctx.add_tab_menu_provider(provider)
     ctx.add_tab_menu_provider(provider)                              # una sola volta
     try:
         menu = window.tab_menu(window.tabs.indexOf(view))
         texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-        assert "Chiudi scheda" in texts and texts.count("Confronta con…") == 1 and seen == [view]
+        assert "Chiudi scheda" in texts and texts.count("Voce di prova del test") == 1 and seen == [view]
         shown = []
         monkeypatch.setattr(window, "exec_tab_menu", lambda m, pos: shown.append([a.text() for a in m.actions()]))
         from PySide6.QtGui import QContextMenuEvent
         bar = window.tabs.tabBar()
         pos = bar.tabRect(0).center()
         bar.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos, bar.mapToGlobal(pos)))
-        assert shown and "Confronta con…" in shown[0]
+        assert shown and "Voce di prova del test" in shown[0]
         assert window.tab_menu(5) is None
     finally:
         window.tab_menu_providers.remove(provider)
