@@ -1290,3 +1290,38 @@ def test_parse_cell_swiss_francs():
     assert parse_cell("CHF 950", ".")[0] == 950
     assert parse_cell("€ 1.234,50", ",")[0] == 1234.5 and parse_cell("1.234,50 EUR", ",")[0] == 1234.5
     assert parse_cell("ABC", ".")[0] == "ABC" and parse_cell("REF 00123", ".")[0] == "REF 00123"
+
+
+def test_txt_tagged_table_cells_and_artifacts(tmp_path):
+    """Collaudo B, D3: nel TXT di un PDF taggato le celle di una riga TR sono separate da
+    tabulazioni e l'intestazione /Artifact non finisce in fondo al testo."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "x", fontsize=1)
+    font = [f[4] for f in page.get_fonts()][0]
+    cells = [("Referenza", 72, 600), ("Prezzo", 250, 600), ("5513", 72, 580), ("9.800", 250, 580)]
+    content = [f"/Artifact <</Type/Pagination/Subtype/Header>> BDC BT /{font} 9 Tf 72 800 Td "
+               f"(Orologeria Verdi - Listino) Tj ET EMC",
+               f"/P <</MCID 0>> BDC BT /{font} 12 Tf 72 700 Td (Listino autunno) Tj ET EMC"]
+    for k, (text, x, y) in enumerate(cells, 1):
+        content.append(f"/TD <</MCID {k}>> BDC BT /{font} 11 Tf {x} {y} Td ({text}) Tj ET EMC")
+    doc.update_stream(page.get_contents()[0], "\n".join(content).encode())
+    root, docel, para, table, tr1, tr2 = (doc.get_new_xref() for _ in range(6))
+    tds = [doc.get_new_xref() for _ in cells]
+    for k, td in enumerate(tds):
+        parent = tr1 if k < 2 else tr2
+        doc.update_object(td, f"<</Type/StructElem/S/TD/P {parent} 0 R/Pg {page.xref} 0 R/K {k + 1}>>")
+    doc.update_object(tr1, f"<</Type/StructElem/S/TR/P {table} 0 R/K[{tds[0]} 0 R {tds[1]} 0 R]>>")
+    doc.update_object(tr2, f"<</Type/StructElem/S/TR/P {table} 0 R/K[{tds[2]} 0 R {tds[3]} 0 R]>>")
+    doc.update_object(table, f"<</Type/StructElem/S/Table/P {docel} 0 R/K[{tr1} 0 R {tr2} 0 R]>>")
+    doc.update_object(para, f"<</Type/StructElem/S/P/P {docel} 0 R/Pg {page.xref} 0 R/K 0>>")
+    doc.update_object(docel, f"<</Type/StructElem/S/Document/P {root} 0 R/K[{para} 0 R {table} 0 R]>>")
+    doc.update_object(root, f"<</Type/StructTreeRoot/K {docel} 0 R>>")
+    doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
+    doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<</Marked true>>")
+    path = _save(doc, tmp_path / "listino_taggato.pdf")
+    text = open(convert_pdf(path, tmp_path / "l.txt", "txt")[0], encoding="utf-8").read()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    assert "Referenza\tPrezzo" in lines and "5513\t9.800" in lines
+    assert lines[0] == "Listino autunno"
+    assert "Orologeria Verdi - Listino" not in lines[-1]
