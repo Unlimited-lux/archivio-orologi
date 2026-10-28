@@ -9,6 +9,8 @@ from PySide6.QtWidgets import QDialog, QMessageBox
 from foliant.modules.pages import dialogs as D
 from foliant.modules.pages import engine as E
 
+from tests.test_document import test_signer  # noqa: F401  (fixture: firmatario di prova del nucleo)
+
 from .conftest import numbered_pdf, page_texts, save_numbered
 
 
@@ -312,3 +314,56 @@ def test_actions_follow_document_access_changes(window, tmp_path):
     assert not c.act_rotate_right.isEnabled()
     assert view.document.unlock("padrone")
     assert c.act_rotate_right.isEnabled() and c.act_delete.isEnabled()
+
+
+def test_extract_and_split_keep_child_bookmarks():
+    """PAG-12/20/21: i segnalibri figli restano anche se il genitore punta a una pagina non estratta."""
+    d = numbered_pdf(3)
+    d.set_toc([[1, "Rolex", 1], [2, "Submariner", 2], [2, "Daytona", 3]])
+    pdf = pymupdf.open(stream=d.tobytes())
+    out = pymupdf.open(stream=E.extract_pages(pdf, [1]))
+    assert out.get_toc() == [[1, "Submariner", 1]]
+    plan = E.split_document(pdf, "bookmarks", 2)
+    tocs = [pymupdf.open(stream=b).get_toc() for b in E.split_to_bytes(pdf, plan)]
+    assert tocs == [[[1, "Rolex", 1]], [[1, "Submariner", 1]], [[1, "Daytona", 1]]]
+    tocs = [pymupdf.open(stream=b).get_toc() for b in E.split_to_bytes(pdf, E.split_document(pdf, "every", 1))]
+    assert [t[0][1] for t in tocs] == ["Rolex", "Submariner", "Daytona"]
+
+
+def test_extract_keeps_bookmark_style():
+    d = numbered_pdf(2)
+    d.set_toc([[1, "Rosso", 2, {"kind": pymupdf.LINK_GOTO, "page": 1, "color": (1, 0, 0), "bold": True}]])
+    pdf = pymupdf.open(stream=d.tobytes())
+    out = pymupdf.open(stream=E.extract_pages(pdf, [1]))
+    item = out.get_toc(simple=False)[0]
+    assert item[1:3] == ["Rosso", 1] and item[3].get("bold") and tuple(round(c) for c in item[3]["color"]) == (1, 0, 0)
+
+
+def test_signed_rotation_single_warning(window, tmp_path, test_signer, monkeypatch):
+    """PDF firmato davvero, tutti i moduli caricati: ruotare mostra un solo avviso (quello di
+    Firma); «Annulla» lascia il documento invariato."""
+    from tests.test_document import _signed_pdf
+    path = _signed_pdf(tmp_path, test_signer, objstm=False)
+    asked = []
+
+    def fake_exec(box):
+        asked.append(box.windowTitle())
+        for b in box.buttons():
+            if box.buttonRole(b) == QMessageBox.ButtonRole.RejectRole:
+                b.click()
+                return 0
+        return 0
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: asked.append(a[1]) or QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: asked.append(a[1]))
+    view = window.open_path(str(path))
+    window.set_mode("pagine")
+    asked.clear()
+    c = window.ctx.pages_controller
+    c.organizer.grid.select_pages([0])
+    c.act_rotate_right.trigger()
+    assert len(asked) == 1, asked
+    with E.ENGINE_LOCK:
+        assert view.document.pdf[0].rotation == 0
+    assert not view.document.can_undo

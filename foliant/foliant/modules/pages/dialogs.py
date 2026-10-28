@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from foliant.api import ENGINE_LOCK, Document, FoliantError, _, icon, theme
+from foliant.api import ENGINE_LOCK, Document, FoliantError, OperationCancelled, _, icon, theme
 
 from . import engine as E
 
@@ -379,6 +379,8 @@ def _apply(ctx, label: str, fn, select=None, view=None):
     try:
         with view.document.change(label) as pdf:
             return fn(pdf)
+    except OperationCancelled:
+        return None
     except FoliantError as e:
         ctx.error(label, str(e))
         return None
