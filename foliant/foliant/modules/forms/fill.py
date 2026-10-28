@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QPlainTextEdit, QToolButton, QWidget, QMenu, QWidgetAction,
 )
 
-from foliant.api import ACCESS, ENGINE_LOCK, HandTool, OperationCancelled, SelectTextTool, _, bind_icon, theme
+from foliant.api import ENGINE_LOCK, HandTool, OperationCancelled, SelectTextTool, _, bind_icon, theme
 
 from . import engine as E
 from . import formats as fm
@@ -311,6 +311,7 @@ class FormFiller(QObject):
         view.layoutChanged.connect(self.reposition)
         view.contentChanged.connect(self._on_content_changed)
         self.document.add_listener(self._on_document_event)
+        self.ctx.documentAccessChanged.connect(self._on_access_changed)
         # FRM-01: la barra compare subito; l'analisi completa (lenta con migliaia di campi)
         # parte appena la vista è mostrata
         with ENGINE_LOCK:
@@ -393,13 +394,7 @@ class FormFiller(QObject):
         self.changed.emit()
 
     def _on_document_event(self, _doc, kind: str) -> None:
-        """Il salvataggio compatta il file e può rinumerare gli oggetti: si rileggono i campi.
-        Con lo sblocco dei permessi (ACCESS) il modulo può diventare compilabile."""
-        if kind == ACCESS:
-            self.state.refresh(force=True)
-            self.update_bar()
-            self.changed.emit()
-            return
+        """Il salvataggio compatta il file e può rinumerare gli oggetti: si rileggono i campi."""
         if kind != "saved":
             return
         active = self.active
@@ -415,12 +410,24 @@ class FormFiller(QObject):
         self.update_bar()
         self.changed.emit()
 
+    def _on_access_changed(self, view) -> None:
+        """Permessi o sola lettura cambiati dal nucleo (es. «Sblocca…»): il modulo può diventare compilabile."""
+        if view is not self.view or not self._alive() or self.document.closed:
+            return
+        self.state.refresh(force=True)
+        self.update_bar()
+        self.changed.emit()
+
     last_warning: str | None = None
 
     def dispose(self) -> None:
         try:
             self.document.remove_listener(self._on_document_event)
         except Exception:
+            pass
+        try:
+            self.ctx.documentAccessChanged.disconnect(self._on_access_changed)
+        except (RuntimeError, TypeError):
             pass
         self.close_editor(commit=False)
         try:
@@ -554,7 +561,7 @@ class FormFiller(QObject):
 
     def unlock_with_owner_password(self, password: str) -> bool:
         """Sblocca con la password del proprietario tramite il nucleo (document.unlock): l'accesso
-        completo vale per tutta l'applicazione e l'evento ACCESS aggiorna il modulo."""
+        completo vale per tutta l'applicazione e ctx.documentAccessChanged aggiorna il modulo."""
         if not self.document.unlock(password):
             self.ctx.error(_("Password del proprietario"), _("Password errata."))
             return False
