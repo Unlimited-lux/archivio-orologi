@@ -91,3 +91,10 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
 
 18. **`close_view(view, discard=True)`** per chiudere senza la richiesta di salvataggio
     (dopo lo spostamento nel cestino o il ripristino): oggi si imposta `doc._saved_state`.
+
+19. **Testi di VIS-06** (password e copia vietata): la specifica chiede «Password non corretta»
+    e, per Ctrl+C con copia vietata, l'avviso «Copia non consentita dal documento»; il nucleo
+    scrive «La password non è corretta. Riprova.» e «Il documento non consente la copia del
+    contenuto.» nella barra di stato. Il comportamento è corretto (verificato da
+    `tests/modules/viewer/test_protection.py`): resta da allineare il testo, e per la copia
+    usare `ctx.notify` invece della barra di stato.
