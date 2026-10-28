@@ -408,7 +408,7 @@ def test_rulers_action_context_and_guides_per_document(window, sample_pdf):
     from foliant.i18n import _
     ctx = window.ctx
     assert window.act_rulers in window._menu_sections[_("Vista")]
-    assert window.act_rulers.shortcut().isEmpty()
+    assert window.act_rulers.shortcut().toString() in ("", "Ctrl+R")   # la assegna il modulo viewer (UX-18)
     view = window.open_path(sample_pdf)
     assert not view.rulers_visible
     ctx.set_rulers_visible(True)

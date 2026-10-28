@@ -765,3 +765,20 @@ def test_conversion_result_is_a_notification(window, ctrl, sample_pdf, tmp_path,
     assert not opened
     text, actions = messages["notify"][-1]
     assert "esempio.txt" in text and actions[:2] == ["Apri", "Mostra cartella"]
+
+
+def test_export_allowed_after_owner_unlock(window, ctrl, tmp_path, monkeypatch, messages):
+    """Dopo lo sblocco con la password dei permessi la conversione è consentita."""
+    path = tmp_path / "vietato.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Riservato", fontsize=12)
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="capo", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    doc.close()
+    view = window.open_path(str(path))
+    assert not view.document.allows(pymupdf.PDF_PERM_COPY)
+    assert view.document.unlock("capo")
+    assert view.document.allows(pymupdf.PDF_PERM_COPY)
+    _accept_export(monkeypatch, tmp_path / "out", "txt")
+    result = ctrl.export()
+    assert result is not None and "Riservato" in open(result.paths[0], encoding="utf-8").read()

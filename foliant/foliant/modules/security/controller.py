@@ -620,7 +620,7 @@ class SecurityController:
         pages = sorted({m.page for m in targets})
         keep = {(m.page, m.xref) for m in all_marks} - {(m.page, m.xref) for m in targets}
         try:
-            with doc.change(_("Applica redazioni")) as pdf:
+            with doc.change(_("Applica redazioni"), kind="redaction") as pdf:
                 # i segni non scelti vengono messi da parte e ricreati dopo
                 saved = _detach_marks(pdf, keep)
                 report = R.apply(pdf, self.apply_options, pages)
@@ -667,7 +667,9 @@ class SecurityController:
         if not path:
             return
         try:
-            doc.save(path)
+            # la copia redatta o ripulita è sempre una riscrittura completa (NFR-09): si usa il
+            # salvataggio del nucleo anche se un altro modulo ha sostituito doc.save
+            type(doc).save(doc, path, incremental=False)
         except DocumentError as e:
             self.ctx.error(_("Salvataggio non riuscito"), str(e))
 
@@ -719,7 +721,7 @@ class SecurityController:
         if not any(options.get(k) for k in S.SANITIZE_KEYS):
             return False
         try:
-            with doc.change(_("Rimuovi dati nascosti")) as pdf:
+            with doc.change(_("Rimuovi dati nascosti"), kind="redaction") as pdf:
                 result = S.sanitize(pdf, options)
         except Exception as e:
             self.ctx.error(_("Rimozione dei dati nascosti non riuscita"),
@@ -764,7 +766,7 @@ class SecurityController:
                        _("Commenti e campi compilati diventeranno parte fissa delle pagine e non saranno più "
                          "modificabili. Le annotazioni nascoste vengono eliminate."), _("Appiattisci")):
             return False
-        with doc.change(_("Appiattisci")) as pdf:
+        with doc.change(_("Appiattisci"), kind="redaction") as pdf:
             S.flatten(pdf)
         self.ctx.status(_("Documento appiattito"))
         return True

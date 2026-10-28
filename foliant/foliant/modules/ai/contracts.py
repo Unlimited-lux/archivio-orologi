@@ -153,7 +153,7 @@ def add_review_comments(document, clauses: list[Clause], author: str | None = No
     targets = [c for c in clauses if c.criticita in ("media", "alta") and c.pagina is not None]
     if not targets:
         return 0
-    with document.change(_("Commenti della revisione del contratto")) as pdf:
+    with document.change(_("Commenti della revisione del contratto"), kind="annotation") as pdf:
         for c in targets:
             page = pdf[c.pagina]
             point = pymupdf.Point(36, 36)

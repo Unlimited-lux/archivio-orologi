@@ -30,7 +30,7 @@ def _author(author: str | None) -> str:
 
 def add_note(document: Document, page: int, point: tuple[float, float], text: str, *, subject: str = SUBJECT,
              author: str | None = None, label: str | None = None) -> None:
-    with document.change(label or _("Inserisci nota IA")) as pdf:
+    with document.change(label or _("Inserisci nota IA"), kind="annotation") as pdf:
         p = pdf[page]
         x = min(max(point[0], 0), p.rect.width - 20)
         y = min(max(point[1], 0), p.rect.height - 20)
@@ -42,7 +42,7 @@ def add_note(document: Document, page: int, point: tuple[float, float], text: st
 def add_text_box(document: Document, page: int, rect: tuple | None, text: str, *, author: str | None = None,
                  fontsize: float = 10, label: str | None = None) -> pymupdf.Rect:
     """Casella di testo (annotazione testo libero) con il testo indicato."""
-    with document.change(label or _("Inserisci casella di testo IA")) as pdf:
+    with document.change(label or _("Inserisci casella di testo IA"), kind="annotation") as pdf:
         p = pdf[page]
         if rect is None:
             r = pymupdf.Rect(p.rect.width * 0.1, p.rect.height * 0.1, p.rect.width * 0.9, p.rect.height * 0.5)
@@ -66,7 +66,7 @@ def insert_text_page(document: Document, text: str, *, at: int = 0, like_page: i
                      label: str | None = None, title: str = "") -> int:
     """Nuova pagina con testo selezionabile e carattere incorporato (riassunto, AI-05)."""
     body = plain_text(text)
-    with document.change(label or _("Inserisci riassunto come pagina")) as pdf:
+    with document.change(label or _("Inserisci riassunto come pagina"), kind="pages") as pdf:
         like = pdf[min(max(like_page, 0), pdf.page_count - 1)].rect
         at = max(0, min(at, pdf.page_count))
         page = pdf.new_page(at, width=like.width, height=like.height)
@@ -176,7 +176,7 @@ def replace_text(document: Document, page: int, rects: list, new_text: str, *,
     """
     warnings: list[str] = []
     rr = [pymupdf.Rect(r) for r in rects]
-    with document.change(label or _("Sostituisci testo (IA)")) as pdf:
+    with document.change(label or _("Sostituisci testo (IA)"), kind="content") as pdf:
         p = pdf[page]
         dom, spans = _dominant_span(p, rr)
         if dom is None:
@@ -271,7 +271,7 @@ def _try_textbox(page: pymupdf.Page, rect: pymupdf.Rect, text: str, fontname: st
 def add_replacement_annotation(document: Document, page: int, rects: list, proposed: str, *,
                                author: str | None = None) -> None:
     """Alternativa non distruttiva: barrato con il testo proposto come contenuto."""
-    with document.change(_("Annotazione di sostituzione (IA)")) as pdf:
+    with document.change(_("Annotazione di sostituzione (IA)"), kind="annotation") as pdf:
         p = pdf[page]
         quads = [pymupdf.Rect(r).quad for r in rects]
         annot = p.add_strikeout_annot(quads=quads)
@@ -282,7 +282,7 @@ def add_replacement_annotation(document: Document, page: int, rects: list, propo
 def add_ocr_layer(document: Document, words_by_page: dict[int, list[tuple]]) -> int:
     """Livello di testo invisibile sopra le scansioni (rende il PDF ricercabile). Un solo «Annulla»."""
     n = 0
-    with document.change(_("Salva il testo riconosciuto")) as pdf:
+    with document.change(_("Salva il testo riconosciuto"), kind="content") as pdf:
         font = pymupdf.Font("helv")
         for index, words in words_by_page.items():
             page = pdf[index]
