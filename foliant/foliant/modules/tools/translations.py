@@ -764,4 +764,8 @@ EN: dict[str, str] = {
     "«{f}» esiste già nella destinazione.": "“{f}” already exists at the destination.",
     "Applica a tutti i conflitti": "Apply to all conflicts",
     "Rinomina": "Rename",
+    "incerta": "uncertain",
+    "Solo differenze incerte (OCR)": "Uncertain differences only (OCR)",
+    "Solo differenze incerte (OCR): {n}": "Uncertain differences only (OCR): {n}",
+    "Parole riconosciute con bassa affidabilità: {p}%": "Words recognized with low confidence: {p}%",
 }

@@ -627,3 +627,27 @@ def test_scan_preset_with_real_ocr_module(tmp_path):
     r = run(scan("a.pdf", "1250"), scan("b.pdf", "1350"), preset="scan", sensitivity="low")
     mods = [d for d in r.differences if d.kind == ce.MODIFIED]
     assert len(mods) == 1 and mods[0].text_a == "1250" and mods[0].text_b == "1350"
+
+
+def test_scan_preset_marks_uncertain_differences(tmp_path):
+    """CMP-12: con soglia di affidabilità altissima tutte le parole sono «incerte»."""
+    import shutil
+    if shutil.which("tesseract") is None or ce._ocr_function() is None:
+        pytest.skip("OCR non disponibile")
+
+    def scan(name, amount):
+        src = pymupdf.open()
+        src.new_page().insert_text((72, 120), f"Importo dovuto {amount} euro", fontsize=22)
+        img = src[0].get_pixmap(dpi=200).tobytes("png")
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_image(page.rect, stream=img)
+        doc.save(str(tmp_path / name))
+        return str(tmp_path / name)
+    a, b = scan("a.pdf", "1250"), scan("b.pdf", "1350")
+    sure = run(a, b, preset="scan", sensitivity="low")
+    assert [d.uncertain for d in sure.differences if d.kind == ce.MODIFIED] == [False]
+    doubtful = run(a, b, preset="scan", sensitivity="low", uncertain_threshold=101)
+    mods = [d for d in doubtful.differences if d.kind == ce.MODIFIED]
+    assert mods and all(d.uncertain for d in mods)
+    assert any("bassa affidabilità: 100" in w for w in doubtful.warnings)

@@ -248,6 +248,8 @@ def build_report(progress, result: CompareResult, data_a: bytes, data_b: bytes,
                     row = f"{d.id}. {kind_label(d.kind)} · A p. {d.page_label('a')} · B p. {d.page_label('b')}"
                     if text:
                         row += f" · {text}"
+                    if d.uncertain:
+                        row += " · " + _("incerta")
                     if d.status:
                         row += f" · {status_label(d.status)}"
                     if d.note:

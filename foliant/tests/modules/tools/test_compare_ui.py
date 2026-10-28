@@ -417,3 +417,17 @@ def test_draw_exclusion_area_and_recompute(window, pdf_builder, monkeypatch):
     assert w2.result.options.exclusions == [[-1, 400.0, 740.0, 590.0, 780.0]]
     assert "Aree escluse: 1" in w2.panel.empty.text()
     assert not isinstance(w2.pane_a.view.tool, cu.ExclusionTool)
+
+
+def test_uncertain_filter(qtbot):
+    info = ce.SideInfo("a", None, "0" * 64, "", 1, [0])
+    diffs = [ce.Difference(ce.MODIFIED, text_a="1250", text_b="1350", rects_a=[(0, 1, 1, 5, 5)],
+                           rects_b=[(0, 1, 1, 5, 5)], id=1, uncertain=True),
+             ce.Difference(ce.ADDED, text_b="euro", rects_b=[(0, 10, 1, 15, 5)], id=2)]
+    panel = cu.DiffPanel()
+    qtbot.addWidget(panel)
+    panel.set_result(ce.CompareResult(info, info, ce.CompareOptions(), diffs))
+    assert not panel.uncertain_only.isHidden()
+    assert "incerta" in panel.model.data(panel.model.index(0))
+    panel.uncertain_only.setChecked(True)
+    assert panel.model.visible == [diffs[0]]
