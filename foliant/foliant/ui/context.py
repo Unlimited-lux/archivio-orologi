@@ -157,6 +157,14 @@ class Context(QObject):
     def hide_properties(self) -> None:
         self._w.hide_properties()
 
+    def add_view_menu_provider(self, provider: Callable) -> None:
+        """Voci del menu contestuale sulle pagine.
+
+        `provider(view, page_event, menu)` aggiunge azioni a `menu` (QMenu) in base
+        alla posizione (`page_event.page`, `page_event.point`) e allo stato del modulo.
+        """
+        self._w.view_menu_providers.append(provider)
+
     # ----------------------------------------------------------------- strumenti
     def set_tool(self, tool: Tool | None) -> None:
         """Attiva uno strumento sulla vista corrente (None = selezione testo)."""

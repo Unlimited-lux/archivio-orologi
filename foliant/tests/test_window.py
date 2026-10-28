@@ -108,3 +108,25 @@ def test_broken_module_does_not_crash(window):
         pass
     # tutti i moduli reali sono stati caricati senza errori
     assert all(err is None for _n, err in window.module_results), window.module_results
+
+
+def test_view_menu_provider(window, sample_pdf, monkeypatch):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtWidgets import QMenu
+    seen = []
+
+    def provider(view, ev, menu):
+        seen.append(ev.page)
+        menu.addAction("Voce di prova")
+
+    window.ctx.add_view_menu_provider(provider)
+    view = window.open_path(sample_pdf)
+    view.flush_rendering()
+    shown = []
+    monkeypatch.setattr(view, "exec_menu", lambda menu, pos: shown.append([a.text() for a in menu.actions()]))
+    r = view.page_rect(0)
+    view.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(int(r.center().x()), int(r.top() + 20)),
+                                            view.viewport().mapToGlobal(QPoint(int(r.center().x()), int(r.top() + 20)))))
+    assert seen == [0]
+    assert shown == [["Voce di prova"]]

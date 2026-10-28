@@ -128,6 +128,7 @@ def ruota(ctx, gradi):
 | `add_sidebar_panel(id, titolo, icona, widget, order)` / `show_sidebar_panel(id)` | pannello sinistro (`widget.set_view(view)` chiamato a ogni cambio documento) |
 | `add_properties_panel(id, widget)` / `show_properties(id)` / `hide_properties()` | pannello destro |
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |
+| `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)` |
 | `run_task(titolo, fn, *args)` | lavoro lungo con avanzamento |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
 | segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `modeChanged` | eventi |

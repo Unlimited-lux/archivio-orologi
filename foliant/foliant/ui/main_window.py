@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self._sidebar: dict[str, tuple[str, str, QWidget, int, QAction]] = {}
         self._props: dict[str, QWidget] = {}
         self._connected_view: DocumentView | None = None
+        self.view_menu_providers: list = []
         self.module_results: list[tuple[str, Exception | None]] = []
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
@@ -534,6 +535,7 @@ class MainWindow(QMainWindow):
 
     def add_document(self, document: Document) -> DocumentView:
         view = DocumentView(document, self.tabs)
+        view.menu_providers = self.view_menu_providers
         view.currentPageChanged.connect(self._update_page_box)
         view.zoomChanged.connect(self._update_zoom_box)
         view.statusMessage.connect(lambda m: self.statusBar().showMessage(m, 6000))

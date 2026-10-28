@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import pymupdf
 from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPolygonF, QTransform
-from PySide6.QtWidgets import QAbstractScrollArea, QFrame
+from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QMenu
 
 from ..core.document import CLOSED, CONTENT, Document
 from ..core.engine import ENGINE_LOCK
@@ -122,6 +122,9 @@ class DocumentView(QAbstractScrollArea):
         self.hand_tool = HandTool()
         # Disegni aggiuntivi dei moduli: callable(view, painter, page_index), painter in coordinate pagina.
         self.overlays: list = []
+        # Voci del menu contestuale (tasto destro): callable(view, page_event, menu).
+        # La finestra principale condivide qui la lista registrata dai moduli.
+        self.menu_providers: list = []
         self.text_selection: TextSelection | None = None
         self.search_hits: dict[int, list] = {}
         self.current_hit: tuple[int, int] | None = None
@@ -724,6 +727,29 @@ class DocumentView(QAbstractScrollArea):
             self.viewport().update()
         else:
             super().mouseDoubleClickEvent(ev)
+
+    def contextMenuEvent(self, ev) -> None:
+        from ..i18n import _
+        pos = QPointF(ev.pos())
+        hit = self.view_to_page(pos)
+        pe = PageEvent(page=hit[0] if hit else None, point=hit[1] if hit else None, pos=pos,
+                       button=Qt.MouseButton.RightButton, buttons=Qt.MouseButton.RightButton,
+                       modifiers=ev.modifiers(), event=ev)
+        menu = QMenu(self)
+        if self.selected_text():
+            menu.addAction(_("Copia"), lambda: copy_text_to_clipboard(self.selected_text()))
+        for provider in list(self.menu_providers):
+            try:
+                provider(self, pe, menu)
+            except Exception as e:
+                self.status(f"Errore nel menu contestuale: {e}")
+        if not menu.isEmpty():
+            self.exec_menu(menu, ev.globalPos())
+        menu.deleteLater()
+
+    def exec_menu(self, menu: QMenu, global_pos) -> None:
+        """Mostra il menu contestuale (separato per poterlo simulare nei test)."""
+        menu.exec(global_pos)
 
     def wheelEvent(self, ev) -> None:
         if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
