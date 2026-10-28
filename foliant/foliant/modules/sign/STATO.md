@@ -98,3 +98,10 @@ Test in `tests/modules/sign/`; i nomi dei test qui sotto omettono il prefisso `t
 - `ctx.request_signature(view, nome_campo) -> bool` (impostato in `register`): apre la procedura di firma
   digitale con il campo firma vuoto indicato già scelto; False se il campo non esiste o è già firmato. Lo
   usa il modulo Moduli al clic su un campo firma vuoto. Test ui: `ctx_request_signature_opens_dialog_with_field`.
+
+## Ritocchi dopo il collaudo visivo (28/10)
+
+- NFR-26: le date di pannello, dettagli e dialoghi usano `format_date` del nucleo (formato della lingua).
+  Test: english `dates_follow_interface_language`.
+- «ID digitali…»: un elenco vuoto mostra una spiegazione; i comandi che agiscono su un elemento sono
+  attivi solo con una selezione. Test ui: `ids_dialog_empty_lists_and_selection_buttons`.
