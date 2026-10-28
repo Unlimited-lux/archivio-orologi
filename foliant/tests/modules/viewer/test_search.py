@@ -241,3 +241,59 @@ def test_search_also_in_comments(viewer_window, tmp_path):
     assert hit.comment and hit.page == 0
     assert "commento" in ctl.panel.tree.topLevelItem(0).child(0).text(0)
     assert 0 in view.search_hits
+
+
+def test_large_document_full_count_is_fast(viewer_window, tmp_path):
+    """NFR-07: 500 pagine con 18.000 occorrenze, conteggio completo in tempi ragionevoli
+    (prima ~50 s: contesto calcolato riscorrendo la pagina e rinumerazione a ogni pagina)."""
+    path = tmp_path / "grande.pdf"
+    doc = pymupdf.open()
+    line = "Il nostro orologio preferito è un orologio automatico, orologio da polso."
+    for _i in range(500):
+        doc.new_page().insert_textbox(pymupdf.Rect(40, 40, 560, 800), "\n".join([line] * 12), fontsize=10)
+    doc.save(str(path))
+    view = viewer_window.open_path(str(path))
+    ctl = _ctl(viewer_window)
+    t = time.perf_counter()
+    ctl.search("orologio")
+    ctl.finish()
+    elapsed = time.perf_counter() - t
+    assert len(ctl.hits) == 18000
+    assert elapsed < 10, f"{elapsed:.1f} s"
+    assert [h.page for h in ctl.hits] == sorted(h.page for h in ctl.hits)
+    h = ctl.hits[3]
+    assert h.found == "orologio" and h.before and h.after
+    flat = [c.data(0, Qt.ItemDataRole.UserRole) for p in ctl.panel._pages
+            for c in (ctl.panel._page_items[p].child(n) for n in range(ctl.panel._page_items[p].childCount()))]
+    assert flat == list(range(18000))           # numerazione dell'elenco completa e ordinata
+    view.document._saved_state = view.document._state
+
+
+def test_snippet_from_indices_matches_and_is_linear():
+    from foliant.modules.viewer.engine import (
+        context_snippet, extract_page_text, find_hits, find_spans, rects_of, span_snippet,
+    )
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_textbox(pymupdf.Rect(40, 40, 560, 800), "\n".join(["Un orologio e un altro orologio."] * 30),
+                        fontsize=10)
+    pt = extract_page_text(page)
+    spans = find_spans(pt, "orologio")
+    assert len(spans) == 60
+    for src in spans[:5]:
+        assert span_snippet(pt, src, 28) == context_snippet(pt, rects_of(pt, src), 28)
+    assert [s for _r, s in find_hits(pt, "orologio")][:2] == [span_snippet(pt, s, 28) for s in spans[:2]]
+
+    def cost(n):
+        """Tempo per occorrenza su una pagina con 80·n occorrenze."""
+        big = pymupdf.open().new_page(width=595, height=842 * n)
+        big.insert_textbox(pymupdf.Rect(40, 40, 560, 842 * n - 40),
+                           "\n".join(["Un orologio e un altro orologio."] * 40 * n), fontsize=10)
+        text = extract_page_text(big)
+        t = time.perf_counter()
+        for _r in range(3):
+            hits = find_hits(text, "orologio")
+        assert len(hits) == 80 * n
+        return (time.perf_counter() - t) / len(hits)
+    small, large = min(cost(1) for _i in range(3)), min(cost(8) for _i in range(3))
+    assert large < small * 4          # lineare: il costo per occorrenza non cresce con la pagina (prima ×8)
