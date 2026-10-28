@@ -423,7 +423,42 @@ def password_strength(pw: str) -> tuple[int, str]:
 # --------------------------------------------------------------------------- #
 
 
-def _reader(data: bytes):
+def _decrypt_with(pdf_reader, password: str | None):
+    """Decifra con la password vuota e poi con quella del documento. Restituisce il
+    risultato di pyHanko o solleva ValueError."""
+    last = None
+    for pw in ("", password) if password else ("",):
+        try:
+            result = pdf_reader.decrypt(pw)
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            continue
+        ok = getattr(result, "status", None)
+        if ok is not None and getattr(ok, "name", "") == "FAILED":
+            continue
+        return result, pw
+    raise ValueError("password") from last
+
+
+def _open_writer(data: bytes, password: str | None):
+    """IncrementalPdfFileWriter che mantiene la cifratura dell'originale. PyMuPDF scrive
+    /Encrypt come dizionario diretto nel trailer: pyHanko lo vuole indiretto."""
+    from pyhanko.pdf_utils import generic
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    writer = IncrementalPdfFileWriter(io.BytesIO(data), strict=False)
+    if writer.prev.encrypted:
+        try:
+            _r, pw = _decrypt_with(writer.prev, password)
+        except ValueError as exc:
+            raise SigningNotAllowed(_("Il documento è cifrato con una password: aprilo con la password per "
+                                      "firmarlo")) from exc
+        writer.encrypt(pw)
+        if writer._encrypt is not None and not isinstance(writer._encrypt, generic.IndirectObject):
+            writer._encrypt = writer.add_object(writer._encrypt)
+    return writer
+
+
+def _reader(data: bytes, password: str | None = None):
     from pyhanko.pdf_utils.reader import PdfFileReader
 
     try:
@@ -432,13 +467,10 @@ def _reader(data: bytes):
         raise SigningNotAllowed(_("Il file è danneggiato o non è un PDF valido")) from exc
     if reader.encrypted:
         try:
-            result = reader.decrypt("")
-            ok = getattr(result, "status", None)
-            if ok is not None and getattr(ok, "name", "") == "FAILED":
-                raise ValueError
-        except Exception as exc:  # noqa: BLE001
+            _decrypt_with(reader, password)
+        except ValueError as exc:
             raise SigningNotAllowed(
-                _("Il documento è cifrato con una password: rimuovi la protezione prima di firmarlo")) from exc
+                _("Il documento è cifrato con una password: aprilo con la password per firmarlo")) from exc
     return reader
 
 
@@ -832,6 +864,7 @@ class SignOptions:
     lock_fields: list[str] | None = None
     md_algorithm: str = "sha256"
     allow_expired: bool = False
+    password: str | None = None    # password del documento cifrato (mai salvata)
 
 
 def _timestamp_error(exc: BaseException) -> TimestampError:
@@ -902,11 +935,9 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
 
     data = bytes(data)
     warnings = check_usable(digital_id, allow_expired=options.allow_expired)
-    reader = _reader(data)
+    reader = _reader(data, options.password)
     try:
-        writer = IncrementalPdfFileWriter(io.BytesIO(data), strict=False)
-        if writer.prev.encrypted:
-            writer.encrypt("")
+        writer = _open_writer(data, options.password)
     except SigningNotAllowed:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -1080,7 +1111,7 @@ def _locked_field_names(reader) -> set[str]:
             sig = sig_ref.get_object() if sig_ref is not None else None
             if sig is None:
                 continue
-            for ref in sig.get("/Reference") or []:
+            for ref in (sig["/Reference"] if "/Reference" in sig else []):
                 ref = ref.get_object()
                 if ref.get("/TransformMethod") != "/FieldMDP":
                     continue
@@ -1122,10 +1153,10 @@ def _raw_items(arr):
         return list(arr)
 
 
-def signature_fields(data: bytes) -> list[FieldInfo]:
+def signature_fields(data: bytes, password: str | None = None) -> list[FieldInfo]:
     from pyhanko.sign.fields import enumerate_sig_fields
 
-    reader = _reader(bytes(data))
+    reader = _reader(bytes(data), password)
     pages = _page_refs(reader.root)
     locked = _locked_field_names(reader)
     out = []
@@ -1193,13 +1224,13 @@ def signature_fields(data: bytes) -> list[FieldInfo]:
 def add_signature_field(data, name, page, rect, *, required=False, tooltip="", timestamp_url=None,
                         timestamp_required=False, lock_fields=None, lock_action="Include",
                         hidden=False, allowed_reasons=None, allowed_issuers=None,
-                        certify_level=None, digest_methods=None) -> tuple[bytes, str]:
+                        certify_level=None, digest_methods=None, password=None) -> tuple[bytes, str]:
     from pyhanko.pdf_utils import generic
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
     from pyhanko.sign import fields as pfields
 
     data = bytes(data)
-    reader = _reader(data)
+    reader = _reader(data, password)
     lvl = None
     try:
         lvl = certification_level(data)
@@ -1208,9 +1239,7 @@ def add_signature_field(data, name, page, rect, *, required=False, tooltip="", t
     if lvl == 1:
         raise SigningNotAllowed(_(
             "Il documento è certificato con livello «nessuna modifica»: non è possibile aggiungere campi"))
-    writer = IncrementalPdfFileWriter(io.BytesIO(data), strict=False)
-    if writer.prev.encrypted:
-        writer.encrypt("")
+    writer = _open_writer(data, password)
     names = _existing_field_names(reader)
     base = (name or "").strip() or _auto_name(names)
     eff = _unique_name(base, names)
@@ -1541,7 +1570,7 @@ def _trusted_der(trusted) -> list[bytes]:
 
 
 def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
-               revocation_mode: str = "mai") -> list[SignatureStatus]:
+               revocation_mode: str = "mai", password: str | None = None) -> list[SignatureStatus]:
     from pyhanko.pdf_utils.reader import PdfFileReader
     from pyhanko.sign.fields import enumerate_sig_fields
     from pyhanko.sign.validation import validate_pdf_signature, validate_pdf_timestamp
@@ -1554,7 +1583,7 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
     try:
         reader = PdfFileReader(io.BytesIO(data), strict=False)
         if reader.encrypted:
-            reader.decrypt("")
+            _decrypt_with(reader, password)
         fields_list = list(enumerate_sig_fields(reader, filled_status=True))
     except Exception:  # noqa: BLE001
         return []
@@ -1562,7 +1591,7 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
     online = revocation_mode == "sempre" and allow_fetching
     finfo = {}
     try:
-        finfo = {f.name: f for f in signature_fields(data)}
+        finfo = {f.name: f for f in signature_fields(data, password)}
     except Exception:  # noqa: BLE001
         pass
     has_dss = "/DSS" in reader.root
@@ -1575,10 +1604,14 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
             st.page, st.rect, st.invisible = fi.page, fi.rect, fi.invisible
         try:
             sig = sig_ref.get_object()
-            st.reason = str(sig.get("/Reason", "") or "")
-            st.location = str(sig.get("/Location", "") or "")
-            st.contact = str(sig.get("/ContactInfo", "") or "")
-            br = [int(v) for v in sig.get("/ByteRange", [])]
+
+            def val(key, default):   # sig[...] decifra; sig.get() restituirebbe un proxy cifrato
+                return sig[key] if key in sig else default
+
+            st.reason = str(val("/Reason", "") or "")
+            st.location = str(val("/Location", "") or "")
+            st.contact = str(val("/ContactInfo", "") or "")
+            br = [int(v) for v in val("/ByteRange", [])]
             if len(br) == 4:
                 st.revision_end = br[2] + br[3]
             emb = EmbeddedPdfSignature(reader, fref, name)
@@ -1782,11 +1815,11 @@ def has_signatures(data) -> bool:
         return False
 
 
-def certification_level(data) -> int | None:
+def certification_level(data, password: str | None = None) -> int | None:
     from pyhanko.sign.validation.pdf_embedded import read_certification_data
 
     try:
-        reader = _reader(bytes(data))
+        reader = _reader(bytes(data), password)
         info = read_certification_data(reader)
     except Exception:  # noqa: BLE001
         return None
@@ -1896,7 +1929,7 @@ TRANSLATIONS_EN = {
     "Formato di esportazione non supportato: {fmt}": "Unsupported export format: {fmt}",
     "Molto debole": "Very weak", "Debole": "Weak", "Discreta": "Fair", "Buona": "Good", "Ottima": "Excellent",
     "Il file è danneggiato o non è un PDF valido": "The file is damaged or is not a valid PDF",
-    "Il documento è cifrato con una password: rimuovi la protezione prima di firmarlo":
+    "Il documento è cifrato con una password: aprilo con la password per firmarlo":
         "The document is encrypted with a password: remove the protection before signing it",
     "Riquadro molto piccolo (meno di 40×15 pt): la firma potrebbe essere poco leggibile":
         "Very small box (less than 40×15 pt): the signature may be hard to read",

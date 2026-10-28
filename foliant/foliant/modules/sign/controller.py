@@ -382,6 +382,7 @@ class SignController(QObject):
         st.running = True
         st.source = data
         version = doc.version
+        password = doc.password
         if online:
             self.ctx.status(_("Verifica online della revoca in corso…"), 5000)
         use_system = str(self.ctx.settings().value("sign/system_certs", "false")).lower() == "true"
@@ -396,9 +397,9 @@ class SignController(QObject):
                     trusted = trusted + store.system_certificates()
                 mode = "sempre" if online else self.revocation_mode()
                 result["statuses"] = digital.verify_pdf(data, trusted=trusted, revocation_mode=mode,
-                                                        allow_fetching=mode == "sempre")
-                result["fields"] = digital.signature_fields(data)
-                result["certification"] = digital.certification_level(data)
+                                                        allow_fetching=mode == "sempre", password=password)
+                result["fields"] = digital.signature_fields(data, password)
+                result["certification"] = digital.certification_level(data, password)
             except Exception as e:
                 result["error"] = str(e) or e.__class__.__name__
             return result
@@ -643,6 +644,7 @@ class SignController(QObject):
         if not dlg.exec():
             return False
         digital_id, options = dlg.digital_id, dlg.options
+        options.password = doc.password
         if required_level:
             options.certify, options.docmdp_level = True, int(required_level)
         if field is not None:
@@ -820,7 +822,7 @@ class SignController(QObject):
                     timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
                     lock_action=lock_action, allowed_reasons=dlg.allowed_reasons(),
                     allowed_issuers=dlg.issuers or None, certify_level=dlg.mdp.currentData(),
-                    digest_methods=dlg.digest.currentData())
+                    digest_methods=dlg.digest.currentData(), password=doc.password)
                 names.append(name)
             name = names[0]
         except digital.SignError as e:

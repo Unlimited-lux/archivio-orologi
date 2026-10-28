@@ -900,3 +900,36 @@ def test_required_unsigned_fields_warning(window, monkeypatch, tmp_path):
     monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(m) or False)
     assert c.confirm_unsigned_required(view, "Invia per e-mail") is False
     assert "Firma del cliente" in asked[0] and "Invia per e-mail" in asked[0]
+
+
+def test_sign_password_protected_document(window, monkeypatch, tmp_path, id_a):
+    """Contratto protetto con password (cifrato da PyMuPDF) → firma digitale → resta cifrato e la firma è valida."""
+    from tests.conftest import make_pdf
+    src = Path(make_pdf(tmp_path / "contratto.pdf", pages=3))
+    d0 = pymupdf.open(str(src))
+    prot = tmp_path / "protetto.pdf"
+    d0.save(str(prot), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="Orologi2026", owner_pw="Orologi2026")
+    d0.close()
+    store.TrustStore().add(id_a[1])
+    from foliant.modules.sign import ui_digital
+    view = window.open_path(str(prot), "Orologi2026")
+    c = _ctl(window)
+    target = tmp_path / "protetto_firmato.pdf"
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(reason="Approvo")
+        return True
+
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(target))
+    monkeypatch.setattr(window, "open_path", lambda p, pw=None: type(window).open_path(window, p, "Orologi2026"))
+    assert c.digital_sign(view, page=1, rect=pymupdf.Rect(100, 600, 300, 680))
+    data = target.read_bytes()
+    assert data.startswith(prot.read_bytes())
+    r = pymupdf.open(stream=data)
+    assert r.needs_pass and r.authenticate("Orologi2026")
+    st = digital.verify_pdf(data, trusted=[id_a[1]], password="Orologi2026")
+    assert st and st[0].status == "valida", st and st[0].reasons
+    new_view = window.current_view()
+    assert [s.status for s in c.state(new_view).statuses] == ["valida"]
