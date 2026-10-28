@@ -13,18 +13,22 @@ from __future__ import annotations
 from datetime import time
 from typing import Any, Callable
 
-from PySide6.QtCore import QSize, Qt, Signal
+import re
+
+from PySide6.QtCore import QSize, QStringListModel, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFormLayout, QFrame, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QScrollArea, QSizePolicy, QSpinBox,
-    QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFormLayout, QFrame,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QRadioButton,
+    QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from foliant.api import _, bind_icon, icon, language, theme
 
 from . import engine as E
 from . import formats as fm
+from . import formula as FX
 
 TRANSLATIONS: dict[str, str] = {
     # intestazione e generale
@@ -177,9 +181,58 @@ TRANSLATIONS: dict[str, str] = {
     "Rombo": "Diamond",
     "Quadrato": "Square",
     "Stella": "Star",
+    # rotazione e predefiniti (FRM-12)
+    "Rotazione": "Rotation",
+    "Usa come predefinito": "Use as default",
+    "Salva l'aspetto come impostazione per i nuovi campi di questo tipo":
+        "Save the appearance as the setting for new fields of this type",
+    # formula (FRM-17)
+    "Calcolo predefinito": "Predefined calculation",
+    "Formula": "Formula",
+    "es. Imponibile * 1.22 - Sconto": "e.g. Net * 1.22 - Discount",
+    "Applica": "Apply",
+    "Errore alla posizione {n}: {msg}": "Error at position {n}: {msg}",
+    "Campi inesistenti: {names}": "Unknown fields: {names}",
+    "La formula non può usare il campo stesso.": "The formula cannot use the field itself.",
+    "Operatori + − × ÷ e parentesi; i nomi con spazi vanno tra virgolette doppie.":
+        "Operators + − × ÷ and parentheses; names with spaces go in double quotes.",
+    # pulsanti (FRM-18)
+    "Didascalia": "Caption",
+    "Campo immagine: in compilazione un clic permette di scegliere l'immagine.":
+        "Image field: when filling in, a click lets you choose the image.",
+    "Azione": "Action",
+    "Reimposta campi": "Reset fields",
+    "Apri indirizzo web": "Open web address",
+    "Stampa": "Print",
+    "Vai a pagina": "Go to page",
+    "Mostra o nascondi campi": "Show or hide fields",
+    "Importa dati": "Import data",
+    "Altra azione (non modificabile qui)": "Other action (not editable here)",
+    "Indirizzo": "Address",
+    "L'indirizzo non è cifrato (non HTTPS)": "The address is not encrypted (not HTTPS)",
+    "Pagina": "Page",
+    "Effetto": "Effect",
+    "Nascondi": "Hide",
+    "Mostra": "Show",
+    "Nessun campo scelto: vengono reimpostati tutti i campi.": "No field chosen: all fields are reset.",
+    # firma (FRM-20)
+    "Firma": "Signature",
+    "Dopo la firma blocca": "After signing, lock",
+    "Nessun campo": "No fields",
+    "Tutti i campi": "All fields",
+    "Solo questi campi": "Only these fields",
+    "Tutti tranne questi": "All except these",
+    "Scegli almeno un campo.": "Choose at least one field.",
 }
 
 Apply = Callable[[list[tuple[int, int]], dict, str], bool]
+SetDefault = Callable[[str, dict], None]
+
+_ROTATIONS = (0, 90, 180, 270)
+_APPEARANCE_KEYS = ("font", "fontsize", "text_color", "fill_color", "border_color", "border_width",
+                    "border_style", "align")
+_ACTION_TYPES = (None, "reset", "uri", "print", "goto", "hide", "import")
+_PLAIN_NAME = re.compile(r"[^\W\d][\w.]*")
 
 _TEXT_LIKE = (E.TEXT, E.COMBO, E.LIST)
 _MARKED = (E.CHECKBOX, E.RADIO)
@@ -262,9 +315,14 @@ class ColorButton(QToolButton):
 class FieldPropertiesPanel(QWidget):
     """Pannello destro con le proprietà dei campi selezionati."""
 
-    def __init__(self, apply: Apply, parent=None):
+    def __init__(self, apply: Apply, parent=None, *, set_default: SetDefault | None = None):
         super().__init__(parent)
         self._apply_cb = apply
+        self._set_default_cb = set_default
+        self._kind: str | None = None
+        self._loaded_formula: str | None = None
+        self._loaded_action: dict | None = None
+        self._loaded_lock: dict | None = None
         self._fields: list[E.FieldInfo] = []
         self._all_names: list[str] = []
         self._radio_exports: dict[str, list[str]] = {}
@@ -302,6 +360,8 @@ class FieldPropertiesPanel(QWidget):
         self._build_format()
         self._build_validation()
         self._build_calc()
+        self._build_button()
+        self._build_signature()
         self.set_fields([], [])
 
     # ------------------------------------------------------------ API
@@ -514,11 +574,44 @@ class FieldPropertiesPanel(QWidget):
         self.align_group.idClicked.connect(self._on_align)
         self.align_row = row
         form.addRow(_("Allineamento"), row)
+        self.rotation_combo = self._combo([(f"{r}°", r) for r in _ROTATIONS],
+                                          lambda v: self._apply({"rotation": v}))
+        form.addRow(_("Rotazione"), self.rotation_combo)
+        self.set_default_btn = QPushButton(_("Usa come predefinito"))
+        self.set_default_btn.setToolTip(_("Salva l'aspetto come impostazione per i nuovi campi di questo tipo"))
+        self.set_default_btn.clicked.connect(self._on_set_default)
+        form.addRow(self.set_default_btn)
         self._appearance_form = form
 
     def _on_align(self, value: int) -> None:
         if not self._loading:
             self._apply({"align": value})
+
+    def current_appearance(self) -> dict:
+        """Proprietà d'aspetto mostrate dalla scheda (i valori misti sono omessi)."""
+        props: dict = {}
+        if self.font_combo.currentIndex() >= 0:
+            props["font"] = self.font_combo.currentData()
+        if not self.size_spin.suffix():
+            props["fontsize"] = float(self.size_spin.value())
+        for key, btn in (("text_color", self.text_color_btn), ("fill_color", self.fill_color_btn),
+                         ("border_color", self.border_color_btn)):
+            if not btn._mixed:
+                props[key] = btn.color()
+        if self.border_width_combo.currentIndex() >= 0:
+            props["border_width"] = self.border_width_combo.currentData()
+        elif self._fields and not self._common("border_width")[1]:
+            props["border_width"] = float(self._fields[0].border_width or 0)
+        if self.border_style_combo.currentIndex() >= 0:
+            props["border_style"] = self.border_style_combo.currentData()
+        if self.align_group.checkedId() >= 0:
+            props["align"] = self.align_group.checkedId()
+        return props
+
+    def _on_set_default(self) -> None:
+        if self._loading or not self._fields or self._kind is None or self._set_default_cb is None:
+            return
+        self._set_default_cb(self._kind, self.current_appearance())
 
     # .............................................................. Opzioni
     def _build_options(self) -> None:
@@ -957,6 +1050,20 @@ class FieldPropertiesPanel(QWidget):
     # .............................................................. Calcolo
     def _build_calc(self) -> None:
         form = self._page("calc", _("Calcolo"))
+        modes = QWidget()
+        mh = QHBoxLayout(modes)
+        mh.setContentsMargins(0, 0, 0, 0)
+        self.calc_mode_predefined = QRadioButton(_("Calcolo predefinito"))
+        self.calc_mode_formula = QRadioButton(_("Formula"))
+        self.calc_mode_group = QButtonGroup(self)
+        self.calc_mode_group.addButton(self.calc_mode_predefined, 0)
+        self.calc_mode_group.addButton(self.calc_mode_formula, 1)
+        self.calc_mode_predefined.setChecked(True)
+        mh.addWidget(self.calc_mode_predefined)
+        mh.addWidget(self.calc_mode_formula)
+        mh.addStretch(1)
+        self.calc_mode_group.idClicked.connect(self._on_calc_mode)
+        form.addRow(modes)
         self.calc_op = self._combo([(_("Nessuno"), None)] + [(_(label), op) for op, label in E.OPERATIONS.items()],
                                    lambda _v: self._on_calc_changed())
         form.addRow(_("Operazione"), self.calc_op)
@@ -985,9 +1092,125 @@ class FieldPropertiesPanel(QWidget):
         bar.addWidget(self.calc_select)
         bar.addWidget(self.calc_clear)
         bar.addStretch(1)
-        form.addRow(bar)
+        bar_w = QWidget()
+        bar_w.setLayout(bar)
+        bar.setContentsMargins(0, 0, 0, 0)
+        form.addRow(bar_w)
+        # formula personalizzata (FRM-17)
+        self.formula_edit = QLineEdit()
+        self.formula_edit.setPlaceholderText(_("es. Imponibile * 1.22 - Sconto"))
+        self.formula_edit.textChanged.connect(lambda _t: self._validate_formula_ui())
+        self.formula_edit.textEdited.connect(self._on_formula_edited)
+        self.formula_edit.editingFinished.connect(self._on_formula_apply)
+        self.formula_completer = QCompleter(self)
+        self.formula_completer.setModel(QStringListModel(self))
+        self.formula_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.formula_completer.setWidget(self.formula_edit)
+        self.formula_completer.activated[str].connect(self._insert_completion)
+        form.addRow(_("Formula"), self.formula_edit)
+        self.formula_error = self._error_label()
+        form.addRow(self.formula_error)
+        self.formula_apply_btn = QPushButton(_("Applica"))
+        self.formula_apply_btn.clicked.connect(self._on_formula_apply)
+        form.addRow(self.formula_apply_btn)
+        self.formula_note = self._note(_("Operatori + − × ÷ e parentesi; i nomi con spazi vanno tra virgolette doppie."))
+        form.addRow(self.formula_note)
         form.addRow(self._note(_("I campi vuoti valgono 0")))
         form.addRow(self._note(_("Conviene rendere il campo di sola lettura e dargli un formato numerico.")))
+        self._calc_form = form
+        self._predefined_rows = [self.calc_op, self.calc_filter, self.calc_list, bar_w]
+        self._formula_rows = [self.formula_edit, self.formula_error, self.formula_apply_btn, self.formula_note]
+
+    def _formula_mode(self) -> bool:
+        return self.calc_mode_formula.isChecked()
+
+    def _update_calc_mode_ui(self) -> None:
+        on = self._formula_mode()
+        for w in self._predefined_rows:
+            self._calc_form.setRowVisible(w, not on)
+        for w in self._formula_rows:
+            self._calc_form.setRowVisible(w, on)
+        if on:
+            self._validate_formula_ui()
+        else:
+            self._show_error(self.formula_error, None)
+
+    def _on_calc_mode(self, _id: int) -> None:
+        if self._loading:
+            return
+        self._update_calc_mode_ui()
+        if not self._formula_mode() and self._loaded_formula is not None:
+            self._on_calc_changed()     # torna al calcolo predefinito: sostituisce la formula
+        elif self._formula_mode() and self.formula_edit.text().strip():
+            self._on_formula_apply()
+
+    # ..... formula
+    def check_formula(self, text: str) -> tuple[FX.Formula | None, str | None]:
+        """(formula, errore) per l'espressione: sintassi, nomi esistenti, nessun riferimento a sé."""
+        try:
+            f = FX.parse(text)
+        except FX.FormulaError as e:
+            return None, _("Errore alla posizione {n}: {msg}").format(n=e.position + 1, msg=e.message)
+        unknown = FX.check(f, set(self._all_names))
+        if unknown:
+            return None, _("Campi inesistenti: {names}").format(names=", ".join(dict.fromkeys(unknown)))
+        own = {x.name for x in self._fields}
+        if own & set(f.names):
+            return None, _("La formula non può usare il campo stesso.")
+        return f, None
+
+    def _validate_formula_ui(self) -> bool:
+        text = self.formula_edit.text()
+        if not text.strip():
+            self._show_error(self.formula_error, None)
+            self.formula_apply_btn.setEnabled(False)
+            return False
+        _f, err = self.check_formula(text)
+        self._show_error(self.formula_error, err)
+        self.formula_apply_btn.setEnabled(err is None)
+        return err is None
+
+    def _on_formula_apply(self) -> None:
+        if self._loading or not self._fields or not self._formula_mode():
+            return
+        text = self.formula_edit.text().strip()
+        if not text:
+            return
+        f, err = self.check_formula(text)
+        self._show_error(self.formula_error, err)
+        if err or text == self._loaded_formula:
+            return
+        if self._apply({"formula": f.expression}):
+            self._loaded_formula = f.expression
+            self._loaded_calc = None
+
+    def _word_before_cursor(self) -> tuple[int, str, bool]:
+        """(inizio, testo, tra virgolette) della parola che si sta scrivendo."""
+        text = self.formula_edit.text()[: self.formula_edit.cursorPosition()]
+        if text.count('"') % 2:
+            start = text.rfind('"')
+            return start, text[start + 1:], True
+        m = re.search(r"[^\W\d][\w.]*$", text)
+        return (m.start(), m.group(0), False) if m else (len(text), "", False)
+
+    def _on_formula_edited(self, _text: str) -> None:
+        start, word, quoted = self._word_before_cursor()
+        if not word and not quoted:
+            self.formula_completer.popup().hide()
+            return
+        self.formula_completer.setCompletionPrefix(word)
+        if self.formula_completer.completionCount():
+            self.formula_completer.complete()
+        else:
+            self.formula_completer.popup().hide()
+
+    def _insert_completion(self, name: str) -> None:
+        start, _word, _quoted = self._word_before_cursor()
+        le = self.formula_edit
+        text, pos = le.text(), le.cursorPosition()
+        token = name if _PLAIN_NAME.fullmatch(name) else '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        le.setText(text[:start] + token + text[pos:])
+        le.setCursorPosition(start + len(token))
 
     def _filter_calc(self, text: str) -> None:
         needle = text.strip().casefold()
@@ -1015,14 +1238,201 @@ class FieldPropertiesPanel(QWidget):
         return E.Calculation(op, names)
 
     def _on_calc_changed(self) -> None:
-        if self._loading or not self._fields:
+        if self._loading or not self._fields or self._formula_mode():
             return
         self.calc_list.setEnabled(self.calc_op.currentData() is not None)
         calc = self.current_calculation()
-        if calc == self._loaded_calc:
+        if calc == self._loaded_calc and self._loaded_formula is None:
             return
-        if self._apply({"calc": calc}):
+        if self._apply({"calc": calc} if calc else {"calc": None, "formula": None}):
             self._loaded_calc = calc
+            self._loaded_formula = None
+
+    # .............................................................. elenchi di campi spuntabili
+    def _checklist(self, handler: Callable[[], None]) -> QListWidget:
+        lw = QListWidget()
+        lw.setMinimumHeight(140)
+        lw.itemChanged.connect(lambda _i: None if self._loading else handler())
+        return lw
+
+    def _fill_checklist(self, lw: QListWidget, chosen: list[str]) -> None:
+        own = {f.name for f in self._fields}
+        lw.clear()
+        seen: set[str] = set()
+        for name in self._all_names + [n for n in chosen if n not in self._all_names]:
+            if name in own or name in seen:
+                continue
+            seen.add(name)
+            it = QListWidgetItem(name)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if name in chosen else Qt.CheckState.Unchecked)
+            lw.addItem(it)
+
+    @staticmethod
+    def _checked(lw: QListWidget) -> list[str]:
+        return [lw.item(i).text() for i in range(lw.count())
+                if lw.item(i).checkState() == Qt.CheckState.Checked]
+
+    # .............................................................. Pulsante (FRM-18)
+    def _build_button(self) -> None:
+        form = self._page("button", _("Pulsante"))
+        self.caption_edit = self._line(lambda t: self._apply({"caption": t}))
+        form.addRow(_("Didascalia"), self.caption_edit)
+        self.image_note = self._note(_("Campo immagine: in compilazione un clic permette di scegliere l'immagine."))
+        form.addRow(self.image_note)
+        self.action_combo = self._combo(
+            [(_("Nessuna"), None), (_("Reimposta campi"), "reset"), (_("Apri indirizzo web"), "uri"),
+             (_("Stampa"), "print"), (_("Vai a pagina"), "goto"), (_("Mostra o nascondi campi"), "hide"),
+             (_("Importa dati"), "import")], lambda _v: self._on_action_changed())
+        form.addRow(_("Azione"), self.action_combo)
+        self.action_uri = QLineEdit()
+        self.action_uri.setPlaceholderText("https://")
+        self.action_uri.textChanged.connect(lambda _t: self._update_uri_warning())
+        self.action_uri.editingFinished.connect(self._on_action_changed)
+        form.addRow(_("Indirizzo"), self.action_uri)
+        self.uri_warning = self._error_label()
+        form.addRow(self.uri_warning)
+        self.action_page = self._spin(1, 99999, lambda _v: self._on_action_changed())
+        form.addRow(_("Pagina"), self.action_page)
+        self.action_hide = self._combo([(_("Nascondi"), True), (_("Mostra"), False)],
+                                       lambda _v: self._on_action_changed())
+        form.addRow(_("Effetto"), self.action_hide)
+        self.action_fields = self._checklist(self._on_action_changed)
+        form.addRow(_("Campi"), self.action_fields)
+        self.reset_note = self._note(_("Nessun campo scelto: vengono reimpostati tutti i campi."))
+        form.addRow(self.reset_note)
+        self.action_error = self._error_label()
+        form.addRow(self.action_error)
+        self._button_form = form
+
+    def _update_action_ui(self) -> None:
+        t = self.action_combo.currentData() if self.action_combo.currentIndex() >= 0 else "?"
+        form = self._button_form
+        form.setRowVisible(self.action_uri, t == "uri")
+        form.setRowVisible(self.uri_warning, t == "uri")
+        form.setRowVisible(self.action_page, t == "goto")
+        form.setRowVisible(self.action_hide, t == "hide")
+        form.setRowVisible(self.action_fields, t in ("reset", "hide"))
+        form.setRowVisible(self.reset_note, t == "reset")
+        self._update_uri_warning()
+
+    def _update_uri_warning(self) -> None:
+        uri = self.action_uri.text().strip()
+        insecure = bool(uri) and not uri.lower().startswith("https://")
+        self._show_error(self.uri_warning, _("L'indirizzo non è cifrato (non HTTPS)") if insecure else None)
+
+    def current_action(self) -> tuple[dict | None, str | None]:
+        """(azione, errore) dagli editor della scheda Pulsante; azione None = nessuna."""
+        t = self.action_combo.currentData()
+        if not t:
+            return None, None
+        if t == "reset":
+            return {"type": "reset", "fields": self._checked(self.action_fields)}, None
+        if t == "uri":
+            uri = self.action_uri.text().strip()
+            return ({"type": "uri", "uri": uri}, None) if uri else (None, "")
+        if t == "goto":
+            return {"type": "goto", "page": self.action_page.value() - 1}, None
+        if t == "hide":
+            names = self._checked(self.action_fields)
+            if not names:
+                return None, _("Scegli almeno un campo.")
+            return {"type": "hide", "fields": names, "hide": bool(self.action_hide.currentData())}, None
+        return {"type": t}, None
+
+    def _on_action_changed(self) -> None:
+        if self._loading or not self._fields or self.action_combo.currentIndex() < 0:
+            return
+        self._update_action_ui()
+        action, err = self.current_action()
+        self._show_error(self.action_error, err or None)
+        if err is not None or action == self._loaded_action:
+            return
+        if self._apply({"action": action}):
+            self._loaded_action = action
+
+    def _load_button(self) -> None:
+        form = self._button_form
+        image = any(f.image for f in self._fields)
+        form.setRowVisible(self.caption_edit, not image)
+        form.setRowVisible(self.image_note, image)
+        if not image:
+            self._load_line(self.caption_edit, "caption")
+        self._show_error(self.action_error, None)
+        action, mixed = self._common("action")
+        action = dict(action or {})
+        t = action.get("type") or None
+        known = t in _ACTION_TYPES
+        # "?" = valore misto o non modificabile: qualunque scelta va applicata
+        self._loaded_action = "?" if mixed or not known else (self._normal_action(action) if t else None)
+        self._load_combo(self.action_combo, t, mixed or not known)
+        if not mixed and not known:
+            self.action_combo.setPlaceholderText(_("Altra azione (non modificabile qui)"))
+        self.action_uri.setText(str(action.get("uri") or "") if t == "uri" else "")
+        self.action_page.setValue(int(action.get("page") or 0) + 1 if t == "goto" else 1)
+        self.action_hide.setCurrentIndex(self.action_hide.findData(bool(action.get("hide", True))))
+        self._fill_checklist(self.action_fields, list(action.get("fields") or []) if t in ("reset", "hide") else [])
+        self._update_action_ui()
+
+    @staticmethod
+    def _normal_action(action: dict) -> dict:
+        """Azione letta dal documento nella stessa forma prodotta da `current_action`."""
+        t = action.get("type")
+        if t == "reset":
+            return {"type": t, "fields": list(action.get("fields") or [])}
+        if t == "uri":
+            return {"type": t, "uri": str(action.get("uri") or "")}
+        if t == "goto":
+            return {"type": t, "page": int(action.get("page") or 0)}
+        if t == "hide":
+            return {"type": t, "fields": list(action.get("fields") or []), "hide": bool(action.get("hide", True))}
+        return {"type": t}
+
+    # .............................................................. Firma (FRM-20)
+    def _build_signature(self) -> None:
+        form = self._page("signature", _("Firma"))
+        self.lock_combo = self._combo(
+            [(_("Nessun campo"), None), (_("Tutti i campi"), "All"), (_("Solo questi campi"), "Include"),
+             (_("Tutti tranne questi"), "Exclude")], lambda _v: self._on_lock_changed())
+        form.addRow(_("Dopo la firma blocca"), self.lock_combo)
+        self.lock_fields = self._checklist(self._on_lock_changed)
+        form.addRow(self.lock_fields)
+        self.lock_error = self._error_label()
+        form.addRow(self.lock_error)
+        self._signature_form = form
+
+    def current_lock(self) -> tuple[dict | None, str | None]:
+        action = self.lock_combo.currentData()
+        if not action:
+            return None, None
+        if action == "All":
+            return {"action": "All", "fields": []}, None
+        names = self._checked(self.lock_fields)
+        if not names:
+            return None, _("Scegli almeno un campo.")
+        return {"action": action, "fields": names}, None
+
+    def _on_lock_changed(self) -> None:
+        if self._loading or not self._fields or self.lock_combo.currentIndex() < 0:
+            return
+        self.lock_fields.setEnabled(self.lock_combo.currentData() in ("Include", "Exclude"))
+        lock, err = self.current_lock()
+        self._show_error(self.lock_error, err)
+        if err or lock == self._loaded_lock:
+            return
+        if self._apply({"lock": lock}):
+            self._loaded_lock = lock
+
+    def _load_signature(self) -> None:
+        lock, mixed = self._common("lock")
+        lock = dict(lock or {})
+        action = lock.get("action") if lock.get("action") in ("All", "Include", "Exclude") else None
+        fields = list(lock.get("fields") or []) if action in ("Include", "Exclude") else []
+        self._loaded_lock = "?" if mixed else ({"action": action, "fields": fields} if action else None)
+        self._load_combo(self.lock_combo, action, mixed)
+        self._fill_checklist(self.lock_fields, fields)
+        self.lock_fields.setEnabled(mixed or action in ("Include", "Exclude"))
+        self._show_error(self.lock_error, None)
 
     # ------------------------------------------------------------ applicazione
     def _label(self) -> str:
@@ -1090,7 +1500,8 @@ class FieldPropertiesPanel(QWidget):
 
     def _load_all(self) -> None:
         fields = self._fields
-        for lab in (self.items_error, self.fmt_error, self.val_error):
+        for lab in (self.items_error, self.fmt_error, self.val_error, self.formula_error, self.action_error,
+                    self.lock_error, self.uri_warning):
             self._show_error(lab, None)
         if not fields:
             self.title.hide()
@@ -1102,6 +1513,7 @@ class FieldPropertiesPanel(QWidget):
         self.tabs.show()
         kinds = {f.kind for f in fields}
         kind = next(iter(kinds)) if len(kinds) == 1 else None
+        self._kind = kind
         single = len(fields) == 1
         if single:
             self.title.setText(_("{kind} «{name}»").format(kind=E.kind_label(fields[0].kind), name=fields[0].name))
@@ -1117,6 +1529,12 @@ class FieldPropertiesPanel(QWidget):
             self._load_format()
             self._load_validation()
             self._load_calc()
+        self._set_tab("button", kind == E.BUTTON)
+        if kind == E.BUTTON:
+            self._load_button()
+        self._set_tab("signature", kind == E.SIGNATURE)
+        if kind == E.SIGNATURE:
+            self._load_signature()
 
     def _load_general(self, kind: str | None, single: bool) -> None:
         form = self._general_form
@@ -1187,6 +1605,9 @@ class FieldPropertiesPanel(QWidget):
         for i, b in enumerate(self.align_buttons):
             b.setChecked(not mixed and i == a)
         self.align_group.setExclusive(True)
+        r, mixed = self._common("rotation")
+        self._load_combo(self.rotation_combo, int(r or 0) % 360, mixed)
+        self.set_default_btn.setEnabled(self._kind is not None and self._set_default_cb is not None)
 
     def _load_options(self, kind: str | None, single: bool) -> None:
         form = self._options_form
@@ -1287,3 +1708,11 @@ class FieldPropertiesPanel(QWidget):
             self.calc_list.addItem(it)
         self._filter_calc(self.calc_filter.text())
         self.calc_list.setEnabled(mixed or calc is not None)
+        formula, fmixed = self._common("formula")
+        self._loaded_formula = None if fmixed or formula is None else formula.expression
+        self.formula_edit.setText(self._loaded_formula or "")
+        self.formula_edit.setPlaceholderText(_("misto") if fmixed else _("es. Imponibile * 1.22 - Sconto"))
+        (self.calc_mode_formula if formula is not None and not mixed else self.calc_mode_predefined).setChecked(True)
+        names = [n for n in self._all_names if n not in own]
+        self.formula_completer.model().setStringList(names)
+        self._update_calc_mode_ui()
