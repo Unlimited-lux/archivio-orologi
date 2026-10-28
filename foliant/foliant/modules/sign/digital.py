@@ -1700,6 +1700,28 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
         st.modification_details = items
     else:
         st.modifications = _("Nessuna modifica")
+    # validità temporale del certificato del firmatario
+    expiry_problem = None
+    cert = st.signer_cert
+    if cert is not None and not is_doc_ts:
+        now_utc = datetime.now(timezone.utc)
+        ts_proof = (tsv is not None and bool(getattr(tsv, "intact", False)) and bool(getattr(tsv, "valid", False))
+                    and st.signing_time is not None)
+        if ts_proof:
+            t = st.signing_time if st.signing_time.tzinfo else st.signing_time.replace(tzinfo=timezone.utc)
+            if t > cert.not_after:
+                expiry_problem = ("invalid", _(
+                    "Certificato scaduto il {date}, prima dell'ora attestata dalla marca temporale ({ts})").format(
+                    date=_fmt_date(cert.not_after), ts=_fmt_date(t)))
+            elif t < cert.not_before:
+                expiry_problem = ("invalid", _(
+                    "Certificato non ancora valido all'ora attestata dalla marca temporale ({ts})").format(
+                    ts=_fmt_date(t)))
+        elif now_utc > cert.not_after or now_utc < cert.not_before:
+            expiry_problem = ("indeterminate", _(
+                "Certificato scaduto il {date} senza prova dell'ora della firma").format(
+                date=_fmt_date(cert.not_after)) if now_utc > cert.not_after else
+                _("Certificato non ancora valido e nessuna prova dell'ora della firma"))
     # esito
     if not st.crypto_ok or bad_format:
         _set_status(st, INVALID)
@@ -1712,6 +1734,13 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
         rd = getattr(status, "revocation_details", None)
         when = _fmt_date(getattr(rd, "revocation_date", None)) if rd else "—"
         reasons.append(_("Certificato revocato il {date}").format(date=when))
+    elif expiry_problem is not None:
+        # validità temporale del certificato (SIG-15): decide prima della fiducia
+        kind, msg = expiry_problem
+        _set_status(st, INVALID if kind == "invalid" else INDETERMINATE)
+        if kind != "invalid":
+            reasons.append(_("Integrità confermata: il documento non è stato alterato"))
+        reasons.append(msg)
     elif not st.trusted:
         _set_status(st, INDETERMINATE)
         reasons.append(_("Integrità confermata: il documento non è stato alterato"))
@@ -1728,7 +1757,8 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
             reasons.append(_("Identità del firmatario non attendibile"))
     else:
         _set_status(st, VALID)
-        if st.signer_cert and datetime.now(timezone.utc) > st.signer_cert.not_after:
+        if st.signer_cert and datetime.now(timezone.utc) > st.signer_cert.not_after and st.time_source == \
+                "marca temporale":
             reasons.append(_("Certificato scaduto dopo l'ora attestata dalla marca temporale"))
     if not is_doc_ts and st.time_source == "dichiarata":
         reasons.append(_("Ora dichiarata dal firmatario"))
@@ -1830,6 +1860,12 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "Certificato scaduto il {date}, prima dell'ora attestata dalla marca temporale ({ts})":
+        "Certificate expired on {date}, before the time attested by the timestamp ({ts})",
+    "Certificato non ancora valido all'ora attestata dalla marca temporale ({ts})":
+        "Certificate not yet valid at the time attested by the timestamp ({ts})",
+    "Certificato non ancora valido e nessuna prova dell'ora della firma":
+        "Certificate not yet valid and no proof of signing time",
     "Il server di marca temporale ha rifiutato le credenziali": "The timestamp server rejected the credentials",
     "Nessun font disponibile copre tutti i caratteri del testo": "No available font covers all the characters of the text",
     "Il campo ammette solo questi motivi: {r}": "The field only allows these reasons: {r}",

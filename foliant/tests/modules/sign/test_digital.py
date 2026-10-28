@@ -598,3 +598,33 @@ def test_field_digest_method_constraint(pdf_bytes, id_a):
     assert st.status == "valida" and st.md_algorithm == "sha512"
     with pytest.raises(d.SignError):
         d.add_signature_field(pdf_bytes, "X", 0, (10, 10, 100, 40), digest_methods=["md5"])
+
+
+def _expired_did(expired_id):
+    return d.load_pkcs12(expired_id[0], PASSWORD)
+
+
+def test_bug01_trusted_expired_without_timestamp_is_indeterminate(pdf_bytes, expired_id):
+    """Certificato attendibile ma scaduto, senza marca temporale → Indeterminata (nessuna prova dell'ora)."""
+    did = _expired_did(expired_id)
+    out = d.sign_pdf(pdf_bytes, did, d.SignOptions(allow_expired=True))
+    st = d.verify_pdf(out, trusted=[expired_id[1]])[0]
+    assert st.status == "indeterminata", st.reasons
+    assert any("senza prova dell'ora" in r for r in st.reasons)
+    assert not any("dopo l'ora attestata" in r for r in st.reasons)
+
+
+def test_bug02_expired_before_timestamp_is_invalid(pdf_bytes, expired_id, tsa):
+    """Certificato scaduto prima dell'ora attestata da una marca temporale valida → Non valida."""
+    did = _expired_did(expired_id)
+    out = d.sign_pdf(pdf_bytes, did, d.SignOptions(allow_expired=True, timestamper=tsa[0]))
+    st = d.verify_pdf(out, trusted=[expired_id[1], tsa[1]])[0]
+    assert st.time_source == "marca temporale"
+    assert st.status == "non valida", st.reasons
+    assert any("prima dell'ora attestata dalla marca temporale" in r for r in st.reasons)
+
+
+def test_valid_certificate_with_timestamp_still_valid(pdf_bytes, id_a, tsa):
+    out = d.sign_pdf(pdf_bytes, id_a[2], d.SignOptions(timestamper=tsa[0]))
+    st = d.verify_pdf(out, trusted=[id_a[1], tsa[1]])[0]
+    assert st.status == "valida", st.reasons
