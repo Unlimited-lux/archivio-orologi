@@ -49,7 +49,7 @@ from .preprocess import (
     warp,
 )
 from .tess import (
-    LOW_CONFIDENCE, Line, OcrCancelled, OcrError, Word, detect_orientation, logical_lines, recognize,
+    LOW_CONFIDENCE, Line, OcrCancelled, OcrError, Word, logical_lines, orientation, recognize,
 )
 
 SEARCHABLE = "searchable"
@@ -355,11 +355,12 @@ def _reading_score(gray: np.ndarray, languages: list[str], dpi: float, cancelled
 
 
 def verify_rotation(gray: np.ndarray, rotation: int, languages: list[str], dpi: float = 300,
-                    cancelled: Callable[[], bool] | None = None) -> int:
+                    cancelled: Callable[[], bool] | None = None, confident: bool = True) -> int:
     """Conferma la rotazione proposta dall'OSD leggendo la pagina nei due versi.
 
     L'OSD sbaglia su pagine con poche righe di testo e molti segni ripetuti (zona MRZ dei
-    passaporti, «<<<<»): si scarta la rotazione se il testo si legge nettamente meglio senza."""
+    passaporti, «<<<<»): si scarta la rotazione se il testo si legge nettamente meglio senza.
+    Una proposta poco affidabile (`confident` falso) si accetta solo se ruotato si legge meglio."""
     h, w = gray.shape[:2]
     scale = min(1.0, 1800.0 / max(h, w))
     if scale < 1.0:
@@ -369,10 +370,35 @@ def verify_rotation(gray: np.ndarray, rotation: int, languages: list[str], dpi: 
         m, size = rotation_affine(gray.shape[1], gray.shape[0], (rotation // 90) % 4, 0.0)
         turned = _reading_score(warp(gray, m, size, (255,)), languages, dpi * scale, cancelled)
     except OcrError:
-        return rotation
+        return rotation if confident else 0
+    if not confident:
+        return rotation if turned > straight * 1.5 else 0
     # Tesseract legge anche le righe verticali: a 90/270° i due punteggi possono coincidere, e nel
     # dubbio vale l'OSD. Si scarta la rotazione solo se il verso originale si legge nettamente meglio.
     return 0 if straight > turned * 1.5 else rotation
+
+
+def _osd_rotation(img: np.ndarray, gray0: np.ndarray, popts: PreprocessOptions, languages: list[str],
+                  dpi: float, cancelled) -> int:
+    rot, conf = orientation(gray0, cancelled)
+    if rot and conf >= 1.5:
+        return verify_rotation(gray0, rot, languages, dpi, cancelled)
+    if rot and conf >= 0.5:
+        found = verify_rotation(gray0, rot, languages, dpi, cancelled, confident=False)
+        if found:
+            return found
+    if conf < 1.5 and popts.perspective:
+        # foto di un documento: sulla foto intera l'OSD trova troppo pochi caratteri; si riprova sul
+        # documento già ritagliato e raddrizzato in prospettiva
+        flat = prepare(img, PreprocessOptions(deskew=False, auto_rotate=False, denoise=popts.denoise,
+                                              contrast=popts.contrast, borders=popts.borders,
+                                              perspective=True), 0)
+        if "perspective" in flat.notes:
+            # sui documenti piccoli e radi l'OSD è poco sicuro anche quando ha ragione: decide la lettura
+            rot, conf = orientation(flat.gray, cancelled)
+            if rot:
+                return verify_rotation(flat.gray, rot, languages, dpi, cancelled, confident=conf >= 1.5)
+    return 0
 
 
 def recognize_array(img: np.ndarray, languages: list[str], dpi: float, popts: PreprocessOptions | None = None,
@@ -384,9 +410,7 @@ def recognize_array(img: np.ndarray, languages: list[str], dpi: float, popts: Pr
     """
     popts = popts or PreprocessOptions()
     gray0 = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    osd = detect_orientation(gray0, cancelled) if popts.auto_rotate else 0
-    if osd:
-        osd = verify_rotation(gray0, osd, languages, dpi, cancelled)
+    osd = _osd_rotation(img, gray0, popts, languages, dpi, cancelled) if popts.auto_rotate else 0
     prep = prepare(img, popts, osd)
     if cancelled is not None and cancelled():
         raise OcrCancelled()
@@ -814,9 +838,7 @@ def preview_page(pdf: pymupdf.Document, index: int, popts: PreprocessOptions, dp
         info = detect.classify_page(page, check_mixed=False)
         img, zoom, _notes = render_page(page, dpi)
     gray = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    osd = detect_orientation(gray) if popts.auto_rotate else 0
-    if osd:
-        osd = verify_rotation(gray, osd, languages or default_languages(), dpi)
+    osd = _osd_rotation(img, gray, popts, languages or default_languages(), dpi, None) if popts.auto_rotate else 0
     prep = prepare(img, popts, osd)
     return {"original": img, "working": prep.gray, "rotation": prep.rotation, "skew": prep.skew,
             "perspective": "perspective" in prep.notes, "dpi": info.dpi, "category": info.category}

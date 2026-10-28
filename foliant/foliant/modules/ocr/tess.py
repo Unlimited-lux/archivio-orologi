@@ -139,12 +139,12 @@ def _write_png(gray: np.ndarray, path: str) -> None:
         f.write(buf.tobytes())
 
 
-def detect_orientation(gray: np.ndarray, cancelled=None) -> int:
-    """Rotazione oraria (0/90/180/270) che raddrizza il contenuto, 0 se incerta."""
+def orientation(gray: np.ndarray, cancelled=None) -> tuple[int, float]:
+    """Rotazione oraria (0/90/180/270) proposta dall'OSD e sua affidabilità; (0, 0) se non stimabile."""
     try:
         from .languages import has_osd
         if not has_osd():
-            return 0
+            return 0, 0.0
     except Exception:
         pass
     h, w = gray.shape[:2]
@@ -157,17 +157,20 @@ def detect_orientation(gray: np.ndarray, cancelled=None) -> int:
         try:
             code, out = _run([img, "stdout", *_tessdata_args(), "--psm", "0", "-l", "osd"], cancelled, 60)
         except OcrError:
-            return 0
+            return 0, 0.0
     if code != 0:
-        return 0
+        return 0, 0.0
     m = re.search(r"Rotate:\s*(\d+)", out)
     c = re.search(r"Orientation confidence:\s*([\d.]+)", out)
     if not m:
-        return 0
-    rot = int(m.group(1)) % 360
-    if c and float(c.group(1)) < 1.5:
-        return 0
-    return rot
+        return 0, 0.0
+    return int(m.group(1)) % 360, float(c.group(1)) if c else 0.0
+
+
+def detect_orientation(gray: np.ndarray, cancelled=None) -> int:
+    """Rotazione oraria (0/90/180/270) che raddrizza il contenuto, 0 se incerta."""
+    rot, conf = orientation(gray, cancelled)
+    return rot if conf >= 1.5 else 0
 
 
 class _HocrParser(HTMLParser):

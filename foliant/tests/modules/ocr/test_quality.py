@@ -12,9 +12,9 @@ from foliant.modules.ocr import engine
 from foliant.modules.ocr.preprocess import PreprocessOptions
 
 from .conftest import image_pdf
-from .realistic import (gray_150, id_card_far, id_card_photo, invoice, invoice_phone_photo, passport_mrz,
-                        red_stamp_over_text, skewed_gray_scan, small_gray_150, thermal_receipt, warranty,
-                        word_accuracy)
+from .realistic import (gray_150, id_card_far, id_card_photo, id_card_portrait_dark, invoice, invoice_phone_photo,
+                        passport_mrz, red_stamp_over_text, signature_over_text, skewed_gray_scan, small_gray_150,
+                        thermal_receipt, warranty, word_accuracy)
 
 CASES = {
     "carta_identita_foto": (id_card_photo, 0.95),
@@ -28,6 +28,8 @@ CASES = {
     "scontrino_termico": (thermal_receipt, 0.95),
     "fattura_fotografata": (invoice_phone_photo, 0.95),
     "fattura_storta_150": (skewed_gray_scan, 0.95),
+    "carta_verticale_buia": (id_card_portrait_dark, 0.95),
+    "firma_blu_sul_testo": (signature_over_text, 0.95),
 }
 
 
@@ -101,3 +103,13 @@ def test_tabella_fattura_righe_con_colonne_separate_da_tabulazioni(tmp_path, gen
     page = _ocr(tmp_path, img, dpi)
     assert "Cinturino in pelle marrone\t2\t85,50 €\t171,00 €" in page.text
     assert "Descrizione\tQ.tà\tPrezzo\tImporto" in page_text(page, paragraphs=True, dehyphenate=True)
+
+
+def test_foto_buia_normalizzata_e_verticale_raddrizzata(tmp_path):
+    """Foto scura: l'ombra si misura in proporzione alla luminosità. Foto in verticale: l'OSD sulla
+    foto intera non trova abbastanza caratteri, si riprova sul documento ritagliato e si conferma
+    leggendo."""
+    img, dpi, expected = id_card_portrait_dark()
+    page = _ocr(tmp_path, img, dpi)
+    assert page.rotation in (90, 270)
+    assert word_accuracy(page.text, expected) >= 0.95
