@@ -105,6 +105,7 @@ class Context(QObject):
     documentOpened = Signal(object)       # DocumentView
     documentClosed = Signal(object)       # DocumentView (prima della chiusura)
     documentChanged = Signal(object)      # DocumentView il cui contenuto è cambiato
+    documentAccessChanged = Signal(object)  # DocumentView: accesso/permessi (unlock) o blocco (set_locked) cambiati
     modeChanged = Signal(str)
     fullscreenChanged = Signal(bool)      # la finestra entra (True) o esce (False) dallo schermo intero
 
