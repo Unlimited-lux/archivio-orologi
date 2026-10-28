@@ -129,7 +129,7 @@ def test_view_menu_provider(window, sample_pdf, monkeypatch):
     view.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(int(r.center().x()), int(r.top() + 20)),
                                             view.viewport().mapToGlobal(QPoint(int(r.center().x()), int(r.top() + 20)))))
     assert seen == [0]
-    assert shown == [["Voce di prova"]]
+    assert len(shown) == 1 and "Voce di prova" in shown[0]      # anche i moduli possono aggiungere voci
 
 
 def test_central_widget_override(window, sample_pdf):
@@ -172,8 +172,12 @@ def test_no_duplicate_shortcuts(window):
     """Due azioni con la stessa scorciatoia si annullano a vicenda in Qt: non devono esistere."""
     from collections import defaultdict
     from PySide6.QtGui import QAction, QKeySequence
+    from PySide6.QtCore import Qt
+    local = (Qt.ShortcutContext.WidgetShortcut, Qt.ShortcutContext.WidgetWithChildrenShortcut)
     seen = defaultdict(list)
     for act in window.findChildren(QAction):
+        if act.shortcutContext() in local:      # valide solo nel proprio pannello: nessun conflitto
+            continue
         for seq in act.shortcuts():
             if not seq.isEmpty():
                 seen[seq.toString(QKeySequence.SequenceFormat.PortableText)].append(act.text() or "(senza nome)")
@@ -252,3 +256,19 @@ def test_mode_scoped_shortcuts(window, sample_pdf):
     assert a1.shortcut() == QKeySequence("Ctrl+D") and a2.shortcut().isEmpty()
     window.set_mode("prova2")
     assert a1.shortcut().isEmpty() and a2.shortcut() == QKeySequence("Ctrl+D")
+
+
+def test_module_disabled_action_survives_view_switch(window, sample_pdf, tmp_path):
+    """Un modulo che disattiva un'azione (es. permessi negati) non viene smentito dal nucleo."""
+    import shutil
+    act = window.ctx.action("Azione protetta", None, lambda: None)
+    window.ctx.currentViewChanged.connect(lambda v: act.setEnabled(v is not None and "b.pdf" not in str(v.document.path)))
+    window.open_path(sample_pdf)
+    assert act.isEnabled()
+    other = tmp_path / "b.pdf"
+    shutil.copy(sample_pdf, other)
+    view = window.open_path(other)
+    with view.document.change("x") as pdf:
+        pdf.delete_page(0)
+    assert not act.isEnabled()
+    view.document._saved_state = view.document._state     # chiusura senza domanda di salvataggio

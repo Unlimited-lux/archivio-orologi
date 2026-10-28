@@ -176,3 +176,39 @@ def test_fit_width_has_no_horizontal_scroll(qtbot, sample_pdf):
         qtbot.waitExposed(v)
         v.set_fit(FIT_WIDTH)
         assert v.horizontalScrollBar().maximum() == 0, w
+
+
+def test_drag_far_from_text_selects_nothing(view, qtbot):
+    """Trascinare in una zona vuota, lontano dal testo, non seleziona la parola più vicina."""
+    view.set_zoom(1.0)
+    view.go_to_page(0)
+    a = view.page_transform(0).map(QPointF(300, 600))
+    b = view.page_transform(0).map(QPointF(450, 700))
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=a.toPoint())
+    qtbot.mouseMove(view.viewport(), pos=b.toPoint())
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=b.toPoint())
+    assert view.selected_text() == ""
+
+
+def test_copy_respects_permission(qtbot, tmp_path):
+    """Con il permesso di copia negato, Ctrl+C non mette il testo negli appunti."""
+    from PySide6.QtGui import QGuiApplication
+    src = make_pdf(tmp_path / "a.pdf", pages=1)
+    d = pymupdf.open(src)
+    path = tmp_path / "noc.pdf"
+    d.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="capo", user_pw="",
+           permissions=pymupdf.PDF_PERM_PRINT)
+    v = DocumentView(Document.open(path))
+    qtbot.addWidget(v)
+    v.resize(900, 700)
+    v.show()
+    qtbot.waitExposed(v)
+    QGuiApplication.clipboard().setText("ORIGINALE")
+    v._select_all_on_page()
+    assert v.selected_text()
+    assert not v.copy_selection()
+    assert QGuiApplication.clipboard().text() == "ORIGINALE"
+    assert v.document.pdf.authenticate("capo")      # accesso da proprietario: copia consentita
+    assert v.copy_selection()
+    assert QGuiApplication.clipboard().text() != "ORIGINALE"
+    QGuiApplication.clipboard().clear()

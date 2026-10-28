@@ -89,7 +89,10 @@ class Context(QObject):
 
     # --------------------------------------------------------------- documenti
     def current_view(self) -> "DocumentView | None":
-        return self._w.current_view()
+        try:
+            return self._w.current_view()
+        except RuntimeError:        # finestra già distrutta (timer dei moduli in ritardo)
+            return None
 
     def current_document(self) -> Document | None:
         view = self._w.current_view()
