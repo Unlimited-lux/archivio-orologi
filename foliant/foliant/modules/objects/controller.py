@@ -49,6 +49,7 @@ class ObjectsController(QObject):
         self._pending: set = set()
         self._parsedReady.connect(self._on_parsed_ready)
         self.smart_guides = True
+        self.crop_ratio = "free"     # proporzioni del ritaglio: free, original, 1:1, 4:3, 3:4, 16:9
         self.links_follow = True     # i collegamenti che coincidono con l'oggetto si spostano con esso
         self.grid_on = False
         self.grid_snap = True
@@ -507,6 +508,58 @@ class ObjectsController(QObject):
             self.status(_("Peso delle immagini: {a} KB → {b} KB").format(
                 a=round(r["before"] / 1024, 1), b=round(r["after"] / 1024, 1)))
 
+    def optimize_document(self, view) -> None:
+        """Ottimizza le immagini di tutte le pagine in un unico passo annullabile."""
+        from . import imaging as IM
+        if view is None:
+            return
+
+        def targets(pdf):
+            out = []
+            for i in range(pdf.page_count):
+                try:
+                    idx = [o.index for o in parse_page(pdf, pdf[i]).objects if o.kind == IMAGE and not o.inline]
+                except Exception:
+                    continue
+                if idx:
+                    out.append((i, idx))
+            return out
+        with ENGINE_LOCK:
+            pages = targets(view.document.pdf)
+        if not pages:
+            self.ctx.info(_("Ottimizza immagini"), _("Il documento non contiene immagini."))
+            return
+
+        def estimate(**kw):
+            before = after = 0
+            with ENGINE_LOCK:
+                for i, idx in pages:
+                    try:
+                        r = IM.estimate_optimization(view.document.pdf, i, idx, **kw)
+                    except E.ObjectError:
+                        continue
+                    before += r["before"]
+                    after += r["after"]
+            return {"before": before, "after": after}
+        vals = D.ask_optimize(self.ctx.window, estimate)
+        if vals is None:
+            return
+
+        def fn(pdf):
+            before = after = 0
+            for i, idx in targets(pdf):
+                try:
+                    r = IM.optimize_images(pdf, i, idx, **vals)
+                except E.ObjectError:
+                    continue
+                before += r["before"]
+                after += r["after"]
+            return {"before": before, "after": after}
+        r = self.run_change(view, _("Ottimizza le immagini del documento"), fn)
+        if r is not None:
+            self.status(_("Peso delle immagini: {a} KB → {b} KB").format(
+                a=round(r["before"] / 1024, 1), b=round(r["after"] / 1024, 1)))
+
     def path_style(self, view) -> None:
         from . import advanced as A
         objs = [o for o in self.selected_objects(view) if o.kind == PATH]
@@ -708,7 +761,7 @@ class ObjectsController(QObject):
         base = os.path.splitext(view.document.display_name)[0]
         n = sum(1 for x in (self.parsed(view, self.sel_page).objects[:o.index + 1]) if x.kind == IMAGE)
         name = f"{base}_p{self.sel_page + 1}_img{n}.{orig.ext}"
-        filters = f"Originale (*.{orig.ext});;PNG (*.png);;JPEG (*.jpg *.jpeg);;" + _("Come appare") + " (*.png)"
+        filters = f"Originale (*.{orig.ext});;PNG (*.png);;JPEG (*.jpg *.jpeg)"
         path = self.ctx.ask_save_path(_("Salva immagine come"), name, filters, default_suffix="." + orig.ext)
         if not path:
             return
@@ -721,6 +774,31 @@ class ObjectsController(QObject):
                     data = E.extract_image(view.document.pdf, o, "png").data
                 else:
                     data = orig.data
+            from foliant.api import atomic_write
+            atomic_write(path, data)
+        except Exception as e:
+            self.ctx.error(_("Salva immagine"), _("Impossibile salvare l'immagine: {e}").format(e=e))
+            return
+        self.status(_("Immagine salvata in {p}").format(p=path))
+
+    def save_image_as_shown(self, view) -> None:
+        """Salva l'immagine come appare (ritaglio, rotazione, capovolgimento, opacità applicati)."""
+        objs = self.selected_objects(view)
+        if len(objs) != 1 or objs[0].kind != IMAGE:
+            self.status(_("Seleziona una sola immagine."))
+            return
+        if not self._extract_allowed(view):
+            self.ctx.error(_("Salva immagine"), _("Il documento non consente di estrarre il contenuto."))
+            return
+        o = objs[0]
+        base = os.path.splitext(view.document.display_name)[0]
+        name = f"{base}_p{self.sel_page + 1}_img{o.index + 1}.png"
+        path = self.ctx.ask_save_path(_("Salva immagine come appare"), name, "PNG (*.png)", default_suffix=".png")
+        if not path:
+            return
+        try:
+            with ENGINE_LOCK:
+                data = E.render_as_shown(view.document.pdf, self.sel_page, o)
             from foliant.api import atomic_write
             atomic_write(path, data)
         except Exception as e:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+
 import pymupdf
 import pytest
 from PySide6.QtCore import QSettings, Qt
@@ -371,3 +373,71 @@ def test_reinsert_image_after_save_is_correct(ui, tmp_path):
         pix = view.document.pdf[0].get_pixmap(dpi=72, clip=o.rect)
     r, g, b = pix.pixel(pix.width // 2, pix.height // 2)[:3]
     assert r > 200 and b < 60
+
+
+def test_crop_with_square_ratio(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(100, 200, 300, 300)]))
+    ui.c.crop_ratio = "1:1"
+    try:
+        ui.c.set_selection(view, 0, [0])
+        ui.c.start_crop(view)
+        r = ui.c.object_tool.crop["rect"]
+        assert abs(r.width - 100) < 0.01 and abs(r.height - 100) < 0.01 and abs(r.x0 - 150) < 0.01
+        drag(view, 0, (250, 300), (230, 300))   # maniglia in basso a destra verso sinistra
+        r = ui.c.object_tool.crop["rect"]
+        assert abs(r.width - r.height) < 0.01 and abs(r.x0 - 150) < 0.5 and abs(r.y0 - 200) < 0.5
+        QTest.keyClick(view, Qt.Key.Key_Return)
+        o = objs(view)[0]
+        assert abs(o.rect.width - o.rect.height) < 0.6
+    finally:
+        ui.c.crop_ratio = "free"
+
+
+def test_ratio_helpers():
+    from foliant.modules.objects.tool import fit_ratio, ratio_from_handle
+    r = fit_ratio(pymupdf.Rect(0, 0, 160, 90), 1.0)
+    assert (r.x0, r.width, r.height) == (35, 90, 90)
+    r = ratio_from_handle(pymupdf.Rect(0, 0, 160, 50), 4, 16 / 9)
+    assert abs(r.width / r.height - 16 / 9) < 1e-6 and r.x0 == 0 and r.y0 == 0
+
+
+def test_save_image_as_shown_cropped_rotated(ui, tmp_path, monkeypatch):
+    from PIL import Image as PImage
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(100, 200, 300, 300)]))
+    ui.c.set_selection(view, 0, [0])
+    with view.document.change("prep") as pdf:
+        E.set_crop(pdf, 0, 0, (0, 0, 0.25, 1))
+        E.rotate(pdf, 0, [0], 90)
+    ui.c.set_selection(view, 0, [0])
+    out = tmp_path / "vista.png"
+    monkeypatch.setattr(ui.ctx, "ask_save_path", lambda *a, **k: str(out))
+    O._state["actions"]["save_shown"].trigger()
+    im = PImage.open(out)
+    o = objs(view)[0]
+    assert abs(im.width / im.height - o.rect.width / o.rect.height) < 0.05
+    assert im.width > im.height   # quarto sinistro (50×100 pt) ruotato di 90°: orizzontale
+
+
+def test_optimize_document_images(ui, tmp_path, monkeypatch):
+    import numpy as np
+    from PIL import Image as PImage
+    from foliant.modules.objects import dialogs as D
+    path = tmp_path / "foto.pdf"
+    doc = pymupdf.open()
+    rng = np.random.default_rng(0)
+    for k in range(2):
+        page = doc.new_page()
+        arr = (rng.random((600, 600, 3)) * 255).astype("uint8")
+        b = io.BytesIO()
+        PImage.fromarray(arr).save(b, "PNG")
+        page.insert_image(pymupdf.Rect(50, 50, 122, 122), stream=b.getvalue())   # 600 px su 1 in
+    doc.save(str(path))
+    view = ui.open(str(path))
+    monkeypatch.setattr(D, "ask_optimize", lambda parent, est: dict(max_ppi=150, mode="jpeg", quality=70))
+    O._state["actions"]["optimize_doc"].trigger()
+    for i in range(2):
+        o = objs(view, i)[0]
+        assert o.width <= 151 and abs(o.rect.width - 72) < 0.5
+    assert view.document.undo_label == "Ottimizza le immagini del documento"
+    view.document.undo()
+    assert objs(view, 0)[0].width == 600

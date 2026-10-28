@@ -20,12 +20,12 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-10 Ruotare | P0 | fatto | ui: test_rotation_handle_snaps_with_shift, test_rotate_buttons_and_flip; eng (4×90° = identità) | |
 | OBJ-11 Capovolgere | P1 | fatto | ui: test_rotate_buttons_and_flip; eng (A\|B → B\|A) | |
 | OBJ-12 Inclinare / reimposta | P2 | fatto | adv: test_skew_keeps_height, test_reset_transform_rotated_flipped_image; ui2: test_advanced_actions | Finestra «Trasforma…». |
-| OBJ-13 Ritagliare | P0 | fatto | ui: test_crop_by_double_click_and_handles, test_crop_escape_cancels; eng (ripristina, definitivo 200×400 px) | Rapporti predefiniti (1:1, 4:3…) non fatti. |
+| OBJ-13 Ritagliare | P0 | fatto | ui: test_crop_by_double_click_and_handles, test_crop_escape_cancels; ui2: test_crop_with_square_ratio, test_ratio_helpers; eng (ripristina, definitivo 200×400 px) | Proporzioni libere, originali, 1:1, 4:3, 3:4, 16:9 (menu Altro). |
 | OBJ-14 Sostituire | P0 | fatto | ui: test_replace_image_dialog_flow; eng (Adatta/Riempi/Deforma, ruotata 30°, opacità, tutte le occorrenze, ritaglio conservato) | |
 | OBJ-15 Eliminare | P0 | fatto | ui: test_delete_key_and_undo; eng (2 XObject dopo salvataggio, logo condiviso) | Pulizia dell'albero di struttura non fatta. |
 | OBJ-16 Opacità | P1 | fatto | ui: test_opacity_slider_single_step; eng (/ca 0.5, pixel 127–128, riuso ExtGState) | Avviso PDF/A non fatto. |
 | OBJ-17 Regolazioni immagine | P2 | fatto | img; ui2: test_image_tools_actions | Anteprima in tempo reale non fatta. |
-| OBJ-18 Ottimizza immagini | P2 | fatto | img; ui2: test_image_tools_actions | JPEG/senza perdita; niente JPEG 2000/CCITT. |
+| OBJ-18 Ottimizza immagini | P2 | fatto | img; ui2: test_image_tools_actions, test_optimize_document_images | Immagini selezionate o tutto il documento (un passo annullabile); JPEG/senza perdita; niente JPEG 2000/CCITT. |
 | OBJ-19 Applicazione esterna | P2 | fatto | ui2: test_external_edit_roundtrip | |
 | OBJ-20 Ordine di sovrapposizione | P1 | fatto | ui: test_reorder_front_shortcut; eng | |
 | OBJ-21 Allineare | P1 | fatto | ui: test_arrange_actions; eng | Riferimento «Oggetto chiave» solo nel motore. |
@@ -34,7 +34,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-24 Tracciati vettoriali | P1 | fatto | eng; ui (riquadro, Canc) | «Seleziona simili». |
 | OBJ-25 Stile dei tracciati | P2 | fatto | adv: test_restyle_cmyk_fill_red, test_restyle_width_and_dash_and_no_fill | |
 | OBJ-26 Scomporre / raggruppare | P2 | fatto | adv: test_decompose_form_same_render, test_decompose_transparency_group_needs_confirmation, test_group_move_and_ungroup | Modalità isolamento non fatta. |
-| OBJ-27 Estrarre l'immagine | P0 | fatto | ui: test_save_image_original_jpeg, test_copy_image_puts_png_on_clipboard; ui2: test_permission_denied_blocks_changes; eng | «Come appare» solo nel motore (`render_as_shown`). |
+| OBJ-27 Estrarre l'immagine | P0 | fatto | ui: test_save_image_original_jpeg, test_copy_image_puts_png_on_clipboard; ui2: test_permission_denied_blocks_changes; eng | «Salva immagine come appare…» (ritaglio, rotazione, opacità applicati): ui2 test_save_image_as_shown_cropped_rotated. |
 | OBJ-28 Estrarre tutte le immagini | P1 | fatto | ext; ui2: test_extract_all_flow, test_extract_all_no_images | |
 | OBJ-29 Cattura area | P1 | non fatto qui | cap (logica) | Nella specifica v2 è del visualizzatore (VIS-29): lo strumento non è esposto nell'interfaccia. |
 | OBJ-30 Copia/taglia/incolla/duplica | P0 | fatto | ui: copy/paste tra pagine e documenti, scostamento +10, duplica, taglia; clip | Ctrl+D e Ctrl+Maiusc+V tolti (specifica v2): «Duplica» e «Incolla in posizione» nel menu. Strutture taggate non aggiornate. |

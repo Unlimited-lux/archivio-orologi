@@ -69,6 +69,7 @@ def register(ctx: Context) -> None:
     sel_action("replace_clip", _("Sostituisci con gli appunti"), "clipboard-paste", c.replace_with_clipboard)
     sel_action("save_image", _("Salva immagine come…"), "image-down", c.save_image)
     sel_action("copy_image", _("Copia immagine"), "copy", c.copy_image)
+    sel_action("save_shown", _("Salva immagine come appare…"), "image-down", c.save_image_as_shown)
     sel_action("delete", _("Elimina"), "trash-2", c.delete)
     sel_action("copy", _("Copia"), "copy", c.copy)
     sel_action("cut", _("Taglia"), "scissors", c.cut)
@@ -138,8 +139,19 @@ def register(ctx: Context) -> None:
     add_opacity_widget(ctx, c, mode)
     more = QMenu(ctx.window)
     for key in ("paste", "paste_in_place", "duplicate", "move_page", "replicate", "similar", "crop_reset",
-                "crop_apply", "replace_clip", "save_image", "copy_image", "make_link"):
+                "crop_apply", "replace_clip", "save_image", "save_shown", "copy_image", "make_link"):
         more.addAction(acts[key])
+    ratio_menu = more.addMenu(_("Proporzioni del ritaglio"))
+    from PySide6.QtGui import QActionGroup
+    group_r = QActionGroup(ratio_menu)
+    for code, text in (("free", _("Libere")), ("original", _("Originali")), ("1:1", "1:1"), ("4:3", "4:3"),
+                       ("3:4", "3:4"), ("16:9", "16:9")):
+        a = ratio_menu.addAction(text)
+        a.setCheckable(True)
+        a.setChecked(code == c.crop_ratio)
+        a.triggered.connect(lambda _c=False, k=code: setattr(c, "crop_ratio", k))
+        group_r.addAction(a)
+    _state["ratio_menu"] = ratio_menu
     more.addSeparator()
     for key in ("adjust", "external", "external_stop", "optimize", "path_style", "transform", "reset_tf", "group", "decompose"):
         more.addAction(acts[key])
@@ -197,6 +209,9 @@ def register(ctx: Context) -> None:
     acts["extract_all"] = ctx.action(_("Estrai tutte le immagini…"), "images",
                                      lambda: extras.extract_all(ctx, c, ctx.current_view()))
     more.addAction(acts["extract_all"])
+    acts["optimize_doc"] = ctx.action(_("Ottimizza le immagini del documento…"), "shrink",
+                                      lambda: c.optimize_document(ctx.current_view()))
+    more.addAction(acts["optimize_doc"])
     ctx.add_menu_action(acts["extract_all"], "Strumenti")
     more.addSeparator()
     more.addAction(acts["detect_urls"])
@@ -293,11 +308,13 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
                 "al_bottom", "make_link", "replicate", "transform", "reset_tf"):
         if key in acts:
             acts[key].setEnabled(has_doc and n > 0)
-    for key in ("crop", "crop_reset", "crop_apply", "replace", "replace_clip", "save_image", "copy_image"):
+    for key in ("crop", "crop_reset", "crop_apply", "replace", "replace_clip", "save_image", "save_shown",
+                "copy_image"):
         if key in acts:
             acts[key].setEnabled(has_doc and single_image)
     if single_image and not c.extract_allowed(view):
         acts["save_image"].setEnabled(False)
+        acts["save_shown"].setEnabled(False)
         acts["copy_image"].setEnabled(False)
     if single_image:
         w = objs[0].wrapper
@@ -366,7 +383,7 @@ def _context_menu(ctx: Context, c: ObjectsController, view, pe, menu: QMenu) -> 
         order.addAction(acts[key])
     if len(objs) == 1 and objs[0].kind == IMAGE:
         menu.addSeparator()
-        for key in ("crop", "crop_reset", "replace", "replace_clip", "save_image", "copy_image"):
+        for key in ("crop", "crop_reset", "replace", "replace_clip", "save_image", "save_shown", "copy_image"):
             menu.addAction(acts[key])
     menu.addSeparator()
     menu.addAction(acts["make_link"])
