@@ -145,7 +145,8 @@ class NavigationController(QObject):
         self.act_forward = ctx.action(_("Avanti"), "arrow-right", self.forward, shortcut="Alt+Right",
                                       tooltip=_("Vai alla posizione successiva") + " (Alt+→)",
                                       requires_document=False)
-        self.act_goto = ctx.action(_("Vai a pagina…"), "hash", self.ask_go_to, shortcut="Ctrl+G")
+        # UX-18: Ctrl+L porta al campo pagina del nucleo; Ctrl+G è «occorrenza successiva»
+        self.act_goto = ctx.action(_("Vai a pagina…"), "hash", self.ask_go_to)
         mode = ctx.mode("leggi")
         if mode is not None:
             mode.add_separator()

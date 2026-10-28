@@ -196,7 +196,9 @@ EN.update({
     # testi scritti nei documenti (riepiloghi, misure, stati)
     "Valore": "Value", "Valore formattato": "Formatted value", "Unità": "Unit", "Scala": "Scale", "Data": "Date",
     "Testo": "Text", "Testo marcato": "Marked text", "N.": "No.", "Risposta a": "Reply to", "Risposta": "Reply",
-    "Nessun commento.": "No comments.", "1 commento": "1 comment", "{state} impostato da {who}": "{state} set by {who}",
+    "Nessun commento.": "No comments.", "Annotazione": "Annotation",
+    "Documento PDF/A-1: l'opacità delle annotazioni è stata portata al 100%.":
+        "PDF/A-1 document: annotation opacity was set to 100%.", "1 commento": "1 comment", "{state} impostato da {who}": "{state} set by {who}",
     "Riepilogo commenti — {title}": "Comment summary — {title}",
 })
 EN.pop("Gomma ", None)

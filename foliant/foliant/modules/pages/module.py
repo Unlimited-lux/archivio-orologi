@@ -17,6 +17,7 @@ from PySide6.QtCore import QByteArray, QMimeData, Qt, QUrl
 from PySide6.QtGui import QAction, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QToolButton
 
+from foliant.i18n import pgettext
 from foliant.api import ENGINE_LOCK, Document, FoliantError, OperationCancelled, PasswordRequired, WrongPassword, _, add_translations, bind_icon
 
 from . import engine as E
@@ -327,8 +328,23 @@ class PagesController:
             if not self.ctx.confirm(_("Elimina pagine"), msg):
                 return
         first = pages[0]
-        self.apply(_("Elimina pagine"), lambda pdf: E.delete_pages(pdf, pages),
-                   select=lambda r: [min(first, view.page_count - 1)])
+        done = self.apply(_("Elimina pagine"), lambda pdf: E.delete_pages(pdf, pages),
+                          select=lambda r: [min(first, view.page_count - 1)])
+        if done is not None:
+            self.notify_undo(view, deleted_summary(len(pages), info))
+
+    def notify_undo(self, view, text: str) -> None:
+        """Avviso non bloccante con «Annulla» dopo un'operazione distruttiva annullabile (UX-13)."""
+        notify = getattr(self.ctx, "notify", None)
+        if notify is None:
+            self.ctx.status(text)
+            return
+        document = view.document
+
+        def undo():
+            if not document.closed:
+                document.undo()
+        notify(text, actions=[(pgettext("undo", "Annulla"), undo)])
 
     def duplicate(self, copies: int = 1, where: str = "after") -> None:
         pages = self.selected()
@@ -397,8 +413,10 @@ class PagesController:
         mime = pages_mime(data, view, pages)
         QGuiApplication.clipboard().setMimeData(mime)
         if cut:
-            self.apply(_("Taglia pagine"), lambda pdf: E.delete_pages(pdf, pages),
-                       select=lambda r: [min(pages[0], view.page_count - 1)])
+            done = self.apply(_("Taglia pagine"), lambda pdf: E.delete_pages(pdf, pages),
+                              select=lambda r: [min(pages[0], view.page_count - 1)])
+            if done is not None:
+                self.notify_undo(view, _("{n} pagine tagliate negli appunti").format(n=len(pages)))
         else:
             self.ctx.status(_("{n} pagine copiate negli appunti").format(n=len(pages)))
         self.update_actions()
@@ -416,6 +434,19 @@ class PagesController:
         at = (pages[0] if before else pages[-1] + 1) if pages else view.page_count
         self.insert_pdf_bytes(data, at, _("Incolla pagine"))
 
+    def warn_pdfa(self, view, sources) -> None:
+        """PAG-03: inserire pagine da file non PDF/A in un documento che dichiara PDF/A."""
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            target = E.declares_pdfa(view.document.pdf)
+            foreign = any(not E.declares_pdfa(s) for s in sources)
+        if target and foreign:
+            text = _("Il documento dichiara la conformità PDF/A: le pagine inserite provengono da file non "
+                     "PDF/A e il risultato potrebbe non essere più conforme.")
+            notify = getattr(self.ctx, "notify", None)
+            notify(text) if notify else self.ctx.info(_("PDF/A"), text)
+
     def insert_pdf_bytes(self, data: bytes, at: int, label: str, view=None) -> None:
         try:
             src = pymupdf.open(stream=data, filetype="pdf")
@@ -423,7 +454,9 @@ class PagesController:
             self.ctx.error(label, _("Il contenuto non è un PDF valido."))
             return
         try:
-            self.apply(label, lambda pdf: E.insert_pdf_pages(pdf, src, at), select=lambda r: r, view=view)
+            if self.apply(label, lambda pdf: E.insert_pdf_pages(pdf, src, at), select=lambda r: r,
+                          view=view) is not None:
+                self.warn_pdfa(view or self.view(), [src])
         finally:
             src.close()
 
@@ -506,7 +539,8 @@ class PagesController:
                 new += added
             return new
         try:
-            self.apply(_("Inserisci pagine"), work, select=lambda r: r)
+            if self.apply(_("Inserisci pagine"), work, select=lambda r: r) is not None and sources:
+                self.warn_pdfa(view, sources)
         finally:
             for s in sources:
                 s.close()
@@ -623,8 +657,10 @@ class PagesController:
         if len(found) < view.page_count and self.ctx.confirm(
                 _("Pagine vuote e duplicate"),
                 _("Trovate {n} pagine:").format(n=len(found)) + "\n" + shown + "\n\n" + _("Eliminarle?")):
-            self.apply(_("Elimina pagine vuote e duplicate"), lambda pdf: E.delete_pages(pdf, found),
-                       select=lambda r: [min(found[0], view.page_count - 1)])
+            done = self.apply(_("Elimina pagine vuote e duplicate"), lambda pdf: E.delete_pages(pdf, found),
+                              select=lambda r: [min(found[0], view.page_count - 1)])
+            if done is not None:
+                self.notify_undo(view, deleted_summary(len(found), {}))
         return found
 
     # ================================================================ sblocco
@@ -695,6 +731,23 @@ class PagesController:
         sub.addAction(_("Duplica"), lambda: run(self.duplicate))
         sub.addAction(_("Elimina"), lambda: run(self.delete))
         sub.addAction(_("Organizza pagine"), lambda: self.ctx.set_mode("pagine"))
+
+
+def deleted_summary(count: int, info: dict) -> str:
+    """«3 pagine eliminate · 2 segnalibri e 1 link interessati»."""
+    text = _("1 pagina eliminata") if count == 1 else _("{n} pagine eliminate").format(n=count)
+    parts = []
+    if info.get("bookmarks"):
+        parts.append(_("1 segnalibro") if info["bookmarks"] == 1 else
+                     _("{n} segnalibri").format(n=info["bookmarks"]))
+    if info.get("links"):
+        parts.append(_("1 link") if info["links"] == 1 else _("{n} link").format(n=info["links"]))
+    if info.get("fields"):
+        parts.append(_("1 campo modulo") if info["fields"] == 1 else _("{n} campi modulo").format(n=info["fields"]))
+    if parts:
+        joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " " + _("e") + " " + parts[-1]
+        text += " · " + _("{x} interessati").format(x=joined)
+    return text
 
 
 def friendly_error(e: Exception) -> str:
