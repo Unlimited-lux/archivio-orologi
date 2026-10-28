@@ -195,6 +195,7 @@ class BatchWidget(QWidget):
         self.items: list[be.QueueItem] = []
         self.steps: list[be.Step] = []
         self.report: be.JobReport | None = None
+        self.task = None   # lavoro in corso (BackgroundTask)
         self.csv_semicolon = False
         self.input_roots: list[str] = []
         self.last_ignored: list[tuple[str, str]] = []
@@ -382,6 +383,11 @@ class BatchWidget(QWidget):
         self.common_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.common_password.setPlaceholderText(_("Password comune per i file protetti (facoltativa)"))
         self.open_folder = QCheckBox(_("Apri la cartella al termine"))
+        self.workers = QSpinBox()
+        self.workers.setRange(1, max(1, os.cpu_count() or 1))
+        self.workers.setValue(max(1, (os.cpu_count() or 2) // 2))
+        self.workers.setToolTip(_("File elaborati contemporaneamente (unione, stampa e conversione restano "
+                                  "sequenziali)"))
         self.preview = QTableWidget(0, 2)
         self.preview.setHorizontalHeaderLabels([_("Originale"), _("Risultato")])
         self.preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -406,6 +412,7 @@ class BatchWidget(QWidget):
         form.addRow(rep)
         form.addRow(_("In caso di errore"), self.error_policy)
         form.addRow(_("Password"), self.common_password)
+        form.addRow(_("File in parallelo"), self.workers)
         form.addRow(self.open_folder)
         ol = QVBoxLayout(out_box)
         ol.addLayout(form)
@@ -589,7 +596,7 @@ class BatchWidget(QWidget):
                 if v.document.is_modified:
                     unsaved.append(v.document.display_name)
         if unsaved:
-            self.ctx.info(_("Modifiche non salvate"), _("Verrà elaborata la versione su disco di: {f}.").format(
+            self.ctx.notify(_("Verrà elaborata la versione su disco di: {f}.").format(
                 f=", ".join(unsaved)))
         if paths:
             self.add_paths(paths)
@@ -739,7 +746,7 @@ class BatchWidget(QWidget):
         path = be.save_sequence(self.sequences_dir(), name, self.steps, output=be.output_of(self.settings()))
         self.refresh_sequences()
         self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(path)))
-        self.ctx.status(_("Sequenza «{n}» salvata.").format(n=name))
+        self.ctx.notify(_("Sequenza «{n}» salvata.").format(n=name))
         return path
 
     def save_sequence_dialog(self) -> None:
@@ -806,7 +813,7 @@ class BatchWidget(QWidget):
         self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(saved)))
         self.load_sequence(saved)
         if warnings:
-            self.ctx.info(_("Sequenza importata"), "\n".join(warnings))
+            self.ctx.notify("\n".join(warnings))
         return saved
 
     def import_sequence_dialog(self) -> None:
@@ -859,7 +866,7 @@ class BatchWidget(QWidget):
             input_root=root, pattern=self.pattern.text(), counter_start=self.counter_start.value(),
             conflict=self.conflict.currentData(), replace_originals=self.replace_originals.isChecked(),
             backup=self.backup.isChecked(), error_policy=self.error_policy.currentData(),
-            passwords=[pw] if pw else [])
+            passwords=[pw] if pw else [], workers=self.workers.value())
 
     def _suggest_pattern(self) -> None:
         """Modello predefinito: «{nome}» o «{nome}_<suffisso>» nella stessa cartella."""
@@ -951,31 +958,49 @@ class BatchWidget(QWidget):
                     if remember:
                         apply_all = choice
                 settings.conflict_choices[target] = choice
+        if self.task is not None and not self.task.done:
+            self.ctx.notify(_("Un'elaborazione in blocco è già in corso."))
+            return None
         control = be.JobControl()
         panel = JobControlPanel(control, self)
         panel.show()
-        try:
-            report = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, list(self.items), settings,
-                                       started, None, control, self.journal_path())
-        except Exception as e:   # il motore non dovrebbe sollevare: sicurezza in più
-            self.ctx.error(_("Elaborazione non riuscita"), str(e))
-            return None
-        finally:
+        items = list(self.items)
+        box: dict = {}
+
+        def cleanup() -> None:
             control.resume()
             panel.close()
             panel.deleteLater()
+            self.task = None
+            self.act_run.setEnabled(True)
+
+        def done(report) -> None:
+            cleanup()
+            box["report"] = self._finish_run(report, settings, items)
+
+        def failed(e: BaseException) -> None:   # il motore non dovrebbe sollevare: sicurezza in più
+            cleanup()
+            self.ctx.error(_("Elaborazione non riuscita"), str(e))
+
+        self.act_run.setEnabled(False)
+        # la finestra resta utilizzabile: avanzamento e Annulla nella barra di stato
+        self.task = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, items, settings, started, None,
+                                      control, self.journal_path(), modal=False, on_done=done, on_error=failed)
+        return box.get("report")
+
+    def _finish_run(self, report: be.JobReport, settings: be.JobSettings, items: list) -> be.JobReport:
         try:
             be.save_history(self.history_dir(), report)
-            be.record_bates_series(settings, list(self.items), report, self._base_dir())
+            be.record_bates_series(settings, items, report, self._base_dir())
         except Exception:
             pass
-        self.last_items = list(self.items)
+        self.last_items = items
         self.report = report
         self.last_settings = settings
         self._fill_report()
         self._refresh_queue()
         self.report_box.show()
-        self.ctx.status(report.summary(), 10000)
+        self.ctx.notify(report.summary(), [(_("Mostra"), lambda: self.ctx.set_central_widget(self))])
         if self.open_folder.isChecked():
             self.open_destination()
         return report
@@ -1021,7 +1046,7 @@ class BatchWidget(QWidget):
             return
         failed = set(self.report.failed_items())
         if not failed:
-            self.ctx.info(_("Riprova"), _("Nessun file da riprovare."))
+            self.ctx.notify(_("Nessun file da riprovare."))
             return
         self.items = [it for it in self.items if it.path in failed]
         self.report = None
@@ -1042,14 +1067,14 @@ class BatchWidget(QWidget):
         except Exception as e:
             self.ctx.error(_("Rapporto non esportato"), str(e))
             return False
-        self.ctx.status(_("Rapporto esportato: {p}").format(p=path))
+        self.ctx.notify(_("Rapporto esportato: {p}").format(p=path))
         return True
 
     def export_bates_index(self, path: str) -> bool:
         settings = getattr(self, "last_settings", None) or self.settings()
         items = getattr(self, "last_items", None) or self.items
         if not any(s.action == "bates" for s in settings.steps):
-            self.ctx.info(_("Indice Bates"), _("Il lavoro non contiene una numerazione Bates."))
+            self.ctx.notify(_("Il lavoro non contiene una numerazione Bates."))
             return False
         try:
             atomic_write(path, be.bates_index_csv(items, settings).encode("utf-8"))

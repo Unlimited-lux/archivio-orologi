@@ -82,3 +82,30 @@ def test_dialog_evaluates_cvs_privately(window, ready, text_pdf):
     dlg.open_ref = lambda path, page: opened.append((path, page))
     dlg.on_cell(0, 2)
     assert opened == [(paths[0], 0)]
+
+
+def test_ranking_pdf_with_reasons_and_notice(tmp_path):
+    import pymupdf
+    crit = [Criterion("Esperienza", "anni", peso=3, obbligatorio=True), Criterion("Lingue", peso=1)]
+    rows = _rows([(8, 6), (0, 10)])
+    rows[0].scores["Esperienza"] = Evaluation("Esperienza", 8, "dieci anni <b>nel settore</b>", [1, 2])
+    rows = ranking.rank(rows, crit)
+    pdf = pymupdf.open("pdf", ranking.to_pdf(rows, crit))
+    text = " ".join(" ".join(p.get_text(flags=0).split()) for p in pdf)   # legature «ﬁ» espanse
+    assert "Confronto e classifica" in text and "Esperienza (×3)" in text
+    assert "dieci anni <b>nel settore</b>" in text                # testo, mai HTML interpretato
+    assert "escluso" in text and "decisione presa da una persona" in text
+    assert "Pagina 1 di" in text
+
+
+def test_ranking_pdf_many_rows_spans_pages():
+    import pymupdf
+    crit = [Criterion("Esperienza"), Criterion("Lingue")]
+    rows = []
+    for n in range(60):
+        rows.append(RankRow(f"/d{n}.pdf", f"D{n}", f"doc{n}.pdf",
+                            {"Esperienza": Evaluation("Esperienza", n % 10, "motivazione " * 12),
+                             "Lingue": Evaluation("Lingue", 5, "ok")}))
+    pdf = pymupdf.open("pdf", ranking.to_pdf(ranking.rank(rows, crit), crit))
+    assert pdf.page_count > 1
+    assert "doc59.pdf" in " ".join(p.get_text() for p in pdf)
