@@ -77,7 +77,7 @@ def test_replace_all_with_confirmation_and_undo(setup):
     dlg.replace_edit.setText("Appaltatore")
     dlg.case_box.setChecked(True)
     dlg.replace_all_btn.click()
-    assert questions and "6" in questions[0]
+    assert questions == []          # nessuna conferma per un'operazione annullabile (UX-13)
     text = _text(view)
     assert text.count("Appaltatore") == 6 and "Fornitore" not in text
     assert view.document.can_undo
@@ -86,15 +86,6 @@ def test_replace_all_with_confirmation_and_undo(setup):
     assert errors == []
     view.document.undo()
     assert _text(view).count("Fornitore") == 6
-
-
-def test_replace_all_cancelled_does_nothing(setup, monkeypatch):
-    view, dlg, _errors, _infos, _q = setup
-    monkeypatch.setattr(dlg.ctx, "confirm", lambda title, text: False)
-    dlg.find_edit.setText("Fornitore")
-    dlg.replace_edit.setText("X")
-    dlg.replace_all_btn.click()
-    assert not view.document.can_undo
 
 
 def test_regex_replace_and_inline_error(setup):
@@ -141,7 +132,7 @@ def test_delete_mode_with_excluded_occurrence(setup):
     assert dlg.results.count() == 3
     dlg.results.item(1).setCheckState(Qt.CheckState.Unchecked)
     dlg.delete_all_btn.click()
-    assert questions and "2" in questions[0]
+    assert questions == []
     text = _text(view)
     assert text.count("BOZZA") == 1
     assert "riservata del Fornitore" in text

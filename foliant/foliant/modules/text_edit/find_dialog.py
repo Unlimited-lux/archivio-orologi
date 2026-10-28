@@ -517,10 +517,7 @@ class FindReplaceDialog(QDialog):
             self.ctx.info(self.windowTitle(), _("Nessuna occorrenza da sostituire."))
             return
         replacement = self.replace_edit.text()
-        question = (_("Sostituire 1 occorrenza con «{t}»?") if n == 1
-                    else _("Sostituire {n} occorrenze con «{t}»?")).format(n=n, t=replacement)
-        if not self.ctx.confirm(_("Sostituisci tutto"), question + _(" L'operazione si annulla con un solo Annulla.")):
-            return
+        # nessuna conferma: l'operazione si annulla con un solo Annulla (UX-13)
         summary = replace_all(view.document, self.find_edit.text(), replacement, self.options(),
                               pages=self._pages(view))
         self._after_bulk(summary, deleting=not replacement)
@@ -539,9 +536,6 @@ class FindReplaceDialog(QDialog):
         n = sum(1 for m in self.matches if m.replaceable) - len(excluded)
         if n <= 0:
             self.ctx.info(self.windowTitle(), _("Nessuna occorrenza selezionata da eliminare."))
-            return
-        question = _("Eliminare 1 occorrenza?") if n == 1 else _("Eliminare {n} occorrenze?").format(n=n)
-        if not self.ctx.confirm(_("Elimina tutto"), question + _(" L'operazione si annulla con un solo Annulla.")):
             return
         summary = replace_all(view.document, self.find_edit.text(), "", self.options(), pages=self._pages(view),
                               delete=True, remove_adjacent_space=self.space_box.isChecked(), exclude=excluded)
