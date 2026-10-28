@@ -152,8 +152,10 @@ def _redact_xrefs(page: pymupdf.Page) -> list[int]:
 def marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[Mark]:
     """Segni di redazione presenti (anche quelli creati da altri programmi)."""
     out: list[Mark] = []
-    for i, page in iter_pages(pdf, pages):
-        for xref in _redact_xrefs(page):
+    index = RedactIndex().pages(pdf)       # niente caricamento delle pagine senza segni
+    wanted = sorted(index) if pages is None else [i for i in pages if i in index]
+    for i, page in iter_pages(pdf, wanted):
+        for xref in index[i]:
             annot = page.load_annot(xref)
             if annot is None:
                 continue
@@ -164,7 +166,55 @@ def marks(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[Mar
 
 
 def has_marks(pdf: pymupdf.Document) -> bool:
-    return any(_redact_xrefs(page) for _i, page in iter_pages(pdf))
+    return RedactIndex().any(pdf)
+
+
+_RX_REF = re.compile(r"(\d+)\s+0\s+R")
+
+
+class RedactIndex:
+    """Pagine con segni di redazione, senza caricare le pagine né le annotazioni.
+
+    Legge solo l'array /Annots di ogni pagina; il tipo di ogni annotazione (che non
+    cambia per uno stesso oggetto) resta in cache, così dopo una modifica si
+    controllano solo le annotazioni nuove. `clear()` dopo le modifiche del modulo
+    (gli oggetti eliminati possono essere riusati)."""
+
+    def __init__(self) -> None:
+        self._redact: dict[int, bool] = {}
+
+    def clear(self) -> None:
+        self._redact.clear()
+
+    def _is_redact(self, pdf: pymupdf.Document, xref: int) -> bool:
+        known = self._redact.get(xref)
+        if known is None:
+            try:
+                known = pdf.xref_get_key(xref, "Subtype") == ("name", "/Redact")
+            except Exception:
+                known = False
+            self._redact[xref] = known
+        return known
+
+    def pages(self, pdf: pymupdf.Document) -> dict[int, list[int]]:
+        out: dict[int, list[int]] = {}
+        for i in range(pdf.page_count):
+            try:
+                kind, value = pdf.xref_get_key(pdf.page_xref(i), "Annots")
+                if kind == "xref":
+                    value = pdf.xref_object(int(value.split()[0]), compressed=True)
+                elif kind != "array":
+                    continue
+            except Exception:
+                continue
+            refs = [int(m.group(1)) for m in _RX_REF.finditer(value)]
+            hits = [x for x in refs if self._is_redact(pdf, x)]
+            if hits:
+                out[i] = hits
+        return out
+
+    def any(self, pdf: pymupdf.Document) -> bool:
+        return bool(self.pages(pdf))
 
 
 def remove_mark(pdf: pymupdf.Document, page_index: int, xref: int) -> bool:

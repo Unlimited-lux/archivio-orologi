@@ -129,11 +129,10 @@ class RedactionPanel(QWidget):
         self.marks = []
         doc = self._doc
         if doc is not None and not doc.closed:
-            with ENGINE_LOCK:
-                try:
-                    self.marks = R.marks(doc.pdf)
-                except Exception:
-                    self.marks = []
+            try:
+                self.marks = self.controller.marks_of(doc)     # solo le pagine con segni
+            except Exception:
+                self.marks = []
         pages: dict[int, QTreeWidgetItem] = {}
         for n, m in enumerate(self.marks):
             parent = pages.get(m.page)

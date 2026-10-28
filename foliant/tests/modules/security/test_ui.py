@@ -956,3 +956,41 @@ def test_scan_many_fields_fast(tmp_path):
     t = time.perf_counter()
     assert R.marks(pdf) == [] and not R.has_marks(pdf)
     assert time.perf_counter() - t < 0.3
+
+
+def test_listener_cost_on_large_document(window, sec, tmp_path):
+    """Una modifica di un altro modulo su 500 pagine × 10 annotazioni: < 50 ms nei listener."""
+    import time
+    path = tmp_path / "grande.pdf"
+    src = pymupdf.open()
+    for i in range(500):
+        page = src.new_page()
+        for k in range(10):
+            page.add_text_annot((20 + k * 30, 50), f"n{i}-{k}")
+    src.save(str(path))
+    view = window.open_path(str(path))
+    doc = view.document
+    assert not sec.has_marks(doc)
+    listener = sec._listeners[view]
+    panel_listener = sec.panel._on_doc
+    doc.remove_listener(listener)          # si misura la prima chiamata dopo la modifica
+    doc.remove_listener(panel_listener)
+    with doc.change("Modifica nota", kind="annotation") as pdf:
+        page = pdf[7]
+        annot = page.load_annot(page.annot_xrefs()[0][0])
+        annot.set_info(content="modificata")
+        annot.update()
+    t = time.perf_counter()
+    listener(doc, "content")
+    panel_listener(doc, "content")
+    elapsed = time.perf_counter() - t
+    doc.add_listener(listener)
+    doc.add_listener(panel_listener)
+    assert elapsed < 0.05, elapsed
+    # i segni nuovi si vedono subito (cache invalidata dalle modifiche del modulo)
+    sec.add_area_mark(3, pymupdf.Rect(100, 100, 200, 200))
+    assert sec.has_marks(doc) and list(sec.marked_pages(doc)) == [3]
+    doc.undo()
+    assert not sec.has_marks(doc)
+    doc.redo()
+    assert sec.has_marks(doc)
