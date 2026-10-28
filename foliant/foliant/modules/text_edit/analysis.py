@@ -209,6 +209,18 @@ def _split_line(line: Line, index: int) -> tuple[Line, Line]:
     return make(line.words[:index]), make(line.words[index:])
 
 
+def _word_gaps(line: Line) -> list[float]:
+    return [b.x - a.x1 for a, b in zip(line.words, line.words[1:])]
+
+
+def _typical_gap(*lines: Line) -> float:
+    """Spazio tipico tra le parole (mediana), per distinguere un rientro di colonna da uno spazio giustificato."""
+    gaps = sorted(g for ln in lines for g in _word_gaps(ln) if g > 0)
+    if not gaps:
+        return 0.3 * max(ln.size for ln in lines)
+    return gaps[len(gaps) // 2]
+
+
 def _split_columns(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
     """Separa le celle di tabella che il motore ha messo nella stessa riga: una parola che inizia, dopo
     uno spazio largo, nello stesso punto in cui iniziano segmenti su altre linee di base."""
@@ -225,10 +237,11 @@ def _split_columns(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
             cut = None
             if _horizontal(ln) and len(ln.words) > 1:
                 b = round(ln.baseline, 1)
+                typical = _typical_gap(ln)
                 for k in range(1, len(ln.words)):
                     gap = ln.words[k].x - ln.words[k - 1].x1
-                    if gap < 0.6 * ln.size:
-                        continue
+                    if gap < 0.6 * ln.size or gap < 2.0 * typical:
+                        continue      # spazio normale o giustificato, non un salto di colonna
                     x = round(ln.words[k].x)
                     rows = set()
                     for d in (-1, 0, 1):
@@ -271,14 +284,27 @@ def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
                 return True
         return False
 
+    def end_aligned(line: Line) -> bool:
+        b = round(line.baseline, 1)
+        rows = set()
+        for d in (-1, 0, 1):
+            rows |= ends.get(round(line.bbox.x1) + d, set())
+        return len(rows - {b}) >= 1
+
     merged: list[tuple[Line, bool]] = []
     for line, inv in horiz:
         if merged:
             prev, pinv = merged[-1]
             size = max(prev.size, line.size)
             gap = line.bbox.x0 - prev.bbox.x1
+            typical = _typical_gap(prev, line)
+            justified_gap = gap <= max(1.6 * typical, 0.35 * size)   # come gli altri spazi della riga
+            # canaletta tra colonne: il segmento inizia dove iniziano altre righe e il precedente finisce
+            # dove finiscono altre righe
+            gutter = column(line) and end_aligned(prev)
             if (pinv == inv and abs(prev.baseline - line.baseline) < 0.3 and -0.5 <= gap <= 1.2 * size
-                    and 0.8 <= line.size / prev.size <= 1.25 and not column(line)):
+                    and 0.8 <= line.size / prev.size <= 1.25 and not gutter
+                    and (justified_gap or not column(line))):
                 runs = merge_runs(prev.runs + [Run(" ", prev.runs[-1].style)] + line.runs)
                 merged[-1] = (Line(bbox=prev.bbox | line.bbox, origin=prev.origin, runs=runs, dir=prev.dir,
                                    words=prev.words + line.words), inv)
@@ -341,8 +367,9 @@ def group_lines(lines: list[Line], rules: list | None = None) -> list[list[Line]
             gap = max(other.bbox.x0 - line.bbox.x1, line.bbox.x0 - other.bbox.x1)
             if gap <= 0:
                 continue
-            # vicino: a breve distanza, oppure una cella corta (quantità, prezzo) a qualsiasi distanza
-            if gap < 6 * line.size or other.bbox.width < 6 * other.size or line.bbox.width < 6 * line.size:
+            # vicino: una cella corta (quantità, prezzo, codice) sulla stessa linea di base, a qualsiasi
+            # distanza; due segmenti lunghi affiancati sono invece colonne di testo
+            if other.bbox.width < 6 * other.size or line.bbox.width < 6 * line.size:
                 return True
         return False
 

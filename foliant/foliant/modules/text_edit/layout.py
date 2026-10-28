@@ -273,6 +273,11 @@ class Composer:
                 extra = avail - natural
                 spaces = [a for a in line_atoms if a.space]
                 space_extra = 0.0
+                if extra < 0 and spaces and not self.slack:
+                    # riga entrata per la tolleranza di arrotondamento: si stringono gli spazi per restare
+                    # esattamente nel riquadro
+                    space_extra = extra / len(spaces)
+                    extra = 0.0
                 if align == ALIGN_RIGHT:
                     x = x0 + line_indent + extra
                 elif align == ALIGN_CENTER:
