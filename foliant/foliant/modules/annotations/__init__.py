@@ -548,6 +548,9 @@ class AnnotationsModule:
             view.document.add_listener(on_doc_event)
 
     def _after_save(self, view) -> None:
+        # programmato con QTimer.singleShot dopo SAVED: la vista (o la finestra) può essere già chiusa
+        if not shiboken6.isValid(view) or view.document.closed or not shiboken6.isValid(self.properties):
+            return
         self.ctrl.after_save(view)
         if self.comments.view is view:
             self.comments.reload()
