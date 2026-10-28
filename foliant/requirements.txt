@@ -17,3 +17,4 @@ pytest-timeout>=2.3
 pyspellchecker>=0.8
 pillow-heif>=0.16
 msoffcrypto-tool>=5.4
+fonttools>=4.40

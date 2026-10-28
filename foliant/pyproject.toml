@@ -25,6 +25,7 @@ dependencies = [
     "pyspellchecker>=0.8",
     "pillow-heif>=0.16",
     "msoffcrypto-tool>=5.4",
+    "fonttools>=4.40",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +38,7 @@ foliant = "foliant.app:main"
 include = ["foliant*"]
 
 [tool.setuptools.package-data]
-foliant = ["resources/**/*"]
+foliant = ["resources/**/*", "modules/**/*.xsd", "modules/**/*.json", "modules/**/*.svg", "modules/**/*.png"]
 
 [tool.pytest.ini_options]
 qt_api = "pyside6"
