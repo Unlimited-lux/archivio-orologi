@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pymupdf
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from foliant.modules.pages import dialogs as D
@@ -396,3 +397,30 @@ def test_resize_anchor_buttons_have_readable_names(window, ten_pdf):
         assert dlg.anchor_buttons["top-left"].toolTip() == "Top left"
     finally:
         i18n.set_language("it")
+
+
+def test_delete_shows_undo_notification(window, tmp_path, qtbot, monkeypatch):
+    """UX-13/PAG-11: Canc su 3 pagine → avviso «3 pagine eliminate · … · Annulla»; il clic ripristina."""
+    from .conftest import numbered_pdf as _np
+    d = _np(6)
+    d.set_toc([[1, "due", 2], [1, "tre", 3]])
+    d[0].insert_link({"kind": pymupdf.LINK_GOTO, "page": 3, "from": pymupdf.Rect(10, 10, 50, 50),
+                      "to": pymupdf.Point(0, 0)})
+    path = tmp_path / "sei.pdf"
+    d.save(str(path))
+    view = window.open_path(str(path))
+    window.set_mode("pagine")
+    c = window.ctx.pages_controller
+    shown = []
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None: shown.append((text, actions)))
+    grid = c.organizer.grid
+    grid.select_pages([1, 2, 3])
+    grid.setFocus()
+    qtbot.keyClick(grid, Qt.Key.Key_Delete)
+    assert view.page_count == 3
+    assert len(shown) == 1
+    text, actions = shown[0]
+    assert text.startswith("3 pagine eliminate") and "2 segnalibri" in text and "1 link" in text
+    assert actions[0][0] == "Annulla"
+    actions[0][1]()
+    assert view.page_count == 6
