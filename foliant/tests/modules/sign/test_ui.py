@@ -1372,3 +1372,22 @@ def test_ctx_request_signature_opens_dialog_with_field(window, monkeypatch, tmp_
     assert window.ctx.request_signature(view, "Firma1") is True
     assert seen == ["Firma1"]
     assert window.ctx.request_signature(view, "Inesistente") is False
+
+
+def test_ids_dialog_empty_lists_and_selection_buttons(window, qtbot, id_a):
+    """Elenchi vuoti con spiegazione; comandi sull'elemento attivi solo con una selezione."""
+    from foliant.modules.sign.ui_digital import IDsDialog
+    dlg = IDsDialog(window, _ctl(window))
+    qtbot.addWidget(dlg)
+    for lst in (dlg.ids, dlg.trusted, dlg.tsas):
+        assert lst.count() == 1 and not lst.item(0).flags() & Qt.ItemFlag.ItemIsSelectable
+        assert all(not b.isEnabled() for b in dlg._needs_selection[lst])
+    assert "p12" in dlg.ids.item(0).text()
+    store.IDRegistry().add(id_a[0], id_a[1])
+    dlg.refresh()
+    assert dlg.ids.count() == 1 and dlg.ids.item(0).flags() & Qt.ItemFlag.ItemIsSelectable
+    assert all(not b.isEnabled() for b in dlg._needs_selection[dlg.ids])
+    dlg.ids.setCurrentRow(0)
+    assert all(b.isEnabled() for b in dlg._needs_selection[dlg.ids])
+    dlg.ids.clearSelection()
+    assert all(not b.isEnabled() for b in dlg._needs_selection[dlg.ids])

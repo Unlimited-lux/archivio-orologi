@@ -89,7 +89,7 @@ _KU_NAMES = [
 
 
 def _fmt_date(dt: datetime | None) -> str:
-    return dt.astimezone().strftime("%d/%m/%Y") if dt else "—"
+    return i18n.format_date(dt.astimezone()) if dt else "—"
 
 
 def _name_cn(name: cx509.Name) -> str:

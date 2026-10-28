@@ -28,7 +28,8 @@ LEVELS = [(1, "Nessuna modifica consentita"), (2, "Consentite solo compilazione 
 
 
 def _date(dt) -> str:
-    return dt.strftime("%d/%m/%Y") if dt else "—"
+    from foliant.api import format_date
+    return format_date(dt) if dt else "—"
 
 
 def _error_label() -> QLabel:
@@ -828,6 +829,7 @@ class IDsDialog(QDialog):
         lay = QVBoxLayout(self)
         tabs = QTabWidget()
         lay.addWidget(tabs, 1)
+        self._needs_selection: dict = {}      # elenco → pulsanti che agiscono sull'elemento scelto
         # --- ID
         w1 = QWidget()
         l1 = QHBoxLayout(w1)
@@ -840,6 +842,8 @@ class IDsDialog(QDialog):
             b = QPushButton(text)
             b.clicked.connect(fn)
             c1.addWidget(b)
+            if fn not in (self._add_id, self._create):
+                self._needs_selection.setdefault(self.ids, []).append(b)
         c1.addStretch(1)
         l1.addLayout(c1)
         tabs.addTab(w1, _("I miei ID digitali"))
@@ -854,6 +858,8 @@ class IDsDialog(QDialog):
             b = QPushButton(text)
             b.clicked.connect(fn)
             c2.addWidget(b)
+            if fn != self._import_cert:
+                self._needs_selection.setdefault(self.trusted, []).append(b)
         c2.addStretch(1)
         l2.addLayout(c2)
         tabs.addTab(w2, _("Certificati attendibili"))
@@ -868,6 +874,8 @@ class IDsDialog(QDialog):
             b = QPushButton(text)
             b.clicked.connect(fn)
             c3.addWidget(b)
+            if fn != self._add_tsa:
+                self._needs_selection.setdefault(self.tsas, []).append(b)
         c3.addStretch(1)
         l3.addLayout(c3)
         tabs.addTab(w3, _("Server marca temporale"))
@@ -922,6 +930,27 @@ class IDsDialog(QDialog):
                                  + ("  ★" if s.default else ""))
             it.setData(Qt.ItemDataRole.UserRole, s)
             self.tsas.addItem(it)
+        for lst, text in [
+                (self.ids, _("Nessun ID digitale. Aggiungi un file .p12/.pfx o creane uno autofirmato.")),
+                (self.trusted, _("Nessun certificato attendibile. Importa il certificato di chi firma o della sua "
+                                 "autorità di certificazione.")),
+                (self.tsas, _("Nessun server di marca temporale. Aggiungine uno per firmare con data certa."))]:
+            if lst.count() == 0:       # riquadro vuoto: spiegazione non selezionabile
+                hint = QListWidgetItem(text)
+                hint.setFlags(Qt.ItemFlag.NoItemFlags)
+                lst.addItem(hint)
+            lst.setWordWrap(True)
+        self._update_selection_buttons()
+
+    def _update_selection_buttons(self) -> None:
+        """I comandi sull'elemento scelto sono attivi solo con una selezione."""
+        for lst, buttons in self._needs_selection.items():
+            if not getattr(lst, "_selection_hooked", False):
+                lst.itemSelectionChanged.connect(self._update_selection_buttons)
+                lst._selection_hooked = True
+            has = self._cur(lst) is not None and bool(lst.selectedItems())
+            for b in buttons:
+                b.setEnabled(has)
 
     def _cur(self, lst):
         it = lst.currentItem()
@@ -1198,6 +1227,12 @@ class SignPreferences(QWidget):
 
 
 TRANSLATIONS_EN = {
+    "Nessun ID digitale. Aggiungi un file .p12/.pfx o creane uno autofirmato.":
+        "No digital ID. Add a .p12/.pfx file or create a self-signed one.",
+    "Nessun certificato attendibile. Importa il certificato di chi firma o della sua autorità di certificazione.":
+        "No trusted certificate. Import the signer's certificate or that of their certification authority.",
+    "Nessun server di marca temporale. Aggiungine uno per firmare con data certa.":
+        "No timestamp server. Add one to sign with a certified date.",
     "Livello PAdES": "PAdES level", "Livello:": "Level:", "B-B — firma di base": "B-B — basic signature",
     "B-T — con marca temporale": "B-T — with timestamp",
     "B-LT — con dati di verifica (lungo termine)": "B-LT — with validation data (long term)",

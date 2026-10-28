@@ -26,7 +26,9 @@ def _fmt_time(dt: datetime | None) -> str:
     if dt is None:
         return "—"
     try:
-        return dt.astimezone().strftime("%d/%m/%Y %H:%M:%S %Z")
+        from foliant.api import format_date
+        local = dt.astimezone()
+        return f"{format_date(local, time=True, seconds=True)} {local.strftime('%Z')}".strip()
     except Exception:
         return str(dt)
 
