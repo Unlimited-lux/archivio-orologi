@@ -1,1 +1,4 @@
-# Nessuna nuova dipendenza: pyHanko, pyhanko-certvalidator, cryptography, Pillow e numpy sono già in requirements.txt.
+# Nessuna nuova dipendenza da installare: pyHanko, pyhanko-certvalidator, cryptography, Pillow e numpy
+# sono già in requirements.txt.
+# Usata direttamente ma già presente come dipendenza di pdf2docx (requirements.txt):
+fonttools>=4.40   # sottoinsieme del font incorporato nell'aspetto delle firme digitali (fonts.py)

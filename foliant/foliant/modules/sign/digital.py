@@ -573,34 +573,36 @@ def _text_width(text: str, size: float) -> float:
         return pymupdf.get_text_length(text.replace(ELLIPSIS, ""), fontname="helv", fontsize=size) + n_ell * size
 
 
-def _truncate(text: str, width: float, size: float) -> str:
-    if _text_width(text, size) <= width:
+def _truncate(text: str, width: float, size: float, measure=None) -> str:
+    measure = measure or _text_width
+    if measure(text, size) <= width:
         return text
     lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if _text_width(text[:mid].rstrip() + ELLIPSIS, size) <= width:
+        if measure(text[:mid].rstrip() + ELLIPSIS, size) <= width:
             lo = mid
         else:
             hi = mid - 1
     return (text[:lo].rstrip() + ELLIPSIS) if lo > 0 else ""
 
 
-def _fit_text(lines: list[str], w: float, h: float, start: float = 10.0, leading: float = 1.2):
+def _fit_text(lines: list[str], w: float, h: float, start: float = 10.0, leading: float = 1.2, measure=None):
     """Restituisce (corpo, righe, troncato)."""
+    measure = measure or _text_width
     lines = [ln for ln in lines if ln]
     if not lines or w <= 0 or h <= 0:
         return start, [], False
     size = float(start)
     while size >= MIN_FONT:
-        if len(lines) * size * leading <= h and all(_text_width(ln, size) <= w for ln in lines):
+        if len(lines) * size * leading <= h and all(measure(ln, size) <= w for ln in lines):
             return size, lines, False
         size -= 0.5
     size = MIN_FONT
     max_lines = max(int(h // (size * leading)), 0)
-    out = [_truncate(ln, w, size) for ln in lines[:max_lines]]
+    out = [_truncate(ln, w, size, measure) for ln in lines[:max_lines]]
     if max_lines < len(lines) and out:
-        out[-1] = _truncate(out[-1] + ELLIPSIS if not out[-1].endswith(ELLIPSIS) else out[-1], w, size)
+        out[-1] = _truncate(out[-1] + ELLIPSIS if not out[-1].endswith(ELLIPSIS) else out[-1], w, size, measure)
     return size, [ln for ln in out if ln], True
 
 
@@ -743,8 +745,15 @@ class _FoliantStamp:
             text_blocks.append((details, (2 * pad + half, pad, half, H - 2 * pad), font_size, False))
         elif text_area:
             text_blocks.append((lines, text_area, font_size, False))
+        from .fonts import font_for, needs_unicode_font
+        all_lines = [ln for blk in text_blocks for ln in blk[0]]
+        ufont = font_for(all_lines) if needs_unicode_font(all_lines) else None
+        if ufont is None and needs_unicode_font(all_lines):
+            st.warnings.append(_("Nessun font disponibile copre tutti i caratteri del testo"))
+        measure = (lambda t, sz: ufont.width(t, sz)) if ufont else _text_width
+        encode = ufont.encode if ufont else _pdf_hex
         for blk_lines, (tx, ty, tw, th), start, centered in text_blocks:
-            size, out, truncated = _fit_text(blk_lines, tw, th, start)
+            size, out, truncated = _fit_text(blk_lines, tw, th, start, measure=measure)
             if truncated:
                 st.warnings.append(_("Il testo non entra nel riquadro ed è stato troncato"))
             if not out:
@@ -754,7 +763,7 @@ class _FoliantStamp:
             y = ty + th - (th - total) / 2 - size if centered else ty + th - size
             cmds.append(b"BT 0 0 0 rg /F1 %.2f Tf" % size)
             for ln in out:
-                cmds.append(b"1 0 0 1 %.3f %.3f Tm %s Tj" % (tx, y + 0.2 * size, _pdf_hex(ln)))
+                cmds.append(b"1 0 0 1 %.3f %.3f Tm %s Tj" % (tx, y + 0.2 * size, encode(ln)))
                 y -= lead
             cmds.append(b"ET")
         if W < 40 or H < 15:
@@ -768,12 +777,15 @@ class _FoliantStamp:
             matrix = [0, -1, 1, 0, 0, self.h]
         else:
             matrix = [1, 0, 0, 1, 0, 0]
-        font = generic.DictionaryObject({
-            generic.NameObject("/Type"): generic.NameObject("/Font"),
-            generic.NameObject("/Subtype"): generic.NameObject("/Type1"),
-            generic.NameObject("/BaseFont"): generic.NameObject("/Helvetica"),
-            generic.NameObject("/Encoding"): generic.NameObject("/WinAnsiEncoding"),
-        })
+        if ufont is not None and ufont.used:
+            font = ufont.pdf_font(self.writer)
+        else:
+            font = generic.DictionaryObject({
+                generic.NameObject("/Type"): generic.NameObject("/Font"),
+                generic.NameObject("/Subtype"): generic.NameObject("/Type1"),
+                generic.NameObject("/BaseFont"): generic.NameObject("/Helvetica"),
+                generic.NameObject("/Encoding"): generic.NameObject("/WinAnsiEncoding"),
+            })
         resources = generic.DictionaryObject({
             generic.NameObject("/Font"): generic.DictionaryObject({generic.NameObject("/F1"): font}),
         })
@@ -1799,6 +1811,7 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "Nessun font disponibile copre tutti i caratteri del testo": "No available font covers all the characters of the text",
     "Il campo ammette solo questi motivi: {r}": "The field only allows these reasons: {r}",
     "Il campo non accetta certificati emessi da «{who}»": "The field does not accept certificates issued by “{who}”",
     "Password errata": "Wrong password",

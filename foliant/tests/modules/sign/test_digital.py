@@ -529,3 +529,45 @@ def test_appearance_date_format_and_label_language():
     assert it == ["Firmato digitalmente da Mario Rossi", "Data: 04/03/2026", "Motivo: Approvo"]
     assert en[0] == "Digitally signed by Mario Rossi" and en[1].startswith("Date: 2026-03-04 ")
     assert en[2] == "Location: Milano"
+
+
+def _obj(doc, x):
+    try:
+        return doc.xref_object(x, compressed=True)
+    except Exception:
+        return ""
+
+
+def _key(doc, x, k):
+    try:
+        return doc.xref_get_key(x, k)
+    except Exception:
+        return ("null", "null")
+
+
+def test_non_latin_name_uses_embedded_unicode_font(pdf_bytes, tmp_path):
+    """SIG-09: nome in alfabeto non latino → font con copertura adeguata, incorporato in sottoinsieme."""
+    from tests.modules.sign.conftest import _fast_create
+    path = tmp_path / "ivan.p12"
+    _fast_create(path, common_name="Иван Петров", country="IT")
+    did = d.load_pkcs12(path, PASSWORD)
+    out = d.sign_pdf(pdf_bytes, did, d.SignOptions(rect=(60, 600, 300, 680), reason="Согласен",
+                                                   appearance={"layout": "testo"}))
+    doc = pymupdf.open(stream=out)
+    forms = [x for x in range(1, doc.xref_length()) if "/Type0" in _obj(doc, x)]
+    assert forms
+    import re as _re
+    tu = int(_re.search(r"/ToUnicode (\d+) 0 R", _obj(doc, forms[0])).group(1))
+    cmap = doc.xref_stream(tu).decode()
+    assert "<0418>" in cmap and "<041F>" in cmap            # «И», «П»
+    ff = [x for x in range(1, doc.xref_length()) if _key(doc, x, "FontFile2")[0] == "xref"]
+    size = len(doc.xref_stream(int(doc.xref_get_key(ff[0], "FontFile2")[1].split()[0])))
+    assert size < 200_000                                    # sottoinsieme, non il font intero
+    st = d.verify_pdf(out, trusted=[did.info])
+    assert st[0].status == "valida"
+
+
+def test_latin_name_keeps_standard_font(pdf_bytes, id_a):
+    out = d.sign_pdf(pdf_bytes, id_a[2], d.SignOptions(rect=(60, 600, 300, 680), appearance={"layout": "testo"}))
+    doc = pymupdf.open(stream=out)
+    assert not [x for x in range(1, doc.xref_length()) if "/Type0" in _obj(doc, x)]
