@@ -17,8 +17,9 @@ from foliant.api import ENGINE_LOCK, OperationCancelled, _, add_translations, th
 from foliant.i18n import pgettext
 
 from .printing_engine import (
-    ACTUAL_SIZE, FIT_PAGE, LAYERS_PRINT, LAYERS_SCREEN, LAYOUT_BOOKLET, LAYOUT_NORMAL, LAYOUT_POSTER, PrintOptions,
-    RangeError, document_print_capability, parse_page_ranges, print_document,
+    ACTUAL_SIZE, FIT_PAGE, LAYERS_PRINT, LAYERS_SCREEN, LAYOUT_BOOKLET, LAYOUT_NORMAL, LAYOUT_POSTER,
+    PAGES_PER_SHEET, PrintOptions, RangeError, document_print_capability, nup_sheet_orientation, parse_page_ranges,
+    print_document,
 )
 
 try:  # PySide6-Essentials include QtPrintSupport; ripiego su PDF se mancasse
@@ -45,6 +46,15 @@ EN = {
     "fronte/retro sul lato corto": "two-sided on the short edge",
     "fronte/retro sul lato lungo": "two-sided on the long edge",
     "Il documento chiede la stampa {mode}.": "The document asks for {mode} printing.",
+    "Pagine per foglio": "Pages on each sheet",
+    "Ordine per colonne": "Column order",
+    "Bordo attorno alle pagine": "Border around pages",
+    "Fronte/retro": "Two-sided",
+    "Come la stampante": "Printer default",
+    "Solo fronte": "One-sided",
+    "Sul lato lungo": "Long edge",
+    "Sul lato corto": "Short edge",
+    "Scala di grigi": "Grayscale",
     "Stampa…": "Print…",
     "File": "File",
     "Stampa": "Print",
@@ -139,6 +149,20 @@ class PrintOptionsDialog(QDialog):
         self.layout_mode.addItem(_("Opuscolo (fogli piegati)"), LAYOUT_BOOKLET)
         self.layout_mode.addItem(_("Poster (pagina divisa su più fogli)"), LAYOUT_POSTER)
         ml.addWidget(self.layout_mode)
+        self.nup = QComboBox(mode_box)
+        for n in PAGES_PER_SHEET:
+            self.nup.addItem(str(n), n)
+        self.nup_label = QLabel(_("Pagine per foglio"), mode_box)
+        self.nup_columns = QCheckBox(_("Ordine per colonne"), mode_box)
+        self.nup_border = QCheckBox(_("Bordo attorno alle pagine"), mode_box)
+        nup_row = QHBoxLayout()
+        nup_row.addWidget(self.nup_label)
+        nup_row.addWidget(self.nup)
+        nup_row.addStretch(1)
+        ml.addLayout(nup_row)
+        ml.addWidget(self.nup_columns)
+        ml.addWidget(self.nup_border)
+        self.nup.currentIndexChanged.connect(self._on_layout_mode)
         self.booklet_rtl = QCheckBox(_("Rilegatura a destra"), mode_box)
         ml.addWidget(self.booklet_rtl)
         self.overlap = QDoubleSpinBox(mode_box)
@@ -194,9 +218,16 @@ class PrintOptionsDialog(QDialog):
         form.addRow(self.layers_label, self.layers)
         self.layers.setVisible(has_layers)
         self.layers_label.setVisible(has_layers)
+        self.duplex_combo = QComboBox(opt_box)
+        for text, value in ((_("Come la stampante"), ""), (_("Solo fronte"), "Simplex"),
+                            (_("Sul lato lungo"), "DuplexFlipLongEdge"),
+                            (_("Sul lato corto"), "DuplexFlipShortEdge")):
+            self.duplex_combo.addItem(text, value)
+        form.addRow(_("Fronte/retro"), self.duplex_combo)
+        self.grayscale = QCheckBox(_("Scala di grigi"), opt_box)
+        form.addRow(self.grayscale)
         root.addWidget(opt_box)
 
-        self.duplex = ""
         self.duplex_note = QLabel(self)
         self.duplex_note.setWordWrap(True)
         self.duplex_note.setProperty("muted", True)
@@ -221,11 +252,17 @@ class PrintOptionsDialog(QDialog):
 
     def _on_layout_mode(self, *_a) -> None:
         mode = self.layout_mode.currentData()
+        normal = mode == LAYOUT_NORMAL
+        for w in (self.nup, self.nup_label):
+            w.setVisible(normal)
+        multi = normal and (self.nup.currentData() or 1) > 1
+        self.nup_columns.setVisible(multi)
+        self.nup_border.setVisible(multi)
         self.booklet_rtl.setVisible(mode == LAYOUT_BOOKLET)
         self.overlap.setVisible(mode == LAYOUT_POSTER)
         self.overlap_label.setVisible(mode == LAYOUT_POSTER)
-        self.size_box.setEnabled(mode == LAYOUT_NORMAL)
-        self.auto_rotate.setEnabled(mode == LAYOUT_NORMAL)
+        self.size_box.setEnabled(normal and not multi)
+        self.auto_rotate.setEnabled(normal and not multi)
         hints = {LAYOUT_BOOKLET: _("Due pagine per facciata in ordine di piegatura; se le pagine non sono multipli "
                                    "di 4 si aggiungono pagine bianche in fondo. Stampa fronte/retro sul lato corto "
                                    "(o rigira i fogli a mano)."),
@@ -248,8 +285,8 @@ class PrintOptionsDialog(QDialog):
             self.rb_actual.setChecked(True)
         if prefs.num_copies > 1:
             self.copies.setValue(prefs.num_copies)
-        self.duplex = prefs.duplex
         if prefs.duplex:
+            self.duplex_combo.setCurrentIndex(max(0, self.duplex_combo.findData(prefs.duplex)))
             labels = {"Simplex": _("solo fronte"), "DuplexFlipShortEdge": _("fronte/retro sul lato corto"),
                       "DuplexFlipLongEdge": _("fronte/retro sul lato lungo")}
             self.duplex_note.setText(_("Il documento chiede la stampa {mode}.").format(mode=labels[prefs.duplex]))
@@ -271,10 +308,14 @@ class PrintOptionsDialog(QDialog):
             annotations=self.annotations.isChecked(),
             auto_rotate=self.auto_rotate.isChecked(),
             layers=self.layers.currentData() or LAYERS_PRINT,
-            duplex=self.duplex,
+            duplex=self.duplex_combo.currentData() or "",
             layout=self.layout_mode.currentData() or LAYOUT_NORMAL,
             booklet_rtl=self.booklet_rtl.isChecked(),
             poster_overlap_mm=self.overlap.value(),
+            pages_per_sheet=self.nup.currentData() or 1,
+            nup_by_columns=self.nup_columns.isChecked(),
+            nup_border=self.nup_border.isChecked(),
+            grayscale=self.grayscale.isChecked(),
         )
 
     def accept(self) -> None:
@@ -349,26 +390,7 @@ class PrintController:
             path = self.ctx.ask_save_path(_("Stampa su file PDF"), view.document.display_name)
             return QPdfWriter(path) if path else None
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setDocName(view.document.display_name)
-        printer.setCopyCount(options.copies)
-        printer.setCollateCopies(options.collate)
-        duplex = {"Simplex": QPrinter.DuplexMode.DuplexNone,
-                  "DuplexFlipShortEdge": QPrinter.DuplexMode.DuplexShortSide,
-                  "DuplexFlipLongEdge": QPrinter.DuplexMode.DuplexLongSide}.get(options.duplex)
-        if duplex is not None:
-            printer.setDuplex(duplex)
-        first = options.pages[0] if options.pages else 0
-        with ENGINE_LOCK:  # orientamento del documento, non della vista (VIS-11)
-            rect = view.document.pdf[first].rect
-        w, h = rect.width, rect.height
-        if options.layout == LAYOUT_BOOKLET:      # due pagine affiancate per foglio
-            printer.setPageOrientation(QPageLayout.Orientation.Landscape if h >= w
-                                       else QPageLayout.Orientation.Portrait)
-        elif options.layout == LAYOUT_POSTER:
-            pass
-        elif options.auto_rotate:
-            printer.setPageOrientation(QPageLayout.Orientation.Landscape if w > h
-                                       else QPageLayout.Orientation.Portrait)
+        configure_printer(printer, view.document, options)
         dlg = QPrintDialog(printer, self.ctx.window)
         dlg.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, False)
         dlg.setOption(QAbstractPrintDialog.PrintDialogOption.PrintCurrentPage, False)
@@ -414,6 +436,35 @@ class PrintController:
         n = int(n or 0)
         self.ctx.status(_("Inviate alla stampante {n} pagine.").format(n=n))
         return n
+
+
+def configure_printer(printer, document, options: PrintOptions) -> None:
+    """Parametri del lavoro di stampa dalle opzioni: copie, fronte/retro, colore, orientamento."""
+    printer.setDocName(document.display_name)
+    printer.setCopyCount(options.copies)
+    printer.setCollateCopies(options.collate)
+    duplex = {"Simplex": QPrinter.DuplexMode.DuplexNone,
+              "DuplexFlipShortEdge": QPrinter.DuplexMode.DuplexShortSide,
+              "DuplexFlipLongEdge": QPrinter.DuplexMode.DuplexLongSide}.get(options.duplex)
+    if duplex is not None:
+        printer.setDuplex(duplex)
+    printer.setColorMode(QPrinter.ColorMode.GrayScale if options.grayscale else QPrinter.ColorMode.Color)
+    first = options.pages[0] if options.pages else 0
+    with ENGINE_LOCK:  # orientamento del documento, non della vista (VIS-11)
+        rect = document.pdf[first].rect
+    w, h = rect.width, rect.height
+    landscape = None
+    if options.layout == LAYOUT_BOOKLET:      # due pagine affiancate per foglio
+        landscape = h >= w
+    elif options.layout == LAYOUT_POSTER:
+        pass
+    elif options.pages_per_sheet > 1:
+        landscape = nup_sheet_orientation(options.pages_per_sheet, w, h)
+    elif options.auto_rotate:
+        landscape = w > h
+    if landscape is not None:
+        printer.setPageOrientation(QPageLayout.Orientation.Landscape if landscape
+                                   else QPageLayout.Orientation.Portrait)
 
 
 def install(ctx) -> PrintController:

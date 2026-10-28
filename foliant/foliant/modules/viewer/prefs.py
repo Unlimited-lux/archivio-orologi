@@ -44,8 +44,8 @@ TRANSLATIONS = {
     "Pagina singola": "Single page",
     "Due pagine": "Two pages",
     "Due pagine con copertina": "Two pages with cover",
-    "Adatta larghezza": "Fit width",
-    "Adatta pagina": "Fit page",
+    "Adatta alla larghezza": "Fit width",
+    "Adatta alla pagina": "Fit page",
     "Strumenti": "Tools",
 }
 
@@ -55,7 +55,7 @@ LAYOUTS = ((VIEW_CONTINUOUS, "Scorrimento continuo"), (VIEW_SINGLE, "Pagina sing
 # applica a ogni documento nuovo: view/mode e view/zoom ("width", "page" o una percentuale).
 KEY_MODE = "view/mode"
 KEY_ZOOM = "view/zoom"
-ZOOMS = ((FIT_WIDTH, "Adatta larghezza"), (FIT_PAGE, "Adatta pagina"), ("75", "75%"), ("100", "100%"),
+ZOOMS = ((FIT_WIDTH, "Adatta alla larghezza"), (FIT_PAGE, "Adatta alla pagina"), ("75", "75%"), ("100", "100%"),
          ("125", "125%"), ("150", "150%"), ("200", "200%"))
 CORE_ZOOMS = (FIT_WIDTH, FIT_PAGE, "100")      # quelle che il nucleo applica da sé
 # chiavi delle versioni precedenti del viewer, migrate su quelle del nucleo

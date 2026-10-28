@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from foliant.api import (
     ENGINE_LOCK, Document, DocumentError, PasswordRequired, WrongPassword, _, add_translations, atomic_write,
-    bind_icon, icon,
+    bind_icon, format_date, icon,
 )
 
 from . import attachments_engine as engine
@@ -110,7 +110,7 @@ class _Item(QTreeWidgetItem):
 
 
 def _fmt_date(dt) -> str:
-    return dt.strftime("%d/%m/%Y %H:%M") if dt else ""
+    return format_date(dt, time=True) if dt else ""
 
 
 class AttachmentsPanel(QWidget):

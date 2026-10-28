@@ -166,6 +166,7 @@ class NavigationController(QObject):
         ctx.add_link_handler(self._link_handler, priority=-100)
         self._assign_ux18_shortcuts()
         ctx.documentOpened.connect(self._attach)
+        ctx.documentClosed.connect(self._detach)
         ctx.currentViewChanged.connect(lambda _v: self._refresh_later())
         ctx.documentChanged.connect(self._on_content)
         for view in ctx.views():
@@ -219,6 +220,23 @@ class NavigationController(QObject):
         view.viewport().installEventFilter(self)
         view.installEventFilter(self)
         view.overlays.append(self._paint_focus)
+
+    def _detach(self, view: DocumentView) -> None:
+        """Vista chiusa (NFR-06): via le funzioni sostituite (chiusure con riferimenti alla vista),
+        i filtri d'evento, il disegno del focus e lo stato, così la vista si può liberare."""
+        if not getattr(view, "_viewer_nav", False):
+            return
+        for name in ("go_to_page", "next_page", "previous_page"):
+            view.__dict__.pop(name, None)            # torna il metodo della classe
+        view._viewer_nav = False
+        try:
+            view.viewport().removeEventFilter(self)
+            view.removeEventFilter(self)
+        except RuntimeError:
+            pass
+        if self._paint_focus in view.overlays:
+            view.overlays.remove(self._paint_focus)
+        self._states.pop(view, None)
 
     def _assign_ux18_shortcuts(self) -> None:
         """UX-18: «Ruota vista» in senso orario/antiorario con Ctrl+Maiusc++ / Ctrl+Maiusc+-

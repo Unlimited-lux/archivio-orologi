@@ -138,6 +138,10 @@ class PrintOptions:
     layout: str = "normal"  # LAYOUT_NORMAL, LAYOUT_BOOKLET o LAYOUT_POSTER (VIS-44)
     booklet_rtl: bool = False          # opuscolo rilegato a destra
     poster_overlap_mm: float = 10.0    # sovrapposizione tra i fogli del poster
+    pages_per_sheet: int = 1           # più pagine per foglio (VIS-43): 1, 2, 4, 6, 9 o 16
+    nup_by_columns: bool = False       # ordine per colonne invece che per righe
+    nup_border: bool = False           # bordo attorno a ogni pagina
+    grayscale: bool = False            # scala di grigi invece del colore
 
     def sequence(self) -> list[int]:
         n = max(1, int(self.copies))
@@ -253,6 +257,61 @@ def impose_poster(pdf: pymupdf.Document, pages: list[int], paper_w: float, paper
     return out
 
 
+# ---------------------------------------------------- più pagine per foglio (VIS-43)
+PAGES_PER_SHEET = (1, 2, 4, 6, 9, 16)
+
+
+def nup_grid(n: int, page_w: float, page_h: float, paper_w: float, paper_h: float) -> tuple[int, int]:
+    """(colonne, righe) per `n` pagine sul foglio: la disposizione che le stampa più grandi."""
+    best, best_scale = (n, 1), -1.0
+    for cols in range(1, n + 1):
+        if n % cols:
+            continue
+        rows = n // cols
+        scale = min(paper_w / cols / page_w, paper_h / rows / page_h)
+        if scale > best_scale + 1e-9:
+            best, best_scale = (cols, rows), scale
+    return best
+
+
+def nup_sheet_orientation(n: int, page_w: float, page_h: float) -> bool:
+    """True se conviene il foglio orizzontale: con 2 e 6 pagine per foglio le pagine
+    verticali stanno meglio affiancate su un foglio orizzontale (e viceversa)."""
+    portrait = page_h >= page_w
+    return portrait if n in (2, 6) else not portrait
+
+
+def impose_nup(pdf: pymupdf.Document, pages: list[int], n: int, paper_w: float, paper_h: float,
+               by_columns: bool = False, border: bool = False) -> pymupdf.Document:
+    """Documento con `n` pagine per foglio, ciascuna adattata e centrata nella sua cella,
+    in ordine per righe o per colonne (ENGINE_LOCK richiesto)."""
+    width = max(pdf[i].rect.width for i in pages)
+    height = max(pdf[i].rect.height for i in pages)
+    cols, rows = nup_grid(n, width, height, paper_w, paper_h)
+    cell_w, cell_h = paper_w / cols, paper_h / rows
+    gap = 2 * MM if n > 1 else 0
+    out = pymupdf.open()
+    for start in range(0, len(pages), n):
+        sheet = out.new_page(width=paper_w, height=paper_h)
+        shape = sheet.new_shape() if border else None
+        for k, index in enumerate(pages[start:start + n]):
+            col, row = (k // rows, k % rows) if by_columns else (k % cols, k // cols)
+            cell = pymupdf.Rect(col * cell_w + gap, row * cell_h + gap,
+                                (col + 1) * cell_w - gap, (row + 1) * cell_h - gap)
+            rect = pdf[index].rect
+            scale = min(cell.width / rect.width, cell.height / rect.height)
+            w, h = rect.width * scale, rect.height * scale
+            target = pymupdf.Rect(cell.x0 + (cell.width - w) / 2, cell.y0 + (cell.height - h) / 2,
+                                  cell.x0 + (cell.width + w) / 2, cell.y0 + (cell.height + h) / 2)
+            sheet.show_pdf_page(target, pdf, index, keep_proportion=True)
+            if shape is not None:
+                shape.draw_rect(target)
+        if shape is not None:
+            shape.finish(color=(0, 0, 0), width=0.5)
+            shape.commit()
+    return out
+
+
 def _print_copy(document, layers_mode: str) -> pymupdf.Document:
     """Copia di lavoro del documento, con lo stato dei livelli da stampare.
 
@@ -341,11 +400,15 @@ def print_document(document, device: QPagedPaintDevice, options: PrintOptions, p
         raise RangeError(_("Nessuna pagina da stampare."))
     work = _print_copy(document, options.layers)
     painter = QPainter()
-    if options.layout in (LAYOUT_BOOKLET, LAYOUT_POSTER):
+    nup = options.layout == LAYOUT_NORMAL and options.pages_per_sheet > 1
+    if options.layout in (LAYOUT_BOOKLET, LAYOUT_POSTER) or nup:
         paint0 = device.pageLayout().paintRectPoints()
         with ENGINE_LOCK:
             bake_for_imposition(work, options.annotations)
-            if options.layout == LAYOUT_BOOKLET:
+            if nup:
+                imposed = impose_nup(work, list(options.pages), options.pages_per_sheet, paint0.width(),
+                                     paint0.height(), options.nup_by_columns, options.nup_border)
+            elif options.layout == LAYOUT_BOOKLET:
                 imposed = impose_booklet(work, list(options.pages), options.booklet_rtl)
             else:
                 imposed = impose_poster(work, list(options.pages), paint0.width(), paint0.height(),
@@ -357,6 +420,8 @@ def print_document(document, device: QPagedPaintDevice, options: PrintOptions, p
         sequence = sheets * n_copies if options.collate else [s for s in sheets for _i in range(n_copies)]
         options = replace(options, scaling=FIT_PAGE if options.layout == LAYOUT_BOOKLET else ACTUAL_SIZE,
                           auto_rotate=options.layout == LAYOUT_BOOKLET)
+        if nup:            # il foglio è già della misura della carta
+            options = replace(options, scaling=FIT_PAGE, auto_rotate=False)
     try:
         if not painter.begin(device):
             raise RuntimeError(_("Impossibile avviare la stampa sul dispositivo scelto."))
@@ -375,6 +440,8 @@ def print_document(document, device: QPagedPaintDevice, options: PrintOptions, p
                 rect = work[index].rect
             place = placement(rect.width, rect.height, paper_w, paper_h, options.scaling, options.auto_rotate)
             image = render_page(work, index, dpi, options.annotations)
+            if options.grayscale:
+                image = image.convertToFormat(QImage.Format.Format_Grayscale8)
             target = QRectF(place.x * px_per_pt, place.y * px_per_pt,
                             place.width * px_per_pt, place.height * px_per_pt)
             painter.save()

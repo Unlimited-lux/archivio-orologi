@@ -7,6 +7,7 @@ ENGINE_LOCK (o dentro `Document.change()`).
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -21,8 +22,10 @@ _LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
 _HYPHENS = "-­‐‑"
 
 
+@functools.lru_cache(maxsize=8192)
 def normalize_char(c: str, case_sensitive: bool, ignore_accents: bool) -> str:
-    """Forma confrontabile di un carattere (può restituire più caratteri o nessuno)."""
+    """Forma confrontabile di un carattere (può restituire più caratteri o nessuno); in cache:
+    i caratteri di un documento si ripetono e la ricerca li normalizza a ogni pagina."""
     s = _LIGATURES.get(c)
     if s is None:
         s = unicodedata.normalize("NFKC", c)
@@ -171,6 +174,14 @@ def compile_query(query: str, opts: SearchOptions) -> "re.Pattern | None":
 
 
 def _normalized_with_map(pt: PageText, opts: SearchOptions) -> tuple[str, list[int]]:
+    key = (opts.case_sensitive, opts.ignore_accents)
+    cache = pt.__dict__.setdefault("_norm_cache", {})
+    if key not in cache:                  # una sola volta per pagina e opzioni
+        cache[key] = _normalize_page(pt, opts)
+    return cache[key]
+
+
+def _normalize_page(pt: PageText, opts: SearchOptions) -> tuple[str, list[int]]:
     out: list[str] = []
     index: list[int] = []
     for i, c in enumerate(pt.text):

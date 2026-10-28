@@ -20,7 +20,7 @@ from PySide6.QtCore import QObject, QRectF, Qt
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import QComboBox, QLabel, QMenu, QToolBar
 
-from foliant.api import ENGINE_LOCK, _, add_translations, bind_icon, language, theme
+from foliant.api import ENGINE_LOCK, _, add_translations, bind_icon, format_number, language, theme
 
 from .speech_engine import (
     SPEEDS, Sentence, SpeechEngine, build_sentences, catalog_language, clamp_rate, detect_engine,
@@ -70,10 +70,7 @@ _EN = {
 
 
 def _speed_label(v: float) -> str:
-    text = f"{v:g}"
-    if language() != "en":
-        text = text.replace(".", ",")
-    return text + "×"
+    return format_number(v) + "×"
 
 
 class SpeechController(QObject):

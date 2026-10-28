@@ -355,3 +355,26 @@ def test_ux18_rotate_tooltips_follow_language(settings, qtbot, monkeypatch):
 def test_ux18_rotate_tooltips_italian(viewer_window):
     nav = viewer_window.ctx.viewer_parts["navigation"]
     assert "Maiusc" in nav.act_rotate_ccw.toolTip()
+
+
+def test_closed_view_not_retained_by_navigation(viewer_window, sample_pdf):
+    """NFR-06: dopo la chiusura della scheda la navigazione non trattiene la vista (chiusure con
+    il metodo originale di go_to_page, filtri d'evento, disegno del focus, stato)."""
+    import gc
+    view = viewer_window.open_path(sample_pdf)
+    view.go_to_page(2)
+    assert "go_to_page" in view.__dict__            # sostituita mentre la scheda è aperta
+    nav = _nav(viewer_window)
+    viewer_window.close_view(view)
+    gc.collect()
+    assert "go_to_page" not in view.__dict__ and not view.overlays.count(nav._paint_focus)
+    assert view not in nav._states
+    from foliant.modules.viewer import navigation as nav_mod
+    holders = [r for r in gc.get_referrers(view)
+               if (callable(r) and getattr(r, "__module__", "") == nav_mod.__name__)
+               or (type(r).__name__ == "cell")]
+    for cell in [r for r in holders if type(r).__name__ == "cell"]:
+        owners = [o for o in gc.get_referrers(cell)
+                  if callable(o) and getattr(o, "__module__", "") == nav_mod.__name__]
+        assert not owners, owners
+    assert not [r for r in holders if callable(r)], holders
