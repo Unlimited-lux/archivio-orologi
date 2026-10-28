@@ -146,20 +146,93 @@ def _check_indices(parsed: ParsedPage, indices) -> list[PageObject]:
 
 
 # ============================================================ trasformazioni
+def _block_end(parsed: ParsedPage, q_index: int) -> int | None:
+    """Posizione subito dopo il Q che chiude il q all'indice dato."""
+    depth = 0
+    for op in parsed.ops[q_index:]:
+        if op.name == "q":
+            depth += 1
+        elif op.name == "Q":
+            depth -= 1
+            if depth == 0:
+                return op.end
+    return None
+
+
+def _transform_edits(parsed: ParsedPage, o: PageObject, Tp: pymupdf.Matrix,
+                     page_rect: pymupdf.Rect) -> list[tuple[int, int, bytes]]:
+    """Modifiche per trasformare l'oggetto. Se l'oggetto è ritagliato da un tracciato
+    definito fuori da sé (anche condiviso con altri oggetti), il ritaglio lo segue:
+    l'oggetto esce dal blocco q…Q del ritaglio e riceve una copia trasformata del
+    tracciato; gli altri oggetti restano invariati (OBJ-08)."""
+    new_ctm = o.ctm * Tp
+    s, e = o.span
+    in_place = [(s, e, _sep(unit_bytes(parsed, o, new_ctm, outer_of(o))))]
+    clips = list(o.state.clips)
+    if o.wrapper is not None:
+        wq = next((k for k, op in enumerate(parsed.ops) if op.start == o.wrapper.start and op.name == "q"), None)
+        clips = [c for c in clips if c[4] != wq]
+    grown = pymupdf.Rect(page_rect.x0 - 1, page_rect.y0 - 1, page_rect.x1 + 1, page_rect.y1 + 1)
+    local = [c for c in clips if not c[2].contains(page_rect) and not (grown.contains(c[2]) and
+                                                                       c[2].contains(page_rect))]
+    if not local:
+        return in_place
+    depth = min(c[3] for c in local)
+    if depth < 1:
+        return in_place          # ritaglio al livello più esterno: non si può uscirne
+    q_index = min(c[4] for c in local if c[3] == depth)
+    end = _block_end(parsed, q_index)
+    if end is None or end <= e:
+        return in_place
+    from .content import ctm_at
+    cur = ctm_at(parsed, end) if end < len(parsed.data) else parsed.end_ctm
+    parts = [b"q"]
+    for cbytes, cctm, _r, cdepth, _qi in clips:
+        if cdepth < depth:
+            continue            # ritaglio esterno al blocco: vale ancora nel punto d'arrivo
+        target = cctm * Tp
+        parts.append(fmt_matrix(target * ~cur))
+        parts.append(cbytes)
+        cur = target
+    parts.append(unit_bytes(parsed, o, new_ctm, cur, include_state=True))
+    parts.append(b"Q")
+    return [(s, e, b"\n"), (end, end, _sep(b"\n".join(parts)))]
+
+
+def _apply_and_locate(pdf, page, parsed: ParsedPage, edits_per_obj: list) -> list[int]:
+    """Applica le modifiche e restituisce i nuovi indici degli oggetti modificati."""
+    flat = [ed for eds in edits_per_obj for ed in eds]
+    data, starts = apply_edits(parsed.data, flat)
+    write_content(pdf, page, data)
+    anchors = []
+    k = 0
+    for eds in edits_per_obj:
+        ed = eds[-1]
+        anchors.append((starts[k + len(eds) - 1], len(ed[2])))
+        k += len(eds)
+    new = parse_page(pdf, page)
+    out = []
+    for a, n in anchors:
+        for ob in new.objects:
+            if a <= ob.span[0] < a + max(n, 1):
+                out.append(ob.index)
+                break
+    return out
+
+
 def transform_objects(pdf: pymupdf.Document, page_index: int, indices, T: pymupdf.Matrix) -> list[int]:
     """Applica la trasformazione T (spazio pagina) agli oggetti indicati."""
     page = pdf[page_index]
     parsed = parse_page(pdf, page)
     objs = _check_indices(parsed, indices)
     Tp = page_to_pdf_transform(parsed, T)
-    edits = []
-    for o in objs:
-        new_ctm = o.ctm * Tp
-        s, e = o.span
-        edits.append((s, e, _sep(unit_bytes(parsed, o, new_ctm, outer_of(o)))))
-    data, _starts = apply_edits(parsed.data, edits)
-    write_content(pdf, page, data)
-    return [o.index for o in objs]
+    pr = pymupdf.Rect(0, 0, page.cropbox.width, page.cropbox.height)
+    edits = [_transform_edits(parsed, o, Tp, pr) for o in objs]
+    if all(len(ed) == 1 for ed in edits):
+        data, _starts = apply_edits(parsed.data, [ed[0] for ed in edits])
+        write_content(pdf, page, data)
+        return [o.index for o in objs]
+    return _apply_and_locate(pdf, pdf[page_index], parsed, edits)
 
 
 def translate(pdf, page_index: int, indices, dx: float, dy: float) -> list[int]:
@@ -1020,13 +1093,15 @@ def translate_each(pdf, page_index: int, indices: list[int], deltas_view: list[t
         o = parsed.objects[i]
         v = pymupdf.Point(dx, dy) * derot - pymupdf.Point(0, 0) * derot
         Tp = page_to_pdf_transform(parsed, pymupdf.Matrix(1, 0, 0, 1, v.x, v.y))
-        s, e = o.span
-        edits.append((s, e, _sep(unit_bytes(parsed, o, o.ctm * Tp, outer_of(o)))))
+        pr = pymupdf.Rect(0, 0, page.cropbox.width, page.cropbox.height)
+        edits.append(_transform_edits(parsed, o, Tp, pr))
     if not edits:
         return []
-    data, _ = apply_edits(parsed.data, edits)
-    write_content(pdf, page, data)
-    return list(indices)
+    if all(len(ed) == 1 for ed in edits):
+        data, _ = apply_edits(parsed.data, [ed[0] for ed in edits])
+        write_content(pdf, page, data)
+        return list(indices)
+    return _apply_and_locate(pdf, pdf[page_index], parsed, edits)
 
 
 def view_rects(page: pymupdf.Page, objs: list[PageObject]) -> list[pymupdf.Rect]:

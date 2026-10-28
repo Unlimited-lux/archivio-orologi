@@ -5,6 +5,7 @@ pagina corrente), evidenziazione, F3/Maiusc+F3, pannello Risultati per pagina.
 
 from __future__ import annotations
 
+import bisect
 import html
 import time
 from dataclasses import dataclass
@@ -21,8 +22,8 @@ from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations,
 from foliant.i18n import pgettext
 
 from .engine import (
-    PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_across_pages, find_in_page_text,
-    page_labels,
+    PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_across_pages, find_hits,
+    find_in_page_text, page_labels,
 )
 
 TRANSLATIONS = {
@@ -115,8 +116,7 @@ class SearchJob:
                 self.results[page] = comment_hits
             return page
         hits = []
-        for rects in find_in_page_text(pt, self.query, self.opts):
-            b, f, a = context_snippet(pt, rects, width=28)
+        for rects, (b, f, a) in find_hits(pt, self.query, self.opts):
             hits.append(Hit(page, rects, b, f, a))
         if page + 1 < self.page_count and not self.opts.regex:
             nxt = get_text(page + 1)
@@ -186,6 +186,7 @@ class ResultsPanel(QWidget):
         self.export_button = QToolButton(self)
         bind_icon(self.export_button, "download")
         self.export_button.setToolTip(_("Esporta i risultati (CSV)…"))
+        self.export_button.setAccessibleName(_("Esporta i risultati (CSV)…"))
         self.export_button.setAutoRaise(True)
         self.export_button.clicked.connect(lambda: self.controller.export_csv())
         head.addWidget(self.export_button)
@@ -210,6 +211,7 @@ class ResultsPanel(QWidget):
         self.note.hide()
         layout.addWidget(self.note)
         self._page_items: dict[int, QTreeWidgetItem] = {}
+        self._pages: list[int] = []          # pagine con risultati, in ordine
 
     def set_view(self, view) -> None:
         self.controller.set_view(view)
@@ -217,6 +219,7 @@ class ResultsPanel(QWidget):
     def clear(self) -> None:
         self.tree.clear()
         self._page_items.clear()
+        self._pages.clear()
         self.note.hide()
 
     def page_title(self, page: int, count: int) -> str:
@@ -239,8 +242,8 @@ class ResultsPanel(QWidget):
                               + html.escape(h.after) + "…")
             child.setData(0, Qt.ItemDataRole.UserRole, flat_start + n)
         # inserimento in ordine di pagina
-        pages = sorted(self._page_items)
-        pos = sum(1 for p in pages if p < page)
+        pos = bisect.bisect_left(self._pages, page)
+        self._pages.insert(pos, page)
         self.tree.insertTopLevelItem(pos, item)
         item.setExpanded(True)
         self._page_items[page] = item
@@ -248,7 +251,7 @@ class ResultsPanel(QWidget):
     def renumber(self) -> None:
         """Dopo l'arrivo di nuove pagine gli indici globali cambiano."""
         flat = 0
-        for p in sorted(self._page_items):
+        for p in self._pages:
             item = self._page_items[p]
             item.setData(0, Qt.ItemDataRole.UserRole, flat)
             for n in range(item.childCount()):
@@ -256,7 +259,7 @@ class ResultsPanel(QWidget):
             flat += item.childCount()
 
     def select(self, flat: int) -> None:
-        for p in sorted(self._page_items):
+        for p in self._pages:
             item = self._page_items[p]
             for n in range(item.childCount()):
                 child = item.child(n)
@@ -342,6 +345,8 @@ class SearchController(QObject):
         self.view: DocumentView | None = None
         self.job: SearchJob | None = None
         self.hits: list[Hit] = []
+        self._hit_pages: list[int] = []      # pagina di ogni risultato (ricerca binaria)
+        self._renumber_pending = False
         self.current: int = -1
         self._texts: dict[int, PageText] = {}
         self._texts_version = -1
@@ -363,9 +368,17 @@ class SearchController(QObject):
         self.panel = ResultsPanel(self)
         ctx.add_sidebar_panel("search", pgettext("barra di ricerca", "Cerca"), "search", self.panel, order=30)
 
+        ctx.add_view_menu_provider(self._menu_provider)
         self.act_find = ctx.action(_("Cerca nel documento"), "search", self.open, shortcut=QKeySequence.StandardKey.Find)
+        # UX-18: F3 / Ctrl+G successivo, Maiusc+F3 / Ctrl+Maiusc+G precedente
         self.act_next = ctx.action(_("Risultato successivo"), "chevron-down", self.next, shortcut="F3")
         self.act_prev = ctx.action(_("Risultato precedente"), "chevron-up", self.previous, shortcut="Shift+F3")
+        self.act_next.setShortcuts([QKeySequence("F3"), QKeySequence("Ctrl+G")])
+        self.act_prev.setShortcuts([QKeySequence("Shift+F3"), QKeySequence("Ctrl+Shift+G")])
+        from foliant.ui.dialogs import key_text
+        for act in (self.act_next, self.act_prev):
+            keys = ", ".join(key_text(s) for s in act.shortcuts())
+            act.setToolTip(f"{act.text()} ({keys})")
         mode = ctx.mode("leggi")
         if mode is not None:
             mode.add_separator()
@@ -445,6 +458,13 @@ class SearchController(QObject):
         return pt
 
     # ------------------------------------------------------------------ comandi
+    def _menu_provider(self, view, _page_event, menu) -> None:
+        """UX-07: «Cerca» nel menu contestuale del testo selezionato (precompila la barra)."""
+        if not view.selected_text().strip():
+            return
+        act = menu.addAction(pgettext("barra di ricerca", "Cerca"), self.open)
+        bind_icon(act, "search")
+
     def open(self) -> None:
         view = self.ctx.current_view()
         if view is None:
@@ -503,6 +523,8 @@ class SearchController(QObject):
         self._timer.stop()
         self.job = None
         self.hits = []
+        self._hit_pages = []
+        self._renumber_pending = False
         self.current = -1
         self.panel.clear()
         self.bar.set_error(False)
@@ -554,6 +576,7 @@ class SearchController(QObject):
                 self._add_page(page, job.results[page])
                 changed = True
         if changed:
+            self._renumber()
             self._update_highlights()
         self._update_counter()
         if not job.done:
@@ -572,21 +595,29 @@ class SearchController(QObject):
             if page in job.results:
                 self._add_page(page, job.results[page])
         if job is not None:
+            self._renumber()
             self._update_highlights()
             self._finished()
 
     def _add_page(self, page: int, hits: list[Hit]) -> None:
-        pos = sum(1 for h in self.hits if h.page < page)
-        current_hit = self.hits[self.current] if 0 <= self.current < len(self.hits) else None
+        """Aggiunge i risultati di una pagina; la numerazione dell'elenco si aggiorna una volta
+        per giro di lavoro (`_renumber`), non a ogni pagina."""
+        pos = bisect.bisect_left(self._hit_pages, page)
         self.hits[pos:pos] = hits
-        if current_hit is not None:
-            self.current = self.hits.index(current_hit)
+        self._hit_pages[pos:pos] = [page] * len(hits)
+        if 0 <= self.current and pos <= self.current:
+            self.current += len(hits)
         self.panel.add_page(page, hits, pos)
-        self.panel.renumber()
+        self._renumber_pending = True
         if self._pending_select:
             self._pending_select = False
             self.current = pos
             self.go_to(pos, record=False)
+
+    def _renumber(self) -> None:
+        if self._renumber_pending:
+            self._renumber_pending = False
+            self.panel.renumber()
 
     def _finished(self) -> None:
         job = self.job

@@ -140,7 +140,9 @@ def ruota(ctx, gradi):
    `foliant.modules.<nome>` usa prima le voci di quel modulo, poi quelle del nucleo, poi quelle
    degli altri moduli. Le parole con più significati nello stesso modulo usano
    `pgettext("contesto", "Annulla")` con la voce `"contesto\x04Annulla"`. Inglese americano
-   («Color», «Canceled»).
+   («Color», «Canceled»). Date e numeri mostrati o scritti nei documenti con
+   `format_date(dt, time=True)` e `format_number(n, decimali)` (da `foliant.api`):
+   «28/10/2026 14:30», «1.234,5» in italiano; «10/28/2026 2:30 PM», «1,234.5» in inglese.
 7. **Icone** con `icon("nome")` o `bind_icon(azione, "nome")` (nomi dei file in
    `foliant/resources/icons`). **Colori** con `theme.color("accent")` ecc., mai valori fissi.
 8. **Errori**: messaggi chiari per l'utente (`ctx.error(titolo, testo)`); un errore di un

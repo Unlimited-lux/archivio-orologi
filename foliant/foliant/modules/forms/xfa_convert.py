@@ -657,7 +657,7 @@ class _Layout:
                 (0 if _path(el, "value", "integer") is not None else 2)
             props["fmt"] = fm.Format(fm.NUMBER, decimals=min(10, decimals))
         elif ui_kind == "dateTimeEdit":
-            props["fmt"] = fm.Format(fm.DATE, pattern="dd/mm/yyyy")
+            props["fmt"] = fm.Format(fm.DATE)
             if value:
                 d = fm.parse_date(str(value).strip()[:10], "yyyy-mm-dd")
                 if d:

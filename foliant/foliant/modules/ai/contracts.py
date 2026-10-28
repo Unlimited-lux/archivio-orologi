@@ -128,7 +128,9 @@ def review_contract(job, scope: engine.Scope) -> list[Clause]:
     text = engine.scope_text(scope)
     bodies = [text] if len(text) <= budget else [c.text for c in chunking.make_chunks(scope.pages, budget)]
     clauses: list[Clause] = []
-    for body in bodies:
+    for n, body in enumerate(bodies):
+        if len(bodies) > 1:     # contratti lunghi: un blocco alla volta, con avanzamento e annullamento
+            job.step(n / len(bodies), _("Blocco {i} di {n}").format(i=n + 1, n=len(bodies)))
         data = _ask_json(job, system, f"<document>\n{body}\n</document>", function="contract-review", scope=scope)
         items = data.get("clauses") if isinstance(data, dict) else data
         for it in items if isinstance(items, list) else []:
@@ -140,6 +142,9 @@ def review_contract(job, scope: engine.Scope) -> list[Clause]:
             src = " ".join(_page_text(scope, page).split()).lower()
             verified = not quote or " ".join(quote.split()).lower() in src
             level = str(it.get("criticita", "bassa")).lower()
+            numero, titolo = str(it.get("numero", len(clauses) + 1)), str(it.get("titolo", ""))
+            if len(bodies) > 1 and any(c.numero == numero and c.titolo == titolo for c in clauses):
+                continue        # clausola ripetuta nella sovrapposizione tra due blocchi
             clauses.append(Clause(str(it.get("numero", len(clauses) + 1)), str(it.get("titolo", "")), page, quote,
                                   str(it.get("sintesi", "")), level if level in LEVELS else "bassa",
                                   str(it.get("lacune", "")), str(it.get("proposta", "")), verified))
@@ -229,18 +234,33 @@ def risks_and_research(job, scope: engine.Scope, party: str, jurisdiction: str =
         "\"impatto\", \"mitigazione\"}], \"sources\": [{\"riferimento\", \"citazione\"}]}.")
     profile = job.profile()
     budget, _o = engine.budget_for(profile, system)
-    data = _ask_json(job, system, f"<document>\n{engine.scope_text(scope)[:budget]}\n</document>",
-                     function="contract-risks", scope=scope)
+    text = engine.scope_text(scope)
+    # contratti lunghi: tutto il testo, un blocco alla volta (mai troncato in silenzio)
+    bodies = [text] if len(text) <= budget else [c.text for c in chunking.make_chunks(scope.pages, budget)]
     res = RisksResult(disclaimer=disclaimer())
-    for it in (data.get("risks") if isinstance(data, dict) else None) or []:
-        if isinstance(it, dict) and it.get("descrizione"):
-            res.risks.append(Risk(str(it["descrizione"]), str(it.get("clausola", "")), str(it.get("probabilita", "")),
-                                  str(it.get("impatto", "")), str(it.get("mitigazione", ""))))
     origin = _("ricerca web del fornitore") if web_search else _("conoscenza del modello")
-    for it in (data.get("sources") if isinstance(data, dict) else None) or []:
-        if isinstance(it, dict) and it.get("riferimento"):
-            res.sources.append(Source(str(it["riferimento"]), str(it.get("citazione", "")), origin,
-                                      da_verificare=not web_search))
+    seen_risks, seen_sources = set(), set()
+    for n, body in enumerate(bodies):
+        if len(bodies) > 1:
+            job.step(n / len(bodies), _("Blocco {i} di {n}").format(i=n + 1, n=len(bodies)))
+        data = _ask_json(job, system, f"<document>\n{body}\n</document>", function="contract-risks", scope=scope)
+        for it in (data.get("risks") if isinstance(data, dict) else None) or []:
+            if isinstance(it, dict) and it.get("descrizione"):
+                key = " ".join(str(it["descrizione"]).lower().split())
+                if key in seen_risks:
+                    continue
+                seen_risks.add(key)
+                res.risks.append(Risk(str(it["descrizione"]), str(it.get("clausola", "")),
+                                      str(it.get("probabilita", "")), str(it.get("impatto", "")),
+                                      str(it.get("mitigazione", ""))))
+        for it in (data.get("sources") if isinstance(data, dict) else None) or []:
+            if isinstance(it, dict) and it.get("riferimento"):
+                key = " ".join(str(it["riferimento"]).lower().split())
+                if key in seen_sources:
+                    continue
+                seen_sources.add(key)
+                res.sources.append(Source(str(it["riferimento"]), str(it.get("citazione", "")), origin,
+                                          da_verificare=not web_search))
     return res
 
 

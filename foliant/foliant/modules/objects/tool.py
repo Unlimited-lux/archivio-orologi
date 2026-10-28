@@ -135,6 +135,18 @@ def ratio_from_handle(r: pymupdf.Rect, handle: int, ratio: float, shrink: bool =
     return pymupdf.Rect(x0, y0, x1, y1)
 
 
+def link_tooltip(link: dict) -> str:
+    """Destinazione completa di un collegamento (dizionario del motore), per il suggerimento."""
+    kind = link.get("kind")
+    if kind == pymupdf.LINK_URI:
+        return link.get("uri", "")
+    if kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED) and link.get("page", -1) >= 0:
+        return _("Pagina {n}").format(n=link["page"] + 1) + "  —  " + _("Ctrl+clic per seguirlo")
+    if link.get("file"):
+        return link["file"]
+    return ""
+
+
 def constrain(dx: float, dy: float) -> tuple[float, float]:
     """Vincola a orizzontale, verticale o 45°."""
     if abs(dx) > 2 * abs(dy):
@@ -470,6 +482,13 @@ class ObjectTool(Tool):
                 elif ev.modifiers & Qt.KeyboardModifier.ControlModifier and view.link_at(ev.page, ev.point):
                     shape = Qt.CursorShape.PointingHandCursor
         view.viewport().setCursor(shape)
+        tip = ""
+        if ev.page is not None:
+            link = view.link_at(ev.page, ev.point)
+            if link is not None:
+                tip = link_tooltip(link)
+        if view.toolTip() != tip:
+            view.setToolTip(tip)
         if old != self.hover:
             view.viewport().update()
 
