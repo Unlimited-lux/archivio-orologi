@@ -917,3 +917,23 @@ def test_ann25_custom_dynamic_template(comments, monkeypatch):
     act.trigger()
     click(view, 0, 300, 400)
     assert module.ctrl.annotations()[0].contents == "Visto da Maria Rossi {sconosciuto}"
+
+
+def test_ann26_library_export_import(comments, tmp_path, monkeypatch):
+    """ANN-26: libreria esportata e importata in un'altra installazione con tutti i timbri; file corrotto → invariata."""
+    window, view, module = comments
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 10), 1)
+    module.ctrl.add_custom_stamp("logo", pix.tobytes("png"))
+    module.ctrl.add_dynamic_template("Visto il {data}")
+    out = tmp_path / "timbri.json"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    assert ui_actions.export_stamp_library(module.ctrl) == str(out)
+    s = window.ctx.settings()
+    s.remove("annotations/custom_stamps")
+    s.remove("annotations/dynamic_templates")
+    assert ui_actions.import_stamp_library(module.ctrl, str(out)) == 2
+    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["logo"]
+    bad = tmp_path / "rotto.json"
+    bad.write_text('{"version": 1, "stamps": [{"name": "x", "png": "AAAA"}]}')
+    assert ui_actions.import_stamp_library(module.ctrl, str(bad)) == 0
+    assert [d["name"] for d in module.ctrl.custom_stamps()] == ["logo"]

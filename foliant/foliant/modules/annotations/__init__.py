@@ -216,6 +216,8 @@ class AnnotationsModule:
         self.custom_menu.aboutToShow.connect(self._fill_custom_stamps)
         menu.addSeparator()
         menu.addAction(_("Da immagine…"), self._image_stamp)
+        menu.addAction(_("Esporta libreria timbri…"), lambda: ui_actions.export_stamp_library(self.ctrl))
+        menu.addAction(_("Importa libreria timbri…"), lambda: ui_actions.import_stamp_library(self.ctrl))
         button.setMenu(menu)
         self.stamp_button = button
         self.ctx.window.register_document_action(menu.menuAction())
