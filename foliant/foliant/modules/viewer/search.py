@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, bind_icon, theme
 
-from .engine import PageText, SearchOptions, context_snippet, extract_page_text, find_in_page_text, page_labels
+from .engine import PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_in_page_text, page_labels
 
 TRANSLATIONS = {
     "Cerca": "Find",
@@ -44,6 +44,16 @@ TRANSLATIONS = {
     "Digita nella barra di ricerca (Ctrl+F).": "Type in the search bar (Ctrl+F).",
     "Nessun documento aperto": "No document open",
     "Vista": "View",
+    "Espressione regolare": "Regular expression",
+    "Espressione non valida: {e}": "Invalid expression: {e}",
+    "Esporta i risultati (CSV)…": "Export results (CSV)…",
+    "Esporta risultati": "Export results",
+    "Risultati esportati: {p}": "Results exported: {p}",
+    "pagina": "page",
+    "etichetta": "label",
+    "prima": "before",
+    "trovato": "match",
+    "dopo": "after",
 }
 
 MAX_HISTORY = 15
@@ -148,6 +158,12 @@ class ResultsPanel(QWidget):
         title.setProperty("heading", True)
         head.addWidget(title)
         head.addStretch(1)
+        self.export_button = QToolButton(self)
+        bind_icon(self.export_button, "download")
+        self.export_button.setToolTip(_("Esporta i risultati (CSV)…"))
+        self.export_button.setAutoRaise(True)
+        self.export_button.clicked.connect(lambda: self.controller.export_csv())
+        head.addWidget(self.export_button)
         layout.addLayout(head)
         self.summary = QLabel(_("Digita nella barra di ricerca (Ctrl+F)."))
         self.summary.setProperty("muted", True)
@@ -264,6 +280,7 @@ class SearchBar(QToolBar):
         self.opt_case = self._toggle(_("Maiuscole/minuscole"), "case-sensitive", "viewer/search_case")
         self.opt_word = self._toggle(_("Parola intera"), "whole-word", "viewer/search_word")
         self.opt_accents = self._toggle(_("Ignora accenti"), "a-large-small", "viewer/search_accents")
+        self.opt_regex = self._toggle(_("Espressione regolare"), "regex", "viewer/search_regex")
         spacer = QWidget(self)
         from PySide6.QtWidgets import QSizePolicy
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -404,13 +421,14 @@ class SearchController(QObject):
     def options(self) -> SearchOptions:
         return SearchOptions(case_sensitive=self.bar.opt_case.isChecked(),
                              whole_word=self.bar.opt_word.isChecked(),
-                             ignore_accents=self.bar.opt_accents.isChecked())
+                             ignore_accents=self.bar.opt_accents.isChecked(),
+                             regex=self.bar.opt_regex.isChecked())
 
     def search(self, text: str, *, case_sensitive: bool | None = None, whole_word: bool | None = None,
-               ignore_accents: bool | None = None, wait: bool = True) -> int:
+               ignore_accents: bool | None = None, regex: bool | None = None, wait: bool = True) -> int:
         """Avvia una ricerca (usata anche dai test); con `wait` la completa subito."""
         for act, value in ((self.bar.opt_case, case_sensitive), (self.bar.opt_word, whole_word),
-                           (self.bar.opt_accents, ignore_accents)):
+                           (self.bar.opt_accents, ignore_accents), (self.bar.opt_regex, regex)):
             if value is not None:
                 act.blockSignals(True)
                 act.setChecked(value)
@@ -448,6 +466,13 @@ class SearchController(QObject):
             return
         self._remember(text)
         start = keep_page if keep_page is not None else self.view.current_page
+        try:
+            compile_query(text, self.options())
+        except ValueError as e:
+            self.bar.set_error(True)
+            self.bar.counter.setText(_("Espressione non valida: {e}").format(e=e)[:60])
+            self.bar.counter.setToolTip(str(e))
+            return
         self.job = SearchJob(text, self.options(), self.view.page_count, start)
         self._pending_select = True
         self._timer.start(0)
@@ -577,6 +602,30 @@ class SearchController(QObject):
             return
         if self.hits:
             self.go_to(self.current - 1)
+
+    def export_csv(self, path: str | None = None) -> str | None:
+        if not self.hits or self.view is None:
+            return None
+        if path is None:
+            path = self.ctx.ask_save_path(_("Esporta risultati"), "risultati.csv", "CSV (*.csv)", ".csv")
+        if not path:
+            return None
+        import csv
+        import io
+        from foliant.api import atomic_write
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([_("pagina"), _("etichetta"), _("prima"), _("trovato"), _("dopo")])
+        labels = self.labels()
+        for h in self.hits:
+            writer.writerow([h.page + 1, labels[h.page] if h.page < len(labels) else "", h.before, h.found, h.after])
+        try:
+            atomic_write(path, buf.getvalue().encode("utf-8-sig"))
+        except Exception as e:
+            self.ctx.error(_("Esporta risultati"), str(e))
+            return None
+        self.ctx.status(_("Risultati esportati: {p}").format(p=path))
+        return path
 
     # --------------------------------------------------------------- cronologia
     def history(self) -> list[str]:

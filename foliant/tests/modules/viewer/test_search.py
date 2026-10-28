@@ -167,3 +167,23 @@ def test_incremental_search_keeps_ui_responsive(viewer_window, tmp_path, qtbot):
     assert time.perf_counter() - t < 0.5        # l'avvio non blocca
     qtbot.waitUntil(lambda: ctl.job is None, timeout=15000)
     assert len(ctl.hits) == 1 and ctl.hits[0].page == 399
+
+
+def test_regex_and_invalid_expression(viewer_window, tmp_path):
+    viewer_window.open_path(_pdf(tmp_path, [["CAP 20121 e 00184", "tel 0212345678"], ["10100"]]))
+    ctl = _ctl(viewer_window)
+    assert ctl.search(r"\b\d{5}\b", regex=True) == 3
+    assert ctl.search("(", regex=True) == 0
+    assert "non valida" in ctl.bar.counter.text()
+    assert ctl.search("cap", regex=False) == 1
+
+
+def test_export_csv(viewer_window, tmp_path):
+    viewer_window.open_path(_pdf(tmp_path, [["Rolex uno"], ["Rolex due"]]))
+    ctl = _ctl(viewer_window)
+    ctl.search("rolex", regex=False)
+    out = ctl.export_csv(str(tmp_path / "r.csv"))
+    import csv
+    rows = list(csv.reader(open(out, encoding="utf-8-sig")))
+    assert rows[0][0] == "pagina" and len(rows) == 3
+    assert rows[2][0] == "2" and rows[2][3] == "Rolex"

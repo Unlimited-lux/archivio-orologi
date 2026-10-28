@@ -99,6 +99,17 @@ class SearchOptions:
     case_sensitive: bool = False
     whole_word: bool = False
     ignore_accents: bool = False
+    regex: bool = False
+
+
+def compile_query(query: str, opts: SearchOptions) -> "re.Pattern | None":
+    """Espressione regolare della ricerca (ValueError con messaggio se non valida)."""
+    if not opts.regex:
+        return None
+    try:
+        return re.compile(query, 0 if opts.case_sensitive else re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(str(e)) from e
 
 
 def _normalized_with_map(pt: PageText, opts: SearchOptions) -> tuple[str, list[int]]:
@@ -120,43 +131,59 @@ def _is_word_char(ch: str) -> bool:
     return ch.isalnum() or ch == "_"
 
 
+def _span_rects(pt: PageText, index: list[int], pos: int, end: int) -> list[pymupdf.Rect]:
+    src = sorted(set(index[pos:end]))
+    rects: dict[int, pymupdf.Rect] = {}
+    order: list[int] = []
+    for i in src:
+        box = pt.boxes[i]
+        line = pt.lines[i]
+        if box is None or line == -2:
+            continue
+        if line not in rects:
+            rects[line] = pymupdf.Rect(box)
+            order.append(line)
+        else:
+            rects[line] |= box
+    return [rects[k] for k in order]
+
+
 def find_in_page_text(pt: PageText, query: str, opts: SearchOptions | None = None) -> list[list[pymupdf.Rect]]:
     """Occorrenze di `query`: per ciascuna, i rettangoli (uno per riga coinvolta)."""
     opts = opts or SearchOptions()
-    q = normalize_query(query, opts.case_sensitive, opts.ignore_accents)
-    if not q or not pt.text:
+    if not query.strip() or not pt.text:
         return []
-    hay, index = _normalized_with_map(pt, opts)
+    pattern = compile_query(query, opts)
+    if pattern is not None:
+        norm = SearchOptions(case_sensitive=True, ignore_accents=opts.ignore_accents)
+        hay, index = _normalized_with_map(pt, norm)
+        spans = [(m.start(), m.end()) for m in pattern.finditer(hay) if m.end() > m.start()]
+    else:
+        q = normalize_query(query, opts.case_sensitive, opts.ignore_accents)
+        if not q:
+            return []
+        hay, index = _normalized_with_map(pt, opts)
+        spans = []
+        start = 0
+        while True:
+            pos = hay.find(q, start)
+            if pos < 0:
+                break
+            spans.append((pos, pos + len(q)))
+            start = pos + 1
     hits: list[list[pymupdf.Rect]] = []
-    start = 0
-    while True:
-        pos = hay.find(q, start)
-        if pos < 0:
-            break
-        end = pos + len(q)
-        start = pos + 1
+    last_end = -1
+    for pos, end in spans:
+        if pos < last_end:
+            continue  # occorrenze sovrapposte
         if opts.whole_word:
             if (pos > 0 and _is_word_char(hay[pos - 1]) and _is_word_char(hay[pos])) or \
                (end < len(hay) and _is_word_char(hay[end]) and _is_word_char(hay[end - 1])):
                 continue
-        src = sorted(set(index[pos:end]))
-        rects: dict[int, pymupdf.Rect] = {}
-        order: list[int] = []
-        for i in src:
-            box = pt.boxes[i]
-            if box is None:
-                continue
-            line = pt.lines[i]
-            if line == -2:
-                continue
-            if line not in rects:
-                rects[line] = pymupdf.Rect(box)
-                order.append(line)
-            else:
-                rects[line] |= box
-        if order:
-            hits.append([rects[k] for k in order])
-        start = end if not opts.whole_word else pos + 1
+        rects = _span_rects(pt, index, pos, end)
+        if rects:
+            hits.append(rects)
+            last_end = end
     return hits
 
 

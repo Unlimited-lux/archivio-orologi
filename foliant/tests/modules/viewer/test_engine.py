@@ -210,3 +210,13 @@ def test_verify_outline():
     items.append(E.Bookmark(1, "Rotto", 50))
     problems = dict((i, why) for i, why in E.verify_outline(items, 10))
     assert problems[7] == "broken" and problems[6] == "duplicate"
+
+
+def test_regex_search():
+    _d, page = _page(["CAP 20121 Milano, 00184 Roma", "telefono 0212345678 e 10100"])
+    pt = E.extract_page_text(page)
+    assert len(E.find_in_page_text(pt, r"\b\d{5}\b", E.SearchOptions(regex=True))) == 3
+    assert len(E.find_in_page_text(pt, r"milano|roma", E.SearchOptions(regex=True))) == 2
+    assert len(E.find_in_page_text(pt, r"milano", E.SearchOptions(regex=True, case_sensitive=True))) == 0
+    with pytest.raises(ValueError):
+        E.compile_query("(", E.SearchOptions(regex=True))
