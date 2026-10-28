@@ -258,14 +258,21 @@ def test_xfa_dynamic_saved_unchanged(window, tmp_path):
     del before
 
 
-def test_convert_hybrid_removes_xfa(window, tmp_path):
+def test_convert_hybrid_creates_new_document(window, tmp_path):
+    import hashlib
     make_xfa(tmp_path / "s.pdf", True)
+    before = hashlib.sha256((tmp_path / "s.pdf").read_bytes()).hexdigest()
     view = open_form(window, tmp_path / "s.pdf")
-    window.ctx.set_current = None
+    module().import_values({"form1.nome": "Anna"}, view)
     module().convert_xfa()
+    new = window.ctx.current_view()
+    assert new is not view
+    with new.document.lock:
+        assert E.xfa_status(new.document.pdf) == "none"
+        assert E.form_values(new.document.pdf) == {"form1.nome": "Anna"}
     with view.document.lock:
-        assert E.xfa_status(view.document.pdf) == "none"
-        assert [f.name for f in E.list_fields(view.document.pdf)] == ["form1.nome"]
+        assert E.xfa_status(view.document.pdf) == "hybrid"  # l'originale non cambia
+    assert hashlib.sha256((tmp_path / "s.pdf").read_bytes()).hexdigest() == before
 
 
 # ---------------------------------------------------------------- riconoscimento

@@ -308,4 +308,10 @@ EN: dict[str, str] = {
     '{n} campo senza dati XML associati': '{n} field without associated XML data',
     '{n} campi senza dati XML associati': '{n} fields without associated XML data',
     'Valori non salvati nei dati XML: {l}': 'Values not saved in the XML data: {l}',
+    'modulo standard': 'standard form',
+    'La conversione dei moduli XML dinamici non è disponibile.': 'Converting dynamic XML forms is not available.',
+    'Conversione in modulo standard': 'Converting to a standard form',
+    'Conversione non riuscita: {e}': 'Conversion failed: {e}',
+    'Rapporto di conversione': 'Conversion report',
+    'Creato «{n}» con un modulo standard.': 'Created “{n}” with a standard form.',
 }

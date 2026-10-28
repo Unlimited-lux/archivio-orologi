@@ -968,20 +968,60 @@ class FormsModule(QObject):
         return problems
 
     def convert_xfa(self) -> None:
+        """FRM-36: crea un NUOVO documento con un modulo standard; l'originale non cambia."""
         view = self.ctx.current_view()
         if view is None:
             return
         with ENGINE_LOCK:
             status = E.xfa_status(view.document.pdf)
+            data = view.document.pdf.tobytes()
         if status == "none":
             self.ctx.info(_("Moduli XML"), _("Il documento non contiene un modulo XML."))
             return
-        if status == "dynamic":
-            self.ctx.error(_("Moduli XML"), _("La conversione dei moduli XML dinamici non è disponibile: "
-                                              "i dati si possono comunque esportare."))
+        name = os.path.splitext(view.document.display_name)[0] + " - " + _("modulo standard") + ".pdf"
+        if status == "hybrid":
+            def work(progress):
+                pdf = pymupdf.open("pdf", data)
+                try:
+                    E.remove_xfa(pdf)
+                    cat = pdf.pdf_catalog()
+                    if pdf.xref_get_key(cat, "NeedsRendering")[0] != "null":
+                        pdf.xref_set_key(cat, "NeedsRendering", "null")
+                    return pdf.tobytes(garbage=3, deflate=True), None
+                finally:
+                    pdf.close()
+        else:
+            try:
+                from . import xfa_convert as XC
+            except ImportError:
+                self.ctx.error(_("Moduli XML"), _("La conversione dei moduli XML dinamici non è disponibile."))
+                return
+
+            def work(progress):
+                pdf = pymupdf.open("pdf", data)
+                try:
+                    return XC.convert(pdf, progress=lambda fr, t: progress.update(fr, t))
+                finally:
+                    pdf.close()
+        try:
+            out, report = self.ctx.run_task(_("Conversione in modulo standard"), work)
+        except OperationCancelled:
             return
-        if self._change(_("Converti in modulo standard"), E.remove_xfa, view):
-            self.ctx.status(_("Parte XML rimossa: restano i campi standard (Annulla per ripristinarla)."))
+        except E.FormError as e:
+            self.ctx.error(_("Moduli XML"), str(e))
+            return
+        except Exception as e:
+            self.ctx.error(_("Moduli XML"), _("Conversione non riuscita: {e}").format(e=e))
+            return
+        from foliant.api import Document
+        self.ctx.open_document(Document.from_bytes(out, display_name=name))
+        if report is not None and (report.unsupported or report.scripts):
+            lines = [_("Campi creati: {n}").format(n=report.fields)]
+            lines += report.unsupported[:40]
+            self.last_conversion_report = report
+            self.ctx.info(_("Rapporto di conversione"), "\n".join(lines))
+        else:
+            self.ctx.status(_("Creato «{n}» con un modulo standard.").format(n=name))
 
     def export_xfa_dialog(self) -> None:
         view = self.ctx.current_view()
