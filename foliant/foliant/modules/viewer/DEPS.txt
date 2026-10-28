@@ -1,2 +1,6 @@
 # Nessuna nuova dipendenza pip: il modulo usa PySide6 (incluso QtPrintSupport) e PyMuPDF del nucleo.
 # Facoltativo per la lettura ad alta voce (pacchetti di sistema): speech-dispatcher (spd-say) oppure espeak-ng.
+# Richiesta (VIS-37, P2, non ancora usata): PySide6-Addons per QtMultimedia/QtMultimediaWidgets,
+# necessario per riprodurre audio e video incorporati nell'area dell'annotazione /Screen o
+# /RichMedia (criterio «la riproduzione inizia entro 2 s nell'area dell'annotazione»). Senza,
+# il viewer non riproduce i contenuti multimediali (li segnala come non supportati, VIS-07).
