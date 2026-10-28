@@ -339,6 +339,7 @@ def test_signed_document_warning(pages_window, monkeypatch):
     c = ctrl(window)
     asked = []
     monkeypatch.setattr(type(c), "is_signed", lambda self, d: True)
+    monkeypatch.setattr(type(c), "sign_handles_warnings", lambda self: False)   # ripiego senza modulo Firma
     monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(m) or False)
     c.organizer.grid.select_pages([0])
     c.act_rotate_right.trigger()
@@ -445,6 +446,7 @@ def test_certified_document_blocking_confirm(pages_window, monkeypatch):
         pdf.update_object(sig, "<</Type/Sig/Reference[<</TransformMethod/DocMDP/TransformParams<</P 1>>>>]/P 1>>")
         pdf.xref_set_key(pdf.pdf_catalog(), "Perms", f"<</DocMDP {sig} 0 R>>")
     asked = []
+    monkeypatch.setattr(type(c), "sign_handles_warnings", lambda self: False)   # ripiego senza modulo Firma
     monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(t) or False)
     c.organizer.grid.select_pages([0])
     c.act_rotate_right.trigger()
