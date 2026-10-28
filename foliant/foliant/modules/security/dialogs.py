@@ -318,8 +318,10 @@ class FindDialog(QDialog):
     """Trova parole/frasi o dati personali e scegli le occorrenze da segnare."""
 
     def __init__(self, mode: str, search: Callable[[dict], tuple[list[Match], list[str]]],
-                 pattern_items: list[tuple[str, str, bool]] | None = None, parent=None):
+                 pattern_items: list[tuple[str, str, bool]] | None = None, parent=None,
+                 saved=None):
         super().__init__(parent)
+        self.saved = saved
         self.mode = mode
         self._search = search
         self.matches: list[Match] = []
@@ -349,14 +351,13 @@ class FindDialog(QDialog):
             lay.addWidget(self.outside)
         else:
             lay.addWidget(QLabel(_("Schemi da cercare:")))
-            grid = QGridLayout()
+            self.grid = QGridLayout()
             self.pattern_boxes: dict[str, QCheckBox] = {}
-            for n, (pid, label, checked) in enumerate(pattern_items or []):
-                cb = QCheckBox(label)
-                cb.setChecked(checked)
-                self.pattern_boxes[pid] = cb
-                grid.addWidget(cb, n // 2, n % 2)
-            lay.addLayout(grid)
+            for pid, label, checked in pattern_items or []:
+                self._add_box(pid, label, checked)
+            for name in (saved.items if saved is not None else {}):
+                self._add_box("user:" + name, name, False)
+            lay.addLayout(self.grid)
             self.invalid = QCheckBox(_("Includi valori con cifra di controllo non valida"))
             lay.addWidget(self.invalid)
             row = QHBoxLayout()
@@ -364,6 +365,16 @@ class FindDialog(QDialog):
             self.custom = QLineEdit()
             self.custom.setPlaceholderText(_("espressione regolare, es. SN-\\d{6}"))
             row.addWidget(self.custom, 1)
+            if saved is not None:
+                self.save_button = QPushButton(_("Salva…"))
+                self.save_button.setToolTip(_("Conserva lo schema con un nome per le prossime ricerche"))
+                self.save_button.clicked.connect(self._ask_save)
+                row.addWidget(self.save_button)
+                for text, slot in ((_("Importa schemi…"), self._import_patterns),
+                                   (_("Esporta schemi…"), self._export_patterns)):
+                    b = QPushButton(text)
+                    b.clicked.connect(slot)
+                    row.addWidget(b)
             lay.addLayout(row)
         scope = QHBoxLayout()
         scope.addWidget(QLabel(_("Pagine:")))
@@ -394,6 +405,64 @@ class FindDialog(QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
+
+    def _add_box(self, pid: str, label: str, checked: bool) -> QCheckBox:
+        cb = self.pattern_boxes.get(pid)
+        if cb is None:
+            n = len(self.pattern_boxes)
+            cb = QCheckBox(label)
+            self.pattern_boxes[pid] = cb
+            self.grid.addWidget(cb, n // 2, n % 2)
+        cb.setChecked(checked)
+        return cb
+
+    def save_pattern(self, name: str) -> bool:
+        """Salva lo schema personalizzato scritto con il nome dato e lo seleziona."""
+        regex = self.custom.text().strip()
+        try:
+            self.saved.add(name, regex)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return False
+        self._add_box("user:" + name.strip(), name.strip(), True)
+        self.custom.clear()
+        self.notice.setText("")
+        return True
+
+    def _ask_save(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, _("Salva schema"), _("Nome dello schema:"))
+        if ok:
+            self.save_pattern(name)
+
+    def import_patterns(self, path: str) -> None:
+        try:
+            done, errors = self.saved.import_file(path)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return
+        for name in done:
+            self._add_box("user:" + name, name, True)
+        msg = [_("{n} schemi importati").format(n=len(done))] + errors
+        self.notice.setText("\n".join(msg))
+
+    def _import_patterns(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa schemi"), "", _("Schemi (*.json);;Tutti i file (*)"))
+        if path:
+            self.import_patterns(path)
+
+    def _export_patterns(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        if not self.saved.items:
+            self.notice.setText(_("Non ci sono schemi salvati da esportare."))
+            return
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta schemi"), "schemi.json", _("Schemi (*.json)"))
+        if path:
+            try:
+                self.saved.export(path)
+            except OSError as e:
+                self.notice.setText(_("Impossibile scrivere il file: {e}").format(e=e.strerror))
 
     def _import_terms(self) -> None:
         from PySide6.QtWidgets import QFileDialog

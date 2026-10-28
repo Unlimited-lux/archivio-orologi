@@ -548,8 +548,9 @@ class SecurityController:
                                             whole_word=options.get("whole_word", False),
                                             ignore_accents=options.get("ignore_accents", False)))
         else:
+            saved = PT.SavedPatterns(self.settings())
             for pid in options.get("patterns", []):
-                p = PT.pattern_by_id(pid)
+                p = saved.pattern(pid[5:]) if pid.startswith("user:") else PT.pattern_by_id(pid)
                 if p is not None:
                     if options.get("include_invalid") and p.check is not None and p.id in ("iban", "cf", "vat",
                                                                                              "card"):
@@ -581,7 +582,8 @@ class SecurityController:
         doc = view.document
         items = [(p.id, p.label, p.id in ("email", "phone", "iban", "cf", "date", "iddoc"))
                  for p in PT.builtin_patterns()]
-        dlg = D.FindDialog(mode, lambda o: self.search(doc, o), items, self.parent)
+        dlg = D.FindDialog(mode, lambda o: self.search(doc, o), items, self.parent,
+                           saved=PT.SavedPatterns(self.settings()))
         if mode == "terms" and view.selected_text():
             dlg.terms.setPlainText(view.selected_text())
         if not run_dialog(dlg):

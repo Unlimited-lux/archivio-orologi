@@ -1151,3 +1151,50 @@ def test_restricted_disables_modifying_commands(window, sec, tmp_path, monkeypat
     for key in ("area", "find", "patterns", "sanitize", "flatten"):
         assert sec.actions[key].isEnabled(), key
     assert "Sblocca" not in sec.actions["area"].toolTip()
+
+
+class _FakeSettings(dict):
+    def value(self, key, default=None):
+        return self.get(key, default)
+
+    def setValue(self, key, value):
+        self[key] = value
+
+
+def test_saved_patterns_roundtrip(window, sec, tmp_path, qtbot, monkeypatch):
+    """Dato uno schema per le matricole salvato con un nome, quando riapro la ricerca
+    allora lo ritrovo, posso esportarlo e importarlo in un'altra installazione."""
+    from foliant.modules.security import patterns as PT
+    path = tmp_path / "matricole.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "Cassa n. SN-123456, scatola SN-654321", fontsize=11)
+    d.save(path)
+    store = _FakeSettings()
+    monkeypatch.setattr(type(sec), "settings", lambda self: store)
+    view = window.open_path(str(path))
+    saved = PT.SavedPatterns(store)
+    dlg = D.FindDialog("patterns", lambda o: sec.search(view.document, o), [("email", "Email", False)],
+                       saved=saved)
+    qtbot.addWidget(dlg)
+    dlg.custom.setText("")
+    assert not dlg.save_pattern("Vuoto")
+    dlg.custom.setText(r"SN-\d{6}")
+    assert dlg.save_pattern("Matricola")
+    assert dlg.pattern_boxes["user:Matricola"].isChecked()
+    dlg.run_search()
+    assert [m.text for m in dlg.matches] == ["SN-123456", "SN-654321"]
+    # nuova apertura: lo schema è ancora disponibile
+    dlg2 = D.FindDialog("patterns", lambda o: sec.search(view.document, o), [], saved=PT.SavedPatterns(store))
+    qtbot.addWidget(dlg2)
+    assert "user:Matricola" in dlg2.pattern_boxes
+    out = tmp_path / "schemi.json"
+    saved.export(str(out))
+    other = PT.SavedPatterns(_FakeSettings())
+    dlg3 = D.FindDialog("patterns", lambda o: o, [], saved=other)
+    qtbot.addWidget(dlg3)
+    dlg3.import_patterns(str(out))
+    assert other.items == {"Matricola": r"SN-\d{6}"} and "1" in dlg3.notice.text()
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"patterns": {"Rotto": "(abc", "Ok": "X\\\\d+"}}', encoding="utf-8")
+    done, errors = other.import_file(str(bad))
+    assert done == ["Ok"] and errors and errors[0].startswith("Rotto")
