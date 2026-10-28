@@ -21,7 +21,7 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
    le finestre è stata tolta. La barra del modulo segue il tema con `changeEvent`.
    *Proposta:* `deleteLater()` delle finestre chiuse e rimozione dei listener.
 
-4. **Prima del salvataggio.** Manca un aggancio «prima di salvare» (es. `document.add_listener`
+4. **[Risolto: `ctx.add_guard("save"/"save_as")`]** **Prima del salvataggio.** Manca un aggancio «prima di salvare» (es. `document.add_listener`
    con tipo `"before_save"`): servirebbe per scrivere gli aspetti mancanti solo al salvataggio e
    per l'avviso sui campi obbligatori vuoti (FRM-09, FRM-15). *Locale:* aspetti e collegamenti
    vengono riparati all'apertura con un passo annullabile «Ripara il modulo».

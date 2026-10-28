@@ -185,6 +185,9 @@ class FormsModule(QObject):
         ctx.add_view_menu_provider(self.context_menu)
         if hasattr(ctx, "add_pending_edit_hook"):
             ctx.add_pending_edit_hook(self.commit_pending)
+        if hasattr(ctx, "add_guard"):
+            ctx.add_guard("save", self.save_guard)
+            ctx.add_guard("save_as", self.save_guard)
         self._install_panels()
         for view in ctx.views():
             self._attach(view)
@@ -262,6 +265,29 @@ class FormsModule(QObject):
                 keys = {(x.page, x.xref) for x in f.state.fields}
                 self.selection = [k for k in self.selection if k in keys]
         self._refresh_panels()
+
+    def save_guard(self, view, info: dict) -> bool:
+        """Prima di salvare (FRM-09, FRM-15, FRM-34). False annulla il salvataggio."""
+        f = self.fillers.get(id(view)) if view is not None else None
+        if f is None or f.view is not view or f.state.version < 0:
+            return True
+        if f.editor is not None and not f.commit_active():
+            return False  # valore non valido nel campo aperto: il focus resta lì
+        f.state.refresh()
+        if f.state.xfa == "hybrid" and f.state.xfa_unmapped:
+            names = ", ".join(f.state.xfa_unmapped[:10])
+            if not self.ctx.confirm(_("Dati XML del modulo"), _(
+                    "Questi campi non hanno dati XML associati e i loro valori non saranno salvati nei dati "
+                    "XML del modulo: {n}.\n\nSalvare comunque?").format(n=names)):
+                return False
+        missing = f.state.required_empty(f.passwords)
+        if missing:
+            # FRM-15: avviso non bloccante (si può salvare una bozza)
+            names = ", ".join(dict.fromkeys(m.name for m in missing))
+            f.last_warning = names
+            self.ctx.notify(_("Campi obbligatori vuoti: {n}").format(n=names),
+                            [(_("Vai al campo"), f.next_required)])
+        return True
 
     def commit_pending(self, view) -> None:
         """Prima di salvare o chiudere: conferma il valore del campo in compilazione."""
