@@ -838,4 +838,9 @@ EN: dict[str, str] = {
     "Nessuna operazione in corso.": "No running operations.",
     "Nessuna proposta valida: prova a riformulare o scegli lo strumento dalla barra.":
         "No valid proposal: try rephrasing or pick the tool from the toolbar.",
+    "Salva il testo riconosciuto": "Save recognized text",
+    "Aggiunge un livello di testo invisibile: il PDF diventa ricercabile. Si può annullare.":
+        "Adds an invisible text layer: the PDF becomes searchable. Can be undone.",
+    "Verifica della connessione…": "Checking connection…",
+    "Testo riconosciuto salvato nel documento.": "Recognized text saved in the document.",
 }

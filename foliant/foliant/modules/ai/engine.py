@@ -766,12 +766,13 @@ def outline(job: Job, scope: Scope, kind: str = "map", depth: int = 3, max_nodes
 
 
 # ------------------------------------------------------------------ OCR prima dell'invio
-def run_ocr(pdf: pymupdf.Document, pages: list[int], language: str, step=None) -> dict[int, tuple[str, float | None]]:
+def run_ocr(pdf: pymupdf.Document, pages: list[int], language: str, step=None,
+            words_out: dict | None = None) -> dict[int, tuple[str, float | None]]:
     out = {}
     for n, i in enumerate(pages):
         if step:
             step(n / max(len(pages), 1), _("OCR pagina {i}/{n}").format(i=n + 1, n=len(pages)))
-        out[i] = content.ocr_page(pdf, i, language)
+        out[i] = content.ocr_page(pdf, i, language, words_out=words_out)
     return out
 
 

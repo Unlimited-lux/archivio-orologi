@@ -160,6 +160,7 @@ class AIPanel(QWidget):
         self._render_timer.setInterval(80)
         self._render_timer.timeout.connect(self._render)
         self.setObjectName("aiPanel")
+        self.setAcceptDrops(True)
         self.setMinimumWidth(320)
         self._build()
         theme.on_change(_safe_callback(self, "_render"))
@@ -674,7 +675,7 @@ class AIPanel(QWidget):
         dlg = TextlessDialog(pages, images_ok, choices, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None, ""
-        return dlg.choice, dlg.language.currentData() or pref
+        return dlg.choice, dlg.language.currentData() or pref, dlg.save_ocr.isChecked()
 
     def ask_confirm(self, title: str, text: str) -> bool:
         return QMessageBox.question(self, title, text) == QMessageBox.StandardButton.Yes
@@ -807,8 +808,11 @@ class AIPanel(QWidget):
         ocr_pages: list[int] = []
         ocr_lang = ""
         image_pages: list[int] = []
+        self._save_ocr = False
         if textless:
-            choice, ocr_lang = self.ask_textless(textless, profile.images)
+            answer = self.ask_textless(textless, profile.images)
+            choice, ocr_lang = answer[0], answer[1]
+            self._save_ocr = bool(answer[2]) if len(answer) > 2 else False
             if choice is None:
                 return None
             if choice == "exclude":
@@ -906,11 +910,13 @@ class AIPanel(QWidget):
             options["task"] = self._task_args
         self._last.options = options
         pdf = doc.pdf if doc is not None else None
+        ocr_words: dict = {} if getattr(self, "_save_ocr", False) else None
+        self._last.options["ocr_words"] = ocr_words
         history_conv = Conversation(messages=[m for m in conv.messages[:-2]]) if fn == "chat" else Conversation()
 
         def work(job):
             if ocr_pages and pdf is not None:
-                texts = engine.run_ocr(pdf, ocr_pages, ocr_lang or "ita+eng", job.step)
+                texts = engine.run_ocr(pdf, ocr_pages, ocr_lang or "ita+eng", job.step, words_out=ocr_words)
                 by = {p.index: p for p in scope.pages}
                 for i, (t, conf) in texts.items():
                     pt = content.PageText(i, content.page_label(pdf, i), t, [], True, conf)
@@ -1009,11 +1015,19 @@ class AIPanel(QWidget):
             msg.flags.append(_("incompleto"))
         if self._last is not None and self._last.message is msg:
             self._last.answer = answer
+            words = self._last.options.get("ocr_words")
+            doc = self._last.document
+            if words and doc is not None and not doc.closed:
+                compose.add_ocr_layer(doc, words)
+                self.ctx.status(_("Testo riconosciuto salvato nel documento."))
         self.status.setText(_("Risposta completata."))
         self._save_history(conv)
         self._render()
         self._set_actions_enabled(True)
-        if self._last and self._last.function == "rewrite" and answer.status == "complete":
+        if self._last and answer.status == "complete" and (
+                self._last.function == "rewrite" or (self._last.function == "translate"
+                                                     and self._last.scope.selection_page is not None
+                                                     and not self._last.scope.pages)):
             self._show_proposal(answer)
         self.refresh_state()
         self.answerFinished.emit()
@@ -1169,15 +1183,69 @@ class AIPanel(QWidget):
     def result_text(self) -> str:
         if self._last is None:
             return ""
-        if self._last.function == "rewrite" and self.proposal_box.isVisible():
+        if self._last.function in ("rewrite", "translate") and self.proposal_box.isVisible():
             return self.proposal_edit.toPlainText()
         return self._last.message.text
 
     def copy_result(self) -> None:
-        text = render.plain_text(self.result_text())
+        """Copia come testo semplice e, per chi lo accetta, come testo formattato."""
+        raw = self.result_text()
+        text = render.plain_text(raw)
         if text:
-            QGuiApplication.clipboard().setText(text)
+            from PySide6.QtCore import QMimeData
+            mime = QMimeData()
+            mime.setText(text)
+            mime.setHtml(render.render_markdown(raw).html)
+            QGuiApplication.clipboard().setMimeData(mime)
             self.status.setText(_("Copiato negli appunti."))
+
+    # ---------------------------------------------------------------- trascinamento di immagini (AI-11)
+    IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif")
+
+    def dragEnterEvent(self, ev):  # noqa: N802 - API Qt
+        md = ev.mimeData()
+        if md.hasImage() or any(u.toLocalFile().lower().endswith(self.IMAGE_SUFFIXES) for u in md.urls()):
+            ev.acceptProposedAction()
+        else:
+            ev.ignore()
+
+    def dropEvent(self, ev):  # noqa: N802 - API Qt
+        md = ev.mimeData()
+        for u in md.urls():
+            path = u.toLocalFile()
+            if path.lower().endswith(self.IMAGE_SUFFIXES):
+                self.choose_external_image(path)
+                ev.acceptProposedAction()
+                return
+        if md.hasImage():
+            self.set_image_data(md.imageData())
+            ev.acceptProposedAction()
+
+    def set_image_data(self, image) -> None:
+        """Immagine incollata o trascinata (QImage)."""
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        image.save(buf, "PNG")
+        buf.close()
+        try:
+            png, w, h, _mt = content.scale_image_bytes(bytes(ba.data()), int(self.store.option("max_image_side", 2048)))
+        except FoliantError as e:
+            self.show_error(_("Immagine"), str(e))
+            return
+        self._set_external(png, w, h)
+
+    def _set_external(self, png: bytes, w: int, h: int) -> None:
+        self._external_image = (png, w, h)
+        self._area = None
+        pm = QPixmap()
+        pm.loadFromData(png)
+        self.thumb.setPixmap(pm.scaled(300, 110, Qt.AspectRatioMode.KeepAspectRatio,
+                                       Qt.TransformationMode.SmoothTransformation))
+        self.thumb.setVisible(True)
+        self.set_function("image")
+        self.set_scope(AREA)
 
     def _anchor(self) -> tuple[int, tuple[float, float], tuple | None]:
         last = self._last
@@ -1347,7 +1415,7 @@ class AIPanel(QWidget):
 
     def accept_proposal(self) -> bool:
         last = self._last
-        if last is None or last.function != "rewrite":
+        if last is None or last.function not in ("rewrite", "translate"):
             return False
         doc = last.document
         if self.proposal_obsolete():
@@ -1420,15 +1488,7 @@ class AIPanel(QWidget):
             self.show_error(_("Immagine"), str(e) if isinstance(e, FoliantError) else
                             _("Impossibile leggere l'immagine."))
             return
-        self._external_image = (png, w, h)
-        self._area = None
-        pm = QPixmap()
-        pm.loadFromData(png)
-        self.thumb.setPixmap(pm.scaled(300, 110, Qt.AspectRatioMode.KeepAspectRatio,
-                                       Qt.TransformationMode.SmoothTransformation))
-        self.thumb.setVisible(True)
-        self.set_function("image")
-        self.set_scope(AREA)
+        self._set_external(png, w, h)
 
     # ================================================================ mappe (AI-12)
     def open_mindmap(self) -> None:

@@ -229,8 +229,13 @@ def textless_pages(pdf: pymupdf.Document, pages: list[int]) -> list[int]:
     return out
 
 
-def ocr_page(pdf: pymupdf.Document, index: int, language: str = "ita+eng", dpi: int = 200) -> tuple[str, float | None]:
-    """OCR locale della pagina: (testo, affidabilità media 0-1 o None)."""
+def ocr_page(pdf: pymupdf.Document, index: int, language: str = "ita+eng", dpi: int = 200,
+             words_out: dict | None = None) -> tuple[str, float | None]:
+    """OCR locale della pagina: (testo, affidabilità media 0-1 o None).
+
+    Con `words_out` vi registra le parole riconosciute (x0, y0, x1, y1, parola) per
+    l'eventuale salvataggio del livello di testo nel documento.
+    """
     try:  # modulo OCR dell'applicazione, se presente
         from foliant.modules.ocr import engine as ocr_engine  # type: ignore
         fn = getattr(ocr_engine, "recognize_page_text", None)
@@ -249,6 +254,8 @@ def ocr_page(pdf: pymupdf.Document, index: int, language: str = "ita+eng", dpi: 
             raise FoliantError(_("OCR non riuscito: {e}. Controlla che Tesseract e la lingua «{l}» siano installati.")
                                .format(e=e, l=language)) from e
         text = page.get_text("text", textpage=tp, sort=True)
+        if words_out is not None:
+            words_out[index] = [tuple(w[:5]) for w in page.get_text("words", textpage=tp)]
     return text.strip(), None
 
 

@@ -116,8 +116,8 @@ class TextlessDialog(QDialog):
         row.addWidget(self.language, 1)
         lay.addLayout(row)
         self.save_ocr = QCheckBox(_("Salva il testo riconosciuto nel documento"))
-        self.save_ocr.setEnabled(False)
-        self.save_ocr.setToolTip(_("Usa la modalità OCR di Foliant per rendere il PDF ricercabile."))
+        self.save_ocr.setToolTip(_("Aggiunge un livello di testo invisibile: il PDF diventa ricercabile. "
+                                   "Si può annullare."))
         lay.addWidget(self.save_ocr)
         buttons = QHBoxLayout()
         self.btn_ocr = QPushButton(_("Esegui OCR locale"))
@@ -447,12 +447,15 @@ class SettingsDialog(QDialog):
             self.verify_result.setText(_("Inserisci la chiave API."))
             return False
         try:
+            from foliant.api import run_task
             if self._verify_fn is not None:
-                models = self._verify_fn(p, key)
+                fn = self._verify_fn
             else:
-                provider = providers.make_provider(p.protocol, p.base_url, key, p.model,
-                                                   p.connect_timeout, p.idle_timeout)
-                models = provider.list_models()
+                def fn(prof, k):
+                    provider = providers.make_provider(prof.protocol, prof.base_url, k, prof.model,
+                                                       prof.connect_timeout, prof.idle_timeout)
+                    return provider.list_models()
+            models = run_task(self, _("Verifica della connessione…"), lambda _progress: fn(p, key))
         except providers.AIError as e:
             p.verified = False
             self.store.save(p)

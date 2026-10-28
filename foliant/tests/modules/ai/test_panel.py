@@ -798,3 +798,74 @@ def test_analyze_pages_without_profile(window, ai, fake, tmp_path):
     assert any(i.page == 3 and i.problem == "blank" for i in dlg.issues)
     assert not dlg.classify_button.isEnabled()
     assert fake.requests == [] and view.document.page_count == 6
+
+
+# ------------------------------------------------------------------ AI-15 salvataggio OCR, AI-06 sostituzione
+def _scan_pdf(tmp_path):
+    src = pymupdf.open()
+    sp = src.new_page(width=400, height=200)
+    sp.insert_text((30, 100), "Orologio meccanico", fontsize=30)
+    pix = sp.get_pixmap(dpi=200)
+    doc = pymupdf.open()
+    p = doc.new_page(width=400, height=200)
+    p.insert_image(p.rect, pixmap=pix)
+    path = tmp_path / "scansione.pdf"
+    doc.save(str(path))
+    return str(path)
+
+
+def test_ocr_temporary_then_saved(qtbot, window, ready, fake, tmp_path):
+    view = window.open_path(_scan_pdf(tmp_path))
+    panel = ready.panel
+    panel.set_function("summary")
+    panel.set_scope("document")
+    panel.ask_textless = lambda pages, ok: ("ocr", "eng", False)
+    panel.send()
+    wait_done(qtbot, panel)
+    assert "Orologio" in fake.all_text() or "Orolog" in fake.all_text()
+    assert not view.document.is_modified
+    panel.ask_textless = lambda pages, ok: ("ocr", "eng", True)
+    panel.send()
+    wait_done(qtbot, panel)
+    assert view.document.is_modified
+    assert "Orolog" in view.document.page_text(0)
+    view.document.undo()
+    assert "Orolog" not in view.document.page_text(0)
+
+
+def test_translate_selection_replace_in_document(qtbot, window, ready, fake, tmp_path):
+    view, panel = None, ready.panel
+    path = tmp_path / "tr.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Buongiorno a tutti", fontsize=12, fontname="helv")
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    select_words(view, 0, lambda w: w in ("Buongiorno", "a", "tutti"))
+    fake.responses = ["Good morning everyone"]
+    panel.set_function("translate")
+    panel.set_scope("selection")
+    panel.send()
+    wait_done(qtbot, panel)
+    assert panel.proposal_box.isVisibleTo(panel)
+    assert panel.accept_proposal()
+    assert "Good morning everyone" in view.document.page_text(0)
+
+
+def test_copy_formatted_and_dropped_image(qtbot, window, ready, fake, sample_pdf):
+    from PySide6.QtGui import QGuiApplication, QImage
+    window.open_path(sample_pdf)
+    fake.responses = ["**Grassetto** e testo"]
+    panel = ready.panel
+    panel.send("x")
+    wait_done(qtbot, panel)
+    panel.copy_result()
+    md = QGuiApplication.clipboard().mimeData()
+    assert md.text() == "Grassetto e testo" and "<b>Grassetto</b>" in md.html()
+    QGuiApplication.clipboard().clear()
+    img = QImage(3000, 1000, QImage.Format.Format_RGB32)
+    img.fill(0xFFFFFF)
+    panel.set_image_data(img)
+    assert panel.function_key() == "image" and panel._external_image[1] == 2048
+    panel.send("cosa vedi?")
+    wait_done(qtbot, panel)
+    assert fake.requests[-1].image_count() == 1

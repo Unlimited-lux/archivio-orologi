@@ -267,3 +267,22 @@ def add_replacement_annotation(document: Document, page: int, rects: list, propo
         annot = p.add_strikeout_annot(quads=quads)
         annot.set_info(title=_author(author), subject=_("Sostituzione testo"), content=proposed)
         annot.update()
+
+
+def add_ocr_layer(document: Document, words_by_page: dict[int, list[tuple]]) -> int:
+    """Livello di testo invisibile sopra le scansioni (rende il PDF ricercabile). Un solo «Annulla»."""
+    n = 0
+    with document.change(_("Salva il testo riconosciuto")) as pdf:
+        font = pymupdf.Font("helv")
+        for index, words in words_by_page.items():
+            page = pdf[index]
+            for x0, y0, x1, y1, word in words:
+                h = max(1.0, y1 - y0)
+                fs = h * 0.85
+                width = font.text_length(word, fontsize=fs) or 1.0
+                # larghezza adattata al riquadro riconosciuto
+                morph = (pymupdf.Point(x0, y1), pymupdf.Matrix((x1 - x0) / width, 1)) if width else None
+                page.insert_text((x0, y1 - h * 0.2), word, fontsize=fs, fontname="helv", render_mode=3,
+                                 morph=morph)
+                n += 1
+    return n
