@@ -317,10 +317,32 @@ def test_piece_info_preserved(window, tmp_path, quiet, qtbot):
 
 
 def test_scanned_page_suggests_ocr(window, scanned_pdf, quiet, qtbot):
+    quiet["answer"] = False
     view = open_in_edit_mode(window, scanned_pdf)
     click(qtbot, view, 0, 200, 150)
     assert any("OCR" in m for m in quiet["status"])
+    assert any("scansione" in m for _t, m in quiet["confirms"])
     assert not view.document.is_modified
+
+
+def test_accepted_ocr_proposal_makes_page_editable(window, tmp_path, quiet, qtbot):
+    """bug_09: accettando la proposta, l'OCR rende la pagina modificabile senza riaprire il documento."""
+    import shutil
+    if not shutil.which("tesseract") or getattr(window.ctx, "ocr", None) is None:
+        pytest.skip("OCR non disponibile")
+    from .conftest import render_text_image
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_image(pymupdf.Rect(0, 0, 595, 842),
+                      stream=render_text_image("Contratto 2019", size=(794, 1123), fontsize=60))
+    path = tmp_path / "scansione_testo.pdf"
+    doc.save(str(path))
+    doc.close()
+    quiet["answer"] = True
+    view = open_in_edit_mode(window, str(path))
+    ctrl = ctrl_of(window)
+    blocks = ctrl.blocks(view, 0)
+    assert blocks and any("2019" in b.text for b in blocks), (quiet, view.document.page_text(0))
 
 
 def test_ocr_layer_correction_from_ui(window, ocr_pdf, quiet, qtbot):

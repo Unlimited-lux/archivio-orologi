@@ -170,4 +170,8 @@ EN: dict[str, str] = {
     "Testo inserito; elementi omessi: {n} (immagini o oggetti).":
         "Text inserted; omitted items: {n} (images or objects).",
     "Il testo si sovrappone ad altro contenuto della pagina.": "The text overlaps other content on the page.",
+    "Pagina senza testo": "Page without text",
+    "La pagina {n} sembra una scansione e non contiene testo modificabile.\n\nEseguire ora l'OCR della pagina per rendere il testo modificabile?":
+        "Page {n} looks like a scan and contains no editable text.\n\nRun OCR on the page now to make the text editable?",
+    "OCR": "OCR",
 }

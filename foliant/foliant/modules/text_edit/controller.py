@@ -68,6 +68,7 @@ class TextEditController(QObject):
         self._grouping: dict[tuple, tuple[list, set]] = {}
         self._grouping_version = 0
         self._filtered: dict[int, object] = {}
+        self._ocr_asked: set[tuple] = set()
         self.clipboard: dict | None = None
         self.last_substitutions: list = []
         self.last_change: tuple | None = None   # (vista, pagina, bbox) dell'ultima modifica
@@ -318,8 +319,35 @@ class TextEditController(QObject):
             self.ctx.status(_("Questa pagina non contiene testo riconosciuto (forse è una scansione): "
                               "usa l'OCR per renderla modificabile."), 10000)
             self.ocr_suggested = page
+            self.propose_ocr(view, page)
         else:
             self.ocr_suggested = None
+
+    def propose_ocr(self, view, page: int) -> bool:
+        """Proposta accettabile di OCR modificabile della pagina scansionata (TXT-15), una volta per pagina."""
+        key = (id(view.document), page)
+        if key in self._ocr_asked:
+            return False
+        self._ocr_asked.add(key)
+        if not self.ctx.confirm(_("Pagina senza testo"),
+                                _("La pagina {n} sembra una scansione e non contiene testo modificabile.\n\n"
+                                  "Eseguire ora l'OCR della pagina per rendere il testo modificabile?")
+                                .format(n=page + 1)):
+            return False
+        ocr = getattr(self.ctx, "ocr", None)
+        if ocr is None or not hasattr(ocr, "run"):
+            # modulo OCR non disponibile con API diretta: si apre la sua modalità
+            if self.ctx.mode("ocr") is not None:
+                self.ctx.set_mode("ocr")
+            return False
+        try:
+            from ..ocr import engine as ocr_engine
+            opts = ocr_engine.OcrOptions(mode=ocr_engine.EDITABLE)
+            ocr.run(view, opts, [page], preview=False)
+        except Exception as e:
+            self.ctx.error(_("OCR"), _("Operazione non riuscita: {e}").format(e=e))
+            return False
+        return bool(self.blocks(view, page))
 
     ocr_suggested: int | None = None
 
