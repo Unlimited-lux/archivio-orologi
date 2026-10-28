@@ -27,6 +27,20 @@ class ToolsModule:
     def open_session(self):
         return self.compare.open_session()
 
+    def compare_text(self):
+        from .text_compare import TextCompareDialog
+        dlg = TextCompareDialog(self.ctx, self.ctx.window)
+        dlg.show()
+        self._text_dialog = dlg
+        return dlg
+
+    def show_revisions(self):
+        from .revisions import RevisionsDialog
+        dlg = RevisionsDialog(self.ctx, self.ctx.current_view())
+        dlg.show()
+        self._revisions_dialog = dlg
+        return dlg
+
     # ---------------------------------------------------------------- in blocco
     def show_batch(self):
         from .batch_ui import BatchWidget
@@ -51,11 +65,17 @@ def register(ctx) -> None:
     act_show = ctx.action(_("Mostra confronto"), "diff", module.show_compare, requires_document=False)
     act_session = ctx.action(_("Apri sessione di confronto"), "folder-open", module.open_session,
                              requires_document=False)
+    act_text = ctx.action(_("Confronta testo"), "file-diff", module.compare_text, requires_document=False,
+                          tooltip=_("Confronta due testi incollati o caricati da file"))
+    act_revisions = ctx.action(_("Revisioni"), "history", module.show_revisions,
+                               tooltip=_("Confronta le revisioni salvate nello stesso file"))
     act_batch = ctx.action(_("Operazioni in blocco"), "layers", module.show_batch, requires_document=False,
                            tooltip=_("Applica operazioni a molti file"))
     mode.add_action(act_compare)
     mode.add_action(act_show)
     mode.add_action(act_session)
+    mode.add_action(act_text)
+    mode.add_action(act_revisions)
     mode.add_separator()
     mode.add_action(act_batch)
     ctx.add_menu_action(act_compare, _("Strumenti"))
@@ -65,5 +85,6 @@ def register(ctx) -> None:
     ctx.add_home_action(_("Operazioni in blocco"), "layers", module.show_batch,
                         _("Comprimi, proteggi, numera, unisci molti file insieme"), order=101)
 
-    module.actions = {"compare": act_compare, "show": act_show, "session": act_session, "batch": act_batch}
+    module.actions = {"compare": act_compare, "show": act_show, "session": act_session, "batch": act_batch,
+                      "text": act_text, "revisions": act_revisions}
     module.mode = mode

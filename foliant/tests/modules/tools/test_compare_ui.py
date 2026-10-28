@@ -357,3 +357,17 @@ def test_review_statuses_filter_report_and_session(window, pdf_builder, tmp_path
     monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(m))
     assert controller(window).open_session(str(newer)) is None
     assert errors and "99" in errors[0]
+
+
+def test_text_and_revision_actions(window, pdf_builder):
+    module = window.ctx.tools_module
+    assert module.actions["text"].isEnabled()
+    dlg = module.compare_text()
+    assert dlg.isVisible()
+    dlg.close()
+    view = window.open_path(pdf_builder([page_lines(1)]))
+    assert module.actions["revisions"].isEnabled()
+    rd = module.show_revisions()
+    assert rd.isVisible()
+    rd.close()
+    del view

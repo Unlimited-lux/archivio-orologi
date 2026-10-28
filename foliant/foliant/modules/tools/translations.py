@@ -614,4 +614,6 @@ EN: dict[str, str] = {
     "rifiutate": "rejected",
     "senza stato": "no status",
     "{n} revisioni trovate.": "{n} revisions found.",
+    "Confronta due testi incollati o caricati da file": "Compare two pasted or loaded texts",
+    "Confronta le revisioni salvate nello stesso file": "Compare the revisions saved in the same file",
 }
