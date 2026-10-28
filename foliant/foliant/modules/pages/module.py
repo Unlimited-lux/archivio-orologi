@@ -203,6 +203,10 @@ class PagesController:
             except Exception:
                 return False
 
+    def sign_handles_warnings(self) -> bool:
+        """True se il modulo Firma è caricato: gestisce lui firme e certificazioni."""
+        return self.ctx.mode("firma") is not None
+
     def is_certified_locked(self, document: Document) -> bool:
         """Certificazione (DocMDP) che non consente modifiche (/P 1)."""
         with ENGINE_LOCK:
@@ -229,6 +233,8 @@ class PagesController:
                              "Sbloccalo con la password del proprietario."))
             return False
         key = id(document)
+        if self.sign_handles_warnings():
+            return True   # il modulo Firma avvisa prima della modifica (SIG-21): un solo avviso (UX-13)
         if key not in self._signed_ack and self.is_certified_locked(document):
             if not self.ctx.confirm(_("Documento certificato"),
                                     _("Il documento è certificato e il suo autore non consente modifiche. "
@@ -575,12 +581,14 @@ class PagesController:
             return True
         if not hidden:
             return True
-        self._crop_warned.add(key)
-        return self.ctx.confirm(
+        ok = self.ctx.confirm(
             _("Contenuto nascosto dal ritaglio"),
             _("Alcune pagine sono ritagliate: il testo fuori dall'area visibile resta nel file e può essere "
               "copiato o cercato. Per eliminarlo davvero usa l'appiattimento o la sanificazione nella modalità "
               "Proteggi.\n\nSalvare comunque?"))
+        if ok:
+            self._crop_warned.add(key)   # solo dopo un «Sì»: un «No» deve richiedere di nuovo
+        return ok
 
     # ================================================================ PAG-40
     def find_blank_and_duplicates(self, mode: str = "identical") -> list[int]:

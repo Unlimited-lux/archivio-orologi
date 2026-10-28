@@ -228,16 +228,30 @@ def test_cyclic_page_tree_handled(window, tmp_path, monkeypatch):
 
 
 def test_save_guard_warns_on_hidden_cropped_text(window, tmp_path, monkeypatch):
-    """PAG-25: al salvataggio avvisa che il testo fuori dal ritaglio resta nel file; «No» annulla."""
-    view = window.open_path(save_numbered(tmp_path / "rit.pdf", 2))
-    with view.document.change("ritaglia") as pdf:
-        pdf[0].set_cropbox(pymupdf.Rect(0, 300, 595, 842))     # nasconde «P1» in alto
-    asked = []
-    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(t) or False)
-    assert window.ctx.run_guards("save", view, {}) is False
-    assert asked == ["Contenuto nascosto dal ritaglio"]
-    # già avvisato per questa versione: non chiede di nuovo
-    assert window.ctx.run_guards("save", view, {}) is True
+    """PAG-25: al salvataggio avvisa che il testo fuori dal ritaglio resta nel file.
+    «No» annulla e al salvataggio successivo chiede di nuovo; dopo «Sì» non chiede più."""
+    import hashlib
+    path = tmp_path / "rit.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 780), "nascosto in basso", fontsize=12)
+    d[0].set_cropbox(pymupdf.Rect(0, 0, 595, 600))
+    d.save(str(path))
+    view = window.open_path(str(path))
+    with view.document.change("modifica") as pdf:
+        pdf[0].insert_text((72, 100), "nuovo")
+    md5 = hashlib.md5(path.read_bytes()).hexdigest()
+    answers = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: answers.append(t) or answers_queue.pop(0))
+    answers_queue = [False, False, True]
+    window.save_view(view)
+    assert answers == ["Contenuto nascosto dal ritaglio"]
+    assert hashlib.md5(path.read_bytes()).hexdigest() == md5
+    window.save_view(view)
+    assert len(answers) == 2 and hashlib.md5(path.read_bytes()).hexdigest() == md5
+    assert window.save_view(view)
+    assert len(answers) == 3 and hashlib.md5(path.read_bytes()).hexdigest() != md5
+    window.save_view(view)          # già confermato per questa versione
+    assert len(answers) == 3
 
 
 def test_unlock_uses_document_api(window, tmp_path, monkeypatch):
@@ -271,3 +285,15 @@ def test_selected_pages_provider_only_in_pages_mode(pages_window):
     assert window.selected_pages_provider is c._previous_provider   # torna quello del viewer
     window.set_mode("pagine")
     assert window.selected_pages_provider == c._selection_provider
+
+
+def test_signed_document_single_warning_with_sign_module(pages_window, monkeypatch):
+    """Con il modulo Firma caricato l'avviso di invalidazione è uno solo: quello di Firma."""
+    window, view = pages_window
+    c = window.ctx.pages_controller
+    assert c.sign_handles_warnings()
+    monkeypatch.setattr(type(c), "is_signed", lambda self, d: True)
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(t) or True)
+    assert c.confirm_structural(view.document)
+    assert "Documento firmato" not in asked
