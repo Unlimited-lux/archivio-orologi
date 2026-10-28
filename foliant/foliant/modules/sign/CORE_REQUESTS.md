@@ -73,3 +73,10 @@ revisione si apre come documento nuovo, senza percorso: per salvarla bisogna sce
 
 Firma digitata e autore delle annotazioni usano `settings().value("user/name")`. Servirebbe una voce
 «Nome» nelle preferenze generali del nucleo.
+
+## 6. Avviso per le firme obbligatorie mancanti prima di stampa, invio e «Salva con nome» (SIG-20)
+
+Il modulo offre `ctx.sign_controller.confirm_unsigned_required(view, "Stampa")`, che restituisce False se
+l'utente annulla. Serve che il nucleo (Salva con nome) e i moduli che stampano o inviano per e-mail lo
+chiamino prima di procedere. In alternativa basta un aggancio generico
+`Context.add_before_output_hook(fn(view, azione) -> bool)`.

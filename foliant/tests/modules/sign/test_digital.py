@@ -587,3 +587,14 @@ def test_timestamp_auth_passed_to_client(pdf_bytes, id_a, monkeypatch):
         d.sign_pdf(pdf_bytes, id_a[2], d.SignOptions(timestamp_url="https://tsa.example.org",
                                                      timestamp_auth=("mario", "pw")))
     assert seen.get("auth") == ("mario", "pw")
+
+
+def test_field_digest_method_constraint(pdf_bytes, id_a):
+    data, _n = d.add_signature_field(pdf_bytes, "Cliente", 0, (300, 700, 500, 760), digest_methods=["sha512"])
+    f = d.signature_fields(data)[0]
+    assert f.digest_methods == ["sha512"]
+    out = d.sign_pdf(data, id_a[2], d.SignOptions(field_name="Cliente"))      # sha256 richiesto → sha512
+    st = d.verify_pdf(out, trusted=[id_a[1]])[0]
+    assert st.status == "valida" and st.md_algorithm == "sha512"
+    with pytest.raises(d.SignError):
+        d.add_signature_field(pdf_bytes, "X", 0, (10, 10, 100, 40), digest_methods=["md5"])

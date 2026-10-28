@@ -519,6 +519,11 @@ class FieldDialog(QDialog):
         for lvl, label in LEVELS:
             self.mdp.addItem(_(label), lvl)
         form.addRow(_("Certificazione richiesta:"), self.mdp)
+        self.digest = QComboBox()
+        self.digest.addItem(_("Qualsiasi"), None)
+        for alg in ("sha256", "sha384", "sha512"):
+            self.digest.addItem(alg.upper().replace("SHA", "SHA-"), [alg])
+        form.addRow(_("Algoritmo di hash richiesto:"), self.digest)
         self.pages = QLineEdit()
         self.pages.setPlaceholderText(_("solo questa pagina; es. «tutte» o «1-3,7»"))
         form.addRow(_("Duplica sulle pagine:"), self.pages)
@@ -1139,7 +1144,7 @@ TRANSLATIONS_EN = {
     "Questo campo accetta solo certificati emessi da: {who}": "This field only accepts certificates issued by: {who}",
     "Il campo non accetta certificati emessi da «{who}».": "The field does not accept certificates issued by “{who}”.",
     "motivi separati da punto e virgola (facoltativo)": "reasons separated by semicolons (optional)",
-    "Motivi ammessi:": "Allowed reasons:", "Nessuno (firma di approvazione)": "None (approval signature)",
+    "Motivi ammessi:": "Allowed reasons:", "Algoritmo di hash richiesto:": "Required hash algorithm:", "Nessuno (firma di approvazione)": "None (approval signature)",
     "Certificazione richiesta:": "Required certification:", "Duplica sulle pagine:": "Duplicate on pages:",
     "solo questa pagina; es. «tutte» o «1-3,7»": "this page only; e.g. “tutte” or “1-3,7”", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
     "Emittente ammesso:": "Allowed issuer:", "Certificato dell'emittente ammesso": "Certificate of the allowed issuer",

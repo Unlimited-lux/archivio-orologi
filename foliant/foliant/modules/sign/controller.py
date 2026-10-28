@@ -434,6 +434,21 @@ class SignController(QObject):
     def empty_fields(self, view) -> list:
         return [f for f in self.state(view).fields if not f.signed]
 
+    def missing_required_signatures(self, view) -> list:
+        """Campi firma obbligatori, visibili e non firmati (SIG-20)."""
+        return [f for f in self.empty_fields(view) if f.required and not f.hidden]
+
+    def confirm_unsigned_required(self, view, action: str) -> bool:
+        """Da chiamare prima di stampare, inviare o salvare con nome: avvisa se mancano
+        firme obbligatorie. Restituisce True se si può procedere."""
+        missing = self.missing_required_signatures(view)
+        if not missing:
+            return True
+        names = "\n".join(f"• {f.tooltip or f.name}" for f in missing)
+        return self.ctx.confirm(_("Firme mancanti"), _(
+            "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con "
+            "«{action}»?").format(names=names, action=action))
+
     # ============================================ salvataggio incrementale (SIG-21)
     def _install_incremental_save(self, doc: Document, st: VerifyState) -> None:
         """Per i documenti firmati «Salva» e «Salva una copia» accodano solo le
@@ -804,7 +819,8 @@ class SignController(QObject):
                     tooltip=dlg.tooltip.text().strip(), timestamp_url=dlg.tsa.text().strip() or None,
                     timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
                     lock_action=lock_action, allowed_reasons=dlg.allowed_reasons(),
-                    allowed_issuers=dlg.issuers or None, certify_level=dlg.mdp.currentData())
+                    allowed_issuers=dlg.issuers or None, certify_level=dlg.mdp.currentData(),
+                    digest_methods=dlg.digest.currentData())
                 names.append(name)
             name = names[0]
         except digital.SignError as e:
@@ -981,6 +997,9 @@ TRANSLATIONS_EN = {
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
     "Operazione non riuscita: {e}": "Operation failed: {e}",
+    "Firme mancanti": "Missing signatures",
+    "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con «{action}»?":
+        "The document has required signature fields not yet signed:\n\n{names}\n\nProceed with “{action}” anyway?",
     "Verifica online della revoca in corso…": "Online revocation check in progress…",
     "L'elemento della libreria non è utilizzabile: {e}": "The library item cannot be used: {e}",
     "Impossibile leggere «{p}»: {e}. Il file è stato spostato o eliminato? Salvalo di nuovo e riprova.":

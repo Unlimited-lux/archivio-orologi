@@ -883,3 +883,20 @@ def test_timestamp_wrong_credentials_asks_again(window, monkeypatch, sample_pdf,
     monkeypatch.setattr(digital, "sign_pdf", sign)
     assert c.digital_sign(view, invisible=True)
     assert attempts == [("mario", "sbagliata"), ("mario", "giusta")]
+
+
+def test_required_unsigned_fields_warning(window, monkeypatch, tmp_path):
+    """SIG-20: prima di stampare/inviare un documento con campi obbligatori non firmati compare l'avviso."""
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "obb.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Cliente", 0, (300, 700, 500, 760), required=True,
+                                           tooltip="Firma del cliente")
+    p = tmp_path / "obbligatorio.pdf"
+    p.write_bytes(data)
+    view = window.open_path(str(p))
+    c = _ctl(window)
+    assert [f.name for f in c.missing_required_signatures(view)] == ["Cliente"]
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(m) or False)
+    assert c.confirm_unsigned_required(view, "Invia per e-mail") is False
+    assert "Firma del cliente" in asked[0] and "Invia per e-mail" in asked[0]
