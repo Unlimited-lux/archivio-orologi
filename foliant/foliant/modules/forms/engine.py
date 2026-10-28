@@ -1343,7 +1343,7 @@ def blank_signature_appearance(pdf: pymupdf.Document, page: int, xref: int) -> N
     if bg:
         ops.append(" ".join(_n(x) for x in bg) + f" {op_fill[len(bg)]} 0 0 {_n(w)} {_n(h)} re f")
     bw = 0.0
-    if pdf.xref_get_key(xref, "BS/W")[0] in ("int", "real"):
+    if pdf.xref_get_key(xref, "BS/W")[0] in ("int", "real", "float"):
         bw = float(pdf.xref_get_key(xref, "BS/W")[1])
     if bc and bw > 0:
         dash = "[3 2] 0 d " if pdf.xref_get_key(xref, "BS/S")[1] == "/D" else ""
