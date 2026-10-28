@@ -874,7 +874,7 @@ class Controller:
             for a in mode.toolbar.actions():
                 if not a.isSeparator():
                     actions.append((mode_id, a))
-        return commands.builtin_tools(self.ctx) + commands.catalog_from_actions(actions)
+        return commands.builtin_tools(self.ctx, self.exec_dialog) + commands.catalog_from_actions(actions)
 
     def open_commands(self, request: str | None = None):
         from . import commands
