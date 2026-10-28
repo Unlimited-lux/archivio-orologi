@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pymupdf
+import pytest
 
 from foliant.modules.tools import compare_engine as ce
 from foliant.modules.tools import revisions as rv
@@ -64,3 +65,36 @@ def test_dialog(window, tmp_path, pdf_builder, monkeypatch):
     single = window.open_path(pdf_builder([page_lines(3)]))
     dlg2 = rv.RevisionsDialog(window.ctx, single)
     assert not dlg2.compare_button.isEnabled() and "una sola revisione" in dlg2.message.text()
+
+
+def _sign(tmp_path, data, name):
+    from foliant.modules.sign import digital
+    p12 = tmp_path / f"{name}.p12"
+    digital.create_self_signed(p12, "segreta", common_name=name)
+    ident = digital.load_pkcs12(str(p12), "segreta")
+    return digital.sign_pdf(data, ident, digital.SignOptions())
+
+
+def test_real_signatures_signer_date_and_changes_after(tmp_path, pdf_builder):
+    """CMP-14: contratto firmato dal venditore, poi dall'acquirente, poi modificato."""
+    pytest.importorskip("pyhanko")
+    path = pdf_builder([page_lines(1)])
+    data = _sign(tmp_path, open(path, "rb").read(), "Mario Rossi")
+    data = _sign(tmp_path, data, "Laura Bianchi")
+    tmp = tmp_path / "firmato.pdf"
+    tmp.write_bytes(data)
+    doc = pymupdf.open(str(tmp))
+    doc[0].add_text_annot((100, 100), "Prezzo modificato").update()
+    doc.save(str(tmp), incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP)
+    doc.close()
+    data = tmp.read_bytes()
+    revs = rv.list_revisions(data)
+    signed = [r for r in revs if r.signed]
+    assert [r.signer for r in signed] == ["Mario Rossi", "Laura Bianchi"]
+    assert all(r.date for r in signed)
+    assert "Laura Bianchi" in signed[-1].label
+    sig = rv.signed_revision(data)
+    assert sig.number == signed[-1].number and sig.number < revs[-1].number
+    r = ce.run_compare(None, ce.SideInput(rv.revision_bytes(data, sig), "Firmata"),
+                       ce.SideInput(data, "Attuale"), ce.CompareOptions(dpi=72))
+    assert any(d.kind == ce.ANNOTATION and d.text_b == "Prezzo modificato" for d in r.differences)

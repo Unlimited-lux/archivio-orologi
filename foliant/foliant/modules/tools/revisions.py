@@ -28,6 +28,7 @@ class Revision:
     date: str = ""                # data leggibile (/ModDate o firma)
     signed: bool = False
     byte_range: tuple | None = None
+    signer: str = ""              # /Name del dizionario della firma
 
     @property
     def label(self) -> str:
@@ -35,7 +36,7 @@ class Revision:
         if self.date:
             parts.append(self.date)
         if self.signed:
-            parts.append(_("firmata"))
+            parts.append(_("firmata da {nome}").format(nome=self.signer) if self.signer else _("firmata"))
         return " · ".join(parts)
 
 
@@ -54,6 +55,41 @@ def byte_ranges(data: bytes) -> list[tuple[int, int, int, int]]:
     return [tuple(int(x) for x in m.groups()) for m in _BYTE_RANGE.finditer(data)]
 
 
+_PDF_STRING = rb"\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]*>"
+
+
+def _pdf_text(raw: bytes) -> str:
+    """Stringa PDF letterale o esadecimale → testo (UTF-16 con BOM o PDFDocEncoding)."""
+    if raw.startswith(b"<"):
+        try:
+            b = bytes.fromhex(re.sub(rb"\s", b"", raw[1:-1]).decode())
+        except ValueError:
+            return ""
+    else:
+        b = re.sub(rb"\\([nrtbf()\\])", lambda m: {b"n": b"\n", b"r": b"\r", b"t": b"\t", b"b": b"\b",
+                                                     b"f": b"\f"}.get(m.group(1), m.group(1)), raw[1:-1])
+        b = re.sub(rb"\\([0-7]{1,3})", lambda m: bytes([int(m.group(1), 8) & 255]), b)
+    if b.startswith(b"\xfe\xff"):
+        return b[2:].decode("utf-16-be", "replace")
+    return b.decode("latin-1")
+
+
+def signature_info(data: bytes, br_match_start: int) -> tuple[str, str]:
+    """(firmatario, data) dal dizionario della firma che contiene il /ByteRange."""
+    start = data.rfind(b" obj", 0, br_match_start)
+    end = data.find(b"endobj", br_match_start)
+    if start < 0 or end < 0:
+        return "", ""
+    chunk = data[start:end]
+    if b"/Contents" not in chunk:   # non è un dizionario di firma
+        return "", ""
+    out = []
+    for key in (rb"/Name", rb"/M"):
+        m = re.search(key + rb"\s*(" + _PDF_STRING + rb")", chunk)
+        out.append(_pdf_text(m.group(1)) if m else "")
+    return out[0].strip(), _pdf_date(out[1])
+
+
 def list_revisions(data: bytes) -> list[Revision]:
     """Revisioni contenute nel file, dalla più vecchia alla più recente."""
     ends = []
@@ -67,6 +103,10 @@ def list_revisions(data: bytes) -> list[Revision]:
         ends.append(len(data))   # dati dopo l'ultimo %%EOF (file non terminato correttamente)
     ranges = byte_ranges(data)
     signed_ends = {r[2] + r[3] for r in ranges}
+    sig_info = {}
+    for m in _BYTE_RANGE.finditer(data):
+        r = tuple(int(x) for x in m.groups())
+        sig_info.setdefault(r, signature_info(data, m.start()))
     revisions: list[Revision] = []
     for end in ends:
         chunk = data[:end]
@@ -83,7 +123,11 @@ def list_revisions(data: bytes) -> list[Revision]:
                 doc.close()
         signed = any(abs(se - end) <= 2 for se in signed_ends)
         br = next((r for r in ranges if abs(r[2] + r[3] - end) <= 2), None)
-        revisions.append(Revision(len(revisions) + 1, end, date, signed, br))
+        signer = ""
+        if br is not None:
+            signer, sig_date = sig_info.get(br, ("", ""))
+            date = sig_date or date   # la data della firma è quella che conta
+        revisions.append(Revision(len(revisions) + 1, end, date, signed, br, signer))
     if not revisions:
         raise DocumentError(_("Struttura dei riferimenti incrociati danneggiata: revisioni non determinabili."))
     return revisions
@@ -93,15 +137,20 @@ def revision_bytes(data: bytes, rev: Revision) -> bytes:
     return data[:rev.end]
 
 
+def signed_revisions(data: bytes) -> list[Revision]:
+    """Tutte le revisioni chiuse da una firma (più firme in successione)."""
+    return [r for r in list_revisions(data) if r.signed]
+
+
 def signed_revision(data: bytes) -> Revision | None:
-    """La revisione coperta dalla prima firma (la «versione firmata»)."""
-    ranges = byte_ranges(data)
-    if not ranges:
-        return None
-    end = ranges[0][2] + ranges[0][3]
+    """La «versione firmata» con cui confrontare il file attuale: l'ultima revisione firmata
+    seguita da modifiche (con più firme, quella dopo cui il documento è cambiato)."""
     revs = list_revisions(data)
-    best = min(revs, key=lambda r: abs(r.end - end))
-    return best if abs(best.end - end) <= 2 else None
+    signed = [r for r in revs if r.signed]
+    if not signed:
+        return None
+    before_last = [r for r in signed if r.number != revs[-1].number]
+    return (before_last or signed)[-1]
 
 
 class RevisionsDialog(QDialog):

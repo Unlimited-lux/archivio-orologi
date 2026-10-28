@@ -43,7 +43,7 @@ Test: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/modules/too
 | CMP-11 | P2 | fatto | cu: `test_review_statuses_filter_report_and_session` | Stati Accettata/Rifiutata/Da verificare e note (menu contestuale dell'elenco), filtro e contatori per stato, sessione con controllo della versione dello schema. Manca la richiesta della nuova posizione di un file spostato. |
 | CMP-12 | P1 | fatto | ce: `test_scan_preset_uses_ocr_in_memory`, `test_scan_preset_without_ocr_falls_back`, `test_swapped_pages_matched_by_content`; cu: `test_setup_proposes_active_document_and_swaps` | Preset Testo, Presentazione, Disegno tecnico, Scansione (OCR in memoria tramite `foliant.modules.ocr.engine.ocr_pdf_bytes`). Con il vero modulo OCR le differenze su parole a bassa affidabilità sono marcate «incerte», filtrabili, e il riepilogo indica la percentuale di parole incerte (ce: `test_scan_preset_marks_uncertain_differences`, `test_scan_preset_with_real_ocr_module`; cu: `test_uncertain_filter`). |
 | CMP-13 | P2 | fatto | tc: tutti | Confronto di testo semplice per riga/parola/carattere, diff unificato verificato con `patch`. |
-| CMP-14 | P2 | parziale | rv: tutti | Revisioni da `%%EOF`; data solo da /ModDate; versione firmata individuata dal /ByteRange (testata con un /ByteRange simulato). |
+| CMP-14 | P2 | fatto | rv: tutti | Revisioni da `%%EOF`; data della firma (/M) o /ModDate; firmatario (/Name) nell’elenco; più firme in successione; «versione firmata» = ultima revisione firmata seguita da modifiche. Testato con firme reali del modulo Firma. |
 
 ## Operazioni in blocco
 

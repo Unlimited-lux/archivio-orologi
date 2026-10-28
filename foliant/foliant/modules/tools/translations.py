@@ -849,4 +849,5 @@ EN: dict[str, str] = {
     "compilato": "filled",
     "dati": "data",
     "{n} campi compilati": "{n} fields filled",
+    "firmata da {nome}": "signed by {nome}",
 }
