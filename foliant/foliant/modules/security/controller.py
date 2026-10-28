@@ -49,6 +49,19 @@ def ask_policy_passwords(parent, policy) -> tuple[str, str] | None:
     return dlg.passwords() if dlg.exec() == QDialog.DialogCode.Accepted else None
 
 
+def ask_envelope_password(parent) -> str | None:
+    dlg = D.PasswordPairDialog(_("Password degli allegati"),
+                               _("Le pagine restano leggibili da tutti; per aprire o estrarre gli allegati servirà "
+                                 "questa password. Nomi e descrizioni degli allegati restano visibili."), parent)
+    return dlg.pw.text() if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def choose_envelope_files(parent) -> list[str]:
+    from PySide6.QtWidgets import QFileDialog
+    files, _f = QFileDialog.getOpenFileNames(parent, _("File da mettere nella busta"), "", _("Tutti i file (*)"))
+    return files
+
+
 def choose_files(parent) -> tuple[list[str], str | None] | None:
     """File PDF da proteggere e cartella di destinazione (None = accanto agli originali)."""
     from PySide6.QtWidgets import QFileDialog
@@ -339,6 +352,66 @@ class SecurityController:
         from .applock import LockDialog
         lock = getattr(self, "applock", None)
         return lock is not None and run_dialog(LockDialog(lock, self.parent))
+
+    # ------------------------------------------------- busta di sicurezza (SEC-10)
+    def save_envelope(self) -> bool:
+        """Proteggi › Cifra solo gli allegati: salva una copia in cui solo i file
+        incorporati richiedono la password."""
+        from . import envelope as E
+        doc = self.document()
+        if doc is None:
+            return False
+        with ENGINE_LOCK:
+            has = E.has_attachments(doc.pdf)
+        if not has:
+            self.ctx.info(_("Cifra solo gli allegati"),
+                          _("Il documento non ha allegati. Con «Crea busta di sicurezza» puoi preparare un PDF con i "
+                            "file da inviare."))
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        pw = ask_envelope_password(self.parent)
+        if pw is None:
+            return False
+        path = self.ctx.ask_save_path(_("Salva busta di sicurezza"), f"{Path(doc.display_name).stem}{_('_busta')}.pdf")
+        if not path:
+            return False
+        with ENGINE_LOCK:
+            data = doc.pdf.tobytes(garbage=1, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
+        return self._write_envelope(data, pw, path)
+
+    def create_envelope(self, files: list[str] | None = None) -> bool:
+        """Proteggi › Crea busta di sicurezza: nuovo PDF con copertina e i file scelti."""
+        from . import envelope as E
+        files = files if files is not None else choose_envelope_files(self.parent)
+        if not files:
+            return False
+        pw = ask_envelope_password(self.parent)
+        if pw is None:
+            return False
+        path = self.ctx.ask_save_path(_("Salva busta di sicurezza"), _("busta.pdf"))
+        if not path:
+            return False
+        try:
+            cover = E.cover_document(files)
+            data = cover.tobytes(garbage=1, deflate=True)
+            cover.close()
+        except OSError as e:
+            self.ctx.error(_("Busta non creata"), _("Impossibile leggere il file: {e}").format(e=e.strerror))
+            return False
+        return self._write_envelope(data, pw, path)
+
+    def _write_envelope(self, data: bytes, password: str, path: str) -> bool:
+        from . import envelope as E
+        try:
+            out = E.encrypt_attachments(data, password)
+            with open(path, "wb") as f:
+                f.write(out)
+        except Exception as e:
+            self.ctx.error(_("Busta non creata"), str(e))
+            return False
+        self.ctx.status(_("Busta di sicurezza salvata: {n}").format(n=os.path.basename(path)))
+        return True
 
     # ------------------------------------------------------------ policy
     def policy_store(self) -> POL.PolicyStore:
@@ -1471,6 +1544,13 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
         elif method:
             head += " — " + method
         rows.append((head, details))
+        from .envelope import is_envelope
+        with ENGINE_LOCK:
+            envelope = is_envelope(doc.pdf)
+        if envelope:
+            rows.append((_("Busta di sicurezza: solo gli allegati sono cifrati"),
+                         [_("Le pagine sono leggibili senza password."),
+                          _("Nomi e descrizioni degli allegati restano visibili.")]))
         if enc.get("perms_tampered"):
             rows.append((_("Permessi del documento alterati"),
                          [_("/P e /Perms non coincidono: valgono i permessi più restrittivi.")]))

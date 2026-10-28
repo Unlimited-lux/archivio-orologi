@@ -1,3 +1,3 @@
-# Il modulo usa solo PySide6 e PyMuPDF (già in requirements.txt); nei test anche numpy (già presente).
+# Il modulo usa PySide6, PyMuPDF e pyHanko (busta di sicurezza, SEC-10), già in requirements.txt; nei test anche numpy (già presente).
 # Facoltativa, non ancora richiesta: keyring>=24, per custodire nel portachiavi di sistema le
 # password delle policy di protezione (SEC-12). Senza, le password si chiedono a ogni applicazione.
