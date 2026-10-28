@@ -161,6 +161,7 @@ class AppLock(QObject):
         self.wait.timeout.connect(self._end_wait)
         self.retry_at = 0.0
         self._filtering = False
+        self.suspend_hooks: list = []
         app = QGuiApplication.instance()
         app.applicationStateChanged.connect(self._state_changed)
         self.reload()
@@ -313,6 +314,8 @@ class AppLock(QObject):
 
     def _state_changed(self, state) -> None:
         if state == Qt.ApplicationState.ApplicationSuspended:
+            for hook in list(self.suspend_hooks):    # es. lo spazio protetto (SEC-31)
+                hook()
             self.lock()
 
     # -------------------------------------------------------------- input
@@ -426,3 +429,40 @@ class LockDialog(QDialog):
     def accept(self) -> None:
         if self.page.apply():
             super().accept()
+
+
+class IdleWatcher(QObject):
+    """Chiama `callback` dopo `ms` millisecondi senza input dell'utente. Il filtro sugli
+    eventi dell'applicazione è installato solo mentre il conteggio è attivo."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self.callback = callback
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self._fire)
+        self.active = False
+
+    def start(self, ms: int) -> None:
+        self.stop()
+        if ms <= 0:
+            return
+        self.timer.setInterval(ms)
+        self.timer.start()
+        QApplication.instance().installEventFilter(self)
+        self.active = True
+
+    def stop(self) -> None:
+        self.timer.stop()
+        if self.active:
+            QApplication.instance().removeEventFilter(self)
+            self.active = False
+
+    def _fire(self) -> None:
+        self.stop()
+        self.callback()
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() in _ACTIVITY and self.active:
+            self.timer.start()
+        return False

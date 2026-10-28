@@ -165,6 +165,20 @@ class ProtectDialog(QDialog):
         f3.addRow(_("Metodo:"), self.method)
         self.method_note = _note("", "warning")
         f3.addRow(self.method_note)
+        self.plain_metadata = QCheckBox(_("Cifra tutto tranne i metadati"))
+        self.plain_metadata.setToolTip(_("Titolo, autore e parole chiave restano leggibili senza password, per "
+                                         "l'indicizzazione e la ricerca nei file."))
+        self.plain_metadata.setChecked(not current.encrypt_metadata)
+        f3.addRow(self.plain_metadata)
+        self.integrity = QCheckBox(_("Aggiungi la verifica di integrità (ISO/TS 32004)"))
+        self.integrity.setToolTip(_("Rende rilevabile qualunque alterazione del file cifrato. I lettori che non "
+                                    "conoscono questa estensione aprono comunque il documento, senza verificarlo."))
+        self.integrity.setChecked(current.integrity)
+        f3.addRow(self.integrity)
+        self.metadata_note = _note("", "warning")
+        f3.addRow(self.metadata_note)
+        self.plain_metadata.toggled.connect(lambda on: self.metadata_note.setText(
+            _("Titolo, autore e parole chiave resteranno leggibili senza password.") if on else ""))
         lay.addWidget(g3)
 
         lay.addWidget(_note(_("Una password dimenticata non è recuperabile. La protezione vale dal prossimo "
@@ -280,6 +294,8 @@ class ProtectDialog(QDialog):
             allowed={k for k, cb in self.perm_boxes.items() if cb.isChecked()},
             print_level=self.print_combo.currentData(),
             method=self.method.currentData(),
+            encrypt_metadata=not self.plain_metadata.isChecked(),
+            integrity=self.integrity.isChecked(),
         )
         if validate:
             probe = P.ProtectionSettings(**{**s.__dict__})

@@ -41,7 +41,7 @@ di risorse sono del nucleo. Proposta: nessuna cache su disco per i documenti
 con `original_protection` non vuota; rendering in processo separato con limiti
 di memoria e tempo.
 
-## 8. Cifratura «tutto tranne i metadati» (SEC-06) — ancora aperta (`ENCRYPT_METADATA_SUPPORTED = False` nel nucleo)
+## 8. Cifratura «tutto tranne i metadati» (SEC-06) — risolta nel modulo con `Document.save_strategy` e pyHanko (vedi §11)
 
 PyMuPDF non permette di scrivere `/EncryptMetadata false`. Servirebbe un
 post-processo del file salvato (riscrittura del dizionario /Encrypt e di /Perms
@@ -86,3 +86,32 @@ Per ora la stessa pagina si apre da Proteggi › Blocco dell'applicazione….
   ISO/TS 32003 (`use_gcm=True`). MuPDF 1.28 apre i file con MAC (senza verificarlo) e
   rifiuta quelli GCM («unknown encryption version»). L'apertura e la verifica dell'integrità
   sono del nucleo.
+
+## 12. Documenti senza file su disco salvati da un modulo (SEC-31)
+
+I documenti dello spazio protetto si aprono con `Document.from_bytes` (senza percorso) e
+si salvano cifrati dal modulo tramite la guardia `save`/`save_as`, che restituisce False
+per evitare il salvataggio su disco. Mancano due cose:
+- un `Document.mark_saved()` pubblico. Il modulo ora scrive `doc._saved_state` e chiama
+  `doc._notify(SAVED)`;
+- nella guardia, distinguere «Salva» da «Salva con nome» per i documenti senza
+  percorso (`info` è identico, `{"path": None, "copy": False}`), per offrire con
+  «Salva con nome» l'esportazione in chiaro.
+
+In alternativa basterebbe un «salvataggio personalizzato» del documento
+(`document.save_target = callable(bytes)`), usato da `save_view` al posto della
+scrittura su file.
+
+Nota per il modulo Annotazioni: `_after_save` (programmato con `QTimer.singleShot(0)`
+su SAVED) chiama `view.viewport()` senza verificare che la vista esista ancora. Se la
+finestra viene distrutta prima che il timer scatti, compare «Internal C++ object
+(DocumentView) already deleted». Basta un `shiboken6.isValid(view)`.
+
+## 13. Apertura dei PDF cifrati con certificato (SEC-09)
+
+MuPDF 1.28 non apre i file con /Filter /Adobe.PubSec («Failed to open stream»), e
+quindi il comando Apri del nucleo mostra un errore generico. Proposta: un gancio
+`ctx.add_open_handler(predicate(bytes) -> bool, open(path, data) -> Document | None)`,
+interrogato quando `open_document_bytes` fallisce. Il modulo security iscriverebbe
+`certenc.is_pubkey` e il proprio flusso «Apri con certificato…» (scelta del PKCS#12,
+decifratura in memoria, permessi del destinatario). Per ora c'è un comando a parte.

@@ -27,21 +27,26 @@ class Policy:
     restrict: bool = True
     allowed: set[str] = field(default_factory=set)
     print_level: str = P.PRINT_HIGH
+    encrypt_metadata: bool = True
+    integrity: bool = False
 
     @classmethod
     def from_settings(cls, name: str, s: P.ProtectionSettings) -> Policy:
         return cls(name=name, open_password=bool(s.open_password), restrict=s.restrict,
-                   allowed=set(s.allowed) if s.restrict else set(P.PERM_BITS), print_level=s.print_level)
+                   allowed=set(s.allowed) if s.restrict else set(P.PERM_BITS), print_level=s.print_level,
+                   encrypt_metadata=s.encrypt_metadata, integrity=s.integrity)
 
     def settings(self, open_password: str = "", permissions_password: str = "") -> P.ProtectionSettings:
         return P.ProtectionSettings(open_password=open_password if self.open_password else "",
                                     permissions_password=permissions_password if self.restrict else "",
                                     restrict=self.restrict, allowed=set(self.allowed),
-                                    print_level=self.print_level, method=P.AES256)
+                                    print_level=self.print_level, method=P.AES256,
+                                    encrypt_metadata=self.encrypt_metadata, integrity=self.integrity)
 
     def to_dict(self) -> dict:
         return {"open_password": self.open_password, "restrict": self.restrict,
-                "allowed": sorted(self.allowed), "print_level": self.print_level, "method": "aes256"}
+                "allowed": sorted(self.allowed), "print_level": self.print_level, "method": "aes256",
+                "encrypt_metadata": self.encrypt_metadata, "integrity": self.integrity}
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> tuple[Policy, list[str]]:
@@ -58,11 +63,16 @@ class Policy:
         if level not in (P.PRINT_NONE, P.PRINT_LOW, P.PRINT_HIGH):
             level = P.PRINT_HIGH
         return cls(name=name, open_password=bool(data.get("open_password")), restrict=bool(data.get("restrict")),
-                   allowed=allowed, print_level=level), notes
+                   allowed=allowed, print_level=level, encrypt_metadata=data.get("encrypt_metadata", True) is not False,
+                   integrity=bool(data.get("integrity"))), notes
 
     def describe(self) -> str:
         parts = [_("AES a 256 bit")]
         parts.append(_("password di apertura") if self.open_password else _("apertura libera"))
+        if not self.encrypt_metadata:
+            parts.append(_("metadati in chiaro"))
+        if self.integrity:
+            parts.append(_("verifica di integrità"))
         if self.restrict:
             prints = {P.PRINT_NONE: _("stampa negata"), P.PRINT_LOW: _("stampa a bassa risoluzione"),
                       P.PRINT_HIGH: _("stampa consentita")}[self.print_level]
@@ -127,7 +137,8 @@ class PolicyStore:
         while new in self.items:
             new, k = f"{base} {k}", k + 1
         src = self.items[name]
-        self.items[new] = Policy(new, src.open_password, src.restrict, set(src.allowed), src.print_level)
+        self.items[new] = Policy(new, src.open_password, src.restrict, set(src.allowed), src.print_level,
+                                 src.encrypt_metadata, src.integrity)
         self._store()
         return new
 
@@ -184,6 +195,15 @@ def protect_file(path: str, out: str, settings: P.ProtectionSettings) -> None:
                                       "proteggilo dalla finestra principale."))
         if settings.method == P.AES256:
             P._declare_aes256(src)
+        if not settings.encrypt_metadata or settings.integrity:
+            from . import crypto as X
+            data = X.encrypt(src.tobytes(garbage=1, deflate=True), opts["user_pw"], opts["owner_pw"],
+                             opts["permissions"], encrypt_metadata=settings.encrypt_metadata,
+                             mac=settings.integrity)
+            with open(out, "wb") as f:
+                f.write(data)
+            return
+        opts.pop("encrypt_metadata", None)
         src.save(out, garbage=1, deflate=True, **opts)
     finally:
         src.close()

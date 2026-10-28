@@ -88,6 +88,8 @@ class ProtectionSettings:
     allowed: set[str] = field(default_factory=lambda: set(PERM_BITS))
     print_level: str = PRINT_HIGH
     method: str = AES256
+    encrypt_metadata: bool = True               # False: «Cifra tutto tranne i metadati» (SEC-06)
+    integrity: bool = False                     # verifica di integrità ISO/TS 32004 (SEC-11)
 
     # ------------------------------------------------------------- permessi
     def permission_value(self) -> int:
@@ -142,12 +144,15 @@ class ProtectionSettings:
         self.validate()
         # senza password dei permessi distinta, il proprietario usa quella di apertura
         owner = self.permissions_password or self.open_password or secrets.token_urlsafe(24)
-        return {
+        opts = {
             "encryption": METHODS[self.method],
             "user_pw": self.open_password,
             "owner_pw": owner,
             "permissions": self.permission_value(),
         }
+        if not self.encrypt_metadata and self.method == AES256:
+            opts["encrypt_metadata"] = False     # chiave prevista dal nucleo; la scrive il modulo
+        return opts
 
 
 def strength(password: str) -> int:
@@ -233,7 +238,8 @@ def settings_from_document(document: Document) -> ProtectionSettings:
     if not i.protected:
         return ProtectionSettings()
     return ProtectionSettings(restrict=i.restricted, allowed=i.allowed(), print_level=i.print_level,
-                              method=i.method or AES256)
+                              method=i.method or AES256,
+                              encrypt_metadata=document.save_options.get("encrypt_metadata", True) is not False)
 
 
 # ------------------------------------------------- accesso (API del nucleo)
