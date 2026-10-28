@@ -12,3 +12,4 @@ keyring>=24
 anthropic>=0.40
 pytest>=8
 pytest-qt>=4.4
+pytest-timeout>=2.3
