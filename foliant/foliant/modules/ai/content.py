@@ -243,10 +243,17 @@ def surrounding_paragraph(pdf: pymupdf.Document, page: int, rects: list[pymupdf.
     return text
 
 
-def textless_pages(pdf: pymupdf.Document, pages: list[int]) -> list[int]:
-    """Pagine dell'ambito senza testo utilizzabile (AI-15)."""
+def textless_pages(pdf: pymupdf.Document, pages: list[int], texts: dict[int, str] | None = None) -> list[int]:
+    """Pagine dell'ambito senza testo utilizzabile (AI-15).
+
+    `texts`: testo già estratto delle pagine (es. dall'indice in cache), per non rileggerle:
+    una pagina con molto testo utilizzabile non è certo una scansione.
+    """
     out = []
     for i in pages:
+        known = texts.get(i) if texts else None
+        if known is not None and len(known) >= 200 and usable_text(known):
+            continue
         words, _e = safe_words(pdf, i)
         text = _words_text(words)
         if not usable_text(text):

@@ -71,7 +71,8 @@ TRANSLATIONS = {
     "Un file per pagina": "One file per page",
     "Un file per intervallo (separati da ;)": "One file per range (separated by ;)",
     "Nome dei file:": "File names:",
-    "Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}": "Placeholders: {nome}, {pagina}, {n}, {inizio}, {fine}",
+    "Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}": "Placeholders: {name}, {page}, {n}, {start}, {end}",
+    "{nome}_p{pagina}": "{name}_p{page}",
     "Elimina le pagine dal documento dopo l'estrazione": "Delete the pages from the document after extracting",
     "Apri il risultato": "Open the result",
     "Estrazione in corso…": "Extracting…",
@@ -91,7 +92,7 @@ TRANSLATIONS = {
     "Alle pagine che contengono il testo (espressione regolare)": "At pages containing the text (regular expression)",
     "Raccogli le pagine escluse in un file aggiuntivo": "Collect the excluded pages in an extra file",
     "Sovrascrivi i file esistenti": "Overwrite existing files",
-    "Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}": "Placeholders: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}",
+    "Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}": "Placeholders: {name}, {n}, {start}, {end}, {bookmark}, {match1}",
     "Si otterranno {k} file: {sizes}": "{k} files will be produced: {sizes}",
     "Divisione in corso…": "Splitting…",
     "Calcolo della divisione…": "Computing the split…",
@@ -157,13 +158,20 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "come il primo file": "same as the first file",
+    "Titolo del risultato:": "Result title:",
+    "Autore del risultato:": "Result author:",
+    "Fai clic su una pagina per iniziare lì una nuova parte (o togliere il taglio)": "Click a page to start a new part there (or remove the cut)",
+    "Parte {k}": "Part {k}",
+    "Esclusa": "Excluded",
+    "Riconosci il testo delle pagine scannerizzate (OCR)": "Recognize the text of scanned pages (OCR)",
     "Pagine acquisite": "Scanned pages",
     "Ruota": "Rotate",
     "Acquisisci ancora": "Scan more",
     "Inserisci campo": "Insert field",
     "Esempio: {f}": "Example: {f}",
     "Capitolo": "Chapter",
-    "{nome}_parte{n}": "{nome}_part{n}",
+    "{nome}_parte{n}": "{name}_part{n}",
     "Fattura n\\. (\\d+)": "Invoice no\\. (\\d+)",
     "Il documento ha una sola pagina: non c'è nulla da dividere.": "The document has only one page: there is nothing to split.",
     "Cerca il testo solo nel quarto superiore della pagina": "Search the text only in the top quarter of the page",
@@ -334,6 +342,7 @@ class TemplateField(QWidget):
         self.button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self.button)
         for code, label in F.MENU:
+            code = F.display_code(code)
             act = menu.addAction(f"{_(label)}  {code}")
             act.triggered.connect(lambda _c=False, code=code: self.insert(code))
         self.button.setMenu(menu)
@@ -476,11 +485,16 @@ class InsertBlankDialog(BaseDialog):
         for sb in (self.width, self.height):
             sb.setRange(0.1, 20000)
             sb.setDecimals(1)
-        self.width.setValue(210)
-        self.height.setValue(297)
         self.unit = QComboBox()
         for u in UNITS:
             self.unit.addItem(u, u)
+        from .prefs import user_paper, user_unit
+        unit = user_unit()
+        self.unit.setCurrentIndex(max(0, self.unit.findData(unit)))
+        pw, ph = E.PAPER_SIZES.get(user_paper(), E.PAPER_SIZES["A4"])
+        f = UNITS.get(unit, E.MM)
+        self.width.setValue(round(pw / f, 1))
+        self.height.setValue(round(ph / f, 1))
         form.addRow(_("Larghezza:"), self.width)
         form.addRow(_("Altezza:"), self.height)
         form.addRow(_("Unità:"), self.unit)
@@ -729,7 +743,7 @@ class ExtractDialog(BaseDialog):
             rb.toggled.connect(self._update)
         self.layout_.addWidget(box)
         form = QFormLayout()
-        self.template_field = TemplateField("{nome}_p{pagina}", Path(document.display_name).stem)
+        self.template_field = TemplateField(_("{nome}_p{pagina}"), Path(document.display_name).stem)
         self.template = self.template_field.edit
         self.template.setToolTip(_("Segnaposto: {nome}, {pagina}, {n}, {inizio}, {fine}"))
         self.template_field.changed.connect(lambda: self._update())
@@ -835,6 +849,9 @@ def pdf_count(document: Document) -> int:
 # PAG-20…23 — dividi
 # =========================================================================
 
+from . import fields as F  # noqa: E402
+
+
 class SplitDialog(BaseDialog):
     METHODS = ("every", "ranges", "parts", "bookmarks", "size", "blank", "text")
 
@@ -885,6 +902,8 @@ class SplitDialog(BaseDialog):
         self.layout_.addWidget(self.collect)
         self.top_only = QCheckBox(_("Cerca il testo solo nel quarto superiore della pagina"))
         self.layout_.addWidget(self.top_only)
+        self.use_ocr = QCheckBox(_("Riconosci il testo delle pagine scannerizzate (OCR)"))
+        self.layout_.addWidget(self.use_ocr)
         form = QFormLayout()
         self.template_field = TemplateField(_("{nome}_parte{n}"), Path(document.display_name).stem)
         self.template = self.template_field.edit
@@ -906,6 +925,14 @@ class SplitDialog(BaseDialog):
         self.preview = QLabel()
         self.preview.setWordWrap(True)
         self.layout_.addWidget(self.preview)
+        self.strip = thumbnail_strip(self)
+        self.strip.setToolTip(_("Fai clic su una pagina per iniziare lì una nuova parte (o togliere il taglio)"))
+        self.strip.setSelectionMode(self.strip.SelectionMode.NoSelection)
+        self.strip.itemClicked.connect(self._toggle_cut)
+        self.layout_.addWidget(self.strip)
+        with ENGINE_LOCK:
+            fill_strip(self.strip, document.pdf, list(range(min(self.page_count, MAX_PREVIEW))))
+        self._parts_cache: list[E.SplitPart] = []
         self.finish_layout()
         for w in (self.every, self.parts, self.level, self.size_mb):
             w.valueChanged.connect(self._update)
@@ -918,6 +945,45 @@ class SplitDialog(BaseDialog):
 
     def method(self) -> str:
         return next(k for k, rb in self.rbs.items() if rb.isChecked())
+
+    PART_COLORS = ("#D7EFEE", "#FCE7C8", "#E3DDF7", "#D9F0D3", "#F9D8D6", "#DCE8FA")
+
+    def _color_strip(self, parts: list[E.SplitPart]) -> None:
+        """Colora le miniature per parte (le pagine escluse restano senza colore)."""
+        from PySide6.QtGui import QBrush, QColor
+        self._parts_cache = list(parts)
+        part_of: dict[int, int] = {}
+        for k, part in enumerate(parts):
+            for i in part.indices:
+                part_of.setdefault(i, k)
+        for row in range(self.strip.count()):
+            item = self.strip.item(row)
+            if not item.text().isdigit():
+                continue
+            k = part_of.get(int(item.text()) - 1)
+            item.setBackground(QBrush(QColor(self.PART_COLORS[k % len(self.PART_COLORS)])) if k is not None
+                               else QBrush())
+            item.setToolTip(_("Parte {k}").format(k=k + 1) if k is not None else _("Esclusa"))
+
+    def _toggle_cut(self, item) -> None:
+        """Clic su una pagina: inizia lì una nuova parte, o toglie il taglio se c'è già."""
+        if not item.text().isdigit():
+            return
+        page = int(item.text()) - 1
+        starts = sorted({p.indices[0] for p in self._parts_cache if p.indices}) or [0]
+        if page == 0:
+            return
+        if page in starts:
+            starts.remove(page)
+        else:
+            starts.append(page)
+            starts.sort()
+        if 0 not in starts:
+            starts.insert(0, 0)
+        bounds = starts + [self.page_count]
+        text = "; ".join(f"{a + 1}-{b}" if b - a > 1 else f"{a + 1}" for a, b in zip(bounds, bounds[1:]))
+        self.rbs["ranges"].setChecked(True)
+        self.ranges.setText(text)
 
     def _choose_extra(self) -> None:
         if self.ask_paths is None:
@@ -954,7 +1020,8 @@ class SplitDialog(BaseDialog):
                 if not self.pattern.text():
                     raise E.RangeError(_("Indica almeno un intervallo."))
                 return E.split_document(pdf, "separators", pattern=self.pattern.text(),
-                                        top_fraction=0.25 if self.top_only.isChecked() else None)
+                                        top_fraction=0.25 if self.top_only.isChecked() else None,
+                                        ocr=self.use_ocr.isChecked())
         raise E.PageOpError("")
 
     def _update(self, *_a) -> None:
@@ -963,9 +1030,14 @@ class SplitDialog(BaseDialog):
         m = self.method()
         self.collect.setEnabled(m == "ranges")
         self.top_only.setEnabled(m == "text")
+        self.use_ocr.setEnabled(m == "text")
+        if m == "text" and self.use_ocr.isChecked():
+            self.preview.setText("")   # OCR costoso: eseguito alla conferma
+            self.set_error(None if self.pattern.text() else _("Indica almeno un intervallo."))
+            return
         part = _("{nome}_parte{n}")
-        defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
-        if self.template.text() in (part, "{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
+        defaults = {"bookmarks": F.display_code("{segnalibro}"), "text": F.display_code("{nome}_{match1}")}
+        if self.template.text() in (part, "{nome}_parte{n}", *defaults.values(), "{segnalibro}", "{nome}_{match1}"):
             self.template.setText(defaults.get(m, part))
         if self.template_field.error():
             self.preview.setText("")
@@ -983,6 +1055,7 @@ class SplitDialog(BaseDialog):
             return
         sizes = ", ".join(str(len(p.indices)) for p in plan.parts[:12]) + (" …" if len(plan.parts) > 12 else "")
         self.preview.setText(_("Si otterranno {k} file: {sizes}").format(k=len(plan.parts), sizes=sizes))
+        self._color_strip(plan.parts)
         self.set_error(None)
         if plan.warnings:
             self.set_note("\n".join(plan.warnings))
@@ -1086,6 +1159,14 @@ class MergeDialog(BaseDialog):
         for cb in (self.bookmarks, self.keep_bookmarks, self.keep_annots, self.blank_odd, self.alternate,
                    self.alternate_reverse):
             self.layout_.addWidget(cb)
+        meta_form = QFormLayout()
+        self.meta_title = QLineEdit()
+        self.meta_title.setPlaceholderText(_("come il primo file"))
+        self.meta_author = QLineEdit()
+        self.meta_author.setPlaceholderText(_("come il primo file"))
+        meta_form.addRow(_("Titolo del risultato:"), self.meta_title)
+        meta_form.addRow(_("Autore del risultato:"), self.meta_author)
+        self.layout_.addLayout(meta_form)
         self.rb_open = QRadioButton(_("Apri il risultato in una nuova scheda"))
         self.rb_save = QRadioButton(_("Salva direttamente su file"))
         self.rb_open.setChecked(True)
@@ -1218,6 +1299,7 @@ class MergeDialog(BaseDialog):
         return {"entries": self.entries(), "bookmarks": self.bookmarks.isChecked(),
                 "keep_bookmarks": self.keep_bookmarks.isChecked(), "annots": self.keep_annots.isChecked(),
                 "blank_after_odd": self.blank_odd.isChecked(), "open": self.rb_open.isChecked(),
+                "metadata_update": {"title": self.meta_title.text().strip(), "author": self.meta_author.text().strip()},
                 "alternate": self.alternate.isChecked(), "alternate_reverse": self.alternate_reverse.isChecked()}
 
 
@@ -1237,7 +1319,8 @@ def open_merge_dialog(ctx, view=None, selected=None, paths: list[str] | None = N
                                      password_b=b.password)
         return E.merge_files(o["entries"], bookmarks=o["bookmarks"], keep_bookmarks=o["keep_bookmarks"],
                              annots=o["annots"], widgets=o["annots"], blank_after_odd=o["blank_after_odd"],
-                             progress=lambda f, t: progress.update(f, t), errors=errors)
+                             progress=lambda f, t: progress.update(f, t), errors=errors,
+                             metadata_update=o["metadata_update"])
     try:
         data = ctx.run_task(_("Unione in corso…"), work)
     except FoliantError as e:

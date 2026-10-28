@@ -36,3 +36,10 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
    mostra. Il file salvato contiene invece un aspetto vuoto (`engine.blank_signature_appearance`),
    corretto per gli altri lettori. *Proposta:* nella stampa e nell'esportazione in immagine
    disattivare la sintesi locale degli aspetti dei widget firma.
+
+7. **Firma di un campo scelto in compilazione (FRM-20).** Il clic su un campo firma vuoto deve
+   aprire la procedura di firma con quel campo preselezionato. Il modulo Firma ha
+   `controller.digital_sign(view, field=…)`, ma non c'è un modo pubblico per chiamarlo da un altro
+   modulo. *Locale:* il clic porta nella modalità Firma e indica nella barra di stato quale campo
+   firmare. *Proposta:* `ctx.request_signature(view, field_name)` registrato dal modulo Firma
+   (oppure un segnale `ctx.signatureFieldActivated(view, field_name)` che il modulo Firma ascolta).

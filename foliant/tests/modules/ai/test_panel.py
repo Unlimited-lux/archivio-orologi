@@ -1144,3 +1144,32 @@ def test_ai_note_on_signed_pdf_keeps_signature(qtbot, window, ready, fake, tmp_p
     with pytest.raises(OperationCancelled):
         compose.insert_text_page(view.document, "Pagina IA")
     assert asked and view.page_count == 2
+
+
+@pytest.mark.parametrize("lang", ["it", "en"])
+def test_settings_page_not_cramped_in_preferences(qtbot, window, ai, lang):
+    """C9: nessun pulsante o casella tagliato nella pagina Preferenze › Assistente IA."""
+    from PySide6.QtWidgets import QCheckBox, QPushButton
+
+    from foliant import i18n
+    from foliant.modules.ai.dialogs import SettingsPage
+    from foliant.ui.dialogs import PreferencesDialog
+    make_active_profile(ai.store)
+    i18n.set_language(lang)
+    try:
+        dlg = PreferencesDialog(window.settings, window, pages=window.preference_pages())
+        dlg.show_page(i18n._("Assistente IA"))
+        dlg.show()
+        qtbot.waitExposed(dlg)
+        page = next(w for w in dlg.module_pages if isinstance(w, SettingsPage))
+        cut = [(type(w).__name__, w.text(), w.sizeHint().width(), w.width())
+               for w in page.findChildren(QPushButton) + page.findChildren(QCheckBox)
+               if w.isVisible() and w.sizeHint().width() - w.width() > 3]
+        assert not cut, cut
+        assert dlg.width() <= 1200, dlg.width()              # entra in uno schermo da portatile
+        if lang == "en":
+            assert page.context.suffix() == " tokens"
+    finally:
+        i18n.set_language("it")
+        dlg.close()
+        dlg.deleteLater()

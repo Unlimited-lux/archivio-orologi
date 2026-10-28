@@ -18,9 +18,9 @@ import re
 from PySide6.QtCore import QSize, QStringListModel, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap, QIcon
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFormLayout, QFrame,
+    QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QCompleter, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QRadioButton,
-    QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout,
+    QScrollArea, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QStackedWidget, QToolButton, QVBoxLayout,
     QWidget,
 )
 
@@ -31,6 +31,55 @@ from . import formats as fm
 from . import formula as FX
 
 TRANSLATIONS: dict[str, str] = {
+    "Sezione": "Section",
+    "Vincoli per chi firma": "Signer constraints",
+    "qualunque motivo": "any reason",
+    "Motivi ammessi, separati da punto e virgola": "Allowed reasons, separated by semicolons",
+    "Motivi ammessi": "Allowed reasons",
+    "Indirizzo del server di marca temporale da usare obbligatoriamente": "Address of the time stamp server that must be used",
+    "Marca temporale": "Time stamp",
+    "Non richiesta": "Not required",
+    "Nessuna modifica consentita": "No changes allowed",
+    "Consenti compilazione e firme": "Allow form filling and signing",
+    "Consenti anche i commenti": "Also allow comments",
+    "Certificazione": "Certification",
+    "Inversione dei colori": "Invert colors",
+    "Contorno": "Outline",
+    "Pressione": "Push",
+    "Al clic": "On click",
+    "Invia modulo": "Submit form",
+    "Formato dei dati": "Data format",
+    "Invia anche i campi vuoti": "Also send empty fields",
+    "Nessun campo scelto: si inviano tutti i campi. Con un indirizzo mailto: si apre il programma di posta con i dati allegati.":
+        "No field chosen: all fields are sent. With a mailto: address the mail program opens with the data attached.",
+    "https:// o mailto:": "https:// or mailto:",
+    "Indirizzo non valido: usa https://, http:// o mailto:.": "Invalid address: use https://, http:// or mailto:.",
+    "Rilascio del pulsante": "Button release",
+    "Pressione del pulsante": "Button press",
+    "Ingresso del puntatore": "Mouse enter",
+    "Uscita del puntatore": "Mouse exit",
+    "Ricezione del focus": "On focus",
+    "Perdita del focus": "On blur",
+    "Quando": "When",
+    "Al passaggio del puntatore": "On mouse over",
+    "Solo testo": "Text only",
+    "Solo icona": "Icon only",
+    "Icona sopra il testo": "Icon above text",
+    "Icona sotto il testo": "Icon below text",
+    "Icona a sinistra del testo": "Icon left of text",
+    "Icona a destra del testo": "Icon right of text",
+    "Testo sopra l'icona": "Text over icon",
+    "Disposizione": "Layout",
+    "Icona": "Icon",
+    "Icona al passaggio": "Mouse-over icon",
+    "Icona alla pressione": "Pressed icon",
+    "Scegli…": "Choose…",
+    "Immagine o pagina PDF da usare come icona": "Image or PDF page to use as the icon",
+    "Rimuovi l'icona": "Remove the icon",
+    "Scegli l'icona": "Choose the icon",
+    "Immagini e PDF": "Images and PDF",
+    "impostata": "set",
+    "nessuna": "none",
     # intestazione e generale
     "Seleziona uno o più campi": "Select one or more fields",
     "{n} campi selezionati": "{n} fields selected",
@@ -236,7 +285,7 @@ SetDefault = Callable[[str, dict], None]
 _ROTATIONS = (0, 90, 180, 270)
 _APPEARANCE_KEYS = ("font", "fontsize", "text_color", "fill_color", "border_color", "border_width",
                     "border_style", "align")
-_ACTION_TYPES = (None, "reset", "uri", "print", "goto", "hide", "import")
+_ACTION_TYPES = (None, "reset", "uri", "print", "goto", "hide", "import", "submit")
 _PLAIN_NAME = re.compile(r"[^\W\d][\w.]*")
 
 _TEXT_LIKE = (E.TEXT, E.COMBO, E.LIST)
@@ -250,6 +299,78 @@ def _qcolor(c) -> QColor:
 
 def _tuple(q: QColor) -> tuple:
     return (round(q.redF(), 4), round(q.greenF(), 4), round(q.blueF(), 4))
+
+
+class SectionTabs(QWidget):
+    """Sezioni del pannello scelte da una tendina (al posto delle schede): con sei sezioni le
+    schede non entrano nel pannello stretto e alcune restavano nascoste dietro le frecce.
+    Offre i metodi di QTabWidget usati dal pannello."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.chooser = QComboBox()
+        self.chooser.setAccessibleName(_("Sezione"))
+        self.stack = QStackedWidget()
+        lay.addWidget(self.chooser)
+        lay.addWidget(self.stack, 1)
+        self._titles: list[str] = []
+        self._visible: list[bool] = []
+        self.chooser.currentIndexChanged.connect(self._on_chosen)
+
+    def addTab(self, widget: QWidget, title: str) -> int:
+        self.stack.addWidget(widget)
+        self._titles.append(title)
+        self._visible.append(True)
+        self._rebuild()
+        return len(self._titles) - 1
+
+    def count(self) -> int:
+        return len(self._titles)
+
+    def indexOf(self, widget: QWidget) -> int:
+        return self.stack.indexOf(widget)
+
+    def tabText(self, index: int) -> str:
+        return self._titles[index]
+
+    def isTabVisible(self, index: int) -> bool:
+        return self._visible[index]
+
+    def setTabVisible(self, index: int, visible: bool) -> None:
+        if self._visible[index] != visible:
+            self._visible[index] = visible
+            self._rebuild()
+
+    def currentIndex(self) -> int:
+        return self.stack.currentIndex()
+
+    def setCurrentIndex(self, index: int) -> None:
+        if 0 <= index < len(self._titles) and self._visible[index]:
+            self.stack.setCurrentIndex(index)
+            self.chooser.blockSignals(True)
+            self.chooser.setCurrentIndex(max(0, self.chooser.findData(index)))
+            self.chooser.blockSignals(False)
+
+    def _rebuild(self) -> None:
+        current = self.stack.currentIndex()
+        self.chooser.blockSignals(True)
+        self.chooser.clear()
+        for i, (title, visible) in enumerate(zip(self._titles, self._visible)):
+            if visible:
+                self.chooser.addItem(title, i)
+        self.chooser.blockSignals(False)
+        if current < 0 or not self._visible[current]:
+            current = next((i for i, v in enumerate(self._visible) if v), -1)
+        if current >= 0:
+            self.setCurrentIndex(current)
+
+    def _on_chosen(self, row: int) -> None:
+        index = self.chooser.itemData(row)
+        if index is not None:
+            self.stack.setCurrentIndex(int(index))
 
 
 class ColorButton(QToolButton):
@@ -328,6 +449,7 @@ class FieldPropertiesPanel(QWidget):
         self._loaded_formula: str | None = None
         self._loaded_action: dict | None = None
         self._loaded_lock: dict | None = None
+        self._loaded_sv: dict | None = None
         self._fields: list[E.FieldInfo] = []
         self._all_names: list[str] = []
         self._radio_exports: dict[str, list[str]] = {}
@@ -353,9 +475,7 @@ class FieldPropertiesPanel(QWidget):
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setWordWrap(True)
         lay.addWidget(self.placeholder, 1)
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.setUsesScrollButtons(True)
+        self.tabs = SectionTabs()   # tendina di sezione: tutte raggiungibili anche nel pannello stretto
         lay.addWidget(self.tabs, 1)
         self._pages: dict[str, QWidget] = {}
 
@@ -1306,13 +1426,51 @@ class FieldPropertiesPanel(QWidget):
         self.caption_down_edit = self._line(lambda t: self._apply({"caption_down": t}))
         self.caption_down_edit.setPlaceholderText(_("uguale alla didascalia"))
         form.addRow(_("Alla pressione"), self.caption_down_edit)
+        self.caption_rollover_edit = self._line(lambda t: self._apply({"caption_rollover": t}))
+        form.addRow(_("Al passaggio del puntatore"), self.caption_rollover_edit)
+        self.layout_combo = self._combo(
+            [(_("Solo testo"), "text"), (_("Solo icona"), "icon"), (_("Icona sopra il testo"), "icon_above"),
+             (_("Icona sotto il testo"), "icon_below"), (_("Icona a sinistra del testo"), "icon_left"),
+             (_("Icona a destra del testo"), "icon_right"), (_("Testo sopra l'icona"), "overlay")],
+            lambda v: self._apply({"layout": v}))
+        form.addRow(_("Disposizione"), self.layout_combo)
+        self.highlight_combo = self._combo(
+            [(_("Nessuno"), "none"), (_("Inversione dei colori"), "invert"), (_("Contorno"), "outline"),
+             (_("Pressione"), "push")], lambda v: self._apply({"highlight": v}))
+        form.addRow(_("Al clic"), self.highlight_combo)
+        self.icon_rows: dict[str, tuple[QLabel, QToolButton, QToolButton]] = {}
+        for state, label in (("normal", _("Icona")), ("rollover", _("Icona al passaggio")),
+                             ("down", _("Icona alla pressione"))):
+            row = QWidget()
+            lay = QHBoxLayout(row)
+            lay.setContentsMargins(0, 0, 0, 0)
+            status = QLabel()
+            choose = QToolButton()
+            choose.setText(_("Scegli…"))
+            choose.setToolTip(_("Immagine o pagina PDF da usare come icona"))
+            choose.clicked.connect(lambda _c=False, st=state: self._choose_icon(st))
+            remove = QToolButton()
+            bind_icon(remove, "x")
+            remove.setToolTip(_("Rimuovi l'icona"))
+            remove.clicked.connect(lambda _c=False, st=state: self._apply({f"icon_{st}": None}))
+            lay.addWidget(status, 1)
+            lay.addWidget(choose)
+            lay.addWidget(remove)
+            form.addRow(label, row)
+            self.icon_rows[state] = (status, choose, remove)
         self.image_note = self._note(_("Campo immagine: in compilazione un clic permette di scegliere l'immagine."))
         form.addRow(self.image_note)
         self.action_combo = self._combo(
             [(_("Nessuna"), None), (_("Reimposta campi"), "reset"), (_("Apri indirizzo web"), "uri"),
              (_("Stampa"), "print"), (_("Vai a pagina"), "goto"), (_("Mostra o nascondi campi"), "hide"),
-             (_("Importa dati"), "import")], lambda _v: self._on_action_changed())
+             (_("Importa dati"), "import"), (_("Invia modulo"), "submit")], lambda _v: self._on_action_changed())
         form.addRow(_("Azione"), self.action_combo)
+        self.event_combo = self._combo(
+            [(_("Rilascio del pulsante"), "U"), (_("Pressione del pulsante"), "D"),
+             (_("Ingresso del puntatore"), "E"), (_("Uscita del puntatore"), "X"),
+             (_("Ricezione del focus"), "Fo"), (_("Perdita del focus"), "Bl")],
+            lambda _v: self._on_action_changed())
+        form.addRow(_("Quando"), self.event_combo)
         self.action_uri = QLineEdit()
         self.action_uri.setPlaceholderText("https://")
         self.action_uri.textChanged.connect(lambda _t: self._update_uri_warning())
@@ -1320,6 +1478,15 @@ class FieldPropertiesPanel(QWidget):
         form.addRow(_("Indirizzo"), self.action_uri)
         self.uri_warning = self._error_label()
         form.addRow(self.uri_warning)
+        self.submit_format = self._combo([("FDF", "fdf"), ("XFDF", "xfdf"), ("HTML", "html"), ("PDF", "pdf")],
+                                         lambda _v: self._on_action_changed())
+        form.addRow(_("Formato dei dati"), self.submit_format)
+        self.submit_empty = QCheckBox(_("Invia anche i campi vuoti"))
+        self.submit_empty.toggled.connect(lambda _c: None if self._loading else self._on_action_changed())
+        form.addRow(self.submit_empty)
+        self.submit_note = self._note(_("Nessun campo scelto: si inviano tutti i campi. Con un indirizzo "
+                                        "mailto: si apre il programma di posta con i dati allegati."))
+        form.addRow(self.submit_note)
         self.action_page = self._spin(1, 99999, lambda _v: self._on_action_changed())
         form.addRow(_("Pagina"), self.action_page)
         self.action_hide = self._combo([(_("Nascondi"), True), (_("Mostra"), False)],
@@ -1333,24 +1500,49 @@ class FieldPropertiesPanel(QWidget):
         form.addRow(self.action_error)
         self._button_form = form
 
+    # scelta del file dell'icona: il modulo la sostituisce con la finestra del nucleo
+    choose_icon_file: Callable[[], str | None] | None = None
+
+    def _choose_icon(self, state: str) -> None:
+        if self.choose_icon_file is not None:
+            path = self.choose_icon_file()
+        else:
+            path, _f = QFileDialog.getOpenFileName(
+                self, _("Scegli l'icona"), "",
+                _("Immagini e PDF") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp *.pdf)")
+        if path:
+            self._apply({f"icon_{state}": path})
+
     def _update_action_ui(self) -> None:
         t = self.action_combo.currentData() if self.action_combo.currentIndex() >= 0 else "?"
         form = self._button_form
-        form.setRowVisible(self.action_uri, t == "uri")
-        form.setRowVisible(self.uri_warning, t == "uri")
+        form.setRowVisible(self.action_uri, t in ("uri", "submit"))
+        form.setRowVisible(self.uri_warning, t in ("uri", "submit"))
+        form.setRowVisible(self.submit_format, t == "submit")
+        form.setRowVisible(self.submit_empty, t == "submit")
+        form.setRowVisible(self.submit_note, t == "submit")
+        self.action_uri.setPlaceholderText(_("https:// o mailto:") if t == "submit" else "https://")
         form.setRowVisible(self.action_page, t == "goto")
         form.setRowVisible(self.action_hide, t == "hide")
-        form.setRowVisible(self.action_fields, t in ("reset", "hide"))
+        form.setRowVisible(self.action_fields, t in ("reset", "hide", "submit"))
         form.setRowVisible(self.reset_note, t == "reset")
+        form.setRowVisible(self.event_combo, bool(t) and t != "?")
         self._update_uri_warning()
 
     def _update_uri_warning(self) -> None:
         uri = self.action_uri.text().strip()
-        insecure = bool(uri) and not uri.lower().startswith("https://")
+        insecure = bool(uri) and not uri.lower().startswith(("https://", "mailto:"))
         self._show_error(self.uri_warning, _("L'indirizzo non è cifrato (non HTTPS)") if insecure else None)
 
     def current_action(self) -> tuple[dict | None, str | None]:
         """(azione, errore) dagli editor della scheda Pulsante; azione None = nessuna."""
+        action, err = self._current_action()
+        event = self.event_combo.currentData() or "U"
+        if action is not None and event != "U":
+            action["event"] = event
+        return action, err
+
+    def _current_action(self) -> tuple[dict | None, str | None]:
         t = self.action_combo.currentData()
         if not t:
             return None, None
@@ -1361,6 +1553,14 @@ class FieldPropertiesPanel(QWidget):
             return ({"type": "uri", "uri": uri}, None) if uri else (None, "")
         if t == "goto":
             return {"type": "goto", "page": self.action_page.value() - 1}, None
+        if t == "submit":
+            url = self.action_uri.text().strip()
+            if not url:
+                return None, ""
+            if not url.lower().startswith(("https://", "http://", "mailto:")):
+                return None, _("Indirizzo non valido: usa https://, http:// o mailto:.")
+            return {"type": "submit", "url": url, "format": self.submit_format.currentData() or "fdf",
+                    "fields": self._checked(self.action_fields), "empty": self.submit_empty.isChecked()}, None
         if t == "hide":
             names = self._checked(self.action_fields)
             if not names:
@@ -1384,10 +1584,28 @@ class FieldPropertiesPanel(QWidget):
         image = any(f.image for f in self._fields)
         form.setRowVisible(self.caption_edit, not image)
         form.setRowVisible(self.caption_down_edit, not image)
+        form.setRowVisible(self.caption_rollover_edit, not image)
+        form.setRowVisible(self.layout_combo, not image)
+        form.setRowVisible(self.highlight_combo, not image)
+        for status, _c, _r in self.icon_rows.values():
+            form.setRowVisible(status.parentWidget(), not image)
         form.setRowVisible(self.image_note, image)
         if not image:
             self._load_line(self.caption_edit, "caption")
             self._load_line(self.caption_down_edit, "caption_down")
+            if not self.caption_down_edit.placeholderText():
+                self.caption_down_edit.setPlaceholderText(_("uguale alla didascalia"))
+            self._load_line(self.caption_rollover_edit, "caption_rollover")
+            if not self.caption_rollover_edit.placeholderText():
+                self.caption_rollover_edit.setPlaceholderText(_("uguale alla didascalia"))
+            layout, mixed = self._common("layout")
+            self._load_combo(self.layout_combo, layout, mixed)
+            hl, mixed = self._common("highlight")
+            self._load_combo(self.highlight_combo, hl, mixed)
+            for state, (status, _choose, remove) in self.icon_rows.items():
+                have = [state in f.icons for f in self._fields]
+                status.setText(_("misto") if len(set(have)) > 1 else (_("impostata") if have[0] else _("nessuna")))
+                remove.setEnabled(any(have))
         self._show_error(self.action_error, None)
         action, mixed = self._common("action")
         action = dict(action or {})
@@ -1398,15 +1616,27 @@ class FieldPropertiesPanel(QWidget):
         self._load_combo(self.action_combo, t, mixed or not known)
         if not mixed and not known:
             self.action_combo.setPlaceholderText(_("Altra azione (non modificabile qui)"))
-        self.action_uri.setText(str(action.get("uri") or "") if t == "uri" else "")
+        self.action_uri.setText(str(action.get("uri") or "") if t == "uri" else
+                                (str(action.get("url") or "") if t == "submit" else ""))
+        self.submit_format.setCurrentIndex(max(0, self.submit_format.findData(action.get("format") or "fdf")))
+        self.submit_empty.setChecked(bool(action.get("empty")))
         self.action_page.setValue(int(action.get("page") or 0) + 1 if t == "goto" else 1)
         self.action_hide.setCurrentIndex(self.action_hide.findData(bool(action.get("hide", True))))
-        self._fill_checklist(self.action_fields, list(action.get("fields") or []) if t in ("reset", "hide") else [])
+        self.event_combo.setCurrentIndex(max(0, self.event_combo.findData(action.get("event") or "U")))
+        self._fill_checklist(self.action_fields,
+                             list(action.get("fields") or []) if t in ("reset", "hide", "submit") else [])
         self._update_action_ui()
 
-    @staticmethod
-    def _normal_action(action: dict) -> dict:
+    @classmethod
+    def _normal_action(cls, action: dict) -> dict:
         """Azione letta dal documento nella stessa forma prodotta da `current_action`."""
+        out = cls._normal_action_body(action)
+        if action.get("event") and action.get("event") != "U":
+            out["event"] = action["event"]
+        return out
+
+    @staticmethod
+    def _normal_action_body(action: dict) -> dict:
         t = action.get("type")
         if t == "reset":
             return {"type": t, "fields": list(action.get("fields") or [])}
@@ -1414,6 +1644,9 @@ class FieldPropertiesPanel(QWidget):
             return {"type": t, "uri": str(action.get("uri") or "")}
         if t == "goto":
             return {"type": t, "page": int(action.get("page") or 0)}
+        if t == "submit":
+            return {"type": t, "url": str(action.get("url") or ""), "format": action.get("format") or "fdf",
+                    "fields": list(action.get("fields") or []), "empty": bool(action.get("empty"))}
         if t == "hide":
             return {"type": t, "fields": list(action.get("fields") or []), "hide": bool(action.get("hide", True))}
         return {"type": t}
@@ -1429,7 +1662,38 @@ class FieldPropertiesPanel(QWidget):
         form.addRow(self.lock_fields)
         self.lock_error = self._error_label()
         form.addRow(self.lock_error)
+        form.addRow(self._note(_("Vincoli per chi firma")))
+        self.sv_reasons = self._line(lambda _t: self._on_sv_changed())
+        self.sv_reasons.setPlaceholderText(_("qualunque motivo"))
+        self.sv_reasons.setToolTip(_("Motivi ammessi, separati da punto e virgola"))
+        form.addRow(_("Motivi ammessi"), self.sv_reasons)
+        self.sv_timestamp = self._line(lambda _t: self._on_sv_changed())
+        self.sv_timestamp.setPlaceholderText(_("nessuna"))
+        self.sv_timestamp.setToolTip(_("Indirizzo del server di marca temporale da usare obbligatoriamente"))
+        form.addRow(_("Marca temporale"), self.sv_timestamp)
+        self.sv_certify = self._combo(
+            [(_("Non richiesta"), 0), (_("Nessuna modifica consentita"), 1), (_("Consenti compilazione e firme"), 2),
+             (_("Consenti anche i commenti"), 3)], lambda _v: self._on_sv_changed())
+        form.addRow(_("Certificazione"), self.sv_certify)
         self._signature_form = form
+
+    def current_sv(self) -> dict:
+        reasons = [r.strip() for r in self.sv_reasons.text().split(";") if r.strip()]
+        out: dict = {}
+        if reasons:
+            out["reasons"] = reasons
+        if self.sv_timestamp.text().strip():
+            out["timestamp"] = self.sv_timestamp.text().strip()
+        if self.sv_certify.currentData():
+            out["certify"] = int(self.sv_certify.currentData())
+        return out
+
+    def _on_sv_changed(self) -> None:
+        if self._loading or not self._fields:
+            return
+        sv = self.current_sv()
+        if sv != self._loaded_sv and self._apply({"sv": sv}):
+            self._loaded_sv = sv
 
     def current_lock(self) -> tuple[dict | None, str | None]:
         action = self.lock_combo.currentData()
@@ -1463,6 +1727,15 @@ class FieldPropertiesPanel(QWidget):
         self._fill_checklist(self.lock_fields, fields)
         self.lock_fields.setEnabled(mixed or action in ("Include", "Exclude"))
         self._show_error(self.lock_error, None)
+        sv, mixed_sv = self._common("sv")
+        sv = dict(sv or {})
+        self._loaded_sv = None if mixed_sv else sv
+        self._load_line(self.sv_reasons, value="; ".join(sv.get("reasons") or []), mixed=mixed_sv)
+        self._load_line(self.sv_timestamp, value=sv.get("timestamp") or "", mixed=mixed_sv)
+        if not mixed_sv:
+            self.sv_reasons.setPlaceholderText(_("qualunque motivo"))
+            self.sv_timestamp.setPlaceholderText(_("nessuna"))
+        self._load_combo(self.sv_certify, int(sv.get("certify") or 0), mixed_sv)
 
     # ------------------------------------------------------------ applicazione
     def _label(self) -> str:

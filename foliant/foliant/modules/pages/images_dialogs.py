@@ -112,7 +112,8 @@ TRANSLATIONS = {
     "Sfoglia…": "Browse…",
     "Scegli la cartella di destinazione": "Choose the destination folder",
     "Modello del nome": "Name template",
-    "Segnaposto: {nome} nome del documento, {pagina} numero di pagina.": "Placeholders: {nome} document name, {pagina} page number.",
+    "Segnaposto: {nome} nome del documento, {pagina} numero di pagina.": "Placeholders: {name} document name, {page} page number.",
+    "{nome}_p{pagina}": "{name}_p{page}",
     "Esporta": "Export",
     "Esportazione immagini…": "Exporting images…",
     "Risoluzione troppo alta": "Resolution too high",
@@ -477,6 +478,11 @@ def clipboard_has_supported_content() -> bool:
         return False
 
 
+def _user_paper() -> str:
+    from .prefs import user_paper
+    return user_paper()
+
+
 class PasteDialog(QDialog):
     """Anteprima del contenuto rilevato negli appunti e opzioni di inserimento."""
 
@@ -521,6 +527,9 @@ class PasteDialog(QDialog):
             self.size_combo.addItem(_("Come l'immagine"), None)
         for name in ("A4", "Letter"):
             self.size_combo.addItem(name, name)
+        if self.kind not in (images.CLIP_IMAGE, images.CLIP_URIS):
+            from .prefs import user_paper
+            self.size_combo.setCurrentIndex(max(0, self.size_combo.findData(user_paper())))
         self.size_label = QLabel(_("Formato pagina"))
         form.addRow(self.size_label, self.size_combo)
         self.margin_spin = QDoubleSpinBox()
@@ -578,7 +587,7 @@ class PasteDialog(QDialog):
         opts = self.options()
         size = images.resolve_page_size(None, opts["page_size"], 0)
         return images.clipboard_payload_to_pdf(
-            self.snapshot, page_size=size, margin=opts["margin"], text_page_size=size or PAPER_SIZES["A4"],
+            self.snapshot, page_size=size, margin=opts["margin"], text_page_size=size or PAPER_SIZES[_user_paper()],
             text_margin=opts["margin"], font_size=opts["font_size"], errors=errors)
 
     def page_count(self) -> int | None:
@@ -713,7 +722,7 @@ class ExportImagesDialog(QDialog):
         folder_row.addWidget(self.folder_edit, 1)
         folder_row.addWidget(self.browse_btn)
         form.addRow(_("Cartella"), folder_row)
-        self.template_edit = QLineEdit("{nome}_p{pagina}")
+        self.template_edit = QLineEdit(_("{nome}_p{pagina}"))
         form.addRow(_("Modello del nome"), self.template_edit)
         form.addRow("", _muted_label(_("Segnaposto: {nome} nome del documento, {pagina} numero di pagina.")))
         _uniform_fields(form)

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import pymupdf
 
 from .content import (
-    FORM, IMAGE, PATH, SHADING, Name, PageObject, ParsedPage, fmt_matrix, fmt_name, fmt_num, matrix_close,
+    FORM, IMAGE, PATH, SHADING, TEXT, Name, PageObject, ParsedPage, fmt_matrix, fmt_name, fmt_num, matrix_close,
     page_content, parse_page, rcenter, Pt, resource_names, resources_value, tokenize_ops,
 )
 
@@ -279,13 +279,17 @@ def rotate(pdf, page_index: int, indices, angle_ccw: float) -> list[int]:
 
 
 def flip(pdf, page_index: int, indices, horizontal: bool) -> list[int]:
-    """Specchia rispetto all'asse verticale (orizzontale=True) o orizzontale della vista."""
+    """Specchia rispetto all'asse verticale (orizzontale=True) o orizzontale della vista.
+    I blocchi di testo sono esclusi (il testo specchiato non resterebbe modificabile)."""
     page = pdf[page_index]
     rot = page.rotation % 180
     if rot == 90:
         horizontal = not horizontal
     parsed = parse_page(pdf, page)
-    objs = _check_indices(parsed, indices)
+    objs = [o for o in _check_indices(parsed, indices) if o.kind != TEXT]
+    if not objs:
+        raise ObjectError("I blocchi di testo non si possono capovolgere.")
+    indices = [o.index for o in objs]
     center = rcenter(union_rect(objs))
     M = pymupdf.Matrix(-1, 0, 0, 1, 0, 0) if horizontal else pymupdf.Matrix(1, 0, 0, -1, 0, 0)
     return transform_objects(pdf, page_index, indices, about(center, M))
@@ -599,6 +603,54 @@ def strip_jpeg_metadata(data: bytes) -> tuple[bytes, int]:
     return data, orient
 
 
+MAX_PIXELS = 100_000_000
+
+
+def image_pixels(data: bytes) -> int:
+    """Numero di pixel di un'immagine (0 se non leggibile), senza decodificarla tutta."""
+    try:
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(io.BytesIO(data)) as im:
+            return im.size[0] * im.size[1]
+    except Exception:
+        return 0
+
+
+def downsample(data: bytes, max_pixels: int = MAX_PIXELS) -> bytes:
+    """Riduce l'immagine sotto `max_pixels` mantenendo le proporzioni (PNG, o JPEG se lo era)."""
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(io.BytesIO(data)) as im:
+        w, h = im.size
+        if w * h <= max_pixels:
+            return data
+        f = (max_pixels / (w * h)) ** 0.5
+        fmt = "JPEG" if (im.format or "").upper() == "JPEG" else "PNG"
+        small = im.resize((max(1, int(w * f)), max(1, int(h * f))), Image.Resampling.LANCZOS)
+        if fmt == "JPEG" and small.mode not in ("RGB", "L", "CMYK"):
+            small = small.convert("RGB")
+        buf = io.BytesIO()
+        small.save(buf, fmt, **({"quality": 90} if fmt == "JPEG" else {}), dpi=im.info.get("dpi", (96, 96)))
+        return buf.getvalue()
+
+
+_EXTRA_FORMATS = False
+
+
+def _register_extra_formats() -> None:
+    """HEIC/HEIF tramite pillow-heif, se installato (AVIF è già in Pillow)."""
+    global _EXTRA_FORMATS
+    if _EXTRA_FORMATS:
+        return
+    _EXTRA_FORMATS = True
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    except Exception:
+        pass
+
+
 def prepare_image(data: bytes) -> tuple[bytes, int]:
     """Valida un'immagine e la prepara all'inserimento. Restituisce (dati, orientamento EXIF)."""
     if not data:
@@ -609,17 +661,21 @@ def prepare_image(data: bytes) -> tuple[bytes, int]:
         orient = 1
     try:
         from PIL import Image
+        _register_extra_formats()
         with Image.open(io.BytesIO(data)) as im:
             im.load()
             fmt = (im.format or "").upper()
             n_frames = getattr(im, "n_frames", 1)
-            if fmt in ("WEBP", "GIF", "TIFF", "BMP", "ICO", "TGA", "PPM") or n_frames > 1 or im.mode in ("P", "LA", "PA") and fmt != "PNG":
-                if fmt not in ("PNG", "JPEG"):
-                    im.seek(0)
-                    buf = io.BytesIO()
-                    conv = im.convert("RGBA") if ("A" in im.mode or "transparency" in im.info) else im.convert("RGB")
-                    conv.save(buf, "PNG")
-                    data = buf.getvalue()
+            passthrough = fmt in ("PNG", "JPEG", "JPEG2000") and n_frames == 1 and not (
+                im.mode in ("P", "LA", "PA") and fmt != "PNG")
+            if not passthrough:
+                # primo fotogramma, compresso senza perdita (HEIC/AVIF/WebP/GIF/TIFF/BMP/TGA/ICO/PNM…)
+                im.seek(0)
+                buf = io.BytesIO()
+                conv = im.convert("RGBA") if ("A" in im.mode or "transparency" in im.info) else im.convert("RGB")
+                extra = {"dpi": im.info["dpi"]} if im.info.get("dpi") else {}
+                conv.save(buf, "PNG", **extra)
+                data = buf.getvalue()
     except ObjectError:
         raise
     except Exception:
@@ -627,7 +683,8 @@ def prepare_image(data: bytes) -> tuple[bytes, int]:
             pymupdf.Pixmap(data)
         except Exception as e:
             raise ObjectError("Il file non è un'immagine valida o è danneggiato.\n"
-                              "Formati accettati: PNG, JPEG, TIFF, BMP, GIF, WebP.") from e
+                              "Formati accettati: PNG, JPEG, JPEG 2000, TIFF, BMP, GIF, WebP, HEIC, AVIF, "
+                              "TGA, ICO, PNM.") from e
     return data, orient
 
 
@@ -1120,6 +1177,32 @@ def view_vector_to_page(page: pymupdf.Page, dx: float, dy: float) -> tuple[float
     return v.x, v.y
 
 
+# ================================================================ profili e moduli
+def pdfa_part(pdf: pymupdf.Document) -> str | None:
+    """Parte PDF/A dichiarata nei metadati XMP («1», «2», …) o None."""
+    try:
+        xmp = pdf.get_xml_metadata() or ""
+    except Exception:
+        return None
+    m = re.search(r"pdfaid:part\s*=\s*[\"'](\d)[\"']|<pdfaid:part>\s*(\d)\s*</pdfaid:part>", xmp)
+    if not m:
+        return None
+    return m.group(1) or m.group(2)
+
+
+def has_dynamic_xfa(pdf: pymupdf.Document) -> bool:
+    """Modulo XFA dinamico (il contenuto delle pagine non è quello mostrato)."""
+    try:
+        cat = pdf.pdf_catalog()
+        t, v = pdf.xref_get_key(cat, "NeedsRendering")
+        if v == "true":
+            return True
+        typ, val = pdf.xref_get_key(cat, "AcroForm/XFA")
+        return typ != "null" and pdf.page_count > 0 and pdf.xref_get_key(cat, "AcroForm/Fields")[1] in ("[]", "null")
+    except Exception:
+        return False
+
+
 # ================================================================ guide e aggancio
 def snap_targets(parsed: ParsedPage, exclude: set, page_rect: pymupdf.Rect, near: pymupdf.Rect | None = None,
                  limit: int = 400) -> tuple[list[float], list[float]]:
@@ -1319,7 +1402,8 @@ def objects_in_rect(parsed: ParsedPage, rect: pymupdf.Rect, intersect: bool = Fa
 
 
 def kind_label(kind: str) -> str:
-    return {IMAGE: "Immagine", PATH: "Tracciato", FORM: "Oggetto composto", SHADING: "Sfumatura"}.get(kind, kind)
+    return {IMAGE: "Immagine", PATH: "Tracciato", FORM: "Oggetto composto", SHADING: "Sfumatura",
+            TEXT: "Blocco di testo"}.get(kind, kind)
 
 
 __all__ = [

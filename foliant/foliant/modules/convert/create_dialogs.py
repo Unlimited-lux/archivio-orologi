@@ -36,8 +36,9 @@ class ImagesDialog(QDialog):
     ROLE_PATH = Qt.ItemDataRole.UserRole
     ROLE_ROT = Qt.ItemDataRole.UserRole + 1
 
-    def __init__(self, parent, paths: list[str], ask_more=None):
+    def __init__(self, parent, paths: list[str], ask_more=None, *, paper: str = "A4", unit: str = "mm"):
         super().__init__(parent)
+        self.margin_unit = "in" if unit == "in" else "mm"
         self.setWindowTitle(_("Crea PDF da immagini"))
         self.resize(760, 560)
         self._ask_more = ask_more
@@ -74,7 +75,7 @@ class ImagesDialog(QDialog):
 
         opts = QGroupBox(_("Pagine"))
         form = QFormLayout(opts)
-        self.size_box = _combo([(_("Come l'immagine"), None)] + [(s, s) for s in STANDARD_SIZES], "A4")
+        self.size_box = _combo([(_("Come l'immagine"), None)] + [(s, s) for s in STANDARD_SIZES], paper)
         form.addRow(_("Formato pagina"), self.size_box)
         self.orient_box = _combo([(_("Automatico"), "auto"), (_("Verticale"), "portrait"),
                                   (_("Orizzontale"), "landscape")])
@@ -83,9 +84,16 @@ class ImagesDialog(QDialog):
                                (_("Dimensione reale centrata"), "actual")])
         form.addRow(_("Adattamento"), self.fit_box)
         self.margin = QDoubleSpinBox()
-        self.margin.setRange(0, 100)
-        self.margin.setValue(10)
-        self.margin.setSuffix(" mm")
+        if self.margin_unit == "in":      # NFR-26: unità di misura locale
+            self.margin.setDecimals(2)
+            self.margin.setRange(0, 4)
+            self.margin.setSingleStep(0.1)
+            self.margin.setValue(0.4)
+            self.margin.setSuffix(" in")
+        else:
+            self.margin.setRange(0, 100)
+            self.margin.setValue(10)
+            self.margin.setSuffix(" mm")
         form.addRow(_("Margini"), self.margin)
         self.quality_box = _combo([(_("Originale (nessuna ricompressione)"), "original"),
                                    (_("Ricompressa"), "recompress")])
@@ -196,7 +204,8 @@ class ImagesDialog(QDialog):
             "orientation": self.orient_box.currentData(),
             "fit": self.fit_box.currentData(),
             # «Come l'immagine»: pagina della dimensione esatta dell'immagine, senza margini
-            "margin_pt": 0.0 if self.size_box.currentData() is None else self.margin.value() * 72 / 25.4,
+            "margin_pt": 0.0 if self.size_box.currentData() is None else
+            self.margin.value() * (72 if self.margin_unit == "in" else 72 / 25.4),
             "quality": self.quality_box.currentData(),
             "max_ppi": self.ppi.value() if self.quality_box.currentData() != "original" else None,
             "rotations": rotations or None,
@@ -206,16 +215,17 @@ class ImagesDialog(QDialog):
 class BlankDialog(QDialog):
     """Nuovo PDF vuoto: formato, orientamento, pagine, colore di fondo e stile carta."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, *, paper: str = "A4", unit: str = "mm"):
         super().__init__(parent)
         self.setWindowTitle(_("Nuovo PDF vuoto"))
+        inches = unit == "in"
         self.setMinimumWidth(420)
         self.background = QColor(255, 255, 255)
         self.line_color = QColor(191, 204, 217)
         lay = QVBoxLayout(self)
         form = QFormLayout()
         self.size_box = _combo([(s, s) for s in ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "B4", "B5", "Letter",
-                                                 "Legal", "Tabloid"]] + [(_("Personalizzato"), "custom")], "A4")
+                                                 "Legal", "Tabloid"]] + [(_("Personalizzato"), "custom")], paper)
         form.addRow(_("Formato"), self.size_box)
         custom = QHBoxLayout()
         self.w = QDoubleSpinBox()
@@ -223,9 +233,16 @@ class BlankDialog(QDialog):
         for s in (self.w, self.h):
             s.setRange(0.1, 100000)
             s.setDecimals(1)
-        self.w.setValue(210)
-        self.h.setValue(297)
-        self.unit = _combo([("mm", "mm"), (_("pollici"), "in"), (_("punti"), "pt")])
+        # dimensioni personalizzate proposte nel formato e nell'unità locali (NFR-26)
+        if inches:
+            for spin in (self.w, self.h):
+                spin.setDecimals(2)
+            self.w.setValue(8.5 if paper == "Letter" else 8.27)
+            self.h.setValue(11.0 if paper == "Letter" else 11.69)
+        else:
+            self.w.setValue(215.9 if paper == "Letter" else 210)
+            self.h.setValue(279.4 if paper == "Letter" else 297)
+        self.unit = _combo([("mm", "mm"), (_("pollici"), "in"), (_("punti"), "pt")], "in" if inches else "mm")
         custom.addWidget(self.w)
         custom.addWidget(QLabel("×"))
         custom.addWidget(self.h)
@@ -245,9 +262,17 @@ class BlankDialog(QDialog):
                                  (_("A punti"), "dots")])
         form.addRow(_("Stile carta"), self.paper_box)
         self.step = QDoubleSpinBox()
-        self.step.setRange(1, 100)
-        self.step.setValue(5)
-        self.step.setSuffix(" mm")
+        self.step_inches = inches
+        if inches:
+            self.step.setDecimals(2)
+            self.step.setRange(0.05, 4)
+            self.step.setSingleStep(0.05)
+            self.step.setValue(0.25)
+            self.step.setSuffix(" in")
+        else:
+            self.step.setRange(1, 100)
+            self.step.setValue(5)
+            self.step.setSuffix(" mm")
         form.addRow(_("Passo"), self.step)
         self.line_button = QPushButton()
         self.line_button.setAutoDefault(False)
@@ -307,7 +332,8 @@ class BlankDialog(QDialog):
         lc = self.line_color
         return {"size": size, "orientation": self.orient_box.currentData(), "pages": self.pages.value(),
                 "background": (bg.redF(), bg.greenF(), bg.blueF()), "paper": self.paper_box.currentData(),
-                "step_mm": self.step.value(), "line_color": (lc.redF(), lc.greenF(), lc.blueF())}
+                "step_mm": self.step.value() * (25.4 if self.step_inches else 1),
+                "line_color": (lc.redF(), lc.greenF(), lc.blueF())}
 
     def accept(self) -> None:
         from .common import ConversionError
@@ -328,17 +354,58 @@ class BlankDialog(QDialog):
 
 
 
-class ScannerDialog(QDialog):
-    """Impostazioni di acquisizione (CNV-24): dispositivo, sorgente, risoluzione, colore, opzioni."""
+# preset predefiniti (CNV-24): pensati per l'archivio di un negozio (documenti, identità, garanzie)
+def builtin_scan_presets() -> list[dict]:
+    return [
+        {"name": _("Documenti in bianco e nero (fatture, contratti)"), "source": "adf", "dpi": 300, "mode": "bw",
+         "straighten": True, "crop": True, "ocr": True, "remove_blank": True},
+        {"name": _("Documento d'identità a colori"), "source": "flatbed", "dpi": 300, "mode": "color",
+         "quality": 90, "id_card": True, "straighten": False, "crop": False},
+        {"name": _("Certificati e garanzie a colori"), "source": "flatbed", "dpi": 300, "mode": "color",
+         "quality": 90, "straighten": True, "crop": True, "ocr": True},
+        {"name": _("Bozza veloce in grigio"), "source": "adf", "dpi": 150, "mode": "gray", "quality": 70},
+    ]
 
-    def __init__(self, parent, devices: list[tuple[str, str]], *, has_document: bool = False, refresh=None):
+
+PRESET_KEYS = ("source", "dpi", "mode", "paper", "brightness", "contrast", "quality", "straighten", "crop", "ocr",
+               "remove_blank", "manual_duplex", "id_card")
+
+
+class ScannerDialog(QDialog):
+    """Impostazioni di acquisizione (CNV-24): preset, dispositivo, sorgente, risoluzione, colore,
+    anteprima e post-elaborazione."""
+
+    def __init__(self, parent, devices: list[tuple[str, str]], *, has_document: bool = False, refresh=None,
+                 settings=None, preview=None):
         super().__init__(parent)
         from PySide6.QtWidgets import QCheckBox
         self.setWindowTitle(_("Crea PDF da scanner"))
         self.setMinimumWidth(460)
         self._refresh = refresh
-        lay = QVBoxLayout(self)
+        self._settings = settings
+        self._preview = preview
+        outer = QHBoxLayout(self)
+        lay = QVBoxLayout()
+        outer.addLayout(lay, 1)
+        preset_row = QHBoxLayout()
+        self.preset = QComboBox()
+        self.preset.setMinimumContentsLength(18)
+        preset_row.addWidget(self.preset, 1)
+        self.save_preset = QPushButton(_("Salva…"))
+        self.delete_preset = QPushButton(_("Elimina"))
+        self.export_preset = QPushButton(_("Esporta…"))
+        self.import_preset = QPushButton(_("Importa…"))
+        for b, ic in ((self.save_preset, "save"), (self.delete_preset, "trash-2"), (self.export_preset, "upload"),
+                      (self.import_preset, "download")):
+            bind_icon(b, ic)
+            b.setAutoDefault(False)
+            preset_row.addWidget(b)
+        self.save_preset.clicked.connect(self._save_preset)
+        self.delete_preset.clicked.connect(self._delete_preset)
+        self.export_preset.clicked.connect(self._export_preset)
+        self.import_preset.clicked.connect(self._import_preset)
         form = QFormLayout()
+        form.addRow(_("Preset"), preset_row)
         dev_row = QHBoxLayout()
         self.device = QComboBox()
         dev_row.addWidget(self.device, 1)
@@ -355,6 +422,9 @@ class ScannerDialog(QDialog):
         form.addRow(_("Risoluzione"), self.dpi)
         self.mode = _combo([(_("Colore"), "color"), (_("Scala di grigi"), "gray"), (_("Bianco e nero"), "bw")])
         form.addRow(_("Colore"), self.mode)
+        from .scanner import PAPER_MM
+        self.paper = _combo([(_("Automatico"), "")] + [(k, k) for k in PAPER_MM])
+        form.addRow(_("Formato carta"), self.paper)
         self.brightness = QSpinBox()
         self.contrast = QSpinBox()
         for s in (self.brightness, self.contrast):
@@ -382,26 +452,173 @@ class ScannerDialog(QDialog):
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.ok_button.setText(_("Acquisisci"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        self.preview_button = buttons.addButton(_("Anteprima"), QDialogButtonBox.ButtonRole.ActionRole)
+        bind_icon(self.preview_button, "eye")
+        self.preview_button.setVisible(preview is not None)
+        self.preview_button.clicked.connect(self._show_preview)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
+        self.preview_label = QLabel()
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setMinimumSize(220, 300)
+        self.preview_label.setVisible(False)
+        outer.addWidget(self.preview_label)
         self.set_devices(devices)
+        self._fill_presets()
+        self.preset.activated.connect(lambda _i: self._apply_current())
 
+    # ---------------------------------------------------------------- preset
+    def _user_presets(self) -> list[dict]:
+        import json
+        if self._settings is None:
+            return []
+        try:
+            data = json.loads(self._settings.value("convert/scan_presets", "[]") or "[]")
+            return [p for p in data if isinstance(p, dict) and p.get("name")]
+        except (ValueError, TypeError):
+            return []
+
+    def _store_user_presets(self, presets: list[dict]) -> None:
+        import json
+        if self._settings is not None:
+            self._settings.setValue("convert/scan_presets", json.dumps(presets, ensure_ascii=False))
+
+    def _fill_presets(self, select: str | None = None) -> None:
+        self.preset.blockSignals(True)
+        self.preset.clear()
+        self.preset.addItem(_("Impostazioni personalizzate"), None)
+        for p in builtin_scan_presets():
+            self.preset.addItem(p["name"], ("builtin", p))
+        for p in self._user_presets():
+            self.preset.addItem(p["name"], ("user", p))
+        if select:
+            i = self.preset.findText(select)
+            self.preset.setCurrentIndex(max(0, i))
+        self.preset.blockSignals(False)
+        self._update_preset_buttons()
+
+    def _update_preset_buttons(self) -> None:
+        data = self.preset.currentData()
+        self.delete_preset.setEnabled(bool(data) and data[0] == "user")
+
+    def _apply_current(self) -> None:
+        data = self.preset.currentData()
+        if data:
+            self.apply_preset(data[1])
+        self._update_preset_buttons()
+
+    def preset_values(self) -> dict:
+        return {"source": self.source.currentData(), "dpi": self.dpi.currentData(), "mode": self.mode.currentData(),
+                "paper": self.paper.currentData(), "brightness": self.brightness.value(),
+                "contrast": self.contrast.value(), "quality": self.quality.value(),
+                "straighten": self.straighten.isChecked(), "crop": self.crop.isChecked(),
+                "ocr": self.ocr.isChecked(), "remove_blank": self.remove_blank.isChecked(),
+                "manual_duplex": self.manual_duplex.isChecked(), "id_card": self.id_card.isChecked()}
+
+    def apply_preset(self, preset: dict) -> None:
+        defaults = {"source": "flatbed", "dpi": 300, "mode": "color", "paper": "", "brightness": 0, "contrast": 0,
+                    "quality": 85, "straighten": False, "crop": False, "ocr": False, "remove_blank": False,
+                    "manual_duplex": False, "id_card": False}
+        values = {**defaults, **{k: v for k, v in preset.items() if k in PRESET_KEYS}}
+        for box, key in ((self.source, "source"), (self.dpi, "dpi"), (self.mode, "mode"), (self.paper, "paper")):
+            i = box.findData(values[key])
+            if i >= 0:
+                box.setCurrentIndex(i)
+        for spin, key in ((self.brightness, "brightness"), (self.contrast, "contrast"), (self.quality, "quality")):
+            try:
+                spin.setValue(int(values[key]))
+            except (TypeError, ValueError):
+                pass
+        for cb, key in ((self.straighten, "straighten"), (self.crop, "crop"), (self.ocr, "ocr"),
+                        (self.remove_blank, "remove_blank"), (self.manual_duplex, "manual_duplex"),
+                        (self.id_card, "id_card")):
+            cb.setChecked(bool(values[key]))
+
+    def _save_preset(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        current = self.preset.currentData()
+        name, ok = QInputDialog.getText(self, _("Salva preset"), _("Nome del preset:"),
+                                        text=current[1]["name"] if current and current[0] == "user" else "")
+        name = name.strip()
+        if not ok or not name:
+            return
+        presets = [p for p in self._user_presets() if p["name"] != name]
+        presets.append({"name": name, **self.preset_values()})
+        self._store_user_presets(presets)
+        self._fill_presets(select=name)
+
+    def _delete_preset(self) -> None:
+        data = self.preset.currentData()
+        if not data or data[0] != "user":
+            return
+        self._store_user_presets([p for p in self._user_presets() if p["name"] != data[1]["name"]])
+        self._fill_presets()
+
+    def _export_preset(self) -> None:
+        import json
+        from PySide6.QtWidgets import QFileDialog
+        data = self.preset.currentData()
+        name = data[1]["name"] if data else _("Impostazioni personalizzate")
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta preset"), name + ".json", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(json.dumps({"foliant_scan_preset": 1, "name": name, **self.preset_values()},
+                                             ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, _("Esporta preset"), _("Impossibile scrivere il file: {e}").format(e=e.strerror or e))
+
+    def _import_preset(self) -> None:
+        import json
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa preset"), "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not str(data.get("name", "")).strip():
+                raise ValueError
+        except (OSError, ValueError, UnicodeDecodeError):
+            QMessageBox.warning(self, _("Importa preset"), _("Il file non contiene un preset di acquisizione valido."))
+            return
+        preset = {"name": str(data["name"]).strip(), **{k: data[k] for k in PRESET_KEYS if k in data}}
+        presets = [p for p in self._user_presets() if p["name"] != preset["name"]] + [preset]
+        self._store_user_presets(presets)
+        self._fill_presets(select=preset["name"])
+        self.apply_preset(preset)
+
+    # ---------------------------------------------------------------- dispositivo
     def set_devices(self, devices) -> None:
         self.device.clear()
         for dev, label in devices:
             self.device.addItem(label or dev, dev)
         self.ok_button.setEnabled(bool(devices))
+        if hasattr(self, "preview_button"):
+            self.preview_button.setEnabled(bool(devices))
 
     def _reload(self) -> None:
         if self._refresh is not None:
             self.set_devices(self._refresh())
 
+    def _show_preview(self) -> None:
+        if self._preview is None:
+            return
+        img = self._preview(self.device.currentData(), self.settings())
+        if img is None:
+            return
+        from PIL.ImageQt import ImageQt
+        pix = QPixmap.fromImage(ImageQt(img.convert("RGB")))
+        self.preview_label.setPixmap(pix.scaled(QSize(220, 300), Qt.AspectRatioMode.KeepAspectRatio,
+                                                Qt.TransformationMode.SmoothTransformation))
+        self.preview_label.setVisible(True)
+
     def settings(self):
         from .scanner import ScanSettings
         return ScanSettings(source=self.source.currentData(), dpi=self.dpi.currentData(), mode=self.mode.currentData(),
                             brightness=self.brightness.value(), contrast=self.contrast.value(),
-                            jpeg_quality=self.quality.value())
+                            paper=self.paper.currentData() or None, jpeg_quality=self.quality.value())
 
 
 class CornerEditor(QLabel):
@@ -475,35 +692,34 @@ class CornerEditor(QLabel):
 class PhotosDialog(QDialog):
     """Foto di documenti: angoli rilevati e regolabili, filtro e formato (CNV-26)."""
 
-    def __init__(self, parent, paths: list[str]):
+    def __init__(self, parent, paths: list[str], *, paper: str = "A4", ask_more=None):
         super().__init__(parent)
-        from .photo import detect_corners, load_image
+        from PySide6.QtWidgets import QCheckBox
         self.setWindowTitle(_("Crea PDF da foto di documenti"))
         self.resize(820, 600)
         self.items: list[dict] = []
-        for p in paths:
-            try:
-                rgb = load_image(p)
-            except Exception:
-                continue
-            corners, found = detect_corners(rgb)
-            self.items.append({"path": p, "rgb": rgb, "corners": corners, "found": found})
+        self._ask_more = ask_more
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
         self.list = QListWidget()
-        for it in self.items:
-            self.list.addItem(Path(it["path"]).name + ("" if it["found"] else "  " + _("(bordi da regolare)")))
         left.addWidget(self.list, 1)
+        self.add_button = QPushButton(_("Aggiungi foto…"))
+        bind_icon(self.add_button, "image-plus")
+        self.add_button.setAutoDefault(False)
+        self.add_button.setVisible(ask_more is not None)
+        self.add_button.clicked.connect(self._add_more)
+        left.addWidget(self.add_button)
         form = QFormLayout()
         self.filter = _combo([(_("Documento a colori"), "color"), (_("Originale"), "original"),
                               (_("Scala di grigi"), "gray"), (_("Bianco e nero"), "bw"), (_("Lavagna"), "whiteboard")])
         form.addRow(_("Filtro"), self.filter)
         self.size = _combo([("A4", "A4"), ("Letter", "Letter"), (_("Biglietto da visita"), "card"),
-                            (_("Documento d'identità"), "id"), (_("Come rilevato"), None)])
+                            (_("Documento d'identità"), "id"), (_("Come rilevato"), None)], paper)
         form.addRow(_("Formato"), self.size)
         left.addLayout(form)
-        hint = QLabel(_("Trascina gli angoli per correggere il bordo del foglio. Fotocamera non disponibile: "
-                        "importa le foto scattate con il telefono."))
+        self.ocr = QCheckBox(_("Rendi il testo ricercabile (OCR)"))
+        left.addWidget(self.ocr)
+        hint = QLabel(_("Trascina gli angoli per correggere il bordo del foglio."))
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
         left.addWidget(hint)
@@ -518,8 +734,30 @@ class PhotosDialog(QDialog):
         lay.addWidget(self.editor, 2)
         self._current = -1
         self.list.currentRowChanged.connect(self._select)
-        if self.items:
+        self.add_paths(paths)
+
+    def add_paths(self, paths: list[str]) -> int:
+        """Aggiunge foto (angoli rilevati subito); restituisce quante sono leggibili."""
+        from .photo import detect_corners, load_image
+        added = 0
+        for p in paths:
+            try:
+                rgb = load_image(p)
+            except Exception:
+                continue
+            corners, found = detect_corners(rgb)
+            self.items.append({"path": p, "rgb": rgb, "corners": corners, "found": found})
+            self.list.addItem(Path(p).name + ("" if found else "  " + _("(bordi da regolare)")))
+            added += 1
+        if added and self.list.currentRow() < 0:
             self.list.setCurrentRow(0)
+        return added
+
+    def _add_more(self) -> None:
+        if self._ask_more is not None:
+            paths = self._ask_more()
+            if paths:
+                self.add_paths(paths)
 
     def _store(self) -> None:
         if 0 <= self._current < len(self.items):
@@ -538,6 +776,9 @@ class PhotosDialog(QDialog):
         self._store()
         return ([{"path": it["path"], "corners": it["corners"]} for it in self.items],
                 {"page_size": self.size.currentData(), "filter_name": self.filter.currentData()})
+
+    def wants_ocr(self) -> bool:
+        return self.ocr.isChecked()
 
 
 class CropLabel(QLabel):
@@ -621,3 +862,184 @@ class CaptureDialog(QDialog):
     def cropped(self):
         sel = self.preview.selection()
         return self.preview._img.copy(sel) if sel is not None else self.preview._img
+
+
+class OfficeOptionsDialog(QDialog):
+    """Opzioni di conversione dei documenti d'ufficio in PDF (CNV-18), ricordate tra le sessioni."""
+
+    KEY = "convert/office_options"
+
+    def __init__(self, parent, *, kinds: set[str], settings=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QCheckBox
+        from .create import OFFICE_DEFAULTS
+        self.setWindowTitle(_("Opzioni dei documenti d'ufficio"))
+        self._settings = settings
+        values = {**OFFICE_DEFAULTS, **self._stored()}
+        lay = QVBoxLayout(self)
+        general = QGroupBox(_("Documento"))
+        g = QFormLayout(general)
+        self.bookmarks = QCheckBox(_("Segnalibri dai titoli"))
+        self.tagged = QCheckBox(_("PDF taggato (accessibile)"))
+        self.comments = QCheckBox(_("Commenti come annotazioni"))
+        self.final_state = QCheckBox(_("Revisioni: stampa lo stato finale senza marcature"))
+        for cb in (self.bookmarks, self.tagged, self.comments, self.final_state):
+            g.addRow(cb)
+        self.image_quality = QSpinBox()
+        self.image_quality.setRange(10, 100)
+        self.image_quality.setSuffix(" %")
+        g.addRow(_("Qualità delle immagini"), self.image_quality)
+        self.max_dpi = _combo([(_("Originale"), 0), ("300 ppi", 300), ("150 ppi", 150), ("96 ppi", 96)])
+        g.addRow(_("Risoluzione massima delle immagini"), self.max_dpi)
+        self.pdfa = _combo([(_("PDF normale"), ""), ("PDF/A-1b", "1b"), ("PDF/A-2b", "2b"), ("PDF/A-3b", "3b")])
+        g.addRow(_("Formato di uscita"), self.pdfa)
+        lay.addWidget(general)
+        self.sheet_box = QGroupBox(_("Fogli di calcolo"))
+        sf = QFormLayout(self.sheet_box)
+        self.sheets = _combo([(_("Tutti i fogli"), "all"), (_("Solo il foglio attivo"), "active")])
+        sf.addRow(_("Fogli"), self.sheets)
+        self.fit_width = QCheckBox(_("Adatta le colonne alla larghezza della pagina"))
+        sf.addRow(self.fit_width)
+        lay.addWidget(self.sheet_box)
+        self.slide_box = QGroupBox(_("Presentazioni"))
+        pf = QFormLayout(self.slide_box)
+        self.notes_pages = QCheckBox(_("Aggiungi le pagine delle note"))
+        self.hidden_slides = QCheckBox(_("Includi le diapositive nascoste"))
+        pf.addRow(self.notes_pages)
+        pf.addRow(self.hidden_slides)
+        lay.addWidget(self.slide_box)
+        self.sheet_box.setVisible("sheet" in kinds)
+        self.slide_box.setVisible("slides" in kinds)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Crea PDF"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.load(values)
+
+    def _stored(self) -> dict:
+        import json
+        if self._settings is None:
+            return {}
+        try:
+            data = json.loads(self._settings.value(self.KEY, "{}") or "{}")
+            return data if isinstance(data, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def load(self, values: dict) -> None:
+        for cb, key in ((self.bookmarks, "bookmarks"), (self.tagged, "tagged"), (self.comments, "comments"),
+                        (self.final_state, "final_state"), (self.fit_width, "fit_width"),
+                        (self.notes_pages, "notes_pages"), (self.hidden_slides, "hidden_slides")):
+            cb.setChecked(bool(values.get(key)))
+        try:
+            self.image_quality.setValue(int(values.get("image_quality", 90)))
+        except (TypeError, ValueError):
+            pass
+        for box, key in ((self.max_dpi, "max_image_dpi"), (self.pdfa, "pdfa"), (self.sheets, "sheets")):
+            i = box.findData(values.get(key))
+            if i >= 0:
+                box.setCurrentIndex(i)
+
+    def values(self) -> dict:
+        return {"bookmarks": self.bookmarks.isChecked(), "tagged": self.tagged.isChecked(),
+                "comments": self.comments.isChecked(), "final_state": self.final_state.isChecked(),
+                "image_quality": self.image_quality.value(), "max_image_dpi": self.max_dpi.currentData(),
+                "pdfa": self.pdfa.currentData(), "sheets": self.sheets.currentData(),
+                "fit_width": self.fit_width.isChecked(), "notes_pages": self.notes_pages.isChecked(),
+                "hidden_slides": self.hidden_slides.isChecked()}
+
+    def _accept(self) -> None:
+        import json
+        if self._settings is not None:
+            self._settings.setValue(self.KEY, json.dumps(self.values()))
+        self.accept()
+
+
+class CameraDialog(QDialog):
+    """Anteprima della webcam con «Scatta» per ogni pagina (CNV-26). `frames` raccoglie gli scatti."""
+
+    def __init__(self, parent, backend, devices: list[tuple[int, str]]):
+        super().__init__(parent)
+        from PySide6.QtCore import QTimer
+        self.setWindowTitle(_("Crea PDF da fotocamera"))
+        self.resize(760, 560)
+        self.backend = backend
+        self.frames: list = []
+        self._last = None
+        lay = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(_("Fotocamera")))
+        self.device = QComboBox()
+        for index, label in devices:
+            self.device.addItem(label, index)
+        row.addWidget(self.device, 1)
+        lay.addLayout(row)
+        self.view = QLabel()
+        self.view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.view.setMinimumSize(480, 360)
+        lay.addWidget(self.view, 1)
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.done_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.done_button.setText(_("Fine"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        self.shot_button = buttons.addButton(_("Scatta"), QDialogButtonBox.ButtonRole.ActionRole)
+        bind_icon(self.shot_button, "camera")
+        self.shot_button.clicked.connect(self.shoot)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.timer = QTimer(self)
+        self.timer.setInterval(66)
+        self.timer.timeout.connect(self.refresh)
+        self.device.currentIndexChanged.connect(lambda _i: self._open())
+        self._open()
+        self._update_status()
+
+    def _open(self) -> None:
+        self.timer.stop()
+        try:
+            self.backend.open(self.device.currentData())
+        except Exception as e:
+            self._last = None
+            self.view.setText(str(e))
+            self.shot_button.setEnabled(False)
+            return
+        self.shot_button.setEnabled(True)
+        self.timer.start()
+        self.refresh()
+
+    def refresh(self) -> None:
+        frame = self.backend.read()
+        if frame is None:
+            return
+        from PySide6.QtGui import QImage
+        self._last = frame
+        h, w = frame.shape[:2]
+        img = QImage(frame.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
+        self.view.setPixmap(QPixmap.fromImage(img).scaled(self.view.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                          Qt.TransformationMode.SmoothTransformation))
+
+    def shoot(self) -> None:
+        if self._last is None:
+            self.refresh()
+        if self._last is not None:
+            self.frames.append(self._last.copy())
+        self._update_status()
+
+    def _update_status(self) -> None:
+        self.status.setText(_("Pagine scattate: {n}. Inquadra il foglio intero su uno sfondo scuro; dopo «Fine» "
+                              "potrai regolare gli angoli.").format(n=len(self.frames)))
+        self.done_button.setEnabled(bool(self.frames))
+
+    def done(self, code) -> None:   # chiude la fotocamera in ogni caso
+        self.timer.stop()
+        try:
+            self.backend.close()
+        except Exception:
+            pass
+        super().done(code)

@@ -31,8 +31,14 @@ def test_all_literal_strings_translated():
 
 
 def test_placeholders_match():
+    from foliant.modules.pages.fields import ALIASES
     for it, en in ALL.items():
-        assert set(re.findall(r"\{(\w*)\}", it)) == set(re.findall(r"\{(\w*)\}", en)), (it, en)
+        it_keys = set(re.findall(r"\{(\w*)\}", it))
+        en_keys = set(re.findall(r"\{(\w*)\}", en))
+        if it.startswith(("Segnaposto", "{nome}_")):   # modelli: i nomi inglesi sono alias dei campi
+            it_keys = {ALIASES.get(k, k) for k in it_keys}
+            en_keys = {ALIASES.get(k, k) for k in en_keys}
+        assert it_keys == en_keys, (it, en)
 
 
 def test_no_key_registered_twice_with_different_values():

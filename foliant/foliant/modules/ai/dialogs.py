@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget,
     QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
@@ -73,8 +73,9 @@ class ConsentDialog(QDialog):
 class PreviewDialog(QDialog):
     """Anteprima integrale di ciò che verrà inviato, con «Invia»."""
 
-    def __init__(self, summary: str, text: str, parent=None, *, confirm: bool = True):
+    def __init__(self, summary: str, text: str, parent=None, *, confirm: bool = True, send_all: bool = False):
         super().__init__(parent)
+        self.choice = "cancel"
         self.setWindowTitle(_("Verrà inviato"))
         self.resize(640, 520)
         lay = QVBoxLayout(self)
@@ -86,7 +87,11 @@ class PreviewDialog(QDialog):
         lay.addWidget(edit, 1)
         box = QDialogButtonBox()
         if confirm:
-            box.addButton(_("Invia"), QDialogButtonBox.ButtonRole.AcceptRole)
+            send = box.addButton(_("Invia"), QDialogButtonBox.ButtonRole.AcceptRole)
+            send.clicked.connect(lambda: setattr(self, "choice", "send"))
+            if send_all:   # operazioni a più richieste (blocchi, più file): conferma una volta sola
+                every = box.addButton(_("Invia tutte (questa operazione)"), QDialogButtonBox.ButtonRole.AcceptRole)
+                every.clicked.connect(lambda: setattr(self, "choice", "all"))
             box.addButton(QDialogButtonBox.StandardButton.Cancel)
         else:
             box.addButton(QDialogButtonBox.StandardButton.Close)
@@ -165,9 +170,14 @@ class SettingsPage(QWidget):
 
         left = QVBoxLayout()
         self.list = QListWidget()
+        self.list.setMaximumWidth(220)
         self.list.currentItemChanged.connect(self._load_current)
         left.addWidget(self.list, 1)
-        row = QHBoxLayout()
+        self.empty_hint = QLabel(_("Nessun profilo: premi «Aggiungi profilo»."))
+        self.empty_hint.setWordWrap(True)
+        self.empty_hint.setMaximumWidth(220)
+        left.addWidget(self.empty_hint)
+        grid = QGridLayout()
         self.btn_add = QPushButton(_("Aggiungi profilo"))
         bind_icon(self.btn_add, "plus")
         self.btn_dup = QPushButton(_("Duplica"))
@@ -175,10 +185,11 @@ class SettingsPage(QWidget):
         self.btn_add.clicked.connect(self.add_profile)
         self.btn_dup.clicked.connect(self.duplicate_profile)
         self.btn_del.clicked.connect(self.delete_profile)
-        for b in (self.btn_add, self.btn_dup, self.btn_del):
-            row.addWidget(b)
-        left.addLayout(row)
-        body.addLayout(left, 2)
+        grid.addWidget(self.btn_add, 0, 0, 1, 2)
+        grid.addWidget(self.btn_dup, 1, 0)
+        grid.addWidget(self.btn_del, 1, 1)
+        left.addLayout(grid)
+        body.addLayout(left, 1)
 
         self.editor = QGroupBox(_("Profilo"))
         form = QFormLayout(self.editor)
@@ -212,10 +223,10 @@ class SettingsPage(QWidget):
         self.context = QSpinBox()
         self.context.setRange(1000, 2_000_000)
         self.context.setSingleStep(1000)
-        self.context.setSuffix(" token")
+        self.context.setSuffix(_(" token"))
         self.max_out = QSpinBox()
         self.max_out.setRange(256, 128_000)
-        self.max_out.setSuffix(" token")
+        self.max_out.setSuffix(_(" token"))
         self.images = QCheckBox(_("Il modello accetta immagini"))
         self.image_model = QLineEdit()
         self.image_model.setPlaceholderText(_("facoltativo, per generare immagini"))
@@ -250,24 +261,24 @@ class SettingsPage(QWidget):
         form.addRow(_("URL base"), self.base_url)
         form.addRow(_("Protocollo"), self.protocol)
         form.addRow(_("Chiave API"), key_w)
-        form.addRow("", self.session_only)
+        form.addRow(self.session_only)
         form.addRow(_("Modello"), self.model)
         form.addRow(_("Finestra di contesto"), self.context)
         form.addRow(_("Risposta massima"), self.max_out)
-        form.addRow("", self.images)
+        form.addRow(self.images)
         form.addRow(_("Modello per vettori"), self.embed_model)
         form.addRow(_("Modello per immagini"), self.image_model)
         form.addRow(_("Limite di utilizzo"), lim_w)
         form.addRow(_("Informativa del fornitore"), self.privacy)
-        btns = QHBoxLayout()
-        for b in (self.verify_btn, self.save_btn, self.activate_btn, self.revoke_btn):
-            btns.addWidget(b)
+        btns = QGridLayout()            # 2×2: nessun pulsante tagliato anche in inglese
+        for n, b in enumerate((self.verify_btn, self.save_btn, self.activate_btn, self.revoke_btn)):
+            btns.addWidget(b, n // 2, n % 2)
         bw = QWidget()
         bw.setLayout(btns)
         btns.setContentsMargins(0, 0, 0, 0)
         form.addRow(bw)
         form.addRow(self.verify_result)
-        body.addWidget(self.editor, 3)
+        body.addWidget(self.editor, 2)
 
         opts = QGroupBox(_("Opzioni"))
         ol = QFormLayout(opts)
@@ -293,6 +304,9 @@ class SettingsPage(QWidget):
         ol.addRow(self.history_encrypt)
         ol.addRow(_("Elimina automaticamente dopo"), self.retention)
         outer.addWidget(opts)
+        # i testi lunghi non si tagliano: pulsanti e caselle mai più stretti del necessario
+        for w in self.findChildren(QPushButton) + self.findChildren(QCheckBox):
+            w.setMinimumWidth(w.sizeHint().width())
         self._current: Profile | None = None
         self._models_verified: list[str] = []
         for w in (self.name, self.base_url, self.key, self.embed_model, self.image_model, self.privacy):
@@ -331,6 +345,7 @@ class SettingsPage(QWidget):
             if p.id == (select or (self._current.id if self._current else None)):
                 self.list.setCurrentItem(item)
         self.list.blockSignals(False)
+        self.empty_hint.setVisible(self.list.count() == 0)
         if self.list.currentItem() is None and self.list.count():
             self.list.setCurrentRow(0)
         self._load_current()

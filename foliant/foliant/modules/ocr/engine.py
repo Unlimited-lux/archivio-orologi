@@ -44,7 +44,7 @@ from foliant.i18n import _
 
 from . import detect
 from .preprocess import (
-    PreprocessOptions, apply_point, clean_background, ink_color, invert, prepare, serif_ratio, slant, stroke_width,
+    PreprocessOptions, apply_point, clean_background, ink_color, invert, prepare, rotation_affine, serif_ratio, slant, stroke_width,
     warp,
 )
 from .tess import LOW_CONFIDENCE, Line, OcrCancelled, OcrError, Word, detect_orientation, recognize
@@ -346,6 +346,32 @@ def _style_lines(lines: list[Line], color_img: np.ndarray | None, gray: np.ndarr
                 ln.family = top
 
 
+def _reading_score(gray: np.ndarray, languages: list[str], dpi: float, cancelled) -> float:
+    lines = recognize(gray, languages, dpi=int(round(dpi)), psm=3, cancelled=cancelled, timeout=60)
+    return sum(w.conf * len(w.text) for ln in lines for w in ln.words if w.conf > 50 and len(w.text) > 1)
+
+
+def verify_rotation(gray: np.ndarray, rotation: int, languages: list[str], dpi: float = 300,
+                    cancelled: Callable[[], bool] | None = None) -> int:
+    """Conferma la rotazione proposta dall'OSD leggendo la pagina nei due versi.
+
+    L'OSD sbaglia su pagine con poche righe di testo e molti segni ripetuti (zona MRZ dei
+    passaporti, «<<<<»): si scarta la rotazione se il testo si legge nettamente meglio senza."""
+    h, w = gray.shape[:2]
+    scale = min(1.0, 1800.0 / max(h, w))
+    if scale < 1.0:
+        gray = cv2.resize(gray, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+    try:
+        straight = _reading_score(gray, languages, dpi * scale, cancelled)
+        m, size = rotation_affine(gray.shape[1], gray.shape[0], (rotation // 90) % 4, 0.0)
+        turned = _reading_score(warp(gray, m, size, (255,)), languages, dpi * scale, cancelled)
+    except OcrError:
+        return rotation
+    # Tesseract legge anche le righe verticali: a 90/270° i due punteggi possono coincidere, e nel
+    # dubbio vale l'OSD. Si scarta la rotazione solo se il verso originale si legge nettamente meglio.
+    return 0 if straight > turned * 1.5 else rotation
+
+
 def recognize_array(img: np.ndarray, languages: list[str], dpi: float, popts: PreprocessOptions | None = None,
                     psm: int = 3, cancelled: Callable[[], bool] | None = None, timeout: float = 120.0,
                     keep_color: bool = False) -> tuple[list[Line], Any, np.ndarray | None]:
@@ -356,6 +382,8 @@ def recognize_array(img: np.ndarray, languages: list[str], dpi: float, popts: Pr
     popts = popts or PreprocessOptions()
     gray0 = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     osd = detect_orientation(gray0, cancelled) if popts.auto_rotate else 0
+    if osd:
+        osd = verify_rotation(gray0, osd, languages, dpi, cancelled)
     prep = prepare(img, popts, osd)
     if cancelled is not None and cancelled():
         raise OcrCancelled()
@@ -771,6 +799,23 @@ def document_copy_bytes(pdf: pymupdf.Document) -> bytes:
         return copy.tobytes(garbage=0, deflate=False)
     finally:
         copy.close()
+
+
+def preview_page(pdf: pymupdf.Document, index: int, popts: PreprocessOptions, dpi: int = 150,
+                 languages: list[str] | None = None) -> dict:
+    """Anteprima della pre-elaborazione di una pagina (OCR-04): immagine originale, immagine di lavoro
+    (quella che vedrà il riconoscimento), orientamento e inclinazione rilevati, risoluzione effettiva."""
+    with ENGINE_LOCK:
+        page = pdf[index]
+        info = detect.classify_page(page, check_mixed=False)
+        img, zoom, _notes = render_page(page, dpi)
+    gray = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    osd = detect_orientation(gray) if popts.auto_rotate else 0
+    if osd:
+        osd = verify_rotation(gray, osd, languages or default_languages(), dpi)
+    prep = prepare(img, popts, osd)
+    return {"original": img, "working": prep.gray, "rotation": prep.rotation, "skew": prep.skew,
+            "perspective": "perspective" in prep.notes, "dpi": info.dpi, "category": info.category}
 
 
 def recognize_area(pdf: pymupdf.Document, index: int, clip: pymupdf.Rect, opts: OcrOptions,

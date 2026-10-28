@@ -2,36 +2,41 @@
 
 from __future__ import annotations
 
+import ctypes
 import itertools
 import logging
 import os
+import sys
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QIntValidator, QKeySequence
+from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QContextMenuEvent, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
-    QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QToolBar, QToolButton,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractScrollArea, QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget,
+    QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import APP_NAME, __version__
-from ..core.document import ACCESS, CONTENT, LOCK, Document
-from ..core.errors import DocumentError, PasswordRequired, WrongPassword
+from ..core.document import ACCESS, CONTENT, LOCK, Document, write_error
+from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import theme
 from .banners import Banner, BannerBar, DocumentTabs
-from .context import PDF_FILTER, Context, Mode
+from .context import PDF_FILTER, Context, Mode, ToolBar
 from .document_view import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView
-from .home import HomeScreen
+from .home import HomeScreen, order_recent
 from .icons import app_icon, bind_icon
 from .notify import NotificationArea
 from .tasks import BackgroundTask, TaskManager, TaskStatusWidget
 
 MAX_RECENT = 15
 READ_ONLY_BANNER = "nucleo.sola_lettura"     # avviso dei file senza permesso di scrittura
+# Comandi con nome della riga di comando e delle azioni del file .desktop (NFR-32): se nessun modulo
+# li registra con ctx.add_command, si usa l'azione rapida della Home con questo titolo.
+HOME_COMMANDS = {"create-pdf": "Crea PDF da file", "merge": "Unisci PDF"}
 
 
 class PageField(QLineEdit):
@@ -65,9 +70,83 @@ class PageField(QLineEdit):
         self.clearFocus()
 OPEN_FILTER = "Documenti (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.xps *.epub *.svg *.txt);;PDF (*.pdf);;Tutti i file (*)"
 
+# Finestre aperte dell'applicazione («Nuova finestra», istanza singola), dalla meno alla più
+# recentemente attiva: l'elenco le tiene vive finché non vengono chiuse (WA_DeleteOnClose).
+_windows: list["MainWindow"] = []
+
+
+def app_windows() -> list["MainWindow"]:
+    """Finestre di Foliant ancora aperte, l'ultima è quella attiva più di recente."""
+    import shiboken6
+    alive = [w for w in _windows if shiboken6.isValid(w)]
+    _windows[:] = alive
+    return [w for w in alive if not w._closed]
+
+
+def active_window() -> "MainWindow | None":
+    """La finestra a cui vanno i file aperti da fuori (gestore file, riga di comando)."""
+    current = QApplication.activeWindow()
+    # non quella che si sta chiudendo: un file aperto lì sparirebbe con lei
+    windows = [w for w in app_windows() if not w._closing]
+    if current in windows:
+        return current
+    return windows[-1] if windows else None
+
+
+def register_window(window: "MainWindow") -> "MainWindow":
+    """Aggiunge `window` alle finestre dell'applicazione; chiusa, viene distrutta e tolta."""
+    if window not in _windows:
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        _windows.append(window)
+    return window
+
+
+def open_window(settings: QSettings, near: "MainWindow | None" = None) -> "MainWindow":
+    """Nuova finestra con le stesse impostazioni, sulla Home (UX-18: Ctrl+N)."""
+    window = register_window(MainWindow(settings))
+    if near is not None and not near.isMaximized() and not near.isFullScreen():
+        window.move(near.pos() + QPoint(32, 32))      # non esattamente sopra l'altra
+    window.show()
+    window.show_home()
+    return window
+
+
+_memory_timer: QTimer | None = None
+
+
+def schedule_memory_release(*_args) -> None:
+    """Dopo la chiusura di una o più schede: un solo `release_memory()` al prossimo giro del ciclo
+    degli eventi. Il timer è dell'applicazione, non della finestra: chiusa una finestra con dei
+    documenti, le sue schede vengono distrutte con lei e il rilascio deve avvenire lo stesso."""
+    global _memory_timer
+    import shiboken6
+    if _memory_timer is None or not shiboken6.isValid(_memory_timer):
+        _memory_timer = QTimer(QApplication.instance())
+        _memory_timer.setSingleShot(True)
+        _memory_timer.setInterval(0)
+        _memory_timer.timeout.connect(lambda: release_memory())
+    _memory_timer.start()
+
+
+def release_memory() -> bool:
+    """Restituisce al sistema la memoria già liberata (NFR-06). Con glibc i blocchi delle
+    immagini di pagina di una scheda chiusa restano all'allocatore e la memoria residente
+    resterebbe al picco: `malloc_trim(0)` li rende al sistema. Solo su Linux con glibc."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        if not os.confstr("CS_GNU_LIBC_VERSION").startswith("glibc"):
+            return False
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:           # altra libc o libreria non disponibile: nulla da fare
+        return False
+    return True
+
 
 class MainWindow(QMainWindow):
     _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
+    _closed = False             # chiusura confermata (closeEvent accettato)
+    _closing = False            # closeEvent in corso (domande aperte): non riceve file da fuori
 
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
@@ -83,12 +162,14 @@ class MainWindow(QMainWindow):
         self._connected_view: DocumentView | None = None
         self.view_menu_providers: list = []
         self.tab_menu_providers: list = []           # ctx.add_tab_menu_provider: fn(view, menu)
+        self.recent_menu_providers: list = []        # ctx.add_recent_menu_provider: fn(path, menu)
         self.selected_pages_provider: Callable | None = None   # ctx.set_selected_pages_provider
         self._preference_pages: list[tuple[int, int, str, Callable]] = []   # (ordine, n, titolo, factory)
         self._preference_seq = itertools.count()
         # Scorciatoie valide solo in una modalità: (azione, scorciatoie, id modalità)
         self._mode_shortcuts: list[tuple[QAction, list, str]] = []
         self.module_results: list[tuple[str, Exception | None]] = []
+        self._commands: dict[str, Callable] = {}          # ctx.add_command
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
         self.setAcceptDrops(True)
@@ -114,7 +195,7 @@ class MainWindow(QMainWindow):
     # ================================================================== UI base
     def _build_ui(self) -> None:
         # Barra in alto
-        self.header = QToolBar(_("Barra principale"), self)
+        self.header = ToolBar(_("Barra principale"), self)
         self.header.setObjectName("header")
         self.header.setMovable(False)
         self.header.setFloatable(False)
@@ -155,7 +236,7 @@ class MainWindow(QMainWindow):
         side_layout = QHBoxLayout(self.sidebar)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(0)
-        self.sidebar_strip = QToolBar(self.sidebar)
+        self.sidebar_strip = ToolBar(self.sidebar)
         self.sidebar_strip.setOrientation(Qt.Orientation.Vertical)
         self.sidebar_strip.setIconSize(QSize(20, 20))
         self.sidebar_group = QActionGroup(self)
@@ -171,6 +252,9 @@ class MainWindow(QMainWindow):
         self.home.openRequested.connect(self.open_dialog)
         self.home.newRequested.connect(self.new_document)
         self.home.pathRequested.connect(self.open_path)
+        self.home.missingRequested.connect(self.missing_recent)
+        self.home.menuRequested.connect(self._on_recent_menu)
+        self.home.recent.menu_extender = self.extend_recent_menu
         self.docs_stack.addWidget(self.home)
         # ogni scheda: barre di avviso (UX-14) sopra la vista; widget(i)/indexOf lavorano con le viste
         self.tabs = DocumentTabs(self.docs_stack)
@@ -212,9 +296,10 @@ class MainWindow(QMainWindow):
         self.zoom_combo = QComboBox(self)
         self.zoom_combo.setEditable(True)
         self.zoom_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.zoom_combo.setFixedWidth(150)
-        self.zoom_combo.addItem(_("Adatta larghezza"), FIT_WIDTH)
-        self.zoom_combo.addItem(_("Adatta pagina"), FIT_PAGE)
+        # stesse parole delle azioni del menu Vista; larghezza presa dalla voce più lunga
+        self.zoom_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.zoom_combo.addItem(_("Adatta alla larghezza"), FIT_WIDTH)
+        self.zoom_combo.addItem(_("Adatta alla pagina"), FIT_PAGE)
         for z in (10, 25, 50, 75, 100, 125, 150, 200, 300, 400, 800, 1600, 3200, 6400):
             self.zoom_combo.addItem(f"{z}%", z / 100)
         self.zoom_combo.activated.connect(self._on_zoom_combo)
@@ -228,7 +313,9 @@ class MainWindow(QMainWindow):
 
     def _build_core_actions(self) -> None:
         a = self._act
-        self.act_new = a(_("Nuovo documento"), "file-plus", self.new_document, "Ctrl+N")
+        # UX-18: Ctrl+N è «Nuova finestra»; il PDF vuoto resta senza scorciatoia (Home e menu ☰)
+        self.act_new_window = a(_("Nuova finestra"), "app-window", self.new_window, "Ctrl+N")
+        self.act_new = a(_("Nuovo documento"), "file-plus", self.new_document)
         self.act_open = a(_("Apri…"), "folder-open", self.open_dialog, QKeySequence.StandardKey.Open)
         self.act_save = a(_("Salva"), "save", lambda: self.save_view(self.current_view()),
                           QKeySequence.StandardKey.Save, requires_document=True)
@@ -238,7 +325,7 @@ class MainWindow(QMainWindow):
         self.act_save_copy = a(_("Salva una copia…"), "copy", lambda: self.save_copy(), requires_document=True)
         self.act_close = a(_("Chiudi documento"), "x", lambda: self.close_view(self.current_view()),
                            QKeySequence.StandardKey.Close, requires_document=True)
-        self.act_quit = a(_("Esci"), "log-out", self.close, "Ctrl+Q")
+        self.act_quit = a(_("Esci"), "log-out", self.quit_application, "Ctrl+Q")
         # UX-18: tasti espliciti, non quelli della piattaforma (fuori da GNOME/KDE Close è solo
         # Ctrl+F4 e Quit non ha tasti)
         self.act_close.setShortcuts([QKeySequence("Ctrl+W"), QKeySequence("Ctrl+F4")])
@@ -371,8 +458,35 @@ class MainWindow(QMainWindow):
         self._shortcut("F9", self.toggle_sidebar)
         self._shortcut("Shift+F9", self.toggle_properties)
         self._shortcut("F10", lambda: self.menu_button.showMenu())
+        for seq in ("Shift+F10", "Menu"):      # su Linux Qt non li trasforma da sé in menu contestuale
+            self._shortcut(seq, self.open_context_menu)
         self._shortcut("F6", lambda: self._cycle_focus(1))
         self._shortcut("Shift+F6", lambda: self._cycle_focus(-1))
+
+    def open_context_menu(self) -> bool:
+        """Maiusc+F10 / tasto Menu (UX-18, UX-07): menu contestuale del widget con il fuoco, come il
+        clic destro; per l'area documento al centro della selezione o della vista."""
+        widget = QApplication.focusWidget()
+        if widget is None or widget.window() is not self:
+            widget = self.current_view()
+        if widget is None:
+            return False
+        target, pos = widget, widget.rect().center()
+        if isinstance(widget, DocumentView):
+            target, pos = widget.viewport(), widget.keyboard_menu_pos()
+        elif isinstance(widget, QAbstractScrollArea):
+            target = widget.viewport()
+            pos = target.rect().center()
+            if isinstance(widget, QAbstractItemView) and widget.currentIndex().isValid():
+                rect = widget.visualRect(widget.currentIndex())
+                if target.rect().contains(rect.center()):
+                    pos = rect.center()
+        elif isinstance(widget, QTabBar) and widget.currentIndex() >= 0:
+            pos = widget.tabRect(widget.currentIndex()).center()
+        event = QContextMenuEvent(QContextMenuEvent.Reason.Keyboard, pos, target.mapToGlobal(pos),
+                                  QApplication.keyboardModifiers())
+        QApplication.sendEvent(target, event)
+        return True
 
     def _focus_page_field(self) -> None:
         if self.current_view() is not None:
@@ -527,14 +641,14 @@ class MainWindow(QMainWindow):
     def _rebuild_menu(self) -> None:
         m = self.main_menu
         m.clear()
-        for act in (self.act_new, self.act_open):
+        for act in (self.act_new_window, self.act_new, self.act_open):
             m.addAction(act)
         recent = m.addMenu(_("Apri recenti"))
-        paths = self.recent_files()
+        paths = order_recent(self.recent_files(), self.pinned_recent())
         for p in paths:
             act = recent.addAction(Path(p).name)
             act.setToolTip(p)
-            act.triggered.connect(lambda _c=False, p=p: self.open_path(p))
+            act.triggered.connect(lambda _c=False, p=p: self.open_recent(p))
         if not paths:
             empty = recent.addAction(_("Nessun file recente"))
             empty.setEnabled(False)
@@ -573,7 +687,7 @@ class MainWindow(QMainWindow):
     def add_mode(self, mode_id: str, title: str, icon_name: str, order: int = 100) -> Mode:
         if mode_id in self.modes:
             return self.modes[mode_id]
-        toolbar = QToolBar(title, self)
+        toolbar = ToolBar(title, self)
         toolbar.setObjectName("contextbar")
         toolbar.setIconSize(QSize(20, 20))
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -802,6 +916,16 @@ class MainWindow(QMainWindow):
     def new_document(self) -> DocumentView:
         return self.add_document(Document.new())
 
+    def new_window(self) -> "MainWindow":
+        """«Nuova finestra» (Ctrl+N): un'altra finestra di Foliant sulla Home."""
+        return open_window(self.settings, near=self)
+
+    def quit_application(self) -> None:
+        """«Esci»: chiude tutte le finestre; ognuna chiede delle proprie modifiche e un Annulla ferma l'uscita."""
+        for window in [w for w in app_windows() if w is not self] + [self]:
+            if not window.close():
+                return
+
     def open_dialog(self) -> None:
         paths = self.ctx.ask_open_paths(_("Apri documenti"), OPEN_FILTER)
         for p in paths:
@@ -829,14 +953,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, _("Password errata"), _("La password non è corretta. Riprova."))
             except DocumentError as e:
                 QMessageBox.warning(self, _("Impossibile aprire il file"), f"{Path(path).name}\n\n{e}")
-                self._forget_recent(path)
+                self._forget_unreadable(path)
                 return None
             except Exception as e:          # errore imprevisto del motore: un file non ferma gli altri
                 logging.getLogger(__name__).exception("apertura di %s", path)
                 QMessageBox.warning(self, _("Impossibile aprire il file"),
                                     f"{Path(path).name}\n\n" + _("Il file non è un PDF valido oppure è danneggiato.")
                                     + f"\n({type(e).__name__})")
-                self._forget_recent(path)
+                self._forget_unreadable(path)
                 return None
             password, ok = QInputDialog.getText(
                 self, _("Documento protetto"),
@@ -848,6 +972,40 @@ class MainWindow(QMainWindow):
             self._add_recent(str(doc.path))
         self.remember_directory(path)
         return self.add_document(doc)
+
+    def add_command(self, name: str, fn: Callable) -> None:
+        self._commands[name] = fn
+
+    def run_command(self, name: str) -> bool:
+        """Comando con nome (`foliant --create`, `--merge`, azioni del file .desktop): quello
+        registrato da un modulo, altrimenti l'azione rapida della Home; se manca, mostra la Home."""
+        fn = self._commands.get(name)
+        if fn is None and name in HOME_COMMANDS:
+            title = HOME_COMMANDS[name]
+            fn = self.home.action_callback(title, _(title))
+        if fn is None:
+            self.show_home()
+            self.statusBar().showMessage(_("Comando non disponibile: {name}").format(name=name), 8000)
+            return False
+        try:
+            fn()
+        except Exception as e:          # un modulo difettoso non chiude l'applicazione
+            logging.getLogger(__name__).exception("comando %s", name)
+            self.statusBar().showMessage(_("Errore imprevisto: {e}").format(e=e), 8000)
+        return True
+
+    def open_files(self, files) -> list[DocumentView]:
+        """File della riga di comando o di un altro avvio: `(percorso, pagina da 1 o None)`;
+        un file già aperto ne attiva la scheda (NFR-31)."""
+        views = []
+        for path, page in files:
+            view = self.open_path(path)
+            if view is None:
+                continue
+            if page and view.page_count:
+                view.go_to_page(min(max(int(page), 1), view.page_count) - 1)
+            views.append(view)
+        return views
 
     def add_document(self, document: Document) -> DocumentView:
         view = DocumentView(document, self.tabs)
@@ -967,17 +1125,44 @@ class MainWindow(QMainWindow):
             self.tabs.removeTab(index)
         view.deleteLater()
         if page is not None:
+            page.release()
             page.deleteLater()                  # contenitore con le barre di avviso
+        # distrutte davvero vista e contenitore, la memoria liberata torna al sistema (NFR-06)
+        # (funzione del modulo: chiudendo la finestra le schede muoiono con lei, ma il rilascio resta)
+        (page if page is not None else view).destroyed.connect(schedule_memory_release)
         if self.tabs.count() == 0:
             self.show_home()
         self._on_current_changed()
 
-    def save_view(self, view: DocumentView | None, save_as: bool = False) -> bool:
+    def save_view(self, view: DocumentView | None, save_as: bool = False, recreate: bool = False) -> bool:
+        """Salva il documento (con `save_as` chiede dove). Se il file è stato eliminato o spostato
+        dopo l'apertura chiede se ricrearlo lì o salvarlo altrove (NFR-12/4); `recreate=True`
+        lo ricrea senza chiedere (l'utente l'ha già scelto, es. dalla barra di avviso)."""
         if view is None:
             return False
         self.commit_pending_edits(view)
         doc = view.document
         path = None
+        missing = doc.path is not None and not os.path.exists(doc.path)
+        if missing and not (save_as or recreate):
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle(_("File eliminato o spostato"))
+            box.setText(_("«{name}» è stato eliminato o spostato dopo l'apertura.").format(name=doc.display_name))
+            box.setInformativeText(_("Puoi ricrearlo nella posizione originale o salvarlo in un'altra posizione."))
+            here = box.addButton(_("Ricrea nella posizione originale"), QMessageBox.ButtonRole.AcceptRole)
+            other = box.addButton(_("Salva con nome…"), QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(other)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is other:
+                save_as = True
+            elif clicked is here:
+                recreate = True
+            else:
+                return False
+        recreate = missing and recreate and not save_as
         if not (save_as or doc.needs_save_as) and doc.disk_changed():
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Warning)
@@ -994,7 +1179,7 @@ class MainWindow(QMainWindow):
                 save_as = True
             elif clicked is not overwrite:
                 return False
-        as_new = save_as or doc.needs_save_as
+        as_new = save_as or (doc.needs_save_as and not recreate)
         info = {"path": None if as_new or doc.path is None else str(doc.path), "copy": False}
         if not self.ctx.run_guards("save_as" if as_new else "save", view, info):
             return False
@@ -1003,7 +1188,14 @@ class MainWindow(QMainWindow):
             if not path:
                 return False
         try:
+            if recreate:
+                try:
+                    doc.path.parent.mkdir(parents=True, exist_ok=True)   # anche la cartella era sparita
+                except OSError as e:
+                    raise write_error(doc.path, e) from e
             doc.save(path)
+        except DocumentWriteError as e:         # disco pieno, cartella non scrivibile…: il documento resta modificato
+            return self._write_failed(e, _("Salva con nome…"), lambda: self.save_view(view, save_as=True))
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
             return False
@@ -1029,10 +1221,27 @@ class MainWindow(QMainWindow):
         try:
             view.document.save_copy(path)
             self.statusBar().showMessage(_("Copia salvata: {p}").format(p=path), 4000)
+        except DocumentWriteError as e:
+            return self._write_failed(e, _("Scegli un'altra posizione…"), lambda: self.save_copy(view))
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
             return False
         return True
+
+    def _write_failed(self, error: DocumentWriteError, other_label: str, other: Callable[[], bool]) -> bool:
+        """Scrittura non riuscita (NFR-08, NFR-15): il messaggio dice causa e azione e propone
+        un'altra posizione. Restituisce l'esito di `other` se l'utente la sceglie."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Salvataggio non riuscito"))
+        box.setText(str(error))
+        retry = box.addButton(other_label, QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Chiudi"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(retry)
+        box.exec()
+        if box.clickedButton() is retry:
+            return other()
+        return False
 
     def undo(self) -> None:
         view = self.current_view()
@@ -1272,15 +1481,178 @@ class MainWindow(QMainWindow):
             value = [value]
         return [p for p in value if isinstance(p, str)]
 
+    def pinned_recent(self) -> list[str]:
+        """Documenti fissati in cima ai recenti, nell'ordine in cui sono stati fissati."""
+        value = self.settings.value("recentPinned", []) or []
+        if isinstance(value, str):
+            value = [value]
+        return [p for p in value if isinstance(p, str)]
+
+    def is_pinned(self, path: str) -> bool:
+        return str(path) in self.pinned_recent()
+
+    def _set_pinned(self, items: list[str]) -> None:
+        seen: set[str] = set()
+        self.settings.setValue("recentPinned", [p for p in items if not (p in seen or seen.add(p))])
+
+    def _store_recent(self, items: list[str]) -> None:
+        """Salva i recenti: al massimo MAX_RECENT non fissati, i fissati restano sempre."""
+        pinned = set(self.pinned_recent())
+        kept, others = [], 0
+        for p in items:
+            if p in pinned or others < MAX_RECENT:
+                kept.append(p)
+                others += p not in pinned
+        self.settings.setValue("recent", kept)
+
+    def pin_recent(self, path: str, pinned: bool = True) -> None:
+        """Fissa (o sblocca) un documento in cima ai recenti (API pubblica: `ctx.pin_recent`).
+        Un file fissato che non era tra i recenti viene aggiunto."""
+        path = str(path)
+        items = [p for p in self.pinned_recent() if p != path]
+        self._set_pinned(items + [path] if pinned else items)
+        if pinned and path not in self.recent_files():
+            self._store_recent([path] + self.recent_files())
+        self._refresh_recent()
+
+    def clear_recent(self, ask: bool = True) -> bool:
+        """«Svuota elenco»: toglie dai recenti tutti i documenti non fissati, dopo la conferma
+        (UX-13) se `ask`. I file sul disco non vengono toccati."""
+        if ask and not self.ask_clear_recent():
+            return False
+        pinned = set(self.pinned_recent())
+        self.settings.setValue("recent", [p for p in self.recent_files() if p in pinned])
+        self._refresh_recent()
+        return True
+
+    def ask_clear_recent(self) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(_("Svuotare l'elenco dei recenti?"))
+        box.setText(_("Svuotare l'elenco dei documenti recenti?"))
+        info = _("I file sul disco non vengono toccati.")
+        if any(p in self.recent_files() for p in self.pinned_recent()):
+            info = _("I documenti fissati restano nell'elenco.") + " " + info
+        box.setInformativeText(info)
+        clear = box.addButton(_("Svuota elenco"), QMessageBox.ButtonRole.DestructiveRole)
+        cancel = box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)                 # UX-13: fuoco iniziale su Annulla
+        box.setEscapeButton(cancel)
+        box.exec()
+        return box.clickedButton() is clear
+
+    def open_recent(self, path: str) -> DocumentView | None:
+        """Apre un recente; se il file non c'è più propone Individua o Rimuovi dall'elenco."""
+        if os.path.exists(path):
+            return self.open_path(path)
+        return self.missing_recent(path)
+
+    def missing_recent(self, path: str) -> DocumentView | None:
+        choice = self.ask_missing_recent(path)
+        if choice == "remove":
+            self.remove_recent(path)
+        elif choice == "locate":
+            return self.locate_recent(path)
+        return None
+
+    def ask_missing_recent(self, path: str) -> str | None:
+        """Scelta per un recente il cui file non esiste più: "locate", "remove" o None."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("File non trovato"))
+        box.setText(_("«{name}» non si trova più in «{folder}»: potrebbe essere stato spostato, "
+                      "rinominato o eliminato.").format(name=Path(path).name, folder=Path(path).parent))
+        locate = box.addButton(_("Individua…"), QMessageBox.ButtonRole.ActionRole)
+        remove = box.addButton(_("Rimuovi dall'elenco"), QMessageBox.ButtonRole.DestructiveRole)
+        cancel = box.addButton(pgettext("pulsante", "Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(locate)
+        box.setEscapeButton(cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        return "locate" if clicked is locate else "remove" if clicked is remove else None
+
+    def locate_recent(self, path: str) -> DocumentView | None:
+        """Chiede dove si trova ora il file di un recente mancante: la voce (anche fissata) lo
+        segue nella stessa posizione e il file si apre."""
+        found = self.ctx.ask_open_paths(_("Individua «{name}»").format(name=Path(path).name),
+                                        OPEN_FILTER, multiple=False)
+        if not found:
+            return None
+        self.replace_recent(path, found[0])
+        return self.open_path(found[0])
+
+    def recent_menu(self, path: str) -> QMenu:
+        """Menu contestuale di un recente della Home (voci del nucleo e dei moduli)."""
+        menu = QMenu(self)
+        menu.setObjectName("coreRecentMenu")
+        self.extend_recent_menu(path, menu)
+        return menu
+
+    def extend_recent_menu(self, path: str, menu: QMenu) -> None:
+        """Aggiunge a `menu` le voci del recente `path`: in testa Apri (Individua… se il file non
+        c'è più) e Fissa/Sblocca, poi le voci di `add_recent_menu_provider`, in fondo Rimuovi
+        dall'elenco e Svuota elenco. Le voci già presenti (stesso testo) non si ripetono: così
+        il nucleo completa anche il menu che un modulo mostra da sé."""
+        present = {a.text().replace("&", "") for a in menu.actions()}
+        first = menu.actions()[0] if menu.actions() else None
+        pinned = self.is_pinned(path)
+        head = [(_("Apri"), "folder-open", lambda: self.open_path(path)) if os.path.exists(path) else
+                (_("Individua…"), "file-search", lambda: self.locate_recent(path)),
+                (pgettext("recenti", "Sblocca"), "pin-off", lambda: self.pin_recent(path, False)) if pinned else
+                (pgettext("recenti", "Fissa"), "pin", lambda: self.pin_recent(path, True))]
+        added = False
+        for text, icon_name, slot in head:
+            if text in present:
+                continue
+            act = QAction(text, menu)
+            bind_icon(act, icon_name)
+            act.triggered.connect(lambda _c=False, s=slot: s())
+            menu.insertAction(first, act)
+            added = True
+        if added and first is not None:
+            menu.insertSeparator(first)
+        if self.recent_menu_providers:
+            menu.addSeparator()
+        for provider in list(self.recent_menu_providers):
+            try:
+                provider(path, menu)
+            except Exception as e:
+                self.statusBar().showMessage(_("Errore nel menu del recente: {e}").format(e=e), 8000)
+        tail = [(text, icon_name, slot) for text, icon_name, slot in (
+            (_("Rimuovi dall'elenco"), "x", lambda: self.remove_recent(path)),
+            (_("Svuota elenco"), "list-x", lambda: self.clear_recent())) if text not in present]
+        if tail and menu.actions() and not menu.actions()[-1].isSeparator():
+            menu.addSeparator()
+        for text, icon_name, slot in tail:
+            act = menu.addAction(text)
+            bind_icon(act, icon_name)
+            act.triggered.connect(lambda _c=False, s=slot: s())
+
+    def _on_recent_menu(self, path: str, global_pos) -> None:
+        menu = self.recent_menu(path)
+        self.exec_recent_menu(menu, global_pos)
+        menu.deleteLater()
+
+    def exec_recent_menu(self, menu: QMenu, global_pos) -> None:
+        """Mostra il menu del recente (separato per poterlo simulare nei test)."""
+        menu.exec(global_pos)
+
     def _add_recent(self, path: str) -> None:
         items = [p for p in self.recent_files() if p != path]
         items.insert(0, path)
-        self.settings.setValue("recent", items[:MAX_RECENT])
+        self._store_recent(items)
         self._refresh_recent()
 
     def _forget_recent(self, path: str) -> None:
         self.settings.setValue("recent", [p for p in self.recent_files() if p != path])
+        if path in self.pinned_recent():
+            self._set_pinned([p for p in self.pinned_recent() if p != path])
         self._refresh_recent()
+
+    def _forget_unreadable(self, path: str) -> None:
+        # un fissato resta: l'errore può essere passeggero (rete, permessi, file in riscrittura)
+        if path not in self.pinned_recent():
+            self._forget_recent(path)
 
     def remove_recent(self, path: str) -> None:
         """Toglie `path` dai recenti (API pubblica: `ctx.remove_recent`)."""
@@ -1289,6 +1661,9 @@ class MainWindow(QMainWindow):
     def replace_recent(self, old_path: str, new_path: str) -> None:
         """Sostituisce `old_path` con `new_path` nella stessa posizione (file rinominato o
         spostato); se `old_path` non c'era, `new_path` va in cima."""
+        pinned = self.pinned_recent()
+        if old_path in pinned:                                               # resta fissato
+            self._set_pinned([new_path if p == old_path else p for p in pinned])
         items = self.recent_files()
         if old_path in items:
             items = [new_path if p == old_path else p for p in items]
@@ -1296,11 +1671,15 @@ class MainWindow(QMainWindow):
             items = [p for p in items if not (p in seen or seen.add(p))]    # niente doppioni
         else:
             items = [new_path] + [p for p in items if p != new_path]
-        self.settings.setValue("recent", items[:MAX_RECENT])
+        self._store_recent(items)
         self._refresh_recent()
 
     def _refresh_recent(self) -> None:
-        self.home.set_recent([p for p in self.recent_files() if os.path.exists(p)])
+        # anche i file che non esistono più: la Home li mostra attenuati («File non trovato»);
+        # le impostazioni sono condivise, quindi si aggiorna la Home di tutte le finestre
+        paths, pinned = self.recent_files(), self.pinned_recent()
+        for window in {self, *app_windows()}:
+            window.home.set_recent(paths, pinned)
 
     def last_directory(self) -> str:
         d = self.settings.value("lastDirectory", "")
@@ -1362,6 +1741,9 @@ class MainWindow(QMainWindow):
     # ================================================================== eventi finestra
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow() and self in _windows:
+            _windows.remove(self)
+            _windows.append(self)           # in fondo: la finestra attiva più di recente
         if event.type() == QEvent.Type.WindowStateChange:
             full = self.isFullScreen()
             if full != self._was_fullscreen:
@@ -1417,6 +1799,14 @@ class MainWindow(QMainWindow):
                 m.button.setToolButtonStyle(style)
 
     def closeEvent(self, event) -> None:
+        # le domande qui sotto fanno girare il ciclo degli eventi: intanto la finestra è «in chiusura»
+        self._closing = True
+        try:
+            self._close_window(event)
+        finally:
+            self._closing = False
+
+    def _close_window(self, event) -> None:
         running = self.task_manager.running()
         if running and not self._confirm_stop_tasks(running):
             event.ignore()
@@ -1449,4 +1839,5 @@ class MainWindow(QMainWindow):
         self.settings.setValue("window/geometry", self.saveGeometry())
         if getattr(self, "_splitter_ready", False):
             self.settings.setValue("window/splitter", self.splitter.saveState())
+        self._closed = True
         event.accept()

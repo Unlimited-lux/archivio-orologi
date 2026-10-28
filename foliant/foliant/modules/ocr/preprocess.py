@@ -53,6 +53,41 @@ def to_gray(img: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
 
+def ocr_gray(img: np.ndarray) -> np.ndarray:
+    """Grigio per il riconoscimento: i timbri colorati che coprono il testo nero si attenuano.
+
+    Un timbro rosso o blu sopra una riga la rende illeggibile in scala di grigi (il rosso pieno
+    diventa grigio scuro come l'inchiostro). Nei pixel colorati di un timbro che si sovrappone a
+    testo neutro si usa il canale più chiaro, dove l'inchiostro colorato quasi scompare e il nero
+    resta nero. Il testo stampato a colori lontano dal testo nero (titoli, loghi) resta intatto."""
+    gray = to_gray(img)
+    if img.ndim == 2:
+        return gray
+    rgb = img[..., :3]
+    hi = rgb.max(axis=2)
+    chroma = (hi.astype(np.int16) - rgb.min(axis=2)).astype(np.int16)
+    colored = (chroma > 60).astype(np.uint8)
+    if colored.mean() < 0.0005:
+        return gray
+    neutral_ink = ((chroma < 40) & (hi < 110)).astype(np.uint8)
+    n, labels, stats, _c = cv2.connectedComponentsWithStats(cv2.dilate(colored, np.ones((9, 9), np.uint8)))
+    out = gray.copy()
+    stamps: list[tuple[int, int, int, int]] = []
+    # dal più grande: le parti di un timbro (cornice, lettere) cadono dentro la sagoma già trovata
+    for i in sorted(range(1, n), key=lambda k: -int(stats[k][2] * stats[k][3])):
+        x, y, w, h, area = (int(v) for v in stats[i])
+        if area < 200:
+            continue
+        inside = any(x >= sx and y >= sy and x + w <= sx + sw and y + h <= sy + sh for sx, sy, sw, sh in stamps)
+        # testo nero nel riquadro del timbro: si attenua il timbro
+        if not inside and neutral_ink[y:y + h, x:x + w].mean() < 0.01:
+            continue
+        stamps.append((x, y, w, h))
+        sel = (labels[y:y + h, x:x + w] == i) & (colored[y:y + h, x:x + w] > 0)
+        out[y:y + h, x:x + w][sel] = hi[y:y + h, x:x + w][sel]
+    return out
+
+
 def paper_color(img: np.ndarray) -> tuple[int, ...]:
     """Colore dominante dello sfondo (mediana dei pixel chiari)."""
     gray = to_gray(img)
@@ -201,20 +236,30 @@ def enhance(gray: np.ndarray, opts: PreprocessOptions) -> np.ndarray:
         # il filtro mediano elimina il rumore «sale e pepe» senza sfumare i bordi
         out = cv2.medianBlur(out, 3)
     if opts.contrast:
-        lo, hi = np.percentile(out, (1, 99))
-        if hi - lo < 160 and hi > lo:
-            out = np.clip((out.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(np.uint8)
-        # fondo ingiallito o non uniforme: normalizza lo sfondo
+        # fondo non uniforme (luce radente, ombre, carta ingiallita a chiazze): si normalizza lo sfondo
         bg = cv2.medianBlur(cv2.resize(out, (max(1, out.shape[1] // 8), max(1, out.shape[0] // 8))), 5)
         bg = cv2.resize(bg, (out.shape[1], out.shape[0]), interpolation=cv2.INTER_LINEAR)
-        if float(np.std(bg)) > 6:
-            out = cv2.divide(out, bg, scale=255)
+        if float(np.std(bg)) > 12:
+            out = cv2.divide(out, np.maximum(bg, 1), scale=255)
+        # contrasto basso (testo sbiadito): inchiostro e carta stimati con Otsu, non con i percentili
+        # (su una pagina con poco testo il 1° percentile è già un grigio del bordo delle lettere)
+        t, _bw = cv2.threshold(out, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        ink = out[out <= t]
+        paper = out[out > t]
+        if ink.size and paper.size:
+            ink_level = float(np.median(ink))
+            paper_level = float(np.median(paper))
+            if paper_level - ink_level < 110:
+                lo = ink_level
+                hi = paper_level
+                scale = 225.0 / max(1.0, hi - lo)
+                out = np.clip((out.astype(np.float32) - lo) * scale + 20, 0, 255).astype(np.uint8)
     return out
 
 
 def prepare(img: np.ndarray, opts: PreprocessOptions, osd_rotation: int = 0) -> Prepared:
     """Ruota (a 90°, valore OSD), raddrizza e migliora l'immagine per l'OCR."""
-    gray = to_gray(img)
+    gray = ocr_gray(img)
     h, w = gray.shape[:2]
     quarter = (osd_rotation // 90) % 4 if opts.auto_rotate else 0
     m, size = rotation_affine(w, h, quarter, 0.0)

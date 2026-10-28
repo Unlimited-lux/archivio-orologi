@@ -456,6 +456,14 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("ignore_case", "Ignora maiuscole/minuscole", "bool", True),
         ]),
         ActionSpec("linearize", "Ottimizza per il web", "web", []),
+        ActionSpec("form_export", "Esporta i dati dei moduli", "dati", [
+            Param("format", "Formato", "choice", "csv",
+                  [("csv", "CSV"), ("json", "JSON"), ("xfdf", "XFDF"), ("fdf", "FDF"), ("xml", "XML")]),
+        ], kind="multi"),
+        ActionSpec("form_import", "Importa i dati dei moduli", "compilato", [
+            Param("file", "File dei dati (CSV con colonna «File» per file diversi, JSON, XFDF, FDF, XML)",
+                  "path", ""),
+        ]),
         ActionSpec("export_images", "Esporta tutte le immagini", "immagine", [
             Param("min_size", "Dimensione minima (px)", "int", 16, minimum=1),
         ], kind="multi"),
@@ -849,6 +857,10 @@ class JobReport:
     def failed_items(self) -> list[str]:
         return [r.input for r in self.results if r.status in ("error", "cancelled", "not_processed")]
 
+    def pending_items(self) -> list[str]:
+        """File lasciati a metà o non iniziati per un annullamento (non quelli in errore)."""
+        return [r.input for r in self.results if r.status in ("cancelled", "not_processed")]
+
     def to_csv(self, sep: str = ",") -> str:
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=sep, lineterminator="\n")
@@ -1099,23 +1111,137 @@ def remove_marks_detailed(data: bytes, kinds: set[str] | list[str], all_marked: 
             doc.close()
 
 
-def compress_pdf(data: bytes, level: str = "medium") -> bytes:
+def _image_dpis(doc, check=None) -> dict[int, float]:
+    """Risoluzione effettiva di ogni immagine (la più bassa tra i suoi usi).
+
+    Gli usi si leggono senza decodificare le immagini e si abbinano agli xref per
+    dimensione in pixel; a parità di dimensione vale l'uso più grande (risoluzione più bassa)."""
+    import math
+    dpis: dict[int, float] = {}
+    for page in doc:
+        if check is not None:
+            check()
+        by_size: dict[tuple[int, int], list[int]] = {}
+        for info in page.get_images(full=True):
+            by_size.setdefault((info[2], info[3]), []).append(info[0])
+        if not by_size:
+            continue
+        try:
+            uses = page.get_image_info(hashes=False, xrefs=False)
+        except Exception:
+            uses = []
+        for u in uses:
+            t = u.get("transform") or (0, 0, 0, 0, 0, 0)
+            dw, dh = math.hypot(t[0], t[1]), math.hypot(t[2], t[3])
+            if dw < 1 or dh < 1:
+                continue
+            dpi = min(u["width"] / (dw / 72.0), u["height"] / (dh / 72.0))
+            for xref in by_size.get((u["width"], u["height"]), []):
+                dpis[xref] = min(dpis.get(xref, dpi), dpi)
+    return dpis
+
+
+def _image_samples(doc, xref: int):
+    """(modo, dimensioni, pixel, maschera, lunghezza attuale) di un'immagine ricampionabile, o None.
+
+    Solo immagini a 8 bit in scala di grigi o RGB, senza /Mask, /Decode o maschere a 1 bit:
+    il resto (scansioni in bianco e nero, CMYK, maschere di colore) resta intatto."""
+    keys = {k: doc.xref_get_key(xref, k) for k in ("Subtype", "ImageMask", "Mask", "Decode", "BitsPerComponent",
+                                                     "Filter", "SMask")}
+    if (keys["Subtype"][1] != "/Image" or keys["ImageMask"][1] == "true" or keys["Mask"][0] != "null"
+            or keys["Decode"][0] != "null" or keys["BitsPerComponent"][1] not in ("8", "null")
+            or any(f in keys["Filter"][1] for f in ("JBIG2", "CCITT", "JPX"))):
+        return None
+    pix = pymupdf.Pixmap(doc, xref)
+    if pix.alpha:
+        pix = pymupdf.Pixmap(pix, 0)
+    if pix.n not in (1, 3):
+        return None
+    mask = None
+    if keys["SMask"][0] == "xref":
+        sx = int(keys["SMask"][1].split()[0])
+        mpix = pymupdf.Pixmap(doc, sx)
+        if mpix.n != 1 or mpix.alpha:
+            return None
+        mask = (sx, (mpix.width, mpix.height), mpix.samples)
+    return ("L" if pix.n == 1 else "RGB", (pix.width, pix.height), pix.samples, mask,
+            len(doc.xref_stream_raw(xref) or b""))
+
+
+def _encode_resampled(sample, scale: float, quality: int):
+    """Ricampiona e codifica in JPEG (solo Pillow: gira fuori dal blocco del motore)."""
+    from PIL import Image
+    mode, size, pixels, mask, old_len = sample
+    w, h = max(1, round(size[0] * scale)), max(1, round(size[1] * scale))
+    img = Image.frombytes(mode, size, pixels).resize((w, h), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=quality, optimize=True)
+    jpg = buf.getvalue()
+    if len(jpg) >= old_len:
+        return None
+    new_mask = None
+    if mask is not None:
+        sx, msize, mpixels = mask
+        new_mask = (sx, Image.frombytes("L", msize, mpixels).resize((w, h), Image.LANCZOS).tobytes())
+    return jpg, (w, h), mode, new_mask
+
+
+def _write_resampled(doc, xref: int, encoded) -> None:
+    jpg, (w, h), mode, mask = encoded
+    doc.update_stream(xref, jpg, compress=False)
+    doc.xref_set_key(xref, "Filter", "/DCTDecode")
+    doc.xref_set_key(xref, "DecodeParms", "null")
+    doc.xref_set_key(xref, "Width", str(w))
+    doc.xref_set_key(xref, "Height", str(h))
+    doc.xref_set_key(xref, "BitsPerComponent", "8")
+    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if mode == "L" else "/DeviceRGB")
+    if mask is not None:
+        sx, mbytes = mask
+        doc.update_stream(sx, mbytes, compress=True)
+        doc.xref_set_key(sx, "DecodeParms", "null")
+        doc.xref_set_key(sx, "Width", str(w))
+        doc.xref_set_key(sx, "Height", str(h))
+        doc.xref_set_key(sx, "BitsPerComponent", "8")
+
+
+def compress_pdf(data: bytes, level: str = "medium", check=None) -> bytes:
+    """Riduce le immagini oltre la soglia e pulisce il file.
+
+    Ogni immagine è trattata una sola volta anche se compare su molte pagine, e tra
+    un'immagine e l'altra il lavoro si può annullare (la riscrittura in blocco di MuPDF
+    ricomprimeva l'immagine a ogni uso e non lasciava rispondere l'interfaccia).
+    Ricampionamento e JPEG avvengono fuori dal blocco del motore, così più file
+    compressi in parallelo procedono davvero insieme."""
     targets = {"low": (225, 200, 85), "medium": (180, 150, 75), "high": (110, 96, 55)}
     threshold, target, quality = targets.get(level, targets["medium"])
     with ENGINE_LOCK:
         doc = _open(data)
-        try:
+    try:
+        with ENGINE_LOCK:
+            dpis = _image_dpis(doc, check)
+        for xref, dpi in dpis.items():
+            if dpi <= threshold:
+                continue
+            if check is not None:
+                check()
             try:
-                doc.rewrite_images(dpi_threshold=threshold, dpi_target=target, quality=quality)
+                with ENGINE_LOCK:
+                    sample = _image_samples(doc, xref)
+                encoded = _encode_resampled(sample, target / dpi, quality) if sample else None
+                if encoded:
+                    with ENGINE_LOCK:
+                        _write_resampled(doc, xref, encoded)
             except Exception:
-                pass
+                pass   # immagine non gestibile: resta com'è
+        with ENGINE_LOCK:
             try:
                 doc.subset_fonts()
             except Exception:
                 pass
             return doc.tobytes(garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True,
                                use_objstms=1, no_new_id=True)
-        finally:
+    finally:
+        with ENGINE_LOCK:
             doc.close()
 
 
@@ -1625,6 +1751,9 @@ def to_pdf_bytes(path: str, params: dict, warnings: list | None = None) -> bytes
 
 def _open_input(data: bytes, item: QueueItem, candidates: list[str]) -> tuple[bytes, dict, int | None]:
     """Apre il file; restituisce (dati in chiaro, opzioni di cifratura originali, n. candidata)."""
+    if not data.strip():
+        raise BatchError("PDF-01", _("File vuoto (0 byte): probabilmente la copia o il download non è "
+                                     "andato a buon fine."))
     with ENGINE_LOCK:
         try:
             doc = _open(data)
@@ -1745,7 +1874,7 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
     a = step.action
     name = Path(item.path).stem
     if a == "compress":
-        out = compress_pdf(data, p.get("level", "medium"))
+        out = compress_pdf(data, p.get("level", "medium"), check=ctx.check)
         if len(out) >= len(data):
             # nessun guadagno: si tiene il risultato del passo precedente (mai l'originale:
             # gli altri passi della sequenza, es. la protezione, devono restare applicati)
@@ -2085,7 +2214,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                     if spec.kind in ("pdf",):
                         try:
                             data, protection = _apply_step(step, data, item, ctx, plan[i], protection, csv_passwords)
-                        except (BatchError, OperationCancelled):
+                        except (BatchError, OperationCancelled, SkipFile):
                             raise
                         except Exception as e:
                             raise BatchError("GEN-01", _("Passo {k} ({a}) non riuscito: {e}").format(
@@ -2730,7 +2859,72 @@ def _x_linearize(data: bytes, p: dict, item, ctx) -> bytes:
             doc.close()
 
 
+def _forms():
+    try:
+        from foliant.modules.forms import engine as fe
+        from foliant.modules.forms import interchange as fx
+    except Exception:
+        raise BatchError("DEP-01", _("I dati dei moduli non sono disponibili: il modulo Moduli non è installato."))
+    return fe, fx
+
+
+def _form_export_parts(data: bytes, p: dict) -> list[tuple[bytes, str]]:
+    fe, fx = _forms()
+    fmt = p.get("format", "csv")
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            values = fe.form_values(doc)
+        finally:
+            doc.close()
+    if not values:
+        raise BatchError("FRM-01", _("Saltato: il file non contiene campi modulo."), status="skipped")
+    return [(fx.export_data(fmt, values), "." + fmt)]
+
+
+def _x_form_import(data: bytes, p: dict, item, ctx) -> bytes:
+    fe, fx = _forms()
+    path = str(p.get("file", "") or "")
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        raise BatchError("FILE-02", _("File dei dati non leggibile: {f}").format(f=os.path.basename(path) or "–"))
+    fmt = fx.format_of(path, raw)
+    try:
+        if fmt == "csv":
+            records = fx.csv_records(raw)
+            keyed = [r for r in records if str(r.get("File", "")).strip()]
+            if keyed:   # una riga per file, riconosciuto dal nome
+                names = {item.name.lower(), Path(item.path).stem.lower()}
+                rec = next((r for r in keyed if str(r["File"]).strip().lower() in names), None)
+                if rec is None:
+                    raise BatchError("FRM-02", _("Saltato: nessuna riga per questo file nei dati."), status="skipped")
+                values = {k: v for k, v in rec.items() if k != "File"}
+            else:
+                values = records[0] if records else {}
+        else:
+            values = fx.parse_data(fmt, raw)
+    except BatchError:
+        raise
+    except Exception as e:
+        raise BatchError("FRM-03", _("Dati dei moduli non validi: {e}").format(e=e)) from e
+    with ENGINE_LOCK:
+        doc = _open(data)
+        try:
+            applied, unknown = fe.apply_values(doc, values)
+            if not applied:
+                raise BatchError("FRM-04", _("Saltato: nessun campo corrisponde ai dati."), status="skipped")
+            ctx.notes.append(_("{n} campi compilati").format(n=len(applied)))
+            if unknown:
+                ctx.warnings.append(_("campi sconosciuti: {c}").format(c=", ".join(unknown[:5])))
+            return _save(doc)
+        finally:
+            doc.close()
+
+
 EXTRA_PDF_ACTIONS = {
+    "form_import": _x_form_import,
     "rotate": _x_rotate, "delete_pages": _x_delete_pages, "extract_pages": _x_extract_pages,
     "flatten": _x_flatten, "sanitize": _x_sanitize, "metadata": _x_metadata, "initial_view": _x_initial_view,
     "redact": _x_redact, "linearize": _x_linearize,
@@ -2796,9 +2990,14 @@ def _do_multi(data: bytes, step: Step, item: QueueItem, index: int, settings: Jo
               pages: int, reserved: set[str], ctx: _Ctx) -> list[str]:
     """Passi che producono più file per ingresso (dividi, esporta immagini)."""
     p = step.merged_params()
-    parts = _split_parts(data, p) if step.action == "split" else _image_parts(data, p)
+    if step.action == "split":
+        parts = _split_parts(data, p)
+    elif step.action == "form_export":
+        parts = _form_export_parts(data, p)
+    else:
+        parts = _image_parts(data, p)
     pattern = settings.pattern
-    if "{pagina" not in pattern and "{parte" not in pattern:
+    if len(parts) > 1 and "{pagina" not in pattern and "{parte" not in pattern:
         pattern += "_{parte:3}"
     dest = _target_dir(item, settings)
     outputs: list[str] = []

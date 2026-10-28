@@ -12,7 +12,7 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from foliant.api import ENGINE_LOCK, Tool, _, theme
 
 from . import engine as E
-from .content import FORM, IMAGE, PATH, SHADING, rcenter
+from .content import FORM, IMAGE, PATH, SHADING, TEXT, rcenter
 
 if TYPE_CHECKING:
     from .controller import ObjectsController
@@ -27,7 +27,7 @@ def view_scale(view, page: int) -> float:
 
 
 def kind_color(kind: str) -> QColor:
-    name = {IMAGE: "accent", PATH: "secondary", FORM: "success", SHADING: "warning"}.get(kind, "accent")
+    name = {IMAGE: "accent", PATH: "secondary", FORM: "success", SHADING: "warning", TEXT: "text_muted"}.get(kind, "accent")
     return theme.color(name)
 
 

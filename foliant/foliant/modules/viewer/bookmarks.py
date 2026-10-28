@@ -19,6 +19,30 @@ from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations,
 from . import engine as E
 
 TRANSLATIONS = {
+    "Genera dalla struttura (titoli taggati)": "Generate from structure (tagged headings)",
+    "Il documento non contiene titoli taggati: prova «Genera dai titoli del testo».":
+        "The document has no tagged headings: try “Generate from text headings”.",
+    "Unisci i duplicati": "Merge duplicates",
+    "Nessun segnalibro duplicato.": "No duplicate bookmarks.",
+    "Maiuscole e minuscole": "Change case",
+    "MAIUSCOLE": "UPPERCASE",
+    "minuscole": "lowercase",
+    "Iniziali Maiuscole": "Title Case",
+    "Come in una frase": "Sentence case",
+    "Trova e sostituisci nei titoli…": "Find and replace in titles…",
+    "Trova e sostituisci nei titoli": "Find and replace in titles",
+    "Trova:": "Find:",
+    "Sostituisci con:": "Replace with:",
+    "Nessun titolo contiene «{t}».": "No title contains “{t}”.",
+    "Correzione proposta per le destinazioni non valide: reindirizzarle alla pagina corrente "
+    "(pagina {p}) oppure rimuovere quei segnalibri.":
+        "Proposed fix for invalid destinations: redirect them to the current page (page {p}) "
+        "or remove those bookmarks.",
+    "Reindirizza alla pagina corrente": "Redirect to the current page",
+    "Rimuovi i segnalibri rotti": "Remove broken bookmarks",
+    "Chiudi": "Close",
+    "Reindirizza segnalibri": "Redirect bookmarks",
+    "Rimuovi segnalibri rotti": "Remove broken bookmarks",
     "{stem} - segnalibri.txt": "{stem} - bookmarks.txt",
     "Segnalibri": "Bookmarks",
     "Aggiungi segnalibro": "Add bookmark",
@@ -204,11 +228,19 @@ class BookmarksPanel(QWidget):
         tools.addAction(_("Esporta come testo…"), self.export_text)
         self.act_import = tools.addAction(_("Importa da testo…"), self.import_text)
         tools.addSeparator()
+        self.act_gen_structure = tools.addAction(_("Genera dalla struttura (titoli taggati)"),
+                                                 lambda: self.generate("structure"))
         self.act_gen_headings = tools.addAction(_("Genera dai titoli del testo"), lambda: self.generate("headings"))
         self.act_gen_every = tools.addAction(_("Genera ogni N pagine…"), lambda: self.generate("every"))
         self.act_gen_regex = tools.addAction(_("Genera da un'espressione regolare…"), lambda: self.generate("regex"))
         tools.addSeparator()
         tools.addAction(_("Verifica segnalibri"), self.verify)
+        self.act_merge_dup = tools.addAction(_("Unisci i duplicati"), self.merge_duplicates)
+        case_menu = tools.addMenu(_("Maiuscole e minuscole"))
+        for mode, text in (("upper", _("MAIUSCOLE")), ("lower", _("minuscole")),
+                           ("title", _("Iniziali Maiuscole")), ("sentence", _("Come in una frase"))):
+            case_menu.addAction(text, lambda m=mode: self.change_case(m))
+        self.act_replace = tools.addAction(_("Trova e sostituisci nei titoli…"), self.replace_in_titles)
         self.act_toc_page = tools.addAction(_("Crea pagina di sommario"), self.create_toc_page)
         self.tools_button.setMenu(tools)
         bar.addWidget(self.tools_button)
@@ -797,10 +829,11 @@ def _bookmark_tools(panel_cls):
                 return False
         else:
             document = view.document
+            builder = E.outline_from_structure if method == "structure" else E.outline_from_headings
 
             def work(progress):
                 with ENGINE_LOCK:
-                    return E.outline_from_headings(document.pdf, progress=lambda f: progress.update(f))
+                    return builder(document.pdf, progress=lambda f: progress.update(f))
 
             try:
                 items = self.ctx.run_task(_("Ricerca dei titoli…"), work)
@@ -811,6 +844,8 @@ def _bookmark_tools(panel_cls):
                 return False
             if not items:
                 self.ctx.info(_("Genera segnalibri"),
+                              _("Il documento non contiene titoli taggati: prova «Genera dai titoli del testo».")
+                              if method == "structure" else
                               _("Nessun titolo riconosciuto: il documento potrebbe essere una scansione (usa l'OCR)."))
                 return False
             if replace is None and not self.ctx.confirm(_("Genera segnalibri"),
@@ -828,11 +863,84 @@ def _bookmark_tools(panel_cls):
         reasons = {"broken": _("destinazione non valida"), "untitled": _("senza titolo"), "duplicate": _("duplicato")}
         lines = [f"• {self.items[i].title or _('(senza titolo)')} — {reasons.get(why, why)}" for i, why in problems[:30]]
         self.tree.setCurrentItem(self._tree_items[problems[0][0]])
-        self.ctx.info(_("Verifica segnalibri"), _("{n} segnalibri con problemi:").format(n=len(problems))
-                      + "\n\n" + "\n".join(lines))
+        text = _("{n} segnalibri con problemi:").format(n=len(problems)) + "\n\n" + "\n".join(lines)
+        broken = sum(1 for _i, why in problems if why == "broken")
+        if broken and self.editable:
+            choice = self.ask_fix_broken(text + "\n\n" + _(
+                "Correzione proposta per le destinazioni non valide: reindirizzarle alla pagina corrente "
+                "(pagina {p}) oppure rimuovere quei segnalibri.").format(p=self.view.current_page + 1))
+            if choice == "redirect":
+                self.redirect_broken()
+            elif choice == "remove":
+                self.remove_broken()
+        else:
+            self.ctx.info(_("Verifica segnalibri"), text)
         return problems
 
-    for fn in (export_text, _merge, import_text, generate, verify):
+    def ask_fix_broken(self, text: str) -> str | None:
+        """«redirect», «remove» o None (sostituibile nei test)."""
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_("Verifica segnalibri"))
+        box.setText(text)
+        redirect = box.addButton(_("Reindirizza alla pagina corrente"), QMessageBox.ButtonRole.AcceptRole)
+        remove = box.addButton(_("Rimuovi i segnalibri rotti"), QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(_("Chiudi"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        return "redirect" if clicked is redirect else "remove" if clicked is remove else None
+
+    def redirect_broken(self, page: int | None = None) -> int:
+        if self.view is None or not self.editable:
+            return 0
+        page = self.view.current_page if page is None else page
+        items, n = E.redirect_broken(self.items, self.view.page_count, page)
+        return n if n and self._apply(_("Reindirizza segnalibri"), items, 0) else 0
+
+    def remove_broken(self) -> int:
+        if self.view is None or not self.editable:
+            return 0
+        items, n = E.remove_broken(self.items, self.view.page_count)
+        return n if n and self._apply(_("Rimuovi segnalibri rotti"), items, 0) else 0
+
+    def merge_duplicates(self) -> int:
+        if self.view is None or not self.editable:
+            return 0
+        items, n = E.merge_duplicates(self.items)
+        if not n:
+            self.ctx.status(_("Nessun segnalibro duplicato."))
+            return 0
+        return n if self._apply(_("Unisci i duplicati"), items, 0) else 0
+
+    def change_case(self, mode: str) -> bool:
+        if self.view is None or not self.editable or not self.items:
+            return False
+        return self._apply(_("Maiuscole e minuscole"), E.change_case(self.items, mode), 0)
+
+    def replace_in_titles(self, find: str | None = None, repl: str | None = None, regex: bool = False) -> int:
+        if self.view is None or not self.editable or not self.items:
+            return 0
+        if find is None:
+            from PySide6.QtWidgets import QInputDialog
+            find, ok = QInputDialog.getText(self, _("Trova e sostituisci nei titoli"), _("Trova:"))
+            if not ok or not find:
+                return 0
+            repl, ok = QInputDialog.getText(self, _("Trova e sostituisci nei titoli"), _("Sostituisci con:"))
+            if not ok:
+                return 0
+        try:
+            items, n = E.replace_in_titles(self.items, find, repl or "", regex=regex)
+        except ValueError as e:
+            self.ctx.error(_("Trova e sostituisci nei titoli"), str(e))
+            return 0
+        if not n:
+            self.ctx.status(_("Nessun titolo contiene «{t}».").format(t=find))
+            return 0
+        return n if self._apply(_("Trova e sostituisci nei titoli"), items, 0) else 0
+
+    for fn in (export_text, _merge, import_text, generate, verify, ask_fix_broken, redirect_broken, remove_broken,
+               merge_duplicates, change_case, replace_in_titles):
         setattr(panel_cls, fn.__name__, fn)
     return panel_cls
 

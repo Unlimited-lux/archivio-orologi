@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pymupdf
 import pytest
 from PySide6.QtCore import QPoint, Qt
@@ -253,7 +255,7 @@ def test_tab_order_selection(window, tmp_path):
     assert [f.name for f in E.navigation_order(again, 0)] == ["C", "A", "B"]
 
 
-def test_preview_fill_and_back(qtbot, window, form_pdf):
+def test_preview_fill_and_back(qtbot, window, form_pdf, monkeypatch):
     view = open_form(window, form_pdf)
     window.ctx.set_mode("moduli")
     m = module()
@@ -262,6 +264,7 @@ def test_preview_fill_and_back(qtbot, window, form_pdf):
     f = filler_of(view)
     assert f.editor is not None
     qtbot.keyClicks(f.editor, "Prova")
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)   # «Scartare i valori di prova?» → no
     m.toggle_preview(False)
     assert values(view)["nome"] == "Prova"
     assert filler_of(view).design
@@ -284,10 +287,24 @@ def test_preview_discard(qtbot, window, form_pdf, monkeypatch):
     m = module()
     m.toggle_preview(True)
     m.import_values({"nome": "a", "cognome": "b", "paese": "IT"}, view)
-    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda title, text: asked.append(text) or True)
     m.toggle_preview(False)
     assert values(view)["nome"] == "" and values(view)["paese"] == ""
+    assert asked == ["Scartare i valori di prova inseriti durante l'anteprima?"]
 
+
+def test_save_during_preview_asks_to_include_test_values(qtbot, window, form_pdf, monkeypatch, tmp_path):
+    """FRM-25: salvando in anteprima si chiede se includere i valori di prova."""
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    m.toggle_preview(True)
+    m.import_values({"nome": "prova"}, view)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)   # non includerli
+    out = tmp_path / "salvato.pdf"
+    assert window.ctx.run_guards("save", view, {"path": str(out)})
+    assert values(view)["nome"] == ""   # salvataggio senza i valori di prova
 
 def test_tab_numbers_overlay(window, form_pdf):
     view = open_form(window, form_pdf)
@@ -524,3 +541,147 @@ def test_signature_field_blank_appearance(window, tmp_path, rotation):
     assert f.kind == E.SIGNATURE and f.value == ""
     ap = int(again.xref_get_key(f.xref, "AP/N")[1].split()[0])
     assert b"Tj" not in again.xref_stream(ap) and b"Do" not in again.xref_stream(ap)
+
+
+def _events_doc(window, tmp_path, event):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "A")
+    E.set_value(pdf, 0, x, "vA")
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "azzera", caption="Azzera")
+    E.set_button_action(pdf, 0, b, {"type": "reset", "fields": ["A"], "event": event})
+    pdf.save(str(tmp_path / f"ev_{event}.pdf"))
+    return open_form(window, tmp_path / f"ev_{event}.pdf")
+
+
+def _button_pos(view, name):
+    from PySide6.QtWidgets import QApplication
+    f = filler_of(view)
+    f.state.refresh(force=True)
+    info = [i for i in f.state.fields if i.name == name][0]
+    view.ensure_visible(info.page, info.rect)
+    QApplication.processEvents()
+    return view.page_to_view(info.page, info.rect).center().toPoint()
+
+
+def test_button_release_runs_only_over_the_button(qtbot, window, tmp_path):
+    """Rilascio (/U): l'azione parte solo se il pulsante viene rilasciato sopra di sé."""
+    view = _events_doc(window, tmp_path, "U")
+    pos = _button_pos(view, "azzera")
+    vp = view.viewport()
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=pos)
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, pos=pos + QPoint(0, 200))   # rilascio altrove
+    assert values(view)["A"] == "vA"
+    qtbot.mouseClick(vp, Qt.MouseButton.LeftButton, pos=pos)
+    assert values(view)["A"] == ""
+
+
+def test_button_press_and_mouse_enter_events(qtbot, window, tmp_path):
+    view = _events_doc(window, tmp_path, "D")
+    pos = _button_pos(view, "azzera")
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=pos)   # basta la pressione
+    assert values(view)["A"] == ""
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=pos)
+    view2 = _events_doc(window, tmp_path, "E")
+    pos = _button_pos(view2, "azzera")
+    qtbot.mouseMove(view2.viewport(), pos=pos + QPoint(0, 200))
+    assert values(view2)["A"] == "vA"
+    qtbot.mouseMove(view2.viewport(), pos=pos)   # ingresso del puntatore
+    assert values(view2)["A"] == ""
+
+
+def test_button_uri_uses_application_confirmation(window, tmp_path, monkeypatch):
+    """L'indirizzo web passa per la conferma unica dell'applicazione (VIS-19)."""
+    from foliant.modules.forms import module as M
+    seen = []
+    monkeypatch.setattr(M, "follow_link", lambda view, link: seen.append(link))
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "sito", caption="Sito")
+    E.set_button_action(pdf, 0, b, {"type": "uri", "uri": "https://example.com/garanzia"})
+    pdf.save(str(tmp_path / "uri.pdf"))
+    view = open_form(window, tmp_path / "uri.pdf")
+    f = filler_of(view)
+    f.click_field([i for i in f.state.fields if i.name == "sito"][0])
+    assert seen == [{"kind": pymupdf.LINK_URI, "uri": "https://example.com/garanzia"}]
+
+
+def test_submit_by_mail_attaches_data(window, tmp_path, monkeypatch, no_modal_boxes):
+    """FRM-18: invio a un indirizzo di posta → programma di posta con il file dei dati allegato."""
+    from foliant.modules.forms import interchange as X
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    m.import_values({"A": "Rolex Submariner", "B": "12500"}, view)
+    mails = []
+    monkeypatch.setattr(m, "launch_mail", lambda addr, subject, path: mails.append((addr, subject, path)) or True)
+    f = filler_of(view)
+    action = {"type": "submit", "url": "mailto:acquisti@esempio.test", "format": "xfdf"}
+    assert m.submit(f, action)
+    (addr, subject, path), = mails
+    assert addr == "acquisti@esempio.test" and "sub.pdf" in subject and path.endswith(".xfdf")
+    assert X.parse_xfdf(Path(path).read_bytes()) == {"A": "Rolex Submariner", "B": "12500"}
+    assert any("acquisti@esempio.test" in c[2] for c in no_modal_boxes)   # conferma con destinazione
+
+
+def test_submit_by_mail_without_mail_helper(window, tmp_path, monkeypatch, no_modal_boxes):
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    opened, notes = [], []
+    monkeypatch.setattr(m, "launch_mail", lambda *a: False)
+    monkeypatch.setattr("foliant.modules.forms.module.QDesktopServices.openUrl", lambda url: opened.append(url))
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), *a, **k: notes.append(text))
+    assert m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test", "format": "fdf"})
+    assert opened and opened[0].toString() == "mailto:a@b.test"
+    assert notes and ".fdf" in notes[0]
+
+
+def test_submit_by_mail_cancelled(window, tmp_path, monkeypatch):
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    mails = []
+    monkeypatch.setattr(m, "launch_mail", lambda *a: mails.append(a) or True)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a, **k: False)
+    assert not m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test"})
+    assert not mails
+
+
+def test_detect_straightens_skewed_scan_on_request(window, tmp_path, monkeypatch):
+    """FRM-27: oltre 5° di inclinazione si propone di raddrizzare la pagina (passo annullabile)."""
+    from foliant.modules.forms import detect as D
+    from foliant.modules.forms import dialogs
+    from .test_detect import _skewed_scan
+    doc = _skewed_scan(7)
+    doc.save(str(tmp_path / "storta.pdf"))
+    view = open_form(window, tmp_path / "storta.pdf")
+    asked = []
+
+    def confirm(title, text, *a, **k):
+        asked.append(text)
+        return "inclinate" in text   # no all'OCR, sì al raddrizzamento
+    monkeypatch.setattr(window.ctx, "confirm", confirm)
+    seen = []
+    monkeypatch.setattr(dialogs, "review_candidates", lambda parent, cands: seen.extend(cands) or [])
+    module().detect_fields()
+    assert any("inclinate di oltre 5°" in t for t in asked)
+    with view.document.lock:
+        assert abs(D.estimate_skew(view.document.pdf[0])) < 0.5
+    assert seen and all(abs(c.angle) < 0.5 for c in seen)
+    assert view.document.can_undo
+
+
+def test_script_button_reports_unavailable_action(window, tmp_path):
+    """FRM-18: un pulsante con script personalizzato non lo esegue e la barra lo indica."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    b = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "calcola", caption="Calcola")
+    pdf.xref_set_key(b, "A", "<</S/JavaScript/JS(app.alert('ciao'))>>")
+    t = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 200, 70), "sconto")
+    pdf.xref_set_key(t, "AA", "<</C<</S/JavaScript/JS(event.value = Math.random();)>>>>")
+    pdf.save(str(tmp_path / "js.pdf"))
+    view = open_form(window, tmp_path / "js.pdf")
+    f = filler_of(view)
+    f.state.refresh(force=True)
+    f.update_bar()
+    assert "calcoli personalizzati non eseguiti (sconto)" in f.text_of_bar()
+    f.click_field([i for i in f.state.fields if i.name == "calcola"][0])
+    assert "«calcola» non disponibile" in f.text_of_bar()

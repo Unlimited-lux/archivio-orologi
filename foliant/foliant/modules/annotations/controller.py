@@ -40,6 +40,7 @@ FACTORY_STYLES: dict[str, Style] = {
     engine.DISTANCE: Style(color=engine.MEASURE_COLOR, width=1.0),
     engine.PERIMETER: Style(color=engine.MEASURE_COLOR, width=1.0),
     engine.AREA: Style(color=engine.MEASURE_COLOR, width=1.0),
+    engine.ANGLE: Style(color=engine.MEASURE_COLOR, width=1.0),
 }
 
 STYLES_VERSION = 1
@@ -234,10 +235,14 @@ class Controller(QObject):
         except Exception:
             return []
 
-    def add_custom_stamp(self, name: str, image: bytes) -> None:
+    def add_custom_stamp(self, name: str, image: bytes, origin: str = "") -> None:
+        """Voce della libreria «Personalizzati»; `origin` «ia» per le immagini generate (ANN-28)."""
         import base64
         stamps = [d for d in self.custom_stamps() if d["name"] != name]
-        stamps.append({"name": name, "png": base64.b64encode(image).decode("ascii")})
+        entry = {"name": name, "png": base64.b64encode(image).decode("ascii")}
+        if origin:
+            entry["origin"] = origin
+        stamps.append(entry)
         self.ctx.settings().setValue("annotations/custom_stamps", json.dumps(stamps))
 
     def remove_custom_stamp(self, name: str) -> None:
@@ -321,6 +326,88 @@ class Controller(QObject):
                 self.ctx.error(_("Commenti"), _("Il documento non consente di aggiungere o modificare commenti."))
             return False
         return True
+
+    # ------------------------------------------------------------------ aggancio delle misure (ANN-33)
+    SNAP_KEY = "annotations/snap"
+
+    def snap_kinds(self) -> tuple[str, ...]:
+        raw = self.ctx.settings().value(self.SNAP_KEY, None)
+        if raw is None:
+            return engine.SNAP_KINDS
+        kinds = [k for k in str(raw).split("|") if k in engine.SNAP_KINDS]
+        return tuple(kinds)
+
+    def set_snap_kind(self, kind: str, on: bool) -> None:
+        kinds = [k for k in self.snap_kinds() if k != kind] + ([kind] if on else [])
+        self.ctx.settings().setValue(self.SNAP_KEY, "|".join(k for k in engine.SNAP_KINDS if k in kinds))
+
+    def snap_targets(self, view, page: int, wait: bool = False) -> engine.SnapTargets | None:
+        """Punti di aggancio della pagina, calcolati una volta per versione del documento in un
+        thread (le pagine vettoriali complesse non bloccano l'interfaccia). Finché il calcolo non
+        è pronto restituisce None (`wait=True` attende, per i test)."""
+        import threading
+        key = (id(view), page, view.document.version)
+        cache = self.__dict__.setdefault("_snap_cache", {})
+        hit = cache.get(key)
+        if isinstance(hit, engine.SnapTargets):
+            return hit
+        if hit is None:
+            done = threading.Event()
+            cache[key] = done
+            if len(cache) > 64:
+                for k in list(cache)[:32]:
+                    if k != key:
+                        cache.pop(k, None)
+            doc = view.document
+
+            def work():
+                try:
+                    with ENGINE_LOCK:
+                        if doc.closed:
+                            return
+                        result = engine.snap_targets(doc.pdf, page)
+                    cache[key] = result
+                except Exception:
+                    cache[key] = engine.SnapTargets()
+                finally:
+                    done.set()
+
+            threading.Thread(target=work, daemon=True).start()
+            hit = done
+        if wait:
+            hit.wait(30)
+            res = cache.get(key)
+            return res if isinstance(res, engine.SnapTargets) else None
+        return None
+
+    def snap(self, view, page: int, point, wait: bool = False) -> tuple[pymupdf.Point, str] | None:
+        kinds = self.snap_kinds()
+        if not kinds:
+            return None
+        targets = self.snap_targets(view, page, wait)
+        if targets is None:
+            return None
+        tol = 8.0 / max(view.zoom, 0.05)        # 8 pixel dello schermo
+        return engine.snap(targets, point, tol, kinds)
+
+    def convert_to_measure(self, page: int, xref: int, view=None) -> int | None:
+        """«Converti in misura»: su una pagina senza scala chiede prima la calibrazione (ANN-33)."""
+        view = view or self.view()
+        if view is None:
+            return None
+        info = self.info(page, xref, view=view)
+        if info is None:
+            return None
+        scale = self.scale_for(page, info.rect.tl, view)
+        if not scale.calibrated:
+            scale = dialogs.ask_scale(view, scale)
+            if scale is None:
+                return None
+            self.set_scale(scale, page)
+        new = self.apply(_("Converti in misura"), engine.convert_to_measure, page, xref, scale, view=view)
+        if new is not None:
+            self.select([(page, new)], view)
+        return new
 
     def read(self, fn: Callable[..., Any], *args, view=None) -> Any:
         view = view or self.view()

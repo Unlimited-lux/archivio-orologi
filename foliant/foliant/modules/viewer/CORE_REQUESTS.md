@@ -10,9 +10,10 @@ pagina e `ctx.refresh_state`), 5 (`ctx.toggle_sidebar_panel`), 6 (`ctx.activate_
 (`ctx.replace_recent`/`remove_recent`), 18 (`ctx.close_view(view, discard=True)`), oltre a
 `ctx.set_selected_pages_provider` e `ctx.add_tab_menu_provider`.
 **Ancora aperte:** 1 (segnale di salto), 8 (area per barre di modulo: la ricerca usa ancora
-una barra nell'area inferiore), 13 (limiti dello zoom), 14 (registrazione del generatore di
+una barra nell'area inferiore), 14 (registrazione del generatore di
 miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomina:
-`window._update_tab_title`), 17 (recenti non disponibili nella Home).
+`window._update_tab_title`), 19 (testi di VIS-06), 20 (selezione e copia, VIS-28),
+21 (schede e finestre, VIS-30). Soddisfatte dopo: 13 (zoom), 17 (recenti).
 
 1. **Segnale di salto nella vista** (`DocumentView.aboutToJump(page)` o simile).
    Oggi `navigation.py` avvolge `go_to_page`, `next_page` e `previous_page` di ogni vista
@@ -63,9 +64,11 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     aggira; anche altri moduli che eliminano allegati (protezione, sanificazione) devono
     tenerne conto.
 
-13. **Zoom**: la specifica chiede Ctrl+0 = adatta pagina, Ctrl+1 = dimensione reale; il nucleo
-    usa scorciatoie diverse. (I limiti 1%–6400% ci sono: oltre ~16 megapixel la vista disegna
-    la pagina a tasselle.)
+13. **Zoom** — *soddisfatta* (scorciatoie Ctrl+0/1/2 e limiti 1%–6400%, verificati da
+    `tests/modules/viewer/test_zoom.py`). Restano piccole differenze dalla specifica: Ctrl+rotella
+    è continuo (non «un passo»), al limite il comando non lo segnala, nessun gesto di pizzico né
+    calibrazione dei dpi. «Adatta all'altezza» e «Adatta al contenuto» li aggiunge il viewer
+    (`zoomfit.py`); se il nucleo li offrirà come modalità di adattamento, `zoomfit` si toglie.
 
 14. **Generatore di miniature per il file manager** (VIS-53): `packaging/install.sh` dovrebbe
     installare un eseguibile `foliant-thumbnailer` che lancia
@@ -81,11 +84,47 @@ miniature), 15 (id stabili dei comandi), 16 (titolo della scheda dopo una rinomi
     percorso, es. le posizioni memorizzate). Oggi `files.py` imposta `doc.path` e chiama
     `window._update_tab_title(view)`.
 
-17. **Recenti** (VIS-02/03): API pubblica per sostituire/rimuovere una voce; la Home dovrebbe
-    ricevere anche i file non disponibili con un indicatore (oggi `_refresh_recent` li scarta,
-    quindi non si possono marcare «non disponibile» con Rimuovi/Individua) e offrire un menu
-    contestuale estendibile sull'elenco dei recenti (oggi `files.py` lo imposta su
-    `window.home.recent`).
+17. **Recenti** (VIS-02/03) — *soddisfatta e adottata*: `ctx.replace_recent`/`remove_recent`,
+    voci «non disponibile» con Individua/Rimuovi, `ctx.pin_recent`/`is_pinned` e
+    `ctx.add_recent_menu_provider`; `files.py` non imposta più un menu proprio sulla Home.
 
 18. **`close_view(view, discard=True)`** per chiudere senza la richiesta di salvataggio
     (dopo lo spostamento nel cestino o il ripristino): oggi si imposta `doc._saved_state`.
+
+19. **Testi di VIS-06** (password e copia vietata): la specifica chiede «Password non corretta»
+    e, per Ctrl+C con copia vietata, l'avviso «Copia non consentita dal documento»; il nucleo
+    scrive «La password non è corretta. Riprova.» e «Il documento non consente la copia del
+    contenuto.» nella barra di stato. Il comportamento è corretto (verificato da
+    `tests/modules/viewer/test_protection.py`): resta da allineare il testo, e per la copia
+    usare `ctx.notify` invece della barra di stato.
+
+20. **Selezione e copia del testo** (VIS-28, P0) — lo strumento Seleziona è del nucleo
+    (`foliant/ui/tools.py`, `DocumentView.words`). Criteri verificati in
+    `tests/modules/viewer/test_selection.py`; quelli ancora mancanti sono `xfail(strict=True)`
+    e diventeranno errori quando il nucleo li soddisferà (allora basta togliere il segno):
+    - **ordine di lettura**: `DocumentView.words()` usa `get_text("words")` nell'ordine del
+      flusso; con la colonna destra scritta per prima, la copia mette la destra prima della
+      sinistra. Proposta: ordinare i blocchi come `foliant.modules.viewer.engine.reading_order`
+      (colonne per sovrapposizione orizzontale da sinistra a destra, blocchi per y0, blocchi a
+      tutta larghezza come separatori) e numerare le parole in quell'ordine;
+    - **trattino di sillabazione**: `words_to_text` lascia «infor-» + «mazione»; proposta: se
+      una riga finisce con lettera + «-» e la successiva inizia con una lettera, unire senza
+      trattino né a capo (come `engine.extract_page_text`);
+    - **triplo clic** (riga/paragrafo), **Maiusc+clic** e **Maiusc+frecce** per estendere,
+      **F7** cursore di testo, **Ctrl+A** su tutto il documento (oggi solo la pagina corrente)
+      con copia in background oltre un limite;
+    - **`/ActualText`**, **artefatti** esclusi (opzione) e **testo bidirezionale**: dipendono
+      dall'estrazione; con PyMuPDF `get_text(..., flags=TEXT_ACCURATE_BBOXES)` e
+      `page.get_texttrace()` si possono riconoscere i contenuti marcati.
+
+21. **Schede e finestre** (VIS-30, P0): mancano nel nucleo il trascinamento di una scheda fuori
+    dalla barra (nuova finestra con il documento nella stessa posizione) o su un'altra finestra,
+    i gruppi di schede (nome, colore, comprimibili, salvati nella sessione), la preferenza
+    «apri in una nuova finestra» e la «Nuova vista del documento» (seconda scheda sullo stesso
+    `Document` in memoria: oggi `_close_view_now` chiude il documento con la scheda, quindi due
+    viste dovrebbero contare i riferimenti prima di `doc.close()`). Il viewer è pronto ad
+    aggiungere le voci al menu della scheda (`ctx.add_tab_menu_provider`) quando il nucleo
+    offrirà, per esempio, `ctx.move_view_to_new_window(view)` e `ctx.open_second_view(view)`.
+    Gli altri criteri (sessione con 3 schede, Ctrl+Maiusc+T con pagina e zoom, un solo dialogo
+    per più documenti modificati, 50 schede con cambio entro 200 ms) sono verificati in
+    `tests/modules/viewer/test_session.py`.

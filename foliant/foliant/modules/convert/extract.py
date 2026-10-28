@@ -72,6 +72,7 @@ class Para:
     bbox: tuple
     kind: str = "p"              # "p", "h1".."h6", "li"
     align: str = "left"
+    angle: int = 0               # rotazione del testo come visualizzato (gradi, antiorari)
 
     @property
     def text(self) -> str:
@@ -108,6 +109,7 @@ class PageContent:
     items: list = field(default_factory=list)
     ocr: bool = False
     warnings: list[str] = field(default_factory=list)
+    ocr_areas: int = 0            # aree di testo non decodificabile riconosciute con OCR
 
     def text(self, table_sep: str = "\t") -> str:
         parts = []
@@ -278,6 +280,9 @@ def find_tables(page: pymupdf.Page, strategy: str | None = None):
                 return _NoTables()
         except Exception:
             pass
+    # PyMuPDF cerca pymupdf.layout per suggerirne l'installazione: con l'esclusione del nucleo
+    # (NFR-19) quella ricerca solleva ModuleNotFoundError e find_tables fallirebbe
+    pymupdf._recommend_layout = False
     try:
         return page.find_tables(use_layout=False, **kwargs)
     except TypeError:
@@ -488,7 +493,81 @@ def _block_to_para(block: dict, links, dehyphenate: bool = True) -> Para | None:
     # rimuove spazi finali/iniziali
     spans[0].text = spans[0].text.lstrip()
     spans[-1].text = spans[-1].text.rstrip()
-    return Para(spans=spans, bbox=tuple(block["bbox"]))
+    return Para(spans=spans, bbox=tuple(block["bbox"]), angle=_line_angle(lines))
+
+
+def _line_angle(lines: list) -> int:
+    """Angolo prevalente delle righe del blocco, arrotondato a 90° (0 se il testo non è
+    chiaramente ruotato)."""
+    import math
+    votes: collections.Counter = collections.Counter()
+    for line in lines:
+        dx, dy = line.get("dir", (1, 0))
+        a = math.degrees(math.atan2(-dy, dx)) % 360
+        snapped = int(round(a / 90) * 90) % 360
+        if abs(((a - snapped) + 180) % 360 - 180) <= 10:
+            votes[snapped] += len("".join(sp.get("text", "") for sp in line.get("spans", [])))
+    return votes.most_common(1)[0][0] if votes else 0
+
+
+def _undecodable_fonts(page: pymupdf.Page) -> set[str]:
+    """Nomi (normalizzati) dei font composti a codifica Identity senza /ToUnicode: il loro testo
+    estratto è una sequenza di codici di glifo, non di caratteri."""
+    doc = page.parent
+    bad: set[str] = set()
+    try:
+        for xref, _ext, ftype, basefont, _name, enc in page.get_fonts():
+            if ftype == "Type0" and enc.startswith("Identity") and \
+                    doc.xref_get_key(xref, "ToUnicode")[0] in ("null", "none"):
+                bad.add(re.sub(r"[^a-z0-9]", "", basefont.split("+")[-1].lower()))
+    except Exception:
+        pass
+    return bad
+
+
+def _garbled(para: Para, bad: set[str]) -> bool:
+    """Paragrafo il cui testo non è decodificabile: caratteri di controllo, U+FFFD o dell'area
+    privata, oppure scritto con un font senza mappatura Unicode."""
+    text = para.text
+    if len(text.strip()) < 3:
+        return False
+    odd = sum(1 for ch in text if ch == "\ufffd" or "\ue000" <= ch <= "\uf8ff"
+              or (ord(ch) < 32 and ch not in "\t\n\r"))
+    if odd >= max(1, 0.05 * len(text)):
+        return True
+    if not bad:
+        return False
+    in_bad = sum(len(sp.text) for sp in para.spans
+                 if any(b.startswith(re.sub(r"[^a-z0-9]", "", sp.font.lower())) for b in bad if sp.font))
+    return in_bad >= 0.5 * len(text)
+
+
+def ocr_area_text(page: pymupdf.Page, bbox, language: str | None = None) -> str:
+    """Testo riconosciuto in un'area della pagina (coordinate della pagina non ruotata)."""
+    if not ocr_available():
+        return ""
+    rect = pymupdf.Rect(bbox) * page.rotation_matrix   # coordinate della pagina visualizzata
+    rect = (rect + (-2, -2, 2, 2)) & page.rect
+    if rect.is_empty:
+        return ""
+    langs = ocr_languages(language)
+    try:
+        from foliant.modules.ocr.engine import ocr_page_text  # type: ignore
+    except Exception:
+        ocr_page_text = None
+    try:
+        if ocr_page_text is not None:
+            text = ocr_page_text(page, languages=langs.split("+"), clip=rect)
+        else:
+            pix = page.get_pixmap(dpi=300, clip=rect)
+            tmp = pymupdf.open(stream=pix.pdfocr_tobytes(language=langs), filetype="pdf")
+            try:
+                text = tmp[0].get_text()
+            finally:
+                tmp.close()
+    except Exception:
+        return ""
+    return normalize_text(" ".join(text.split()))
 
 
 def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None = None,
@@ -532,6 +611,7 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
         for bbox, rows, _used in grid_tables(data.get("blocks", [])):
             table_items.append(TableItem(rows=rows, bbox=bbox))
     boxes: list[tuple[tuple, object]] = [(t.bbox, t) for t in table_items]
+    bad_fonts = _undecodable_fonts(page) if textpage is None and ocr != "never" else set()
     for block in data.get("blocks", []):
         bbox = tuple(block.get("bbox", (0, 0, 0, 0)))
         if any(_inside(bbox, t.bbox) for t in table_items):
@@ -548,6 +628,15 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
                                           height=block.get("height", 0), bbox=bbox)))
         elif block.get("type") == 0:
             para = _block_to_para(block, links, dehyphenate)
+            if para is not None and textpage is None and ocr != "never" and _garbled(para, bad_fonts):
+                # testo nativo non decodificabile (font senza /ToUnicode): OCR della sola area
+                fixed = ocr_area_text(page, bbox, language)
+                if fixed:
+                    first = para.spans[0]
+                    para.spans = [Span(fixed, first.size, first.font, first.bold, first.italic, first.color)]
+                    content.ocr_areas += 1
+                elif "testo-non-decodificabile" not in content.warnings:
+                    content.warnings.append("testo-non-decodificabile")
             if para is not None:
                 boxes.append((bbox, para))
     if page.rotation and textpage is None:
@@ -557,10 +646,27 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
         for bbox, item in boxes:
             r = tuple(pymupdf.Rect(bbox) * m)
             item.bbox = r
+            if isinstance(item, Para):
+                item.angle = (item.angle - page.rotation) % 360
             rotated.append((r, item))
         boxes = rotated
-    content.items = _xy_cut(boxes)
+    content.items = _xy_cut(_upright(boxes))
     return content
+
+
+def _upright(boxes: list) -> list:
+    """Se il testo della pagina è in prevalenza ruotato, l'ordine di lettura si calcola sulle
+    coordinate raddrizzate (le righe di un testo verticale si leggono da destra a sinistra o
+    viceversa); i riquadri degli elementi restano quelli della pagina."""
+    votes: collections.Counter = collections.Counter()
+    for _b, it in boxes:
+        if isinstance(it, Para):
+            votes[it.angle] += len(it.text)
+    angle = votes.most_common(1)[0][0] if votes else 0
+    if not angle or votes[angle] < 0.5 * sum(votes.values()):
+        return boxes
+    m = pymupdf.Matrix(angle)
+    return [(tuple(pymupdf.Rect(b) * m), it) for b, it in boxes]
 
 
 def assign_headings(pages: list[PageContent], max_levels: int = 3) -> None:
@@ -648,7 +754,9 @@ def repeated_furniture(pages: list[PageContent]) -> set[int]:
             if not isinstance(it, Para):
                 continue
             top, bottom = it.bbox[1], it.bbox[3]
-            if top > pc.height * 0.12 and bottom < pc.height * 0.88:
+            # solo paragrafi contenuti per intero nella fascia alta o bassa: un paragrafo che
+            # occupa la pagina (stesso testo su ogni pagina) non è un'intestazione
+            if bottom > pc.height * 0.15 and top < pc.height * 0.85:
                 continue
             key = re.sub(r"\d+", "#", it.text.strip().lower())
             if key in seen:

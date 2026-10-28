@@ -1,4 +1,6 @@
+import errno
 import os
+import re
 
 import pymupdf
 import pytest
@@ -151,6 +153,34 @@ def test_listeners_and_replace(sample_pdf, tmp_path):
 def test_atomic_write_error(tmp_path):
     with pytest.raises(DocumentError):
         atomic_write(tmp_path / "non" / "esiste" / "x.pdf", b"x")
+
+
+@pytest.mark.parametrize("where, code, reason", [
+    ("fsync", errno.ENOSPC, "spazio su disco insufficiente"),
+    ("mkstemp", errno.EACCES, "non è scrivibile"),
+    ("replace", errno.EBUSY, "in uso da un altro programma"),
+])
+def test_atomic_write_error_is_recognizable_and_explained(sample_pdf, monkeypatch, where, code, reason):
+    """NFR-08/2, NFR-15/3: errore riconoscibile (errno, file), causa tradotta e azione suggerita;
+    l'originale resta intatto e nella cartella non resta alcun file temporaneo."""
+    import tempfile
+
+    from foliant.core.errors import DocumentWriteError
+    folder = os.path.dirname(sample_pdf)
+    before = open(sample_pdf, "rb").read()
+
+    def fail(*a, **k):
+        raise OSError(code, os.strerror(code))
+    target = {"fsync": (os, "fsync"), "mkstemp": (tempfile, "mkstemp"), "replace": (os, "replace")}[where]
+    with monkeypatch.context() as m, pytest.raises(DocumentWriteError) as info:
+        m.setattr(*target, fail)
+        atomic_write(sample_pdf, b"%PDF-1.7 nuovo")
+    e = info.value
+    assert e.errno == code and os.path.basename(e.filename) == "esempio.pdf"
+    assert "«esempio.pdf»" in str(e) and reason in str(e) and "un'altra posizione" in str(e)
+    assert os.strerror(code) not in str(e)                          # niente causa di sistema in inglese
+    assert open(sample_pdf, "rb").read() == before
+    assert sorted(os.listdir(folder)) == ["esempio.pdf"]
 
 
 def test_save_options_encryption(sample_pdf, tmp_path):
@@ -481,6 +511,67 @@ def test_saved_notification_updates_disk_stamp(sample_pdf):
     assert not doc.disk_changed()
     atomic_write(sample_pdf, data + b"% ancora\n")      # le scritture di Foliant non contano come esterne
     assert not doc.disk_changed()
+
+
+def test_pdf_14_keeps_its_version_when_saved(tmp_path):
+    """NFR-29: un PDF 1.4 con un'evidenziazione aggiunta resta 1.4 (niente flussi di oggetti né
+    xref compresse); i documenti nuovi e quelli già ≥ 1.5 continuano a usare i flussi di oggetti."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Testo da evidenziare", fontsize=14)
+    data = src.tobytes().replace(b"%PDF-1.7", b"%PDF-1.4", 1)    # xref classica, stessa lunghezza
+    assert data.startswith(b"%PDF-1.4") and b"/ObjStm" not in data
+    path = tmp_path / "vecchio.pdf"
+    path.write_bytes(data)
+    doc = Document.open(path)
+    assert not doc.uses_object_streams
+    with doc.change("Evidenzia", kind="annotation") as pdf:
+        page = pdf[0]
+        page.add_highlight_annot(page.search_for("Testo")[0])
+    doc.save()
+    saved = path.read_bytes()
+    assert saved.startswith(b"%PDF-1.4")
+    assert b"/ObjStm" not in saved and not re.search(rb"/Type\s*/XRef", saved)
+    check = pymupdf.open(path)
+    assert [a.type[1] for a in check[0].annots()] == ["Highlight"]
+    # /Version 1.6 nel catalogo vale come versione del documento
+    with doc.change("Versione", kind="metadata") as pdf:
+        pdf.xref_set_key(pdf.pdf_catalog(), "Version", "/1.6")
+    assert doc.uses_object_streams and b"/ObjStm" in doc.save_bytes()
+    new = Document.new()
+    assert new.uses_object_streams and b"/ObjStm" in new.save_bytes()
+
+
+def _saved_version(data: bytes, password: str | None = None) -> tuple:
+    head = re.match(rb"%PDF-(\d)\.(\d)", data)
+    version = (int(head.group(1)), int(head.group(2)))
+    pdf = pymupdf.open("pdf", data)
+    if password:
+        pdf.authenticate(password)
+    kind, value = pdf.xref_get_key(pdf.pdf_catalog(), "Version")
+    if kind == "name":
+        version = max(version, tuple(int(x) for x in value.strip("/").split(".")))
+    return version
+
+
+def test_pdf_14_version_raised_to_minimum_needed(tmp_path):
+    """NFR-29: se il contenuto richiede una versione più recente (livelli → 1.5, AES-128 → 1.6,
+    AES-256 → 1.7) il file salvato la dichiara, senza toccare il documento aperto."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Testo", fontsize=14)
+    path = tmp_path / "vecchio.pdf"
+    path.write_bytes(src.tobytes().replace(b"%PDF-1.7", b"%PDF-1.4", 1))
+    doc = Document.open(path)
+    assert _saved_version(doc.save_bytes()) == (1, 4)
+    with doc.change("Livello") as pdf:
+        pdf.add_ocg("Filigrana")
+    doc.save()
+    saved = path.read_bytes()
+    assert b"/OCProperties" in saved and b"/ObjStm" not in saved
+    assert _saved_version(saved) == (1, 5)
+    assert doc.pdf.xref_get_key(doc.pdf.pdf_catalog(), "Version")[0] == "null"   # solo la copia scritta
+    for enc, version in ((pymupdf.PDF_ENCRYPT_AES_128, (1, 6)), (pymupdf.PDF_ENCRYPT_AES_256, (1, 7))):
+        data = doc.save_bytes(encryption=enc, user_pw="u", owner_pw="o")
+        assert _saved_version(data, "u") == version
 
 
 def test_to_bytes_without_object_streams(sample_pdf):

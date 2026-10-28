@@ -776,7 +776,8 @@ class OcrController(QObject):
                         existing=engine.FORCE if any(
                             st.infos.get(i) is not None and st.infos[i].category == detect.UNEXTRACTABLE
                             for i in (pages if pages is not None else detected)) else None,
-                        selected=self._selected_pages(view))
+                        selected=self._selected_pages(view),
+                        preview_cb=lambda i, popts, v=view: self._preview(v, i, popts))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.settings().setValue("ocr/mode", dlg.mode())
@@ -829,6 +830,16 @@ class OcrController(QObject):
         except BaseException as e:  # gestita come nell'esecuzione in background
             return self._complete(view, opts, None, e, data, preview, new_document)
         return self._complete(view, opts, result, None, data, preview, new_document)
+
+    def _preview(self, view, index: int, popts) -> dict:
+        with ENGINE_LOCK:
+            data = engine.document_copy_bytes(view.document.pdf)
+            pdf = pymupdf.open(stream=data, filetype="pdf")
+        try:
+            return engine.preview_page(pdf, index, popts)
+        finally:
+            with ENGINE_LOCK:
+                pdf.close()
 
     def _selected_pages(self, view) -> list[int]:
         try:

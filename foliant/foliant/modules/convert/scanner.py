@@ -27,6 +27,9 @@ from .common import check
 MM = 72 / 25.4
 ID_CARD_MM = (85.6, 54.0)
 A4 = (595.28, 841.89)
+PAPER_MM = {"A4": (210.0, 297.0), "A5": (148.0, 210.0), "Letter": (215.9, 279.4), "Legal": (215.9, 355.6)}
+# oltre questa memoria le pagine acquisite passano su disco (600 dpi a colori: ~100 MB a pagina)
+MEMORY_BUDGET = 256 * 1024 * 1024
 
 
 class ScannerError(FoliantError):
@@ -46,6 +49,37 @@ class ScanSettings:
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
+
+
+class StoredPage:
+    """Pagina acquisita conservata su disco (PNG senza perdita) per le acquisizioni grandi.
+    La cartella temporanea viene eliminata quando non resta più alcuna pagina che la usa."""
+
+    def __init__(self, folder, path: str, img):
+        self._folder = folder           # TemporaryDirectory condivisa
+        self.path = path
+        self.size = img.size
+        self.width, self.height = img.size
+        self.mode = img.mode
+        self.info = {"dpi": img.info.get("dpi")} if img.info.get("dpi") else {}
+
+    def load(self):
+        from PIL import Image
+        with Image.open(self.path) as im:
+            img = im.copy()
+        if self.info.get("dpi"):
+            img.info["dpi"] = self.info["dpi"]
+        return img
+
+
+def load_page(page):
+    """Immagine Pillow di una pagina acquisita (in memoria o su disco)."""
+    return page.load() if isinstance(page, StoredPage) else page
+
+
+def _raw_size(img) -> int:
+    bands = {"1": 0.125, "L": 1, "P": 1, "RGB": 3, "RGBA": 4}.get(img.mode, 4)
+    return int(img.width * img.height * bands)
 
 
 @dataclass
@@ -87,6 +121,9 @@ class SaneBackend:
             raise ScannerError(_("Il programma «scanimage» non è installato (sudo apt install sane-utils)."))
         mode = {"color": "Color", "gray": "Gray", "bw": "Lineart"}.get(settings.mode, "Color")
         args = [self.program, "-d", device, "--format=png", f"--resolution={settings.dpi}", f"--mode={mode}"]
+        if settings.paper in PAPER_MM:
+            w, h = PAPER_MM[settings.paper]
+            args += ["-x", f"{w:g}", "-y", f"{h:g}"]
         if settings.source in ("adf", "adf-duplex"):
             args.append("--source=" + ("ADF Duplex" if settings.source == "adf-duplex" else "ADF"))
         with tempfile.TemporaryDirectory(prefix="foliant-scan-") as tmp:
@@ -131,9 +168,16 @@ class SaneBackend:
 
 # ------------------------------------------------------------------ acquisizione
 def acquire(backend, device: str, settings: ScanSettings, progress=None, *, remove_blank: bool = False,
-            blank_threshold: float = 0.005, straighten: bool = False, crop: bool = False) -> ScanResult:
-    """Acquisisce le pagine; in caso di errore del dispositivo conserva quelle già acquisite."""
+            blank_threshold: float = 0.005, straighten: bool = False, crop: bool = False,
+            memory_budget: int | None = None) -> ScanResult:
+    """Acquisisce le pagine; in caso di errore del dispositivo conserva quelle già acquisite.
+
+    Oltre `memory_budget` byte di immagini in memoria le pagine successive vengono salvate su
+    disco (`StoredPage`): centinaia di pagine a 600 dpi non esauriscono la memoria."""
     result = ScanResult()
+    budget = MEMORY_BUDGET if memory_budget is None else memory_budget
+    in_memory = 0
+    folder = None
     try:
         for k, img in enumerate(backend.scan(device, settings, progress)):
             check(progress, None, _("Pagina {n} acquisita").format(n=k + 1))
@@ -147,6 +191,15 @@ def acquire(backend, device: str, settings: ScanSettings, progress=None, *, remo
             if remove_blank and is_blank(img, blank_threshold):
                 result.removed_blank += 1
                 continue
+            size = _raw_size(img)
+            if in_memory + size > budget:
+                if folder is None:
+                    folder = tempfile.TemporaryDirectory(prefix="foliant-scan-")
+                path = os.path.join(folder.name, f"p{len(result.pages):05d}.png")
+                img.save(path, format="PNG", compress_level=1)
+                result.pages.append(StoredPage(folder, path, img))
+                continue
+            in_memory += size
             result.pages.append(img)
     except OperationCancelled:
         raise
@@ -155,6 +208,22 @@ def acquire(backend, device: str, settings: ScanSettings, progress=None, *, remo
     except Exception as e:   # dispositivo scollegato o risposta non valida
         result.error = _("Errore dello scanner: {e}").format(e=e)
     return result
+
+
+def preview(backend, device: str, settings: ScanSettings, progress=None):
+    """Anteprima rapida del piano (75 dpi) con le regolazioni scelte; None se non riesce."""
+    import copy
+    quick = copy.copy(settings)
+    quick.dpi = 75
+    quick.source = "flatbed"
+    try:
+        for img in backend.scan(device, quick, progress):
+            return adjust(img, quick)
+    except OperationCancelled:
+        raise
+    except Exception as e:
+        raise ScannerError(_("Anteprima non riuscita: {e}").format(e=e)) from e
+    return None
 
 
 def adjust(img, settings: ScanSettings):
@@ -252,6 +321,7 @@ def pages_to_pdf(images: list, settings: ScanSettings, progress=None, *, into: p
         doc = pymupdf.open()
         for k, img in enumerate(images):
             check(progress, 0.9 + 0.1 * k / len(images), _("Creazione del PDF…"))
+            img = load_page(img)
             dpi = (img.info.get("dpi") or (settings.dpi, settings.dpi))[0] or settings.dpi
             w, h = img.width * 72 / dpi, img.height * 72 / dpi
             page = doc.new_page(width=w, height=h)
@@ -270,6 +340,7 @@ def id_card_pdf(front, back, settings: ScanSettings) -> bytes:
         cw, ch = ID_CARD_MM[0] * MM, ID_CARD_MM[1] * MM
         x = (A4[0] - cw) / 2
         for k, img in enumerate((front, back)):
+            img = load_page(img)
             dpi = settings.dpi
             # ritaglio alla dimensione reale della tessera (in alto a sinistra del piano)
             wpx, hpx = int(round(ID_CARD_MM[0] / 25.4 * dpi)), int(round(ID_CARD_MM[1] / 25.4 * dpi))

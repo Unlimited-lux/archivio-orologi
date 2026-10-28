@@ -722,6 +722,322 @@ def outline_every_n(page_count: int, n: int, template: str = "Pagine {a}-{b}") -
     return out
 
 
+# ------------------------------------------------------------ titoli taggati (VIS-17)
+_HEADING_ROLES = {"H1": 1, "H2": 2, "H3": 3, "H4": 4, "H5": 5, "H6": 6, "H": 0, "Title": 1}
+_MAX_STRUCT_NODES = 50000
+
+
+def _pdf_obj(pdf: pymupdf.Document, value: str) -> str:
+    """Testo dell'oggetto: risolve un riferimento «n 0 R»."""
+    m = re.fullmatch(r"\s*(\d+)\s+0\s+R\s*", value or "")
+    return pdf.xref_object(int(m.group(1)), compressed=True) if m else value
+
+
+def _dict_get(pdf, obj: str, key: str) -> str | None:
+    """Valore grezzo di /key in un dizionario PDF (testo), riferimenti non risolti."""
+    m = re.search(r"/" + key + r"(?![A-Za-z0-9])\s*", obj)
+    if not m:
+        return None
+    rest = obj[m.end():]
+    if rest.startswith("<<"):
+        depth, i = 0, 0
+        while i < len(rest):
+            if rest.startswith("<<", i):
+                depth += 1
+                i += 2
+            elif rest.startswith(">>", i):
+                depth -= 1
+                i += 2
+                if depth == 0:
+                    return rest[:i]
+            else:
+                i += 1
+        return rest
+    if rest.startswith("["):
+        depth = 0
+        for i, ch in enumerate(rest):
+            depth += ch == "["
+            depth -= ch == "]"
+            if depth == 0:
+                return rest[:i + 1]
+        return rest
+    if rest.startswith("("):
+        depth, i, esc = 0, 0, False
+        while i < len(rest):
+            ch = rest[i]
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return rest[:i + 1]
+            i += 1
+        return rest
+    m2 = re.match(r"(\d+\s+0\s+R|<[0-9A-Fa-f\s]*>|/[^\s/<>\[\]()]+|[^\s/<>\[\]()]+)", rest)
+    return m2.group(1) if m2 else None
+
+
+def _pdf_string(raw: str | None) -> str:
+    """Testo di una stringa PDF «(…)» o «<…>» (PDFDocEncoding o UTF-16BE con BOM)."""
+    if not raw:
+        return ""
+    raw = raw.strip()
+    data = b""
+    if raw.startswith("<") and raw.endswith(">"):
+        try:
+            data = bytes.fromhex(re.sub(r"\s", "", raw[1:-1]))
+        except ValueError:
+            return ""
+    elif raw.startswith("(") and raw.endswith(")"):
+        out = bytearray()
+        body, i = raw[1:-1], 0
+        esc = {"n": 10, "r": 13, "t": 9, "b": 8, "f": 12, "(": 40, ")": 41, "\\": 92}
+        while i < len(body):
+            ch = body[i]
+            if ch == "\\" and i + 1 < len(body):
+                nxt = body[i + 1]
+                if nxt in esc:
+                    out.append(esc[nxt])
+                    i += 2
+                    continue
+                m = re.match(r"[0-7]{1,3}", body[i + 1:])
+                if m:
+                    out.append(int(m.group(0), 8) & 0xFF)
+                    i += 1 + len(m.group(0))
+                    continue
+                i += 2
+                continue
+            out += ch.encode("latin-1", "replace")
+            i += 1
+        data = bytes(out)
+    if data.startswith(b"\xfe\xff"):
+        return data[2:].decode("utf-16-be", "replace")
+    return data.decode("latin-1", "replace")
+
+
+def _show_ops(content: bytes) -> list[tuple[int | None, bytes]]:
+    """Operatori di testo del flusso in ordine, con l'MCID del contenuto marcato che li contiene
+    e la stringa mostrata (byte grezzi)."""
+    tokens = re.finditer(rb"\((?:\\.|[^\\)])*\)|<<|>>|<[0-9A-Fa-f\s]*>|\[|\]|/[^\s/<>\[\]()%]+|"
+                         rb"%[^\r\n]*|[^\s/<>\[\]()%]+", content)
+    stack: list[int | None] = []
+    operands: list[bytes] = []
+    pending_dict: list[bytes] = []
+    depth = 0
+    out = []
+    for m in tokens:
+        tok = m.group(0)
+        if tok.startswith(b"%"):
+            continue
+        if tok == b"<<":
+            depth += 1
+            pending_dict.append(tok)
+            continue
+        if depth:
+            pending_dict.append(tok)
+            if tok == b">>":
+                depth -= 1
+                if not depth:
+                    operands.append(b" ".join(pending_dict))
+                    pending_dict = []
+            continue
+        if tok[:1] in (b"(", b"<", b"[", b"]", b"/") or re.fullmatch(rb"[-+.\d]+", tok):
+            operands.append(tok)
+            continue
+        op = tok
+        if op in (b"BDC", b"BMC"):
+            mcid = None
+            for o in operands:
+                mm = re.search(rb"/MCID\s+(\d+)", o)
+                if mm:
+                    mcid = int(mm.group(1))
+            stack.append(mcid)
+        elif op == b"EMC":
+            if stack:
+                stack.pop()
+        elif op in (b"Tj", b"TJ", b"'", b'"'):
+            current = next((x for x in reversed(stack) if x is not None), None)
+            text = b"".join(o for o in operands if o[:1] in (b"(", b"<"))
+            out.append((current, text))
+        operands = []
+    return out
+
+
+def mcid_texts(page: pymupdf.Page) -> dict[int, tuple[str, pymupdf.Rect | None]]:
+    """Testo e riquadro di ogni contenuto marcato (MCID) della pagina.
+
+    Gli operatori di testo del flusso si collegano, nell'ordine, ai tratti del testo di MuPDF
+    (`get_texttrace`, numerati in ordine di esecuzione): così il testo è decodificato con i font
+    del documento anche con codifiche CID. Se i conteggi non tornano (testo in oggetti esterni),
+    si ripiega sulla decodifica diretta delle stringhe."""
+    try:
+        ops = _show_ops(page.read_contents())
+        trace = page.get_texttrace()
+    except Exception:
+        return {}
+    groups: dict[int, list] = {}
+    for span in trace:
+        groups.setdefault(span["seqno"], []).append(span)
+    ordered = [groups[k] for k in sorted(groups)]
+    out: dict[int, list] = {}
+    mapped = len(ordered) == len(ops)
+    if not mapped:
+        visible = [op for op in ops if op[1].strip(b" ()<>[]")]
+        if len(visible) == len(ordered):
+            ops, mapped = visible, True
+    for i, (mcid, raw) in enumerate(ops):
+        if mcid is None:
+            continue
+        entry = out.setdefault(mcid, ["", None])
+        if mapped:
+            for span in ordered[i]:
+                entry[0] += "".join(chr(c[0]) for c in span["chars"] if c[0] > 0)
+                r = pymupdf.Rect(span["bbox"])
+                entry[1] = r if entry[1] is None else entry[1] | r
+        else:
+            entry[0] += "".join(_pdf_string(s.decode("latin-1"))
+                                for s in re.findall(rb"\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]*>", raw))
+    return {k: (v[0], v[1]) for k, v in out.items()}
+
+
+def outline_from_structure(pdf: pymupdf.Document, progress=None) -> list[Bookmark]:
+    """Segnalibri dai titoli della struttura logica (`/StructTreeRoot`: H1–H6, H, Title, anche
+    tramite `/RoleMap`). Titolo da `/ActualText`, `/Alt` o `/T`, altrimenti dal testo dei
+    contenuti marcati; destinazione sulla pagina dell'elemento. [] se il documento non è taggato."""
+    cat = pdf.pdf_catalog()
+    kind, root = pdf.xref_get_key(cat, "StructTreeRoot")
+    if kind != "xref":
+        return []
+    root_xref = int(root.split()[0])
+    page_of = {pdf.page_xref(i): i for i in range(pdf.page_count)}
+    root_obj = pdf.xref_object(root_xref, compressed=True)
+    rolemap: dict[str, str] = {}
+    rm = _dict_get(pdf, root_obj, "RoleMap")
+    if rm:
+        rm = _pdf_obj(pdf, rm)
+        rolemap = {a: b for a, b in re.findall(r"/([^\s/<>\[\]()]+)\s*/([^\s/<>\[\]()]+)", rm)}
+    texts_cache: dict[int, dict] = {}
+
+    def role(name: str) -> str:
+        seen = set()
+        while name in rolemap and name not in seen and name not in _HEADING_ROLES:
+            seen.add(name)
+            name = rolemap[name]
+        return name
+
+    def page_index(value: str | None) -> int | None:
+        if not value:
+            return None
+        m = re.match(r"(\d+)\s+0\s+R", value)
+        return page_of.get(int(m.group(1))) if m else None
+
+    def collect_mcids(obj: str, page: int | None, out: list, seen: set, budget: list) -> None:
+        k = _dict_get(pdf, obj, "K")
+        if k is None:
+            return
+        items = re.findall(r"<<.*?>>|\d+\s+0\s+R|\d+", k[1:-1] if k.startswith("[") else k, re.S)
+        for it in items:
+            if budget[0] <= 0:
+                return
+            budget[0] -= 1
+            if re.fullmatch(r"\d+", it):
+                out.append((page, int(it)))
+            elif it.startswith("<<"):
+                mc = _dict_get(pdf, it, "MCID")
+                if mc is not None and mc.isdigit():
+                    out.append((page_index(_dict_get(pdf, it, "Pg")) if _dict_get(pdf, it, "Pg") else page,
+                                int(mc)))
+            else:
+                x = int(it.split()[0])
+                if x in seen:
+                    continue
+                seen.add(x)
+                child = pdf.xref_object(x, compressed=True)
+                if "/MCR" in child:
+                    mc = _dict_get(pdf, child, "MCID")
+                    if mc and mc.isdigit():
+                        p = page_index(_dict_get(pdf, child, "Pg"))
+                        out.append((p if p is not None else page, int(mc)))
+                elif "/StructElem" in child or _dict_get(pdf, child, "S"):
+                    p = page_index(_dict_get(pdf, child, "Pg"))
+                    collect_mcids(child, p if p is not None else page, out, seen, budget)
+
+    def element_text(obj: str, page: int | None) -> tuple[str, int | None, pymupdf.Rect | None]:
+        for key in ("ActualText", "Alt", "T"):
+            raw = _dict_get(pdf, obj, key)
+            if raw:
+                text = _pdf_string(_pdf_obj(pdf, raw))
+                if text.strip():
+                    return text, page, None
+        mcids: list = []
+        collect_mcids(obj, page, mcids, set(), [2000])
+        text, first_page, rect = "", None, None
+        for p, mcid in mcids:
+            if p is None:
+                continue
+            if p not in texts_cache:
+                texts_cache[p] = mcid_texts(pdf[p])
+            t, r = texts_cache[p].get(mcid, ("", None))
+            if t and first_page is None:
+                first_page, rect = p, r
+            text += t
+        return text, first_page if first_page is not None else page, rect
+
+    out: list[Bookmark] = []
+    seen: set[int] = set()
+    budget = [_MAX_STRUCT_NODES]
+
+    def walk(xref: int, page: int | None, sect_depth: int) -> None:
+        if xref in seen or budget[0] <= 0:
+            return
+        seen.add(xref)
+        budget[0] -= 1
+        obj = pdf.xref_object(xref, compressed=True)
+        p = page_index(_dict_get(pdf, obj, "Pg"))
+        page = p if p is not None else page
+        s = _dict_get(pdf, obj, "S")
+        name = role(s[1:]) if s and s.startswith("/") else ""
+        if name in _HEADING_ROLES:
+            text, hpage, rect = element_text(obj, page)
+            title = re.sub(r"\s+", " ", text).strip()[:200]
+            if title and hpage is not None:
+                level = _HEADING_ROLES[name] or max(1, sect_depth)
+                to = pymupdf.Point(0, max(0.0, rect.y0 - 6)) if rect is not None else pymupdf.Point(0, 0)
+                out.append(Bookmark(level, title, hpage, {"kind": pymupdf.LINK_GOTO, "page": hpage, "to": to}))
+            return
+        child_depth = sect_depth + (1 if name == "Sect" else 0)
+        k = _dict_get(pdf, obj, "K")
+        if not k:
+            return
+        for ref in re.findall(r"(\d+)\s+0\s+R", k):
+            walk(int(ref), page, child_depth)
+
+    k = _dict_get(pdf, root_obj, "K")
+    refs = [int(r) for r in re.findall(r"(\d+)\s+0\s+R", k or "")]
+    for i, ref in enumerate(refs):
+        if progress is not None:
+            progress(i / max(1, len(refs)))
+        walk(ref, None, 0)
+    return _normalize_levels(out)
+
+
+def _normalize_levels(items: list[Bookmark]) -> list[Bookmark]:
+    """Livelli consecutivi: il primo è 1 e nessun salto di più di un livello (H1 → H3)."""
+    if not items:
+        return items
+    base = min(b.level for b in items)
+    prev = 0
+    for b in items:
+        lvl = b.level - base + 1
+        b.level = max(1, min(lvl, prev + 1))
+        prev = b.level
+    return items
+
+
 def outline_from_headings(pdf: pymupdf.Document, max_levels: int = 3, progress=None) -> list[Bookmark]:
     """Titoli riconosciuti dallo stile del testo: righe brevi con corpo più grande
     del testo normale (o in grassetto e più grandi). I corpi distinti diventano livelli."""
@@ -782,6 +1098,80 @@ def verify_outline(items: list[Bookmark], page_count: int) -> list[tuple[int, st
         seen.setdefault(key, i)
     return problems
 
+
+
+def _fix_levels(items: list[Bookmark]) -> list[Bookmark]:
+    """Dopo aver tolto voci: nessun salto di più di un livello rispetto alla voce precedente."""
+    prev = 0
+    for b in items:
+        b.level = max(1, min(b.level, prev + 1))
+        prev = b.level
+    return items
+
+
+def merge_duplicates(items: list[Bookmark]) -> tuple[list[Bookmark], int]:
+    """Toglie le voci uguali (stesso titolo, pagina e livello) a una precedente; i loro figli
+    restano e passano alla voce che le precede. Restituisce (voci, quante tolte)."""
+    drop = {i for i, why in verify_outline(items, 10 ** 9) if why == "duplicate"}
+    kept = [Bookmark(b.level, b.title, b.page, dict(b.dest)) for i, b in enumerate(items) if i not in drop]
+    return _fix_levels(kept), len(drop)
+
+
+CASE_MODES = ("upper", "lower", "title", "sentence")
+
+
+def change_case(items: list[Bookmark], mode: str) -> list[Bookmark]:
+    """Maiuscole («upper»), minuscole («lower»), iniziali maiuscole («title») o come in una
+    frase («sentence»: solo la prima lettera maiuscola)."""
+    def conv(t: str) -> str:
+        if mode == "upper":
+            return t.upper()
+        if mode == "lower":
+            return t.lower()
+        if mode == "title":
+            return " ".join(w[:1].upper() + w[1:].lower() for w in t.split(" "))
+        low = t.lower()
+        for i, ch in enumerate(low):
+            if ch.isalpha():
+                return low[:i] + ch.upper() + low[i + 1:]
+        return low
+    return [Bookmark(b.level, conv(b.title), b.page, dict(b.dest)) for b in items]
+
+
+def replace_in_titles(items: list[Bookmark], find: str, repl: str, regex: bool = False,
+                      case_sensitive: bool = False) -> tuple[list[Bookmark], int]:
+    """Trova e sostituisci nei titoli. Restituisce (voci, numero di sostituzioni)."""
+    try:
+        rx = re.compile(find if regex else re.escape(find), 0 if case_sensitive else re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(str(e)) from e
+    total = 0
+    out = []
+    for b in items:
+        title, n = rx.subn(repl if regex else (lambda _m: repl), b.title)
+        total += n
+        out.append(Bookmark(b.level, title, b.page, dict(b.dest)))
+    return out, total
+
+
+def remove_broken(items: list[Bookmark], page_count: int) -> tuple[list[Bookmark], int]:
+    """Toglie i segnalibri con destinazione non valida (i figli restano)."""
+    drop = {i for i, why in verify_outline(items, page_count) if why == "broken"}
+    kept = [Bookmark(b.level, b.title, b.page, dict(b.dest)) for i, b in enumerate(items) if i not in drop]
+    return _fix_levels(kept), len(drop)
+
+
+def redirect_broken(items: list[Bookmark], page_count: int, page: int) -> tuple[list[Bookmark], int]:
+    """Reindirizza i segnalibri con destinazione non valida alla pagina indicata."""
+    broken = {i for i, why in verify_outline(items, page_count) if why == "broken"}
+    out = []
+    for i, b in enumerate(items):
+        if i in broken:
+            out.append(Bookmark(b.level, b.title, page,
+                                {"kind": pymupdf.LINK_GOTO, "page": page, "to": pymupdf.Point(0, 0)}))
+        else:
+            out.append(Bookmark(b.level, b.title, b.page, dict(b.dest)))
+    return out, len(broken)
 
 
 def outline_from_regex(pdf: pymupdf.Document, pattern: str, case_sensitive: bool = False,

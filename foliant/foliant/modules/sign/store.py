@@ -94,6 +94,7 @@ class IDEntry:
     issuer: str = ""
     default: bool = False
     missing: bool = False
+    policies: list = field(default_factory=list)   # OID delle policy del certificato (SIG-19)
 
     @property
     def expires(self) -> datetime | None:
@@ -106,7 +107,7 @@ class IDEntry:
 class IDRegistry:
     """Elenco degli ID digitali dell'utente (solo riferimenti: percorso e impronta)."""
 
-    _ALLOWED = ("path", "alias", "fingerprint", "subject", "not_after", "issuer", "default")
+    _ALLOWED = ("path", "alias", "fingerprint", "subject", "not_after", "issuer", "default", "policies")
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else _sign_dir() / "ids.json"
@@ -131,6 +132,7 @@ class IDRegistry:
             "issuer": info.issuer,
             "not_after": info.not_after.isoformat(),
             "default": False,
+            "policies": list(getattr(info, "policies", []) or []),
         }
         replaced = False
         for i, it in enumerate(items):
@@ -190,6 +192,7 @@ class IDRegistry:
             fingerprint=str(it.get("fingerprint", "")), subject=str(it.get("subject", "")),
             not_after=str(it.get("not_after", "")), issuer=str(it.get("issuer", "")),
             default=bool(it.get("default")),
+            policies=[str(o) for o in it.get("policies") or [] if isinstance(o, str)],
         )
         e.missing = not Path(e.path).is_file()
         return e
@@ -367,6 +370,7 @@ class TSAServer:
     policy_oid: str = ""
     default: bool = False
     user: str = ""          # nome utente (la password è solo nel portachiavi di sistema)
+    client_cert: str = ""   # file .p12/.pfx/.pem del certificato client (la password è nel portachiavi)
 
 
 KEYRING_SERVICE = "foliant-tsa"
@@ -379,6 +383,15 @@ def tsa_password(url: str) -> str | None:
         return keyring.get_password(KEYRING_SERVICE, url)
     except Exception:  # noqa: BLE001 - portachiavi non disponibile
         return None
+
+
+def tsa_client_password(url: str) -> str | None:
+    """Password del certificato client della TSA dal portachiavi (None se assente)."""
+    return tsa_password("client:" + url)
+
+
+def store_tsa_client_password(url: str, password: str) -> bool:
+    return store_tsa_password("client:" + url, password)
 
 
 def store_tsa_password(url: str, password: str) -> bool:
@@ -394,7 +407,7 @@ def store_tsa_password(url: str, password: str) -> bool:
 class TSAConfig:
     """Elenco dei server TSA (mai credenziali su disco)."""
 
-    _FIELDS = ("name", "url", "timeout", "hash_algorithm", "policy_oid", "default", "user")
+    _FIELDS = ("name", "url", "timeout", "hash_algorithm", "policy_oid", "default", "user", "client_cert")
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else _sign_dir() / "tsa.json"
@@ -423,13 +436,19 @@ class TSAConfig:
             raise StoreError(_("Il timeout deve essere compreso fra 1 e 300 secondi"))
 
     def add(self, name: str, url: str, timeout: float = 15.0, *, hash_algorithm: str = "sha256",
-            policy_oid: str = "", default: bool = False, user: str = "") -> TSAServer:
+            policy_oid: str = "", default: bool = False, user: str = "", client_cert: str = "") -> TSAServer:
         url = url.strip()
         self._validate(url, timeout)
+        if client_cert:
+            if not url.startswith("https://"):
+                raise StoreError(_("Il certificato client richiede un server https://"))
+            if not Path(client_cert).is_file():
+                raise StoreError(_("File del certificato client non trovato"))
+            client_cert = str(Path(client_cert).resolve())
         servers = [s for s in self.list() if s.url != url]
         srv = TSAServer(name=name.strip() or url, url=url, timeout=float(timeout),
                         hash_algorithm=hash_algorithm, policy_oid=policy_oid, default=default,
-                        user=user.strip())
+                        user=user.strip(), client_cert=client_cert)
         if default or not any(s.default for s in servers):
             for s in servers:
                 s.default = False
@@ -565,6 +584,8 @@ class AppearanceProfiles:
 
 
 TRANSLATIONS_EN = {
+    "Il certificato client richiede un server https://": "A client certificate requires an https:// server",
+    "File del certificato client non trovato": "Client certificate file not found",
     "Il nome dell'aspetto non può essere vuoto": "The appearance name cannot be empty",
     "Impossibile creare la cartella {path}": "Cannot create folder {path}",
     "Impossibile scrivere il file {path}": "Cannot write file {path}",
