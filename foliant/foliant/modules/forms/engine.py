@@ -2757,6 +2757,28 @@ def _prune_empty_parents(pdf: pymupdf.Document, fx: int) -> None:
 
 
 # ====================================================================== caratteri incorporati
+def has_rtl(text: str) -> bool:
+    """True se il testo contiene caratteri di scritture da destra a sinistra."""
+    import unicodedata
+    return any(unicodedata.bidirectional(c) in ("R", "AL") for c in text)
+
+
+def _rtl_text(tp, info, text: str, color, w: float, h: float) -> None:
+    from html import escape
+    size = info.fontsize or (10 if info.multiline else min(12.0, h * 0.6))
+    rgb = "#%02x%02x%02x" % tuple(int(max(0, min(1, c)) * 255) for c in color[:3])
+    align = {ALIGN_LEFT: "left", ALIGN_CENTER: "center", ALIGN_RIGHT: "right"}.get(info.align, "right")
+    if info.align == ALIGN_LEFT:
+        align = "right"  # nei testi da destra a sinistra l'inizio è a destra
+    style = f"font-size:{size:.1f}px;color:{rgb};text-align:{align};line-height:1.15;margin:0"
+    # un paragrafo per riga: il motore HTML applica l'algoritmo bidirezionale e la composizione
+    html = "".join(f'<p style="{style}">{escape(line) or "&nbsp;"}</p>' for line in text.split("\n"))
+    box = pymupdf.Rect(2, 1, w - 2, h - 1)
+    if not info.multiline:
+        box = pymupdf.Rect(2, max(0.0, (h - size * 1.3) / 2), w - 2, h)
+    tp.insert_htmlbox(box, html, scale_low=0.3)
+
+
 def needs_embedded_font(text: str) -> bool:
     """True se il testo contiene caratteri non rappresentabili con i caratteri standard (WinAnsi)."""
     try:
@@ -2829,10 +2851,20 @@ def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) 
             bw = info.border_width
             tp.draw_rect(pymupdf.Rect(bw / 2, bw / 2, w - bw / 2, h - bw / 2), color=info.border_color,
                          width=bw, dashes="[3 2] 0" if info.border_style == "D" else None)
-        tp.insert_font(fontname="FoliantU", fontbuffer=font.buffer)
         color = tuple(info.text_color or (0, 0, 0))
         lines = text.replace("\r\n", "\n").replace("\r", "\n")
-        if info.multiline:
+        if has_rtl(lines):
+            # testo da destra a sinistra (arabo, ebraico…): composizione con il motore HTML,
+            # che applica l'ordine bidirezionale e le forme contestuali delle lettere
+            _rtl_text(tp, info, lines, color, w, h)
+            tmp.subset_fonts()
+            data = tmp.tobytes(garbage=3, deflate=True)
+            lines = None
+        else:
+            tp.insert_font(fontname="FoliantU", fontbuffer=font.buffer)
+        if lines is None:
+            pass
+        elif info.multiline:
             size = info.fontsize or 10
             box = pymupdf.Rect(2, 2, w - 2, h - 2)
             while tp.insert_textbox(box, lines, fontname="FoliantU", fontsize=size, color=color,
@@ -2855,8 +2887,9 @@ def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) 
                 tw = font.text_length(line, size)
                 x = {ALIGN_CENTER: (w - tw) / 2, ALIGN_RIGHT: w - 2 - tw}.get(info.align, 2)
                 tp.insert_text((x, h / 2 + size * 0.35), line, fontname="FoliantU", fontsize=size, color=color)
-        tmp.subset_fonts()
-        data = tmp.tobytes(garbage=3, deflate=True)
+        if lines is not None:
+            tmp.subset_fonts()
+            data = tmp.tobytes(garbage=3, deflate=True)
     finally:
         tmp.close()
     src = pymupdf.open("pdf", data)

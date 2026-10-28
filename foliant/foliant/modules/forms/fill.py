@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QPlainTextEdit, QToolButton, QWidget, QMenu, QWidgetAction,
 )
 
-from foliant.api import ENGINE_LOCK, HandTool, SelectTextTool, _, bind_icon, theme
+from foliant.api import ENGINE_LOCK, HandTool, OperationCancelled, SelectTextTool, _, bind_icon, theme
 
 from . import engine as E
 from . import formats as fm
@@ -349,14 +349,14 @@ class FormFiller(QObject):
         if from_xml:
             # FRM-34: se dati XML e campi divergono, prevalgono i dati XML
             try:
-                with doc.change(_("Allinea i campi ai dati XML")) as pdf:
+                with doc.change(_("Allinea i campi ai dati XML"), kind="form") as pdf:
                     E.apply_values(pdf, from_xml)
             except Exception:
                 pass
         if not needed:
             return
         try:
-            with doc.change(_("Ripara il modulo")) as pdf:
+            with doc.change(_("Ripara il modulo"), kind="form") as pdf:
                 E.prepare_for_edit(pdf)
         except Exception:
             return
@@ -828,7 +828,7 @@ class FormFiller(QObject):
         self._committing = True
         try:
             calcs = self.state.has_calculations
-            with self.document.change(_("Compila «{n}»").format(n=f.name)) as pdf:
+            with self.document.change(_("Compila «{n}»").format(n=f.name), kind="form") as pdf:
                 E.set_value(pdf, f.page, f.xref, value)
                 changed = {f.name} | set(E.recalculate(pdf) if calcs else [])
                 if self.state.xfa == "hybrid":
@@ -836,6 +836,10 @@ class FormFiller(QObject):
                 self._pending_patch = changed
         except E.FormError as e:
             self.show_error(f, str(e))
+            return False
+        except OperationCancelled as e:  # una guardia del nucleo ha rifiutato la modifica
+            self.show_error(f, str(e) or _("Modifica non consentita."))
+            self._restore_original()
             return False
         except Exception as e:  # mai chiudere l'applicazione per un campo
             self.show_error(f, _("Impossibile memorizzare il valore: {e}").format(e=e))
@@ -985,15 +989,15 @@ class FormFiller(QObject):
             return
         try:
             calcs = self.state.has_calculations
-            with self.document.change(_("Compila «{n}»").format(n=f.name)) as pdf:
+            with self.document.change(_("Compila «{n}»").format(n=f.name), kind="form") as pdf:
                 E.toggle(pdf, f.page, f.xref)
                 changed = {f.name} | set(E.recalculate(pdf) if calcs else [])
                 if self.state.xfa == "hybrid":
                     E.sync_xfa_from_fields(pdf)
                 self._pending_patch = changed
-        except E.FormError as e:
+        except (E.FormError, OperationCancelled) as e:
             self._pending_patch = None
-            self.show_error(f, str(e))
+            self.show_error(f, str(e) or _("Modifica non consentita."))
             return
         self._pending_patch = None
         self.state.refresh()

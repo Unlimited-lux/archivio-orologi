@@ -26,7 +26,7 @@ Ogni punto ha già una soluzione locale nel modulo; la modifica al nucleo la ren
    per l'avviso sui campi obbligatori vuoti (FRM-09, FRM-15). *Locale:* aspetti e collegamenti
    vengono riparati all'apertura con un passo annullabile «Ripara il modulo».
 
-5. **Salvataggio incrementale.** Per i documenti firmati FRM-09 richiede il salvataggio
+5. **[Risolto nel nucleo]** **Salvataggio incrementale.** Per i documenti firmati FRM-09 richiede il salvataggio
    incrementale (il file originale come prefisso). Il nucleo salva sempre un file completo.
    *Proposta:* opzione `Document.save(incremental=True)` usata automaticamente se il documento
    contiene firme.
