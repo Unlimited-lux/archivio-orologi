@@ -779,4 +779,5 @@ EN: dict[str, str] = {
     "Un confronto è già in corso.": "A comparison is already running.",
     "Un'elaborazione in blocco è già in corso.": "A batch job is already running.",
     "Mostra": "Show",
+    "Apri": "Open",
 }

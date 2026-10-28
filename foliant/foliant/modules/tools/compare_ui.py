@@ -418,7 +418,7 @@ class CompareSetupDialog(QDialog):
                 setattr(opts, k, v)
             self.set_options(opts)
             if key == "scan" and ce._ocr_function() is None:
-                self.ctx.status(_("OCR non disponibile: le scansioni saranno confrontate solo visivamente."))
+                self.ctx.notify(_("OCR non disponibile: le scansioni saranno confrontate solo visivamente."))
 
     def set_options(self, o: ce.CompareOptions) -> None:
         self.mode_buttons.get(o.mode, self.mode_buttons[ce.MODE_AUTO]).setChecked(True)
@@ -1683,12 +1683,13 @@ class CompareWidget(QWidget):
                                      self.source_a.password, self.source_b.password)
             atomic_write(path, data)
         except OperationCancelled:
-            self.ctx.status(_("Generazione del rapporto annullata."))
+            self.ctx.notify(_("Generazione del rapporto annullata."))
             return None
         except Exception as e:
             self.ctx.error(_("Rapporto non esportato"), str(e))
             return None
-        self.ctx.status(_("Rapporto salvato: {p}").format(p=path))
+        self.ctx.notify(_("Rapporto salvato: {p}").format(p=os.path.basename(path)),
+                        [(_("Apri"), lambda p=path: self.ctx.open_path(p))])
         if open_after:
             self.ctx.open_path(path)
         return path
@@ -1709,7 +1710,7 @@ class CompareWidget(QWidget):
         except Exception as e:
             self.ctx.error(_("Esportazione non riuscita"), str(e))
             return None
-        self.ctx.status(_("Creato B annotato con {n} commenti: {p}").format(n=n, p=path))
+        self.ctx.notify(_("Creato B annotato con {n} commenti: {p}").format(n=n, p=path))
         return path
 
     def session_data(self) -> dict:
@@ -1730,7 +1731,7 @@ class CompareWidget(QWidget):
         except Exception as e:
             self.ctx.error(_("Sessione non salvata"), str(e))
             return None
-        self.ctx.status(_("Sessione salvata: {p}").format(p=path))
+        self.ctx.notify(_("Sessione salvata: {p}").format(p=path))
         return path
 
     def restore_view_state(self, data: dict) -> None:
@@ -1751,8 +1752,7 @@ class CompareWidget(QWidget):
         if lost:
             lines = "\n".join(f"• {ce.kind_label(x.get('kind', ce.MODIFIED))}: {x.get('text_a') or x.get('text_b') or ''}"
                               f" ({ce.status_label(x.get('status', ''))})" for x in lost[:20])
-            self.ctx.info(_("Differenze non più presenti"),
-                          _("Dopo il ricalcolo queste differenze non esistono più e il loro stato è stato "
+            self.ctx.notify(_("Dopo il ricalcolo queste differenze non esistono più e il loro stato è stato "
                             "scartato:") + "\n" + lines)
         self.set_layout(view.get("layout", "side"))
         self.overlay.refresh()
@@ -1907,7 +1907,7 @@ class CompareController:
             if src is None:
                 return None
             if ce.sha256(src.data) != side.get("sha256"):
-                self.ctx.info(_("File modificato"), _("«{f}» è cambiato dopo il salvataggio della sessione: il "
+                self.ctx.notify(_("«{f}» è cambiato dopo il salvataggio della sessione: il "
                                                        "confronto viene ricalcolato.").format(f=src.label))
             sources.append((src, side.get("pages")))
         options = ce.CompareOptions.from_dict(data.get("options") or {})

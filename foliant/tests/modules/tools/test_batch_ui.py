@@ -290,7 +290,7 @@ def test_export_import_duplicate_sequence(batch, tmp_path, monkeypatch):
     tampered = tmp_path / "manomessa.foliantseq"
     tampered.write_text(json.dumps(data), encoding="utf-8")
     infos = []
-    monkeypatch.setattr(batch.ctx, "info", lambda t, m: infos.append(m))
+    monkeypatch.setattr(batch.ctx, "notify", lambda m, *a, **k: infos.append(m))
     batch.steps = []
     assert batch.import_sequence(str(tampered))
     assert [s.action for s in batch.steps] == ["ocr", "compress", "protect"]

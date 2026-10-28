@@ -590,7 +590,7 @@ class BatchWidget(QWidget):
                 if v.document.is_modified:
                     unsaved.append(v.document.display_name)
         if unsaved:
-            self.ctx.info(_("Modifiche non salvate"), _("Verrà elaborata la versione su disco di: {f}.").format(
+            self.ctx.notify(_("Verrà elaborata la versione su disco di: {f}.").format(
                 f=", ".join(unsaved)))
         if paths:
             self.add_paths(paths)
@@ -740,7 +740,7 @@ class BatchWidget(QWidget):
         path = be.save_sequence(self.sequences_dir(), name, self.steps, output=be.output_of(self.settings()))
         self.refresh_sequences()
         self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(path)))
-        self.ctx.status(_("Sequenza «{n}» salvata.").format(n=name))
+        self.ctx.notify(_("Sequenza «{n}» salvata.").format(n=name))
         return path
 
     def save_sequence_dialog(self) -> None:
@@ -807,7 +807,7 @@ class BatchWidget(QWidget):
         self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(saved)))
         self.load_sequence(saved)
         if warnings:
-            self.ctx.info(_("Sequenza importata"), "\n".join(warnings))
+            self.ctx.notify("\n".join(warnings))
         return saved
 
     def import_sequence_dialog(self) -> None:
@@ -1040,7 +1040,7 @@ class BatchWidget(QWidget):
             return
         failed = set(self.report.failed_items())
         if not failed:
-            self.ctx.info(_("Riprova"), _("Nessun file da riprovare."))
+            self.ctx.notify(_("Nessun file da riprovare."))
             return
         self.items = [it for it in self.items if it.path in failed]
         self.report = None
@@ -1061,14 +1061,14 @@ class BatchWidget(QWidget):
         except Exception as e:
             self.ctx.error(_("Rapporto non esportato"), str(e))
             return False
-        self.ctx.status(_("Rapporto esportato: {p}").format(p=path))
+        self.ctx.notify(_("Rapporto esportato: {p}").format(p=path))
         return True
 
     def export_bates_index(self, path: str) -> bool:
         settings = getattr(self, "last_settings", None) or self.settings()
         items = getattr(self, "last_items", None) or self.items
         if not any(s.action == "bates" for s in settings.steps):
-            self.ctx.info(_("Indice Bates"), _("Il lavoro non contiene una numerazione Bates."))
+            self.ctx.notify(_("Il lavoro non contiene una numerazione Bates."))
             return False
         try:
             atomic_write(path, be.bates_index_csv(items, settings).encode("utf-8"))
