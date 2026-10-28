@@ -212,8 +212,8 @@ EN = {
     "Il contenuto degli appunti non è valido.": "The clipboard content is not valid.",
     "Il file immagine è vuoto.": "The image file is empty.",
     "Il file non è un'immagine valida o è danneggiato.": "The file is not a valid image or is damaged.",
-    "Il file non è un'immagine valida o è danneggiato.\nFormati accettati: PNG, JPEG, TIFF, BMP, GIF, WebP.":
-        "The file is not a valid image or is damaged.\nAccepted formats: PNG, JPEG, TIFF, BMP, GIF, WebP.",
+    "Il file non è un'immagine valida o è danneggiato.\nFormati accettati: PNG, JPEG, JPEG 2000, TIFF, BMP, GIF, WebP, HEIC, AVIF, TGA, ICO, PNM.":
+        "The file is not a valid image or is damaged.\nAccepted formats: PNG, JPEG, JPEG 2000, TIFF, BMP, GIF, WebP, HEIC, AVIF, TGA, ICO, PNM.",
     "Il rettangolo del collegamento è troppo piccolo.": "The link rectangle is too small.",
     "Il ritaglio definitivo è disponibile solo per le immagini.": "Permanent cropping is only available for images.",
     "Impossibile aggiungere l'immagine alla pagina.": "Cannot add the image to the page.",

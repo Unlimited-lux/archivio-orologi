@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from foliant.api import Context, DocumentView
 
 IMAGE_FILTER = "Immagini (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp);;Tutti i file (*)"
-IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".pnm", ".ppm", ".pgm", ".pbm",
+IMAGE_EXTS = (".svg", ".heic", ".heif", ".avif", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".pnm", ".ppm", ".pgm", ".pbm",
               ".tga", ".ico", ".jp2", ".jpx", ".j2k")
 
 _last_payload: C.Payload | None = None       # copia locale degli appunti interni

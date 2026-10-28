@@ -268,3 +268,43 @@ def test_invisible_ocr_text_is_hidden_object():
     assert o.hidden
     assert E.hit_test(E.objects(doc, 0), pymupdf.Point(80, 96)) == []
     assert E.hit_test(E.objects(doc, 0), pymupdf.Point(80, 96), include_hidden=True) == [o.index]
+
+
+# ------------------------------------------------------------------ OBJ-07: formati aggiuntivi
+def _pil_bytes(fmt, size=(64, 32), mode="RGB", **kw):
+    from PIL import Image as PImage
+    b = io.BytesIO()
+    PImage.new(mode, size, (10, 120, 200) if mode == "RGB" else (10, 120, 200, 255)).save(b, fmt, **kw)
+    return b.getvalue()
+
+
+def test_insert_jpeg2000_keeps_codestream():
+    data = _pil_bytes("JPEG2000")
+    doc = pymupdf.open()
+    doc.new_page()
+    E.insert_images(doc, 0, [data])
+    o = E.objects(doc, 0).objects[0]
+    assert "JPX" in doc.xref_get_key(o.xref, "Filter")[1]
+    assert (o.width, o.height) == (64, 32)
+
+
+@pytest.mark.parametrize("fmt", ["AVIF", "TGA", "ICO", "PPM"])
+def test_insert_additional_formats_same_pixels(fmt):
+    data = _pil_bytes(fmt, size=(64, 32) if fmt != "ICO" else (48, 48))
+    doc = pymupdf.open()
+    doc.new_page()
+    E.insert_images(doc, 0, [data])
+    o = E.objects(doc, 0).objects[0]
+    assert (o.width, o.height) == ((64, 32) if fmt != "ICO" else (48, 48))
+
+
+def test_insert_heic_same_pixel_size():
+    pytest.importorskip("pillow_heif")
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    data = _pil_bytes("HEIF", size=(80, 40))
+    doc = pymupdf.open()
+    doc.new_page()
+    E.insert_images(doc, 0, [data])
+    o = E.objects(doc, 0).objects[0]
+    assert (o.width, o.height) == (80, 40)

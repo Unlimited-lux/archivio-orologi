@@ -635,6 +635,22 @@ def downsample(data: bytes, max_pixels: int = MAX_PIXELS) -> bytes:
         return buf.getvalue()
 
 
+_EXTRA_FORMATS = False
+
+
+def _register_extra_formats() -> None:
+    """HEIC/HEIF tramite pillow-heif, se installato (AVIF è già in Pillow)."""
+    global _EXTRA_FORMATS
+    if _EXTRA_FORMATS:
+        return
+    _EXTRA_FORMATS = True
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    except Exception:
+        pass
+
+
 def prepare_image(data: bytes) -> tuple[bytes, int]:
     """Valida un'immagine e la prepara all'inserimento. Restituisce (dati, orientamento EXIF)."""
     if not data:
@@ -645,17 +661,21 @@ def prepare_image(data: bytes) -> tuple[bytes, int]:
         orient = 1
     try:
         from PIL import Image
+        _register_extra_formats()
         with Image.open(io.BytesIO(data)) as im:
             im.load()
             fmt = (im.format or "").upper()
             n_frames = getattr(im, "n_frames", 1)
-            if fmt in ("WEBP", "GIF", "TIFF", "BMP", "ICO", "TGA", "PPM") or n_frames > 1 or im.mode in ("P", "LA", "PA") and fmt != "PNG":
-                if fmt not in ("PNG", "JPEG"):
-                    im.seek(0)
-                    buf = io.BytesIO()
-                    conv = im.convert("RGBA") if ("A" in im.mode or "transparency" in im.info) else im.convert("RGB")
-                    conv.save(buf, "PNG")
-                    data = buf.getvalue()
+            passthrough = fmt in ("PNG", "JPEG", "JPEG2000") and n_frames == 1 and not (
+                im.mode in ("P", "LA", "PA") and fmt != "PNG")
+            if not passthrough:
+                # primo fotogramma, compresso senza perdita (HEIC/AVIF/WebP/GIF/TIFF/BMP/TGA/ICO/PNM…)
+                im.seek(0)
+                buf = io.BytesIO()
+                conv = im.convert("RGBA") if ("A" in im.mode or "transparency" in im.info) else im.convert("RGB")
+                extra = {"dpi": im.info["dpi"]} if im.info.get("dpi") else {}
+                conv.save(buf, "PNG", **extra)
+                data = buf.getvalue()
     except ObjectError:
         raise
     except Exception:
@@ -663,7 +683,8 @@ def prepare_image(data: bytes) -> tuple[bytes, int]:
             pymupdf.Pixmap(data)
         except Exception as e:
             raise ObjectError("Il file non è un'immagine valida o è danneggiato.\n"
-                              "Formati accettati: PNG, JPEG, TIFF, BMP, GIF, WebP.") from e
+                              "Formati accettati: PNG, JPEG, JPEG 2000, TIFF, BMP, GIF, WebP, HEIC, AVIF, "
+                              "TGA, ICO, PNM.") from e
     return data, orient
 
 

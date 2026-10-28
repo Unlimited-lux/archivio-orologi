@@ -19,7 +19,7 @@ from . import engine as E
 from . import links as L
 from .content import FORM, IMAGE, PATH, SHADING, TEXT
 
-IMAGE_FILTER_TEXT = "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.svg *.jp2 *.tga *.pnm *.ppm *.pgm *.pbm *.ico"
+IMAGE_FILTER_TEXT = "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.heic *.heif *.avif *.svg *.jp2 *.tga *.pnm *.ppm *.pgm *.pbm *.ico"
 
 _session_style = L.LinkStyle()
 _filter_kinds = {IMAGE, PATH, FORM, SHADING, TEXT}
