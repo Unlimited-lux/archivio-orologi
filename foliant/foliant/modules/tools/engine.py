@@ -70,6 +70,15 @@ def run_ocr(fn: Callable, data: bytes, languages: list[str], redo: bool = False)
     return fn(data, list(languages), "searchable", None, None)
 
 
+def _pdfa_function() -> Callable | None:
+    """`convert_to_pdfa(data, level) -> (byte, resoconto)` del modulo Converti (CNV-14)."""
+    try:
+        from foliant.modules.convert.pdfa import convert_to_pdfa
+    except Exception:
+        return None
+    return convert_to_pdfa
+
+
 def _convert_function() -> Callable | None:
     try:
         from foliant.modules.convert.engine import convert_pdf
@@ -292,6 +301,10 @@ def _build_actions() -> dict[str, ActionSpec]:
                    ("center", "Centra a dimensione reale")]),
             Param("margin", "Margine (mm)", "float", 0.0, minimum=0, maximum=100),
         ], kind="create"),
+        ActionSpec("pdfa", "Converti in PDF/A con verifica", "pdfa", [
+            Param("level", "Livello", "choice", "2b", [("1b", "PDF/A-1b"), ("2b", "PDF/A-2b"), ("3b", "PDF/A-3b")]),
+            Param("save_anyway", "Se la conformità non è raggiunta, salva comunque (con avviso)", "bool", False),
+        ]),
         ActionSpec("compress", "Comprimi", "compresso", [
             Param("level", "Livello", "choice", "medium",
                   [("low", "Leggera (qualità alta)"), ("medium", "Bilanciata"), ("high", "Massima")]),
@@ -483,6 +496,8 @@ def action_available(action_id: str) -> tuple[bool, str]:
         return False, _("Operazione sconosciuta: {a}").format(a=action_id)
     if action_id == "ocr" and _ocr_function() is None:
         return False, _("L'OCR non è disponibile: il modulo OCR non è installato.")
+    if action_id == "pdfa" and _pdfa_function() is None:
+        return False, _("La conversione in PDF/A non è disponibile: il modulo Converti non è installato.")
     if action_id == "convert" and _convert_function() is None:
         return False, _("La conversione non è disponibile: il modulo Converti non è installato.")
     return True, ""
@@ -1691,6 +1706,25 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         out, warns = insert_pages(data, p.get("file", ""), p.get("where", "start"), int(p.get("number", 1)))
         ctx.warnings.extend(warns)
         return out, protection
+    if a == "pdfa":
+        fn = _pdfa_function()
+        if fn is None:
+            raise BatchError("DEP-01", _("La conversione in PDF/A non è disponibile: il modulo Converti non è "
+                                         "installato."))
+        level = str(p.get("level", "2b"))
+        try:
+            out, info = fn(data, level)
+        except Exception as e:   # es. Ghostscript mancante: messaggio del modulo Converti
+            raise BatchError("PDFA-01", str(e)) from e
+        errors = list((info or {}).get("errors") or [])
+        if errors and not p.get("save_anyway"):
+            raise BatchError("PDFA-02", _("Conformità PDF/A-{l} non raggiunta: {e}").format(
+                l=level, e="; ".join(errors[:5])))
+        if errors:
+            ctx.warnings.append(_("conformità PDF/A-{l} non raggiunta: {e}").format(l=level, e="; ".join(errors[:5])))
+        else:
+            ctx.notes.append(_("verifica PDF/A-{l}: conforme").format(l=level))
+        return out, {}   # PDF/A non ammette la cifratura
     if a == "ocr":
         fn = _ocr_function()
         if fn is None:

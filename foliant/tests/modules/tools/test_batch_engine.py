@@ -1061,3 +1061,46 @@ def test_bates_font_choice(tmp_path):
     fonts = {sp["font"] for b in page.get_text("dict")["blocks"] for ln in b.get("lines", [])
              for sp in ln["spans"] if "ACME" in sp["text"]}
     assert any("Courier" in f for f in fonts)
+
+
+def test_pdfa_step_reports_conformance(tmp_path, monkeypatch):
+    calls = []
+
+    def fake(data, level):
+        calls.append(level)
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        doc.set_metadata({"title": "archivio"})
+        out = doc.tobytes()
+        ok = "rotto" not in (pymupdf.open(stream=data, filetype="pdf")[0].get_text())
+        return out, {"level": level, "errors": [] if ok else ["font non incorporato: Helvetica"],
+                     "compliant": ok}
+    monkeypatch.setattr(be, "_pdfa_function", lambda: fake)
+    good = mk(tmp_path / "in" / "fattura.pdf", pages=1)
+    bad = tmp_path / "in" / "scheda.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "rotto", fontsize=12)
+    d.save(str(bad))
+    items = [be.analyze_file(p) for p in (good, str(bad))]
+    rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("pdfa", {"level": "2b"})],
+                                                 destination=str(tmp_path / "out")))
+    assert calls == ["2b", "2b"]
+    assert rep.results[0].status == "ok" and "conforme" in rep.results[0].message
+    assert rep.results[1].status == "error" and rep.results[1].code == "PDFA-02"
+    assert "font non incorporato" in rep.results[1].message
+    assert os.listdir(tmp_path / "out") == ["fattura.pdf"]
+    rep = be.run_job(None, items[1:], be.JobSettings(steps=[be.Step("pdfa", {"save_anyway": True})],
+                                                     destination=str(tmp_path / "out2")))
+    assert rep.results[0].status == "warning" and os.listdir(tmp_path / "out2") == ["scheda.pdf"]
+
+
+def test_pdfa_step_without_ghostscript_is_clear(tmp_path):
+    if be._pdfa_function() is None:
+        pytest.skip("modulo Converti non disponibile")
+    import shutil as _sh
+    if _sh.which("gs"):
+        pytest.skip("Ghostscript presente: verificato dal modulo Converti")
+    a = mk(tmp_path / "in" / "a.pdf", pages=1)
+    rep = be.run_job(None, [be.analyze_file(a)], be.JobSettings(steps=[be.Step("pdfa")],
+                                                               destination=str(tmp_path / "out")))
+    assert rep.results[0].status == "error" and rep.results[0].code == "PDFA-01"
+    assert "Ghostscript" in rep.results[0].message

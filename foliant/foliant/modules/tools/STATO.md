@@ -94,3 +94,8 @@ BAT-19, `patch` solo per un test di CMP-13.
   riconosciuta in rimozione (be: `test_watermark_shares_marking_with_pages_module`,
   `test_legacy_marks_still_removed`, `test_header_and_numbers_share_marking_and_dont_replace_each_other`).
   Restano con la marcatura propria la carta intestata PDF e i Bates con riquadro bianco.
+- Uscita PDF/A con verifica: passo «Converti in PDF/A con verifica» (1b/2b/3b) che usa
+  `convert.pdfa.convert_to_pdfa`; il resoconto di conformità è nell'esito di ogni file, e un file non
+  conforme va in errore (PDFA-02) oppure, a scelta, viene salvato con avviso
+  (be: `test_pdfa_step_reports_conformance`, `test_pdfa_step_without_ghostscript_is_clear`).
+  Serve Ghostscript (non installato nell'ambiente di test: verificato con un motore simulato).

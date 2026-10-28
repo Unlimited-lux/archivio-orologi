@@ -780,4 +780,12 @@ EN: dict[str, str] = {
     "Un'elaborazione in blocco è già in corso.": "A batch job is already running.",
     "Mostra": "Show",
     "Apri": "Open",
+    "Converti in PDF/A con verifica": "Convert to PDF/A with verification",
+    "Se la conformità non è raggiunta, salva comunque (con avviso)": "If conformance is not achieved, save anyway (with warning)",
+    "La conversione in PDF/A non è disponibile: il modulo Converti non è installato.": "PDF/A conversion is not available: the Convert module is not installed.",
+    "Conformità PDF/A-{l} non raggiunta: {e}": "PDF/A-{l} conformance not achieved: {e}",
+    "conformità PDF/A-{l} non raggiunta: {e}": "PDF/A-{l} conformance not achieved: {e}",
+    "verifica PDF/A-{l}: conforme": "PDF/A-{l} check: compliant",
+    "PDF/A-1b": "PDF/A-1b",
+    "PDF/A-3b": "PDF/A-3b",
 }
