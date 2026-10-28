@@ -1245,3 +1245,35 @@ def test_ocr_low_resolution_scan_warns(tmp_path):
     res = run_conversion(path, tmp_path / "b.txt", "txt", language="ita")
     assert res.ocr_pages == [1]
     assert any("Pagina 1" in w and "isoluzione" in w for w in res.warnings), res.warnings
+
+
+def test_total_line_right_below_table_is_kept(tmp_path):
+    """Collaudo B, D2: la riga «Totale imponibile» 3-4 pt sotto l'ultimo bordo della tabella, che
+    MuPDF unisce all'ultima riga in un solo blocco, non deve sparire (DOCX, HTML, RTF, TXT)."""
+    import docx
+    doc = pymupdf.open()
+    p = doc.new_page()
+    rows = [["Articolo", "Qtà", "Prezzo", "Importo"], ["Cronografo", "1", "18.000,00", "18.000,00"],
+            ["Cinturino", "2", "193,25", "386,50"], ["Revisione", "1", "4.000,00", "4.000,00"]]
+    x0, y0, cw, rh = 90, 140, 90, 14
+    for r, row in enumerate(rows):
+        for c, v in enumerate(row):
+            rect = pymupdf.Rect(x0 + c * cw, y0 + r * rh, x0 + (c + 1) * cw, y0 + (r + 1) * rh)
+            p.draw_rect(rect, color=(0, 0, 0), width=0.8)
+            p.insert_text((rect.x0 + 4, rect.y1 - 3), v, fontsize=10)
+    bottom = y0 + len(rows) * rh
+    p.insert_text((x0 + 4, bottom + 3.5 + 8), "Totale imponibile 22.386,50 EUR", fontsize=10)
+    path = _save(doc, tmp_path / "fattura.pdf")
+    # precondizione: MuPDF mette tabella e totale nello stesso blocco
+    with pymupdf.open(path) as chk:
+        merged = [b for b in chk[0].get_text("dict")["blocks"]
+                  if any("Totale" in "".join(s["text"] for s in ln["spans"]) for ln in b["lines"])]
+        assert len(merged[0]["lines"]) > 1
+    d = docx.Document(convert_pdf(path, tmp_path / "f.docx", "docx")[0])
+    assert any("Totale imponibile 22.386,50 EUR" in q.text for q in d.paragraphs)
+    assert len(d.tables) == 1 and d.tables[0].cell(3, 0).text == "Revisione"
+    for fmt in ("html", "rtf", "txt"):
+        out = convert_pdf(path, tmp_path / f"f.{fmt}", fmt)[0]
+        text = open(out, encoding="utf-8", errors="replace").read()
+        assert "22.386,50" in text, fmt
+        assert text.count("Revisione") == 1, fmt
