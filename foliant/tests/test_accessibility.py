@@ -85,3 +85,44 @@ def test_checked_tool_button_text_contrast():
                          theme.stylesheet(t), re.M)
         assert rule, name
         assert contrast(rule.group(2), rule.group(1)) >= 4.5, (name, rule.groups())
+
+
+# contorno o indicatore / sfondo adiacente (≥ 3:1, WCAG 1.4.11)
+OUTLINE_PAIRS = [("control_border", "window"), ("control_border", "surface")]
+
+
+def test_token_outline_contrast():
+    low = [(name, fg, bg, round(contrast(t[fg], t[bg]), 2)) for name, t in _themes()
+           for fg, bg in OUTLINE_PAIRS if contrast(t[fg], t[bg]) < 3]
+    assert not low, low
+
+
+def test_input_outline_is_visible_without_focus(qapp, qtbot):
+    """NFR-23: il contorno di un campo senza fuoco si distingue dal dialogo e dal riempimento."""
+    from PySide6.QtWidgets import QDialog, QLineEdit, QPushButton, QVBoxLayout
+
+    from foliant.ui import theme
+    try:
+        for mode in ("light", "dark"):
+            theme.apply(qapp, mode)
+            dlg = QDialog()
+            qtbot.addWidget(dlg)
+            button = QPushButton("OK", dlg)
+            edit = QLineEdit(dlg)
+            layout = QVBoxLayout(dlg)
+            layout.addWidget(button)
+            layout.addWidget(edit)
+            dlg.resize(240, 120)
+            dlg.show()
+            qtbot.waitExposed(dlg)
+            button.setFocus()
+            assert not edit.hasFocus()
+            image = dlg.grab().toImage()
+            y = edit.y() + edit.height() // 2
+            edge = [image.pixelColor(edit.x() + dx, y) for dx in (0, 1)]
+            for bg in ("window", "surface"):
+                best = max(contrast(c, theme.color(bg)) for c in edge)
+                assert best >= 3, (mode, bg, [c.name() for c in edge], round(best, 2))
+            dlg.close()
+    finally:
+        theme.apply(qapp, "light")

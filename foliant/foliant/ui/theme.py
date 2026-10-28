@@ -25,6 +25,7 @@ LIGHT: dict[str, str | tuple] = {
     "surface": "#FFFFFF",
     "surface_alt": "#EFEFEC",
     "border": "#E3E3DE",
+    "control_border": "#868C91",     # contorno dei campi di immissione: ≥ 3:1 su window e surface
     "text": "#1C2125",
     "text_muted": "#585F65",
     "canvas": "#E7E7E3",
@@ -45,6 +46,7 @@ DARK: dict[str, str | tuple] = {
     "surface": "#25292C",
     "surface_alt": "#2E3337",
     "border": "#363B40",
+    "control_border": "#7A7F85",
     "text": "#ECEEEF",
     "text_muted": "#A9AFB4",
     "canvas": "#151719",
@@ -253,7 +255,7 @@ QPushButton:disabled {{ color: {h('text_muted')}; }}
 QPushButton:default:disabled, QPushButton[primary="true"]:disabled {{ background: {h('surface_alt')};
     border-color: {h('border')}; color: {h('text_muted')}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {{
-    background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px; padding: 3px 6px;
+    background: {h('surface')}; border: 1px solid {h('control_border')}; border-radius: 6px; padding: 3px 6px;
     color: {h('text')}; selection-background-color: {h('accent')}; selection-color: {h('accent_text')}; }}
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {h('accent')}; }}
 QTabWidget::pane {{ border: none; }}
@@ -285,7 +287,7 @@ QProgressBar::chunk {{ background: {h('accent')}; border-radius: 5px; }}
 QGroupBox {{ border: 1px solid {h('border')}; border-radius: 8px; margin-top: 14px; padding-top: 8px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {h('text_muted')}; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; background: {h('surface')};
-    border: 1px solid {h('text_muted')}; }}
+    border: 1px solid {h('control_border')}; }}
 QCheckBox::indicator {{ border-radius: 4px; }}
 QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {h('accent')}; }}
