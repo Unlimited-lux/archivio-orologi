@@ -22,6 +22,7 @@ PARTS = (
     "thumbnails",     # pannello Miniature
     "bookmarks",      # pannello Segnalibri
     "search",         # barra e pannello di ricerca
+    "advsearch",      # ricerca avanzata e su più documenti
     "attachments",    # pannello Allegati
     "layers",         # pannello Livelli
     "printing",       # stampa
@@ -31,6 +32,7 @@ PARTS = (
     "tools",          # zoom area, istantanea
     "session",        # posizione per file, vista iniziale, schede, sessione
     "recovery",       # salvataggio automatico e recupero dopo crash
+    "reload",         # ripristina e ricarica
     "archives",       # archivi ZIP
     "articles",       # thread di articoli
     "integrity",      # file danneggiati e funzioni non supportate

@@ -220,3 +220,10 @@ def test_regex_search():
     assert len(E.find_in_page_text(pt, r"milano", E.SearchOptions(regex=True, case_sensitive=True))) == 0
     with pytest.raises(ValueError):
         E.compile_query("(", E.SearchOptions(regex=True))
+
+
+def test_snippet_does_not_spill_into_next_line():
+    _d, page = _page(["CAP 20121 Milano, 00184 Roma", "telefono 0212345678"])
+    pt = E.extract_page_text(page)
+    hits = E.find_in_page_text(pt, "20121")
+    assert E.context_snippet(pt, hits[0])[1] == "20121"

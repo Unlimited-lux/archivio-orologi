@@ -225,25 +225,24 @@ def find_across_pages(a: PageText, b: PageText, query: str,
 
 
 def context_snippet(pt: PageText, rects: list[pymupdf.Rect], width: int = 40) -> tuple[str, str, str]:
-    """(prima, trovato, dopo) per l'elenco dei risultati."""
-    first = rects[0]
-    idx = [i for i, b in enumerate(pt.boxes) if b is not None and pt.lines[i] != -2 and first.intersects(b)
-           and abs((b.x0 + b.x1) / 2 - (first.x0 + first.x1) / 2) <= first.width / 2 + 0.5]
+    """(prima, trovato, dopo) per l'elenco dei risultati: «trovato» comprende solo
+    i caratteri il cui centro cade in uno dei rettangoli dell'occorrenza."""
+    idx = []
+    for i, box in enumerate(pt.boxes):
+        if box is None or pt.lines[i] == -2:
+            continue
+        cx, cy = (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2
+        if any(r.x0 - 0.5 <= cx <= r.x1 + 0.5 and r.y0 - 0.5 <= cy <= r.y1 + 0.5 for r in rects):
+            idx.append(i)
     if not idx:
         return "", "", ""
-    a = idx[0]
-    last = rects[-1]
-    idx_end = [i for i, b in enumerate(pt.boxes) if b is not None and last.intersects(b)
-               and (b.x0 + b.x1) / 2 <= last.x1 + 0.5 and (b.x0 + b.x1) / 2 >= last.x0 - 0.5]
-    b = (idx_end[-1] if idx_end else a) + 1
+    a, b = idx[0], idx[-1] + 1
 
     def clean(s: str) -> str:
         return re.sub(r"\s+", " ", s)
 
-    before = clean(pt.text[max(0, a - width):a])
-    found = clean("".join(c for i, c in enumerate(pt.text[a:b], start=a) if pt.lines[i] != -2))
-    after = clean(pt.text[b:b + width])
-    return before.lstrip(), found, after.rstrip()
+    found = "".join(c for i, c in enumerate(pt.text[a:b], start=a) if pt.lines[i] != -2)
+    return clean(pt.text[max(0, a - width):a]).lstrip(), clean(found), clean(pt.text[b:b + width]).rstrip()
 
 
 # ====================================================================== etichette

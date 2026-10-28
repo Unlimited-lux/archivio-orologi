@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import weakref
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton, QWidget
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, bind_icon, theme
@@ -47,7 +47,7 @@ class InfoBar(QWidget):
     def __init__(self, text: str, action_text: str | None, action, parent=None):
         super().__init__(parent)
         self.setObjectName("viewerInfoBar")
-        self.setAutoFillBackground(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             f"QWidget#viewerInfoBar {{ background: {theme.hex_color('accent_soft')};"
             f" border-bottom: 1px solid {theme.hex_color('border')}; }}")
@@ -118,6 +118,12 @@ class IntegrityController(QObject):
         for b in bars:
             b.setGeometry(0, y, view.width(), b.sizeHint().height())
             y += b.sizeHint().height()
+        # un'eventuale barra della parte «reload» resta sotto le nostre
+        reload = getattr(self.ctx, "viewer_parts", {}).get("reload")
+        other = reload.bar(view) if reload is not None else None
+        if other is not None and not other.isHidden():
+            other.setGeometry(0, y, view.width(), other.sizeHint().height())
+            y += other.sizeHint().height()
         view.setViewportMargins(0, y, 0, 0)
 
     def eventFilter(self, obj, ev) -> bool:
