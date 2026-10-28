@@ -13,6 +13,7 @@ Regole per chi modifica un documento:
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import tempfile
 from contextlib import contextmanager
@@ -113,6 +114,20 @@ def protection_options(pdf: pymupdf.Document, password: str | None, auth_code: i
     return opts
 
 
+def _security_handler(data: bytes) -> str | None:
+    """Nome del gestore di sicurezza (/Encrypt /Filter) letto dai byte grezzi, se presente."""
+    m = re.search(rb"/Encrypt\s+(\d+)\s+(\d+)\s+R", data)
+    body = None
+    if m:
+        obj = re.search(rb"(?<!\d)" + m.group(1) + rb"\s+" + m.group(2) + rb"\s+obj(.*?)endobj", data, re.S)
+        body = obj.group(1) if obj else None
+    else:
+        inline = re.search(rb"/Encrypt\s*<<(.*?)>>", data, re.S)
+        body = inline.group(1) if inline else None
+    f = re.search(rb"/Filter\s*/([^\s/<>\[\]()]+)", body) if body else None
+    return f.group(1).decode("latin-1") if f else None
+
+
 def open_pdf_bytes(data: bytes, password: str | None = None, filetype: str | None = None) -> tuple[pymupdf.Document, bool, dict]:
     """Apre dati PDF (o altri formati supportati, convertiti in PDF).
 
@@ -124,6 +139,9 @@ def open_pdf_bytes(data: bytes, password: str | None = None, filetype: str | Non
         try:
             pdf = pymupdf.open(stream=data, filetype=filetype or "pdf")
         except Exception as e:
+            handler = _security_handler(data)
+            if handler and handler != "Standard":
+                raise DocumentError(f"Il file è protetto con un sistema di sicurezza non supportato ({handler}).") from e
             raise DocumentError("Il file non è un PDF valido oppure è danneggiato.") from e
         needed_password = bool(pdf.needs_pass)
         auth_code = 0
@@ -241,6 +259,12 @@ class Document:
         if self.path is not None:
             return self.path.name
         return self._display_name or "Senza titolo.pdf"
+
+    @property
+    def can_copy(self) -> bool:
+        """Il file consente di copiarne il contenuto (permesso di copia, o accesso da proprietario)."""
+        with self.lock:
+            return bool(self._pdf.permissions & pymupdf.PDF_PERM_COPY)
 
     @property
     def is_modified(self) -> bool:
