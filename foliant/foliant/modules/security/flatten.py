@@ -2,10 +2,9 @@
 ritaglio e, a scelta, rasterizzazione delle pagine.
 
 Tutte le funzioni lavorano su un `pymupdf.Document` già dentro `document.change()`.
-Il motore fonde con `bake()` *tutte* le annotazioni, comprese quelle nascoste e i segni
-di redazione non applicati (un riquadro nero fuso senza togliere il testo sotto sarebbe
-una falsa redazione): gli elementi da conservare vengono quindi staccati dalla pagina
-prima della fusione e riattaccati dopo.
+Il `bake()` del motore non si usa: elimina in silenzio i segni di redazione non applicati
+(il testo sotto resta, la redazione da fare si perde) e le annotazioni nascoste, che
+ANN-40 chiede di conservare. Ogni annotazione viene quindi fusa singolarmente.
 """
 from __future__ import annotations
 
