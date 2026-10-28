@@ -23,7 +23,9 @@ import pymupdf
 
 from foliant.i18n import _
 
+from . import formats as fm
 from . import pdfsyntax as ps
+from .formats import Format, parse_number, parse_date
 
 TEXT, CHECKBOX, RADIO, COMBO, LIST, BUTTON, SIGNATURE = (
     "text", "checkbox", "radio", "combo", "list", "button", "signature")
@@ -49,6 +51,33 @@ ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT = 0, 1, 2
 OFF = "Off"
 
 
+# Bit dei flag di campo (/Ff) e di annotazione (/F) usati qui (numerazione ISO 32000-2).
+FF_NO_EXPORT = 1 << 2
+FF_NO_TOGGLE_OFF = 1 << 14
+FF_RADIO = 1 << 15
+FF_PUSHBUTTON = 1 << 16
+FF_NO_SPELL = 1 << 22
+FF_DO_NOT_SCROLL = 1 << 23
+FF_IN_UNISON = 1 << 25
+AF_HIDDEN, AF_PRINT, AF_NOVIEW, AF_LOCKED = 2, 4, 32, 128
+
+# Stili del segno di caselle e opzioni: carattere del font simbolico standard (ZapfDingbats).
+CHECK_STYLES = {"check": "4", "circle": "l", "cross": "8", "diamond": "u", "square": "n", "star": "H"}
+
+
+def check_style_label(style: str) -> str:
+    return {"check": _("Spunta"), "circle": _("Cerchio"), "cross": _("Croce"), "diamond": _("Rombo"),
+            "square": _("Quadrato"), "star": _("Stella")}.get(style, style)
+
+
+def _annot_flags(pdf: pymupdf.Document, xref: int) -> int:
+    t, v = pdf.xref_get_key(xref, "F")
+    try:
+        return int(v) if t == "int" else 0
+    except ValueError:
+        return 0
+
+
 class FormError(Exception):
     """Errore con messaggio per l'utente."""
 
@@ -61,45 +90,6 @@ def kind_label(kind: str) -> str:
 
 
 # ====================================================================== formati
-@dataclass
-class Format:
-    """Formato di un campo di testo (memorizzato come script standard dei moduli)."""
-
-    type: str = "none"          # none | number | percent | date
-    decimals: int = 2
-    separator: int = 2          # 0 «1,234.56» · 1 «1234.56» · 2 «1.234,56» · 3 «1234,56»
-    currency: str = ""
-    pattern: str = "dd/mm/yyyy"
-
-    def scripts(self) -> tuple[str | None, str | None]:
-        """(script di formato, script di battitura) in sintassi standard."""
-        cur = self.currency.replace("\\", "\\\\").replace('"', '\\"')
-        if self.type == "number":
-            args = f"{self.decimals}, {self.separator}, 0, 0, \"{cur}\", true"
-            return f"AFNumber_Format({args});", f"AFNumber_Keystroke({args});"
-        if self.type == "percent":
-            args = f"{self.decimals}, {self.separator}"
-            return f"AFPercent_Format({args});", f"AFPercent_Keystroke({args});"
-        if self.type == "date":
-            pat = self.pattern.replace('"', "")
-            return f"AFDate_FormatEx(\"{pat}\");", f"AFDate_KeystrokeEx(\"{pat}\");"
-        return None, None
-
-    @classmethod
-    def from_script(cls, script: str | None) -> "Format":
-        s = script or ""
-        m = re.search(r"AFNumber_Format\(\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+\s*,\s*\d+\s*,\s*\"((?:[^\"\\]|\\.)*)\"", s)
-        if m:
-            return cls("number", int(m.group(1)), int(m.group(2)), m.group(3).replace('\\"', '"'))
-        m = re.search(r"AFPercent_Format\(\s*(\d+)\s*,\s*(\d+)", s)
-        if m:
-            return cls("percent", int(m.group(1)), int(m.group(2)))
-        m = re.search(r"AFDate_Format(?:Ex)?\(\s*\"([^\"]*)\"", s)
-        if m:
-            return cls("date", pattern=m.group(1))
-        return cls()
-
-
 @dataclass
 class Calculation:
     """Calcolo semplice: operazione su un elenco di campi."""
@@ -127,24 +117,78 @@ class Calculation:
 OPERATIONS = {"SUM": "Somma", "AVG": "Media", "PRD": "Prodotto", "MIN": "Minimo", "MAX": "Massimo"}
 
 
+_VALIDATE_MARK = "/* foliant-validate "
+
+
 @dataclass
 class Validation:
-    """Intervallo ammesso per i campi numerici (None = senza limite)."""
+    """Regole di validazione: intervallo numerico, lunghezza minima, espressione regolare.
+
+    L'intervallo da solo è scritto come chiamata alla funzione predefinita; le
+    altre regole come script breve preceduto da un marcatore riconoscibile."""
 
     minimum: float | None = None
     maximum: float | None = None
+    min_length: int = 0
+    regex: str = ""
+    message: str = ""
 
-    def script(self) -> str | None:
-        if self.minimum is None and self.maximum is None:
-            return None
+    @property
+    def empty(self) -> bool:
+        return self.minimum is None and self.maximum is None and not self.min_length and not self.regex
+
+    def check(self) -> str | None:
+        """Errore nella definizione delle regole (None se corrette)."""
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            return _("Il minimo non può superare il massimo.")
+        if self.regex:
+            try:
+                re.compile(self.regex)
+            except re.error as e:
+                return _("Espressione regolare non valida alla posizione {p}: {m}.").format(p=(e.pos or 0) + 1, m=e.msg)
+        return None
+
+    def _range_call(self) -> str:
         lo = self.minimum if self.minimum is not None else 0
         hi = self.maximum if self.maximum is not None else 0
         return (f"AFRange_Validate({'true' if self.minimum is not None else 'false'}, {_num_js(lo)}, "
                 f"{'true' if self.maximum is not None else 'false'}, {_num_js(hi)});")
 
+    def script(self) -> str | None:
+        if self.empty:
+            return None
+        if not self.min_length and not self.regex and not self.message:
+            return self._range_call()
+        import json
+        data = {k: v for k, v in (("min", self.minimum), ("max", self.maximum), ("minlen", self.min_length),
+                                  ("regex", self.regex), ("message", self.message)) if v not in (None, "", 0)}
+        marker = _VALIDATE_MARK + json.dumps(data, ensure_ascii=False).replace("*/", "*\\/") + " */\n"
+        msg = json.dumps(self.message or _("Valore non valido."), ensure_ascii=False)
+        conds = []
+        if self.minimum is not None:
+            conds.append(f"Number(v) < {_num_js(self.minimum)}")
+        if self.maximum is not None:
+            conds.append(f"Number(v) > {_num_js(self.maximum)}")
+        if self.min_length:
+            conds.append(f"v.length < {int(self.min_length)}")
+        if self.regex:
+            conds.append(f"!(new RegExp({json.dumps(self.regex)})).test(v)")
+        return (marker + "var v = String(event.value);\n"
+                f"if (v !== \"\" && ({' || '.join(conds)})) {{ app.alert({msg}); event.rc = false; }}")
+
     @classmethod
     def from_script(cls, script: str | None) -> "Validation":
-        m = re.search(r"AFRange_Validate\(\s*(true|false)\s*,\s*([-\d.eE+]+)\s*,\s*(true|false)\s*,\s*([-\d.eE+]+)", script or "")
+        s = (script or "").strip()
+        if s.startswith(_VALIDATE_MARK):
+            import json
+            end = s.find(" */")
+            try:
+                data = json.loads(s[len(_VALIDATE_MARK):end].replace("*\\/", "*/"))
+                return cls(data.get("min"), data.get("max"), int(data.get("minlen") or 0),
+                           data.get("regex") or "", data.get("message") or "")
+            except (ValueError, TypeError, AttributeError):
+                return cls()
+        m = re.fullmatch(r"AFRange_Validate\(\s*(true|false)\s*,\s*([-\d.eE+]+)\s*,\s*(true|false)\s*,\s*([-\d.eE+]+)\s*\)\s*;?", s)
         if not m:
             return cls()
         return cls(float(m.group(2)) if m.group(1) == "true" else None,
@@ -166,7 +210,8 @@ class FieldInfo:
     rect: pymupdf.Rect
     value: Any = None           # testo | bool (casella) | stato (opzione) | lista (elenco multiplo)
     export: str | None = None   # stato attivo di caselle e pulsanti di opzione
-    options: list[str] = field(default_factory=list)
+    options: list[str] = field(default_factory=list)       # testi visualizzati
+    exports: list[str] = field(default_factory=list)       # valori di esportazione (stesso ordine)
     readonly: bool = False
     required: bool = False
     multiline: bool = False
@@ -174,6 +219,18 @@ class FieldInfo:
     comb: bool = False
     multiselect: bool = False
     editable: bool = False      # elenco a discesa con testo libero
+    sort: bool = False
+    commit_on_change: bool = False
+    no_toggle_off: bool = False  # gruppo di opzioni: una scelta sempre presente
+    in_unison: bool = False      # opzioni con lo stesso valore attivate insieme
+    do_not_scroll: bool = False
+    no_spell: bool = False
+    no_export: bool = False
+    hidden: bool = False         # widget nascosto (flag Hidden)
+    visibility: str = "visible"  # visible | hidden | screen | print
+    locked: bool = False
+    check_style: str = "check"   # stile del segno di caselle e opzioni
+    custom_scripts: list = field(default_factory=list)  # azioni personalizzate non eseguite
     maxlen: int = 0
     font: str = "Helvetica"
     fontsize: float = 0.0       # 0 = automatico
@@ -227,7 +284,7 @@ def _value_of(t: str, v: str) -> Any:
     if t == "null":
         return None
     if t == "name":
-        return v.lstrip("/")
+        return _decode_name(v.lstrip("/"))
     if t == "string":
         return v
     if t == "array":
@@ -242,12 +299,44 @@ def _value_of(t: str, v: str) -> Any:
 
 
 def _option_texts(values) -> list[str]:
+    """Testi visualizzati delle voci."""
+    return [d for _e, d in _option_pairs(values)]
+
+
+def _option_pairs(values) -> list[tuple[str, str]]:
+    """Voci come (valore di esportazione, testo visualizzato)."""
     out = []
     for v in values or []:
         if isinstance(v, (list, tuple)):
-            out.append(str(v[1] if len(v) > 1 else v[0]))
+            e = str(v[0]) if v else ""
+            out.append((e, str(v[1]) if len(v) > 1 else e))
         else:
-            out.append(str(v))
+            out.append((str(v), str(v)))
+    return out
+
+
+def _read_options(pdf: pymupdf.Document, xref: int) -> list[tuple[str, str]]:
+    t, v = _inherited(pdf, xref, "Opt")
+    if t == "xref":
+        try:
+            v = pdf.xref_object(int(v.split()[0]), compressed=True)
+            t = "array"
+        except Exception:
+            return []
+    if t != "array":
+        return []
+    try:
+        arr = ps.parse(v)
+    except ps.PdfSyntaxError:
+        return []
+    out = []
+    for item in arr:
+        if isinstance(item, list):
+            e = ps.text_of(item[0]) if item else ""
+            out.append((e or "", (ps.text_of(item[1]) if len(item) > 1 else e) or ""))
+        else:
+            t_ = ps.text_of(item) or ""
+            out.append((t_, t_))
     return out
 
 
@@ -263,7 +352,21 @@ def _color(c) -> tuple | None:
     return c[:3]
 
 
+def _decode_name(n: str) -> str:
+    if "#" not in n:
+        return n
+    raw = re.sub(r"#([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), n).encode("latin-1", "replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
+
 def _on_state(w: pymupdf.Widget) -> str | None:
+    return _decode_name(_raw_on_state(w))
+
+
+def _raw_on_state(w: pymupdf.Widget) -> str:
     try:
         states = (w.button_states() or {}).get("normal") or []
     except Exception:
@@ -286,6 +389,23 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
                      rect=pymupdf.Rect(w.rect))
     info.readonly = bool(flags & pymupdf.PDF_FIELD_IS_READ_ONLY)
     info.required = bool(flags & pymupdf.PDF_FIELD_IS_REQUIRED)
+    info.no_export = bool(flags & FF_NO_EXPORT)
+    info.no_toggle_off = kind == RADIO and bool(flags & FF_NO_TOGGLE_OFF)
+    info.in_unison = kind == RADIO and bool(flags & FF_IN_UNISON)
+    info.do_not_scroll = kind == TEXT and bool(flags & FF_DO_NOT_SCROLL)
+    info.no_spell = kind in (TEXT, COMBO) and bool(flags & FF_NO_SPELL)
+    aflags = _annot_flags(pdf, w.xref)
+    info.hidden = bool(aflags & AF_HIDDEN)
+    info.locked = bool(aflags & AF_LOCKED)
+    if aflags & AF_HIDDEN:
+        info.visibility = "hidden"
+    elif aflags & AF_NOVIEW:
+        info.visibility = "print"
+    elif not aflags & AF_PRINT:
+        info.visibility = "screen"
+    if kind in (CHECKBOX, RADIO):
+        ca = _value_of(*pdf.xref_get_key(w.xref, "MK/CA"))
+        info.check_style = next((k for k, c in CHECK_STYLES.items() if c == ca), "check" if kind == CHECKBOX else "circle")
     info.font = _FONT_NAMES.get(w.text_font or "Helv", w.text_font or "Helvetica")
     info.fontsize = float(w.text_fontsize or 0)
     info.text_color = _color(w.text_color) or (0, 0, 0)
@@ -324,7 +444,11 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
                 info.value = state
         info.default = raw_dv if isinstance(raw_dv, str) else OFF
     elif kind in (COMBO, LIST):
-        info.options = _option_texts(w.choice_values)
+        pairs = _read_options(pdf, w.xref) or _option_pairs(w.choice_values)
+        info.exports = [e for e, _d in pairs]
+        info.options = [d for _e, d in pairs]
+        info.sort = bool(flags & pymupdf.PDF_CH_FIELD_IS_SORT)
+        info.commit_on_change = bool(flags & pymupdf.PDF_CH_FIELD_IS_COMMIT_ON_SEL_CHANGE)
         info.multiselect = bool(flags & pymupdf.PDF_CH_FIELD_IS_MULTI_SELECT)
         info.editable = bool(flags & pymupdf.PDF_CH_FIELD_IS_EDIT)
         if kind == LIST and info.multiselect:
@@ -398,32 +522,38 @@ def _truthy(value: Any, export: str | None) -> bool:
 
 
 def set_value(pdf: pymupdf.Document, page: int, xref: int, value: Any) -> None:
-    """Imposta il valore di un campo e ne rigenera l'aspetto."""
+    """Imposta il valore memorizzato di un campo (condiviso da tutti i suoi widget)
+    e ne rigenera gli aspetti. I campi password non vengono mai scritti nel file."""
     w = find_widget(pdf, page, xref)
     kind = _KIND_OF_TYPE.get(w.field_type, TEXT)
+    fx = _field_xref(pdf, w.xref)
+    flags = w.field_flags or 0
     if kind == TEXT:
         text = "" if value is None else str(value)
         maxlen = int(w.text_maxlen or 0)
         if maxlen and len(text) > maxlen:
             text = text[:maxlen]
-        fx = _field_xref(pdf, w.xref)
-        pdf.xref_set_key(fx, "V", ps.encode_string(text))
+        if flags & pymupdf.PDF_TX_FIELD_IS_PASSWORD:
+            text = ""
+        pdf.xref_set_key(fx, "V", ps.encode_string(text) if text else "null")
         _regen_field(pdf, fx, page, w.xref)
     elif kind == CHECKBOX:
         on = _on_state(w)
-        checked = _truthy(value, on)
-        _set_button_states(pdf, [w.xref], on if checked else OFF, _field_xref(pdf, w.xref))
+        checked = _truthy(value, on) or (isinstance(value, str) and value not in ("", OFF) and value in _all_states(pdf, fx))
+        state = (value if isinstance(value, str) and value in _all_states(pdf, fx) and value != OFF else on) if checked else OFF
+        _set_button_states(pdf, _widgets_of_field(pdf, fx) or [w.xref], state, fx)
     elif kind == RADIO:
         state = OFF if value in (None, False, "", OFF) else str(value)
         if value is True:
             state = _on_state(w)
-        fx = _field_xref(pdf, w.xref)
-        group = [x for x in _widgets_of_field(pdf, fx)] or [w.xref]
-        _set_button_states(pdf, group, state, fx)
+        group = _widgets_of_field(pdf, fx) or [w.xref]
+        only = None if flags & FF_IN_UNISON else _first_with_state(pdf, group, state, prefer=w.xref)
+        _set_button_states(pdf, group, state, fx, only=only)
     elif kind in (COMBO, LIST):
-        flags = w.field_flags or 0
         multi = kind == LIST and bool(flags & pymupdf.PDF_CH_FIELD_IS_MULTI_SELECT)
-        options = _option_texts(w.choice_values)
+        pairs = _read_options(pdf, w.xref) or _option_pairs(w.choice_values)
+        exports = [e for e, _d in pairs]
+        displays = [d for _e, d in pairs]
         if isinstance(value, (list, tuple)):
             values = [str(v) for v in value]
         elif value in (None, ""):
@@ -432,23 +562,87 @@ def set_value(pdf: pymupdf.Document, page: int, xref: int, value: Any) -> None:
             values = [str(value)] if not multi else [v.strip() for v in re.split(r"[;\n]", str(value)) if v.strip()]
         if not multi:
             values = values[:1]
-        if kind == LIST or not (flags & pymupdf.PDF_CH_FIELD_IS_EDIT):
-            unknown = [v for v in values if v not in options]
-            if unknown:
-                raise FormError(_("«{v}» non è tra le voci del campo «{n}».").format(v=unknown[0], n=w.field_name))
-        fx = _field_xref(pdf, w.xref)
-        if not values:
+        resolved = []
+        for v in values:
+            if v in exports:
+                resolved.append(v)
+            elif v in displays:
+                resolved.append(exports[displays.index(v)])
+            elif kind == COMBO and flags & pymupdf.PDF_CH_FIELD_IS_EDIT:
+                resolved.append(v)
+            else:
+                raise FormError(_("«{v}» non è tra le voci del campo «{n}».").format(v=v, n=w.field_name))
+        if not resolved:
             pdf.xref_set_key(fx, "V", "null")
-        elif multi and len(values) > 1:
-            pdf.xref_set_key(fx, "V", ps.serialize(values))
+        elif multi and len(resolved) > 1:
+            pdf.xref_set_key(fx, "V", ps.serialize(resolved))
         else:
-            pdf.xref_set_key(fx, "V", ps.encode_string(values[0]))
-        if kind == LIST:
-            idx = [options.index(v) for v in values if v in options]
-            pdf.xref_set_key(fx, "I", ps.serialize(sorted(idx)) if idx else "null")
+            pdf.xref_set_key(fx, "V", ps.encode_string(resolved[0]))
+        duplicates = len(set(exports)) != len(exports)
+        if kind == LIST or duplicates:
+            idx = sorted({exports.index(v) for v in resolved if v in exports})
+            pdf.xref_set_key(fx, "I", ps.serialize(idx) if idx and (multi or duplicates or kind == LIST) else "null")
         _regen_field(pdf, fx, page, w.xref)
     else:
         raise FormError(_("Questo campo non si compila."))
+
+
+def _all_states(pdf: pymupdf.Document, fx: int) -> set[str]:
+    out: set[str] = set()
+    for k in _widgets_of_field(pdf, fx):
+        t, n = pdf.xref_get_key(k, "AP/N")
+        if t == "dict":
+            try:
+                out.update(ps.parse(n).keys())
+            except ps.PdfSyntaxError:
+                pass
+    return out
+
+
+def _states_of(pdf: pymupdf.Document, xref: int) -> list[str]:
+    t, n = pdf.xref_get_key(xref, "AP/N")
+    if t != "dict":
+        return []
+    try:
+        return list(ps.parse(n).keys())
+    except ps.PdfSyntaxError:
+        return []
+
+
+def _first_with_state(pdf: pymupdf.Document, group: list[int], state: str, prefer: int) -> int | None:
+    if state == OFF:
+        return None
+    if state in _states_of(pdf, prefer):
+        return prefer
+    return next((x for x in group if state in _states_of(pdf, x)), None)
+
+
+def toggle(pdf: pymupdf.Document, page: int, xref: int) -> Any:
+    """Clic su una casella o su un pulsante di opzione. Restituisce il nuovo valore."""
+    info = field_info(pdf, page, xref)
+    if info.kind == CHECKBOX:
+        state = _value_of(*pdf.xref_get_key(xref, "AS"))
+        new = not (state and state != OFF)
+        set_value(pdf, page, xref, info.export if new else OFF)
+        return new
+    if info.kind == RADIO:
+        state = _value_of(*pdf.xref_get_key(xref, "AS"))
+        if state and state != OFF:
+            if info.no_toggle_off:
+                return info.export
+            set_value(pdf, page, xref, OFF)
+            return OFF
+        group = _widgets_of_field(pdf, info.field_xref) or [xref]
+        only = None if info.in_unison else xref
+        _set_button_states(pdf, group, info.export, info.field_xref, only=only)
+        return info.export
+    raise FormError(_("Questo campo non si attiva con un clic."))
+
+
+def radio_siblings(pdf: pymupdf.Document, page: int, xref: int) -> list[tuple[int, int]]:
+    """Widget (pagina, xref) dello stesso gruppo di opzioni, nell'ordine dei campi."""
+    fx = _field_xref(pdf, xref)
+    return [(f.page, f.xref) for f in list_fields(pdf) if f.kind == RADIO and f.field_xref == fx]
 
 
 def regenerate(pdf: pymupdf.Document, page: int, xref: int) -> None:
@@ -477,18 +671,46 @@ def _page_index_of(pdf: pymupdf.Document, widget_xref: int, hint: int | None = N
 
 
 def _regen_field(pdf: pymupdf.Document, fx: int, page: int, xref: int) -> None:
-    """Rigenera tutti i widget del campo (un campo può comparire in più punti)."""
+    """Rigenera tutti i widget del campo (un campo può comparire in più punti).
+
+    Per i campi con formato l'aspetto mostra il valore formattato mentre /V
+    resta in forma canonica: si scrive temporaneamente il testo formattato,
+    si rigenera e si ripristina il valore."""
     kids = _widgets_of_field(pdf, fx)
     if xref not in kids:
         kids = [xref]
-    for k in kids:
-        pi = page if k == xref else _page_index_of(pdf, k, page)
-        if pi is None:
-            continue
-        try:
-            regenerate(pdf, pi, k)
-        except FormError:
-            continue
+    fmt = Format.from_script(_action_script(pdf, xref, "F"))
+    saved_v = pdf.xref_get_key(fx, "V")
+    saved_da = pdf.xref_get_key(fx, "DA")
+    formatted = None
+    if _inherited(pdf, xref, "FT")[1] == "/Ch" and saved_v[0] == "string":
+        pairs = _read_options(pdf, xref)
+        shown = next((d for e, d in pairs if e == saved_v[1]), None)
+        if shown is not None and shown != saved_v[1]:
+            formatted = shown
+            pdf.xref_set_key(fx, "V", ps.encode_string(shown))
+    elif fmt.type != fm.NONE and saved_v[0] == "string" and saved_v[1]:
+        text, red = fm.display(fmt, saved_v[1])
+        if text != saved_v[1] or red:
+            formatted = text
+            pdf.xref_set_key(fx, "V", ps.encode_string(text))
+            if red and saved_da[0] == "string":
+                da = re.sub(r"[\d.]+\s+[\d.]+\s+[\d.]+\s+rg|[\d.]+\s+g\b", "", saved_da[1])
+                pdf.xref_set_key(fx, "DA", ps.encode_string("1 0 0 rg " + da.strip()))
+    try:
+        for k in kids:
+            pi = page if k == xref else _page_index_of(pdf, k, page)
+            if pi is None:
+                continue
+            try:
+                regenerate(pdf, pi, k)
+            except FormError:
+                continue
+    finally:
+        if formatted is not None:
+            pdf.xref_set_key(fx, "V", ps.encode_string(saved_v[1]))
+            if saved_da[0] == "string":
+                pdf.xref_set_key(fx, "DA", ps.encode_string(saved_da[1]))
 
 
 def _widgets_of_field(pdf: pymupdf.Document, field_xref: int) -> list[int]:
@@ -502,17 +724,15 @@ def _widgets_of_field(pdf: pymupdf.Document, field_xref: int) -> list[int]:
     return [k[0] for k in kids if isinstance(k, ps.Ref)]
 
 
-def _set_button_states(pdf: pymupdf.Document, widgets: list[int], state: str, field_xref: int) -> None:
-    """Attiva lo stato `state` (o Off) sui widget di una casella o di un gruppo di opzioni."""
+def _set_button_states(pdf: pymupdf.Document, widgets: list[int], state: str, field_xref: int,
+                       only: int | None = None) -> None:
+    """Attiva lo stato `state` (o Off) sui widget di una casella o di un gruppo di opzioni.
+    Con `only` si attiva soltanto quel widget anche se altri hanno lo stesso stato."""
     for x in widgets:
-        t, n = pdf.xref_get_key(x, "AP/N")
-        names: list[str] = []
-        if t == "dict":
-            try:
-                names = list(ps.parse(n).keys())
-            except ps.PdfSyntaxError:
-                names = []
-        own = state if state in names or not names else OFF
+        names = _states_of(pdf, x)
+        own = state if (state in names or not names) else OFF
+        if only is not None and x != only:
+            own = OFF
         pdf.xref_set_key(x, "AS", ps.encode_name(own))
     pdf.xref_set_key(field_xref, "V", ps.encode_name(state))
 
@@ -602,151 +822,55 @@ def _with_value(f: FieldInfo, value: Any) -> FieldInfo:
     return replace(f, value=value)
 
 
-# ====================================================================== numeri e date
-def parse_number(text: Any) -> float | None:
-    """Interpreta numeri scritti all'italiana o all'inglese («1.234,5», «1,234.5», «12%», «€ 3»)."""
-    if text is None:
-        return None
-    if isinstance(text, (int, float)) and not isinstance(text, bool):
-        return float(text)
-    s = str(text).strip()
-    if not s:
-        return None
-    s = re.sub(r"[^\d,.\-+eE]", "", s.replace("−", "-"))
-    if not re.search(r"\d", s):
-        return None
-    if "," in s and "." in s:
-        if s.rfind(",") > s.rfind("."):
-            s = s.replace(".", "").replace(",", ".")
-        else:
-            s = s.replace(",", "")
-    elif "," in s:
-        parts = s.split(",")
-        if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3 and len(parts[0].lstrip("-+")) <= 3 and False):
-            s = s.replace(",", "")
-        else:
-            s = s.replace(",", ".")
-    elif s.count(".") > 1:
-        s = s.replace(".", "")
-    try:
-        v = float(s)
-    except ValueError:
-        return None
-    return v if math.isfinite(v) else None
-
-
-def format_number(value: float, decimals: int | None = None) -> str:
-    """Valore numerico grezzo da memorizzare nel campo (punto decimale, senza migliaia)."""
-    if decimals is not None:
-        s = f"{value:.{max(0, decimals)}f}"
-    else:
-        s = f"{value:.10f}".rstrip("0").rstrip(".")
-    if s in ("-0", "") or re.fullmatch(r"-0\.?0*", s):
-        s = s.lstrip("-") or "0"
-    return s
-
-
-def display_number(value: float, fmt: Format) -> str:
-    """Numero formattato per la visualizzazione secondo il formato del campo."""
-    dec = max(0, fmt.decimals)
-    if fmt.type == "percent":
-        value = value * 100
-    s = f"{abs(value):,.{dec}f}"
-    if fmt.separator == 1:
-        s = s.replace(",", "")
-    elif fmt.separator == 2:
-        s = s.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
-    elif fmt.separator == 3:
-        s = s.replace(",", "").replace(".", ",")
-    if value < 0:
-        s = "-" + s
-    if fmt.type == "percent":
-        s += "%"
-    elif fmt.currency:
-        s = f"{fmt.currency} {s}"
-    return s
-
-
-_DATE_TOKENS = [("yyyy", "%Y"), ("yy", "%y"), ("mmmm", "%B"), ("mmm", "%b"), ("mm", "%m"), ("m", "%m"),
-                ("dd", "%d"), ("d", "%d"), ("HH", "%H"), ("MM", "%M"), ("ss", "%S")]
-
-
-def _strf(pattern: str) -> str:
-    out, i = [], 0
-    while i < len(pattern):
-        for tok, rep in _DATE_TOKENS:
-            if pattern.startswith(tok, i):
-                out.append(rep)
-                i += len(tok)
-                break
-        else:
-            out.append(pattern[i].replace("%", "%%"))
-            i += 1
-    return "".join(out)
-
-
-def parse_date(text: str, pattern: str = "dd/mm/yyyy") -> date | None:
-    s = (text or "").strip()
-    if not s:
-        return None
-    for fmt in (_strf(pattern), "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d", "%d/%m/%y"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def format_date(d: date, pattern: str = "dd/mm/yyyy") -> str:
-    return d.strftime(_strf(pattern))
-
-
 # ====================================================================== validazione
+def _required_msg(info: FieldInfo) -> str:
+    return _("Il campo «{n}» è obbligatorio.").format(n=info.name)
+
+
 def validate(info: FieldInfo, value: Any) -> str | None:
-    """Messaggio d'errore se `value` non è accettabile per il campo, altrimenti None."""
+    """Messaggio d'errore se il valore memorizzabile `value` non è accettabile, altrimenti None."""
     if info.kind != TEXT:
         if info.required and export_value(_with_value(info, value)) in ("", OFF, [], None):
-            return _("Il campo «{n}» è obbligatorio.").format(n=info.name)
+            return _required_msg(info)
         return None
     text = "" if value is None else str(value)
     if not text.strip():
-        return _("Il campo «{n}» è obbligatorio.").format(n=info.name) if info.required else None
+        return _required_msg(info) if info.required else None
     if info.maxlen and len(text) > info.maxlen:
         return _("Il campo «{n}» ammette al massimo {k} caratteri.").format(n=info.name, k=info.maxlen)
-    if info.fmt.type in ("number", "percent"):
-        num = parse_number(text)
-        if num is None:
-            return _("Nel campo «{n}» va inserito un numero.").format(n=info.name)
-        v = info.validation
-        if v.minimum is not None and num < v.minimum:
-            return _("Il valore di «{n}» deve essere almeno {m}.").format(n=info.name, m=_num_js(v.minimum))
-        if v.maximum is not None and num > v.maximum:
-            return _("Il valore di «{n}» deve essere al massimo {m}.").format(n=info.name, m=_num_js(v.maximum))
-    elif info.fmt.type == "date":
-        if parse_date(text, info.fmt.pattern) is None:
-            return _("Nel campo «{n}» va inserita una data nel formato {p}.").format(n=info.name, p=info.fmt.pattern)
-    elif info.validation.minimum is not None or info.validation.maximum is not None:
-        num = parse_number(text)
-        if num is None:
-            return _("Nel campo «{n}» va inserito un numero.").format(n=info.name)
+    v = info.validation
+    custom = v.message
+    num = parse_number(text) if (info.fmt.numeric or v.minimum is not None or v.maximum is not None) else None
+    if (info.fmt.numeric or v.minimum is not None or v.maximum is not None) and num is None:
+        return custom or _("Nel campo «{n}» va inserito un numero.").format(n=info.name)
+    if v.minimum is not None and num is not None and num < v.minimum:
+        return custom or _("Il valore di «{n}» deve essere almeno {m}.").format(n=info.name, m=_num_js(v.minimum))
+    if v.maximum is not None and num is not None and num > v.maximum:
+        return custom or _("Il valore di «{n}» deve essere al massimo {m}.").format(n=info.name, m=_num_js(v.maximum))
+    if v.min_length and len(text) < v.min_length:
+        return custom or _("Il campo «{n}» richiede almeno {k} caratteri.").format(n=info.name, k=v.min_length)
+    if v.regex:
+        try:
+            ok = re.search(v.regex, text) is not None
+        except re.error:
+            ok = True
+        if not ok:
+            return custom or _("Il valore di «{n}» non ha la forma richiesta.").format(n=info.name)
     return None
 
 
 def normalize_input(info: FieldInfo, text: str) -> str:
-    """Valore da memorizzare per l'input dell'utente (numeri senza separatori, date nel formato)."""
-    if info.kind != TEXT or not text.strip():
+    """Valore da memorizzare per l'input dell'utente; solleva FormError se non interpretabile."""
+    if info.kind != TEXT:
         return text
-    if info.fmt.type in ("number", "percent"):
-        num = parse_number(text)
-        if num is not None:
-            if info.fmt.type == "percent" and text.strip().endswith("%"):
-                num = num / 100
-            return format_number(num)
-    elif info.fmt.type == "date":
-        d = parse_date(text, info.fmt.pattern)
-        if d is not None:
-            return format_date(d, info.fmt.pattern)
-    return text
+    if not info.multiline:
+        text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    else:
+        text = text.replace("\r\n", "\r").replace("\n", "\r")
+    try:
+        return fm.normalize(info.fmt, text)
+    except fm.FormatError as e:
+        raise FormError(str(e)) from e
 
 
 def missing_required(pdf: pymupdf.Document) -> list[FieldInfo]:
@@ -790,45 +914,145 @@ def compute(op: str, numbers: list[float]) -> float:
     raise FormError(_("Operazione di calcolo sconosciuta: {op}").format(op=op))
 
 
-def recalculate(pdf: pymupdf.Document) -> list[str]:
-    """Ricalcola i campi con un calcolo semplice. Restituisce i nomi dei campi aggiornati."""
+def expand_names(names: Iterable[str], all_names: Iterable[str]) -> list[str]:
+    """Nomi dei campi citati: un nome di gruppo («importo») include i discendenti («importo.0»…)."""
+    all_names = list(all_names)
+    out: list[str] = []
+    for n in names:
+        matches = [a for a in all_names if a == n or a.startswith(n + ".")]
+        for m in matches or [n]:
+            if m not in out:
+                out.append(m)
+    return out
+
+
+def _dependencies(fields: list[FieldInfo]) -> dict[str, list[str]]:
+    names = [f.name for f in fields]
+    return {f.name: expand_names(f.calc.fields, names) for f in fields if f.kind == TEXT and f.calc}
+
+
+def find_cycle(pdf: pymupdf.Document, target: str, calc: Calculation | None) -> list[str] | None:
+    """Ciclo di dipendenze che si creerebbe dando a `target` il calcolo `calc` (None se nessuno)."""
     fields = list_fields(pdf)
-    calcs = [f for f in fields if f.kind == TEXT and f.calc]
-    if not calcs:
+    deps = _dependencies(fields)
+    names = [f.name for f in fields]
+    if calc is None:
+        deps.pop(target, None)
+    else:
+        deps[target] = expand_names(calc.fields, names)
+
+    def visit(node, path):
+        for d in deps.get(node, []):
+            if d == target:
+                return path + [d]
+            if d in path:
+                continue
+            found = visit(d, path + [d])
+            if found:
+                return found
+        return None
+
+    return visit(target, [target])
+
+
+def dependency_order(pdf: pymupdf.Document) -> list[str]:
+    """Campi calcolati in un ordine che rispetta le dipendenze."""
+    fields = list_fields(pdf)
+    deps = _dependencies(fields)
+    order: list[str] = []
+    visiting: set[str] = set()
+
+    def visit(n):
+        if n in order or n in visiting or n not in deps:
+            return
+        visiting.add(n)
+        for d in deps[n]:
+            visit(d)
+        visiting.discard(n)
+        order.append(n)
+
+    for f in fields:
+        if f.name in deps:
+            visit(f.name)
+    return order
+
+
+def calc_order(pdf: pymupdf.Document) -> list[str]:
+    """Ordine di calcolo dichiarato (/CO), completato con i campi calcolati mancanti."""
+    fields = list_fields(pdf)
+    by_xref = {f.field_xref: f.name for f in fields}
+    names = [by_xref[x] for x in _calc_order(pdf) if x in by_xref]
+    for f in fields:
+        if f.kind == TEXT and f.calc and f.name not in names:
+            names.append(f.name)
+    return [n for i, n in enumerate(names) if n not in names[:i]]
+
+
+def order_problems(pdf: pymupdf.Document, order: list[str] | None = None) -> list[tuple[str, str]]:
+    """Coppie (campo, dipendenza) in cui il campo è calcolato prima di ciò da cui dipende."""
+    order = calc_order(pdf) if order is None else order
+    deps = _dependencies(list_fields(pdf))
+    pos = {n: i for i, n in enumerate(order)}
+    return [(n, d) for n in order for d in deps.get(n, []) if d in pos and pos[d] > pos[n]]
+
+
+def set_calc_order(pdf: pymupdf.Document, names: list[str]) -> None:
+    fields = list_fields(pdf)
+    by_name = {}
+    for f in fields:
+        if f.kind == TEXT and f.calc:
+            by_name.setdefault(f.name, f.field_xref)
+    xrefs = [by_name[n] for n in names if n in by_name]
+    xrefs += [x for x in by_name.values() if x not in xrefs]
+    cat = pdf.pdf_catalog()
+    if pdf.xref_get_key(cat, "AcroForm")[0] != "null":
+        pdf.xref_set_key(cat, "AcroForm/CO", ps.serialize([ps.Ref(x) for x in xrefs]) if xrefs else "null")
+
+
+def recalculate(pdf: pymupdf.Document) -> list[str]:
+    """Ricalcola i campi con un calcolo semplice nell'ordine di calcolo; ogni campo al massimo
+    una volta. I campi vuoti o non numerici valgono 0 (anche nella media), come negli altri lettori.
+    Restituisce i nomi dei campi aggiornati."""
+    fields = list_fields(pdf)
+    deps = _dependencies(fields)
+    if not deps:
         return []
-    order = _calc_order(pdf)
-    calcs.sort(key=lambda f: order.index(f.field_xref) if f.field_xref in order else len(order) + fields.index(f))
-    values = {f.name: f.value for f in fields if f.kind == TEXT}
-    values.update({f.name: (1.0 if f.value else 0.0) if f.kind == CHECKBOX else export_value(f)
-                   for f in fields if f.kind in (COMBO, LIST, RADIO, CHECKBOX)})
+    values: dict[str, Any] = {}
+    for f in fields:
+        if f.kind == TEXT:
+            values.setdefault(f.name, f.value)
+        elif f.kind == CHECKBOX:
+            values[f.name] = 1.0 if f.value or values.get(f.name) == 1.0 else 0.0
+        elif f.kind in (COMBO, LIST, RADIO):
+            values.setdefault(f.name, export_value(f))
+    first = {}
+    for f in fields:
+        if f.name in deps and f.name not in first:
+            first[f.name] = f
     changed: list[str] = []
-    for _round in range(len(calcs)):  # dipendenze a catena senza ordine dichiarato
-        progress = False
-        for f in calcs:
-            nums = [n for n in (parse_number(values.get(name)) for name in f.calc.fields) if n is not None]
-            result = compute(f.calc.op, nums)
-            decimals = f.fmt.decimals if f.fmt.type in ("number",) else None
-            text = format_number(round(result, 10), decimals)
-            if values.get(f.name) != text:
-                values[f.name] = text
-                set_value(pdf, f.page, f.xref, text)
-                if f.name not in changed:
-                    changed.append(f.name)
-                progress = True
-        if not progress:
-            break
+    for name in calc_order(pdf):
+        f = first.get(name)
+        if f is None:
+            continue
+        nums = []
+        for src in deps[name]:
+            v = values.get(src)
+            if isinstance(v, list):
+                v = v[0] if v else None
+            n = parse_number(v)
+            nums.append(n if n is not None else 0.0)
+        result = compute(f.calc.op, nums)
+        text = fm.canonical_number(result, f.fmt.decimals if f.fmt.numeric else None)
+        if values.get(name) != text:
+            values[name] = text
+            set_value(pdf, f.page, f.xref, text)
+            changed.append(name)
     return changed
 
 
 def _set_calc_order(pdf: pymupdf.Document) -> None:
-    cat = pdf.pdf_catalog()
-    xrefs = []
-    for f in list_fields(pdf):
-        if f.kind == TEXT and f.calc and f.field_xref not in xrefs:
-            xrefs.append(f.field_xref)
-    if pdf.xref_get_key(cat, "AcroForm")[0] == "null":
-        return
-    pdf.xref_set_key(cat, "AcroForm/CO", ps.serialize([ps.Ref(x) for x in xrefs]) if xrefs else "null")
+    """Aggiorna /CO: conserva l'ordine dichiarato e aggiunge in coda i nuovi campi calcolati."""
+    set_calc_order(pdf, calc_order(pdf))
 
 
 # ====================================================================== creazione e proprietà
@@ -849,7 +1073,8 @@ def unique_name(pdf: pymupdf.Document, base: str, taken: set[str] | None = None)
 
 def default_base_name(kind: str) -> str:
     return {TEXT: _("Testo"), CHECKBOX: _("Casella"), RADIO: _("Opzione"), COMBO: _("Discesa"),
-            LIST: _("Elenco"), BUTTON: _("Pulsante"), SIGNATURE: _("Firma")}.get(kind, _("Campo"))
+            LIST: _("Elenco"), BUTTON: _("Pulsante"), SIGNATURE: _("Firma"), "date": _("Data"),
+            "image": _("Immagine")}.get(kind, _("Campo"))
 
 
 DEFAULT_SIZES = {TEXT: (160, 20), CHECKBOX: (14, 14), RADIO: (14, 14), COMBO: (140, 20), LIST: (140, 60),
@@ -863,22 +1088,29 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
     Per i pulsanti di opzione `props["export"]` è il valore della singola opzione
     e `name` il nome del gruppo (un gruppo esistente con lo stesso nome viene esteso).
     """
+    if kind == DATE_KIND:
+        kind = TEXT
+        props.setdefault("fmt", Format(fm.DATE, pattern="dd/mm/yyyy"))
+        name = name or default_name(pdf, DATE_KIND)
     if kind not in _TYPE_OF_KIND:
         raise FormError(_("Tipo di campo sconosciuto."))
-    rect = pymupdf.Rect(rect).normalize()
-    if rect.is_empty or rect.width < 4 or rect.height < 4:
-        raise FormError(_("Il campo è troppo piccolo."))
     pg = pdf[page]
+    rect = clamp_rect(pdf, page, rect)
     existing_group = None
     if kind == RADIO and name:
         for f in list_fields(pdf):
             if f.kind == RADIO and f.name == name:
                 existing_group = f
                 break
+    full_name = None
     if not name:
-        name = unique_name(pdf, default_base_name(kind))
-    elif kind != RADIO and name in field_names(pdf):
-        raise FormError(_("Esiste già un campo chiamato «{n}».").format(n=name))
+        name = default_name(pdf, kind)
+    elif kind != RADIO or existing_group is None:
+        taken = {f.name: f.kind for f in list_fields(pdf)}
+        if name in taken:
+            raise NameTaken(name, taken[name] == kind)
+        if "." in name:
+            full_name, name = name, unique_name(pdf, "tmp")
     w = pymupdf.Widget()
     w.field_type = _TYPE_OF_KIND[kind]
     w.field_name = name
@@ -898,8 +1130,12 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
         w.button_caption = props.get("caption", name)
     if kind == SIGNATURE:
         w.field_value = None
+    first_on_page = not any(True for _w in pg.widgets())
+    _ensure_acroform(pdf)
     pg.add_widget(w)
     xref = w.xref
+    if first_on_page and pdf.xref_get_key(pg.xref, "Tabs")[0] == "null":
+        pdf.xref_set_key(pg.xref, "Tabs", "/R")
     if kind in (CHECKBOX, RADIO):
         export = str(props.get("export") or ("Yes" if kind == CHECKBOX else _next_export(pdf, existing_group, name)))
         _rename_on_state(pdf, xref, export)
@@ -910,10 +1146,49 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
         if pdf.xref_get_key(fx, "V")[0] == "null" or kind == CHECKBOX or existing_group is None:
             pdf.xref_set_key(fx, "V", "/Off")
         pdf.xref_set_key(xref, "AS", "/Off")
+    if pg.rotation:
+        pdf.xref_set_key(xref, "MK/R", str(pg.rotation))
+    if full_name:
+        fx = _field_xref(pdf, xref)
+        if fx == xref:
+            raise FormError(_("Impossibile creare il campo con un nome gerarchico."))
+        _rename_field(pdf, fx, name, full_name)
     rest = {k: v for k, v in props.items() if k not in ("export", "caption")}
     if rest:
         update_properties(pdf, page, xref, **rest)
+    elif kind in (TEXT, COMBO, LIST):
+        regenerate(pdf, page, xref)
     return xref
+
+
+DATE_KIND = "date"
+MIN_SIZE = 4.0
+
+
+def clamp_rect(pdf: pymupdf.Document, page: int, rect) -> pymupdf.Rect:
+    """Riquadro limitato all'area visibile della pagina e portato almeno a 4×4 pt."""
+    r = pymupdf.Rect(rect).normalize()
+    pg = pdf[page]
+    area = pymupdf.Rect(pg.rect * pg.derotation_matrix).normalize()
+    area = pymupdf.Rect(0, 0, area.width, area.height)
+    if r.width < MIN_SIZE:
+        r.x1 = r.x0 + MIN_SIZE
+    if r.height < MIN_SIZE:
+        r.y1 = r.y0 + MIN_SIZE
+    w, h = min(r.width, area.width), min(r.height, area.height)
+    x0 = min(max(r.x0, area.x0), area.x1 - w)
+    y0 = min(max(r.y0, area.y0), area.y1 - h)
+    return pymupdf.Rect(x0, y0, x0 + w, y0 + h)
+
+
+def default_name(pdf: pymupdf.Document, kind: str) -> str:
+    """Nome predefinito con contatore: «Testo1», «Casella2»…"""
+    base = default_base_name(kind)
+    taken = field_names(pdf)
+    n = 1
+    while f"{base}{n}" in taken:
+        n += 1
+    return f"{base}{n}"
 
 
 def _next_export(pdf: pymupdf.Document, group: FieldInfo | None, name: str) -> str:
@@ -957,15 +1232,162 @@ def _merge_into_group(pdf: pymupdf.Document, xref: int, own_parent: int, group: 
 
 
 def _remove_from_acroform(pdf: pymupdf.Document, field_xref: int) -> None:
-    cat = pdf.pdf_catalog()
-    t, v = pdf.xref_get_key(cat, "AcroForm/Fields")
-    if t != "array":
-        return
+    """Toglie il campo dall'albero del modulo (dal genitore o da /Fields)."""
+    parent = _parent_node(pdf, field_xref) if pdf.xref_get_key(field_xref, "T")[0] != "null" else None
+    kids = _children(pdf, parent)
+    if field_xref in kids:
+        _set_children(pdf, parent, [k for k in kids if k != field_xref])
+
+
+class NameTaken(FormError):
+    """Esiste già un campo con questo nome (si può proporre l'unione)."""
+
+    def __init__(self, name: str, compatible: bool):
+        super().__init__(_("Esiste già un campo chiamato «{n}».").format(n=name))
+        self.name = name
+        self.compatible = compatible
+
+
+def _root_of(pdf: pymupdf.Document, xref: int) -> int:
+    seen = set()
+    x = xref
+    while x not in seen:
+        seen.add(x)
+        p = _parent_node(pdf, x)
+        if p is None:
+            return x
+        x = p
+    return x  # gerarchia ciclica: interrotta
+
+
+def repair_orphans(pdf: pymupdf.Document) -> int:
+    """Collega a /AcroForm /Fields i campi con widget nelle pagine ma non elencati.
+    Restituisce il numero di campi ricollegati."""
+    listed = set(_acroform_fields(pdf))
+    roots: list[int] = []
+    for i in range(pdf.page_count):
+        for w in pdf[i].widgets():
+            r = _root_of(pdf, w.xref)
+            if r not in listed and r not in roots:
+                roots.append(r)
+    if roots:
+        _set_children(pdf, None, _acroform_fields(pdf) + roots)
+    return len(roots)
+
+
+def orphan_count(pdf: pymupdf.Document) -> int:
+    listed = set(_acroform_fields(pdf))
+    roots = set()
+    for i in range(pdf.page_count):
+        for w in pdf[i].widgets():
+            r = _root_of(pdf, w.xref)
+            if r not in listed:
+                roots.add(r)
+    return len(roots)
+
+
+def needs_appearances(pdf: pymupdf.Document) -> bool:
+    return pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm/NeedAppearances") == ("bool", "true")
+
+
+def regenerate_all(pdf: pymupdf.Document) -> int:
+    """Rigenera l'aspetto di tutti i campi e toglie /NeedAppearances."""
+    n = 0
+    for f in list_fields(pdf):
+        if f.kind in (TEXT, COMBO, LIST):
+            _regen_field(pdf, f.field_xref, f.page, f.xref)
+            n += 1
+        elif f.kind in (CHECKBOX, RADIO) and not _states_of(pdf, f.xref):
+            regenerate(pdf, f.page, f.xref)
+            n += 1
+    if pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] != "null":
+        pdf.xref_set_key(pdf.pdf_catalog(), "AcroForm/NeedAppearances", "null")
+    return n
+
+
+def prepare_for_edit(pdf: pymupdf.Document) -> None:
+    """Riparazioni da applicare insieme alla prima modifica del modulo."""
+    if orphan_count(pdf):
+        repair_orphans(pdf)
+    if needs_appearances(pdf):
+        regenerate_all(pdf)
+
+
+def custom_scripts(pdf: pymupdf.Document) -> list[tuple[str, str]]:
+    """(nome del campo, evento) delle azioni personalizzate che Foliant non esegue."""
+    out = []
+    names = {"K": _("battitura"), "F": _("formato"), "V": _("validazione"), "C": _("calcolo")}
+    for f in list_fields(pdf):
+        for trig, label in names.items():
+            js = _action_script(pdf, f.xref, trig)
+            if not js:
+                continue
+            if trig == "C" and Calculation.from_script(js):
+                continue
+            if trig == "V" and (Validation.from_script(js).empty is False):
+                continue
+            if trig in ("K", "F") and not fm.is_custom_script(js):
+                continue
+            item = (f.name, label)
+            if item not in out:
+                out.append(item)
+    return out
+
+
+def fill_blocked_reason(pdf: pymupdf.Document) -> str | None:
+    """Motivo per cui il documento non consente la compilazione (None se consentita)."""
     try:
-        refs = [r for r in ps.parse(v) if isinstance(r, ps.Ref) and r[0] != field_xref]
-    except ps.PdfSyntaxError:
-        return
-    pdf.xref_set_key(cat, "AcroForm/Fields", ps.serialize(refs))
+        perms = pdf.permissions
+    except Exception:
+        perms = -1
+    if pdf.is_encrypted or (pdf.metadata or {}).get("encryption"):
+        if not (perms & pymupdf.PDF_PERM_FORM) and not (perms & pymupdf.PDF_PERM_ANNOTATE):
+            return _("I permessi del documento non consentono la compilazione dei moduli.")
+    t, v = pdf.xref_get_key(pdf.pdf_catalog(), "Perms/DocMDP")
+    if t == "xref":
+        p = pdf.xref_get_key(int(v.split()[0]), "Reference")
+        if p[0] != "null" and "/P 1" in pdf.xref_object(int(v.split()[0]), compressed=True).replace(" ", " "):
+            return _("Il documento è certificato e non consente modifiche.")
+    return None
+
+
+def navigation_order(pdf: pymupdf.Document, page: int) -> list[FieldInfo]:
+    """Widget della pagina nell'ordine di tabulazione dichiarato (/Tabs)."""
+    fields = list_fields(pdf, page)
+    tabs = _value_of(*pdf.xref_get_key(pdf.page_xref(page), "Tabs"))
+    if tabs in ("R", "C"):
+        pg = pdf[page]
+        rot = pg.rotation_matrix
+
+        def shown(f):
+            return pymupdf.Rect(f.rect) * rot
+
+        return sort_geometric(fields, "row" if tabs == "R" else "column", key=shown)
+    return fields
+
+
+def sort_geometric(fields: list[FieldInfo], by: str, key=None) -> list[FieldInfo]:
+    """Ordine per righe (sinistra→destra, poi in basso) o per colonne. Due campi sono
+    sulla stessa riga se si sovrappongono verticalmente per almeno metà dell'altezza del più basso."""
+    rect = key or (lambda f: f.rect)
+    items = [(f, pymupdf.Rect(rect(f))) for f in fields]
+    if by == "column":
+        items = [(f, pymupdf.Rect(r.y0, r.x0, r.y1, r.x1)) for f, r in items]
+    items.sort(key=lambda it: (it[1].y0, it[1].x0))
+    rows: list[list] = []
+    for f, r in items:
+        for row in rows:
+            ref = row[0][1]
+            overlap = min(ref.y1, r.y1) - max(ref.y0, r.y0)
+            if overlap >= 0.5 * min(ref.height, r.height):
+                row.append((f, r))
+                break
+        else:
+            rows.append([(f, r)])
+    out = []
+    for row in rows:
+        out.extend(f for f, _r in sorted(row, key=lambda it: it[1].x0))
+    return out
 
 
 def _da(font: str, size: float, color: tuple) -> str:
@@ -997,9 +1419,9 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         if not new:
             raise FormError(_("Il nome del campo non può essere vuoto."))
         if new != info.name:
-            others = {f.name for f in list_fields(pdf) if f.field_xref != fx}
+            others = {f.name: f.kind for f in list_fields(pdf) if f.field_xref != fx}
             if new in others:
-                raise FormError(_("Esiste già un campo chiamato «{n}».").format(n=new))
+                raise NameTaken(new, others[new] == kind)
             _rename_field(pdf, fx, info.name, new)
     t, v = _inherited(pdf, xref, "Ff")
     try:
@@ -1028,8 +1450,10 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
             maxlen = max(0, int(props["maxlen"] or 0))
         if flags & pymupdf.PDF_TX_FIELD_IS_COMB and not maxlen:
             raise FormError(_("Per la suddivisione in caselle serve una lunghezza massima."))
-        if flags & pymupdf.PDF_TX_FIELD_IS_COMB and flags & pymupdf.PDF_TX_FIELD_IS_MULTILINE:
-            raise FormError(_("Un campo suddiviso in caselle non può essere su più righe."))
+        if flags & pymupdf.PDF_TX_FIELD_IS_COMB:
+            # il pettine esclude multiriga, password e scorrimento
+            flags &= ~(pymupdf.PDF_TX_FIELD_IS_MULTILINE | pymupdf.PDF_TX_FIELD_IS_PASSWORD)
+            flags |= FF_DO_NOT_SCROLL
         if "maxlen" in props:
             pdf.xref_set_key(fx, "MaxLen", str(maxlen) if maxlen else "null")
             if maxlen and len(info.value or "") > maxlen:
@@ -1049,18 +1473,69 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
             flag(pymupdf.PDF_CH_FIELD_IS_MULTI_SELECT, bool(props["multiselect"]))
         if "editable" in props and kind == COMBO:
             flag(pymupdf.PDF_CH_FIELD_IS_EDIT, bool(props["editable"]))
-        if "options" in props:
-            opts = [str(o) for o in props["options"] if str(o).strip()]
-            if not opts:
+        if "sort" in props:
+            flag(pymupdf.PDF_CH_FIELD_IS_SORT, bool(props["sort"]))
+        if "commit_on_change" in props:
+            flag(pymupdf.PDF_CH_FIELD_IS_COMMIT_ON_SEL_CHANGE, bool(props["commit_on_change"]))
+        opts_in = props.get("options")
+        if opts_in is None and props.get("sort") and not info.sort:
+            opts_in = list(zip(info.exports, info.options))
+        if opts_in is not None:
+            pairs = []
+            for o in opts_in:
+                if isinstance(o, (list, tuple)):
+                    e, d = str(o[0]), str(o[1] if len(o) > 1 else o[0])
+                else:
+                    e = d = str(o)
+                if d.strip() or e.strip():
+                    pairs.append((e, d))
+            if not pairs:
                 raise FormError(_("Un elenco deve avere almeno una voce."))
-            pdf.xref_set_key(fx, "Opt", ps.serialize(opts))
+            if flags & pymupdf.PDF_CH_FIELD_IS_SORT:
+                import locale
+                try:
+                    keyf = locale.strxfrm
+                    pairs.sort(key=lambda p_: (keyf(p_[1].casefold()), p_[1]))
+                except Exception:
+                    pairs.sort(key=lambda p_: p_[1].casefold())
+            pdf.xref_set_key(fx, "Opt", ps.serialize([e if e == d else [e, d] for e, d in pairs]))
+            exports = [e for e, _d in pairs]
             current = info.value if isinstance(info.value, list) else ([info.value] if info.value else [])
-            keep = [c for c in current if c in opts or (kind == COMBO and flags & pymupdf.PDF_CH_FIELD_IS_EDIT)]
+            keep = [c for c in current if c in exports or (kind == COMBO and flags & pymupdf.PDF_CH_FIELD_IS_EDIT)]
             if keep != current:
                 pdf.xref_set_key(fx, "V", ps.encode_string(keep[0]) if len(keep) == 1 else (ps.serialize(keep) if keep else "null"))
             if kind == LIST:
-                idx = sorted(opts.index(c) for c in keep if c in opts)
+                idx = sorted(exports.index(c) for c in keep if c in exports)
                 pdf.xref_set_key(fx, "I", ps.serialize(idx) if idx else "null")
+    if kind == RADIO:
+        if "no_toggle_off" in props:
+            flag(FF_NO_TOGGLE_OFF, bool(props["no_toggle_off"]))
+        if "in_unison" in props:
+            flag(FF_IN_UNISON, bool(props["in_unison"]))
+    if kind == TEXT:
+        if "do_not_scroll" in props:
+            flag(FF_DO_NOT_SCROLL, bool(props["do_not_scroll"]))
+    if kind in (TEXT, COMBO) and "no_spell" in props:
+        flag(FF_NO_SPELL, bool(props["no_spell"]))
+    if "no_export" in props:
+        flag(FF_NO_EXPORT, bool(props["no_export"]))
+    if "visibility" in props or "locked" in props:
+        af = _annot_flags(pdf, xref) & ~(AF_HIDDEN | AF_NOVIEW | AF_PRINT) if "visibility" in props else _annot_flags(pdf, xref)
+        vis = props.get("visibility")
+        if vis == "hidden":
+            af |= AF_HIDDEN
+        elif vis == "print":
+            af |= AF_NOVIEW | AF_PRINT
+        elif vis == "screen":
+            pass
+        elif vis is not None:
+            af |= AF_PRINT
+        if "locked" in props:
+            af = (af | AF_LOCKED) if props["locked"] else (af & ~AF_LOCKED)
+        pdf.xref_set_key(xref, "F", str(af))
+    if "check_style" in props and kind in (CHECKBOX, RADIO):
+        ch = CHECK_STYLES.get(props["check_style"], "4")
+        pdf.xref_set_key(xref, "MK/CA", ps.encode_string(ch))
     if flags != old_flags:
         pdf.xref_set_key(fx, "Ff", str(flags))
     if "tooltip" in props:
@@ -1167,16 +1642,106 @@ def _set_default(pdf: pymupdf.Document, fx: int, kind: str, value: Any, info: Fi
         pdf.xref_set_key(fx, "DV", ps.encode_string(str(value)))
 
 
-def _rename_field(pdf: pymupdf.Document, fx: int, old_full: str, new_full: str) -> None:
-    """Rinomina un campo: cambia il nome parziale /T (il prefisso dei genitori resta)."""
-    old_parts, new_parts = old_full.split("."), new_full.split(".")
-    if len(new_parts) == len(old_parts) and new_parts[:-1] == old_parts[:-1]:
-        partial = new_parts[-1]
+def _acroform_fields(pdf: pymupdf.Document) -> list[int]:
+    t, v = pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm/Fields")
+    if t == "xref":
+        v, t = pdf.xref_object(int(v.split()[0]), compressed=True), "array"
+    if t != "array":
+        return []
+    try:
+        return [r[0] for r in ps.parse(v) if isinstance(r, ps.Ref)]
+    except ps.PdfSyntaxError:
+        return []
+
+
+def _ensure_acroform(pdf: pymupdf.Document) -> None:
+    cat = pdf.pdf_catalog()
+    if pdf.xref_get_key(cat, "AcroForm")[0] == "null":
+        pdf.xref_set_key(cat, "AcroForm", "<</Fields[]/DA(0 g /Helv 0 Tf)>>")
+    _ensure_font_resource(pdf, "Helv")
+
+
+def _children(pdf: pymupdf.Document, parent: int | None) -> list[int]:
+    if parent is None:
+        return _acroform_fields(pdf)
+    t, v = pdf.xref_get_key(parent, "Kids")
+    if t != "array":
+        return []
+    try:
+        return [r[0] for r in ps.parse(v) if isinstance(r, ps.Ref)]
+    except ps.PdfSyntaxError:
+        return []
+
+
+def _set_children(pdf: pymupdf.Document, parent: int | None, kids: list[int]) -> None:
+    value = ps.serialize([ps.Ref(k) for k in kids])
+    if parent is None:
+        _ensure_acroform(pdf)
+        pdf.xref_set_key(pdf.pdf_catalog(), "AcroForm/Fields", value)
     else:
-        partial = new_full if "." not in old_full else None
-    if partial is None:
-        raise FormError(_("Per rinominare un campo annidato cambia solo l'ultima parte del nome."))
-    pdf.xref_set_key(fx, "T", ps.encode_string(partial))
+        pdf.xref_set_key(parent, "Kids", value)
+
+
+def _parent_node(pdf: pymupdf.Document, fx: int) -> int | None:
+    t, v = pdf.xref_get_key(fx, "Parent")
+    return int(v.split()[0]) if t == "xref" else None
+
+
+def _rename_field(pdf: pymupdf.Document, fx: int, old_full: str, new_full: str) -> None:
+    """Rinomina un campo. Un nome con punti («cliente.nome») sposta il campo sotto
+    i nodi genitori corrispondenti, creandoli se servono."""
+    parts = [p.strip() for p in new_full.split(".")]
+    if any(not p for p in parts):
+        raise FormError(_("Il nome «{n}» non è valido: ogni parte tra i punti deve essere non vuota.").format(n=new_full))
+    old_parts = old_full.split(".")
+    if parts[:-1] == old_parts[:-1]:
+        pdf.xref_set_key(fx, "T", ps.encode_string(parts[-1]))
+        return
+    old_parent = _parent_node(pdf, fx)
+    siblings = _children(pdf, old_parent)
+    if fx in siblings:
+        _set_children(pdf, old_parent, [k for k in siblings if k != fx])
+    parent: int | None = None
+    for part in parts[:-1]:
+        child = None
+        for k in _children(pdf, parent):
+            if (pdf.xref_get_key(k, "Subtype")[1] != "/Widget"
+                    and _value_of(*pdf.xref_get_key(k, "T")) == part and k != fx):
+                child = k
+                break
+        if child is None:
+            child = pdf.get_new_xref()
+            pdf.update_object(child, f"<</T{ps.encode_string(part)}/Kids[]" +
+                              (f"/Parent {parent} 0 R" if parent else "") + ">>")
+            _set_children(pdf, parent, _children(pdf, parent) + [child])
+        parent = child
+    _set_children(pdf, parent, _children(pdf, parent) + [fx])
+    pdf.xref_set_key(fx, "Parent", f"{parent} 0 R" if parent else "null")
+    pdf.xref_set_key(fx, "T", ps.encode_string(parts[-1]))
+
+
+def merge_into(pdf: pymupdf.Document, page: int, xref: int, target_name: str) -> None:
+    """Unisce il widget al campo `target_name` (stesso tipo): i widget condividono il valore."""
+    info = field_info(pdf, page, xref)
+    target = next((f for f in list_fields(pdf) if f.name == target_name and f.field_xref != info.field_xref), None)
+    if target is None:
+        raise FormError(_("Il campo «{n}» non esiste.").format(n=target_name))
+    if target.kind != info.kind:
+        raise FormError(_("Non si possono unire campi di tipo diverso."))
+    if target.field_xref == target.xref or info.field_xref == info.xref:
+        raise FormError(_("Questi campi non si possono unire."))
+    old = info.field_xref
+    kids = _widgets_of_field(pdf, target.field_xref)
+    pdf.xref_set_key(target.field_xref, "Kids", ps.serialize([ps.Ref(k) for k in kids + [xref]]))
+    pdf.xref_set_key(xref, "Parent", f"{target.field_xref} 0 R")
+    rest = [k for k in _widgets_of_field(pdf, old) if k != xref]
+    if rest:
+        pdf.xref_set_key(old, "Kids", ps.serialize([ps.Ref(k) for k in rest]))
+    else:
+        parent = _parent_node(pdf, old)
+        _set_children(pdf, parent, [k for k in _children(pdf, parent) if k != old])
+        pdf.xref_set_key(old, "Kids", "[]")
+    _regen_field(pdf, target.field_xref, page, xref)
 
 
 def delete_field(pdf: pymupdf.Document, page: int, xref: int) -> None:
@@ -1323,22 +1888,25 @@ def set_tab_order(pdf: pymupdf.Document, page: int, xrefs: list[int]) -> None:
         pdf.update_object(arr_xref, new)
     else:
         pdf.xref_set_key(pg.xref, "Annots", new)
-    pdf.xref_set_key(pg.xref, "Tabs", "null")
+    version = (pdf.metadata or {}).get("format", "")
+    pdf.xref_set_key(pg.xref, "Tabs", "/A" if "2.0" in version else "null")
 
 
 def auto_tab_order(pdf: pymupdf.Document, page: int, by: str = "row") -> list[int]:
-    """Ordina per righe (dall'alto, poi da sinistra) o per colonne."""
-    fields = list_fields(pdf, page)
-
-    def key(f: FieldInfo):
-        r = f.rect
-        if by == "column":
-            return (round(r.x0 / 12), r.y0, r.x0)
-        return (round((r.y0 + r.y1) / 2 / 10), r.x0, r.y0)
-
-    order = [f.xref for f in sorted(fields, key=key)]
+    """Ordine per righe o per colonne (sull'orientamento visualizzato): dichiarato in /Tabs
+    e applicato anche all'array delle annotazioni per i lettori che lo ignorano."""
+    rot = pdf[page].rotation_matrix
+    fields = sort_geometric(list_fields(pdf, page), by, key=lambda f: pymupdf.Rect(f.rect) * rot)
+    order = [f.xref for f in fields]
     set_tab_order(pdf, page, order)
+    pdf.xref_set_key(pdf.page_xref(page), "Tabs", "/C" if by == "column" else "/R")
     return order
+
+
+def tab_mode(pdf: pymupdf.Document, page: int) -> str:
+    """'row', 'column', 'structure' oppure 'manual' (ordine delle annotazioni)."""
+    tabs = _value_of(*pdf.xref_get_key(pdf.page_xref(page), "Tabs"))
+    return {"R": "row", "C": "column", "S": "structure"}.get(tabs or "", "manual")
 
 
 # ====================================================================== appiattimento e XFA
