@@ -1020,3 +1020,34 @@ def test_ann26_snapshot_area(comments, tmp_path):
     doc = saved(window, view, tmp_path)
     st, = annots(doc, 0, "Stamp")
     assert key_of(doc, st.xref, "IT")[1] == "/StampSnapshot"
+
+
+def test_ann35_apply_filter_to_page_and_dates(comments, monkeypatch):
+    """ANN-35: «Applica il filtro alla pagina» nasconde in pagina le escluse senza cambiare /F; filtro per data."""
+    window, view, module = comments
+    a = module.ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(100, 400), (200, 500)],
+                          engine.Style(color=(1, 0, 0), width=3), "Anna")
+    import pytest
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(engine, "pdf_now", lambda: "D:20200101100000+00'00'")
+        b = module.ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(300, 400), (400, 500)],
+                              engine.Style(color=(1, 0, 0), width=3), "Luca")
+    panel = module.comments
+    panel.reload()
+    panel.set_filter("days", {"7"})
+    assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(0, a)]
+    flags_before = module.ctrl.info(0, b).flags
+    panel.set_apply_to_page(True)
+    img = view._render_page(0, 1.0)
+
+    def red(x, y):
+        c = img.pixelColor(int(x), int(y))
+        return c.red() > 150 and c.green() < 100
+
+    assert any(red(100 + d, 450) for d in range(-2, 3))
+    assert not any(red(300 + d, 450) for d in range(-2, 3))
+    assert module.ctrl.info(0, b).flags == flags_before
+    panel.set_filter("days", set())
+    img = view._render_page(0, 1.0)
+    assert any(img.pixelColor(300 + d, 450).red() > 150 and img.pixelColor(300 + d, 450).green() < 100
+               for d in range(-2, 3))

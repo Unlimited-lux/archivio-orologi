@@ -505,7 +505,8 @@ class CommentsPanel(QWidget):
         self.count.setStyleSheet(f"color:{theme.hex_color('text_muted')}")
         lay.addWidget(self.count)
         self.filters = {"types": set(), "authors": set(), "status": set(), "colors": set(), "replies": set(),
-                        "pages": set(), "marked": set()}
+                        "pages": set(), "marked": set(), "days": set()}
+        self.apply_to_page = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(50)
@@ -584,6 +585,14 @@ class CommentsPanel(QWidget):
             return False
         if f["marked"] and ("yes" if info.marked else "no") not in f["marked"]:
             return False
+        if f["days"]:
+            dt = engine.parse_pdf_date(info.modified or info.created)
+            if dt is None:
+                return False
+            from datetime import datetime, timedelta
+            now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+            if now - dt > timedelta(days=min(int(d) for d in f["days"])):
+                return False
         if query:
             hay = " ".join([info.contents, info.marked_text, info.author] + [r.contents for r in info.replies])
             if query not in _fold(hay):
@@ -660,6 +669,7 @@ class CommentsPanel(QWidget):
         filtered = len(shown) != total
         self.count.setText(_("{n} di {t} commenti").format(n=len(shown), t=total) if filtered
                            else _("{t} commenti").format(t=total))
+        self._update_page_filter()
         self._sync_from_selection()
 
     def _item(self, info: engine.AnnotInfo, reply: bool = False) -> QTreeWidgetItem:
@@ -742,12 +752,44 @@ class CommentsPanel(QWidget):
             a.setChecked(key in self.filters["marked"])
             a.toggled.connect(lambda on, k=key: self._toggle_filter("marked", k, on))
         m.addAction(_("Pagine…"), self._ask_pages)
+        sub = m.addMenu(_("Data di modifica"))
+        for days, label in (("1", "Ultime 24 ore"), ("7", "Ultimi 7 giorni"), ("30", "Ultimi 30 giorni")):
+            a = sub.addAction(_(label))
+            a.setCheckable(True)
+            a.setChecked(days in self.filters["days"])
+            a.toggled.connect(lambda on, k=days: self._toggle_filter("days", k, on))
+        m.addSeparator()
+        ap = m.addAction(_("Applica il filtro alla pagina"))
+        ap.setCheckable(True)
+        ap.setChecked(self.apply_to_page)
+        ap.toggled.connect(self.set_apply_to_page)
         sub = m.addMenu(_("Stato"))
         for st, label in STATE_LABELS.items():
             a = sub.addAction(_(label))
             a.setCheckable(True)
             a.setChecked(st in self.filters["status"])
             a.toggled.connect(lambda on, k=st: self._toggle_filter("status", k, on))
+
+    def set_apply_to_page(self, on: bool) -> None:
+        self.apply_to_page = on
+        self._update_page_filter()
+
+    def _update_page_filter(self) -> None:
+        if self.view is None:
+            return
+        from .visibility import set_view_filter
+        keep = None
+        if self.apply_to_page and self._filter_active():
+            keep = {}
+            query = _fold(self.search.text().strip())
+            for info in self._infos:
+                if self._matches(info, query):
+                    keep.setdefault(info.page, set()).add(info.xref)
+        if keep != getattr(self.view, "_annot_keep", None):
+            set_view_filter(self.view, keep, hidden=self.ctrl.annotations_hidden(self.view))
+
+    def _filter_active(self) -> bool:
+        return any(self.filters.values()) or bool(self.search.text().strip())
 
     def _ask_pages(self) -> None:
         text = dialogs.ask_text(self, _("Filtra per pagine"), _("Pagine (es. 1-3, 7; vuoto = tutte):"), "")
