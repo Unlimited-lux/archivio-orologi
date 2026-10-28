@@ -794,6 +794,20 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int)
     text = info.contents or info.marked_text
     if text:
         menu.addAction(_("Copia testo"), lambda: copy_text_to_clipboard(text))
+    if info.kind == engine.STAMP:
+        rot = menu.addMenu(_("Ruota"))
+        rot.addAction(_("90° in senso orario"), lambda: ctrl.rotate(-90, [(page, xref)]))
+        rot.addAction(_("90° in senso antiorario"), lambda: ctrl.rotate(90, [(page, xref)]))
+
+        def ask_angle():
+            value = dialogs.ask_text(ctrl.view(), _("Ruota"), _("Gradi (senso antiorario):"), "30")
+            try:
+                deg = float((value or "").replace(",", "."))
+            except ValueError:
+                return
+            ctrl.rotate(deg, [(page, xref)])
+
+        rot.addAction(_("Angolo…"), ask_angle)
     menu.addSeparator()
     if not info.irt:
         menu.addAction(_("Porta in primo piano"), lambda: ctrl.restack(True, [(page, xref)]))

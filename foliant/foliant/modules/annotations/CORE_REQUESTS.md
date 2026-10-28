@@ -23,3 +23,9 @@
 
 6. **Preferenze utente condivise (ANN-02).** Il nome autore è salvato in `annotations/author`;
    se il nucleo introduce una finestra Preferenze, conviene una voce «Nome autore» che usi questa chiave.
+
+7. **Finestre dei test mai distrutte.** La fixture `window` chiude la finestra ma non la elimina
+   (`deleteLater`/`WA_DeleteOnClose`): i widget restano vivi e ogni `theme.apply()` successivo
+   li ripulisce tutti, per cui la configurazione di ogni test cresce linearmente (fino a ~10 s a
+   fine suite). Proposta: `win.setAttribute(Qt.WA_DeleteOnClose)` nella fixture oppure
+   `win.deleteLater()` + `QApplication.sendPostedEvents(None, QEvent.DeferredDelete)` alla fine.

@@ -351,6 +351,18 @@ class Controller(QObject):
 
         return bool(self.apply(_("Ridimensiona annotazione"), run))
 
+    def rotate(self, degrees: float, items=None) -> bool:
+        items = list(items if items is not None else self.selection)
+        if not items:
+            return False
+
+        def run(pdf):
+            for page, xref in items:
+                engine.rotate_annot(pdf, page, xref, degrees)
+            return True
+
+        return bool(self.apply(_("Ruota annotazione"), run))
+
     def move_vertex(self, page: int, xref: int, index: int, point) -> bool:
         info = self.info(page, xref)
         if info is None:

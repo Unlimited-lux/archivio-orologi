@@ -544,3 +544,36 @@ def test_ann33_measures_csv(comments):
     assert rows[0][0] == "Pagina" and len(rows) == 4
     assert [r[3] for r in rows[1:]] == ["1,00 m", "1,50 m", "1,00 m²"]
     assert float(rows[2][2]) == 1.5
+
+
+def test_ann03_rotate_stamp(comments, tmp_path):
+    """ANN-03: timbro ruotato di 30°: /Rect contiene l'aspetto ruotato e la resa è ruotata."""
+    window, view, module = comments
+    xref = module.ctrl.apply("s", engine.create_stamp, 0, (300, 400), engine.StampSpec("Approvato", name="Approved"),
+                             engine.Style(), "A")
+    before = module.ctrl.info(0, xref).rect
+    assert module.ctrl.rotate(30, [(0, xref)])
+    doc = saved(window, view, tmp_path)
+    st, = annots(doc, 0, "Stamp")
+    w, h = before.width, before.height
+    import math
+    exp_h = w * math.sin(math.radians(30)) + h * math.cos(math.radians(30))
+    assert abs(st.rect.height - exp_h) < 1
+    # i pixel colorati occupano gli angoli opposti dell'ingombro (diagonale) e non escono da /Rect
+    pix = doc[0].get_pixmap(clip=st.rect + (-3, -3, 3, 3))
+    red = [(x, y) for y in range(pix.height) for x in range(pix.width) if pix.pixel(x, y)[0] > 150 and pix.pixel(x, y)[1] < 100]
+    assert red
+    assert min(x for x, y in red) >= 2 and max(x for x, y in red) <= pix.width - 2
+
+
+def test_ann16_autofit_height(comments, tmp_path):
+    """ANN-16: con l'adattamento automatico, aggiungendo cinque righe l'altezza di /Rect aumenta."""
+    window, view, module = comments
+    xref = module.ctrl.apply("t", engine.create_freetext, 0, (100, 400, 300, 430), "Una riga",
+                             engine.Style(fontsize=12, width=1, color=(0, 0, 0)), "A")
+    h1 = module.ctrl.info(0, xref).rect.height
+    module.ctrl.apply("c", engine.set_contents, 0, xref, "Una riga\nDue\nTre\nQuattro\nCinque\nSei")
+    h2 = module.ctrl.info(0, xref).rect.height
+    assert h2 > h1 + 50
+    doc = saved(window, view, tmp_path)
+    assert "Sei" in doc[0].get_text()

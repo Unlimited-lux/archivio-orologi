@@ -176,6 +176,7 @@ class Style:
     fontsize: float = 12.0
     text_color: tuple | None = None
     align: int = 0               # 0 sinistra, 1 centro, 2 destra
+    autofit: bool = True         # caselle di testo: altezza adattata al testo
     icon: str = "Comment"        # icona delle note
 
     def copy(self, **changes) -> "Style":
@@ -462,6 +463,8 @@ def create_freetext(pdf: pymupdf.Document, page_no: int, rect, text: str, style:
             pdf.xref_set_key(annot.xref, "CL", "null")
             annot = page.load_annot(annot.xref)
     xref = _finish(annot, author, text, kind=CALLOUT if callout else FREETEXT)
+    if style.autofit and not callout:
+        pdf.xref_set_key(xref, AUTOFIT_KEY, "true")
     if style.width > 0 and style.color is not None:
         pdf.xref_set_key(xref, FT_BORDER_KEY, "[{:.3f} {:.3f} {:.3f}]".format(*_rgb(style.color)))
     refresh_freetext(pdf, page_no, xref)
@@ -469,6 +472,7 @@ def create_freetext(pdf: pymupdf.Document, page_no: int, rect, text: str, style:
 
 
 FT_BORDER_KEY = "FoliantBorder"
+AUTOFIT_KEY = "FoliantAutoFit"
 
 
 def _array(pdf: pymupdf.Document, xref: int, key: str) -> list[float] | None:
@@ -573,6 +577,13 @@ def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     pad = 2 + bw
     avail = max(10.0, inner.width - 2 * pad)
     lines = _wrap(text, avail, size)
+    if pdf.xref_get_key(xref, AUTOFIT_KEY)[1] == "true" and not pts:
+        need = 2 * pad + size * 1.2 * len(lines) + size * 0.2
+        if need > inner.height + 0.5:
+            # adattamento automatico: si allunga la casella verso il basso e si ridisegna
+            grown = pymupdf.Rect(rect.x0, rect.y0, rect.x1, rect.y1 + (need - inner.height))
+            pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, grown)))
+            return refresh_freetext(pdf, page_no, xref)
     r, g, b = _rgb(tcolor)
     lead = size * 1.2
     y = y1 - pad - size * 0.9
@@ -1025,9 +1036,71 @@ def _stamp_appearance(spec: StampSpec, w: float, h: float, opacity: float) -> by
     return "\n".join(ops).encode("latin-1")
 
 
+ANGLE_KEY = "FoliantAngle"
+SIZE_KEY = "FoliantSize"
+
+
+def _rotation(pdf: pymupdf.Document, xref: int) -> tuple[float, tuple[float, float] | None]:
+    k, v = pdf.xref_get_key(xref, ANGLE_KEY)
+    angle = float(v) if k in ("int", "real") else 0.0
+    size = _array(pdf, xref, SIZE_KEY)
+    return angle, (size[0], size[1]) if size and len(size) == 2 else None
+
+
+def _rotated_box(w: float, h: float, angle: float) -> tuple[float, float]:
+    a = math.radians(angle)
+    return abs(w * math.cos(a)) + abs(h * math.sin(a)), abs(w * math.sin(a)) + abs(h * math.cos(a))
+
+
+def _apply_rotation(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
+    """Ruota l'aspetto (/Matrix del Form XObject) e adatta /Rect all'ingombro ruotato."""
+    angle, size = _rotation(pdf, xref)
+    annot = get_annot(page, xref)
+    k, v = pdf.xref_get_key(xref, "AP/N")
+    if k != "xref" or size is None:
+        return
+    ap = int(v.split()[0])
+    w, h = size
+    a = math.radians(angle)
+    c, s_ = math.cos(a), math.sin(a)
+    pdf.xref_set_key(ap, "Matrix", f"[{c:.6f} {s_:.6f} {-s_:.6f} {c:.6f} 0 0]")
+    bbox = _array(pdf, ap, "BBox")
+    if bbox and len(bbox) == 4 and abs((bbox[2] - bbox[0]) - w) > 0.5:
+        # aspetto con riquadro diverso (es. immagine 1×1): la scala porta il riquadro alla dimensione
+        sx, sy = w / max(bbox[2] - bbox[0], 1e-6), h / max(bbox[3] - bbox[1], 1e-6)
+        pdf.xref_set_key(ap, "Matrix", f"[{c * sx:.6f} {s_ * sx:.6f} {-s_ * sy:.6f} {c * sy:.6f} 0 0]")
+    rw, rh = _rotated_box(w, h, angle)
+    r = annot.rect
+    cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+    new = pymupdf.Rect(cx - rw / 2, cy - rh / 2, cx + rw / 2, cy + rh / 2)
+    pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, new)))
+
+
+def rotate_annot(pdf: pymupdf.Document, page_no: int, xref: int, degrees: float) -> None:
+    """Ruota timbri (vettoriali e immagine) di `degrees` gradi in senso antiorario (ANN-03)."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    if annot.type[0] != pymupdf.PDF_ANNOT_STAMP:
+        raise AnnotationError("Si possono ruotare solo i timbri.")
+    if annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
+        raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
+    angle, size = _rotation(pdf, xref)
+    if size is None:
+        r = annot.rect
+        size = (r.width, r.height)
+        pdf.xref_set_key(xref, SIZE_KEY, f"[{size[0]:.3f} {size[1]:.3f}]")
+    angle = (angle + degrees) % 360
+    pdf.xref_set_key(xref, ANGLE_KEY, f"{angle:g}")
+    touch(get_annot(page, xref))
+    _apply_rotation(pdf, page, xref)
+
+
 def _write_stamp_ap(pdf: pymupdf.Document, annot: pymupdf.Annot, spec: StampSpec, opacity: float) -> None:
     r = annot.rect
     w, h = r.width, r.height
+    angle, size = _rotation(pdf, annot.xref)
+    if size is not None:
+        w, h = size
     font_b = pdf.get_new_xref()
     pdf.update_object(font_b, "<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>")
     font_r = pdf.get_new_xref()
@@ -1038,6 +1111,8 @@ def _write_stamp_ap(pdf: pymupdf.Document, annot: pymupdf.Annot, spec: StampSpec
                           f"/ExtGState<</GS0<</Type/ExtGState/CA {opacity:.3f}/ca {opacity:.3f}>>>>>>>>")
     pdf.update_stream(ap, _stamp_appearance(spec, w, h, opacity))
     pdf.xref_set_key(annot.xref, "AP", f"<</N {ap} 0 R>>")
+    if size is not None:
+        _apply_rotation(pdf, annot.get_parent(), annot.xref)
 
 
 def create_stamp(pdf: pymupdf.Document, page_no: int, point, spec: StampSpec, style: Style,
@@ -1605,6 +1680,10 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         old = g["rect"]
         if old.width <= 0 or old.height <= 0:
             raise AnnotationError("Annotazione non valida.")
+        _angle, base = _rotation(pdf, xref)
+        if base is not None:
+            k = new_rect.width / old.width
+            pdf.xref_set_key(xref, SIZE_KEY, f"[{base[0] * k:.3f} {base[1] * k:.3f}]")
         sx = new_rect.width / old.width
         sy = new_rect.height / old.height
 
@@ -1638,6 +1717,8 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         _dirty_update(annot)
         if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
             refresh_stamp(pdf, page_no, xref)
+        elif base is not None:
+            _apply_rotation(pdf, page, xref)
         if t == pymupdf.PDF_ANNOT_FREE_TEXT:
             refresh_freetext(pdf, page_no, xref)
         if is_area_markup(pdf, xref):
