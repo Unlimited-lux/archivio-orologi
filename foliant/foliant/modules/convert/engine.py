@@ -92,6 +92,11 @@ class ConversionResult:
         lines = [_("Pagine convertite: {n}").format(n=len(self.pages))]
         if self.ocr_pages:
             lines.append(_("Pagine riconosciute con OCR: {p}").format(p=", ".join(map(str, self.ocr_pages))))
+            ocr = self.details.get("ocr") or {}
+            if ocr.get("languages"):
+                lines.append(_("Lingue OCR: {l}").format(l=", ".join(ocr["languages"])))
+            if ocr.get("mean_confidence") is not None:
+                lines.append(_("Confidenza media OCR: {c:.0f}%").format(c=ocr["mean_confidence"]))
         for p in self.paths:
             lines.append(_("File creato: {p}").format(p=p))
         if self.warnings:
@@ -110,6 +115,9 @@ def foliant_ocr_module():
     if fn is None:
         return None
     return fn, getattr(ocr_engine, "EDITABLE", "editable")
+
+
+ILLEGIBLE_CONFIDENCE = 50.0   # sotto questa confidenza media la pagina è segnalata come poco leggibile
 
 
 class Job:
@@ -143,6 +151,14 @@ class Job:
             self.warn(_("Pagina {p} scansionata: OCR disattivato, il testo non è stato riconosciuto.").format(p=p))
         if "ocr-non-disponibile" in pc.warnings:
             self.warn(_("Pagina {p} scansionata: OCR non disponibile (installa tesseract-ocr).").format(p=p))
+        if pc.ocr_areas:
+            self.warn(_("Pagina {p}: testo non decodificabile (font senza mappatura Unicode) riconosciuto con "
+                        "OCR in {n} aree: controlla il risultato.").format(p=p, n=pc.ocr_areas))
+            if p not in self.result.ocr_pages:
+                self.result.ocr_pages.append(p)
+        if "testo-non-decodificabile" in pc.warnings:
+            self.warn(_("Pagina {p}: parte del testo non è decodificabile e non è stato possibile "
+                        "riconoscerla con l'OCR.").format(p=p))
 
     # ------------------------------------------------------------------ OCR
     def ocr_document_bytes(self, work: pymupdf.Document) -> bytes:
@@ -165,13 +181,16 @@ class Job:
             try:
                 ENGINE_LOCK.release()   # il modulo OCR prende il lock da sé, pagina per pagina
                 try:
-                    out = ocr_pdf_bytes(data, langs, editable, pages=scanned, progress=self.progress)
+                    out = self._foliant_ocr(data, langs, scanned)
+                    if out is None:
+                        out = ocr_pdf_bytes(data, langs, editable, pages=scanned, progress=self.progress)
                 finally:
                     ENGINE_LOCK.acquire()
                 if isinstance(out, tuple):
                     out = out[0]
                 if isinstance(out, (bytes, bytearray)) and out:
-                    self.result.ocr_pages.extend(self.source_index(i) + 1 for i in scanned)
+                    if "ocr" not in self.result.details:   # ocr_pdf_bytes: nessun dettaglio per pagina
+                        self.result.ocr_pages.extend(self.source_index(i) + 1 for i in scanned)
                     return bytes(out)
                 self.warn(_("Il modulo OCR non ha restituito un documento: uso il riconoscimento di base."))
             except OperationCancelled:
@@ -189,8 +208,57 @@ class Job:
         finally:
             doc.close()
 
+    def _foliant_ocr(self, data: bytes, langs: list[str], scanned: list[int]) -> bytes | None:
+        """OCR con il modulo di Foliant raccogliendo il dettaglio per il report (confidenza media,
+        pagine illeggibili, avvisi di risoluzione). None se il modulo non espone queste funzioni:
+        si usa allora `ocr_pdf_bytes`. Da chiamare senza ENGINE_LOCK."""
+        try:
+            from foliant.modules.ocr import engine as oe  # type: ignore
+            recognize, apply, options = oe.recognize_document, oe.apply_result, oe.OcrOptions
+        except (ImportError, AttributeError):
+            return None
+        from foliant.modules.ocr.languages import check_languages  # type: ignore
+        opts = options()
+        opts.languages = list(langs)
+        opts.mode = getattr(oe, "EDITABLE", "editable")
+        check_languages(opts.languages)
+        with ENGINE_LOCK:
+            pdf = pymupdf.open(stream=data, filetype="pdf")
+        try:
+            result = recognize(pdf, opts, scanned, self.progress)
+            with ENGINE_LOCK:
+                apply(pdf, result, opts.mode)
+                out = pdf.tobytes(garbage=3, deflate=True)
+        finally:
+            with ENGINE_LOCK:
+                pdf.close()
+        per_page = {}
+        for pr in result.pages:
+            n = self.source_index(pr.index) + 1
+            if pr.status == "failed":
+                self.warn(_("Pagina {p}: OCR non riuscito, la pagina resta un'immagine ({m}).").format(
+                    p=n, m=pr.message or "?"))
+                continue
+            if pr.status != "ok":
+                continue
+            words = [w for ln in pr.lines for w in ln.words]
+            conf = sum(w.conf for w in words) / len(words) if words else 0.0
+            per_page[n] = round(conf, 1)
+            self.result.ocr_pages.append(n)
+            if not words or conf < ILLEGIBLE_CONFIDENCE:
+                self.warn(_("Pagina {p}: testo poco leggibile (scrittura a mano o scansione illeggibile), "
+                            "confidenza {c:.0f}%: controlla il risultato.").format(p=n, c=conf))
+        for note in result.notes():
+            self.warn(note)
+        all_words = [w for pr in result.pages if pr.status == "ok" for ln in pr.lines for w in ln.words]
+        self.result.details["ocr"] = {
+            "languages": list(langs), "pages": per_page,
+            "mean_confidence": round(sum(w.conf for w in all_words) / len(all_words), 1) if all_words else None}
+        return out
+
     def _ocr_pages(self, doc: pymupdf.Document, scanned: list[int]) -> bytes:
         lang = ocr_languages(self.language)
+        self.result.details.setdefault("ocr", {"languages": lang.split("+"), "pages": {}, "mean_confidence": None})
         for k, i in enumerate(scanned):
             check(self.progress, 0.1 * k / len(scanned), _("OCR della pagina {p}").format(p=self.source_index(i) + 1))
             try:
@@ -247,6 +315,16 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
     check(progress, 0.0, _("Apertura del documento…"))
     with ENGINE_LOCK:
         src = open_source(source, options.get("password"), need_extract=not fmt.startswith(("pdfa", "pdfx")))
+        member = options.get("portfolio_member")
+        if member:
+            # portfolio: si converte uno dei PDF incorporati invece del documento di copertina
+            try:
+                data = _member_bytes(src, member)
+                member_label = _file_label(src, _member_key(src, member))
+            finally:
+                src.close()
+            src = open_source(data, options.get("member_password"),
+                              need_extract=not fmt.startswith(("pdfa", "pdfx")))
         work = None
         try:
             pages = options.get("pages")
@@ -260,7 +338,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
                                              options.get("selected"))
             name = Path(str(source)).stem if not isinstance(source, (bytes, bytearray)) else \
                 Path(output_path).stem
-            name = options.get("name") or name
+            name = options.get("name") or (Path(member_label).stem if member else name)
             if not options.get("language"):
                 options = dict(options)
                 options["language"] = _lang_to_tesseract(src)
@@ -282,7 +360,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
                                  for p in work for w in (p.widgets() or []))
                 except Exception:
                     pass
-                embedded = work.embfile_count() if hasattr(work, "embfile_count") else 0
+                embedded = _attachment_names(work)
         except BaseException:
             if work is not None:
                 work.close()
@@ -295,7 +373,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
     try:
         return _run_job(work, job, fmt, output_path,
                         src_bytes if work is None else None, signed if work is not None else False,
-                        embedded if work is not None else 0, progress, options)
+                        embedded if work is not None else [], progress, options)
     finally:
         with ENGINE_LOCK:
             for doc in (work, getattr(job, "_replaced_work", None)):
@@ -303,7 +381,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
                     doc.close()
 
 
-def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool, embedded: int, progress,
+def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool, embedded: list[str], progress,
              options: dict) -> ConversionResult:
     from . import export_image, export_office, export_text
     if work is not None and fmt in TEXT_FORMATS and job.ocr != "never" and foliant_ocr_module() is not None:
@@ -319,7 +397,10 @@ def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool
         if signed:
             job.warn(_("Il documento è firmato: le firme non sono trasferibili nel formato di uscita."))
         if embedded:
-            job.warn(_("Gli allegati del PDF ({n}) non sono stati convertiti.").format(n=embedded))
+            shown = ", ".join(embedded[:10]) + (" …" if len(embedded) > 10 else "")
+            job.warn(_("Gli allegati del PDF ({n}) non sono stati convertiti: {names}.").format(
+                n=len(embedded), names=shown))
+            job.result.details["attachments"] = list(embedded)
         if fmt in TEXT_FORMATS and job.ocr == "never":
             with ENGINE_LOCK:
                 scanned = [job.source_index(i) + 1 for i in range(work.page_count)
@@ -380,6 +461,84 @@ def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool
         raise ConversionError(_("Impossibile scrivere il file: {e}").format(e=e.strerror or e)) from e
     job.result.ocr_pages = sorted(set(job.result.ocr_pages))
     return job.result
+
+
+def _file_label(pdf: pymupdf.Document, key: str) -> str:
+    """Nome del file incorporato come lo vede l'utente (/UF o /F; la chiave dei portfolio ha
+    spesso un prefisso di cartella come «<2>»)."""
+    try:
+        info = pdf.embfile_info(key)
+        return info.get("ufilename") or info.get("filename") or key
+    except Exception:
+        return key
+
+
+def _attachment_names(pdf: pymupdf.Document) -> list[str]:
+    """Nomi dei file incorporati (allegati a livello di documento e nelle annotazioni)."""
+    names: list[str] = []
+    try:
+        names += [_file_label(pdf, k) for k in pdf.embfile_names()]
+    except Exception:
+        pass
+    for page in pdf:
+        try:
+            for annot in page.annots(types=[pymupdf.PDF_ANNOT_FILE_ATTACHMENT]):
+                names.append(annot.file_info.get("filename") or annot.info.get("content") or "?")
+        except Exception:
+            pass
+    return names
+
+
+def _member_key(pdf: pymupdf.Document, member: str) -> str:
+    keys = pdf.embfile_names()
+    if member in keys:
+        return member
+    by_label = [k for k in keys if _file_label(pdf, k) == member]
+    if len(by_label) == 1:
+        return by_label[0]
+    raise ConversionError(_("Il portfolio non contiene «{n}».").format(n=member))
+
+
+def _member_bytes(pdf: pymupdf.Document, member: str) -> bytes:
+    key = _member_key(pdf, member)
+    data = pdf.embfile_get(key)
+    if b"%PDF" not in data[:1024]:
+        raise ConversionError(_("«{n}» non è un PDF: si possono convertire solo i PDF del portfolio.").format(
+            n=_file_label(pdf, key)))
+    return data
+
+
+def portfolio_members(source, password: str | None = None) -> list[tuple[str, str]]:
+    """PDF incorporati di un portfolio come (chiave, nome da mostrare); vuoto se il documento
+    non è un portfolio. I nomi ripetuti (stesso file in cartelle diverse) restano distinti."""
+    from .portfolio import is_portfolio
+    with ENGINE_LOCK:
+        src = open_source(source, password, need_extract=False)
+        try:
+            if not is_portfolio(src):
+                return []
+            out = []
+            for key in src.embfile_names():
+                try:
+                    head = src.embfile_get(key)[:1024]
+                except Exception:
+                    continue
+                if b"%PDF" in head:
+                    out.append((key, _file_label(src, key)))
+            labels = [label for _k, label in out]
+            return [(k, label if labels.count(label) == 1 else f"{label} ({k})") for k, label in out]
+        finally:
+            src.close()
+
+
+def portfolio_member_bytes(source, member: str, password: str | None = None) -> bytes:
+    """Byte di un PDF incorporato nel portfolio (per chiave o per nome del file)."""
+    with ENGINE_LOCK:
+        src = open_source(source, password, need_extract=False)
+        try:
+            return _member_bytes(src, member)
+        finally:
+            src.close()
 
 
 def convert_pdf(input_path, output_path, fmt, progress=None, **options) -> list[str]:
