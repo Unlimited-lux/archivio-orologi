@@ -7,14 +7,19 @@ Rende i documenti scannerizzati ricercabili (testo invisibile) o modificabili
 
 from __future__ import annotations
 
-from foliant.api import Context, _, add_translations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from foliant.api import Context
 
 ORDER = 60
 
 controller = None
 
 
-def register(ctx: Context) -> None:
+def register(ctx: "Context") -> None:
+    # importazioni qui: il pacchetto si importa anche senza interfaccia (processo di resa, motore)
+    from foliant.api import _, add_translations
     global controller
     from .translations import EN
     add_translations("en", EN)
@@ -93,6 +98,8 @@ def register(ctx: Context) -> None:
 
 
 def _home_ocr(ctx, controller):
+    from foliant.api import _
+
     def run():
         paths = ctx.ask_open_paths(_("PDF scannerizzato"), multiple=False)
         if not paths:
