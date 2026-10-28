@@ -599,3 +599,73 @@ def test_copy_paste_with_formatting_between_editors(window, paragraphs_pdf, quie
     plain = [r for r in runs if "semplice" in r.text][0]
     assert abs(plain.style.size - 12) < 0.05 and plain.style.color == src.style.color   # stile del punto
     ctrl.cancel_editor(view)
+
+
+def test_rotation_handle(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-08: trascinando la maniglia di rotazione il blocco ruota (Maiusc: passi di 15°)."""
+    import math
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "contratto")
+    tool = view.tool
+    tool.select(view, 0, block)
+    rh = tool._rotate_handle(view, block)
+    assert tool._handle_at(view, rh) == "rotate"
+    c = block.bbox
+    center = pymupdf.Point((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2)
+    target = pymupdf.Point(center.x - 80, center.y + 3)        # circa 90° in senso antiorario
+    vp = view.viewport()
+    shift = Qt.KeyboardModifier.ShiftModifier
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=to_view(view, 0, rh.x, rh.y))
+    qtbot.mouseMove(vp, to_view(view, 0, target.x, target.y))
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, shift, to_view(view, 0, target.x, target.y))
+    with view.document.lock:
+        line = [ln for b in view.document.pdf[0].get_text("dict")["blocks"] for ln in b["lines"]
+                if "contratto" in "".join(s["text"] for s in ln["spans"])][0]
+    angle = -math.degrees(math.atan2(line["dir"][1], line["dir"][0]))
+    assert abs(angle - 90) <= 0.5
+    assert "contratto" in view.document.page_text(0, sort=False)
+
+
+def test_panel_left_indent(window, paragraphs_pdf, quiet, qtbot):
+    """TXT-05: rientro sinistro di tutto il paragrafo; il bordo destro non supera quello originale."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "Lorem")
+    x0, x1, n = block.x0, block.x0 + block.width, len(block.lines)
+    view.tool.select(view, 0, block)
+    ctrl.panel.left_indent.setValue(30)
+    ctrl.panel._left_indent_chosen()
+    nb = block_with(ctrl, view, "Lorem")
+    for ln in nb.lines:
+        assert abs(ln.bbox.x0 - (x0 + 30)) <= 0.6 and ln.bbox.x1 <= x1 + 0.6
+    assert len(nb.lines) > n
+    assert ctrl.panel.left_indent.value() == 0
+
+
+@pytest.mark.parametrize("all_pages", [False, True])
+def test_shared_content_this_or_all_pages(window, tmp_path, quiet, qtbot, all_pages):
+    """TXT-20: testo in un Form XObject usato da più pagine: «solo questa pagina» o «tutte le pagine»."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Intestazione 2024", fontsize=14)
+    doc = pymupdf.open()
+    for _i in range(3):
+        p = doc.new_page()
+        p.show_pdf_page(p.rect, src, 0)
+    path = tmp_path / "condiviso.pdf"
+    doc.save(str(path))
+    view = open_in_edit_mode(window, str(path))
+    ctrl = ctrl_of(window)
+    quiet["answer"] = all_pages
+    block = block_with(ctrl, view, "Intestazione", page=1)
+    ed = ctrl.open_editor(view, 1, block)
+    ed.selectAll()
+    ed.insertPlainText("Intestazione 2026")
+    ctrl.commit_editor(view)
+    assert any("altre pagine" in m for _t, m in quiet["confirms"])
+    texts = [view.document.page_text(i) for i in range(3)]
+    assert "2026" in texts[1]
+    for i in (0, 2):
+        assert ("2026" in texts[i]) == all_pages
+    view.document.undo()
+    assert all("2024" in view.document.page_text(i) for i in range(3))
