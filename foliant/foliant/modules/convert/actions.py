@@ -50,6 +50,7 @@ class ConvertController:
     def __init__(self, ctx):
         self.ctx = ctx
         self.last_result = None
+        self.last_batch = None
         self.scanner_backend = None   # None = SANE (scanimage); i test usano un dispositivo simulato
 
     # ============================================================ utilità
@@ -70,6 +71,30 @@ class ConvertController:
         except Exception as e:   # mai chiudere l'applicazione per un errore del modulo
             self.ctx.error(title.rstrip("…. "), _("Errore imprevisto: {e}").format(e=e))
         return False, None
+
+    def _report_error(self, title: str, e: BaseException) -> None:
+        if isinstance(e, OperationCancelled):
+            self.ctx.status(_("Operazione annullata."))
+        elif isinstance(e, FoliantError):
+            self.ctx.error(title.rstrip("…. "), str(e))
+        elif isinstance(e, MemoryError):
+            self.ctx.error(title.rstrip("…. "), _("Memoria insufficiente per completare l'operazione."))
+        else:
+            self.ctx.error(title.rstrip("…. "), _("Errore imprevisto: {e}").format(e=e))
+
+    def _run_background(self, title: str, on_done, fn, *args, **kwargs):
+        """Lavoro lungo NON modale: la finestra resta usabile (avanzamento e Annulla nella barra di
+        stato); `on_done(risultato)` viene chiamato nel thread dell'interfaccia. Restituisce il task."""
+        return self.ctx.run_task(title, lambda progress: fn(*args, progress=progress, **kwargs), modal=False,
+                                 on_done=on_done, on_error=lambda e: self._report_error(title, e))
+
+    def _notify_warnings(self, title: str, text: str) -> None:
+        """Avvisi di fine operazione: notifica non bloccante con «Dettagli»."""
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        if not lines:
+            return
+        summary = lines[0] if len(lines) == 1 else _("{t}: {n} avvisi").format(t=title, n=len(lines))
+        self.ctx.notify(summary, [(_("Dettagli"), lambda: self.ctx.info(title, text))] if len(lines) > 1 else [])
 
     def _ask_password(self, name: str) -> str | None:
         pw, ok = QInputDialog.getText(self.window, _("Documento protetto"),
@@ -92,6 +117,37 @@ class ConvertController:
                              "contenuto»). Serve la password del proprietario."))
             return False
         return True
+
+    # ============================================================ CNV-32
+    def on_document_opened(self, view) -> None:
+        """Avviso sopra le pagine se il motore ha dovuto riparare il file all'apertura."""
+        if view is None or not getattr(view.document, "repaired", False):
+            return
+        self.ctx.show_banner(view, "riparato", _("Il file era danneggiato ed è stato riparato in memoria."),
+                             [(_("Salva copia riparata"), lambda v=view: self.save_repaired_copy(v))],
+                             level="warning", priority=30)
+
+    def save_repaired_copy(self, view):
+        """Salva una copia completamente riscritta (struttura valida) senza toccare l'originale."""
+        doc = view.document
+        stem = Path(doc.display_name).stem
+        folder = str(doc.path.parent) if doc.path else self.window.last_directory()
+        path = self.ctx.ask_save_path(_("Salva copia riparata"), os.path.join(folder, stem + "_riparato.pdf"),
+                                      "PDF (*.pdf)")
+        if not path:
+            return None
+        if doc.path is not None and os.path.abspath(path) == os.path.abspath(doc.path):
+            self.ctx.error(_("Salva copia riparata"), _("Scegli un nome diverso dall'originale."))
+            return None
+        try:
+            doc.save_copy(path)
+        except FoliantError as e:
+            self.ctx.error(_("Salva copia riparata"), str(e))
+            return None
+        self.ctx.hide_banner(view, "riparato")
+        self.ctx.notify(_("Copia riparata salvata: {n}").format(n=Path(path).name),
+                        [(_("Apri"), lambda p=path: self.ctx.open_path(p))])
+        return path
 
     def selected_pages(self) -> list[int]:
         """Pagine selezionate nelle miniature (API del nucleo); vuoto se non c'è una selezione multipla."""
@@ -181,16 +237,13 @@ class ConvertController:
                 options["ocr"] = "auto"
         if fmt.startswith("pdfa") and not self._confirm_pdfa(source, fmt, password):
             return None
-        ok, result = self._run(_("Conversione in corso…"), run_conversion, source, out_path, fmt, **options)
-        if not ok:
-            return None
-        if fmt.startswith("pdfa"):
-            report = result.details.get("pdfa", {})
-            if not report.get("compliant", True):
-                pass
-        self.last_result = result
-        self.show_result(result)
-        return result
+        def finished(result):
+            self.last_result = result
+            self.show_result(result)
+
+        task = self._run_background(_("Conversione in corso…"), finished, run_conversion, source, out_path, fmt,
+                                    **options)
+        return task.result if task.done and task.error is None else None
 
     def _confirm_pdfa(self, source, fmt: str, password: str | None) -> bool:
         """CNV-14: analisi preliminare con l'elenco dei problemi e delle correzioni."""
@@ -213,37 +266,32 @@ class ConvertController:
         return self.ctx.confirm(_("Conversione in {f}").format(f=fmt.upper().replace("PDFA-", "PDF/A-")), text)
 
     def show_result(self, result) -> None:
-        """Esito con report e azioni «Apri» e «Mostra nella cartella»."""
+        """Esito non bloccante con «Apri», «Mostra cartella» e «Salva report…»."""
         if not result.paths:
             return
-        box = QMessageBox(self.window)
-        box.setIcon(QMessageBox.Icon.Warning if result.warnings else QMessageBox.Icon.Information)
-        box.setWindowTitle(_("Conversione completata"))
-        if len(result.paths) == 1:
-            box.setText(_("File creato: {name}").format(name=Path(result.paths[0]).name))
-        else:
-            box.setText(_("{n} file creati in {folder}").format(n=len(result.paths), folder=Path(result.paths[0]).parent))
-        box.setDetailedText(result.report_text())
-        if result.warnings:
-            box.setInformativeText(_("Avvisi: {n}. Vedi i dettagli.").format(n=len(result.warnings)))
-        open_btn = box.addButton(_("Apri"), QMessageBox.ButtonRole.AcceptRole)
-        folder_btn = box.addButton(_("Mostra nella cartella"), QMessageBox.ButtonRole.ActionRole)
-        save_btn = box.addButton(_("Salva report…"), QMessageBox.ButtonRole.ActionRole)
-        box.addButton(_("Chiudi"), QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        clicked = box.clickedButton()
         first = result.paths[0]
-        if clicked is open_btn:
+        if len(result.paths) == 1:
+            text = _("File creato: {name}").format(name=Path(first).name)
+        else:
+            text = _("{n} file creati in {folder}").format(n=len(result.paths), folder=Path(first).parent)
+        if result.warnings:
+            text += " · " + _("Avvisi: {n}").format(n=len(result.warnings))
+
+        def open_first():
             if first.lower().endswith(".pdf"):
                 self.ctx.open_path(first)
             else:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(first))
-        elif clicked is folder_btn:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(first).parent)))
-        elif clicked is save_btn:
+
+        def save_report():
             path = self.ctx.ask_save_path(_("Salva report"), "report_conversione.txt", _("Testo (*.txt)"), ".txt")
             if path:
                 Path(path).write_text(result.report_text(), encoding="utf-8")
+
+        self.ctx.notify(text, [(_("Apri"), open_first),
+                               (_("Mostra cartella"),
+                                lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(first).parent)))),
+                               (_("Salva report…"), save_report)])
 
     # ============================================================== crea
     def create_from_files(self, paths: list[str] | None = None):
@@ -323,7 +371,7 @@ class ConvertController:
         name = (Path(files[0]).stem if len(files) == 1 else _("Immagini")) + ".pdf"
         view = self.open_created(data, name)
         if warnings:
-            self.ctx.info(_("Crea PDF da immagini"), "\n".join(warnings[:20]))
+            self._notify_warnings(_("Crea PDF da immagini"), "\n".join(warnings[:20]))
         return view
 
     def create_from_url(self):
@@ -518,7 +566,7 @@ class ConvertController:
         data, warnings = res
         view = self.open_created(data, _("Documento") + ".pdf")
         if warnings:
-            self.ctx.info(_("Crea PDF da foto"), "\n".join(warnings[:15]))
+            self._notify_warnings(_("Crea PDF da foto"), "\n".join(warnings[:15]))
         return view
 
     def create_from_screen(self, delay_s: int | None = None):
@@ -582,7 +630,7 @@ class ConvertController:
         data, warnings = res
         view = self.open_created(data, opts["title"] + ".pdf")
         if warnings:
-            self.ctx.info(_("Crea portfolio"), "\n".join(warnings[:15]))
+            self._notify_warnings(_("Crea portfolio"), "\n".join(warnings[:15]))
         return view
 
     def edit_portfolio(self):
@@ -759,8 +807,8 @@ class ConvertController:
                          suffix: str):
         after = len(out)
         if after >= before:
-            self.ctx.info(title, _("Nessuna riduzione possibile: il file è già ottimizzato ({s}). "
-                                   "Il documento non è stato modificato.").format(s=human_size(before)))
+            self.ctx.notify(_("Nessuna riduzione possibile: il file è già ottimizzato ({s}). "
+                              "Il documento non è stato modificato.").format(s=human_size(before)))
             return {"before": before, "after": after, "reduced": False}
         percent = (1 - after / before) * 100
         summary = _("Prima: {a} — Dopo: {b} — Riduzione: {p:.0f}%").format(a=human_size(before), b=human_size(after),
@@ -778,15 +826,15 @@ class ConvertController:
                 doc.undo()
                 doc.save_options.clear()
                 doc.save_options.update(previous)
-                self.ctx.info(title, _("Nessuna riduzione possibile: il file è già ottimizzato ({s}). "
-                                       "Il documento non è stato modificato.").format(s=human_size(before)))
+                self.ctx.notify(_("Nessuna riduzione possibile: il file è già ottimizzato ({s}). "
+                                  "Il documento non è stato modificato.").format(s=human_size(before)))
                 return {"before": before, "after": after, "reduced": False}
             percent = (1 - after / before) * 100
             summary = _("Prima: {a} — Dopo: {b} — Riduzione: {p:.0f}%").format(
                 a=human_size(before), b=human_size(after), p=percent)
             self.ctx.status(summary, 10000)
-            self.ctx.info(title, summary + "\n\n" + _("Le modifiche si applicano al file quando salvi; "
-                                                      "puoi annullarle con Annulla."))
+            self.ctx.notify(summary + " · " + _("Le modifiche si applicano al file quando salvi; "
+                                                 "puoi annullarle con Annulla."))
             return {"before": before, "after": after, "reduced": True}
         if doc is not None:
             # il nuovo file deve avere la stessa protezione del documento (metodo, permessi, password)
@@ -809,7 +857,7 @@ class ConvertController:
         except FoliantError as e:
             self.ctx.error(title, str(e))
             return None
-        self.ctx.info(title, summary + "\n\n" + _("Salvato in: {p}").format(p=save))
+        self.ctx.notify(summary, [(_("Apri"), lambda p=save: self.ctx.open_path(p))])
         return {"before": before, "after": after, "reduced": True, "output": save}
 
     @staticmethod
@@ -870,7 +918,7 @@ class ConvertController:
         lines = [f"{Path(p).name}: {human_size(b)} → {human_size(a)} ({note})" for p, b, a, note in rows]
         lines.append(_("Totale: {b} → {a}, risparmiati {s}").format(b=human_size(tb), a=human_size(ta),
                                                                     s=human_size(tb - ta)))
-        self.ctx.info(_("Comprimi più PDF"), "\n".join(lines))
+        self.ctx.notify(lines[-1], [(_("Dettagli"), lambda: self.ctx.info(_("Comprimi più PDF"), "\n".join(lines)))])
         return rows
 
     def optimize_advanced(self):
@@ -922,7 +970,7 @@ class ConvertController:
         doc.replace_with(out, _("Appiattisci"))
         self.ctx.status(_("Documento appiattito. Puoi annullare con Annulla finché non salvi."), 8000)
         if report.get("warnings"):
-            self.ctx.info(_("Appiattisci"), "\n".join(report["warnings"]))
+            self._notify_warnings(_("Appiattisci"), "\n".join(report["warnings"]))
         return report
 
     def remove_conformance(self):
@@ -990,14 +1038,7 @@ class ConvertController:
             if report.get("lost_pages"):
                 lines.append(_("Pagine perse: {p}").format(p=", ".join(map(str, report["lost_pages"]))))
             lines.extend(report.get("warnings", [])[:10])
-            box = QMessageBox(self.window)
-            box.setWindowTitle(_("Ripara PDF"))
-            box.setText("\n".join(lines))
-            open_btn = box.addButton(_("Apri"), QMessageBox.ButtonRole.AcceptRole)
-            box.addButton(_("Chiudi"), QMessageBox.ButtonRole.RejectRole)
-            box.exec()
-            if box.clickedButton() is open_btn:
-                self.ctx.open_path(out)
+            self.ctx.notify(" · ".join(lines[:3]), [(_("Apri"), lambda o=out: self.ctx.open_path(o))])
         return results
 
     @staticmethod
@@ -1022,10 +1063,15 @@ class ConvertController:
             return None
         from .batch import batch_convert
         files, fmt, out_dir, keep, root, options = dlg.values()
-        ok, items = self._run(_("Conversione in blocco…"), batch_convert, files, fmt, out_dir=out_dir,
-                              keep_structure=keep, root=root, **options)
-        if not ok:
-            return None
+        task = self._run_background(_("Conversione in blocco…"),
+                                    lambda items: self._batch_finished(items, fmt, out_dir, keep, root, options),
+                                    batch_convert, files, fmt, out_dir=out_dir, keep_structure=keep, root=root,
+                                    **options)
+        return self.last_batch if task.done and task.error is None else None
+
+    def _batch_finished(self, items, fmt, out_dir, keep, root, options):
+        from .batch import batch_convert
+        from .batch_dialog import show_batch_report
         # file protetti: password chiesta alla fine, senza bloccare gli altri (Annulla = salta)
         locked = [it for it in items if it.status == "saltato" and it.message == _("Protetto da password")]
         passwords = {}
@@ -1040,6 +1086,7 @@ class ConvertController:
             if ok:
                 by_path = {r.path: r for r in retried}
                 items = [by_path.get(it.path, it) for it in items]
+        self.last_batch = items
         show_batch_report(self, items)
         return items
 
@@ -1068,5 +1115,7 @@ class ConvertController:
         lines = [_("PDF creati: {n}").format(n=len(report.get("created", [])) or (1 if single else 0))]
         for p, reason in report.get("skipped", []):
             lines.append(_("Saltato: {f} ({r})").format(f=Path(p).name, r=reason))
-        self.ctx.info(_("Crea PDF in blocco"), "\n".join(lines))
+        self.ctx.notify(lines[0] + (" · " + _("Saltati: {n}").format(n=len(lines) - 1) if len(lines) > 1 else ""),
+                        [(_("Dettagli"), lambda: self.ctx.info(_("Crea PDF in blocco"), "\n".join(lines)))]
+                        if len(lines) > 1 else [])
         return report

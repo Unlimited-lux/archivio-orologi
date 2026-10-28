@@ -22,9 +22,11 @@ def ctrl(window):
 @pytest.fixture
 def messages(window, monkeypatch):
     """Raccoglie errori e informazioni invece di mostrare finestre modali."""
-    log = {"error": [], "info": [], "confirm": []}
+    log = {"error": [], "info": [], "confirm": [], "notify": []}
     monkeypatch.setattr(window.ctx, "error", lambda t, m: log["error"].append((t, m)))
     monkeypatch.setattr(window.ctx, "info", lambda t, m: log["info"].append((t, m)))
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None:
+                        log["notify"].append((text, [a[0] for a in actions])))
 
     def confirm(t, m):
         log["confirm"].append((t, m))
@@ -276,7 +278,7 @@ def test_compress_document_undoable(window, ctrl, photo_pdf, monkeypatch, messag
     assert view.document.is_modified and "Foto del quadrante" in view.document.page_text(0)
     assert open(photo_pdf, "rb").read() == before_file
     assert view.document.undo()
-    assert "Riduzione" in messages["info"][0][1]
+    assert "Riduzione" in messages["notify"][0][0]
 
 
 def test_compress_no_reduction(window, ctrl, tmp_path, monkeypatch, messages):
@@ -290,7 +292,7 @@ def test_compress_no_reduction(window, ctrl, tmp_path, monkeypatch, messages):
     monkeypatch.setattr(optimize, "compress_pdf_bytes", lambda data, *a, **k: data + b"\n%%")
     res = ctrl.compress()
     assert res["reduced"] is False and not view.document.is_modified
-    assert "Nessuna riduzione" in messages["info"][0][1]
+    assert "Nessuna riduzione" in messages["notify"][0][0]
 
 
 # ------------------------------------------------------------- riparazione
@@ -685,7 +687,7 @@ def test_compress_document_reduction_survives_save(window, ctrl, tmp_path, monke
     monkeypatch.setattr(CompressDialog, "exec", fake_exec)
     res = ctrl.compress()
     before = os.path.getsize(path)
-    assert res["reduced"], messages["info"]
+    assert res["reduced"], messages["notify"]
     if res["reduced"]:
         assert window.save_view(view)
         saved = os.path.getsize(path)
@@ -714,3 +716,52 @@ def test_export_uses_thumbnail_selection(window, ctrl, twenty_pages, tmp_path, m
     text = open(result.paths[0], encoding="utf-8").read()
     nums = [int(line.split()[-1]) for line in text.replace("\f", "\n").splitlines() if line.startswith("Pagina")]
     assert nums == [2, 5, 7]
+
+
+def test_repaired_document_banner_and_copy(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
+    data = bytearray(open(sample_pdf, "rb").read())
+    i = data.rfind(b"startxref")
+    data[i + 10:i + 14] = b"9999"
+    bad = tmp_path / "rotto.pdf"
+    bad.write_bytes(bytes(data))
+    view = window.open_path(str(bad))
+    assert view.document.repaired
+    assert "riparato" in window.ctx.banners(view)
+    out = tmp_path / "rotto_riparato.pdf"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    assert ctrl.save_repaired_copy(view) == str(out)
+    fixed = pymupdf.open(str(out))
+    assert fixed.page_count == 3 and not getattr(fixed, "is_repaired", False)
+    assert "riparato" not in window.ctx.banners(view)
+    assert open(bad, "rb").read() == bytes(data)
+
+
+def test_export_runs_non_modal(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
+    """Le conversioni lunghe non bloccano la finestra: run_task con modal=False e on_done."""
+    window.open_path(sample_pdf)
+    seen = {}
+    original = window.ctx.run_task
+
+    def spy(title, fn, *args, **kwargs):
+        if kwargs.get("modal") is False:
+            seen["modal"] = False
+            seen["on_done"] = kwargs.get("on_done") is not None
+        return original(title, fn, *args, **kwargs)
+    monkeypatch.setattr(window.ctx, "run_task", spy)
+    _accept_export(monkeypatch, tmp_path, "txt")
+    result = ctrl.export()
+    assert seen == {"modal": False, "on_done": True}
+    assert result is not None and os.path.exists(result.paths[0])
+
+
+
+def test_conversion_result_is_a_notification(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
+    """Fine conversione: avviso non bloccante con «Apri» e «Mostra cartella», nessuna finestra modale."""
+    window.open_path(sample_pdf)
+    opened = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: opened.append(self.text()) or 0)
+    _accept_export(monkeypatch, tmp_path, "txt")
+    ctrl.export()
+    assert not opened
+    text, actions = messages["notify"][-1]
+    assert "esempio.txt" in text and actions[:2] == ["Apri", "Mostra cartella"]
