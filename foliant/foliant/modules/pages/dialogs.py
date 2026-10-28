@@ -157,6 +157,9 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Fai clic su una pagina per iniziare lì una nuova parte (o togliere il taglio)": "Click a page to start a new part there (or remove the cut)",
+    "Parte {k}": "Part {k}",
+    "Esclusa": "Excluded",
     "Riconosci il testo delle pagine scannerizzate (OCR)": "Recognize the text of scanned pages (OCR)",
     "Pagine acquisite": "Scanned pages",
     "Ruota": "Rotate",
@@ -909,6 +912,14 @@ class SplitDialog(BaseDialog):
         self.preview = QLabel()
         self.preview.setWordWrap(True)
         self.layout_.addWidget(self.preview)
+        self.strip = thumbnail_strip(self)
+        self.strip.setToolTip(_("Fai clic su una pagina per iniziare lì una nuova parte (o togliere il taglio)"))
+        self.strip.setSelectionMode(self.strip.SelectionMode.NoSelection)
+        self.strip.itemClicked.connect(self._toggle_cut)
+        self.layout_.addWidget(self.strip)
+        with ENGINE_LOCK:
+            fill_strip(self.strip, document.pdf, list(range(min(self.page_count, MAX_PREVIEW))))
+        self._parts_cache: list[E.SplitPart] = []
         self.finish_layout()
         for w in (self.every, self.parts, self.level, self.size_mb):
             w.valueChanged.connect(self._update)
@@ -921,6 +932,45 @@ class SplitDialog(BaseDialog):
 
     def method(self) -> str:
         return next(k for k, rb in self.rbs.items() if rb.isChecked())
+
+    PART_COLORS = ("#D7EFEE", "#FCE7C8", "#E3DDF7", "#D9F0D3", "#F9D8D6", "#DCE8FA")
+
+    def _color_strip(self, parts: list[E.SplitPart]) -> None:
+        """Colora le miniature per parte (le pagine escluse restano senza colore)."""
+        from PySide6.QtGui import QBrush, QColor
+        self._parts_cache = list(parts)
+        part_of: dict[int, int] = {}
+        for k, part in enumerate(parts):
+            for i in part.indices:
+                part_of.setdefault(i, k)
+        for row in range(self.strip.count()):
+            item = self.strip.item(row)
+            if not item.text().isdigit():
+                continue
+            k = part_of.get(int(item.text()) - 1)
+            item.setBackground(QBrush(QColor(self.PART_COLORS[k % len(self.PART_COLORS)])) if k is not None
+                               else QBrush())
+            item.setToolTip(_("Parte {k}").format(k=k + 1) if k is not None else _("Esclusa"))
+
+    def _toggle_cut(self, item) -> None:
+        """Clic su una pagina: inizia lì una nuova parte, o toglie il taglio se c'è già."""
+        if not item.text().isdigit():
+            return
+        page = int(item.text()) - 1
+        starts = sorted({p.indices[0] for p in self._parts_cache if p.indices}) or [0]
+        if page == 0:
+            return
+        if page in starts:
+            starts.remove(page)
+        else:
+            starts.append(page)
+            starts.sort()
+        if 0 not in starts:
+            starts.insert(0, 0)
+        bounds = starts + [self.page_count]
+        text = "; ".join(f"{a + 1}-{b}" if b - a > 1 else f"{a + 1}" for a, b in zip(bounds, bounds[1:]))
+        self.rbs["ranges"].setChecked(True)
+        self.ranges.setText(text)
 
     def _choose_extra(self) -> None:
         if self.ask_paths is None:
@@ -992,6 +1042,7 @@ class SplitDialog(BaseDialog):
             return
         sizes = ", ".join(str(len(p.indices)) for p in plan.parts[:12]) + (" …" if len(plan.parts) > 12 else "")
         self.preview.setText(_("Si otterranno {k} file: {sizes}").format(k=len(plan.parts), sizes=sizes))
+        self._color_strip(plan.parts)
         self.set_error(None)
         if plan.warnings:
             self.set_note("\n".join(plan.warnings))

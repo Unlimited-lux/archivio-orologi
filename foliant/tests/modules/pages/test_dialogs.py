@@ -409,3 +409,18 @@ def test_scan_review_rotate_delete_more_and_cancel(pages_window, monkeypatch):
                         else QDialog.DialogCode.Rejected)
     assert not D.open_scanner_dialog(window.ctx, view, [0])
     assert view.page_count == 10 and not view.document.can_undo
+
+
+def test_split_preview_colors_and_click_cuts(window, ten_pdf):
+    """PAG-20: le miniature sono colorate per parte e un clic aggiunge/toglie un punto di taglio."""
+    view = window.open_path(ten_pdf)
+    dlg = D.SplitDialog(window, view.document)
+    dlg.rbs["every"].setChecked(True)
+    dlg.every.setValue(5)
+    assert dlg.strip.item(0).background().color() != dlg.strip.item(5).background().color()
+    assert dlg.strip.item(5).toolTip() == "Parte 2"
+    dlg._toggle_cut(dlg.strip.item(2))          # nuovo taglio prima della pagina 3
+    assert dlg.rbs["ranges"].isChecked() and dlg.ranges.text() == "1-2; 3-5; 6-10"
+    assert "3 file" in dlg.preview.text()
+    dlg._toggle_cut(dlg.strip.item(5))          # toglie il taglio prima della pagina 6
+    assert dlg.ranges.text() == "1-2; 3-10"
