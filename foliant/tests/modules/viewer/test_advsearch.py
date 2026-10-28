@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import time
 
 import pymupdf
@@ -320,3 +321,55 @@ def test_folder_search_includes_attachments(viewer_window, tmp_path):
     ctl.set_folder(str(folder))
     assert ctl.search("Speedmaster", scope=advsearch.SCOPE_FOLDER, mode=eng.PHRASE, attachments=True) == 1
     assert ctl.hits[0].attachment == "garanzia.pdf" and ctl.hits[0].file.endswith("pratica.pdf")
+
+
+# ------------------------------------------------------------- indice full-text
+def _archive(folder, n=4):
+    folder.mkdir(exist_ok=True)
+    for i in range(n):
+        _pdf(folder / f"pratica{i}.pdf", [[f"Pratica numero {i}"], [f"Cliente {'Rossi' if i == 2 else 'Bianchi'}"]])
+    enc = pymupdf.open()
+    enc.new_page().insert_text((72, 100), "Rossi riservato")
+    enc.save(str(folder / "cifrato.pdf"), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="x", owner_pw="y")
+    return folder
+
+
+def test_fulltext_index_create_search_update_delete(viewer_window, tmp_path):
+    from foliant.modules.viewer import fulltext
+    folder = _archive(tmp_path / "archivio")
+    ctl = _ctl(viewer_window)
+    ctl.open()
+    stats = ctl.create_index(str(folder), "Archivio pratiche")
+    assert stats.added == 4 and [os.path.basename(p) for p, _r in stats.skipped] == ["cifrato.pdf"]
+    assert "Archivio_pratiche" in fulltext.list_indexes()
+    p = ctl.ensure_panel()
+    assert p.scope.currentData() == advsearch.SCOPE_INDEX and p.index_box.isVisibleTo(p)
+    assert ctl.search("Rossi", mode=eng.PHRASE) == 1
+    hit = ctl.hits[0]
+    assert hit.file.endswith("pratica2.pdf") and hit.page == 1 and not hit.stale
+    # clic: apre il file alla pagina e calcola l'evidenziazione
+    view = ctl.go_to(0)
+    assert view is not None and view.current_page == 1 and view.current_hit == (1, 0)
+    # file cambiato dopo l'indicizzazione: segnalato; «Aggiorna» rilegge solo quello
+    time.sleep(0.01)
+    _pdf(folder / "pratica3.pdf", [["Pratica numero 3"], ["Cliente Rossi trasferito"]])
+    assert ctl.search("Rossi") == 1 and "aggiorna l'indice" in ctl.summary_text
+    stats = ctl.update_index()
+    assert (stats.updated, stats.added, stats.unchanged) == (1, 0, 3)
+    assert ctl.search("Rossi") == 2
+    os.remove(folder / "pratica0.pdf")
+    assert ctl.update_index().removed == 1
+    assert ctl.delete_index(confirm=False)
+    assert "Archivio_pratiche" not in fulltext.list_indexes()
+
+
+def test_fulltext_modes_and_regex():
+    from foliant.modules.viewer import fulltext
+    opts = eng.AdvOptions(query="orologio automatico", mode=eng.ALL_WORDS)
+    assert fulltext._fts_query(opts) == '"orologio" AND "automatico"'
+    opts.mode = eng.ANY_WORD
+    assert fulltext._fts_query(opts) == '"orologio" OR "automatico"'
+    opts.mode = eng.PHRASE
+    assert fulltext._fts_query(opts) == '"orologio automatico"'
+    opts.mode = eng.REGEX
+    assert fulltext._fts_query(opts) is None

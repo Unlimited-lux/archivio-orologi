@@ -82,6 +82,7 @@ class AdvHit:
     doc_key: object = None   # chiave del documento aperto (None = file su disco)
     label: str = ""          # nome del campo, chiave dei metadati, ecc.
     attachment: str = ""     # nome dell'allegato PDF in cui si trova l'occorrenza ("" = il documento)
+    stale: bool = False      # indice: file cambiato o eliminato dopo l'indicizzazione
 
     @property
     def excerpt(self) -> str:
@@ -94,6 +95,7 @@ class AdvSummary:
     files_with_hits: int = 0
     skipped: list = field(default_factory=list)    # [(percorso, motivo)]
     timed_out: list = field(default_factory=list)  # [(file, pagina)]
+    stale: list = field(default_factory=list)      # indice: file cambiati dopo l'indicizzazione
     truncated: bool = False
 
 
