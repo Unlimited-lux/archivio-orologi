@@ -899,3 +899,82 @@ def test_history_encrypted_with_keyring_key(memory_keyring):
     assert "IBAN" not in raw and raw.startswith(history.ENC_PREFIX)
     assert ("foliant-ai", "history-key") in memory_keyring.store
     assert history.HistoryStore().get(c.id).messages[0].text == "testo riservato IBAN"
+
+
+# ------------------------------------------------------------------ regressioni dalla revisione
+def test_extraction_ban_survives_undo(tmp_path):
+    from foliant.api import Document
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Riservato", fontsize=12)
+    path = tmp_path / "ban.pdf"
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="p", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    d = Document.open(str(path))
+    assert not content.extraction_allowed(d)
+    with d.change("x") as pdf:
+        pdf[0].insert_text((72, 200), "altro", fontsize=10)
+    d.undo()
+    assert not content.extraction_allowed(d)
+
+
+def test_ocr_excludes_text_under_redaction(tmp_path):
+    path = _scan_pdf(tmp_path)
+    d = pymupdf.open(path)
+    page = d[0]
+    page.add_redact_annot(pymupdf.Rect(0, 0, 200, 200))   # copre «Orologio»
+    words = {}
+    text, _conf = content.ocr_page(d, 0, "eng", words_out=words)
+    assert "Orolog" not in text and all("Orolog" not in w[4] for w in words[0])
+
+
+def test_sanitized_copy_drops_hidden_and_redacted(tmp_path):
+    from foliant.api import Document
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Visibile IBAN-123", fontsize=12)
+    p.insert_text((72, 200), "Nascosto", fontsize=12, render_mode=3)
+    p.add_redact_annot(p.search_for("IBAN-123")[0])
+    path = tmp_path / "s.pdf"
+    doc.save(str(path))
+    clean = pymupdf.open(stream=content.sanitized_copy(Document.open(str(path))), filetype="pdf")
+    text = clean[0].get_text()
+    assert "Visibile" in text and "IBAN-123" not in text and "Nascosto" not in text
+
+
+def test_rewrite_keeps_other_redaction_marks(qtbot, window, ready, fake, tmp_path):
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Il documento e stato aprovato", fontsize=12, fontname="helv")
+    page.insert_text((72, 300), "Conto IBAN-123", fontsize=12, fontname="helv")
+    page.add_redact_annot(page.search_for("IBAN-123")[0])
+    path = tmp_path / "rr.pdf"
+    doc.save(str(path))
+    view, panel = _do_rewrite(qtbot, window, ready, fake, str(path), "Il documento è stato approvato")
+    assert panel.accept_proposal()
+    d = view.document
+    assert "IBAN-123" in d.page_text(0)          # marcatura non applicata
+    assert [i for i, r in annots_of(d, 0)] and len(annots_of(d, 0)) == 1
+
+
+def test_locked_history_not_isolated(memory_keyring):
+    from foliant.modules.ai.engine import ChatMessage, Conversation
+    h = history.HistoryStore(encrypt=True)
+    c = Conversation(messages=[ChatMessage("user", "x")])
+    h.save(c)
+    memory_keyring.store.clear()
+    store2 = history.HistoryStore()
+    store2.secrets = None
+    from foliant.modules.ai.config import SecretStore
+    store2.secrets = SecretStore()
+    assert store2.load_all() == [] and store2.locked and not store2.damaged
+    assert h._path(c.id).exists()
+
+
+def test_collection_does_not_send_file_names(window, ready, fake, text_pdf):
+    a = text_pdf(1, name="contratto-rossi.pdf", texts=["Alfa"])
+    fake.responses = ["ok"]
+    ready.controller.exec_dialog = lambda dlg: 0
+    dlg = ready.controller.open_collection()
+    dlg.add_paths([a])
+    dlg.ask("Domanda")
+    assert "contratto-rossi" not in fake.all_text()

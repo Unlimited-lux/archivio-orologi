@@ -57,7 +57,7 @@ def test_hidden_text_excluded_but_ocr_layer_included(tmp_path):
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 50, 50), False)
     pix.clear_with(200)
     p2.insert_image(p2.rect, pixmap=pix)
-    p2.insert_text((72, 100), "StratoOCR", fontsize=12, render_mode=3)
+    p2.insert_text((72, 300), "StratoOCR", fontsize=12, render_mode=3)   # sopra la scansione
     path = tmp_path / "h.pdf"
     doc.save(str(path))
     pdf = pymupdf.open(str(path))

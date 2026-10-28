@@ -23,7 +23,21 @@ class ContentBlocked(FoliantError):
     pass
 
 
-def extraction_allowed(pdf: pymupdf.Document) -> bool:
+def extraction_allowed(pdf) -> bool:
+    """Estrazione consentita? Accetta un `Document` (preferito) o un documento del motore.
+
+    Con un `Document` si usano i permessi del file all'apertura: dopo un annulla il
+    documento interno è una copia non cifrata e non porta più le restrizioni.
+    """
+    if hasattr(pdf, "original_protection"):
+        document = pdf
+        prot = document.original_protection or {}
+        perms = prot.get("permissions")
+        if perms is not None:
+            owner = bool(document.password) and prot.get("owner_pw") == document.password
+            if not (perms & pymupdf.PDF_PERM_COPY) and not owner:
+                return False
+        pdf = document.pdf
     with ENGINE_LOCK:
         if not pdf.is_encrypted and not (pdf.metadata or {}).get("encryption"):
             return True
@@ -86,15 +100,23 @@ def _redaction_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
 
 
 def _hidden_rects(page: pymupdf.Page) -> list[pymupdf.Rect]:
-    """Testo invisibile (non OCR) o completamente trasparente."""
-    has_images = bool(page.get_images(full=False))
+    """Testo invisibile (non OCR) o completamente trasparente.
+
+    Il testo invisibile è considerato strato OCR solo se si trova sopra un'immagine
+    che occupa una parte consistente della pagina (una scansione).
+    """
+    parea = abs(page.rect) or 1.0
+    scans = [pymupdf.Rect(im["bbox"]) for im in page.get_image_info()
+             if abs(pymupdf.Rect(im["bbox"]) & page.rect) > 0.25 * parea]
     out = []
     try:
         trace = page.get_texttrace()
     except Exception:  # noqa: BLE001
         return out
     for span in trace:
-        invisible = span.get("type") == 3 and not has_images
+        box = pymupdf.Rect(span["bbox"])
+        center = pymupdf.Point((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2)
+        invisible = span.get("type") == 3 and not any(r.contains(center) for r in scans)
         transparent = (span.get("opacity") is not None and span.get("opacity") <= 0.01)
         if invisible or transparent:
             out.append(pymupdf.Rect(span["bbox"]))
@@ -236,10 +258,12 @@ def ocr_page(pdf: pymupdf.Document, index: int, language: str = "ita+eng", dpi: 
     Con `words_out` vi registra le parole riconosciute (x0, y0, x1, y1, parola) per
     l'eventuale salvataggio del livello di testo nel documento.
     """
-    try:  # modulo OCR dell'applicazione, se presente
+    with ENGINE_LOCK:
+        has_redactions = bool(_redaction_rects(pdf[index]))
+    try:  # modulo OCR dell'applicazione, se presente (non con oscuramenti in sospeso)
         from foliant.modules.ocr import engine as ocr_engine  # type: ignore
         fn = getattr(ocr_engine, "recognize_page_text", None)
-        if fn is not None:
+        if fn is not None and not has_redactions and words_out is None:
             res = fn(pdf, index, language=language)
             if isinstance(res, tuple):
                 return res[0], res[1]
@@ -253,10 +277,49 @@ def ocr_page(pdf: pymupdf.Document, index: int, language: str = "ita+eng", dpi: 
         except Exception as e:  # noqa: BLE001
             raise FoliantError(_("OCR non riuscito: {e}. Controlla che Tesseract e la lingua «{l}» siano installati.")
                                .format(e=e, l=language)) from e
-        text = page.get_text("text", textpage=tp, sort=True)
-        if words_out is not None:
-            words_out[index] = [tuple(w[:5]) for w in page.get_text("words", textpage=tp)]
-    return text.strip(), None
+        words = page.get_text("words", textpage=tp, sort=True)
+        redact = _redaction_rects(page)
+    # il testo riconosciuto sotto le marcature di oscuramento non viene mai usato
+    words = [w for w in words if not (redact and _inside(pymupdf.Rect(w[:4]), redact))]
+    if words_out is not None:
+        words_out[index] = [tuple(w[:5]) for w in words]
+    return _words_text(words), None
+
+
+def ocr_area(pdf: pymupdf.Document, index: int, rect, language: str = "ita+eng") -> str:
+    """OCR locale di un'area, escludendo il testo sotto le marcature di oscuramento."""
+    with ENGINE_LOCK:
+        page = pdf[index]
+        try:
+            tp = page.get_textpage_ocr(language=language, full=True)
+        except Exception as e:  # noqa: BLE001
+            raise FoliantError(_("OCR non riuscito: {e}").format(e=e)) from e
+        words = page.get_text("words", textpage=tp, clip=pymupdf.Rect(rect), sort=True)
+        redact = _redaction_rects(page)
+    words = [w for w in words if not (redact and _inside(pymupdf.Rect(w[:4]), redact))]
+    return _words_text(words)
+
+
+def sanitized_copy(document) -> bytes:
+    """Copia di lavoro senza testo nascosto e con le marcature di oscuramento applicate.
+
+    Usata per le elaborazioni che leggono il PDF intero (traduzione in un nuovo PDF):
+    il contenuto escluso dall'invio non è più presente nella copia.
+    """
+    with ENGINE_LOCK:
+        data = document.pdf.tobytes(garbage=0, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
+    copy = pymupdf.open(stream=data, filetype="pdf")
+    try:
+        for page in copy:
+            hidden = _hidden_rects(page)
+            for r in hidden:
+                page.add_redact_annot(r)
+            if hidden or _redaction_rects(page):
+                page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                                      graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+        return copy.tobytes(garbage=1, deflate=True)
+    finally:
+        copy.close()
 
 
 def ocr_languages_available() -> list[str]:

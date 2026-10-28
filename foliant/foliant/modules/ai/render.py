@@ -111,6 +111,7 @@ class _Renderer:
     def __init__(self, spaces, known=None, prefix=""):
         self.spaces = spaces
         self.known = known
+        self._used: set[int] = set()
         self.prefix = prefix
         self.refs: list[PageRef] = []
         self.links: list[str] = []
@@ -136,14 +137,24 @@ class _Renderer:
                         f"title='{html.escape(url, quote=True)}'>{html.escape(text)}</span>")
 
         def ref(m):
-            if self.known is not None and len(self.refs) < len(self.known):
-                r = PageRef.from_dict(self.known[len(self.refs)])
-            else:
+            r = None
+            index = None
+            if self.known is not None:
+                # stesso riferimento (testo identico) non ancora usato
+                for i, k in enumerate(self.known):
+                    if i not in self._used and k.get("raw") == m.group(0):
+                        self._used.add(i)
+                        r = PageRef.from_dict(k)
+                        index = i
+                        break
+            if r is None:
                 r = find_refs(m.group(0), self.spaces)[0]
             self.refs.append(r)
+            if index is None:
+                index = len(self.refs) - 1
             shown = (f"{r.doc} › " if r.doc else "") + f"p. {r.label}"
             if r.verified and not r.outdated:
-                return slot(f"<a href='page:{self.prefix}{len(self.refs) - 1}' style='color:{self.colors['accent']}'>"
+                return slot(f"<a href='page:{self.prefix}{index}' style='color:{self.colors['accent']}'>"
                             f"{html.escape(shown)}</a>")
             return slot(f"<span style='color:{self.colors['muted']}' title='{html.escape(_('non verificato'))}'>"
                         f"{html.escape(shown)} <i>({html.escape(_('non verificato'))})</i></span>")
@@ -250,7 +261,7 @@ def render_markdown(text: str, spaces: list[PageSpace] | PageSpace | None = None
     if isinstance(spaces, PageSpace):
         spaces = [spaces]
     r = _Renderer(spaces or [], known_refs, prefix)
-    body = r.render(text or "")
+    body = r.render((text or "").replace("\x00", ""))
     return Rendered(body, r.refs, r.links, r.images)
 
 

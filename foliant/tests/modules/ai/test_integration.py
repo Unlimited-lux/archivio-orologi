@@ -381,3 +381,30 @@ def test_summary_of_pasted_text(qtbot, window, ready, fake):
     p.send("Testo incollato da riassumere con varie informazioni sulla vendita di orologi.")
     wait_done(qtbot, p)
     assert "Testo incollato da riassumere" in fake.requests[0].messages[-1].content
+
+
+# ------------------------------------------------------------------ AI-25 / AI-27 integrazione
+def test_generate_graphic_disabled_without_image_model(window, ready, sample_pdf):
+    window.open_path(sample_pdf)
+    seen = []
+    ready.controller.exec_dialog = lambda dlg: seen.append(dlg) or 0
+    dlg = ready.controller.generate_graphic()
+    assert seen and not dlg.generate_button.isEnabled()
+
+
+def test_convert_to_docx_with_heading(window, ready, fake, tmp_path):
+    import zipfile
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 80), "Titolo del contratto", fontsize=20)
+    p.insert_text((72, 130), "Testo del primo articolo del contratto.", fontsize=10)
+    path = tmp_path / "c.pdf"
+    doc.save(str(path))
+    window.open_path(str(path))
+    fake.default = json.dumps({"blocks": [{"id": 0, "role": "heading1"}, {"id": 1, "role": "paragraph"}],
+                               "tables": []})
+    out = tmp_path / "c.docx"
+    report = ready.controller.convert_to_docx(str(out))
+    assert report["ai_used"]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert "Heading1" in xml and "Titolo del contratto" in xml

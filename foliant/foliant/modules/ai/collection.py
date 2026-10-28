@@ -49,7 +49,7 @@ class Collection:
             self.members.append(m)
             return m
         try:
-            if not content.extraction_allowed(doc.pdf):
+            if not content.extraction_allowed(doc):
                 m.excluded = _("permessi: l'estrazione del contenuto non è consentita")
             m.fingerprint = content.content_fingerprint(doc.pdf)
             if document is not None:
@@ -159,7 +159,7 @@ def prepare(members: list[Member], open_documents: dict[str, Document] | None = 
             m.excluded = str(e)
             continue
         try:
-            if not content.extraction_allowed(d.pdf):
+            if not content.extraction_allowed(d):
                 m.excluded = _("permessi: l'estrazione del contenuto non è consentita")
                 continue
             fp = content.content_fingerprint(d.pdf)
@@ -181,8 +181,9 @@ SYSTEM = (" The content comes from several documents. Each page starts with a ma
 
 def chat(job: engine.Job, conv: Conversation, prepared, question: str) -> Answer:
     profile = job.profile()
-    docs_list = "\n".join(f"{space.name} = {m.title}" for m, _p, space in prepared)
-    system = engine._system(prompts.BASE, job.language) + SYSTEM + " Documents:\n" + docs_list
+    # solo le lettere dei documenti: titoli e nomi dei file restano sul computer
+    docs_list = ", ".join(space.name for _m, _p, space in prepared)
+    system = engine._system(prompts.BASE, job.language) + SYSTEM + " Documents: " + docs_list
     history = conv.history()
     budget, out_tokens = engine.budget_for(profile, system, question)
     budget -= sum(len(h.content) for h in history)

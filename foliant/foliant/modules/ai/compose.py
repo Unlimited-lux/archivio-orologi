@@ -192,10 +192,20 @@ def replace_text(document: Document, page: int, rects: list, new_text: str, *,
             warnings.append(_("Il carattere originale non contiene tutti i glifi: è stato usato un carattere simile."))
         size = dom["size"]
         color = pymupdf.sRGB_to_pdf(dom["color"])
+        # le marcature di oscuramento già presenti non devono essere applicate: si tolgono e
+        # si rimettono uguali dopo aver rimosso il testo selezionato
+        pending = []
+        for a in list(p.annots(types=[pymupdf.PDF_ANNOT_REDACT]) or []):
+            pending.append((pymupdf.Rect(a.rect), dict(a.info), (a.colors or {}).get("fill")))
+            p.delete_annot(a)
         for r in rr:
             p.add_redact_annot(r)
         p.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                            text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        for rect, info, fill in pending:
+            a = p.add_redact_annot(rect, fill=fill or (0, 0, 0))
+            a.set_info(info)
+            a.update()
         if buf:
             p.insert_font(fontname=fontname, fontbuffer=buf)
         # una sola riga d'origine: si riscrive sulla stessa linea di base se c'è spazio a destra

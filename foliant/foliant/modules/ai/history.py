@@ -22,6 +22,10 @@ RETENTION_CHOICES = (0, 30, 90, 365)   # giorni; 0 = mai
 ENC_PREFIX = "FOLIANT-ENC1\n"
 
 
+class HistoryLocked(Exception):
+    """Cronologia cifrata e chiave non disponibile (portachiavi bloccato o assente)."""
+
+
 class HistoryStore:
     """Archivio della cronologia. Con `encrypt` i file sono cifrati (chiave nel portachiavi)."""
 
@@ -56,7 +60,7 @@ class HistoryStore:
         if raw.startswith(ENC_PREFIX):
             fernet = self._fernet(False)
             if fernet is None:
-                raise ValueError("chiave della cronologia non disponibile")
+                raise HistoryLocked()
             raw = fernet.decrypt(raw[len(ENC_PREFIX):].encode("ascii")).decode("utf-8")
         return Conversation.from_dict(json.loads(raw))
 
@@ -82,6 +86,7 @@ class HistoryStore:
     def load_all(self) -> list[Conversation]:
         out = []
         self.damaged = []
+        self.locked = False
         try:
             files = sorted(self.directory.glob("*.json"))
         except OSError:
@@ -89,6 +94,9 @@ class HistoryStore:
         for f in files:
             try:
                 conv = self._read(f)
+            except HistoryLocked:
+                self.locked = True
+                continue
             except Exception:  # noqa: BLE001 - file danneggiato o non decifrabile
                 self._isolate(f)
                 continue

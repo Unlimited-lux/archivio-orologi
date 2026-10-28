@@ -162,6 +162,7 @@ class SecretStore:
 
     def __init__(self) -> None:
         self._session: dict[str, str] = {}
+        self._cache: dict[str, str | None] = {}   # il portachiavi si interroga una volta per voce
 
     @staticmethod
     def _backend():
@@ -193,20 +194,27 @@ class SecretStore:
         except Exception as e:  # noqa: BLE001
             raise KeyringUnavailable(_("Impossibile salvare la chiave nel portachiavi: {e}").format(e=e)) from e
         self._session.pop(profile_id, None)
+        self._cache[profile_id] = key
 
     def get(self, profile_id: str) -> str | None:
         if profile_id in self._session:
             return self._session[profile_id]
+        if self._cache.get(profile_id):
+            return self._cache[profile_id]
         try:
             kr = self._backend()
-            return kr.get_password(KEYRING_SERVICE, profile_id)
+            value = kr.get_password(KEYRING_SERVICE, profile_id)
         except KeyringUnavailable:
             return None
         except Exception:  # noqa: BLE001 - portachiavi bloccato o rifiutato
             return None
+        if value:
+            self._cache[profile_id] = value
+        return value
 
     def delete(self, profile_id: str) -> None:
         self._session.pop(profile_id, None)
+        self._cache.pop(profile_id, None)
         try:
             kr = self._backend()
             kr.delete_password(KEYRING_SERVICE, profile_id)

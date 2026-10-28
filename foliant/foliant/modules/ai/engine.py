@@ -547,6 +547,11 @@ def summarize(job: Job, scope: Scope, options: SummaryOptions) -> Answer:
                 if sum(len(x) for x in groups[-1]) + len(p) > cbudget and groups[-1]:
                     groups.append([])
                 groups[-1].append(p)
+            if len(groups) >= len(partials):
+                # riassunti parziali troppo lunghi: si accorciano per garantire la convergenza
+                limit = max(200, cbudget // max(2 * len(partials), 1))
+                partials = [p[:limit] for p in partials]
+                continue
             new = []
             for g in groups:
                 job.step(0.9, _("Combinazione dei riassunti parziali (livello {n})").format(n=level))

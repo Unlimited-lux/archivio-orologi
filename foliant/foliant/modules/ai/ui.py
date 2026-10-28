@@ -160,6 +160,8 @@ class HistoryDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, c.id)
             self.list.addItem(item)
         notes = []
+        if getattr(h, "locked", False):
+            notes.append(_("Alcune conversazioni sono cifrate e il portachiavi non è disponibile."))
         if h.damaged:
             notes.append(_("Alcuni file della cronologia erano danneggiati e sono stati isolati."))
         if not h.enabled:
@@ -195,7 +197,10 @@ class HistoryDialog(QDialog):
         path = self.services.ctx.ask_save_path(_("Esporta conversazione"), f"conversazione.{fmt}", flt, f".{fmt}")
         if path:
             text = history.export_markdown(conv) if fmt == "md" else history.export_json(conv)
-            atomic_write(path, text.encode("utf-8"))
+            try:
+                atomic_write(path, text.encode("utf-8"))
+            except FoliantError as e:
+                QMessageBox.warning(self, _("Esporta conversazione"), str(e))
 
     def delete_selected(self) -> None:
         conv = self._selected()
@@ -297,7 +302,7 @@ class Controller:
         if view is None or panel is None:
             return None
         doc = view.document
-        if not content.extraction_allowed(doc.pdf):
+        if not content.extraction_allowed(doc):
             self.ctx.error(_("Traduci in un nuovo PDF"), content.blocked_reason(doc.pdf))
             return None
         if not panel._ensure_ready():
@@ -319,7 +324,7 @@ class Controller:
             self.ctx.info(_("Traduci in un nuovo PDF"),
                           _("Le pagine {p} non hanno testo: rimarranno non tradotte. Usa prima l'OCR per "
                             "tradurle.").format(p=", ".join(str(i + 1) for i in textless)))
-        source = _plain_bytes(doc)
+        source = content.sanitized_copy(doc)   # niente testo nascosto o sotto oscuramenti
         self.ctx.settings().setValue("ai/last_target", options["target"])
         return self._run_translation(source, pages, options, path, None, None)
 
@@ -363,6 +368,11 @@ class Controller:
 
     def _run(self, title, fn):
         """Esegue `fn(job)` con avanzamento; None se annullato o in errore (già segnalato)."""
+        panel = self.services.panel
+        if self.services.store.option("confirm_each", False) and panel is not None and not panel.ask_preview(
+                _("Verrà inviato: ") + title, _("Contenuto richiesto dall'operazione «{t}», secondo l'ambito "
+                                                "scelto.").format(t=title.rstrip("…"))):
+            return None
         try:
             return self.ctx.run_task(title, lambda progress: fn(self._job(progress)))
         except OperationCancelled:
@@ -381,7 +391,7 @@ class Controller:
         panel = self.services.panel
         if view is None or panel is None:
             return None
-        if not content.extraction_allowed(view.document.pdf):
+        if not content.extraction_allowed(view.document):
             self.ctx.error(_("Assistente IA"), content.blocked_reason(view.document.pdf))
             return None
         if not panel._ensure_ready():
@@ -421,7 +431,7 @@ class Controller:
         def generate(params):
             scope = None
             if params.get("use_document") and doc is not None:
-                if not content.extraction_allowed(doc.pdf):
+                if not content.extraction_allowed(doc):
                     raise FoliantError(content.blocked_reason(doc.pdf))
                 scope = engine.build_scope(doc.pdf, engine.DOCUMENT, cache=self.services.cache,
                                            fingerprint=content.content_fingerprint(doc.pdf))
@@ -669,6 +679,76 @@ class Controller:
         self.exec_dialog(dlg)
         return dlg
 
+    # ---------------------------------------------------------------- elementi grafici (AI-25)
+    def generate_graphic(self, kind: str = "stamp"):
+        import pymupdf
+
+        from . import graphics
+        from .graphics_view import GenerateGraphicDialog
+        view = self.ctx.current_view()
+        if view is None:
+            return None
+        doc = view.document
+        profile = self.services.store.active()
+
+        def run(title, fn):
+            try:
+                return self.ctx.run_task(title, lambda progress: fn(progress=progress))
+            except OperationCancelled:
+                return None
+
+        provider = (lambda: self.services.store.provider_for(profile)) if profile else None
+        dlg = GenerateGraphicDialog(profile, provider, run, self.ctx.window, kind=kind)
+        self.exec_dialog(dlg)
+        png = getattr(dlg, "chosen_png", None)
+        if not png:
+            return dlg
+        chosen = dlg.kind
+        try:
+            if chosen in ("stamp", "sticker"):
+                page = view.current_page
+                with ENGINE_LOCK:
+                    r = doc.pdf[page].rect
+                w = min(r.width, r.height) * 0.3
+                rect = pymupdf.Rect(r.x1 - w - 36, 36, r.x1 - 36, 36 + w)
+                graphics.apply_as_stamp(doc, page, rect, png)
+            elif chosen == "watermark":
+                graphics.apply_as_watermark(doc, list(range(doc.page_count)), png)
+            else:
+                graphics.apply_as_background(doc, list(range(doc.page_count)), png)
+        except FoliantError as e:
+            self.ctx.error(_("Genera con IA"), str(e))
+        return dlg
+
+    # ---------------------------------------------------------------- conversione assistita (AI-27)
+    def convert_to_docx(self, path: str | None = None):
+        from . import convert_assist
+        view = self._ready_view()
+        if view is None:
+            return None
+        doc = view.document
+        if path is None:
+            base = os.path.splitext(doc.display_name)[0]
+            path = self.ctx.ask_save_path(_("Converti in documento di testo"), f"{base}.docx",
+                                          _("Documento Word (*.docx)"), ".docx")
+        if not path:
+            return None
+        pages = list(range(doc.page_count))
+        structure = self._run(_("Analisi della struttura…"), lambda job: convert_assist.classify(job, doc.pdf, pages))
+        if structure is None:
+            return None
+        try:
+            report = convert_assist.to_docx(doc.pdf, pages, structure, path)
+        except Exception as e:  # noqa: BLE001
+            self.ctx.error(_("Converti in documento di testo"), str(e))
+            return None
+        msgs = report.get("messages") or []
+        if msgs:
+            self.ctx.info(_("Converti in documento di testo"), "\n".join(msgs))
+        else:
+            self.ctx.status(_("Documento salvato in {p}").format(p=path))
+        return report
+
     # ---------------------------------------------------------------- comandi (AI-23)
     def tool_catalog(self):
         from . import commands
@@ -723,7 +803,7 @@ class Controller:
         except OperationCancelled:
             return None
         job_factory = None
-        if self.services.store.active() is not None and content.extraction_allowed(doc.pdf):
+        if self.services.store.active() is not None and content.extraction_allowed(doc):
             job_factory = lambda: engine.Job(self.services.gateway())  # noqa: E731
         dlg = PageAnalysisDialog(doc, issues, job_factory, self.ctx.window)
         self.exec_dialog(dlg)
@@ -914,12 +994,18 @@ class CommandsDialog(QDialog):
 class GeneralChatDialog(QDialog):
     def __init__(self, ctx, services, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(_("Assistente IA — chat generale"))
         self.resize(520, 640)
         lay = QVBoxLayout(self)
         self.panel = AIPanel(ctx, services, self, standalone=True)
         self.panel.set_scope("none")
         lay.addWidget(self.panel)
+
+    def done(self, result) -> None:
+        if self.panel.worker is not None:
+            self.panel.worker.cancel()
+        super().done(result)
 
 
 # =================================================================== registrazione
@@ -974,6 +1060,8 @@ def register(ctx, *, provider_factory=None) -> Services:
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
     a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_gfx = act(_("Genera elemento grafico"), "image-plus", lambda: controller.generate_graphic())
+    a_docx = act(_("Converti in Word con l'IA"), "file-text", lambda: controller.convert_to_docx())
     a_bib = act(_("Ricerca bibliografica"), "library", lambda: controller.open_bibliography(), requires=False)
     a_cmd = act(_("Assistente comandi"), "terminal", lambda: controller.open_commands())
     a_ops = act(_("Operazioni in corso"), "activity", lambda: OperationsDialog(services, ctx.window).exec(),
@@ -992,9 +1080,9 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_log = act(_("Registro degli invii"), "list", lambda: services.show_log(), requires=False)
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
-                            a_section, a_sem, a_cmd]
+                            a_section, a_sem, a_cmd, a_docx]
     services.profile_actions = [a_tasks, a_write, a_coll, a_bib]
-    services.local_actions = [a_pages]   # funziona anche senza profilo (controlli locali)
+    services.local_actions = [a_pages, a_gfx]   # la generazione spiega da sé se manca il modello   # funziona anche senza profilo (controlli locali)
     for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
         mode.add_action(a)
     mode.add_separator()
@@ -1007,7 +1095,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     more.setAutoRaise(True)
     more_menu = QMenu(more)
-    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages), (a_coll, a_tasks, a_write, a_bib, a_cmd),
+    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_tasks, a_write, a_bib, a_cmd),
                   (a_ops, a_log)):
         for a in group:
             more_menu.addAction(a)
@@ -1041,7 +1129,7 @@ def register(ctx, *, provider_factory=None) -> Services:
             return
         sub = menu.addMenu(_("Assistente IA"))
         bind_icon(sub.menuAction(), "sparkles")
-        enabled = services.store.active() is not None and content.extraction_allowed(view.document.pdf)
+        enabled = services.store.active() is not None and content.extraction_allowed(view.document)
         if sel:
             for key, text in (("chat", "Chiedi"), ("summary", "Riassumi"), ("translate", "Traduci"),
                               ("explain", "Spiega"), ("rewrite", "Correggi"), ("rewrite-improve", "Riscrivi")):

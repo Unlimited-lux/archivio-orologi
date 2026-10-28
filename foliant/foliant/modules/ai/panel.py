@@ -509,7 +509,7 @@ class AIPanel(QWidget):
         doc = self.document()
         if doc is None:
             return ""
-        if not content.extraction_allowed(doc.pdf):
+        if not content.extraction_allowed(doc):
             return content.blocked_reason(doc.pdf)
         return ""
 
@@ -628,7 +628,8 @@ class AIPanel(QWidget):
         self.act_box.setEnabled(has_doc)
         self.act_page.setEnabled(has_doc and fn == "summary")
         self.act_page.setVisible(fn == "summary")
-        self.act_continue.setVisible(on and last is not None and last.message.status in ("incomplete", "interrupted"))
+        self.act_continue.setVisible(on and last is not None and fn == "chat"
+                                     and last.message.status in ("incomplete", "interrupted"))
         self.act_map.setVisible(on and fn in ("outline", "map"))
         self.act_map.setEnabled(on and last is not None and last.answer is not None
                                 and getattr(last.answer, "data", None) is not None)
@@ -872,13 +873,7 @@ class AIPanel(QWidget):
                                     _("Il modello non accetta immagini. Riconoscere il testo dell'area con l'OCR "
                                       "locale e inviare solo il testo?")):
                 return None
-            try:
-                with ENGINE_LOCK:
-                    p = doc.pdf[page]
-                    tp = p.get_textpage_ocr(full=True, language="ita+eng")
-                    ocr = p.get_text("text", textpage=tp, clip=rect)
-            except Exception as e:  # noqa: BLE001
-                raise FoliantError(_("OCR non riuscito: {e}").format(e=e)) from e
+            ocr = content.ocr_area(doc.pdf, page, rect)
             scope.selection = (ocr or scope.selection).strip()
             return scope, [], ""
         scope.images = [ImagePart(png, "image/png", w, h)]
@@ -910,6 +905,7 @@ class AIPanel(QWidget):
         conv.messages.append(msg)
         self._stream_msg, self._stream_conv = msg, conv
         self._last = Outcome(fn, scope, msg, None, doc, {})
+        self._last_text = text
         self.input.clear()
         self.proposal_box.setVisible(False)
         self._set_actions_enabled(False)
@@ -920,6 +916,7 @@ class AIPanel(QWidget):
         pdf = doc.pdf if doc is not None else None
         ocr_words: dict = {} if getattr(self, "_save_ocr", False) else None
         self._last.options["ocr_words"] = ocr_words
+        self._last.options["doc_version"] = doc.version if doc is not None else None
         history_conv = Conversation(messages=[m for m in conv.messages[:-2]]) if fn == "chat" else Conversation()
 
         def work(job):
@@ -1028,8 +1025,15 @@ class AIPanel(QWidget):
             words = self._last.options.get("ocr_words")
             doc = self._last.document
             if words and doc is not None and not doc.closed:
-                compose.add_ocr_layer(doc, words)
-                self.ctx.status(_("Testo riconosciuto salvato nel documento."))
+                if doc.version != self._last.options.get("doc_version"):
+                    self.status.setText(_("Il documento è cambiato durante l'operazione: il testo riconosciuto "
+                                          "non è stato salvato."))
+                else:
+                    try:
+                        compose.add_ocr_layer(doc, words)
+                        self.ctx.status(_("Testo riconosciuto salvato nel documento."))
+                    except Exception as e:  # noqa: BLE001
+                        self.show_error(_("Salva il testo riconosciuto"), str(e))
         self.status.setText(_("Risposta completata."))
         self._save_history(conv)
         self._render()
@@ -1067,7 +1071,8 @@ class AIPanel(QWidget):
             self._save_history(conv)
         self._render()
         self._set_actions_enabled(msg is not None and bool(msg.text))
-        self.act_continue.setVisible(msg is not None and msg.status == "interrupted")
+        self.act_continue.setVisible(msg is not None and msg.status == "interrupted"
+                                     and msg.function == "chat")
         self.refresh_state()
         self.answerFinished.emit()
 
@@ -1153,6 +1158,10 @@ class AIPanel(QWidget):
                 links = render.render_markdown(conv.messages[msg_i].text).links
                 target = links[link_i]
             except (ValueError, IndexError):
+                return
+            if QUrl(target).scheme().lower() not in ("http", "https", "mailto"):
+                self.show_error(_("Collegamento esterno"),
+                                _("Indirizzo non consentito: {u}").format(u=target))
                 return
             if self.ask_open_url(target):
                 QDesktopServices.openUrl(QUrl(target))
@@ -1265,7 +1274,15 @@ class AIPanel(QWidget):
         if last and last.scope.kind == AREA and self._area:
             r = self._area[1]
             return self._area[0], (r.x1 + 4, r.y0), tuple(r)
-        page = self.view.current_page if self.view else 0
+        doc = last.document if last else None
+        if self.view is not None and doc is not None and self.view.document is doc:
+            page = self.view.current_page
+        elif last and last.scope.page_indices:
+            page = last.scope.page_indices[0]
+        else:
+            page = 0
+        if doc is not None and not doc.closed:
+            page = max(0, min(page, doc.page_count - 1))
         return page, (36, 36), None
 
     def _target_document(self):
@@ -1280,7 +1297,22 @@ class AIPanel(QWidget):
         v = self.ctx.settings().value("author", "") or self.ctx.settings().value("preferences/author", "")
         return str(v) if v else (os.environ.get("USER") or _("Assistente IA"))
 
+    def _safe(self, title: str, fn) -> None:
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001 - un errore non deve chiudere l'app
+            self.show_error(title, str(e) or type(e).__name__)
+
     def insert_note(self) -> None:
+        self._safe(_("Inserisci come nota"), self._insert_note)
+
+    def insert_textbox(self) -> None:
+        self._safe(_("Inserisci come casella di testo"), self._insert_textbox)
+
+    def insert_page(self) -> None:
+        self._safe(_("Inserisci come nuova pagina"), self._insert_page)
+
+    def _insert_note(self) -> None:
         doc = self._target_document()
         if doc is None:
             return
@@ -1290,7 +1322,7 @@ class AIPanel(QWidget):
                          author=self._author())
         self.status.setText(_("Nota inserita."))
 
-    def insert_textbox(self) -> None:
+    def _insert_textbox(self) -> None:
         doc = self._target_document()
         if doc is None:
             return
@@ -1299,7 +1331,7 @@ class AIPanel(QWidget):
         compose.add_text_box(doc, page, rect, render.plain_text(self.result_text()), author=self._author())
         self.status.setText(_("Casella di testo inserita."))
 
-    def insert_page(self) -> None:
+    def _insert_page(self) -> None:
         doc = self._target_document()
         if doc is None:
             return
@@ -1336,10 +1368,7 @@ class AIPanel(QWidget):
         conv = self.conversation()
         if conv.messages and conv.messages[-1] is last.message:
             conv.messages.pop()
-        user = next((m for m in reversed(conv.messages) if m.role == "user"), None)
-        text = ""
-        if user is not None and last.function == "chat":
-            text = user.text
+        text = getattr(self, "_last_text", "") or ""
         self._launch(last.function, last.scope, text, [], "", regenerate=True)
 
     def continue_answer(self) -> None:
@@ -1383,6 +1412,9 @@ class AIPanel(QWidget):
         if prepared is None:
             return None
         scope, ocr_pages, ocr_lang = prepared
+        if self.store.option("confirm_each", False) and not self.ask_preview(
+                _("Verrà inviato: ") + scope.describe(profile), scope.preview()):
+            return None
         self._task_args = (task, dict(values))
         return self._launch("task", scope, "", ocr_pages, ocr_lang)
 
