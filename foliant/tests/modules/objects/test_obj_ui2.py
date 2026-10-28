@@ -538,3 +538,14 @@ def test_link_from_multiline_multipage_selection(ui, tmp_path, monkeypatch):
     view.document.undo()
     with O.ENGINE_LOCK:
         assert sum(len(L.page_links(view.document.pdf, i)) for i in range(2)) == 0
+
+
+def test_actions_follow_document_access_changes(ui, tmp_path, monkeypatch):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 250, 170)]))
+    ui.c.set_selection(view, 0, [0])
+    monkeypatch.setattr(type(ui.c), "extract_allowed", lambda self, v: False)
+    ui.ctx.documentAccessChanged.emit(view)
+    assert not O._state["actions"]["save_image"].isEnabled()
+    monkeypatch.setattr(type(ui.c), "extract_allowed", lambda self, v: True)
+    ui.ctx.documentAccessChanged.emit(view)
+    assert O._state["actions"]["save_image"].isEnabled()
