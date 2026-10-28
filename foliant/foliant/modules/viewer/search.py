@@ -19,7 +19,10 @@ from PySide6.QtWidgets import (
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, bind_icon, theme
 
-from .engine import PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_in_page_text, page_labels
+from .engine import (
+    PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_across_pages, find_in_page_text,
+    page_labels,
+)
 
 TRANSLATIONS = {
     "Cerca": "Find",
@@ -67,12 +70,14 @@ class Hit:
     before: str = ""
     found: str = ""
     after: str = ""
+    cont: tuple | None = None     # (pagina successiva, rettangoli) se la frase prosegue
 
 
 class SearchJob:
     """Ricerca su tutte le pagine, a partire da `start`, con ripresa dall'inizio."""
 
     def __init__(self, query: str, opts: SearchOptions, page_count: int, start: int):
+        self.page_count = page_count
         self.query = query
         self.opts = opts
         self.order = list(range(start, page_count)) + list(range(0, start))
@@ -95,12 +100,17 @@ class SearchJob:
         if not pt.has_text:
             self.no_text += 1
             return page
-        found = find_in_page_text(pt, self.query, self.opts)
-        if found:
-            hits = []
-            for rects in found:
-                b, f, a = context_snippet(pt, rects, width=28)
-                hits.append(Hit(page, rects, b, f, a))
+        hits = []
+        for rects in find_in_page_text(pt, self.query, self.opts):
+            b, f, a = context_snippet(pt, rects, width=28)
+            hits.append(Hit(page, rects, b, f, a))
+        if page + 1 < self.page_count and not self.opts.regex:
+            nxt = get_text(page + 1)
+            for ra, rb in find_across_pages(pt, nxt, self.query, self.opts):
+                b, f, _a = context_snippet(pt, ra, width=28)
+                _b, f2, a2 = context_snippet(nxt, rb, width=28)
+                hits.append(Hit(page, ra, b, f + " " + f2, a2, cont=(page + 1, rb)))
+        if hits:
             self.results[page] = hits
         return page
 
@@ -568,6 +578,9 @@ class SearchController(QObject):
             if i == self.current:
                 current = (h.page, len(lst))
             lst.extend(h.rects)
+        for h in self.hits:          # parti delle frasi che proseguono sulla pagina successiva
+            if h.cont is not None:
+                hits.setdefault(h.cont[0], []).extend(h.cont[1])
         view.set_search_hits(hits, current)
 
     def go_to(self, index: int, record: bool = False) -> None:

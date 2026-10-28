@@ -31,7 +31,7 @@ sono in `CORE_REQUESTS.md`; nessuna nuova dipendenza pip (`DEPS.txt`).
 | VIS-21 Livelli: gestione | P2 | parziale | `test_layers.py::test_save_visibility_as_default` | Solo «salva la visibilità come predefinita». |
 | VIS-22 Allegati | P1 | parziale | `test_attachments.py` (16 test) | Elenco, apri, salva, salva tutti, aggiungi, elimina, eseguibili bloccati. Portfolio: non fatto. |
 | VIS-23 Thread di articoli | P2 | fatto | `test_articles.py` | |
-| VIS-24 Ricerca | P0 | fatto | `test_search.py`, `test_engine.py::test_case_sensitivity`, `test_whole_word`, `test_ignore_accents_and_ligatures`, `test_hyphenated_word_across_lines` | Ricerca incrementale non bloccante, opzioni, F3/Maiusc+F3, pannello Risultati, cronologia delle ricerche, pagine senza testo. Frase a cavallo tra due pagine: non fatto. |
+| VIS-24 Ricerca | P0 | fatto | `test_search.py`, `test_engine.py::test_case_sensitivity`, `test_whole_word`, `test_ignore_accents_and_ligatures`, `test_hyphenated_word_across_lines` | Ricerca incrementale non bloccante, opzioni, F3/Maiusc+F3, pannello Risultati, cronologia delle ricerche, pagine senza testo. Frasi e parole sillabate a cavallo tra due pagine incluse (`test_phrase_continuing_on_next_page`). |
 | VIS-25 Ricerca avanzata | P2 | parziale | `test_search.py::test_regex_and_invalid_expression`, `test_export_csv`, `test_advsearch.py` | Vedi parte `advsearch` (se integrata). |
 | VIS-26 Trova e sostituisci | P1 | non fatto | | Richiede il motore di modifica del testo (area Modifica testo). |
 | VIS-27 Ricerca semantica IA | P2 | non fatto | | Area IA. |

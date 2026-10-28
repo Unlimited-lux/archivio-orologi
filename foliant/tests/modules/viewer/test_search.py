@@ -187,3 +187,18 @@ def test_export_csv(viewer_window, tmp_path):
     rows = list(csv.reader(open(out, encoding="utf-8-sig")))
     assert rows[0][0] == "pagina" and len(rows) == 3
     assert rows[2][0] == "2" and rows[2][3] == "Rolex"
+
+
+def test_phrase_continuing_on_next_page(viewer_window, tmp_path):
+    view = viewer_window.open_path(_pdf(tmp_path, [["inizio", "il prezzo del"], ["Rolex Daytona", "fine"]]))
+    ctl = _ctl(viewer_window)
+    assert ctl.search("del rolex") == 1
+    hit = ctl.hits[0]
+    assert hit.page == 0 and hit.cont is not None and hit.cont[0] == 1
+    assert 0 in view.search_hits and 1 in view.search_hits     # evidenziata su entrambe le pagine
+    assert "Rolex" in hit.found
+
+
+def test_hyphenated_word_across_pages(viewer_window, tmp_path):
+    viewer_window.open_path(_pdf(tmp_path, [["una infor-"], ["mazione utile"]]))
+    assert _ctl(viewer_window).search("informazione") == 1

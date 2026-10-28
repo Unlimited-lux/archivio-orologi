@@ -131,25 +131,8 @@ def _is_word_char(ch: str) -> bool:
     return ch.isalnum() or ch == "_"
 
 
-def _span_rects(pt: PageText, index: list[int], pos: int, end: int) -> list[pymupdf.Rect]:
-    src = sorted(set(index[pos:end]))
-    rects: dict[int, pymupdf.Rect] = {}
-    order: list[int] = []
-    for i in src:
-        box = pt.boxes[i]
-        line = pt.lines[i]
-        if box is None or line == -2:
-            continue
-        if line not in rects:
-            rects[line] = pymupdf.Rect(box)
-            order.append(line)
-        else:
-            rects[line] |= box
-    return [rects[k] for k in order]
-
-
-def find_in_page_text(pt: PageText, query: str, opts: SearchOptions | None = None) -> list[list[pymupdf.Rect]]:
-    """Occorrenze di `query`: per ciascuna, i rettangoli (uno per riga coinvolta)."""
+def find_spans(pt: PageText, query: str, opts: SearchOptions | None = None) -> list[list[int]]:
+    """Occorrenze di `query` come elenchi degli indici dei caratteri di `pt.text`."""
     opts = opts or SearchOptions()
     if not query.strip() or not pt.text:
         return []
@@ -171,7 +154,7 @@ def find_in_page_text(pt: PageText, query: str, opts: SearchOptions | None = Non
                 break
             spans.append((pos, pos + len(q)))
             start = pos + 1
-    hits: list[list[pymupdf.Rect]] = []
+    out: list[list[int]] = []
     last_end = -1
     for pos, end in spans:
         if pos < last_end:
@@ -180,11 +163,65 @@ def find_in_page_text(pt: PageText, query: str, opts: SearchOptions | None = Non
             if (pos > 0 and _is_word_char(hay[pos - 1]) and _is_word_char(hay[pos])) or \
                (end < len(hay) and _is_word_char(hay[end]) and _is_word_char(hay[end - 1])):
                 continue
-        rects = _span_rects(pt, index, pos, end)
-        if rects:
-            hits.append(rects)
+        src = sorted(set(index[pos:end]))
+        if any(pt.boxes[i] is not None and pt.lines[i] != -2 for i in src):
+            out.append(src)
             last_end = end
-    return hits
+    return out
+
+
+def _rects_of(pt: PageText, src: list[int]) -> list[pymupdf.Rect]:
+    rects: dict[int, pymupdf.Rect] = {}
+    order: list[int] = []
+    for i in src:
+        box = pt.boxes[i]
+        line = pt.lines[i]
+        if box is None or line == -2:
+            continue
+        if line not in rects:
+            rects[line] = pymupdf.Rect(box)
+            order.append(line)
+        else:
+            rects[line] |= box
+    return [rects[k] for k in order]
+
+
+def find_in_page_text(pt: PageText, query: str, opts: SearchOptions | None = None) -> list[list[pymupdf.Rect]]:
+    """Occorrenze di `query`: per ciascuna, i rettangoli (uno per riga coinvolta)."""
+    return [_rects_of(pt, src) for src in find_spans(pt, query, opts)]
+
+
+def find_across_pages(a: PageText, b: PageText, query: str,
+                      opts: SearchOptions | None = None) -> list[tuple[list[pymupdf.Rect], list[pymupdf.Rect]]]:
+    """Occorrenze che iniziano alla fine della pagina `a` e proseguono all'inizio di `b`:
+    per ciascuna, (rettangoli su a, rettangoli su b)."""
+    opts = opts or SearchOptions()
+    if opts.regex or not a.has_text or not b.has_text:
+        return []
+    q = normalize_query(query, opts.case_sensitive, opts.ignore_accents)
+    if len(q) < 2:
+        return []
+    keep = len(q) * 3 + 8
+    ta = max(0, len(a.text) - keep)
+    hb = min(len(b.text), keep)
+    na = len(a.text) - ta
+    joined = PageText()
+    joined.text = a.text[ta:] + " " + b.text[:hb]
+    joined.boxes = a.boxes[ta:] + [None] + b.boxes[:hb]
+    joined.lines = a.lines[ta:] + [-1] + [(ln + 1_000_000 if ln >= 0 else ln) for ln in b.lines[:hb]]
+    # parola sillabata a cavallo delle due pagine
+    if na >= 2 and a.text[-1] in _HYPHENS and a.text[-2].isalpha() and b.text[:1].isalpha():
+        joined.lines[na - 1] = -2
+        joined.lines[na] = -2      # niente spazio tra le due parti
+    out = []
+    for src in find_spans(joined, query, opts):
+        ia = [i + ta for i in src if i < na]
+        ib = [i - na - 1 for i in src if i > na]
+        if ia and ib:
+            ra, rb = _rects_of(a, ia), _rects_of(b, ib)
+            if ra and rb:
+                out.append((ra, rb))
+    return out
 
 
 def context_snippet(pt: PageText, rects: list[pymupdf.Rect], width: int = 40) -> tuple[str, str, str]:
@@ -664,3 +701,4 @@ def verify_outline(items: list[Bookmark], page_count: int) -> list[tuple[int, st
             problems.append((i, "duplicate"))
         seen.setdefault(key, i)
     return problems
+
