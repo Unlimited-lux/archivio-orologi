@@ -857,6 +857,10 @@ class JobReport:
     def failed_items(self) -> list[str]:
         return [r.input for r in self.results if r.status in ("error", "cancelled", "not_processed")]
 
+    def pending_items(self) -> list[str]:
+        """File lasciati a metà o non iniziati per un annullamento (non quelli in errore)."""
+        return [r.input for r in self.results if r.status in ("cancelled", "not_processed")]
+
     def to_csv(self, sep: str = ",") -> str:
         buf = io.StringIO()
         w = csv.writer(buf, delimiter=sep, lineterminator="\n")
@@ -1723,6 +1727,9 @@ def to_pdf_bytes(path: str, params: dict, warnings: list | None = None) -> bytes
 
 def _open_input(data: bytes, item: QueueItem, candidates: list[str]) -> tuple[bytes, dict, int | None]:
     """Apre il file; restituisce (dati in chiaro, opzioni di cifratura originali, n. candidata)."""
+    if not data.strip():
+        raise BatchError("PDF-01", _("File vuoto (0 byte): probabilmente la copia o il download non è "
+                                     "andato a buon fine."))
     with ENGINE_LOCK:
         try:
             doc = _open(data)

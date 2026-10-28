@@ -850,4 +850,8 @@ EN: dict[str, str] = {
     "dati": "data",
     "{n} campi compilati": "{n} fields filled",
     "firmata da {nome}": "signed by {nome}",
+    "File vuoto (0 byte): probabilmente la copia o il download non è andato a buon fine.": "Empty file (0 bytes): the copy or download probably did not complete.",
+    "Nessun file da riprendere.": "No files to resume.",
+    "Rimette in coda solo i file non completati per l'annullamento e riavvia il lavoro con le stesse impostazioni": "Queues only the files left unfinished by the cancellation and restarts the job with the same settings",
+    "Riprendi i non elaborati": "Resume unprocessed files",
 }

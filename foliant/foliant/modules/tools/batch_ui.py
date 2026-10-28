@@ -442,6 +442,13 @@ class BatchWidget(QWidget):
         rbar = QHBoxLayout()
         rbar.addWidget(self.report_filter)
         rbar.addStretch(1)
+        self.resume_button = QPushButton(_("Riprendi i non elaborati"))
+        bind_icon(self.resume_button, "play")
+        self.resume_button.setToolTip(_("Rimette in coda solo i file non completati per l'annullamento e "
+                                        "riavvia il lavoro con le stesse impostazioni"))
+        self.resume_button.clicked.connect(lambda: self.resume_pending())
+        self.resume_button.hide()
+        rbar.addWidget(self.resume_button)
         for text, name, slot in ((_("Riprova i non riusciti"), "rotate-cw", self.retry_failed),
                                  (_("Esporta rapporto"), "file-output", self.export_report_dialog),
                                  (_("Indice Bates"), "list-ordered", self.export_bates_index_dialog),
@@ -1010,6 +1017,7 @@ class BatchWidget(QWidget):
         if report is None:
             return
         self.report_summary.setText((_("Lavoro annullato.") + " " if report.cancelled else "") + report.summary())
+        self.resume_button.setVisible(bool(report.cancelled and report.pending_items()))
         flt = self.report_filter.currentData()
         rows = [r for r in report.results if not flt or r.status == flt]
         self.report_table.setSortingEnabled(False)
@@ -1040,6 +1048,20 @@ class BatchWidget(QWidget):
             self.ctx.open_path(path)
         else:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def resume_pending(self):
+        """Dopo un annullamento: riparte dai soli file non completati, con le stesse impostazioni."""
+        if self.report is None:
+            return None
+        pending = set(self.report.pending_items())
+        if not pending:
+            self.ctx.notify(_("Nessun file da riprendere."))
+            return None
+        self.items = [it for it in self.items if it.path in pending]
+        self.report = None
+        self.report_box.hide()
+        self._refresh_queue()
+        return self.run(confirm=False)
 
     def retry_failed(self) -> None:
         if self.report is None:
