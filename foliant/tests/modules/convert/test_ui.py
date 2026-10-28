@@ -679,3 +679,29 @@ def test_compress_document_reduction_survives_save(window, ctrl, tmp_path, monke
         assert saved == res["after"] and saved < before
     else:
         assert not view.document.is_modified and os.path.getsize(path) == before
+
+
+def test_export_uses_thumbnail_selection(window, ctrl, twenty_pages, tmp_path, monkeypatch, messages):
+    view = window.open_path(twenty_pages)
+
+    class FakeThumbs:
+        def __init__(self, v):
+            self.view = v
+
+        def selected_pages(self):
+            return [1, 4, 6]
+
+    monkeypatch.setitem(window._sidebar, "thumbnails", ("Miniature", "x", FakeThumbs(view), 10, None))
+
+    def fake_exec(dlg):
+        assert dlg.selected == [1, 4, 6]
+        dlg.folder_edit.setText(str(tmp_path))
+        dlg.format_box.setCurrentIndex(dlg.format_box.findData("txt"))
+        dlg.range_edit.setText("selezionate")
+        dlg.validate()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ExportDialog, "exec", fake_exec)
+    result = ctrl.export()
+    text = open(result.paths[0], encoding="utf-8").read()
+    nums = [int(line.split()[-1]) for line in text.replace("\f", "\n").splitlines() if line.startswith("Pagina")]
+    assert nums == [2, 5, 7]

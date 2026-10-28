@@ -90,6 +90,23 @@ class ConvertController:
             return False
         return True
 
+    def selected_pages(self) -> list[int]:
+        """Pagine selezionate nel pannello miniature (vuoto se nessuna o pannello assente).
+
+        Il nucleo non espone ancora un'API pubblica (vedi CORE_REQUESTS.md): si usa il pannello
+        registrato con id «thumbnails» se offre `selected_pages()`."""
+        try:
+            entry = getattr(self.window, "_sidebar", {}).get("thumbnails")
+            panel = entry[2] if entry else None
+            if panel is None or not hasattr(panel, "selected_pages"):
+                return []
+            if getattr(panel, "view", self.ctx.current_view()) is not self.ctx.current_view():
+                return []
+            pages = [int(p) for p in panel.selected_pages()]
+            return pages if len(pages) > 1 else []
+        except Exception:
+            return []
+
     def open_created(self, data: bytes, name: str, modified: bool = True):
         doc = Document.from_bytes(data, display_name=name, modified=modified)
         return self.ctx.open_document(doc)
@@ -144,7 +161,8 @@ class ConvertController:
         settings = self.ctx.settings()
         dlg = ExportDialog(self.window, page_count=page_count, current_page=current, name=name, folder=folder,
                            fmt=fmt or settings.value("convert/last_format", "docx") or "docx",
-                           settings=settings, scanned=scanned)
+                           settings=settings, scanned=scanned,
+                           selected=self.selected_pages() if view is not None else None)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         fmt, out_path, options = dlg.values()
