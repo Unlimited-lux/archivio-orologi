@@ -228,3 +228,17 @@ def test_engine_apply_state_respects_names():
     assert engine.apply_state(doc, {0: ("A", True)})
     assert engine.layers(doc)[0].on
     assert engine.matches(engine.layers(doc)[0], "a") and not engine.matches(engine.layers(doc)[0], "zz")
+
+
+def test_thumbnails_follow_layer_visibility(viewer_window, layers_pdf):
+    view, panel = _open(viewer_window, layers_pdf)
+    thumbs = viewer_window.ctx.viewer_parts["thumbnails"].panel
+    thumbs.set_view(view)
+    viewer_window.ctx.show_sidebar_panel("thumbnails")
+    thumbs.flush()
+    before = thumbs.image(0)
+    assert before is not None
+    panel._widgets[panel.layer("Quote").number].setChecked(True)
+    assert thumbs.image(0) is None      # da rigenerare con il nuovo stato
+    thumbs.flush()
+    assert thumbs.image(0) is not None and thumbs.image(0) != before

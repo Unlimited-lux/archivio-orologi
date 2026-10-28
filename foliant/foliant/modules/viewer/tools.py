@@ -7,8 +7,10 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QActionGroup, QGuiApplication, QImage, QPen
 from PySide6.QtWidgets import QMenu
 
+from PySide6.QtCore import QEvent, QObject
+
 from foliant.api import (
-    ENGINE_LOCK, Context, DocumentView, Tool, _, add_translations, theme, words_to_text,
+    ENGINE_LOCK, Context, DocumentView, TextSelection, Tool, _, add_translations, theme, words_to_text,
 )
 
 TRANSLATIONS = {
@@ -61,6 +63,40 @@ def capture_image(view: DocumentView, page: int, rect: pymupdf.Rect, dpi: int) -
     img.setDotsPerMeterX(int(dpi / 0.0254))
     img.setDotsPerMeterY(int(dpi / 0.0254))
     return img, dpi
+
+
+def table_text(words: list[tuple]) -> str:
+    """Testo di una selezione rettangolare: una riga per riga, tabulazione tra le colonne."""
+    if not words:
+        return ""
+    ws = sorted(words, key=lambda w: ((w[1] + w[3]) / 2, w[0]))
+    rows: list[list[tuple]] = []
+    for w in ws:
+        cy = (w[1] + w[3]) / 2
+        if rows:
+            last = rows[-1]
+            ref = sum((x[1] + x[3]) / 2 for x in last) / len(last)
+            height = max(x[3] - x[1] for x in last)
+            if abs(cy - ref) <= height * 0.5:
+                last.append(w)
+                continue
+        rows.append([w])
+    lines = []
+    for row in rows:
+        row.sort(key=lambda w: w[0])
+        parts = [row[0][4]]
+        for prev, w in zip(row, row[1:]):
+            char_w = (prev[2] - prev[0]) / max(1, len(prev[4]))
+            gap = w[0] - prev[2]
+            parts.append("\t" if gap > char_w * 1.8 else " ")
+            parts.append(w[4])
+        lines.append("".join(parts))
+    return "\n".join(lines)
+
+
+def words_in_rect(view: DocumentView, page: int, rect: pymupdf.Rect) -> list[tuple]:
+    return [w for w in view.words(page)
+            if rect.contains(pymupdf.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
 
 
 def area_text(view: DocumentView, page: int, rect: pymupdf.Rect) -> str:
@@ -137,6 +173,16 @@ class _RectTool(Tool):
         raise NotImplementedError
 
 
+class RectSelectTool(_RectTool):
+    """Selezione rettangolare del testo (Alt+trascinamento con lo strumento di selezione)."""
+
+    id = "rect-select"
+
+    def finished(self, view, page, rect, start_pos, end_pos) -> None:
+        self.c.select_rect(view, page, rect)
+        self.c.end_temporary(view)
+
+
 class ZoomAreaTool(_RectTool):
     id = "zoom-area"
 
@@ -153,9 +199,33 @@ class SnapshotTool(_RectTool):
         self.c.snapshot_menu(view, page, rect, end_pos)
 
 
+class _AltDragFilter(QObject):
+    """Alt+pressione sinistra con lo strumento di selezione → selezione rettangolare."""
+
+    def __init__(self, controller: "ToolsController"):
+        super().__init__(controller.ctx)
+        self.c = controller
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() != QEvent.Type.MouseButtonPress or ev.button() != Qt.MouseButton.LeftButton:
+            return False
+        if not ev.modifiers() & Qt.KeyboardModifier.AltModifier:
+            return False
+        view = obj.parent()
+        if not isinstance(view, DocumentView) or view.tool is not view._default_tool:
+            return False
+        self.c.begin_temporary(view)
+        return False  # la vista inoltra la pressione allo strumento appena attivato
+
+
 class ToolsController:
     def __init__(self, ctx: Context):
         self.ctx = ctx
+        self.rect_tool = RectSelectTool(self)
+        self._alt_filter = _AltDragFilter(self)
+        ctx.documentOpened.connect(lambda v: v.viewport().installEventFilter(self._alt_filter))
+        for v in ctx.views():
+            v.viewport().installEventFilter(self._alt_filter)
         self.zoom_tool = ZoomAreaTool(self)
         self.snapshot_tool = SnapshotTool(self)
         self.act_zoom = ctx.action(_("Zoom area"), "scan-search", lambda on: self._toggle(self.zoom_tool, on),
@@ -212,6 +282,24 @@ class ToolsController:
     def _on_tool(self, tool) -> None:
         self.act_zoom.setChecked(tool is self.zoom_tool)
         self.act_snapshot.setChecked(tool is self.snapshot_tool)
+
+    # ------------------------------------------------- selezione rettangolare
+    def begin_temporary(self, view: DocumentView) -> None:
+        view.set_tool(self.rect_tool)
+
+    def end_temporary(self, view: DocumentView) -> None:
+        if view.tool is self.rect_tool:
+            view.set_tool(None)
+
+    def select_rect(self, view: DocumentView, page: int, rect: pymupdf.Rect) -> TextSelection | None:
+        words = words_in_rect(view, page, rect)
+        if not words:
+            view.clear_text_selection()
+            return None
+        sel = TextSelection(page=page, rects=[pymupdf.Rect(w[:4]) for w in words],
+                            text=table_text(words), words=list(words))
+        view.set_text_selection(sel)
+        return sel
 
     # ------------------------------------------------------------- zoom area
     def zoom_to_area(self, view: DocumentView, page: int, rect: pymupdf.Rect, click_pos: QPointF | None = None) -> None:

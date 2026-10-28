@@ -1,0 +1,1 @@
+# Nessuna nuova dipendenza pip: il modulo usa PySide6 (incluso QtPrintSupport) e PyMuPDF del nucleo.

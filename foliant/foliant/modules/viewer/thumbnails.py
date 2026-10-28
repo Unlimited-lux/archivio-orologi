@@ -253,6 +253,12 @@ class ThumbnailPanel(QWidget):
         self.model.reset(self.view.page_count)
         self._select_current()
 
+    def refresh(self) -> None:
+        """Rigenera le miniature (es. dopo un cambio di visibilità dei livelli)."""
+        self._cache.clear()
+        self.failed.clear()
+        self.list.viewport().update()
+
     def _on_page(self, page: int) -> None:
         old = self.current_page
         self.current_page = page

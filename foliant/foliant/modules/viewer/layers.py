@@ -353,6 +353,9 @@ class LayersPanel(QWidget):
         self._session[self.view] = self._read(engine.state, {}) or {}
         if changed:
             self._refresh_view(self.view)
+            thumbs = getattr(self.ctx, "viewer_parts", {}).get("thumbnails")
+            if thumbs is not None and thumbs.panel.view is self.view:
+                thumbs.panel.refresh()
         self._sync_widgets()
 
     @staticmethod

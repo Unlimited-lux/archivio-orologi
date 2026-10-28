@@ -114,3 +114,28 @@ def test_copy_permission_survives_edit(viewer_window, tmp_path):
         pdf[0].insert_text((72, 200), "altro")
     from foliant.modules.viewer.tools import copy_allowed
     assert not copy_allowed(view)
+
+
+def test_alt_drag_rectangular_table_selection(viewer_window, tmp_path, qtbot):
+    path = tmp_path / "tabella.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 80), "Titolo fuori dalla tabella", fontsize=12)
+    rows = [("Modello", "Anno", "Prezzo"), ("Daytona", "2019", "28000"), ("Nautilus", "2021", "95000")]
+    for r, row in enumerate(rows):
+        for c, cell in enumerate(row):
+            page.insert_text((72 + c * 150, 140 + r * 20), cell, fontsize=11)
+    page.insert_text((72, 260), "Nota a fondo pagina", fontsize=12)
+    doc.save(str(path))
+    view = viewer_window.open_path(str(path))
+    view.flush_rendering()
+    t = view.page_transform(0)
+    a = t.map(QPointF(60, 125)).toPoint()
+    b = t.map(QPointF(450, 190)).toPoint()
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.AltModifier, a)
+    qtbot.mouseMove(view.viewport(), b)
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.AltModifier, b)
+    assert view.tool is view._default_tool
+    assert view.selected_text() == "Modello\tAnno\tPrezzo\nDaytona\t2019\t28000\nNautilus\t2021\t95000"
+    qtbot.keyClick(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    assert QGuiApplication.clipboard().text().startswith("Modello\tAnno")
