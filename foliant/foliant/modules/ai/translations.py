@@ -1166,4 +1166,5 @@ EN: dict[str, str] = {
     "Istruzioni dell'app:": 'App instructions:',
     'Problemi: {n} (nei controlli della tabella).': 'Problems: {n} (in the table checks).',
     'Elaborazione interrotta a «{f}»: {m} I file seguenti non sono stati elaborati.': 'Processing stopped at “{f}”: {m} The following files were not processed.',
+    'Documento {l} troppo lungo: valutato sui passaggi più pertinenti ai criteri.': 'Document {l} too long: evaluated on the passages most relevant to the criteria.',
 }

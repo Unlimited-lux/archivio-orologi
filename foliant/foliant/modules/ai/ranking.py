@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from foliant.api import FoliantError, _
 
 from . import chunking, engine, prompts
-from .providers import ChatRequest, Message
+from .providers import GLOBAL_KINDS, AIError, ChatRequest, Message
 
 HUMAN_DECISION = ("Avviso: la classifica è un supporto e non sostituisce una decisione presa da una persona.")
 CV_RULES = ("Evaluate only information relevant to the criteria. Ignore and never mention age, marital status, "
@@ -136,19 +136,28 @@ def evaluate(job: engine.Job, prepared, criteria: list[Criterion], *, cv_mode: b
             chunks = chunking.make_chunks(pages, max(400, budget // 4), doc=space.name)
             query = " ".join(c.nome + " " + c.descrizione for c in criteria)
             text = "\n\n".join(c.text for c in chunking.select_chunks(chunks, query, budget))
+            warnings.append(_("Documento {l} troppo lungo: valutato sui passaggi più pertinenti ai criteri.")
+                            .format(l=space.name))
         body = f"Document {space.name}:\n<document>\n{text}\n</document>"
         scores = None
+        failure = ""
         for attempt in range(2):
             msgs = [Message("user", body if attempt == 0 else body + "\n\nReply ONLY with valid JSON as specified.")]
-            r = job.gateway.send(ChatRequest(system, msgs, out_tokens), function="ranking",
-                                 pages=[p.index for p in pages], cancel=job.cancel, on_wait=job.on_wait,
-                                 profile=profile)
+            try:
+                r = job.gateway.send(ChatRequest(system, msgs, out_tokens), function="ranking",
+                                     pages=[p.index for p in pages], cancel=job.cancel, on_wait=job.on_wait,
+                                     profile=profile)
+            except AIError as e:
+                if e.kind in GLOBAL_KINDS:
+                    raise           # chiave, rete, quota: anche gli altri documenti fallirebbero
+                failure = e.user_message()      # rifiuto o richiesta non valida per questo documento
+                break
             scores = _parse(r.text, criteria, space)
             if scores is not None:
                 break
         row = RankRow(member.path, space.name, member.title)
         if scores is None:
-            row.escluso, row.motivo = True, _("risposta non valida del fornitore")
+            row.escluso, row.motivo = True, failure or _("risposta non valida del fornitore")
         else:
             row.scores = scores
         rows.append(row)

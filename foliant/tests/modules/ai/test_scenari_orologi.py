@@ -481,3 +481,20 @@ def test_invoice_batch_stops_on_invalid_key_and_network_loss(window, services, t
     result = services.controller.last_dialog.result
     assert len(result.records) == 3 and any("interrotta" in c and "rete" in c.lower() for c in result.checks), \
         result.checks
+
+
+def test_ranking_offers_one_refused_others_ranked(window, services, text_pdf):
+    from foliant.modules.ai.providers import REFUSED, AIError
+    paths = [text_pdf(1, name=f"offerta-{i}.pdf", texts=[f"Offerta {i}: Omega Seamaster, prezzo {9000 + i * 500} euro"])
+             for i in range(3)]
+    replies = iter([json.dumps({"evaluations": [{"criterio": "Prezzo", "punteggio": 8, "motivazione": "ok"}]}),
+                    AIError(REFUSED, "policy"),
+                    json.dumps({"evaluations": [{"criterio": "Prezzo", "punteggio": 6, "motivazione": "ok"}]})])
+    services.fake.default = lambda req: next(replies)
+    dlg = services.controller.open_ranking()
+    dlg.add_paths(paths)
+    dlg.add_criterion("Prezzo", "prezzo più basso", 1)
+    dlg.evaluate()
+    assert [r.totale for r in dlg.rows if not r.escluso] == [8, 6]
+    refused = [r for r in dlg.rows if r.escluso]
+    assert len(refused) == 1 and "rifiut" in refused[0].motivo.lower()
