@@ -439,7 +439,7 @@ def test_ann43_summary_files(comments, tmp_path, monkeypatch):
 
 
 def test_context_menu_on_text_selection(comments):
-    """Menu contestuale: «Commenta il testo» sulla selezione e «Aggiungi nota qui»."""
+    """Menu contestuale sulla selezione (UX-07): Evidenzia, Sottolinea, Barrato, Aggiungi nota; «Aggiungi nota qui»."""
     from PySide6.QtWidgets import QMenu
     from foliant.api import PageEvent, selection_from_words
     from PySide6.QtCore import QPointF
@@ -451,10 +451,20 @@ def test_context_menu_on_text_selection(comments):
                    Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier)
     module._view_menu(view, pe, menu)
     texts = [a.text() for a in menu.actions()]
-    assert "Commenta il testo" in texts and "Aggiungi nota qui" in texts
-    sub = [a for a in menu.actions() if a.text() == "Commenta il testo"][0].menu()
-    [a for a in sub.actions() if a.text() == "Evidenzia"][0].trigger()
+    assert {"Evidenzia", "Sottolinea", "Barrato", "Aggiungi nota", "Aggiungi nota qui"} <= set(texts)
+    [a for a in menu.actions() if a.text() == "Evidenzia"][0].trigger()
     assert module.ctrl.annotations()[0].kind == engine.HIGHLIGHT
+    # «Aggiungi nota»: evidenziazione con il commento scritto
+    view.set_text_selection(selection_from_words(0, words))
+    menu = QMenu()
+    module._view_menu(view, pe, menu)
+    from foliant.modules.annotations import dialogs
+    import pytest
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(dialogs, "edit_comment", lambda *a, **k: ("Da verificare", None))
+        [a for a in menu.actions() if a.text() == "Aggiungi nota"][0].trigger()
+    infos = module.ctrl.annotations()
+    assert len(infos) == 2 and infos[-1].kind == engine.HIGHLIGHT and infos[-1].contents == "Da verificare"
 
 
 

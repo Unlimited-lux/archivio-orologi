@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Any
 
@@ -47,15 +47,27 @@ def _js_str(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def default_separator() -> int:
+    """Stile dei separatori proposto secondo la lingua (NFR-26): 1.234,56 in italiano, 1,234.56 in inglese."""
+    from foliant.i18n import language
+    return 2 if language() == "it" else 0
+
+
+def default_date_pattern() -> str:
+    """Modello di data proposto secondo la lingua (NFR-26): 28/10/2026 in italiano, 10/28/2026 in inglese."""
+    from foliant.i18n import language
+    return "dd/mm/yyyy" if language() == "it" else "mm/dd/yyyy"
+
+
 @dataclass
 class Format:
     type: str = NONE
     decimals: int = 2
-    separator: int = 2
+    separator: int = field(default_factory=default_separator)
     negative: int = 0
     currency: str = ""
     currency_before: bool = False
-    pattern: str = "dd/mm/yyyy"     # data o ora
+    pattern: str = field(default_factory=default_date_pattern)     # data o ora
     mask: str = ""                   # formato speciale (9 cifra, A lettera, O alfanumerico, X qualsiasi)
 
     # ---------------------------------------------------------------- script

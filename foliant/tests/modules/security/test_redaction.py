@@ -516,3 +516,12 @@ def test_ocr_scan_redaction_covers_full_glyph_height(tmp_path):
     assert not light, (len(light), light[:5], out.width, out.height, r)      # tutta l'area è coperta dal riempimento nero (nessun pixel chiaro di sfondo)
     assert "CA12345XY" not in doc.page_text(0)
     doc.close()
+
+
+def test_identity_document_numbers(tmp_path):
+    """Dati dei clienti nei documenti d'identità allegati ai contratti di compravendita."""
+    pdf = _text_pdf(tmp_path, ["Carta d'identità n. CA12345XY rilasciata dal Comune",
+                               "Passaporto YA1234567, patente MI1234567A",
+                               "Orologio Submariner ref. 116610LN, prezzo EUR 9.500"])
+    found = [m.text for m in PT.find(pdf, [PT.pattern_by_id("iddoc")])]
+    assert found == ["CA12345XY", "YA1234567", "MI1234567A"]

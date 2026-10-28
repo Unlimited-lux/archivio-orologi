@@ -436,7 +436,9 @@ class ReloadController(QObject):
                        (_("Ignora"), lambda v=view: self.ignore(v), False)]
         else:
             text = _("Il file «{name}» è stato eliminato o spostato.").format(name=name)
-            buttons = [(_("Salva"), lambda v=view: self.save(v), True)]
+            # «Salva» ricrea il file dov'era, senza domande; «Salva con nome…» ne sceglie un altro
+            buttons = [(_("Salva"), lambda v=view: self.save(v), True),
+                       (_("Salva con nome…"), lambda v=view: self.save_as(v), False)]
         on_close = (lambda v=view: self.ignore(v)) if kind != BAR_MISSING else (lambda v=view: self._remove_bar(v))
         w.bar = ReloadBar(kind, text, buttons)
         self.ctx.show_banner(view, ReloadBar.BANNER_ID, text, buttons,

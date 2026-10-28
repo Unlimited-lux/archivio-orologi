@@ -118,3 +118,25 @@ def test_each_module_keeps_its_own_translations(english):
     core = run("foliant.ui.prova", 'r = _("Annulla")')
     assert core["r"] == "Undo"                      # il nucleo non viene sovrascritto dai moduli
     assert run("foliant.modules.prova_a.x", 'r = _("Annulla")')["r"] == "Cancel-A"
+
+
+def test_dates_and_numbers_follow_the_language():
+    import datetime as dt
+
+    from foliant import i18n
+    when = dt.datetime(2026, 10, 28, 14, 5, 9)
+    previous = i18n.language()
+    try:
+        i18n.set_language("it")
+        assert i18n.format_date(when) == "28/10/2026"
+        assert i18n.format_date(when, time=True) == "28/10/2026 14:05"
+        assert i18n.format_number(1234) == "1.234" and i18n.format_number(1234.5) == "1.234,5"
+        assert i18n.format_number(9800, 2) == "9.800,00"
+        i18n.set_language("en")
+        assert i18n.format_date(when) == "10/28/2026"
+        assert i18n.format_date(when, time=True) == "10/28/2026 2:05 PM"
+        assert i18n.format_date(dt.datetime(2026, 1, 2, 0, 7), time=True, seconds=True) == "01/02/2026 12:07:00 AM"
+        assert i18n.format_number(1234) == "1,234" and i18n.format_number(1234.5) == "1,234.5"
+        assert i18n.format_number(9800, 2) == "9,800.00"
+    finally:
+        i18n.set_language(previous)

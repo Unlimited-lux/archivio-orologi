@@ -136,6 +136,8 @@ def build_actions(ctx, c, mode) -> None:
     # --- timbri (sotto-modulo stamp)
     c.act_numbers = act(_("Numeri di pagina…"), "hash", _dialog(c, "stamp_dialogs", "open_page_numbers_dialog"))
     c.act_bates = act(_("Numerazione Bates…"), "list-ordered", _dialog(c, "stamp_dialogs", "open_bates_dialog"))
+    c.act_bates_files = act(_("Numerazione Bates su più file…"), "files",
+                            _dialog(c, "bates_dialogs", "open_bates_files_dialog"), structural_op=False)
     c.act_header = act(_("Intestazione e piè di pagina…"), "panel-top",
                        _dialog(c, "stamp_dialogs", "open_header_footer_dialog"))
     c.act_watermark = act(_("Filigrana…"), "droplet", _dialog(c, "stamp_dialogs", "open_watermark_dialog"))
@@ -178,7 +180,7 @@ def build_actions(ctx, c, mode) -> None:
     mode.add_widget(menu_button(pgettext("menu", "Formato"), "crop", [
         c.act_crop, c.act_margins, c.act_resize, c.act_boxes, None, c.act_nup]))
     mode.add_widget(menu_button(_("Timbri"), "stamp", [
-        c.act_numbers, c.act_bates, c.act_header, None, c.act_watermark, c.act_background, c.act_remove_stamps,
+        c.act_numbers, c.act_bates, c.act_bates_files, c.act_header, None, c.act_watermark, c.act_background, c.act_remove_stamps,
         None, c.act_labels]))
     mode.add_widget(menu_button(_("Altro"), "ellipsis", [
         c.act_copy, c.act_cut, c.act_paste, c.act_paste_before, None, c.act_detect, c.act_extract_images, c.act_share,

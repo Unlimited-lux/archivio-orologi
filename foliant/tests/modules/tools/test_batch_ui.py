@@ -388,3 +388,17 @@ def test_parallel_setting_used(batch, folder, tmp_path):
     batch.dest_path.setText(str(tmp_path / "out"))
     report = batch.run(confirm=False)
     assert all(r.status in ("ok", "warning") for r in report.results) and len(os.listdir(tmp_path / "out")) == 5
+
+
+def test_control_panel_shows_disk_full(batch):
+    control = be.JobControl()
+    panel = bu.JobControlPanel(control, batch)
+    panel.refresh()
+    assert panel.disk_label.isHidden()
+    control.disk_full = True
+    control.pause()
+    panel.refresh()
+    assert not panel.disk_label.isHidden() and panel.pause_button.text() == "Riprendi"
+    panel.toggle_pause()
+    assert not control.paused
+    panel.close()

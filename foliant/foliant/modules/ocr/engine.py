@@ -132,6 +132,7 @@ class OcrOptions:
     clean_page: bool = False     # ricercabile: la pulizia sostituisce anche l'immagine visibile (OCR-09)
     zones: list = field(default_factory=list)   # zone manuali (layout.Zone), uguali per tutte le pagine
     auto_tables: bool = True     # riconoscimento automatico delle tabelle con bordi (OCR-10)
+    compression: str = "exact"   # ricercabile: immagine della pagina exact | balanced | maximum (OCR-19)
 
     def worker_count(self) -> int:
         if self.workers > 0:
@@ -179,6 +180,8 @@ class PageResult:
     existing_text: str = ""               # pagine saltate perché già con testo: testo estraibile
     tables: list = field(default_factory=list)   # layout.Table rilevate (pixel elaborati)
     remove_layer: bool = False            # togliere il livello OCR invisibile esistente
+    foreground: bytes | None = None       # OCR-19: maschera del testo (PNG con trasparenza) sopra lo sfondo
+    source_bytes: int = 0                 # dimensione degli stream delle immagini originali della pagina
     original: bytes | None = None         # scansione originale (per il livello nascosto)
     offset: tuple[float, float] = (0.0, 0.0)   # OCR di un'area: origine dell'area sulla pagina (punti)
 
@@ -477,6 +480,11 @@ def _classify_job(pdf: pymupdf.Document, index: int, opts: OcrOptions) -> tuple[
         res.mixed = info.category == detect.MIXED and opts.existing_text != FORCE
         if info.category == detect.MIXED and opts.existing_text == FORCE:
             res.rasterize = True
+        if opts.compression != "exact":
+            try:
+                res.source_bytes = sum(len(pdf.xref_stream_raw(x[0]) or b"") for x in page.get_images(full=True))
+            except Exception:
+                res.source_bytes = 0
         if info.low_resolution:
             res.notes.append(_("Risoluzione bassa ({d} dpi): accuratezza ridotta.").format(d=int(info.dpi)))
         if res.mixed:
@@ -484,6 +492,22 @@ def _classify_job(pdf: pymupdf.Document, index: int, opts: OcrOptions) -> tuple[
             m = placement.page_to_display_matrix(page)
             res.patches = [("text", tuple(pymupdf.Rect(r) * m)) for r in info.text_rects]
         return res, True
+
+
+def _box_original(res: PageResult, bbox) -> tuple[float, float, float, float]:
+    """Riquadro di una parola (pixel elaborati) nei pixel dell'immagine resa della pagina."""
+    pts = [res.processed_to_display(x, y) for x, y in ((bbox[0], bbox[1]), (bbox[2], bbox[1]),
+                                                       (bbox[0], bbox[3]), (bbox[2], bbox[3]))]
+    z = res.zoom
+    xs = [p[0] * z for p in pts]
+    ys = [p[1] * z for p in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _image_bytes_estimate(img: np.ndarray) -> int:
+    """Dimensione di riferimento della scansione non compressa con perdita (PNG)."""
+    ok, png = cv2.imencode(".png", cv2.cvtColor(img, cv2.COLOR_RGB2BGR) if img.ndim == 3 else img)
+    return len(png) if ok else img.size
 
 
 def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Callable[[], bool]) -> PageResult:
@@ -534,6 +558,15 @@ def _process(res: PageResult, img: np.ndarray, opts: OcrOptions, cancelled: Call
                 res.original = _encode_background(img)
     elif opts.mode == SEARCHABLE and res.rasterize:
         res.background = _encode_background(img)
+    elif opts.mode == SEARCHABLE and opts.compression != "exact" and not res.mixed and \
+            res.category == detect.IMAGE_ONLY:
+        from .compress import compress_page
+        boxes = [_box_original(res, w.bbox) for w in res.words]
+        bg, fg = compress_page(img, boxes, opts.compression)
+        reference = res.source_bytes or _image_bytes_estimate(img)
+        if len(bg) + len(fg or b"") < 0.9 * reference:     # guadagno sotto il 10%: immagine invariata
+            res.background, res.foreground = bg, fg
+            res.rasterize = True
     elif opts.mode == SEARCHABLE and opts.clean_page and not res.mixed:
         # immagine della pagina pulita (rumore, contrasto, bordi) con la stessa geometria
         from .preprocess import enhance, to_gray
@@ -1020,6 +1053,9 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
             _clear_page_content(page)
             placement.insert_image(page, placement.page_rect(page), stream=res.background, keep_proportion=False,
                                    upright=True)
+            if res.foreground:
+                placement.insert_image(page, placement.page_rect(page), stream=res.foreground,
+                                       keep_proportion=False, upright=True)
         if apply_to_page and (res.rotation or res.skew) and not res.mixed:
             _straighten_page(page, res)
             sx = page.rect.width / max(1.0, res.size[0])

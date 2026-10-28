@@ -1286,12 +1286,35 @@ class JobControlPanel(QWidget):
         skip = QPushButton(_("Annulla file"))
         bind_icon(skip, "skip-forward")
         skip.clicked.connect(control.skip_current)
-        lay = QHBoxLayout(self)
+        self.disk_label = QLabel(_("Spazio esaurito nella destinazione: libera spazio e premi Riprendi, "
+                                   "oppure annulla il lavoro."))
+        self.disk_label.setWordWrap(True)
+        self.disk_label.setStyleSheet(f"color: {theme.hex_color('danger')}")
+        self.disk_label.hide()
+        from PySide6.QtCore import QTimer
+        self.poll = QTimer(self)
+        self.poll.setInterval(300)
+        self.poll.timeout.connect(self.refresh)
+        self.poll.start()
+        outer = QVBoxLayout(self)
+        lay = QHBoxLayout()
         lay.addWidget(self.pause_button)
         lay.addWidget(skip)
+        outer.addLayout(lay)
+        outer.addWidget(self.disk_label)
         if parent is not None:
             g = parent.window().geometry()
             self.move(g.right() - 320, g.top() + 80)
+
+    def refresh(self) -> None:
+        """Mostra l'avviso di disco pieno e lo stato del pulsante (il lavoro gira in un altro thread)."""
+        full = bool(getattr(self.control, "disk_full", False))
+        self.disk_label.setVisible(full)
+        paused = self.control.paused
+        self.pause_button.setText(_("Riprendi") if paused else _("Pausa"))
+        bind_icon(self.pause_button, "play" if paused else "pause")
+        if full and not self.isVisible():
+            self.show()
 
     def toggle_pause(self) -> None:
         if self.control.paused:
