@@ -303,21 +303,47 @@ def _placement():
 
 
 _MATRIX_CACHE: dict | None = None
+_PAGE_CACHE: dict | None = None
+
+
+def _page(pdf: pymupdf.Document, page_no: int) -> pymupdf.Page:
+    """Pagina del motore. Durante un'operazione massiva (`bulk_geometry`) resta caricata solo la
+    pagina corrente: ricaricarla a ogni elemento rilegge tutte le sue annotazioni, ma tenere caricate
+    molte pagine rallenta ogni nuova annotazione (MuPDF aggiorna le annotazioni di tutte le pagine
+    aperte), in entrambi i casi con costo quadratico."""
+    if _PAGE_CACHE is None:
+        return pdf[page_no]
+    key = (id(pdf), page_no)
+    _PAGE_CACHE["uses"] = _PAGE_CACHE.get("uses", 0) + 1
+    page = _PAGE_CACHE.get(key)
+    if page is None:
+        for k in [k for k in _PAGE_CACHE if k != "uses"]:
+            del _PAGE_CACHE[k]
+        if _PAGE_CACHE["uses"] >= 200:
+            # oggetti Annot rimasti in cicli di riferimenti tengono aperte in MuPDF le pagine già
+            # lasciate: una raccolta ogni 200 elementi le chiude (una raccolta costa ~40 ms)
+            import gc
+            gc.collect()
+            _PAGE_CACHE["uses"] = 0
+        page = _PAGE_CACHE[key] = pdf[page_no]
+    return page
 
 
 @contextmanager
 def bulk_geometry() -> Iterator[None]:
     """Durante un'operazione su molte annotazioni (importazione, esportazione) le matrici di
     `placement` sono calcolate una volta per pagina e rotazione invece che a ogni punto."""
-    global _MATRIX_CACHE
+    global _MATRIX_CACHE, _PAGE_CACHE
     outer = _MATRIX_CACHE is not None
     if not outer:
         _MATRIX_CACHE = {}
+        _PAGE_CACHE = {}
     try:
         yield
     finally:
         if not outer:
             _MATRIX_CACHE = None
+            _PAGE_CACHE = None
 
 
 def _page_matrix(page: pymupdf.Page, to_pdf: bool):
@@ -448,7 +474,7 @@ def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequenc
     quads = [q for q in quads if not q.rect.is_empty]
     if not quads:
         raise AnnotationError("Nessun testo selezionato.")
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     fn = {HIGHLIGHT: page.add_highlight_annot, UNDERLINE: page.add_underline_annot,
           STRIKEOUT: page.add_strikeout_annot, SQUIGGLY: page.add_squiggly_annot}[kind]
     annot = fn(quads=quads)
@@ -461,7 +487,7 @@ def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequenc
         pdf.xref_set_key(xref, AREA_KEY, "true")
         _fit_area_rect(pdf, page, xref, quads[0].rect if len(quads) == 1 else None)
     if contents:
-        ensure_popup(pdf, page_no, xref)
+        ensure_popup(pdf, page_no, xref, annot=annot)
     return xref
 
 
@@ -513,7 +539,7 @@ def marked_text(page: pymupdf.Page, annot: pymupdf.Annot, words: list | None = N
 def open_popups(pdf: pymupdf.Document, page_no: int) -> list[tuple[pymupdf.Rect, str, str, str]]:
     """Popup aperte della pagina: (riquadro, autore, data, testo). Costo lineare: si leggono
     solo le chiavi /Popup e /Open dal dizionario (chiamata a ogni ridisegno)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     out = []
     for xref, atype, _nm in page.annot_xrefs():
         if atype in NON_COMMENT_TYPES:
@@ -543,10 +569,12 @@ def set_popup_open(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool) 
     ensure_popup(pdf, page_no, xref, open_)
 
 
-def ensure_popup(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool | None = None) -> None:
-    """Crea (se manca) la finestra popup collegata all'annotazione (ANN-05)."""
-    page = pdf[page_no]
-    annot = get_annot(page, xref)
+def ensure_popup(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool | None = None,
+                 annot: pymupdf.Annot | None = None) -> None:
+    """Crea (se manca) la finestra popup collegata all'annotazione (ANN-05). `annot`, se già
+    disponibile, evita la ricerca lineare nella pagina (importazioni di migliaia di commenti)."""
+    page = annot.get_parent() if annot is not None else pdf[page_no]
+    annot = annot if annot is not None else get_annot(page, xref)
     if annot.type[0] in (pymupdf.PDF_ANNOT_FREE_TEXT, pymupdf.PDF_ANNOT_POPUP) or \
             annot.type[0] in NON_COMMENT_TYPES:
         return
@@ -558,7 +586,6 @@ def ensure_popup(pdf: pymupdf.Document, page_no: int, xref: int, open_: bool | N
         y0 = max(pr.y0, min(r.y0, pr.y1 - 120))
         with unrotated(page):
             annot.set_popup(pymupdf.Rect(x0, y0, x0 + 200, y0 + 120))
-        annot = page.load_annot(xref)
     if open_ is not None:
         annot.set_open(bool(open_))
 
@@ -569,7 +596,7 @@ NOTE_SIZE = 20.0
 
 def create_note(pdf: pymupdf.Document, page_no: int, point, text: str, style: Style,
                 author: str | None = None, icon: str | None = None) -> int:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     p = pymupdf.Point(point)
     icon = icon or style.icon or "Comment"
     if icon not in NOTE_ICONS:
@@ -593,13 +620,13 @@ def create_note(pdf: pymupdf.Document, page_no: int, point, text: str, style: St
     annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[NOTE]))
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
     xref = _finish(annot, author, text, kind=NOTE)
-    ensure_popup(pdf, page_no, xref)
+    ensure_popup(pdf, page_no, xref, annot=annot)
     return xref
 
 
 def create_freetext(pdf: pymupdf.Document, page_no: int, rect, text: str, style: Style,
                     author: str | None = None, callout: Sequence | None = None) -> int:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     rect = pymupdf.Rect(rect).normalize()
     if rect.width < 8 or rect.height < 8:
         rect = pymupdf.Rect(rect.x0, rect.y0, rect.x0 + 180, rect.y0 + max(28, style.fontsize * 2.2))
@@ -624,7 +651,6 @@ def create_freetext(pdf: pymupdf.Document, page_no: int, rect, text: str, style:
             # il motore sottrae l'origine del /CropBox invece di sommarla: /CL, /Rect e /RD
             # vengono riscritti con le conversioni di `placement`
             _set_callout(pdf, page, annot.xref, rect, kwargs["callout"])
-        annot = page.load_annot(annot.xref)
     xref = _finish(annot, author, text, kind=CALLOUT if callout else FREETEXT)
     if style.autofit and not callout:
         pdf.xref_set_key(xref, AUTOFIT_KEY, "true")
@@ -710,7 +736,7 @@ def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     """Aspetto vettoriale di caselle di testo e richiami: riempimento, bordo (colore proprio),
     testo a capo con allineamento, linea di richiamo con punta. Per testi fuori dalla codifica
     dei caratteri standard o pagine ruotate si usa l'aspetto generato dal motore."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     rc = pdf.xref_get_key(xref, "RC")
     try:
         _refresh_freetext(pdf, page, page_no, xref)
@@ -927,7 +953,7 @@ def create_typewriter(pdf: pymupdf.Document, page_no: int, point, text: str, sty
     st = style.copy(fill=None, width=0, color=None, text_color=style.text_color or style.color or (0, 0, 0))
     xref = create_freetext(pdf, page_no, rect, text, st, author)
     pdf.xref_set_key(xref, "IT", "/FreeTextTypeWriter")
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     annot.set_info(subject=_(SUBJECTS[TYPEWRITER]))
     annot.update()
@@ -947,7 +973,7 @@ def _new_caret(pdf: pymupdf.Document, page: pymupdf.Page, rect: pymupdf.Rect) ->
 def create_caret(pdf: pymupdf.Document, page_no: int, point, text: str, style: Style,
                  author: str | None = None, paragraph: bool = False, height: float = 12.0) -> int:
     """Segno di inserimento (^) centrato sul punto, con il testo da inserire (ANN-13)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     p = pymupdf.Point(point)
     rect = pymupdf.Rect(p.x - 4, p.y - height / 2, p.x + 4, p.y + height / 2)
     annot = _new_caret(pdf, page, rect)
@@ -968,7 +994,7 @@ def create_replacement(pdf: pymupdf.Document, page_no: int, quads: Sequence, tex
     caret = create_caret(pdf, page_no, (last.x1, (last.y0 + last.y1) / 2), text, style, author,
                          height=max(6.0, last.height))
     strike = create_markup(pdf, page_no, STRIKEOUT, quads, style.copy(color=style.color or (0.85, 0.1, 0.1)), author)
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, strike)
     annot.set_irt_xref(caret)
     pdf.xref_set_key(strike, "RT", "/Group")
@@ -982,7 +1008,7 @@ def create_shape(pdf: pymupdf.Document, page_no: int, kind: str, points: Sequenc
                  author: str | None = None, contents: str = "") -> int:
     """Forme: RECT/ELLIPSE ricevono due punti opposti; LINE/ARROW due estremi;
     POLYGON/POLYLINE/CLOUD i vertici."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     pts = [pymupdf.Point(p) for p in points]
     if kind in (RECT, ELLIPSE):
         if len(pts) < 2:
@@ -1077,7 +1103,7 @@ def create_ink(pdf: pymupdf.Document, page_no: int, strokes: Sequence[Sequence],
     strokes = _clean_strokes(strokes)
     if not strokes:
         raise AnnotationError("Disegno vuoto.")
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     with unrotated(page):
         annot = page.add_ink_annot(strokes)
     _apply_style(annot, style.copy(color=style.color or DEFAULT_COLORS[INK], cloud=False, dash="solid"))
@@ -1088,7 +1114,7 @@ def create_ink(pdf: pymupdf.Document, page_no: int, strokes: Sequence[Sequence],
 
 def add_ink_strokes(pdf: pymupdf.Document, page_no: int, xref: int, strokes: Sequence[Sequence]) -> None:
     """Aggiunge tratti a un disegno esistente (tratti consecutivi = un'unica annotazione)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     new = _clean_strokes(strokes)
     if not new:
         return
@@ -1239,7 +1265,7 @@ def scale_of(pdf: pymupdf.Document, xref: int) -> Scale | None:
 def viewport_scale(pdf: pymupdf.Document, page_no: int, point) -> Scale | None:
     """Scala dell'area di misura /VP della pagina che contiene il punto (ISO 32000-2 §12.9):
     si usa l'ultima area dell'elenco che contiene il punto."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     k, v = pdf.xref_get_key(page.xref, "VP")
     if k == "null":
         return None
@@ -1271,7 +1297,7 @@ def viewport_scale(pdf: pymupdf.Document, page_no: int, point) -> Scale | None:
 
 def update_measure(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     """Ricalcola il valore di una misura dalla sua geometria e dalla sua scala."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     kind = kind_of(pdf, annot)
     if kind not in MEASURE_KINDS:
@@ -1284,7 +1310,7 @@ def update_measure(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
 
 def create_measure(pdf: pymupdf.Document, page_no: int, kind: str, points: Sequence, style: Style,
                    scale: Scale, author: str | None = None) -> int:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     pts = [pymupdf.Point(p) for p in points]
     value = measure_value(kind, pts, scale)
     st = style.copy(color=style.color or MEASURE_COLOR, cloud=False)
@@ -1332,7 +1358,7 @@ def convert_to_measure(pdf: pymupdf.Document, page_no: int, xref: int, scale: Sc
     """«Converti in misura» (ANN-33): linea → /IT /LineDimension, polilinea → /PolyLineDimension,
     poligono → /PolygonDimension, con /Measure e il valore come testo. Un rettangolo diventa un
     poligono di misura dell'area con lo stesso aspetto. Restituisce l'xref della misura."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     kind = kind_of(pdf, annot)
     target = CONVERTIBLE.get(kind)
@@ -1411,7 +1437,7 @@ def _segment_cross(a, b, c, d) -> pymupdf.Point | None:
 def snap_targets(pdf: pymupdf.Document, page_no: int) -> SnapTargets:
     """Estremi, punti medi, intersezioni e segmenti del contenuto vettoriale della pagina e vertici
     delle annotazioni. Pagina senza grafica vettoriale (scansione): solo le annotazioni."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     res = SnapTargets()
     straight: list[tuple[pymupdf.Point, pymupdf.Point]] = []
     try:
@@ -1687,7 +1713,7 @@ def keep_rotation(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
 
 def rotate_annot(pdf: pymupdf.Document, page_no: int, xref: int, degrees: float) -> None:
     """Ruota timbri (vettoriali e immagine) di `degrees` gradi in senso antiorario (ANN-03)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     t = annot.type[0]
     if t not in ROTATABLE or (t == pymupdf.PDF_ANNOT_FREE_TEXT and (
@@ -1729,7 +1755,7 @@ def _write_stamp_ap(pdf: pymupdf.Document, annot: pymupdf.Annot, spec: StampSpec
 def create_stamp(pdf: pymupdf.Document, page_no: int, point, spec: StampSpec, style: Style,
                  author: str | None = None, height: float = 44.0) -> int:
     """Timbro vettoriale con aspetto proprio, centrato su `point`."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     w, h = stamp_size(spec, height)
     p = pymupdf.Point(point)
     rect = pymupdf.Rect(p.x - w / 2, p.y - h / 2, p.x + w / 2, p.y + h / 2)
@@ -1811,7 +1837,7 @@ def refresh_stamp(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     spec = stamp_spec_of(pdf, xref)
     if spec is None:
         return
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     _write_stamp_ap(pdf, annot, spec, annot.opacity if annot.opacity >= 0 else 1.0)
 
@@ -1896,7 +1922,7 @@ def create_sticker(pdf: pymupdf.Document, page_no: int, point, name: str, style:
     """Adesivo grafico vettoriale (non dipende da caratteri emoji)."""
     if name not in STICKERS:
         raise AnnotationError("Adesivo sconosciuto.")
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     p = pymupdf.Point(point)
     rect = pymupdf.Rect(p.x - size / 2, p.y - size / 2, p.x + size / 2, p.y + size / 2)
     with unrotated(page):
@@ -1921,7 +1947,7 @@ def refresh_sticker(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
     k, v = pdf.xref_get_key(xref, STICKER_KEY)
     if k != "name" or v.lstrip("/") not in STICKERS:
         return
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     _sticker_ap(pdf, xref, v.lstrip("/"), annot.opacity if annot.opacity >= 0 else 1.0)
     if _rotation(pdf, xref)[1] is not None:
@@ -1944,7 +1970,7 @@ def create_page_stamp(pdf: pymupdf.Document, page_no: int, point, src: pymupdf.D
     k = max_side / max(w, h)
     p = pymupdf.Point(point)
     rect = pymupdf.Rect(p.x - w * k / 2, p.y - h * k / 2, p.x + w * k / 2, p.y + h * k / 2)
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     with unrotated(page):
         annot = page.add_stamp_annot(rect, 0)
     xref = _finish(annot, author, name or "Timbro da pagina", kind=STAMP)
@@ -1982,7 +2008,7 @@ def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes,
                        author: str | None = None, max_side: float = 160.0, name: str = "",
                        intent: str = "StampImage", sticker: bool = False) -> int:
     """Timbro da immagine; con `sticker` è un adesivo personalizzato (/Subj «Adesivo», ANN-27)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     try:
         pix = pymupdf.Pixmap(image)
         w, h = pix.width, pix.height
@@ -2013,7 +2039,7 @@ def create_attachment(pdf: pymupdf.Document, page_no: int, point, data: bytes, f
         raise AnnotationError("Il documento è PDF/A-1: il profilo non ammette file allegati.")
     if len(data) > MAX_ATTACHMENT:
         raise AnnotationError("Il file è troppo grande per essere allegato (massimo 200 MB).")
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = page.add_file_annot(pymupdf.Point(point), data, filename, desc=description or filename,
                                 icon="PushPin")
     annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[ATTACHMENT]))
@@ -2061,7 +2087,7 @@ def conform(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> Confor
     if tagged:
         _prune_structure(pdf)
     for page_no in (range(pdf.page_count) if pages is None else pages):
-        page = pdf[page_no]
+        page = _page(pdf, page_no)
         items = [(x, t) for x, t, _n in page.annot_xrefs() if t not in (pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK)]
         if not items:
             continue
@@ -2237,7 +2263,7 @@ def _parent_tree_add(pdf, root: int, key: int, elem: int) -> None:
 
 
 def attachment_data(pdf: pymupdf.Document, page_no: int, xref: int) -> tuple[str, bytes]:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     info = annot.file_info
     return info.get("filename") or "allegato", annot.get_file()
@@ -2382,7 +2408,7 @@ def _info(pdf: pymupdf.Document, page_no: int, annot: pymupdf.Annot, words: list
 
 
 def page_annotations(pdf: pymupdf.Document, page_no: int) -> list[AnnotInfo]:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     out = []
     words = None
     annot = page.first_annot
@@ -2464,7 +2490,7 @@ def _irt_of(pdf: pymupdf.Document, xref: int) -> int:
 
 def annotation(pdf: pymupdf.Document, page_no: int, xref: int) -> AnnotInfo | None:
     """Una sola annotazione con risposte dirette e stato (costo lineare, usata a ogni ridisegno)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = find_annot(page, xref)
     if annot is None or annot.type[0] in NON_COMMENT_TYPES:
         return None
@@ -2517,7 +2543,7 @@ def _no_rotate(pdf: pymupdf.Document, xref: int) -> bool:
 
 def annot_rects(pdf: pymupdf.Document, page_no: int) -> list[tuple[int, pymupdf.Rect | None]]:
     """(xref, riquadro standard) delle annotazioni di commento, in ordine di sovrapposizione."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     pl = _placement()
     m = pl.pdf_to_page_matrix(page) if pl is not None else None
     out = []
@@ -2542,7 +2568,7 @@ def annot_rects(pdf: pymupdf.Document, page_no: int) -> list[tuple[int, pymupdf.
 def annot_at(pdf: pymupdf.Document, page_no: int, point, tolerance: float = 4.0,
              rects: list | None = None) -> int | None:
     """Xref dell'annotazione più in alto sotto il punto (None se nessuna)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     p = pymupdf.Point(point)
     hit = None
     # preselezione dai riquadri (/Rect): si caricano solo le annotazioni vicine al punto
@@ -2595,7 +2621,7 @@ def set_style(pdf: pymupdf.Document, page_no: int, xref: int, **props) -> None:
 
 def _set_style(pdf: pymupdf.Document, page_no: int, xref: int, *, color=..., fill=..., opacity=None,
                width=None, dash=None, cloud=None, fontsize=None, text_color=...) -> None:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     t = annot.type[0]
     if t == pymupdf.PDF_ANNOT_STAMP and stamp_spec_of(pdf, xref) is not None:
@@ -2703,7 +2729,7 @@ def _decode_text_string(v: str) -> str:
 
 def set_contents(pdf: pymupdf.Document, page_no: int, xref: int, text: str, rich: str | None = None) -> None:
     """Testo del commento (/Contents) ed eventuale testo formattato XHTML (/RC)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     if annot.flags & FLAG_LOCKED_CONTENTS:
         raise AnnotationError("Il contenuto dell'annotazione è bloccato.")
@@ -2722,7 +2748,7 @@ def set_contents(pdf: pymupdf.Document, page_no: int, xref: int, text: str, rich
 
 
 def set_author(pdf: pymupdf.Document, page_no: int, xref: int, author: str) -> None:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     annot.set_info(title=author, modDate=pdf_now())
     annot.update()
@@ -2772,7 +2798,7 @@ def _set_quads(annot: pymupdf.Annot, quads: Sequence[pymupdf.Quad]) -> None:
 def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) -> None:
     """Sposta/ridimensiona un'annotazione portando il suo rettangolo in `new_rect`
     (i vertici di linee, poligoni, disegni ed evidenziazioni vengono scalati)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     new_rect = pymupdf.Rect(new_rect).normalize()
     with unrotated(page):
         annot = get_annot(page, xref)
@@ -2897,7 +2923,7 @@ VERTEX_TYPES = (pymupdf.PDF_ANNOT_LINE, pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_A
 
 def vertex_points(pdf: pymupdf.Document, page_no: int, xref: int) -> list[pymupdf.Point]:
     """Punti modificabili: vertici di linee e poligoni, punta dei richiami."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = find_annot(page, xref)
     if annot is None:
         return []
@@ -2912,7 +2938,7 @@ def vertex_points(pdf: pymupdf.Document, page_no: int, xref: int) -> list[pymupd
 
 def set_vertex(pdf: pymupdf.Document, page_no: int, xref: int, index: int, point) -> None:
     """Sposta un vertice (o la punta di un richiamo, indice 0) lasciando invariato il resto."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     p = pymupdf.Point(point)
     with unrotated(page):
         annot = get_annot(page, xref)
@@ -2945,7 +2971,7 @@ def set_vertex(pdf: pymupdf.Document, page_no: int, xref: int, index: int, point
 
 def edit_vertices(pdf: pymupdf.Document, page_no: int, xref: int, point, add: bool) -> None:
     """Aggiunge un vertice sul lato più vicino al punto oppure rimuove il vertice più vicino."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     p = pymupdf.Point(point)
     with unrotated(page):
         annot = get_annot(page, xref)
@@ -2971,7 +2997,7 @@ def edit_vertices(pdf: pymupdf.Document, page_no: int, xref: int, point, add: bo
 
 def set_cloud_intensity(pdf: pymupdf.Document, page_no: int, xref: int, intensity: int) -> None:
     """Intensità degli archi del bordo a nuvola (0 = bordo continuo, 1–2)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     border = annot.border or {}
     annot.set_border(width=border.get("width", 1), dashes=border.get("dashes") or [], clouds=max(0, min(2, intensity)))
@@ -2980,14 +3006,14 @@ def set_cloud_intensity(pdf: pymupdf.Document, page_no: int, xref: int, intensit
 
 
 def move_annot(pdf: pymupdf.Document, page_no: int, xref: int, dx: float, dy: float) -> None:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     r = pymupdf.Rect(get_annot(page, xref).rect)
     transform_annot(pdf, page_no, xref, r + (dx, dy, dx, dy))
 
 
 def delete_annot(pdf: pymupdf.Document, page_no: int, xref: int, force: bool = False) -> None:
     """Elimina un'annotazione con le sue risposte, i suoi stati e la sua popup."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     target = get_annot(page, xref)
     if not force and target.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
         raise AnnotationError("L'annotazione è bloccata: non si può eliminare.")
@@ -3028,7 +3054,7 @@ def _write_annots_array(pdf, holder: int, key: str, refs: list[int]) -> None:
 
 def restack(pdf: pymupdf.Document, page_no: int, xref: int, front: bool) -> None:
     """Porta in primo piano (fine dell'array /Annots) o sullo sfondo (inizio)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     holder, key, refs = _annots_array(pdf, page)
     if xref not in refs:
         raise AnnotationError("L'annotazione non esiste più.")
@@ -3048,7 +3074,7 @@ FLAG_HIDDEN = pymupdf.PDF_ANNOT_IS_HIDDEN
 
 
 def set_flag(pdf: pymupdf.Document, page_no: int, xref: int, flag: int, on: bool) -> None:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     flags = annot.flags | flag if on else annot.flags & ~flag
     annot.set_flags(flags)
@@ -3175,7 +3201,7 @@ def move_thread(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: int, 
 def delete_all(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
     n = 0
     for page_no in (pages if pages is not None else range(pdf.page_count)):
-        page = pdf[page_no]
+        page = _page(pdf, page_no)
         xrefs = [a.xref for a in iter_annots(page) if a.type[0] not in NON_COMMENT_TYPES]
         for x in xrefs:
             a = find_annot(page, x)
@@ -3188,7 +3214,7 @@ def delete_all(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int
 # ------------------------------------------------------------------ risposte e stato
 def add_reply(pdf: pymupdf.Document, page_no: int, parent_xref: int, text: str, author: str | None = None,
               date: str | None = None) -> int:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     parent = get_annot(page, parent_xref)
     if parent.type[0] in NON_COMMENT_TYPES:
         raise AnnotationError("Non si può rispondere a collegamenti o campi modulo.")
@@ -3206,7 +3232,7 @@ def add_reply(pdf: pymupdf.Document, page_no: int, parent_xref: int, text: str, 
 def set_status(pdf: pymupdf.Document, page_no: int, xref: int, state: str, author: str | None = None,
                model: str = "Review", date: str | None = None) -> int:
     """Registra uno stato (risposta di stato nascosta, come da standard PDF)."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     parent = get_annot(page, xref)
     annot = page.add_text_annot(parent.rect.tl, "", icon="Comment")
     annot.set_flags(pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_PRINT)
@@ -3232,7 +3258,7 @@ def set_marked(pdf: pymupdf.Document, page_no: int, xref: int, marked: bool, aut
 def erase_ink(pdf: pymupdf.Document, page_no: int, point, radius: float = 6.0, whole: bool = False) -> int:
     """Cancella i tratti a mano libera vicini al punto. Spezza i tratti attraversati;
     le annotazioni che restano vuote vengono eliminate. Restituisce i tratti toccati."""
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     p = pymupdf.Point(point)
     touched = 0
     with unrotated(page):
@@ -3385,7 +3411,7 @@ def _flatten_selected(pdf: pymupdf.Document, selected: set[tuple[int, int]]) -> 
             return 0
         tmp.bake(annots=True, widgets=False)
         for page_no in pages:
-            page = pdf[page_no]
+            page = _page(pdf, page_no)
             placement.show_pdf_page(page, placement.page_rect(page), tmp, page_no, keep_proportion=False,
                                     overlay=True, as_displayed=False)
             done = {x for p, x in selected if p == page_no}
@@ -3442,7 +3468,7 @@ def _export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int]
 
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', f'<xfdf xmlns="{XFDF_NS}" xml:space="preserve">', "<annots>"]
     for page_no in (pages if pages is not None else range(pdf.page_count)):
-        page = pdf[page_no]
+        page = _page(pdf, page_no)
         names: dict[int, str] = {}
         annots = [a for a in iter_annots(page) if a.type[0] not in NON_COMMENT_TYPES]
         for a in annots:
@@ -3630,11 +3656,33 @@ class ImportResult:
     messages: list[str] = field(default_factory=list)
 
 
+@contextmanager
+def _fast_annot_ids() -> Iterator[None]:
+    """Durante un'importazione massiva: PyMuPDF, a ogni nuova annotazione, rilegge tutti i /NM della
+    pagina e cerca un numero libero con una scansione lineare (costo quadratico per pagina). Il /NM
+    viene comunque sostituito da un UUID in `_finish`, quindi si assegna subito un UUID. Va usato
+    tenendo ENGINE_LOCK (unico accesso al motore)."""
+    original = getattr(pymupdf, "JM_add_annot_id", None)
+    if original is None:
+        yield
+        return
+
+    def add_id(annot, stem):
+        name = new_name()
+        mupdf.pdf_dict_puts(mupdf.pdf_annot_obj(annot), "NM", mupdf.pdf_new_string(name, len(name)))
+
+    pymupdf.JM_add_annot_id = add_id
+    try:
+        yield
+    finally:
+        pymupdf.JM_add_annot_id = original
+
+
 def import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = False) -> ImportResult:
     """Importa commenti da XFDF. Con `replace` elimina prima i commenti esistenti.
 
     I commenti già presenti con lo stesso nome (/NM) non vengono duplicati."""
-    with bulk_geometry():
+    with bulk_geometry(), _fast_annot_ids():
         return _import_xfdf(pdf, data, replace=replace)
 
 
@@ -3745,7 +3793,7 @@ def _el_text(el, name: str) -> str | None:
 
 
 def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None:
-    page = pdf[page_no]
+    page = _page(pdf, page_no)
     t = _TAG_TYPES.get(tag)
     if t is None:
         return None
@@ -3777,7 +3825,6 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
                 return None
             annot = page.add_text_annot(rect.tl, contents, icon=el.get("icon") or "Comment")
             pdf.xref_set_key(annot.xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*rect_vals))
-            annot = page.load_annot(annot.xref)
             if color:
                 annot.set_colors(stroke=color)
             annot.set_opacity(opacity)
@@ -3913,7 +3960,7 @@ def export_fdf(pdf: pymupdf.Document, filename: str = "") -> bytes:
     /IRT (risposte e stati) punta all'oggetto FDF del commento padre; /RT e /NM restano."""
     items: list[tuple[int, int]] = []           # (pagina, xref)
     for page_no in range(pdf.page_count):
-        page = pdf[page_no]
+        page = _page(pdf, page_no)
         for a in iter_annots(page):
             if a.type[0] not in NON_COMMENT_TYPES:
                 items.append((page_no, a.xref))
