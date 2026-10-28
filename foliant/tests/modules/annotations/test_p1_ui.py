@@ -1051,3 +1051,18 @@ def test_ann35_apply_filter_to_page_and_dates(comments, monkeypatch):
     img = view._render_page(0, 1.0)
     assert any(img.pixelColor(300 + d, 450).red() > 150 and img.pixelColor(300 + d, 450).green() < 100
                for d in range(-2, 3))
+
+
+def test_ann03_minibar(comments, monkeypatch):
+    """ANN-03: mini-barra sopra l'annotazione selezionata con colore, commento ed elimina."""
+    window, view, module = comments
+    xref = _rect(module)
+    module.ctrl.select([(0, xref)], view)
+    bar = module.minibar
+    assert bar.isVisible()
+    r = view.page_to_view(0, module.ctrl.info(0, xref).rect)
+    assert bar.geometry().bottom() <= r.top() or bar.geometry().top() >= r.bottom()
+    bar.color._pick((0, 0, 1))
+    assert module.ctrl.info(0, xref).color == (0, 0, 1)
+    bar._delete()
+    assert module.ctrl.info(0, xref) is None and not bar.isVisible()

@@ -429,6 +429,9 @@ class AnnotationsModule:
             self._overlay = overlay
         if overlay not in view.overlays:
             view.overlays.append(overlay)
+        if getattr(self, "minibar", None) is None:
+            from .minibar import MiniBar
+            self.minibar = MiniBar(self.ctrl)
         if not getattr(view, "_annotations_connected", False):
             view._annotations_connected = True
             view.toolChanged.connect(self._sync_actions)
@@ -449,6 +452,7 @@ class AnnotationsModule:
     def _on_view_changed(self, view) -> None:
         if view is not None:
             self._attach_view(view)
+            self.minibar.attach(view)
             hidden = self.ctrl.annotations_hidden(view)
             self.hide_action.blockSignals(True)
             self.hide_action.setChecked(hidden)
