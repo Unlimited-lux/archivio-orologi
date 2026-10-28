@@ -1053,13 +1053,29 @@ class ObjectsController(QObject):
                 r = pymupdf.Rect(r.x0, r.y0, max(r.x1, r.x0 + 4), max(r.y1, r.y0 + 4))
             self.create_link_interactive(view, self.sel_page, r)
             return
-        sel = view.text_selection
-        if sel is not None and sel.rects:
-            quads = [r.quad for r in sel.rects]
-            rect = pymupdf.Rect(sel.rects[0])
-            for r in sel.rects[1:]:
-                rect |= r
-            self.create_link_interactive(view, sel.page, rect, quads=quads, default_text=sel.text)
+        sels = [x for x in (getattr(view, "text_selections", None) or
+                            ([view.text_selection] if view.text_selection is not None else [])) if x.rects]
+        if sels:
+            text = " ".join(x.text for x in sels).strip()
+            target = L.suggest_from_text(text) if text else None
+            res = D.ask_link(self.ctx.window, view, sels[0].page, None, target=target, description=text)
+            if res is None:
+                return
+            target, style, desc = res
+            D.remember_style(style)
+            parts = [(x.page, line_quads(x)) for x in sels]
+
+            def fn(pdf):
+                out = []
+                for page, quads in parts:   # un collegamento per pagina, stessa destinazione
+                    rect = pymupdf.Rect(quads[0].rect)
+                    for q in quads[1:]:
+                        rect |= q.rect
+                    if rect.width < 4 or rect.height < 4:
+                        rect = pymupdf.Rect(rect.x0, rect.y0, max(rect.x1, rect.x0 + 4), max(rect.y1, rect.y0 + 4))
+                    out.append(L.create_link(pdf, page, rect, target, style, desc, quads))
+                return out
+            self.run_change(view, _("Crea collegamento"), fn)
             return
         self.status(_("Seleziona del testo o un oggetto, oppure usa lo strumento Collegamento."))
 
@@ -1200,6 +1216,24 @@ def _translate_with_links(pdf, page, indices, dx, dy):
     for x in attached:
         L.update_link(pdf, page, x, move=(dx, dy))
     return res
+
+
+def line_quads(sel) -> list:
+    """Un quadrilatero per riga di testo selezionata (OBJ-34)."""
+    words = getattr(sel, "words", None) or []
+    if not words:
+        return [pymupdf.Rect(r).quad for r in sel.rects]
+    lines: dict = {}
+    order = []
+    for w in words:
+        key = (w[5], w[6])
+        r = pymupdf.Rect(w[:4])
+        if key in lines:
+            lines[key] |= r
+        else:
+            lines[key] = r
+            order.append(key)
+    return [lines[k].quad for k in order]
 
 
 class _NoChange(Exception):

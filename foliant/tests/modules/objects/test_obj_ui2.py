@@ -496,3 +496,30 @@ def test_old_guides_migrated_to_core(ui, tmp_path):
     lines = view.page_guide_lines(0)
     assert 72.0 in [round(v, 3) for v in lines["x"]] and 144.0 in [round(v, 3) for v in lines["y"]]
     assert not ui.ctx.settings().value(key, "")
+
+
+def test_link_from_multiline_multipage_selection(ui, tmp_path, monkeypatch):
+    from foliant.api import selection_from_words
+    from foliant.modules.objects import dialogs as D
+    path = tmp_path / "mp.pdf"
+    doc = pymupdf.open()
+    for k in range(2):
+        p = doc.new_page()
+        p.insert_text((72, 100), f"prima riga {k}", fontsize=12)
+        p.insert_text((72, 120), f"seconda riga {k}", fontsize=12)
+    doc.save(str(path))
+    view = ui.open(path)
+    view.set_tool(None)
+    sels = [selection_from_words(i, view.words(i)) for i in range(2)]
+    view.set_text_selections(sels)
+    monkeypatch.setattr(D, "ask_link", lambda *a, **k: (L.LinkTarget(kind=L.URI, uri="https://esempio.it"),
+                                                        L.LinkStyle(), "x"))
+    ui.c.create_link_from_selection(view)
+    with O.ENGINE_LOCK:
+        infos = [L.page_links(view.document.pdf, i) for i in range(2)]
+    assert [len(x) for x in infos] == [1, 1]
+    assert all(x[0].target.uri == "https://esempio.it" and len(x[0].quads) == 2 for x in infos)
+    assert view.document.undo_label == "Crea collegamento"
+    view.document.undo()
+    with O.ENGINE_LOCK:
+        assert sum(len(L.page_links(view.document.pdf, i)) for i in range(2)) == 0
