@@ -305,6 +305,72 @@ class ObjectsController(QObject):
         parsed = self.parsed(view, self.sel_page)
         self.set_selection(view, self.sel_page, E.similar_paths(parsed, objs[0].index))
 
+    # ---------------------------------------------------------------- avanzate
+    def replicate(self, view) -> None:
+        from . import advanced as A
+        if not self.selection:
+            return
+        res = D.ask_replicate(self.ctx.window, view.document.page_count)
+        if res is None:
+            return
+        pages, skip = res
+        page, indices = self.sel_page, list(self.selection)
+        done = self.run_change(view, _("Replica su pagine"), A.replicate, page, indices, pages, skip)
+        if done is not None:
+            self.clear_selection(view)
+            self.status(_("Oggetti replicati su {n} pagine.").format(n=len(done)))
+
+    def transform_dialog(self, view) -> None:
+        from . import advanced as A
+        if not self.selection:
+            return
+        res = D.ask_transform(self.ctx.window)
+        if res is None:
+            return
+        kw, each = res
+        page = self.sel_page
+        r = self.run_change(view, _("Trasforma"), lambda pdf: A.apply_transform(pdf, page, list(self.selection),
+                                                                               each=each, **kw))
+        if r is not None:
+            self.set_selection(view, page, r)
+
+    def reset_transform(self, view) -> None:
+        from . import advanced as A
+        if not self.selection:
+            return
+        page = self.sel_page
+        r = self.run_change(view, _("Reimposta trasformazione"), A.reset_transform, page, list(self.selection))
+        if r is not None:
+            self.set_selection(view, page, r[0])
+            if r[1]:
+                self.status(_("L'oggetto era inclinato: è stato riportato a una forma ortogonale."))
+
+    def decompose(self, view) -> None:
+        from . import advanced as A
+        objs = self.selected_objects(view)
+        if len(objs) != 1 or objs[0].kind != "composto":
+            self.status(_("Seleziona un oggetto composto."))
+            return
+        page, index = self.sel_page, objs[0].index
+        with ENGINE_LOCK:
+            transp = A.form_is_transparency_group(view.document.pdf, objs[0].xref)
+        if transp and not self.ctx.confirm(_("Scomponi"), _("L'oggetto è un gruppo di trasparenza: scomporlo "
+                                                            "può cambiarne la resa. Continuare?")):
+            return
+        r = self.run_change(view, _("Scomponi"), A.decompose, page, index, True)
+        if r is not None:
+            self.set_selection(view, page, r)
+
+    def group(self, view) -> None:
+        from . import advanced as A
+        if len(self.selection) < 2:
+            self.status(_("Seleziona almeno 2 oggetti da raggruppare."))
+            return
+        page = self.sel_page
+        r = self.run_change(view, _("Raggruppa"), A.group, page, list(self.selection))
+        if r is not None:
+            self.set_selection(view, page, r)
+
     # ---------------------------------------------------------------- ritaglio
     def start_crop(self, view) -> None:
         if view.tool is not self.object_tool:

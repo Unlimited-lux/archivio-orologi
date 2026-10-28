@@ -184,3 +184,23 @@ def test_launch_link_blocked(ui, tmp_path, monkeypatch):
     LO.activate(ui.ctx, view, 0, pymupdf.Point(150, 210))
     assert not opened
     assert any("bloccati" in m for _t, m in ui.errors)
+
+
+def test_advanced_actions(ui, tmp_path, monkeypatch):
+    from foliant.modules.objects import dialogs as D
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 150, 120), (200, 70, 300, 120)]))
+    ui.c.set_selection(view, 0, [0, 1])
+    O._state["actions"]["group"].trigger()
+    assert len(objs(view)) == 1 and objs(view)[0].kind == "composto"
+    O._state["actions"]["decompose"].trigger()
+    assert len(objs(view)) == 2
+    ui.c.set_selection(view, 0, [0])
+    monkeypatch.setattr(D, "ask_transform", lambda parent: (dict(rotate=30), False))
+    O._state["actions"]["transform"].trigger()
+    assert abs(E.object_angle(objs(view)[0]) - 30) < 0.01
+    O._state["actions"]["reset_tf"].trigger()
+    assert abs(E.object_angle(objs(view)[0])) < 0.01
+    ui.c.set_selection(view, 0, [0])
+    monkeypatch.setattr(D, "ask_replicate", lambda parent, n: ([0, 1], True))
+    O._state["actions"]["replicate"].trigger()
+    assert len(objs(view, 1)) == 1

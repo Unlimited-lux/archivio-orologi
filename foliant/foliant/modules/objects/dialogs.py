@@ -511,3 +511,89 @@ def ask_delete_links(parent, view):
 
 __all__ = ["ask_link", "ask_replace_options", "ask_image_paths", "ask_page", "ask_url_scope", "ask_found_urls",
            "ask_delete_links", "parse_range", "pymupdf"]
+
+
+class ReplicateDialog(QDialog):
+    def __init__(self, parent, count: int):
+        super().__init__(parent)
+        self.setWindowTitle(_("Replica su pagine"))
+        self.count = count
+        lay = QFormLayout(self)
+        self.scope = QComboBox()
+        for code, text in (("all", _("Tutte le pagine")), ("odd", _("Pagine dispari")), ("even", _("Pagine pari")),
+                           ("range", _("Intervallo o elenco"))):
+            self.scope.addItem(text, code)
+        self.range = QLineEdit(f"1-{count}")
+        self.skip = QCheckBox(_("Salta le pagine di formato diverso"))
+        self.skip.setChecked(True)
+        lay.addRow(_("Pagine:"), self.scope)
+        lay.addRow("", self.range)
+        lay.addRow("", self.skip)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+
+    def values(self):
+        s = self.scope.currentData()
+        if s == "all":
+            pages = list(range(self.count))
+        elif s == "odd":
+            pages = list(range(0, self.count, 2))
+        elif s == "even":
+            pages = list(range(1, self.count, 2))
+        else:
+            pages = parse_range(self.range.text(), self.count)
+        return pages, self.skip.isChecked()
+
+
+def ask_replicate(parent, count: int):
+    dlg = ReplicateDialog(parent, count)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dlg.values()
+
+
+class TransformDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle(_("Trasforma"))
+        lay = QFormLayout(self)
+
+        def spin(lo, hi, val, suffix):
+            s = QDoubleSpinBox()
+            s.setRange(lo, hi)
+            s.setDecimals(2)
+            s.setValue(val)
+            s.setSuffix(suffix)
+            return s
+        self.sx = spin(1, 10000, 100, " %")
+        self.sy = spin(1, 10000, 100, " %")
+        self.rot = spin(-360, 360, 0, " °")
+        self.kx = spin(-80, 80, 0, " °")
+        self.ky = spin(-80, 80, 0, " °")
+        self.dx = spin(-10000, 10000, 0, " pt")
+        self.dy = spin(-10000, 10000, 0, " pt")
+        self.each = QCheckBox(_("Applica a ogni oggetto attorno al proprio centro"))
+        for label, w in ((_("Scala orizzontale:"), self.sx), (_("Scala verticale:"), self.sy),
+                         (_("Rotazione:"), self.rot), (_("Inclinazione orizzontale:"), self.kx),
+                         (_("Inclinazione verticale:"), self.ky), (_("Spostamento X:"), self.dx),
+                         (_("Spostamento Y:"), self.dy)):
+            lay.addRow(label, w)
+        lay.addRow("", self.each)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addRow(bb)
+
+    def values(self):
+        return dict(scale_x=self.sx.value(), scale_y=self.sy.value(), rotate=self.rot.value(),
+                    skew_x=self.kx.value(), skew_y=self.ky.value(), dx=self.dx.value(), dy=self.dy.value()), \
+            self.each.isChecked()
+
+
+def ask_transform(parent):
+    dlg = TransformDialog(parent)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dlg.values()

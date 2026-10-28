@@ -76,6 +76,11 @@ def register(ctx: Context) -> None:
     sel_action("move_page", _("Sposta in pagina…"), "file-output", c.ask_move_to_page)
     sel_action("similar", _("Seleziona simili"), "shapes", c.select_similar)
     sel_action("make_link", _("Crea collegamento"), "link-2", c.create_link_from_selection)
+    sel_action("replicate", _("Replica su pagine…"), "copy", c.replicate)
+    sel_action("transform", _("Trasforma…"), "scaling", c.transform_dialog)
+    sel_action("reset_tf", _("Reimposta trasformazione"), "rotate-ccw-square", c.reset_transform)
+    sel_action("decompose", _("Scomponi"), "ungroup", c.decompose)
+    sel_action("group", _("Raggruppa"), "group", c.group)
     acts["paste"] = ctx.action(_("Incolla"), "clipboard-paste", lambda: c.paste(ctx.current_view()))
     acts["paste_in_place"] = ctx.action(_("Incolla in posizione"), "clipboard-paste",
                                         lambda: c.paste(ctx.current_view(), in_place=True))
@@ -127,8 +132,11 @@ def register(ctx: Context) -> None:
     _state["arrange_button"] = btn
     add_opacity_widget(ctx, c, mode)
     more = QMenu(ctx.window)
-    for key in ("paste", "paste_in_place", "duplicate", "move_page", "similar", "crop_reset", "crop_apply",
-                "replace_clip", "save_image", "copy_image", "make_link"):
+    for key in ("paste", "paste_in_place", "duplicate", "move_page", "replicate", "similar", "crop_reset",
+                "crop_apply", "replace_clip", "save_image", "copy_image", "make_link"):
+        more.addAction(acts[key])
+    more.addSeparator()
+    for key in ("transform", "reset_tf", "group", "decompose"):
         more.addAction(acts[key])
     guides = ctx.action(_("Guide intelligenti"), None, None, checkable=True, requires_document=False)
     guides.setChecked(str(ctx.settings().value("objects/smart_guides", "true")).lower() != "false")
@@ -232,7 +240,7 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
     has_doc = view is not None
     for key in ("rotate_ccw", "rotate_cw", "flip_h", "flip_v", "delete", "copy", "cut", "duplicate", "move_page",
                 "front", "forward", "backward", "back", "al_left", "al_hc", "al_right", "al_top", "al_vc",
-                "al_bottom", "make_link"):
+                "al_bottom", "make_link", "replicate", "transform", "reset_tf"):
         if key in acts:
             acts[key].setEnabled(has_doc and n > 0)
     for key in ("crop", "crop_reset", "crop_apply", "replace", "replace_clip", "save_image", "copy_image"):
@@ -248,6 +256,8 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
     for key in ("dist_h", "dist_v"):
         acts[key].setEnabled(has_doc and n >= 3)
     acts["similar"].setEnabled(n == 1 and objs[0].kind == PATH)
+    acts["group"].setEnabled(n >= 2)
+    acts["decompose"].setEnabled(n == 1 and objs[0].kind == "composto")
     panel = _state.get("panel")
     if panel is not None:
         panel.refresh()
