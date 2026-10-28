@@ -166,3 +166,65 @@ def test_gotor_missing_file(viewer_window, tmp_path, monkeypatch, sample_pdf):
     monkeypatch.setattr(w.ctx, "error", lambda t, m: errors.append(m))
     assert _nav(w).open_remote(view, {"kind": pymupdf.LINK_GOTOR, "file": "manca.pdf", "page": 0}) is None
     assert errors and "manca.pdf" in errors[0]
+
+
+def _links_pdf(tmp_path):
+    path = tmp_path / "cinque.pdf"
+    doc = pymupdf.open()
+    for _ in range(12):
+        doc.new_page()
+    page = doc[0]
+    # inseriti in ordine sparso: l'ordine di lettura è per righe
+    positions = [(300, 300), (72, 100), (300, 100), (72, 300), (72, 500)]
+    for n, (x, y) in enumerate(positions):
+        page.insert_text((x, y + 15), f"link{n}")
+        page.insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(x, y, x + 100, y + 20),
+                          "page": n + 5, "to": pymupdf.Point(0, 0)})
+    doc.save(str(path))
+    return str(path)
+
+
+def test_tab_visits_links_in_reading_order(viewer_window, tmp_path, qtbot):
+    view = viewer_window.open_path(_links_pdf(tmp_path))
+    nav = _nav(viewer_window)
+    view.setFocus()
+    visited = []
+    for _ in range(5):
+        qtbot.keyClick(view, Qt.Key.Key_Tab)
+        visited.append(nav.focused_link(view)["page"])
+    assert visited == [6, 7, 8, 5, 9]
+    qtbot.keyClick(view, Qt.Key.Key_Return)
+    assert view.current_page == 9
+    assert nav.state(view).history.can_back
+
+
+def test_link_order_tabs_structure():
+    from foliant.modules.viewer.navigation import link_order
+    links = [{"from": pymupdf.Rect(300, 100, 400, 120)}, {"from": pymupdf.Rect(72, 100, 170, 120)}]
+    assert link_order(links, None) == [1, 0]
+    assert link_order(links, "/S") == [0, 1]
+
+
+def test_detect_url_in_text(viewer_window, tmp_path, qtbot, monkeypatch):
+    from foliant.modules.viewer.navigation import detect_url
+    assert detect_url("www.esempio.it") == "https://www.esempio.it"
+    assert detect_url("info@orologi.it,") == "mailto:info@orologi.it"
+    assert detect_url("parola") is None
+    path = tmp_path / "url.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Visita www.esempio.it oggi", fontsize=14)
+    doc.save(str(path))
+    view = viewer_window.open_path(str(path))
+    nav = _nav(viewer_window)
+    asked = []
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.StandardButton.No)
+    word = [w for w in view.words(0) if w[4] == "www.esempio.it"][0]
+    point = ((word[0] + word[2]) / 2, (word[1] + word[3]) / 2)
+    _click(qtbot, view, 0, point)
+    qtbot.wait(20)
+    assert asked == []              # preferenza disattiva
+    nav.act_detect_urls.trigger()
+    _click(qtbot, view, 0, point)
+    qtbot.waitUntil(lambda: bool(asked), timeout=1000)
+    assert "https://www.esempio.it" in asked[0]

@@ -9,6 +9,7 @@ partenza dei salti non continui.
 from __future__ import annotations
 
 import os
+import re
 import weakref
 from pathlib import Path
 
@@ -44,7 +45,39 @@ TRANSLATIONS = {
     "File collegato non trovato: {p}": "Linked file not found: {p}",
     "Destinazione non trovata": "Destination not found",
     "Vista": "View",
+    "Rileva URL nel testo": "Detect URLs in text",
+    "Rende cliccabili indirizzi web ed e-mail scritti come semplice testo":
+        "Makes web and e-mail addresses written as plain text clickable",
 }
+
+_URL_RE = re.compile(r"^(?:(?:https?://|www\.)[^\s<>\"]+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+)$", re.IGNORECASE)
+
+
+def detect_url(word: str) -> str | None:
+    """URI per una parola che sembra un indirizzo web o e-mail (None altrimenti)."""
+    w = word.strip().strip("()[]<>«»\"'")
+    w = w.rstrip(".,;:!?")
+    if not w or not _URL_RE.match(w):
+        return None
+    if "@" in w and "://" not in w and not w.lower().startswith("www."):
+        return "mailto:" + w
+    if w.lower().startswith("www."):
+        return "https://" + w
+    return w
+
+
+def link_order(links: list[dict], tabs: str | None) -> list[int]:
+    """Ordine di tabulazione dei collegamenti di una pagina: `/Tabs /C` per colonne,
+    `/S` o `/A` nell'ordine delle annotazioni, altrimenti ordine di lettura (righe)."""
+    idx = list(range(len(links)))
+    t = (tabs or "").strip("/")
+    if t in ("S", "A"):
+        return idx
+    def r(i):
+        return pymupdf.Rect(links[i]["from"])
+    if t == "C":
+        return sorted(idx, key=lambda i: (round(r(i).x0 / 10), r(i).y0))
+    return sorted(idx, key=lambda i: (round(r(i).y0 / 6), r(i).x0))
 
 
 def describe_link(link: dict, labels: list[str] | None = None) -> str:
@@ -93,6 +126,7 @@ class _ViewState:
         self.labels: list[str] | None = None
         self.labels_version = -1
         self.last_goto: int = -1
+        self.focus: tuple[int, int] | None = None   # (pagina, indice del collegamento)
 
 
 class NavigationController(QObject):
@@ -113,7 +147,11 @@ class NavigationController(QObject):
             mode.add_separator()
             mode.add_action(self.act_back)
             mode.add_action(self.act_forward)
-        for act in (self.act_back, self.act_forward, self.act_goto):
+        self.act_detect_urls = ctx.action(_("Rileva URL nel testo"), "link", self._set_detect_urls,
+                                          tooltip=_("Rende cliccabili indirizzi web ed e-mail scritti come semplice testo"),
+                                          checkable=True, requires_document=False)
+        self.act_detect_urls.setChecked(self.detect_urls)
+        for act in (self.act_back, self.act_forward, self.act_goto, self.act_detect_urls):
             ctx.add_menu_action(act, _("Vista"))
         self.label_box = QLabel(w)
         self.label_box.setProperty("muted", True)
@@ -171,6 +209,8 @@ class NavigationController(QObject):
         view.previous_page = sequential(original_prev)
         view.currentPageChanged.connect(lambda _p: self._refresh_later())
         view.viewport().installEventFilter(self)
+        view.installEventFilter(self)
+        view.overlays.append(self._paint_focus)
 
     def record_jump(self, view: DocumentView) -> None:
         """Da chiamare prima di un salto fatto senza `go_to_page` (es. zoom su un'area)."""
@@ -302,6 +342,113 @@ class NavigationController(QObject):
         else:
             self.label_box.hide()
 
+    # ------------------------------------------------- collegamenti da tastiera
+    @property
+    def detect_urls(self) -> bool:
+        return self.ctx.settings().value("viewer/detect_urls", False) in (True, "true")
+
+    def _set_detect_urls(self, on: bool) -> None:
+        self.ctx.settings().setValue("viewer/detect_urls", bool(on))
+
+    def _ordered_links(self, view: DocumentView, page: int) -> list[dict]:
+        links = view.links(page)
+        if not links:
+            return []
+        with ENGINE_LOCK:
+            try:
+                kind, tabs = view.document.pdf.xref_get_key(view.document.pdf[page].xref, "Tabs")
+            except Exception:
+                tabs = None
+        return [links[i] for i in link_order(links, tabs if tabs and tabs != "null" else None)]
+
+    def focus_link(self, view: DocumentView, step: int) -> dict | None:
+        """Sposta il fuoco sul collegamento successivo (step=1) o precedente (-1)."""
+        st = self.state(view)
+        n = view.page_count
+        if st.focus is not None:
+            page, i = st.focus
+        else:
+            page, i = view.current_page, (-1 if step > 0 else None)
+        for _round in range(min(n + 1, 300)):   # limite: niente scansioni lunghissime
+            links = self._ordered_links(view, page)
+            if i is None:
+                i = len(links)
+            j = i + step
+            if 0 <= j < len(links):
+                st.focus = (page, j)
+                link = links[j]
+                view.ensure_visible(page, pymupdf.Rect(link["from"]))
+                view.viewport().update()
+                return link
+            page = (page + step) % n
+            i = -1 if step > 0 else None
+        st.focus = None
+        return None
+
+    def focused_link(self, view: DocumentView) -> dict | None:
+        st = self.state(view)
+        if st.focus is None:
+            return None
+        page, i = st.focus
+        links = self._ordered_links(view, page)
+        return links[i] if i < len(links) else None
+
+    def activate_link(self, view: DocumentView, link: dict) -> None:
+        kind = link.get("kind")
+        if kind == pymupdf.LINK_GOTOR:
+            self.open_remote(view, link)
+        elif kind == pymupdf.LINK_LAUNCH:
+            view.status(_("Il collegamento chiede di avviare un programma: azione bloccata per sicurezza."))
+        else:
+            from foliant.api import follow_link
+            follow_link(view, link)
+
+    def _paint_focus(self, view, painter, page) -> None:
+        st = self._states.get(view)
+        if st is None or st.focus is None or st.focus[0] != page:
+            return
+        link = self.focused_link(view)
+        if link is None:
+            return
+        from PySide6.QtGui import QPen
+        from foliant.api import theme
+        r = pymupdf.Rect(link["from"])
+        pen = QPen(theme.color("accent"))
+        pen.setCosmetic(True)
+        pen.setWidthF(2.0)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        from PySide6.QtCore import QRectF
+        painter.drawRect(QRectF(r.x0 - 1, r.y0 - 1, r.width + 2, r.height + 2))
+
+    def _key(self, view: DocumentView, ev) -> bool:
+        key = ev.key()
+        if key == Qt.Key.Key_Backtab or (key == Qt.Key.Key_Tab and ev.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            return self.focus_link(view, -1) is not None
+        if key == Qt.Key.Key_Tab and not ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            return self.focus_link(view, 1) is not None
+        st = self.state(view)
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and st.focus is not None:
+            link = self.focused_link(view)
+            if link is not None:
+                self.activate_link(view, link)
+                return True
+        if key == Qt.Key.Key_Escape and st.focus is not None:
+            st.focus = None
+            view.viewport().update()
+        return False
+
+    def _url_click(self, view: DocumentView, page: int, point) -> bool:
+        if not self.detect_urls:
+            return False
+        word = view.word_at(page, point)
+        uri = detect_url(word[4]) if word else None
+        if uri is None:
+            return False
+        from foliant.api import follow_link
+        QTimer.singleShot(0, lambda: follow_link(view, {"kind": pymupdf.LINK_URI, "uri": uri}))
+        return True
+
     # --------------------------------------------------------------- eventi
     def _view_of(self, obj) -> DocumentView | None:
         parent = obj.parent() if obj is not None else None
@@ -309,6 +456,13 @@ class NavigationController(QObject):
 
     def eventFilter(self, obj, ev) -> bool:
         t = ev.type()
+        if isinstance(obj, DocumentView):
+            if t == QEvent.Type.KeyPress and not obj.document.closed:
+                try:
+                    return self._key(obj, ev)
+                except Exception as e:
+                    obj.status(str(e))
+            return False
         if t not in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, QEvent.Type.ToolTip):
             return False
         view = self._view_of(obj)
@@ -337,6 +491,8 @@ class NavigationController(QObject):
                     return False
                 link = view.link_at(hit[0], hit[1])
                 if link is None:
+                    if not view.selected_text():
+                        self._url_click(view, hit[0], hit[1])
                     return False
                 kind = link.get("kind")
                 if kind == pymupdf.LINK_GOTOR:
@@ -347,6 +503,11 @@ class NavigationController(QObject):
             if t == QEvent.Type.ToolTip:
                 hit = view.view_to_page(QPointF(ev.pos()))
                 link = view.link_at(hit[0], hit[1]) if hit else None
+                if link is None and hit and self.detect_urls:
+                    word = view.word_at(hit[0], hit[1])
+                    uri = detect_url(word[4]) if word else None
+                    if uri:
+                        link = {"kind": pymupdf.LINK_URI, "uri": uri}
                 if link is None:
                     QToolTip.hideText()
                     return False
