@@ -182,3 +182,17 @@ def test_generated_names_and_reports_english(sample_pdf, tmp_path):
     assert suffixes == ["_compressed", "_custom", "_repaired"]
     assert template == "{name}_{page:03}"
     assert [p.rsplit("/", 1)[-1] for p in images] == ["doc_001.png", "doc_002.png", "doc_003.png"]
+
+
+def test_sizes_use_language_decimal_separator():
+    """Collaudo C11 (NFR-26): «1,4 KB» in italiano, «1.4 KB» in inglese."""
+    from foliant.modules.convert.optimize_dialogs import human_size
+    from foliant.modules.convert.portfolio import _size
+    try:
+        set_language("en")
+        assert human_size(1434) == "1.4 KB" and _size(1434) == "1.4 KB"
+        assert human_size(5 * 1024 ** 2 + 200 * 1024) == "5.2 MB"
+        set_language("it")
+        assert human_size(1434) == "1,4 KB" and _size(1434) == "1,4 KB"
+    finally:
+        set_language("it")

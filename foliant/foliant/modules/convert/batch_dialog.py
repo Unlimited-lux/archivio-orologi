@@ -16,6 +16,47 @@ from .engine import FORMATS
 from .export_dialog import FORMAT_ORDER, build_options
 
 
+class FileList(QListWidget):
+    """Elenco dei file con un segnaposto quando è vuoto; accetta file e cartelle trascinati."""
+
+    def __init__(self, on_drop=None):
+        super().__init__()
+        self._on_drop = on_drop
+        self.setAcceptDrops(True)
+        self.placeholder = _("Aggiungi file o cartelle, o trascinali qui")
+
+    def paintEvent(self, ev) -> None:
+        super().paintEvent(ev)
+        if self.count() == 0:
+            from PySide6.QtCore import Qt
+            from PySide6.QtGui import QPainter
+            p = QPainter(self.viewport())
+            p.setPen(theme.color("text_muted"))
+            p.drawText(self.viewport().rect().adjusted(16, 16, -16, -16),
+                       int(Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap), self.placeholder)
+            p.end()
+
+    def dragEnterEvent(self, ev) -> None:
+        if ev.mimeData().hasUrls():
+            ev.acceptProposedAction()
+        else:
+            super().dragEnterEvent(ev)
+
+    def dragMoveEvent(self, ev) -> None:
+        if ev.mimeData().hasUrls():
+            ev.acceptProposedAction()
+        else:
+            super().dragMoveEvent(ev)
+
+    def dropEvent(self, ev) -> None:
+        paths = [u.toLocalFile() for u in ev.mimeData().urls() if u.isLocalFile()]
+        if paths and self._on_drop is not None:
+            ev.acceptProposedAction()
+            self._on_drop(paths)
+        else:
+            super().dropEvent(ev)
+
+
 class BatchDialog(QDialog):
     def __init__(self, parent, ctx):
         super().__init__(parent)
@@ -24,7 +65,7 @@ class BatchDialog(QDialog):
         self.resize(640, 600)
         self._roots: list[str] = []
         lay = QVBoxLayout(self)
-        self.list = QListWidget()
+        self.list = FileList(on_drop=lambda paths: self.add_paths(paths))
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         lay.addWidget(self.list, 1)

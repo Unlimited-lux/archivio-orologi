@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QLabel, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
-from foliant.api import _, bind_icon, theme
+from foliant.api import _, bind_icon, format_number, theme
 
 LEVEL_LABELS = {
     "lossless": ("Senza perdita", "Nessun ricampionamento: pulizia e compressione ottimale"),
@@ -25,7 +25,7 @@ def human_size(n: int | float | None) -> str:
     n = float(n)
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}".replace(".", ",")
+            return f"{n:.0f} {unit}" if unit == "B" else f"{format_number(n, 1)} {unit}"
         n /= 1024
     return f"{n:.1f} GB"
 
@@ -141,7 +141,7 @@ class AdvancedDialog(QDialog):
         for r, (cat, n) in enumerate(analysis):
             table.setItem(r, 0, QTableWidgetItem(_(cat)))
             table.setItem(r, 1, QTableWidgetItem(human_size(n)))
-            table.setItem(r, 2, QTableWidgetItem(f"{n * 100 / total:.1f}%".replace(".", ",")))
+            table.setItem(r, 2, QTableWidgetItem(f"{format_number(n * 100 / total, 1)}%"))
         table.setMaximumHeight(240)
         bl.addWidget(table)
         lay.addWidget(box)

@@ -152,3 +152,27 @@ def test_layers_whole_document_and_raster_keeps_toc():
                                  ocr=False, pages="1")
     res2 = pymupdf.open(stream=out2)
     assert res2.get_toc() == [[1, "Cap 1", 1], [1, "Cap 2", 2]]
+
+
+@pytest.mark.parametrize("pages", [None, "1"])
+def test_flatten_keeps_pending_redactions_and_hidden(pages):
+    """Sicurezza: l'appiattimento non elimina in silenzio i segni di redazione non applicati né
+    le annotazioni nascoste (ANN-40): restano annotazioni, con avviso per le redazioni."""
+    doc = pymupdf.open()
+    for _k in range(2):
+        p = doc.new_page()
+        p.insert_text((72, 100), "IBAN IT60X0542811101000000123456", fontsize=12)
+        p.add_highlight_annot(pymupdf.Rect(70, 88, 300, 104))
+    p = doc[0]
+    p.add_redact_annot(pymupdf.Rect(70, 88, 330, 104))
+    hidden = p.add_text_annot((400, 400), "Nota riservata")
+    hidden.set_flags(pymupdf.PDF_ANNOT_IS_HIDDEN)
+    hidden.update()
+    kwargs = {} if pages is None else {"pages": pages}
+    out, report = flatten_pdf_bytes(doc.tobytes(), **kwargs)
+    res = pymupdf.open(stream=out)
+    types = sorted(a.type[0] for a in res[0].annots())
+    assert types == sorted([pymupdf.PDF_ANNOT_REDACT, pymupdf.PDF_ANNOT_TEXT])
+    assert any(a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN for a in res[0].annots())
+    assert any("redazione" in w for w in report["warnings"])
+    assert "IBAN" in res[0].get_text()          # la redazione non è stata applicata, resta da applicare

@@ -1116,3 +1116,23 @@ def test_photos_ocr_option(window, ctrl, tmp_path, monkeypatch, messages):
         return QDialog.DialogCode.Accepted
     monkeypatch.setattr(PhotosDialog, "exec", photos_exec)
     assert ctrl.create_from_photos([str(path)]) is not None and len(ocr) == 1
+
+
+def test_batch_dialog_empty_placeholder_and_drop(window, sample_pdf, tmp_path):
+    """Collaudo C12: l'elenco vuoto spiega cosa fare; si possono trascinare file e cartelle."""
+    from PySide6.QtCore import QMimeData, QPoint, QUrl
+    from PySide6.QtGui import QDropEvent
+    from PySide6.QtCore import Qt
+
+    from foliant.modules.convert.batch_dialog import BatchDialog
+    dlg = BatchDialog(window, window.ctx)
+    assert dlg.list.count() == 0 and "trascinali" in dlg.list.placeholder
+    dlg.resize(640, 600)
+    img = dlg.list.grab().toImage()          # il segnaposto viene disegnato senza errori
+    assert not img.isNull()
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(sample_pdf)])
+    ev = QDropEvent(QPoint(10, 10), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier)
+    dlg.list.dropEvent(ev)
+    assert dlg.files() == [sample_pdf] and dlg.ok_button.isEnabled()
