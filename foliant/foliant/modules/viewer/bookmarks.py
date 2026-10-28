@@ -45,6 +45,8 @@ TRANSLATIONS = {
     "Sposta segnalibro": "Move bookmark",
     "Modifica segnalibro": "Edit bookmark",
     "Imposta destinazione sulla vista corrente": "Set destination to current view",
+    "Apri un indirizzo web…": "Open a web address…",
+    "Indirizzo da aprire:": "Address to open:",
     "Grassetto": "Bold",
     "Corsivo": "Italic",
     "Colore…": "Colour…",
@@ -595,6 +597,27 @@ class BookmarksPanel(QWidget):
         b.dest.pop("uri", None)
         return self._apply(_("Modifica segnalibro"), new_items, index)
 
+    def set_uri(self, index: int, uri: str) -> bool:
+        """Il segnalibro apre un indirizzo web (con la conferma dei collegamenti del nucleo)."""
+        uri = uri.strip()
+        if not uri:
+            return False
+        if "://" not in uri and not uri.startswith("mailto:"):
+            uri = "https://" + uri
+        new_items = [E.Bookmark(b.level, b.title, b.page, dict(b.dest)) for b in self.items]
+        b = new_items[index]
+        b.dest = {k: v for k, v in b.dest.items() if k in ("bold", "italic", "color", "collapse")}
+        b.dest.update({"kind": pymupdf.LINK_URI, "uri": uri})
+        b.page = -1
+        return self._apply(_("Modifica segnalibro"), new_items, index)
+
+    def ask_uri(self, index: int) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        current = self.items[index].dest.get("uri", "")
+        uri, ok = QInputDialog.getText(self, _("Apri un indirizzo web…"), _("Indirizzo da aprire:"), text=current)
+        if ok and uri.strip():
+            self.set_uri(index, uri)
+
     def set_style(self, index: int, bold: bool | None = None, italic: bool | None = None,
                   color: tuple | None | bool = False) -> bool:
         new_items = [E.Bookmark(b.level, b.title, b.page, dict(b.dest)) for b in self.items]
@@ -621,6 +644,7 @@ class BookmarksPanel(QWidget):
                 menu.addSeparator()
                 menu.addAction(self.actions["rename"])
                 menu.addAction(_("Imposta destinazione sulla vista corrente"), lambda: self.set_destination_here(i))
+                menu.addAction(_("Apri un indirizzo web…"), lambda: self.ask_uri(i))
                 b = self.items[i]
                 a = menu.addAction(_("Grassetto"), lambda: self.set_style(i, bold=not b.bold))
                 a.setCheckable(True)

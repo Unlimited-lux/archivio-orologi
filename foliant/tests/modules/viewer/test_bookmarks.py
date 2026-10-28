@@ -349,3 +349,18 @@ def test_empty_panel_layout_compact(viewer_window, sample_pdf):
     assert all(b.width() >= 24 for b in buttons)
     menu_texts = [a.text() for a in panel.tools_button.menu().actions()]
     assert "Sposta su" in menu_texts and "Espandi tutto" in menu_texts
+
+
+def test_bookmark_opening_web_address(viewer_window, tmp_path, monkeypatch):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    assert panel.set_uri(0, "www.esempio.it")
+    out = tmp_path / "uri.pdf"
+    view.document.save(out)
+    toc = pymupdf.open(str(out)).get_toc(simple=False)
+    assert toc[0][3]["uri"] == "https://www.esempio.it"
+    asked = []
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.No)
+    panel.follow(0)
+    assert asked                    # passa dalla conferma dei collegamenti esterni del nucleo
+    assert not panel.item(0).font(0).italic() or panel.items[0].bold   # non marcato come rotto
