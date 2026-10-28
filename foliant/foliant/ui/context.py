@@ -157,6 +157,15 @@ class Context(QObject):
     def hide_properties(self) -> None:
         self._w.hide_properties()
 
+    def set_central_widget(self, widget: QWidget | None) -> None:
+        """Mostra un widget del modulo al posto della vista documento (es.
+        organizzatore pagine, confronto). Con None torna alla vista documento.
+        Il documento attivo (`current_view()`) non cambia."""
+        self._w.set_central_override(widget)
+
+    def central_widget(self) -> QWidget | None:
+        return self._w.central_override()
+
     def add_view_menu_provider(self, provider: Callable) -> None:
         """Voci del menu contestuale sulle pagine.
 

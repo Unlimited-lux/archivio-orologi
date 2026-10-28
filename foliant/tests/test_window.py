@@ -130,3 +130,16 @@ def test_view_menu_provider(window, sample_pdf, monkeypatch):
                                             view.viewport().mapToGlobal(QPoint(int(r.center().x()), int(r.top() + 20)))))
     assert seen == [0]
     assert shown == [["Voce di prova"]]
+
+
+def test_central_widget_override(window, sample_pdf):
+    from PySide6.QtWidgets import QLabel
+    view = window.open_path(sample_pdf)
+    grid = QLabel("organizzatore")
+    window.ctx.set_central_widget(grid)
+    assert window.docs_stack.currentWidget() is grid
+    assert window.ctx.current_view() is view          # il documento attivo resta
+    assert window.ctx.central_widget() is grid
+    window.ctx.set_central_widget(None)
+    assert window.docs_stack.currentWidget() is window.tabs
+    assert window.ctx.central_widget() is None

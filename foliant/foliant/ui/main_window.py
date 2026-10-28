@@ -472,10 +472,26 @@ class MainWindow(QMainWindow):
 
     # ================================================================== documenti
     def current_view(self) -> DocumentView | None:
-        if self.docs_stack.currentWidget() is not self.tabs:
+        if self.docs_stack.currentWidget() is self.home:
             return None
         w = self.tabs.currentWidget()
         return w if isinstance(w, DocumentView) else None
+
+    def set_central_override(self, widget: QWidget | None) -> None:
+        """Mostra `widget` al posto delle schede documento (None = ripristina).
+
+        Il documento attivo resta quello della scheda corrente."""
+        if widget is None:
+            if self.docs_stack.currentWidget() not in (self.home, self.tabs):
+                self.docs_stack.setCurrentWidget(self.tabs if self.tabs.count() else self.home)
+            return
+        if self.docs_stack.indexOf(widget) < 0:
+            self.docs_stack.addWidget(widget)
+        self.docs_stack.setCurrentWidget(widget)
+
+    def central_override(self) -> QWidget | None:
+        w = self.docs_stack.currentWidget()
+        return None if w in (self.home, self.tabs) else w
 
     def views(self) -> list[DocumentView]:
         return [self.tabs.widget(i) for i in range(self.tabs.count()) if isinstance(self.tabs.widget(i), DocumentView)]
@@ -487,6 +503,7 @@ class MainWindow(QMainWindow):
 
     def show_home(self) -> None:
         self._refresh_recent()
+        self.set_central_override(None)
         self.docs_stack.setCurrentWidget(self.home)
         self._on_current_changed()
 
@@ -541,6 +558,7 @@ class MainWindow(QMainWindow):
         view.statusMessage.connect(lambda m: self.statusBar().showMessage(m, 6000))
         view.contentChanged.connect(lambda v=view: self.ctx.documentChanged.emit(v))
         view._bridge.changed.connect(lambda _k, v=view: self._update_tab_title(v))
+        self.set_central_override(None)
         index = self.tabs.addTab(view, document.display_name)
         self.tabs.setTabToolTip(index, str(document.path or document.display_name))
         self.docs_stack.setCurrentWidget(self.tabs)
