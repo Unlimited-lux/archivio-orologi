@@ -3216,25 +3216,32 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
 
 # ------------------------------------------------------------------ FDF
 def export_fdf(pdf: pymupdf.Document, filename: str = "") -> bytes:
-    """FDF minimale (formato a oggetti PDF) con i commenti: un oggetto per annotazione."""
-    objs: list[bytes] = []
-    annot_refs: list[int] = []
-    next_num = 2
+    """FDF minimale (formato a oggetti PDF) con i commenti: un oggetto per annotazione.
+
+    /IRT (risposte e stati) punta all'oggetto FDF del commento padre; /RT e /NM restano."""
+    items: list[tuple[int, int]] = []           # (pagina, xref)
     for page_no in range(pdf.page_count):
         page = pdf[page_no]
         for a in iter_annots(page):
-            if a.type[0] in NON_COMMENT_TYPES:
-                continue
-            src = pdf.xref_object(a.xref, compressed=True)
-            # rimuove riferimenti non trasferibili (pagina, aspetto, popup, IRT)
-            src = re.sub(r"/(P|AP|Popup|IRT|Parent)\s*(\d+\s+\d+\s+R|<<.*?>>)", "", src, flags=re.S)
-            src = src.strip()
-            if src.endswith(">>"):
-                src = src[:-2] + f"/Page {page_no}>>"
-            objs.append(f"{next_num} 0 obj\n{src}\nendobj\n".encode("latin-1", errors="replace"))
-            annot_refs.append(next_num)
-            next_num += 1
-    refs = " ".join(f"{n} 0 R" for n in annot_refs)
+            if a.type[0] not in NON_COMMENT_TYPES:
+                items.append((page_no, a.xref))
+    numbers = {xref: i + 2 for i, (_p, xref) in enumerate(items)}
+
+    def irt(m: re.Match) -> str:
+        n = numbers.get(int(m.group(1)))
+        return f"/IRT {n} 0 R" if n is not None else ""
+
+    objs: list[bytes] = []
+    for page_no, xref in items:
+        src = pdf.xref_object(xref, compressed=True)
+        src = re.sub(r"/IRT\s*(\d+)\s+\d+\s+R", irt, src)
+        # rimuove riferimenti non trasferibili (pagina, aspetto, popup)
+        src = re.sub(r"/(P|AP|Popup|Parent)\s*(\d+\s+\d+\s+R|<<.*?>>)", "", src, flags=re.S)
+        src = src.strip()
+        if src.endswith(">>"):
+            src = src[:-2] + f"/Page {page_no}>>"
+        objs.append(f"{numbers[xref]} 0 obj\n{src}\nendobj\n".encode("latin-1", errors="replace"))
+    refs = " ".join(f"{numbers[x]} 0 R" for _p, x in items)
     head = f"%FDF-1.2\n1 0 obj\n<</FDF<</Annots[{refs}]" + (f"/F{_pdf_string(filename)}" if filename else "") + \
         ">>>>\nendobj\n"
     body = head.encode("latin-1", errors="replace") + b"".join(objs)

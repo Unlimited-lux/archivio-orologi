@@ -61,3 +61,18 @@ def test_callout_with_cropbox_roundtrip(fmt):
     assert (pts[0].x, pts[0].y) == pytest.approx((100, 400), abs=0.05)
     assert engine._array(pdf, a.xref, "CL")[:2] == pytest.approx((140, 392), abs=0.05)
 
+
+def test_fdf_keeps_replies_and_status():
+    pdf = pymupdf.open()
+    pdf.new_page()
+    note = engine.create_note(pdf, 0, (100, 100), "Domanda", engine.Style(), "Anna")
+    engine.add_reply(pdf, 0, note, "Prima risposta", "Bruno")
+    engine.add_reply(pdf, 0, note, "Seconda risposta", "Carla")
+    engine.set_status(pdf, 0, note, engine.STATE_ACCEPTED, "Bruno")
+    fdf = engine.export_fdf(pdf)
+    assert fdf.count(b"/IRT") == 3 and b"/RT/R" in fdf.replace(b" ", b"")
+    _roundtrip(pdf, "fdf")
+    top = engine.list_annotations(pdf)
+    assert len(top) == 1
+    assert [r.contents for r in top[0].replies] == ["Prima risposta", "Seconda risposta"]
+    assert top[0].status == engine.STATE_ACCEPTED
