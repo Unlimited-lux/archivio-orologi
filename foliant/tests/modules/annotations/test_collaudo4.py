@@ -94,3 +94,32 @@ def test_freetext_roundtrip_keeps_border_and_rect(fmt):
     assert tuple(after) == pytest.approx(tuple(before), abs=0.02)
     assert engine._array(pdf, a.xref, engine.FT_BORDER_KEY) == pytest.approx([1.0, 0.0, 0.0])
     assert a.contents == "Riquadro"
+
+
+def _icon_box(page) -> pymupdf.IRect:
+    """Riquadro dei pixel non bianchi della pagina visualizzata (ruotata)."""
+    pix = page.get_pixmap(dpi=72)
+    xs, ys = [], []
+    for y in range(pix.height):
+        for x in range(pix.width):
+            if pix.pixel(x, y) != (255, 255, 255):
+                xs.append(x)
+                ys.append(y)
+    return pymupdf.IRect(min(xs), min(ys), max(xs) + 1, max(ys) + 1)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_note_icon_under_click_on_rotated_page(rotation):
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=595, height=842)
+    page.set_rotation(rotation)
+    click = pymupdf.Point(150, 650)                      # coordinate standard (pagina non ruotata)
+    xref = engine.create_note(pdf, 0, click, "x", engine.Style(color=(1, 0, 0)), "A")
+    page = pdf[0]
+    shown = click * page.rotation_matrix                  # punto nella pagina visualizzata
+    box = _icon_box(page)
+    assert box.contains(shown), (box, shown)
+    centre = pymupdf.Point((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2)
+    assert abs(centre - shown) < 3
+    assert engine.annot_at(pdf, 0, click, 1.0) == xref   # il clic sull'icona la seleziona
+

@@ -502,6 +502,17 @@ def create_note(pdf: pymupdf.Document, page_no: int, point, text: str, style: St
         h = NOTE_SIZE / 2
         annot.set_rect(pymupdf.Rect(p.x - h, p.y - h, p.x + h, p.y + h))
     annot.set_flags(pymupdf.PDF_ANNOT_IS_PRINT | pymupdf.PDF_ANNOT_IS_NO_ZOOM | pymupdf.PDF_ANNOT_IS_NO_ROTATE)
+    if page.rotation:
+        # /NoRotate: l'icona resta diritta ruotando attorno all'angolo superiore sinistro di /Rect,
+        # quindi su una pagina ruotata cade fuori da /Rect. Si trasla /Rect perché l'icona
+        # visualizzata (annot.rect del motore) sia centrata sul punto.
+        xref = annot.xref
+        shown = pymupdf.Rect(page.load_annot(xref).rect)
+        dx, dy = p.x - (shown.x0 + shown.x1) / 2, p.y - (shown.y0 + shown.y1) / 2
+        with unrotated(page):
+            annot = page.load_annot(xref)
+            annot.set_rect(pymupdf.Rect(p.x - h + dx, p.y - h + dy, p.x + h + dx, p.y + h + dy))
+        annot = page.load_annot(xref)
     annot.set_colors(stroke=_rgb(style.color or DEFAULT_COLORS[NOTE]))
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
     xref = _finish(annot, author, text, kind=NOTE)
@@ -1895,18 +1906,33 @@ def _dist_to_segment(p: pymupdf.Point, a: pymupdf.Point, b: pymupdf.Point) -> fl
     return abs(p - (a + ab * t))
 
 
+ICON_TYPES = (pymupdf.PDF_ANNOT_TEXT, pymupdf.PDF_ANNOT_FILE_ATTACHMENT, pymupdf.PDF_ANNOT_SOUND)
+
+
+def _no_rotate(pdf: pymupdf.Document, xref: int) -> bool:
+    k, v = pdf.xref_get_key(xref, "F")
+    try:
+        return k == "int" and bool(int(v) & pymupdf.PDF_ANNOT_IS_NO_ROTATE)
+    except ValueError:
+        return False
+
+
 def annot_rects(pdf: pymupdf.Document, page_no: int) -> list[tuple[int, pymupdf.Rect | None]]:
     """(xref, riquadro standard) delle annotazioni di commento, in ordine di sovrapposizione."""
     page = pdf[page_no]
     pl = _placement()
     m = pl.pdf_to_page_matrix(page) if pl is not None else None
     out = []
+    rotated = bool(page.rotation)
     for x, t, _n in page.annot_xrefs():
         if t in NON_COMMENT_TYPES:
             continue
         raw = _array(pdf, x, "Rect")
         if not raw or len(raw) != 4:
             out.append((x, None))
+        elif rotated and t in ICON_TYPES and _no_rotate(pdf, x):
+            a = find_annot(page, x)     # icona diritta: il riquadro visualizzato non è /Rect
+            out.append((x, pymupdf.Rect(a.rect) if a is not None else None))
         elif m is not None:
             out.append((x, pymupdf.Rect(pymupdf.Point(raw[0], raw[1]) * m,
                                         pymupdf.Point(raw[2], raw[3]) * m).normalize()))
