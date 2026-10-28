@@ -27,6 +27,8 @@ SCOPE_OPEN = "open"
 SCOPE_FOLDER = "folder"
 
 TRANSLATIONS = {
+    "Allegati PDF": "PDF attachments",
+    "Allegato «{name}»": "Attachment “{name}”",
     "ricerca.csv": "search.csv",
     "Ricerca avanzata…": "Advanced search…",
     "Ricerca avanzata": "Advanced search",
@@ -180,7 +182,8 @@ class AdvancedSearchPanel(QDialog):
         self.inc_bookmarks = QCheckBox(_("Segnalibri"), self)
         self.inc_fields = QCheckBox(_("Campi modulo"), self)
         self.inc_metadata = QCheckBox(_("Metadati"), self)
-        for cb in (self.inc_comments, self.inc_bookmarks, self.inc_fields, self.inc_metadata):
+        self.inc_attachments = QCheckBox(_("Allegati PDF"), self)
+        for cb in (self.inc_comments, self.inc_bookmarks, self.inc_fields, self.inc_metadata, self.inc_attachments):
             inc.addWidget(cb)
         inc.addStretch(1)
         form.addRow(_("Includi"), inc)
@@ -259,8 +262,10 @@ class AdvancedSearchPanel(QDialog):
                     tag = kinds.get(h.kind, h.kind)
                     if h.label:
                         tag += f" · {h.label}"
+                    if h.attachment:
+                        tag = _("Allegato «{name}»").format(name=h.attachment) + " · " + tag
                     child = QTreeWidgetItem(pitem)
-                    prefix = "" if h.kind == eng.KIND_TEXT else \
+                    prefix = "" if h.kind == eng.KIND_TEXT and not h.attachment else \
                         f"<span style='color:{muted}'>[{html.escape(tag)}]</span> "
                     child.setText(0, prefix + "…" + html.escape(h.before) + "<b>" + html.escape(h.found) + "</b>"
                                   + html.escape(h.after) + "…")
@@ -315,13 +320,14 @@ class AdvancedSearchController(QObject):
         return AdvOptions(query=p.field.text(), mode=p.mode.currentData(), case_sensitive=p.opt_case.isChecked(),
                           whole_word=p.opt_word.isChecked(), ignore_accents=p.opt_accents.isChecked(),
                           comments=p.inc_comments.isChecked(), bookmarks=p.inc_bookmarks.isChecked(),
-                          fields=p.inc_fields.isChecked(), metadata=p.inc_metadata.isChecked())
+                          fields=p.inc_fields.isChecked(), metadata=p.inc_metadata.isChecked(),
+                          attachments=p.inc_attachments.isChecked())
 
     def configure(self, query: str | None = None, *, scope: str | None = None, mode: str | None = None,
                   case_sensitive: bool | None = None, whole_word: bool | None = None,
                   ignore_accents: bool | None = None, comments: bool | None = None, bookmarks: bool | None = None,
                   fields: bool | None = None, metadata: bool | None = None, folder: str | None = None,
-                  recursive: bool | None = None) -> None:
+                  recursive: bool | None = None, attachments: bool | None = None) -> None:
         p = self.ensure_panel()
         if query is not None:
             p.field.setText(query)
@@ -331,7 +337,7 @@ class AdvancedSearchController(QObject):
             p.mode.setCurrentIndex(p.mode.findData(mode))
         for cb, value in ((p.opt_case, case_sensitive), (p.opt_word, whole_word), (p.opt_accents, ignore_accents),
                           (p.inc_comments, comments), (p.inc_bookmarks, bookmarks), (p.inc_fields, fields),
-                          (p.inc_metadata, metadata), (p.recursive, recursive)):
+                          (p.inc_metadata, metadata), (p.recursive, recursive), (p.inc_attachments, attachments)):
             if value is not None:
                 cb.setChecked(value)
         if folder is not None:
@@ -474,6 +480,10 @@ class AdvancedSearchController(QObject):
                 return None
         else:
             self._activate(view)
+        if hit.attachment:                     # occorrenza in un PDF allegato: si apre in una scheda
+            view = self._open_attachment(view, hit.attachment)
+            if view is None:
+                return None
         if hit.page < 0:
             return view
         page = min(hit.page, view.document.page_count - 1)
@@ -494,6 +504,17 @@ class AdvancedSearchController(QObject):
             view.set_search_hits({}, None)
             view.go_to_page(page)
         return view
+
+    def _open_attachment(self, view, name: str):
+        panel = getattr(self.ctx, "viewer_parts", {}).get("attachments")
+        if panel is None:
+            return None
+        panel.set_view(view)
+        att = next((a for a in panel.items() if a.key == name), None)
+        if att is None:
+            return None
+        opened = panel.open_item(att)
+        return opened if hasattr(opened, "document") else None
 
     # ------------------------------------------------------------- esportazione
     def export_csv(self, path: str | None = None) -> str | None:

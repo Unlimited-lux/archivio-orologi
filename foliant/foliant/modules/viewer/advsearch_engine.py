@@ -18,7 +18,7 @@ import select
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
 
 import pymupdf
@@ -58,6 +58,7 @@ class AdvOptions:
     bookmarks: bool = False
     fields: bool = False
     metadata: bool = False
+    attachments: bool = False        # PDF incorporati (un livello)
 
     def search_options(self) -> SearchOptions:
         return SearchOptions(case_sensitive=self.case_sensitive, whole_word=self.whole_word,
@@ -80,6 +81,7 @@ class AdvHit:
     rects: list = field(default_factory=list)   # rettangoli (tuple x0,y0,x1,y1) sulla pagina
     doc_key: object = None   # chiave del documento aperto (None = file su disco)
     label: str = ""          # nome del campo, chiave dei metadati, ecc.
+    attachment: str = ""     # nome dell'allegato PDF in cui si trova l'occorrenza ("" = il documento)
 
     @property
     def excerpt(self) -> str:
@@ -358,7 +360,44 @@ def search_document(pdf: pymupdf.Document, opts: AdvOptions, file: str, *, doc_k
         for value, name, rect in widgets:
             for b, f, a in find_in_string(value, opts):
                 add(AdvHit(file, i, KIND_FIELD, b, f, a, [rect], doc_key, label=name))
+    if opts.attachments and len(hits) < limit:
+        for name, data in _pdf_attachments(pdf, lock):
+            try:
+                sub = pymupdf.open("pdf", data)
+            except Exception:
+                if summary is not None:
+                    summary.skipped.append((f"{file} › {name}", "damaged"))
+                continue
+            if sub.needs_pass:
+                if summary is not None:
+                    summary.skipped.append((f"{file} › {name}", "encrypted"))
+                continue
+            inner = replace(opts, attachments=False)        # un solo livello di allegati
+            for h in search_document(sub, inner, file, doc_key=doc_key, guard=guard, summary=summary,
+                                     limit=limit - len(hits)):
+                h.attachment = name
+                if not add(h):
+                    break
+            sub.close()
     return hits
+
+
+def _pdf_attachments(pdf: pymupdf.Document, lock) -> list[tuple[str, bytes]]:
+    """Allegati di documento che sono PDF: (nome nel name tree, dati)."""
+    out = []
+    with lock:
+        try:
+            names = pdf.embfile_names()
+        except Exception:
+            names = []
+        for name in names:
+            try:
+                data = pdf.embfile_get(name)
+            except Exception:
+                continue
+            if data[:1024].lstrip().startswith(b"%PDF") or b"%PDF-" in data[:1024]:
+                out.append((name, data))
+    return out
 
 
 # ============================================================ ricerca in cartella

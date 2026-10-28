@@ -276,3 +276,47 @@ def test_option_checkboxes_are_spaced(viewer_window, sample_pdf):
         for a, b in zip(boxes, boxes[1:]):
             assert b.geometry().left() - a.geometry().right() >= 12
     panel.hide()
+
+
+def test_search_inside_pdf_attachments(viewer_window, tmp_path):
+    """Allegati PDF inclusi: l'occorrenza è nell'allegato, il clic apre l'allegato in una scheda
+    alla pagina giusta; senza l'opzione l'allegato non si cerca."""
+    inner = pymupdf.open()
+    inner.new_page().insert_text((72, 100), "Introduzione")
+    inner.new_page().insert_text((72, 100), "Certificato Patek Philippe 5711")
+    path = _pdf(tmp_path / "con_allegato.pdf", [["Documento principale"]])
+    doc = pymupdf.open(path)
+    doc.embfile_add("certificato.pdf", inner.tobytes(), filename="certificato.pdf")
+    doc.embfile_add("note.txt", b"Patek nel testo semplice", filename="note.txt")
+    doc.saveIncr()
+    doc.close()
+    view = viewer_window.open_path(path)
+    ctl = _ctl(viewer_window)
+    ctl.open()
+    assert ctl.search("Patek", scope=advsearch.SCOPE_CURRENT, mode=eng.PHRASE) == 0
+    assert ctl.search("Patek", attachments=True) == 1
+    hit = ctl.hits[0]
+    assert hit.attachment == "certificato.pdf" and hit.page == 1 and hit.kind == eng.KIND_TEXT
+    item = _leaf_items(ctl.panel.tree)[0]
+    assert "certificato.pdf" in item.text(0)
+    ctl.panel.tree.itemClicked.emit(item, 0)
+    opened = viewer_window.current_view()
+    assert opened is not view and opened.document.display_name == "certificato.pdf"
+    assert opened.current_page == 1 and opened.current_hit == (1, 0)
+
+
+def test_folder_search_includes_attachments(viewer_window, tmp_path):
+    folder = tmp_path / "archivio"
+    folder.mkdir()
+    inner = pymupdf.open()
+    inner.new_page().insert_text((72, 100), "Garanzia Omega Speedmaster")
+    path = _pdf(folder / "pratica.pdf", [["Pratica senza parola chiave"]])
+    doc = pymupdf.open(path)
+    doc.embfile_add("garanzia.pdf", inner.tobytes(), filename="garanzia.pdf")
+    doc.saveIncr()
+    doc.close()
+    ctl = _ctl(viewer_window)
+    ctl.open()
+    ctl.set_folder(str(folder))
+    assert ctl.search("Speedmaster", scope=advsearch.SCOPE_FOLDER, mode=eng.PHRASE, attachments=True) == 1
+    assert ctl.hits[0].attachment == "garanzia.pdf" and ctl.hits[0].file.endswith("pratica.pdf")
