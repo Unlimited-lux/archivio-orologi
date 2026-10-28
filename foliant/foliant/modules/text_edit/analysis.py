@@ -193,8 +193,62 @@ def extract_lines(page: pymupdf.Page) -> list[tuple[Line, bool]]:
     return _merge_segments(out)
 
 
+def _split_line(line: Line, index: int) -> tuple[Line, Line]:
+    """Divide una riga prima della parola `index` (i run seguono il testo delle parole)."""
+    def make(words):
+        runs: list[Run] = []
+        for k, w in enumerate(words):
+            if k:
+                runs.append(Run(" ", words[k - 1].style))
+            runs.append(Run(w.text, w.style))
+        x0 = words[0].x
+        x1 = words[-1].x1
+        bbox = pymupdf.Rect(x0, line.bbox.y0, x1, line.bbox.y1)
+        return Line(bbox=bbox, origin=pymupdf.Point(x0, line.origin.y), runs=merge_runs(runs), dir=line.dir,
+                    words=list(words))
+    return make(line.words[:index]), make(line.words[index:])
+
+
+def _split_columns(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
+    """Separa le celle di tabella che il motore ha messo nella stessa riga: una parola che inizia, dopo
+    uno spazio largo, nello stesso punto in cui iniziano segmenti su altre linee di base."""
+    starts: dict[int, set] = {}
+    for line, _inv in lines:
+        if _horizontal(line):
+            starts.setdefault(round(line.bbox.x0), set()).add(round(line.baseline, 1))
+    out: list[tuple[Line, bool]] = []
+    for line, inv in lines:
+        pending = [line]
+        result = []
+        while pending:
+            ln = pending.pop(0)
+            cut = None
+            if _horizontal(ln) and len(ln.words) > 1:
+                b = round(ln.baseline, 1)
+                for k in range(1, len(ln.words)):
+                    gap = ln.words[k].x - ln.words[k - 1].x1
+                    if gap < 0.6 * ln.size:
+                        continue
+                    x = round(ln.words[k].x)
+                    rows = set()
+                    for d in (-1, 0, 1):
+                        rows |= starts.get(x + d, set())
+                    if rows - {b}:
+                        cut = k
+                        break
+            if cut is None:
+                result.append(ln)
+            else:
+                a, rest = _split_line(ln, cut)
+                result.append(a)
+                pending.insert(0, rest)
+        out.extend((ln, inv) for ln in result)
+    return out
+
+
 def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
     """Riunisce i segmenti della stessa riga separati da spazi larghi (testo giustificato)."""
+    lines = _split_columns(lines)
     horiz = [x for x in lines if _horizontal(x[0])]
     others = [x for x in lines if not _horizontal(x[0])]
     horiz.sort(key=lambda x: (round(x[0].baseline, 1), x[0].bbox.x0))
@@ -274,8 +328,9 @@ def _compatible(prev: Line, line: Line, group: list[Line]) -> float | None:
     return gap
 
 
-def group_lines(lines: list[Line]) -> list[list[Line]]:
-    """Raggruppa righe orizzontali in paragrafi."""
+def group_lines(lines: list[Line], rules: list | None = None) -> list[list[Line]]:
+    """Raggruppa righe orizzontali in paragrafi. `rules`: filetti orizzontali (rettangoli sottili),
+    che separano sempre due righe."""
     ordered = sorted(lines, key=lambda ln: (round(ln.baseline, 1), ln.bbox.x0))
     # righe con altro testo vicino sulla stessa linea di base (celle di tabella): non si uniscono
     # a righe senza vicini (paragrafi)
@@ -284,7 +339,10 @@ def group_lines(lines: list[Line]) -> list[list[Line]]:
             if other is line or abs(other.baseline - line.baseline) > 0.5:
                 continue
             gap = max(other.bbox.x0 - line.bbox.x1, line.bbox.x0 - other.bbox.x1)
-            if 0 < gap < 6 * line.size:
+            if gap <= 0:
+                continue
+            # vicino: a breve distanza, oppure una cella corta (quantità, prezzo) a qualsiasi distanza
+            if gap < 6 * line.size or other.bbox.width < 6 * other.size or line.bbox.width < 6 * line.size:
                 return True
         return False
 
@@ -295,6 +353,8 @@ def group_lines(lines: list[Line]) -> list[list[Line]]:
         for g in groups:
             if neighbors[id(g[-1])] != neighbors[id(line)]:
                 continue
+            if rules and _rule_between(g[-1], line, rules):
+                continue
             d = _compatible(g[-1], line, g)
             if d is not None and (best_d is None or d < best_d):
                 # nessun'altra riga già assegnata deve trovarsi tra le due
@@ -304,6 +364,29 @@ def group_lines(lines: list[Line]) -> list[list[Line]]:
         else:
             groups.append([line])
     return groups
+
+
+def _rule_between(a: Line, b: Line, rules: list) -> bool:
+    top, bottom = a.baseline, b.bbox.y0 + 0.2 * b.size
+    for r in rules:
+        y = (r.y0 + r.y1) / 2
+        if top < y < bottom and min(a.bbox.x1, b.bbox.x1, r.x1) - max(a.bbox.x0, b.bbox.x0, r.x0) > 0:
+            return True
+    return False
+
+
+def page_rules(page: pymupdf.Page) -> list:
+    """Filetti orizzontali della pagina (riquadro di lavoro)."""
+    out = []
+    try:
+        frame = frame_matrix(page)
+        for d in page.get_drawings():
+            r = pymupdf.Rect(d.get("rect")) * frame
+            if r.height <= 2.0 and r.width >= 20:
+                out.append(r)
+    except Exception:
+        return []
+    return out
 
 
 def _spread(values: list[float]) -> float:
@@ -412,6 +495,7 @@ def build_block(page_index: int, index: int, lines: list[Line], invisible: bool)
 def analyze_page(page: pymupdf.Page, page_index: int = 0, granularity: str = "paragraph") -> list[TextBlock]:
     """Blocchi di testo modificabili della pagina, in ordine di lettura."""
     extracted = extract_lines(page)
+    rules = page_rules(page) if granularity != GRANULARITY_LINE else []
     horizontal = [(ln, inv) for ln, inv in extracted if _horizontal(ln)]
     others = [(ln, inv) for ln, inv in extracted if not _horizontal(ln)]
     groups: list[tuple[list[Line], bool]] = []
@@ -420,7 +504,7 @@ def analyze_page(page: pymupdf.Page, page_index: int = 0, granularity: str = "pa
         if granularity == GRANULARITY_LINE:
             groups.extend(([ln], inv) for ln in subset)
         else:
-            groups.extend((g, inv) for g in group_lines(subset))
+            groups.extend((g, inv) for g in group_lines(subset, rules))
     groups.extend(([ln], inv) for ln, inv in others)
     groups.sort(key=lambda g: (round(g[0][0].bbox.y0 / 4), g[0][0].bbox.x0))
     return [build_block(page_index, i, g, inv) for i, (g, inv) in enumerate(groups)]
