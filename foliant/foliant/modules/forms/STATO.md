@@ -48,3 +48,10 @@ Altre note: dopo la specifica v2 restano da allineare i testi che citano gli scr
  richieste al nucleo in `CORE_REQUESTS.md`; nessuna nuova dipendenza (`DEPS.txt`);
 traduzioni inglesi in `i18n_en.py` e nelle costanti `TRANSLATIONS` di pannelli, formule ed
 elaborazione multipla.
+
+Lingua e formati locali: `test_english.py` costruisce in italiano e in inglese l'avviso del
+modulo, le azioni, il menu contestuale, il pannello delle proprietà per ogni tipo di campo,
+l'elenco dei campi e i dialoghi, e segnala i testi inglesi uguali all'italiano o con parole
+italiane (NFR-25). I nuovi campi numero e data propongono i formati della lingua: 1.234,56 e
+gg/mm/aaaa in italiano, 1,234.56 e mm/dd/yyyy in inglese (NFR-26). I formati già presenti nel
+file restano quelli del file.

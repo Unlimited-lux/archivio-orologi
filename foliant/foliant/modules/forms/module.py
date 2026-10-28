@@ -22,7 +22,11 @@ if TYPE_CHECKING:
     from foliant.api import Context, DocumentView
 
 DATA_FILTER = "FDF (*.fdf);;XFDF (*.xfdf);;CSV (*.csv);;JSON (*.json);;XML (*.xml);;TXT (*.txt)"
-IMPORT_FILTER = _("Dati del modulo") + " (*.fdf *.xfdf *.csv *.json *.xml *.txt);;" + DATA_FILTER
+
+
+def import_filter() -> str:
+    """Filtro dei file di dati (tradotto quando serve, non all'importazione del modulo)."""
+    return _("Dati del modulo") + " (*.fdf *.xfdf *.csv *.json *.xml *.txt);;" + DATA_FILTER
 
 CREATE_KINDS = [E.TEXT, E.CHECKBOX, E.RADIO, E.COMBO, E.LIST, E.BUTTON, "image", "date", E.SIGNATURE]
 
@@ -879,7 +883,7 @@ class FormsModule(QObject):
         view = self.ctx.current_view()
         if view is None:
             return
-        paths = self.ctx.ask_open_paths(_("Importa dati del modulo"), IMPORT_FILTER, multiple=False)
+        paths = self.ctx.ask_open_paths(_("Importa dati del modulo"), import_filter(), multiple=False)
         if not paths:
             return
         try:
