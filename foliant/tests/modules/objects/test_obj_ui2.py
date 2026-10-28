@@ -479,10 +479,20 @@ def test_user_guides_snap_and_persist(ui, tmp_path):
     assert abs(objs(view)[0].rect.x0 - 100) < 0.01
     view.flush_rendering()
     assert not ui.window.grab().isNull()
-    # le guide si ritrovano riaprendo lo stesso file (preferenze locali, non nel PDF)
-    view._objects_guides = None
-    assert ui.c.guides(view)["x"] == [100.0]
+    assert ui.c.guides(view, 0)["x"] == [100.0]
     assert view.document.undo_label == "Sposta oggetti"   # aggiungere guide non crea passi nel PDF
     ui.c.clear_guides(view)
-    view._objects_guides = None
-    assert ui.c.guides(view)["x"] == []
+    assert ui.c.guides(view, 0)["x"] == []
+
+
+def test_old_guides_migrated_to_core(ui, tmp_path):
+    import hashlib
+    import json
+    import os
+    path = make_doc(tmp_path / "old.pdf", images=[])
+    key = "objects/guides/" + hashlib.sha1(os.path.abspath(path).encode()).hexdigest()
+    ui.ctx.settings().setValue(key, json.dumps({"x": [72.0], "y": [144.0]}))
+    view = ui.open(path)
+    lines = view.page_guide_lines(0)
+    assert 72.0 in [round(v, 3) for v in lines["x"]] and 144.0 in [round(v, 3) for v in lines["y"]]
+    assert not ui.ctx.settings().value(key, "")

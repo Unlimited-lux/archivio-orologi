@@ -468,6 +468,7 @@ def _install_drop(ctx: Context, c: ObjectsController, view) -> None:
     view.viewport().installEventFilter(f)
     view.toolChanged.connect(lambda _t: _sync_tool_buttons(ctx))
     view.overlays.append(c.paint_grid)
+    c.migrate_guides(view)
 
 
 

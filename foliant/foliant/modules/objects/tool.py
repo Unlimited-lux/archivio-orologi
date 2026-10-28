@@ -402,7 +402,7 @@ class ObjectTool(Tool):
                 if parsed is not None:
                     if "targets" not in d:
                         xs, ys = E.snap_targets(parsed, set(self.c.selection), page_rect, r)
-                        g = self.c.guides(view)
+                        g = self.c.guides(view, d["page"])
                         d["targets"] = (xs + list(g["x"]), ys + list(g["y"]))
                     xs, ys = d["targets"]
                     tol = 5.0 / view_scale(view, d["page"])
