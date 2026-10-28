@@ -65,7 +65,10 @@ class SignatureTool(Tool):
         with ENGINE_LOCK:
             if page >= view.document.pdf.page_count:
                 return None
-            s = g.find_signature(view.document.pdf, page, xref)
+            try:
+                s = g.find_signature(view.document.pdf, page, xref)
+            except Exception:
+                return None
         return s.rect if s else None
 
     def _hit(self, view, page: int, pt: pymupdf.Point):
@@ -221,7 +224,7 @@ class SignatureTool(Tool):
             center = hit[1]
         else:
             with ENGINE_LOCK:
-                crop = pymupdf.Rect(view.document.pdf[page].cropbox)   # coordinate non ruotate
+                crop = g.page_area(view.document.pdf[page])   # coordinate non ruotate
             center = pymupdf.Point((crop.x0 + crop.x1) / 2, (crop.y0 + crop.y1) / 2)
         item = self.pending
         rect = self.placement_rect(view, page, center)
@@ -245,6 +248,8 @@ class SignatureTool(Tool):
                 self.selected = None
             view.viewport().update()
             return True
+        if self.selected is not None and self.selected_rect(view) is None:
+            self.selected = None            # selezione non più valida (annulla, pagine eliminate…)
         if self.selected is None:
             return False
         if k in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -293,7 +298,7 @@ class SignatureTool(Tool):
             return
         ppp = _pixels_per_point(view, page)
         with ENGINE_LOCK:
-            crop = pymupdf.Rect(view.document.pdf[page].cropbox)
+            crop = g.page_area(view.document.pdf[page])
         painter.setPen(QPen(theme.color("secondary"), 1 / ppp, Qt.PenStyle.DashDotLine))
         for axis, v in self.active_guides:
             if axis == "x":

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pymupdf
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox
 
 from foliant.api import ENGINE_LOCK, SAVED, Document, DocumentError, _, atomic_write
@@ -35,6 +35,8 @@ class VerifyState:
     source: bytes | None = None     # byte verificati (file su disco se il documento non è modificato)
     base: bytes | None = None       # byte del file firmato su disco: base del salvataggio incrementale
     incremental: bool = False       # salvataggio incrementale installato sul documento
+    signed_hint: bool = False
+    warning_pending: bool = False       # il file contiene /ByteRange (firmato, anche se non ancora verificato)
 
 
 class _Bridge(QObject):
@@ -118,8 +120,9 @@ class SignController(QObject):
             return
         try:
             item = lib.load_item(entry_id)
-        except LibraryError as e:
-            self.ctx.error(_("Libreria firme"), str(e))
+        except Exception as e:
+            self.ctx.error(_("Libreria firme"), _("L'elemento della libreria non è utilizzabile: {e}").format(
+                e=str(e) or e.__class__.__name__))
             return
         self.start_placement(view, item)
 
@@ -159,6 +162,10 @@ class SignController(QObject):
                 return fn(pdf)
         except (g.GraphicSignatureError, DocumentError) as e:
             self.ctx.error(_("Firma"), str(e))
+            return None
+        except Exception as e:
+            self.tool_for(view).selected = None
+            self.ctx.error(_("Firma"), _("Operazione non riuscita: {e}").format(e=str(e) or e.__class__.__name__))
             return None
         finally:
             self._own_change = False
@@ -282,8 +289,27 @@ class SignController(QObject):
         return str(self.ctx.settings().value("sign/auto_verify", "true")).lower() != "false"
 
     def _on_opened(self, view) -> None:
+        self.detect_signed(view)
         if self.auto_verify():
             self.verify(view)
+
+    def detect_signed(self, view) -> None:
+        """Rilevamento sincrono ed economico delle firme: installa subito il
+        salvataggio incrementale, anche prima (o senza) la verifica completa."""
+        doc = view.document
+        st = self.state(doc)
+        if doc.path is None or doc.is_modified:
+            return
+        try:
+            data = Path(doc.path).read_bytes()
+        except OSError:
+            return
+        if b"/ByteRange" in data:
+            st.base = data
+            st.signed = True
+            st.signed_hint = True
+            if not st.incremental:
+                self._install_incremental_save(doc, st)
 
     def _on_closed(self, view) -> None:
         self._states.pop(id(view.document), None)
@@ -356,7 +382,7 @@ class SignController(QObject):
         st.statuses = result.get("statuses", [])
         st.fields = result.get("fields", [])
         st.certification = result.get("certification")
-        st.signed = bool(st.statuses)
+        st.signed = bool(st.statuses) or st.signed_hint
         if st.signed and st.base is not None and not st.incremental:
             self._install_incremental_save(doc, st)
         for view in self.ctx.views():
@@ -372,7 +398,7 @@ class SignController(QObject):
     def _install_incremental_save(self, doc: Document, st: VerifyState) -> None:
         """Per i documenti firmati «Salva» e «Salva una copia» accodano solo le
         modifiche al file firmato (vedi CORE_REQUESTS.md, richiesta 1)."""
-        from .incremental import IncrementalSaveError, incremental_update
+        from .incremental import incremental_update
         original_save, original_copy = doc.save, doc.save_copy
         controller = self
 
@@ -380,8 +406,9 @@ class SignController(QObject):
             try:
                 with doc.lock:
                     return incremental_update(st.base, doc.pdf, doc.password)
-            except IncrementalSaveError as e:
-                raise DocumentError(_("Salvataggio incrementale non riuscito: {e}").format(e=e)) from e
+            except Exception as e:  # mai un'eccezione non gestita verso la finestra
+                raise DocumentError(_("Salvataggio incrementale non riuscito: {e}").format(
+                    e=str(e) or e.__class__.__name__)) from e
 
         def save(path=None, **options):
             if doc.is_protected and doc.save_options != doc.original_protection:
@@ -461,7 +488,21 @@ class SignController(QObject):
         st = self._states.get(id(doc))
         if st is None or self._in_warning or self._own_change:
             return
-        if st.signed and not st.warned and doc.is_modified and self._content_changed(doc, st):
+        if st.signed and not st.warned and doc.is_modified and not st.warning_pending:
+            # rimandato: la change() di chi ha modificato deve terminare prima di un eventuale annulla
+            st.warning_pending = True
+            QTimer.singleShot(0, lambda v=view: self._deferred_warning(v))
+        self.stateChanged.emit(view)
+
+    def _deferred_warning(self, view) -> None:
+        doc = view.document
+        st = self._states.get(id(doc))
+        if st is None:
+            return
+        st.warning_pending = False
+        if doc.closed or self._in_warning or st.warned or not doc.is_modified:
+            return
+        if self._content_changed(doc, st):
             self._in_warning = True
             try:
                 label = doc.undo_label or _("Modifica")
@@ -474,7 +515,7 @@ class SignController(QObject):
                         self.open_unsigned_copy(view)
             finally:
                 self._in_warning = False
-        self.stateChanged.emit(view)
+            self.stateChanged.emit(view)
 
     def _content_changed(self, doc, st: VerifyState) -> bool:
         """Le modifiche consentite (annotazioni, moduli) non richiedono l'avviso
@@ -483,7 +524,7 @@ class SignController(QObject):
             return True
         from .incremental import changes_content
         with doc.lock:
-            return changes_content(st.base, doc.pdf)
+            return changes_content(st.base, doc.pdf, doc.password)
 
     def open_unsigned_copy(self, view):
         from . import digital
@@ -560,7 +601,13 @@ class SignController(QObject):
             if not self.ctx.confirm(_("Firma digitale"), _("Sovrascrivere il file originale con la versione "
                                                            "firmata?")):
                 return False
-        data = Path(doc.path).read_bytes()
+        try:
+            data = Path(doc.path).read_bytes()
+        except OSError as e:
+            self.ctx.error(_("Firma digitale"), _("Impossibile leggere «{p}»: {e}. Il file è stato spostato o "
+                                                  "eliminato? Salvalo di nuovo e riprova.").format(
+                p=doc.path, e=e.strerror or e))
+            return False
         signed = self._run_signing(data, digital_id, options)
         if signed is None:
             return False
@@ -658,6 +705,10 @@ class SignController(QObject):
         except digital.SignError as e:
             self.ctx.error(_("Campo firma"), str(e))
             return
+        except Exception as e:
+            self.ctx.error(_("Campo firma"), _("Impossibile aggiungere il campo firma: {e}").format(
+                e=str(e) or e.__class__.__name__))
+            return
         if name != (dlg.name.text().strip() or _("Firma")):
             self.ctx.info(_("Campo firma"), _("Esiste già un campo con quel nome: il nuovo campo si chiama «{n}».")
                           .format(n=name))
@@ -666,7 +717,11 @@ class SignController(QObject):
             target = self.ctx.ask_save_path(_("Salva il documento con il nuovo campo"), Path(doc.path).name)
             if not target:
                 return
-            atomic_write(target, new)
+            try:
+                atomic_write(target, new)
+            except DocumentError as e:
+                self.ctx.error(_("Campo firma"), str(e))
+                return
             self._reopen(view, target)
             return
         self._own_change = True
@@ -811,6 +866,11 @@ TRANSLATIONS_EN = {
     "{name} (versione firmata da {who}).pdf": "{name} (version signed by {who}).pdf",
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
+    "Operazione non riuscita: {e}": "Operation failed: {e}",
+    "L'elemento della libreria non è utilizzabile: {e}": "The library item cannot be used: {e}",
+    "Impossibile leggere «{p}»: {e}. Il file è stato spostato o eliminato? Salvalo di nuovo e riprova.":
+        "Cannot read “{p}”: {e}. Was the file moved or deleted? Save it again and retry.",
+    "Impossibile aggiungere il campo firma: {e}": "Cannot add the signature field: {e}",
     "Documento certificato": "Certified document",
     "Il documento è certificato con livello «nessuna modifica»: «{what}» non è consentito.\n\nVuoi lavorare "
     "su una copia senza firme?": "The document is certified with level “no changes”: “{what}” is not allowed.\n\n"

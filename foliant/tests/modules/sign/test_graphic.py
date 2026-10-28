@@ -364,3 +364,12 @@ def test_group_ids_and_ungroup():
     assert g.group_of(g.placed_signatures(pdf, 2)[0].nm) == nm0
     assert g.ungroup(pdf, nm0) == 3
     assert g.group_size(pdf, nm0) == 1
+
+
+def test_clamp_with_offset_cropbox():
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=600, height=800)
+    page.set_cropbox(pymupdf.Rect(100, 100, 500, 700))
+    assert g.clamp_rect(pdf[0], pymupdf.Rect(10, 10, 60, 40)) == pymupdf.Rect(10, 10, 60, 40)
+    r = g.clamp_rect(pdf[0], pymupdf.Rect(380, 10, 440, 40))
+    assert r.x1 <= 400.01

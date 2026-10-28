@@ -10,7 +10,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from foliant.api import PageEvent
 from foliant.modules.sign import digital, graphic as g, store
@@ -254,12 +254,14 @@ def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path,
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")
     with view.document.change("Ruota pagina") as pdf:
         pdf[0].set_rotation(90)
+    QApplication.processEvents()
     assert asked == ["Ruota pagina"]
     assert not view.document.is_modified
     # «Lavora su una copia senza firme»
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "copy")
     with view.document.change("Ruota pagina") as pdf:
         pdf[0].set_rotation(90)
+    QApplication.processEvents()
     copy_view = window.current_view()
     assert copy_view is not view and "senza firme" in copy_view.document.display_name
     assert not digital.has_signatures(copy_view.document.to_bytes())
@@ -268,6 +270,7 @@ def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path,
     window.tabs.setCurrentWidget(view)
     with view.document.change("Ruota pagina") as pdf:
         pdf[0].set_rotation(90)
+    QApplication.processEvents()
     with view.document.change("Ruota pagina") as pdf:
         pdf[0].set_rotation(180)
     assert view.document.is_modified and asked.count("Ruota pagina") == 2
@@ -502,6 +505,7 @@ def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sam
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "proceed")
     with view.document.change("Nota") as pdf:
         pdf[0].add_text_annot((300, 300), "Va bene")
+    QApplication.processEvents()
     assert asked == []                                   # modifica consentita: nessun avviso
     assert window.save_view(view)
     data = target.read_bytes()
@@ -512,6 +516,7 @@ def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sam
     # una seconda modifica, al contenuto, chiede conferma
     with view.document.change("Testo") as pdf:
         pdf[0].insert_text((100, 400), "AGGIUNTO")
+    QApplication.processEvents()
     assert asked == ["Testo"]
     assert window.save_view(view)
     assert target.read_bytes().startswith(data)
@@ -642,3 +647,35 @@ def test_robust_with_damaged_and_encrypted(window, monkeypatch, tmp_path, encryp
     st2 = _ctl(window).state(view2)
     assert st2.statuses and st2.statuses[0].status in ("non valida", "indeterminata") or st2.error
     _panel(window).refresh()
+
+
+def test_save_incremental_even_without_auto_verify(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """Rilevamento sincrono: con la verifica automatica disattivata il salvataggio resta incrementale."""
+    data = digital.sign_pdf(Path(sample_pdf).read_bytes(), id_a[2], digital.SignOptions())
+    p = tmp_path / "noauto.pdf"
+    p.write_bytes(data)
+    window.settings.setValue("sign/auto_verify", "false")
+    try:
+        view = window.open_path(str(p))
+        with view.document.change("Nota") as pdf:
+            pdf[0].add_text_annot((300, 300), "ok")
+        QApplication.processEvents()
+        assert window.save_view(view)
+        assert p.read_bytes().startswith(data)
+        st = digital.verify_pdf(p.read_bytes(), trusted=[id_a[1]])
+        assert st[0].status == "valida"
+    finally:
+        window.settings.setValue("sign/auto_verify", "true")
+
+
+def test_damaged_library_item_reports_error(window, monkeypatch, sample_pdf):
+    view = window.open_path(sample_pdf)
+    c = _ctl(window)
+    lib = c.library(interactive=False)
+    e = lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]]))), "Rotta")
+    (lib.root / e.file).write_text("non è svg")
+    errors = []
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(m))
+    c.use_library_item(e.id)
+    assert errors and "danneggiato" in errors[0]
+    assert c.tool_for(view).pending is None

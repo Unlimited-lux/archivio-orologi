@@ -334,6 +334,15 @@ class SignatureLibrary:
             raise LibraryError(_("Elemento non trovato nella libreria."))
         if not (self.root / e.file).exists():
             raise LibraryError(_("Il file dell'elemento «{name}» non è disponibile.").format(name=e.name))
+        try:
+            return self._load(e)
+        except (LibraryError, LibraryLocked):
+            raise
+        except Exception as ex:
+            raise LibraryError(_("L'elemento «{name}» è danneggiato e non può essere usato.").format(
+                name=e.name)) from ex
+
+    def _load(self, e: LibraryEntry) -> SignatureItem:
         raw = self._read_file(e)
         item = SignatureItem(kind=e.kind, origin=e.origin, name=e.name, color=e.color, id=e.id)
         if e.origin == "immagine":
@@ -474,4 +483,5 @@ TRANSLATIONS_EN = {
     "La libreria contiene già {n} elementi di questo tipo.": "The library already contains {n} items of this type.",
     "Il nome non può essere vuoto.": "The name cannot be empty.",
     "{name} (copia)": "{name} (copy)",
+    "L'elemento «{name}» è danneggiato e non può essere usato.": "The item “{name}” is damaged and cannot be used.",
 }

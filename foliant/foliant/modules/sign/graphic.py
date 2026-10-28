@@ -713,10 +713,17 @@ def unrotated_rect(page: pymupdf.Page, visual_rect: pymupdf.Rect) -> pymupdf.Rec
     return r
 
 
+def page_area(page: pymupdf.Page) -> pymupdf.Rect:
+    """Parte visibile della pagina (CropBox) nelle coordinate non ruotate usate da
+    eventi e annotazioni: l'origine è l'angolo del CropBox, non del MediaBox."""
+    r = pymupdf.Rect(page.rect) * page.derotation_matrix
+    r.normalize()
+    return r
+
+
 def clamp_rect(page: pymupdf.Page, rect: pymupdf.Rect) -> pymupdf.Rect:
     """Vincola il riquadro al CropBox (coordinate non ruotate), lato minimo 8 pt."""
-    crop = pymupdf.Rect(page.cropbox)
-    # cropbox è in coordinate non ruotate con origine in alto a sinistra della mediabox
+    crop = page_area(page)
     r = pymupdf.Rect(rect)
     w = max(MIN_SIDE, min(r.width, crop.width))
     h = max(MIN_SIDE, min(r.height, crop.height))
@@ -827,6 +834,8 @@ def set_signature_rect(pdf: pymupdf.Document, page_index: int, xref: int, rect) 
 
 
 def delete_signature(pdf: pymupdf.Document, page_index: int, xref: int) -> None:
+    if find_signature(pdf, page_index, xref) is None:
+        raise GraphicSignatureError(_("Firma non trovata."))
     page = pdf[page_index]
     for annot in page.annots():
         if annot.xref == xref:
@@ -972,7 +981,7 @@ def page_guides(page: pymupdf.Page) -> tuple[list[float], list[float], list[tupl
     x/y: bordi del CropBox a distanza SNAP_MARGIN; linee: tratti orizzontali
     lunghi almeno 40 pt (tipiche linee di firma), anche fatte di trattini «____».
     """
-    crop = pymupdf.Rect(page.cropbox)
+    crop = page_area(page)
     xs = [crop.x0 + SNAP_MARGIN, crop.x1 - SNAP_MARGIN]
     ys = [crop.y0 + SNAP_MARGIN, crop.y1 - SNAP_MARGIN]
     lines: list[tuple[float, float, float]] = []
@@ -1134,9 +1143,7 @@ def anchored_rect(src_page: pymupdf.Rect, src: pymupdf.Rect, dst_page: pymupdf.R
 
 
 def _visual_page_rect(page: pymupdf.Page) -> pymupdf.Rect:
-    crop = pymupdf.Rect(page.cropbox) * page.rotation_matrix
-    crop.normalize()
-    return crop
+    return pymupdf.Rect(page.rect)
 
 
 def repeat_signature(pdf: pymupdf.Document, page_index: int, xref: int, pages: list[int],
