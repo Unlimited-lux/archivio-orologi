@@ -19,6 +19,28 @@ foliant documento.pdf
 Opzioni: `--default-pdf` imposta Foliant come lettore PDF predefinito.
 Disinstallazione: `./packaging/uninstall.sh`.
 
+## Uso quotidiano
+
+La barra in alto contiene le modalità; ognuna mostra i propri strumenti nella barra sotto.
+Ogni modifica si annulla con Ctrl+Z e il file originale cambia solo quando salvi (Ctrl+S).
+Ctrl+? mostra tutte le scorciatoie, Ctrl+, apre le preferenze (tema, lingua, nome dell'autore).
+
+| Voglio… | Dove |
+|---|---|
+| Leggere, cercare (Ctrl+F), stampare (Ctrl+P) | **Leggi** |
+| Evidenziare, sottolineare, aggiungere note, timbri, forme | **Commenta** |
+| Correggere il testo o le immagini di un PDF | **Modifica** → «Modifica testo», «Oggetti», «Aggiungi immagine» |
+| Modificare un PDF **scannerizzato** | **OCR** → «Esegui OCR» in modalità modificabile, poi **Modifica** |
+| Unire, dividere, ruotare, riordinare, estrarre pagine | **Pagine** |
+| Compilare o creare moduli, esportare i dati | **Moduli** |
+| Trasformare in Word, Excel, PowerPoint, immagini; comprimere | **Converti** |
+| Password, permessi, redazione di dati riservati | **Proteggi** |
+| Firma grafica o digitale, verifica delle firme | **Firma** |
+| Confrontare due PDF; filigrane, numerazione e altre operazioni su molti file | **Strumenti** |
+| Riassumere, tradurre, chiedere al documento (facoltativo) | **Assistente IA** (si configura il fornitore nelle sue impostazioni) |
+
+I problemi noti e lo stato delle funzioni sono in `docs/avanzamento.md`.
+
 ## Sviluppo
 
 ```bash
