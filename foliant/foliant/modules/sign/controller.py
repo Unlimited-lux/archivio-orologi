@@ -11,7 +11,7 @@ import pymupdf
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QMessageBox
 
-from foliant.api import ENGINE_LOCK, SAVED, Document, DocumentError, _, atomic_write
+from foliant.api import ENGINE_LOCK, SAVED, Document, DocumentError, OperationCancelled, _, atomic_write
 
 from . import graphic as g
 from .library import LibraryError, LibraryLocked, SignatureLibrary
@@ -34,7 +34,7 @@ class VerifyState:
     warned: bool = False
     source: bytes | None = None     # byte verificati (file su disco se il documento non è modificato)
     signed_hint: bool = False
-    warning_pending: bool = False       # il file contiene /ByteRange (firmato, anche se non ancora verificato)
+       # il file contiene /ByteRange (firmato, anche se non ancora verificato)
 
 
 class _Bridge(QObject):
@@ -53,11 +53,10 @@ class SignController(QObject):
         self._states: dict[int, VerifyState] = {}
         self._bridge = _Bridge()
         self._bridge.verified.connect(self._on_verified)
-        self._in_warning = False
-        self._own_change = False
         ctx.documentOpened.connect(self._on_opened)
         ctx.documentClosed.connect(self._on_closed)
         ctx.documentChanged.connect(self._on_changed)
+        ctx.add_change_guard(self._change_guard)
 
     # ================================================================ libreria
     def library(self, interactive: bool = True) -> SignatureLibrary | None:
@@ -151,13 +150,15 @@ class SignController(QObject):
         return True
 
     def _change(self, view, label: str, fn, kind: str = "annotation"):
-        """Esegue `fn(pdf)` come passo annullabile, con l'avviso SIG-21 se il documento è firmato."""
-        if not self.confirm_invalidating(view, label, kind):
-            return None
-        self._own_change = True
+        """Esegue `fn(pdf)` come passo annullabile; l'avviso SIG-21 per i documenti firmati
+        lo dà la guardia sulle modifiche (`_change_guard`), prima di modificare."""
         try:
-            with view.document.change(label) as pdf:
+            with view.document.change(label, kind=kind) as pdf:
                 return fn(pdf)
+        except OperationCancelled as e:
+            if str(e) and view.document.locked:
+                self.ctx.status(str(e), 6000)
+            return None
         except (g.GraphicSignatureError, DocumentError) as e:
             self.ctx.error(_("Firma"), str(e))
             return None
@@ -165,8 +166,6 @@ class SignController(QObject):
             self.tool_for(view).selected = None
             self.ctx.error(_("Firma"), _("Operazione non riuscita: {e}").format(e=str(e) or e.__class__.__name__))
             return None
-        finally:
-            self._own_change = False
 
     def place(self, view, page: int, rect: pymupdf.Rect, item: g.SignatureItem) -> int | None:
         author = self.default_name()
@@ -456,23 +455,31 @@ class SignController(QObject):
             return incremental and st.certification in (None, 2, 3)
         return False
 
-    def confirm_invalidating(self, view, what: str, kind: str = "content") -> bool:
-        """Prima di una modifica a un documento firmato: Annulla / Copia senza firme / Procedi."""
-        st = self.state(view)
+    def _view_of(self, document):
+        return next((v for v in self.ctx.views() if v.document is document), None)
+
+    def _change_guard(self, document, label: str, kind: str) -> bool:
+        """SIG-21, prima di ogni modifica (di qualsiasi modulo): le modifiche consentite
+        dalle firme presenti passano; per quelle invalidanti si chiede conferma con le
+        scelte Annulla / Lavora su una copia senza firme / Procedi comunque."""
+        st = self._states.get(id(document))
+        view = self._view_of(document)
+        if st is None or view is None or not st.signed:
+            return True
         if st.certification == 1:
             if self.ctx.confirm(_("Documento certificato"), _(
                     "Il documento è certificato con livello «nessuna modifica»: «{what}» non è consentito.\n\n"
-                    "Vuoi lavorare su una copia senza firme?").format(what=what)):
-                self.open_unsigned_copy(view)
+                    "Vuoi lavorare su una copia senza firme?").format(what=label)):
+                QTimer.singleShot(0, lambda v=view: self.open_unsigned_copy(v))
             return False
-        if not st.signed or st.warned or self.allowed_change(view, kind):
+        if st.warned or self.allowed_change(view, kind):
             return True
-        choice = self._ask_invalidation(view, what)
+        choice = self._ask_invalidation(view, label)
         if choice == "proceed":
             st.warned = True
             return True
         if choice == "copy":
-            self.open_unsigned_copy(view)
+            QTimer.singleShot(0, lambda v=view: self.open_unsigned_copy(v))
         return False
 
     def _ask_invalidation(self, view, what: str) -> str:
@@ -493,48 +500,8 @@ class SignController(QObject):
         return "proceed" if clicked is proceed else "copy" if clicked is copy else "cancel"
 
     def _on_changed(self, view) -> None:
-        doc = view.document
-        st = self._states.get(id(doc))
-        if st is None or self._in_warning or self._own_change:
-            return
-        if st.signed and not st.warned and doc.is_modified and not st.warning_pending:
-            # rimandato: la change() di chi ha modificato deve terminare prima di un eventuale annulla
-            st.warning_pending = True
-            QTimer.singleShot(0, lambda v=view: self._deferred_warning(v))
-        self.stateChanged.emit(view)
-
-    def _deferred_warning(self, view) -> None:
-        doc = view.document
-        st = self._states.get(id(doc))
-        if st is None:
-            return
-        st.warning_pending = False
-        if doc.closed or self._in_warning or st.warned or not doc.is_modified:
-            return
-        if self._content_changed(doc, st):
-            self._in_warning = True
-            try:
-                label = doc.undo_label or _("Modifica")
-                choice = self._ask_invalidation(view, label)
-                if choice == "proceed":
-                    st.warned = True
-                else:
-                    doc.undo()
-                    if choice == "copy":
-                        self.open_unsigned_copy(view)
-            finally:
-                self._in_warning = False
+        if id(view.document) in self._states:
             self.stateChanged.emit(view)
-
-    def _content_changed(self, doc, st: VerifyState) -> bool:
-        """Le modifiche consentite (annotazioni, moduli) non richiedono l'avviso
-        se il salvataggio è incrementale e la certificazione le ammette."""
-        base = getattr(doc, "original_bytes", None)
-        if not getattr(doc, "has_signatures", False) or base is None or st.certification not in (None, 3):
-            return True
-        from .incremental import changes_content
-        with doc.lock:
-            return changes_content(base, doc.pdf, doc.password)
 
     def open_unsigned_copy(self, view):
         from . import digital
@@ -801,11 +768,10 @@ class SignController(QObject):
                 return
             self._reopen(view, target)
             return
-        self._own_change = True
         try:
-            doc.replace_with(new, _("Aggiungi campo firma"))
-        finally:
-            self._own_change = False
+            doc.replace_with(new, _("Aggiungi campo firma"), kind="form")
+        except OperationCancelled:
+            return
         self.verify(view, force=True)
 
     # ======================================================= ID e certificati

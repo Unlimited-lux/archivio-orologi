@@ -247,20 +247,28 @@ def test_expired_certificate_blocked_in_dialog(window, qtbot, sample_pdf, expire
 
 
 def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path, id_a):
-    """SIG-21: una modifica a un documento firmato chiede conferma; «Annulla» la ritira."""
+    """SIG-21: la conferma arriva PRIMA della modifica invalidante; «Annulla» non modifica nulla."""
+    from foliant.api import OperationCancelled
     view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "w.pdf", id_a)
     c = _ctl(window)
     asked = []
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")
-    with view.document.change("Ruota pagina") as pdf:
-        pdf[0].set_rotation(90)
-    QApplication.processEvents()
+    before = view.document.version
+    with pytest.raises(OperationCancelled):
+        with view.document.change("Ruota pagina", kind="pages") as pdf:
+            pdf[0].set_rotation(90)
     assert asked == ["Ruota pagina"]
-    assert not view.document.is_modified
+    assert not view.document.is_modified and view.document.version == before
+    # le modifiche consentite (annotazioni) passano senza domande
+    with view.document.change("Nota", kind="annotation") as pdf:
+        pdf[0].add_text_annot((300, 300), "ok")
+    assert asked == ["Ruota pagina"] and view.document.is_modified
+    view.document.undo()
     # «Lavora su una copia senza firme»
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "copy")
-    with view.document.change("Ruota pagina") as pdf:
-        pdf[0].set_rotation(90)
+    with pytest.raises(OperationCancelled):
+        with view.document.change("Ruota pagina", kind="pages") as pdf:
+            pdf[0].set_rotation(90)
     QApplication.processEvents()
     copy_view = window.current_view()
     assert copy_view is not view and "senza firme" in copy_view.document.display_name
@@ -268,10 +276,9 @@ def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path,
     # «Procedi comunque»: l'avviso non si ripete
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "proceed")
     window.tabs.setCurrentWidget(view)
-    with view.document.change("Ruota pagina") as pdf:
+    with view.document.change("Ruota pagina", kind="pages") as pdf:
         pdf[0].set_rotation(90)
-    QApplication.processEvents()
-    with view.document.change("Ruota pagina") as pdf:
+    with view.document.change("Ruota pagina", kind="pages") as pdf:
         pdf[0].set_rotation(180)
     assert view.document.is_modified and asked.count("Ruota pagina") == 2
 
@@ -508,7 +515,7 @@ def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sam
     c = _ctl(window)
     asked = []
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "proceed")
-    with view.document.change("Nota") as pdf:
+    with view.document.change("Nota", kind="annotation") as pdf:
         pdf[0].add_text_annot((300, 300), "Va bene")
     QApplication.processEvents()
     assert asked == []                                   # modifica consentita: nessun avviso
@@ -519,7 +526,7 @@ def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sam
     assert st.statuses[0].status == "valida"
     assert "consentite" in st.statuses[0].modifications
     # una seconda modifica, al contenuto, chiede conferma
-    with view.document.change("Testo") as pdf:
+    with view.document.change("Testo", kind="content") as pdf:
         pdf[0].insert_text((100, 400), "AGGIUNTO")
     QApplication.processEvents()
     assert asked == ["Testo"]
@@ -662,7 +669,7 @@ def test_save_incremental_even_without_auto_verify(window, monkeypatch, sample_p
     window.settings.setValue("sign/auto_verify", "false")
     try:
         view = window.open_path(str(p))
-        with view.document.change("Nota") as pdf:
+        with view.document.change("Nota", kind="annotation") as pdf:
             pdf[0].add_text_annot((300, 300), "ok")
         QApplication.processEvents()
         assert window.save_view(view)
@@ -696,7 +703,7 @@ def test_undo_redo_after_incremental_save(window, monkeypatch, sample_pdf, tmp_p
     c = _ctl(window)
     monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "proceed")
     doc = view.document
-    with doc.change("Nota") as pdf:
+    with doc.change("Nota", kind="annotation") as pdf:
         pdf[0].add_text_annot((300, 300), "Prima nota")
     QApplication.processEvents()
     assert window.save_view(view)
