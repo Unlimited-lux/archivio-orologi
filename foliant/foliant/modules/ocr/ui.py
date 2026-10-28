@@ -12,8 +12,8 @@ import pymupdf
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
+    QPushButton, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from foliant.api import (
@@ -338,15 +338,18 @@ class ReviewPanel(QWidget):
         row.addWidget(self.edit, 1)
         row.addWidget(self.btn_fix)
         lay.addLayout(row)
-        row2 = QHBoxLayout()
+        # su due righe: nel pannello laterale stretto tre pulsanti affiancati si troncavano
+        row2 = QGridLayout()
         self.btn_ok = QPushButton(_("Accetta"), self)
         self.btn_ok.setToolTip(_("La parola è corretta (Ctrl+Invio)"))
         self.btn_all = QPushButton(_("Accetta tutte uguali"), self)
-        self.btn_all.setToolTip(_("Ctrl+Maiusc+Invio"))
+        self.btn_all.setToolTip(_("Accetta tutte le parole uguali a questa (Ctrl+Maiusc+Invio)"))
         self.btn_dict = QPushButton(_("Aggiungi al dizionario"), self)
-        self.btn_dict.setToolTip(_("Ctrl+D"))
-        for b in (self.btn_ok, self.btn_all, self.btn_dict):
-            row2.addWidget(b)
+        self.btn_dict.setToolTip(_("Aggiungi la parola al dizionario utente: non sarà più segnalata (Ctrl+D)"))
+        row2.addWidget(self.btn_ok, 0, 0)
+        row2.addWidget(self.btn_all, 0, 1)
+        row2.addWidget(self.btn_dict, 1, 0, 1, 2)
+        row2.setColumnStretch(1, 1)
         lay.addLayout(row2)
         self.table.currentCellChanged.connect(lambda r, *_a: self._select(r))
         self.btn_fix.clicked.connect(self._fix)

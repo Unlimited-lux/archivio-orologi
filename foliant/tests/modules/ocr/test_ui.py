@@ -1077,3 +1077,29 @@ def test_due_finestre_chiusa_la_seconda_la_prima_funziona(window, qtbot, scan_tw
     first.review_panel.set_view(view)
     first.review_panel.refresh()
     first.actions["review"].setChecked(False)
+
+
+@pytest.mark.parametrize("lang", ["it", "en"])
+def test_pannello_parole_incerte_pulsanti_non_tagliati(window, qtbot, scan_two, lang):
+    from PySide6.QtWidgets import QPushButton
+
+    from foliant import i18n
+    old = i18n.language()
+    i18n.set_language(lang)
+    try:
+        panel = ui.ReviewPanel(window.ctx.ocr)
+        qtbot.addWidget(panel)
+        panel.setFixedWidth(260)           # larghezza minima del pannello delle proprietà
+        view = window.open_path(scan_two)
+        window.ctx.ocr.actions["review"].setChecked(True)
+        panel.set_view(view)
+        panel.show()
+        qtbot.waitUntil(panel.isVisible, timeout=2000)
+        buttons = [b for b in panel.findChildren(QPushButton) if b.isVisible()]
+        assert len(buttons) >= 4
+        for b in buttons:
+            assert b.sizeHint().width() - b.width() <= 3, (b.text(), b.sizeHint().width(), b.width())
+    finally:
+        window.ctx.ocr.actions["review"].setChecked(False)
+        if old is not None:
+            i18n.set_language(old)
