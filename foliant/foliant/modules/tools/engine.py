@@ -469,6 +469,8 @@ def action_available(action_id: str) -> tuple[bool, str]:
 class Step:
     action: str
     params: dict = field(default_factory=dict)
+    ask: list = field(default_factory=list)     # parametri «chiedi all'avvio»
+    enabled: bool = True
 
     def merged_params(self) -> dict:
         spec = ACTIONS.get(self.action)
@@ -483,11 +485,27 @@ class Step:
             for k in spec.secret_keys():
                 if k in params:
                     params[k] = ""
-        return {"action": self.action, "params": params}
+        out = {"action": self.action, "params": params}
+        if self.ask:
+            out["ask"] = list(self.ask)
+        if not self.enabled:
+            out["enabled"] = False
+        return out
+
+    def ask_keys(self) -> list[str]:
+        """Parametri da chiedere all'avvio: quelli marcati e le password vuote."""
+        spec = ACTIONS.get(self.action)
+        keys = list(self.ask)
+        if spec:
+            for p in spec.params:
+                if p.secret and p.type == "password" and not (self.params or {}).get(p.key) and p.key not in keys:
+                    keys.append(p.key)
+        return keys
 
     @classmethod
     def from_dict(cls, data: dict) -> "Step":
-        return cls(str(data.get("action", "")), dict(data.get("params") or {}))
+        return cls(str(data.get("action", "")), dict(data.get("params") or {}), list(data.get("ask") or []),
+                   bool(data.get("enabled", True)))
 
 
 # =============================================================================
@@ -1617,7 +1635,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
     items = list(items)   # coda congelata
     report = JobReport([FileResult(it.path) for it in items], list(settings.steps), started,
                        settings=settings.to_dict())
-    steps = list(settings.steps)
+    steps = [s for s in settings.steps if s.enabled]
     merge_index = next((i for i, s in enumerate(steps) if ACTIONS.get(s.action, None) and
                         ACTIONS[s.action].kind == "merge"), None)
     pre_steps = steps if merge_index is None else steps[:merge_index]
@@ -1741,6 +1759,9 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                 res.message = "; ".join(ctx.notes + ctx.warnings)
             elif ctx.notes and res.status == "ok":
                 res.message = "; ".join(ctx.notes)
+            elif res.status == "ok" and len(pre_steps) > 1 and not res.message:
+                res.message = _("passi completati: {p}").format(p=", ".join(action_label(s.action)
+                                                                              for s in pre_steps))
         except SkipFile:
             res.status, res.code = "cancelled", "USR-02"
             res.message = _("File annullato dall'utente.")
@@ -2429,12 +2450,52 @@ def _sequence_filename(name: str) -> str:
     return (_sanitize(name) or "sequenza") + ".json"
 
 
-def save_sequence(directory: str, name: str, steps: list[Step]) -> str:
+SEQUENCE_VERSION = 1
+
+
+def sequence_data(name: str, steps: list[Step], description: str = "") -> dict:
+    return {"format": "foliant-sequence", "version": SEQUENCE_VERSION, "name": name, "description": description,
+            "created": datetime.now().isoformat(timespec="seconds"), "steps": [s.to_dict() for s in steps]}
+
+
+def save_sequence(directory: str, name: str, steps: list[Step], description: str = "") -> str:
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, _sequence_filename(name))
-    data = {"format": "foliant-sequence", "version": 1, "name": name, "steps": [s.to_dict() for s in steps]}
-    atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+    atomic_write(path, json.dumps(sequence_data(name, steps, description), ensure_ascii=False,
+                                  indent=2).encode("utf-8"))
     return path
+
+
+def export_sequence(path: str, name: str, steps: list[Step], description: str = "") -> None:
+    atomic_write(path, json.dumps(sequence_data(name, steps, description), ensure_ascii=False,
+                                  indent=2).encode("utf-8"))
+
+
+def import_sequence(path: str, directory: str) -> tuple[str, list[str]]:
+    """Importa una sequenza da file: (percorso salvato, avvisi). Rifiuta schemi più
+    recenti e operazioni sconosciute; ignora eventuali password presenti."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise DocumentError(_("Sequenza non leggibile: {f}").format(f=os.path.basename(path))) from e
+    if not isinstance(data, dict) or data.get("format", "foliant-sequence") != "foliant-sequence":
+        raise DocumentError(_("Il file non contiene una sequenza di Foliant."))
+    if int(data.get("version", 1) or 1) > SEQUENCE_VERSION:
+        raise DocumentError(_("La sequenza usa uno schema più recente ({v}): aggiorna Foliant.").format(
+            v=data.get("version")))
+    name, steps = load_sequence(path)
+    unknown = sorted({s.action for s in steps if s.action not in ACTIONS})
+    if unknown:
+        raise DocumentError(_("Operazioni sconosciute: {o}").format(o=", ".join(unknown)))
+    warnings = []
+    for s in steps:
+        for k in ACTIONS[s.action].secret_keys():
+            if s.params.get(k):
+                s.params[k] = ""
+                if _("Le password contenute nel file sono state ignorate.") not in warnings:
+                    warnings.append(_("Le password contenute nel file sono state ignorate."))
+    return save_sequence(directory, name, steps, str(data.get("description", ""))), warnings
 
 
 def load_sequence(path: str) -> tuple[str, list[Step]]:

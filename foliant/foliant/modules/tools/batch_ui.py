@@ -64,13 +64,31 @@ class ParamForm(QWidget):
             warn.setWordWrap(True)
             warn.setStyleSheet(f"color: {theme.hex_color('danger')}")
             self.form.addRow(warn)
+        self.ask_buttons: dict[str, QToolButton] = {}
         for p in spec.params:
             w = self._widget(p, values.get(p.key, p.default))
             self.widgets[p.key] = w
             if p.type == "bool":
                 self.form.addRow(w)
+                continue
+            holder = QWidget()
+            row = QHBoxLayout(holder)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(w, 1)
+            ask = QToolButton()
+            ask.setCheckable(True)
+            bind_icon(ask, "message-circle-question")
+            ask.setToolTip(_("Chiedi all'avvio"))
+            if p.secret and p.type == "password":
+                ask.setChecked(True)
+                ask.setEnabled(False)
+                ask.setToolTip(_("Le password vuote sono sempre chieste all'avvio"))
             else:
-                self.form.addRow(_(p.label), w)
+                ask.setChecked(p.key in step.ask)
+            ask.toggled.connect(lambda on, k=p.key: self._toggle_ask(k, on))
+            self.ask_buttons[p.key] = ask
+            row.addWidget(ask)
+            self.form.addRow(_(p.label), holder)
 
     def _widget(self, p: be.Param, value):
         if p.type == "bool":
@@ -124,6 +142,15 @@ class ParamForm(QWidget):
                 w.setEchoMode(QLineEdit.EchoMode.Password)
             w.textChanged.connect(self._store)
         return w
+
+    def _toggle_ask(self, key: str, on: bool) -> None:
+        if self.step is None:
+            return
+        if on and key not in self.step.ask:
+            self.step.ask.append(key)
+        elif not on and key in self.step.ask:
+            self.step.ask.remove(key)
+        self.changed.emit()
 
     def values(self) -> dict:
         out = {}
@@ -255,6 +282,7 @@ class BatchWidget(QWidget):
         self.steps_list = QListWidget()
         self.steps_list.setMaximumHeight(130)
         self.steps_list.currentRowChanged.connect(self._step_selected)
+        self.steps_list.itemChanged.connect(self._step_toggled)
         srow = QHBoxLayout()
         srow.addWidget(self.action_combo, 1)
         srow.addWidget(add_step)
@@ -270,16 +298,20 @@ class BatchWidget(QWidget):
         sbtn.addStretch(1)
         self.sequence_combo = QComboBox()
         self.sequence_combo.setMinimumWidth(120)
-        sbtn.addWidget(QLabel(_("Sequenze")))
-        sbtn.addWidget(self.sequence_combo)
+        seqrow = QHBoxLayout()
+        seqrow.addWidget(QLabel(_("Sequenze")))
+        seqrow.addWidget(self.sequence_combo, 1)
         for tip, name, slot in ((_("Carica sequenza"), "folder-open", self.load_selected_sequence),
                                 (_("Salva sequenza"), "save", self.save_sequence_dialog),
+                                (_("Duplica sequenza"), "copy", self.duplicate_selected_sequence),
+                                (_("Importa sequenza…"), "folder-input", self.import_sequence_dialog),
+                                (_("Esporta sequenza…"), "folder-output", self.export_sequence_dialog),
                                 (_("Elimina sequenza"), "trash-2", self.delete_selected_sequence)):
             b = QToolButton()
             b.setToolTip(tip)
             bind_icon(b, name)
             b.clicked.connect(lambda _c=False, s=slot: s())
-            sbtn.addWidget(b)
+            seqrow.addWidget(b)
         self.params = ParamForm()
         self.params.changed.connect(self._params_changed)
         pscroll = QScrollArea()
@@ -290,6 +322,7 @@ class BatchWidget(QWidget):
         sl.addLayout(srow)
         sl.addWidget(self.steps_list)
         sl.addLayout(sbtn)
+        sl.addLayout(seqrow)
         sl.addWidget(pscroll, 1)
 
         # ------------------------------------------------ destinazione e nomi (BAT-02, BAT-03)
@@ -664,6 +697,9 @@ class BatchWidget(QWidget):
         for i, s in enumerate(self.steps, 1):
             ok, msg = be.action_available(s.action)
             item = QListWidgetItem(f"{i}. {be.action_label(s.action)}")
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if s.enabled else Qt.CheckState.Unchecked)
+            item.setToolTip(_("Deseleziona per disattivare il passo senza rimuoverlo"))
             if not ok:
                 item.setForeground(theme.color("danger"))
                 item.setToolTip(msg)
@@ -676,6 +712,11 @@ class BatchWidget(QWidget):
             self.params.set_step(None)
         self._suggest_pattern()
         self._update_preview()
+
+    def _step_toggled(self, item) -> None:
+        row = self.steps_list.row(item)
+        if 0 <= row < len(self.steps):
+            self.steps[row].enabled = item.checkState() == Qt.CheckState.Checked
 
     def _step_selected(self, row: int) -> None:
         self.params.set_step(self.steps[row] if 0 <= row < len(self.steps) else None)
@@ -723,6 +764,54 @@ class BatchWidget(QWidget):
         path = self.sequence_combo.currentData()
         if path:
             self.load_sequence(path)
+
+    def duplicate_selected_sequence(self) -> str | None:
+        path = self.sequence_combo.currentData()
+        if not path:
+            return None
+        name, steps = be.load_sequence(path)
+        copy_name = _("{n} (copia)").format(n=name)
+        new = be.save_sequence(self.sequences_dir(), copy_name, steps)
+        self.refresh_sequences()
+        self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(new)))
+        return new
+
+    def import_sequence(self, path: str) -> str | None:
+        try:
+            saved, warnings = be.import_sequence(path, self.sequences_dir())
+        except Exception as e:
+            self.ctx.error(_("Sequenza non importata"), str(e))
+            return None
+        self.refresh_sequences()
+        self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(saved)))
+        self.load_sequence(saved)
+        if warnings:
+            self.ctx.info(_("Sequenza importata"), "\n".join(warnings))
+        return saved
+
+    def import_sequence_dialog(self) -> None:
+        paths = self.ctx.ask_open_paths(_("Importa sequenza"), _("Sequenza di Foliant (*.json *.foliantseq)"),
+                                        multiple=False)
+        if paths:
+            self.import_sequence(paths[0])
+
+    def export_sequence(self, path: str) -> bool:
+        if not self.steps:
+            return False
+        name = self.sequence_combo.currentText() or os.path.splitext(os.path.basename(path))[0]
+        try:
+            be.export_sequence(path, name, self.steps)
+        except Exception as e:
+            self.ctx.error(_("Sequenza non esportata"), str(e))
+            return False
+        return True
+
+    def export_sequence_dialog(self) -> None:
+        name = (self.sequence_combo.currentText() or "sequenza") + ".foliantseq"
+        path = self.ctx.ask_save_path(_("Esporta sequenza"), name, _("Sequenza di Foliant (*.foliantseq)"),
+                                      ".foliantseq")
+        if path:
+            self.export_sequence(path)
 
     def delete_selected_sequence(self) -> None:
         path = self.sequence_combo.currentData()
@@ -785,8 +874,29 @@ class BatchWidget(QWidget):
             self.preview.setItem(r, 1, QTableWidgetItem(dst))
 
     # ================================================================ esecuzione
+    def launch_requests(self) -> list[tuple[int, be.Param, object]]:
+        out = []
+        for i, step in enumerate(self.steps):
+            spec = be.ACTIONS.get(step.action)
+            if not step.enabled or spec is None:
+                continue
+            for key in step.ask_keys():
+                p = next((x for x in spec.params if x.key == key), None)
+                if p is not None:
+                    out.append((i, p, step.merged_params().get(key)))
+        return out
+
     def run(self, confirm: bool = True) -> be.JobReport | None:
         settings = self.settings()
+        requests = self.launch_requests()
+        if requests:
+            values = ask_launch_parameters(self, requests)
+            if values is None:
+                return None
+            steps = [be.Step(s.action, dict(s.params), list(s.ask), s.enabled) for s in settings.steps]
+            for (i, key), value in values.items():
+                steps[i].params[key] = value
+            settings.steps = steps
         errors, warnings = be.validate_settings(self.items, settings)
         if errors:
             self.ctx.error(_("Impossibile avviare"), "\n".join(errors))
@@ -936,6 +1046,42 @@ class BatchWidget(QWidget):
             target = os.path.dirname(outputs[0]) if outputs else ""
         if target and os.path.isdir(target):
             QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+
+
+def ask_launch_parameters(parent, requests: list[tuple[int, be.Param, object]]) -> dict | None:
+    """Chiede una sola volta, per l'intero lavoro, i parametri «chiedi all'avvio»
+    (sostituibile nei test). Restituisce {(indice passo, chiave): valore} o None."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(_("Parametri del lavoro"))
+    form = QFormLayout(dlg)
+    helper = ParamForm()
+    fields = []
+    for i, p, value in requests:
+        w = helper._widget(p, "" if p.secret else value)
+        form.addRow(f"{i + 1}. {_(p.label)}", w)
+        fields.append((i, p, w))
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    form.addRow(buttons)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    out = {}
+    for i, p, w in fields:
+        if isinstance(w, QCheckBox):
+            out[(i, p.key)] = w.isChecked()
+        elif isinstance(w, (QSpinBox, QDoubleSpinBox)):
+            out[(i, p.key)] = w.value()
+        elif isinstance(w, QComboBox):
+            out[(i, p.key)] = w.currentData()
+        elif isinstance(w, QPlainTextEdit):
+            out[(i, p.key)] = w.toPlainText()
+        elif isinstance(w, QLineEdit):
+            out[(i, p.key)] = w.text()
+        elif hasattr(w, "edit"):
+            out[(i, p.key)] = w.edit.text()
+    return out
 
 
 class WatchDialog(QWidget):

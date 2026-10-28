@@ -236,3 +236,81 @@ def test_bates_series_and_index_from_ui(batch, folder, tmp_path):
     batch.run(confirm=False)
     doc = pymupdf.open(str(tmp_path / "o2" / "alfa.pdf"))
     assert "VND-00005" in doc[0].get_text()
+
+
+# ----------------------------------------------------------------- BAT-20 completo
+def test_ask_at_launch_once_for_all_files(batch, folder, tmp_path, monkeypatch):
+    calls = []
+
+    def fake(parent, requests):
+        calls.append([(i, p.key) for i, p, _v in requests])
+        return {(i, p.key): ("URGENTE" if p.key == "text" else "apri") for i, p, _v in requests}
+    monkeypatch.setattr(bu, "ask_launch_parameters", fake)
+    batch.add_paths([str(folder / n) for n in ("alfa.pdf", "doc2.pdf", "doc10.pdf")])
+    wm = batch.add_step("watermark")
+    batch.params.ask_buttons["text"].setChecked(True)
+    assert wm.ask == ["text"]
+    batch.add_step("protect", {"owner_password": "capo"})
+    batch.dest_path.setText(str(tmp_path / "out"))
+    report = batch.run(confirm=False)
+    assert len(calls) == 1 and (0, "text") in calls[0] and (1, "user_password") in calls[0]
+    assert report.counts()["ok"] == 3
+    for name in os.listdir(tmp_path / "out"):
+        doc = pymupdf.open(str(tmp_path / "out" / name))
+        assert doc.needs_pass and doc.authenticate("apri")
+        assert "URGENTE" in doc[0].get_text()
+    assert all("passi completati" in r.message for r in report.results)
+    assert not batch.steps[1].params.get("user_password")   # le password non restano nella sequenza
+
+
+def test_disabled_step_is_skipped(batch, folder, tmp_path):
+    batch.add_paths([str(folder / "alfa.pdf")])
+    batch.add_step("watermark", {"text": "NON DEVE COMPARIRE"})
+    batch.add_step("page_numbers")
+    batch.steps_list.item(0).setCheckState(bu.Qt.CheckState.Unchecked)
+    assert not batch.steps[0].enabled
+    batch.dest_path.setText(str(tmp_path / "out"))
+    batch.run(confirm=False)
+    text = pymupdf.open(str(tmp_path / "out" / "alfa.pdf"))[0].get_text()
+    assert "NON DEVE COMPARIRE" not in text and "Pagina 1 di 2" in text
+
+
+def test_export_import_duplicate_sequence(batch, tmp_path, monkeypatch):
+    import json
+    batch.add_step("ocr")
+    batch.add_step("compress")
+    batch.add_step("protect", {"user_password": "segreta", "owner_password": "capo"})
+    batch.save_sequence("Scansioni")
+    exported = tmp_path / "scansioni.foliantseq"
+    assert batch.export_sequence(str(exported))
+    text = exported.read_text(encoding="utf-8")
+    assert "segreta" not in text and "capo" not in text
+    data = json.loads(text)
+    data["steps"][2]["params"]["user_password"] = "trapelata"
+    tampered = tmp_path / "manomessa.foliantseq"
+    tampered.write_text(json.dumps(data), encoding="utf-8")
+    infos = []
+    monkeypatch.setattr(batch.ctx, "info", lambda t, m: infos.append(m))
+    batch.steps = []
+    assert batch.import_sequence(str(tampered))
+    assert [s.action for s in batch.steps] == ["ocr", "compress", "protect"]
+    assert not batch.steps[2].params.get("user_password") and infos
+    data["steps"].append({"action": "teletrasporto", "params": {}})
+    bad = tmp_path / "ignota.foliantseq"
+    bad.write_text(json.dumps(data), encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(batch.ctx, "error", lambda t, m: errors.append(m))
+    assert batch.import_sequence(str(bad)) is None and "teletrasporto" in errors[0]
+    batch.sequence_combo.setCurrentIndex(batch.sequence_combo.findText("Scansioni"))
+    dup = batch.duplicate_selected_sequence()
+    assert dup and batch.sequence_combo.findText("Scansioni (copia)") >= 0
+
+
+def test_convert_then_watermark_blocked(batch, folder, tmp_path, monkeypatch):
+    errors = []
+    monkeypatch.setattr(batch.ctx, "error", lambda t, m: errors.append(m))
+    batch.add_paths([str(folder / "alfa.pdf")])
+    batch.add_step("convert")
+    batch.add_step("watermark")
+    batch.dest_path.setText(str(tmp_path / "out"))
+    assert batch.run(confirm=False) is None and errors
