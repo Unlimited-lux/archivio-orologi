@@ -1,0 +1,1 @@
+# Nessuna nuova dipendenza pip: numpy e Pillow sono già in requirements.txt.
