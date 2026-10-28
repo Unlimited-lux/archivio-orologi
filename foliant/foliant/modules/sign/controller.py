@@ -843,11 +843,7 @@ class SignController(QObject):
                                                   "eliminato? Salvalo di nuovo e riprova.").format(
                 p=doc.path, e=e.strerror or e))
             return False
-        try:
-            signed = self._run_signing(data, digital_id, options)
-        finally:
-            if hasattr(digital_id, "close"):      # SIG-23: chiude la sessione del dispositivo
-                digital_id.close()
+        signed = self._run_signing(data, digital_id, options)
         if signed is None:
             return False
         try:

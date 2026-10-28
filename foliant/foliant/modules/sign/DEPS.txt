@@ -1,10 +1,4 @@
-# pyHanko, pyhanko-certvalidator, cryptography, Pillow e numpy sono già in requirements.txt.
+# Nessuna nuova dipendenza da installare: pyHanko, pyhanko-certvalidator, cryptography, Pillow e numpy
+# sono già in requirements.txt.
 # Usata direttamente ma già presente come dipendenza di pdf2docx (requirements.txt):
 fonttools>=4.40   # sottoinsieme del font incorporato nell'aspetto delle firme digitali (fonts.py)
-
-# Nuova (SIG-23, firma con smart card e token PKCS#11). Facoltativa: senza, la scheda «Dispositivi» spiega
-# che manca e il resto del modulo funziona.
-python-pkcs11>=0.7
-
-# Solo per i test di SIG-23 (pacchetto di sistema, non Python): softhsm2 (es. `apt install softhsm2`).
-# Senza, i test in tests/modules/sign/test_devices.py vengono saltati.
