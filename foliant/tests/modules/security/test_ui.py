@@ -741,3 +741,29 @@ def test_protect_warns_on_signatures(window, sec, sample_pdf, monkeypatch):
     monkeypatch.setattr(C, "confirm", lambda parent, title, text, action: asked.append(text) or False)
     assert not sec.protect()
     assert "firme digitali" in asked[0]
+
+
+def test_area_tool_resize_corner(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(100, 300, 200, 400), R.MarkStyle())
+    tool = sec.area_tool()
+    view.set_tool(tool)
+    tool.press(view, _ev(0, 200, 400))           # angolo in basso a destra
+    tool._end = pymupdf.Point(250, 450)
+    tool.release(view, _ev(0, 250, 450))
+    with view.document.lock:
+        r = R.marks(view.document.pdf)[0].rect
+    assert abs(r.x0 - 100) < 0.5 and abs(r.x1 - 250) < 0.5 and abs(r.y1 - 450) < 0.5
+
+
+def test_export_import_marks(window, sec, sample_pdf, tmp_path):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    out = tmp_path / "segni.xfdf"
+    assert sec.export_marks(str(out))
+    with view.document.change("Pulisci") as pdf:
+        R.clear_marks(pdf)
+    assert sec.import_marks(str(out)) == 1
+    assert sec.panel.count.text() == "1"

@@ -206,6 +206,9 @@ def apply(pdf: pymupdf.Document, options: ApplyOptions | None = None, pages: Ite
         graphics = (pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED if whole
                     else _GRAPHICS.get(options.graphics, pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED))
         page.apply_redactions(images=images, graphics=graphics, text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        # la miniatura incorporata mostrerebbe ancora il contenuto rimosso
+        if pdf.xref_get_key(page.xref, "Thumb")[0] != "null":
+            pdf.xref_set_key(page.xref, "Thumb", "null")
     return report
 
 
@@ -250,3 +253,70 @@ def words_under_marks(pdf: pymupdf.Document, page_index: int) -> list[pymupdf.Re
         if any(r.intersects(x) for x in rects):
             out.append(r)
     return out
+
+
+# ------------------------------------------------------------------ XFDF
+
+
+def export_xfdf(pdf: pymupdf.Document, filename: str = "") -> str:
+    """Segni di redazione in XFDF (ISO 19444-1) per la revisione da parte di altri."""
+    from xml.sax.saxutils import quoteattr
+
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve">', "<annots>"]
+    for m in marks(pdf):
+        page = pdf[m.page]
+        h = page.cropbox.height
+        # XFDF usa coordinate PDF (origine in basso a sinistra)
+        rect = f"{m.rect.x0:.2f},{h - m.rect.y1:.2f},{m.rect.x1:.2f},{h - m.rect.y0:.2f}"
+        annot = page.load_annot(m.xref)
+        fill = (annot.colors or {}).get("fill") or (0, 0, 0)
+        color = "#%02X%02X%02X" % tuple(int(round(c * 255)) for c in fill[:3])
+        overlay = ""
+        kind, val = pdf.xref_get_key(m.xref, "OverlayText")
+        if kind == "string":
+            overlay = val
+        attrs = (f"page={quoteattr(str(m.page))} rect={quoteattr(rect)} interior-color={quoteattr(color)} "
+                 f"title={quoteattr(MARK_TITLE)} subject={quoteattr(m.source)} "
+                 f"overlay-text={quoteattr(overlay)}")
+        lines.append(f"<redact {attrs}><contents>{_esc(m.text)}</contents></redact>")
+    lines += ["</annots>", f'<f href={quoteattr(filename)}/>' if filename else "", "</xfdf>"]
+    return "\n".join(line for line in lines if line)
+
+
+def _esc(text: str) -> str:
+    from xml.sax.saxutils import escape
+    return escape(text or "")
+
+
+def import_xfdf(pdf: pymupdf.Document, data: str, style: MarkStyle | None = None) -> int:
+    """Ricrea i segni di redazione da un file XFDF. Solleva ValueError se non valido."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        raise ValueError(_("Il file XFDF non è valido: {e}").format(e=e)) from e
+    n = 0
+    for el in root.iter():
+        if not el.tag.endswith("redact"):
+            continue
+        try:
+            page_index = int(el.get("page", "0"))
+            x0, y0, x1, y1 = (float(v) for v in el.get("rect", "").split(","))
+        except ValueError:
+            continue
+        if not 0 <= page_index < pdf.page_count:
+            continue
+        h = pdf[page_index].cropbox.height
+        rect = pymupdf.Rect(x0, h - y1, x1, h - y0)
+        st = MarkStyle(**{**(style or MarkStyle()).__dict__})
+        color = el.get("interior-color", "")
+        if len(color) == 7 and color.startswith("#"):
+            st.fill = tuple(int(color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+            st.text_color = contrast_color(st.fill)
+        st.overlay_text = el.get("overlay-text", st.overlay_text)
+        contents = "".join(c.text or "" for c in el if c.tag.endswith("contents"))
+        if add_mark(pdf, page_index, rect, st, el.get("subject", "area") or "area", contents) is not None:
+            n += 1
+    return n

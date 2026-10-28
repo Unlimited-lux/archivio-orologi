@@ -351,3 +351,42 @@ def test_invisible_ocr_text_found_and_removed(tmp_path):
         R.apply(pdf)
     assert "12345678" not in doc.page_text(0)
     doc.close()
+
+
+def test_xfdf_roundtrip(sample_pdf):
+    src = Document.open(sample_pdf)
+    with src.change("Segna") as pdf:
+        R.add_mark(pdf, 1, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle(fill=(0.2, 0.4, 0.6), overlay_text="OMISSIS"))
+        data = R.export_xfdf(pdf, "esempio.pdf")
+    assert "<redact" in data and 'overlay-text="OMISSIS"' in data
+    dst = Document.open(sample_pdf)
+    with dst.change("Importa") as pdf:
+        assert R.import_xfdf(pdf, data) == 1
+        m = R.marks(pdf)[0]
+    assert m.page == 1 and abs(m.rect.x0 - 60) < 0.01 and abs(m.rect.y1 - 110) < 0.01
+    with pytest.raises(ValueError):
+        with dst.change("x") as pdf:
+            R.import_xfdf(pdf, "<xfdf")
+    src.close()
+    dst.close()
+
+
+def test_thumbnail_removed_on_apply(sample_pdf):
+    doc = Document.open(sample_pdf)
+    with doc.change("Segna") as pdf:
+        x = pdf.get_new_xref()
+        pdf.update_object(x, "<< /Width 1 /Height 1 >>")
+        pdf.xref_set_key(pdf[0].xref, "Thumb", f"{x} 0 R")
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+        R.apply(pdf)
+        assert pdf.xref_get_key(pdf[0].xref, "Thumb")[0] == "null"
+    doc.close()
+
+
+def test_include_invalid_check_digit(tmp_path):
+    from foliant.modules.security import patterns as P2
+    from dataclasses import replace
+    pdf = _text_pdf(tmp_path, ["RSSMRA85T10A562X"])
+    p = P2.pattern_by_id("cf")
+    assert P2.find(pdf, [p]) == []
+    assert len(P2.find(pdf, [replace(p, check=None)])) == 1

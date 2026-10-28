@@ -1,0 +1,1 @@
+# Nessuna dipendenza aggiuntiva: il modulo usa solo PySide6 e PyMuPDF (già in requirements.txt).

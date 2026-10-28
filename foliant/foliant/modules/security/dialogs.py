@@ -357,6 +357,8 @@ class FindDialog(QDialog):
                 self.pattern_boxes[pid] = cb
                 grid.addWidget(cb, n // 2, n % 2)
             lay.addLayout(grid)
+            self.invalid = QCheckBox(_("Includi valori con cifra di controllo non valida"))
+            lay.addWidget(self.invalid)
             row = QHBoxLayout()
             row.addWidget(QLabel(_("Schema personalizzato:")))
             self.custom = QLineEdit()
@@ -417,7 +419,7 @@ class FindDialog(QDialog):
                      ignore_accents=self.accents.isChecked(), outside=self.outside.isChecked())
         else:
             o.update(patterns=[k for k, cb in self.pattern_boxes.items() if cb.isChecked()],
-                     custom=self.custom.text().strip())
+                     custom=self.custom.text().strip(), include_invalid=self.invalid.isChecked())
         return o
 
     def run_search(self) -> None:

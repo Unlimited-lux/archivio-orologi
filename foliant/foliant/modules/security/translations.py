@@ -2,4 +2,478 @@
 
 EN: dict[str, str] = {
     "Proteggi": "Protect",
+    "Revoca documenti attendibili": "Revoke trusted documents",
+    "Password e permessi": "Password and permissions",
+    "Rimuovi protezione": "Remove protection",
+    "Proprietà di sicurezza": "Security properties",
+    "Segna area": "Mark area",
+    "Segna testo": "Mark text",
+    "Trova e segna": "Find and mark",
+    "Trova dati personali": "Find personal data",
+    "Segna pagine": "Mark pages",
+    "Impostazioni di redazione": "Redaction settings",
+    "Elenco redazioni": "Redaction list",
+    "Applica redazioni": "Apply redactions",
+    "Esamina documento": "Inspect document",
+    "Sanifica": "Sanitize",
+    "Metadati": "Metadata",
+    "Appiattisci": "Flatten",
+    "Nessuna area contrassegnata per la redazione": "No areas marked for redaction",
+    "Contrassegna per redazione": "Mark for redaction",
+    "Segna pagina per redazione": "Mark page for redaction",
+    "Accesso completo": "Full access",
+    "Accesso limitato": "Restricted access",
+    "Rimuovi segno di redazione": "Remove redaction mark",
+    "Applica questo segno": "Apply this mark",
+    "Oscura questa pagina": "Redact this page",
+    "Ripeti su più pagine…": "Repeat on multiple pages…",
+    "Annulla": "Cancel",
+    "Il file salvato sarà leggibile da chiunque, senza password né restrizioni.": (
+        "The saved file will be readable by anyone, with no password or restrictions."
+    ),
+    "Protezione con password": "Password protection",
+    "Modifica": "Editing",
+    "Copia": "Copying",
+    "Commenti": "Comments",
+    "Compilazione": "Form filling",
+    "Accessibilità": "Accessibility",
+    "Assemblaggio": "Assembly",
+    "Script": "Scripts",
+    "Avvio di programmi o file": "Launching programs or files",
+    "Altri file": "Other files",
+    "Invio di moduli": "Form submission",
+    "Collegamenti esterni": "External links",
+    "Importa codici": "Import codes",
+    "Esporta codici": "Export codes",
+    "Sblocca": "Unlock",
+    "Il documento ha permessi limitati. Inserisci la password dei permessi:": (
+        "The document has restricted permissions. Enter the permissions password:"
+    ),
+    "Protezione impostata: verrà applicata al salvataggio.": "Protection set: it will be applied when you save.",
+    "Protezione rimossa: salva il documento per renderla effettiva.": (
+        "Protection removed: save the document for it to take effect."
+    ),
+    "Aggiorna ad AES-256": "Upgrade to AES-256",
+    "La protezione sarà salvata con AES a 256 bit.": "The protection will be saved with 256-bit AES.",
+    "Area segnata: verrà oscurata quando applichi le redazioni.": (
+        "Area marked: it will be blacked out when you apply redactions."
+    ),
+    "Ricerca in corso…": "Searching…",
+    "Segna pagine per redazione": "Mark pages for redaction",
+    "Ripeti su più pagine": "Repeat on multiple pages",
+    "Salva documento redatto": "Save redacted document",
+    "Esame del documento…": "Inspecting document…",
+    "Nessuna informazione nascosta rilevata.": "No hidden information found.",
+    "Il documento contiene queste informazioni nascoste o contenuti attivi:": (
+        "The document contains this hidden information or active content:"
+    ),
+    "Metadati aggiornati": "Metadata updated",
+    "Documento appiattito": "Document flattened",
+    "Contenuti attivi": "Active content",
+    "Foliant non esegue script né avvia programmi indicati dai documenti; i collegamenti esterni chiedono sempre conferma.": (
+        "Foliant does not run scripts or launch programs specified by documents; external links always ask "
+        "for confirmation."
+    ),
+    "Documento considerato attendibile": "Document trusted",
+    "Segnalibro": "Bookmark",
+    "AES 256 bit": "AES 256-bit",
+    "AES 128 bit": "AES 128-bit",
+    "RC4 128 bit": "RC4 128-bit",
+    "Stampa: non consentita": "Printing: not allowed",
+    "consentita": "allowed",
+    "non consentita": "not allowed",
+    "Permessi": "Permissions",
+    "Password non corretta": "Incorrect password",
+    "La password dei permessi non è corretta.": "The permissions password is incorrect.",
+    "Il documento contiene firme digitali: la cifratura riscrive il file e le firme risulteranno non valide.": (
+        "The document contains digital signatures: encryption rewrites the file and the signatures will "
+        "become invalid."
+    ),
+    "Il documento dichiara la conformità PDF/A o PDF/X: la cifratura la fa decadere e la dichiarazione verrà rimossa.": (
+        "The document declares PDF/A or PDF/X conformance: encryption voids it and the declaration will be "
+        "removed."
+    ),
+    "Il documento non è protetto.": "The document is not protected.",
+    "Il documento contiene firme digitali: dopo il salvataggio risulteranno non valide.": (
+        "The document contains digital signatures: they will become invalid after saving."
+    ),
+    "Rimuovere la protezione?": "Remove protection?",
+    "Modifica protezione…": "Change protection…",
+    "Proteggi…": "Protect…",
+    "Sposta segno di redazione": "Move redaction mark",
+    "Seleziona prima il testo da oscurare.": "First select the text to redact.",
+    "Segna testo per redazione": "Mark text for redaction",
+    "Segna per redazione": "Mark for redaction",
+    "Ripeti segno su più pagine": "Repeat mark on multiple pages",
+    "Rimuovi segni di redazione": "Remove redaction marks",
+    "Applicare {n} redazioni?": "Apply {n} redactions?",
+    "Il contenuto sotto {n} aree su {p} pagine verrà rimosso definitivamente (testo, immagini, grafica, commenti e campi). Puoi annullare fino al salvataggio; dopo non sarà più recuperabile.": (
+        "Content under {n} areas on {p} pages will be permanently removed (text, images, graphics, "
+        "comments and fields). You can undo until you save; after that it cannot be recovered."
+    ),
+    "Le firme digitali del documento risulteranno non valide.": (
+        "The document's digital signatures will become invalid."
+    ),
+    "Applica": "Apply",
+    "Salvare il documento redatto?": "Save the redacted document?",
+    "Analisi del documento": "Document analysis",
+    "(presenti)": "(present)",
+    "Applicazione di origine": "Creator application",
+    "Produttore PDF": "PDF producer",
+    "Creato il": "Created",
+    "Modificato il": "Modified",
+    "Versione": "Version",
+    "Pagine": "Pages",
+    "Modifica metadati": "Edit metadata",
+    "Appiattire commenti e moduli?": "Flatten comments and forms?",
+    "Commenti e campi compilati diventeranno parte fissa delle pagine e non saranno più modificabili. Le annotazioni nascoste vengono eliminate.": (
+        "Comments and filled-in fields will become a fixed part of the pages and can no longer be edited. "
+        "Hidden annotations are deleted."
+    ),
+    "Considera attendibile": "Trust",
+    "Salva prima il documento.": "Save the document first.",
+    "Allegato": "Attachment",
+    "Nessuna protezione": "No protection",
+    "Accesso: completo": "Access: full",
+    "Accesso: limitato": "Access: restricted",
+    "Stampa: bassa risoluzione": "Printing: low resolution",
+    "Stampa: consentita": "Printing: allowed",
+    "Il file non contiene un insieme di codici valido.": "The file does not contain a valid set of codes.",
+    "Importazione non riuscita": "Import failed",
+    "Proteggere comunque il documento?": "Protect the document anyway?",
+    "Continua": "Continue",
+    "Protezione non applicata": "Protection not applied",
+    "Rimuovi dichiarazione PDF/A": "Remove PDF/A declaration",
+    "Protezione debole": "Weak protection",
+    "Segna area per redazione": "Mark area for redaction",
+    "Scrivi la parola o la frase da cercare.": "Type the word or phrase to search for.",
+    "Scegli almeno uno schema.": "Choose at least one pattern.",
+    "{n} segni di redazione aggiunti": "{n} redaction marks added",
+    "Oscurare tutte le pagine?": "Redact all pages?",
+    "Segna tutte": "Mark all",
+    "Redazione non applicata": "Redaction not applied",
+    "Redazioni applicate: {n} aree su {p} pagine": "Redactions applied: {n} areas on {p} pages",
+    "Salvataggio non riuscito": "Save failed",
+    "Rimuovi…": "Remove…",
+    "Sanifica documento": "Sanitize document",
+    "Sanificazione non riuscita": "Sanitization failed",
+    "Documento sanificato: {d}": "Document sanitized: {d}",
+    "Questo documento contiene {what}.": "This document contains {what}.",
+    "Gli script sono disattivati.": "Scripts are disabled.",
+    "Metadati ({k})": "Metadata ({k})",
+    "Tutti i permessi sono consentiti.": "All permissions are allowed.",
+    "Metadati non cifrati": "Metadata not encrypted",
+    "Al salvataggio: {d}": "On save: {d}",
+    "File incorporati": "Embedded files",
+    "Il file contiene versioni precedenti (aggiornamenti incrementali) che possono conservare contenuti cancellati. Un salvataggio completo le elimina.": (
+        "The file contains earlier versions (incremental updates) that may retain deleted content. A full "
+        "save removes them."
+    ),
+    "Esportazione non riuscita": "Export failed",
+    "{n} pagine senza testo (scansioni): esegui l'OCR per includerle.": (
+        "{n} pages without text (scans): run OCR to include them."
+    ),
+    "Verranno cancellate anche {n} occorrenze fuori dalle pagine (metadati, segnalibri, commenti, campi, allegati).": (
+        "{n} occurrences outside the pages will also be deleted (metadata, bookmarks, comments, fields, "
+        "attachments)."
+    ),
+    "Salva ora una copia con nome «{n}_redatto.pdf»: l'originale resta intatto.": (
+        "Now save a copy as “{n}_redatto.pdf”: the original stays untouched."
+    ),
+    "nulla da rimuovere": "nothing to remove",
+    "Documento con restrizioni: alcune operazioni non sono consentite.": (
+        "Restricted document: some operations are not allowed."
+    ),
+    "Commento a pagina {n}": "Comment on page {n}",
+    "Campo «{f}»": "Field “{f}”",
+    "All'apertura: {d}": "On open: {d}",
+    "Password di apertura: {s}": "Open password: {s}",
+    "L'algoritmo RC4 o AES-256 revisione 5 non è più considerato sicuro: aggiorna ad AES-256.": (
+        "The RC4 or AES-256 revision 5 algorithm is no longer considered secure: upgrade to AES-256."
+    ),
+    "Livelli nascosti: {n}": "Hidden layers: {n}",
+    "Commenti: {n}": "Comments: {n}",
+    "Campi modulo: {n}": "Form fields: {n}",
+    "Testo nascosto: {n} frammenti": "Hidden text: {n} fragments",
+    "Livello OCR: {n} pagine": "OCR layer: {n} pages",
+    "Annotazioni nascoste: {n}": "Hidden annotations: {n}",
+    "Miniature incorporate: {n}": "Embedded thumbnails: {n}",
+    "Segnalibri: {n}": "Bookmarks: {n}",
+    "Revisioni precedenti nel file: {n}": "Earlier revisions in the file: {n}",
+    "Firme digitali: {n}": "Digital signatures: {n}",
+    "Hai scelto tutte le {n} pagine: dopo l'applicazione non resterà alcun contenuto.": (
+        "You selected all {n} pages: after applying, no content will remain."
+    ),
+    "Si è verificato un errore: nessuna modifica è stata fatta.\n\n{e}": (
+        "An error occurred: no changes were made.\n\n{e}"
+    ),
+    "Nessuna modifica è stata fatta.\n\n{e}": "No changes were made.\n\n{e}",
+    "Il file salvato contiene {n} segni di redazione non applicati: il contenuto sotto i segni non è stato rimosso.": (
+        "The saved file contains {n} unapplied redaction marks: the content under the marks has not been "
+        "removed."
+    ),
+    "Applica ora": "Apply now",
+    "script ({n})": "scripts ({n})",
+    "avvio di programmi ({n})": "program launching ({n})",
+    "invio di moduli ({n})": "form submission ({n})",
+    "collegamenti esterni ({n})": "external links ({n})",
+    "collegamenti ad altri file ({n})": "links to other files ({n})",
+    "file incorporati ({n})": "embedded files ({n})",
+    "Dettagli": "Details",
+    "Il documento contiene {n} segni di redazione non applicati.": (
+        "The document contains {n} unapplied redaction marks."
+    ),
+    "Rivedi": "Review",
+    "Fuori dalle pagine": "Outside the pages",
+    "Versione {v}, revisione {r}": "Version {v}, revision {r}",
+    "sì": "yes",
+    "no": "no",
+    "Sblocca…": "Unlock…",
+    "Mostra/nascondi": "Show/hide",
+    "Proteggi con password": "Protect with password",
+    "Apertura": "Opening",
+    "Richiedi una password per aprire il documento": "Require a password to open the document",
+    "Lascia vuoto per mantenere quella attuale": "Leave blank to keep the current one",
+    "Password:": "Password:",
+    "Conferma:": "Confirm:",
+    "Limita stampa e modifica": "Restrict printing and editing",
+    "Password dei permessi:": "Permissions password:",
+    "Preimpostazioni:": "Presets:",
+    "Stampa:": "Printing:",
+    "Cifratura": "Encryption",
+    "Livello di cifratura:": "Encryption level:",
+    "Imposta una password di apertura oppure limita almeno un permesso.": (
+        "Set an open password or restrict at least one permission."
+    ),
+    "tutte (oppure es. 1-3, 5)": "all (or e.g. 1-3, 5)",
+    "Cerca": "Search",
+    "Segna selezionati": "Mark selected",
+    "Importa elenco": "Import list",
+    "Testo (*.txt);;Tutti i file (*)": "Text (*.txt);;All files (*)",
+    "Scegli colore": "Choose color",
+    "Aspetto del riquadro": "Box appearance",
+    "Riempimento:": "Fill:",
+    "nessuno (es. OMISSIS)": "none (e.g. OMISSIS)",
+    "Testo sovrapposto:": "Overlay text:",
+    "Colore del testo:": "Text color:",
+    "Automatica": "Automatic",
+    "Dimensione:": "Size:",
+    "Ripeti il testo per riempire l'area": "Repeat the text to fill the area",
+    "Applicazione": "Application",
+    "Cancella solo i pixel coperti": "Erase only the covered pixels",
+    "Elimina le immagini toccate": "Delete images that are touched",
+    "Immagini:": "Images:",
+    "Elimina la grafica coperta": "Delete covered graphics",
+    "Elimina la grafica che tocca l'area": "Delete graphics touching the area",
+    "Grafica:": "Graphics:",
+    "Azzera i valori": "Clear the values",
+    "Rimuovi i campi": "Remove the fields",
+    "Metadati del documento": "Document metadata",
+    "Chiudi": "Close",
+    "Una password dimenticata non è recuperabile. La protezione vale dal prossimo salvataggio; il documento aperto resta modificabile.": (
+        "A forgotten password cannot be recovered. Protection takes effect from the next save; the open "
+        "document remains editable."
+    ),
+    "Scrivi la password di apertura.": "Enter the open password.",
+    "Le password non coincidono": "Passwords do not match",
+    "Per limitare i permessi serve una password dei permessi.": (
+        "Restricting permissions requires a permissions password."
+    ),
+    "Le password dei permessi non coincidono": "Permissions passwords do not match",
+    "Con AES a 256 bit l'estrazione per l'accessibilità è sempre consentita (PDF 2.0).": (
+        "With 256-bit AES, extraction for accessibility is always allowed (PDF 2.0)."
+    ),
+    "È consentita anche la creazione di campi modulo.": "Creating form fields is also allowed.",
+    "Senza password di apertura i permessi sono rispettati dai lettori conformi ma il contenuto resta leggibile.": (
+        "Without an open password, permissions are honored by compliant readers but the content remains "
+        "readable."
+    ),
+    "Algoritmo debole: usalo solo se il destinatario ha un lettore molto datato.": (
+        "Weak algorithm: use it only if the recipient has a very old reader."
+    ),
+    "Password debole": "Weak password",
+    "La password scelta è debole e facile da indovinare. Usarla comunque?": (
+        "The chosen password is weak and easy to guess. Use it anyway?"
+    ),
+    "Importa elenco…": "Import list…",
+    "Maiuscole/minuscole": "Match case",
+    "Parola intera": "Whole word",
+    "Ignora accenti": "Ignore accents",
+    "Cerca anche in metadati, segnalibri, commenti, campi e allegati": (
+        "Also search metadata, bookmarks, comments, fields and attachments"
+    ),
+    "espressione regolare, es. SN-\\d{6}": "regular expression, e.g. SN-\\d{6}",
+    "Pagine:": "Pages:",
+    "Occorrenza": "Occurrence",
+    "Pagina": "Page",
+    "Contesto": "Context",
+    "Nessuna occorrenza trovata": "No occurrences found",
+    "Intervallo:": "Range:",
+    "Pagine pari": "Even pages",
+    "Pagine dispari": "Odd pages",
+    "facoltativo, es. Pagina omessa": "optional, e.g. Page omitted",
+    "Con il riempimento bianco l'omissione non sarà evidente a chi legge.": (
+        "With a white fill, the omission will not be noticeable to readers."
+    ),
+    "Il colore del testo coincide con il riempimento: il testo non si vedrà.": (
+        "The text color matches the fill: the text will not be visible."
+    ),
+    "Rimuove le informazioni nascoste e i contenuti attivi scelti senza cambiare l'aspetto delle pagine.": (
+        "Removes the selected hidden information and active content without changing how the pages look."
+    ),
+    "Moduli:": "Forms:",
+    "Personalizzati": "Custom",
+    "AES a 128 bit è deprecato in PDF 2.0: preferisci AES a 256 bit.": (
+        "128-bit AES is deprecated in PDF 2.0: prefer 256-bit AES."
+    ),
+    "Parole o frasi da oscurare (una per riga):": "Words or phrases to redact (one per line):",
+    "Schemi da cercare:": "Patterns to search for:",
+    "Schema personalizzato:": "Custom pattern:",
+    "es. 2, 4-7": "e.g. 2, 4-7",
+    "Nessuna pagina scelta.": "No pages selected.",
+    "Importa codici…": "Import codes…",
+    "Esporta codici…": "Export codes…",
+    "Il documento non consente modifiche: i campi sono in sola lettura.": (
+        "The document does not allow changes: the fields are read-only."
+    ),
+    "{n} occorrenze trovate": "{n} occurrences found",
+    "Pagina corrente ({n})": "Current page ({n})",
+    "Tutte le pagine ({n})": "All pages ({n})",
+    "Le pagine vanno da 1 a {n}.": "Pages range from 1 to {n}.",
+    "Impossibile leggere il file: {e}": "Unable to read the file: {e}",
+    "Intervallo non valido: «{p}»": "Invalid range: “{p}”",
+    "Il documento vuole aprire questo indirizzo:": "The document wants to open this address:",
+    "«Sì a tutti» apre e non chiede più per questo dominio.": "“Yes to All” opens it and stops asking for this domain.",
+    "Collegamento esterno": "External link",
+    "Apri altro file": "Open other file",
+    "Il collegamento apre un file locale non PDF.": "The link opens a local non-PDF file.",
+    "Indirizzo non valido.": "Invalid address.",
+    "Azione bloccata": "Action blocked",
+    "Collegamento bloccato": "Link blocked",
+    "Lo schema «{s}:» non è consentito per sicurezza.": "The “{s}:” scheme is not allowed for security reasons.",
+    "Il testo indica un indirizzo diverso dalla destinazione ({shown}).": (
+        "The text shows an address different from the destination ({shown})."
+    ),
+    "Il collegamento apre un altro documento:\n\n{f}\n\nAprirlo in una nuova scheda?": (
+        "The link opens another document:\n\n{f}\n\nOpen it in a new tab?"
+    ),
+    "Dominio: {h}": "Domain: {h}",
+    "Il documento vuole avviare un programma o aprire un file:\n\n{f}\n\nFoliant non avvia programmi indicati dai documenti.": (
+        "The document wants to launch a program or open a file:\n\n{f}\n\nFoliant does not launch programs "
+        "specified by documents."
+    ),
+    "Il collegamento apre un file che non è un PDF:\n\n{f}": "The link opens a file that is not a PDF:\n\n{f}",
+    "Il dominio contiene caratteri di alfabeti diversi e potrebbe imitare un altro indirizzo. Forma reale: {p}": (
+        "The domain contains characters from different alphabets and may imitate another address. Actual "
+        "form: {p}"
+    ),
+    "Il collegamento è stato bloccato:\n\n{u}\n\n{r}": "The link was blocked:\n\n{u}\n\n{r}",
+    "Collegamento non gestito: {e}": "Link not handled: {e}",
+    "Schema personalizzato": "Custom pattern",
+    "Indirizzi email": "Email addresses",
+    "Numeri di telefono": "Phone numbers",
+    "IBAN": "IBAN",
+    "Codici fiscali": "Italian tax codes",
+    "Partite IVA": "VAT numbers",
+    "Carte di pagamento": "Payment cards",
+    "Date": "Dates",
+    "Importi": "Amounts",
+    "Indirizzi web": "Web addresses",
+    "Indirizzi IP": "IP addresses",
+    "L'espressione trova anche il testo vuoto: rendila più specifica.": (
+        "The expression also matches empty text: make it more specific."
+    ),
+    "Espressione non valida: {e}": "Invalid expression: {e}",
+    "Pagina {n} di {t}": "Page {n} of {t}",
+    "AES a 256 bit (consigliato)": "256-bit AES (recommended)",
+    "AES a 128 bit": "128-bit AES",
+    "RC4 a 128 bit (compatibile con lettori vecchi)": "128-bit RC4 (compatible with old readers)",
+    "Modifica del contenuto": "Content editing",
+    "Copia di testo e immagini": "Copying text and images",
+    "Commenti e annotazioni": "Comments and annotations",
+    "Compilazione dei moduli": "Filling in forms",
+    "Estrazione per l'accessibilità": "Extraction for accessibility",
+    "Assemblaggio (inserire, ruotare, eliminare pagine)": "Assembly (insert, rotate, delete pages)",
+    "Consentita": "Allowed",
+    "Solo a bassa risoluzione": "Low resolution only",
+    "Non consentita": "Not allowed",
+    "Ripristina protezione originale": "Restore original protection",
+    "password di apertura": "open password",
+    "nessuna password di apertura": "no open password",
+    "permessi limitati": "restricted permissions",
+    "tutti i permessi": "all permissions",
+    "Imposta protezione": "Set protection",
+    "La password dei permessi deve essere diversa da quella di apertura: altrimenti chi apre il documento avrebbe tutti i permessi.": (
+        "The permissions password must differ from the open password: otherwise anyone opening the "
+        "document would have all permissions."
+    ),
+    "Livello di cifratura non riconosciuto.": "Unrecognized encryption level.",
+    "La password è troppo lunga (massimo 127 byte).": "The password is too long (maximum 127 bytes).",
+    "Con questo livello di cifratura le password sono limitate a 32 caratteri. Usa AES a 256 bit o una password più corta.": (
+        "With this encryption level, passwords are limited to 32 characters. Use 256-bit AES or a shorter "
+        "password."
+    ),
+    "Con questo livello di cifratura le password possono contenere solo lettere latine, numeri e simboli comuni. Usa AES a 256 bit.": (
+        "With this encryption level, passwords can only contain Latin letters, numbers and common symbols. "
+        "Use 256-bit AES."
+    ),
+    "Pagina intera": "Whole page",
+    "Apertura del documento": "Document opening",
+    "Metadati (autore, titolo, programmi, date, XMP)": "Metadata (author, title, programs, dates, XMP)",
+    "Script e azioni automatiche": "Scripts and automatic actions",
+    "File incorporati e allegati": "Embedded files and attachments",
+    "Livelli nascosti": "Hidden layers",
+    "Dati inseriti nei moduli": "Form data",
+    "Testo nascosto (invisibile)": "Hidden (invisible) text",
+    "Collegamenti": "Links",
+    "Miniature incorporate": "Embedded thumbnails",
+    "Pulizia del documento": "Document cleanup",
+    "Titolo": "Title",
+    "Autore": "Author",
+    "Oggetto": "Subject",
+    "Parole chiave": "Keywords",
+    "Script e azioni": "Scripts and actions",
+    "Metadati XMP presenti": "XMP metadata present",
+    "Documento": "Document",
+    "Pagina {n}": "Page {n}",
+    "Script (JavaScript): {n}": "Scripts (JavaScript): {n}",
+    "Azioni che avviano programmi o file: {n}": "Actions that launch programs or files: {n}",
+    "Moduli che inviano dati in rete: {n}": "Forms that send data over the network: {n}",
+    "Collegamenti a siti esterni: {n}": "Links to external sites: {n}",
+    "Collegamenti ad altri file: {n}": "Links to other files: {n}",
+    "File incorporati: {n}": "Embedded files: {n}",
+    "Pagina {n}: {k} frammenti": "Page {n}: {k} fragments",
+    "Schema": "Pattern",
+    "Area": "Area",
+    "Redazioni": "Redactions",
+    "Nessun segno di redazione. Usa «Segna area», «Segna testo», «Trova e segna» o «Trova dati personali» per indicare cosa oscurare.": (
+        "No redaction marks. Use “Mark area”, “Mark text”, “Find and mark” or “Find personal data” to "
+        "indicate what to redact."
+    ),
+    "Rimuovi": "Remove",
+    "Anteprima risultato": "Preview result",
+    "Applica selezionati": "Apply selected",
+    "Applica tutti": "Apply all",
+    "Testo selezionato": "Selected text",
+    "Ricerca": "Search",
+    "Segno": "Mark",
+    "Origine": "Source",
+    "(nessun testo)": "(no text)",
+    "1 altro avviso": "1 more warning",
+    "{n} altri avvisi": "{n} more warnings",
+    "Debole": "Weak",
+    "Media": "Fair",
+    "Forte": "Strong",
+    "Molto forte": "Very strong",
+    "Sola lettura": "Read only",
+    "Solo compilazione e firma": "Filling and signing only",
+    "Commenti, compilazione e firma": "Comments, filling and signing",
+    "Solo assemblaggio pagine": "Page assembly only",
+    "Esporta XFDF": "Export XFDF",
+    "Importa XFDF": "Import XFDF",
+    "Esporta segni di redazione": "Export redaction marks",
+    "Importa segni di redazione": "Import redaction marks",
+    "Il file XFDF non è valido: {e}": "The XFDF file is not valid: {e}",
+    "Includi valori con cifra di controllo non valida": "Include values with an invalid check digit",
+    "Segni esportati in {p}": "Marks exported to {p}",
 }

@@ -394,6 +394,10 @@ class SecurityController:
             for pid in options.get("patterns", []):
                 p = PT.pattern_by_id(pid)
                 if p is not None:
+                    if options.get("include_invalid") and p.check is not None and p.id in ("iban", "cf", "vat",
+                                                                                             "card"):
+                        from dataclasses import replace
+                        p = replace(p, check=None)
                     pats.append(p)
             if options.get("custom"):
                 pats.append(PT.custom_pattern(options["custom"]))
@@ -493,6 +497,44 @@ class SecurityController:
             return 0
         with doc.change(_("Rimuovi segni di redazione")) as pdf:
             n = sum(1 for m in marks if R.remove_mark(pdf, m.page, m.xref))
+        return n
+
+    def export_marks(self, path: str | None = None) -> bool:
+        doc = self.document()
+        if doc is None:
+            return False
+        stem = Path(doc.display_name).stem
+        path = path or self.ctx.ask_save_path(_("Esporta segni di redazione"), f"{stem}_redazioni.xfdf",
+                                              "XFDF (*.xfdf)", ".xfdf")
+        if not path:
+            return False
+        with ENGINE_LOCK:
+            data = R.export_xfdf(doc.pdf, doc.display_name)
+        try:
+            Path(path).write_text(data, "utf-8")
+        except OSError as e:
+            self.ctx.error(_("Esportazione non riuscita"), str(e))
+            return False
+        self.ctx.status(_("Segni esportati in {p}").format(p=path))
+        return True
+
+    def import_marks(self, path: str | None = None) -> int:
+        doc = self.document()
+        if doc is None or not self.require_modify(doc):
+            return 0
+        if path is None:
+            paths = self.ctx.ask_open_paths(_("Importa segni di redazione"), "XFDF (*.xfdf *.xml)", multiple=False)
+            if not paths:
+                return 0
+            path = paths[0]
+        try:
+            data = Path(path).read_text("utf-8")
+            with doc.change(_("Importa segni di redazione")) as pdf:
+                n = R.import_xfdf(pdf, data, self.style)
+        except (OSError, ValueError) as e:
+            self.ctx.error(_("Importazione non riuscita"), str(e))
+            return 0
+        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n))
         return n
 
     def redaction_settings(self) -> bool:

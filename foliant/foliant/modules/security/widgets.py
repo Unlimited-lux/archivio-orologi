@@ -86,6 +86,18 @@ class RedactionPanel(QWidget):
         row2.addWidget(self.apply_selected_button)
         row2.addWidget(self.apply_all_button)
         lay.addLayout(row2)
+        row3 = QHBoxLayout()
+        self.export_button = QPushButton(icon("download"), _("Esporta XFDF"))
+        self.export_button.clicked.connect(lambda: self.controller.export_marks())
+        self.import_button = QPushButton(icon("upload"), _("Importa XFDF"))
+        self.import_button.clicked.connect(lambda: self.controller.import_marks())
+        row3.addWidget(self.export_button)
+        row3.addWidget(self.import_button)
+        lay.addLayout(row3)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        sc = QShortcut(QKeySequence(QKeySequence.StandardKey.Delete), self.tree)
+        sc.setContext(Qt.ShortcutContext.WidgetShortcut)
+        sc.activated.connect(self._remove)
         self.marks: list[R.Mark] = []
         self.refresh()
 
@@ -130,8 +142,9 @@ class RedactionPanel(QWidget):
         has = bool(self.marks)
         self.empty.setVisible(not has)
         self.tree.setVisible(has)
-        for b in (self.remove_button, self.apply_selected_button, self.apply_all_button):
+        for b in (self.remove_button, self.apply_selected_button, self.apply_all_button, self.export_button):
             b.setEnabled(has)
+        self.import_button.setEnabled(doc is not None)
         tip = "" if has else _("Nessuna area contrassegnata per la redazione")
         self.apply_all_button.setToolTip(tip)
 
@@ -179,17 +192,24 @@ class RedactAreaTool(Tool):
         self._start: pymupdf.Point | None = None
         self._end: pymupdf.Point | None = None
         self._moving: tuple[int, pymupdf.Rect] | None = None   # (xref, rettangolo originale)
+        self._corner: str | None = None                         # angolo trascinato (ridimensiona)
 
     def press(self, view, ev):
         if ev.button != Qt.MouseButton.LeftButton or ev.page is None:
             return False
         self._page, self._start, self._end = ev.page, ev.point, ev.point
         self._moving = None
+        self._corner = None
         if self.on_move is not None:
+            tol = 6 / max(view.zoom, 0.1)
             with ENGINE_LOCK:
                 for m in R.marks(view.document.pdf, [ev.page]):
-                    if m.rect.contains(ev.point) and not m.whole_page:
+                    if m.whole_page:
+                        continue
+                    corner = _corner_at(m.rect, ev.point, tol)
+                    if corner is not None or m.rect.contains(ev.point):
                         self._moving = (m.xref, pymupdf.Rect(m.rect))
+                        self._corner = corner
                         break
         return True
 
@@ -213,7 +233,9 @@ class RedactAreaTool(Tool):
             dx, dy = end.x - start.x, end.y - start.y
             if abs(dx) + abs(dy) >= 1 and self.on_move is not None:
                 xref, rect = moving
-                self.on_move(page, xref, rect + (dx, dy, dx, dy))
+                new = _resized(rect, self._corner, dx, dy)
+                if new.width >= 2 and new.height >= 2:
+                    self.on_move(page, xref, new)
             return True
         rect = pymupdf.Rect(start, end).normalize()
         if rect.width < 2 or rect.height < 2:      # clic senza trascinamento: nessun segno
@@ -238,12 +260,37 @@ class RedactAreaTool(Tool):
         if self._moving is not None:
             _x, r = self._moving
             dx, dy = self._end.x - self._start.x, self._end.y - self._start.y
+            n = _resized(r, self._corner, dx, dy)
             painter.setBrush(QColor(220, 38, 38, 50))
-            painter.drawRect(QRectF(r.x0 + dx, r.y0 + dy, r.width, r.height))
+            painter.drawRect(QRectF(n.x0, n.y0, n.width, n.height))
             return
         painter.setBrush(QColor(220, 38, 38, 40))
         r = pymupdf.Rect(self._start, self._end).normalize()
         painter.drawRect(QRectF(r.x0, r.y0, r.width, r.height))
+
+
+def _corner_at(rect: pymupdf.Rect, pt: pymupdf.Point, tol: float) -> str | None:
+    for name, (x, y) in {"tl": (rect.x0, rect.y0), "tr": (rect.x1, rect.y0),
+                         "bl": (rect.x0, rect.y1), "br": (rect.x1, rect.y1)}.items():
+        if abs(pt.x - x) <= tol and abs(pt.y - y) <= tol:
+            return name
+    return None
+
+
+def _resized(rect: pymupdf.Rect, corner: str | None, dx: float, dy: float) -> pymupdf.Rect:
+    """Spostamento (nessun angolo) o ridimensionamento dall'angolo indicato."""
+    r = pymupdf.Rect(rect)
+    if corner is None:
+        return r + (dx, dy, dx, dy)
+    if "l" in corner:
+        r.x0 += dx
+    else:
+        r.x1 += dx
+    if "t" in corner:
+        r.y0 += dy
+    else:
+        r.y1 += dy
+    return r.normalize()
 
 
 # ------------------------------------------------------------ anteprima
