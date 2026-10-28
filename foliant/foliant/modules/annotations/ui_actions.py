@@ -143,26 +143,35 @@ def fdf_to_xfdf(data: bytes) -> str:
     if not m:
         raise engine.AnnotationError("Il file non è un FDF valido.")
     refs = [int(x) for x in re.findall(r"(\d+)\s+0\s+R", m.group(1))]
-    pages: dict[int, list[str]] = {}
+    pages: dict[int, list[tuple[int, str]]] = {}
     for r in refs:
         body = objs.get(r)
         if not body:
             continue
         pm = re.search(r"/Page\s+(\d+)", body)
         page = int(pm.group(1)) if pm else 0
-        pages.setdefault(page, []).append(re.sub(r"/Page\s+\d+", "", body))
+        pages.setdefault(page, []).append((r, re.sub(r"/Page\s+\d+", "", body)))
     if not pages:
         return '<?xml version="1.0" encoding="UTF-8"?><xfdf xmlns="http://ns.adobe.com/xfdf/"><annots/></xfdf>'
     tmp = pymupdf.open()
     try:
         for i in range(max(pages) + 1):
             tmp.new_page()
+        new_xref = {}                   # oggetto FDF → oggetto del PDF temporaneo
+        for bodies in pages.values():
+            for r, _body in bodies:
+                new_xref[r] = tmp.get_new_xref()
+
+        def irt(mm) -> str:             # risposte e stati: riferimento al padre nel PDF temporaneo
+            x = new_xref.get(int(mm.group(1)))
+            return f"/IRT {x} 0 R" if x is not None else ""
+
         for page_no, bodies in pages.items():
             page = tmp[page_no]
             xrefs = []
-            for body in bodies:
-                x = tmp.get_new_xref()
-                tmp.update_object(x, body)
+            for r, body in bodies:
+                x = new_xref[r]
+                tmp.update_object(x, re.sub(r"/IRT\s*(\d+)\s+\d+\s+R", irt, body))
                 tmp.xref_set_key(x, "P", f"{page.xref} 0 R")
                 xrefs.append(x)
             tmp.xref_set_key(page.xref, "Annots", "[" + " ".join(f"{x} 0 R" for x in xrefs) + "]")

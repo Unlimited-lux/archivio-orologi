@@ -24,10 +24,10 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-11 | P1 | fatto | test_ann11_area_highlight, test_ann10_image_page_area_highlight | Strumento «Evidenzia area» o Alt+trascinamento; /Rect = quadrilatero, ridimensionabile. |
 | ANN-12 | P0 | fatto | test_ann12_three_markups_same_quads, test_ann12_line_positions | Stessa selezione per sottolineato/barrato/ondulato (multipagina: vedi ANN-10). |
 | ANN-13 | P1 | fatto | test_ann13_insert_and_replace | Inserisci testo/paragrafo (/Caret /Sy), Sostituisci (barrato /IRT /RT /Group); voce unica «Sostituzione»; eliminazione di gruppo. |
-| ANN-14 | P0 | fatto | test_ann14_note_click, test_ann14_note_icon_and_color, test_ann14_note_cancel_creates_nothing | Il motore normalizza l'icona a 16 pt (lato richiesto 20): l'icona ha dimensione costante a schermo (NoZoom). |
+| ANN-14 | P0 | fatto | test_ann14_note_click, test_ann14_note_icon_and_color, test_ann14_note_cancel_creates_nothing, test_note_icon_under_click_on_rotated_page | Il motore normalizza l'icona a 16 pt (lato richiesto 20): l'icona ha dimensione costante a schermo (NoZoom). Su pagine ruotate /Rect è traslato perché l'icona diritta (/NoRotate) cada sotto il clic; selezione sul riquadro visualizzato. |
 | ANN-15 | P1 | fatto | test_ann15_typewriter | Senza bordo, rettangolo adattato; testo vuoto → nessuna annotazione. Caratteri CJK: aspetto del motore. |
 | ANN-16 | P0 | fatto | test_ann16_textbox, test_ann16_click_creates_default_width_box, test_ann16_rotated_page_text_horizontal | Aspetto vettoriale proprio (bordo e sfondo di colori distinti, a capo, allineamento, margine). Adattamento automatico dell'altezza (test_ann16_autofit_height); grassetto/corsivo/sottolineato/colore su porzioni di testo in /RC e nell'aspetto (test_ann16_rich_text_in_textbox). |
-| ANN-17 | P1 | fatto | test_ann17_callout, test_ann17_move_tip_only | Punta, gomito, casella; punta spostabile da sola. |
+| ANN-17 | P1 | fatto | test_ann17_callout, test_ann17_move_tip_only, test_callout_with_cropbox* | Punta, gomito, casella; punta spostabile da sola. Corretto con /CropBox diverso dal /MediaBox (anche importando). |
 | ANN-18 | P0 | fatto | test_ann18_* (4) | Maiusc quadrato/cerchio, Alt dal centro. |
 | ANN-19 | P0 | fatto | test_ann19_arrow, test_ann19_shift_snaps_45, test_ann19_caption | Estremità modificabili, didascalia (/Cap). |
 | ANN-20 | P1 | fatto | test_ann20_polygon_tool, test_ann20_drag_vertex, test_polygon_vertices, test_polyline_vertices | Doppio clic/Invio/clic sul primo vertice, Backspace, Esc; vertici trascinabili, aggiunti e rimossi dal menu (test_ann20_add_remove_vertex_and_cloud_intensity). |
@@ -46,12 +46,12 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-33 | P2 | parziale | test_ann33_measures_csv | Solo esportazione CSV delle misure. |
 | ANN-34 | P0 | fatto | test_ann34_* (4) | Gruppi per pagina, autore/data, testo marcato, stato, risposte, spunta, menu contestuale, doppio clic, contatore. |
 | ANN-35 | P1 | fatto | test_ann35_* (5) | Tipo, autore, colore, stato, spunta, risposte, pagine, data di modifica, ricerca senza maiuscole/accenti, «n di N», «Applica il filtro alla pagina» (solo nella vista, /F invariati; `view.set_annotation_filter` del nucleo, valido anche a tasselle). |
-| ANN-36 | P1 | fatto | test_ann36_sort_by_date_desc | Pagina, data ±, autore, tipo, stato con gruppi. |
+| ANN-36 | P1 | fatto | test_ann36_sort_by_date_desc, test_comments_sorted_top_down_on_rotated_page | Pagina, data ±, autore, tipo, stato con gruppi. Ordine dall'alto in basso nella vista anche su pagine ruotate. |
 | ANN-37 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_reply_structure_after_save, test_cyclic_irt_chain_lists_all, test_delete_root_removes_replies | |
 | ANN-38 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_status_* , test_marked_on_then_off | «Cronologia degli stati…» nel menu (test_ann38_history_menu). |
 | ANN-39 | P1 | fatto | test_ann39_hide_annotations | `view.show_annotations` del nucleo. |
 | ANN-40 | P1 | fatto | test_ann40_flatten_from_ui, test_ann40_flatten_selection, test_flatten_* | Tutto il documento, pagina corrente o selezione; non stampabili esclusi; annullabile. Manca l'ambito «annotazioni filtrate». |
-| ANN-41 | P1 | fatto | test_ann41_42_export_import_ui, test_export_xfdf_*, test_export_fdf | XFDF (con aspetto dei timbri) e FDF. |
+| ANN-41 | P1 | fatto | test_ann41_42_export_import_ui, test_export_xfdf_*, test_export_fdf, test_fdf_keeps_replies_and_status, test_freetext_roundtrip_*, test_note_roundtrip_* | XFDF (con aspetto dei timbri) e FDF. FDF con risposte e stati; casella di testo con colore del bordo e /Rect esatti; /Rect del file esportato tal quale. |
 | ANN-42 | P1 | fatto | test_ann41_42_export_import_ui, test_ann42_import_from_pdf_and_malformed, test_xfdf_* | XFDF, FDF, PDF; duplicati saltati; un passo di annullamento. |
 | ANN-43 | P1 | fatto | test_ann43_summary_files, test_ann43_page_layout_numbers, test_summary_* | PDF «solo elenco» o «pagine con commenti numerati» (marcatori e connettori), CSV (riga per risposta con padre), testo, HTML. Manca l'anteprima/stampa diretta. |
 | ANN-44 | P2 | non fatto | | |
