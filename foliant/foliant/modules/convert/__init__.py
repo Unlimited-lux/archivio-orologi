@@ -78,8 +78,18 @@ def register(ctx) -> None:
     act_repair = ctx.action(_("Ripara PDF…"), "wrench", lambda: c.repair(), requires_document=False)
     act_batch = ctx.action(_("Converti più file…"), "folder-output", lambda: c.batch_convert(),
                            requires_document=False)
-    for a in (act_compress, act_advanced, act_repair, act_batch):
-        mode.add_action(a)
+    mode.add_action(act_compress)
+    more_menu = QMenu(ctx.window)
+    for a in (act_advanced, act_compress_many, act_repair, act_batch, act_batch_create):
+        more_menu.addAction(a)
+    more_btn = QToolButton()
+    more_btn.setText(_("Altri strumenti"))
+    more_btn.setToolTip(_("Ottimizzazione avanzata, riparazione e operazioni su più file"))
+    bind_icon(more_btn, "wrench")
+    more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+    more_btn.setMenu(more_menu)
+    more_btn.setToolButtonStyle(mode.toolbar.toolButtonStyle())
+    mode.add_widget(more_btn)
 
     ctx.add_menu_action(act_export, _("Converti"))
     ctx.add_menu_action(act_blank, _("Converti"))
@@ -94,8 +104,6 @@ def register(ctx) -> None:
     ctx.add_home_action(_("Converti PDF"), "file-output", lambda: c.export(),
                         _("In Word, Excel, PowerPoint, immagini, testo, PDF/A…"), 32)
     ctx.add_home_action(_("Comprimi PDF"), "shrink", lambda: c.compress(), _("Riduci la dimensione del file"), 33)
-    ctx.add_home_action(_("PDF vuoto"), "file", lambda: c.create_blank(), _("Pagine bianche, a righe o a quadretti"),
-                        34)
 
     c.actions = {"export": act_export, "from_file": act_from_file, "from_images": act_from_images,
                  "from_url": act_from_url, "clipboard": act_clipboard, "blank": act_blank,

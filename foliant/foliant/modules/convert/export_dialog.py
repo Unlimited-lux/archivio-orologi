@@ -305,6 +305,10 @@ class ExportDialog(QDialog):
 
     def _format_changed(self, *_a) -> None:
         fmt = self.fmt
+        from PySide6.QtWidgets import QSizePolicy
+        for key, panel in self.panels.items():
+            pol = QSizePolicy.Policy.Preferred if key == fmt else QSizePolicy.Policy.Ignored
+            panel.setSizePolicy(pol, pol)
         self.stack.setCurrentWidget(self.panels[fmt])
         self.specific.setVisible(bool(self.panels[fmt].fields))
         self.layout_box.setEnabled(fmt in LAYOUT_FORMATS)

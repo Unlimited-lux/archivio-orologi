@@ -36,7 +36,7 @@ class ConvertController:
     def _run(self, title: str, fn, *args, **kwargs):
         """Esegue in background; restituisce (ok, risultato). Gli errori sono mostrati all'utente."""
         try:
-            return True, self.ctx.run_task(title, fn, *args, **kwargs)
+            return True, self.ctx.run_task(title, lambda progress: fn(*args, progress=progress, **kwargs))
         except OperationCancelled:
             self.ctx.status(_("Operazione annullata."))
         except FoliantError as e:
@@ -226,8 +226,10 @@ class ConvertController:
             password = None
             while True:
                 try:
-                    data, warnings = self.ctx.run_task(_("Creazione del PDF…"), create.file_to_pdf, path,
-                                                       **({"password": password} if password else {}))
+                    extra = {"password": password} if password else {}
+                    data, warnings = self.ctx.run_task(
+                        _("Creazione del PDF…"), lambda progress, path=path, extra=extra: create.file_to_pdf(
+                            path, progress=progress, **extra))
                     break
                 except (PasswordRequired, WrongPassword) as e:
                     if isinstance(e, WrongPassword):
@@ -442,7 +444,7 @@ class ConvertController:
         return self._apply_optimized(out, before, doc, name, path, values["target"], _("Comprimi PDF"),
                                      suffix=_("_compresso"))
 
-    def _preview_task(self, progress, data: bytes, page: int, level: str, password):
+    def _preview_task(self, data: bytes, page: int, level: str, password, progress=None):
         from PySide6.QtGui import QImage
         from . import optimize
         with ENGINE_LOCK:

@@ -48,6 +48,8 @@ class CompressDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for col in (1, 2):
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self.levels = list(levels)
         for r, level in enumerate(levels):
             title, desc = LEVEL_LABELS.get(level, (level, ""))
@@ -60,16 +62,18 @@ class CompressDialog(QDialog):
             red = "—" if not est or not before else f"{max(0.0, (1 - est / before) * 100):.0f}%"
             self.table.setItem(r, 2, QTableWidgetItem(red))
         self.table.selectRow(min(2, len(levels) - 1))
-        self.table.setMinimumHeight(self.table.verticalHeader().length() + self.table.horizontalHeader().height() + 6)
+        self.table.setFixedHeight(self.table.verticalHeader().length() + self.table.horizontalHeader().sizeHint().height() + 4)
         lay.addWidget(self.table)
 
         prev = QGroupBox(_("Anteprima di un dettaglio della pagina"))
-        pl = QHBoxLayout(prev)
+        outer = QVBoxLayout(prev)
+        pl = QHBoxLayout()
+        outer.addLayout(pl)
         self.before_label = QLabel(_("Originale"))
         self.after_label = QLabel(_("Compresso"))
         for lab in (self.before_label, self.after_label):
             lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lab.setMinimumSize(220, 180)
+            lab.setFixedSize(250, 180)
             lab.setStyleSheet(f"border: 1px solid {theme.hex_color('border')};")
             pl.addWidget(lab, 1)
         self.preview_button = QPushButton(_("Anteprima"))
@@ -77,7 +81,7 @@ class CompressDialog(QDialog):
         self.preview_button.setAutoDefault(False)
         self.preview_button.clicked.connect(self.update_preview)
         self.preview_button.setEnabled(preview is not None)
-        pl.addWidget(self.preview_button, 0, Qt.AlignmentFlag.AlignBottom)
+        outer.addWidget(self.preview_button, 0, Qt.AlignmentFlag.AlignRight)
         lay.addWidget(prev)
 
         form = QFormLayout()

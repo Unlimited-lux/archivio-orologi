@@ -586,9 +586,17 @@ def test_xml_words(sample_pdf, tmp_path):
         assert joined.split()[0] in txt
 
 
-def test_xml_schema_published():
+def test_xml_valid_against_schema(sample_pdf, tmp_path):
+    lxml = pytest.importorskip("lxml.etree")
     from foliant.modules.convert.export_text import XSD_PATH
-    assert XSD_PATH.exists()
+    schema = lxml.XMLSchema(lxml.parse(str(XSD_PATH)))
+    doc = pymupdf.open(sample_pdf)
+    doc[0].add_text_annot((100, 200), "Nota \x07 con controllo")
+    doc[0].insert_image(pymupdf.Rect(300, 300, 400, 380), stream=_jpeg_bytes())
+    path = _save(doc, tmp_path / "s.pdf")
+    for detail in ("words", "lines", "blocks"):
+        out = convert_pdf(path, tmp_path / f"{detail}.xml", "xml", detail=detail)[0]
+        assert schema.validate(lxml.parse(out)), schema.error_log
 
 
 def test_xml_annotations(sample_pdf, tmp_path):
@@ -646,3 +654,14 @@ def test_rtf_styles_and_images(tmp_path):
     assert re.search(r"\\b\\i0 Grassetto", rtf) and re.search(r"\\b0\\i Corsivo", rtf)
     assert "\\u224?" in rtf    # à
     assert rtf.count("\\pict") == 2
+
+
+# ------------------------------------------------------------------ CNV-14
+@pytest.mark.skipif(__import__("shutil").which("gs") is None, reason="Ghostscript non installato")
+def test_pdfa_through_engine(sample_pdf, tmp_path):
+    from foliant.modules.convert import pdfa
+    result = run_conversion(sample_pdf, tmp_path / "a.pdf", "pdfa-2b")
+    data = open(result.paths[0], "rb").read()
+    assert pdfa.verify_pdfa(data, "2b") == []
+    assert result.details["pdfa"]["compliant"]
+    assert os.path.basename(result.paths[0]) == "a.pdf"
