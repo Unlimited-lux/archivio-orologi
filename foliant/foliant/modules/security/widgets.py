@@ -112,6 +112,15 @@ class RedactionPanel(QWidget):
 
     def _on_doc(self, _doc, kind: str) -> None:
         if kind == "content":
+            if self.isVisible():
+                self.refresh()
+            else:
+                self._stale = True   # aggiornato quando il pannello viene mostrato
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if getattr(self, "_stale", False):
+            self._stale = False
             self.refresh()
 
     def refresh(self) -> None:

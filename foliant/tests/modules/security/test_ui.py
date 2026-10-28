@@ -357,6 +357,7 @@ def test_find_and_mark_terms(window, sec, tmp_path, monkeypatch):
 
 def test_find_patterns_dialog(window, sec, pii_pdf, monkeypatch, accept_all):
     view = window.open_path(pii_pdf)
+    sec.show_panel()
     captured = {}
 
     def fake_run(dlg):
@@ -418,6 +419,7 @@ def test_repeat_mark(window, sec, sample_pdf):
 
 def test_panel_group_and_remove(window, sec, sample_pdf, monkeypatch):
     view = window.open_path(sample_pdf)
+    sec.show_panel()
     doc = view.document
     with doc.change("Segna") as pdf:
         for page in (0, 0, 1, 2):
@@ -438,6 +440,7 @@ def test_panel_group_and_remove(window, sec, sample_pdf, monkeypatch):
 
 def test_apply_selected_only(window, sec, sample_pdf, monkeypatch, accept_all):
     view = window.open_path(sample_pdf)
+    sec.show_panel()
     doc = view.document
     with doc.change("Segna") as pdf:
         R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
@@ -759,6 +762,7 @@ def test_area_tool_resize_corner(window, sec, sample_pdf):
 
 def test_export_import_marks(window, sec, sample_pdf, tmp_path):
     view = window.open_path(sample_pdf)
+    sec.show_panel()
     with view.document.change("Segna") as pdf:
         R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
     out = tmp_path / "segni.xfdf"
