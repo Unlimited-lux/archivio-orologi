@@ -1132,3 +1132,20 @@ def test_analisi_all_apertura_limitata_e_a_passi_brevi(window, qtbot, tmp_path, 
     assert ctl.page_info(view, 400).category == detect.TEXT        # su richiesta
     ctl.complete_analysis(view)
     assert len(st.infos) == 500 and st.complete
+
+
+def test_foto_senza_testo_nessuna_proposta(window, qtbot, tmp_path):
+    """La foto di un orologio (pagina di sola immagine senza caratteri) non fa proporre l'OCR; il
+    controllo avviene in un thread, la scansione di un documento resta proposta."""
+    from .test_detect_photo import watch_photo
+    ctl = ocr_controller()
+    photo = window.open_path(image_pdf(str(tmp_path / "foto.pdf"), [watch_photo()], dpi=150))
+    wait_analysis(qtbot, photo)
+    qtbot.waitUntil(lambda: ctl.state(photo).photo_job is None and bool(ctl.state(photo).photo_checked), timeout=5000)
+    st = ctl.state(photo)
+    assert st.infos[0].category == detect.IMAGE_ONLY and 0 in st.photos
+    assert st.detected == []
+    assert st.bar is None or not st.bar.isVisible()
+    scan = window.open_path(image_pdf(str(tmp_path / "scan.pdf"), [scan_image()], dpi=300))
+    qtbot.waitUntil(lambda: ctl.state(scan).bar is not None and ctl.state(scan).bar.isVisible(), timeout=5000)
+    assert ctl.state(scan).detected == [0]
