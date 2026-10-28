@@ -245,6 +245,10 @@ QToolButton::menu-indicator {{ image: none; }}
 QToolButton#qt_toolbar_ext_button {{ padding: 0px; border: none; }}
 QToolButton[homeAction="true"] {{ border: 1px solid {h('border')}; border-radius: 10px; background: {h('surface')}; }}
 QToolButton[homeAction="true"]:hover {{ border-color: {h('accent')}; }}
+QToolButton:focus {{ border: 2px solid {h('accent')}; padding: 3px 5px; }}
+QToolButton[modeButton="true"]:focus {{ padding: 4px 9px; }}
+QToolButton[modeButton="true"]:checked:focus {{ border-color: {h('accent_text')}; }}
+QToolButton#qt_toolbar_ext_button:focus {{ border: 2px solid {h('accent')}; }}
 QPushButton {{ background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px;
     padding: 6px 14px; color: {h('text')}; }}
 QPushButton:hover {{ background: {h('surface_alt')}; }}
@@ -254,15 +258,20 @@ QPushButton[primary="true"]:hover {{ background: {h('accent_hover')}; }}
 QPushButton:disabled {{ color: {h('text_muted')}; }}
 QPushButton:default:disabled, QPushButton[primary="true"]:disabled {{ background: {h('surface_alt')};
     border-color: {h('border')}; color: {h('text_muted')}; }}
+QPushButton:focus {{ border: 2px solid {h('accent')}; padding: 5px 13px; }}
+QPushButton:default:focus, QPushButton[primary="true"]:focus {{ border-color: {h('accent_text')}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {{
     background: {h('surface')}; border: 1px solid {h('control_border')}; border-radius: 6px; padding: 3px 6px;
     color: {h('text')}; selection-background-color: {h('accent')}; selection-color: {h('accent_text')}; }}
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {h('accent')}; }}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTextEdit:focus {{
+    border: 2px solid {h('accent')}; padding: 2px 5px; }}
+QSpinBox#pageSpin:focus {{ padding: 1px 3px; }}
 QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{ background: transparent; padding: 6px 12px; border: none; border-bottom: 2px solid transparent;
     color: {h('text_muted')}; }}
 QTabBar::tab:selected {{ color: {h('text')}; border-bottom: 2px solid {h('accent')}; }}
 QTabBar::tab:hover {{ color: {h('text')}; }}
+QTabBar::tab:focus {{ border: 2px solid {h('accent')}; padding: 4px 10px 6px 10px; }}
 QStatusBar {{ background: {h('surface')}; border-top: 1px solid {h('border')}; color: {h('text_muted')}; }}
 QWidget#sidebar, QWidget#properties {{ background: {h('surface')}; }}
 QWidget#sidebar {{ border-right: 1px solid {h('border')}; }}
@@ -286,6 +295,8 @@ QProgressBar {{ border: 1px solid {h('border')}; border-radius: 6px; text-align:
 QProgressBar::chunk {{ background: {h('accent')}; border-radius: 5px; }}
 QGroupBox {{ border: 1px solid {h('border')}; border-radius: 8px; margin-top: 14px; padding-top: 8px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {h('text_muted')}; }}
+QCheckBox, QRadioButton {{ border: 2px solid transparent; border-radius: 4px; }}
+QCheckBox:focus, QRadioButton:focus {{ border-color: {h('accent')}; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; background: {h('surface')};
     border: 1px solid {h('control_border')}; }}
 QCheckBox::indicator {{ border-radius: 4px; }}

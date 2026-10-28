@@ -40,6 +40,71 @@ def test_toolbar_buttons_are_reachable_with_tab(window, sample_pdf, qtbot):
     assert header_buttons[0] in reached
 
 
+def _focus_change(qtbot, widget, elsewhere):
+    """Immagini di `widget` senza e con il fuoco (dato con Tab)."""
+    elsewhere.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.waitUntil(elsewhere.hasFocus)
+    before = widget.grab().toImage()
+    widget.setFocus(Qt.FocusReason.TabFocusReason)
+    qtbot.waitUntil(widget.hasFocus)
+    return before, widget.grab().toImage()
+
+
+def test_focus_indicator_is_visible(qapp, qtbot):
+    """NFR-21: il controllo con il fuoco ha un contorno con contrasto ≥ 3:1 rispetto allo stato
+    senza fuoco, e il contenuto non si sposta."""
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QCheckBox, QPushButton, QRadioButton, QTabBar, QToolButton, QVBoxLayout, QWidget
+
+    from foliant.ui import theme
+    from foliant.ui.context import ToolBar
+    try:
+        for mode in ("light", "dark"):
+            theme.apply(qapp, mode)
+            w = QWidget()
+            qtbot.addWidget(w)
+            layout = QVBoxLayout(w)
+            other = QPushButton("Altro")
+            bar = ToolBar("Prova")
+            bar.setObjectName("contextbar")
+            bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            plain, checked = QAction("Ruota", w), QAction("Seleziona", w, checkable=True, checked=True)
+            bar.addAction(plain)
+            bar.addAction(checked)
+            mode_button = QToolButton()
+            mode_button.setText("Leggi")
+            mode_button.setProperty("modeButton", True)
+            mode_button.setCheckable(True)
+            mode_button.setChecked(True)
+            tabs = QTabBar()
+            tabs.addTab("Uno")
+            tabs.addTab("Due")
+            controls = {"pulsante barra": bar.widgetForAction(plain), "pulsante attivo": bar.widgetForAction(checked),
+                        "modalità": mode_button, "pulsante": QPushButton("Pulsante"), "schede": tabs,
+                        "casella": QCheckBox("Casella"), "opzione": QRadioButton("Opzione")}
+            for widget in (other, bar, *list(controls.values())[2:]):
+                layout.addWidget(widget)
+            w.show()
+            w.activateWindow()
+            qtbot.waitUntil(w.isActiveWindow)
+            for name, widget in controls.items():
+                before, after = _focus_change(qtbot, widget, other)
+                assert before.size() == after.size(), (mode, name)
+                best, moved = 1.0, 0
+                for y in range(before.height()):
+                    for x in range(before.width()):
+                        a, b = before.pixelColor(x, y), after.pixelColor(x, y)
+                        if a != b:
+                            best = max(best, contrast(a, b))
+                            moved += 3 <= y < before.height() - 3 and 6 <= x < before.width() - 6
+                assert best >= 3, (mode, name, round(best, 2))
+                if widget is not tabs:              # il bordo di una scheda cade dentro la barra
+                    assert moved == 0, (mode, name, moved)
+            w.close()
+    finally:
+        theme.apply(qapp, "light")
+
+
 # ------------------------------------------------------------------ contrasto (NFR-23, WCAG 2.x)
 def _luminance(value) -> float:
     from PySide6.QtGui import QColor
@@ -88,7 +153,10 @@ def test_checked_tool_button_text_contrast():
 
 
 # contorno o indicatore / sfondo adiacente (≥ 3:1, WCAG 1.4.11)
-OUTLINE_PAIRS = [("control_border", "window"), ("control_border", "surface")]
+OUTLINE_PAIRS = [("control_border", "window"), ("control_border", "surface"),
+                 # indicatore del fuoco: accent sugli sfondi dei controlli, accent_text su quelli in accent
+                 ("accent", "window"), ("accent", "surface"), ("accent", "surface_alt"), ("accent", "accent_soft"),
+                 ("accent_text", "accent")]
 
 
 def test_token_outline_contrast():
