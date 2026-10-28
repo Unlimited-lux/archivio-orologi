@@ -43,49 +43,104 @@ class PageText:
         return [out[k] for k in sorted(out)]
 
 
-def _tight(box: pymupdf.Rect) -> pymupdf.Rect:
-    # Il riquadro del motore copre l'intera altezza del carattere (ascendenti e
-    # discendenti) e spesso sconfina nella riga successiva: lo stringiamo così
-    # l'oscuramento non porta via caratteri delle righe vicine.
-    h = box.height
-    return pymupdf.Rect(box.x0, box.y0 + h * 0.2, box.x1, box.y1 - h * 0.2)
+def line_bands(boxes: list[pymupdf.Rect]) -> list[tuple[float, float]]:
+    """Fascia verticale di ogni riga senza sconfinare nelle righe vicine.
+
+    Il riquadro del motore copre l'intera altezza del carattere (ascendenti e
+    discendenti) e nel testo nativo spesso sconfina nella riga sopra o sotto: si
+    toglie solo la parte che si sovrappone a un'altra riga allineata in orizzontale.
+    Il testo OCR e le righe ben spaziate restano alti per intero, così il riquadro
+    copre anche i pixel della scansione sotto il testo invisibile."""
+    order = sorted(range(len(boxes)), key=lambda k: boxes[k].y0)
+    top = [b.y0 for b in boxes]
+    bottom = [b.y1 for b in boxes]
+    for pos, i in enumerate(order):
+        bi = boxes[i]
+        for j in order[pos + 1:]:
+            bj = boxes[j]
+            if bj.y0 >= bi.y1:
+                break
+            if bj.x1 <= bi.x0 or bj.x0 >= bi.x1:
+                continue                       # colonne diverse
+            ci, cj = (bi.y0 + bi.y1) / 2, (bj.y0 + bj.y1) / 2
+            if abs(ci - cj) < 0.3 * min(bi.height, bj.height):
+                continue                       # stessa riga (es. pedici, parole OCR)
+            upper, lower = (i, j) if ci < cj else (j, i)
+            bottom[upper] = min(bottom[upper], boxes[lower].y0)
+            top[lower] = max(top[lower], boxes[upper].y1)
+    out = []
+    for k, b in enumerate(boxes):
+        t, u = top[k], bottom[k]
+        if u - t < 0.3 * b.height:             # righe quasi sovrapposte: fascia centrale
+            t, u = b.y0 + b.height * 0.35, b.y1 - b.height * 0.35
+        out.append((t, u))
+    return out
+
+
+def _clip(box: pymupdf.Rect, band: tuple[float, float]) -> pymupdf.Rect:
+    return pymupdf.Rect(box.x0, max(box.y0, band[0]), box.x1, min(box.y1, band[1]))
+
+
+def clip_to_lines(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> list[pymupdf.Rect]:
+    """Riquadri di parole (es. testo selezionato) ridotti dove sconfinano in altre righe."""
+    try:
+        lines = [pymupdf.Rect(line["bbox"]) for block in page.get_text("dict", flags=0).get("blocks", [])
+                 for line in block.get("lines", [])]
+    except Exception:
+        lines = []
+    out = []
+    for r in rects:
+        r = pymupdf.Rect(r)
+        bands = line_bands([r] + [b for b in lines if b.intersects(r) or abs(b.y0 - r.y0) < r.height * 2])
+        out.append(_clip(r, bands[0]))
+    return out
 
 
 def page_text(page: pymupdf.Page) -> PageText:
     """Ricostruisce il testo della pagina (righe separate da «\\n»)."""
     flags = pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_PRESERVE_LIGATURES | pymupdf.TEXT_MEDIABOX_CLIP
     raw = page.get_text("rawdict", flags=flags)
-    chars: list[str] = []
-    boxes: list[pymupdf.Rect | None] = []
-    lines: list[int] = []
-    line_no = 0
+    # prima passata: caratteri per riga e riquadro di ogni riga
+    line_chars: list[list[tuple[str, pymupdf.Rect, float]]] = []
     for block in raw.get("blocks", []):
         if block.get("type", 0) != 0:
             continue
         for line in block.get("lines", []):
-            prev: pymupdf.Rect | None = None
-            prev_size = 0.0
+            items = []
             for span in line.get("spans", []):
                 size = float(span.get("size", 10) or 10)
                 for ch in span.get("chars", []):
-                    c = ch.get("c", "")
-                    if not c:
-                        continue
-                    box = pymupdf.Rect(ch["bbox"])
-                    # spazi «impliciti»: caratteri distanziati senza spazio nel file
-                    if (prev is not None and not c.isspace() and chars and not chars[-1].isspace()
-                            and box.x0 - prev.x1 > 0.25 * max(size, prev_size)):
-                        chars.append(" ")
-                        boxes.append(None)
-                        lines.append(-1)
-                    chars.append(c)
-                    boxes.append(_tight(box) if not box.is_empty else None)
-                    lines.append(line_no)
-                    prev, prev_size = box, size
-            chars.append("\n")
-            boxes.append(None)
-            lines.append(-1)
-            line_no += 1
+                    if ch.get("c", ""):
+                        items.append((ch["c"], pymupdf.Rect(ch["bbox"]), size))
+            line_chars.append(items)
+    line_boxes = []
+    for items in line_chars:
+        r = pymupdf.Rect()
+        for _c, box, _s in items:
+            if not box.is_empty:
+                r = box if r.is_empty else r | box
+        line_boxes.append(r)
+    bands = line_bands(line_boxes)
+    chars: list[str] = []
+    boxes: list[pymupdf.Rect | None] = []
+    lines: list[int] = []
+    for line_no, items in enumerate(line_chars):
+        prev: pymupdf.Rect | None = None
+        prev_size = 0.0
+        for c, box, size in items:
+            # spazi «impliciti»: caratteri distanziati senza spazio nel file
+            if (prev is not None and not c.isspace() and chars and not chars[-1].isspace()
+                    and box.x0 - prev.x1 > 0.25 * max(size, prev_size)):
+                chars.append(" ")
+                boxes.append(None)
+                lines.append(-1)
+            chars.append(c)
+            boxes.append(_clip(box, bands[line_no]) if not box.is_empty else None)
+            lines.append(line_no)
+            prev, prev_size = box, size
+        chars.append("\n")
+        boxes.append(None)
+        lines.append(-1)
     return PageText("".join(chars), boxes, lines)
 
 
