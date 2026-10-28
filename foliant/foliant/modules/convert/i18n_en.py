@@ -182,7 +182,8 @@ EN: dict[str, str] = {
     "Formato «{e}» non supportato.": "Unsupported format “{e}”.",
     "Ghostscript ha impiegato troppo tempo ed è stato interrotto.": "Ghostscript took too long and was stopped.",
     "Ghostscript non è riuscito a convertire il documento in PDF/A. {d}": "Ghostscript could not convert the document to PDF/A. {d}",
-    "Gli allegati del PDF ({n}) non sono stati convertiti.": "The PDF attachments ({n}) were not converted.",
+    "Gli allegati del PDF ({n}) non sono stati convertiti: {names}.":
+        "The PDF attachments ({n}) were not converted: {names}.",
     "Gli appunti non contengono dati utilizzabili per creare un PDF.": "The clipboard contains no usable data for creating a PDF.",
     "Gli appunti sono vuoti o contengono un formato non supportato. Copia un'immagine, del testo o dei file e riprova.": "The clipboard is empty or contains an unsupported format. Copy an image, text, or files and try again.",
     "Grafica vettoriale": "Vector graphics",
@@ -824,3 +825,11 @@ EN.update({"Avvisi: {n}": "Warnings: {n}", "Dettagli": "Details", "Mostra cartel
 
 # NFR-25: suffissi dei file e modello dei nomi
 EN.update({"_riparato": "_repaired", "{nome}_{pagina:03}": "{name}_{page:03}"})
+
+# CNV-01: portfolio come sorgente
+EN.update({"Documento di copertina": "Cover document", "Portfolio PDF": "PDF portfolio",
+           "Il documento è un portfolio. Che cosa vuoi convertire?":
+               "The document is a portfolio. What do you want to convert?",
+           "Il portfolio non contiene «{n}».": "The portfolio does not contain “{n}”.",
+           "«{n}» non è un PDF: si possono convertire solo i PDF del portfolio.":
+               "“{n}” is not a PDF: only the PDFs in the portfolio can be converted."})

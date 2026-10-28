@@ -247,6 +247,16 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
     check(progress, 0.0, _("Apertura del documento…"))
     with ENGINE_LOCK:
         src = open_source(source, options.get("password"), need_extract=not fmt.startswith(("pdfa", "pdfx")))
+        member = options.get("portfolio_member")
+        if member:
+            # portfolio: si converte uno dei PDF incorporati invece del documento di copertina
+            try:
+                data = _member_bytes(src, member)
+                member_label = _file_label(src, _member_key(src, member))
+            finally:
+                src.close()
+            src = open_source(data, options.get("member_password"),
+                              need_extract=not fmt.startswith(("pdfa", "pdfx")))
         work = None
         try:
             pages = options.get("pages")
@@ -260,7 +270,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
                                              options.get("selected"))
             name = Path(str(source)).stem if not isinstance(source, (bytes, bytearray)) else \
                 Path(output_path).stem
-            name = options.get("name") or name
+            name = options.get("name") or (Path(member_label).stem if member else name)
             if not options.get("language"):
                 options = dict(options)
                 options["language"] = _lang_to_tesseract(src)
@@ -282,7 +292,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
                                  for p in work for w in (p.widgets() or []))
                 except Exception:
                     pass
-                embedded = work.embfile_count() if hasattr(work, "embfile_count") else 0
+                embedded = _attachment_names(work)
         except BaseException:
             if work is not None:
                 work.close()
@@ -295,7 +305,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
     try:
         return _run_job(work, job, fmt, output_path,
                         src_bytes if work is None else None, signed if work is not None else False,
-                        embedded if work is not None else 0, progress, options)
+                        embedded if work is not None else [], progress, options)
     finally:
         with ENGINE_LOCK:
             for doc in (work, getattr(job, "_replaced_work", None)):
@@ -303,7 +313,7 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
                     doc.close()
 
 
-def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool, embedded: int, progress,
+def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool, embedded: list[str], progress,
              options: dict) -> ConversionResult:
     from . import export_image, export_office, export_text
     if work is not None and fmt in TEXT_FORMATS and job.ocr != "never" and foliant_ocr_module() is not None:
@@ -319,7 +329,10 @@ def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool
         if signed:
             job.warn(_("Il documento è firmato: le firme non sono trasferibili nel formato di uscita."))
         if embedded:
-            job.warn(_("Gli allegati del PDF ({n}) non sono stati convertiti.").format(n=embedded))
+            shown = ", ".join(embedded[:10]) + (" …" if len(embedded) > 10 else "")
+            job.warn(_("Gli allegati del PDF ({n}) non sono stati convertiti: {names}.").format(
+                n=len(embedded), names=shown))
+            job.result.details["attachments"] = list(embedded)
         if fmt in TEXT_FORMATS and job.ocr == "never":
             with ENGINE_LOCK:
                 scanned = [job.source_index(i) + 1 for i in range(work.page_count)
@@ -380,6 +393,84 @@ def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool
         raise ConversionError(_("Impossibile scrivere il file: {e}").format(e=e.strerror or e)) from e
     job.result.ocr_pages = sorted(set(job.result.ocr_pages))
     return job.result
+
+
+def _file_label(pdf: pymupdf.Document, key: str) -> str:
+    """Nome del file incorporato come lo vede l'utente (/UF o /F; la chiave dei portfolio ha
+    spesso un prefisso di cartella come «<2>»)."""
+    try:
+        info = pdf.embfile_info(key)
+        return info.get("ufilename") or info.get("filename") or key
+    except Exception:
+        return key
+
+
+def _attachment_names(pdf: pymupdf.Document) -> list[str]:
+    """Nomi dei file incorporati (allegati a livello di documento e nelle annotazioni)."""
+    names: list[str] = []
+    try:
+        names += [_file_label(pdf, k) for k in pdf.embfile_names()]
+    except Exception:
+        pass
+    for page in pdf:
+        try:
+            for annot in page.annots(types=[pymupdf.PDF_ANNOT_FILE_ATTACHMENT]):
+                names.append(annot.file_info.get("filename") or annot.info.get("content") or "?")
+        except Exception:
+            pass
+    return names
+
+
+def _member_key(pdf: pymupdf.Document, member: str) -> str:
+    keys = pdf.embfile_names()
+    if member in keys:
+        return member
+    by_label = [k for k in keys if _file_label(pdf, k) == member]
+    if len(by_label) == 1:
+        return by_label[0]
+    raise ConversionError(_("Il portfolio non contiene «{n}».").format(n=member))
+
+
+def _member_bytes(pdf: pymupdf.Document, member: str) -> bytes:
+    key = _member_key(pdf, member)
+    data = pdf.embfile_get(key)
+    if b"%PDF" not in data[:1024]:
+        raise ConversionError(_("«{n}» non è un PDF: si possono convertire solo i PDF del portfolio.").format(
+            n=_file_label(pdf, key)))
+    return data
+
+
+def portfolio_members(source, password: str | None = None) -> list[tuple[str, str]]:
+    """PDF incorporati di un portfolio come (chiave, nome da mostrare); vuoto se il documento
+    non è un portfolio. I nomi ripetuti (stesso file in cartelle diverse) restano distinti."""
+    from .portfolio import is_portfolio
+    with ENGINE_LOCK:
+        src = open_source(source, password, need_extract=False)
+        try:
+            if not is_portfolio(src):
+                return []
+            out = []
+            for key in src.embfile_names():
+                try:
+                    head = src.embfile_get(key)[:1024]
+                except Exception:
+                    continue
+                if b"%PDF" in head:
+                    out.append((key, _file_label(src, key)))
+            labels = [label for _k, label in out]
+            return [(k, label if labels.count(label) == 1 else f"{label} ({k})") for k, label in out]
+        finally:
+            src.close()
+
+
+def portfolio_member_bytes(source, member: str, password: str | None = None) -> bytes:
+    """Byte di un PDF incorporato nel portfolio (per chiave o per nome del file)."""
+    with ENGINE_LOCK:
+        src = open_source(source, password, need_extract=False)
+        try:
+            return _member_bytes(src, member)
+        finally:
+            src.close()
 
 
 def convert_pdf(input_path, output_path, fmt, progress=None, **options) -> list[str]:

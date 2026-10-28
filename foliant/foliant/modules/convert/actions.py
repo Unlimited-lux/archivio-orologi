@@ -193,24 +193,38 @@ class ConvertController:
             source = paths[0]
             name = Path(source).stem
             folder = str(Path(source).parent)
-            while True:
+            probed = self._probe_source(source, Path(source).name)
+            if probed is None:
+                return None
+            page_count, password = probed
+            current = 0
+        selected = self.selected_pages() if view is not None else None
+        # CNV-01: un portfolio si converte come documento di copertina o come uno dei PDF incorporati
+        try:
+            from .engine import portfolio_member_bytes, portfolio_members
+            members = portfolio_members(source, password)
+        except Exception:
+            members = []
+        if members:
+            cover = _("Documento di copertina")
+            labels = [label for _key, label in members]
+            choice, ok = QInputDialog.getItem(self.window, _("Portfolio PDF"),
+                                              _("Il documento è un portfolio. Che cosa vuoi convertire?"),
+                                              [cover] + labels, 0, False)
+            if not ok:
+                return None
+            if choice != cover and choice in labels:
+                key = members[labels.index(choice)][0]
                 try:
-                    with ENGINE_LOCK:
-                        from .common import open_source
-                        probe = open_source(source, password, need_extract=False)
-                        page_count = probe.page_count
-                        probe.close()
-                    break
-                except (PasswordRequired, WrongPassword) as e:
-                    if isinstance(e, WrongPassword):
-                        QMessageBox.warning(self.window, _("Password errata"), _("La password non è corretta. Riprova."))
-                    password = self._ask_password(Path(source).name)
-                    if password is None:
-                        return None
+                    source = portfolio_member_bytes(source, key, password)
                 except FoliantError as e:
                     self.ctx.error(_("Impossibile aprire il file"), str(e))
                     return None
-            current = 0
+                probed = self._probe_source(source, choice)
+                if probed is None:
+                    return None
+                page_count, password = probed
+                name, current, selected = Path(choice).stem, 0, None   # nome del file mostrato
         try:   # analisi in background (documenti grandi): basta un campione di pagine
             scanned = bool(self.ctx.run_task(_("Analisi del documento…"),
                                              lambda progress: scanned_pages(source, password, limit=50)))
@@ -220,7 +234,7 @@ class ConvertController:
         dlg = ExportDialog(self.window, page_count=page_count, current_page=current, name=name, folder=folder,
                            fmt=fmt or settings.value("convert/last_format", "docx") or "docx",
                            settings=settings, scanned=scanned,
-                           selected=self.selected_pages() if view is not None else None)
+                           selected=selected)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         fmt, out_path, options = dlg.values()
@@ -249,6 +263,28 @@ class ConvertController:
         task = self._run_background(_("Conversione in corso…"), finished, run_conversion, source, out_path, fmt,
                                     **options)
         return task.result if task.done and task.error is None else None
+
+    def _probe_source(self, source, label: str):
+        """Apre il PDF per contarne le pagine, chiedendo la password se serve.
+        Restituisce (pagine, password) oppure None se l'utente rinuncia o il file non si apre."""
+        from .common import open_source
+        password = None
+        while True:
+            try:
+                with ENGINE_LOCK:
+                    probe = open_source(source, password, need_extract=False)
+                    page_count = probe.page_count
+                    probe.close()
+                return page_count, password
+            except (PasswordRequired, WrongPassword) as e:
+                if isinstance(e, WrongPassword):
+                    QMessageBox.warning(self.window, _("Password errata"), _("La password non è corretta. Riprova."))
+                password = self._ask_password(label)
+                if password is None:
+                    return None
+            except FoliantError as e:
+                self.ctx.error(_("Impossibile aprire il file"), str(e))
+                return None
 
     def _confirm_pdfa(self, source, fmt: str, password: str | None) -> bool:
         """CNV-14: analisi preliminare con l'elenco dei problemi e delle correzioni."""

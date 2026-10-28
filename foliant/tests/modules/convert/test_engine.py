@@ -1096,3 +1096,33 @@ def test_docx_mostly_rotated_page_stays_in_flow(tmp_path):
     path = _save(doc, tmp_path / "pagina_ruotata.pdf")
     body = [q.text for q in docx.Document(convert_pdf(path, tmp_path / "p.docx", "docx")[0]).paragraphs]
     assert body == ["Listino prezzi autunno", "Cronografo in oro rosa"]
+
+
+def test_txt_5000_pages_memory(tmp_path):
+    """CNV-01: 5 000 pagine in TXT restano sotto il limite di memoria di NFR-14 (2 GB),
+    misurato in un processo separato."""
+    import subprocess
+    import sys
+    script = tmp_path / "misura.py"
+    script.write_text(
+        "import resource, sys, pymupdf\n"
+        "import foliant\n"
+        "from foliant.modules.convert.engine import convert_pdf\n"
+        "doc = pymupdf.open()\n"
+        "for i in range(5000):\n"
+        "    p = doc.new_page()\n"
+        "    p.insert_text((72, 100), f'Pagina {i + 1} listino', fontsize=12)\n"
+        "    p.insert_text((72, 130), 'Referenza 1234 acciaio automatico 5.400 euro', fontsize=10)\n"
+        "data = doc.tobytes(); doc.close()\n"
+        "base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
+        "out = convert_pdf(data, sys.argv[1], 'txt')[0]\n"
+        "print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)\n"
+        "print(open(out, encoding='utf-8').read().count('\\f'))\n")
+    from pathlib import Path
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))
+    res = subprocess.run([sys.executable, str(script), str(tmp_path / "grande.txt")], capture_output=True,
+                         text=True, timeout=170, env=env)
+    assert res.returncode == 0, res.stderr[-2000:]
+    peak_mb, feeds = (int(v) for v in res.stdout.split())
+    assert peak_mb < 2048
+    assert feeds == 4999

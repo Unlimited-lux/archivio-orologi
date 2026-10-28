@@ -119,3 +119,53 @@ def test_remove_from_portfolio(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("x")
     assert add_files(doc, [{"path": str(f)}, {"path": str(f)}]) == ["a.txt", "a (2).txt"]
+
+
+# ------------------------------------------------------- portfolio come sorgente (CNV-01)
+def test_convert_portfolio_member_and_cover(four_files, tmp_path):
+    from foliant.modules.convert.common import ConversionError
+    from foliant.modules.convert.engine import convert_pdf, portfolio_members, run_conversion
+    data, _w = create_portfolio(four_files, title="Orologio 1234")
+    assert sorted(label for _k, label in portfolio_members(data)) == ["contratto.pdf", "fattura.pdf"]
+    out = convert_pdf(data, tmp_path / "f.txt", "txt", portfolio_member="fattura.pdf")
+    text = open(out[0], encoding="utf-8").read()
+    assert "Pagina 1" in text and "Pagina 2" in text and "Orologio 1234" not in text
+    # il documento di copertina resta la scelta predefinita; gli allegati sono elencati nel report
+    res = run_conversion(data, tmp_path / "c.txt", "txt")
+    assert "Orologio 1234" in open(res.paths[0], encoding="utf-8").read()
+    assert sorted(res.details["attachments"]) == ["contratto.pdf", "fattura.pdf", "foto.jpg", "scheda.docx"]
+    assert any("scheda.docx" in w for w in res.warnings)
+    with pytest.raises(ConversionError):
+        convert_pdf(data, tmp_path / "x.txt", "txt", portfolio_member="scheda.docx")
+    with pytest.raises(ConversionError):
+        convert_pdf(data, tmp_path / "x.txt", "txt", portfolio_member="manca.pdf")
+    assert portfolio_members(make_pdf(tmp_path / "semplice.pdf")) == []
+
+
+def test_export_ui_asks_portfolio_member(window, four_files, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QDialog, QInputDialog
+
+    from foliant.modules.convert.export_dialog import ExportDialog
+    data, _w = create_portfolio(four_files, title="Orologio 1234")
+    path = tmp_path / "pratica.pdf"
+    path.write_bytes(data)
+    window.open_path(str(path))
+    asked = []
+
+    def get_item(parent, title, label, items, current, editable):
+        asked.append(items)
+        return "fattura.pdf", True
+    monkeypatch.setattr(QInputDialog, "getItem", get_item)
+    seen = {}
+
+    def fake_exec(dlg):
+        dlg.format_box.setCurrentIndex(dlg.format_box.findData("txt"))
+        dlg.folder_edit.setText(str(tmp_path / "out"))
+        seen["pages"] = dlg.page_count
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ExportDialog, "exec", fake_exec)
+    result = window.ctx.convert_controller.export()
+    assert asked and asked[0][0] == "Documento di copertina" and "fattura.pdf" in asked[0]
+    assert "scheda.docx" not in asked[0]
+    assert seen["pages"] == 2
+    assert result.paths == [str(tmp_path / "out" / "fattura.txt")]
