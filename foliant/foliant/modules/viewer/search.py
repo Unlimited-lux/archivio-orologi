@@ -229,10 +229,12 @@ class ResultsPanel(QWidget):
                 if label and label != str(page + 1) else _("Pagina {n}").format(n=page + 1))
         return f"<b>{head}</b> &nbsp;<span style='color:{theme.hex_color('text_muted')}'>{count}</span>"
 
-    def add_page(self, page: int, hits: list[Hit], flat_start: int) -> None:
+    def add_page(self, page: int, hits: list[Hit]) -> None:
+        """Righe dei risultati di una pagina. Ogni riga ricorda (pagina, n): la posizione nell'elenco
+        completo si ricava al clic (`flat_of`), così l'arrivo di altre pagine non costa nulla."""
         item = QTreeWidgetItem()
         item.setText(0, self.page_title(page, len(hits)))
-        item.setData(0, Qt.ItemDataRole.UserRole, flat_start)
+        item.setData(0, Qt.ItemDataRole.UserRole, (page, 0))
         for n, h in enumerate(hits):
             child = QTreeWidgetItem(item)
             if h.comment:
@@ -240,7 +242,7 @@ class ResultsPanel(QWidget):
             else:
                 child.setText(0, "…" + html.escape(h.before) + "<b>" + html.escape(h.found) + "</b>"
                               + html.escape(h.after) + "…")
-            child.setData(0, Qt.ItemDataRole.UserRole, flat_start + n)
+            child.setData(0, Qt.ItemDataRole.UserRole, (page, n))
         # inserimento in ordine di pagina
         pos = bisect.bisect_left(self._pages, page)
         self._pages.insert(pos, page)
@@ -248,29 +250,29 @@ class ResultsPanel(QWidget):
         item.setExpanded(True)
         self._page_items[page] = item
 
-    def renumber(self) -> None:
-        """Dopo l'arrivo di nuove pagine gli indici globali cambiano."""
-        flat = 0
-        for p in self._pages:
-            item = self._page_items[p]
-            item.setData(0, Qt.ItemDataRole.UserRole, flat)
-            for n in range(item.childCount()):
-                item.child(n).setData(0, Qt.ItemDataRole.UserRole, flat + n)
-            flat += item.childCount()
+    def flat_of(self, item: QTreeWidgetItem) -> int | None:
+        """Posizione del risultato della riga nell'elenco completo (ricerca binaria)."""
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(key, tuple):
+            return None
+        page, n = key
+        return self.controller.first_hit_of_page(page) + n
 
     def select(self, flat: int) -> None:
-        for p in self._pages:
-            item = self._page_items[p]
-            for n in range(item.childCount()):
-                child = item.child(n)
-                if child.data(0, Qt.ItemDataRole.UserRole) == flat:
-                    self.tree.setCurrentItem(child)
-                    self.tree.scrollToItem(child)
-                    return
+        hits = self.controller.hits
+        if not 0 <= flat < len(hits):
+            return
+        page = hits[flat].page
+        item = self._page_items.get(page)
+        n = flat - self.controller.first_hit_of_page(page)
+        if item is not None and 0 <= n < item.childCount():
+            child = item.child(n)
+            self.tree.setCurrentItem(child)
+            self.tree.scrollToItem(child)
 
     def _on_item(self, item: QTreeWidgetItem, _col: int = 0) -> None:
-        flat = item.data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(flat, int):
+        flat = self.flat_of(item)
+        if flat is not None:
             self.controller.go_to(flat, record=True)
 
 
@@ -346,7 +348,10 @@ class SearchController(QObject):
         self.job: SearchJob | None = None
         self.hits: list[Hit] = []
         self._hit_pages: list[int] = []      # pagina di ogni risultato (ricerca binaria)
-        self._renumber_pending = False
+        self._hl_timer = QTimer(self)
+        self._hl_timer.setSingleShot(True)
+        self._hl_timer.setInterval(250)
+        self._hl_timer.timeout.connect(self._update_highlights)
         self.current: int = -1
         self._texts: dict[int, PageText] = {}
         self._texts_version = -1
@@ -521,10 +526,10 @@ class SearchController(QObject):
 
     def _reset_results(self) -> None:
         self._timer.stop()
+        self._hl_timer.stop()
         self.job = None
         self.hits = []
         self._hit_pages = []
-        self._renumber_pending = False
         self.current = -1
         self.panel.clear()
         self.bar.set_error(False)
@@ -576,8 +581,7 @@ class SearchController(QObject):
                 self._add_page(page, job.results[page])
                 changed = True
         if changed:
-            self._renumber()
-            self._update_highlights()
+            self._highlights_later()
         self._update_counter()
         if not job.done:
             if not self._timer.isActive():
@@ -595,33 +599,35 @@ class SearchController(QObject):
             if page in job.results:
                 self._add_page(page, job.results[page])
         if job is not None:
-            self._renumber()
             self._update_highlights()
             self._finished()
 
+    def first_hit_of_page(self, page: int) -> int:
+        return bisect.bisect_left(self._hit_pages, page)
+
+    def _highlights_later(self) -> None:
+        """Evidenziazioni aggiornate al massimo ogni 250 ms durante la ricerca (e alla fine)."""
+        if not self._hl_timer.isActive():
+            self._hl_timer.start()
+
     def _add_page(self, page: int, hits: list[Hit]) -> None:
-        """Aggiunge i risultati di una pagina; la numerazione dell'elenco si aggiorna una volta
-        per giro di lavoro (`_renumber`), non a ogni pagina."""
+        """Aggiunge i risultati di una pagina (costo indipendente dal numero di risultati)."""
         pos = bisect.bisect_left(self._hit_pages, page)
         self.hits[pos:pos] = hits
         self._hit_pages[pos:pos] = [page] * len(hits)
         if 0 <= self.current and pos <= self.current:
             self.current += len(hits)
-        self.panel.add_page(page, hits, pos)
-        self._renumber_pending = True
+        self.panel.add_page(page, hits)
         if self._pending_select:
             self._pending_select = False
             self.current = pos
             self.go_to(pos, record=False)
 
-    def _renumber(self) -> None:
-        if self._renumber_pending:
-            self._renumber_pending = False
-            self.panel.renumber()
-
     def _finished(self) -> None:
         job = self.job
         self._timer.stop()
+        self._hl_timer.stop()
+        self._update_highlights()
         self._update_counter(final=True)
         if job is not None and job.no_text:
             n = job.no_text

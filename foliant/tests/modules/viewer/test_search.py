@@ -244,8 +244,11 @@ def test_search_also_in_comments(viewer_window, tmp_path):
 
 
 def test_large_document_full_count_is_fast(viewer_window, tmp_path):
-    """NFR-07: 500 pagine con 18.000 occorrenze, conteggio completo in tempi ragionevoli
-    (prima ~50 s: contesto calcolato riscorrendo la pagina e rinumerazione a ogni pagina)."""
+    """NFR-07: 500 pagine con 36 occorrenze per pagina (18.000), conteggio completo nel ciclo di
+    eventi reale entro 3 s su una macchina libera (qui tolleranza ×3). Prima ~50 s: contesto
+    ricalcolato riscorrendo la pagina, rinumerazione dell'elenco e evidenziazioni a ogni passo,
+    normalizzazione del testo ripetuta."""
+    from PySide6.QtWidgets import QApplication
     path = tmp_path / "grande.pdf"
     doc = pymupdf.open()
     line = "Il nostro orologio preferito è un orologio automatico, orologio da polso."
@@ -255,15 +258,18 @@ def test_large_document_full_count_is_fast(viewer_window, tmp_path):
     view = viewer_window.open_path(str(path))
     ctl = _ctl(viewer_window)
     t = time.perf_counter()
-    ctl.search("orologio")
-    ctl.finish()
+    ctl.open()
+    ctl.bar.field.setText("orologio")
+    ctl.restart()
+    while ctl.job is not None and time.perf_counter() - t < 60:
+        QApplication.processEvents()
     elapsed = time.perf_counter() - t
     assert len(ctl.hits) == 18000
-    assert elapsed < 10, f"{elapsed:.1f} s"
+    assert elapsed < 9, f"{elapsed:.1f} s"
     assert [h.page for h in ctl.hits] == sorted(h.page for h in ctl.hits)
     h = ctl.hits[3]
     assert h.found == "orologio" and h.before and h.after
-    flat = [c.data(0, Qt.ItemDataRole.UserRole) for p in ctl.panel._pages
+    flat = [ctl.panel.flat_of(c) for p in ctl.panel._pages
             for c in (ctl.panel._page_items[p].child(n) for n in range(ctl.panel._page_items[p].childCount()))]
     assert flat == list(range(18000))           # numerazione dell'elenco completa e ordinata
     view.document._saved_state = view.document._state
