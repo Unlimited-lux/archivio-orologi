@@ -39,11 +39,8 @@ di modifica. Barra di stato: pulsante lucchetto «Accesso completo/limitato».
 
 ## 3. Collegamenti esterni (SEC-27) — risolta
 
-Il modulo usa `ctx.add_link_handler` (registrato una sola volta: l'elenco del
-nucleo è globale). Poiché il controllo di sicurezza deve valere come ultima
-istanza prima del comportamento predefinito, il gestore del modulo interroga
-prima i gestori registrati dopo di lui. Proposta: un parametro `priority` in
-`add_link_handler` (es. «ultimo») per evitare questa precedenza manuale.
+Il modulo registra il suo gestore con `ctx.add_link_handler(handler, priority=-100)`:
+ultima istanza prima del comportamento predefinito del nucleo.
 
 ## 4. Avviso al salvataggio con segni non applicati (SEC-19)
 

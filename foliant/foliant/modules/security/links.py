@@ -232,13 +232,6 @@ _installed = False
 
 
 def handler(view, link: dict) -> bool:
-    # Il controllo di sicurezza è l'ultima istanza prima del comportamento del nucleo:
-    # i gestori registrati dopo questo (altri moduli) hanno la precedenza.
-    from foliant.ui.tools import LINK_HANDLERS
-    if handler in LINK_HANDLERS:
-        for other in LINK_HANDLERS[LINK_HANDLERS.index(handler) + 1:]:
-            if other(view, link):
-                return True
     try:
         return follow_external(view, link)
     except Exception as e:   # un errore del modulo non deve chiudere l'applicazione
@@ -247,9 +240,7 @@ def handler(view, link: dict) -> bool:
 
 
 def install(ctx) -> None:
-    """Registra una sola volta il gestore dei collegamenti (l'elenco del nucleo è globale)."""
+    """Registra il gestore come ultima istanza prima del comportamento del nucleo."""
     global _installed
-    if _installed:
-        return
-    ctx.add_link_handler(handler)
+    ctx.add_link_handler(handler, priority=-100)
     _installed = True

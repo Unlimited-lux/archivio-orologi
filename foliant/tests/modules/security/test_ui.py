@@ -610,7 +610,8 @@ def test_link_homograph_warning():
 
 def test_core_link_hook_installed(window, sec):
     from foliant.ui import tools
-    assert L._installed and tools.LINK_HANDLERS.count(L.handler) == 1
+    entries = [(p, h) for p, _s, h in tools.LINK_HANDLERS if h is L.handler]
+    assert L._installed and entries == [(-100, L.handler)]
 
 
 def test_internal_links_delegated(window, sec, sample_pdf):
