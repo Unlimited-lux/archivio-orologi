@@ -267,6 +267,19 @@ def tokenize_ops(data: bytes) -> list[Op]:
             operands = []
             start = None
             continue
+        if kind == "num":
+            if start is None:
+                start = tok_start
+            tok = m.group(kind)
+            operands.append(float(tok) if b"." in tok else int(tok))
+            i = m.end()
+            continue
+        if kind == "name":
+            if start is None:
+                start = tok_start
+            operands.append(Name(_name_decode(m.group(kind))))
+            i = m.end()
+            continue
         val, j, vk = _read_value(data, i)
         if vk in ("aclose", "dclose", "bopen", "bclose", "junk", None):
             i = j
@@ -396,6 +409,23 @@ class ParsedPage:
     end_ctm: pymupdf.Matrix
     pdf_to_page: pymupdf.Matrix
     names_used: dict
+
+
+class Pt:
+    """Punto leggero (coordinate pagina) per i tracciati analizzati."""
+
+    __slots__ = ("x", "y")
+
+    def __init__(self, x: float, y: float):
+        self.x = x
+        self.y = y
+
+    def __iter__(self):
+        yield self.x
+        yield self.y
+
+    def __repr__(self) -> str:
+        return f"Pt({self.x:.2f}, {self.y:.2f})"
 
 
 def rcenter(r) -> pymupdf.Point:
@@ -592,8 +622,17 @@ def parse_page(doc: pymupdf.Document, page: pymupdf.Page, data: bytes | None = N
     def use(cat: str, name) -> None:
         names_used.setdefault(cat, set()).add(str(name))
 
-    def to_page(x: float, y: float) -> pymupdf.Point:
-        return pymupdf.Point(x, y) * st.ctm * P
+    cache = {"key": None, "m": None}
+
+    def to_page(x: float, y: float) -> Pt:
+        c = st.ctm
+        key = (c.a, c.b, c.c, c.d, c.e, c.f)
+        if cache["key"] != key:
+            m = c * P
+            cache["key"] = key
+            cache["m"] = (m.a, m.b, m.c, m.d, m.e, m.f)
+        a, b, cc, d, e, f = cache["m"]
+        return Pt(a * x + cc * y + e, b * x + d * y + f)
 
     def num(v) -> float:
         return float(v) if isinstance(v, (int, float)) else 0.0
@@ -691,15 +730,15 @@ def parse_page(doc: pymupdf.Document, page: pymupdf.Page, data: bytes | None = N
                 segments.append(current)
                 current = []
             pts = [p for seg in segments for el in seg for p in el[1:]]
+            if pts:
+                xs = [p.x for p in pts]
+                ys = [p.y for p in pts]
+                bbox = (min(xs), min(ys), max(xs), max(ys))
             if clip_pending and pts:
-                r = pymupdf.Rect(pts[0], pts[0])
-                for p in pts[1:]:
-                    r |= p
+                r = pymupdf.Rect(bbox)
                 st.clip = r if st.clip is None else (st.clip & r)
             if name != "n" and not clip_pending and path_start is not None and pts and not in_text:
-                r = pymupdf.Rect(pts[0], pts[0])
-                for p in pts[1:]:
-                    r |= p
+                r = pymupdf.Rect(bbox)
                 if name in ("S", "s", "B", "B*", "b", "b*"):
                     scale = (abs(st.ctm.a * st.ctm.d - st.ctm.b * st.ctm.c)) ** 0.5
                     lw = st.line_width * scale / 2
@@ -771,12 +810,13 @@ def _set_colors(obj: PageObject, st: GState) -> None:
     for key, attr in (("SC", "stroke_color"), ("sc", "fill_color")):
         raw = st.ops.get(key)
         if raw:
-            try:
-                ops = tokenize_ops(raw)
-                if ops:
-                    setattr(obj, attr, _color_tuple(ops[0].operands))
-            except Exception:
-                pass
+            vals = []
+            for tok in raw.split()[:-1]:
+                try:
+                    vals.append(float(tok))
+                except ValueError:
+                    pass
+            setattr(obj, attr, tuple(vals) if vals else None)
         else:
             setattr(obj, attr, (0.0,))
 

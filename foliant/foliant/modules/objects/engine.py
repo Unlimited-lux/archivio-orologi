@@ -17,7 +17,7 @@ import pymupdf
 
 from .content import (
     FORM, IMAGE, PATH, SHADING, Name, PageObject, ParsedPage, fmt_matrix, fmt_name, fmt_num, matrix_close,
-    page_content, parse_page, rcenter, resource_names, resources_value, tokenize_ops,
+    page_content, parse_page, rcenter, Pt, resource_names, resources_value, tokenize_ops,
 )
 
 MIN_SIZE = 1.0          # punti
@@ -1168,7 +1168,7 @@ def _quad_contains(q: pymupdf.Quad, p: pymupdf.Point) -> bool:
     return True
 
 
-def flatten(segments: list) -> list[list[pymupdf.Point]]:
+def flatten(segments: list) -> list[list]:
     polys = []
     for seg in segments:
         poly: list[pymupdf.Point] = []
@@ -1185,7 +1185,7 @@ def flatten(segments: list) -> list[list[pymupdf.Point]]:
                 for k in range(1, 9):
                     t = k / 8
                     mt = 1 - t
-                    poly.append(pymupdf.Point(
+                    poly.append(Pt(
                         mt ** 3 * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t ** 3 * p3.x,
                         mt ** 3 * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t ** 3 * p3.y))
             elif el[0] == "h" and start is not None:
@@ -1199,9 +1199,9 @@ def _dist_seg(p, a, b) -> float:
     dx, dy = b.x - a.x, b.y - a.y
     L = dx * dx + dy * dy
     if L <= 0:
-        return abs(p - a)
+        return math.hypot(p.x - a.x, p.y - a.y)
     t = max(0.0, min(1.0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L))
-    return abs(p - pymupdf.Point(a.x + t * dx, a.y + t * dy))
+    return math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
 
 
 def _path_contains(o: PageObject, p: pymupdf.Point, tol: float) -> bool:
