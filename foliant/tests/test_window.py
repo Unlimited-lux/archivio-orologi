@@ -252,3 +252,19 @@ def test_mode_scoped_shortcuts(window, sample_pdf):
     assert a1.shortcut() == QKeySequence("Ctrl+D") and a2.shortcut().isEmpty()
     window.set_mode("prova2")
     assert a1.shortcut().isEmpty() and a2.shortcut() == QKeySequence("Ctrl+D")
+
+
+def test_module_disabled_action_survives_view_switch(window, sample_pdf, tmp_path):
+    """Un modulo che disattiva un'azione (es. permessi negati) non viene smentito dal nucleo."""
+    import shutil
+    act = window.ctx.action("Azione protetta", None, lambda: None)
+    window.ctx.currentViewChanged.connect(lambda v: act.setEnabled(v is not None and "b.pdf" not in str(v.document.path)))
+    window.open_path(sample_pdf)
+    assert act.isEnabled()
+    other = tmp_path / "b.pdf"
+    shutil.copy(sample_pdf, other)
+    view = window.open_path(other)
+    with view.document.change("x") as pdf:
+        pdf.delete_page(0)
+    assert not act.isEnabled()
+    view.document._saved_state = view.document._state     # chiusura senza domanda di salvataggio
