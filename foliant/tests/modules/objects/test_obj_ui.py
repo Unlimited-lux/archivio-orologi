@@ -335,12 +335,12 @@ def test_paste_image_from_clipboard_centered(ui, tmp_path):
     img = QImage.fromData(png_bytes(400, 200, (10, 200, 10, 128), mode="RGBA"))
     QGuiApplication.clipboard().setImage(img)
     view.setFocus()
+    c = ui.c.visible_center(view, 0)
     QTest.keyClick(view, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
     o = objs(view)[-1]
     assert (o.width, o.height) == (400, 200)
     with O.ENGINE_LOCK:
         assert view.document.pdf.xref_get_key(o.xref, "SMask")[0] == "xref"
-    c = ui.c.visible_center(view, 0)
     assert abs((o.rect.x0 + o.rect.x1) / 2 - c.x) < 1 and abs((o.rect.y0 + o.rect.y1) / 2 - c.y) < 1
 
 
