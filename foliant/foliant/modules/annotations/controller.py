@@ -343,10 +343,6 @@ class Controller(QObject):
         if locked:
             self.ctx.error(_("Commenti"), _("Le annotazioni bloccate non si possono eliminare."))
             return False
-        if confirm_threads and any(i is not None and i.replies for i in infos):
-            if not self.ctx.confirm(_("Elimina commento"),
-                                    _("Il commento ha delle risposte: eliminare l'intera discussione?")):
-                return False
 
         def run(pdf):
             for page, xref in sorted(items, key=lambda t: -t[1]):

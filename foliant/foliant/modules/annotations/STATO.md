@@ -26,7 +26,7 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-13 | P1 | fatto | test_ann13_insert_and_replace | Inserisci testo/paragrafo (/Caret /Sy), Sostituisci (barrato /IRT /RT /Group); voce unica «Sostituzione»; eliminazione di gruppo. |
 | ANN-14 | P0 | fatto | test_ann14_note_click, test_ann14_note_icon_and_color, test_ann14_note_cancel_creates_nothing | Il motore normalizza l'icona a 16 pt (lato richiesto 20): l'icona ha dimensione costante a schermo (NoZoom). |
 | ANN-15 | P1 | fatto | test_ann15_typewriter | Senza bordo, rettangolo adattato; testo vuoto → nessuna annotazione. Caratteri CJK: aspetto del motore. |
-| ANN-16 | P0 | parziale | test_ann16_textbox, test_ann16_click_creates_default_width_box, test_ann16_rotated_page_text_horizontal | Aspetto vettoriale proprio (bordo e sfondo di colori distinti, a capo, allineamento, margine). Adattamento automatico dell'altezza (test_ann16_autofit_height). Manca la formattazione su porzioni di testo. |
+| ANN-16 | P0 | fatto | test_ann16_textbox, test_ann16_click_creates_default_width_box, test_ann16_rotated_page_text_horizontal | Aspetto vettoriale proprio (bordo e sfondo di colori distinti, a capo, allineamento, margine). Adattamento automatico dell'altezza (test_ann16_autofit_height); grassetto/corsivo/sottolineato/colore su porzioni di testo in /RC e nell'aspetto (test_ann16_rich_text_in_textbox). |
 | ANN-17 | P1 | fatto | test_ann17_callout, test_ann17_move_tip_only | Punta, gomito, casella; punta spostabile da sola. |
 | ANN-18 | P0 | fatto | test_ann18_* (4) | Maiusc quadrato/cerchio, Alt dal centro. |
 | ANN-19 | P0 | fatto | test_ann19_arrow, test_ann19_shift_snaps_45, test_ann19_caption | Estremità modificabili, didascalia (/Cap). |
@@ -37,8 +37,8 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-24 | P1 | fatto | test_ann24_25_stamp_tools, test_preset_stamp | 20 timbri originali, /Name standard o personalizzato, aspetto vettoriale. |
 | ANN-25 | P1 | fatto | test_ann24_25_stamp_tools, test_ann25_counter_never_decrements, test_fill_template, test_dynamic_stamp_frozen_value | Segnaposto {autore} {data} {ora} {file} {pagina} {contatore}; contatore persistente. Editor di modelli personalizzati non fatto. |
 | ANN-26 | P1 | parziale | test_ann26_custom_stamp_library, test_image_stamp | Timbri da immagine salvati nella libreria «Personalizzati» (persistente). Mancano timbri da pagina PDF/area e importa/esporta libreria. |
-| ANN-27 | P2 | parziale | test_ann27_sticker | Sei adesivi vettoriali originali (spunta, croce, stella, attenzione, informazione, freccia), ruotabili; nessuna categoria né adesivi personalizzati. |
-| ANN-28 | P2 | non fatto | | |
+| ANN-27 | P1 (spec. v2) | parziale | test_ann27_sticker | Sei adesivi vettoriali originali (spunta, croce, stella, attenzione, informazione, freccia), ruotabili; nessuna categoria né adesivi personalizzati. |
+| ANN-28 | P1 (spec. v2) | non fatto | | Generazione con IA non implementata (richiede il fornitore del modulo IA). |
 | ANN-29 | P1 | fatto | test_ann29_attachment_tool, test_attachment_round_trip | Doppio clic → solo «Salva allegato con nome» (nessuna esecuzione). PDF/A-1: allegato impedito (test_ann29_pdfa1_blocks_attachments). |
 | ANN-30 | P1 | parziale | test_ann30_calibrate_tool, test_scale_calibrate | Scala per rapporto o calibrazione; /Measure. Ambito pagina corrente o tutte (test_ann30_scale_per_page), scala indicata nella barra di stato. Mancano le aree /VP del documento. |
 | ANN-31 | P1 | fatto | test_ann31_distance_tool, test_ann31_measure_updates_when_vertex_moves, test_distance_measure | |
@@ -50,7 +50,7 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 | ANN-37 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_reply_structure_after_save, test_cyclic_irt_chain_lists_all, test_delete_root_removes_replies | |
 | ANN-38 | P1 | fatto | test_ann37_38_reply_and_status_from_ui, test_status_* , test_marked_on_then_off | «Cronologia degli stati…» nel menu (test_ann38_history_menu). |
 | ANN-39 | P1 | fatto | test_ann39_hide_annotations | Soluzione locale (CORE_REQUESTS 2). |
-| ANN-40 | P1 | fatto | test_ann40_flatten_from_ui, test_ann40_flatten_selection, test_flatten_* | Tutto il documento, pagina corrente o selezione; non stampabili esclusi; annullabile. Manca l'ambito «annotazioni filtrate». |
+| ANN-40 | P1 | parziale | test_ann40_flatten_from_ui, test_flatten_* | Tutto il documento o pagina corrente (l'ambito «selezione» è disattivato: test_ann40_flatten_selection in xfail); non stampabili esclusi; annullabile. Manca l'ambito «annotazioni filtrate». |
 | ANN-41 | P1 | fatto | test_ann41_42_export_import_ui, test_export_xfdf_*, test_export_fdf | XFDF (con aspetto dei timbri) e FDF. |
 | ANN-42 | P1 | fatto | test_ann41_42_export_import_ui, test_ann42_import_from_pdf_and_malformed, test_xfdf_* | XFDF, FDF, PDF; duplicati saltati; un passo di annullamento. |
 | ANN-43 | P1 | fatto | test_ann43_summary_files, test_ann43_page_layout_numbers, test_summary_* | PDF «solo elenco» o «pagine con commenti numerati» (marcatori e connettori), CSV (riga per risposta con padre), testo, HTML. Manca l'anteprima/stampa diretta. |
@@ -59,3 +59,9 @@ Test: `tests/modules/annotations/` — `test_p0_create.py`, `test_p0_tools.py` (
 ## Verifica visiva
 Catture offscreen nei temi chiaro e scuro (barra strumenti compatta a icone, pannello proprietà,
 elenco commenti con risposte e stato, maniglie di selezione e vertici).
+
+## Note finali
+- Specifica v2 applicata: nessuna conferma per le operazioni annullabili (eliminazione di discussioni,
+  «Elimina tutti», appiattimento); scorciatoie del modulo limitate alla modalità Commenta.
+- Non verificato: rilettura su pagine ruotate con CropBox più grande del MediaBox (`core/placement.py`):
+  il modulo usa ancora le coordinate del motore.

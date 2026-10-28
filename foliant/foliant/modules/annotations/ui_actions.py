@@ -227,26 +227,19 @@ def flatten(ctrl: "Controller", current_page_only: bool = False, selection: bool
     if not ctrl.annotations():
         ctrl.ctx.info(_("Appiattisci annotazioni"), _("Il documento non contiene annotazioni da appiattire."))
         return 0
-    if not ctrl.ctx.confirm(_("Appiattisci annotazioni"),
-                            _("Le annotazioni diventeranno parte fissa delle pagine e, dopo il salvataggio, "
-                              "non saranno più modificabili. Continuare?")):
-        return 0
     pages = [view.current_page] if current_page_only else None
     only = list(ctrl.selection) if selection else None
     if selection and not only:
         return 0
     n = ctrl.apply(_("Appiattisci annotazioni"), engine.flatten, pages, only) or 0
     ctrl.clear_selection()
-    ctrl.ctx.status(_("Annotazioni appiattite: {n}").format(n=n))
+    ctrl.ctx.status(_("Annotazioni appiattite: {n}").format(n=n) + " — " + _("Annulla per ripristinarle."))
     return n
 
 
 def delete_all(ctrl: "Controller") -> int:
     infos = ctrl.annotations()
     if not infos:
-        return 0
-    if not ctrl.ctx.confirm(_("Elimina tutti i commenti"),
-                            _("Eliminare tutti i {n} commenti del documento?").format(n=len(infos))):
         return 0
     n = ctrl.apply(_("Elimina tutti i commenti"), engine.delete_all) or 0
     ctrl.clear_selection()

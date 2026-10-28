@@ -925,8 +925,5 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int,
         menu.addAction(_("Porta in primo piano"), lambda: ctrl.restack(True, [(page, xref)]))
         menu.addAction(_("Porta sullo sfondo"), lambda: ctrl.restack(False, [(page, xref)]))
         menu.addAction(_("Proprietà"), lambda: (ctrl.select([(page, xref)]), ctrl.ctx.show_properties("annotations")))
-    if not info.irt:
-        menu.addAction(_("Appiattisci selezione…"),
-                       lambda: ui_actions.flatten(ctrl, selection=True))
     menu.addSeparator()
     menu.addAction(_("Elimina"), lambda: ctrl.delete([(page, xref)]))

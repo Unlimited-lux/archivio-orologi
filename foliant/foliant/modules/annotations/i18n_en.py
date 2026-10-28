@@ -146,7 +146,7 @@ EN: dict[str, str] = {
         "Annotations can only be pasted into the same document.",
     "Le annotazioni erano nascoste: sono di nuovo visibili.": "Annotations were hidden: they are visible again.",
     "Sola lettura": "Read only", "Contenuto bloccato": "Locked contents", "Cancellazione": "Deletion",
-    "Sostituzione": "Replacement", "tutte le pagine": "all pages", "pagina {n}": "page {n}", "Aggiungi vertice qui": "Add vertex here", "Aggiungi vertice": "Add vertex",
+    "Sostituzione": "Replacement", "Annulla per ripristinarle.": "Undo to restore them.", "tutte le pagine": "all pages", "pagina {n}": "page {n}", "Aggiungi vertice qui": "Add vertex here", "Aggiungi vertice": "Add vertex",
     "Rimuovi vertice": "Remove vertex", "Intensità 1": "Intensity 1", "Intensità 2": "Intensity 2", "Allinea": "Align", "Distribuisci": "Distribute",
     "A sinistra": "Left", "Al centro orizzontale": "Horizontal center", "A destra": "Right", "In alto": "Top",
     "Al centro verticale": "Vertical center", "In basso": "Bottom", "In orizzontale": "Horizontally",

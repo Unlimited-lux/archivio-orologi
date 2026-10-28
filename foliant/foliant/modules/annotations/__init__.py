@@ -136,6 +136,7 @@ class AnnotationsModule:
 
     def _tool_action(self, key: str, text: str, icon_name: str, tool, shortcut: str | None = None) -> QAction:
         act = self.ctx.action(text, icon_name, lambda _c=False, k=key: self.activate(k), shortcut=shortcut,
+                              mode="commenta" if shortcut else None,
                               checkable=True)
         self.group.addAction(act)
         self.actions[key] = act
