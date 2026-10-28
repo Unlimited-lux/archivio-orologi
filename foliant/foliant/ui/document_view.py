@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import pymupdf
 from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPolygonF, QTransform
-from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QMenu
+from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSlider, QFrame, QMenu
 
 from ..core.document import CLOSED, CONTENT, Document
 from ..core.engine import ENGINE_LOCK
@@ -784,8 +784,28 @@ class DocumentView(QAbstractScrollArea):
             self._select_all_on_page()
             return
         key = ev.key()
-        if key == Qt.Key.Key_Escape and self.text_selection is not None:
-            self.clear_text_selection()
+        mods = ev.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        if key == Qt.Key.Key_Escape:
+            if self._tool is not None:
+                self.set_tool(None)       # torna allo strumento Seleziona
+            elif self.text_selection is not None:
+                self.clear_text_selection()
+            return
+        if mods == Qt.KeyboardModifier.NoModifier and key == Qt.Key.Key_N:
+            self.next_page()
+            return
+        if mods == Qt.KeyboardModifier.NoModifier and key == Qt.Key.Key_P:
+            self.previous_page()
+            return
+        if key == Qt.Key.Key_Space and mods in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier):
+            action = (QAbstractSlider.SliderAction.SliderPageStepSub
+                      if mods == Qt.KeyboardModifier.ShiftModifier else
+                      QAbstractSlider.SliderAction.SliderPageStepAdd)
+            self.verticalScrollBar().triggerAction(action)
+            return
+        if (mods == Qt.KeyboardModifier.NoModifier and key in (Qt.Key.Key_Right, Qt.Key.Key_Left)
+                and self.horizontalScrollBar().maximum() == 0):
+            self.next_page() if key == Qt.Key.Key_Right else self.previous_page()
             return
         if key == Qt.Key.Key_Home:
             self.go_to_page(0)
@@ -793,10 +813,12 @@ class DocumentView(QAbstractScrollArea):
         if key == Qt.Key.Key_End:
             self.go_to_page(len(self._geoms) - 1)
             return
-        if self._view_mode != VIEW_CONTINUOUS and key in (Qt.Key.Key_PageDown, Qt.Key.Key_Right):
+        if self._view_mode == VIEW_SINGLE and key == Qt.Key.Key_PageDown and (
+                self.verticalScrollBar().value() >= self.verticalScrollBar().maximum()):
             self.next_page()
             return
-        if self._view_mode != VIEW_CONTINUOUS and key in (Qt.Key.Key_PageUp, Qt.Key.Key_Left):
+        if self._view_mode == VIEW_SINGLE and key == Qt.Key.Key_PageUp and (
+                self.verticalScrollBar().value() <= self.verticalScrollBar().minimum()):
             self.previous_page()
             return
         super().keyPressEvent(ev)

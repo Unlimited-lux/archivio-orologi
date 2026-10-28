@@ -222,24 +222,18 @@ class MainWindow(QMainWindow):
         self.act_quit = a(_("Esci"), "log-out", self.close, QKeySequence.StandardKey.Quit)
         self.act_undo = a(_("Annulla"), "undo-2", self.undo, QKeySequence.StandardKey.Undo, requires_document=True)
         self.act_redo = a(_("Ripeti"), "redo-2", self.redo, QKeySequence.StandardKey.Redo, requires_document=True)
-        redo_alt = QAction(self)
-        redo_alt.setShortcut(QKeySequence("Ctrl+Y"))
-        redo_alt.triggered.connect(self.redo)
-        self.addAction(redo_alt)
+        self.act_redo.setShortcuts([QKeySequence("Ctrl+Shift+Z"), QKeySequence("Ctrl+Y")])
         self.act_zoom_in = a(_("Aumenta zoom"), "zoom-in", lambda: self._with_view(lambda v: v.zoom_in()),
                              QKeySequence.StandardKey.ZoomIn, requires_document=True)
-        zoom_in_alt = QAction(self)
-        zoom_in_alt.setShortcut(QKeySequence("Ctrl+="))
-        zoom_in_alt.triggered.connect(self.act_zoom_in.trigger)
-        self.addAction(zoom_in_alt)
+        self.act_zoom_in.setShortcuts([QKeySequence("Ctrl++"), QKeySequence("Ctrl+=")])
         self.act_zoom_out = a(_("Riduci zoom"), "zoom-out", lambda: self._with_view(lambda v: v.zoom_out()),
                               QKeySequence.StandardKey.ZoomOut, requires_document=True)
         self.act_zoom_100 = a(_("Dimensione reale"), "scan", lambda: self._with_view(lambda v: v.set_zoom(1.0)),
-                              "Ctrl+0", requires_document=True)
+                              "Ctrl+1", requires_document=True)
         self.act_fit_width = a(_("Adatta alla larghezza"), "move-horizontal",
                                lambda: self._with_view(lambda v: v.set_fit(FIT_WIDTH)), "Ctrl+2", requires_document=True)
         self.act_fit_page = a(_("Adatta alla pagina"), "maximize",
-                              lambda: self._with_view(lambda v: v.set_fit(FIT_PAGE)), "Ctrl+1", requires_document=True)
+                              lambda: self._with_view(lambda v: v.set_fit(FIT_PAGE)), "Ctrl+0", requires_document=True)
         self.act_rotate_view = a(_("Ruota vista"), "rotate-cw", lambda: self._with_view(lambda v: v.rotate_view(90)),
                                  "Ctrl+R", requires_document=True)
         self.act_first = a(_("Prima pagina"), "chevrons-up", lambda: self._with_view(lambda v: v.go_to_page(0)),
@@ -273,6 +267,12 @@ class MainWindow(QMainWindow):
             self.view_mode_actions[mode] = act
         self.view_mode_actions[VIEW_CONTINUOUS].setChecked(True)
 
+        self.act_preferences = a(_("Preferenze…"), "settings", self.show_preferences, "Ctrl+,")
+        self.act_shortcuts = a(_("Scorciatoie da tastiera"), "keyboard", self.show_shortcuts, "Ctrl+?")
+        self.act_help = a(_("Guida rapida"), "circle-help", self.show_help, "F1")
+        self.act_reopen = a(_("Riapri scheda chiusa"), "history", self.reopen_closed, "Ctrl+Shift+T")
+        self._build_navigation_shortcuts()
+
         for act in (self.act_open, self.act_save, self.act_undo, self.act_redo):
             self.header.addAction(act)
         self.header.addWidget(self._mode_bar)
@@ -300,6 +300,111 @@ class MainWindow(QMainWindow):
             btn.setDefaultAction(act)
             btn.setAutoRaise(True)
             sb.addPermanentWidget(btn)
+
+    def _shortcut(self, seq: str, slot) -> QAction:
+        act = QAction(self)
+        act.setShortcut(QKeySequence(seq))
+        act.triggered.connect(slot)
+        self.addAction(act)
+        return act
+
+    def _build_navigation_shortcuts(self) -> None:
+        """Scorciatoie globali della tabella UX-18 senza voce di menu propria."""
+        self._closed_paths: list[str] = []
+        self._shortcut("Ctrl+T", self.show_home)
+        self._shortcut("Ctrl+Shift+?", self.show_shortcuts)
+        self._shortcut("Ctrl+L", self._focus_page_field)
+        for seq in ("Ctrl+Tab", "Ctrl+PgDown"):
+            self._shortcut(seq, lambda: self._cycle_tab(1))
+        for seq in ("Ctrl+Shift+Tab", "Ctrl+PgUp"):
+            self._shortcut(seq, lambda: self._cycle_tab(-1))
+        for n in range(1, 10):
+            self._shortcut(f"Alt+{n}", lambda _c=False, n=n: self._go_tab(n - 1))
+        for n in range(10):
+            self._shortcut(f"Ctrl+Alt+{n}", lambda _c=False, n=n: self._mode_by_index(9 if n == 0 else n - 1))
+        self._shortcut("F9", self.toggle_sidebar)
+        self._shortcut("Shift+F9", self.toggle_properties)
+        self._shortcut("F10", lambda: self.menu_button.showMenu())
+        self._shortcut("F6", lambda: self._cycle_focus(1))
+        self._shortcut("Shift+F6", lambda: self._cycle_focus(-1))
+
+    def _focus_page_field(self) -> None:
+        if self.current_view() is not None:
+            self.page_spin.setFocus()
+            self.page_spin.selectAll()
+
+    def _cycle_tab(self, step: int) -> None:
+        n = self.tabs.count()
+        if n:
+            self.docs_stack.setCurrentWidget(self.tabs)
+            self.tabs.setCurrentIndex((self.tabs.currentIndex() + step) % n)
+
+    def _go_tab(self, index: int) -> None:
+        if 0 <= index < self.tabs.count():
+            self.docs_stack.setCurrentWidget(self.tabs)
+            self.tabs.setCurrentIndex(index)
+
+    def _mode_by_index(self, index: int) -> None:
+        ordered = sorted(self.modes.values(), key=lambda m: (m.order, m.title))
+        if 0 <= index < len(ordered):
+            self.set_mode(ordered[index].id)
+
+    def toggle_sidebar(self) -> None:
+        if self.sidebar.isVisible():
+            self.sidebar.hide()
+        elif self._sidebar and self.current_view() is not None:
+            self.sidebar.show()
+            self.sidebar_stack.show()
+            self._sidebar_open = True
+
+    def toggle_properties(self) -> None:
+        if self.properties.isVisible():
+            self.properties.hide()
+        elif self.properties.count() and self.current_view() is not None:
+            self.properties.show()
+
+    def _cycle_focus(self, step: int) -> None:
+        regions = [w for w in (self.header, self.sidebar_stack.currentWidget() if self.sidebar.isVisible() else None,
+                               self.current_view() or self.docs_stack.currentWidget(),
+                               self.properties.currentWidget() if self.properties.isVisible() else None)
+                   if w is not None and w.isVisible()]
+        if not regions:
+            return
+        focus = QApplication.focusWidget()
+        current = 0
+        for i, w in enumerate(regions):
+            if focus is not None and (focus is w or w.isAncestorOf(focus)):
+                current = i
+                break
+        target = regions[(current + step) % len(regions)]
+        target.setFocus(Qt.FocusReason.TabFocusReason)
+        if not target.hasFocus():
+            target.focusNextChild()
+
+    def reopen_closed(self) -> None:
+        while self._closed_paths:
+            path = self._closed_paths.pop()
+            if os.path.exists(path):
+                self.open_path(path)
+                return
+
+    def show_preferences(self) -> None:
+        from .dialogs import PreferencesDialog
+        dlg = PreferencesDialog(self.settings, self)
+        if dlg.exec():
+            old_lang = self.settings.value("language", "")
+            dlg.apply()
+            self.set_theme(self.settings.value("theme", "system"))
+            if dlg.language.currentData() != old_lang:
+                self.statusBar().showMessage(_("La lingua verrà applicata al prossimo avvio."), 6000)
+
+    def show_shortcuts(self) -> None:
+        from .dialogs import ShortcutsDialog
+        ShortcutsDialog(self).exec()
+
+    def show_help(self) -> None:
+        from .dialogs import HelpDialog
+        HelpDialog(self).exec()
 
     def _build_read_mode(self) -> None:
         mode = self.add_mode("leggi", _("Leggi"), "book-open-text", 10)
@@ -337,7 +442,7 @@ class MainWindow(QMainWindow):
             empty = recent.addAction(_("Nessun file recente"))
             empty.setEnabled(False)
         m.addSeparator()
-        for act in (self.act_save, self.act_save_as, self.act_save_copy, self.act_close):
+        for act in (self.act_save, self.act_save_as, self.act_save_copy, self.act_close, self.act_reopen):
             m.addAction(act)
         for section, actions in self._menu_sections.items():
             m.addSeparator()
@@ -360,6 +465,9 @@ class MainWindow(QMainWindow):
             act.setCheckable(True)
             act.setChecked(current_lang == key)
             act.triggered.connect(lambda _c=False, k=key: self.set_language(k))
+        m.addAction(self.act_preferences)
+        m.addAction(self.act_shortcuts)
+        m.addAction(self.act_help)
         m.addAction(_("Informazioni su Foliant"), self.about)
         m.addSeparator()
         m.addAction(self.act_quit)
@@ -553,6 +661,14 @@ class MainWindow(QMainWindow):
     def add_document(self, document: Document) -> DocumentView:
         view = DocumentView(document, self.tabs)
         view.menu_providers = self.view_menu_providers
+        mode = self.settings.value("view/mode", "continuous")
+        if mode in (VIEW_SINGLE, VIEW_FACING, VIEW_COVER):
+            view.set_view_mode(mode)
+        zoom = self.settings.value("view/zoom", "width")
+        if zoom == "page":
+            view.set_fit(FIT_PAGE)
+        elif zoom == "100":
+            view.set_zoom(1.0)
         view.currentPageChanged.connect(self._update_page_box)
         view.zoomChanged.connect(self._update_zoom_box)
         view.statusMessage.connect(lambda m: self.statusBar().showMessage(m, 6000))
@@ -591,6 +707,8 @@ class MainWindow(QMainWindow):
             elif clicked is not discard:
                 return False
         self.ctx.documentClosed.emit(view)
+        if doc.path is not None:
+            self._closed_paths.append(str(doc.path))
         index = self.tabs.indexOf(view)
         view.dispose()
         doc.close()
