@@ -172,8 +172,12 @@ def test_no_duplicate_shortcuts(window):
     """Due azioni con la stessa scorciatoia si annullano a vicenda in Qt: non devono esistere."""
     from collections import defaultdict
     from PySide6.QtGui import QAction, QKeySequence
+    from PySide6.QtCore import Qt
+    local = (Qt.ShortcutContext.WidgetShortcut, Qt.ShortcutContext.WidgetWithChildrenShortcut)
     seen = defaultdict(list)
     for act in window.findChildren(QAction):
+        if act.shortcutContext() in local:      # valide solo nel proprio pannello: nessun conflitto
+            continue
         for seq in act.shortcuts():
             if not seq.isEmpty():
                 seen[seq.toString(QKeySequence.SequenceFormat.PortableText)].append(act.text() or "(senza nome)")
