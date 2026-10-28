@@ -908,6 +908,13 @@ def test_required_unsigned_fields_warning(window, monkeypatch, tmp_path):
     monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(m) or False)
     assert c.confirm_unsigned_required(view, "Invia per e-mail") is False
     assert "Firma del cliente" in asked[0] and "Invia per e-mail" in asked[0]
+    # agganciato alle guardie del nucleo: stampa e Salva con nome
+    assert window.ctx.run_guards("print", view) is False
+    assert "Stampa" in asked[-1]
+    assert window.ctx.run_guards("save_as", view, {"copy": False}) is False
+    assert "Salva con nome" in asked[-1]
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: True)
+    assert window.ctx.run_guards("print", view) is True
 
 
 def test_sign_password_protected_document(window, monkeypatch, tmp_path, id_a):

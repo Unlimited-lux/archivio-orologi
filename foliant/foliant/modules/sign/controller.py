@@ -59,6 +59,11 @@ class SignController(QObject):
         ctx.add_change_guard(self._change_guard)
         self.panel = None                     # SignaturesPanel, impostato in register()
         self.stateChanged.connect(self.update_banner)
+        # SIG-20: avviso per le firme obbligatorie mancanti prima di stampa e «Salva con nome»
+        if hasattr(ctx, "add_guard"):
+            ctx.add_guard("print", lambda view, info: self._required_guard(view, _("Stampa")))
+            ctx.add_guard("save_as", lambda view, info: self._required_guard(
+                view, _("Salva una copia") if (info or {}).get("copy") else _("Salva con nome")))
 
     # ================================================================ libreria
     def library(self, interactive: bool = True) -> SignatureLibrary | None:
@@ -488,6 +493,11 @@ class SignController(QObject):
     def missing_required_signatures(self, view) -> list:
         """Campi firma obbligatori, visibili e non firmati (SIG-20)."""
         return [f for f in self.empty_fields(view) if f.required and not f.hidden]
+
+    def _required_guard(self, view, action: str) -> bool:
+        if view is None or id(view.document) not in self._states:
+            return True
+        return self.confirm_unsigned_required(view, action)
 
     def confirm_unsigned_required(self, view, action: str) -> bool:
         """Da chiamare prima di stampare, inviare o salvare con nome: avvisa se mancano
@@ -985,7 +995,8 @@ TRANSLATIONS_EN = {
     "Documento certificato «nessuna modifica»: per modificarlo lavora su una copia senza firme.":
         "Document certified “no changes”: to change it, work on a copy without signatures.",
     "Versione firmata da {who}: sola lettura.": "Version signed by {who}: read-only.",
-    "Firme mancanti": "Missing signatures",
+    "Firme mancanti": "Missing signatures", "Stampa": "Print", "Salva una copia": "Save a copy",
+    "Salva con nome": "Save as",
     "Il documento ha campi firma obbligatori non ancora firmati:\n\n{names}\n\nProcedere comunque con «{action}»?":
         "The document has required signature fields not yet signed:\n\n{names}\n\nProceed with “{action}” anyway?",
     "Verifica online della revoca in corso…": "Online revocation check in progress…",
