@@ -171,7 +171,7 @@ def test_duplicate_ctrl_d_and_delete(qtbot, window, form_pdf):
     nome = [f for f in fields(view) if f.name == "nome"][0]
     m.set_selection([(0, nome.xref)])
     view.setFocus()
-    qtbot.keyClick(view, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
+    m.duplicate_selected()  # dal menu contestuale, senza scorciatoia (FRM-23, UX-18)
     fs = fields(view)
     copy = [f for f in fs if f.name not in ("nome", "cognome", "privacy", "scelta", "paese", "colori")]
     assert len(copy) == 1 and copy[0].name.startswith("nome")

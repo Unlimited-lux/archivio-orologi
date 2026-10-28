@@ -146,9 +146,6 @@ class FieldSelectTool(Tool):
         if key == Qt.Key.Key_V and mods & Qt.KeyboardModifier.ControlModifier:
             self.m.paste_fields(view)
             return True
-        if key == Qt.Key.Key_D and mods & Qt.KeyboardModifier.ControlModifier:
-            self.m.duplicate_selected()
-            return True
         if key == Qt.Key.Key_A and mods & Qt.KeyboardModifier.ControlModifier:
             filler = self.m.filler(view)
             self.m.set_selection([(f.page, f.xref) for f in filler.state.by_page.get(view.current_page, [])])

@@ -116,8 +116,7 @@ class FormsModule(QObject):
         b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         b.setToolButtonStyle(mode.toolbar.toolButtonStyle())
         mode.add_widget(b)
-        self.act_duplicate = ctx.action(_("Duplica campo"), "copy-plus", self.duplicate_selected, shortcut="Ctrl+D",
-                                        mode="moduli")
+        self.act_duplicate = ctx.action(_("Duplica campo"), "copy-plus", self.duplicate_selected)
         self.act_copy_pages = ctx.action(_("Copia su più pagine…"), "copy", self.copy_to_pages_dialog)
         self.act_delete = ctx.action(_("Elimina campo"), "trash-2", self.delete_selected)
         tab_menu = QMenu(_("Ordine di tabulazione"), ctx.window)

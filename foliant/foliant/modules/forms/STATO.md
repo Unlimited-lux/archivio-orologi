@@ -29,7 +29,7 @@ Test in `tests/modules/forms/` (file abbreviati: `engine` = `test_engine.py`, `f
 | FRM-20 Campo firma | P1 | parziale | engine: `test_create_each_kind`; fill: `test_reset_skips_signature_locked`; design: `test_signed_field_cannot_move`; panel (scheda Firma) | Creazione, /Lock, clic → modalità Firma. La firma vera è del modulo Firma. |
 | FRM-21 Ordine di tabulazione | P1 | fatto | design: `test_tab_order_selection`, `test_tab_numbers_overlay`; engine: `test_tab_order_rows_columns_manual` | Manuale = ordine della selezione (Ctrl+clic); /Tabs /A nei PDF 2.0. |
 | FRM-22 Allinea e distribuisci | P1 | fatto | design: `test_align_distribute_same_size`, `test_select_move_and_single_undo`; engine: `test_align_left_and_distribute` | |
-| FRM-23 Duplica e copia su pagine | P1 | fatto | design: `test_duplicate_ctrl_d_and_delete`, `test_copy_to_pages_shared_and_independent`, `test_copy_paste_between_documents_renames` | Ctrl+C/Ctrl+V anche tra documenti, con rinomina automatica. |
+| FRM-23 Duplica e copia su pagine | P1 | fatto | design: `test_duplicate_ctrl_d_and_delete`, `test_copy_to_pages_shared_and_independent`, `test_copy_paste_between_documents_renames` | Duplica dal menu contestuale (senza scorciatoia, UX-18); Ctrl+C/Ctrl+V anche tra documenti, con rinomina automatica. |
 | FRM-24 Elenco campi | P1 | fatto | fields: tutti | |
 | FRM-25 Anteprima | P1 | fatto | design: `test_preview_fill_and_back`, `test_preview_discard`, `test_submit_blocked_and_preview` | |
 | FRM-26 Riconoscimento (piatti) | P1 | fatto | detect: tutti (benchmark 20/20); data: `test_detect_and_create_subset_single_undo` | Linee, rettangoli, caselle, pettini, sottolineature; nomi dalle etichette. |
