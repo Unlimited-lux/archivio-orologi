@@ -274,9 +274,10 @@ class MainWindow(QMainWindow):
         self.zoom_combo = QComboBox(self)
         self.zoom_combo.setEditable(True)
         self.zoom_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.zoom_combo.setFixedWidth(150)
-        self.zoom_combo.addItem(_("Adatta larghezza"), FIT_WIDTH)
-        self.zoom_combo.addItem(_("Adatta pagina"), FIT_PAGE)
+        # stesse parole delle azioni del menu Vista; larghezza presa dalla voce più lunga
+        self.zoom_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.zoom_combo.addItem(_("Adatta alla larghezza"), FIT_WIDTH)
+        self.zoom_combo.addItem(_("Adatta alla pagina"), FIT_PAGE)
         for z in (10, 25, 50, 75, 100, 125, 150, 200, 300, 400, 800, 1600, 3200, 6400):
             self.zoom_combo.addItem(f"{z}%", z / 100)
         self.zoom_combo.activated.connect(self._on_zoom_combo)

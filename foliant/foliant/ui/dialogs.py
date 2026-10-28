@@ -81,7 +81,7 @@ class PreferencesDialog(QDialog):
         self.view_mode.setCurrentIndex(max(0, self.view_mode.findData(settings.value("view/mode", "continuous"))))
         form.addRow(_("Visualizzazione predefinita"), self.view_mode)
         self.zoom = QComboBox(self)
-        for key, label in (("width", _("Adatta larghezza")), ("page", _("Adatta pagina")), ("100", "100%")):
+        for key, label in (("width", _("Adatta alla larghezza")), ("page", _("Adatta alla pagina")), ("100", "100%")):
             self.zoom.addItem(label, key)
         self.zoom.setCurrentIndex(max(0, self.zoom.findData(settings.value("view/zoom", "width"))))
         form.addRow(_("Zoom predefinito"), self.zoom)
