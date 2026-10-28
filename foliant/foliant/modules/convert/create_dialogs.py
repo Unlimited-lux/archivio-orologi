@@ -362,12 +362,16 @@ class ScannerDialog(QDialog):
         self.quality.setValue(85)
         form.addRow(_("Qualità JPEG"), self.quality)
         lay.addLayout(form)
+        self.straighten = QCheckBox(_("Raddrizza automaticamente"))
+        self.straighten.setChecked(True)
+        self.crop = QCheckBox(_("Ritaglia automaticamente i bordi"))
+        self.crop.setChecked(True)
         self.remove_blank = QCheckBox(_("Rimuovi le pagine vuote"))
         self.manual_duplex = QCheckBox(_("Fronte/retro manuale (acquisisci prima i fronti, poi i retro)"))
         self.id_card = QCheckBox(_("Documento d'identità: fronte e retro sulla stessa pagina A4"))
         self.insert = QCheckBox(_("Inserisci nel documento aperto dopo la pagina corrente"))
         self.insert.setVisible(has_document)
-        for cb in (self.remove_blank, self.manual_duplex, self.id_card, self.insert):
+        for cb in (self.straighten, self.crop, self.remove_blank, self.manual_duplex, self.id_card, self.insert):
             lay.addWidget(cb)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)

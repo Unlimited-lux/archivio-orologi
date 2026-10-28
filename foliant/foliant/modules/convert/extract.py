@@ -192,12 +192,20 @@ def ocr_textpage(page: pymupdf.Page, language: str | None = None, dpi: int = 300
         return None
     try:
         lang = ocr_languages(language)
+        from PIL import Image
+
+        from .imaging import estimate_skew
         probe = page.get_pixmap(dpi=100, colorspace=pymupdf.csGRAY)
         rotation = detect_rotation(probe.tobytes("png"))
-        if rotation:
-            from PIL import Image
+        probe_img = Image.frombytes("L", (probe.width, probe.height), probe.samples).rotate(-rotation, expand=True)
+        skew = estimate_skew(probe_img)
+        if abs(skew) < 0.3:
+            skew = 0.0
+        if rotation or skew:
             pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
             img = Image.frombytes("L", (pix.width, pix.height), pix.samples).rotate(-rotation, expand=True)
+            if skew:
+                img = img.rotate(skew, resample=Image.Resampling.BICUBIC, fillcolor=255)
             tmp = pymupdf.open()
             w, h = img.width * 72 / dpi, img.height * 72 / dpi
             tp_page = tmp.new_page(width=w, height=h)

@@ -706,3 +706,6 @@ EN.update({
 
 EN.update({"Indice": "Index", "Precedente": "Previous", "Successiva": "Next",
            "Un file per pagina (con indice)": "One file per page (with index)"})
+
+EN.update({"Raddrizza automaticamente": "Straighten automatically",
+           "Ritaglia automaticamente i bordi": "Crop borders automatically"})

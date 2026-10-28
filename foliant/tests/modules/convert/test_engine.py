@@ -871,3 +871,28 @@ def test_html_per_page(links_pdf, tmp_path):
     assert names == ["s.html", "s_001.html", "s_002.html", "s_003.html"]
     first = open(outs[1], encoding="utf-8").read()
     assert 'href="s_002.html#page-2"' in first and 'href="s_002.html"' in first
+
+
+def test_ocr_skewed_scan(tmp_path):
+    from foliant.modules.convert.extract import ocr_available
+    if not ocr_available():
+        pytest.skip("tesseract non installato")
+    import difflib
+    import io as _io
+    from PIL import Image
+    lines = ["Garanzia internazionale del produttore", "Numero di serie verificato in negozio",
+             "Scatola e documenti originali presenti"]
+    src = pymupdf.open()
+    sp = src.new_page()
+    for k, line in enumerate(lines):
+        sp.insert_text((60, 120 + k * 40), line, fontsize=20)
+    pix = sp.get_pixmap(dpi=300)
+    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).rotate(3, fillcolor="white")
+    doc = pymupdf.open()
+    p = doc.new_page()
+    buf = _io.BytesIO()
+    img.save(buf, "PNG")
+    p.insert_image(p.rect, stream=buf.getvalue())
+    path = _save(doc, tmp_path / "storto.pdf")
+    text = " ".join(open(convert_pdf(path, tmp_path / "s.txt", "txt")[0], encoding="utf-8").read().split())
+    assert difflib.SequenceMatcher(None, " ".join(lines), text).ratio() >= 0.95

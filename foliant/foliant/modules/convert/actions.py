@@ -401,11 +401,13 @@ class ConvertController:
         settings = dlg.settings()
         device = dlg.device.currentData()
         remove_blank = dlg.remove_blank.isChecked()
+        straighten, crop = dlg.straighten.isChecked(), dlg.crop.isChecked()
 
         def grab(src: str):
             settings.source = src
             ok2, res = self._run(_("Acquisizione in corso…"), scanner.acquire, backend, device, settings,
-                                 remove_blank=remove_blank)
+                                 remove_blank=remove_blank, straighten=straighten and src != "id",
+                                 crop=crop)
             if not ok2:
                 return None
             if res.error:

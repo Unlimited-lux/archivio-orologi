@@ -99,3 +99,13 @@ def test_sane_backend_without_program():
     assert b.list_devices() == []
     with pytest.raises(ScannerError):
         list(b.scan("x", ScanSettings()))
+
+
+def test_acquire_straightens_and_crops():
+    from foliant.modules.convert.imaging import estimate_skew
+    page = _page(100, "x").rotate(3, fillcolor="white", expand=False)
+    framed = Image.new("RGB", (page.width + 80, page.height + 80), "black")
+    framed.paste(page, (40, 40))
+    res = acquire(FakeScanner([framed]), "sim:0", ScanSettings(dpi=100, mode="gray"), straighten=True, crop=True)
+    out = res.pages[0]
+    assert out.width <= page.width and abs(estimate_skew(out)) <= 0.4

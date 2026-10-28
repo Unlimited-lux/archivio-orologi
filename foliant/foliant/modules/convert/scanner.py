@@ -131,12 +131,18 @@ class SaneBackend:
 
 # ------------------------------------------------------------------ acquisizione
 def acquire(backend, device: str, settings: ScanSettings, progress=None, *, remove_blank: bool = False,
-            blank_threshold: float = 0.005) -> ScanResult:
+            blank_threshold: float = 0.005, straighten: bool = False, crop: bool = False) -> ScanResult:
     """Acquisisce le pagine; in caso di errore del dispositivo conserva quelle già acquisite."""
     result = ScanResult()
     try:
         for k, img in enumerate(backend.scan(device, settings, progress)):
             check(progress, None, _("Pagina {n} acquisita").format(n=k + 1))
+            if crop:
+                from .imaging import autocrop
+                img = autocrop(img)
+            if straighten:
+                from .imaging import deskew
+                img, _angle = deskew(img)
             img = adjust(img, settings)
             if remove_blank and is_blank(img, blank_threshold):
                 result.removed_blank += 1
