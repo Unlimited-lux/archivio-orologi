@@ -54,6 +54,8 @@ class PagesController:
         self.structural_actions: list[QAction] = []
         self.all_actions: list[QAction] = []
         self._signed_ack: set[int] = set()
+        self._previous_provider = None
+        self._crop_warned: set[tuple[int, int]] = set()
         grid = self.organizer.grid
         grid.moveRequested.connect(self.move_to_index)
         grid.dropRequested.connect(self.drop_mime)
@@ -85,8 +87,16 @@ class PagesController:
         view = self.view()
         if view is None:
             return False
+        return self.assembly_allowed(view.document)
+
+    @staticmethod
+    def assembly_allowed(document: Document) -> bool:
+        """Permesso di assemblaggio della sessione (API del nucleo; ripiego sul motore)."""
+        allows = getattr(document, "allows", None)
+        if allows is not None:
+            return bool(allows(pymupdf.PDF_PERM_ASSEMBLE))
         with ENGINE_LOCK:
-            return E.assembly_allowed(view.document.pdf)
+            return E.assembly_allowed(document.pdf)
 
     def update_actions(self) -> None:
         view = self.view()
@@ -114,12 +124,37 @@ class PagesController:
             return
         self.organizer.set_view(view)
         self.ctx.set_central_widget(self.organizer)
+        self._install_selection_provider()
         self.organizer.grid.setFocus()
         self.organizer.grid.flush_rendering()
         self.update_actions()
         self.organizer._update_info()
 
+    def _install_selection_provider(self) -> None:
+        """Mentre l'organizzatore è attivo, le «pagine selezionate» dell'app sono le sue; fuori
+        dalla modalità torna il provider precedente (miniature del viewer)."""
+        win = self.ctx.window
+        current = getattr(win, "selected_pages_provider", None)
+        if current is self._selection_provider:
+            return
+        self._previous_provider = current
+        self.ctx.set_selected_pages_provider(self._selection_provider)
+
+    def _restore_selection_provider(self) -> None:
+        win = self.ctx.window
+        if getattr(win, "selected_pages_provider", None) is self._selection_provider:
+            self.ctx.set_selected_pages_provider(self._previous_provider)
+
+    def _selection_provider(self, view):
+        if self.active() and view is self.organizer.view:
+            pages = self.organizer.selected_pages()
+            if pages:
+                return pages
+        prev = self._previous_provider
+        return prev(view) if prev is not None else None
+
     def on_mode_left(self) -> None:
+        self._restore_selection_provider()
         self.ctx.window.statusBar().clearMessage()
         if self.ctx.central_widget() is self.organizer:
             self.ctx.set_central_widget(None)
@@ -187,8 +222,7 @@ class PagesController:
 
     def confirm_structural(self, document: Document) -> bool:
         """Permesso di assemblaggio e avviso firme (PAG-03)."""
-        with ENGINE_LOCK:
-            allowed = E.assembly_allowed(document.pdf)
+        allowed = self.assembly_allowed(document)
         if not allowed:
             self.ctx.error(_("Operazione non consentita"),
                            _("Il documento non consente di riorganizzare le pagine. "
@@ -522,6 +556,32 @@ class PagesController:
                           _("Nessun programma di posta disponibile. Il file è stato salvato in:\n{p}").format(p=path))
         return path
 
+    # ================================================================ PAG-25: avviso al salvataggio
+    def save_guard(self, view, info) -> bool:
+        """Il ritaglio nasconde contenuto che resta nel file: avvisa e propone l'appiattimento."""
+        if view is None:
+            return True
+        document = view.document
+        key = (id(document), document.version)
+        if key in self._crop_warned:
+            return True
+        layout = _optional("layout")
+        if layout is None:
+            return True
+        try:
+            with ENGINE_LOCK:
+                hidden = layout.hidden_content_outside_crop(document.pdf)
+        except Exception:
+            return True
+        if not hidden:
+            return True
+        self._crop_warned.add(key)
+        return self.ctx.confirm(
+            _("Contenuto nascosto dal ritaglio"),
+            _("Alcune pagine sono ritagliate: il testo fuori dall'area visibile resta nel file e può essere "
+              "copiato o cercato. Per eliminarlo davvero usa l'appiattimento o la sanificazione nella modalità "
+              "Proteggi.\n\nSalvare comunque?"))
+
     # ================================================================ PAG-40
     def find_blank_and_duplicates(self, mode: str = "identical") -> list[int]:
         """Trova pagine vuote e duplicate, le seleziona e propone di eliminarle."""
@@ -566,12 +626,9 @@ class PagesController:
                                       _("Password del proprietario:"), QLineEdit.EchoMode.Password)
         if not ok:
             return
-        with ENGINE_LOCK:
-            code = view.document.pdf.authenticate(pw)
-        if code not in (4, 6):
+        if not view.document.unlock(pw):
             self.ctx.error(_("Sblocca documento"), _("Password del proprietario errata."))
             return
-        view.document.password = pw
         self.update_actions()
         self.ctx.status(_("Documento sbloccato"))
 
@@ -700,6 +757,9 @@ def register(ctx) -> PagesController:
     ctx.documentChanged.connect(c.on_document_changed)
     ctx.documentClosed.connect(c.on_document_closed)
     ctx.add_view_menu_provider(c.view_menu)
+    if hasattr(ctx, "add_guard"):
+        ctx.add_guard("save", c.save_guard)
+        ctx.add_guard("save_as", c.save_guard)
     from .actions import build_actions
     build_actions(ctx, c, mode)
     return c

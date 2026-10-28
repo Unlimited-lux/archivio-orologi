@@ -225,3 +225,49 @@ def test_cyclic_page_tree_handled(window, tmp_path, monkeypatch):
     grid.select_pages([0, 1])
     assert c.copy_pages()
     assert view.page_count == 3
+
+
+def test_save_guard_warns_on_hidden_cropped_text(window, tmp_path, monkeypatch):
+    """PAG-25: al salvataggio avvisa che il testo fuori dal ritaglio resta nel file; «No» annulla."""
+    view = window.open_path(save_numbered(tmp_path / "rit.pdf", 2))
+    with view.document.change("ritaglia") as pdf:
+        pdf[0].set_cropbox(pymupdf.Rect(0, 300, 595, 842))     # nasconde «P1» in alto
+    asked = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: asked.append(t) or False)
+    assert window.ctx.run_guards("save", view, {}) is False
+    assert asked == ["Contenuto nascosto dal ritaglio"]
+    # già avvisato per questa versione: non chiede di nuovo
+    assert window.ctx.run_guards("save", view, {}) is True
+
+
+def test_unlock_uses_document_api(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    path = tmp_path / "bloccato.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 72), "x")
+    d.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="padrone",
+           permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(path))
+    window.set_mode("pagine")
+    c = window.ctx.pages_controller
+    assert not c.can_assemble() and not c.act_rotate_right.isEnabled()
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("padrone", True))
+    c.unlock()
+    assert view.document.allows(pymupdf.PDF_PERM_ASSEMBLE)
+    assert c.act_rotate_right.isEnabled()
+    c.organizer.grid.select_pages([0])
+    c.act_rotate_right.trigger()
+    view.document.undo()
+    view.document.redo()
+    assert c.can_assemble()
+
+
+def test_selected_pages_provider_only_in_pages_mode(pages_window):
+    window, view = pages_window
+    c = window.ctx.pages_controller
+    c.organizer.grid.select_pages([2, 5])
+    assert window.ctx.selected_pages(view) == [2, 5]
+    window.set_mode("leggi")
+    assert window.selected_pages_provider is c._previous_provider   # torna quello del viewer
+    window.set_mode("pagine")
+    assert window.selected_pages_provider is c._selection_provider
