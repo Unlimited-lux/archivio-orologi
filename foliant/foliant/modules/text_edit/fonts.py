@@ -88,6 +88,21 @@ class SystemFont:
         return "italic" in s or "oblique" in s
 
 
+_USER_MAP: dict[str, str] = {}
+
+
+def set_user_mappings(mapping: dict[str, str]) -> None:
+    """Tabella personale «font originale -> font da usare» (TXT-11), applicata in tutti i documenti."""
+    _USER_MAP.clear()
+    for k, v in (mapping or {}).items():
+        if k and v:
+            _USER_MAP[family_of(k)] = v
+
+
+def user_mapping(name: str) -> str | None:
+    return _USER_MAP.get(family_of(name))
+
+
 _index_lock = threading.Lock()
 _index: list[SystemFont] | None = None
 
@@ -368,6 +383,15 @@ class FontResolver:
         if sf is not None:
             choice = self._from_file(sf.file, KIND_SYSTEM, f"{sf.family} {sf.style}".strip(),
                                      sim_bold=style.bold and not sf.bold, sim_italic=style.italic and not sf.italic)
+            if choice is not None:
+                return choice
+        mapped = user_mapping(style.font)
+        if mapped:
+            choice = self._variant_from_families([mapped], style.bold, style.italic, KIND_SYSTEM)
+            if choice is None:
+                sfm = find_system_font(mapped)
+                if sfm is not None:
+                    choice = self._from_file(sfm.file, KIND_SYSTEM, f"{sfm.family} {sfm.style}".strip())
             if choice is not None:
                 return choice
         choice = None

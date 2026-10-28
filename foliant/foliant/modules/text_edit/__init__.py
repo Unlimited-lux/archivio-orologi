@@ -33,6 +33,8 @@ def register(ctx: Context) -> None:
         add_translations("en", FIND_EN)
     except Exception:
         pass
+    from . import fontlist, fonts
+    fonts.set_user_mappings(fontlist.load_mappings())
     ctrl = TextEditController(ctx)
     _controller = ctrl
     ctx.text_edit = ctrl  # accesso per i test e per altri moduli
@@ -65,9 +67,11 @@ def register(ctx: Context) -> None:
                           shortcut="Ctrl+H")
     mode.add_action(act_edit)
     mode.add_action(act_add)
+    act_fonts = ctx.action(_("Font del documento"), "type-outline", lambda: open_fonts_dialog(ctx))
     mode.add_action(act_find)
+    mode.add_action(act_fonts)
     mode.add_separator()
-    ctrl.actions = {"edit": act_edit, "add": act_add, "find": act_find}
+    ctrl.actions = {"edit": act_edit, "add": act_add, "find": act_find, "fonts": act_fonts}
     ctx.add_menu_action(act_find, _("Modifica"))
 
     def sync_actions(*_a) -> None:
@@ -146,4 +150,17 @@ def open_find_dialog(ctx: Context):
     dlg.show()
     dlg.raise_()
     dlg.activateWindow()
+    return dlg
+
+
+def open_fonts_dialog(ctx: Context):
+    """Dialogo «Font del documento» (TXT-11)."""
+    if ctx.current_view() is None:
+        return None
+    if _controller is not None:
+        _controller.commit_editor(ctx.current_view())
+    from .fontlist_ui import FontsDialog
+    dlg = FontsDialog(ctx, ctx.window)
+    ctx._text_fonts_dialog = dlg
+    dlg.show()
     return dlg

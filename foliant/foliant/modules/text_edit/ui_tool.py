@@ -271,7 +271,20 @@ class EditTextTool(Tool):
                     painter.setPen(QPen(faint, 0.8 / z, Qt.PenStyle.DotLine))
                     painter.setBrush(Qt.BrushStyle.NoBrush)
                     painter.drawRect(frame_rect_to_page(self.ctrl, page, b.bbox))
-        if self.hover and self.hover[0] == page and not self.ctrl.editor_for(view):
+        editor = self.ctrl.editor_for(view)
+        if editor is not None and editor.spec.page == page:
+            try:
+                er = editor.content_rect_points()
+                if editor.spec.cover is not None:
+                    er = er.united(editor.spec.cover)
+                pr = frame_rect_to_page(self.ctrl, page, pymupdf.Rect(er.left(), er.top(), er.right(), er.bottom()))
+                m = 3 / z
+                painter.setPen(QPen(accent, 1.2 / z))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(pr.adjusted(-m, -m, m, m))
+            except RuntimeError:
+                pass
+        if self.hover and self.hover[0] == page and not editor:
             b = self.hover[1]
             painter.setPen(QPen(accent if b.editable else danger, 1.5 / z))
             fill = QColor(accent)
