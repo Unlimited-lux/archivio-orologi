@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 import pymupdf
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QHeaderView, QLabel, QPushButton, QToolButton, QTreeWidget, QTreeWidgetItem,
@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 
 def source_label(source: str) -> str:
     if source.startswith("schema:"):
-        return _("Schema: {s}").format(s=source.split(":", 1)[1])
+        return source.split(":", 1)[1] or _("Schema")
+    if source == "schema":
+        return _("Schema")
     return {
         "area": _("Area"),
         "selezione": _("Testo selezionato"),
@@ -65,7 +67,8 @@ class RedactionPanel(QWidget):
                               "o «Trova dati personali» per indicare cosa oscurare."))
         self.empty.setWordWrap(True)
         self.empty.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
-        lay.addWidget(self.empty)
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self.empty, 1)
         row = QHBoxLayout()
         self.remove_button = QPushButton(icon("trash-2"), _("Rimuovi"))
         self.remove_button.clicked.connect(self._remove)
@@ -321,44 +324,53 @@ class Banner(QFrame):
     """Barra non modale in cima all'area documento: un avviso alla volta."""
 
     def __init__(self, view):
-        super().__init__(view)
+        super().__init__(view.viewport())
         self.view = view
         self.setObjectName("securityBanner")
         self.notices: list[Notice] = []
         self.dismissed: set[str] = set()
         self._index = 0
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 6, 6, 6)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 6, 6, 6)
+        outer.setSpacing(4)
+        top = QHBoxLayout()
         self.icon = QLabel()
-        lay.addWidget(self.icon)
+        top.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
         self.label = QLabel()
         self.label.setWordWrap(True)
-        lay.addWidget(self.label, 1)
-        self.buttons_box = QHBoxLayout()
-        lay.addLayout(self.buttons_box)
-        self.more = QPushButton()
-        self.more.setFlat(True)
-        self.more.clicked.connect(self._next)
-        lay.addWidget(self.more)
+        top.addWidget(self.label, 1)
         self.close_button = QToolButton()
         self.close_button.setIcon(icon("x"))
         self.close_button.setToolTip(_("Chiudi"))
         self.close_button.setAutoRaise(True)
         self.close_button.clicked.connect(self.dismiss_current)
-        lay.addWidget(self.close_button)
+        top.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
+        outer.addLayout(top)
+        bottom = QHBoxLayout()
+        self.more = QPushButton()
+        self.more.setFlat(True)
+        self.more.clicked.connect(self._next)
+        bottom.addWidget(self.more)
+        bottom.addStretch(1)
+        self.buttons_box = QHBoxLayout()
+        bottom.addLayout(self.buttons_box)
+        outer.addLayout(bottom)
         self.hide()
-        view.installEventFilter(self)
+        view.viewport().installEventFilter(self)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if obj is self.view and event.type() == QEvent.Type.Resize:
+        if obj is self.view.viewport() and event.type() == QEvent.Type.Resize:
             self._place()
         return False
 
     def _place(self) -> None:
-        vp = self.view.viewport().geometry()
-        w = min(vp.width() - 24, 900)
+        vp = self.view.viewport().rect()
+        w = min(vp.width() - 24, 760)
         self.setFixedWidth(max(200, w))
-        self.adjustSize()
+        lay = self.layout()
+        lay.activate()
+        h = lay.totalHeightForWidth(self.width()) if lay.hasHeightForWidth() else lay.totalSizeHint().height()
+        self.setFixedHeight(max(h, lay.totalMinimumSize().height()))
         self.move(vp.x() + (vp.width() - self.width()) // 2, vp.y() + 8)
 
     def set_notice(self, notice: Notice) -> None:
@@ -413,3 +425,4 @@ class Banner(QFrame):
         self.show()
         self.raise_()
         self._place()
+        QTimer.singleShot(0, self._place)   # dopo che i pulsanti nuovi sono stati disposti

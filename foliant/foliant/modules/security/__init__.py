@@ -39,7 +39,7 @@ def register(ctx: Context) -> None:
         "remove": act(_("Rimuovi protezione"), "lock-open", c.remove_protection, requires_document=False),
         "properties": act(_("Proprietà di sicurezza"), "shield-check", c.security_properties),
         "area": act(_("Segna area"), "square-dashed", c.activate_area_tool),
-        "text": act(_("Segna testo selezionato"), "text-select", c.mark_selection, shortcut="Ctrl+Shift+R"),
+        "text": act(_("Segna testo"), "text-select", c.mark_selection, shortcut="Ctrl+Shift+R"),
         "find": act(_("Trova e segna"), "text-search", lambda: c.find_and_mark("terms")),
         "patterns": act(_("Trova dati personali"), "scan-search", lambda: c.find_and_mark("patterns")),
         "pages": act(_("Segna pagine"), "file-x", c.mark_pages),
@@ -52,6 +52,9 @@ def register(ctx: Context) -> None:
         "metadata": act(_("Metadati"), "file-pen", c.edit_metadata),
         "flatten": act(_("Appiattisci"), "layers", c.flatten),
     }
+    from PySide6.QtGui import QAction
+    for key in ("remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages", "text"):
+        c.actions[key].setPriority(QAction.Priority.LowPriority)   # solo icona nella barra
     groups = [("protect", "remove", "properties"),
               ("area", "text", "find", "patterns", "pages", "style", "panel", "apply"),
               ("inspect", "sanitize", "metadata", "flatten")]

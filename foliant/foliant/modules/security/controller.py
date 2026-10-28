@@ -306,9 +306,13 @@ class SecurityController:
     def mark_matches(self, document, matches: list[PT.Match], source: str) -> int:
         if not matches:
             return 0
+        n = 0
         with document.change(_("Segna per redazione")) as pdf:
-            n = R.add_marks(pdf, ((m.page, r, m.text) for m in matches if m.page >= 0 for r in m.rects),
-                            self.style, source)
+            for m in matches:
+                if m.page < 0:
+                    continue
+                src = f"schema:{m.pattern_label}" if source == "schema" else source
+                n += R.add_marks(pdf, ((m.page, r, m.text) for r in m.rects), self.style, src)
         return n
 
     def search(self, document, options: dict) -> tuple[list[PT.Match], list[str]]:

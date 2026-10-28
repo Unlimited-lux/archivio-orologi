@@ -370,9 +370,11 @@ class FindDialog(QDialog):
         self.notice = _note("", "warning")
         lay.addWidget(self.notice)
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels([_("Occorrenza"), _("Pagina")])
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.setHeaderLabels([_("Occorrenza"), _("Pagina"), _("Contesto")])
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.tree.setColumnWidth(0, 230)
         lay.addWidget(self.tree, 1)
         self.summary = QLabel()
         lay.addWidget(self.summary)
@@ -413,12 +415,14 @@ class FindDialog(QDialog):
             key = m.pattern
             parent = groups.get(key)
             if parent is None:
-                parent = QTreeWidgetItem(self.tree, [m.pattern_label or m.pattern, ""])
+                parent = QTreeWidgetItem(self.tree, [m.pattern_label or m.pattern, "", ""])
                 parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsAutoTristate | Qt.ItemFlag.ItemIsUserCheckable)
                 parent.setCheckState(0, Qt.CheckState.Checked)
                 parent.setExpanded(True)
                 groups[key] = parent
-            item = QTreeWidgetItem(parent, [m.context or m.text, str(m.page + 1) if m.page >= 0 else "—"])
+            item = QTreeWidgetItem(parent, [m.text.replace("\n", " "), str(m.page + 1) if m.page >= 0 else "—",
+                                            m.context])
+            item.setToolTip(2, m.context)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(0, Qt.CheckState.Checked)
             item.setData(0, Qt.ItemDataRole.UserRole, n)

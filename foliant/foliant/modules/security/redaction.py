@@ -99,7 +99,7 @@ def add_mark(pdf: pymupdf.Document, page_index: int, rect: pymupdf.Rect, style: 
     annot = page.add_redact_annot(rect, **kwargs)
     covered = covered_text(page, rect) if text is None else text
     annot.set_info(title=MARK_TITLE, subject=source, content=covered)
-    annot.update(fill_color=fill)
+    annot.update(fill_color=fill, cross_out=False)
     return annot.xref
 
 
