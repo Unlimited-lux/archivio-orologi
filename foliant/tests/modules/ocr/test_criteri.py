@@ -365,19 +365,18 @@ def test_due_colonne_ordine_di_lettura(tmp_path):
 @pytest.mark.parametrize("crop", [False, True])
 @pytest.mark.parametrize("rot", [90, 180, 270])
 def test_rilettura_pagine_ruotate_e_ritagliate(tmp_path, rot, crop):
-    """Le parole del livello ricercabile cadono sulle parole della scansione anche con /Rotate e CropBox."""
-    from foliant.modules.ocr.preprocess import PreprocessOptions
+    """bug_01/bug_02: le parole riconosciute stanno esattamente dove sono nella scansione
+    anche con /Rotate e CropBox spostato (scarto = origine del ritaglio, ± 1 pt)."""
     src = pymupdf.open(image_pdf(tmp_path / "s.pdf", [scan_image(lines=FRASI[:2], dpi=150)], dpi=150))
-    d = pymupdf.open()
-    d.insert_pdf(src)
-    if crop:
-        d[0].set_cropbox(pymupdf.Rect(30, 40, 580, 800))
-    d[0].set_rotation(rot)
     for mode in ("searchable", "editable"):
+        base = pymupdf.open(stream=engine.ocr_pdf_bytes(src.tobytes(), ["ita"], mode))[0].search_for(
+            "compravendita")[0]
+        d = pymupdf.open()
+        d.insert_pdf(src)
+        if crop:
+            d[0].set_cropbox(pymupdf.Rect(30, 40, 580, 800))
+        d[0].set_rotation(rot)
+        dx, dy = (30, 40) if crop else (0, 0)
         with pymupdf.open(stream=engine.ocr_pdf_bytes(d.tobytes(), ["ita"], mode)) as out:
-            q = out[0]
-            r = q.search_for("compravendita")[0]
-            area = (r * q.rotation_matrix) + (-60, -60, 60, 60)
-            seen = engine.ocr_page_text(q, clip=area, languages=["ita"],
-                                        preprocess=PreprocessOptions(auto_rotate=True))
-            assert "compravendita" in seen.replace("\n", " "), (mode, seen)
+            r = out[0].search_for("compravendita")[0]
+            assert abs(r.x0 - (base.x0 - dx)) <= 1 and abs(r.y0 - (base.y0 - dy)) <= 1, (mode, r, base)

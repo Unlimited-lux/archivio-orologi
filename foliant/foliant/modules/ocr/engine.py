@@ -36,6 +36,7 @@ import cv2
 import numpy as np
 import pymupdf
 
+from foliant.core import placement
 from foliant.core.engine import ENGINE_LOCK
 from foliant.core.errors import OperationCancelled
 from foliant.i18n import _
@@ -378,7 +379,7 @@ def _render_job(pdf: pymupdf.Document, index: int, opts: OcrOptions) -> tuple[Pa
             res.notes.append(_("Risoluzione bassa ({d} dpi): accuratezza ridotta.").format(d=int(info.dpi)))
         if res.mixed:
             # area del testo vettoriale esistente in coordinate visualizzate
-            m = page.rotation_matrix
+            m = placement.page_to_display_matrix(page)
             res.patches = [("text", tuple(pymupdf.Rect(r) * m)) for r in info.text_rects]
         return res, img
 
@@ -584,7 +585,7 @@ def _clear_page_content(page: pymupdf.Page) -> None:
 
 def _rigid(page: pymupdf.Page, mapper: Callable[[float, float], tuple[float, float]]):
     """Matrice lineare e traslazione della trasformazione rigida pixel → pagina non ruotata."""
-    der = page.derotation_matrix
+    der = placement.display_to_page_matrix(page)
     def to_page(x, y):
         dx, dy = mapper(x, y)
         p = pymupdf.Point(dx, dy) * der
@@ -613,7 +614,7 @@ def _write(page: pymupdf.Page, writer: pymupdf.TextWriter, lin, t, render_mode: 
     kwargs = {"render_mode": render_mode, "color": color}
     if morph is not None:
         kwargs["morph"] = morph
-    writer.write_text(page, **kwargs)
+    placement.write_text(page, writer, **kwargs)
 
 
 class _Placer:
@@ -647,7 +648,7 @@ class _Placer:
     def flush(self, render_mode: int) -> None:
         for (color, _k), w in self.writers:
             if self.translation_only:
-                w.write_text(self.page, render_mode=render_mode, color=color)
+                placement.write_text(self.page, w, render_mode=render_mode, color=color)
             else:
                 # posizioni nello spazio elaborato con origine 0: la traslazione
                 # va espressa in punti dello stesso spazio
@@ -670,7 +671,7 @@ def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: f
     Il font viene incorporato (con /ToUnicode) tramite TextWriter; il contenuto è poi
     riscritto con gli operatori per parola."""
     font = get_font("sans")
-    to_page = lambda x, y: (pymupdf.Point(*mapper(x, y)) * page.derotation_matrix)  # noqa: E731
+    to_page = lambda x, y: (pymupdf.Point(*mapper(x, y)) * placement.display_to_page_matrix(page))  # noqa: E731
     items = []
     tw = pymupdf.TextWriter(page.rect)
     for ln in res.lines:
@@ -719,7 +720,7 @@ def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: f
     if not m:
         return len(items)
     fname = m.group(1).decode()
-    inv = ~page.transformation_matrix     # coordinate pagina (y in basso) → spazio PDF
+    inv = placement.page_to_pdf_matrix(page)     # coordinate standard (y in basso) → spazio PDF
     out = ["q", "BT", "3 Tr"]
     for p0, p1, length, natural, fs, gids in items:
         o = p0 * inv
@@ -788,49 +789,49 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
     if mode == SEARCHABLE:
         if res.rasterize and res.background:
             _clear_page_content(page)
-            page.insert_image(page.rect * page.derotation_matrix, stream=res.background, keep_proportion=False,
-                              rotate=page.rotation)
+            placement.insert_image(page, placement.page_rect(page), stream=res.background, keep_proportion=False,
+                                   upright=True)
         if apply_to_page and (res.rotation or res.skew) and not res.mixed:
             _straighten_page(page, res)
             sx = page.rect.width / max(1.0, res.size[0])
             sy = page.rect.height / max(1.0, res.size[1])
             with _marked(page):
                 _insert_words_invisible(page, res, lambda x, y: (x * sx, y * sy), 2.0 / (sx + sy))
-            der = page.derotation_matrix
+            der = placement.display_to_page_matrix(page)
             res.placed = [(pymupdf.Rect(w.bbox[0] * sx, w.bbox[1] * sy, w.bbox[2] * sx, w.bbox[3] * sy) * der, w)
                           for w in res.words]
         else:
             with _marked(page):
                 _insert_words_invisible(page, res, res.processed_to_display, res.zoom)
-            der = page.derotation_matrix
+            der = placement.display_to_page_matrix(page)
             res.placed = [(res.word_rect_display(w) * der, w) for w in res.words]
         if res.rasterize:
             _drop_unused_images(page)
     elif mode == EDITABLE:
         if res.mixed:
             for box, color in res.patches:
-                r = _box_display(res, box) * page.derotation_matrix
-                page.draw_rect(r, color=None, fill=color, overlay=True)
+                r = _box_display(res, box) * placement.display_to_page_matrix(page)
+                placement.draw_rect(page, r, color=None, fill=color, overlay=True)
             with _marked(page):
                 _insert_lines_visible(page, res, res.processed_to_display, res.zoom, family)
-            der = page.derotation_matrix
+            der = placement.display_to_page_matrix(page)
             res.placed = [(res.word_rect_display(w) * der, w) for w in res.words]
         else:
             _clear_page_content(page)
             page.set_rotation((res.page_rotation + res.rotation) % 360)
             if res.original and original_ocg:
                 # la scansione originale resta nel file, nascosta in visualizzazione e stampa
-                page.insert_image(page.rect * page.derotation_matrix, stream=res.original, keep_proportion=False,
-                                  rotate=(page.rotation - res.rotation) % 360, oc=original_ocg)
-            page.insert_image(page.rect * page.derotation_matrix, stream=res.background, keep_proportion=False,
-                              rotate=page.rotation)
+                placement.insert_image(page, placement.page_rect(page), stream=res.original, keep_proportion=False,
+                                       rotate=(-res.rotation) % 360, upright=True, oc=original_ocg)
+            placement.insert_image(page, placement.page_rect(page), stream=res.background, keep_proportion=False,
+                                   upright=True)
             # l'immagine elaborata (raddrizzata) riempie la pagina visualizzata
             sx = page.rect.width / max(1.0, res.size[0])
             sy = page.rect.height / max(1.0, res.size[1])
             with _marked(page):
                 _insert_lines_visible(page, res, lambda x, y: (x * sx, y * sy), 2.0 / (sx + sy), family)
             _drop_unused_images(page)
-            der = page.derotation_matrix
+            der = placement.display_to_page_matrix(page)
             res.placed = [(pymupdf.Rect(w.bbox[0] * sx, w.bbox[1] * sy, w.bbox[2] * sx, w.bbox[3] * sy) * der, w)
                           for w in res.words]
 
@@ -1136,7 +1137,7 @@ def replace_word(page: pymupdf.Page, rect: pymupdf.Rect, new_text: str, family: 
     kw = {"render_mode": 3 if invisible else 0, "color": color}
     if abs(angle) > 0.01:
         kw["morph"] = (origin, pymupdf.Matrix(angle))
-    tw.write_text(page, **kw)
+    placement.write_text(page, tw, **kw)
     return True
 
 
