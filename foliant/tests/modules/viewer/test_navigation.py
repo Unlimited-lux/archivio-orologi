@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import pymupdf
 from PySide6.QtCore import QPointF, Qt
 
@@ -243,13 +245,23 @@ def _gotor_source(tmp_path):
     return str(src)
 
 
-def test_gotor_click_goes_through_link_handlers(viewer_window, tmp_path, qtbot):
+@pytest.fixture
+def only_viewer_link_handlers():
+    """Nell'app completa Proteggi intercetta i GoToR con priorità alta: qui si prova solo il viewer."""
+    from foliant.ui import tools
+    saved = list(tools.LINK_HANDLERS)
+    tools.LINK_HANDLERS[:] = [t for t in saved if t[0] <= 0]
+    yield
+    tools.LINK_HANDLERS[:] = saved
+
+
+def test_gotor_click_goes_through_link_handlers(viewer_window, tmp_path, qtbot, only_viewer_link_handlers):
     view = viewer_window.open_path(_gotor_source(tmp_path))
     _click(qtbot, view, 0, (100, 215))
     qtbot.waitUntil(lambda: len(viewer_window.views()) == 2, timeout=2000)
 
 
-def test_gotor_blocked_by_higher_priority_handler(viewer_window, tmp_path, qtbot):
+def test_gotor_blocked_by_higher_priority_handler(viewer_window, tmp_path, qtbot, only_viewer_link_handlers):
     blocked = []
 
     def guard(view, link):

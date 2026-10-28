@@ -65,11 +65,14 @@ class Services:
         return [w for w in self.workers if w.running and (document is None or w.document is document)]
 
     def refresh(self) -> None:
-        if self.panel is not None:
-            self.panel.refresh_state()
-        configured = self.store.active(check_key=False) is not None   # il portachiavi si apre al primo uso
-        for a in getattr(self, "doc_actions", []):
-            a.setEnabled(configured and self.ctx.current_view() is not None)
+        try:
+            if self.panel is not None:
+                self.panel.refresh_state()
+            configured = self.store.active(check_key=False) is not None   # il portachiavi si apre al primo uso
+            for a in getattr(self, "doc_actions", []):
+                a.setEnabled(configured and self.ctx.current_view() is not None)
+        except RuntimeError:        # finestra già distrutta (aggiornamento differito arrivato tardi)
+            return
         for a in getattr(self, "profile_actions", []):
             a.setEnabled(configured)
         for a in getattr(self, "local_actions", []):

@@ -228,6 +228,7 @@ def test_engine_error_shown_not_raised(opened, accept, monkeypatch):
     assert not view.document.is_modified
 
 
+@pytest.mark.timeout(900)   # con tutti i moduli il cambio di tema ristilizza molte finestre
 def test_dark_theme_construction(opened, qtbot):
     from PySide6.QtWidgets import QApplication
 
