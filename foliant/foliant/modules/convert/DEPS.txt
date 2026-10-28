@@ -1,0 +1,8 @@
+# Dipendenze del modulo Converti
+# pip (già in requirements.txt): pdf2docx openpyxl python-pptx python-docx Pillow
+# facoltativo: msoffcrypto-tool (documenti Office protetti da password)
+apt: ghostscript
+apt: qpdf
+apt: tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng
+apt: libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui
+apt: fonts-dejavu-core
