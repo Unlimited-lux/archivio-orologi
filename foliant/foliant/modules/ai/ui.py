@@ -722,7 +722,7 @@ class Controller:
             panel.input.setPlainText(_("A proposito di questo passaggio: «{t}» — ").format(t=r.excerpt[:300]))
 
         def highlight(r):
-            with doc.change(_("Evidenzia risultato")) as pdf:
+            with doc.change(_("Evidenzia risultato"), kind="annotation") as pdf:
                 annot = pdf[r.page].add_highlight_annot(result_quads(r))
                 annot.update()
 

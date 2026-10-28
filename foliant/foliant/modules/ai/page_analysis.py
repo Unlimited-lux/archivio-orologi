@@ -453,7 +453,7 @@ def apply(document, issues: list[Issue]) -> ApplyResult:
 
     if not (deletes or rotations or normalize):
         return result
-    with document.change(_("Pulizia pagine")) as pdf:
+    with document.change(_("Pulizia pagine"), kind="pages") as pdf:
         count = pdf.page_count
         for i, angle in sorted(rotations.items()):
             if 0 <= i < count and angle:

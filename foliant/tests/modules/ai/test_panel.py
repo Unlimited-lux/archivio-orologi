@@ -1100,3 +1100,32 @@ def test_rewrite_multipage_selection_not_replaceable(qtbot, window, ready, fake,
     wait_done(qtbot, panel)
     assert not panel.accept_btn.isEnabled()
     assert "una pagina alla volta" in panel.replace_reason.text()
+
+
+# ------------------------------------------------------------------ documenti firmati (SIG-21)
+from tests.test_document import _signed_pdf, _validate, test_signer  # noqa: E402,F401 - fixture e utilità firmate
+
+
+def test_ai_note_on_signed_pdf_keeps_signature(qtbot, window, ready, fake, tmp_path, test_signer, monkeypatch):
+    path = _signed_pdf(tmp_path, test_signer, objstm=False)
+    view = window.open_path(str(path))
+    asked = []
+    monkeypatch.setattr(window.ctx.sign_controller, "_ask_invalidation",
+                        lambda v, what: asked.append(what) or "cancel")
+    fake.responses = ["Nota sul documento firmato"]
+    panel = ready.panel
+    panel.send("domanda")
+    wait_done(qtbot, panel)
+    panel.insert_note()
+    panel.insert_textbox()
+    assert asked == []                                  # annotazioni: nessuna domanda
+    assert len(annots_of(view.document, view.current_page)) == 2
+    view.document.save()
+    st = _validate(path.read_bytes(), test_signer)
+    assert st.intact and st.valid
+    # una modifica del contenuto invece chiede conferma (qui annullata: nessuna modifica)
+    from foliant.modules.ai import compose
+    from foliant.api import OperationCancelled
+    with pytest.raises(OperationCancelled):
+        compose.insert_text_page(view.document, "Pagina IA")
+    assert asked and view.page_count == 2
