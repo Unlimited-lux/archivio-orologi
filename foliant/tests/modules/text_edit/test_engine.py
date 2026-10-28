@@ -702,3 +702,27 @@ def test_deleted_text_leaves_orphan_annotation(paragraphs_pdf):
     assert res.orphans == 1
     with d.lock:
         assert len(list(d.pdf[0].annots())) == 1
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("crop", [False, True])
+def test_edit_on_rotated_and_cropped_pages(tmp_path, rotation, crop):
+    doc, page = new_doc_with_font()
+    page.insert_text((100, 300), "Il contratto scade nel 2024", fontname="F1", fontsize=12)
+    if crop:
+        page.set_cropbox(pymupdf.Rect(40, 60, 560, 800))
+    page.set_rotation(rotation)
+    d = Document.open(save(doc, tmp_path / f"r{rotation}{crop}.pdf"))
+    with d.lock:
+        before = span_with(d.pdf[0], "contratto")
+        block = blocks_of(d.pdf)[0]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "2024", "2026"))
+    out = reopen(d, tmp_path)
+    text = out[0].get_text()
+    assert "2026" in text and "2024" not in text
+    after = span_with(out[0], "contratto")
+    assert abs(after["origin"][0] - before["origin"][0]) <= 1
+    assert abs(after["origin"][1] - before["origin"][1]) <= 1
+    assert tuple(round(v, 2) for v in after["dir"]) == tuple(round(v, 2) for v in before["dir"]) if "dir" in after \
+        else True

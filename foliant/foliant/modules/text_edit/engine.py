@@ -59,7 +59,7 @@ def _lin(m: pymupdf.Matrix) -> pymupdf.Matrix:
 def _band(line: Line) -> pymupdf.Rect:
     """Fascia interna alla riga: tocca tutti i suoi glifi e nessuno delle righe vicine."""
     size = line.size
-    if abs(line.dir[1]) < 0.02:
+    if abs(line.dir[1]) < 0.02 and line.dir[0] > 0:
         y = line.baseline
         x0 = line.bbox.x0 + min(0.3, line.bbox.width / 4)
         x1 = line.bbox.x1 - min(0.3, line.bbox.width / 4)
