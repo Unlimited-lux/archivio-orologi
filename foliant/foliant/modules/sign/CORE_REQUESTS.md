@@ -31,9 +31,20 @@ un'annotazione, che sarebbe una modifica consentita.
   file originale è un prefisso esatto) e lo riapre con `ctx.open_path`.
 - Anche l'aggiunta di un campo firma a un documento già firmato viene scritta in modo incrementale
   direttamente su file.
-- Per tutte le altre modifiche a un documento firmato il modulo ascolta `documentChanged` e, alla prima
-  modifica, mostra l'avviso SIG-21 con tre scelte: «Annulla» (esegue `undo()`), «Lavora su una copia
-  senza firme», «Procedi comunque». L'avviso arriva **dopo** la modifica (vedi richiesta 2).
+- **Salvataggio incrementale locale** (`incremental.py`). Quando un documento aperto risulta firmato, il
+  modulo sostituisce i metodi `save` e `save_copy` *di quell'istanza* di `Document`. Le versioni
+  sostitutive accodano ai byte firmati su disco solo gli oggetti cambiati: confrontano oggetto per oggetto
+  il documento in memoria con il file e salvano con `save(incremental=True)` di pymupdf su una copia
+  temporanea, poi la scrivono con `atomic_write`. Il nucleo non viene modificato. La soluzione dipende
+  però da due dettagli interni:
+  - la numerazione degli oggetti, che le istantanee `tobytes(garbage=0)` conservano;
+  - gli attributi privati `_saved_state` e `_notify`.
+
+  Con il supporto del nucleo (punti a o b qui sopra) questa sostituzione si può eliminare.
+- Per le modifiche al **contenuto** di un documento firmato (pagine, testo; le annotazioni sono escluse
+  quando la certificazione le consente) il modulo ascolta `documentChanged` e, alla prima modifica, mostra
+  l'avviso SIG-21 con tre scelte: «Annulla» (esegue `undo()`), «Lavora su una copia senza firme»,
+  «Procedi comunque». L'avviso arriva **dopo** la modifica (vedi richiesta 2).
 
 ## 2. Avviso *prima* delle operazioni invalidanti (SIG-21)
 

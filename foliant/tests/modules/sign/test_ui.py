@@ -273,13 +273,22 @@ def test_signed_document_edit_warning(window, monkeypatch, sample_pdf, tmp_path,
     assert view.document.is_modified and asked.count("Ruota pagina") == 2
 
 
-def test_graphic_signature_on_signed_doc_asks_first(window, monkeypatch, sample_pdf, tmp_path, id_a):
+def test_graphic_signature_on_signed_doc(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """Firma grafica (annotazione) su documento firmato: consentita senza avviso per le firme di
+    approvazione; con certificazione livello 2 chiede conferma prima dell'inserimento."""
+    store.TrustStore().add(id_a[1])
     view = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "g.pdf", id_a)
     c = _ctl(window)
-    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: "cancel")
+    asked = []
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")
     item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]])))
-    assert c.place(view, 0, pymupdf.Rect(10, 10, 100, 40), item) is None
-    assert not view.document.is_modified
+    assert c.place(view, 0, pymupdf.Rect(10, 10, 100, 40), item)
+    assert asked == []
+    assert window.save_view(view)
+    assert c.state(view).statuses[0].status == "valida"
+    view2 = _sign_file(window, monkeypatch, sample_pdf, tmp_path / "c2.pdf", id_a, certify=True, level=2)
+    assert c.place(view2, 0, pymupdf.Rect(10, 10, 100, 40), item) is None
+    assert asked and not view2.document.is_modified
 
 
 def test_panel_valid_invalid_and_empty_field(window, monkeypatch, tmp_path, id_a, id_b):
@@ -480,3 +489,34 @@ def test_appearance_profiles(window, qtbot, monkeypatch, sample_pdf, id_a):
     dlg2._accept()
     assert dlg2.options.appearance["layout"] == "nome_grande"
     assert "luogo" not in dlg2.options.appearance["show"]
+
+
+def test_signed_document_annotation_saved_incrementally(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """SIG-21: commento aggiunto e salvato → salvataggio incrementale, firma «Valida» con modifiche consentite."""
+    store.TrustStore().add(id_a[1])
+    target = tmp_path / "commentato.pdf"
+    view = _sign_file(window, monkeypatch, sample_pdf, target, id_a)
+    signed = target.read_bytes()
+    c = _ctl(window)
+    asked = []
+    monkeypatch.setattr(c, "_ask_invalidation", lambda v, what: asked.append(what) or "proceed")
+    with view.document.change("Nota") as pdf:
+        pdf[0].add_text_annot((300, 300), "Va bene")
+    assert asked == []                                   # modifica consentita: nessun avviso
+    assert window.save_view(view)
+    data = target.read_bytes()
+    assert data.startswith(signed) and len(data) > len(signed)
+    st = c.state(view)
+    assert st.statuses[0].status == "valida"
+    assert "consentite" in st.statuses[0].modifications
+    # una seconda modifica, al contenuto, chiede conferma
+    with view.document.change("Testo") as pdf:
+        pdf[0].insert_text((100, 400), "AGGIUNTO")
+    assert asked == ["Testo"]
+    assert window.save_view(view)
+    assert target.read_bytes().startswith(data)
+    assert c.state(view).statuses[0].status == "non valida"
+    # «Salva una copia»: anche la copia è incrementale
+    copy = tmp_path / "copia.pdf"
+    view.document.save_copy(copy)
+    assert copy.read_bytes().startswith(signed)
