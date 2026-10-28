@@ -29,6 +29,8 @@ def detect_language() -> str:
 def set_language(lang: str) -> None:
     global _language
     _language = lang if lang in ("it", "en") else "it"
+    if _language == "en":
+        from .ui import i18n_en  # noqa: F401  (registra le traduzioni del nucleo)
 
 
 def language() -> str:

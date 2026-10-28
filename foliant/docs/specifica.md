@@ -16,15 +16,15 @@ criteri di accettazione verificabili («Dato…, quando…, allora…») e prior
 | 2. Gestione pagine | 41 | 12 | 25 | 4 |
 | 3. Modifica testo | 25 | 13 | 7 | 5 |
 | 4. Immagini, oggetti e collegamenti | 43 | 20 | 14 | 9 |
-| 5. Annotazioni e commenti | 33 | 14 | 16 | 3 |
+| 5. Annotazioni e commenti | 44 | 15 | 25 | 4 |
 | 6. Conversione, creazione e ottimizzazione | 33 | 8 | 16 | 9 |
 | 7. OCR e PDF scannerizzati | 20 | 9 | 9 | 2 |
 | 8. Moduli | 36 | 16 | 15 | 5 |
 | 9. Firma | 25 | 11 | 9 | 5 |
-| 10. Protezione e sicurezza | 31 | 14 | 12 | 5 |
+| 10. Protezione e sicurezza | 34 | 15 | 12 | 7 |
 | 11. Confronto e operazioni in blocco | 37 | 23 | 8 | 6 |
 | 12. Assistente IA | 27 | 0 | 16 | 11 |
-| **Totale** | **404** | **157** | **168** | **79** |
+| **Totale** | **418** | **159** | **177** | **82** |
 
 ## 0. Sezioni generali
 
@@ -531,6 +531,228 @@ Mostra gli strumenti della modalità attiva, raggruppati e separati. Nelle modal
 - **Dato** una modalità qualsiasi, **allora** la barra contestuale contiene gli strumenti indicati in tabella per quella modalità.
 - **Dato** lo strumento **Rettangolo** scelto con un clic singolo, **quando** disegno un rettangolo, **allora** torna attivo **Seleziona**; **dato** lo stesso strumento scelto con doppio clic, **allora** posso disegnare più rettangoli finché non premo Esc.
 - **Dato** **Applica redazioni** senza redazioni contrassegnate, **quando** lo raggiungo con il puntatore o con il fuoco, **allora** è disattivato e il suggerimento dice «Nessuna area contrassegnata per la redazione».
+
+#### UX-06 · Pannello laterale sinistro — P0
+Pannello ridimensionabile e richiudibile (F9), con schede scelte da una colonna di icone. Ogni scheda mostra un contatore (es. «Commenti 12») e, se vuota, uno stato vuoto che spiega cosa conterrà e come aggiungere elementi. Il pannello segue il documento: la miniatura e il segnalibro della posizione corrente sono evidenziati; un clic su un elemento porta alla sua posizione. Larghezza e scheda attiva vengono ricordate.
+
+| Scheda | Contenuto | Azioni principali (dettaglio nell'area) |
+|---|---|---|
+| Miniature | anteprime delle pagine con numero ed etichetta | selezione multipla, trascinamento per riordinare, menu delle pagine (2) |
+| Segnalibri | albero dei segnalibri | aggiungi, rinomina, annida, elimina (1) |
+| Commenti | annotazioni per pagina con autore, data, stato e risposte | filtra, ordina, rispondi, esporta (5) |
+| Allegati | file allegati al documento e alle pagine | apri (NFR-18), salva, aggiungi, elimina (4) |
+| Livelli | livelli del documento | mostra/nascondi a schermo e in stampa (1) |
+| Risultati ricerca | occorrenze con il testo intorno | vai all'occorrenza, opzioni di ricerca (1) |
+| Firme | firme e campi firma con lo stato di verifica | dettagli, verifica, vai alla firma (9) |
+| Campi (solo in Moduli) | elenco dei campi modulo | seleziona, rinomina, ordine di tabulazione (8) |
+
+- **Dato** un documento con 12 commenti, **allora** la scheda **Commenti** mostra «12»; **quando** faccio clic su un commento, **allora** la vista va alla sua pagina e lo seleziona.
+- **Dato** lo scorrimento del documento, **allora** la miniatura della pagina corrente è evidenziata e il pannello scorre per mantenerla visibile.
+- **Dato** un documento senza livelli, **quando** apro **Livelli**, **allora** un messaggio spiega che il documento non ha livelli e cosa sono.
+- **Dato** il pannello aperto, **quando** premo F9, **allora** si chiude e l'area documento si allarga mantenendo la posizione di lettura.
+
+#### UX-07 · Area documento — P0
+Mostra le pagine nella vista scelta, su uno sfondo neutro che le distingue. Lo zoom con Ctrl+rotella o con il gesto di pizzico è centrato sul puntatore; la vista si sposta con lo strumento **Mano** o tenendo premuto Spazio e trascinando. Il menu contestuale dipende dall'elemento sotto il puntatore (testo selezionato, annotazione, immagine, campo, pagina). In alto compaiono i banner (UX-14) e, con Ctrl+F, la barra di ricerca.
+- **Dato** il puntatore su un punto della pagina, **quando** uso Ctrl+rotella o il pizzico, **allora** lo zoom cambia tenendo fermo il punto sotto il puntatore.
+- **Dato** del testo selezionato, **quando** apro il menu contestuale (clic destro, tasto Menu o Maiusc+F10), **allora** trovo almeno **Copia**, **Evidenzia**, **Sottolinea**, **Barrato**, **Aggiungi nota**, **Cerca**, **Contrassegna per redazione** e, se un fornitore IA è configurato, **Chiedi all'assistente**.
+- **Dato** un documento senza pagine visibili ancora disegnate, **allora** l'area mostra segnaposto nelle dimensioni delle pagine (NFR-04), mai un'area vuota.
+
+#### UX-08 · Pannello proprietà (destro) — P0
+Pannello ridimensionabile e richiudibile (Maiusc+F9). Mostra le proprietà dell'elemento selezionato; senza selezione, le impostazioni dello strumento attivo (es. colore predefinito dell'evidenziatore); con **Seleziona** e nessuna selezione, il riepilogo del documento (titolo, autore, pagine, dimensione, versione PDF, protezione, conformità, firme). In **Assistente IA** ospita la conversazione. Le modifiche si applicano subito e ciascuna è un solo passo annullabile; con più elementi selezionati compaiono solo le proprietà comuni, con «Misto» dove i valori differiscono. I campi numerici accettano valori con unità (mm, pt, in).
+- **Dato** un'annotazione selezionata, **quando** ne cambio il colore nel pannello, **allora** l'annotazione cambia subito e un solo **Annulla** ripristina il colore precedente.
+- **Dato** tre annotazioni di colori diversi selezionate, **allora** il campo colore indica «Misto»; **quando** scelgo un colore, **allora** si applica a tutte e tre.
+- **Dato** lo strumento **Evidenzia** attivo senza selezione, **quando** cambio il colore nel pannello, **allora** il nuovo colore vale per le evidenziazioni successive e non modifica quelle esistenti.
+
+#### UX-09 · Barra di stato — P0
+Contiene: **Pagina [n] di N**, con campo modificabile che accetta numeri o etichette (se l'etichetta differisce dal numero mostra entrambi, es. «iv (4 di 120)»); il controllo dello zoom (riduci, valore modificabile con valori preimpostati e **Adatta pagina**/**Adatta larghezza**, ingrandisci); il selettore della vista (pagina singola, continua, doppia, doppia con copertina); le icone di stato del documento (cifrato, firmato, PDF/A, script disattivati, sola lettura) con suggerimento e azione al clic; l'avanzamento delle attività in background.
+- **Dato** un documento in cui le prime quattro pagine hanno etichette romane e la quinta l'etichetta «1», **quando** sono sulla quinta pagina, **allora** la barra mostra «1 (5 di 120)»; **quando** digito «iv», **allora** vado alla quarta pagina.
+- **Dato** il campo zoom, **quando** digito 137 e premo Invio, **allora** lo zoom diventa 137%.
+- **Dato** un'attività in background in corso (es. OCR), **allora** la barra ne mostra l'avanzamento; **quando** ci clicco, **allora** si apre un riquadro con il dettaglio e **Annulla**.
+
+#### UX-10 · Schermata Home — P0
+Compare all'avvio senza documenti e in ogni nuova scheda (Ctrl+T). Contiene: (1) **Apri file** con zona di rilascio «Trascina qui PDF o altri file»; (2) **Azioni rapide**: Crea PDF da file, PDF vuoto, Da scanner, Unisci file, Converti, Comprimi, OCR, Confronta, Elaborazione in blocco; (3) **Recenti**: almeno gli ultimi 50 documenti, in elenco o griglia, con miniatura, nome, cartella, data dell'ultima apertura e numero di pagine; filtro per nome; **Fissa** per tenere un documento in cima; menu con Apri, Mostra nella cartella, Copia percorso, Rimuovi dall'elenco; **Svuota elenco**. Nessuna pubblicità, promozione o richiesta di account; nessun contenuto scaricato dalla rete.
+- **Dato** Foliant avviato senza file, **allora** la Home mostra le tre aree e il fuoco è su **Apri file**.
+- **Dato** che trascino sulla Home due PDF e un'immagine, **allora** i due PDF si aprono in due schede e per l'immagine si avvia **Crea PDF**.
+- **Dato** un recente il cui file è stato spostato o eliminato, **allora** l'elemento appare attenuato con «File non trovato» e l'azione **Rimuovi dall'elenco**.
+- **Dato** un documento fissato, **allora** resta in cima all'elenco indipendentemente dalla data.
+- **Dato** il filtro, **quando** digito parte di un nome, **allora** l'elenco si riduce mentre scrivo.
+
+#### UX-11 · Temi dell'interfaccia — P0
+Temi **Chiaro**, **Scuro** e **Come il sistema** (predefinito), applicati subito, senza riavvio; colore d'accento e contrasto elevato del sistema sono rispettati. Il tema dell'interfaccia è distinto dal tema di lettura delle pagine (area 1), che cambia solo la resa a schermo e mai il documento.
+- **Dato** **Come il sistema**, **quando** cambio il tema del desktop da chiaro a scuro, **allora** Foliant si adegua entro 1 s, mantenendo documenti e stato.
+- **Dato** il tema scuro dell'interfaccia e nessun tema di lettura, **allora** le pagine sono mostrate con i loro colori originali.
+- **Dato** un tema di lettura attivo, **quando** salvo o stampo, **allora** il documento conserva i colori originali.
+
+#### UX-12 · Avanzamento e annullamento delle operazioni lunghe — P0
+Le operazioni che durano più di 1 s mostrano avanzamento in percentuale, tempo residuo quando stimabile, e **Annulla**. Le operazioni che impediscono di modificare il documento corrente (es. OCR) bloccano solo quella scheda, con un riquadro sovrapposto, non l'applicazione. Le operazioni che producono altri file (esportazioni, elaborazioni in blocco) proseguono in background, con avanzamento nella barra di stato e una notifica al termine (NFR-34). Annullare riporta il documento allo stato precedente senza modifiche parziali e non lascia file parziali sul disco. Al termine un riepilogo mostra l'esito e i file prodotti (**Apri**, **Mostra nella cartella**).
+- **Dato** un OCR su 100 pagine, **quando** premo **Annulla** a metà, **allora** entro 2 s l'operazione si ferma, il documento è identico a prima e la cronologia non contiene passi nuovi.
+- **Dato** un'esportazione in corso, **quando** la annullo, **allora** nella cartella di destinazione non resta alcun file parziale.
+- **Dato** un'operazione in background in corso, **quando** chiudo la finestra, **allora** mi viene chiesto se interromperla o attendere la fine.
+- **Dato** un'elaborazione in blocco terminata con errori su alcuni file, **allora** il riepilogo elenca i file riusciti e quelli falliti, con il motivo.
+
+#### UX-13 · Conferme e annullamento rapido — P0
+Le operazioni annullabili nella sessione (es. eliminare pagine o commenti) non chiedono conferma: un avviso temporaneo descrive l'esito e offre **Annulla** (es. «3 pagine eliminate · Annulla»). Le operazioni irreversibili o che agiscono fuori dal documento corrente chiedono conferma: applicare redazioni, appiattire, sanitizzare, rimuovere firme digitali, salvare invalidando firme, sovrascrivere un file esistente (Salva con nome, esportazioni, elaborazioni in blocco), chiudere senza salvare, svuotare i recenti. La finestra di conferma ha un titolo in forma di domanda specifica («Applicare 4 redazioni?»), spiega la conseguenza, ha il pulsante di conferma con il verbo dell'azione in stile distruttivo e il fuoco iniziale su **Annulla**. «Non chiedere più» è ammesso solo per conferme non critiche, mai per redazione, sanitizzazione, firme e sovrascritture.
+- **Dato** tre pagine selezionate, **quando** premo Canc, **allora** vengono eliminate senza conferma e un avviso con **Annulla** resta visibile per almeno 5 s.
+- **Dato** delle redazioni contrassegnate, **quando** scelgo **Applica redazioni**, **allora** la conferma indica quante aree e pagine sono coinvolte, e premendo Invio senza spostare il fuoco l'operazione viene annullata.
+- **Dato** un'esportazione verso un file già esistente, **allora** posso scegliere **Sostituisci**, **Mantieni entrambi** (nuovo nome numerato) o **Annulla**.
+
+#### UX-14 · Banner di stato del documento — P0
+Le condizioni persistenti del documento sono segnalate da un banner in cima all'area documento, con un'azione pertinente. Condizioni previste: sola lettura o permessi limitati (**Inserisci password dei permessi**, **Salva una copia**); file riparato; script disattivati (**Attiva per questo documento**); firme presenti, con esito della verifica (**Mostra firme**); conformità dichiarata a PDF/A o altri standard; modulo compilabile (**Evidenzia campi**); file modificato da un altro programma (**Ricarica**); documento scansionato senza testo (**Esegui OCR**). Si vede un banner alla volta, in ordine di importanza (sicurezza, integrità, informazione), con l'indicazione di quanti altri ce ne sono. Un banner chiuso non ricompare fino alla riapertura del documento; l'informazione resta come icona nella barra di stato.
+- **Dato** un PDF scansionato senza livello di testo, **quando** lo apro, **allora** compare il banner con **Esegui OCR**; **quando** lo premo, **allora** si apre la modalità OCR.
+- **Dato** un documento firmato e con script, **allora** è visibile un solo banner, con l'indicazione «1 altro avviso» e il modo di vederlo.
+- **Dato** un banner chiuso, **allora** non ricompare finché il documento resta aperto e la stessa informazione è disponibile dall'icona nella barra di stato.
+
+#### UX-15 · Stampa — P0
+**Stampa** (Ctrl+P), disponibile in ogni modalità, apre la finestra di stampa del sistema con le stampanti configurate, completata dalle opzioni del documento: intervallo (tutte, pagina corrente, pagine selezionate, intervallo con numeri o etichette, solo pari o dispari); copie e fascicolazione; fronte/retro (se la stampante lo supporta); scala (adatta all'area stampabile, dimensioni reali, riduci solo se necessario, percentuale); orientamento automatico; contenuto (documento; documento e commenti; solo campi modulo); più pagine per foglio; stampa come immagine (per file problematici); opuscolo (P2). Un'anteprima si aggiorna a ogni cambio. La stampa non modifica il documento e procede in background. La stampa in blocco è nell'area 11.
+- **Dato** un documento di 20 pagine con commenti, **quando** stampo «3-5, 8» con **Documento e commenti** e scala **Adatta**, **allora** escono 4 pagine con i commenti visibili, come mostrato dall'anteprima prima della conferma.
+- **Dato** un documento con stampa non consentita dai permessi, **allora** **Stampa** è disattivato e il suggerimento spiega il motivo.
+- **Dato** un documento con pagine A4 e A3 e la scala **Adatta** su carta A4, **allora** ogni pagina è stampata intera nel foglio, mantenendo le proporzioni.
+
+#### UX-16 · Invio per email e azioni sul file — P1
+Dal menu principale e dal menu della scheda: **Invia per email…** (apre il programma di posta predefinito con il documento allegato), **Mostra nella cartella**, **Copia percorso**, **Proprietà documento**. La condivisione tramite link o codice QR è fuori ambito (0.2).
+- **Dato** un documento salvato, **quando** scelgo **Invia per email…**, **allora** si apre il programma di posta predefinito con un nuovo messaggio che ha il PDF in allegato.
+- **Dato** un documento con modifiche non salvate, **quando** scelgo **Invia per email…**, **allora** mi viene chiesto di salvare prima o di allegare una copia con le modifiche.
+- **Dato** nessun programma di posta configurato, **allora** un messaggio lo spiega e propone **Mostra nella cartella**.
+
+#### UX-17 · Preferenze — P1
+Finestra **Preferenze** (Ctrl+,) con le sezioni: **Generale** (cosa mostrare all'avvio, apertura dei file in scheda o finestra, recenti attivi o no); **Aspetto** (tema, tema di lettura predefinito, dimensione delle miniature); **Documenti** (vista e zoom predefiniti, unità di misura, formato carta, nome dell'autore per i commenti, predefinito il nome dell'account di sistema); **Salvataggio** (autosalvataggio e intervallo, modalità di salvataggio); **Sicurezza e riservatezza** (script, collegamenti esterni e domini consentiti, verifica online della revoca, servizio di marca temporale); **Assistente IA** (fornitori, modello, contenuti che possono essere inviati); **Lingua** (interfaccia, lingue OCR); **Scorciatoie** (P2, UX-19). Ogni sezione ha **Ripristina predefiniti**. Le preferenze si possono esportare e importare come file, escluse password e chiavi.
+- **Dato** una preferenza modificata, **allora** l'effetto è immediato, salvo la lingua dell'interfaccia, per cui accanto all'opzione è indicato che serve il riavvio.
+- **Dato** un file di preferenze esportato, **quando** lo importo su un altro computer, **allora** tutte le preferenze sono ripristinate, tranne password e chiavi d'accesso.
+- **Dato** **Ripristina predefiniti** in una sezione, **allora** solo quella sezione torna ai valori iniziali.
+- **Dato** il primo commento creato, **allora** l'autore è il nome visualizzato dell'account di sistema, modificabile nelle preferenze.
+
+#### UX-18 · Scorciatoie da tastiera principali — P0
+Scorciatoie comuni a tutte le modalità. Quelle specifiche di un'area sono definite nella relativa sezione e non devono entrare in conflitto con questa tabella né con le scorciatoie globali del desktop. I tasti senza modificatori (lettere, Spazio, frecce) agiscono sull'area documento solo quando il fuoco non è in un campo di testo o in una modifica di testo.
+
+| Azione | Scorciatoia |
+|---|---|
+| Apri file | Ctrl+O |
+| Nuova scheda (Home) | Ctrl+T |
+| Nuova finestra | Ctrl+N |
+| Salva | Ctrl+S |
+| Salva con nome | Ctrl+Maiusc+S |
+| Stampa | Ctrl+P |
+| Chiudi scheda | Ctrl+W |
+| Riapri l'ultima scheda chiusa | Ctrl+Maiusc+T |
+| Esci | Ctrl+Q |
+| Annulla | Ctrl+Z |
+| Ripeti | Ctrl+Maiusc+Z oppure Ctrl+Y |
+| Taglia / Copia / Incolla | Ctrl+X / Ctrl+C / Ctrl+V |
+| Seleziona tutto (nel contesto attivo) | Ctrl+A |
+| Elimina la selezione | Canc |
+| Cerca nel documento | Ctrl+F |
+| Occorrenza successiva / precedente | Ctrl+G / Ctrl+Maiusc+G (nel campo di ricerca anche Invio / Maiusc+Invio) |
+| Trova e sostituisci | Ctrl+H |
+| Ingrandisci / Riduci | Ctrl++ (anche Ctrl+=) / Ctrl+-; Ctrl+rotella |
+| Adatta alla pagina / Dimensioni reali / Adatta alla larghezza | Ctrl+0 / Ctrl+1 / Ctrl+2 |
+| Pagina successiva / precedente | N / P; → / ← quando la pagina è interamente visibile in larghezza |
+| Scorri di una schermata avanti / indietro | Pag giù / Pag su; Spazio / Maiusc+Spazio |
+| Prima / ultima pagina | Inizio / Fine (anche Ctrl+Inizio / Ctrl+Fine) |
+| Vai alla pagina (fuoco sul campo pagina) | Ctrl+L |
+| Indietro / Avanti nella cronologia di navigazione | Alt+← / Alt+→ |
+| Scheda successiva / precedente | Ctrl+Pag giù / Ctrl+Pag su (anche Ctrl+Tab / Ctrl+Maiusc+Tab) |
+| Vai alla scheda 1…9 | Alt+1 … Alt+9 |
+| Modalità da Leggi a Strumenti (ordine della barra) | Ctrl+Alt+1 … Ctrl+Alt+9, Ctrl+Alt+0 |
+| Assistente IA | Ctrl+Alt+I |
+| Mostra/nascondi pannello laterale / pannello proprietà | F9 / Maiusc+F9 |
+| Sposta il fuoco tra le regioni della finestra | F6 / Maiusc+F6 |
+| Menu principale / menu contestuale | F10 / Maiusc+F10 o tasto Menu |
+| Torna a Seleziona; interrompi l'azione in corso | Esc |
+| Mano temporanea | Spazio tenuto premuto durante il trascinamento |
+| Schermo intero / Presentazione | F11 / F5 |
+| Proprietà documento | Alt+Invio |
+| Preferenze | Ctrl+, |
+| Elenco delle scorciatoie / Guida | Ctrl+? / F1 |
+
+- **Dato** ciascuna riga della tabella, **quando** premo la combinazione nel contesto indicato, **allora** si esegue l'azione corrispondente.
+- **Dato** il fuoco in un campo di testo o in una modifica di testo, **quando** premo N, P, Spazio o le frecce, **allora** agiscono sul testo e non sulla navigazione.
+- **Dato** la finestra **Scorciatoie da tastiera** (Ctrl+?), **allora** elenca tutte le scorciatoie, comprese quelle delle aree, raggruppate per modalità e ricercabili per nome.
+- **Dato** un comando con scorciatoia, **allora** la scorciatoia è indicata nel suo suggerimento e nella voce di menu.
+
+#### UX-19 · Personalizzazione di scorciatoie e barre — P2
+L'utente può riassegnare le scorciatoie e scegliere quali strumenti mostrare, e in che ordine, nella barra contestuale di ogni modalità.
+- **Dato** la sezione **Scorciatoie**, **quando** assegno una combinazione già in uso, **allora** vengo avvisato del conflitto e posso sostituirla o annullare.
+- **Dato** una barra contestuale personalizzata, **quando** scelgo **Ripristina predefiniti**, **allora** torna alla composizione di UX-05.
+
+#### UX-20 · Layout adattivo, più finestre e schermo intero — P1
+Da 1024 px di larghezza in su sono visibili tutte le regioni; tra 800 e 1023 px il pannello proprietà si apre sovrapposto al documento; sotto 800 px anche il pannello laterale è sovrapposto e la barra delle modalità mostra solo icone. Dimensione minima utilizzabile: 640 × 480 px. Ogni finestra (Ctrl+N) ha le proprie schede, trasferibili tra finestre. **Schermo intero** (F11) lascia visibile solo l'area documento: le barre ricompaiono avvicinando il puntatore al bordo superiore; Esc esce.
+- **Dato** una finestra ridotta da 1440 a 640 px di larghezza, **allora** nessun controllo diventa irraggiungibile e l'interfaccia non richiede scorrimento orizzontale (escluso il documento).
+- **Dato** lo schermo intero, **quando** porto il puntatore al bordo superiore, **allora** ricompaiono le barre; **quando** premo Esc, **allora** torno alla finestra normale.
+- **Dato** due finestre, **quando** trascino una scheda dall'una all'altra, **allora** il documento passa con vista e cronologia di annullamento intatte.
+
+#### UX-21 · Primo avvio, guida e nessun account — P0
+Al primo avvio si apre direttamente la Home: nessuna registrazione, accesso, attivazione, raccolta di dati o procedura obbligatoria; un'eventuale presentazione delle funzioni è facoltativa e si chiude con un clic. La guida, in italiano e inglese, è inclusa nell'installazione, consultabile offline (F1) e contestuale alla modalità attiva. **Informazioni su Foliant** mostra versione, licenza e riconoscimenti.
+- **Dato** una nuova installazione senza rete, **quando** avvio Foliant per la prima volta, **allora** la Home è subito utilizzabile, senza richieste di account, indirizzo email o consenso alla raccolta di dati.
+- **Dato** la modalità **Moduli** attiva, **quando** premo F1, **allora** la guida si apre alla pagina dei moduli, anche senza rete.
+
+#### UX-22 · Trascinamento — P1
+Comportamento uniforme del trascinamento: file sulla Home o sulla barra delle schede → apertura (PDF) o creazione di un PDF (altri formati supportati); file sul pannello **Miniature** → inserimento di pagine nel punto di rilascio; immagine sull'area documento in **Modifica** → inserimento dell'immagine; miniature verso un altro documento → copia delle pagine; miniature verso il gestore file → estrazione in un nuovo PDF. Durante il trascinamento la destinazione è evidenziata (linea di inserimento o riquadro); Esc annulla.
+- **Dato** due documenti in due finestre, **quando** trascino 3 miniature dal primo al pannello **Miniature** del secondo, **allora** le pagine vengono copiate nel punto indicato dalla linea di inserimento, come un solo passo annullabile nel secondo documento.
+- **Dato** una miniatura della pagina 5 trascinata nel gestore file, **allora** nella cartella di destinazione si crea un PDF con quella pagina, chiamato «‹nome documento› - pagina 5.pdf».
+- **Dato** un trascinamento in corso, **quando** premo Esc, **allora** nulla viene modificato.
+
+## 0.6 Convenzioni della specifica
+
+### Struttura di un requisito
+
+| Elemento | Contenuto |
+|---|---|
+| ID | identificativo univoco (formato sotto) |
+| Titolo | frase breve che nomina il comportamento |
+| Priorità | P0, P1 o P2 |
+| Descrizione | cosa fa il sistema, in termini osservabili dall'utente |
+| Criteri di accettazione | uno o più criteri nel formato «Dato…, quando…, allora…» |
+| Parità (facoltativo) | voci dell'inventario di parità coperte, come «area.numero» (es. «Parità: 2.4») |
+| Dipendenze (facoltativo) | ID dei requisiti necessari |
+
+Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizione e criteri.
+
+### Formato degli ID
+
+- Forma `PREFISSO-NN`: prefisso in maiuscolo, trattino, numero progressivo a due cifre (tre oltre il 99, es. `NFR-100`).
+- Prefissi delle sezioni generali: `NFR` (requisiti non funzionali, 0.4) e `UX` (interfaccia comune, 0.5); gli obiettivi di 0.1 sono `O1`…`O7`.
+- Ogni sezione d'area usa un proprio prefisso di 2–4 lettere, dichiarato all'inizio della sezione e unico nella specifica (es. `PAG` per Pagine).
+- Gli ID non si riusano: un requisito eliminato resta nell'elenco come «Ritirato», con il motivo; se un requisito viene diviso, la prima parte conserva l'ID originale.
+- Riferimenti: si cita l'ID (es. «vedi NFR-08»); un intervallo si scrive NFR-08…NFR-12; un singolo criterio si cita con l'ID e la sua posizione (es. `NFR-08/2` = secondo criterio di NFR-08).
+
+### Priorità
+
+| Priorità | Significato | Regola di rilascio |
+|---|---|---|
+| **P0** | Indispensabile nella prima versione: senza, il prodotto non è rilasciabile (lettura, salvataggio sicuro, funzioni di base di ogni area, sicurezza). | Tutti i P0 completati e verificati prima del primo rilascio. |
+| **P1** | Necessario per la prima versione completa, cioè per raggiungere la parità funzionale. | Tutti i P1 completati per dichiarare la parità (O1). |
+| **P2** | Successivo: miglioramenti, casi specialistici, estensioni oltre la parità. | Pianificato dopo la versione completa. |
+
+- Un requisito non può dipendere da uno di priorità inferiore (un P0 non dipende da un P1).
+- Un singolo criterio può avere una priorità diversa da quella del requisito: la si indica tra parentesi alla fine del criterio, es. «(P1)».
+
+### Criteri di accettazione
+
+- Forma: **Dato** [situazione iniziale], **quando** [azione dell'utente o evento], **allora** [risultato osservabile]. Se il criterio descrive uno stato, «quando» può mancare («Dato…, allora…»).
+- Ogni criterio verifica un solo comportamento osservabile e misurabile (tempi, quantità, testi, stati visibili, contenuto del file). Termini vaghi come «veloce», «intuitivo», «semplice» sono ammessi solo accompagnati da una soglia.
+- Le soglie numeriche si misurano nelle condizioni di 0.4 (macchina di riferimento, corpus di prova), salvo diversa indicazione.
+- Un requisito è soddisfatto solo se lo sono tutti i suoi criteri.
+- Ogni criterio deve potersi tradurre in un test, manuale o automatico; i file di prova necessari si aggiungono al corpus di 0.4.
+
+### Linguaggio e notazioni
+
+- Verbi: «deve» = obbligatorio; «dovrebbe» = raccomandato, con deroga ammessa se motivata; «può» = facoltativo. Le descrizioni al presente indicativo valgono come «deve».
+- Comandi ed etichette dell'interfaccia in **grassetto** (testo previsto, soggetto a revisione linguistica); esempi di messaggi tra virgolette basse «…», vincolanti nel contenuto ma non nella forma esatta.
+- Tasti con i nomi della tastiera italiana: Ctrl, Alt, Maiusc, Invio, Canc, Esc, Tab, Spazio, Inizio, Fine, Pag su, Pag giù; combinazioni unite da «+» (es. Ctrl+Maiusc+S).
+- Unità: s e ms; MB e GB come multipli binari (1 MB = 1.048.576 byte); px riferiti alla scala 100%; date nel formato gg/mm/aaaa.
+- Rimandi: «area N» per le sezioni d'area, «0.N» per le sezioni generali.
+
+### Neutralità e metodo clean-room
+
+- La specifica descrive comportamenti osservabili, non soluzioni tecniche: niente librerie, linguaggi di programmazione o strutture interne. Sono ammessi gli standard pubblici di file e protocolli (es. ISO 32000, PDF/A, PAdES).
+- Nessun nome di prodotto commerciale: l'editor di riferimento non viene nominato; i formati di terzi si indicano per tipo ed estensione (es. «documento di testo .docx», «foglio di calcolo .xlsx»), non con il nome del programma.
+- Nessun testo copiato da fonti esterne: le descrizioni sono scritte ex novo a partire da informazioni pubbliche.
+- Per l'interfaccia valgono i principi di 0.5 e il requisito UX-01.
+
+### Tracciabilità della parità
+
+- Ogni voce dell'inventario di parità è coperta da almeno un requisito di area (campo «Parità») oppure compare tra le esclusioni motivate di 0.2.
+- Una matrice di copertura (voce → ID) accompagna la specifica; una voce senza copertura impedisce di dichiarare raggiunto l'obiettivo O1.
 
 
 ## 1. Visualizzazione e navigazione
@@ -4034,7 +4256,203 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Priorità:** P2
 
-<!-- ANN-CONTINUA -->
+### ANN-34 — Pannello elenco commenti
+
+**Descrizione:** Pannello laterale con tutte le annotazioni del documento (esclusi collegamenti, campi modulo e popup), raggruppate per pagina. Ogni voce mostra icona del tipo, autore, data e ora di modifica, anteprima del commento, testo marcato per i markup testuali, valore per le misure, stato e numero di risposte. Clic su una voce → vista sulla pagina e selezione dell'annotazione; selezione in pagina → voce evidenziata. Modifica del commento direttamente nella voce, menu contestuale (rispondi, imposta stato, proprietà, copia testo, elimina), selezione multipla, comprimi/espandi tutto, comandi successivo/precedente, contatore totale, "Elimina tutti" con conferma, navigazione completa da tastiera.
+
+**Flusso:** 1. Aprire il pannello Commenti. 2. Scorrere o navigare con le frecce. 3. Clic o Invio su una voce per raggiungere l'annotazione. 4. Agire dal menu contestuale.
+
+**Formati/strutture:** lettura delle `/Annots` di tutte le pagine; esclusi `/Link`, `/Widget`, `/Popup` e le annotazioni di stato; risposte (`/IRT`) annidate sotto la voce principale; nessuna scrittura nel file oltre alle modifiche esplicite.
+
+**Casi limite:** 10.000 annotazioni → elenco virtualizzato, prima schermata entro 2 s, scorrimento fluido; pagine non ancora rese → annotazioni comunque elencate; annotazione senza autore → "(autore sconosciuto)"; senza data → in coda nell'ordinamento per data; testo lungo → anteprima su 3 righe con "mostra tutto"; annotazione nascosta (flag Hidden) → elencata con indicatore.
+
+**Criteri di accettazione:**
+- Dato un documento con 3 evidenziazioni a pagina 1 e 2 note a pagina 4, quando l'utente apre il pannello, allora sono elencate 5 voci in due gruppi, "Pagina 1" con 3 voci e "Pagina 4" con 2, ciascuna con autore e data.
+- Dato una voce del pannello, quando l'utente vi fa clic, allora la vista mostra la pagina dell'annotazione e l'annotazione risulta selezionata.
+- Dato un'annotazione selezionata in pagina, quando la selezione cambia, allora la voce corrispondente è evidenziata e portata in vista nel pannello.
+- Dato un documento con collegamenti e campi modulo, quando l'utente apre il pannello, allora essi non sono elencati.
+- Dato un documento con 10.000 annotazioni, quando l'utente apre il pannello, allora la prima schermata dell'elenco compare entro 2 s sulla configurazione di riferimento.
+
+**Priorità:** P0
+
+### ANN-35 — Filtri e ricerca nei commenti
+
+**Descrizione:** Filtri combinabili per tipo, autore, colore, stato di revisione, segno di spunta, pagina o intervallo di pagine, intervallo di date, presenza di risposte; ricerca testuale nel commento, nelle risposte e nel testo marcato, senza distinzione tra maiuscole e minuscole e, a scelta, tra lettere accentate e non. Contatore "n di N" e azzeramento rapido. L'opzione "Applica il filtro alla pagina" mostra in pagina solo le annotazioni filtrate.
+
+**Flusso:** 1. Aprire il menu Filtri del pannello. 2. Selezionare i criteri (autori e colori presenti nel documento sono proposti come elenco). 3. Digitare nel campo di ricerca. 4. Azzerare con un clic.
+
+**Formati/strutture:** nessuna modifica al file (filtro solo di visualizzazione); i filtri non vengono salvati nel documento.
+
+**Casi limite:** nessuna corrispondenza → messaggio "Nessun commento corrisponde ai filtri"; autori che differiscono solo per spazi iniziali o finali → trattati come lo stesso autore; commento appena creato ed escluso dal filtro → mostrato finché il filtro non viene modificato.
+
+**Criteri di accettazione:**
+- Dato commenti di 3 autori, quando l'utente filtra per l'autore "Anna", allora il pannello elenca solo annotazioni con `/T` "Anna" e il contatore mostra "n di N".
+- Dato i filtri tipo "Evidenziazione" e stato "Accettato", quando sono applicati, allora sono elencate solo le evidenziazioni il cui stato di revisione più recente è Accettato.
+- Dato la ricerca "scadenza", quando viene eseguita, allora sono elencati i commenti in cui "scadenza" o "Scadenza" compare nel testo, nelle risposte o nel testo marcato, con l'occorrenza evidenziata.
+- Dato "Applica il filtro alla pagina" attivo, quando l'utente salva, allora le annotazioni escluse non sono visibili in pagina ma i loro `/F` nel file sono invariati.
+
+**Priorità:** P1
+
+### ANN-36 — Ordinamento e raggruppamento dei commenti
+
+**Descrizione:** Ordinamento dell'elenco per pagina e posizione (dall'alto in basso), autore, data di creazione o di modifica (crescente o decrescente), tipo, colore, stato; raggruppamento corrispondente con intestazioni comprimibili e conteggio per gruppo. Le risposte restano sempre sotto il proprio commento.
+
+**Flusso:** 1. Aprire il menu Ordina del pannello. 2. Scegliere criterio e verso. 3. L'elenco si riorganizza mantenendo filtri e selezione.
+
+**Formati/strutture:** nessuna modifica al file; l'ordinamento scelto è ricordato come preferenza dell'utente.
+
+**Casi limite:** chiavi uguali → ordinamento stabile (a parità, pagina e poi posizione); date mancanti → in coda; ordine alfabetico secondo le regole della lingua dell'interfaccia (lettere accentate collocate correttamente); pagine ruotate → "dall'alto in basso" valutato nella vista.
+
+**Criteri di accettazione:**
+- Dato commenti con date diverse, quando l'utente ordina per data di modifica decrescente, allora la prima voce è quella con `/M` più recente.
+- Dato l'ordinamento per pagina, quando la stessa pagina contiene più voci, allora esse seguono l'ordine dall'alto in basso del bordo superiore di `/Rect` nella vista (tenendo conto di `/Rotate`).
+- Dato l'ordinamento per autore, quando l'elenco viene mostrato, allora i gruppi seguono l'ordine alfabetico della lingua e ogni risposta resta sotto il proprio commento.
+
+**Priorità:** P1
+
+### ANN-37 — Risposte ai commenti
+
+**Descrizione:** Risposta a qualsiasi annotazione di markup dal pannello o dalla popup; il thread mostra le risposte in ordine cronologico con autore e data, comprese le risposte a una risposta (con indicazione "in risposta a"). Le proprie risposte, e quelle altrui non bloccate, si modificano ed eliminano; eliminare un commento principale elimina, previa conferma, l'intero thread.
+
+**Flusso:** 1. "Rispondi" sulla voce o nella popup. 2. Digitare il testo e confermare con Invio (Maiusc+Invio per andare a capo). 3. La risposta compare in fondo al thread.
+
+**Formati/strutture:** risposta = annotazione `/Text` sulla stessa pagina del commento, con `/IRT` riferito al commento, `/RT /R` (o assente), `/T`, `/CreationDate`, `/M`, `/Contents`, `/RC`; stesso `/Rect` del commento; non disegnata in pagina.
+
+**Casi limite:** `/IRT` che punta a un oggetto inesistente → risposta mostrata come commento autonomo; catena di `/IRT` ciclica → interrotta in lettura senza errori; risposta a collegamenti o campi modulo → non consentita; spostamento del commento con taglia/incolla → il thread si sposta con esso.
+
+**Criteri di accettazione:**
+- Dato un'evidenziazione, quando l'utente risponde "D'accordo" e salva, allora la stessa pagina contiene un `/Text` con `/IRT` riferito all'evidenziazione, `/Contents` "D'accordo" e `/T` uguale all'autore corrente.
+- Dato un thread con 3 risposte, quando l'utente elimina il commento principale, conferma e salva, allora né il commento né le 3 risposte sono presenti.
+- Dato un file con una catena ciclica di `/IRT`, quando viene aperto, allora l'apertura riesce e tutte le annotazioni coinvolte sono elencate.
+- Dato risposte create in momenti diversi, quando il thread viene mostrato, allora le risposte sono in ordine crescente di `/CreationDate`.
+
+**Priorità:** P1
+
+### ANN-38 — Stato di revisione e segno di spunta
+
+**Descrizione:** Per ogni commento o risposta l'utente imposta uno stato di revisione — Nessuno, Accettato, Rifiutato, Annullato, Completato — e un segno di spunta (contrassegnato o no). Ogni cambio di stato è registrato con autore e data; il pannello mostra lo stato più recente con un'icona e, a richiesta, la cronologia completa per autore.
+
+**Flusso:** 1. Menu contestuale della voce o della popup → "Imposta stato". 2. Scelta dello stato. 3. Per la spunta, clic sulla casella della voce. 4. Lo stato è filtrabile (ANN-35) e compare nel riepilogo (ANN-43).
+
+**Formati/strutture:** annotazione di stato = `/Text` con `/IRT` al commento, `/StateModel /Review` e `/State` (/None, /Accepted, /Rejected, /Cancelled, /Completed), oppure `/StateModel /Marked` e `/State` (/Marked, /Unmarked); `/T` dell'autore che imposta lo stato; `/CreationDate`; non disegnata in pagina né mostrata come risposta testuale.
+
+**Casi limite:** autori diversi con stati diversi → stato visibile = il più recente, cronologia con tutti; stati impostati da altri programmi conformi → interpretati allo stesso modo; eliminazione del commento → eliminate anche le sue annotazioni di stato; documento che vieta i commenti → stato non modificabile.
+
+**Criteri di accettazione:**
+- Dato un commento, quando l'utente "Maria" imposta lo stato "Accettato" e salva, allora la stessa pagina contiene un `/Text` con `/IRT` al commento, `/StateModel /Review`, `/State /Accepted` e `/T` "Maria", e il pannello mostra "Accettato".
+- Dato gli stati "Accettato" e poi "Completato", quando l'utente apre la cronologia, allora lo stato visibile è "Completato" e la cronologia elenca entrambi in ordine.
+- Dato il segno di spunta attivato e poi disattivato, quando l'utente salva, allora esistono annotazioni con `/StateModel /Marked` e lo stato più recente è `/Unmarked`.
+- Dato un file con stati di revisione creati da un altro programma conforme, quando viene aperto, allora il pannello mostra per ogni commento lo stesso stato più recente.
+
+**Priorità:** P1
+
+### ANN-39 — Mostra e nascondi annotazioni
+
+**Descrizione:** Comando globale (menu Vista, barra Commenti, scorciatoia da tastiera) per nascondere o mostrare tutte le annotazioni nella vista, e comando separato per aprire o chiudere tutte le popup. È un'impostazione di visualizzazione per documento: non modifica il file né la stampa, che segue le proprie opzioni.
+
+**Flusso:** 1. Scegliere "Nascondi annotazioni": la pagina mostra solo il contenuto. 2. Il pannello indica che le annotazioni sono nascoste. 3. "Mostra annotazioni" ripristina la vista.
+
+**Formati/strutture:** nessuna modifica al file; i flag `/F` non vengono alterati; lo stato vale per la sessione del documento.
+
+**Casi limite:** annotazione selezionata al momento dell'occultamento → deselezionata; creazione di una nuova annotazione mentre sono nascoste → visualizzazione riattivata con avviso; salvataggio con annotazioni nascoste → file identico a quello salvato con annotazioni visibili; collegamenti e campi modulo → non interessati.
+
+**Criteri di accettazione:**
+- Dato un documento con 10 annotazioni, quando l'utente sceglie "Nascondi annotazioni", allora il rendering di ogni pagina coincide con quello dello stesso documento privo di annotazioni (confronto pixel).
+- Dato le annotazioni nascoste, quando l'utente salva e riapre, allora tutte le annotazioni sono visibili e i loro `/F` sono invariati.
+- Dato le annotazioni nascoste, quando l'utente sceglie "Mostra annotazioni", allora tutte tornano visibili nella posizione originale.
+
+**Priorità:** P1
+
+### ANN-40 — Appiattimento delle annotazioni
+
+**Descrizione:** Fonde l'aspetto delle annotazioni nel contenuto della pagina, rendendole parte fissa del documento. Ambito: tutto il documento, pagina corrente, intervallo, selezione o annotazioni filtrate per tipo. Opzioni: escludere i collegamenti, includere o meno le annotazioni non stampabili (predefinito: non appiattite e lasciate come annotazioni), eliminare popup e risposte; salvataggio sul documento o come copia.
+
+**Flusso:** 1. "Appiattisci annotazioni" dal menu Commenti o dal menu contestuale della selezione. 2. Scelta di ambito e opzioni, con avviso di irreversibilità dopo il salvataggio. 3. Esecuzione con indicatore di avanzamento. 4. L'operazione è annullabile finché il documento resta aperto.
+
+**Formati/strutture:** per ogni annotazione, `/AP /N` inserito nel contenuto della pagina come Form XObject con la trasformazione derivata da `/Rect`, `/BBox` e `/Matrix` secondo ISO 32000-2 §12.5.5; rimozione da `/Annots` dell'annotazione, della sua popup e delle risposte; aggiornamento della struttura logica nei documenti taggati; i file incorporati degli allegati appiattiti sono rimossi, con avviso.
+
+**Casi limite:** annotazione senza `/AP` → aspetto generato prima dell'appiattimento; pagina ruotata → posizione e orientamento conservati; documento firmato → avviso che l'operazione invalida le firme e proposta di salvare una copia; testo di caselle e commenti di testo → resta testo reale, ricercabile ed estraibile; annotazioni nascoste o non stampabili → non appiattite salvo scelta esplicita; misure → il valore resta visibile come testo.
+
+**Criteri di accettazione:**
+- Dato una pagina con 5 annotazioni di tipi diversi, quando l'utente appiattisce tutto e salva, allora la pagina non ha più annotazioni (salvo i collegamenti esclusi) e il suo rendering coincide con quello precedente l'appiattimento (confronto pixel con tolleranza di antialiasing).
+- Dato una casella di testo "Totale 100", quando viene appiattita, allora l'estrazione del testo della pagina contiene "Totale 100".
+- Dato una selezione di 2 annotazioni su 4, quando l'utente appiattisce la selezione, allora le altre 2 restano annotazioni modificabili.
+- Dato un'annotazione con il flag Print disattivato, quando l'utente appiattisce con le opzioni predefinite, allora essa non compare nel contenuto della pagina e resta come annotazione.
+- Dato un appiattimento appena eseguito, quando l'utente esegue Annulla, allora tutte le annotazioni tornano modificabili.
+
+**Priorità:** P1
+
+### ANN-41 — Esportazione dei commenti in formato di interscambio
+
+**Descrizione:** Esporta tutti i commenti, quelli selezionati o quelli filtrati in un file leggero da inviare senza il PDF: XFDF (predefinito) o FDF. Comprende risposte, stati, popup e, a scelta, gli aspetti dei timbri e gli allegati incorporati. Il file riporta il riferimento al documento di origine per la reimportazione.
+
+**Flusso:** 1. "Esporta commenti" dal menu Commenti o dal pannello. 2. Scelta di formato, ambito e opzioni (includi allegati, includi aspetti). 3. Scelta del file di destinazione. 4. Messaggio con il numero di commenti esportati.
+
+**Formati/strutture:** XFDF secondo ISO 19444-1 (UTF-8; `<xfdf>` con `<annots>` e un elemento per tipo — highlight, underline, strikeout, squiggly, text, freetext, line, square, circle, polygon, polyline, ink, stamp, caret, fileattachment, popup —; attributi con indice di pagina a base 0, rettangolo, nome, autore, date, colore, opacità, flag, inreplyto, replyType, coordinate dei quadrilateri; contenuto semplice e formattato; aspetto incluso; `<f href>` e `<ids>`); FDF secondo ISO 32000-2 §12.7.8 (`/FDF` con `/F`, `/ID` e `/Annots`, ogni annotazione con `/Page`).
+
+**Casi limite:** nessun commento → comando disattivato con spiegazione; timbri personalizzati → aspetto incluso perché la grafica non vada persa; allegati esclusi per scelta → annotazione esportata senza il file, con avviso; caratteri speciali (&, <, emoji) → codificati correttamente; esportazione filtrata → incluse le risposte e gli stati dei commenti esportati.
+
+**Criteri di accettazione:**
+- Dato un documento con 1 evidenziazione, 1 nota con 2 risposte e 1 timbro personalizzato, quando l'utente esporta in XFDF, allora il file è XML ben formato, valido rispetto allo schema XFDF, con 5 annotazioni (le risposte con inreplyto) e l'aspetto del timbro incluso.
+- Dato lo stesso documento, quando l'utente esporta in FDF, allora il file è un FDF valido con 5 dizionari in `/Annots`, ciascuno con il `/Page` corretto.
+- Dato un commento "A & B < C 😀", quando viene esportato in XFDF e reimportato, allora il testo è identico.
+- Dato un filtro per autore attivo, quando l'utente esporta i commenti filtrati, allora il file contiene solo quei commenti con le relative risposte.
+
+**Priorità:** P1
+
+### ANN-42 — Importazione e unione dei commenti
+
+**Descrizione:** Importa commenti da XFDF, FDF o da un altro PDF (copia delle sue annotazioni pagina per pagina), anche da più file in sequenza per unire le revisioni di più revisori. Gestione dei duplicati (stesso identificativo): salta, sostituisci se più recente, mantieni entrambi. Avviso se il file proviene da un documento diverso o fa riferimento a pagine inesistenti.
+
+**Flusso:** 1. "Importa commenti" e scelta di uno o più file. 2. Verifica di corrispondenza con il documento (identificativo, numero di pagine) e scelta della regola per i duplicati. 3. Importazione con indicatore di avanzamento. 4. Riepilogo finale: importati, saltati e ignorati, con motivazione.
+
+**Formati/strutture:** lettura di XFDF (ISO 19444-1), FDF (ISO 32000-2 §12.7.8) e PDF; assegnazione di `/P`; ricollegamento di `/IRT` tramite i nomi; generazione degli aspetti mancanti.
+
+**Casi limite:** commenti su pagine oltre l'ultima → saltati e riportati nel riepilogo; pagine di dimensioni diverse → coordinate mantenute, con avviso; file malformato → documento invariato, errore con indicazione della posizione; elementi sconosciuti → ignorati e conteggiati; 5.000 commenti → avanzamento visibile, interruzione possibile, un solo passo di Annulla; documento che vieta i commenti → importazione impedita.
+
+**Criteri di accettazione:**
+- Dato un XFDF esportato dal documento A con 5 commenti, quando l'utente lo importa in una copia di A priva di commenti, allora la copia contiene 5 annotazioni con gli stessi tipi, pagine, `/Rect` (tolleranza 0,01 pt), colori, testi, autori e date, e le risposte sono collegate ai commenti corretti.
+- Dato lo stesso XFDF importato due volte con la regola "salta", quando termina la seconda importazione, allora il numero di annotazioni non è cambiato.
+- Dato un XFDF con un commento a pagina 12 importato in un documento di 10 pagine, quando l'importazione termina, allora i commenti validi sono importati e il riepilogo segnala 1 commento saltato.
+- Dato gli XFDF di due revisori diversi importati in sequenza, quando l'utente apre il pannello, allora sono elencati i commenti di entrambi gli autori.
+- Dato un XFDF malformato, quando l'utente tenta l'importazione, allora il documento resta invariato e compare un messaggio di errore.
+
+**Priorità:** P1
+
+### ANN-43 — Riepilogo commenti esportabile
+
+**Descrizione:** Genera un documento di riepilogo dei commenti (tutti o filtrati, nell'ordinamento scelto) senza modificare l'originale. Layout: solo elenco dei commenti; pagina del documento con i commenti affiancati e collegati da connettori numerati; pagina seguita dall'elenco dei suoi commenti. Per ogni voce: numero, tipo, autore, data, pagina, stato, testo marcato, commento e risposte. Uscita in PDF (predefinita), CSV o testo semplice, oppure stampa diretta.
+
+**Flusso:** 1. "Riepilogo commenti" dal menu Commenti. 2. Scelta di layout, formato carta, dimensione del carattere, ambito e campi da includere. 3. Anteprima. 4. Salvataggio o stampa.
+
+**Formati/strutture:** nuovo PDF con caratteri incorporati e connettori disegnati come grafica; CSV UTF-8 con intestazione (pagina, tipo, autore, data, stato, testo marcato, commento, identificativo del commento padre); testo semplice UTF-8.
+
+**Casi limite:** nessun commento → generazione impedita con avviso; testi lunghi → continuazione su più pagine; caratteri non latini → carattere con copertura adeguata incorporato; pagine ruotate → raffigurate nell'orientamento di visualizzazione; 1.000 commenti → avanzamento visibile e annullamento possibile.
+
+**Criteri di accettazione:**
+- Dato un documento con 4 commenti su 2 pagine, quando l'utente genera il riepilogo PDF "solo commenti", allora il PDF contiene, in ordine, i 4 commenti con autore, data, pagina e testo, e il file originale non è modificato.
+- Dato il layout con connettori, quando il riepilogo viene generato, allora per ogni pagina con commenti esso mostra la pagina e numeri identici a quelli delle voci corrispondenti.
+- Dato un'evidenziazione sulla frase "termine di consegna", quando l'utente genera il riepilogo, allora la voce riporta il testo marcato "termine di consegna".
+- Dato l'esportazione in CSV, quando il file viene aperto, allora contiene una riga per ogni commento e per ogni risposta, con il riferimento al commento padre per le risposte.
+
+**Priorità:** P1
+
+### ANN-44 — Controllo ortografico nei commenti
+
+**Descrizione:** Durante la scrittura in note, caselle di testo, callout, commenti di testo e risposte, le parole non riconosciute sono sottolineate; il menu contestuale propone correzioni, "Aggiungi al dizionario" e "Ignora". Lingua predefinita = lingua dell'interfaccia, modificabile per singolo testo; più dizionari installabili; funzione disattivabile.
+
+**Flusso:** 1. L'utente scrive in un campo di commento. 2. Le parole sconosciute sono sottolineate in tempo reale. 3. Clic destro → scelta della correzione o dell'azione.
+
+**Formati/strutture:** nessun effetto sul PDF (le sottolineature non vengono salvate); dizionario personale nel profilo utente.
+
+**Casi limite:** lingua senza dizionario installato → controllo disattivato con indicazione; parole con apostrofo o trattino → trattate secondo le regole della lingua; testi molto lunghi → controllo eseguito senza rallentare la digitazione.
+
+**Criteri di accettazione:**
+- Dato il dizionario italiano attivo, quando l'utente scrive "prova di ortogarfia" in una nota, allora "ortogarfia" è segnalata e tra i suggerimenti compare "ortografia".
+- Dato una parola aggiunta al dizionario personale, quando l'utente la riscrive in un altro documento, allora non è segnalata.
+- Dato un commento con parole segnalate, quando l'utente salva, allora l'aspetto dell'annotazione è identico a quello generato con il controllo disattivato.
+
+**Priorità:** P2
 
 
 ## 6. Conversione, creazione e ottimizzazione
@@ -6901,10 +7319,62 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Priorità:** P2
 
+### SEC-32 — Blocco dell'applicazione
+
+**Descrizione:** Protegge l'accesso a Foliant con un codice dell'applicazione o con l'autenticazione del sistema (impronta digitale inclusa, se disponibile) all'avvio e dopo un periodo di inattività, nascondendo il contenuto dei documenti aperti mentre l'applicazione è bloccata (equivalente desktop del blocco con biometria o codice delle app per dispositivi mobili).
+
+**Flusso:** 1. Preferenze → Sicurezza → "Blocca Foliant": metodo (codice dell'applicazione o autenticazione del sistema), blocco all'avvio, dopo N minuti di inattività, alla sospensione o al blocco dello schermo. 2. Da bloccata, ogni finestra mostra una schermata di blocco senza contenuti né nomi dei documenti. 3. Sblocco con il metodo scelto; dopo 5 tentativi errati il ritardo tra i tentativi aumenta progressivamente.
+
+**Formati/strutture:** codice dell'applicazione conservato solo come impronta con sale calcolata da una funzione di derivazione lenta; uso del servizio di autenticazione del sistema operativo quando disponibile.
+
+**Casi limite:** autenticazione del sistema non disponibile → ripiego sul codice dell'applicazione; codice dimenticato → reimpostazione previa autenticazione dell'utente del sistema; anteprime delle finestre nel selettore delle applicazioni → mostrano la schermata di blocco; elaborazioni in corso (es. elaborazione in blocco) → proseguono durante il blocco; avviso che il blocco non cifra i file, che restano leggibili da altri programmi (per questo esiste SEC-31).
+
+**Criteri di accettazione:**
+- Dato un blocco impostato a 1 minuto di inattività, quando trascorre 1 minuto senza input, allora tutte le finestre mostrano la schermata di blocco e nessun nome di documento compare nei titoli delle finestre.
+- Dato Foliant bloccato, quando l'utente inserisce un codice errato, allora l'applicazione resta bloccata; con il codice corretto torna allo stato precedente senza perdita delle modifiche non salvate.
+- Dato il blocco all'avvio attivo, quando si avvia Foliant passando un file dalla riga di comando, allora il file viene mostrato solo dopo lo sblocco.
+
+**Priorità:** P2
+
+### SEC-33 — Cifratura lato client dei documenti sincronizzati
+
+**Descrizione:** Quando l'utente sincronizza documenti con uno storage remoto (servizi cloud, WebDAV, SFTP, condivisioni di rete), può attivare la cifratura lato client: i file vengono cifrati sul dispositivo prima del caricamento e il servizio remoto non riceve mai contenuti né chiavi in chiaro (equivalente dell'archiviazione cloud cifrata).
+
+**Flusso:** 1. Impostazioni dell'account di storage → "Cifra i file prima del caricamento". 2. Creazione o importazione della chiave (passphrase con derivazione e chiave di recupero). 3. I file vengono cifrati al caricamento e decifrati in memoria allo scaricamento. 4. Su un secondo dispositivo l'utente importa la stessa chiave per accedere ai file.
+
+**Formati/strutture:** cifratura autenticata per file (es. AES-256-GCM) con chiave per file protetta dalla chiave principale; cifratura facoltativa dei nomi dei file; metadati minimi in chiaro (dimensione approssimativa, data); trasporto su canale sicuro (SEC-34).
+
+**Casi limite:** chiave persa → file remoti irrecuperabili, con avviso esplicito alla creazione; file remoti già presenti non cifrati → proposta di cifrarli; conflitto di versioni → entrambe le versioni conservate cifrate; cartella condivisa con altri utenti → la condivisione richiede lo scambio sicuro della chiave, altrimenti la cifratura lato client va disattivata per quella cartella con avviso.
+
+**Criteri di accettazione:**
+- Dato un PDF caricato con la cifratura lato client attiva, quando lo si scarica direttamente dallo storage con un altro client, allora il contenuto non è un PDF leggibile e non contiene stringhe del documento.
+- Dato la stessa chiave importata su un secondo dispositivo, quando si apre il file sincronizzato, allora il documento coincide byte per byte con l'originale.
+- Dato un file remoto alterato, quando viene scaricato, allora Foliant segnala l'errore di integrità e non ne apre il contenuto.
+
+**Priorità:** P2
+
+### SEC-34 — Trasmissione dati sicura e riservatezza di rete
+
+**Descrizione:** Tutte le funzioni di base di Foliant funzionano senza rete; le funzioni che la richiedono (aggiornamenti, storage remoto, marche temporali, verifica delle revoche, servizi facoltativi) comunicano solo su canali cifrati e autenticati, e nessun dato dei documenti lascia il dispositivo senza un'azione esplicita dell'utente.
+
+**Flusso:** 1. Al primo avvio Foliant non stabilisce connessioni senza consenso; Preferenze → Rete elenca le funzioni che usano la rete, ognuna con il proprio interruttore, e un interruttore generale "Modalità non in linea". 2. Prima del primo invio di contenuti di un documento a un servizio remoto, una finestra indica quali dati vengono inviati e a chi. 3. Le connessioni usano il proxy di sistema, se configurato. 4. Un errore di certificato provoca il rifiuto della connessione con un messaggio comprensibile.
+
+**Formati/strutture:** TLS 1.2 o superiore (1.3 preferito) con verifica della catena di certificati sull'archivio di certificati del sistema e verifica del nome host; nessun ripiego su HTTP in chiaro né su versioni di protocollo obsolete; autorità di certificazione aziendali riconosciute tramite l'archivio di sistema; telemetria e segnalazione degli errori disattivate per impostazione predefinita e attivabili solo con consenso; registro locale consultabile delle connessioni effettuate.
+
+**Casi limite:** certificato scaduto, autofirmato o con nome non corrispondente → connessione rifiutata, senza opzione "ignora" nelle impostazioni predefinite; proxy aziendale con ispezione del traffico → funziona se la sua autorità è nell'archivio di sistema; rete assente → funzioni locali pienamente utilizzabili e funzioni di rete in stato "non in linea"; reindirizzamento da HTTPS a HTTP → bloccato; servizi di marca temporale e di revoca che per protocollo usano HTTP con risposte firmate → ammessi perché l'integrità è garantita dalla firma, e annotati nel registro.
+
+**Criteri di accettazione:**
+- Dato un server con certificato scaduto, quando Foliant tenta di connettersi, allora la connessione viene rifiutata e l'utente vede un messaggio di errore di certificato.
+- Dato la modalità non in linea attiva, quando si usano per un'ora le funzioni locali (apertura, modifica, redazione, protezione, salvataggio) con monitoraggio del traffico, allora non viene effettuata alcuna connessione di rete.
+- Dato una nuova installazione, quando Foliant viene avviato per la prima volta e chiuso senza interazioni, allora non viene effettuata alcuna connessione di rete.
+- Dato una funzione che invia contenuti di un documento a un servizio remoto, quando viene usata per la prima volta, allora compare la finestra che indica dati e destinatario e, scegliendo "Annulla", nessun dato viene trasmesso.
+
+**Priorità:** P0
+
 
 ## 11. Confronto e operazioni in blocco
 
-Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (precedente) e **B** la versione da verificare (nuova): *aggiunta* = contenuto presente solo in B, *eliminazione* = contenuto presente solo in A, *modifica* = tratto di A sostituito da un tratto diverso in B. Le operazioni in blocco BAT-06…BAT-23 usano l'infrastruttura comune BAT-01…BAT-05 (coda, destinazione, nomi, esecuzione, errori e rapporto), che non viene ripetuta nei singoli blocchi. Regole trasversali: i file sorgente non vengono mai modificati, salvo scelta esplicita di sostituzione (BAT-02); ogni scrittura su disco è atomica; le password non compaiono mai in rapporti, registri o file di sequenza; le soglie di tempo dei criteri si misurano sull'hardware di riferimento definito nel piano di test.
+Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (precedente) e **B** la versione da verificare (nuova): *aggiunta* = contenuto presente solo in B, *eliminazione* = contenuto presente solo in A, *modifica* = tratto di A sostituito da un tratto diverso in B. Le funzioni BAT-06…BAT-23 usano l'infrastruttura comune BAT-01…BAT-05 (coda, destinazione, nomi, esecuzione, errori e rapporto), che non viene ripetuta nei singoli blocchi. Regole trasversali: i file sorgente non vengono mai modificati, salvo scelta esplicita di sostituzione (BAT-02); ogni scrittura su disco è atomica; le password non compaiono mai in rapporti, registri o file di sequenza; le soglie di tempo dei criteri si misurano sull'hardware di riferimento definito nel piano di test.
 
 ### CMP-01 — Avvio del confronto e scelta delle versioni
 **Descrizione:** L'utente sceglie i due documenti da confrontare (A e B), eventualmente limitati a intervalli di pagine, e il tipo di confronto (automatico, solo testo, solo visivo). Il calcolo avviene in background e produce una *sessione di confronto* aperta in una scheda dedicata, senza modificare i documenti.
@@ -6965,7 +7435,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Formati/strutture:** attributi dallo stato grafico del testo: font (/BaseFont senza prefisso di subset "ABCDEF+"), dimensione effettiva (dimensione del font × matrice di testo × matrice di trasformazione corrente), colore di riempimento convertito in RGB per il confronto, flag e peso del descrittore del font (/Flags, /FontWeight) e nome della variante.
 **Casi limite:**
 - Stesso font incorporato con prefissi di subset diversi → nessuna differenza.
-- Nomi diversi della stessa variante di font (nome commerciale contro nome PostScript) → normalizzati secondo una tabella di equivalenze; se non riconosciuti, riportati come differenza di font.
+- Nomi diversi della stessa variante di font (nome di famiglia contro nome interno del font) → normalizzati secondo una tabella di equivalenze; se non riconosciuti, riportati come differenza di font.
 - Stesso colore espresso in spazi colore diversi (grigio 0 contro RGB 0,0,0) → nessuna differenza.
 - Testo cambiato e riformattato insieme → una sola differenza di tipo modifica, con il dettaglio di formattazione allegato.
 **Criteri di accettazione:**
@@ -7016,8 +7486,8 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato B con 2 pagine inserite dopo pagina 3 di A, quando l'utente scorre A dalla pagina 3 alla pagina 4, allora B mostra la pagina 6, che contiene il testo corrispondente, e non la pagina 4.
 - Dato lo scorrimento sincronizzato disattivato, quando l'utente scorre il riquadro sinistro, allora il destro non si muove; quando la sincronizzazione viene riattivata, allora il destro si riallinea alla posizione corrispondente.
-- Dato uno zoom al 200% impostato nel riquadro A con sincronizzazione attiva, allora anche B passa al 200%.
-- Dato la selezione di una differenza nel riquadro B, allora la stessa differenza risulta evidenziata in A e selezionata nell'elenco.
+- Dato la sincronizzazione attiva, quando l'utente imposta lo zoom al 200% nel riquadro A, allora anche B passa al 200%.
+- Dato una sessione di confronto aperta, quando l'utente seleziona una differenza nel riquadro B, allora la stessa differenza risulta evidenziata in A e selezionata nell'elenco.
 **Priorità:** P0
 
 ### CMP-06 — Vista sovrapposta (overlay)
@@ -7038,9 +7508,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato A e B identici, quando si apre la vista sovrapposta, allora nessun pixel appare nel colore puro di A o di B.
 - Dato B con una linea spostata di 2 mm, quando si visualizza la sovrapposizione, allora la linea compare due volte, una nel colore di A e una nel colore di B, a 2 mm di distanza.
-- Dato l'opacità di A impostata a 0%, allora nella vista è visibile solo il contenuto di B.
+- Dato la vista sovrapposta aperta, quando l'utente imposta l'opacità di A a 0%, allora nella vista è visibile solo il contenuto di B.
 - Dato un allineamento manuale di +3 mm in orizzontale su una pagina, quando la sessione viene salvata e riaperta, allora l'allineamento risulta invariato.
-- Dato l'alternanza attiva, allora la frequenza misurata non supera 3 commutazioni al secondo.
+- Dato la vista sovrapposta aperta, quando l'utente attiva l'alternanza, allora la frequenza misurata non supera 3 commutazioni al secondo.
 **Priorità:** P0
 
 ### CMP-07 — Elenco differenze navigabile
@@ -7061,10 +7531,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Fine dell'elenco raggiunta con "successiva" → segnalazione e proposta di ripartire dalla prima.
 **Criteri di accettazione:**
 - Dato un confronto con 25 differenze, quando l'utente preme "Differenza successiva" 25 volte partendo dall'inizio, allora visita ogni differenza esattamente una volta in ordine di documento e alla pressione successiva viene segnalata la fine dell'elenco.
-- Dato il clic su una voce a pagina 40, allora entrambi i riquadri mostrano la differenza centrata entro 500 ms.
-- Dato un confronto senza differenze, allora il pannello mostra il messaggio di identità con l'elenco dei criteri applicati.
-- Dato un confronto con 20.000 differenze, allora l'elenco si apre e scorre senza blocchi dell'interfaccia superiori a 100 ms.
-- Dato nessun filtro attivo, allora la somma dei contatori per tipo è uguale al numero di voci dell'elenco.
+- Dato un confronto con una differenza a pagina 40, quando l'utente fa clic sulla voce corrispondente, allora entrambi i riquadri mostrano la differenza centrata entro 500 ms.
+- Dato due documenti senza differenze, quando il confronto termina, allora il pannello mostra il messaggio di identità con l'elenco dei criteri applicati.
+- Dato un confronto con 20.000 differenze, quando l'utente apre e scorre l'elenco, allora non si verificano blocchi dell'interfaccia superiori a 100 ms.
+- Dato nessun filtro attivo, quando il confronto termina, allora la somma dei contatori per tipo è uguale al numero di voci dell'elenco.
 **Priorità:** P0
 
 ### CMP-08 — Filtri per tipo ed esclusioni
@@ -7085,7 +7555,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato un confronto con 5 aggiunte e 3 eliminazioni, quando l'utente deseleziona "Eliminazioni", allora l'elenco mostra 5 voci, le evidenziazioni delle eliminazioni scompaiono dalle viste e il contatore indica "5 di 8".
 - Dato A e B che differiscono solo per la data stampata nel piè di pagina di ogni pagina, quando "Ignora intestazioni e piè di pagina" è attivo, allora il confronto riporta zero differenze.
 - Dato un'area di esclusione sul cartiglio applicata a tutte le pagine, quando il confronto viene ricalcolato, allora non viene riportata alcuna differenza con centro in quell'area.
-- Dato tutti i tipi deselezionati, allora il pannello indica il numero di differenze nascoste e non il messaggio di documenti identici.
+- Dato un confronto con differenze, quando l'utente deseleziona tutti i tipi, allora il pannello indica il numero di differenze nascoste e non il messaggio di documenti identici.
 **Priorità:** P0
 
 ### CMP-09 — Differenze di struttura: pagine, immagini, annotazioni e campi
@@ -7106,9 +7576,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Campo modulo rinominato → eliminazione del vecchio campo e aggiunta del nuovo.
 **Criteri di accettazione:**
 - Dato B ottenuto da A spostando la pagina 7 in posizione 2, quando si confronta, allora viene riportata una differenza "pagina spostata" e nessuna differenza di testo sul contenuto di quella pagina.
-- Dato B con un logo sostituito da un'immagine diversa nella stessa posizione, allora viene riportata una differenza "immagine sostituita" con riquadro su entrambe le pagine.
-- Dato B con un commento aggiunto a pagina 2 e il testo di un altro commento modificato, allora l'elenco contiene una differenza "annotazione aggiunta" e una "annotazione modificata" con testo prima e dopo.
-- Dato un modulo compilato in cui il campo "importo" vale 100 in A e 150 in B, allora viene riportata una differenza "campo modulo" con i due valori.
+- Dato B con un logo sostituito da un'immagine diversa nella stessa posizione, quando si confronta, allora viene riportata una differenza "immagine sostituita" con riquadro su entrambe le pagine.
+- Dato B con un commento aggiunto a pagina 2 e il testo di un altro commento modificato, quando si confronta, allora l'elenco contiene una differenza "annotazione aggiunta" e una "annotazione modificata" con testo prima e dopo.
+- Dato un modulo compilato in cui il campo "importo" vale 100 in A e 150 in B, quando si confronta, allora viene riportata una differenza "campo modulo" con i due valori.
 **Priorità:** P1
 
 ### CMP-10 — Rapporto delle differenze esportabile in PDF
@@ -7130,9 +7600,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato un confronto con 8 differenze, quando si esporta il rapporto completo, allora il PDF contiene una pagina di riepilogo con conteggi uguali a quelli dell'elenco e ogni voce del riepilogo ha un collegamento funzionante verso la pagina con la differenza.
 - Dato il rapporto esportato, allora le impronte di A e B sono invariate e il rapporto supera senza errori un controllo di conformità strutturale PDF (e la validazione PDF/A-2b quando l'opzione è attiva).
-- Dato il filtro che nasconde la formattazione e l'opzione "applica filtri" attiva, allora il rapporto non contiene differenze di formattazione e il riepilogo dichiara il filtro.
-- Dato "Esporta B annotato", allora il numero di annotazioni create è uguale al numero di differenze testuali visibili e ogni eliminazione riporta il testo eliminato nel commento.
-- Dato l'annullamento durante la generazione, allora nella destinazione non resta alcun file, nemmeno parziale.
+- Dato il filtro che nasconde la formattazione e l'opzione "applica filtri" attiva, quando si esporta il rapporto, allora il rapporto non contiene differenze di formattazione e il riepilogo dichiara il filtro.
+- Dato un confronto con differenze testuali, quando l'utente sceglie "Esporta B annotato", allora il numero di annotazioni create è uguale al numero di differenze testuali visibili e ogni eliminazione riporta il testo eliminato nel commento.
+- Dato la generazione di un rapporto in corso, quando l'utente la annulla, allora nella destinazione non resta alcun file, nemmeno parziale.
 **Priorità:** P0
 
 ### CMP-11 — Stato di revisione delle differenze e salvataggio della sessione
@@ -7149,9 +7619,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Sessione salvata da una versione più recente dello schema → apertura rifiutata con messaggio che indica la versione richiesta.
 **Criteri di accettazione:**
 - Dato 3 differenze accettate e 1 rifiutata, quando l'utente filtra per "Rifiutate", allora l'elenco mostra solo quella voce, e il rapporto esportato riporta lo stato di tutte e quattro.
-- Dato una sessione salvata e riaperta con file invariati, allora stati, note, filtri e allineamenti coincidono con quelli salvati.
+- Dato una sessione salvata i cui file non sono cambiati, quando viene riaperta, allora stati, note, filtri e allineamenti coincidono con quelli salvati.
 - Dato B modificato dopo il salvataggio, quando la sessione viene riaperta e ricalcolata, allora gli stati sono mantenuti per le differenze ancora presenti e l'utente riceve l'elenco di quelle scartate.
-- Dato l'uso di accetta e rifiuta, allora le impronte di A e B restano invariate.
+- Dato una sessione con differenze, quando l'utente ne accetta o rifiuta alcune, allora le impronte di A e B restano invariate.
 **Priorità:** P2
 
 ### CMP-12 — Preset per tipo di documento e confronto di scansioni
@@ -7169,8 +7639,8 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Stessa scansione confrontata con sé stessa → zero differenze.
 **Criteri di accettazione:**
 - Dato due scansioni della stessa lettera in cui in B è cambiata una cifra di un importo, quando si usa il preset Scansione, allora viene riportata una modifica sul numero e le impronte dei file sorgente restano invariate.
-- Dato il preset Presentazione e B con le pagine 3 e 4 scambiate, allora le pagine sono abbinate per contenuto e non viene riportata alcuna differenza di testo.
-- Dato una parola riconosciuta con confidenza inferiore alla soglia, allora la differenza che la coinvolge è marcata "incerta" e può essere filtrata separatamente.
+- Dato B con le pagine 3 e 4 scambiate rispetto ad A, quando si confronta con il preset Presentazione, allora le pagine sono abbinate per contenuto e non viene riportata alcuna differenza di testo.
+- Dato una parola riconosciuta con confidenza inferiore alla soglia, quando rientra in una differenza, allora la differenza è marcata "incerta" e può essere filtrata separatamente.
 **Priorità:** P1
 
 ### CMP-13 — Confronto di testo semplice
@@ -7180,7 +7650,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 2. Sceglie la granularità (riga, parola, carattere) e le opzioni (ignora maiuscole, spazi, terminatori di riga).
 3. Naviga le differenze con l'elenco (come CMP-07).
 4. Esporta il risultato come rapporto PDF (disposizione semplificata di CMP-10) o come testo nel formato "diff unificato".
-**Formati/strutture:** testo UTF-8 o UTF-16 con riconoscimento del BOM; codifiche a 8 bit selezionabili (ISO-8859-1, Windows-1252); terminatori LF e CRLF normalizzati; esportazione in diff unificato.
+**Formati/strutture:** testo UTF-8 o UTF-16 con riconoscimento del BOM; codifiche a 8 bit selezionabili (ISO-8859-1, ISO-8859-15, CP1252); terminatori LF e CRLF normalizzati; esportazione in diff unificato.
 **Casi limite:**
 - File binario → rifiutato con messaggio.
 - Codifica riconosciuta in modo errato → l'utente sceglie la codifica e il confronto viene ricalcolato.
@@ -7188,7 +7658,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Differenze di soli terminatori di riga → ignorate per impostazione predefinita.
 **Criteri di accettazione:**
 - Dato due testi che differiscono per una sola parola in una riga, quando si confrontano a granularità di parola, allora è evidenziata come modifica solo quella parola.
-- Dato due file identici salvo i terminatori CRLF e LF, allora non viene riportata alcuna differenza.
+- Dato due file identici salvo i terminatori CRLF e LF, quando si confrontano con le opzioni predefinite, allora non viene riportata alcuna differenza.
 - Dato l'esportazione in diff unificato, quando la si applica al primo testo con uno strumento standard di applicazione delle patch, allora si ottiene esattamente il secondo testo.
 **Priorità:** P2
 
@@ -7206,7 +7676,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - File salvato di recente con riscrittura completa → le revisioni precedenti non esistono più; il sistema lo spiega.
 **Criteri di accettazione:**
 - Dato un PDF firmato al quale è stata aggiunta un'annotazione con salvataggio incrementale, quando l'utente sceglie "Confronta con la versione firmata", allora il confronto riporta esattamente l'annotazione aggiunta.
-- Dato un PDF senza aggiornamenti incrementali, allora l'elenco mostra una sola revisione e il confronto tra revisioni non è disponibile.
+- Dato un PDF senza aggiornamenti incrementali, quando l'utente apre "Revisioni", allora l'elenco mostra una sola revisione e il confronto tra revisioni non è disponibile.
 **Priorità:** P2
 
 ### BAT-01 — Coda dei file di input
@@ -7229,10 +7699,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Nomi con spazi, accenti o caratteri non latini → gestiti senza alterazioni.
 **Criteri di accettazione:**
 - Dato una cartella con 3 PDF e una sottocartella con 2 PDF e 1 file di testo, quando l'utente la aggiunge con "includi sottocartelle" per l'operazione Comprimi, allora la coda contiene esattamente 5 file e un avviso indica 1 file ignorato.
-- Dato l'ordinamento per nome, allora "doc2.pdf" precede "doc10.pdf".
-- Dato un PDF cifrato con password di apertura, allora prima dell'avvio la sua riga mostra lo stato "richiede password".
-- Dato lo stesso file aggiunto due volte, allora la coda contiene una sola voce.
-- Dato l'aggiunta di 10.000 file, allora durante l'analisi preliminare nessun blocco dell'interfaccia supera 200 ms.
+- Dato una coda con "doc10.pdf" e "doc2.pdf", quando l'utente ordina per nome, allora "doc2.pdf" precede "doc10.pdf".
+- Dato un PDF cifrato con password di apertura, quando viene aggiunto alla coda, allora prima dell'avvio la sua riga mostra lo stato "richiede password".
+- Dato un file già presente nella coda, quando l'utente lo aggiunge di nuovo, anche tramite un collegamento simbolico, allora la coda contiene una sola voce.
+- Dato una cartella con 10.000 PDF, quando l'utente la aggiunge alla coda, allora durante l'analisi preliminare nessun blocco dell'interfaccia supera 200 ms.
 **Priorità:** P0
 
 ### BAT-02 — Cartella di destinazione e politica di sovrascrittura
@@ -7252,11 +7722,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Percorso risultante troppo lungo → nome accorciato preservando estensione e suffisso di univocità, con avviso nel rapporto.
 - Sostituzione dell'originale di un file firmato o PDF/A → segnalata tra gli avvisi preliminari (BAT-04).
 **Criteri di accettazione:**
-- Dato due file "relazione.pdf" da cartelle diverse e un'unica destinazione con politica "rinomina", allora la destinazione contiene "relazione.pdf" e "relazione (1).pdf" e nessun file preesistente è sovrascritto.
-- Dato la politica "salta" e un file già esistente in destinazione, allora quel file non viene toccato (impronta e data di modifica invariate) e il rapporto indica "saltato: esiste già".
-- Dato un annullamento o un errore durante la scrittura, allora nella destinazione non resta alcun file parziale o temporaneo.
-- Dato "mantieni struttura delle sottocartelle", allora ingresso/a/x.pdf e ingresso/b/y.pdf producono destinazione/a/x.pdf e destinazione/b/y.pdf.
-- Dato "sostituisci gli originali" con copia di sicurezza, allora per ogni file elaborato esiste "<nome>.bak" identico byte per byte all'originale.
+- Dato due file "relazione.pdf" da cartelle diverse e un'unica destinazione con politica "rinomina", quando il lavoro termina, allora la destinazione contiene "relazione.pdf" e "relazione (1).pdf" e nessun file preesistente è sovrascritto.
+- Dato la politica "salta" e un file già esistente in destinazione, quando il lavoro termina, allora quel file non viene toccato (impronta e data di modifica invariate) e il rapporto indica "saltato: esiste già".
+- Dato un lavoro in corso, quando l'utente lo annulla o la scrittura di un file fallisce, allora nella destinazione non resta alcun file parziale o temporaneo.
+- Dato "mantieni struttura delle sottocartelle" attivo, quando si elaborano ingresso/a/x.pdf e ingresso/b/y.pdf, allora si ottengono destinazione/a/x.pdf e destinazione/b/y.pdf.
+- Dato "sostituisci gli originali" con copia di sicurezza, quando il lavoro termina, allora per ogni file elaborato esiste "<nome>.bak" identico byte per byte all'originale.
 **Priorità:** P0
 
 ### BAT-03 — Schema dei nomi dei file di output
@@ -7275,10 +7745,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Carattere non valido proveniente dal nome originale → sostituito.
 - Nome risultante troppo lungo → troncamento come in BAT-02.
 **Criteri di accettazione:**
-- Dato il modello "{nome}_{contatore:3}" con valore iniziale 1 e i file a.pdf, b.pdf, c.pdf, allora anteprima e risultati sono a_001.pdf, b_002.pdf, c_003.pdf.
-- Dato il modello "Fattura/2026", allora il nome risultante è "Fattura_2026.pdf".
-- Dato il segnaposto inesistente "{autore_x}", allora l'avvio è impedito con un messaggio che indica il segnaposto non valido.
-- Dato la conversione in PNG di un file "nome.pdf" di 3 pagine con modello "{nome}", allora i file prodotti sono nome_001.png, nome_002.png e nome_003.png.
+- Dato il modello "{nome}_{contatore:3}" con valore iniziale 1 e i file a.pdf, b.pdf, c.pdf, quando il lavoro termina, allora anteprima e risultati sono a_001.pdf, b_002.pdf, c_003.pdf.
+- Dato il modello "Fattura/2026", quando l'anteprima calcola il nome, allora il nome risultante è "Fattura_2026.pdf".
+- Dato il segnaposto inesistente "{autore_x}" nel modello, quando l'utente preme Avvia, allora l'avvio è impedito con un messaggio che indica il segnaposto non valido.
+- Dato un file "nome.pdf" di 3 pagine e il modello "{nome}", quando lo si converte in PNG, allora i file prodotti sono nome_001.png, nome_002.png e nome_003.png.
 **Priorità:** P0
 
 ### BAT-04 — Esecuzione, avanzamento, pausa e annullamento
@@ -7300,9 +7770,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Operazione sequenziale (unione) annullata → nessun file unito parziale.
 **Criteri di accettazione:**
 - Dato un lavoro su 20 file, quando l'utente sceglie "Annulla tutto" durante l'ottavo file, allora i file 1–7 restano completati e validi, l'ottavo non lascia risultati né temporanei e i file 9–20 risultano "Non elaborato" nel rapporto.
-- Dato un lavoro in corso, allora l'utente può aprire e scorrere un altro documento senza blocchi dell'interfaccia superiori a 200 ms.
-- Dato un lavoro messo in pausa, allora entro 5 s nessun file avanza e, dopo la ripresa, i risultati coincidono byte per byte con quelli di un'esecuzione senza pausa (operazioni deterministiche, data e identificativi fissati dal test).
-- Dato l'operazione Comprimi su 10 file, allora i risultati con parallelismo 4 coincidono con quelli con parallelismo 1.
+- Dato un lavoro in corso, quando l'utente apre e scorre un altro documento, allora non si verificano blocchi dell'interfaccia superiori a 200 ms.
+- Dato un lavoro in corso, quando l'utente lo mette in pausa e poi lo riprende, allora entro 5 s dalla pausa nessun file avanza e i risultati finali coincidono byte per byte con quelli di un'esecuzione senza pausa (operazioni deterministiche, data e identificativi fissati dal test).
+- Dato l'operazione Comprimi su 10 file, quando la si esegue con parallelismo 4 e con parallelismo 1, allora i risultati delle due esecuzioni coincidono.
 - Dato l'arresto forzato del processo a metà lavoro, quando l'applicazione viene riavviata, allora viene proposto di riprendere con i soli file non completati e nella destinazione non esiste alcun file corrotto.
 **Priorità:** P0
 
@@ -7323,10 +7793,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Rapporti con migliaia di righe → visualizzazione virtualizzata; l'esportazione resta completa.
 **Criteri di accettazione:**
 - Dato una coda di 10 file in cui il quarto è danneggiato e il settimo ha la password errata, quando il lavoro termina con politica "continua", allora 8 file risultano completati e il rapporto riporta 2 errori con cause e codici distinti.
-- Dato la politica "fermati al primo errore" con la stessa coda, allora il lavoro si arresta sul quarto file e i file 5–10 risultano "Non elaborato".
-- Dato il rapporto esportato in CSV, allora contiene l'intestazione e una riga per ciascun file della coda, con esiti uguali a quelli mostrati a schermo.
-- Dato un lavoro con password impostate, allora né il rapporto (CSV, JSON, PDF) né il giornale né i registri dell'applicazione contengono alcuna password.
-- Dato "Riprova i non riusciti", allora viene creato un lavoro che contiene solo i file in errore, con le stesse impostazioni.
+- Dato la politica "fermati al primo errore" con la stessa coda, quando il lavoro viene eseguito, allora si arresta sul quarto file e i file 5–10 risultano "Non elaborato".
+- Dato un lavoro terminato, quando l'utente esporta il rapporto in CSV, allora il file contiene l'intestazione e una riga per ciascun file della coda, con esiti uguali a quelli mostrati a schermo.
+- Dato un lavoro con password impostate, quando termina e il rapporto viene esportato, allora né il rapporto (CSV, JSON, PDF) né il giornale né i registri dell'applicazione contengono alcuna password.
+- Dato un lavoro terminato con file in errore, quando l'utente sceglie "Riprova i non riusciti", allora viene creato un lavoro che contiene solo quei file, con le stesse impostazioni.
 **Priorità:** P0
 
 ### BAT-06 — Conversione in blocco da PDF ad altri formati
@@ -7345,11 +7815,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Conformità PDF/A non raggiungibile (es. font non incorporabile) → errore con l'elenco delle regole violate.
 - Immagine lunga oltre i limiti del formato di uscita → divisa in più immagini numerate, con avviso.
 **Criteri di accettazione:**
-- Dato 5 PDF e il formato DOCX, allora vengono prodotti 5 file DOCX che superano la validazione dello schema del formato, uno per ingresso, con i nomi previsti dal modello.
-- Dato PNG a 150 dpi su un PDF A4 di 3 pagine, allora vengono prodotte 3 immagini di 1240×1754 pixel (±1 pixel).
-- Dato l'OCR "solo pagine senza testo" su un PDF misto e uscita TXT, allora il testo delle pagine scansionate compare nel risultato e il giornale del lavoro mostra che le pagine con testo nativo non sono state riconosciute.
-- Dato un PDF che vieta l'estrazione, senza password dei permessi, allora quel file risulta in errore con codice di permesso e gli altri file vengono convertiti.
-- Dato il formato PDF/A-2b, allora ogni risultato supera la validazione del profilo oppure il file è riportato in errore con le regole violate.
+- Dato 5 PDF e il formato DOCX, quando il lavoro termina, allora vengono prodotti 5 file DOCX che superano la validazione dello schema del formato, uno per ingresso, con i nomi previsti dal modello.
+- Dato un PDF A4 di 3 pagine, quando lo si converte in PNG a 150 dpi, allora vengono prodotte 3 immagini di 1240×1754 pixel (±1 pixel).
+- Dato l'OCR "solo pagine senza testo" su un PDF misto e uscita TXT, quando il lavoro termina, allora il testo delle pagine scansionate compare nel risultato e il giornale del lavoro mostra che le pagine con testo nativo non sono state riconosciute.
+- Dato un PDF che vieta l'estrazione, senza password dei permessi, quando il lavoro termina, allora quel file risulta in errore con codice di permesso e gli altri file vengono convertiti.
+- Dato il formato PDF/A-2b, quando il lavoro termina, allora ogni risultato supera la validazione del profilo oppure il file è riportato in errore con le regole violate.
 **Priorità:** P0
 
 ### BAT-07 — Creazione in blocco di PDF da altri formati
@@ -7369,11 +7839,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - GIF animata → solo il primo fotogramma, con avviso.
 - Unico PDF con un file in errore → si applica la politica di BAT-17 (interrompi oppure ometti con avviso).
 **Criteri di accettazione:**
-- Dato 10 JPEG con modalità "un PDF per file" e "dimensione originale", allora vengono creati 10 PDF di una pagina, ciascuno con dimensioni pari a pixel/dpi dichiarati (tolleranza 1 pt).
-- Dato una foto con orientamento EXIF di 90°, allora la pagina mostra l'immagine nel verso corretto.
-- Dato un TIFF di 4 pagine, allora il PDF risultante ha 4 pagine.
-- Dato la modalità "unico PDF" con 3 DOCX e 2 PNG, allora il risultato contiene le pagine nell'ordine della coda e un segnalibro di primo livello per ciascun file.
-- Dato un DOCX protetto da password nella coda, allora quel file risulta in errore e gli altri PDF vengono creati.
+- Dato 10 JPEG con modalità "un PDF per file" e "dimensione originale", quando il lavoro termina, allora vengono creati 10 PDF di una pagina, ciascuno con dimensioni pari a pixel/dpi dichiarati (tolleranza 1 pt).
+- Dato una foto con orientamento EXIF di 90°, quando il lavoro termina, allora la pagina mostra l'immagine nel verso corretto.
+- Dato un TIFF di 4 pagine, quando il lavoro termina, allora il PDF risultante ha 4 pagine.
+- Dato la modalità "unico PDF" con 3 DOCX e 2 PNG, quando il lavoro termina, allora il risultato contiene le pagine nell'ordine della coda e un segnalibro di primo livello per ciascun file.
+- Dato un DOCX protetto da password nella coda, quando il lavoro termina, allora quel file risulta in errore e gli altri PDF vengono creati.
 **Priorità:** P1
 
 ### BAT-08 — OCR in blocco
@@ -7394,10 +7864,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Scansioni a 600 dpi molto grandi → elaborazione pagina per pagina entro un limite di memoria.
 **Criteri di accettazione:**
 - Dato 3 PDF scansionati in italiano, quando l'OCR in blocco termina, allora in ogni risultato la ricerca di una parola presente nella scansione trova l'occorrenza nella posizione corretta e il confronto visivo (CMP-04) con l'originale non riporta differenze.
-- Dato un PDF misto con "salta pagine con testo", allora il contenuto delle pagine native è identico a quello dell'originale.
-- Dato un PDF già interamente ricercabile, allora l'esito è "Saltato: nessuna pagina da riconoscere".
-- Dato l'uscita PDF/A-2u, allora ogni risultato supera la validazione del profilo.
-- Dato una pagina capovolta con rotazione automatica attiva, allora la pagina risultante appare dritta e il testo riconosciuto è corretto.
+- Dato un PDF misto con "salta pagine con testo", quando il lavoro termina, allora il contenuto delle pagine native è identico a quello dell'originale.
+- Dato un PDF già interamente ricercabile, quando il lavoro termina, allora l'esito è "Saltato: nessuna pagina da riconoscere".
+- Dato l'uscita PDF/A-2u, quando il lavoro termina, allora ogni risultato supera la validazione del profilo.
+- Dato una pagina capovolta con rotazione automatica attiva, quando il lavoro termina, allora la pagina risultante appare dritta e il testo riconosciuto è corretto.
 **Priorità:** P0
 
 ### BAT-09 — Compressione in blocco
@@ -7415,11 +7885,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Immagini con maschere o trasparenza → maschere conservate.
 - File firmato → avviso preliminare di invalidazione della firma.
 **Criteri di accettazione:**
-- Dato un PDF di 20 MB con immagini a 600 dpi e livello "bilanciata", allora il risultato è più piccolo dell'originale, nessuna immagine supera la risoluzione obiettivo del livello e il testo resta selezionabile e ricercabile.
-- Dato un PDF per cui la compressione non porta riduzione, allora l'esito è "Avviso: nessuna riduzione ottenuta" e il risultato non è più grande dell'originale.
-- Dato un PDF/A-1b con "mantieni conformità PDF/A", allora il risultato supera la validazione PDF/A-1b.
-- Dato un PDF cifrato con password di apertura nota, allora il risultato si apre con la stessa password e presenta gli stessi permessi.
-- Dato il rapporto, allora per ogni file le dimensioni prima e dopo coincidono con quelle dei file su disco.
+- Dato un PDF di 20 MB con immagini a 600 dpi e livello "bilanciata", quando il lavoro termina, allora il risultato è più piccolo dell'originale, nessuna immagine supera la risoluzione obiettivo del livello e il testo resta selezionabile e ricercabile.
+- Dato un PDF per cui la compressione non porta riduzione, quando il lavoro termina, allora l'esito è "Avviso: nessuna riduzione ottenuta" e il risultato non è più grande dell'originale.
+- Dato un PDF/A-1b con "mantieni conformità PDF/A", quando il lavoro termina, allora il risultato supera la validazione PDF/A-1b.
+- Dato un PDF cifrato con password di apertura nota, quando il lavoro termina, allora il risultato si apre con la stessa password e presenta gli stessi permessi.
+- Dato un lavoro di compressione terminato, quando si confrontano i valori del rapporto con i file su disco, allora per ogni file le dimensioni prima e dopo coincidono.
 **Priorità:** P0
 
 ### BAT-10 — Protezione con password in blocco
@@ -7438,11 +7908,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - File già cifrato senza password attuale disponibile → errore "password richiesta".
 - PDF/A in ingresso → nel risultato la dichiarazione di conformità viene rimossa dai metadati XMP e il file riceve un avviso.
 **Criteri di accettazione:**
-- Dato 5 PDF e la password di apertura "Prova!2026", allora ogni risultato richiede quella password, è cifrato con AES-256 (/R 6) e non si apre con password vuota o errata.
-- Dato la sola password dei permessi con stampa non consentita, allora ogni risultato si apre senza password e le proprietà di sicurezza indicano la stampa non consentita.
-- Dato un CSV con password diverse per 3 file, allora ciascun risultato si apre solo con la propria password e un quarto file assente dal CSV risulta "Saltato: password non definita".
-- Dato password di apertura e dei permessi uguali, allora l'avvio è impedito con messaggio esplicativo.
-- Dato un PDF/A in ingresso, allora il risultato non dichiara più la conformità PDF/A e il rapporto riporta l'avviso.
+- Dato 5 PDF e la password di apertura "Prova!2026", quando il lavoro termina, allora ogni risultato richiede quella password, è cifrato con AES-256 (/R 6) e non si apre con password vuota o errata.
+- Dato la sola password dei permessi con stampa non consentita, quando il lavoro termina, allora ogni risultato si apre senza password e le proprietà di sicurezza indicano la stampa non consentita.
+- Dato un CSV con password diverse per 3 file, quando il lavoro termina, allora ciascun risultato si apre solo con la propria password e un quarto file assente dal CSV risulta "Saltato: password non definita".
+- Dato password di apertura e dei permessi uguali, quando l'utente preme Avvia, allora l'avvio è impedito con messaggio esplicativo.
+- Dato un PDF/A in ingresso, quando il lavoro termina, allora il risultato non dichiara più la conformità PDF/A e il rapporto riporta l'avviso.
 **Priorità:** P0
 
 ### BAT-11 — Rimozione in blocco della password nota
@@ -7460,11 +7930,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - File firmato → avviso preliminare: la firma non sarà più valida.
 - Elenco con più di 20 candidate → avvio impedito.
 **Criteri di accettazione:**
-- Dato 4 PDF cifrati con la stessa password nota, allora i 4 risultati si aprono senza password e non contengono il dizionario /Encrypt.
-- Dato un elenco di 3 candidate in cui quella corretta è la terza, allora il file viene sbloccato e il rapporto indica "candidata n. 3" senza mostrare la password.
-- Dato un file con password di apertura e stampa non consentita per il quale è fornita solo la password di apertura, allora il file risulta in errore "serve la password dei permessi" e non viene prodotto alcun risultato.
-- Dato un file non protetto nella coda, allora risulta "Saltato: non protetto".
-- Dato un elenco di 21 candidate, allora l'avvio è impedito.
+- Dato 4 PDF cifrati con la stessa password nota, quando il lavoro termina, allora i 4 risultati si aprono senza password e non contengono il dizionario /Encrypt.
+- Dato un elenco di 3 candidate in cui quella corretta è la terza, quando il lavoro termina, allora il file viene sbloccato e il rapporto indica "candidata n. 3" senza mostrare la password.
+- Dato un file con password di apertura e stampa non consentita per il quale è fornita solo la password di apertura, quando il lavoro termina, allora il file risulta in errore "serve la password dei permessi" e non viene prodotto alcun risultato.
+- Dato un file non protetto nella coda, quando il lavoro termina, allora risulta "Saltato: non protetto".
+- Dato un elenco di 21 candidate, quando l'utente preme Avvia, allora l'avvio è impedito.
 **Priorità:** P0
 
 ### BAT-12 — Filigrana in blocco
@@ -7484,11 +7954,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - File con restrizioni di modifica senza password dei permessi → errore per quel file.
 - File firmato → avviso preliminare di invalidazione della firma.
 **Criteri di accettazione:**
-- Dato 3 PDF e la filigrana di testo "RISERVATO" al 30% ruotata di 45°, allora ogni pagina di ogni risultato contiene la filigrana, il testo originale estratto è invariato e la filigrana è marcata come artefatto.
-- Dato l'intervallo "pagine dispari", allora le pagine pari dei risultati non contengono filigrana.
-- Dato il segnaposto {nome} nel testo, allora ogni risultato riporta il nome del proprio file.
+- Dato 3 PDF e la filigrana di testo "RISERVATO" al 30% ruotata di 45°, quando il lavoro termina, allora ogni pagina di ogni risultato contiene la filigrana, il testo originale estratto è invariato e la filigrana è marcata come artefatto.
+- Dato l'intervallo "pagine dispari", quando il lavoro termina, allora le pagine pari dei risultati non contengono filigrana.
+- Dato il segnaposto {nome} nel testo, quando il lavoro termina, allora ogni risultato riporta il nome del proprio file.
 - Dato un risultato con filigrana, quando si esegue la rimozione (BAT-16), allora il documento ottenuto è visivamente identico all'originale (CMP-04 senza differenze).
-- Dato "sostituisci filigrane precedenti" su un file già filigranato da Foliant, allora ogni pagina contiene una sola filigrana.
+- Dato "sostituisci filigrane precedenti" su un file già filigranato da Foliant, quando il lavoro termina, allora ogni pagina contiene una sola filigrana.
 **Priorità:** P0
 
 ### BAT-13 — Sfondo in blocco
@@ -7505,10 +7975,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Sfondo già aggiunto da Foliant e opzione di sostituzione attiva → il precedente viene rimosso, nessuna duplicazione.
 - Sfondo PDF cifrato → password richiesta all'avvio.
 **Criteri di accettazione:**
-- Dato una carta intestata PDF di 2 pagine con "pagina 1 sulla prima, pagina 2 sulle successive", allora in ogni risultato la prima pagina ha lo sfondo 1 e tutte le altre lo sfondo 2.
-- Dato uno sfondo a colore pieno con opacità 100%, allora il testo originale resta visibile sopra lo sfondo e selezionabile.
-- Dato un file già elaborato con sfondo e l'opzione di sostituzione, allora il risultato contiene un solo sfondo per pagina.
-- Dato la rimozione dello sfondo (BAT-16), allora il resto del contenuto risulta invariato.
+- Dato una carta intestata PDF di 2 pagine con "pagina 1 sulla prima, pagina 2 sulle successive", quando il lavoro termina, allora in ogni risultato la prima pagina ha lo sfondo 1 e tutte le altre lo sfondo 2.
+- Dato uno sfondo a colore pieno con opacità 100%, quando il lavoro termina, allora il testo originale resta visibile sopra lo sfondo e selezionabile.
+- Dato un file già elaborato con sfondo e l'opzione di sostituzione, quando il lavoro termina, allora il risultato contiene un solo sfondo per pagina.
+- Dato un file con sfondo aggiunto da Foliant, quando si esegue la rimozione dello sfondo (BAT-16), allora il resto del contenuto risulta invariato.
 **Priorità:** P1
 
 ### BAT-14 — Intestazioni, piè di pagina e numerazione delle pagine in blocco
@@ -7527,11 +7997,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Numerazione continua con un file in errore → l'intervallo di numeri di quel file resta riservato, i file successivi mantengono i numeri calcolati all'avvio e il rapporto indica l'intervallo riservato, così che il file possa essere rielaborato con gli stessi numeri.
 - Testo da destra a sinistra → allineamento coerente con la direzione della scrittura.
 **Criteri di accettazione:**
-- Dato 2 file di 3 e 4 pagine con "Pagina {pagina} di {totale}" al centro del piè e numerazione per file, allora la terza pagina del primo file riporta "Pagina 3 di 3" e l'ultima del secondo "Pagina 4 di 4".
-- Dato gli stessi file con numerazione continua da 1 e testo "{pagina} di {totale_coda}", allora la prima pagina del secondo file riporta "4 di 7" e l'ultima "7 di 7".
-- Dato "speculari sulle pagine pari" con testo in alto a destra, allora sulle pagine pari il testo compare in alto a sinistra.
-- Dato l'esclusione della prima pagina con "conta le pagine escluse" attiva, allora la prima pagina non contiene testo aggiunto e la seconda riporta il numero 2.
-- Dato un file elaborato due volte con l'opzione di sostituzione, allora ogni pagina contiene una sola intestazione e un solo piè.
+- Dato 2 file di 3 e 4 pagine con "Pagina {pagina} di {totale}" al centro del piè e numerazione per file, quando il lavoro termina, allora la terza pagina del primo file riporta "Pagina 3 di 3" e l'ultima del secondo "Pagina 4 di 4".
+- Dato gli stessi file con numerazione continua da 1 e testo "{pagina} di {totale_coda}", quando il lavoro termina, allora la prima pagina del secondo file riporta "4 di 7" e l'ultima "7 di 7".
+- Dato "speculari sulle pagine pari" con testo in alto a destra, quando il lavoro termina, allora sulle pagine pari il testo compare in alto a sinistra.
+- Dato l'esclusione della prima pagina con "conta le pagine escluse" attiva, quando il lavoro termina, allora la prima pagina non contiene testo aggiunto e la seconda riporta il numero 2.
+- Dato un file elaborato due volte con l'opzione di sostituzione, quando il lavoro termina, allora ogni pagina contiene una sola intestazione e un solo piè.
 **Priorità:** P0
 
 ### BAT-15 — Numerazione Bates
@@ -7551,10 +8021,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Prefisso con caratteri non validi nei nomi di file → mantenuti sulla pagina, sostituiti solo nei nomi di file (BAT-03).
 - Esecuzione in parallelo → numeri precalcolati all'avvio, quindi senza salti né duplicati.
 **Criteri di accettazione:**
-- Dato 3 file di 2, 3 e 1 pagina, prefisso "ACME-", 6 cifre e inizio 1, allora le pagine riportano in ordine da ACME-000001 a ACME-000006 senza salti né duplicati e l'indice CSV indica per il secondo file l'intervallo ACME-000003–ACME-000005.
-- Dato la modalità "ricomincia per documento", allora la prima pagina di ciascun file riporta il numero iniziale.
-- Dato inizio 999998 con 6 cifre e 5 pagine complessive, allora l'avvio è impedito con il messaggio sulle cifre insufficienti.
-- Dato il modello di nome "{bates_inizio}_{bates_fine}", allora il secondo file si chiama "ACME-000003_ACME-000005.pdf".
+- Dato 3 file di 2, 3 e 1 pagina, prefisso "ACME-", 6 cifre e inizio 1, quando il lavoro termina, allora le pagine riportano in ordine da ACME-000001 a ACME-000006 senza salti né duplicati e l'indice CSV indica per il secondo file l'intervallo ACME-000003–ACME-000005.
+- Dato la modalità "ricomincia per documento", quando il lavoro termina, allora la prima pagina di ciascun file riporta il numero iniziale.
+- Dato inizio 999998 con 6 cifre e 5 pagine complessive, quando l'utente preme Avvia, allora l'avvio è impedito con il messaggio sulle cifre insufficienti.
+- Dato il modello di nome "{bates_inizio}_{bates_fine}", quando il lavoro termina, allora il secondo file si chiama "ACME-000003_ACME-000005.pdf".
 - Dato una serie con ultimo numero 000006, quando si avvia una nuova produzione con "continua la serie", allora la prima pagina riporta ACME-000007.
 **Priorità:** P0
 
@@ -7572,9 +8042,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - File firmato → avviso preliminare di invalidazione della firma.
 **Criteri di accettazione:**
 - Dato un file a cui Foliant ha aggiunto filigrana e piè di pagina, quando si rimuove solo la filigrana, allora il piè di pagina resta e la filigrana scompare da tutte le pagine.
-- Dato un file elaborato con BAT-12 e poi con BAT-16, allora il risultato è visivamente identico all'originale (CMP-04 senza differenze).
-- Dato un file con intestazioni originali marcate come artefatto e l'ambito predefinito, allora quelle intestazioni non vengono rimosse.
-- Dato un file senza elementi riconoscibili, allora l'esito è "Saltato: nessun elemento riconoscibile".
+- Dato un file filigranato con BAT-12, quando si rimuove la filigrana con BAT-16, allora il risultato è visivamente identico all'originale (CMP-04 senza differenze).
+- Dato un file con intestazioni originali marcate come artefatto e l'ambito predefinito, quando il lavoro termina, allora quelle intestazioni non vengono rimosse.
+- Dato un file senza elementi riconoscibili, quando il lavoro termina, allora l'esito è "Saltato: nessun elemento riconoscibile".
 **Priorità:** P1
 
 ### BAT-17 — Unione in blocco
@@ -7593,11 +8063,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - File cifrati → serve la password di apertura; il risultato non è cifrato, salvo un passo successivo di protezione (BAT-10, BAT-20).
 - Pagine di formati diversi → conservati.
 **Criteri di accettazione:**
-- Dato 3 PDF di 2, 5 e 1 pagina nell'ordine C, A, B della coda, allora il risultato ha 8 pagine nell'ordine C, A, B e tre segnalibri di primo livello con i nomi dei file, ciascuno collegato alla prima pagina del proprio file.
-- Dato due moduli che contengono entrambi un campo "nome" e l'opzione predefinita, allora nel risultato i due campi mantengono valori distinti.
-- Dato "pagina bianca dopo i file con pagine dispari", allora nel risultato ogni file inizia su una pagina di numero dispari.
-- Dato la modalità "un file per cartella" su 2 sottocartelle, allora si ottengono 2 PDF uniti, ciascuno con i soli file della propria sottocartella.
-- Dato un file danneggiato nella coda e la politica predefinita, allora non viene prodotto alcun file unito e il rapporto indica il file responsabile.
+- Dato 3 PDF di 2, 5 e 1 pagina nell'ordine C, A, B della coda, quando il lavoro termina, allora il risultato ha 8 pagine nell'ordine C, A, B e tre segnalibri di primo livello con i nomi dei file, ciascuno collegato alla prima pagina del proprio file.
+- Dato due moduli che contengono entrambi un campo "nome" e l'opzione predefinita, quando il lavoro termina, allora nel risultato i due campi mantengono valori distinti.
+- Dato "pagina bianca dopo i file con pagine dispari", quando il lavoro termina, allora nel risultato ogni file inizia su una pagina di numero dispari.
+- Dato la modalità "un file per cartella" su 2 sottocartelle, quando il lavoro termina, allora si ottengono 2 PDF uniti, ciascuno con i soli file della propria sottocartella.
+- Dato un file danneggiato nella coda e la politica predefinita, quando il lavoro termina, allora non viene prodotto alcun file unito e il rapporto indica il file responsabile.
 **Priorità:** P0
 
 ### BAT-18 — Inserimento di pagine in blocco
@@ -7614,10 +8084,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Sorgente che è anche un file della coda → si usa lo stato del file prima dell'elaborazione.
 - Pagina bianca "come la pagina adiacente" in file con formati misti → formato della pagina che la precede (della successiva se inserita all'inizio).
 **Criteri di accettazione:**
-- Dato 4 file e una copertina PDF di 1 pagina inserita all'inizio, allora ogni risultato ha una pagina in più e la sua prima pagina è visivamente identica alla copertina.
-- Dato "dopo ogni 2 pagine" con una pagina bianca su un file di 5 pagine, allora il risultato ha 7 pagine con pagine bianche in posizione 3 e 6.
-- Dato "dopo la pagina 10" su un file di 6 pagine con l'opzione predefinita, allora la pagina è inserita alla fine e il rapporto riporta l'avviso.
-- Dato un segnalibro che puntava alla pagina 3 originale, allora dopo l'inserimento di una pagina all'inizio punta alla stessa pagina, ora in posizione 4.
+- Dato 4 file e una copertina PDF di 1 pagina inserita all'inizio, quando il lavoro termina, allora ogni risultato ha una pagina in più e la sua prima pagina è visivamente identica alla copertina.
+- Dato "dopo ogni 2 pagine" con una pagina bianca su un file di 5 pagine, quando il lavoro termina, allora il risultato ha 7 pagine con pagine bianche in posizione 3 e 6.
+- Dato "dopo la pagina 10" su un file di 6 pagine con l'opzione predefinita, quando il lavoro termina, allora la pagina è inserita alla fine e il rapporto riporta l'avviso.
+- Dato un segnalibro che puntava alla pagina 3 originale, quando il lavoro termina, allora dopo l'inserimento di una pagina all'inizio punta alla stessa pagina, ora in posizione 4.
 **Priorità:** P1
 
 ### BAT-19 — Stampa in blocco
@@ -7635,10 +8105,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Intervallo oltre la fine del file → stampa delle sole pagine esistenti con avviso.
 - Annullamento → i lavori non ancora inviati sono annullati; per quelli già nella coda di stampa del sistema viene richiesta la cancellazione, con avviso se non è possibile.
 **Criteri di accettazione:**
-- Dato 3 file e una stampante virtuale di prova che registra i lavori ricevuti, allora vengono registrati 3 lavori nell'ordine della coda con il numero di pagine e di copie impostato.
-- Dato un file con stampa non consentita e senza password dei permessi, allora quel file risulta in errore e gli altri vengono stampati.
-- Dato fronte/retro sul lato lungo, allora i lavori registrati riportano la corrispondente modalità fronte/retro.
-- Dato "pagine 1-2" su un file di 1 pagina, allora viene stampata la pagina esistente e il rapporto riporta l'avviso.
+- Dato 3 file e una stampante virtuale di prova che registra i lavori ricevuti, quando il lavoro termina, allora vengono registrati 3 lavori nell'ordine della coda con il numero di pagine e di copie impostato.
+- Dato un file con stampa non consentita e senza password dei permessi, quando il lavoro termina, allora quel file risulta in errore e gli altri vengono stampati.
+- Dato fronte/retro sul lato lungo, quando il lavoro termina, allora i lavori registrati riportano la corrispondente modalità fronte/retro.
+- Dato "pagine 1-2" su un file di 1 pagina, quando il lavoro termina, allora viene stampata la pagina esistente e il rapporto riporta l'avviso.
 **Priorità:** P0
 
 ### BAT-20 — Sequenze di azioni riutilizzabili
@@ -7659,10 +8129,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Documento attivo con modifiche non salvate → proposta di salvare prima; altrimenti si elabora la versione su disco.
 **Criteri di accettazione:**
 - Dato la sequenza salvata "OCR → Comprimi → Proteggi", quando viene eseguita su 3 scansioni, allora ogni risultato è ricercabile e si apre solo con la password inserita all'avvio, e il rapporto indica per ogni file i tre passi completati.
-- Dato una sequenza esportata e reimportata su un'altra installazione, allora passi, parametri e ordine coincidono e il file esportato non contiene alcuna password.
-- Dato un passo "Converti in DOCX" seguito da "Filigrana", allora la sequenza è segnalata non valida e non può essere eseguita.
+- Dato una sequenza salvata, quando viene esportata e reimportata su un'altra installazione, allora passi, parametri e ordine coincidono e il file esportato non contiene alcuna password.
+- Dato una sequenza con il passo "Converti in DOCX" seguito da "Filigrana", quando l'utente tenta di eseguirla, allora la sequenza è segnalata non valida e l'esecuzione è impedita.
 - Dato un parametro "chiedi all'avvio" per il testo della filigrana, quando la sequenza viene eseguita su 10 file, allora il valore è chiesto una sola volta e applicato a tutti.
-- Dato il fallimento del passo 2 su un file, allora per quel file non esiste alcun risultato e il rapporto indica "passo 2 (Comprimi)".
+- Dato la sequenza "OCR → Comprimi → Proteggi" e un file su cui il passo 2 fallisce, quando il lavoro termina, allora per quel file non esiste alcun risultato e il rapporto indica "passo 2 (Comprimi)".
 **Priorità:** P1
 
 ### BAT-21 — Cartelle monitorate
@@ -7681,8 +8151,8 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Più file con lo stesso nome nel tempo → conflitti risolti secondo BAT-02.
 **Criteri di accettazione:**
 - Dato una cartella monitorata con l'operazione Comprimi, quando vi si copia un PDF, allora entro 30 s dalla fine della copia il risultato compare nella destinazione e l'originale è trattato secondo l'opzione scelta.
-- Dato un file danneggiato copiato nella cartella, allora finisce nella sottocartella "errori", la causa è registrata e il monitoraggio continua.
-- Dato una destinazione uguale alla cartella monitorata, allora la configurazione non può essere salvata.
+- Dato una cartella monitorata attiva, quando vi si copia un file danneggiato, allora il file finisce nella sottocartella "errori", la causa è registrata e il monitoraggio continua.
+- Dato una destinazione uguale alla cartella monitorata, quando l'utente salva la configurazione, allora il salvataggio è impedito.
 - Dato 3 file copiati ad applicazione chiusa, quando l'applicazione riparte, allora i 3 file vengono elaborati.
 **Priorità:** P2
 
@@ -7700,9 +8170,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Interruzione da tastiera o segnale di terminazione → annullamento pulito come in BAT-04, codice 4.
 **Criteri di accettazione:**
 - Dato un ambiente senza sessione grafica, quando si esegue l'operazione Comprimi su una cartella di 5 PDF, allora vengono prodotti 5 risultati e il processo termina con codice 0.
-- Dato fra gli ingressi un file danneggiato, allora il processo termina con codice 2 e il rapporto JSON riporta quel file con la causa.
-- Dato una password passata come argomento, allora il comando è rifiutato con codice 3 e messaggio sui canali ammessi.
-- Dato un'interruzione durante il lavoro, allora non restano file parziali e il codice di uscita è 4.
+- Dato fra gli ingressi un file danneggiato, quando il comando termina, allora il codice di uscita è 2 e il rapporto JSON riporta quel file con la causa.
+- Dato una password passata come argomento, quando il comando viene invocato, allora è rifiutato con codice 3 e messaggio sui canali ammessi.
+- Dato un lavoro avviato da riga di comando, quando viene interrotto da tastiera, allora non restano file parziali e il codice di uscita è 4.
 **Priorità:** P2
 
 ### BAT-23 — Operazioni aggiuntive in blocco
@@ -7717,10 +8187,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Divisione che produce più file per ingresso → nomi con il segnaposto {parte} (BAT-03).
 - File firmato → avviso preliminare di invalidazione della firma per tutte le operazioni che modificano il file.
 **Criteri di accettazione:**
-- Dato "imposta metadati" con autore "Ufficio legale" su 10 file, allora ogni risultato riporta quell'autore sia nel dizionario Info sia nei metadati XMP.
-- Dato la redazione per schema "codice fiscale" su 3 file, allora nei risultati nessuna occorrenza resta estraibile e il rapporto indica il numero di redazioni per file.
-- Dato "elimina pagine 1-3" su un file di 3 pagine, allora quel file risulta in errore e gli altri proseguono.
-- Dato "dividi ogni 2 pagine" su un file di 5 pagine, allora si ottengono 3 file di 2, 2 e 1 pagina.
+- Dato "imposta metadati" con autore "Ufficio legale" su 10 file, quando il lavoro termina, allora ogni risultato riporta quell'autore sia nel dizionario Info sia nei metadati XMP.
+- Dato la redazione per schema "codice fiscale" su 3 file, quando il lavoro termina, allora nei risultati nessuna occorrenza resta estraibile e il rapporto indica il numero di redazioni per file.
+- Dato "elimina pagine 1-3" su un file di 3 pagine, quando il lavoro termina, allora quel file risulta in errore e gli altri proseguono.
+- Dato "dividi ogni 2 pagine" su un file di 5 pagine, quando il lavoro termina, allora si ottengono 3 file di 2, 2 e 1 pagina.
 **Priorità:** P2
 
 
@@ -8644,6 +9114,17 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | ANN-31 | Misura di distanza | P1 | 5. Annotazioni e commenti |
 | ANN-32 | Misura di perimetro e area | P1 | 5. Annotazioni e commenti |
 | ANN-33 | Funzioni avanzate di misura | P2 | 5. Annotazioni e commenti |
+| ANN-34 | Pannello elenco commenti | P0 | 5. Annotazioni e commenti |
+| ANN-35 | Filtri e ricerca nei commenti | P1 | 5. Annotazioni e commenti |
+| ANN-36 | Ordinamento e raggruppamento dei commenti | P1 | 5. Annotazioni e commenti |
+| ANN-37 | Risposte ai commenti | P1 | 5. Annotazioni e commenti |
+| ANN-38 | Stato di revisione e segno di spunta | P1 | 5. Annotazioni e commenti |
+| ANN-39 | Mostra e nascondi annotazioni | P1 | 5. Annotazioni e commenti |
+| ANN-40 | Appiattimento delle annotazioni | P1 | 5. Annotazioni e commenti |
+| ANN-41 | Esportazione dei commenti in formato di interscambio | P1 | 5. Annotazioni e commenti |
+| ANN-42 | Importazione e unione dei commenti | P1 | 5. Annotazioni e commenti |
+| ANN-43 | Riepilogo commenti esportabile | P1 | 5. Annotazioni e commenti |
+| ANN-44 | Controllo ortografico nei commenti | P2 | 5. Annotazioni e commenti |
 | CNV-01 | Esporta come: finestra di conversione e opzioni comuni | P0 | 6. Conversione, creazione e ottimizzazione |
 | CNV-02 | Conversione di PDF scansionati con OCR automatico | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-03 | PDF → DOCX (documento modificabile) | P0 | 6. Conversione, creazione e ottimizzazione |
@@ -8789,6 +9270,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | SEC-29 | Robustezza e isolamento verso file malevoli | P1 | 10. Protezione e sicurezza |
 | SEC-30 | Riservatezza dei dati locali | P1 | 10. Protezione e sicurezza |
 | SEC-31 | Spazio protetto per documenti riservati | P2 | 10. Protezione e sicurezza |
+| SEC-32 | Blocco dell'applicazione | P2 | 10. Protezione e sicurezza |
+| SEC-33 | Cifratura lato client dei documenti sincronizzati | P2 | 10. Protezione e sicurezza |
+| SEC-34 | Trasmissione dati sicura e riservatezza di rete | P0 | 10. Protezione e sicurezza |
 | CMP-01 | Avvio del confronto e scelta delle versioni | P0 | 11. Confronto e operazioni in blocco |
 | CMP-02 | Confronto del contenuto testuale | P0 | 11. Confronto e operazioni in blocco |
 | CMP-03 | Confronto della formattazione del testo | P1 | 11. Confronto e operazioni in blocco |
