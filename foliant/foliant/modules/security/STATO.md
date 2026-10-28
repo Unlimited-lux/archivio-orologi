@@ -1,0 +1,59 @@
+# Stato del modulo Proteggi (sezione 10 della specifica)
+
+Test in `tests/modules/security/`: `test_protection.py` (P), `test_redaction.py` (R),
+`test_sanitize.py` (S), `test_ui.py` (U), `test_i18n.py` (I).
+
+| ID | Priorità | Stato | Test | Note |
+|---|---|---|---|---|
+| SEC-01 Apertura di documenti protetti | P0 | parziale | U `test_remove_wrong_owner_password`, `test_restricted_banner_and_unlock`; P `test_unicode_password_roundtrip` | Apertura e richiesta password sono del nucleo. Il modulo mostra il lucchetto «Accesso completo/limitato» nella barra di stato e il file con sola password dei permessi si apre senza richiesta. Mostra/nascondi, Bloc Maiusc e gestore non supportato: CORE_REQUESTS §2. |
+| SEC-02 Applicazione dei permessi | P0 | parziale | P `test_owner_password_required_for_restricted`; U `test_restricted_blocks_redaction`, `test_restricted_banner_and_unlock`, `test_metadata_read_only_when_restricted` | Barra «Documento con restrizioni» con «Sblocca…» (password verificata sul file). Le funzioni del modulo rispettano il permesso di modifica. Disattivare stampa/copia/esportazione nel resto dell'app è del nucleo (CORE_REQUESTS §2). |
+| SEC-03 Proprietà di sicurezza (riepilogo «Protezione») | P0 | fatto | U `test_security_properties_rows`, `test_security_properties_unprotected`, `test_rc4_marked_weak`, `test_upgrade_rc4_to_aes256` | Si apre dal lucchetto della barra di stato. Metodo («AES, chiave a 256 bit»), versione/revisione, password di apertura, elenchi «Azioni consentite» e «Azioni non consentite», «Metodo superato in PDF 2.0» per AES-128, tipo di accesso, «Protezione debole» con «Aggiorna ad AES-256», «Metadati non cifrati». Manca la riga sulle firme di certificazione. |
+| SEC-04 Password di apertura | P0 | fatto | P `test_open_password_aes256`, `test_same_password_twice_differs`, `test_original_file_untouched_until_save`; U `test_protect_flow`, `test_protect_dialog_validation`, `test_weak_password_asks`, `test_protect_warns_on_signatures` | /V 5 /R 6 AESV3, estensione ADBE livello 8, robustezza, conferma «Le password non coincidono», avviso firme e PDF/A (dichiarazione rimossa). |
+| SEC-05 Password dei permessi e restrizioni | P0 | fatto | P `test_permissions_bits`, `test_validation_errors`, `test_aes256_forces_accessibility`, `test_comments_imply_forms`; U `test_protect_dialog_validation` | Bit di /P come da tabella 22, preimpostazioni, commenti ⇒ compilazione, accessibilità forzata con AES-256. |
+| SEC-06 Livello di cifratura | P0 | parziale | P `test_methods`, `test_open_password_aes256`; U `test_protect_dialog_validation`, `test_upgrade_rc4_to_aes256` | Specifica v2: la nuova protezione usa solo AES-256 (/V 5 /R 6, estensione ADBE 8); AES-128 e RC4 si leggono e il nucleo li conserva al salvataggio; «Aggiorna ad AES-256» dal riepilogo Protezione. «Cifra tutto tranne i metadati» non supportato dal motore (CORE_REQUESTS §8). |
+| SEC-07 Cambio delle password | P1 | fatto | P `test_change_password`; U `test_change_keeps_open_password` | Campi vuoti = «Mantieni». Con accesso limitato chiede prima la password dei permessi. |
+| SEC-08 Rimozione della protezione | P0 | fatto | P `test_remove_protection`; U `test_remove_with_owner_password`, `test_remove_wrong_owner_password` | Conferma con avviso, avviso firme, file su disco intatto con password errata, nessun /Encrypt né /Prev dopo il salvataggio. |
+| SEC-09 Cifratura con certificato | P2 | non fatto | — | |
+| SEC-10 Cifratura dei soli allegati | P2 | non fatto | — | |
+| SEC-11 Cifratura autenticata (PDF 2.0) | P2 | non fatto | — | |
+| SEC-12 Policy di protezione | P2 | non fatto | — | |
+| SEC-13 Marcatura per area | P0 | fatto | R `test_mark_is_preview_only`, `test_rotated_page_mark`, `test_mark_clipped_and_empty`; U `test_area_tool_marks_and_moves`, `test_area_tool_resize_corner`, `test_repeat_mark` | Trascinamento, spostamento, ridimensionamento dagli angoli, «Ripeti su più pagine…» (menu contestuale), clic senza trascinamento ignorato, area ritagliata alla pagina. Manca l'aspetto finale al passaggio del mouse (c'è «Anteprima risultato»). |
+| SEC-14 Marcatura del testo selezionato | P0 | parziale | U `test_mark_selection_two_lines`; R `test_neighbour_line_kept` | Un riquadro per riga, voce «Contrassegna per redazione» e Ctrl+Maiusc+R. La selezione del nucleo è per parole intere e su una pagina (CORE_REQUESTS §6). |
+| SEC-15 Ricerca di parole e frasi | P0 | fatto | R `test_term_case_and_hyphen`; U `test_find_and_mark_terms`, `test_find_dialog_import_terms` | Più termini, importazione da file, maiuscole, parola intera, ignora accenti, frasi a capo e sillabate, pagine scelte, avviso pagine senza testo, occorrenze in metadati/segnalibri/commenti/campi/allegati cancellate all'applicazione. |
+| SEC-16 Redazione per schemi | P1 | fatto | R `test_patterns_find_each`, `test_cf_check_digit`, `test_spec_examples`, `test_reapply_patterns_after_redaction`, `test_custom_pattern_errors`, `test_include_invalid_check_digit`; U `test_find_patterns_dialog`, `test_find_dialog_invalid_regex` | Email, telefono, IBAN (mod 97), codice fiscale (con omocodia), partita IVA, carte (Luhn), date (anche in lettere, date inesistenti escluse), importi, URL, IP, schema personalizzato. Manca il limite di tempo per espressioni onerose e il salvataggio degli schemi personalizzati. |
+| SEC-17 Redazione di intere pagine | P1 | fatto | R `test_whole_pages_and_overlay`; U `test_mark_pages_even` | Pagina corrente, intervallo, pari, dispari, tutte (con conferma); testo sovrapposto; annotazioni, widget e immagini rimossi, dimensioni invariate. |
+| SEC-18 Aspetto dei riquadri | P1 | fatto | R `test_fill_color`, `test_repeat_overlay`; U `test_style_dialog_values`, `test_redaction_settings_and_codes` | Riempimento, testo sovrapposto con insiemi di codici (importa/esporta JSON), colore, dimensione, ripetizione, avvisi bianco/stesso colore. Colore del contorno fisso (rosso del motore). |
+| SEC-19 Anteprima e revisione | P0 | parziale | U `test_panel_group_and_remove`, `test_apply_selected_only`, `test_preview_overlay`, `test_unapplied_marks_banner_on_reopen`, `test_export_import_marks`; R `test_remove_mark_keeps_content`, `test_xfdf_roundtrip` | Pannello per pagina con conteggio, origine ed estratto, vai al segno, rimuovi (anche Canc), «Anteprima risultato», applica tutti/selezionati con conferma, XFDF. L'avviso arriva *dopo* il salvataggio con segni non applicati (CORE_REQUESTS §4). |
+| SEC-20 Applicazione con rimozione definitiva | P0 | fatto | R `test_apply_removes_text_and_saves`, `test_image_pixels_removed`, `test_image_fully_covered_removed`, `test_vector_graphics_removed`, `test_annotations_and_links_under_mark_removed`, `test_widget_under_mark_removed`, `test_invisible_ocr_text_found_and_removed`, `test_thumbnail_removed_on_apply`, `test_undo_apply`; U `test_apply_offers_save_redacted`, `test_apply_cancel_keeps_everything` | Testo, pixel delle immagini (o immagini intere), grafica, annotazioni, campi e collegamenti; miniature rimosse; annullabile fino al salvataggio; errore ⇒ nessuna modifica; proposta «_redatto.pdf». Struttura logica e /ActualText non aggiornati. |
+| SEC-21 Ispezione del documento | P1 | fatto | S `test_scan_active`, `test_launch_and_submit_detected`, `test_inspect_extra`, `test_ocr_layer_classified`, `test_previous_revisions`; U `test_inspect_flow` | Metadati, script, azioni, file incorporati, livelli nascosti, commenti, campi, testo nascosto, livello OCR, annotazioni nascoste, miniature, segnalibri, firme, revisioni precedenti. Non apre le revisioni in sola lettura; EXIF non analizzato. |
+| SEC-22 Rimozione dei dati nascosti | P1 | fatto | S `test_sanitize_defaults`, `test_sanitize_render_identical`, `test_hidden_layer_removed`, `test_strip_marked_content_nested`, `test_form_data_reset_and_remove`, `test_sanitize_keeps_pdfa_identification`; U `test_sanitize_flow` | Rendering identico, identificazione PDF/A conservata, salvataggio proposto come «nome_ripulito.pdf». Mancano EXIF nei JPEG e rimozione delle firme. |
+| SEC-23 Metadati | P1 | fatto | S `test_metadata_xmp_sync`; U `test_metadata_flow`, `test_metadata_read_only_when_restricted` | Info e XMP allineati (dc:title, dc:creator per «;», dc:subject, date con fuso). Mancano le proprietà personalizzate. |
+| SEC-24 Appiattimento | P1 | parziale | S `test_flatten`; U `test_flatten_flow` | Commenti e campi fusi, annotazioni nascoste eliminate. Livelli e ritaglio non appiattiti. |
+| SEC-25 PDF/A, PDF/E, PDF/X | P1 | non fatto | — | Area del modulo Converti. |
+| SEC-26 Avvisi per contenuti attivi | P0 | fatto | U `test_active_content_banner`, `test_no_banner_for_plain_pdf`; S `test_launch_and_submit_detected` | Barra non modale con conteggi e «Dettagli» (posizione e codice degli script, indirizzi completi). Foliant non ha un motore di script: gli script non vengono mai eseguiti, quindi «Attiva per questa sessione» non serve. |
+| SEC-27 Conferma dei collegamenti esterni | P0 | fatto | U `test_link_javascript_blocked`, `test_link_confirm_and_allow_domain`, `test_link_homograph_warning`, `test_internal_links_delegated`, `test_core_link_hook_installed` | Conferma con dominio, «Sì a tutti» = consenti sempre il dominio, punycode e avviso di contraffazione, testo diverso dalla destinazione, blocco javascript:/data:/Launch/eseguibili, altri PDF in nuova scheda. Registrato con `ctx.add_link_handler`. |
+| SEC-28 Documenti attendibili | P1 | fatto | U `test_trusted_document`, `test_trusted_folder` | Documento (impronta SHA-256, revocata se il file cambia fuori da Foliant) o cartella con sottocartelle dalla barra d'avviso; «Revoca documenti attendibili» nel menu. Manca l'elenco gestibile nelle Preferenze. |
+| SEC-29 Robustezza verso file malevoli | P1 | non fatto | — | Del nucleo (CORE_REQUESTS §7). |
+| SEC-30 Riservatezza dei dati locali | P1 | non fatto | — | Del nucleo (CORE_REQUESTS §7). |
+| SEC-31 Spazio protetto | P2 | non fatto | — | |
+| SEC-32 Blocco dell'applicazione | P2 | non fatto | — | |
+| SEC-33 Cifratura lato client | — | fuori ambito | — | Dichiarata fuori ambito dall'orchestratore (nessun account). |
+| SEC-34 Trasmissione dati sicura | P0 | fatto (per il modulo) | U fixture `no_network` (tutti i test d'interfaccia falliscono se si apre una connessione) | Il modulo non apre connessioni di rete; i collegamenti web si aprono solo dopo conferma. |
+
+Traduzioni inglesi complete: I `test_all_strings_translated`, `test_placeholders_preserved`.
+
+Verifica visiva: catture offscreen nei temi chiaro e scuro (barra d'avviso, segni,
+anteprima risultato, dialoghi Proteggi/Trova/Impostazioni), usate per correggere
+la barra strumenti (le voci secondarie mostrano solo l'icona), la barra d'avviso e il pannello.
+
+Aggiornamenti dell'orchestratore applicati: etichetta «Rimuovi dati nascosti» al posto di «Sanifica»; SEC-33 fuori ambito; SEC-34 resta P0 (correzione dell'orchestratore): il modulo non apre connessioni di rete, verificato dalla fixture `no_network`; nessuna scorciatoia globale registrata (solo Ctrl+Maiusc+R per «Segna testo», non in UX-18).
+
+Allineamento alla specifica v2 (commit c8fddf4) fatto dopo la scadenza delle 07:15, su richiesta dell'orchestratore: SEC-03, SEC-06, SEC-22, SEC-34.
+
+Collaudo end-to-end dell'orchestratore (08:00 UTC): corretti bug_07 (grafica che tocca l'area rimossa per
+impostazione predefinita), bug_08 (pixel delle immagini col colore di riempimento), bug_05 (riquadro e testo
+sovrapposto disegnati con core/placement su pagine ruotate con CropBox spostato), bug_11 (stato «Da applicare»),
+bug_09 (gestore dei collegamenti a priorità 1000), bug_10 (indirizzi decodificati e non duplicati), bug_04
+(RC4 a 40 bit), bug_03 (lo sblocco riautentica il motore ed emette documentChanged). Aperti: bug_06 (il motore
+compensa male l'avanzamento dei glifi rimossi: il testo dopo il segno si sposta), bug_02 e bug_01 (viewer e
+nucleo).

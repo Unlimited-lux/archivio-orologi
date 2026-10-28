@@ -1,0 +1,870 @@
+"""Flussi dell'interfaccia del modulo Proteggi (dialoghi simulati con monkeypatch)."""
+
+from __future__ import annotations
+
+import hashlib
+import socket
+
+import pymupdf
+import pytest
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtWidgets import QMessageBox
+
+from foliant.api import PageEvent, TextSelection
+from foliant.modules import security
+from foliant.modules.security import controller as C
+from foliant.modules.security import dialogs as D
+from foliant.modules.security import links as L
+from foliant.modules.security import protection as P
+from foliant.modules.security import redaction as R
+
+
+@pytest.fixture
+def sec(window):
+    c = security.CONTROLLER
+    assert c is not None and c.ctx is window.ctx
+    return c
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """SEC-34: nessuna funzione del modulo apre connessioni di rete."""
+    def refuse(*a, **k):
+        raise AssertionError("connessione di rete non prevista")
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+
+
+@pytest.fixture(autouse=True)
+def no_unexpected_dialogs(monkeypatch):
+    """Un dialogo modale non previsto bloccherebbe i test: lo trasformiamo in errore."""
+    from PySide6.QtWidgets import QDialog, QInputDialog
+
+    def unexpected(*a, **k):
+        raise AssertionError(f"dialogo inatteso: {a[1:3] if len(a) > 2 else a}")
+    for name in ("information", "warning", "question", "critical"):
+        monkeypatch.setattr(QMessageBox, name, unexpected)
+    # QMessageBox.exec senza scelta: equivale ad «Annulla» (anche alla chiusura della finestra)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    monkeypatch.setattr(QDialog, "exec", unexpected)
+    monkeypatch.setattr(QInputDialog, "getText", unexpected)
+
+
+@pytest.fixture
+def accept_all(monkeypatch):
+    monkeypatch.setattr(C, "confirm", lambda *a, **k: True)
+
+
+def _ev(page, x, y, button=Qt.MouseButton.LeftButton):
+    return PageEvent(page, pymupdf.Point(x, y), QPointF(0, 0), button, button, Qt.KeyboardModifier.NoModifier)
+
+
+def _text(path) -> str:
+    pdf = pymupdf.open(path)
+    try:
+        return "".join(p.get_text() for p in pdf)
+    finally:
+        pdf.close()
+
+
+def _sha(path) -> str:
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+# ----------------------------------------------------------------- modalità
+
+
+def test_mode_and_actions(window, sec):
+    assert "proteggi" in window.modes
+    texts = [a.text() for a in window.modes["proteggi"].toolbar.actions() if a.text()]
+    for t in ("Password e permessi", "Rimuovi protezione", "Proprietà di sicurezza", "Segna area",
+              "Trova e segna", "Trova dati personali", "Segna pagine", "Applica redazioni", "Rimuovi dati nascosti",
+              "Appiattisci"):
+        assert t in texts
+    assert not sec.actions["apply"].isEnabled()
+
+
+def test_apply_disabled_without_marks(window, sec, sample_pdf):
+    window.open_path(sample_pdf)
+    act = sec.actions["apply"]
+    assert not act.isEnabled()
+    assert act.toolTip() == "Nessuna area contrassegnata per la redazione"
+
+
+# --------------------------------------------------------------- protezione
+
+
+class _FakeDialog:
+    def __init__(self, settings, keep_open=False, keep_perm=False):
+        self._s = settings
+        self.keep_open_password = keep_open
+        self.keep_permissions_password = keep_perm
+
+    def settings(self):
+        return self._s
+
+
+def test_protect_flow(window, sec, sample_pdf, tmp_path, monkeypatch):
+    view = window.open_path(sample_pdf)
+    monkeypatch.setattr(C, "ask_protection",
+                        lambda parent, doc: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
+    assert sec.protect()
+    out = tmp_path / "protetto.pdf"
+    view.document.save(out)
+    pdf = pymupdf.open(out)
+    assert pdf.needs_pass and pdf.authenticate("Apri-123!")
+    assert sec.lock_button.isVisible() or sec.lock_button.text() == "Accesso completo"
+
+
+def test_protect_dialog_validation(qtbot):
+    dlg = D.ProtectDialog(P.ProtectionSettings(), already_protected=False, has_open_password=False)
+    qtbot.addWidget(dlg)
+    dlg.open_pw.setText("Prova-2026!")
+    dlg.open_pw2.setText("Prova-2026?")
+    assert not dlg.apply_button.isEnabled()
+    assert dlg.error.text() == "Le password non coincidono"
+    dlg.open_pw2.setText("Prova-2026!")
+    assert dlg.apply_button.isEnabled()
+    # permessi: password uguale a quella di apertura → bloccato
+    dlg.restrict.setChecked(True)
+    dlg.perm_pw.setText("Prova-2026!")
+    dlg.perm_pw2.setText("Prova-2026!")
+    assert not dlg.apply_button.isEnabled() and "diversa" in dlg.error.text()
+    dlg.perm_pw.setText("Capo-9999!")
+    dlg.perm_pw2.setText("Capo-9999!")
+    assert dlg.apply_button.isEnabled()
+    # AES-256: accessibilità selezionata e non modificabile
+    acc = dlg.perm_boxes["accessibility"]
+    assert acc.isChecked() and not acc.isEnabled()
+    # commenti → compilazione forzata
+    dlg.perm_boxes["form"].setChecked(False)
+    dlg.perm_boxes["annotate"].setChecked(True)
+    assert dlg.perm_boxes["form"].isChecked() and not dlg.perm_boxes["form"].isEnabled()
+    dlg.preset.setCurrentIndex(1)   # sola lettura
+    assert not dlg.perm_boxes["copy"].isChecked()
+    s = dlg.settings()
+    assert s.restrict and s.permissions_password == "Capo-9999!"
+    # livello di compatibilità: avviso
+    # SEC-06 (v2): la nuova protezione usa solo AES-256
+    assert dlg.method.count() == 1 and dlg.method.currentData() == P.AES256 and not dlg.method.isEnabled()
+
+
+def test_protect_dialog_empty_password_disabled(qtbot):
+    dlg = D.ProtectDialog(P.ProtectionSettings(), already_protected=False, has_open_password=False)
+    qtbot.addWidget(dlg)
+    assert not dlg.apply_button.isEnabled()
+
+
+def test_weak_password_asks(qtbot, monkeypatch):
+    dlg = D.ProtectDialog(P.ProtectionSettings(), already_protected=False, has_open_password=False)
+    qtbot.addWidget(dlg)
+    dlg.open_pw.setText("abc")
+    dlg.open_pw2.setText("abc")
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.No)
+    dlg._accept()
+    assert asked and dlg.result() != 1
+
+
+def test_change_keeps_open_password(window, sec, tmp_path, sample_pdf, monkeypatch):
+    first = tmp_path / "doc.pdf"
+    from foliant.api import Document
+    d = Document.open(sample_pdf)
+    P.apply_protection(d, P.ProtectionSettings(open_password="vecchia-1"))
+    d.save(first)
+    d.close()
+    view = window.open_path(str(first), "vecchia-1")
+    s = P.ProtectionSettings(open_password="", permissions_password="Capo-1234", restrict=True,
+                             allowed={"copy"})
+    monkeypatch.setattr(C, "ask_protection", lambda parent, doc: _FakeDialog(s, keep_open=True))
+    assert sec.protect()
+    view.document.save()
+    pdf = pymupdf.open(first)
+    assert pdf.authenticate("vecchia-1")
+    assert pdf.permissions & pymupdf.PDF_PERM_COPY
+
+
+def _owner_only(tmp_path):
+    path = tmp_path / "limitato.pdf"
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Testo riservato")
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="capo",
+             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_ACCESSIBILITY)
+    return str(path)
+
+
+def test_remove_wrong_owner_password(window, sec, tmp_path, monkeypatch, accept_all):
+    path = _owner_only(tmp_path)
+    before = _sha(path)
+    view = window.open_path(path)
+    assert sec.lock_button.text() == "Accesso limitato"
+    errors = []
+    monkeypatch.setattr(C, "ask_password", lambda *a: "sbagliata")
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(t))
+    assert not sec.remove_protection()
+    assert errors == ["Password non corretta"]
+    assert view.document.is_protected and _sha(path) == before
+
+
+def test_remove_with_owner_password(window, sec, tmp_path, monkeypatch, accept_all):
+    path = _owner_only(tmp_path)
+    view = window.open_path(path)
+    monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
+    assert sec.remove_protection()
+    assert sec.lock_button.text() == "Accesso completo"
+    view.document.save()
+    data = open(path, "rb").read()
+    assert b"/Encrypt" not in data
+    assert "Testo riservato" in _text(path)
+
+
+def test_restricted_banner_and_unlock(window, sec, tmp_path, monkeypatch):
+    view = window.open_path(_owner_only(tmp_path))
+    banner = sec.banners[view]
+    assert banner.current().key == "restricted" and banner.isVisible()
+    monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
+    assert sec.unlock(view.document)
+    assert banner.current() is None or banner.current().key != "restricted"
+
+
+def test_restricted_blocks_redaction(window, sec, tmp_path, monkeypatch):
+    view = window.open_path(_owner_only(tmp_path))
+    monkeypatch.setattr(C, "ask_password", lambda *a: None)
+    sec.activate_area_tool()
+    assert view.tool.id != "security-redact-area"
+
+
+def test_security_properties_rows(window, sec, tmp_path):
+    path = tmp_path / "proprieta.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="capo",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(path))
+    flat = []
+    for head, lines in C.security_rows(view.document):
+        flat.append(head)
+        flat.extend(lines)
+    joined = "\n".join(flat)
+    rows = dict(C.security_rows(view.document))
+    assert "AES, chiave a 256 bit" in joined and "Accesso: limitato" in joined
+    assert "Stampare, solo a bassa risoluzione" in rows["Azioni consentite"]
+    assert "Copiare testo e immagini" in rows["Azioni non consentite"]
+
+
+def test_security_properties_unprotected(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    rows = C.security_rows(view.document)
+    assert rows[0][0] == "Nessuna protezione"
+    assert dict(rows)["Azioni non consentite"] == []
+
+
+def test_rc4_marked_weak(window, sec, tmp_path):
+    path = tmp_path / "rc4.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_RC4_40, user_pw="", owner_pw="o", permissions=-1)
+    view = window.open_path(str(path))
+    assert any(h == "Protezione debole" for h, _l in C.security_rows(view.document))
+
+
+# ---------------------------------------------------------------- redazione
+
+
+def test_area_tool_marks_and_moves(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    sec.activate_area_tool()
+    tool = view.tool
+    assert tool.id == "security-redact-area"
+    tool.press(view, _ev(0, 60, 75))
+    tool._end = pymupdf.Point(300, 110)
+    tool.release(view, _ev(0, 300, 110))
+    doc = view.document
+    with doc.lock:
+        marks = R.marks(doc.pdf)
+    assert len(marks) == 1 and "Pagina 1" in marks[0].text
+    assert sec.panel.count.text() == "1"
+    assert sec.panel.tree.topLevelItem(0).child(0).text(2) == "Da applicare"   # bug_11
+    assert sec.actions["apply"].isEnabled()
+    # testo ancora presente prima dell'applicazione
+    assert "Pagina 1" in doc.page_text(0)
+    # clic senza trascinamento → nessun segno
+    tool.press(view, _ev(0, 400, 400))
+    tool.release(view, _ev(0, 400, 400))
+    # trascina il segno per spostarlo
+    tool.press(view, _ev(0, 100, 90))
+    tool._end = pymupdf.Point(100, 140)
+    tool.release(view, _ev(0, 100, 140))
+    with doc.lock:
+        marks = R.marks(doc.pdf)
+    assert len(marks) == 1 and abs(marks[0].rect.y0 - 125) < 1
+    doc.undo()
+    with doc.lock:
+        assert abs(R.marks(doc.pdf)[0].rect.y0 - 75) < 1
+
+
+def test_mark_selection_two_lines(window, sec, tmp_path, monkeypatch, accept_all):
+    path = tmp_path / "sel.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((72, 100), "Mario Rossi, nato", fontsize=12)
+    page.insert_text((72, 114), "a Roma nel 1980", fontsize=12)
+    src.save(str(path))
+    view = window.open_path(str(path))
+    words = view.words(0)
+    chosen = [w for w in words if w[4] in ("Rossi,", "nato")]
+    from foliant.api import selection_from_words
+    view.set_text_selection(selection_from_words(0, chosen))
+    assert sec.mark_selection() == 1
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert sec.apply_redactions(None)
+    text = view.document.page_text(0)
+    assert "Mario" in text and "a Roma" in text and "Rossi" not in text and "nato" not in text
+
+
+def test_find_and_mark_terms(window, sec, tmp_path, monkeypatch):
+    path = tmp_path / "nomi.pdf"
+    src = pymupdf.open()
+    for i in range(2):
+        page = src.new_page()
+        page.insert_text((72, 100), "Cliente Mario Rossi e MARIO ROSSI", fontsize=12)
+        page.insert_text((72, 120), "firmato Mario", fontsize=12)
+        page.insert_text((72, 134), "Rossi", fontsize=12)
+    src.new_page()   # pagina senza testo
+    src.set_metadata({"title": "Contratto Mario Rossi"})
+    src.save(str(path))
+    view = window.open_path(str(path))
+
+    def fake_run(dlg):
+        dlg.terms.setPlainText("mario rossi")
+        dlg.outside.setChecked(True)
+        dlg.run_search()
+        assert "senza testo" in dlg.notice.text()
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    n = sec.find_and_mark("terms")
+    assert n == 2 * (2 + 2)        # 3 occorrenze per pagina, una su due righe
+    assert len(sec.pending_outside[view.document]) == 1
+    monkeypatch.setattr(C, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert sec.apply_redactions(None)
+    out = tmp_path / "nomi-redatto.pdf"
+    view.document.save_copy(out)
+    text = _text(out).lower()
+    assert "rossi" not in text
+    pdf = pymupdf.open(out)
+    assert "Rossi" not in (pdf.metadata.get("title") or "")
+    assert b"Rossi" not in out.read_bytes()
+
+
+def test_find_patterns_dialog(window, sec, pii_pdf, monkeypatch, accept_all):
+    view = window.open_path(pii_pdf)
+    sec.show_panel()
+    captured = {}
+
+    def fake_run(dlg):
+        dlg.run_search()
+        captured["count"] = len(dlg.matches)
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    n = sec.find_and_mark("patterns")
+    assert n >= 2 * 6 and captured["count"] >= 2 * 6
+    assert sec.panel.count.text() == str(n)
+
+
+def test_find_dialog_invalid_regex(window, sec, sample_pdf, qtbot):
+    view = window.open_path(sample_pdf)
+    dlg = D.FindDialog("patterns", lambda o: sec.search(view.document, o),
+                       [("email", "Email", False)])
+    qtbot.addWidget(dlg)
+    dlg.custom.setText("(abc")
+    dlg.run_search()
+    assert "non valida" in dlg.notice.text()
+
+
+def test_mark_pages_even(window, sec, tmp_path, monkeypatch):
+    from tests.conftest import make_pdf
+    path = make_pdf(tmp_path / "sei.pdf", pages=6)
+    view = window.open_path(path)
+
+    def fake_run(dlg):
+        dlg.radios["even"].setChecked(True)
+        dlg.overlay.setText("Pagina omessa")
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    assert sec.mark_pages() == 3
+    with view.document.lock:
+        assert sorted(m.page for m in R.marks(view.document.pdf)) == [1, 3, 5]
+
+
+def test_parse_pages():
+    assert D.parse_pages("2, 4-5", 10) == [1, 3, 4]
+    assert D.parse_pages("", 3) == [0, 1, 2]
+    with pytest.raises(ValueError):
+        D.parse_pages("0-2", 3)
+    with pytest.raises(ValueError):
+        D.parse_pages("x", 3)
+
+
+def test_repeat_mark(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    doc = view.document
+    with doc.change("Segna") as pdf:
+        xref = R.add_mark(pdf, 0, pymupdf.Rect(50, 20, 200, 60), R.MarkStyle())
+    assert sec.repeat_mark_on(doc, 0, xref, [1, 2]) == 2
+    with doc.lock:
+        marks = R.marks(doc.pdf)
+    assert len(marks) == 3 and all(abs(m.rect.x0 - 50) < 0.01 for m in marks)
+
+
+def test_panel_group_and_remove(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    sec.show_panel()
+    doc = view.document
+    with doc.change("Segna") as pdf:
+        for page in (0, 0, 1, 2):
+            R.add_mark(pdf, page, pymupdf.Rect(60, 75 + page, 300, 110), R.MarkStyle())
+    panel = sec.panel
+    assert panel.count.text() == "4" and panel.tree.topLevelItemCount() == 3
+    # rimuovi il segno della pagina 2 (indice 1)
+    item = panel.tree.topLevelItem(1).child(0)
+    panel.tree.clearSelection()
+    item.setSelected(True)
+    panel._remove()
+    assert panel.count.text() == "3"
+    monkeypatch.setattr(C, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    sec.apply_redactions(None)
+    assert "Pagina 2" in doc.page_text(1) and "Pagina 1" not in doc.page_text(0)
+
+
+def test_apply_selected_only(window, sec, sample_pdf, monkeypatch, accept_all):
+    view = window.open_path(sample_pdf)
+    sec.show_panel()
+    doc = view.document
+    with doc.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+        R.add_mark(pdf, 1, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    first = [m for m in sec.panel.marks if m.page == 0]
+    assert sec.apply_redactions(first)
+    assert "Pagina 1" not in doc.page_text(0) and "Pagina 2" in doc.page_text(1)
+    with doc.lock:
+        assert [m.page for m in R.marks(doc.pdf)] == [1]
+
+
+def test_apply_cancel_keeps_everything(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    doc = view.document
+    with doc.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    monkeypatch.setattr(C, "confirm", lambda *a: False)
+    assert not sec.apply_redactions(None)
+    assert "Pagina 1" in doc.page_text(0)
+
+
+def test_apply_offers_save_redacted(window, sec, sample_pdf, tmp_path, monkeypatch, accept_all):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    names = []
+    target = tmp_path / "esempio_redatto.pdf"
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda title, name, *a: names.append(name) or str(target))
+    assert sec.apply_redactions(None)
+    assert names == ["esempio_redatto.pdf"]
+    assert "Pagina 1" not in _text(target)
+    assert "Pagina 1" in _text(sample_pdf)    # originale intatto
+
+
+def test_preview_overlay(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(100, 60, 500, 200), R.MarkStyle(fill=(0, 0, 0)))
+    view.flush_rendering()
+    r = view.page_to_view(0, pymupdf.Rect(445, 115, 455, 125))
+    pt = r.center().toPoint()
+    before = view.viewport().grab().toImage().pixelColor(pt)
+    sec.set_preview(True)
+    assert sec.panel.preview_button.isChecked()
+    after = view.viewport().grab().toImage().pixelColor(pt)
+    assert after.lightness() < 30 and before.lightness() > 60
+    sec.set_preview(False)
+
+
+def test_unapplied_marks_banner_on_reopen(window, sec, sample_pdf, tmp_path):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        for i in range(3):
+            R.add_mark(pdf, i, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    out = tmp_path / "con-segni.pdf"
+    view.document.save(out)
+    # salvataggio con segni non applicati: avviso, testo ancora estraibile
+    assert sec.banners[view].current().key == "unapplied-saved"
+    assert "Pagina 1" in _text(out)
+    view.document._saved_state = view.document._state
+    window.close_view(view)
+    view2 = window.open_path(str(out))
+    notice = sec.banners[view2].current()
+    assert notice.key == "unapplied" and "3 segni" in notice.text
+
+
+def test_style_dialog_values(qtbot):
+    dlg = D.StyleDialog(R.MarkStyle(), R.ApplyOptions(), ["OMISSIS"])
+    qtbot.addWidget(dlg)
+    dlg.fill.set_rgb((1, 1, 1))
+    dlg._check()
+    assert "bianco" in dlg.warning.text()
+    dlg.text.setCurrentText("OMISSIS")
+    dlg.repeat.setChecked(True)
+    style, options = dlg.values()
+    assert style.overlay_text == "OMISSIS" and style.repeat_text and options.images == R.IMAGES_PIXELS
+
+
+def test_redaction_settings_and_codes(window, sec, tmp_path, monkeypatch):
+    def fake_run(dlg):
+        dlg.text.setCurrentText("Riservato cliente")
+        dlg.fill.set_rgb((0.2, 0.1, 0.5))
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    assert sec.redaction_settings()
+    assert sec.style.overlay_text == "Riservato cliente" and "Riservato cliente" in sec.codes()
+    out = tmp_path / "codici.json"
+    sec.export_codes(str(out))
+    sec.set_codes(["altro"])
+    assert sec.import_codes(str(out))[-1] == "Riservato cliente"
+    assert sec.codes()[0] == C.DEFAULT_CODES[0]
+
+
+# ------------------------------------------------------- avvisi e collegamenti
+
+
+def test_active_content_banner(window, sec, active_pdf, monkeypatch):
+    view = window.open_path(active_pdf)
+    notice = sec.banners[view].current()
+    assert notice.key == "active"
+    assert "script (1)" in notice.text and "collegamenti esterni (1)" in notice.text
+    assert sec.banners[view].isVisible()
+    rows = dict(C.active_rows(sec.scans[view.document]))
+    assert rows["Script (1)"] == ["Apertura del documento: app.alert('ciao');"]
+    assert rows["Collegamenti esterni (1)"] == ["https://esterno.example.com/traccia"]
+    shown = []
+    monkeypatch.setattr(C, "show_report", lambda dlg: shown.append(dlg) or False)
+    sec.show_active_details(view)
+    assert shown and shown[0].tree.topLevelItemCount() >= 2
+
+
+def test_no_banner_for_plain_pdf(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    assert sec.banners[view].current() is None and not sec.banners[view].isVisible()
+
+
+def test_trusted_document(window, sec, active_pdf):
+    view = window.open_path(active_pdf)
+    sec.trust_document(view)
+    assert sec.banners[view].current() is None
+    window.close_view(view)
+    view = window.open_path(active_pdf)
+    assert sec.banners[view].current() is None
+    window.close_view(view)
+    with open(active_pdf, "ab") as f:      # modificato da un altro programma
+        f.write(b"\n% modifica esterna\n")
+    view = window.open_path(active_pdf)
+    assert sec.banners[view].current().key == "active"
+    sec.revoke_trust()
+
+
+def test_link_javascript_blocked(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    blocked, opened = [], []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: blocked.append(a[2]))
+    monkeypatch.setattr(L, "open_url", lambda uri: opened.append(uri))
+    L.follow_external(view, {"kind": pymupdf.LINK_URI, "uri": "javascript:alert(1)"})
+    assert blocked and not opened
+    L.follow_external(view, {"kind": pymupdf.LINK_LAUNCH, "file": "/usr/bin/xterm"})
+    assert len(blocked) == 2 and not opened
+
+
+def test_link_confirm_and_allow_domain(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    opened, asked = [], []
+    monkeypatch.setattr(L, "open_url", lambda uri: opened.append(uri))
+    answers = iter(["cancel", "always", "open"])
+    monkeypatch.setattr(L, "ask_open", lambda parent, uri, host, warnings: asked.append(host) or next(answers))
+    link = {"kind": pymupdf.LINK_URI, "uri": "https://esempio.it/pagina", "from": pymupdf.Rect(0, 0, 1, 1)}
+    L.follow_external(view, link)
+    assert opened == [] and asked == ["esempio.it"]
+    L.follow_external(view, link)          # «Sì a tutti»
+    assert opened == ["https://esempio.it/pagina"]
+    L.follow_external(view, link)          # ora senza conferma
+    assert len(asked) == 2 and len(opened) == 2
+    L.follow_external(view, {"kind": pymupdf.LINK_URI, "uri": "https://altro.it"})
+    assert asked[-1] == "altro.it"
+
+
+def test_link_homograph_warning():
+    puny, warnings = L.host_warnings("еxample.com")   # «е» cirillica
+    assert puny.startswith("xn--") and warnings
+
+
+def test_core_link_hook_installed(window, sec):
+    from foliant.ui import tools
+    entries = [(p, h) for p, _s, h in tools.LINK_HANDLERS if h is L.handler]
+    assert L._installed and entries == [(1000, L.handler)]
+
+
+def test_internal_links_delegated(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    seen = []
+    assert L.follow_external(view, {"kind": pymupdf.LINK_GOTO, "page": 1}) is False
+    from foliant.ui import tools
+    tools.follow_link(view, {"kind": pymupdf.LINK_GOTO, "page": 1})
+    seen.append(view.current_page)
+    assert seen == [1]
+
+
+# --------------------------------------------------- sanificazione e altro
+
+
+def test_sanitize_flow(window, sec, active_pdf, tmp_path, monkeypatch):
+    view = window.open_path(active_pdf)
+    monkeypatch.setattr(C, "run_dialog", lambda dlg: True)
+    names = []
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda title, name, *a: names.append(name) or None)
+    assert sec.sanitize()
+    assert names == ["attivo_ripulito.pdf"]
+    out = tmp_path / "sanificato.pdf"
+    view.document.save(out)
+    from foliant.modules.security import sanitize as S
+    pdf = pymupdf.open(out)
+    rep = S.scan(pdf)
+    assert rep.javascript == 0 and rep.embedded_files == 0 and rep.comments == 0 and not rep.has_metadata
+    assert b"JavaScript" not in out.read_bytes()
+    assert "Documento con contenuti attivi" in pdf[0].get_text()
+
+
+def test_inspect_flow(window, sec, active_pdf, monkeypatch):
+    before = _sha(active_pdf)
+    view = window.open_path(active_pdf)
+    shown = []
+    monkeypatch.setattr(C, "show_report", lambda dlg: shown.append(dlg) or False)
+    rep = sec.inspect()
+    assert rep.javascript == 1 and shown
+    heads = [shown[0].tree.topLevelItem(i).text(0) for i in range(shown[0].tree.topLevelItemCount())]
+    assert "Metadati" in heads and any(h.startswith("Script") for h in heads)
+    assert not view.document.is_modified and _sha(active_pdf) == before
+
+
+def test_metadata_flow(window, sec, sample_pdf, tmp_path, monkeypatch):
+    view = window.open_path(sample_pdf)
+
+    def fake_run(dlg):
+        dlg.edits["title"].setText("Relazione 2026 – Città")
+        dlg.edits["author"].setText("Anna Bianchi")
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    assert sec.edit_metadata()
+    out = tmp_path / "meta.pdf"
+    view.document.save(out)
+    meta = pymupdf.open(out).metadata
+    assert meta["title"] == "Relazione 2026 – Città" and meta["author"] == "Anna Bianchi"
+    view.document.undo()
+    with view.document.lock:
+        assert view.document.pdf.metadata["title"] != "Relazione 2026 – Città"
+
+
+def test_metadata_read_only_when_restricted(window, sec, tmp_path, monkeypatch):
+    path = tmp_path / "ro.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="capo",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    window.open_path(str(path))
+    seen = []
+    monkeypatch.setattr(C, "run_dialog", lambda dlg: seen.append(all(e.isReadOnly() for e in dlg.edits.values()))
+                        or True)
+    assert not sec.edit_metadata()
+    assert seen == [True]
+
+
+def test_flatten_flow(window, sec, tmp_path, accept_all):
+    path = tmp_path / "commenti.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((72, 100), "Testo", fontsize=12)
+    a = page.add_rect_annot(pymupdf.Rect(100, 200, 200, 300))
+    a.set_colors(stroke=(1, 0, 0))
+    a.update()
+    h = page.add_text_annot((300, 300), "nascosta")
+    h.set_flags(pymupdf.PDF_ANNOT_IS_HIDDEN)
+    h.update()
+    src.save(str(path))
+    view = window.open_path(str(path))
+    assert sec.flatten()
+    out = tmp_path / "piatto.pdf"
+    view.document.save(out)
+    pdf = pymupdf.open(out)
+    assert list(pdf[0].annots()) == []
+    assert pdf[0].get_drawings()
+
+
+def test_upgrade_rc4_to_aes256(window, sec, tmp_path, monkeypatch):
+    path = tmp_path / "vecchio.pdf"
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Vecchio", fontsize=12)
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_RC4_128, user_pw="apri", owner_pw="capo",
+             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ)
+    view = window.open_path(str(path), "apri")
+    monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
+    rows = C.security_rows(view.document)
+    assert any(h == "Protezione debole" for h, _l in rows)
+    monkeypatch.setattr(C, "show_report", lambda dlg: dlg.action_button.text() == "Aggiorna ad AES-256")
+    sec.security_properties()
+    view.document.save()
+    pdf = pymupdf.open(path)
+    assert "AES" in (pdf.metadata or {}).get("encryption", "") or pdf.needs_pass
+    assert pdf.authenticate("apri") and not pdf.permissions & pymupdf.PDF_PERM_COPY
+    pdf2 = pymupdf.open(path)
+    assert pdf2.authenticate("capo") & 4
+    assert "256" in pdf2.metadata["encryption"]
+
+
+def test_find_dialog_import_terms(window, sec, sample_pdf, tmp_path, qtbot):
+    view = window.open_path(sample_pdf)
+    lst = tmp_path / "termini.txt"
+    lst.write_text("Orologeria\nVerdi\n\n", encoding="utf-8")
+    dlg = D.FindDialog("terms", lambda o: sec.search(view.document, o))
+    qtbot.addWidget(dlg)
+    dlg.terms.setPlainText("Pagina")
+    dlg.load_terms(str(lst))
+    assert dlg.terms.toPlainText().splitlines() == ["Pagina", "Orologeria", "Verdi"]
+    dlg.run_search()
+    assert len(dlg.matches) == 9 and dlg.ok.isEnabled()
+
+
+def test_protect_warns_on_signatures(window, sec, sample_pdf, monkeypatch):
+    window.open_path(sample_pdf)
+    monkeypatch.setattr(C.SecurityController, "_has_signatures", staticmethod(lambda doc: True))
+    asked = []
+    monkeypatch.setattr(C, "confirm", lambda parent, title, text, action: asked.append(text) or False)
+    assert not sec.protect()
+    assert "firme digitali" in asked[0]
+
+
+def test_area_tool_resize_corner(window, sec, sample_pdf):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(100, 300, 200, 400), R.MarkStyle())
+    tool = sec.area_tool()
+    view.set_tool(tool)
+    tool.press(view, _ev(0, 200, 400))           # angolo in basso a destra
+    tool._end = pymupdf.Point(250, 450)
+    tool.release(view, _ev(0, 250, 450))
+    with view.document.lock:
+        r = R.marks(view.document.pdf)[0].rect
+    assert abs(r.x0 - 100) < 0.5 and abs(r.x1 - 250) < 0.5 and abs(r.y1 - 450) < 0.5
+
+
+def test_export_import_marks(window, sec, sample_pdf, tmp_path):
+    view = window.open_path(sample_pdf)
+    sec.show_panel()
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    out = tmp_path / "segni.xfdf"
+    assert sec.export_marks(str(out))
+    with view.document.change("Pulisci") as pdf:
+        R.clear_marks(pdf)
+    assert sec.import_marks(str(out)) == 1
+    assert sec.panel.count.text() == "1"
+
+
+def test_trusted_folder(window, sec, active_pdf, tmp_path):
+    import shutil
+    view = window.open_path(active_pdf)
+    actions = dict(sec.banners[view].current().actions)
+    menu = dict(actions["Considera attendibile"])
+    menu["Tutti i documenti di questa cartella"]()
+    import tempfile
+    from pathlib import Path
+    other = Path(tempfile.mkdtemp(prefix="foliant-altra-"))
+    copy = shutil.copy(active_pdf, other / "copia.pdf")
+    window.close_view(view)
+    view = window.open_path(active_pdf)
+    assert sec.banners[view].current() is None
+    view2 = window.open_path(str(copy))
+    assert sec.banners[view2].current().key == "active"
+    sec.revoke_trust()
+
+
+def test_protect_undo_save_unencrypted(window, sec, sample_pdf, tmp_path, monkeypatch):
+    view = window.open_path(sample_pdf)
+    monkeypatch.setattr(C, "ask_protection",
+                        lambda parent, doc: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
+    assert sec.protect()
+    view.document.undo()
+    out = tmp_path / "annullato.pdf"
+    view.document.save(out)
+    pdf = pymupdf.open(out)
+    assert not pdf.needs_pass and not pdf.is_encrypted
+    view.document.redo()
+    out2 = tmp_path / "ripetuto.pdf"
+    view.document.save(out2)
+    assert pymupdf.open(out2).needs_pass
+
+
+def test_bug04_rc4_40_label(window, sec, tmp_path):
+    path = tmp_path / "rc440.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_RC4_40, user_pw="", owner_pw="o", permissions=-1)
+    view = window.open_path(str(path))
+    heads = [h for h, _l in C.security_rows(view.document)]
+    assert any("RC4, chiave a 40 bit" in h for h in heads)
+    assert not any("128" in h for h in heads)
+
+
+def test_bug10_uri_details_decoded(tmp_path):
+    from foliant.modules.security import sanitize as S
+    path = tmp_path / "uri.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    uris = ["https://esempio.it/a", "https://аpple.com/login", "javascript:alert(1)", "mailto:a@b.it", "http://x.it"]
+    for n, u in enumerate(uris):
+        page.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(10, 10 + 20 * n, 100, 25 + 20 * n), "uri": u})
+    src.save(str(path))
+    rep = S.scan(pymupdf.open(path))
+    assert sorted(rep.external_links) == sorted(uris)
+    rows = dict(C.active_rows(rep))
+    assert len(rows["Collegamenti esterni (5)"]) == 5
+
+
+def test_bug09_gotor_refused_is_handled(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    opened = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    monkeypatch.setattr(window, "open_path", lambda *a, **k: opened.append(a))
+    assert L.handler(view, {"kind": pymupdf.LINK_GOTOR, "file": "altro.pdf"}) is True
+    assert L.handler(view, {"kind": pymupdf.LINK_GOTOR, "file": "note.txt"}) is True
+    assert opened == []
+    from foliant.ui import tools
+    prio = max(p for p, _s, h in tools.LINK_HANDLERS if h is L.handler)
+    assert prio >= max([p for p, _s, h in tools.LINK_HANDLERS if h is not L.handler] or [prio])
+
+
+def test_bug03_unlock_notifies_and_grants_engine_permissions(window, sec, tmp_path, monkeypatch):
+    view = window.open_path(_owner_only(tmp_path))
+    with view.document.lock:
+        assert not view.document.pdf.permissions & pymupdf.PDF_PERM_COPY
+    seen = []
+    window.ctx.documentChanged.connect(lambda v: seen.append(v))
+    monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
+    assert sec.unlock(view.document)
+    assert view in seen
+    with view.document.lock:
+        assert view.document.pdf.permissions & pymupdf.PDF_PERM_COPY
