@@ -78,6 +78,7 @@ class Context(QObject):
     def __init__(self, window: "MainWindow"):
         super().__init__(window)
         self._w = window
+        self.pending_edit_hooks: list = []     # vedi add_pending_edit_hook
 
     # ---------------------------------------------------------------- finestra
     @property
@@ -88,6 +89,11 @@ class Context(QObject):
         return self._w.settings
 
     # --------------------------------------------------------------- documenti
+    def add_pending_edit_hook(self, hook: Callable[["DocumentView"], Any]) -> None:
+        """`hook(view)` conferma un editor in loco aperto: il nucleo lo chiama prima di salvare o chiudere."""
+        if hook not in self.pending_edit_hooks:
+            self.pending_edit_hooks.append(hook)
+
     def current_view(self) -> "DocumentView | None":
         try:
             return self._w.current_view()

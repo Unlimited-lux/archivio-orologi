@@ -739,9 +739,29 @@ class MainWindow(QMainWindow):
         view.setFocus()
         return view
 
+    def commit_pending_edits(self, view: DocumentView | None) -> None:
+        """Conferma l'editor aperto sulla pagina (testo, campo modulo) prima di salvare o chiudere.
+
+        Gli editor in loco dei moduli confermano quando perdono il fuoco: togliendolo qui la
+        modifica in corso entra nel documento invece di andare persa.
+        """
+        if view is None:
+            return
+        for hook in list(self.ctx.pending_edit_hooks):
+            try:
+                hook(view)
+            except Exception as e:          # un modulo difettoso non deve impedire il salvataggio
+                self.statusBar().showMessage(_("Errore in un pannello: {e}").format(e=e), 8000)
+        fw = QApplication.focusWidget()
+        if fw is not None and fw is not view and view.isAncestorOf(fw):
+            fw.clearFocus()
+            view.setFocus()
+            QApplication.processEvents()
+
     def close_view(self, view: DocumentView | None) -> bool:
         if view is None:
             return True
+        self.commit_pending_edits(view)
         doc = view.document
         if doc.is_modified:
             self.tabs.setCurrentWidget(view)
@@ -778,6 +798,7 @@ class MainWindow(QMainWindow):
     def save_view(self, view: DocumentView | None, save_as: bool = False) -> bool:
         if view is None:
             return False
+        self.commit_pending_edits(view)
         doc = view.document
         path = None
         if save_as or doc.needs_save_as:
@@ -802,6 +823,7 @@ class MainWindow(QMainWindow):
         view = self.current_view()
         if view is None:
             return
+        self.commit_pending_edits(view)
         path = self.ctx.ask_save_path(_("Salva una copia"), view.document.display_name, PDF_FILTER)
         if not path:
             return

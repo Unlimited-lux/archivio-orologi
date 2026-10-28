@@ -42,6 +42,8 @@ def register(ctx: Context) -> None:
     ctrl = TextEditController(ctx)
     _controller = ctrl
     ctx.text_edit = ctrl  # accesso per i test e per altri moduli
+    if hasattr(ctx, "add_pending_edit_hook"):     # Salva/Chiudi confermano l'editor aperto
+        ctx.add_pending_edit_hook(lambda view: ctrl.commit_editor(view))
 
     mode = ctx.add_mode("modifica", _("Modifica"), "pencil-line", 30)
     panel = TextPropertiesPanel(ctrl)

@@ -304,3 +304,21 @@ def test_mode_switch_hides_previous_properties_panel(window, sample_pdf):
     assert window.properties.isVisible()
     window.set_mode("leggi")
     assert not window.properties.isVisible()
+
+
+def test_save_commits_pending_editor(window, sample_pdf):
+    """Salva conferma prima l'editor in loco aperto (gancio dei moduli)."""
+    view = window.open_path(sample_pdf)
+    calls = []
+
+    def hook(v):
+        calls.append(v)
+        with v.document.change("Editor confermato") as pdf:
+            pdf[0].insert_text((72, 300), "confermato")
+    window.ctx.add_pending_edit_hook(hook)
+    try:
+        assert window.save_view(view)
+    finally:
+        window.ctx.pending_edit_hooks.remove(hook)
+    assert calls == [view]
+    assert "confermato" in pymupdf.open(sample_pdf)[0].get_text()
