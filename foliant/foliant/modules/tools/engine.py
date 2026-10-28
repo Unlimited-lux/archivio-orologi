@@ -28,7 +28,8 @@ from typing import Any, Callable
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, DocumentError, OperationCancelled, _, atomic_write, placement
+from foliant.api import (ENGINE_LOCK, DocumentError, OperationCancelled, _, atomic_write, format_date, format_number,
+                         placement)
 
 INPUT_EXTENSIONS = (".pdf",)
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp")
@@ -288,6 +289,8 @@ class ActionSpec:
             value = p.default
             if p.type == "str" and isinstance(value, str) and value and p.key not in _UNTRANSLATED_DEFAULTS:
                 value = _(value)
+            if p.key == "page_size" and value == "a4":
+                value = default_page_size()   # A4 o Letter secondo preferenze e impostazioni locali (NFR-26)
             out[p.key] = value
         return out
 
@@ -911,7 +914,7 @@ class JobReport:
         parts = [f"{c[k]} {_(STATUS_LABELS[k]).lower()}" for k in STATUS_LABELS if c.get(k)]
         if self.finished:
             secs = (self.finished - self.started).total_seconds()
-            parts.append(_("durata {s} s").format(s=f"{secs:.1f}".replace(".", ",")))
+            parts.append(_("durata {s} s").format(s=format_number(secs, 1)))
         return " · ".join(parts)
 
 
@@ -1670,6 +1673,16 @@ class _Ctx:
 PAGE_SIZES = {"a4": (595.28, 841.89), "letter": (612.0, 792.0)}
 
 
+def default_page_size() -> str:
+    """«a4» o «letter»: formato carta delle preferenze, altrimenti delle impostazioni locali."""
+    try:
+        from foliant.api import locale_defaults
+        value = locale_defaults.paper_size().lower()
+    except Exception:
+        return "a4"
+    return value if value in PAGE_SIZES else "a4"
+
+
 def _office_command(src: str, outdir: str) -> list[str] | None:
     """Comando di conversione dei documenti Office (sostituibile nei test)."""
     exe = shutil.which("soffice") or shutil.which("libreoffice")
@@ -1678,7 +1691,7 @@ def _office_command(src: str, outdir: str) -> list[str] | None:
     return [exe, "--headless", "--convert-to", "pdf", "--outdir", outdir, src]
 
 
-def image_to_pdf(path: str, page_size: str = "a4", fit: str = "fit", margin_mm: float = 0.0,
+def image_to_pdf(path: str, page_size: str | None = None, fit: str = "fit", margin_mm: float = 0.0,
                  warnings: list | None = None) -> bytes:
     """Immagine (anche TIFF multipagina) -> PDF, con orientamento EXIF applicato."""
     from PIL import Image, ImageOps, ImageSequence
@@ -1711,7 +1724,7 @@ def image_to_pdf(path: str, page_size: str = "a4", fit: str = "fit", margin_mm: 
             if page_size == "original":
                 pw, ph = w_pt + 2 * margin, h_pt + 2 * margin
             else:
-                pw, ph = PAGE_SIZES.get(page_size, PAGE_SIZES["a4"])
+                pw, ph = PAGE_SIZES.get(page_size or default_page_size(), PAGE_SIZES["a4"])
                 if w_pt > h_pt:
                     pw, ph = ph, pw
             page = out.new_page(width=pw, height=ph)
@@ -1734,7 +1747,7 @@ def to_pdf_bytes(path: str, params: dict, warnings: list | None = None) -> bytes
     """Converte un file non PDF in PDF (BAT-07)."""
     low = path.lower()
     if low.endswith(IMAGE_EXTENSIONS):
-        return image_to_pdf(path, params.get("page_size", "a4"), params.get("fit", "fit"),
+        return image_to_pdf(path, params.get("page_size") or default_page_size(), params.get("fit", "fit"),
                             float(params.get("margin", 0.0) or 0.0), warnings)
     if low.endswith(TEXT_EXTENSIONS):
         with ENGINE_LOCK:
@@ -1931,7 +1944,7 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         total = queue_total = None
         if numbering:
             first, total, queue_total = numbering
-        values = {"nome": name, "data": datetime.now().strftime("%d/%m/%Y")}
+        values = {"nome": name, "data": format_date(datetime.now())}
         if a == "header_footer":
             texts = {"top-left": p.get("header_left", ""), "top-center": p.get("header_center", ""),
                      "top-right": p.get("header_right", ""), "bottom-left": p.get("footer_left", ""),
@@ -2420,9 +2433,9 @@ def report_pdf(report: JobReport) -> bytes:
         try:
             w = _Writer(doc)
             w.line(_("Rapporto dell'elaborazione in blocco"), size=16, gap=10)
-            w.line(_("Inizio: {d}").format(d=report.started.strftime("%d/%m/%Y %H:%M:%S")), size=9)
+            w.line(_("Inizio: {d}").format(d=format_date(report.started, time=True, seconds=True)), size=9)
             if report.finished:
-                w.line(_("Fine: {d}").format(d=report.finished.strftime("%d/%m/%Y %H:%M:%S")), size=9)
+                w.line(_("Fine: {d}").format(d=format_date(report.finished, time=True, seconds=True)), size=9)
             w.line(_("Operazioni: {o}").format(o=", ".join(action_label(s.action) for s in report.steps)), size=9)
             w.line(report.summary(), size=10, gap=10)
             for r in report.results:
@@ -2788,7 +2801,7 @@ def build_xmp(title: str = "", author: str = "", subject: str = "", keywords: st
 
 
 def _x_metadata(data: bytes, p: dict, item, ctx) -> bytes:
-    values = {"nome": Path(item.path).stem, "data": datetime.now().strftime("%d/%m/%Y")}
+    values = {"nome": Path(item.path).stem, "data": format_date(datetime.now())}
     fields = {k: _expand(str(p.get(k, "") or ""), values) for k in ("title", "author", "subject", "keywords")}
     with ENGINE_LOCK:
         doc = _open(data)

@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, _, format_date
 
 from .compare_engine import (
     ADDED, ANNOTATION, DELETED, FIELD, FORMAT, IMAGE, KINDS, MODIFIED, PAGE, STATUSES, VISUAL, CompareResult,
@@ -205,7 +205,7 @@ def build_report(progress, result: CompareResult, data_a: bytes, data_b: bytes,
         # ---- riepilogo
         with ENGINE_LOCK:
             writer.line(_("Rapporto di confronto"), size=18, gap=10)
-            writer.line(_("Data e ora del confronto: {d}").format(d=when.strftime("%d/%m/%Y %H:%M")), size=9)
+            writer.line(_("Data e ora del confronto: {d}").format(d=format_date(when, time=True)), size=9)
             writer.space()
             writer.line(_("Documento A (riferimento)"), size=12, gap=6)
             for line in _side_lines(result.side_a, len(data_a)):
