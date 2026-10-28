@@ -1356,3 +1356,19 @@ def test_library_sync_dialog_and_periodic_cycle(window, qtbot, monkeypatch, tmp_
     assert "attiva" in c.sync_status
     sync.sync(other, "Passphrase-Negozio")
     assert "Offline" in [e.name for e in other.entries()]
+
+
+def test_ctx_request_signature_opens_dialog_with_field(window, monkeypatch, tmp_path):
+    """Per Moduli: ctx.request_signature(view, "Firma1") apre la firma con il campo preselezionato."""
+    from foliant.modules.sign import ui_digital
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "campo.pdf", pages=1)).read_bytes()
+    data, name = digital.add_signature_field(data, "Firma1", 0, (300, 600, 500, 680))
+    p = tmp_path / "campo2.pdf"
+    p.write_bytes(data)
+    view = window.open_path(str(p))
+    seen = []
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", lambda d: seen.append(d.field.name) or False)
+    assert window.ctx.request_signature(view, "Firma1") is True
+    assert seen == ["Firma1"]
+    assert window.ctx.request_signature(view, "Inesistente") is False
