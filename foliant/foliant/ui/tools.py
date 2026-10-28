@@ -49,10 +49,17 @@ class TextSelection:
 
 
 class Tool:
-    """Base per gli strumenti. I metodi restituiscono True se l'evento è gestito."""
+    """Base per gli strumenti. I metodi restituiscono True se l'evento è gestito.
+
+    `key()` riceve anche Tab e Maiusc+Tab (Key_Backtab): restituendo True lo strumento li
+    tiene per sé, altrimenti spostano il fuoco come di consueto.
+    Con `autoscroll = True`, durante un trascinamento col tasto sinistro iniziato dallo
+    strumento (press() → True) la vista scorre da sola quando il puntatore ne raggiunge il
+    bordo e ripete `move()` con la stessa posizione (`ev.event` è None)."""
 
     id = "tool"
     cursor = Qt.CursorShape.ArrowCursor
+    autoscroll = False
 
     def activate(self, view: "DocumentView") -> None:
         pass
@@ -98,6 +105,23 @@ def _nearest_word(words: list[tuple], pt: pymupdf.Point, max_dist: float | None 
         if best_d is None or d < best_d:
             best, best_d = idx, d
     return best
+
+
+def _first_word_after(words: list[tuple], pt: pymupdf.Point) -> int | None:
+    """Prima parola, in ordine di lettura, che segue il punto (sotto, o a destra sulla stessa riga)."""
+    for idx, w in enumerate(words):
+        if w[1] >= pt.y or (w[3] > pt.y and w[2] >= pt.x):
+            return idx
+    return None
+
+
+def _last_word_before(words: list[tuple], pt: pymupdf.Point) -> int | None:
+    """Ultima parola, in ordine di lettura, che precede il punto (sopra, o a sinistra sulla stessa riga)."""
+    for idx in range(len(words) - 1, -1, -1):
+        w = words[idx]
+        if w[3] <= pt.y or (w[1] < pt.y and w[0] <= pt.x):
+            return idx
+    return None
 
 
 def words_to_text(words: list[tuple]) -> str:
@@ -162,7 +186,11 @@ def follow_link(view: "DocumentView", link: dict) -> None:
 
 
 class SelectTextTool(Tool):
-    """Strumento predefinito: selezione del testo e clic sui collegamenti."""
+    """Strumento predefinito: selezione del testo e clic sui collegamenti.
+
+    Il trascinamento può proseguire sulle pagine successive o precedenti (in ordine di
+    lettura, VIS-28): una `TextSelection` per pagina in `view.text_selections`; oltre il bordo
+    la vista scorre da sola."""
 
     id = "select-text"
     cursor = Qt.CursorShape.IBeamCursor
@@ -170,6 +198,11 @@ class SelectTextTool(Tool):
     def __init__(self) -> None:
         self._anchor: tuple[int, pymupdf.Point] | None = None
         self._moved = False
+
+    @property
+    def autoscroll(self) -> bool:
+        # solo mentre si seleziona il testo (le sottoclassi trascinano anche altro)
+        return self._anchor is not None
 
     def press(self, view, ev):
         if ev.button != Qt.MouseButton.LeftButton:
@@ -187,16 +220,48 @@ class SelectTextTool(Tool):
             self._update_cursor(view, ev)
             return False
         page, start = self._anchor
-        if ev.point is None:
-            return True
         hit = view.view_to_page(ev.pos, clamp=True)
-        if hit is None or hit[0] != page:
-            # selezione limitata alla pagina iniziale
-            hit = (page, view.clamp_to_page(page, ev.pos))
-        end = hit[1]
-        if not self._moved and abs(end.x - start.x) + abs(end.y - start.y) < 2:
+        if hit is None:
+            return True
+        end_page, end = hit
+        if not self._moved and end_page == page and abs(end.x - start.x) + abs(end.y - start.y) < 2:
             return True
         self._moved = True
+        if end_page == page:
+            sel = self._select_on_page(view, page, start, end)
+            if sel is None:
+                view.clear_text_selection()
+            else:
+                view.set_text_selection(sel)
+            return True
+        # più pagine: dal punto iniziale alla fine della prima, le intermedie intere, poi fino al punto finale
+        if end_page > page:
+            first, p0, last, p1 = page, start, end_page, end
+        else:
+            first, p0, last, p1 = end_page, end, page, start
+        sels = []
+        for i in range(first, last + 1):
+            words = view.words(i)
+            if not words:
+                continue
+            lo, hi = 0, len(words) - 1
+            if i == first:
+                lo = _nearest_word(words, p0, SNAP_DISTANCE)
+                if lo is None:
+                    lo = _first_word_after(words, p0)
+            if i == last:
+                hi = _nearest_word(words, p1, SNAP_DISTANCE)
+                if hi is None:
+                    hi = _last_word_before(words, p1)
+            if lo is None or hi is None or lo > hi:
+                continue
+            sels.append(selection_from_words(i, words[lo:hi + 1]))
+        view.set_text_selections(sels)
+        return True
+
+    @staticmethod
+    def _select_on_page(view, page: int, start: pymupdf.Point, end: pymupdf.Point) -> TextSelection | None:
+        """Selezione tra due punti della stessa pagina (None = nessuna parola)."""
         words = view.words(page)
         a = _nearest_word(words, start, SNAP_DISTANCE)
         b = _nearest_word(words, end, SNAP_DISTANCE)
@@ -205,18 +270,16 @@ class SelectTextTool(Tool):
             box = pymupdf.Rect(start, end).normalize()
             inside = [i for i, w in enumerate(words) if box.intersects(pymupdf.Rect(w[:4]))]
             if not inside:
-                view.clear_text_selection()
-                return True
+                return None
             a, b = inside[0], inside[-1]
         if a is None:
             a = _nearest_word(words, start)
         if b is None:
             b = _nearest_word(words, end)
         if a is None or b is None:
-            return True
+            return None
         lo, hi = min(a, b), max(a, b)
-        view.set_text_selection(selection_from_words(page, words[lo:hi + 1]))
-        return True
+        return selection_from_words(page, words[lo:hi + 1])
 
     def release(self, view, ev):
         if ev.button != Qt.MouseButton.LeftButton:

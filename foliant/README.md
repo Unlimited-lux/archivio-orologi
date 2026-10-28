@@ -70,12 +70,14 @@ foliant/
     incremental.py salvataggio incrementale dei documenti firmati (byte originali + modifiche in coda)
     security.py   accesso (utente/proprietario), permessi effettivi /P e /Perms, descrizione della cifratura
     engine.py     ENGINE_LOCK: unico lock per ogni accesso al motore PDF
+    render.py     resa per stampa/immagini; annotations_hidden (flag Hidden temporaneo)
     errors.py     errori con messaggi per l'utente
   ui/          interfaccia Qt
     main_window.py  finestra: barra modalità, schede, pannelli, barra di stato
-    document_view.py vista pagine: impaginazione, zoom, rendering, coordinate, strumenti
+    document_view.py vista pagine: impaginazione, zoom, rendering, coordinate, strumenti, guide
+    rulers.py       righelli della vista (VIS-39)
     context.py      Context: API per i moduli
-    tools.py        Tool (strumenti interattivi), selezione testo, mano
+    tools.py        Tool (strumenti interattivi), selezione testo (anche su più pagine), mano
     tasks.py        run_task: attività lunghe con avanzamento/annulla
     theme.py        tema chiaro/scuro e colori
     icons.py        icone (nomi = file in resources/icons)
@@ -147,9 +149,12 @@ La tabella UX-18 della specifica è l'unica autorità. Il nucleo registra: Ctrl+
 Ctrl+N, Ctrl+S, Ctrl+Maiusc+S, Ctrl+W, Ctrl+Maiusc+T, Ctrl+Q, Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
 Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
 N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
-Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R. Spettano ai moduli: Ctrl+P, Ctrl+F,
+Maiusc+F9, F10, F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
 Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
 duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
+«Righelli» (menu ☰ › Vista) non ha scorciatoia: UX-18 riserva Ctrl+R ai righelli e Ctrl+Maiusc++/-
+alla rotazione della vista, ma oggi Ctrl+R è di «Ruota vista» e Ctrl+Maiusc++/- di «Ruota a
+destra/sinistra» (pages); lo scambio va deciso insieme.
 Le scorciatoie specifiche di un modulo vanno **limitate alla sua modalità**:
 `ctx.action(..., shortcut="Ctrl+D", mode="pagine")` oppure `mode.scope_shortcuts(azione, ...)`.
 Così due modalità possono usare lo stesso tasto senza conflitti. Per i tasti che servono solo
@@ -198,7 +203,9 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `set_tool(tool)` | strumento attivo sulla vista (None = selezione testo) |
 | `set_central_widget(w)` / `central_widget()` | mostra un widget del modulo al posto della vista documento (None = ripristina) |
 | `add_link_handler(fn, priority=0)` | apertura dei collegamenti: `fn(view, link) -> bool` (True = gestito); priorità più alta = interrogato prima |
-| `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)`; la selezione di testo è `view.text_selection` (pagina, rettangoli, parole) e `view.selected_text()` (il clic destro non la cancella) |
+| `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)`; la selezione di testo è `view.text_selections` (una per pagina: pagina, rettangoli, parole; `view.text_selection` = la prima) e `view.selected_text()` (il clic destro non la cancella) |
+| `set_rulers_visible(bool)` / `rulers_visible()` | righelli (VIS-39) su tutte le viste, anche future, come la voce «Righelli» del menu ☰ › Vista; la scelta resta tra le sessioni |
+| `set_ruler_unit(u)` / `ruler_unit()` | unità dei righelli per tutte le viste: `"mm"` (predefinita), `"pt"`, `"in"`; anche nelle Preferenze e nel menu del righello |
 | `add_tab_menu_provider(fn)` | voci nel menu del tasto destro su una scheda: `fn(view, menu)`. Es. `ctx.add_tab_menu_provider(lambda v, m: m.addAction(_("Confronta con…"), lambda: confronta(v)))` |
 | `show_banner(view, id, testo, actions=[(etichetta, fn)], level="info", priority=0, closable=True, on_close=None)` / `hide_banner(view, id)` / `banners(view)` | barra di avviso sopra le pagine della scheda (UX-14): `level` = `"info"`, `"warning"` o `"error"`; un avviso alla volta (priorità più alta, poi livello) con «N altri avvisi» per scorrerli; lo stesso `id` aggiorna l'avviso; chiuso con × non ricompare finché il documento è aperto (resta nell'icona della barra di stato) o finché il modulo non chiama `hide_banner`. Es. `ctx.show_banner(view, "ocr", _("Documento senza testo"), [(_("Esegui OCR"), avvia)], level="warning", priority=20)` |
 | `notify(testo, actions=[(etichetta, fn)], duration_ms=None)` | avviso non bloccante in basso (6 s, 10 s con azioni, 0 = finché non si chiude) al posto delle finestre modali informative. Es. `ctx.notify(_("3 pagine eliminate"), [(_("Annulla"), doc.undo)])` |
@@ -239,9 +246,34 @@ un proprio `customContextMenuRequested` sulla barra delle schede: le voci vanno 
 **ignorata**: PyMuPDF/MuPDF non sanno scrivere `/EncryptMetadata false` e cifrano comunque il flusso
 `/Metadata` (`ENCRYPT_METADATA_SUPPORTED = False`).
 
+### API della vista (`foliant/ui/document_view.py`)
+
 `DocumentView` offre: `current_page`, `go_to_page(i)`, `page_count`, `words(i)`,
-`text_selection` (+ `selectionChanged`), `set_search_hits(dict, current)`, `overlays`,
-`set_tool()`, `render_page_image(i, zoom)`, `ensure_visible(i, rect)`, `zoom`, `set_zoom()`.
+`set_search_hits(dict, current)`, `overlays`, `set_tool()`, `render_page_image(i, zoom)`,
+`ensure_visible(i, rect)`, `zoom`, `set_zoom()`, e inoltre:
+
+| Membro | Uso |
+|---|---|
+| `text_selections` → `list[TextSelection]` / `set_text_selections(lista)` | selezione di testo, una per pagina in ordine di pagina: trascinando con «Seleziona testo» oltre la pagina la selezione prosegue sulle pagine successive o precedenti e la vista scorre da sola; segnale `selectionChanged` |
+| `text_selection` / `set_text_selection(sel)` / `clear_text_selection()` | compatibilità: la selezione della **prima** pagina selezionata; assegnarla sostituisce tutta la selezione |
+| `selected_text()` | testo di tutte le pagine selezionate, separate da `"\n\n"`; Ctrl+C lo copia se `document.can_copy`; Ctrl+A seleziona la pagina corrente |
+| `set_annotation_filter(fn \| None)` / `annotation_filter` | annotazioni disegnate a schermo: `fn(pagina, xref) -> bool` (True = visibile) per ogni voce di `/Annots`, valida per pagine intere e tasselle; quelle escluse ricevono il flag Hidden solo durante la resa (sotto `ENGINE_LOCK`, ripristinato subito: il file non cambia). Va richiamata (anche con la stessa `fn`) quando cambia ciò che nasconde. `show_annotations = False` nasconde comunque tutto. Es. `view.set_annotation_filter(lambda p, x: x not in nascoste)` |
+| `refresh_rendering()` | ridisegna le pagine senza modifiche al documento (la resa precedente resta visibile finché arriva la nuova) |
+| `set_rulers_visible(bool)` / `rulers_visible`, `set_ruler_unit(u)` / `ruler_unit` (+ `rulerUnitChanged`) | righelli di questa vista (di solito si usa `ctx.set_rulers_visible`); zero nell'angolo superiore sinistro della pagina come si vede (CropBox, /Rotate e rotazione della vista) sotto il puntatore o corrente: `ruler_page()`, `ruler_position(pos_viewport)` → (x, y) nell'unità |
+| `guides()` → `list[(orientamento, posizione_pt, pagina \| None)]` | guide (VIS-39, OBJ-23): `GUIDE_HORIZONTAL` (y costante) o `GUIDE_VERTICAL` (x costante) nelle coordinate della **pagina visualizzata** (punti dall'angolo superiore sinistro della CropBox con /Rotate applicato, senza la rotazione della vista: restano attaccate al contenuto); pagina `None` = tutte le pagine |
+| `add_guide(orientamento, posizione_pt, pagina=None)` / `remove_guide(orientamento, posizione_pt, pagina=None)` → bool / `set_guides(lista)` / `clear_guides()` | modifica delle guide (orientamento anche `"h"`/`"v"` o, come nel modulo oggetti, `"y"`/`"x"`); segnale `guidesChanged`. La finestra le salva per documento nelle impostazioni (non nel file) e le ripristina alla riapertura |
+| `guides_on_page(i)` → `[(orientamento, posizione_pt)]` / `page_guide_lines(i)` → `{"x": [...], "y": [...]}` | guide valide per la pagina; `page_guide_lines` le dà in coordinate pagina (non ruotata, come `get_text`/`get_drawings`) per l'aggancio: su una pagina con /Rotate 90 una guida verticale diventa una `y` |
+| `display_transform(i)`, `display_size(i)` | coordinate della pagina visualizzata → viewport (`page_transform(i)` = `placement.page_to_display_matrix` seguita da questa) |
+| `set_guides_visible(bool)` / `guides_visible`, `set_guides_locked(bool)` / `guides_locked` | guide disegnate o no; bloccate. Con i righelli visibili si trascinano dal righello (Ctrl al rilascio = su tutte le pagine), si spostano prendendole sulla pagina e si eliminano trascinandole fuori dalla pagina; il menu del righello cambia unità, blocca o rimuove tutte le guide |
+
+Il modulo oggetti può sostituire le sue guide «da menu» con queste: `view.add_guide("x", valore)`
+al posto di `add_guide(view, "x", valore)` (stesso valore sulle pagine senza /Rotate) e
+`view.page_guide_lines(pagina)` al posto di `guides(view)` per l'aggancio e il disegno.
+
+Strumenti: `Tool.key()` riceve anche Tab e Maiusc+Tab (`Key_Backtab`) prima del cambio di fuoco;
+restituendo True lo strumento li tiene per sé. Con `autoscroll = True` (attributo o proprietà dello
+strumento) durante un trascinamento col tasto sinistro la vista scorre quando il puntatore ne
+raggiunge il bordo e ripete `move()` con `ev.event = None`.
 
 ### Modalità e cartelle
 

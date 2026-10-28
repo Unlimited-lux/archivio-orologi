@@ -85,6 +85,12 @@ class PreferencesDialog(QDialog):
             self.zoom.addItem(label, key)
         self.zoom.setCurrentIndex(max(0, self.zoom.findData(settings.value("view/zoom", "width"))))
         form.addRow(_("Zoom predefinito"), self.zoom)
+        from .rulers import unit_names
+        self.ruler_unit = QComboBox(self)
+        for key, label in unit_names():
+            self.ruler_unit.addItem(label, key)
+        self.ruler_unit.setCurrentIndex(max(0, self.ruler_unit.findData(settings.value("view/ruler_unit", "mm"))))
+        form.addRow(_("Unità dei righelli"), self.ruler_unit)
         note = QLabel(_("La lingua viene applicata al prossimo avvio."))
         note.setProperty("muted", True)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -143,6 +149,7 @@ class PreferencesDialog(QDialog):
         s.setValue("author", self.author.text().strip())
         s.setValue("view/mode", self.view_mode.currentData())
         s.setValue("view/zoom", self.zoom.currentData())
+        s.setValue("view/ruler_unit", self.ruler_unit.currentData())
         for widget in self.module_pages:
             apply = getattr(widget, "apply", None)
             if callable(apply):

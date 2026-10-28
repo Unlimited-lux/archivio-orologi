@@ -262,6 +262,10 @@ class MainWindow(QMainWindow):
         self.act_last = a(_("Ultima pagina"), "chevrons-down",
                           lambda: self._with_view(lambda v: v.go_to_page(v.page_count - 1)), requires_document=True)
         self.act_fullscreen = a(_("Schermo intero"), "expand", self.toggle_fullscreen, "F11", checkable=True)
+        # Righelli (VIS-39): niente scorciatoia, Ctrl+R è già di «Ruota vista».
+        self.act_rulers = a(_("Righelli"), "ruler", self.set_rulers_visible, checkable=True)
+        self.act_rulers.setChecked(self.rulers_visible())
+        self.add_menu_action(self.act_rulers, _("Vista"))
         self.act_hand = a(_("Mano (trascina)"), "hand", self._toggle_hand, "H", checkable=True, requires_document=True)
         self.act_select = a(_("Seleziona testo"), "text-cursor", lambda: self.ctx.set_tool(None), "V",
                             checkable=True, requires_document=True)
@@ -462,6 +466,7 @@ class MainWindow(QMainWindow):
             old_lang = self.settings.value("language", "")
             dlg.apply()
             self.set_theme(self.settings.value("theme", "system"))
+            self.set_ruler_unit(self.ruler_unit())
             if dlg.language.currentData() != old_lang:
                 self.statusBar().showMessage(_("La lingua verrà applicata al prossimo avvio."), 6000)
 
@@ -843,6 +848,11 @@ class MainWindow(QMainWindow):
             view.set_fit(FIT_PAGE)
         elif zoom == "100":
             view.set_zoom(1.0)
+        view.set_ruler_unit(self.ruler_unit())
+        view.set_rulers_visible(self.rulers_visible())
+        self._load_guides(view)
+        view.guidesChanged.connect(lambda v=view: self._store_guides(v))
+        view.rulerUnitChanged.connect(self.set_ruler_unit)
         view.currentPageChanged.connect(self._update_page_box)
         view.zoomChanged.connect(self._update_zoom_box)
         view.statusMessage.connect(lambda m: self.statusBar().showMessage(m, 6000))
@@ -1174,6 +1184,63 @@ class MainWindow(QMainWindow):
         if view is not None:
             view.set_zoom(value)
             view.setFocus()
+
+    # ================================================================== righelli e guide (VIS-39)
+    def rulers_visible(self) -> bool:
+        return str(self.settings.value("view/rulers", "false")).lower() == "true"
+
+    def set_rulers_visible(self, visible: bool) -> None:
+        """Righelli su tutte le viste, anche quelle aperte dopo (preferenza salvata)."""
+        visible = bool(visible)
+        self.settings.setValue("view/rulers", "true" if visible else "false")
+        if self.act_rulers.isChecked() != visible:
+            self.act_rulers.setChecked(visible)
+        for view in self.views():
+            view.set_rulers_visible(visible)
+
+    def ruler_unit(self) -> str:
+        from .rulers import RULER_UNITS
+        unit = str(self.settings.value("view/ruler_unit", "mm") or "mm")
+        return unit if unit in RULER_UNITS else "mm"
+
+    def set_ruler_unit(self, unit: str) -> None:
+        from .rulers import RULER_UNITS
+        if unit not in RULER_UNITS:
+            raise ValueError(f"unità dei righelli non valida: {unit!r}")
+        self.settings.setValue("view/ruler_unit", unit)
+        for view in self.views():
+            view.set_ruler_unit(unit)
+
+    @staticmethod
+    def _guides_key(view: DocumentView) -> str | None:
+        """Chiave delle guide del documento nelle impostazioni (per percorso; non nel file)."""
+        path = view.document.path
+        if not path:
+            return None
+        import hashlib
+        return "view/guides/" + hashlib.sha1(os.path.abspath(str(path)).encode("utf-8")).hexdigest()
+
+    def _load_guides(self, view: DocumentView) -> None:
+        key = self._guides_key(view)
+        if key is None:
+            return
+        import json
+        try:
+            data = json.loads(str(self.settings.value(key, "") or "[]"))
+            view.set_guides([(g[0], g[1], g[2] if len(g) > 2 else None) for g in data])
+        except (ValueError, TypeError, IndexError, KeyError):
+            pass                         # guide salvate illeggibili: si riparte senza
+
+    def _store_guides(self, view: DocumentView) -> None:
+        key = self._guides_key(view)
+        if key is None:
+            return
+        guides = view.guides()
+        if guides:
+            import json
+            self.settings.setValue(key, json.dumps([list(g) for g in guides]))
+        else:
+            self.settings.remove(key)
 
     # ================================================================== recenti e cartelle
     def recent_files(self) -> list[str]:

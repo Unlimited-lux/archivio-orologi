@@ -176,6 +176,16 @@ EN = {
     "Errore nello strumento della modalità: {e}": "Error in the mode's tool: {e}",
     "Generale": "General",
     "Impossibile mostrare questa pagina: {e}": "This page cannot be shown: {e}",
+    "Vista": "View",
+    "Righelli": "Rulers",
+    "Unità dei righelli": "Ruler units",
+    "Millimetri": "Millimeters",
+    "Punti": "Points",
+    "Pollici": "Inches",
+    "Blocca le guide": "Lock guides",
+    "Rimuovi tutte le guide": "Remove all guides",
+    "Trascina sulla pagina per creare una guida (con Ctrl: su tutte le pagine)":
+        "Drag onto the page to create a guide (with Ctrl: on all pages)",
 }
 
 add_translations("en", EN)

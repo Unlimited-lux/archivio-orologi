@@ -5,9 +5,16 @@ ancora vuoto, anche se il file contiene un aspetto vuoto. A schermo fa da indica
 stampa e nelle immagini esportate non deve comparire (FRM-20: il campo vuoto si vede solo a
 schermo). `page_pixmap(..., hide_unsigned_signatures=True)` nasconde quei campi solo per la
 durata della resa, senza modificare il documento.
+
+`annotations_hidden(pdf, xrefs)` è il meccanismo comune: imposta il flag «Hidden» sulle
+annotazioni indicate e lo ripristina subito dopo (lo usa anche il filtro delle annotazioni
+della vista, `DocumentView.set_annotation_filter`).
 """
 
 from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import Iterable, Iterator
 
 import pymupdf
 
@@ -26,6 +33,29 @@ def unsigned_signature_widgets(pdf: pymupdf.Document, page_index: int) -> list[i
     return out
 
 
+@contextmanager
+def annotations_hidden(pdf: pymupdf.Document, xrefs: Iterable[int]) -> Iterator[None]:
+    """Nasconde (flag /F «Hidden») le annotazioni `xrefs` per la durata del blocco.
+
+    All'uscita, anche dopo un errore, /F torna al valore originale: gli oggetti tornano
+    identici e il documento non risulta modificato (nemmeno per il salvataggio incrementale).
+    Tiene ENGINE_LOCK per tutto il blocco: nessun altro thread vede lo stato provvisorio."""
+    with ENGINE_LOCK:
+        saved: dict[int, tuple[str, str]] = {}
+        try:
+            for x in xrefs:
+                if x in saved:
+                    continue
+                kind, value = pdf.xref_get_key(x, "F")
+                saved[x] = (kind, value)
+                flags = int(value) if kind == "int" else 0
+                pdf.xref_set_key(x, "F", str(flags | _HIDDEN))
+            yield
+        finally:
+            for x, (kind, value) in saved.items():
+                pdf.xref_set_key(x, "F", value if kind != "null" else "null")
+
+
 def page_pixmap(pdf: pymupdf.Document, page_index: int, *, hide_unsigned_signatures: bool = False,
                 **kwargs) -> pymupdf.Pixmap:
     """Come `pdf[page_index].get_pixmap(**kwargs)`; con `hide_unsigned_signatures` senza segnaposti."""
@@ -35,12 +65,5 @@ def page_pixmap(pdf: pymupdf.Document, page_index: int, *, hide_unsigned_signatu
         xrefs = unsigned_signature_widgets(pdf, page_index)
         if not xrefs:
             return pdf[page_index].get_pixmap(**kwargs)
-        saved = {x: pdf.xref_get_key(x, "F") for x in xrefs}
-        try:
-            for x, (kind, value) in saved.items():
-                flags = int(value) if kind == "int" else 0
-                pdf.xref_set_key(x, "F", str(flags | _HIDDEN))
+        with annotations_hidden(pdf, xrefs):
             return pdf[page_index].get_pixmap(**kwargs)
-        finally:
-            for x, (kind, value) in saved.items():
-                pdf.xref_set_key(x, "F", value if kind != "null" else "null")
