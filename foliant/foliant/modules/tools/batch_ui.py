@@ -1,0 +1,838 @@
+"""Interfaccia delle operazioni in blocco: coda, sequenza di azioni,
+destinazione e nomi, esecuzione e rapporto finale."""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime
+
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtWidgets import (
+    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
+    QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QPlainTextEdit, QPushButton, QRadioButton, QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
+    QToolBar, QToolButton, QVBoxLayout, QWidget,
+)
+
+from foliant.api import OperationCancelled, _, atomic_write, bind_icon, icon, theme
+
+from . import engine as be
+
+STATUS_COLORS = {"ok": "success", "warning": "warning", "error": "danger", "skipped": "text_muted",
+                 "cancelled": "text_muted", "not_processed": "text_muted"}
+
+
+def _human_size(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}".replace(".", ",")
+        size /= 1024
+    return str(n)
+
+
+# =============================================================================
+# Modulo dei parametri di un'azione
+# =============================================================================
+class ParamForm(QWidget):
+    """Campi generati dai parametri di un'azione."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.form = QFormLayout(self)
+        self.form.setContentsMargins(0, 0, 0, 0)
+        self.widgets: dict[str, QWidget] = {}
+        self.step: be.Step | None = None
+
+    def set_step(self, step: be.Step | None) -> None:
+        while self.form.rowCount():
+            self.form.removeRow(0)
+        self.widgets.clear()
+        self.step = step
+        if step is None:
+            return
+        spec = be.ACTIONS.get(step.action)
+        if spec is None:
+            return
+        values = step.merged_params()
+        ok, msg = be.action_available(step.action)
+        if not ok:
+            warn = QLabel("⚠ " + msg)
+            warn.setWordWrap(True)
+            warn.setStyleSheet(f"color: {theme.hex_color('danger')}")
+            self.form.addRow(warn)
+        for p in spec.params:
+            w = self._widget(p, values.get(p.key, p.default))
+            self.widgets[p.key] = w
+            if p.type == "bool":
+                self.form.addRow(w)
+            else:
+                self.form.addRow(_(p.label), w)
+
+    def _widget(self, p: be.Param, value):
+        if p.type == "bool":
+            w = QCheckBox(_(p.label))
+            w.setChecked(bool(value))
+            w.toggled.connect(self._store)
+        elif p.type == "int":
+            w = QSpinBox()
+            w.setRange(int(p.minimum if p.minimum is not None else -10**9), int(p.maximum if p.maximum is not None
+                                                                                else 10**9))
+            w.setValue(int(value or 0))
+            w.valueChanged.connect(self._store)
+        elif p.type == "float":
+            w = QDoubleSpinBox()
+            w.setRange(float(p.minimum if p.minimum is not None else -1e9),
+                       float(p.maximum if p.maximum is not None else 1e9))
+            w.setDecimals(1)
+            w.setValue(float(value or 0))
+            w.valueChanged.connect(self._store)
+        elif p.type in ("choice", "position"):
+            w = QComboBox()
+            for key, label in p.choices:
+                w.addItem(_(label), key)
+            w.setCurrentIndex(max(0, w.findData(value)))
+            w.currentIndexChanged.connect(self._store)
+        elif p.type == "text":
+            w = QPlainTextEdit(str(value or ""))
+            w.setFixedHeight(70)
+            w.textChanged.connect(self._store)
+        elif p.type == "path":
+            w = QWidget()
+            row = QHBoxLayout(w)
+            row.setContentsMargins(0, 0, 0, 0)
+            edit = QLineEdit(str(value or ""))
+            btn = QToolButton()
+            bind_icon(btn, "folder-open")
+            btn.setToolTip(_("Sfoglia…"))
+
+            def browse(_c=False, e=edit):
+                path, _f = QFileDialog.getOpenFileName(self, _("Scegli il file"))
+                if path:
+                    e.setText(path)
+            btn.clicked.connect(browse)
+            edit.textChanged.connect(self._store)
+            row.addWidget(edit, 1)
+            row.addWidget(btn)
+            w.edit = edit
+        else:   # str, password, color, pages
+            w = QLineEdit(str(value or ""))
+            if p.type == "password":
+                w.setEchoMode(QLineEdit.EchoMode.Password)
+            w.textChanged.connect(self._store)
+        return w
+
+    def values(self) -> dict:
+        out = {}
+        spec = be.ACTIONS.get(self.step.action) if self.step else None
+        if spec is None:
+            return out
+        for p in spec.params:
+            w = self.widgets.get(p.key)
+            if w is None:
+                continue
+            if isinstance(w, QCheckBox):
+                out[p.key] = w.isChecked()
+            elif isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                out[p.key] = w.value()
+            elif isinstance(w, QComboBox):
+                out[p.key] = w.currentData()
+            elif isinstance(w, QPlainTextEdit):
+                out[p.key] = w.toPlainText()
+            elif isinstance(w, QLineEdit):
+                out[p.key] = w.text()
+            elif hasattr(w, "edit"):
+                out[p.key] = w.edit.text()
+        return out
+
+    def _store(self, *_a) -> None:
+        if self.step is not None:
+            self.step.params.update(self.values())
+            self.changed.emit()
+
+
+# =============================================================================
+# Pannello principale
+# =============================================================================
+class BatchWidget(QWidget):
+    """Elaborazione in blocco, mostrata al posto della vista documento."""
+
+    COLUMNS = ("Nome", "Cartella", "Pagine", "Dimensione", "Stato", "Esito")
+
+    def __init__(self, ctx, parent=None):
+        super().__init__(parent)
+        self.ctx = ctx
+        self.items: list[be.QueueItem] = []
+        self.steps: list[be.Step] = []
+        self.report: be.JobReport | None = None
+        self.input_roots: list[str] = []
+        self.last_ignored: list[tuple[str, str]] = []
+        self.setAcceptDrops(True)
+        self.setObjectName("batchPanel")
+
+        bar = QToolBar()
+        bar.setIconSize(QSize(18, 18))
+        bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        title = QLabel("  " + _("Operazioni in blocco") + "  ")
+        title.setStyleSheet("font-weight: 600")
+        bar.addWidget(title)
+        bar.addSeparator()
+        self.act_run = bar.addAction(_("Avvia"))
+        bind_icon(self.act_run, "play")
+        self.act_run.triggered.connect(lambda: self.run())
+        bar.addSeparator()
+        act_close = bar.addAction(_("Chiudi"))
+        bind_icon(act_close, "x")
+        act_close.triggered.connect(lambda: ctx.set_central_widget(None))
+
+        # ------------------------------------------------ coda (BAT-01)
+        queue_box = QGroupBox(_("File da elaborare"))
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels([_(c) for c in self.COLUMNS])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.table.setAlternatingRowColors(True)
+        self.table.cellDoubleClicked.connect(self._double_clicked)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._queue_menu)
+        self.recursive = QCheckBox(_("Includi sottocartelle"))
+        self.recursive.setChecked(True)
+        qbar = QHBoxLayout()
+        for text, name, slot in ((_("Aggiungi file"), "file-plus", self.add_files_dialog),
+                                 (_("Aggiungi cartella"), "folder-plus", self.add_folder_dialog),
+                                 (_("Documenti aperti"), "files", self.add_open_documents)):
+            b = QPushButton(text)
+            bind_icon(b, name)
+            b.clicked.connect(lambda _c=False, s=slot: s())
+            qbar.addWidget(b)
+        qbar.addStretch(1)
+        qbar2 = QHBoxLayout()
+        qbar2.addWidget(self.recursive)
+        qbar2.addStretch(1)
+        for tip, name, slot in ((_("Sposta su"), "arrow-up", lambda: self.move_selected(-1)),
+                                (_("Sposta giù"), "arrow-down", lambda: self.move_selected(1)),
+                                (_("Ordina per nome"), "arrow-down-a-z", self.sort_by_name),
+                                (_("Rimuovi"), "minus", self.remove_selected),
+                                (_("Svuota la coda"), "trash-2", self.clear_queue)):
+            b = QToolButton()
+            b.setToolTip(tip)
+            bind_icon(b, name)
+            b.clicked.connect(lambda _c=False, s=slot: s())
+            qbar2.addWidget(b)
+        self.totals = QLabel()
+        self.notice = QLabel()
+        self.notice.setWordWrap(True)
+        ql = QVBoxLayout(queue_box)
+        ql.addLayout(qbar)
+        ql.addLayout(qbar2)
+        ql.addWidget(self.table, 1)
+        ql.addWidget(self.totals)
+        ql.addWidget(self.notice)
+
+        # ------------------------------------------------ azioni e sequenze (BAT-20)
+        steps_box = QGroupBox(_("Operazioni"))
+        self.action_combo = QComboBox()
+        for spec in be.available_actions():
+            ok, _msg = be.action_available(spec.id)
+            label = _(spec.label) + ("" if ok else " " + _("(non disponibile)"))
+            self.action_combo.addItem(label, spec.id)
+        add_step = QPushButton(_("Aggiungi"))
+        bind_icon(add_step, "plus")
+        add_step.clicked.connect(lambda: self.add_step(self.action_combo.currentData()))
+        self.steps_list = QListWidget()
+        self.steps_list.setMaximumHeight(130)
+        self.steps_list.currentRowChanged.connect(self._step_selected)
+        srow = QHBoxLayout()
+        srow.addWidget(self.action_combo, 1)
+        srow.addWidget(add_step)
+        sbtn = QHBoxLayout()
+        for tip, name, slot in ((_("Sposta su"), "arrow-up", lambda: self.move_step(-1)),
+                                (_("Sposta giù"), "arrow-down", lambda: self.move_step(1)),
+                                (_("Rimuovi operazione"), "minus", self.remove_step)):
+            b = QToolButton()
+            b.setToolTip(tip)
+            bind_icon(b, name)
+            b.clicked.connect(lambda _c=False, s=slot: s())
+            sbtn.addWidget(b)
+        sbtn.addStretch(1)
+        self.sequence_combo = QComboBox()
+        self.sequence_combo.setMinimumWidth(120)
+        sbtn.addWidget(QLabel(_("Sequenze")))
+        sbtn.addWidget(self.sequence_combo)
+        for tip, name, slot in ((_("Carica sequenza"), "folder-open", self.load_selected_sequence),
+                                (_("Salva sequenza"), "save", self.save_sequence_dialog),
+                                (_("Elimina sequenza"), "trash-2", self.delete_selected_sequence)):
+            b = QToolButton()
+            b.setToolTip(tip)
+            bind_icon(b, name)
+            b.clicked.connect(lambda _c=False, s=slot: s())
+            sbtn.addWidget(b)
+        self.params = ParamForm()
+        self.params.changed.connect(self._params_changed)
+        pscroll = QScrollArea()
+        pscroll.setWidgetResizable(True)
+        pscroll.setFrameShape(QFrame.Shape.NoFrame)
+        pscroll.setWidget(self.params)
+        sl = QVBoxLayout(steps_box)
+        sl.addLayout(srow)
+        sl.addWidget(self.steps_list)
+        sl.addLayout(sbtn)
+        sl.addWidget(pscroll, 1)
+
+        # ------------------------------------------------ destinazione e nomi (BAT-02, BAT-03)
+        out_box = QGroupBox(_("Destinazione e nomi"))
+        self.dest_group = QButtonGroup(self)
+        self.dest_folder = QRadioButton(_("Cartella"))
+        self.dest_same = QRadioButton(_("Stessa cartella dell'originale"))
+        self.dest_sub = QRadioButton(_("Sottocartella accanto all'originale"))
+        for b in (self.dest_folder, self.dest_same, self.dest_sub):
+            self.dest_group.addButton(b)
+            b.toggled.connect(self._settings_changed)
+        self.dest_folder.setChecked(True)
+        self.dest_path = QLineEdit()
+        self.dest_path.setPlaceholderText(_("Scegli la cartella di destinazione"))
+        self.dest_path.textChanged.connect(self._settings_changed)
+        browse = QToolButton()
+        bind_icon(browse, "folder-open")
+        browse.clicked.connect(self.choose_destination)
+        drow = QHBoxLayout()
+        drow.addWidget(self.dest_folder)
+        drow.addWidget(self.dest_path, 1)
+        drow.addWidget(browse)
+        self.subfolder = QLineEdit("elaborati")
+        self.subfolder.textChanged.connect(self._settings_changed)
+        self.keep_structure = QCheckBox(_("Mantieni la struttura delle sottocartelle"))
+        self.pattern = QLineEdit("{nome}")
+        self.pattern.textChanged.connect(self._settings_changed)
+        ph = QToolButton()
+        ph.setText("{ }")
+        ph.setToolTip(_("Inserisci un segnaposto"))
+        ph.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(ph)
+        for key in ("nome", "est", "cartella", "data", "ora", "contatore:3", "pagine", "operazione",
+                    "bates_inizio", "bates_fine"):
+            menu.addAction("{" + key + "}", lambda k=key: self.pattern.insert("{" + k + "}"))
+        ph.setMenu(menu)
+        prow = QHBoxLayout()
+        prow.addWidget(self.pattern, 1)
+        prow.addWidget(ph)
+        self.counter_start = QSpinBox()
+        self.counter_start.setRange(0, 10**9)
+        self.counter_start.setValue(1)
+        self.counter_start.valueChanged.connect(self._settings_changed)
+        self.conflict = QComboBox()
+        self.conflict.addItem(_("Rinomina con (1), (2)…"), "rename")
+        self.conflict.addItem(_("Sovrascrivi"), "overwrite")
+        self.conflict.addItem(_("Salta"), "skip")
+        self.replace_originals = QCheckBox(_("Sostituisci gli originali"))
+        self.replace_originals.toggled.connect(self._settings_changed)
+        self.backup = QCheckBox(_("Copia di sicurezza .bak"))
+        self.backup.setChecked(True)
+        self.error_policy = QComboBox()
+        self.error_policy.addItem(_("Continua con gli altri file"), "continue")
+        self.error_policy.addItem(_("Fermati al primo errore"), "stop")
+        self.common_password = QLineEdit()
+        self.common_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.common_password.setPlaceholderText(_("Password comune per i file protetti (facoltativa)"))
+        self.open_folder = QCheckBox(_("Apri la cartella al termine"))
+        self.preview = QTableWidget(0, 2)
+        self.preview.setHorizontalHeaderLabels([_("Originale"), _("Risultato")])
+        self.preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.preview.verticalHeader().setVisible(False)
+        self.preview.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.preview.setMaximumHeight(150)
+        form = QFormLayout()
+        form.addRow(drow)
+        form.addRow(self.dest_same)
+        sub = QHBoxLayout()
+        sub.addWidget(self.dest_sub)
+        sub.addWidget(self.subfolder, 1)
+        form.addRow(sub)
+        form.addRow(self.keep_structure)
+        form.addRow(_("Nome dei file"), prow)
+        form.addRow(_("Contatore da"), self.counter_start)
+        form.addRow(_("Se il file esiste"), self.conflict)
+        rep = QHBoxLayout()
+        rep.addWidget(self.replace_originals)
+        rep.addWidget(self.backup)
+        rep.addStretch(1)
+        form.addRow(rep)
+        form.addRow(_("In caso di errore"), self.error_policy)
+        form.addRow(_("Password"), self.common_password)
+        form.addRow(self.open_folder)
+        ol = QVBoxLayout(out_box)
+        ol.addLayout(form)
+        ol.addWidget(QLabel(_("Anteprima dei nomi")))
+        ol.addWidget(self.preview)
+        self.pattern_error = QLabel()
+        self.pattern_error.setStyleSheet(f"color: {theme.hex_color('danger')}")
+        ol.addWidget(self.pattern_error)
+        ol.addStretch(1)
+
+        # ------------------------------------------------ rapporto (BAT-05)
+        self.report_box = QGroupBox(_("Rapporto"))
+        self.report_summary = QLabel()
+        self.report_summary.setWordWrap(True)
+        self.report_filter = QComboBox()
+        self.report_filter.addItem(_("Tutti gli esiti"), "")
+        for key, label in be.STATUS_LABELS.items():
+            self.report_filter.addItem(_(label), key)
+        self.report_filter.currentIndexChanged.connect(self._fill_report)
+        self.report_table = QTableWidget(0, 4)
+        self.report_table.setHorizontalHeaderLabels([_("File"), _("Esito"), _("Messaggio"), _("Risultato")])
+        self.report_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.report_table.verticalHeader().setVisible(False)
+        self.report_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.report_table.setSortingEnabled(True)
+        self.report_table.cellDoubleClicked.connect(self._open_result)
+        rbar = QHBoxLayout()
+        rbar.addWidget(self.report_filter)
+        rbar.addStretch(1)
+        for text, name, slot in ((_("Riprova i non riusciti"), "rotate-cw", self.retry_failed),
+                                 (_("Esporta rapporto"), "file-output", self.export_report_dialog),
+                                 (_("Apri cartella"), "folder-open", self.open_destination)):
+            b = QPushButton(text)
+            bind_icon(b, name)
+            b.clicked.connect(lambda _c=False, s=slot: s())
+            rbar.addWidget(b)
+        rl = QVBoxLayout(self.report_box)
+        rl.addWidget(self.report_summary)
+        rl.addLayout(rbar)
+        rl.addWidget(self.report_table, 1)
+        self.report_box.hide()
+
+        top = QSplitter(Qt.Orientation.Horizontal)
+        top.addWidget(queue_box)
+        for box in (steps_box, out_box):
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.Shape.NoFrame)
+            area.setWidget(box)
+            top.addWidget(area)
+        top.setSizes([520, 460, 420])
+        top.setChildrenCollapsible(False)
+        main = QSplitter(Qt.Orientation.Vertical)
+        main.addWidget(top)
+        main.addWidget(self.report_box)
+        main.setStretchFactor(0, 3)
+        main.setStretchFactor(1, 2)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(bar)
+        inner = QVBoxLayout()
+        inner.setContentsMargins(8, 8, 8, 8)
+        inner.addWidget(main)
+        lay.addLayout(inner, 1)
+        self.refresh_sequences()
+        self._refresh_queue()
+        self._settings_changed()
+
+    # ================================================================ coda
+    def sequences_dir(self) -> str:
+        base = os.path.dirname(self.ctx.settings().fileName()) or os.path.expanduser("~/.config/foliant")
+        return os.path.join(base, "foliant-sequenze")
+
+    def add_paths(self, paths: list[str]) -> tuple[int, list[tuple[str, str]]]:
+        """Aggiunge file e cartelle; restituisce (aggiunti, ignorati)."""
+        new, ignored = be.collect_inputs(paths, self.recursive.isChecked(), existing=[i.path for i in self.items])
+        for p in paths:
+            if os.path.isdir(p):
+                self.input_roots.append(os.path.realpath(p))
+        if new:
+            try:
+                analyzed = self.ctx.run_task(_("Analisi dei file…"), _analyze_all, new)
+            except OperationCancelled:
+                analyzed = [be.QueueItem(path=p) for p in new]
+            self.items.extend(analyzed)
+        self.last_ignored = ignored
+        if ignored:
+            details = "\n".join(f"{os.path.basename(p)}: {why}" for p, why in ignored[:20])
+            self.notice.setText(_("{n} file ignorati.").format(n=len(ignored)))
+            self.notice.setToolTip(details)
+        else:
+            self.notice.setText("")
+            self.notice.setToolTip("")
+        self._refresh_queue()
+        return len(new), ignored
+
+    def add_files_dialog(self) -> None:
+        paths = self.ctx.ask_open_paths(_("Aggiungi file"))
+        if paths:
+            self.add_paths(paths)
+
+    def add_folder_dialog(self) -> None:
+        path = self.ctx.ask_directory(_("Aggiungi cartella"))
+        if path:
+            self.add_paths([path])
+
+    def add_open_documents(self) -> None:
+        paths = []
+        unsaved = []
+        for v in self.ctx.views():
+            if v.document.path is not None:
+                paths.append(str(v.document.path))
+                if v.document.is_modified:
+                    unsaved.append(v.document.display_name)
+        if unsaved:
+            self.ctx.info(_("Modifiche non salvate"), _("Verrà elaborata la versione su disco di: {f}.").format(
+                f=", ".join(unsaved)))
+        if paths:
+            self.add_paths(paths)
+
+    def remove_selected(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        for r in rows:
+            del self.items[r]
+        self._refresh_queue()
+
+    def clear_queue(self) -> None:
+        self.items.clear()
+        self.input_roots.clear()
+        self._refresh_queue()
+
+    def move_selected(self, delta: int) -> None:
+        row = self.table.currentRow()
+        target = row + delta
+        if row < 0 or not 0 <= target < len(self.items):
+            return
+        self.items[row], self.items[target] = self.items[target], self.items[row]
+        self._refresh_queue()
+        self.table.selectRow(target)
+
+    def sort_by_name(self) -> None:
+        self.items.sort(key=lambda it: be.natural_key(it.path))
+        self._refresh_queue()
+
+    def set_password(self, row: int, password: str | None) -> None:
+        self.items[row].password = password or None
+        self._refresh_queue()
+
+    def _double_clicked(self, row: int, col: int) -> None:
+        item = self.items[row]
+        if item.needs_password:
+            pw, ok = QInputDialog.getText(self, _("Password del file"), _("Password per «{n}»:").format(n=item.name),
+                                          QLineEdit.EchoMode.Password)
+            if ok:
+                self.set_password(row, pw)
+
+    def _queue_menu(self, pos) -> None:
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        menu = QMenu(self)
+        menu.addAction(icon("key"), _("Imposta password…"), lambda: self._double_clicked(row, 0))
+        menu.addAction(icon("minus"), _("Rimuovi"), self.remove_selected)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _refresh_queue(self) -> None:
+        self.table.setRowCount(len(self.items))
+        result_by_path = {r.input: r for r in self.report.results} if self.report else {}
+        for row, it in enumerate(self.items):
+            res = result_by_path.get(it.path)
+            values = (it.name, os.path.dirname(it.path), str(it.pages or "–"), _human_size(it.size),
+                      it.status_text, res.status_label if res else "")
+            for col, val in enumerate(values):
+                cell = QTableWidgetItem(val)
+                if col == 1:
+                    cell.setToolTip(it.path)
+                if col == 4 and (it.damaged or (it.needs_password and not it.password) or it.error):
+                    cell.setForeground(theme.color("danger"))
+                if col == 5 and res is not None:
+                    cell.setForeground(theme.color(STATUS_COLORS.get(res.status, "text")))
+                    cell.setToolTip(res.message)
+                self.table.setItem(row, col, cell)
+        pages = sum(it.pages for it in self.items)
+        size = sum(it.size for it in self.items)
+        self.totals.setText(_("{n} file · {p} pagine · {s}").format(n=len(self.items), p=pages, s=_human_size(size)))
+        self._update_preview()
+
+    # trascinamento di file e cartelle
+    def dragEnterEvent(self, ev) -> None:
+        if ev.mimeData().hasUrls():
+            ev.acceptProposedAction()
+
+    def dropEvent(self, ev) -> None:
+        paths = [u.toLocalFile() for u in ev.mimeData().urls() if u.isLocalFile()]
+        if paths:
+            self.add_paths(paths)
+
+    # ================================================================ operazioni
+    def add_step(self, action_id: str, params: dict | None = None) -> be.Step:
+        step = be.Step(action_id, dict(params or {}))
+        self.steps.append(step)
+        self._refresh_steps(len(self.steps) - 1)
+        return step
+
+    def remove_step(self) -> None:
+        row = self.steps_list.currentRow()
+        if 0 <= row < len(self.steps):
+            del self.steps[row]
+            self._refresh_steps(min(row, len(self.steps) - 1))
+
+    def move_step(self, delta: int) -> None:
+        row = self.steps_list.currentRow()
+        target = row + delta
+        if row < 0 or not 0 <= target < len(self.steps):
+            return
+        self.steps[row], self.steps[target] = self.steps[target], self.steps[row]
+        self._refresh_steps(target)
+
+    def _refresh_steps(self, select: int = -1) -> None:
+        self.steps_list.blockSignals(True)
+        self.steps_list.clear()
+        for i, s in enumerate(self.steps, 1):
+            ok, msg = be.action_available(s.action)
+            item = QListWidgetItem(f"{i}. {be.action_label(s.action)}")
+            if not ok:
+                item.setForeground(theme.color("danger"))
+                item.setToolTip(msg)
+            self.steps_list.addItem(item)
+        self.steps_list.blockSignals(False)
+        if 0 <= select < len(self.steps):
+            self.steps_list.setCurrentRow(select)
+            self.params.set_step(self.steps[select])
+        else:
+            self.params.set_step(None)
+        self._suggest_pattern()
+        self._update_preview()
+
+    def _step_selected(self, row: int) -> None:
+        self.params.set_step(self.steps[row] if 0 <= row < len(self.steps) else None)
+
+    def _params_changed(self) -> None:
+        self._update_preview()
+
+    # ---------------------------------------------------------------- sequenze
+    def refresh_sequences(self) -> None:
+        self.sequence_combo.clear()
+        for name, path in be.list_sequences(self.sequences_dir()):
+            self.sequence_combo.addItem(name, path)
+
+    def save_sequence(self, name: str) -> str | None:
+        errors = be.validate_sequence(self.steps)
+        if not self.steps or errors:
+            self.ctx.error(_("Sequenza non salvata"), "\n".join(errors) or _("La sequenza è vuota."))
+            return None
+        path = be.save_sequence(self.sequences_dir(), name, self.steps)
+        self.refresh_sequences()
+        self.sequence_combo.setCurrentIndex(max(0, self.sequence_combo.findData(path)))
+        self.ctx.status(_("Sequenza «{n}» salvata.").format(n=name))
+        return path
+
+    def save_sequence_dialog(self) -> None:
+        name, ok = QInputDialog.getText(self, _("Salva sequenza"), _("Nome della sequenza:"))
+        if ok and name.strip():
+            self.save_sequence(name.strip())
+
+    def load_sequence(self, path: str) -> bool:
+        try:
+            _name, steps = be.load_sequence(path)
+        except Exception as e:
+            self.ctx.error(_("Sequenza non caricata"), str(e))
+            return False
+        errors = be.validate_sequence(steps)
+        if errors:
+            self.ctx.error(_("Sequenza non valida"), "\n".join(errors))
+            return False
+        self.steps = steps
+        self._refresh_steps(0)
+        return True
+
+    def load_selected_sequence(self) -> None:
+        path = self.sequence_combo.currentData()
+        if path:
+            self.load_sequence(path)
+
+    def delete_selected_sequence(self) -> None:
+        path = self.sequence_combo.currentData()
+        if path and self.ctx.confirm(_("Elimina sequenza"), _("Eliminare la sequenza «{n}»?").format(
+                n=self.sequence_combo.currentText())):
+            be.delete_sequence(path)
+            self.refresh_sequences()
+
+    # ================================================================ impostazioni
+    def choose_destination(self) -> None:
+        path = self.ctx.ask_directory(_("Cartella di destinazione"))
+        if path:
+            self.dest_path.setText(path)
+            self.dest_folder.setChecked(True)
+
+    def settings(self) -> be.JobSettings:
+        mode = "folder" if self.dest_folder.isChecked() else ("same" if self.dest_same.isChecked() else "subfolder")
+        root = None
+        if self.keep_structure.isChecked() and self.input_roots:
+            root = os.path.commonpath(self.input_roots) if len(self.input_roots) > 1 else self.input_roots[0]
+        pw = self.common_password.text()
+        return be.JobSettings(
+            steps=list(self.steps), destination_mode=mode, destination=self.dest_path.text().strip(),
+            subfolder=self.subfolder.text().strip() or "elaborati", keep_structure=self.keep_structure.isChecked(),
+            input_root=root, pattern=self.pattern.text(), counter_start=self.counter_start.value(),
+            conflict=self.conflict.currentData(), replace_originals=self.replace_originals.isChecked(),
+            backup=self.backup.isChecked(), error_policy=self.error_policy.currentData(),
+            passwords=[pw] if pw else [])
+
+    def _suggest_pattern(self) -> None:
+        """Modello predefinito: «{nome}» o «{nome}_<suffisso>» nella stessa cartella."""
+        current = self.pattern.text()
+        if current == "{nome}" or current.startswith("{nome}_") and current.count("{") == 1:
+            self.pattern.blockSignals(True)
+            self.pattern.setText(be.default_pattern(self.settings()))
+            self.pattern.blockSignals(False)
+
+    def _settings_changed(self, *_a) -> None:
+        if not hasattr(self, "preview"):   # durante la costruzione
+            return
+        folder = self.dest_folder.isChecked()
+        self.dest_path.setEnabled(folder)
+        self.subfolder.setEnabled(self.dest_sub.isChecked())
+        self.backup.setEnabled(self.replace_originals.isChecked())
+        self.pattern.setEnabled(not self.replace_originals.isChecked())
+        if self.sender() in (self.dest_folder, self.dest_same, self.dest_sub):
+            self._suggest_pattern()
+        self._update_preview()
+
+    def _update_preview(self) -> None:
+        if not hasattr(self, "preview"):
+            return
+        settings = self.settings()
+        errors = be.validate_pattern(settings.pattern)
+        self.pattern_error.setText("\n".join(errors))
+        rows = be.preview_names(self.items, settings, limit=5) if self.items else []
+        self.preview.setRowCount(len(rows))
+        for r, (src, dst) in enumerate(rows):
+            self.preview.setItem(r, 0, QTableWidgetItem(os.path.basename(src)))
+            self.preview.setItem(r, 1, QTableWidgetItem(dst))
+
+    # ================================================================ esecuzione
+    def run(self, confirm: bool = True) -> be.JobReport | None:
+        settings = self.settings()
+        errors, warnings = be.validate_settings(self.items, settings)
+        if errors:
+            self.ctx.error(_("Impossibile avviare"), "\n".join(errors))
+            return None
+        if confirm and warnings and not self.ctx.confirm(
+                _("Avvisi"), "\n".join(warnings) + "\n\n" + _("Continuare?")):
+            return None
+        if settings.replace_originals and confirm:
+            if not self.ctx.confirm(_("Sostituisci gli originali"),
+                                    _("I file originali verranno sovrascritti. Continuare?")):
+                return None
+            if not self.ctx.confirm(_("Conferma"), _("Confermi la sostituzione di {n} file?").format(
+                    n=len(self.items))):
+                return None
+        if settings.destination_mode == "folder" and not settings.replace_originals:
+            try:
+                os.makedirs(settings.destination, exist_ok=True)
+            except OSError as e:
+                self.ctx.error(_("Impossibile avviare"), _("Impossibile creare la cartella: {e}").format(e=e.strerror))
+                return None
+        try:
+            report = self.ctx.run_task(_("Elaborazione in blocco…"), be.run_job, list(self.items), settings)
+        except Exception as e:   # il motore non dovrebbe sollevare: sicurezza in più
+            self.ctx.error(_("Elaborazione non riuscita"), str(e))
+            return None
+        self.report = report
+        self.last_settings = settings
+        self._fill_report()
+        self._refresh_queue()
+        self.report_box.show()
+        self.ctx.status(report.summary(), 10000)
+        if self.open_folder.isChecked():
+            self.open_destination()
+        return report
+
+    def _fill_report(self) -> None:
+        report = self.report
+        if report is None:
+            return
+        self.report_summary.setText((_("Lavoro annullato.") + " " if report.cancelled else "") + report.summary())
+        flt = self.report_filter.currentData()
+        rows = [r for r in report.results if not flt or r.status == flt]
+        self.report_table.setSortingEnabled(False)
+        self.report_table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            status = QTableWidgetItem(r.status_label)
+            status.setForeground(theme.color(STATUS_COLORS.get(r.status, "text")))
+            msg = f"{r.code} {r.message}".strip()
+            cells = (QTableWidgetItem(os.path.basename(r.input)), status, QTableWidgetItem(msg),
+                     QTableWidgetItem(", ".join(os.path.basename(o) for o in r.outputs)))
+            cells[0].setToolTip(r.input)
+            cells[3].setToolTip("\n".join(r.outputs))
+            cells[3].setData(Qt.ItemDataRole.UserRole, r.outputs)
+            for c, cell in enumerate(cells):
+                self.report_table.setItem(i, c, cell)
+        self.report_table.setSortingEnabled(True)
+
+    def _open_result(self, row: int, _col: int) -> None:
+        cell = self.report_table.item(row, 3)
+        outputs = cell.data(Qt.ItemDataRole.UserRole) if cell else None
+        if not outputs:
+            return
+        path = outputs[0]
+        if not os.path.exists(path):
+            self.ctx.error(_("File non trovato"), _("Il risultato è stato spostato o eliminato: {p}").format(p=path))
+            return
+        if path.lower().endswith(".pdf"):
+            self.ctx.open_path(path)
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def retry_failed(self) -> None:
+        if self.report is None:
+            return
+        failed = set(self.report.failed_items())
+        if not failed:
+            self.ctx.info(_("Riprova"), _("Nessun file da riprovare."))
+            return
+        self.items = [it for it in self.items if it.path in failed]
+        self.report = None
+        self.report_box.hide()
+        self._refresh_queue()
+
+    def export_report(self, path: str) -> bool:
+        if self.report is None:
+            return False
+        if path.lower().endswith(".json"):
+            data = self.report.to_json()
+        else:
+            data = self.report.to_csv(";" if path.lower().endswith(".tsv") else ",")
+        try:
+            atomic_write(path, data.encode("utf-8"))
+        except Exception as e:
+            self.ctx.error(_("Rapporto non esportato"), str(e))
+            return False
+        self.ctx.status(_("Rapporto esportato: {p}").format(p=path))
+        return True
+
+    def export_report_dialog(self) -> None:
+        if self.report is None:
+            return
+        name = f"rapporto_{self.report.started:%Y-%m-%d_%H-%M-%S}.csv"
+        path = self.ctx.ask_save_path(_("Esporta rapporto"), name, "CSV (*.csv);;JSON (*.json)", ".csv")
+        if path:
+            self.export_report(path)
+
+    def open_destination(self) -> None:
+        settings = getattr(self, "last_settings", None) or self.settings()
+        target = settings.destination
+        if settings.destination_mode != "folder" or settings.replace_originals:
+            outputs = [o for r in (self.report.results if self.report else []) for o in r.outputs]
+            target = os.path.dirname(outputs[0]) if outputs else ""
+        if target and os.path.isdir(target):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+
+
+def _analyze_all(progress, paths: list[str]) -> list[be.QueueItem]:
+    out = []
+    n = max(1, len(paths))
+    for i, p in enumerate(paths):
+        progress.update(i / n, _("Analisi di {f}").format(f=os.path.basename(p)))
+        out.append(be.analyze_file(p))
+    return out

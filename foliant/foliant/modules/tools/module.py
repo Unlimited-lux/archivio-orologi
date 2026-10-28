@@ -32,6 +32,8 @@ class ToolsModule:
         from .batch_ui import BatchWidget
         if self.batch is None:
             self.batch = BatchWidget(self.ctx)
+        if self.ctx.mode("strumenti") is not None:
+            self.ctx.set_mode("strumenti")
         self.ctx.set_central_widget(self.batch)
         return self.batch
 
