@@ -404,3 +404,25 @@ def test_xfa_unmapped_fields_reported(window, tmp_path):
     view = open_form(window, tmp_path / "s2.pdf")
     bar = forms.instance().filler(view).text_of_bar()
     assert "1 campo senza dati XML associati" in bar
+
+
+def test_convert_dynamic_from_window(window, tmp_path):
+    import hashlib
+
+    from .test_xfa_convert import data, make_xfa as make_dynamic, tpl
+    body = ('<field name="nome" w="80mm" h="9mm"><ui><textEdit/></ui><caption><value><text>Nome</text></value></caption></field>'
+            '<field name="eta" w="40mm" h="9mm"><ui><numericEdit/></ui></field>')
+    pdf = make_dynamic(tpl(body), data("<form1><nome>Anna</nome><eta>30</eta></form1>"))
+    path = tmp_path / "dinamico.pdf"
+    pdf.save(str(path))
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    view = open_form(window, path)
+    assert forms.instance().filler(view).state.xfa == "dynamic"
+    module().convert_xfa()
+    new = window.ctx.current_view()
+    assert new is not view
+    with new.document.lock:
+        vals = E.form_values(new.document.pdf)
+        assert E.xfa_status(new.document.pdf) == "none"
+    assert vals["form1.nome"] == "Anna" and vals["form1.eta"] == "30"
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before

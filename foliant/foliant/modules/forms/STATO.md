@@ -42,7 +42,7 @@ Test in `tests/modules/forms/` (file abbreviati: `engine` = `test_engine.py`, `f
 | FRM-33 XML dinamici | P0 | fatto | data: `test_xfa_detection`, `test_xfa_dynamic_saved_unchanged` | |
 | FRM-34 XML statici | P1 | parziale | data: `test_xfa_static_sync_on_fill`, `test_xfa_data_wins_on_open_and_iso_dates` | Associazione per nome finale del campo; i campi senza nodo dati sono segnalati nella barra (data: `test_xfa_unmapped_fields_reported`). Manca il dialogo con «annulla» al salvataggio (serve un aggancio del nucleo che possa annullare il salvataggio). |
 | FRM-35 Dati XML | P2 | fatto | data: `test_xfa_export_import_data` | |
-| FRM-36 Conversione XML | P2 | parziale | data: `test_convert_hybrid_removes_xfa` | Solo moduli statici (rimozione della parte XML); i dinamici non si convertono. |
+| FRM-36 Conversione XML | P2 | fatto | data: `test_convert_hybrid_creates_new_document`, `test_convert_dynamic_from_window`; xfa_convert: tutti | Nuovo documento, originale intatto. Dinamici: impaginazione di un sottoinsieme del modello (sottomoduli posizionati e a scorrimento, ripetuti secondo i dati, campi, testi, linee, riquadri, calcoli semplici); il resto è elencato nel rapporto. |
 
 Altre note: dopo la specifica v2 restano da allineare i testi che citano gli script (oggi «script personalizzati»), la conferma all'unione dei campi omonimi e all'uscita dall'anteprima.
  richieste al nucleo in `CORE_REQUESTS.md`; nessuna nuova dipendenza (`DEPS.txt`);
