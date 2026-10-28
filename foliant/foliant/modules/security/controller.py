@@ -1103,6 +1103,8 @@ def inspection_rows(rep: S.ScanReport, extra: dict) -> list[tuple[str, list[str]
     rows: list[tuple[str, list[str]]] = []
     if extra.get("metadata"):
         rows.append((_("Metadati"), extra["metadata"]))
+    if extra.get("image_metadata"):
+        rows.append((_("Immagini con metadati (EXIF, posizione GPS…): {n}").format(n=extra["image_metadata"]), []))
     rows.extend(active_rows(rep))
     if rep.hidden_layers:
         rows.append((_("Livelli nascosti: {n}").format(n=rep.hidden_layers), extra.get("layers", [])))

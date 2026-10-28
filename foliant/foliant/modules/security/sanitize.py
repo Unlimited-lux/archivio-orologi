@@ -491,6 +491,7 @@ def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
                     page.delete_annot(annot)
         rep.done.append("comments")
     if o["metadata"]:
+        strip_image_metadata(pdf)
         # data e programma non devono riapparire: metadati vuoti espliciti; per i
         # documenti PDF/A resta un pacchetto XMP minimo con l'identificazione
         pdfa = _pdfa_identification(original_xmp)
@@ -581,7 +582,8 @@ def format_pdf_date(value: str) -> str:
 
 def inspect_extra(pdf: pymupdf.Document, max_pages: int = 2000) -> dict:
     """Dettagli per l'ispezione (SEC-21) oltre a quelli di `scan()`."""
-    out: dict = {"metadata": [], "layers": [], "fields": [], "hidden_text": 0, "hidden_where": [],
+    out: dict = {"image_metadata": count_image_metadata(pdf),
+                 "metadata": [], "layers": [], "fields": [], "hidden_text": 0, "hidden_where": [],
                  "ocr_text": 0, "hidden_annots": 0, "thumbnails": 0, "bookmarks": 0, "signatures": 0}
     meta = pdf.metadata or {}
     labels = metadata_labels()
@@ -776,4 +778,73 @@ def clear_fields(pdf: pymupdf.Document, page: pymupdf.Page, xrefs: set[int] | No
             w.update()
         except Exception:
             pass
+    return n
+
+
+# ------------------------------------------------------ metadati delle immagini
+
+_KEEP_APP = {0xE0, 0xEE}   # JFIF e Adobe (servono a interpretare i colori)
+
+
+def strip_jpeg_metadata(data: bytes) -> bytes:
+    """Toglie da un JPEG i segmenti APPn con metadati (EXIF, GPS, XMP, IPTC) e i
+    commenti, senza ricomprimere l'immagine. Restituisce i dati invariati se il
+    flusso non è un JPEG riconoscibile."""
+    if data[:2] != b"\xff\xd8":
+        return data
+    out = bytearray(data[:2])
+    i, n = 2, len(data)
+    while i + 4 <= n:
+        if data[i] != 0xFF:
+            return data
+        marker = data[i + 1]
+        if marker == 0xFF:          # riempimento
+            i += 1
+            continue
+        if marker == 0xDA:          # inizio dei dati dell'immagine: il resto si copia così com'è
+            out += data[i:]
+            return bytes(out)
+        if 0xD0 <= marker <= 0xD9 or marker == 0x01:
+            out += data[i:i + 2]
+            i += 2
+            continue
+        length = int.from_bytes(data[i + 2:i + 4], "big")
+        if length < 2 or i + 2 + length > n:
+            return data
+        segment = data[i:i + 2 + length]
+        if not ((0xE1 <= marker <= 0xEF and marker not in _KEEP_APP) or marker == 0xFE):
+            out += segment
+        i += 2 + length
+    return data
+
+
+def strip_image_metadata(pdf: pymupdf.Document) -> int:
+    """Rimuove i metadati EXIF/XMP/IPTC dai flussi JPEG del documento."""
+    n = 0
+    for xref in range(1, pdf.xref_length()):
+        try:
+            if not pdf.xref_is_stream(xref) or pdf.xref_get_key(xref, "Filter") != ("name", "/DCTDecode"):
+                continue
+            raw = pdf.xref_stream_raw(xref)
+            new = strip_jpeg_metadata(raw)
+            if new != raw:
+                pdf.update_stream(xref, new, compress=False)
+                pdf.xref_set_key(xref, "Filter", "/DCTDecode")
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
+def count_image_metadata(pdf: pymupdf.Document, limit: int = 400_000) -> int:
+    """Immagini JPEG con metadati incorporati (EXIF, XMP, IPTC)."""
+    n = 0
+    for xref in range(1, min(pdf.xref_length(), limit)):
+        try:
+            if pdf.xref_is_stream(xref) and pdf.xref_get_key(xref, "Filter") == ("name", "/DCTDecode"):
+                raw = pdf.xref_stream_raw(xref)
+                if strip_jpeg_metadata(raw) != raw:
+                    n += 1
+        except Exception:
+            continue
     return n
