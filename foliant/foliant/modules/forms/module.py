@@ -749,7 +749,9 @@ class FormsModule(QObject):
             fields = E.list_fields(pdf)
             values = E.form_values(pdf)
         skip = {f.name for f in fields if f.password or f.no_export}
-        return {k: v for k, v in values.items() if k not in skip}
+        tm = {f.name: f.export_name for f in fields if f.export_name}
+        # FRM-11: il nome per l'esportazione (/TM), se presente, sostituisce il nome del campo
+        return {tm.get(k, k): v for k, v in values.items() if k not in skip}
 
     def export_data(self, path: str, fmt: str | None = None, view=None) -> int:
         view = view or self.ctx.current_view()
@@ -787,8 +789,13 @@ class FormsModule(QObject):
             by_name = {}
             for f in E.list_fields(pdf):
                 by_name.setdefault(f.name, f)
+            for f in list(by_name.values()):
+                if f.export_name:
+                    by_name.setdefault(f.export_name, f)
             for name, value in values.items():
                 f = by_name.get(name)
+                if f is not None:
+                    name = f.name
                 if f is None or f.kind not in E.FILLABLE:
                     report["unknown"].append(name)
                     continue

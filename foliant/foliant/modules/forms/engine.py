@@ -250,6 +250,7 @@ class FieldInfo:
     border_style: str = "S"     # S pieno · D tratteggiato · B rilievo · I incassato · U sottolineato
     align: int = ALIGN_LEFT
     tooltip: str = ""
+    export_name: str = ""       # nome per l'esportazione (/TM), facoltativo
     default: Any = None
     fmt: Format = field(default_factory=Format)
     calc: Calculation | None = None
@@ -435,6 +436,7 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
     info.border_color = _color(w.border_color)
     info.border_width = float(w.border_width or 0)
     info.border_style = (w.border_style or "S")[:1].upper()
+    info.export_name = _value_of(*_inherited(pdf, w.xref, "TM")) or ""
     info.tooltip = w.field_label or ""
     if info.tooltip == "Unnamed":
         info.tooltip = ""
@@ -1722,6 +1724,9 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         pdf.xref_set_key(xref, "MK/CA", ps.encode_string(ch))
     if flags != old_flags:
         pdf.xref_set_key(fx, "Ff", str(flags))
+    if "export_name" in props:
+        tm = str(props["export_name"] or "").strip()
+        pdf.xref_set_key(fx, "TM", ps.encode_string(tm) if tm else "null")
     if "tooltip" in props:
         pdf.xref_set_key(fx, "TU", ps.encode_string(props["tooltip"]) if props["tooltip"] else "null")
     if any(k in props for k in ("font", "fontsize", "text_color")):

@@ -366,3 +366,23 @@ def test_collect_and_series_from_window(window, tmp_path, form_pdf):
     assert names == ["Rossi (2).pdf", "Rossi.pdf"]
     assert E.form_values(pymupdf.open(str(outdir / "Rossi (2).pdf")))["nome"] == "Luca"
     del report
+
+
+def test_export_name_tm(window, tmp_path, form_pdf):
+    view = open_form(window, form_pdf)
+    with view.document.change("tm") as pdf:
+        f = [x for x in E.list_fields(pdf) if x.name == "cognome"][0]
+        E.update_properties(pdf, 0, f.xref, export_name="surname")
+    module().import_values({"cognome": "Bianchi"}, view)
+    out = tmp_path / "d.json"
+    module().export_data(str(out), view=view)
+    data = json.loads(out.read_text())
+    assert data["surname"] == "Bianchi" and "cognome" not in data
+    blank = tmp_path / "b.pdf"
+    pdf = build_form()
+    g = [x for x in E.list_fields(pdf) if x.name == "cognome"][0]
+    E.update_properties(pdf, 0, g.xref, export_name="surname")
+    pdf.save(str(blank))
+    view2 = open_form(window, blank)
+    report = module().import_data(str(out), view=view2)
+    assert values(view2)["cognome"] == "Bianchi" and not report["unknown"]
