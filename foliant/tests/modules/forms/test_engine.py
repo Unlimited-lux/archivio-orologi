@@ -675,3 +675,29 @@ def test_rich_text_value_kept_coherent():
     plain = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 150, 300, 170), "semplice")
     E.set_value(pdf, 0, plain, "x")
     assert pdf.xref_get_key(E._field_xref(pdf, plain), "RV")[0] == "null"
+
+
+def test_scan_matches_widget_reader():
+    """La lettura veloce (scan.py) coincide con quella del motore, anche su pagine ruotate e ritagliate."""
+    import dataclasses
+    from foliant.modules.forms import scan as S
+    pdf = build_form(pages=2)
+    pdf[1].set_cropbox(pymupdf.Rect(10, 20, 500, 800))
+    pdf[1].set_rotation(90)
+    E.create_field(pdf, 1, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "r", fmt=fm.Format(fm.NUMBER, 2, 2, 1, "€", True),
+                   validation=E.Validation(1, 9), maxlen=8, font="Times", fontsize=11, text_color=(1, 0, 0),
+                   align=2, tooltip="t", export_name="tm", fill_color=None, border_style="D", border_width=2)
+    E.create_field(pdf, 1, E.BUTTON, pymupdf.Rect(50, 100, 150, 120), "b", caption="Ok", caption_down="Giù")
+    E.apply_values(pdf, {"nome": "Mario", "privacy": True, "scelta": "B", "paese": "FR", "colori": ["blu"]})
+    slow = [E._info(pdf, i, w) for i in range(pdf.page_count) for w in pdf[i].widgets()]
+    fast = S.scan_fields(pdf)
+    assert len(slow) == len(fast)
+    for a, b in zip(slow, fast):
+        for fld in dataclasses.fields(a):
+            va, vb = getattr(a, fld.name), getattr(b, fld.name)
+            if isinstance(va, (tuple, pymupdf.Rect)) and isinstance(vb, (tuple, pymupdf.Rect)):
+                assert all(abs(p - q) < 0.01 for p, q in zip(va, vb)), (a.name, fld.name)
+            elif isinstance(va, float) or isinstance(vb, float):
+                assert abs((va or 0) - (vb or 0)) < 0.01, (a.name, fld.name)
+            else:
+                assert va == vb, (a.name, fld.name, va, vb)

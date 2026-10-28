@@ -78,15 +78,16 @@ class FormState:
         """Rilegge solo i campi con questi nomi (dopo una compilazione): con migliaia di campi
         rileggere tutto a ogni valore sarebbe troppo lento."""
         doc = self.view.document
-        pages = sorted({f.page for f in self.fields if f.name in names})
+        from .scan import widget_info
+        targets = [f for f in self.fields if f.name in names]
         with ENGINE_LOCK:
             if doc.closed:
                 return
             try:
-                fresh = E.fields_named(doc.pdf, names, pages)
+                fresh = [widget_info(doc.pdf, f.page, f.xref) for f in targets]
             except Exception:
                 fresh = None
-        if fresh is None or len(fresh) != sum(1 for f in self.fields if f.name in names):
+        if fresh is None or any(x is None for x in fresh) or not targets:
             self.refresh(force=True)
             return
         by_key = {(f.page, f.xref): f for f in fresh}

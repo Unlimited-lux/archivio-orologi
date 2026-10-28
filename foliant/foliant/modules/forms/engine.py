@@ -513,37 +513,48 @@ def _action_script(pdf: pymupdf.Document, xref: int, trigger: str) -> str | None
 
 def fields_named(pdf: pymupdf.Document, names: set[str], pages: Iterable[int]) -> list[FieldInfo]:
     """Campi con questi nomi nelle pagine indicate (rilettura mirata dopo una modifica)."""
-    out = []
-    for i in pages:
-        pg = pdf[i]
-        for w in pg.widgets():
-            if w.field_name in names:
-                out.append(_info(pdf, i, w))
-    return out
+    from .scan import scan_fields
+    return scan_fields(pdf, list(pages), names=set(names))
 
 
 def list_fields(pdf: pymupdf.Document, page: int | None = None) -> list[FieldInfo]:
     """Campi del documento (o di una pagina) nell'ordine di tabulazione."""
-    pages = range(pdf.page_count) if page is None else [page]
-    out: list[FieldInfo] = []
-    for i in pages:
-        pg = pdf[i]
-        for w in pg.widgets():
-            out.append(_info(pdf, i, w))
-    return out
+    # lettura lineare degli oggetti (scan.py): page.widgets() è quadratico con molti campi
+    from .scan import scan_fields
+    return scan_fields(pdf, None if page is None else [page])
 
 
 def find_widget(pdf: pymupdf.Document, page: int, xref: int) -> pymupdf.Widget:
     pg = pdf[page]
-    for w in pg.widgets():
-        if w.xref == xref:
+    if xref in _page_widget_set(pdf, page) and pdf.xref_get_key(xref, "Subtype")[1] == "/Widget":
+        try:
+            w = pg.load_widget(xref)
+        except Exception:
+            w = None
+        if w is not None:
             w._foliant_page = pg  # la pagina deve restare viva finché si usa il widget
             return w
     raise FormError(_("Il campo non esiste più nel documento."))
 
 
+def _page_widget_set(pdf: pymupdf.Document, page: int) -> set[int]:
+    """Xref delle annotazioni della pagina (solo l'array /Annots, senza leggere gli oggetti)."""
+    t, v = pdf.xref_get_key(pdf.page_xref(page), "Annots")
+    if t == "xref":
+        v = pdf.xref_object(int(v.split()[0]), compressed=True)
+    elif t != "array":
+        return set()
+    return {int(n) for n in re.findall(r"(\d+)\s+\d+\s+R", v)}
+
+
 def field_info(pdf: pymupdf.Document, page: int, xref: int) -> FieldInfo:
-    return _info(pdf, page, find_widget(pdf, page, xref))
+    from .scan import widget_info
+    if xref not in _page_widget_set(pdf, page):
+        raise FormError(_("Il campo non esiste più nel documento."))
+    info = widget_info(pdf, page, xref)
+    if info is None:
+        raise FormError(_("Il campo non esiste più nel documento."))
+    return info
 
 
 def has_form(pdf: pymupdf.Document) -> bool:
@@ -1247,7 +1258,7 @@ def create_field(pdf: pymupdf.Document, page: int, kind: str, rect: pymupdf.Rect
         w.button_caption = props.get("caption", name)
     if kind == SIGNATURE:
         w.field_value = None
-    first_on_page = not any(True for _w in pg.widgets())
+    first_on_page = not tab_order(pdf, page)
     _ensure_acroform(pdf)
     pg.add_widget(w)
     xref = w.xref
@@ -1450,9 +1461,10 @@ def repair_orphans(pdf: pymupdf.Document) -> int:
     Restituisce il numero di campi ricollegati."""
     listed = set(_acroform_fields(pdf))
     roots: list[int] = []
+    from .scan import widget_xrefs
     for i in range(pdf.page_count):
-        for w in pdf[i].widgets():
-            r = _root_of(pdf, w.xref)
+        for x in widget_xrefs(pdf, i):
+            r = _root_of(pdf, x)
             if r not in listed and r not in roots:
                 roots.append(r)
     if roots:
@@ -1463,9 +1475,10 @@ def repair_orphans(pdf: pymupdf.Document) -> int:
 def orphan_count(pdf: pymupdf.Document) -> int:
     listed = set(_acroform_fields(pdf))
     roots = set()
+    from .scan import widget_xrefs
     for i in range(pdf.page_count):
-        for w in pdf[i].widgets():
-            r = _root_of(pdf, w.xref)
+        for x in widget_xrefs(pdf, i):
+            r = _root_of(pdf, x)
             if r not in listed:
                 roots.add(r)
     return len(roots)
@@ -2109,7 +2122,8 @@ def move_fields(pdf: pymupdf.Document, changes: list[tuple[int, int, pymupdf.Rec
 
 
 def tab_order(pdf: pymupdf.Document, page: int) -> list[int]:
-    return [w.xref for w in pdf[page].widgets()]
+    from .scan import widget_xrefs
+    return widget_xrefs(pdf, page)
 
 
 def set_tab_order(pdf: pymupdf.Document, page: int, xrefs: list[int]) -> None:
@@ -2168,7 +2182,8 @@ def xfa_status(pdf: pymupdf.Document) -> str:
     cat = pdf.pdf_catalog()
     if pdf.xref_get_key(cat, "AcroForm/XFA")[0] == "null":
         return "none"
-    has_widgets = any(True for i in range(pdf.page_count) for _w in pdf[i].widgets())
+    from .scan import widget_xrefs
+    has_widgets = any(widget_xrefs(pdf, i) for i in range(pdf.page_count))
     return "hybrid" if has_widgets else "dynamic"
 
 
@@ -2721,7 +2736,8 @@ def flatten_pages(pdf: pymupdf.Document, pages: list[int] | None = None, keep_si
                     _remove_from_acroform(pdf, fx)
                     _prune_empty_parents(pdf, fx)
             count += 1
-    if not any(True for i in range(pdf.page_count) for _w in pdf[i].widgets()):
+    from .scan import widget_xrefs
+    if not any(widget_xrefs(pdf, i) for i in range(pdf.page_count)):
         cat = pdf.pdf_catalog()
         if pdf.xref_get_key(cat, "AcroForm")[0] != "null":
             pdf.xref_set_key(cat, "AcroForm", "null")
