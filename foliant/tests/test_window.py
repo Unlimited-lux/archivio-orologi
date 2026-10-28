@@ -463,3 +463,51 @@ def test_unlock_and_repaired_messages(window, tmp_path):
     plain.write_bytes(d2.tobytes().replace(b"startxref", b"startxrXf"))
     view2 = window.open_path(str(plain))
     assert view2.document.repaired       # l'avviso in pagina è del modulo convert («riparato»)
+
+
+def test_access_changes_reach_the_modules(window, tmp_path):
+    """unlock() e set_locked() arrivano ai moduli con ctx.documentAccessChanged (per riabilitare
+    stampa, copia, …) anche se la vista non è quella corrente."""
+    path = tmp_path / "riservato.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "Riservato")
+    d.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="capo",
+           permissions=pymupdf.PDF_PERM_ACCESSIBILITY)
+    view = window.open_path(str(path))
+    seen = []
+    window.ctx.documentAccessChanged.connect(seen.append)
+    try:
+        assert view.document.unlock("capo")
+        assert seen == [view]
+        other = tmp_path / "altro.pdf"
+        d2 = pymupdf.open()
+        d2.new_page()
+        d2.save(str(other))
+        window.open_path(str(other))                     # la prima scheda non è più corrente
+        view.document.set_locked("OCR in corso")
+        view.document.set_locked(None)
+        assert seen == [view, view, view]
+    finally:
+        window.ctx.documentAccessChanged.disconnect(seen.append)
+
+
+def test_qt_key_names_follow_the_interface_language(qapp):
+    """Menu e suggerimenti disegnati da Qt usano gli stessi nomi dei tasti della finestra
+    Scorciatoie (UX-18): «Ctrl+Maiusc+S», non «Ctrl+Shift+S»."""
+    from PySide6.QtGui import QKeySequence
+    from foliant.app import install_qt_translations
+    from foliant.i18n import language, set_language
+    previous = language()
+    set_language("it")
+    install_qt_translations(qapp)
+    try:
+        native = QKeySequence.SequenceFormat.NativeText
+        assert QKeySequence("Ctrl+Shift+S").toString(native) == "Ctrl+Maiusc+S"
+        assert QKeySequence("Shift+F5").toString(native) == "Maiusc+F5"
+        assert QKeySequence("Ctrl+PgDown").toString(native) == "Ctrl+Pag giù"
+        assert QKeySequence("Ctrl+Q").toString(native) == "Ctrl+Q"
+    finally:
+        for tr in getattr(qapp, "_foliant_translators", []):
+            qapp.removeTranslator(tr)
+        qapp._foliant_translators = []
+        set_language(previous)
