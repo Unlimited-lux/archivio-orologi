@@ -877,8 +877,6 @@ class MainWindow(QMainWindow):
                                  .format(name=document.display_name),
                                  [(_("Salva con nome…"), lambda v=view: self.save_view(v, save_as=True))],
                                  level="info", priority=5)
-        if document.repaired:
-            self.statusBar().showMessage(_("Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto."), 15000)
         if document.locked_reason:
             self.statusBar().showMessage(_("Sola lettura: {reason}").format(reason=document.locked_reason), 15000)
         view.setFocus()

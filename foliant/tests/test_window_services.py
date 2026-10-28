@@ -144,6 +144,45 @@ def test_notify_is_not_modal(window, recwarn, qtbot):
     assert not [w for w in recwarn if "finestra modale" in str(w.message)]
 
 
+def test_stacked_notifications_keep_their_height(window, sample_pdf):
+    """Un secondo avviso non schiaccia il primo: la pila cresce e ogni pulsante resta leggibile."""
+    from PySide6.QtWidgets import QAbstractButton, QApplication
+    window.resize(1280, 800)
+    window.open_path(sample_pdf)
+    ctx = window.ctx
+    first = ctx.notify("Documento salvato in /home/utente/Documenti/Orologi/Listino autunno 2026 con un nome "
+                       "di file piuttosto lungo.pdf", [("Apri cartella", lambda: None)], duration_ms=0)
+    QApplication.processEvents()
+    alone = first.height()
+    second = ctx.notify("Seconda notifica", duration_ms=0)
+    QApplication.processEvents()
+    assert first.height() == alone and second.height() >= second.minimumSizeHint().height()
+    for n in (first, second):
+        for b in n.findChildren(QAbstractButton):
+            assert b.height() >= b.minimumSizeHint().height()
+    area = window.notifications
+    assert area.height() >= first.height() + second.height()
+
+
+def test_toolbar_extension_button_follows_theme(qapp):
+    """Il pulsante «»» delle barre usa un'icona del tema (non il grigio fisso di Fusion) e
+    il suo spazio è quello dell'icona."""
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QStyle
+    from foliant.ui import theme
+    for mode in ("dark", "light"):
+        theme.apply(qapp, mode)
+        style = qapp.style()
+        assert style.pixelMetric(QStyle.PixelMetric.PM_ToolBarExtensionExtent) == 20
+        img = style.standardIcon(QStyle.StandardPixmap.SP_ToolBarHorizontalExtensionButton).pixmap(16, 16).toImage()
+        ink = [QColor(img.pixel(x, y)) for x in range(img.width()) for y in range(img.height())
+               if QColor.fromRgba(img.pixel(x, y)).alpha() > 200]
+        assert ink, mode
+        text = theme.color("text")
+        assert min(abs(c.lightness() - text.lightness()) for c in ink) < 40, mode   # colore del testo del tema
+    theme.apply(qapp, "light")
+
+
 # ====================================================================== controlli
 def test_save_guards(window, sample_pdf):
     ctx = window.ctx

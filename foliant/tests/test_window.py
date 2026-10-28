@@ -156,7 +156,7 @@ def test_english_translations_cover_core_strings():
     for f in list((root / "ui").glob("*.py")) + [root / "app.py"]:
         if f.name == "i18n_en.py":
             continue
-        for m in re.finditer(r'_\("((?:[^"\\]|\\.)*)"\)', f.read_text(encoding="utf-8")):
+        for m in re.finditer(r'(?<![\w.])_\("((?:[^"\\]|\\.)*)"\)', f.read_text(encoding="utf-8")):
             text = m.group(1).encode().decode("unicode_escape").encode("latin-1").decode("utf-8")
             if text not in EN:
                 missing.add(text)
@@ -462,5 +462,4 @@ def test_unlock_and_repaired_messages(window, tmp_path):
     d2.new_page().insert_text((72, 100), "Testo")
     plain.write_bytes(d2.tobytes().replace(b"startxref", b"startxrXf"))
     view2 = window.open_path(str(plain))
-    assert view2.document.repaired
-    assert "riparato" in window.statusBar().currentMessage()
+    assert view2.document.repaired       # l'avviso in pagina è del modulo convert («riparato»)
