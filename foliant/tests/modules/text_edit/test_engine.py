@@ -726,3 +726,24 @@ def test_edit_on_rotated_and_cropped_pages(tmp_path, rotation, crop):
     assert abs(after["origin"][1] - before["origin"][1]) <= 1
     assert tuple(round(v, 2) for v in after["dir"]) == tuple(round(v, 2) for v in before["dir"]) if "dir" in after \
         else True
+
+
+@pytest.mark.parametrize("rotation", [90, 180, 270])
+def test_underline_on_rotated_cropped_page(tmp_path, rotation):
+    """bug_03: la sottolineatura resta sotto la parola anche su pagine ruotate e ritagliate."""
+    doc, page = new_doc_with_font()
+    page.insert_text((100, 300), "Parola sottolineata", fontname="F1", fontsize=12)
+    page.set_cropbox(pymupdf.Rect(40, 60, 560, 820))
+    page.set_rotation(rotation)
+    d = Document.open(save(doc, tmp_path / f"u{rotation}.pdf"))
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+    with d.change("Sottolinea") as pdf:
+        engine.restyle_block(pdf, 0, block, underline=True)
+    with d.lock:
+        p = d.pdf[0]
+        word = p.search_for("sottolineata")[0]
+        lines = [dr["rect"] for dr in p.get_drawings()]
+    assert lines
+    r = lines[0]
+    assert abs(r.x1 - word.x1) <= 2 and word.y0 <= r.y0 <= word.y1 + 3

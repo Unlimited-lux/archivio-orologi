@@ -243,6 +243,15 @@ def reanchor(page: pymupdf.Page, anchors: list[dict], bbox: pymupdf.Rect) -> int
     return orphans
 
 
+def _draw_line(page: pymupdf.Page, p0, p1, **kw) -> None:
+    """Linea in coordinate standard: il disegno del motore è spostato su pagine ruotate/ritagliate."""
+    try:
+        from ...core import placement
+        placement.draw_line(page, p0, p1, **kw)
+    except ImportError:
+        page.draw_line(p0, p1, **kw)
+
+
 class _Writer:
     """Scrive righe composte nella pagina."""
 
@@ -331,8 +340,8 @@ class _Writer:
                 if angle:
                     p0 = anchor + (p0 - anchor) * pymupdf.Matrix(angle)
                     p1 = anchor + (p1 - anchor) * pymupdf.Matrix(angle)
-                self.page.draw_line(p0 * self.unframe, p1 * self.unframe, color=st.color, width=width,
-                                   overlay=self.overlay)
+                _draw_line(self.page, p0 * self.unframe, p1 * self.unframe, color=st.color, width=width,
+                           overlay=self.overlay)
 
 
 # ====================================================================== confronto righe

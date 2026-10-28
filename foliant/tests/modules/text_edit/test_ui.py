@@ -456,3 +456,16 @@ def test_add_text_returns_to_edit_tool(window, sample_pdf, quiet, qtbot):
     qtbot.keyClick(ctrl.editor_for(view), Qt.Key.Key_Escape)
     assert "Nuovo" in view.document.page_text(0)
     assert isinstance(view.tool, EditTextTool)
+
+
+def test_overlap_indicator(window, paragraphs_pdf, quiet, qtbot):
+    """bug_08: un paragrafo che cresce sopra il successivo mostra l'indicatore di sovrapposizione."""
+    view = open_in_edit_mode(window, paragraphs_pdf)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "Lorem")
+    ed = ctrl.open_editor(view, 0, block)
+    ed.moveCursor(QTextCursor.MoveOperation.End)
+    ed.insertPlainText(" e ancora molte altre parole aggiunte per far crescere il paragrafo di due righe intere")
+    ctrl.commit_editor(view)
+    assert ctrl.overflow_marks(view)
+    assert any("sovrappone" in m for m in quiet["status"])

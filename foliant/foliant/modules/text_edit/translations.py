@@ -169,4 +169,5 @@ EN: dict[str, str] = {
     "Il testo supera 1 MB. Inserirlo comunque?": "The text exceeds 1 MB. Insert it anyway?",
     "Testo inserito; elementi omessi: {n} (immagini o oggetti).":
         "Text inserted; omitted items: {n} (images or objects).",
+    "Il testo si sovrappone ad altro contenuto della pagina.": "The text overlaps other content on the page.",
 }

@@ -358,6 +358,14 @@ class TextEditController(QObject):
         if getattr(result, "overflow", False):
             marks.append((self._last_page, pymupdf.Rect(result.bbox)))
             self.ctx.status(_("Il testo esce dall'area visibile della pagina."), 8000)
+        elif getattr(result, "changed", False) and result.bbox is not None and not result.bbox.is_empty:
+            # sovrapposizione con altri blocchi (TXT-03): nessun altro contenuto viene spostato
+            mine = self._refind(view, self._last_page, result.bbox)
+            others = [b for b in self.blocks(view, self._last_page) if b is not mine]
+            hit = pymupdf.Rect(result.bbox) + (0.5, 0.5, -0.5, -0.5)
+            if any(hit.intersects(b.bbox) for b in others):
+                marks.append((self._last_page, pymupdf.Rect(result.bbox)))
+                self.ctx.status(_("Il testo si sovrappone ad altro contenuto della pagina."), 8000)
         self._overflow[id(view)] = marks
 
     _last_page = 0
