@@ -610,3 +610,108 @@ def test_booklet_keeps_printable_annotations(qapp, tmp_path):
     colors = {pix.pixel(x, y)[:3] for x in range(w, pix.width, 3) for y in range(0, pix.height, 3)}
     assert any(r > 200 and g < 80 and b < 80 for r, g, b in colors)        # rosso: stampata
     assert not any(b > 200 and r < 80 and g < 80 for r, g, b in colors)    # blu: senza /Print
+
+
+# ------------------------------------------------- più pagine per foglio, fronte/retro, grigi (VIS-43)
+def _numbers_on(page) -> list[int]:
+    """Numeri «PAGn» letti dal foglio, in ordine di lettura (righe, poi colonne)."""
+    words = [w for w in page.get_text("words") if w[4].startswith("PAG")]
+    words.sort(key=lambda w: (round(w[1] / 20), w[0]))
+    return [int(w[4][3:]) for w in words]
+
+
+def test_nup_grid_and_order(qapp, tmp_path):
+    from foliant.modules.viewer.printing_engine import impose_nup, nup_grid
+    a4 = (595, 842)
+    assert nup_grid(4, *a4, *a4) == (2, 2)
+    assert nup_grid(2, *a4, 842, 595) == (2, 1)       # foglio orizzontale: affiancate
+    assert nup_grid(16, *a4, *a4) == (4, 4)
+    src = pymupdf.open(_numbered(tmp_path, 4))
+    assert _numbers_on(impose_nup(src, list(range(4)), 4, *a4)[0]) == [1, 2, 3, 4]
+    by_cols = impose_nup(src, list(range(4)), 4, *a4, by_columns=True)[0]
+    assert _numbers_on(by_cols) == [1, 3, 2, 4]           # 1 e 2 nella prima colonna
+    bordered = impose_nup(src, list(range(4)), 4, *a4, border=True)[0]
+    assert sum(len(d["items"]) for d in bordered.get_drawings()) == 4
+    last = impose_nup(pymupdf.open(_numbered(tmp_path, 10, name="dieci.pdf")), list(range(10)), 4, *a4)
+    assert last.page_count == 3 and _numbers_on(last[2]) == [9, 10]
+
+
+def test_four_pages_per_sheet_10_pages_to_file(viewer_window, tmp_path, monkeypatch):
+    """Dato «4 pagine per foglio» su 10 pagine, la stampa su file ha 3 fogli e l'ultimo
+    contiene le pagine 9 e 10 (criterio di VIS-43)."""
+    view = viewer_window.open_path(_numbered(tmp_path, 10))
+    ctl = part(viewer_window, "printing")
+    dlg = ctl.options_dialog(view)
+    assert not dlg.nup_columns.isVisibleTo(dlg)
+    dlg.nup.setCurrentIndex(dlg.nup.findData(4))
+    assert dlg.nup_columns.isVisibleTo(dlg) and not dlg.size_box.isEnabled()
+    options = dlg.options()
+    assert options.pages_per_sheet == 4
+    out = tmp_path / "4xfoglio.pdf"
+    printer = _printer(out)
+    assert print_document(view.document, printer, options) == 3
+    del printer
+    printed = pymupdf.open(str(out))
+    assert printed.page_count == 3
+
+    def inked(page, clip) -> bool:      # l'output è raster: si guarda se la zona ha inchiostro
+        pix = page.get_pixmap(clip=clip, matrix=pymupdf.Matrix(0.5, 0.5))
+        return min(pix.samples) < 128
+    w, h = printed[2].rect.width, printed[2].rect.height
+    assert inked(printed[2], pymupdf.Rect(0, 0, w / 2, h / 2))           # pagina 9
+    assert inked(printed[2], pymupdf.Rect(w / 2, 0, w, h / 2))           # pagina 10
+    assert not inked(printed[2], pymupdf.Rect(0, h / 2, w, h))           # riga inferiore vuota
+    assert inked(printed[0], pymupdf.Rect(0, h / 2, w / 2, h))
+
+
+def test_duplex_short_edge_and_grayscale_reach_the_print_job(viewer_window, sample_pdf):
+    """«Fronte/retro sul lato corto» e «Scala di grigi» scelti nel dialogo arrivano ai
+    parametri del lavoro di stampa."""
+    view = viewer_window.open_path(sample_pdf)
+    dlg = part(viewer_window, "printing").options_dialog(view)
+    dlg.duplex_combo.setCurrentIndex(dlg.duplex_combo.findData("DuplexFlipShortEdge"))
+    dlg.grayscale.setChecked(True)
+    options = dlg.options()
+
+    class Queue:        # coda di stampa simulata: registra i parametri del lavoro
+        def __init__(self):
+            self.job = {}
+
+        def __getattr__(self, name):
+            return lambda value: self.job.__setitem__(name, value)
+    queue = Queue()
+    printing_mod.configure_printer(queue, view.document, options)
+    assert queue.job["setDuplex"] == QPrinter.DuplexMode.DuplexShortSide
+    assert queue.job["setColorMode"] == QPrinter.ColorMode.GrayScale
+    options.pages_per_sheet = 2                         # pagine verticali affiancate
+    printing_mod.configure_printer(queue, view.document, options)
+    assert queue.job["setPageOrientation"] == QPageLayout.Orientation.Landscape
+
+
+def test_grayscale_output_has_no_color(viewer_window, tmp_path):
+    from foliant.core.document import Document
+    path = tmp_path / "rosso.pdf"
+    src = pymupdf.open()
+    src.new_page().draw_rect(RED_RECT, color=(1, 0, 0), fill=(1, 0, 0))
+    src.save(str(path))
+    doc = Document.open(str(path))
+    for gray, check in ((False, _is_red), (True, lambda rgb: max(rgb) - min(rgb) < 8 and max(rgb) < 200)):
+        out = tmp_path / f"grigi{gray}.pdf"
+        printer = _printer(out)
+        print_document(doc, printer, PrintOptions(pages=[0], grayscale=gray))
+        del printer
+        assert check(_pixel(out, 0, RED_RECT.tl + (20, 20)))
+    doc.close()
+
+
+def test_document_duplex_preference_preselected(viewer_window, tmp_path):
+    from foliant.modules.viewer.session_engine import read_open_options  # noqa: F401
+    path = tmp_path / "duplex.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.xref_set_key(src.pdf_catalog(), "ViewerPreferences", "<</Duplex /DuplexFlipLongEdge>>")
+    src.save(str(path))
+    view = viewer_window.open_path(str(path))
+    dlg = part(viewer_window, "printing").options_dialog(view)
+    assert dlg.duplex_combo.currentData() == "DuplexFlipLongEdge"
+    assert dlg.options().duplex == "DuplexFlipLongEdge"
