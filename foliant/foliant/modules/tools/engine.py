@@ -1639,7 +1639,14 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
     a = step.action
     name = Path(item.path).stem
     if a == "compress":
-        return compress_pdf(data, p.get("level", "medium")), protection
+        out = compress_pdf(data, p.get("level", "medium"))
+        if len(out) >= len(data):
+            # nessun guadagno: si tiene il risultato del passo precedente (mai l'originale:
+            # gli altri passi della sequenza, es. la protezione, devono restare applicati)
+            if _("nessuna riduzione ottenuta") not in ctx.warnings:
+                ctx.warnings.append(_("nessuna riduzione ottenuta"))
+            return data, protection
+        return out, protection
     if a == "protect":
         user, owner = p.get("user_password") or "", p.get("owner_password") or ""
         if p.get("password_csv"):
@@ -1961,9 +1968,12 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
             else:
                 if protection:
                     data = _reencrypt(data, protection)
-                if any(s.action == "compress" for s in steps) and len(data) >= len(raw):
+                # solo per una sequenza fatta unicamente di «Comprimi»: se il file non si riduce si
+                # riscrive l'originale (che mantiene anche la sua eventuale protezione)
+                if pre_steps and all(s.action == "compress" for s in pre_steps) and len(data) >= len(raw):
                     data = raw
-                    ctx.warnings.append(_("nessuna riduzione ottenuta"))
+                    if _("nessuna riduzione ottenuta") not in ctx.warnings:
+                        ctx.warnings.append(_("nessuna riduzione ottenuta"))
                 ctx.check()
                 if settings.replace_originals:
                     if settings.backup:
