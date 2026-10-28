@@ -227,3 +227,40 @@ def test_snippet_does_not_spill_into_next_line():
     pt = E.extract_page_text(page)
     hits = E.find_in_page_text(pt, "20121")
     assert E.context_snippet(pt, hits[0])[1] == "20121"
+
+
+# ------------------------------------------------------- ordine di lettura (VIS-24)
+def _two_columns():
+    """A4 con due caselle affiancate; la colonna destra è più corta."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_textbox(pymupdf.Rect(50, 100, 280, 400),
+                        "Colonna sinistra con il Submariner. Testo che continua e va a capo. "
+                        "Altre righe della colonna sinistra per renderla più lunga di quella destra.",
+                        fontsize=11)
+    page.insert_textbox(pymupdf.Rect(315, 100, 545, 200), "Colonna destra: Speedmaster.", fontsize=11)
+    page.insert_textbox(pymupdf.Rect(50, 40, 545, 70), "Titolo a tutta pagina", fontsize=14)
+    return pymupdf.open("pdf", doc.tobytes())
+
+
+def test_two_columns_follow_reading_order():
+    doc = _two_columns()
+    text = E.extract_page_text(doc[0]).text
+    assert text.index("Titolo") < text.index("Submariner") < text.index("Speedmaster")
+    assert text.index("renderla") < text.index("Speedmaster")     # tutta la colonna sinistra prima
+    pt = E.extract_page_text(doc[0])
+    assert E.find_spans(pt, "Submariner") and E.find_spans(pt, "Speedmaster")
+    assert not E.find_spans(pt, "Speedmaster. Colonna sinistra")    # niente frasi a cavallo delle colonne
+
+
+def test_reading_order_single_column_top_to_bottom():
+    blocks = [{"bbox": (50, 300, 500, 320), "n": 2}, {"bbox": (50, 100, 500, 120), "n": 1},
+              {"bbox": (60, 500, 480, 520), "n": 3}]
+    assert [b["n"] for b in E.reading_order(blocks)] == [1, 2, 3]
+
+
+def test_reading_order_columns_and_wide_blocks():
+    blocks = [{"bbox": (320, 120, 540, 150), "n": "R1"}, {"bbox": (50, 120, 280, 400), "n": "L1"},
+              {"bbox": (50, 40, 540, 70), "n": "T"}, {"bbox": (50, 450, 540, 480), "n": "W"},
+              {"bbox": (320, 500, 540, 520), "n": "R2"}, {"bbox": (50, 500, 280, 560), "n": "L2"}]
+    assert [b["n"] for b in E.reading_order(blocks)] == ["T", "L1", "R1", "W", "L2", "R2"]
