@@ -42,9 +42,10 @@ def register(ctx) -> None:
     act_from_url = ctx.action(_("Da pagina web…"), "globe", lambda: c.create_from_url(), requires_document=False)
     act_clipboard = ctx.action(_("Dagli appunti"), "clipboard-paste", lambda: c.create_from_clipboard(),
                                requires_document=False)
+    act_scanner = ctx.action(_("Da scanner…"), "scan", lambda: c.create_from_scanner(), requires_document=False)
     act_blank = ctx.action(_("PDF vuoto…"), "file", lambda: c.create_blank(), requires_document=False)
     act_batch_create = ctx.action(_("Crea in blocco…"), "files", lambda: c.batch_create(), requires_document=False)
-    for a in (act_from_file, act_from_images, act_from_url, act_clipboard, act_blank):
+    for a in (act_from_file, act_from_images, act_from_url, act_clipboard, act_scanner, act_blank):
         create_menu.addAction(a)
     create_menu.addSeparator()
     create_menu.addAction(act_batch_create)
@@ -108,7 +109,7 @@ def register(ctx) -> None:
     ctx.add_home_action(_("Comprimi PDF"), "shrink", lambda: c.compress(), _("Riduci la dimensione del file"), 33)
 
     c.actions = {"export": act_export, "from_file": act_from_file, "from_images": act_from_images,
-                 "from_url": act_from_url, "clipboard": act_clipboard, "blank": act_blank,
+                 "from_url": act_from_url, "clipboard": act_clipboard, "blank": act_blank, "scanner": act_scanner,
                  "compress": act_compress, "compress_many": act_compress_many, "advanced": act_advanced,
                  "repair": act_repair, "flatten": act_flatten, "batch": act_batch, "batch_create": act_batch_create}
     c.create_button = create_btn

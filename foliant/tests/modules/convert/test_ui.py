@@ -392,3 +392,46 @@ def test_flatten_ui_undoable(window, ctrl, tmp_path, monkeypatch, messages):
     with pymupdf.open(stream=view.document.to_bytes()) as d:
         assert len(list(d[0].annots())) == 1
     assert len(list(pymupdf.open(str(path))[0].annots())) == 1
+
+
+def test_scanner_ui_flatbed_two_pages_insert(window, ctrl, sample_pdf, monkeypatch, messages):
+    from PIL import Image
+    from foliant.modules.convert.create_dialogs import ScannerDialog
+
+    class Fake:
+        def list_devices(self):
+            return [("sim:0", "Simulato")]
+
+        def scan(self, device, settings, progress=None):
+            yield Image.new("RGB", (int(8.27 * settings.dpi), int(11.69 * settings.dpi)), "white")
+
+    ctrl.scanner_backend = Fake()
+    view = window.open_path(sample_pdf)
+
+    def fake_exec(d):
+        d.dpi.setCurrentIndex(d.dpi.findData(75))
+        d.insert.setChecked(True)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ScannerDialog, "exec", fake_exec)
+    clicks = {"n": 0}
+
+    def box_exec(box):
+        clicks["n"] += 1
+        label = "Acquisisci un'altra pagina" if clicks["n"] == 1 else "Fine"
+        for b in box.buttons():
+            if b.text() == label:
+                b.click()
+        return 0
+    monkeypatch.setattr(QMessageBox, "exec", box_exec)
+    ctrl.create_from_scanner()
+    assert view.document.page_count == 5
+    assert "Pagina 1" in view.document.page_text(0) and "Pagina 2" in view.document.page_text(3)
+
+
+def test_scanner_none_found(window, ctrl, messages):
+    class Empty:
+        def list_devices(self):
+            return []
+    ctrl.scanner_backend = Empty()
+    assert ctrl.create_from_scanner() is None
+    assert "Nessuno scanner" in messages["info"][0][1]

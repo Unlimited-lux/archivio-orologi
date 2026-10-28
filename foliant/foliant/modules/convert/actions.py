@@ -27,6 +27,7 @@ class ConvertController:
     def __init__(self, ctx):
         self.ctx = ctx
         self.last_result = None
+        self.scanner_backend = None   # None = SANE (scanimage); i test usano un dispositivo simulato
 
     # ============================================================ utilità
     @property
@@ -357,6 +358,96 @@ class ConvertController:
         if not ok or not data:
             return None
         return self.open_created(data, _("Appunti") + ".pdf")
+
+    def create_from_scanner(self):
+        """CNV-24: acquisizione da scanner (piano, alimentatore, fronte/retro, documento d'identità)."""
+        from . import scanner
+        from .create_dialogs import ScannerDialog
+        backend = self.scanner_backend or scanner.SaneBackend()
+        ok, devices = self._run(_("Ricerca degli scanner…"), lambda progress: backend.list_devices())
+        if not ok:
+            return None
+        if not devices:
+            self.ctx.info(_("Crea PDF da scanner"), _(
+                "Nessuno scanner trovato. Verifica che sia acceso e collegato (o raggiungibile in rete), che il "
+                "pacchetto «sane-utils» sia installato e che il tuo utente abbia i permessi sul dispositivo."))
+            return None
+        view = self.ctx.current_view()
+        dlg = ScannerDialog(self.window, devices, has_document=view is not None, refresh=backend.list_devices)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        settings = dlg.settings()
+        device = dlg.device.currentData()
+        remove_blank = dlg.remove_blank.isChecked()
+
+        def grab(src: str):
+            settings.source = src
+            ok2, res = self._run(_("Acquisizione in corso…"), scanner.acquire, backend, device, settings,
+                                 remove_blank=remove_blank)
+            if not ok2:
+                return None
+            if res.error:
+                self.ctx.error(_("Scanner"), res.error + ("\n\n" + _("Le pagine già acquisite sono state conservate.")
+                                                       if res.pages else ""))
+            return res
+
+        pages: list = []
+        if dlg.id_card.isChecked():
+            front = grab("flatbed")
+            if not front or not front.pages:
+                return None
+            if not self.ctx.confirm(_("Documento d'identità"), _("Gira il documento sul piano e premi Sì per "
+                                                                "acquisire il retro.")):
+                return None
+            back = grab("flatbed")
+            if not back or not back.pages:
+                return None
+            data = scanner.id_card_pdf(front.pages[0], back.pages[0], settings)
+        else:
+            source = settings.source
+            if dlg.manual_duplex.isChecked():
+                fronts = grab("adf" if source != "flatbed" else source)
+                if not fronts or not fronts.pages:
+                    return None
+                if self.ctx.confirm(_("Fronte/retro manuale"), _("Capovolgi la pila dei fogli senza riordinarla e "
+                                                                 "premi Sì per acquisire i retro.")):
+                    backs = grab("adf" if source != "flatbed" else source)
+                    pages = scanner.merge_duplex(fronts.pages, backs.pages if backs else [])
+                else:
+                    pages = fronts.pages
+            else:
+                while True:
+                    res = grab(source)
+                    if res is None:
+                        break
+                    pages.extend(res.pages)
+                    if source != "flatbed" or res.error:
+                        break
+                    box = QMessageBox(self.window)
+                    box.setWindowTitle(_("Crea PDF da scanner"))
+                    box.setText(_("Pagine acquisite: {n}").format(n=len(pages)))
+                    more = box.addButton(_("Acquisisci un'altra pagina"), QMessageBox.ButtonRole.AcceptRole)
+                    box.addButton(_("Fine"), QMessageBox.ButtonRole.RejectRole)
+                    box.exec()
+                    if box.clickedButton() is not more:
+                        break
+            if not pages:
+                return None
+            ok, data = self._run(_("Creazione del PDF…"), scanner.pages_to_pdf, pages, settings)
+            if not ok:
+                return None
+        if dlg.insert.isChecked() and view is not None:
+            at = view.current_page + 1
+            with ENGINE_LOCK:
+                new = pymupdf.open(stream=data, filetype="pdf")
+            try:
+                with view.document.change(_("Inserisci pagine acquisite")) as pdf:
+                    pdf.insert_pdf(new, start_at=at)
+            finally:
+                with ENGINE_LOCK:
+                    new.close()
+            return view
+        return self.open_created(data, _("Scansione") + ".pdf")
 
     def create_blank(self):
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""

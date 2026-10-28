@@ -322,4 +322,74 @@ class BlankDialog(QDialog):
         super().accept()
 
 
-__all__ = ["ImagesDialog", "BlankDialog", "IMAGE_FILTER_EXT", "os"]
+
+
+class ScannerDialog(QDialog):
+    """Impostazioni di acquisizione (CNV-24): dispositivo, sorgente, risoluzione, colore, opzioni."""
+
+    def __init__(self, parent, devices: list[tuple[str, str]], *, has_document: bool = False, refresh=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QCheckBox
+        self.setWindowTitle(_("Crea PDF da scanner"))
+        self.setMinimumWidth(460)
+        self._refresh = refresh
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+        dev_row = QHBoxLayout()
+        self.device = QComboBox()
+        dev_row.addWidget(self.device, 1)
+        again = QPushButton(_("Aggiorna"))
+        bind_icon(again, "refresh-cw")
+        again.setAutoDefault(False)
+        again.clicked.connect(self._reload)
+        dev_row.addWidget(again)
+        form.addRow(_("Scanner"), dev_row)
+        self.source = _combo([(_("Piano"), "flatbed"), (_("Alimentatore"), "adf"),
+                              (_("Alimentatore fronte/retro"), "adf-duplex")])
+        form.addRow(_("Sorgente"), self.source)
+        self.dpi = _combo([(f"{d} dpi", d) for d in (75, 150, 200, 300, 400, 600, 1200)], 300)
+        form.addRow(_("Risoluzione"), self.dpi)
+        self.mode = _combo([(_("Colore"), "color"), (_("Scala di grigi"), "gray"), (_("Bianco e nero"), "bw")])
+        form.addRow(_("Colore"), self.mode)
+        self.brightness = QSpinBox()
+        self.contrast = QSpinBox()
+        for s in (self.brightness, self.contrast):
+            s.setRange(-100, 100)
+        form.addRow(_("Luminosità"), self.brightness)
+        form.addRow(_("Contrasto"), self.contrast)
+        self.quality = QSpinBox()
+        self.quality.setRange(10, 100)
+        self.quality.setValue(85)
+        form.addRow(_("Qualità JPEG"), self.quality)
+        lay.addLayout(form)
+        self.remove_blank = QCheckBox(_("Rimuovi le pagine vuote"))
+        self.manual_duplex = QCheckBox(_("Fronte/retro manuale (acquisisci prima i fronti, poi i retro)"))
+        self.id_card = QCheckBox(_("Documento d'identità: fronte e retro sulla stessa pagina A4"))
+        self.insert = QCheckBox(_("Inserisci nel documento aperto dopo la pagina corrente"))
+        self.insert.setVisible(has_document)
+        for cb in (self.remove_blank, self.manual_duplex, self.id_card, self.insert):
+            lay.addWidget(cb)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.ok_button.setText(_("Acquisisci"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.set_devices(devices)
+
+    def set_devices(self, devices) -> None:
+        self.device.clear()
+        for dev, label in devices:
+            self.device.addItem(label or dev, dev)
+        self.ok_button.setEnabled(bool(devices))
+
+    def _reload(self) -> None:
+        if self._refresh is not None:
+            self.set_devices(self._refresh())
+
+    def settings(self):
+        from .scanner import ScanSettings
+        return ScanSettings(source=self.source.currentData(), dpi=self.dpi.currentData(), mode=self.mode.currentData(),
+                            brightness=self.brightness.value(), contrast=self.contrast.value(),
+                            jpeg_quality=self.quality.value())
