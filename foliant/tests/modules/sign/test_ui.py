@@ -396,7 +396,7 @@ def test_timestamp_unreachable_offers_choices(window, monkeypatch, sample_pdf, t
     monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(target))
     seen = []
 
-    def choose(message):
+    def choose(message, current=None):
         seen.append(message)
         assert not target.exists()
         return "cancel" if len(seen) == 1 else "without"
@@ -715,3 +715,39 @@ def test_undo_redo_after_incremental_save(window, monkeypatch, sample_pdf, tmp_p
     st = digital.verify_pdf(third, trusted=[id_a[1]])
     assert st[0].status == "valida", st[0].reasons + st[0].modification_details
     assert c.state(view).statuses[0].status == "valida"
+
+
+def test_timestamp_failure_use_other_server(window, monkeypatch, sample_pdf, tmp_path, id_a, tsa):
+    """SIG-10: «Usa un altro server» riprova con il server scelto."""
+    from foliant.modules.sign import ui_digital
+    store.TSAConfig().add("Guasto", "http://127.0.0.1:9/")
+    store.TSAConfig().add("Buono", "http://tsa.example.invalid/")
+    view = window.open_path(sample_pdf)
+    c = _ctl(window)
+    target = tmp_path / "altro.pdf"
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(timestamp_url="http://127.0.0.1:9/", timestamp_timeout=2)
+        return True
+
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(target))
+    assert [srv.name for srv in c.other_tsa_servers("http://127.0.0.1:9/")] == ["Buono"]
+    used = []
+    real_sign = digital.sign_pdf
+
+    def sign(data, did, opts):
+        used.append(opts.timestamp_url)
+        if opts.timestamp_url == "http://tsa.example.invalid/":
+            opts.timestamper = tsa[0]
+        return real_sign(data, did, opts)
+
+    monkeypatch.setattr(digital, "sign_pdf", sign)
+    monkeypatch.setattr(c, "_ask_timestamp_failure",
+                        lambda msg, cur: ("server", "http://tsa.example.invalid/", 5.0))
+    assert c.digital_sign(view, invisible=True)
+    assert used == ["http://127.0.0.1:9/", "http://tsa.example.invalid/"]
+    st = digital.verify_pdf(target.read_bytes())
+    assert st[0].time_source == "marca temporale"
+    assert c.clock_skew_warning(target.read_bytes()) is None

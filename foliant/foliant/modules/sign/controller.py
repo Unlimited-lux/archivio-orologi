@@ -617,6 +617,9 @@ class SignController(QObject):
             self.ctx.error(_("Firma digitale"), str(e))
             return False
         self._reopen(view, target)
+        skew = self.clock_skew_warning(signed) if options.timestamp_url or options.timestamper else None
+        if skew:
+            self.ctx.error(_("Marca temporale"), skew)
         self.ctx.info(_("Documento firmato"), _("Il documento firmato è stato salvato in:\n{path}\n\nAttenzione: "
                                                 "modificarlo e salvarlo di nuovo invaliderà la firma.")
                       .format(path=target))
@@ -632,8 +635,12 @@ class SignController(QObject):
                 if e.kind != "rete":
                     self.ctx.error(_("Marca temporale"), str(e))
                     return None
-                choice = self._ask_timestamp_failure(str(e))
+                choice = self._ask_timestamp_failure(str(e), options.timestamp_url)
                 if choice == "retry":
+                    continue
+                if isinstance(choice, tuple) and choice[0] == "server":
+                    options.timestamp_url, options.timestamp_timeout = choice[1], choice[2]
+                    options.timestamper = None
                     continue
                 if choice == "without":
                     options.timestamp_url = None
@@ -647,18 +654,49 @@ class SignController(QObject):
                 self.ctx.error(_("Firma digitale"), _("Firma non riuscita: {e}").format(e=e))
                 return None
 
-    def _ask_timestamp_failure(self, message: str) -> str:
+    def other_tsa_servers(self, current: str | None) -> list:
+        from . import store
+        return [srv for srv in store.TSAConfig().list() if srv.url != current]
+
+    def _ask_timestamp_failure(self, message: str, current_url: str | None = None):
         box = QMessageBox(self.ctx.window)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle(_("Marca temporale non disponibile"))
         box.setText(message + "\n\n" + _("Nessun file è stato scritto."))
         box.setInformativeText(_("Senza marca temporale l'ora della firma sarà quella dichiarata dal computer."))
         retry = box.addButton(_("Riprova"), QMessageBox.ButtonRole.AcceptRole)
+        others = self.other_tsa_servers(current_url)
+        other = box.addButton(_("Usa un altro server…"), QMessageBox.ButtonRole.ActionRole) if others else None
         without = box.addButton(_("Firma senza marca temporale"), QMessageBox.ButtonRole.ActionRole)
         box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
         box.exec()
         c = box.clickedButton()
+        if other is not None and c is other:
+            labels = [f"{srv.name} — {srv.url}" for srv in others]
+            choice, ok = QInputDialog.getItem(self.ctx.window, _("Server marca temporale"), _("Server:"),
+                                              labels, 0, False)
+            if not ok:
+                return "cancel"
+            srv = others[labels.index(choice)]
+            return ("server", srv.url, srv.timeout)
         return "retry" if c is retry else "without" if c is without else "cancel"
+
+    def clock_skew_warning(self, signed: bytes) -> str | None:
+        """Avviso se l'ora del computer differisce di oltre 5 minuti da quella della marca temporale."""
+        from datetime import datetime, timezone
+
+        from . import digital
+        try:
+            st = digital.verify_pdf(signed)[-1]
+        except Exception:
+            return None
+        if st.time_source != "marca temporale" or st.signing_time is None:
+            return None
+        delta = abs((datetime.now(timezone.utc) - st.signing_time).total_seconds())
+        if delta > 300:
+            return _("L'orologio del computer differisce di {m} minuti dall'ora della marca temporale: "
+                     "controlla data e ora del sistema.").format(m=int(delta // 60))
+        return None
 
     def _reopen(self, view, target: str) -> None:
         doc = view.document
@@ -851,7 +889,10 @@ TRANSLATIONS_EN = {
     "Nessun file è stato scritto.": "No file has been written.",
     "Senza marca temporale l'ora della firma sarà quella dichiarata dal computer.":
         "Without a timestamp the signing time will be the one declared by the computer.",
-    "Riprova": "Retry", "Firma senza marca temporale": "Sign without timestamp",
+    "Riprova": "Retry", "Usa un altro server…": "Use another server…", "Server:": "Server:",
+    "Server marca temporale": "Timestamp server",
+    "L'orologio del computer differisce di {m} minuti dall'ora della marca temporale: controlla data e ora del "
+    "sistema.": "The computer clock differs by {m} minutes from the timestamp time: check the system date and time.", "Firma senza marca temporale": "Sign without timestamp",
     "Traccia il riquadro del nuovo campo firma.": "Draw the box of the new signature field.",
     "Il campo è più piccolo di 20×10 pt: potrebbe essere difficile da firmare.":
         "The field is smaller than 20×10 pt: it may be hard to sign.",
