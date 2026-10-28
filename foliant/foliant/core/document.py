@@ -16,7 +16,7 @@ import os
 import secrets
 import tempfile
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -41,14 +41,17 @@ class _Snapshot:
     label: str
     data: bytes
     state: int
+    save_options: dict = field(default_factory=dict)
 
 
 def atomic_write(target: str | os.PathLike, data: bytes) -> None:
     """Scrive `data` in `target` senza mai lasciare un file a metà."""
-    target = Path(target)
-    directory = target.parent if str(target.parent) else Path(".")
+    target = Path(os.path.realpath(target))          # salva nel file vero, non sul collegamento
+    directory = target.parent
+    if target.exists() and (not os.access(target, os.W_OK) or not (target.stat().st_mode & 0o222)):
+        raise DocumentError(f"«{target.name}» è in sola lettura: salvalo con un altro nome.")
     try:
-        fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=directory)
+        fd, tmp = tempfile.mkstemp(prefix=".foliant-", suffix=".tmp", dir=directory)
     except OSError as e:
         raise DocumentError(f"Impossibile scrivere nella cartella «{directory}»: {e.strerror}.") from e
     try:
@@ -56,11 +59,14 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        if target.exists():
-            try:
+        try:
+            if target.exists():
                 os.chmod(tmp, target.stat().st_mode & 0o7777)
-            except OSError:
-                pass
+            else:
+                umask = os.umask(0); os.umask(umask)
+                os.chmod(tmp, 0o666 & ~umask)
+        except OSError:
+            pass
         os.replace(tmp, target)
     except BaseException as e:
         try:
@@ -300,6 +306,7 @@ class Document:
                     self._depth -= 1
                 return
             before = self._snapshot()
+            before_opts = dict(self.save_options)
             previous_state = self._state
             self._depth = 1
             try:
@@ -307,9 +314,10 @@ class Document:
             except BaseException:
                 self._depth = 0
                 self._restore(before)
+                self.save_options = before_opts
                 raise
             self._depth = 0
-            self._push(self._undo, _Snapshot(label, before, previous_state))
+            self._push(self._undo, _Snapshot(label, before, previous_state, before_opts))
             self._redo.clear()
             self._state = self._next_state
             self._next_state += 1
@@ -325,9 +333,10 @@ class Document:
             if not self._undo or self._depth:
                 return False
             snap = self._undo.pop()
-            self._redo.append(_Snapshot(snap.label, self._snapshot(), self._state))
+            self._redo.append(_Snapshot(snap.label, self._snapshot(), self._state, dict(self.save_options)))
             self._restore(snap.data)
             self._state = snap.state
+            self.save_options = dict(snap.save_options)
         self._notify(CONTENT)
         return True
 
@@ -336,15 +345,17 @@ class Document:
             if not self._redo or self._depth:
                 return False
             snap = self._redo.pop()
-            self._push(self._undo, _Snapshot(snap.label, self._snapshot(), self._state))
+            self._push(self._undo, _Snapshot(snap.label, self._snapshot(), self._state, dict(self.save_options)))
             self._restore(snap.data)
             self._state = snap.state
+            self.save_options = dict(snap.save_options)
         self._notify(CONTENT)
         return True
 
     def _snapshot(self) -> bytes:
-        # Copia in memoria non cifrata: la protezione si riapplica al salvataggio.
-        return self._pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_NONE)
+        # KEEP: la copia conserva la cifratura originale (stesse password e permessi);
+        # _restore() ri-autentica con self.password.
+        return self._pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_KEEP)
 
     def _restore(self, data: bytes) -> None:
         new = pymupdf.open(stream=data, filetype="pdf")
@@ -370,6 +381,14 @@ class Document:
 
     def to_bytes(self, **options) -> bytes:
         opts = {"garbage": 3, "deflate": True}
+        with self.lock:
+            keep = (self.save_options == self.original_protection and self.original_protection
+                    and (self._pdf.metadata or {}).get("encryption"))
+        if keep and "encryption" not in options:   # protezione invariata e ancora presente: riusa la cifratura originale
+            opts.update(options)
+            opts["encryption"] = pymupdf.PDF_ENCRYPT_KEEP
+            with self.lock:
+                return self._pdf.tobytes(**opts)
         opts.update(self.save_options)
         opts.update(options)
         if opts.get("encryption", pymupdf.PDF_ENCRYPT_NONE) in (pymupdf.PDF_ENCRYPT_NONE, pymupdf.PDF_ENCRYPT_KEEP):
@@ -384,6 +403,10 @@ class Document:
         target = Path(path) if path is not None else self.path
         if target is None:
             raise DocumentError("Scegli dove salvare il documento.")
+        if (path is None and not options and not self.is_modified
+                and self.save_options == self.original_protection and target.exists()):
+            self._notify(SAVED)   # niente da scrivere: non invalidare firme né cifratura
+            return
         data = self.to_bytes(**options)
         atomic_write(target, data)
         self.path = target
