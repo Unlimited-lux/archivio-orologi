@@ -68,3 +68,19 @@ Limiti noti: l'OCR tiene il lock del motore per la durata del riconoscimento (il
 è thread-safe); il limite di operazioni parallele per profilo non è imposto; con il fornitore
 Anthropic l'interruzione è immediata solo all'arrivo del frammento successivo (al più il tempo
 di inattività configurato).
+
+## Specifica v2 (commit c8fddf4) — non completata entro la scadenza
+
+La specifica v2 è arrivata dopo il completamento delle funzioni sopra. Rispetto a essa:
+
+| ID | Stato | Note |
+|---|---|---|
+| AI-20 (v2) | parziale | Modello generico configurabile, import/esport JSON e attività predefinite presenti (quiz, analisi di articolo, bilancio, flussi di cassa, curriculum, piano d'impresa, analisi strategica, video, matematica…). Non implementati i criteri v2 specifici: segnaposto `{parametro:nome}`, sezioni fisse con «da completare», passaggi numerati con risultato evidenziato, marcatura «non verificato» dei valori numerici citati. |
+| AI-28 Contratti | parziale | Solo il modello «Scheda di un contratto» e «Analisi dei rischi di un contratto» / «Bozza di contratto» come attività testuali; mancano tabella delle clausole, «Aggiungi come commenti», fonti «da verificare». |
+| AI-29 Fatture e ricevute | parziale | Coperto da AI-10 (estrazione fattura, controllo somme, «non verificato», CSV/JSON); mancano controllo formale di partita IVA e codice fiscale, CSV con file d'origine su più PDF, lettura locale dell'XML di fattura elettronica allegato. |
+| AI-30 Schede prodotto | parziale | Attività «Scheda prodotto» testuale; manca la tabella delle specifiche strutturata con unità, limite di 300 caratteri ed esportazione CSV. |
+| AI-31 Comunicazioni ai clienti | parziale | Attività «Comunicazione al cliente» e scrittura assistita (AI-19, con «Crea nuovo PDF»); manca l'evidenziazione dei segnaposto e l'avvio dal risultato di una revisione. |
+| AI-32 Confronto e classifica | non fatto | Il confronto testuale è disponibile (attività «Confronto», «Più documenti › Confronta»); manca la classifica con criteri pesati e totali calcolati localmente. |
+
+I subagenti avviati per queste funzioni si sono interrotti per il limite di utilizzo dell'API
+prima di produrre codice; nessun file parziale è stato aggiunto.
