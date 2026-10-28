@@ -1,6 +1,6 @@
 import pymupdf
 import pytest
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 
 from foliant.core.document import Document
 from foliant.ui.document_view import FIT_PAGE, FIT_WIDTH, VIEW_FACING, VIEW_SINGLE, DocumentView
@@ -71,6 +71,218 @@ def test_coordinate_mapping_matches_rendering(qtbot, tmp_path, rotation, crop):
     page, pt = v.view_to_page(QPointF(cx, cy))
     assert page == 0
     assert abs(pt.x - target.x0 - 20) < 1 and abs(pt.y - target.y0 - 15) < 1
+
+
+def test_zoom_limits_spec(view):
+    """VIS-10: limiti 1%–6400%; i passi proseguono oltre l'800% senza saltare al massimo."""
+    view.set_zoom(1000)
+    assert view.zoom == pytest.approx(64.0)
+    view.zoom_in()
+    assert view.zoom == pytest.approx(64.0)
+    view.set_zoom(8.0)
+    view.zoom_in()
+    assert 8.0 < view.zoom < 64.0
+    view.set_zoom(0.0001)
+    assert view.zoom == pytest.approx(0.01)
+    view.zoom_out()
+    assert view.zoom == pytest.approx(0.01)
+
+
+def test_zoom_1_percent(view):
+    """VIS-10: lo zoom all'1% funziona e disegna le pagine."""
+    view.set_zoom(0.01)
+    assert view.zoom == pytest.approx(0.01)
+    view.flush_rendering()
+    view.grab()
+    r = view.page_rect(0)
+    assert 5 < r.width() < 10 and 8 < r.height() < 14
+    key = view._scale_key()
+    assert (0, key, 0, view.document.version) in view._cache
+
+
+def test_zoom_6400_renders_only_visible_tiles(qtbot, tmp_path, monkeypatch):
+    """VIS-10: a 6400% una A4 (circa 38.000 px di lato) si disegna a tasselle, mai per intero."""
+    path = make_pdf(tmp_path / "a4.pdf", pages=2)
+    v = DocumentView(Document.open(path))
+    qtbot.addWidget(v)
+    v.resize(900, 700)
+    v.show()
+    qtbot.waitExposed(v)
+    v.flush_rendering()
+    sizes = []
+    original = pymupdf.Page.get_pixmap
+
+    def spy(page, *a, **k):
+        pix = original(page, *a, **k)
+        sizes.append(pix.width * pix.height)
+        return pix
+
+    monkeypatch.setattr(pymupdf.Page, "get_pixmap", spy)
+    v.set_zoom(64)
+    assert v.zoom == pytest.approx(64.0)
+    v.flush_rendering()
+    v.grab()
+    assert sizes and max(sizes) <= 20_000_000, max(sizes)
+    assert all(img.width() * img.height() <= 20_000_000 for img in v._cache.values())
+    assert v._tiled(0, v._scale_key()) and v._tiles
+    assert v._tiles_bytes <= v.TILE_CACHE_LIMIT
+    # le tasselle visibili ci sono tutte
+    key, ver = v._scale_key(), v.document.version
+    visible = v._tiles_in(0, key, QRectF(v.viewport().rect()))
+    assert visible and all((0, key, 0, ver) + t in v._tiles for t in visible)
+    # allo scorrimento si disegnano solo le tasselle nuove; tornando indietro si riusano quelle in cache
+    hbar, vbar = v.horizontalScrollBar(), v.verticalScrollBar()
+    x, y = hbar.value(), vbar.value()
+    vbar.setValue(y + 5000)
+    v.flush_rendering()
+    hbar.setValue(x + 3000)
+    v.flush_rendering()
+    hbar.setValue(x)
+    vbar.setValue(y)
+    before = len(sizes)
+    v.flush_rendering()
+    assert len(sizes) == before
+    assert max(sizes) <= 20_000_000
+    v.set_zoom(1.0)                     # zoom normale: niente più tasselle in memoria
+    v.flush_rendering()
+    assert not v._tiles and v._tiles_bytes == 0
+
+
+def test_tile_cache_is_bounded(qtbot, sample_pdf, monkeypatch):
+    """La cache delle tasselle scarta le meno usate oltre il limite."""
+    v = DocumentView(Document.open(sample_pdf))
+    qtbot.addWidget(v)
+    v.resize(900, 700)
+    v.show()
+    qtbot.waitExposed(v)
+    monkeypatch.setattr(v, "TILE_CACHE_LIMIT", 12 * 1024 * 1024)
+    v.set_zoom(20)
+    vbar = v.verticalScrollBar()
+    for step in range(6):
+        vbar.setValue(vbar.value() + 1500)
+        v.flush_rendering()
+        assert v._tiles_bytes <= v.TILE_CACHE_LIMIT
+        assert v._tiles_bytes == sum(t[0].sizeInBytes() for t in v._tiles.values())
+
+
+@pytest.mark.parametrize("rotation,crop,view_rotation", [
+    (0, None, 0),
+    (90, (20, 40, 500, 700), 0),
+    (90, (20, 40, 500, 700), 90),
+    (270, (50, 30, 550, 800), 0),
+    (180, None, 270),
+])
+def test_tiled_rendering_matches_mapping(qtbot, tmp_path, rotation, crop, view_rotation):
+    """A zoom 3200% il rettangolo nero compare, a tasselle, dove page_to_view lo mappa."""
+    target = pymupdf.Rect(100, 200, 140, 230)
+
+    def extra(page, i):
+        page.draw_rect(target, color=None, fill=(0, 0, 0))     # senza bordo: margini netti
+        assert page.get_drawings()
+        if crop:
+            page.set_cropbox(pymupdf.Rect(*crop))
+        page.set_rotation(rotation)
+
+    path = make_pdf(tmp_path / "r.pdf", pages=1, extra=extra)
+    with pymupdf.open(path) as d:
+        target = d[0].get_drawings()[0]["rect"]
+    v = DocumentView(Document.open(path))
+    qtbot.addWidget(v)
+    v.resize(800, 900)
+    v.show()
+    qtbot.waitExposed(v)
+    if view_rotation:
+        v.rotate_view(view_rotation)
+    v.set_zoom(32)
+    assert v._tiled(0, v._scale_key())
+    hbar, vbar = v.horizontalScrollBar(), v.verticalScrollBar()
+    vw, vh = v.viewport().width(), v.viewport().height()
+
+    def show_tiles_at(point: QPointF):
+        """Porta `point` (viewport) al centro e cattura solo le tasselle (senza la resa intera sotto)."""
+        hbar.setValue(int(round(hbar.value() + point.x() - vw / 2)))
+        vbar.setValue(int(round(vbar.value() + point.y() - vh / 2)))
+        v.flush_rendering()
+        v._stale.clear()
+        return v.grab().toImage()
+
+    def dark(img, x, y):
+        dpr = img.devicePixelRatio()
+        px = img.pixelColor(int(x * dpr), int(y * dpr))
+        return px.red() < 60 and px.green() < 60, px.name()
+
+    img = show_tiles_at(v.page_to_view(0, target).center())
+    c = v.page_to_view(0, target).center()
+    ok, name = dark(img, c.x(), c.y())
+    assert ok, (rotation, crop, view_rotation, name)
+    # precisione: un angolo del rettangolo, ±12 px (meno di 0,3 pt) dentro e fuori
+    mapped = v.page_to_view(0, target)
+    img = show_tiles_at(mapped.topLeft())
+    corner = v.page_to_view(0, target).topLeft()
+    assert dark(img, corner.x() + 12, corner.y() + 12)[0]
+    assert not dark(img, corner.x() - 12, corner.y() - 12)[0]
+    assert not dark(img, corner.x() + 12, corner.y() - 12)[0]
+    assert not dark(img, corner.x() - 12, corner.y() + 12)[0]
+    page, pt = v.view_to_page(QPointF(corner.x() + 12, corner.y() + 12))
+    assert page == 0 and pymupdf.Rect(target).contains(pt)
+
+
+def test_tiles_follow_content_changes(qtbot, sample_pdf):
+    """Dopo una modifica le tasselle si ridisegnano; quelle vecchie restano solo finché servono."""
+    v = DocumentView(Document.open(sample_pdf))
+    qtbot.addWidget(v)
+    v.resize(900, 700)
+    v.show()
+    qtbot.waitExposed(v)
+    v.set_zoom(16)
+    v.go_to_page(0, pymupdf.Point(72, 100))
+    v.flush_rendering()
+    old = v.document.version
+    with v.document.change("Riquadro") as pdf:
+        pdf[0].draw_rect(pymupdf.Rect(0, 0, 595, 842), color=None, fill=(0, 0, 0))
+    assert v.document.version != old
+    assert v._tiles and all(k[3] == old for k in v._tiles)   # resa provvisoria in attesa delle nuove
+    v.flush_rendering()
+    key, ver = v._scale_key(), v.document.version
+    visible = v._tiles_in(0, key, QRectF(v.viewport().rect()))
+    assert visible and all((0, key, 0, ver) + t in v._tiles for t in visible)
+    assert not any(k[3] == old and (k[4], k[5]) in visible for k in v._tiles if k[0] == 0)
+    img = v.grab().toImage()
+    r = v.page_rect(0) & QRectF(v.viewport().rect())
+    px = img.pixelColor(int(r.center().x() * img.devicePixelRatio()), int(r.center().y() * img.devicePixelRatio()))
+    assert px.red() < 30
+
+
+def test_tiles_respect_hidden_annotations(qtbot, tmp_path):
+    """Con le annotazioni nascoste, anche le tasselle si disegnano senza."""
+    path = tmp_path / "annot.pdf"
+    d = pymupdf.open()
+    p = d.new_page()
+    a = p.add_rect_annot(pymupdf.Rect(100, 200, 300, 400))
+    a.set_colors(stroke=(0, 0, 0), fill=(0, 0, 0))
+    a.update()
+    d.save(str(path))
+    v = DocumentView(Document.open(path))
+    qtbot.addWidget(v)
+    v.resize(800, 800)
+    v.show()
+    qtbot.waitExposed(v)
+    v.set_zoom(12)
+    v.ensure_visible(0, pymupdf.Rect(150, 250, 250, 350))
+    centre = v.page_to_view(0, pymupdf.Rect(150, 250, 250, 350)).center()
+
+    def colour():
+        v.flush_rendering()
+        v._stale.clear()
+        img = v.grab().toImage()
+        dpr = img.devicePixelRatio()
+        return img.pixelColor(int(centre.x() * dpr), int(centre.y() * dpr)).red()
+
+    assert v._tiled(0, v._scale_key())
+    assert colour() < 60
+    v.show_annotations = False
+    v._invalidate_render()
+    assert colour() > 200
 
 
 def test_view_modes(view):

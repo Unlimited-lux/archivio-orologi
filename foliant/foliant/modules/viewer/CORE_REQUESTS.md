@@ -52,8 +52,9 @@ la soluzione locale si può togliere.
     aggira; anche altri moduli che eliminano allegati (protezione, sanificazione) devono
     tenerne conto.
 
-13. **Zoom**: la specifica chiede limiti 1%–6400% e Ctrl+0 = adatta pagina, Ctrl+1 =
-    dimensione reale; il nucleo usa 10%–800% e scorciatoie diverse.
+13. **Zoom**: la specifica chiede Ctrl+0 = adatta pagina, Ctrl+1 = dimensione reale; il nucleo
+    usa scorciatoie diverse. (I limiti 1%–6400% ci sono: oltre ~16 megapixel la vista disegna
+    la pagina a tasselle.)
 
 14. **Generatore di miniature per il file manager** (VIS-53): `packaging/install.sh` dovrebbe
     installare un eseguibile `foliant-thumbnailer` che lancia
