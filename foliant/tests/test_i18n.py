@@ -140,3 +140,17 @@ def test_dates_and_numbers_follow_the_language():
         assert i18n.format_number(9800, 2) == "9,800.00"
     finally:
         i18n.set_language(previous)
+
+
+def test_english_catalog_has_no_duplicate_keys():
+    """Una chiave ripetuta nel dizionario EN del nucleo sovrascrive in silenzio la prima voce."""
+    import ast
+    from collections import Counter
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parent.parent / "foliant" / "ui" / "i18n_en.py"
+    dicts = [n for n in ast.walk(ast.parse(source.read_text(encoding="utf-8"))) if isinstance(n, ast.Dict)]
+    assert dicts
+    for d in dicts:
+        keys = [ast.literal_eval(k) for k in d.keys if k is not None]
+        assert not [k for k, n in Counter(keys).items() if n > 1]
