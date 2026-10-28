@@ -1,0 +1,1268 @@
+"""Modulo «Moduli»: integrazione con l'applicazione (modalità, azioni, pannelli, viste)."""
+
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING, Any
+
+import pymupdf
+from PySide6.QtCore import QEvent, QObject, Qt, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
+from PySide6.QtWidgets import QMenu, QToolButton
+
+from foliant.api import ENGINE_LOCK, OperationCancelled, _, bind_icon, icon
+
+from . import detect as D
+from . import engine as E
+from . import interchange as X
+from .design import KIND_ICONS, FieldCreateTool, FieldSelectTool, paint_fields, paint_tab_numbers
+from .fill import FormFiller
+
+if TYPE_CHECKING:
+    from foliant.api import Context, DocumentView
+
+DATA_FILTER = "FDF (*.fdf);;XFDF (*.xfdf);;CSV (*.csv);;JSON (*.json);;XML (*.xml);;TXT (*.txt)"
+IMPORT_FILTER = _("Dati del modulo") + " (*.fdf *.xfdf *.csv *.json *.xml *.txt);;" + DATA_FILTER
+
+CREATE_KINDS = [E.TEXT, E.CHECKBOX, E.RADIO, E.COMBO, E.LIST, E.BUTTON, "image", "date", E.SIGNATURE]
+
+
+def create_label(kind: str) -> str:
+    return {E.TEXT: _("Testo"), E.CHECKBOX: _("Casella di controllo"), E.RADIO: _("Pulsante di opzione"),
+            E.COMBO: _("Elenco a discesa"), E.LIST: _("Casella di riepilogo"), E.BUTTON: _("Pulsante"),
+            "image": _("Immagine"), "date": _("Data"), E.SIGNATURE: _("Firma")}[kind]
+
+
+class FormsModule(QObject):
+    def __init__(self, ctx: "Context"):
+        super().__init__(ctx)
+        self.ctx = ctx
+        self.fillers: dict[int, FormFiller] = {}
+        self.selection: list[tuple[int, int]] = []
+        self.design_active = False
+        self.preview = False
+        self.last_radio_group: str | None = None
+        self.select_tool = FieldSelectTool(self)
+        self.panel = None
+        self.fields_panel = None
+        self.last_report: dict = {}
+
+    # ================================================================ registrazione
+    def register(self) -> None:
+        ctx = self.ctx
+        mode = ctx.add_mode("moduli", _("Moduli"), "text-cursor-input", 50)
+        self.mode = mode
+        self.act_select = ctx.action(_("Seleziona campi"), "mouse-pointer-2", self.activate_select_tool,
+                                     checkable=True, tooltip=_("Seleziona, sposta e ridimensiona i campi"))
+        mode.add_action(self.act_select)
+        self.tool_group = QActionGroup(self)
+        self.tool_group.addAction(self.act_select)
+        self.create_actions: dict[str, QAction] = {}
+        for kind in CREATE_KINDS:
+            act = ctx.action(create_label(kind), KIND_ICONS[kind], None, checkable=True,
+                             tooltip=_("Crea: {t} (doppio clic per crearne più di uno)").format(t=create_label(kind)))
+            act.triggered.connect(lambda _c=False, k=kind: self.start_create(k))
+            self.tool_group.addAction(act)
+            self.create_actions[kind] = act
+        create_menu = QMenu(_("Nuovo campo"), ctx.window)
+        for kind in CREATE_KINDS:
+            create_menu.addAction(self.create_actions[kind])
+        for kind in (E.TEXT, E.CHECKBOX, E.RADIO, E.COMBO, E.LIST, "date"):
+            mode.add_action(self.create_actions[kind])
+            btn = mode.toolbar.widgetForAction(self.create_actions[kind])
+            if isinstance(btn, QToolButton):
+                btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+                btn.installEventFilter(self)
+        more = QToolButton(mode.toolbar)
+        more.setText(_("Altri campi"))
+        more.setToolTip(_("Altri tipi di campo"))
+        bind_icon(more, "plus")
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        more.setMenu(create_menu)
+        more.setToolButtonStyle(mode.toolbar.toolButtonStyle())
+        mode.add_widget(more)
+        mode.add_separator()
+        self.act_detect = ctx.action(_("Riconosci campi"), "scan-search", self.detect_fields,
+                                     tooltip=_("Propone i campi su moduli piatti o scansionati"))
+        mode.add_action(self.act_detect)
+        arrange = QMenu(_("Disponi"), ctx.window)
+        self.arrange_actions = {}
+        for key, text, ic in (
+            ("left", _("Allinea a sinistra"), "align-start-vertical"),
+            ("hcenter", _("Allinea al centro orizzontale"), "align-center-vertical"),
+            ("right", _("Allinea a destra"), "align-end-vertical"),
+            ("top", _("Allinea in alto"), "align-start-horizontal"),
+            ("vcenter", _("Allinea al centro verticale"), "align-center-horizontal"),
+            ("bottom", _("Allinea in basso"), "align-end-horizontal"),
+            (None, None, None),
+            ("dist_h", _("Distribuisci orizzontalmente"), "align-horizontal-distribute-center"),
+            ("dist_v", _("Distribuisci verticalmente"), "align-vertical-distribute-center"),
+            (None, None, None),
+            ("same_width", _("Stessa larghezza"), "move-horizontal"),
+            ("same_height", _("Stessa altezza"), "move-vertical"),
+            ("same_size", _("Stessa larghezza e altezza"), "scaling"),
+        ):
+            if key is None:
+                arrange.addSeparator()
+                continue
+            a = ctx.action(text, ic, None)
+            a.triggered.connect(lambda _c=False, k=key: self.arrange(k))
+            arrange.addAction(a)
+            self.arrange_actions[key] = a
+        b = QToolButton(mode.toolbar)
+        b.setText(_("Allinea e distribuisci"))
+        bind_icon(b, "align-horizontal-distribute-center")
+        b.setMenu(arrange)
+        b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        b.setToolButtonStyle(mode.toolbar.toolButtonStyle())
+        mode.add_widget(b)
+        self.act_duplicate = ctx.action(_("Duplica campo"), "copy-plus", self.duplicate_selected)
+        self.act_copy_pages = ctx.action(_("Copia su più pagine…"), "copy", self.copy_to_pages_dialog)
+        self.act_delete = ctx.action(_("Elimina campo"), "trash-2", self.delete_selected)
+        tab_menu = QMenu(_("Ordine di tabulazione"), ctx.window)
+        tab_menu.addAction(ctx.action(_("Per righe"), "list-ordered", lambda: self.tab_order("row")))
+        tab_menu.addAction(ctx.action(_("Per colonne"), "list-ordered", lambda: self.tab_order("column")))
+        tab_menu.addAction(ctx.action(_("Ordine della selezione"), "list-ordered", lambda: self.tab_order("selection")))
+        tab_menu.addSeparator()
+        self.act_tab_numbers = ctx.action(_("Mostra l'ordine sui campi"), "hash", self.toggle_tab_numbers, checkable=True)
+        tab_menu.addAction(self.act_tab_numbers)
+        tb = QToolButton(mode.toolbar)
+        tb.setText(_("Ordine di tabulazione"))
+        bind_icon(tb, "list-ordered")
+        tb.setMenu(tab_menu)
+        tb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        tb.setToolButtonStyle(mode.toolbar.toolButtonStyle())
+        mode.add_widget(tb)
+        mode.add_separator()
+        self.act_preview = ctx.action(_("Anteprima compilazione"), "eye", self.toggle_preview, checkable=True)
+        mode.add_action(self.act_preview)
+        self.act_import = ctx.action(_("Importa dati…"), "file-input", self.import_data_dialog)
+        self.act_export = ctx.action(_("Esporta dati…"), "file-output", self.export_data_dialog)
+        self.act_reset = ctx.action(_("Reimposta modulo"), "rotate-ccw", self.reset_dialog)
+        self.act_flatten = ctx.action(_("Appiattisci modulo…"), "layers", self.flatten_dialog)
+        self.act_recalc = ctx.action(_("Ricalcola"), "calculator", self.recalculate)
+        self.act_check = ctx.action(_("Verifica modulo"), "list-checks", self.check_form)
+        self.act_collect = ctx.action(_("Raccogli dati da più PDF…"), "table", self.collect_dialog, requires_document=False)
+        self.act_series = ctx.action(_("Compila in serie da CSV…"), "files", self.series_dialog)
+        self.act_calc_order = ctx.action(_("Ordine di calcolo…"), "list-ordered", self.calc_order_dialog)
+        self.act_xfa = ctx.action(_("Converti in modulo standard"), "file-check", self.convert_xfa)
+        self.act_xfa_export = ctx.action(_("Esporta dati XML…"), "file-output", self.export_xfa_dialog)
+        self.act_xfa_import = ctx.action(_("Importa dati XML…"), "file-input", self.import_xfa_dialog)
+        data_menu = QMenu(_("Dati"), ctx.window)
+        for a in (self.act_import, self.act_export, None, self.act_reset, self.act_recalc, self.act_calc_order, self.act_check,
+                  None, self.act_collect, self.act_series,
+                  None, self.act_flatten, None, self.act_xfa_export, self.act_xfa_import, self.act_xfa):
+            if a is None:
+                data_menu.addSeparator()
+            else:
+                data_menu.addAction(a)
+        db = QToolButton(mode.toolbar)
+        db.setText(_("Dati e modulo"))
+        bind_icon(db, "file-output")
+        db.setMenu(data_menu)
+        db.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        db.setToolButtonStyle(mode.toolbar.toolButtonStyle())
+        mode.add_widget(db)
+        edit_menu = QMenu(_("Campo"), ctx.window)
+        for a in (self.act_duplicate, self.act_copy_pages, self.act_delete):
+            edit_menu.addAction(a)
+        eb = QToolButton(mode.toolbar)
+        eb.setText(_("Campo"))
+        eb.setToolTip(_("Duplica, copia su più pagine, elimina"))
+        bind_icon(eb, "copy-plus")
+        eb.setMenu(edit_menu)
+        eb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        eb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        mode.add_widget(eb)
+        for a in (self.act_import, self.act_export, self.act_reset, self.act_flatten, self.act_collect, self.act_series):
+            ctx.add_menu_action(a, _("Moduli"))
+        mode.entered.connect(self.enter_design)
+        mode.left.connect(self.leave_design)
+        ctx.documentOpened.connect(self._attach)
+        ctx.currentViewChanged.connect(self._current_changed)
+        ctx.documentClosed.connect(self._detach)
+        ctx.modeChanged.connect(lambda _m: self._sync_tools())
+        ctx.add_view_menu_provider(self.context_menu)
+        self._install_panels()
+        for view in ctx.views():
+            self._attach(view)
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() == QEvent.Type.MouseButtonDblClick and isinstance(obj, QToolButton):
+            for kind, act in self.create_actions.items():
+                if obj.defaultAction() is act:
+                    self.start_create(kind, sticky=True)
+                    self.ctx.status(_("Strumento bloccato: crea più campi, Esc per terminare."))
+                    return True
+        return False
+
+    def _install_panels(self) -> None:
+        try:
+            from .panel import FieldPropertiesPanel
+        except Exception:  # pannello non disponibile: il resto del modulo funziona
+            FieldPropertiesPanel = None
+        if FieldPropertiesPanel is not None:
+            try:
+                self.panel = FieldPropertiesPanel(self.apply_properties, set_default=self.set_kind_defaults)
+            except TypeError:
+                self.panel = FieldPropertiesPanel(self.apply_properties)
+            self.ctx.add_properties_panel("moduli", self.panel)
+        try:
+            from .fields_panel import FieldsPanel
+        except Exception:
+            FieldsPanel = None
+        if FieldsPanel is not None:
+            self.fields_panel = FieldsPanel(self)
+            self.ctx.add_sidebar_panel("moduli-campi", _("Campi"), "text-cursor-input", self.fields_panel, 60)
+
+    # ================================================================ viste
+    def filler(self, view: "DocumentView") -> FormFiller:
+        f = self.fillers.get(id(view))
+        if f is None or f.view is not view:
+            f = self._attach(view)
+        return f
+
+    def _attach(self, view) -> FormFiller | None:
+        if view is None:
+            return None
+        f = self.fillers.get(id(view))
+        if f is not None and f.view is view:
+            return f
+        f = FormFiller(self.ctx, view, self)
+        f.designRequested.connect(lambda: self.ctx.set_mode("moduli"))
+        f.resetRequested.connect(self.reset_dialog)
+        f.dataRequested.connect(self.data_menu_popup)
+        f.changed.connect(self._filler_changed)
+        f.design = self.design_active and not self.preview
+        self.fillers[id(view)] = f
+        return f
+
+    def _detach(self, view) -> None:
+        f = self.fillers.pop(id(view), None)
+        if f is not None:
+            f.dispose()
+
+    def _current_changed(self, view) -> None:
+        self.selection = []
+        if view is not None:
+            f = self.filler(view)
+            f.design = self.design_active and not self.preview
+            f.update_bar()
+            if self.design_active:
+                view.set_tool(self.select_tool)
+        self._refresh_panels()
+
+    def _filler_changed(self) -> None:
+        view = self.ctx.current_view()
+        if view is not None:
+            f = self.fillers.get(id(view))
+            if f is not None:
+                keys = {(x.page, x.xref) for x in f.state.fields}
+                self.selection = [k for k in self.selection if k in keys]
+        self._refresh_panels()
+
+    def document_saved(self, view) -> None:
+        """Dopo un salvataggio gli identificativi dei widget possono cambiare: si riseleziona per posizione."""
+        if view is not self.ctx.current_view() or not self.selection:
+            return
+        self.selection = []
+        self._refresh_panels()
+
+    def highlight_changed(self, on: bool) -> None:
+        for f in self.fillers.values():
+            f.set_highlight(on)
+
+    def icon(self, name: str):
+        return icon(name)
+
+    def exec_popup(self, menu: QMenu, pos) -> None:
+        menu.popup(pos)
+
+    # ================================================================ modalità modifica
+    def enter_design(self) -> None:
+        self.design_active = True
+        self.preview = False
+        self.act_preview.setChecked(False)
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        f = self.filler(view)
+        if f.state.xfa == "dynamic":
+            self.ctx.status(_("I moduli XML dinamici non si possono modificare."))
+        if f.state.blocked:
+            self.ctx.status(_("Modifica del modulo non disponibile: {r}").format(r=f.state.blocked))
+        f.close_editor(commit=True)
+        f.design = True
+        f.update_bar()
+        self.activate_select_tool()
+        self.show_properties()
+        view.viewport().update()
+
+    def leave_design(self) -> None:
+        self.design_active = False
+        self.preview = False
+        for f in self.fillers.values():
+            f.design = False
+            f.update_bar()
+            f.view.viewport().update()
+        self.selection = []
+        self.ctx.hide_properties()
+
+    def toggle_preview(self, on: bool | None = None) -> None:
+        on = self.act_preview.isChecked() if on is None else on
+        self.act_preview.setChecked(on)
+        self.preview = on
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        f = self.filler(view)
+        f.close_editor(commit=True)
+        doc = view.document
+        if on:
+            self._preview_start = (id(doc), len(doc._undo))
+        else:
+            start = getattr(self, "_preview_start", None)
+            self._preview_start = None
+            if start and start[0] == id(doc):
+                steps = len(doc._undo) - start[1]
+                if steps > 0 and not self.ctx.confirm(
+                        _("Anteprima compilazione"),
+                        _("Mantenere i valori inseriti durante l'anteprima?")):
+                    for _i in range(steps):
+                        doc.undo()
+        f.design = self.design_active and not on
+        if on:
+            self.ctx.set_tool(None)
+            self.selection = []
+        else:
+            self.activate_select_tool()
+        f.update_bar()
+        view.viewport().update()
+
+    def _sync_tools(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        tool = view.tool
+        self.act_select.setChecked(tool is self.select_tool)
+        for kind, act in self.create_actions.items():
+            act.setChecked(isinstance(tool, FieldCreateTool) and tool.kind == kind)
+
+    def activate_select_tool(self) -> None:
+        if self.ctx.current_mode() != "moduli":
+            self.ctx.set_mode("moduli")
+        self.ctx.set_tool(self.select_tool)
+        self.act_select.setChecked(True)
+
+    def start_create(self, kind: str, sticky: bool | None = None) -> FieldCreateTool | None:
+        view = self.ctx.current_view()
+        if view is None:
+            return None
+        if self.ctx.current_mode() != "moduli":
+            self.ctx.set_mode("moduli")
+        f = self.filler(view)
+        if f.state.xfa == "dynamic":
+            self.ctx.error(_("Moduli"), _("I moduli XML dinamici non si possono modificare."))
+            return None
+        if f.state.blocked:
+            self.ctx.error(_("Moduli"), _("Modifica del modulo non disponibile: {r}").format(r=f.state.blocked))
+            return None
+        if sticky is None:
+            current = view.tool
+            sticky = isinstance(current, FieldCreateTool) and current.kind == kind and not current.sticky \
+                and getattr(self, "_last_create_click", None) == kind
+        self._last_create_click = kind
+        tool = FieldCreateTool(self, kind, sticky=bool(sticky))
+        self.ctx.set_tool(tool)
+        self.create_actions[kind].setChecked(True)
+        self.ctx.status(_("Fai clic o trascina sulla pagina per creare il campo. Esc per annullare."))
+        return tool
+
+    def paint_design(self, view, p, page: int, fields) -> None:
+        paint_fields(view, p, page, fields, set(self.selection))
+        if self.show_tab_numbers:
+            with ENGINE_LOCK:
+                order = E.navigation_order(view.document.pdf, page)
+            paint_tab_numbers(p, order)
+
+    show_tab_numbers = False
+
+    def toggle_tab_numbers(self, on: bool) -> None:
+        self.show_tab_numbers = on
+        view = self.ctx.current_view()
+        if view is not None:
+            view.viewport().update()
+
+    # ================================================================ selezione e modifiche
+    def set_selection(self, keys: list[tuple[int, int]]) -> None:
+        self.selection = list(dict.fromkeys(keys))
+        view = self.ctx.current_view()
+        if view is not None:
+            view.viewport().update()
+        self._refresh_panels()
+
+    def selected_fields(self, view=None) -> list[E.FieldInfo]:
+        view = view or self.ctx.current_view()
+        if view is None:
+            return []
+        f = self.filler(view)
+        f.state.refresh()
+        out = []
+        for page, xref in self.selection:
+            info = f.state.find(page, xref)
+            if info is not None:
+                out.append(info)
+        return out
+
+    def _refresh_panels(self) -> None:
+        view = self.ctx.current_view()
+        if self.panel is not None:
+            names: list[str] = []
+            radios: dict[str, list[str]] = {}
+            if view is not None:
+                st = self.filler(view).state
+                st.refresh()
+                names = list(dict.fromkeys(f.name for f in st.fields))
+                for f in st.fields:
+                    if f.kind == E.RADIO and f.export:
+                        radios.setdefault(f.name, [])
+                        if f.export not in radios[f.name]:
+                            radios[f.name].append(f.export)
+            self.panel.set_fields(self.selected_fields(view) if view else [], names, radio_exports=radios)
+        if self.fields_panel is not None:
+            self.fields_panel.refresh()
+
+    def show_properties(self) -> None:
+        if self.panel is not None:
+            self.ctx.show_properties("moduli")
+
+    def _change(self, label: str, fn, view=None) -> Any:
+        """Esegue `fn(pdf)` come unico passo annullabile; mostra gli errori all'utente."""
+        view = view or self.ctx.current_view()
+        if view is None:
+            return None
+        try:
+            with view.document.change(label) as pdf:
+                result = fn(pdf)
+        except E.FormError as e:
+            self.ctx.error(_("Moduli"), str(e))
+            return None
+        except Exception as e:
+            self.ctx.error(_("Moduli"), _("Operazione non riuscita: {e}").format(e=e))
+            return None
+        f = self.filler(view)
+        f.state.refresh(force=True)
+        f.update_bar()
+        self._filler_changed()
+        view.viewport().update()
+        return result
+
+    def apply_properties(self, keys: list[tuple[int, int]], props: dict, label: str) -> bool:
+        view = self.ctx.current_view()
+        if view is None or not keys:
+            return False
+        if "calc" in props and props["calc"] is not None:
+            with ENGINE_LOCK:
+                for page, xref in keys:
+                    name = E.field_info(view.document.pdf, page, xref).name
+                    cycle = E.find_cycle(view.document.pdf, name, props["calc"])
+                    if cycle:
+                        self.ctx.error(_("Calcolo"), _("Il calcolo creerebbe un ciclo: {c}.").format(c=" → ".join(cycle)))
+                        return False
+        if props.get("formula"):
+            from . import formula as FX
+            try:
+                parsed = FX.parse(props["formula"]) if isinstance(props["formula"], str) else props["formula"]
+            except FX.FormulaError as e:
+                self.ctx.error(_("Formula"), _("{m} (posizione {p}).").format(m=e.message, p=e.position + 1))
+                return False
+            with ENGINE_LOCK:
+                for page, xref in keys:
+                    name = E.field_info(view.document.pdf, page, xref).name
+                    cycle = E.find_cycle(view.document.pdf, name, parsed)
+                    if cycle:
+                        self.ctx.error(_("Calcolo"), _("Il calcolo creerebbe un ciclo: {c}.").format(c=" → ".join(cycle)))
+                        return False
+        if "name" in props and len(keys) == 1:
+            page, xref = keys[0]
+            try:
+                with ENGINE_LOCK:
+                    E.field_info(view.document.pdf, page, xref)
+                result = self._change_raw(view, label, lambda pdf: E.update_properties(pdf, page, xref, **props))
+                return result
+            except E.NameTaken as e:
+                if e.compatible and self.ctx.confirm(_("Nome già usato"), _(
+                        "Esiste già un campo «{n}» dello stesso tipo. Unire i due campi? Condivideranno il valore "
+                        "(prevale quello del campo esistente).").format(n=e.name)):
+                    return self._change(_("Unisci campi"), lambda pdf: E.merge_into(pdf, page, xref, e.name)) is not None \
+                        or True
+                if not e.compatible:
+                    self.ctx.error(_("Nome già usato"), _("Esiste già un campo «{n}» di tipo diverso: scegli un altro nome.").format(n=e.name))
+                return False
+
+        def run(pdf):
+            for page, xref in keys:
+                E.update_properties(pdf, page, xref, **props)
+            if "calc" in props or "formula" in props:
+                E.recalculate(pdf)
+            return True
+
+        return bool(self._change(label, run))
+
+    def _change_raw(self, view, label, fn) -> bool:
+        """Come _change ma lascia passare NameTaken (serve per proporre l'unione)."""
+        try:
+            with view.document.change(label) as pdf:
+                fn(pdf)
+        except E.NameTaken:
+            raise
+        except E.FormError as e:
+            self.ctx.error(_("Moduli"), str(e))
+            return False
+        f = self.filler(view)
+        f.state.refresh(force=True)
+        self._filler_changed()
+        view.viewport().update()
+        return True
+
+    # ---------------------------------------------------------------- predefiniti per tipo
+    _DEFAULT_KEYS = ("font", "fontsize", "text_color", "fill_color", "border_color", "border_width",
+                     "border_style", "align")
+
+    def set_kind_defaults(self, kind: str, props: dict) -> None:
+        import json
+        clean = {k: (list(v) if isinstance(v, tuple) else v) for k, v in props.items() if k in self._DEFAULT_KEYS}
+        self.ctx.settings().setValue(f"forms/defaults/{kind}", json.dumps(clean))
+        self.ctx.status(_("Aspetto salvato come predefinito per i nuovi campi di questo tipo."))
+
+    def kind_defaults(self, kind: str) -> dict:
+        import json
+        raw = self.ctx.settings().value(f"forms/defaults/{kind}", "")
+        try:
+            data = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            return {}
+        return {k: (tuple(v) if isinstance(v, list) else v) for k, v in data.items() if k in self._DEFAULT_KEYS}
+
+    def create_field(self, view, page: int, kind: str, rect: pymupdf.Rect, *, sticky: bool = False,
+                     name: str | None = None, **props) -> int | None:
+        label = _("Crea campo")
+        props = {**self.kind_defaults(E.BUTTON if kind == "image" else kind), **props}
+        if kind == E.RADIO and name is None and sticky and self.last_radio_group:
+            name = self.last_radio_group
+        if kind == "image":
+            props.setdefault("caption", "")
+
+        def run(pdf):
+            k = E.BUTTON if kind == "image" else kind
+            x = E.create_field(pdf, page, k, rect, name, **props)
+            if kind == "image":
+                E.mark_image_field(pdf, page, x)
+            return x
+
+        xref = self._change(label, run, view)
+        if xref is None:
+            return None
+        if kind == E.RADIO:
+            with ENGINE_LOCK:
+                self.last_radio_group = E.field_info(view.document.pdf, page, xref).name
+        self.set_selection([(page, xref)])
+        self.show_properties()
+        if not sticky:
+            self.activate_select_tool() if self.design_active else None
+        return xref
+
+    def _signed_keys(self, view, keys) -> set:
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            return {(p, x) for p, x in keys if E.is_signed(pdf, x)}
+
+    def move_fields(self, view, changes, label: str) -> None:
+        signed = self._signed_keys(view, [(p, x) for p, x, _r in changes])
+        if signed:
+            self.ctx.error(_("Moduli"), _("I campi firma già firmati non si possono spostare né ridimensionare."))
+            changes = [c for c in changes if (c[0], c[1]) not in signed]
+            if not changes:
+                return
+        self._change(label, lambda pdf: E.move_fields(pdf, [(p, x, E.clamp_rect(pdf, p, r)) for p, x, r in changes]), view)
+
+    def nudge_selected(self, dx: float, dy: float) -> None:
+        sel = [f for f in self.selected_fields() if not f.locked]
+        if not sel:
+            return
+        changes = [(f.page, f.xref, pymupdf.Rect(f.rect.x0 + dx, f.rect.y0 + dy, f.rect.x1 + dx, f.rect.y1 + dy))
+                   for f in sel]
+        self.move_fields(self.ctx.current_view(), changes, _("Sposta campi"))
+
+    def delete_selected(self) -> None:
+        sel = self.selected_fields()
+        if not sel:
+            return
+        view = self.ctx.current_view()
+        signed = self._signed_keys(view, [(f.page, f.xref) for f in sel])
+        if signed:
+            self.ctx.error(_("Moduli"), _("I campi firma già firmati non si possono eliminare."))
+            sel = [f for f in sel if (f.page, f.xref) not in signed]
+            if not sel:
+                return
+
+        def run(pdf):
+            for f in sel:
+                E.delete_field(pdf, f.page, f.xref)
+
+        self._change(_("Elimina campo") if len(sel) == 1 else _("Elimina campi"), run)
+        self.set_selection([])
+
+    def duplicate_selected(self) -> list[tuple[int, int]]:
+        sel = self.selected_fields()
+        if not sel:
+            return []
+
+        def run(pdf):
+            return [(f.page, E.duplicate_field(pdf, f.page, f.xref, 10, 10)) for f in sel]
+
+        keys = self._change(_("Duplica campo"), run) or []
+        self.set_selection(keys)
+        return keys
+
+    field_clipboard: list[dict] = []
+
+    def copy_selected(self) -> int:
+        """Copia i campi selezionati (tipo, posizione, proprietà) per incollarli anche in altri documenti."""
+        items = []
+        for f in self.selected_fields():
+            props = E.properties_of(f)
+            if f.kind == E.RADIO:
+                props.pop("export", None)
+            items.append({"kind": E.BUTTON if f.kind == E.BUTTON else f.kind, "rect": pymupdf.Rect(f.rect),
+                          "name": f.name, "props": props, "image": f.image})
+        FormsModule.field_clipboard = items
+        if items:
+            self.ctx.status(_("Campi copiati: {n}").format(n=len(items)))
+        return len(items)
+
+    def paste_fields(self, view=None) -> list[tuple[int, int]]:
+        """Incolla i campi copiati nella pagina corrente; i nomi già usati vengono resi univoci."""
+        view = view or self.ctx.current_view()
+        items = FormsModule.field_clipboard
+        if view is None or not items:
+            return []
+        page = view.current_page
+
+        def run(pdf):
+            keys = []
+            for it in items:
+                name = it["name"]
+                if name in E.field_names(pdf):
+                    name = E.unique_name(pdf, name)
+                x = E.create_field(pdf, page, it["kind"], it["rect"], name, **it["props"])
+                if it.get("image"):
+                    E.mark_image_field(pdf, page, x)
+                keys.append((page, x))
+            return keys
+
+        keys = self._change(_("Incolla campi"), run, view) or []
+        self.set_selection(keys)
+        return keys
+
+    def copy_to_pages(self, pages: list[int], shared: bool) -> int:
+        sel = self.selected_fields()
+        if not sel:
+            return 0
+
+        def run(pdf):
+            n = 0
+            for f in sel:
+                for p in pages:
+                    if p == f.page or not 0 <= p < pdf.page_count:
+                        continue
+                    E.copy_field_to_page(pdf, f.page, f.xref, p, shared=shared)
+                    n += 1
+            return n
+
+        return self._change(_("Copia campi su più pagine"), run) or 0
+
+    def copy_to_pages_dialog(self) -> None:
+        from .dialogs import ask_copy_pages
+        view = self.ctx.current_view()
+        if view is None or not self.selected_fields():
+            self.ctx.status(_("Seleziona prima uno o più campi."))
+            return
+        answer = ask_copy_pages(self.ctx.window, view.page_count, view.current_page)
+        if answer:
+            pages, shared = answer
+            n = self.copy_to_pages(pages, shared)
+            self.ctx.status(_("Copie create: {n}").format(n=n))
+
+    def arrange(self, how: str) -> None:
+        sel = [f for f in self.selected_fields() if not f.locked]
+        if len(sel) < 2:
+            self.ctx.status(_("Seleziona almeno due campi."))
+            return
+        if how.startswith("dist_"):
+            if len(sel) < 3:
+                self.ctx.status(_("Per distribuire servono almeno tre campi."))
+                return
+            pages = {f.page for f in sel}
+            if len(pages) > 1:
+                self.ctx.status(_("I campi da distribuire devono essere sulla stessa pagina."))
+                return
+            rects = E.distribute_rects([f.rect for f in sel], "h" if how == "dist_h" else "v")
+        else:
+            rects = E.align_rects([f.rect for f in sel], how, reference=0)
+        changes = [(f.page, f.xref, r) for f, r in zip(sel, rects)]
+        self.move_fields(self.ctx.current_view(), changes, _("Disponi campi"))
+
+    def tab_order(self, how: str) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        page = view.current_page
+        if how == "selection":
+            keys = [x for p, x in self.selection if p == page]
+            if not keys:
+                self.ctx.status(_("Seleziona i campi della pagina nell'ordine desiderato (Ctrl+clic)."))
+                return
+            self._change(_("Ordine di tabulazione"), lambda pdf: E.set_tab_order(pdf, page, keys), view)
+        else:
+            self._change(_("Ordine di tabulazione"), lambda pdf: E.auto_tab_order(pdf, page, how), view)
+        self.ctx.status(_("Ordine di tabulazione aggiornato."))
+
+    # ================================================================ comandi sui dati
+    def _view_or_status(self):
+        view = self.ctx.current_view()
+        if view is None:
+            return None
+        return view
+
+    def values_for_export(self, view) -> dict[str, Any]:
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            fields = E.list_fields(pdf)
+            values = E.form_values(pdf)
+        skip = {f.name for f in fields if f.password or f.no_export}
+        return {k: v for k, v in values.items() if k not in skip}
+
+    def export_data(self, path: str, fmt: str | None = None, view=None) -> int:
+        view = view or self.ctx.current_view()
+        fmt = fmt or X.format_of(path)
+        values = self.values_for_export(view)
+        with ENGINE_LOCK:
+            buttons = {f.name for f in E.list_fields(view.document.pdf) if f.kind in (E.CHECKBOX, E.RADIO)}
+        data = X.export_data(fmt, values, view.document.display_name, buttons)
+        from foliant.api import atomic_write
+        atomic_write(path, data)
+        return len(values)
+
+    def export_data_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        base = os.path.splitext(view.document.display_name)[0]
+        path = self.ctx.ask_save_path(_("Esporta dati del modulo"), base + ".xfdf", DATA_FILTER, ".xfdf")
+        if not path:
+            return
+        try:
+            n = self.export_data(path)
+        except Exception as e:
+            self.ctx.error(_("Esporta dati"), _("Esportazione non riuscita: {e}").format(e=e))
+            return
+        self.ctx.status(_("Esportati {n} campi in «{f}».").format(n=n, f=os.path.basename(path)))
+
+    def import_values(self, values: dict[str, Any], view=None) -> dict:
+        """Applica i valori (un solo passo annullabile). Restituisce il rapporto."""
+        view = view or self.ctx.current_view()
+        report = {"applied": [], "unknown": [], "rejected": []}
+
+        def run(pdf):
+            E.prepare_for_edit(pdf)
+            by_name = {}
+            for f in E.list_fields(pdf):
+                by_name.setdefault(f.name, f)
+            for name, value in values.items():
+                f = by_name.get(name)
+                if f is None or f.kind not in E.FILLABLE:
+                    report["unknown"].append(name)
+                    continue
+                if f.readonly:
+                    report["rejected"].append((name, _("campo in sola lettura")))
+                    continue
+                try:
+                    E.apply_values(pdf, {name: value})
+                    report["applied"].append(name)
+                except E.FormError as e:
+                    report["rejected"].append((name, str(e)))
+            E.recalculate(pdf)
+            if E.xfa_status(pdf) == "hybrid":
+                E.sync_xfa_from_fields(pdf)
+
+        self._change(_("Importa dati del modulo"), run, view)
+        self.last_report = report
+        return report
+
+    def import_data(self, path: str, row: int | None = None, view=None) -> dict:
+        view = view or self.ctx.current_view()
+        with open(path, "rb") as fh:
+            data = fh.read()
+        fmt = X.format_of(path, data)
+        if fmt in ("csv", "txt"):
+            records = X.csv_records(data)
+            if not records:
+                raise X.InterchangeError(_("Il file CSV non contiene righe di dati."))
+            if row is None:
+                row = self.choose_csv_row(records) if len(records) > 1 else 0
+                if row is None:
+                    raise OperationCancelled()
+            if not 0 <= row < len(records):
+                raise X.InterchangeError(_("Il file CSV ha solo {n} righe di dati.").format(n=len(records)))
+            values = records[row]
+        else:
+            values = X.parse_data(fmt, data)
+        report = self.import_values(values, view)
+        if fmt == "fdf" and any(k in data for k in (b"/Ff", b"/SetFf", b"/ClrFf", b"/SetF", b"/ClrF")):
+            report.setdefault("ignored", []).append(_("istruzioni di modifica dei flag"))
+        return report
+
+    def choose_csv_row(self, records: list[dict]) -> int | None:
+        from .dialogs import ask_csv_row
+        return ask_csv_row(self.ctx.window, records)
+
+    def import_data_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        paths = self.ctx.ask_open_paths(_("Importa dati del modulo"), IMPORT_FILTER, multiple=False)
+        if not paths:
+            return
+        try:
+            report = self.import_data(paths[0])
+        except OperationCancelled:
+            return
+        except (X.InterchangeError, OSError) as e:
+            self.ctx.error(_("Importa dati"), str(e))
+            return
+        self.ctx.info(_("Importa dati"), report_text(report))
+
+    def data_menu_popup(self) -> None:
+        menu = QMenu(self.ctx.window)
+        menu.addAction(self.act_import)
+        menu.addAction(self.act_export)
+        from PySide6.QtGui import QCursor
+        self.exec_popup(menu, QCursor.pos())
+
+    def reset(self, names: list[str] | None = None, view=None) -> int:
+        view = view or self.ctx.current_view()
+        f = self.filler(view)
+        if names is None:
+            f.passwords.clear()
+        else:
+            for n in names:
+                f.passwords.pop(n, None)
+
+        def run(pdf):
+            n = E.reset_form(pdf, names)
+            E.recalculate(pdf)
+            return n
+
+        return self._change(_("Reimposta modulo"), run, view) or 0
+
+    def reset_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        # UX-13: nessuna conferma, l'operazione si annulla con Annulla. In modifica modulo con
+        # una selezione si reimpostano solo i campi selezionati, altrimenti tutti.
+        sel = self.selected_fields(view) if self.design_active else []
+        names = list(dict.fromkeys(f.name for f in sel)) if sel else None
+        n = self.reset(names)
+        self.ctx.status(_("Campi reimpostati: {n} (Annulla per ripristinarli)").format(n=n))
+
+    def flatten(self, pages: list[int] | None = None, view=None) -> int:
+        view = view or self.ctx.current_view()
+        with ENGINE_LOCK:
+            signed = [f.name for f in E.list_fields(view.document.pdf) if f.kind == E.SIGNATURE and E.is_signed(view.document.pdf, f.xref)]
+        n = self._change(_("Appiattisci modulo"), lambda pdf: E.flatten_pages(pdf, pages), view) or 0
+        if signed:
+            self.ctx.status(_("I campi firma firmati non sono stati appiattiti."))
+        return n
+
+    def flatten_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        from .dialogs import ask_flatten
+        answer = ask_flatten(self.ctx.window, view.page_count)
+        if answer is None:
+            return
+        n = self.flatten(answer)
+        self.ctx.status(_("Campi appiattiti: {n}").format(n=n))
+
+    def recalculate(self) -> None:
+        names = self._change(_("Ricalcola"), E.recalculate) or []
+        self.ctx.status(_("Campi ricalcolati: {n}").format(n=len(names)))
+
+    def calc_order_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            order = E.calc_order(view.document.pdf)
+        if not order:
+            self.ctx.info(_("Ordine di calcolo"), _("Il modulo non contiene campi calcolati."))
+            return
+        from .dialogs import ask_calc_order
+
+        def problems(names):
+            with ENGINE_LOCK:
+                return E.order_problems(view.document.pdf, names)
+
+        def auto():
+            with ENGINE_LOCK:
+                return E.dependency_order(view.document.pdf)
+
+        new = ask_calc_order(self.ctx.window, order, problems, auto)
+        if new and new != order:
+            self._change(_("Ordine di calcolo"), lambda pdf: E.set_calc_order(pdf, new) or True, view)
+
+    def check_form(self) -> list[tuple[E.FieldInfo, str]]:
+        view = self.ctx.current_view()
+        if view is None:
+            return []
+        filler = self.filler(view)
+        problems: list[tuple[E.FieldInfo, str]] = []
+        filler.state.refresh(force=True)
+        for f in filler.state.required_empty(filler.passwords):
+            problems.append((f, _("obbligatorio non compilato")))
+        seen = set()
+        for f in filler.state.fields:
+            if f.kind == E.TEXT and f.name not in seen and f.value:
+                seen.add(f.name)
+                err = E.validate(f, f.value)
+                if err:
+                    problems.append((f, err))
+        if problems:
+            from .dialogs import show_problems
+            target = show_problems(self.ctx.window, problems)
+            if target is not None:
+                filler.activate(target)
+        else:
+            self.ctx.info(_("Verifica modulo"), _("Il modulo è completo e valido."))
+        return problems
+
+    def convert_xfa(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            status = E.xfa_status(view.document.pdf)
+        if status == "none":
+            self.ctx.info(_("Moduli XML"), _("Il documento non contiene un modulo XML."))
+            return
+        if status == "dynamic":
+            self.ctx.error(_("Moduli XML"), _("La conversione dei moduli XML dinamici non è disponibile: "
+                                              "i dati si possono comunque esportare."))
+            return
+        if self._change(_("Converti in modulo standard"), E.remove_xfa, view):
+            self.ctx.status(_("Parte XML rimossa: restano i campi standard (Annulla per ripristinarla)."))
+
+    def export_xfa_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        base = os.path.splitext(view.document.display_name)[0]
+        path = self.ctx.ask_save_path(_("Esporta dati XML"), base + ".xml", "XML (*.xml)", ".xml")
+        if not path:
+            return
+        try:
+            with ENGINE_LOCK:
+                data = E.export_xfa_data(view.document.pdf)
+            from foliant.api import atomic_write
+            atomic_write(path, data)
+        except Exception as e:
+            self.ctx.error(_("Esporta dati XML"), str(e))
+            return
+        self.ctx.status(_("Dati XML esportati."))
+
+    def import_xfa(self, path: str, view=None) -> bool:
+        view = view or self.ctx.current_view()
+        with open(path, "rb") as fh:
+            data = fh.read()
+        return bool(self._change(_("Importa dati XML"), lambda pdf: E.import_xfa_data(pdf, data) or True, view))
+
+    def import_xfa_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        paths = self.ctx.ask_open_paths(_("Importa dati XML"), "XML (*.xml)", multiple=False)
+        if paths:
+            self.import_xfa(paths[0])
+
+    # ================================================================ elaborazione multipla
+    def collect(self, paths: list[str], out_path: str) -> dict:
+        from . import batch as B
+        return self.ctx.run_task(_("Raccolta dei dati dei moduli"), lambda progress: B.collect_csv(
+            paths, out_path, progress=lambda fr, t: progress.update(fr, t)))
+
+    def collect_dialog(self) -> None:
+        paths = self.ctx.ask_open_paths(_("Scegli i PDF compilati"))
+        if not paths:
+            return
+        out = self.ctx.ask_save_path(_("Salva i dati raccolti"), "dati_moduli.csv", "CSV (*.csv)", ".csv")
+        if not out:
+            return
+        try:
+            report = self.collect(paths, out)
+        except OperationCancelled:
+            return
+        except Exception as e:
+            self.ctx.error(_("Raccogli dati"), str(e))
+            return
+        lines = [_("Righe scritte: {n}").format(n=report.get("rows", 0))]
+        lines += [f"{os.path.basename(p)}: {m}" for p, m in report.get("errors", [])]
+        self.ctx.info(_("Raccogli dati"), "\n".join(lines))
+
+    def fill_series(self, csv_path: str, out_dir: str, pattern: str, view=None) -> dict:
+        import tempfile
+        from . import batch as B
+        view = view or self.ctx.current_view()
+        with open(csv_path, "rb") as fh:
+            records = X.csv_records(fh.read())
+        data = view.document.to_bytes()
+        fd, template = tempfile.mkstemp(suffix=".pdf")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        try:
+            return self.ctx.run_task(_("Compilazione in serie"), lambda progress: B.fill_series(
+                template, records, out_dir, pattern, progress=lambda fr, t: progress.update(fr, t)))
+        finally:
+            os.unlink(template)
+
+    def series_dialog(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        paths = self.ctx.ask_open_paths(_("Scegli il file CSV con i dati"), "CSV (*.csv)", multiple=False)
+        if not paths:
+            return
+        out_dir = self.ctx.ask_directory(_("Cartella per i PDF compilati"))
+        if not out_dir:
+            return
+        from .dialogs import ask_text
+        pattern = ask_text(self.ctx.window, _("Nomi dei file"),
+                           _("Modello del nome ({Campo} = valore del campo, {n} = numero di riga):"), "{n}.pdf")
+        if not pattern:
+            return
+        try:
+            report = self.fill_series(paths[0], out_dir, pattern, view)
+        except OperationCancelled:
+            return
+        except Exception as e:
+            self.ctx.error(_("Compila in serie"), str(e))
+            return
+        lines = [_("PDF creati: {n}").format(n=len(report.get("created", [])))]
+        if report.get("unknown"):
+            lines.append(_("Colonne senza campo corrispondente: {l}").format(l=", ".join(report["unknown"])))
+        for row, fieldname, msg in report.get("errors", [])[:30]:
+            lines.append(_("Riga {r}, campo «{f}»: {m}").format(r=row, f=fieldname, m=msg))
+        self.ctx.info(_("Compila in serie"), "\n".join(lines))
+
+    # ================================================================ rilevamento
+    def detect_fields(self) -> None:
+        view = self.ctx.current_view()
+        if view is None:
+            return
+        doc = view.document
+        page_count = view.page_count
+        with ENGINE_LOCK:
+            scanned = [i for i in range(page_count) if D.page_needs_ocr(doc.pdf, i)]
+        if scanned and self.ctx.mode("ocr") is not None and self.ctx.confirm(
+                _("Riconosci campi"),
+                _("{n} pagine sembrano scansionate e senza testo: senza OCR i campi non avranno nomi. "
+                  "Eseguire prima l'OCR?").format(n=len(scanned))):
+            self.ctx.set_mode("ocr")
+            return
+
+        def work(progress):
+            with ENGINE_LOCK:
+                # copia dei dati: il motore non va usato senza lock fuori da qui
+                data = doc.pdf.tobytes(garbage=0)
+            pdf = pymupdf.open("pdf", data)
+            try:
+                return D.detect(pdf, list(range(page_count)), progress=lambda fr, t: progress.update(fr, t))
+            finally:
+                pdf.close()
+
+        try:
+            candidates = self.ctx.run_task(_("Riconoscimento dei campi"), work)
+        except OperationCancelled:
+            return
+        except Exception as e:
+            self.ctx.error(_("Riconosci campi"), _("Riconoscimento non riuscito: {e}").format(e=e))
+            return
+        if not candidates:
+            self.ctx.info(_("Riconosci campi"), _("Nessun campo riconosciuto."))
+            return
+        from .dialogs import review_candidates
+        accepted = review_candidates(self.ctx.window, candidates)
+        if accepted:
+            n = self.create_candidates(accepted, view)
+            self.ctx.status(_("Campi creati: {n}").format(n=n))
+
+    def create_candidates(self, candidates: list, view=None) -> int:
+        view = view or self.ctx.current_view()
+
+        def run(pdf):
+            n = 0
+            for c in candidates:
+                kind = E.CHECKBOX if c.kind == "checkbox" else E.TEXT
+                name = c.name or None
+                if name and name in E.field_names(pdf):
+                    name = E.unique_name(pdf, name)
+                props = {}
+                if kind == E.TEXT and getattr(c, "multiline", False):
+                    props["multiline"] = True
+                if getattr(c, "comb", 0):
+                    props.update(comb=True, maxlen=int(c.comb))
+                E.create_field(pdf, c.page, kind, c.rect, name, **props)
+                n += 1
+            return n
+
+        return self._change(_("Crea campi riconosciuti"), run, view) or 0
+
+    # ================================================================ pulsanti e firme
+    def run_button(self, filler: FormFiller, f: E.FieldInfo) -> None:
+        with ENGINE_LOCK:
+            pdf = filler.document.pdf
+            if E.is_image_field(pdf, f.xref):
+                action = {"type": "image"}
+            else:
+                action = E.button_action(pdf, f.xref)
+        kind = action.get("type")
+        if kind == "image":
+            paths = self.ctx.ask_open_paths(_("Scegli un'immagine"), _("Immagini") + " (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp)", multiple=False)
+            if paths:
+                self._change(_("Inserisci immagine"), lambda pdf: E.set_button_image(pdf, f.page, f.xref, paths[0]), filler.view)
+            return
+        if kind == "reset":
+            names = action.get("fields")
+            self.reset(names if names else None, filler.view)
+        elif kind == "uri":
+            uri = action.get("uri", "")
+            if self.ctx.confirm(_("Collegamento esterno"), _("Il modulo vuole aprire questo indirizzo:\n\n{u}\n\nAprirlo?").format(u=uri)):
+                QDesktopServices.openUrl(QUrl(uri))
+        elif kind == "goto":
+            filler.view.go_to_page(action.get("page", 0))
+        elif kind == "print":
+            act = getattr(self.ctx.window, "act_print", None)
+            if act is not None:
+                act.trigger()
+        elif kind == "import":
+            self.import_data_dialog()
+        elif kind == "hide":
+            self._change(_("Mostra/nascondi campi"),
+                         lambda pdf: E.hide_fields(pdf, action.get("fields", []), action.get("hide", True)), filler.view)
+        elif kind == "submit":
+            self.submit(filler, action)
+        elif kind == "javascript":
+            self.ctx.status(_("Il pulsante esegue uno script personalizzato, non supportato."))
+        else:
+            self.ctx.status(_("Il pulsante «{n}» non ha azioni.").format(n=f.name))
+
+    def submission_data(self, view, action: dict) -> tuple[bytes, str]:
+        """(dati, tipo MIME) da inviare secondo il formato dell'azione."""
+        values = self.values_for_export(view)
+        if action.get("fields"):
+            values = {k: v for k, v in values.items() if k in action["fields"]}
+        if not action.get("empty"):
+            values = {k: v for k, v in values.items() if v not in ("", [], None)}
+        fmt = action.get("format", "fdf")
+        if fmt == "xfdf":
+            return X.export_xfdf(values, view.document.display_name), "application/vnd.adobe.xfdf"
+        if fmt == "pdf":
+            return view.document.to_bytes(), "application/pdf"
+        if fmt == "html":
+            from urllib.parse import urlencode
+            flat = {k: ("; ".join(v) if isinstance(v, list) else v) for k, v in values.items()}
+            return urlencode(flat).encode(), "application/x-www-form-urlencoded"
+        with ENGINE_LOCK:
+            buttons = {f.name for f in E.list_fields(view.document.pdf) if f.kind in (E.CHECKBOX, E.RADIO)}
+        return X.export_fdf(values, view.document.display_name, buttons), "application/vnd.fdf"
+
+    def post(self, url: str, data: bytes, mime: str) -> int:
+        """Invio HTTP (in un thread di attività). Restituisce il codice di stato."""
+        import urllib.request
+        req = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": mime})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status
+
+    def submit(self, filler: FormFiller, action: dict) -> bool:
+        view = filler.view
+        url = action.get("url", "")
+        missing = filler.state.required_empty(filler.passwords)
+        if missing:
+            self.ctx.error(_("Invia modulo"), _("Invio bloccato: compila i campi obbligatori ({n}).").format(
+                n=", ".join(dict.fromkeys(f.name for f in missing))))
+            return False
+        data, mime = self.submission_data(view, action)
+        if self.design_active and self.preview:
+            self.ctx.info(_("Invia modulo"), _("Anteprima: nessun invio. Verrebbero inviati a {u}:\n\n{d}").format(
+                u=url, d=data[:4000].decode("utf-8", "replace")))
+            return False
+        if url.lower().startswith("mailto:"):
+            QDesktopServices.openUrl(QUrl(url))
+            self.ctx.status(_("Allega al messaggio i dati esportati con «Esporta dati…»."))
+            return True
+        if not url.lower().startswith(("http://", "https://")):
+            self.ctx.error(_("Invia modulo"), _("Indirizzo di invio non valido: {u}").format(u=url))
+            return False
+        text = _("Inviare i dati del modulo a:\n\n{u}").format(u=url)
+        if not url.lower().startswith("https://"):
+            text += "\n\n" + _("Attenzione: l'indirizzo non è cifrato (non HTTPS), i dati viaggeranno in chiaro.")
+        if not self.ctx.confirm(_("Invia modulo"), text):
+            return False
+        try:
+            status = self.ctx.run_task(_("Invio del modulo"), lambda progress: self.post(url, data, mime))
+        except OperationCancelled:
+            return False
+        except Exception as e:
+            if self.ctx.confirm(_("Invia modulo"), _("Invio non riuscito: {e}\n\nSalvare i dati in un file da inviare in seguito?").format(e=e)):
+                self.export_data_dialog()
+            return False
+        self.ctx.status(_("Modulo inviato (risposta {s}).").format(s=status))
+        return True
+
+    def signature_clicked(self, view, f: E.FieldInfo) -> None:
+        if self.ctx.mode("firma") is not None:
+            self.ctx.set_mode("firma")
+        self.ctx.status(_("Campo firma «{n}»: usa la modalità Firma per firmare.").format(n=f.name))
+
+    # ================================================================ menu contestuale
+    def context_menu(self, view, ev, menu: QMenu) -> None:
+        if ev.page is None or ev.point is None:
+            return
+        filler = self.filler(view)
+        f = filler.state.field_at(ev.page, ev.point)
+        if f is None:
+            return
+        menu.addSection(f.name)
+        if self.design_active and not self.preview:
+            if (f.page, f.xref) not in self.selection:
+                self.set_selection([(f.page, f.xref)])
+            menu.addAction(icon("sliders-horizontal"), _("Proprietà"), self.show_properties)
+            menu.addAction(icon("copy-plus"), _("Duplica campo"), self.duplicate_selected)
+            menu.addAction(icon("trash-2"), _("Elimina campo"), self.delete_selected)
+        else:
+            if f.kind in E.FILLABLE and not f.readonly:
+                menu.addAction(icon("rotate-ccw"), _("Reimposta campo"), lambda: self.reset([f.name], view))
+            menu.addAction(icon("square-pen"), _("Modifica modulo"), lambda: self.ctx.set_mode("moduli"))
+
+
+def report_text(report: dict) -> str:
+    lines = [_("Campi compilati: {n}").format(n=len(report.get("applied", [])))]
+    if report.get("unknown"):
+        lines.append(_("Campi non trovati nel modulo: {l}").format(l=", ".join(report["unknown"])))
+    for name, why in report.get("rejected", []):
+        lines.append(_("Valore rifiutato per «{n}»: {w}").format(n=name, w=why))
+    for what in report.get("ignored", []):
+        lines.append(_("Ignorate: {w}").format(w=what))
+    return "\n".join(lines)
