@@ -46,6 +46,9 @@ ATTACHMENT = "attachment"
 DISTANCE = "distance"
 PERIMETER = "perimeter"
 AREA = "area"
+TYPEWRITER = "typewriter"
+CARET = "caret"
+REPLACE = "replace"
 
 MARKUP_KINDS = (HIGHLIGHT, UNDERLINE, STRIKEOUT, SQUIGGLY)
 SHAPE_KINDS = (RECT, ELLIPSE, LINE, ARROW, POLYGON, POLYLINE, CLOUD)
@@ -111,7 +114,8 @@ SUBJECTS = {
     NOTE: "Nota", FREETEXT: "Casella di testo", CALLOUT: "Richiamo", RECT: "Rettangolo", ELLIPSE: "Ellisse",
     LINE: "Linea", ARROW: "Freccia", POLYGON: "Poligono", POLYLINE: "Polilinea", CLOUD: "Nuvola",
     INK: "Disegno a mano libera", STAMP: "Timbro", ATTACHMENT: "Allegato", DISTANCE: "Distanza",
-    PERIMETER: "Perimetro", AREA: "Area",
+    PERIMETER: "Perimetro", AREA: "Area", TYPEWRITER: "Commento di testo", CARET: "Inserimento",
+    REPLACE: "Sostituzione",
 }
 
 
@@ -351,12 +355,22 @@ def create_markup(pdf: pymupdf.Document, page_no: int, kind: str, quads: Sequenc
     xref = _finish(annot, author, contents, kind=kind)
     if area:
         pdf.xref_set_key(xref, AREA_KEY, "true")
+        _fit_area_rect(pdf, page, xref)
     if contents:
         ensure_popup(pdf, page_no, xref)
     return xref
 
 
 AREA_KEY = "FoliantArea"
+
+
+def _fit_area_rect(pdf: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
+    """Evidenziazione ad area: /Rect coincide con il quadrilatero (ANN-11)."""
+    annot = get_annot(page, xref)
+    v = annot.vertices or []
+    if len(v) == 4:
+        r = pymupdf.Rect(min(p[0] for p in v), min(p[1] for p in v), max(p[0] for p in v), max(p[1] for p in v))
+        pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, r)))
 
 
 def is_area_markup(pdf: pymupdf.Document, xref: int) -> bool:
@@ -583,6 +597,73 @@ def refresh_freetext(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
                           f"/ExtGState<</GS0<</Type/ExtGState/CA {opacity:.3f}/ca {opacity:.3f}>>>>>>>>")
     pdf.update_stream(ap, "\n".join(ops).encode("latin-1"))
     pdf.xref_set_key(xref, "AP", f"<</N {ap} 0 R>>")
+
+
+def create_typewriter(pdf: pymupdf.Document, page_no: int, point, text: str, style: Style,
+                      author: str | None = None) -> int | None:
+    """Commento di testo sulla pagina, senza bordo né sfondo (ANN-15). Testo vuoto: nulla."""
+    if not text.strip():
+        return None
+    size = max(4.0, float(style.fontsize))
+    lines = text.split("\n")
+    try:
+        width = max(pymupdf.get_text_length(ln, fontname="helv", fontsize=size) for ln in lines) + 8
+    except Exception:
+        width = size * max(len(ln) for ln in lines) * 0.6 + 8
+    p = pymupdf.Point(point)
+    rect = pymupdf.Rect(p.x, p.y, p.x + max(width, 20), p.y + size * 1.2 * len(lines) + 6)
+    st = style.copy(fill=None, width=0, color=None, text_color=style.text_color or style.color or (0, 0, 0))
+    xref = create_freetext(pdf, page_no, rect, text, st, author)
+    pdf.xref_set_key(xref, "IT", "/FreeTextTypeWriter")
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    annot.set_info(subject=SUBJECTS[TYPEWRITER])
+    annot.update()
+    refresh_freetext(pdf, page_no, xref)
+    return xref
+
+
+def _new_caret(pdf: pymupdf.Document, page: pymupdf.Page, rect: pymupdf.Rect) -> pymupdf.Annot:
+    with unrotated(page):
+        a = mupdf.pdf_create_annot(page._pdf_page(), mupdf.PDF_ANNOT_CARET)
+        mupdf.pdf_set_annot_rect(a, mupdf.fz_make_rect(rect.x0, rect.y0, rect.x1, rect.y1))
+        mupdf.pdf_update_annot(a)
+        xref = mupdf.pdf_to_num(mupdf.pdf_annot_obj(a))
+    return get_annot(page, xref)
+
+
+def create_caret(pdf: pymupdf.Document, page_no: int, point, text: str, style: Style,
+                 author: str | None = None, paragraph: bool = False, height: float = 12.0) -> int:
+    """Segno di inserimento (^) centrato sul punto, con il testo da inserire (ANN-13)."""
+    page = pdf[page_no]
+    p = pymupdf.Point(point)
+    rect = pymupdf.Rect(p.x - 4, p.y - height / 2, p.x + 4, p.y + height / 2)
+    annot = _new_caret(pdf, page, rect)
+    annot.set_colors(stroke=_rgb(style.color or (0.1, 0.3, 0.8)))
+    xref = _finish(annot, author, text, kind=CARET)
+    pdf.xref_set_key(xref, "Sy", "/P" if paragraph else "/None")
+    return xref
+
+
+def create_replacement(pdf: pymupdf.Document, page_no: int, quads: Sequence, text: str, style: Style,
+                       author: str | None = None) -> int:
+    """Sostituzione: barrato sul testo + segno di inserimento alla fine, raggruppati (ANN-13).
+    Restituisce lo xref del segno di inserimento (la voce principale)."""
+    quads = [q if isinstance(q, pymupdf.Quad) else pymupdf.Rect(q).quad for q in quads]
+    if not quads:
+        raise AnnotationError("Nessun testo selezionato.")
+    last = quads[-1].rect
+    caret = create_caret(pdf, page_no, (last.x1, (last.y0 + last.y1) / 2), text, style, author,
+                         height=max(6.0, last.height))
+    strike = create_markup(pdf, page_no, STRIKEOUT, quads, style.copy(color=style.color or (0.85, 0.1, 0.1)), author)
+    page = pdf[page_no]
+    annot = get_annot(page, strike)
+    annot.set_irt_xref(caret)
+    pdf.xref_set_key(strike, "RT", "/Group")
+    annot = get_annot(page, caret)
+    annot.set_info(subject=SUBJECTS[REPLACE])
+    annot.update()
+    return caret
 
 
 def create_shape(pdf: pymupdf.Document, page_no: int, kind: str, points: Sequence, style: Style,
@@ -1121,6 +1202,8 @@ class AnnotInfo:
     status: str = STATE_NONE   # stato corrente (ultimo stato registrato)
     marked: bool = False
     history: list["AnnotInfo"] = field(default_factory=list)   # stati registrati, in ordine
+    reply_type: str = ""        # /RT: "R" risposta, "Group" elemento di un gruppo
+    group: list["AnnotInfo"] = field(default_factory=list)
 
     @property
     def is_state(self) -> bool:
@@ -1128,10 +1211,12 @@ class AnnotInfo:
 
     @property
     def locked(self) -> bool:
-        return bool(self.flags & pymupdf.PDF_ANNOT_IS_LOCKED)
+        return bool(self.flags & (pymupdf.PDF_ANNOT_IS_LOCKED | pymupdf.PDF_ANNOT_IS_READ_ONLY))
 
     @property
     def label(self) -> str:
+        if self.kind in (REPLACE, TYPEWRITER):
+            return SUBJECTS[self.kind] if self.contents or self.kind == TYPEWRITER else "Cancellazione"
         return TYPE_LABELS.get(self.type, self.type)
 
 
@@ -1158,7 +1243,11 @@ def kind_of(pdf: pymupdf.Document, annot: pymupdf.Annot) -> str:
     if t == pymupdf.PDF_ANNOT_TEXT:
         return NOTE
     if t == pymupdf.PDF_ANNOT_FREE_TEXT:
+        if intent == "FreeTextTypeWriter":
+            return TYPEWRITER
         return CALLOUT if intent == "FreeTextCallout" else FREETEXT
+    if t == pymupdf.PDF_ANNOT_CARET:
+        return CARET
     if t == pymupdf.PDF_ANNOT_SQUARE:
         return RECT
     if t == pymupdf.PDF_ANNOT_CIRCLE:
@@ -1203,6 +1292,7 @@ def _info(pdf: pymupdf.Document, page_no: int, annot: pymupdf.Annot) -> AnnotInf
         rect=pymupdf.Rect(annot.rect), name=info.get("id", ""), irt=annot.irt_xref or 0,
         state=state, state_model=state_model, hidden=bool(annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN),
         flags=annot.flags,
+        reply_type=pdf.xref_get_key(annot.xref, "RT")[1].lstrip("/") if annot.irt_xref else "",
         marked_text=marked_text(annot.get_parent(), annot) if annot.type[0] in MARKUP_TYPES else "",
     )
 
@@ -1236,6 +1326,12 @@ def list_annotations(pdf: pymupdf.Document, pages: Iterable[int] | None = None) 
                 continue
             if a.is_state:
                 states.append(a)
+                continue
+            if a.reply_type == "Group":
+                parent.group.append(a)
+                if parent.kind == CARET:
+                    parent.kind = REPLACE
+                    parent.marked_text = a.marked_text
                 continue
             # risalire al commento principale (catene cicliche interrotte)
             seen = {a.xref}
@@ -1540,6 +1636,8 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
             refresh_stamp(pdf, page_no, xref)
         if t == pymupdf.PDF_ANNOT_FREE_TEXT:
             refresh_freetext(pdf, page_no, xref)
+        if is_area_markup(pdf, xref):
+            _fit_area_rect(pdf, page, xref)
     # sposta anche le risposte (stessa posizione del commento)
     for a in page.annots():
         if a.irt_xref == xref and a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
@@ -1608,8 +1706,10 @@ def delete_annot(pdf: pymupdf.Document, page_no: int, xref: int, force: bool = F
     target = get_annot(page, xref)
     if not force and target.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
         raise AnnotationError("L'annotazione è bloccata: non si può eliminare.")
-    del target
     victims = {xref}
+    if target.irt_xref and pdf.xref_get_key(xref, "RT")[1] == "/Group":
+        victims.add(target.irt_xref)   # elemento di un gruppo: si elimina tutto il gruppo
+    del target
     changed = True
     annots = list(page.annots())
     while changed:
@@ -1671,15 +1771,54 @@ def set_flag(pdf: pymupdf.Document, page_no: int, xref: int, flag: int, on: bool
     annot.update()
 
 
+def duplicate_annot(pdf: pymupdf.Document, src_page: int, xref: int, dst_page: int, dx: float = 0.0,
+                    dy: float = 0.0, author: str | None = None, keep_identity: bool = False) -> int:
+    """Copia un'annotazione (dizionario e aspetto) su una pagina dello stesso documento.
+
+    Con `keep_identity` conserva /NM, autore e date (taglia+incolla), altrimenti la copia
+    riceve un nuovo /NM e l'autore e le date correnti."""
+    page = pdf[src_page]
+    get_annot(page, xref)
+    dst = pdf[dst_page]
+    new = pdf.get_new_xref()
+    pdf.update_object(new, pdf.xref_object(xref, compressed=False))
+    for key in ("Popup", "IRT", "RT"):
+        pdf.xref_set_key(new, key, "null")
+    pdf.xref_set_key(new, "P", f"{dst.xref} 0 R")
+    kind, value = pdf.xref_get_key(new, "AP/N")
+    if kind == "xref":
+        src_ap = int(value.split()[0])
+        ap = pdf.get_new_xref()
+        pdf.update_object(ap, pdf.xref_object(src_ap, compressed=False))
+        pdf.update_stream(ap, pdf.xref_stream(src_ap) or b"")
+        pdf.xref_set_key(new, "AP", f"<</N {ap} 0 R>>")
+    holder, key, refs = _annots_array(pdf, dst)
+    _write_annots_array(pdf, holder, key, refs + [new])
+    del page
+    dst = pdf.reload_page(dst)
+    annot = get_annot(dst, new)
+    if not keep_identity:
+        now = pdf_now()
+        annot.set_info(title=author if author is not None else default_author(), creationDate=now, modDate=now)
+        pdf.xref_set_key(new, "NM", _pdf_string(new_name()))
+    if dx or dy:
+        with unrotated(dst):
+            annot = get_annot(dst, new)
+            r = pymupdf.Rect(annot.rect)
+        transform_annot(pdf, dst_page, new, r + (dx, dy, dx, dy))
+    return new
+
+
 def delete_all(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int:
     n = 0
     for page_no in (pages if pages is not None else range(pdf.page_count)):
         page = pdf[page_no]
-        for a in list(page.annots()):
-            if a.type[0] in NON_COMMENT_TYPES:
-                continue
-            page.delete_annot(a)
-            n += 1
+        xrefs = [a.xref for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES]
+        for x in xrefs:
+            a = find_annot(page, x)
+            if a is not None:
+                page.delete_annot(a)
+                n += 1
     return n
 
 

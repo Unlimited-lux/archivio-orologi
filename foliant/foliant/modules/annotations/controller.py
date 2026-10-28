@@ -79,6 +79,8 @@ class Controller(QObject):
         self.scale = engine.Scale()
         self.page_scales: dict[int, engine.Scale] = {}
         self.keep_tool = True
+        self.clipboard: dict | None = None      # {"view", "items": [(pagina, xref)], "cut": bool}
+        self.hidden_views: set[int] = set()
         ctx.documentChanged.connect(self._on_document_changed)
         ctx.currentViewChanged.connect(lambda _v: self.clear_selection())
 
@@ -410,6 +412,92 @@ class Controller(QObject):
             return True
 
         return bool(self.apply(_("Cambia autore"), run))
+
+    # ------------------------------------------------------------------ appunti (ANN-07)
+    def copy(self, cut: bool = False) -> bool:
+        if not self.selection:
+            return False
+        infos = self.selected_infos()
+        if cut and any(i.locked for i in infos):
+            self.ctx.error(_("Commenti"), _("Le annotazioni bloccate non si possono eliminare."))
+            return False
+        self.clipboard = {"view": self._sel_view, "items": list(self.selection), "cut": cut,
+                          "data": None}
+        from foliant.api import copy_text_to_clipboard
+        text = "\n\n".join(i.contents for i in infos if i.contents)
+        if text:
+            copy_text_to_clipboard(text)
+        self.ctx.status(_("Annotazioni tagliate.") if cut else _("Annotazioni copiate."))
+        return True
+
+    def paste(self, page: int | None = None) -> list[tuple[int, int]]:
+        clip = self.clipboard
+        view = self.view()
+        if not clip or view is None:
+            return []
+        if clip["view"] is not view:
+            self.ctx.error(_("Commenti"), _("Le annotazioni si possono incollare solo nello stesso documento."))
+            return []
+        target = view.current_page if page is None else page
+        items = [it for it in clip["items"] if self.info(*it, view=view) is not None]
+        if not items:
+            return []
+        cut = clip["cut"]
+
+        def run(pdf):
+            out = []
+            for src_page, xref in items:
+                same = src_page == target and not cut
+                off = 10.0 if same else 0.0
+                new = engine.duplicate_annot(pdf, src_page, xref, target, off, off, self.author(), keep_identity=cut)
+                out.append((target, new))
+            if cut:
+                for src_page, xref in items:
+                    engine.delete_annot(pdf, src_page, xref)
+            return out
+
+        res = self.apply(_("Incolla annotazioni"), run, view=view) or []
+        if cut and res:
+            self.clipboard = {"view": view, "items": res, "cut": False, "data": None}
+        if res:
+            self.select(res, view)
+        return res
+
+    def duplicate(self) -> list[tuple[int, int]]:
+        if not self.selection:
+            return []
+        clip = self.clipboard
+        self.clipboard = {"view": self._sel_view, "items": list(self.selection), "cut": False, "data": None}
+        page = self.selection[0][0]
+        try:
+            return self.paste(page)
+        finally:
+            self.clipboard = clip
+
+    # ------------------------------------------------------------------ visibilità (ANN-39)
+    def reveal_after_create(self, view) -> None:
+        if self.annotations_hidden(view):
+            self.set_annotations_hidden(False, view)
+            self.ctx.status(_("Le annotazioni erano nascoste: sono di nuovo visibili."))
+
+    def annotations_hidden(self, view=None) -> bool:
+        view = view or self.view()
+        return view is not None and id(view) in self.hidden_views
+
+    def set_annotations_hidden(self, hidden: bool, view=None) -> None:
+        """Nasconde o mostra le annotazioni nella vista (il file non cambia)."""
+        view = view or self.view()
+        if view is None:
+            return
+        from .visibility import set_view_annotations
+        set_view_annotations(view, not hidden)
+        if hidden:
+            self.hidden_views.add(id(view))
+            if self._sel_view is view:
+                self.clear_selection()
+        else:
+            self.hidden_views.discard(id(view))
+        self.annotationsVisibilityChanged.emit(hidden)
 
     def go_to(self, page: int, xref: int, view=None) -> None:
         view = view or self.view()

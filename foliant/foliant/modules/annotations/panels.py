@@ -30,7 +30,8 @@ KIND_ICONS = {
     engine.CALLOUT: "message-square-quote", engine.RECT: "square", engine.ELLIPSE: "circle", engine.LINE: "minus",
     engine.ARROW: "move-up-right", engine.POLYGON: "pentagon", engine.POLYLINE: "spline", engine.CLOUD: "cloud",
     engine.INK: "pencil", engine.STAMP: "stamp", engine.ATTACHMENT: "paperclip", engine.DISTANCE: "ruler",
-    engine.PERIMETER: "ruler", engine.AREA: "land-plot",
+    engine.PERIMETER: "ruler", engine.AREA: "land-plot", engine.TYPEWRITER: "text-cursor-input",
+    engine.CARET: "text-cursor", engine.REPLACE: "replace",
 }
 
 DASH_CHOICES = [("solid", "Continua"), ("dashed", "Tratteggiata"), ("dotted", "Punteggiata")]
@@ -176,6 +177,10 @@ class PropertiesPanel(QWidget):
         self.locked.toggled.connect(lambda v: self._flag(engine.FLAG_LOCKED, v))
         self.printable = QCheckBox(_("Stampa"))
         self.printable.toggled.connect(lambda v: self._flag(engine.FLAG_PRINT, v))
+        self.read_only = QCheckBox(_("Sola lettura"))
+        self.read_only.toggled.connect(lambda v: self._flag(engine.FLAG_READ_ONLY, v))
+        self.locked_contents = QCheckBox(_("Contenuto bloccato"))
+        self.locked_contents.toggled.connect(lambda v: self._flag(engine.FLAG_LOCKED_CONTENTS, v))
         self.rows: dict[str, QWidget] = {}
         for key, label, widget in (
                 ("color", _("Colore"), self.color), ("fill", _("Riempimento"), self.fill),
@@ -186,7 +191,8 @@ class PropertiesPanel(QWidget):
                 ("fontsize", _("Dimensione testo"), self.fontsize),
                 ("text_color", _("Colore testo"), self.text_color), ("align", _("Allineamento"), self.align),
                 ("icon", _("Icona"), self.icon_combo), ("author", _("Autore"), self.author),
-                ("locked", "", self.locked), ("printable", "", self.printable)):
+                ("locked", "", self.locked), ("locked_contents", "", self.locked_contents),
+                ("read_only", "", self.read_only), ("printable", "", self.printable)):
             form.addRow(label, widget)
             self.rows[key] = widget
         lay.addLayout(form)
@@ -226,7 +232,7 @@ class PropertiesPanel(QWidget):
                 base | {"width", "dash"}
         if kind in (engine.INK, "marker"):
             return base | {"width"}
-        if kind in (engine.FREETEXT, engine.CALLOUT):
+        if kind in (engine.FREETEXT, engine.CALLOUT, engine.TYPEWRITER):
             return {"color", "fill", "opacity", "width", "dash", "fontsize", "text_color", "align"}
         if kind == engine.NOTE:
             return base | {"icon"}
@@ -242,7 +248,8 @@ class PropertiesPanel(QWidget):
             infos = self.ctrl.selected_infos() if self.ctrl.selection else []
             if infos:
                 kinds = {i.kind for i in infos}
-                keys = set.intersection(*(self._keys_for(k) for k in kinds)) | {"author", "locked", "printable"}
+                keys = set.intersection(*(self._keys_for(k) for k in kinds)) | {"author", "locked", "printable",
+                                                                                "read_only", "locked_contents"}
                 first = infos[0]
                 if len(infos) == 1:
                     self.title.setText(_(first.label))
@@ -262,6 +269,8 @@ class PropertiesPanel(QWidget):
                 self.author.setText(first.author)
                 self.locked.setChecked(all(i.locked for i in infos))
                 self.printable.setChecked(all(i.flags & engine.FLAG_PRINT for i in infos))
+                self.read_only.setChecked(all(i.flags & engine.FLAG_READ_ONLY for i in infos))
+                self.locked_contents.setChecked(all(i.flags & engine.FLAG_LOCKED_CONTENTS for i in infos))
                 self.default_btn.setVisible(len(kinds) == 1)
             else:
                 kind = self.ctrl.tool_kind

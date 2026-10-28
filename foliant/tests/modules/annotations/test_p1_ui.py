@@ -1,0 +1,441 @@
+"""Criteri P1 verificati dall'interfaccia: appunti, flag, area, correzioni, commento di testo,
+callout, poligoni, timbri, allegati, filtri, ordinamento, risposte, stato, visibilità,
+appiattimento, esportazione e importazione, riepilogo."""
+
+from __future__ import annotations
+
+import re
+
+import pymupdf
+from PySide6.QtCore import Qt
+
+from foliant.modules.annotations import dialogs, engine, ui_actions
+
+from .conftest import annots, click, double_click, drag, key, key_of, saved
+
+
+def _rect(module, a=(100, 400), b=(200, 500), page=0):
+    return module.ctrl.apply("r", engine.create_shape, page, engine.RECT, [a, b], engine.Style(width=1), "A")
+
+
+def test_ann07_copy_paste_other_page(comments, tmp_path):
+    """ANN-07: rettangolo copiato a pagina 1 e incollato a pagina 3: stessi /C /IC /BS /Rect, /NM diverso."""
+    window, view, module = comments
+    xref = module.ctrl.apply("r", engine.create_shape, 0, engine.RECT, [(100, 400), (200, 500)],
+                             engine.Style(color=(1, 0, 0), fill=(0, 1, 0), width=2), "A")
+    module.activate("select")
+    click(view, 0, 150, 450)
+    key(view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    view.go_to_page(2)
+    module.ctrl.paste(2)
+    doc = saved(window, view, tmp_path)
+    a, = annots(doc, 0, "Square")
+    b, = annots(doc, 2, "Square")
+    for k in ("C", "IC", "BS/W"):
+        assert key_of(doc, a.xref, k) == key_of(doc, b.xref, k)
+    assert a.rect == b.rect
+    assert a.info["id"] != b.info["id"]
+    assert key_of(doc, b.xref, "P")[1] == f"{doc[2].xref} 0 R"
+    assert xref
+
+
+def test_ann07_cut_paste_keeps_identity(comments):
+    """ANN-07: taglia+incolla sposta la nota conservando /NM, autore e data di creazione."""
+    window, view, module = comments
+    xref = module.ctrl.apply("n", engine.create_note, 1, (300, 300), "nota", engine.Style(), "Mario")
+    info = module.ctrl.info(1, xref)
+    module.ctrl.select([(1, xref)], view)
+    assert module.ctrl.copy(cut=True)
+    (page, new), = module.ctrl.paste(3)
+    assert module.ctrl.info(1, xref) is None
+    moved = module.ctrl.info(3, new)
+    assert (moved.name, moved.author, moved.created) == (info.name, info.author, info.created)
+
+
+def test_ann07_duplicate_same_page_offset(comments):
+    window, view, module = comments
+    xref = _rect(module)
+    module.ctrl.select([(0, xref)], view)
+    (p, new), = module.ctrl.duplicate()
+    r1, r2 = module.ctrl.info(0, xref).rect, module.ctrl.info(0, new).rect
+    assert abs(r2.x0 - r1.x0 - 10) < 1 and abs(r2.y0 - r1.y0 - 10) < 1
+
+
+def test_ann09_flags(comments, tmp_path):
+    """ANN-09: Stampa disattivata → bit 3 di /F a 0; nuove annotazioni con Print attivo."""
+    window, view, module = comments
+    xref = _rect(module)
+    assert module.ctrl.info(0, xref).flags & engine.FLAG_PRINT
+    module.ctrl.select([(0, xref)], view)
+    module.properties.refresh()
+    module.properties.printable.setChecked(False)
+    doc = saved(window, view, tmp_path)
+    assert not annots(doc, 0, "Square")[0].flags & pymupdf.PDF_ANNOT_IS_PRINT
+
+
+def test_ann09_locked_contents(comments, monkeypatch):
+    """ANN-09: con «Contenuto bloccato» il testo non è modificabile ma la casella si sposta."""
+    window, view, module = comments
+    xref = module.ctrl.apply("t", engine.create_freetext, 0, (100, 400, 300, 450), "Fisso", engine.Style(), "A")
+    module.ctrl.set_flag(engine.FLAG_LOCKED_CONTENTS, True, [(0, xref)])
+    monkeypatch.setattr(dialogs, "edit_comment", lambda *a, **k: ("Cambiato", None))
+    assert not module.ctrl.edit_text(0, xref)
+    assert module.ctrl.info(0, xref).contents == "Fisso"
+    assert module.ctrl.move(10, 0, [(0, xref)])
+
+
+def test_ann11_area_highlight(comments, tmp_path):
+    """ANN-11: area da (100,100) a (300,200) → /Highlight con /Rect e un solo quadrilatero; clic → nulla."""
+    window, view, module = comments
+    module.activate("area-highlight")
+    click(view, 0, 400, 400)
+    assert module.ctrl.annotations() == []
+    drag(view, 0, (100, 500), (300, 600))
+    (p, xref), = module.ctrl.selection
+    info = module.ctrl.info(0, xref)
+    assert abs(info.rect.x0 - 100) < 1.5 and abs(info.rect.x1 - 300) < 1.5
+    # l'area si ridimensiona: /QuadPoints e /Rect estesi insieme
+    module.ctrl.resize(0, xref, pymupdf.Rect(info.rect.x0, info.rect.y0, info.rect.x1 + 50, info.rect.y1))
+    with view.document.lock:
+        page = view.document.pdf[0]
+        verts = page.load_annot(xref).vertices
+    assert len(verts) == 4 and abs(max(v[0] for v in verts) - 350) < 2
+
+
+def test_ann13_insert_and_replace(comments, tmp_path, monkeypatch):
+    """ANN-13: «Inserisci testo» → /Caret con /Contents; «Sostituisci» → /StrikeOut con /IRT al /Caret e /RT /Group."""
+    window, view, module = comments
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "non ")
+    module.activate(engine.CARET)
+    words = [w for w in view.words(0) if w[4] == "Lorem"]
+    r = pymupdf.Rect(words[0][:4])
+    click(view, 0, r.x1 + 1, (r.y0 + r.y1) / 2)
+    from foliant.api import selection_from_words
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "blu")
+    words2 = [w for w in view.words(0) if w[4] == "Prima"]
+    view.set_text_selection(selection_from_words(0, words2))
+    module.tools[engine.REPLACE].apply_selection(view)
+    module.activate("paragraph")
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "")
+    click(view, 0, 400, 700)
+    doc = saved(window, view, tmp_path)
+    carets = annots(doc, 0, "Caret")
+    assert len(carets) == 3
+    first = [c for c in carets if c.info["content"] == "non "][0]
+    assert abs((first.rect.x0 + first.rect.x1) / 2 - (r.x1 + 1)) < 2.5
+    blu = [c for c in carets if c.info["content"] == "blu"][0]
+    strike = annots(doc, 0, "StrikeOut")[0]
+    assert strike.irt_xref == blu.xref
+    assert key_of(doc, strike.xref, "RT")[1] == "/Group"
+    assert any(key_of(doc, c.xref, "Sy")[1] == "/P" for c in carets)
+    # il pannello mostra una sola voce «Sostituzione»; eliminare il barrato elimina il gruppo
+    infos = module.ctrl.annotations()
+    labels = sorted(i.label for i in infos)
+    assert labels.count("Sostituzione") == 1 and "Barrato" not in labels
+    with view.document.lock:
+        sx = [a.xref for a in view.document.pdf[0].annots() if a.type[1] == "StrikeOut"][0]
+    module.ctrl.delete([(0, sx)])
+    with view.document.lock:
+        assert not any(a.type[1] == "StrikeOut" for a in view.document.pdf[0].annots())
+        assert len([a for a in view.document.pdf[0].annots() if a.type[1] == "Caret"]) == 2
+    view.document.undo()
+    with view.document.lock:
+        assert len([a for a in view.document.pdf[0].annots() if a.type[1] == "Caret"]) == 3
+
+
+def test_ann15_typewriter(comments, tmp_path, monkeypatch):
+    """ANN-15: «Mario Rossi» 11 pt nero → /FreeText /IT /FreeTextTypeWriter, /DA 11 nero, senza bordo."""
+    window, view, module = comments
+    st = module.ctrl.style_for(engine.FREETEXT)
+    st.fontsize, st.text_color = 11, (0, 0, 0)
+    module.ctrl.set_style_for(engine.FREETEXT, st)
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "Mario Rossi")
+    module.activate(engine.TYPEWRITER)
+    click(view, 0, 100, 600)
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "   ")
+    click(view, 0, 100, 700)
+    doc = saved(window, view, tmp_path)
+    ft, = annots(doc, 0, "FreeText")
+    assert key_of(doc, ft.xref, "IT")[1] == "/FreeTextTypeWriter"
+    assert ft.info["content"] == "Mario Rossi"
+    da = key_of(doc, ft.xref, "DA")[1]
+    assert re.search(r" 11(\.0)? Tf", da) and "0 0 0 rg" in da.replace(".000", "")
+    assert not ft.border or ft.border.get("width", 0) == 0
+    assert "Mario Rossi" in doc[0].get_text()
+
+
+def test_ann17_callout(comments, tmp_path, monkeypatch):
+    """ANN-17: callout con punta indicata: /IT /FreeTextCallout, /CL che inizia dalla punta, /Rect la contiene."""
+    window, view, module = comments
+    monkeypatch.setattr(dialogs, "edit_comment", lambda *a, **k: ("Vedi qui", None))
+    module.activate(engine.CALLOUT)
+    drag(view, 0, (100, 500), (220, 420))
+    doc = saved(window, view, tmp_path)
+    ft, = annots(doc, 0, "FreeText")
+    assert key_of(doc, ft.xref, "IT")[1] == "/FreeTextCallout"
+    cl = [float(v) for v in key_of(doc, ft.xref, "CL")[1].strip("[]").split()]
+    tip = engine.from_pdf_point(doc[0], cl[0], cl[1])
+    assert abs(tip[0] - 100) < 1 and abs(tip[1] - 500) < 1
+    assert ft.rect.contains(pymupdf.Point(tip))
+
+
+def test_ann20_polygon_tool(comments, tmp_path):
+    """ANN-20: cinque clic e doppio clic → /Polygon con 10 valori; Esc con 2 vertici → nulla."""
+    window, view, module = comments
+    module.activate(engine.POLYGON)
+    pts = [(100, 400), (200, 380), (260, 450), (200, 520), (110, 500)]
+    for p in pts:
+        click(view, 0, *p)
+    double_click(view, 0, *pts[-1])
+    module.activate(engine.POLYLINE)
+    click(view, 0, 300, 300)
+    click(view, 0, 350, 300)
+    key(view, Qt.Key.Key_Escape)
+    doc = saved(window, view, tmp_path)
+    poly, = annots(doc, 0, "Polygon")
+    assert len(poly.vertices) == 5
+    for (x, y), v in zip(pts, poly.vertices):
+        assert abs(v[0] - x) < 0.5 and abs(v[1] - y) < 0.5
+    assert annots(doc, 0, "PolyLine") == []
+
+
+def test_ann21_cloud_tool(comments, tmp_path):
+    """ANN-21: nuvola con 4 vertici → /Polygon /IT /PolygonCloud e /BE /S /C."""
+    window, view, module = comments
+    module.activate(engine.CLOUD)
+    for p in ((100, 400), (250, 400), (250, 500), (100, 500)):
+        click(view, 0, *p)
+    key(view, Qt.Key.Key_Return)
+    doc = saved(window, view, tmp_path)
+    poly, = annots(doc, 0, "Polygon")
+    assert key_of(doc, poly.xref, "IT")[1] == "/PolygonCloud"
+    assert key_of(doc, poly.xref, "BE/S")[1] == "/C"
+
+
+def test_ann24_25_stamp_tools(comments, tmp_path, monkeypatch):
+    """ANN-24/25: timbro predefinito con un clic; timbro dinamico con autore e data congelati."""
+    window, view, module = comments
+    module.use_stamp(engine.StampSpec("Approvato", (0, 0.5, 0), "", "Approved"))
+    click(view, 0, 300, 400)
+    module.use_stamp(engine.StampSpec("Approvato", (0, 0.5, 0)), template="Approvato da {autore} il {data}")
+    click(view, 0, 300, 600)
+    doc = saved(window, view, tmp_path)
+    stamps = annots(doc, 0, "Stamp")
+    contents = sorted(s.info["content"] for s in stamps)
+    assert contents[0] == "Approvato"
+    assert contents[1].startswith("Approvato da Maria Rossi il ")
+    std = [s for s in stamps if s.info["content"] == "Approvato"][0]
+    assert key_of(doc, std.xref, "Name")[1] == "/Approved"
+    assert std.rect.contains(pymupdf.Point(300, 400))
+
+
+def test_ann29_attachment_tool(comments, tmp_path, monkeypatch):
+    """ANN-29: allegato in un punto; «Salva allegato con nome» produce un file identico."""
+    window, view, module = comments
+    src = tmp_path / "verbale.docx"
+    src.write_bytes(b"contenuto del verbale" * 100)
+    monkeypatch.setattr(dialogs, "ask_open_file", lambda *a, **k: str(src))
+    module.activate(engine.ATTACHMENT)
+    click(view, 0, 100, 700)
+    (p, xref), = module.ctrl.selection
+    out = tmp_path / "estratto.docx"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    ui_actions.save_attachment(module.ctrl, p, xref)
+    assert out.read_bytes() == src.read_bytes()
+    doc = saved(window, view, tmp_path)
+    fa, = annots(doc, 0, "FileAttachment")
+    assert fa.file_info["filename"] == "verbale.docx"
+
+
+def test_ann32_area_measure_tool(comments, tmp_path):
+    """ANN-32: con scala 100 pt = 1 m un quadrato 100×100 pt misura «1,00 m²»."""
+    window, view, module = comments
+    module.ctrl.scale = engine.Scale.calibrate(100, 1, "m")
+    module.activate(engine.AREA)
+    for p in ((100, 400), (200, 400), (200, 500), (100, 500)):
+        click(view, 0, *p)
+    key(view, Qt.Key.Key_Return)
+    doc = saved(window, view, tmp_path)
+    poly, = annots(doc, 0, "Polygon")
+    assert poly.info["content"] == "1,00 m²"
+    assert key_of(doc, poly.xref, "IT")[1] == "/PolygonDimension"
+
+
+def test_ann31_distance_tool(comments, tmp_path):
+    """ANN-31: scala 72 pt = 1 in, misura da (100,100) a (244,100) → «2,00 in»."""
+    window, view, module = comments
+    module.ctrl.scale = engine.Scale.from_ratio(72, "pt", 1, "in")
+    module.activate(engine.DISTANCE)
+    drag(view, 0, (100, 100), (244, 100))
+    doc = saved(window, view, tmp_path)
+    line, = annots(doc, 0, "Line")
+    assert line.info["content"] == "2,00 in"
+    assert key_of(doc, line.xref, "IT")[1] == "/LineDimension"
+
+
+def _populate(module):
+    ctrl = module.ctrl
+    a = ctrl.apply("h", engine.create_markup, 0, engine.HIGHLIGHT, [pymupdf.Rect(72, 290, 260, 303)],
+                   engine.Style(), "Anna", "Verificare la scadenza")
+    b = ctrl.apply("n", engine.create_note, 1, (300, 300), "Tutto bene", engine.Style(), "Luca")
+    c = ctrl.apply("n", engine.create_note, 2, (300, 300), "Altro", engine.Style(), " Anna ")
+    return a, b, c
+
+
+def test_ann35_filters_and_search(comments):
+    """ANN-35: filtro per autore con contatore «n di N»; ricerca senza maiuscole e accenti."""
+    window, view, module = comments
+    a, b, c = _populate(module)
+    panel = module.comments
+    panel.reload()
+    panel.set_filter("authors", {"Anna"})
+    assert {tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()} == {(0, a), (2, c)}
+    assert panel.count.text() == "2 di 3 commenti"
+    panel.set_filter("authors", set())
+    panel.search.setText("SCADENZA")
+    assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(0, a)]
+    panel.search.setText("nessuna corrispondenza")
+    assert panel.empty.isVisibleTo(panel) and "Nessun commento corrisponde" in panel.empty.text()
+
+
+def test_ann35_filter_type_and_status(comments):
+    window, view, module = comments
+    a, b, c = _populate(module)
+    module.ctrl.set_status(0, a, engine.STATE_ACCEPTED)
+    panel = module.comments
+    panel.reload()
+    panel.set_filter("types", {engine.HIGHLIGHT})
+    panel.set_filter("status", {engine.STATE_ACCEPTED})
+    assert [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()] == [(0, a)]
+
+
+def test_ann36_sort_by_date_desc(comments, monkeypatch):
+    """ANN-36: ordinamento per data di modifica decrescente: prima la più recente."""
+    window, view, module = comments
+    dates = iter(["D:20260101100000+01'00'", "D:20260301100000+01'00'", "D:20260201100000+01'00'"])
+    monkeypatch.setattr(engine, "pdf_now", lambda: next(dates))
+    a, b, c = _populate(module)
+    panel = module.comments
+    panel.reload()
+    panel.sort.setCurrentIndex(panel.sort.findData("date_desc"))
+    keys = [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()]
+    assert keys[0] == (1, b)
+
+
+def test_ann37_38_reply_and_status_from_ui(comments, monkeypatch):
+    """ANN-37/38: risposta e stato dal menu; il pannello mostra risposta e «Accettato»."""
+    window, view, module = comments
+    a, b, c = _populate(module)
+    monkeypatch.setattr(dialogs, "ask_text", lambda *a, **k: "D'accordo")
+    module.ctrl.reply(0, a)
+    module.ctrl.set_status(0, a, engine.STATE_ACCEPTED)
+    panel = module.comments
+    panel.reload()
+    item = panel.item_for(0, a)
+    assert item.childCount() == 1 and "D'accordo" in item.child(0).text(0)
+    assert "Accettato" in item.text(0)
+    item.setCheckState(0, Qt.CheckState.Checked)
+    assert module.ctrl.info(0, a).marked
+
+
+def test_ann39_hide_annotations(comments):
+    """ANN-39: «Nascondi annotazioni» → resa senza annotazioni; il file non cambia."""
+    window, view, module = comments
+    _rect(module, (100, 400), (300, 500))
+    view.flush_rendering()
+    before = view.document.to_bytes()
+    module.ctrl.set_annotations_hidden(True, view)
+    view.flush_rendering()
+    img = view._render_page(0, 1.0)
+    with view.document.lock:
+        pix = view.document.pdf[0].get_pixmap(annots=False)
+    assert img.width() == pix.width
+    color = img.pixelColor(int(100 * 1.0), int(450 * 1.0))
+    assert color.red() > 240 and color.green() > 240   # nessun bordo rosso
+    assert len(view.document.to_bytes()) == len(before)
+    module.ctrl.set_annotations_hidden(False, view)
+    img2 = view._render_page(0, 1.0)
+    c2 = img2.pixelColor(100, 450)
+    assert c2.green() < 200
+
+
+def test_ann40_flatten_from_ui(comments):
+    """ANN-40: appiattimento con conferma e annullabile."""
+    window, view, module = comments
+    xref = module.ctrl.apply("t", engine.create_freetext, 0, (100, 400, 300, 450), "Totale 100", engine.Style(), "A")
+    assert ui_actions.flatten(module.ctrl) == 1
+    assert module.ctrl.annotations() == []
+    assert "Totale 100" in view.document.page_text(0)
+    view.document.undo()
+    assert module.ctrl.info(0, xref) is not None
+
+
+def test_ann41_42_export_import_ui(comments, tmp_path, monkeypatch):
+    """ANN-41/42: esportazione XFDF e reimportazione in un'altra copia del documento."""
+    window, view, module = comments
+    a, b, c = _populate(module)
+    module.ctrl.reply(0, a, "Risposta")
+    out = tmp_path / "commenti.xfdf"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(out))
+    assert ui_actions.export_comments(module.ctrl, "xfdf") == str(out)
+    ui_actions.delete_all(module.ctrl)
+    assert module.ctrl.annotations() == []
+    res = ui_actions.import_comments(module.ctrl, [str(out)])
+    assert res.imported == 4
+    infos = module.ctrl.annotations()
+    assert len(infos) == 3 and sum(len(i.replies) for i in infos) == 1
+    view.document.undo()
+    assert module.ctrl.annotations() == []
+
+
+def test_ann42_import_from_pdf_and_malformed(comments, tmp_path):
+    """ANN-42: importazione da un altro PDF; file malformato → documento invariato e messaggio."""
+    window, view, module = comments
+    other = pymupdf.open()
+    other.new_page()
+    p = other[0]
+    p.add_text_annot((100, 100), "dal revisore")
+    other.save(str(tmp_path / "altro.pdf"))
+    res = ui_actions.import_comments(module.ctrl, [str(tmp_path / "altro.pdf")])
+    assert res.imported == 1
+    bad = tmp_path / "rotto.xfdf"
+    bad.write_text("<xfdf><annots><text page='0'")
+    version = view.document.version
+    assert ui_actions.import_comments(module.ctrl, [str(bad)]) is None
+    assert view.document.version == version
+    assert any(m[0] == "error" for m in module.messages)
+
+
+def test_ann43_summary_files(comments, tmp_path, monkeypatch):
+    """ANN-43: riepilogo PDF e CSV salvati senza modificare l'originale."""
+    window, view, module = comments
+    _populate(module)
+    version = view.document.version
+    for fmt in ("pdf", "csv", "txt", "html"):
+        out = tmp_path / f"riepilogo.{fmt}"
+        monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, o=out, **k: str(o))
+        assert ui_actions.export_summary(module.ctrl, fmt) == str(out)
+        assert out.stat().st_size > 0
+    text = pymupdf.open(str(tmp_path / "riepilogo.pdf"))[0].get_text()
+    assert "Verificare la scadenza" in text and "Tutto bene" in text
+    assert view.document.version == version
+
+
+def test_context_menu_on_text_selection(comments):
+    """Menu contestuale: «Commenta il testo» sulla selezione e «Aggiungi nota qui»."""
+    from PySide6.QtWidgets import QMenu
+    from foliant.api import PageEvent, selection_from_words
+    from PySide6.QtCore import QPointF
+    window, view, module = comments
+    words = [w for w in view.words(0) if w[4] == "Lorem"]
+    view.set_text_selection(selection_from_words(0, words))
+    menu = QMenu()
+    pe = PageEvent(0, pymupdf.Point(500, 700), QPointF(0, 0), Qt.MouseButton.RightButton,
+                   Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier)
+    module._view_menu(view, pe, menu)
+    texts = [a.text() for a in menu.actions()]
+    assert "Commenta il testo" in texts and "Aggiungi nota qui" in texts
+    sub = [a for a in menu.actions() if a.text() == "Commenta il testo"][0].menu()
+    [a for a in sub.actions() if a.text() == "Evidenzia"][0].trigger()
+    assert module.ctrl.annotations()[0].kind == engine.HIGHLIGHT
+

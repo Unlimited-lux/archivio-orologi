@@ -105,6 +105,7 @@ class AnnotTool(Tool):
     def created(self, view, page: int, xref: int | None) -> None:
         if xref is None:
             return
+        self.ctrl.reveal_after_create(view)
         self.ctrl.select([(page, xref)], view)
         if not self.ctrl.keep_tool:
             self.ctrl.ctx.set_tool(None)
@@ -304,8 +305,17 @@ class SelectAnnotTool(SelectTextTool):
 
     def key(self, view, event):
         key = event.key()
+        ctrl_mod = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if ctrl_mod and key == Qt.Key.Key_V and self.ctrl.clipboard:
+            self.ctrl.paste()
+            return True
         if not self.ctrl.selection:
             return False
+        if ctrl_mod and key in (Qt.Key.Key_C, Qt.Key.Key_X):
+            return self.ctrl.copy(cut=key == Qt.Key.Key_X)
+        if ctrl_mod and key == Qt.Key.Key_D:
+            self.ctrl.duplicate()
+            return True
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.ctrl.delete()
             return True
@@ -437,6 +447,7 @@ class TextMarkupTool(SelectTextTool):
                                self.ctrl.style_for(self.kind), self.ctrl.author())
         view.clear_text_selection()
         if xref is not None:
+            self.ctrl.reveal_after_create(view)
             self.ctrl.select([(sel.page, xref)], view)
         return xref
 
@@ -1024,3 +1035,84 @@ class AttachmentTool(AnnotTool):
 
 def text_selection_on(view, page: int, words) -> None:
     view.set_text_selection(selection_from_words(page, words))
+
+
+# ======================================================================== testo e correzioni
+class TypewriterTool(AnnotTool):
+    """Commento di testo sulla pagina, senza bordo né sfondo (ANN-15)."""
+
+    kind = engine.TYPEWRITER
+
+    def press(self, view, ev):
+        return ev.button == Qt.MouseButton.LeftButton and ev.page is not None
+
+    def release(self, view, ev):
+        if ev.button != Qt.MouseButton.LeftButton or ev.page is None:
+            return False
+        text = dialogs.ask_text(view, _("Commento di testo"), _("Testo:"), "", multiline=True)
+        if text is None or not text.strip():
+            return True   # testo vuoto: nessuna annotazione
+        st = self.ctrl.style_for(engine.FREETEXT)
+        st = engine.Style(fontsize=st.fontsize, text_color=st.text_color or (0, 0, 0), opacity=st.opacity)
+        self.created(view, ev.page, self.ctrl.apply(_("Aggiungi commento di testo"), engine.create_typewriter,
+                                                    ev.page, ev.point, text, st, self.ctrl.author()))
+        return True
+
+
+class CaretTool(AnnotTool):
+    """Inserisci testo: clic tra due caratteri e testo da aggiungere (ANN-13)."""
+
+    kind = engine.CARET
+
+    def __init__(self, ctrl, paragraph: bool = False):
+        super().__init__(ctrl)
+        self.paragraph = paragraph
+
+    def press(self, view, ev):
+        return ev.button == Qt.MouseButton.LeftButton and ev.page is not None
+
+    def release(self, view, ev):
+        if ev.button != Qt.MouseButton.LeftButton or ev.page is None:
+            return False
+        point, height = ev.point, 12.0
+        word = view.word_at(ev.page, ev.point)
+        if word is not None:
+            r = pymupdf.Rect(word[:4])
+            height = r.height
+            point = pymupdf.Point(ev.point.x, (r.y0 + r.y1) / 2)
+        text = dialogs.ask_text(view, _("Inserisci testo"), _("Testo da inserire:"), "", multiline=True)
+        if text is None:
+            return True
+        self.created(view, ev.page, self.ctrl.apply(_("Inserisci testo"), engine.create_caret, ev.page, point,
+                                                    text, self.style(), self.ctrl.author(), self.paragraph, height))
+        return True
+
+
+class ReplaceTool(TextMarkupTool):
+    """Sostituisci testo: selezione del testo + testo sostitutivo (ANN-13)."""
+
+    def __init__(self, ctrl):
+        super().__init__(ctrl, engine.STRIKEOUT)
+        self.kind = engine.REPLACE
+
+    def activate(self, view):
+        self.ctrl.set_tool_kind(engine.REPLACE)
+        sel = view.text_selection
+        if sel is not None and sel.rects:
+            self.apply_selection(view)
+
+    def apply_selection(self, view):
+        sel = view.text_selection
+        if sel is None or not sel.rects:
+            return None
+        text = dialogs.ask_text(view, _("Sostituisci testo"), _("Testo sostitutivo:"), "", multiline=True)
+        if text is None:
+            view.clear_text_selection()
+            return None
+        quads = engine.quads_from_words(sel.words) if sel.words else sel.quads
+        xref = self.ctrl.apply(_("Sostituisci testo"), engine.create_replacement, sel.page, quads, text,
+                               self.ctrl.style_for(engine.STRIKEOUT), self.ctrl.author())
+        view.clear_text_selection()
+        if xref is not None:
+            self.ctrl.select([(sel.page, xref)], view)
+        return xref

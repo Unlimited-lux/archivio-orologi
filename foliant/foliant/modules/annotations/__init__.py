@@ -13,8 +13,8 @@ from .controller import Controller
 from .i18n_en import EN
 from .panels import CommentsPanel, PropertiesPanel, build_annotation_menu
 from .tools import (
-    AttachmentTool, CalloutTool, EraserTool, InkTool, NoteTool, PolyTool, SelectAnnotTool, ShapeTool, StampTool,
-    TextBoxTool, TextMarkupTool, paint_selection,
+    AttachmentTool, CalloutTool, CaretTool, EraserTool, InkTool, NoteTool, PolyTool, ReplaceTool, SelectAnnotTool,
+    ShapeTool, StampTool, TextBoxTool, TextMarkupTool, TypewriterTool, paint_selection,
 )
 
 ORDER = 20
@@ -32,7 +32,11 @@ class AnnotationsModule:
             engine.UNDERLINE: TextMarkupTool(self.ctrl, engine.UNDERLINE),
             engine.STRIKEOUT: TextMarkupTool(self.ctrl, engine.STRIKEOUT),
             engine.SQUIGGLY: TextMarkupTool(self.ctrl, engine.SQUIGGLY),
-            "area": TextMarkupTool(self.ctrl, engine.HIGHLIGHT),
+            "area-highlight": TextMarkupTool(self.ctrl, engine.HIGHLIGHT),
+            engine.TYPEWRITER: TypewriterTool(self.ctrl),
+            engine.CARET: CaretTool(self.ctrl),
+            "paragraph": CaretTool(self.ctrl, paragraph=True),
+            engine.REPLACE: ReplaceTool(self.ctrl),
             engine.NOTE: NoteTool(self.ctrl),
             engine.FREETEXT: TextBoxTool(self.ctrl),
             engine.CALLOUT: CalloutTool(self.ctrl),
@@ -52,7 +56,7 @@ class AnnotationsModule:
             engine.PERIMETER: PolyTool(self.ctrl, engine.PERIMETER),
             engine.AREA: PolyTool(self.ctrl, engine.AREA),
         }
-        self.tools["area"].area_mode = True
+        self.tools["area-highlight"].area_mode = True
         self.actions: dict[str, QAction] = {}
         self.group = QActionGroup(ctx)
         self.group.setExclusive(True)
@@ -79,7 +83,11 @@ class AnnotationsModule:
                                                        self.tools[engine.FREETEXT])))
         mode.add_widget(self._menu_button(_("Altri strumenti di testo"), [
             ("callout", engine.CALLOUT, _("Richiamo"), "message-square-quote"),
-            ("area", "area", _("Evidenzia area"), "square-dashed"),
+            ("area", "area-highlight", _("Evidenzia area"), "square-dashed"),
+            ("typewriter", engine.TYPEWRITER, _("Commento di testo"), "text-cursor-input"),
+            ("caret", engine.CARET, _("Inserisci testo"), "text-cursor"),
+            ("paragraph", "paragraph", _("Inserisci paragrafo"), "pilcrow"),
+            ("replace", engine.REPLACE, _("Sostituisci testo"), "replace"),
         ]))
         mode.add_separator()
         mode.add_widget(self._menu_button(_("Forme"), [
@@ -213,6 +221,12 @@ class AnnotationsModule:
         bind_icon(button, "messages-square")
         menu = QMenu(button)
         menu.addAction(_("Elenco commenti"), lambda: self.ctx.show_sidebar_panel("comments"))
+        hide = menu.addAction(_("Nascondi annotazioni"))
+        hide.setCheckable(True)
+        hide.toggled.connect(lambda on: self.ctrl.set_annotations_hidden(on))
+        self.hide_action = hide
+        self.ctrl.annotationsVisibilityChanged.connect(lambda h: (hide.blockSignals(True), hide.setChecked(h),
+                                                                  hide.blockSignals(False)))
         menu.addSeparator()
         menu.addAction(_("Esporta commenti (XFDF)…"), lambda: ui_actions.export_comments(self.ctrl, "xfdf"))
         menu.addAction(_("Esporta commenti (FDF)…"), lambda: ui_actions.export_comments(self.ctrl, "fdf"))
@@ -306,6 +320,10 @@ class AnnotationsModule:
     def _on_view_changed(self, view) -> None:
         if view is not None:
             self._attach_view(view)
+            hidden = self.ctrl.annotations_hidden(view)
+            self.hide_action.blockSignals(True)
+            self.hide_action.setChecked(hidden)
+            self.hide_action.blockSignals(False)
             if self.ctx.current_mode() == "commenta" and view.tool is view._default_tool:
                 view.set_tool(self.select_tool)
             self._sync_actions(view.tool)
