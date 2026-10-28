@@ -156,6 +156,9 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Applica anche ad altri file…": "Apply to other files too…",
+    "Altri file da dividere": "Other files to split",
+    "File non divisi:": "Files not split:",
     "Includi i segnalibri (sotto un segnalibro con il nome del file)": "Include bookmarks (under a bookmark named after the file)",
     "Unione alternata di due file (fronti e retri)": "Alternate merge of two files (fronts and backs)",
     "Secondo file in ordine inverso": "Second file in reverse order",
@@ -768,6 +771,16 @@ class SplitDialog(BaseDialog):
         self.layout_.addLayout(form)
         self.overwrite = QCheckBox(_("Sovrascrivi i file esistenti"))
         self.layout_.addWidget(self.overwrite)
+        self.extra_paths: list[str] = []
+        erow = QHBoxLayout()
+        self.extra_btn = QPushButton(icon("files"), _("Applica anche ad altri file…"))
+        self.extra_btn.clicked.connect(self._choose_extra)
+        self.extra_label = QLabel()
+        self.extra_label.setWordWrap(True)
+        erow.addWidget(self.extra_btn)
+        erow.addWidget(self.extra_label, 1)
+        self.layout_.addLayout(erow)
+        self.ask_paths = None
         self.preview = QLabel()
         self.preview.setWordWrap(True)
         self.layout_.addWidget(self.preview)
@@ -782,10 +795,27 @@ class SplitDialog(BaseDialog):
     def method(self) -> str:
         return next(k for k, rb in self.rbs.items() if rb.isChecked())
 
+    def _choose_extra(self) -> None:
+        if self.ask_paths is None:
+            return
+        paths = self.ask_paths(_("Altri file da dividere"), "PDF (*.pdf)")
+        self.set_extra_paths(paths)
+
+    def set_extra_paths(self, paths: list[str]) -> None:
+        self.extra_paths = list(paths)
+        self.extra_label.setText(", ".join(Path(p).name for p in self.extra_paths))
+
     def plan(self) -> E.SplitPlan:
+        with ENGINE_LOCK:
+            return self.plan_for(self.document.pdf)
+
+    def plan_for(self, pdf: pymupdf.Document, max_bytes: int | None = None, progress=None) -> E.SplitPlan:
+        """Stessa divisione applicata a un documento qualsiasi."""
         m = self.method()
         with ENGINE_LOCK:
-            pdf = self.document.pdf
+            if m == "size":
+                return E.split_document(pdf, "size", max_bytes or int(self.size_mb.value() * 1024 * 1024),
+                                        progress=progress)
             if m == "every":
                 return E.split_document(pdf, "every", self.every.value())
             if m == "ranges":
@@ -838,6 +868,7 @@ def open_split_dialog(ctx, view, selected: list[int] | None = None) -> bool:
             ctx.error(_("Dividi documento"), _("Il documento non ha pagine."))
             return False
     dlg = SplitDialog(ctx.window, document)
+    dlg.ask_paths = ctx.ask_open_paths
     if not _exec(dlg):
         return False
     o = dlg.options()
@@ -847,16 +878,28 @@ def open_split_dialog(ctx, view, selected: list[int] | None = None) -> bool:
     stem = Path(document.display_name).stem
     method = o["method"]
 
+    extra = list(dlg.extra_paths)
+    failures: list[str] = []
+
     def work(progress):
         progress.update(0, _("Calcolo della divisione…"))
-        if method == "size":
-            with ENGINE_LOCK:
-                plan = E.split_document(document.pdf, "size", o["max_bytes"],
-                                        progress=lambda f: progress.update(f * 0.5))
-        else:
-            plan = dlg.plan()
+        plan = dlg.plan_for(document.pdf, o["max_bytes"], progress=lambda f: progress.update(f * 0.5))
         files = E.write_parts(document.pdf, plan.parts, folder, o["template"], stem, overwrite=o["overwrite"],
                               progress=lambda f, t: progress.update(0.5 + f * 0.5, t))
+        for path in extra:
+            try:
+                src = E.open_source(path)
+            except FoliantError as e:
+                failures.append(f"{Path(path).name}: {e}")
+                continue
+            try:
+                p2 = dlg.plan_for(src, o["max_bytes"])
+                files += E.write_parts(src, p2.parts, folder, o["template"], Path(path).stem,
+                                       overwrite=o["overwrite"])
+            except FoliantError as e:
+                failures.append(f"{Path(path).name}: {e}")
+            finally:
+                src.close()
         return plan, files
     try:
         plan, files = ctx.run_task(_("Divisione in corso…"), work)
@@ -866,6 +909,8 @@ def open_split_dialog(ctx, view, selected: list[int] | None = None) -> bool:
     msg = _("Creati {n} file in {f}").format(n=len(files), f=folder)
     if plan.warnings:
         msg += "\n\n" + "\n".join(plan.warnings)
+    if failures:
+        msg += "\n\n" + _("File non divisi:") + "\n" + "\n".join(failures)
     ctx.info(_("Dividi documento"), msg)
     return True
 

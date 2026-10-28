@@ -158,6 +158,26 @@ def test_split_dialog_every(pages_window, accept, tmp_path, monkeypatch):
     assert [pymupdf.open(str(f)).page_count for f in files] == [3, 3, 3, 1]
 
 
+def test_split_dialog_multiple_files(pages_window, accept, tmp_path, monkeypatch):
+    window, view = pages_window
+    out = tmp_path / "out"
+    out.mkdir()
+    other = save_numbered(tmp_path / "altro.pdf", 4, prefix="X")
+    monkeypatch.setattr(window.ctx, "ask_directory", lambda *a, **k: str(out))
+    accept(lambda d: (d.rbs["every"].setChecked(True), d.every.setValue(5), d.set_extra_paths([other])))
+    assert D.open_split_dialog(window.ctx, view)
+    names = sorted(p.name for p in out.glob("*.pdf"))
+    assert names == ["altro_parte1.pdf", "doc_parte1.pdf", "doc_parte2.pdf"]
+
+
+def test_split_dialog_bookmark_template(window, tmp_path):
+    view = window.open_path(save_numbered(tmp_path / "s.pdf", 4, toc=[[1, "Uno", 1], [1, "Due", 3]]))
+    dlg = D.SplitDialog(window, view.document)
+    dlg.rbs["bookmarks"].setChecked(True)
+    assert dlg.template.text() == "{segnalibro}"
+    assert "2 file" in dlg.preview.text()
+
+
 def test_split_dialog_preview_warning(window, ten_pdf):
     view = window.open_path(ten_pdf)
     dlg = D.SplitDialog(window, view.document)
