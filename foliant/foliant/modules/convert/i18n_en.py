@@ -907,3 +907,7 @@ EN.update({"Cartella:": "Folder:", "Cartella (vuota = radice del portfolio):": "
            "sarà più conforme. Vuoi continuare?":
                "The document declares PDF/A-{n} conformance, which does not allow these attachments: after the "
                "change it will no longer conform. Continue?"})
+
+# CNV-33: redazioni non applicate
+EN.update({"{n} segni di redazione non applicati non sono stati appiattiti: restano da applicare.":
+               "{n} unapplied redaction marks were not flattened: they still need to be applied."})
