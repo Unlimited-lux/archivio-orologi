@@ -8,6 +8,18 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 
 
+@pytest.fixture(autouse=True)
+def _flush_deferred_deletes():
+    """Distrugge a fine test gli oggetti con deleteLater (finestre e viste chiuse).
+
+    Senza un ciclo di eventi vero si accumulerebbero e il primo qtbot.wait di un test
+    successivo li distruggerebbe tutti insieme (minuti, con il timeout di pytest)."""
+    yield
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is not None:
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 @pytest.fixture
 def text_pdf(tmp_path):
     """PDF di 4 pagine: una riga «Lorem ipsum», un paragrafo di tre righe, testo su ogni pagina."""

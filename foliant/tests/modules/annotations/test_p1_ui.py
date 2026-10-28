@@ -615,14 +615,14 @@ def test_ann05_popup_left_open_is_saved(comments, tmp_path):
     assert module.ctrl.popups(view, 0) == [], module.messages
 
 
-def test_selection_reset_after_save(comments, tmp_path, qtbot):
+def test_selection_reset_after_save(comments, tmp_path):
     """Dopo il salvataggio (xref rinumerati) selezione e pannello restano coerenti."""
     window, view, module = comments
     a = _rect(module)
     module.ctrl.apply("n", engine.create_note, 0, (400, 300), "dopo", engine.Style(), "A")
     module.ctrl.select([(0, a)], view)
     view.document.save(str(tmp_path / "x.pdf"))
-    qtbot.wait(20)
+    QApplication.processEvents()
     assert module.ctrl.selection == [(0, a)]       # selezione valida dopo il salvataggio
     from .conftest import key as _key
     _key(view, Qt.Key.Key_Delete)
