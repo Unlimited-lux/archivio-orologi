@@ -378,21 +378,28 @@ def is_area_markup(pdf: pymupdf.Document, xref: int) -> bool:
     return pdf.xref_get_key(xref, AREA_KEY)[1] == "true"
 
 
-def marked_text(page: pymupdf.Page, annot: pymupdf.Annot) -> str:
+def marked_text(page: pymupdf.Page, annot: pymupdf.Annot, words: list | None = None) -> str:
     """Testo coperto dai quadrilateri di un markup (non memorizzato nel file)."""
     verts = annot.vertices or []
+    if words is None:
+        try:
+            words = page.get_text("words")
+        except Exception:
+            words = []
     parts = []
     for i in range(0, len(verts) - 3, 4):
         r = pymupdf.Quad(*verts[i:i + 4]).rect
         # si restringe in verticale per non prendere le righe vicine
         h = r.height
         r = pymupdf.Rect(r.x0, r.y0 + h * 0.2, r.x1, r.y1 - h * 0.2)
-        try:
-            words = page.get_text("words", clip=r)
-        except Exception:
-            words = []
-        words = [w for w in words if pymupdf.Rect(w[:4]).intersects(r)]
-        parts.append(" ".join(w[4] for w in words))
+        found = []
+        for w in words:
+            if w[2] > r.x0 and w[0] < r.x1 and w[3] > r.y0 and w[1] < r.y1:
+                # parola coperta per almeno metà della larghezza
+                cover = min(w[2], r.x1) - max(w[0], r.x0)
+                if cover >= (w[2] - w[0]) * 0.5:
+                    found.append(w[4])
+        parts.append(" ".join(found))
     return " ".join(p for p in parts if p).strip()
 
 
@@ -831,6 +838,7 @@ class Scale:
     factor: float = 25.4 / 72
     label: str = ""
     calibrated: bool = False
+    all_pages: bool = True       # ambito scelto nella finestra «Scala»
 
     @classmethod
     def from_ratio(cls, paper: float, paper_unit: str, real: float, real_unit: str) -> "Scale":
@@ -1440,7 +1448,7 @@ def kind_of(pdf: pymupdf.Document, annot: pymupdf.Annot) -> str:
     return ""
 
 
-def _info(pdf: pymupdf.Document, page_no: int, annot: pymupdf.Annot) -> AnnotInfo:
+def _info(pdf: pymupdf.Document, page_no: int, annot: pymupdf.Annot, words: list | None = None) -> AnnotInfo:
     info = annot.info or {}
     colors = annot.colors or {}
     border = annot.border or {}
@@ -1462,18 +1470,26 @@ def _info(pdf: pymupdf.Document, page_no: int, annot: pymupdf.Annot) -> AnnotInf
         state=state, state_model=state_model, hidden=bool(annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN),
         flags=annot.flags,
         reply_type=pdf.xref_get_key(annot.xref, "RT")[1].lstrip("/") if annot.irt_xref else "",
-        marked_text=marked_text(annot.get_parent(), annot) if annot.type[0] in MARKUP_TYPES else "",
+        marked_text=marked_text(annot.get_parent(), annot, words) if annot.type[0] in MARKUP_TYPES else "",
     )
 
 
 def page_annotations(pdf: pymupdf.Document, page_no: int) -> list[AnnotInfo]:
     page = pdf[page_no]
     out = []
-    for annot in page.annots():
-        if annot.type[0] in NON_COMMENT_TYPES:
+    words = None
+    annot = page.first_annot
+    while annot is not None:
+        current, annot = annot, annot.next
+        if current.type[0] in NON_COMMENT_TYPES:
             continue
+        if words is None and current.type[0] in MARKUP_TYPES:
+            try:
+                words = page.get_text("words")
+            except Exception:
+                words = []
         try:
-            out.append(_info(pdf, page_no, annot))
+            out.append(_info(pdf, page_no, current, words))
         except Exception:
             continue
     return out
@@ -1927,6 +1943,42 @@ def set_vertex(pdf: pymupdf.Document, page_no: int, xref: int, index: int, point
         else:
             raise AnnotationError("Vertice inesistente.")
     update_measure(pdf, page_no, xref)
+
+
+def edit_vertices(pdf: pymupdf.Document, page_no: int, xref: int, point, add: bool) -> None:
+    """Aggiunge un vertice sul lato più vicino al punto oppure rimuove il vertice più vicino."""
+    page = pdf[page_no]
+    p = pymupdf.Point(point)
+    with unrotated(page):
+        annot = get_annot(page, xref)
+        if annot.type[0] not in (pymupdf.PDF_ANNOT_POLYGON, pymupdf.PDF_ANNOT_POLY_LINE):
+            raise AnnotationError("Vertice inesistente.")
+        if annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED:
+            raise AnnotationError("L'annotazione è bloccata: non si può spostare né ridimensionare.")
+        pts = [pymupdf.Point(v) for v in annot.vertices or []]
+        closed = annot.type[0] == pymupdf.PDF_ANNOT_POLYGON
+        if add:
+            segs = list(range(len(pts) - 1)) + ([len(pts) - 1] if closed else [])
+            best = min(segs, key=lambda i: _dist_to_segment(p, pts[i], pts[(i + 1) % len(pts)]))
+            pts.insert(best + 1, p)
+        else:
+            if len(pts) <= (3 if closed else 2):
+                raise AnnotationError("Servono almeno {n} punti.".replace("{n}", "3" if closed else "2"))
+            pts.pop(min(range(len(pts)), key=lambda i: abs(pts[i] - p)))
+        _set_vertices(annot, pts)
+        touch(annot)
+        _dirty_update(annot)
+    update_measure(pdf, page_no, xref)
+
+
+def set_cloud_intensity(pdf: pymupdf.Document, page_no: int, xref: int, intensity: int) -> None:
+    """Intensità degli archi del bordo a nuvola (0 = bordo continuo, 1–2)."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    border = annot.border or {}
+    annot.set_border(width=border.get("width", 1), dashes=border.get("dashes") or [], clouds=max(0, min(2, intensity)))
+    touch(annot)
+    annot.update()
 
 
 def move_annot(pdf: pymupdf.Document, page_no: int, xref: int, dx: float, dy: float) -> None:

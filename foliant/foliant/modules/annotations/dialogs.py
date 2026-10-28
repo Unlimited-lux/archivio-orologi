@@ -250,8 +250,10 @@ class ScaleDialog(QDialog):
         form.addRow(buttons)
 
     def scale(self) -> engine.Scale:
-        return engine.Scale.from_ratio(self.paper.value(), self.paper_unit.currentText(),
-                                       self.real.value(), self.real_unit.currentText())
+        sc = engine.Scale.from_ratio(self.paper.value(), self.paper_unit.currentText(),
+                                     self.real.value(), self.real_unit.currentText())
+        sc.all_pages = self.all_pages.isChecked()
+        return sc
 
 
 def ask_scale(parent, scale: engine.Scale, calibrate_points: float | None = None) -> engine.Scale | None:

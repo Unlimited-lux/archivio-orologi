@@ -740,3 +740,125 @@ def test_ann29_pdfa1_blocks_attachments(comments, tmp_path, monkeypatch):
     click(view, 0, 100, 100)
     assert module.ctrl.annotations() == []
     assert any("PDF/A-1" in m[2] for m in module.messages)
+
+
+def test_ann03_align_and_distribute(comments):
+    """ANN-03: allinea a sinistra e distribuisci in verticale."""
+    window, view, module = comments
+    xs = [_rect(module, (100 + 30 * i, 300 + 80 * i * i), (160 + 30 * i, 340 + 80 * i * i)) for i in range(3)]
+    module.ctrl.select([(0, x) for x in xs], view)
+    assert module.ctrl.align("left")
+    lefts = {round(module.ctrl.info(0, x).rect.x0, 1) for x in xs}
+    assert len(lefts) == 1
+    assert module.ctrl.align("vdist")
+    r = [module.ctrl.info(0, x).rect for x in xs]
+    assert abs((r[1].y0 - r[0].y1) - (r[2].y0 - r[1].y1)) < 0.6
+
+
+def test_ann07_paste_system_text_and_image(comments):
+    """ANN-07: testo negli appunti → commento di testo; immagine PNG → /Stamp con immagine."""
+    from PySide6.QtGui import QGuiApplication, QImage, QColor
+    window, view, module = comments
+    QGuiApplication.clipboard().setText("Testo incollato")
+    module.activate("select")
+    key(view, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+    kinds = [i.kind for i in module.ctrl.annotations()]
+    assert kinds == [engine.TYPEWRITER]
+    img = QImage(40, 20, QImage.Format.Format_ARGB32)
+    img.fill(QColor(200, 0, 0))
+    QGuiApplication.clipboard().setImage(img)
+    module.ctrl.paste_system(1)
+    infos = module.ctrl.annotations()
+    assert any(i.kind == engine.STAMP and i.page == 1 for i in infos)
+
+
+def test_ann20_add_remove_vertex_and_cloud_intensity(comments, tmp_path):
+    """ANN-20/21: vertici aggiunti/rimossi dal menu; nuvola con intensità 2 → /BE << /S /C /I 2 >>."""
+    from PySide6.QtWidgets import QMenu
+    from foliant.modules.annotations.panels import build_annotation_menu
+    window, view, module = comments
+    xref = module.ctrl.apply("p", engine.create_shape, 0, engine.POLYGON, [(100, 400), (300, 400), (200, 550)],
+                             engine.Style(width=1), "A")
+    menu = QMenu()
+    build_annotation_menu(module.ctrl, menu, 0, xref, pymupdf.Point(200, 402))
+    [a for a in menu.actions() if a.text() == "Aggiungi vertice qui"][0].trigger()
+    assert len(module.ctrl.vertices(0, xref)) == 4
+    menu = QMenu()
+    build_annotation_menu(module.ctrl, menu, 0, xref, pymupdf.Point(200, 550))
+    [a for a in menu.actions() if a.text() == "Rimuovi vertice"][0].trigger()
+    assert len(module.ctrl.vertices(0, xref)) == 3
+    r = _rect(module, (100, 600), (200, 700))
+    module.ctrl.apply("c", lambda pdf: engine.set_cloud_intensity(pdf, 0, r, 2) or True)
+    doc = saved(window, view, tmp_path)
+    sq, = annots(doc, 0, "Square")
+    assert key_of(doc, sq.xref, "BE/S")[1] == "/C" and key_of(doc, sq.xref, "BE/I")[1] == "2"
+
+
+def test_ann30_scale_per_page(comments):
+    """ANN-30: pagine con scale diverse: ogni misura usa la scala della propria pagina."""
+    window, view, module = comments
+    sc1 = engine.Scale.calibrate(100, 1, "m")
+    sc1.all_pages = True
+    module.ctrl.set_scale(sc1, 0)
+    sc2 = engine.Scale.calibrate(100, 10, "m")
+    sc2.all_pages = False
+    module.ctrl.set_scale(sc2, 1)
+    for page in (0, 1):
+        module.ctrl.apply("m", engine.create_measure, page, engine.DISTANCE, [(100, 100), (200, 100)],
+                          engine.Style(), module.ctrl.scale_for(page), "A")
+    vals = {i.page: i.contents for i in module.ctrl.annotations()}
+    assert vals == {0: "1,00 m", 1: "10,00 m"}
+
+
+def test_encrypted_document_comment_and_save(window, encrypted_pdf, tmp_path, monkeypatch):
+    """Documento cifrato: la nota si aggiunge e il file salvato resta protetto."""
+    monkeypatch.setattr(window.ctx, "error", lambda *a: None)
+    view = window.open_path(encrypted_pdf, "segreta")
+    module = window.ctx.annotations
+    window.set_mode("commenta")
+    xref = module.ctrl.apply("n", engine.create_note, 0, (100, 100), "riservata", engine.Style(), "A")
+    assert xref
+    out = tmp_path / "cifrato.pdf"
+    view.document.save(str(out))
+    doc = pymupdf.open(str(out))
+    assert doc.needs_pass and doc.authenticate("segreta")
+    assert annots(doc, 0, "Text")[0].info["content"] == "riservata"
+    view.document._saved_state = view.document._state
+
+
+def test_no_comment_permission_blocks_tools(window, tmp_path, monkeypatch):
+    """Permessi che vietano i commenti: strumenti disattivati con spiegazione."""
+    path = tmp_path / "noannot.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 72), "Testo")
+    d.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="padrone",
+           permissions=pymupdf.PDF_PERM_PRINT)
+    msgs = []
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: msgs.append(m))
+    view = window.open_path(str(path))
+    module = window.ctx.annotations
+    module.activate(engine.NOTE)
+    assert view.tool is not module.tools[engine.NOTE]
+    assert msgs and "non consente" in msgs[0]
+
+
+def test_ann34_many_annotations_first_screen_fast(window, tmp_path, qtbot):
+    """ANN-34: con migliaia di commenti la prima schermata dell'elenco compare subito."""
+    import time
+    path = tmp_path / "molti.pdf"
+    d = pymupdf.open()
+    for i in range(120):
+        p = d.new_page()
+        for j in range(50):
+            p.add_text_annot((50 + (j % 10) * 50, 50 + (j // 10) * 60), f"nota {i}-{j}")
+    d.save(str(path))
+    view = window.open_path(str(path))
+    module = window.ctx.annotations
+    panel = module.comments
+    panel.set_view(view)
+    t = time.perf_counter()
+    panel.reload()
+    assert time.perf_counter() - t < 2.0
+    assert panel.items()
+    qtbot.waitUntil(lambda: len(panel._infos) == 6000, timeout=60000)
+    qtbot.waitUntil(lambda: panel.count.text() == "6000 commenti", timeout=60000)

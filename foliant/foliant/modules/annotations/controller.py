@@ -212,6 +212,16 @@ class Controller(QObject):
         stamps = [d for d in self.custom_stamps() if d["name"] != name]
         self.ctx.settings().setValue("annotations/custom_stamps", json.dumps(stamps))
 
+    def set_scale(self, scale: engine.Scale, page: int | None = None) -> None:
+        """Scala per tutte le pagine o solo per `page` (ANN-30)."""
+        if scale.all_pages or page is None:
+            self.scale = scale
+            self.page_scales.clear()
+        else:
+            self.page_scales[page] = scale
+        where = _("tutte le pagine") if scale.all_pages or page is None else _("pagina {n}").format(n=page + 1)
+        self.ctx.status(_("Scala: {s}").format(s=scale.text()) + f" ({where})", 10000)
+
     def scale_for(self, page: int) -> engine.Scale:
         return self.page_scales.get(page, self.scale)
 
@@ -409,6 +419,98 @@ class Controller(QObject):
             return True
 
         return bool(self.apply(_("Ridimensiona annotazione"), run))
+
+    def align(self, how: str, items=None) -> bool:
+        """Allinea (left/hcenter/right/top/vcenter/bottom) o distribuisce (hdist/vdist) la selezione."""
+        items = [it for it in (items if items is not None else self.selection)]
+        infos = [self.info(p, x) for p, x in items]
+        pairs = [(it, i) for it, i in zip(items, infos) if i is not None and not self.is_text_anchored(i)]
+        if len(pairs) < 2 or len({it[0] for it, _i in pairs}) != 1:
+            self.ctx.status(_("Seleziona almeno due annotazioni sulla stessa pagina."))
+            return False
+        if any(i.locked for _it, i in pairs):
+            self.ctx.status(_("Annotazione bloccata: non si può spostare."))
+            return False
+        rects = [i.rect for _it, i in pairs]
+        moves: list[tuple[float, float]] = []
+        if how in ("hdist", "vdist"):
+            if len(pairs) < 3:
+                self.ctx.status(_("Per distribuire servono almeno tre annotazioni."))
+                return False
+            horiz = how == "hdist"
+            order = sorted(range(len(rects)), key=lambda k: rects[k].x0 if horiz else rects[k].y0)
+            first, last = rects[order[0]], rects[order[-1]]
+            total = sum((r.width if horiz else r.height) for r in rects)
+            span = (last.x1 - first.x0) if horiz else (last.y1 - first.y0)
+            gap = (span - total) / (len(rects) - 1)
+            pos = first.x0 if horiz else first.y0
+            moves = [(0.0, 0.0)] * len(rects)
+            for k in order:
+                r = rects[k]
+                d = pos - (r.x0 if horiz else r.y0)
+                moves[k] = (d, 0.0) if horiz else (0.0, d)
+                pos += (r.width if horiz else r.height) + gap
+        else:
+            for r in rects:
+                if how == "left":
+                    moves.append((min(q.x0 for q in rects) - r.x0, 0.0))
+                elif how == "right":
+                    moves.append((max(q.x1 for q in rects) - r.x1, 0.0))
+                elif how == "hcenter":
+                    c = sum((q.x0 + q.x1) / 2 for q in rects) / len(rects)
+                    moves.append((c - (r.x0 + r.x1) / 2, 0.0))
+                elif how == "top":
+                    moves.append((0.0, min(q.y0 for q in rects) - r.y0))
+                elif how == "bottom":
+                    moves.append((0.0, max(q.y1 for q in rects) - r.y1))
+                else:
+                    c = sum((q.y0 + q.y1) / 2 for q in rects) / len(rects)
+                    moves.append((0.0, c - (r.y0 + r.y1) / 2))
+
+        def run(pdf):
+            for ((page, xref), info), (dx, dy) in zip(pairs, moves):
+                if abs(dx) > 1e-3 or abs(dy) > 1e-3:
+                    engine.transform_annot(pdf, page, xref, info.rect + (dx, dy, dx, dy))
+            return True
+
+        return bool(self.apply(_("Allinea annotazioni") if how not in ("hdist", "vdist")
+                               else _("Distribuisci annotazioni"), run))
+
+    def paste_system(self, page: int | None = None, point=None) -> int | None:
+        """Incolla dagli appunti di sistema: immagine → timbro immagine, testo → commento di testo."""
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        from PySide6.QtGui import QGuiApplication
+        view = self.view()
+        if view is None:
+            return None
+        page = view.current_page if page is None else page
+        cb = QGuiApplication.clipboard()
+        md = cb.mimeData()
+        with ENGINE_LOCK:
+            r = view.document.pdf[page].rect
+        point = point or pymupdf.Point(r.width / 2, r.height / 3)
+        if md is not None and md.hasImage():
+            img = cb.image()
+            if not img.isNull():
+                ba = QByteArray()
+                buf = QBuffer(ba)
+                buf.open(QIODevice.OpenModeFlag.WriteOnly)
+                img.save(buf, "PNG")
+                data = bytes(ba.data())
+                xref = self.apply(_("Incolla"), engine.create_image_stamp, page, point, data, self.style_for(engine.STAMP),
+                                  self.author())
+                if xref:
+                    self.select([(page, xref)], view)
+                return xref
+        text = cb.text()
+        if text and text.strip():
+            st = self.style_for(engine.FREETEXT)
+            xref = self.apply(_("Incolla"), engine.create_typewriter, page, point, text,
+                              Style(fontsize=st.fontsize, text_color=st.text_color or (0, 0, 0)), self.author())
+            if xref:
+                self.select([(page, xref)], view)
+            return xref
+        return None
 
     def rotate(self, degrees: float, items=None) -> bool:
         items = list(items if items is not None else self.selection)

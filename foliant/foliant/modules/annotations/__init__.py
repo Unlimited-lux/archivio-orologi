@@ -394,7 +394,7 @@ class AnnotationsModule:
                 self.ctrl.select([(pe.page, xref)], view)
             if not menu.isEmpty():
                 menu.addSeparator()
-            build_annotation_menu(self.ctrl, menu, pe.page, xref)
+            build_annotation_menu(self.ctrl, menu, pe.page, xref, pe.point)
             return
         sel = view.text_selection
         if sel is not None and sel.rects:

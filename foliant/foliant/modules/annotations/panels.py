@@ -521,15 +521,37 @@ class CommentsPanel(QWidget):
         if view is self.view:
             self._timer.start()
 
+    CHUNK = 30   # pagine lette per passo: la prima schermata compare subito anche con migliaia di commenti
+
     def reload(self) -> None:
+        self._generation = getattr(self, "_generation", 0) + 1
         if self.view is None or self.view.document.closed:
             self._infos = []
-        else:
-            try:
-                self._infos = self.ctrl.annotations(view=self.view)
-            except Exception:
-                self._infos = []
+            self.rebuild()
+            return
+        total = self.view.page_count
+        self._infos = self._read_pages(0, min(total, self.CHUNK))
         self.rebuild()
+        if total > self.CHUNK:
+            QTimer.singleShot(0, lambda g=self._generation, v=self.view: self._continue(g, v, self.CHUNK))
+
+    def _read_pages(self, start: int, end: int) -> list:
+        from foliant.api import ENGINE_LOCK
+        try:
+            with ENGINE_LOCK:
+                return engine.list_annotations(self.view.document.pdf, range(start, end))
+        except Exception:
+            return []
+
+    def _continue(self, generation: int, view, start: int) -> None:
+        if generation != self._generation or view is not self.view or view.document.closed:
+            return
+        end = min(view.page_count, start + self.CHUNK)
+        self._infos.extend(self._read_pages(start, end))
+        if end < view.page_count:
+            QTimer.singleShot(0, lambda: self._continue(generation, view, end))
+        else:
+            self.rebuild()
 
     def _matches(self, info: engine.AnnotInfo, query: str) -> bool:
         f = self.filters
@@ -833,7 +855,7 @@ def _icon(name: str, color=None) -> QIcon:
     return icon(name)
 
 
-def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int) -> None:
+def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int, point=None) -> None:
     """Voci comuni del menu contestuale di un'annotazione (pagina e pannello)."""
     info = ctrl.info(page, xref)
     if info is None:
@@ -880,6 +902,24 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int)
             ctrl.rotate(deg, [(page, xref)])
 
         rot.addAction(_("Angolo…"), ask_angle)
+    if point is not None and info.type in ("Polygon", "PolyLine"):
+        menu.addAction(_("Aggiungi vertice qui"), lambda: ctrl.apply(
+            _("Aggiungi vertice"), lambda pdf: engine.edit_vertices(pdf, page, xref, point, True) or True))
+        menu.addAction(_("Rimuovi vertice"), lambda: ctrl.apply(
+            _("Rimuovi vertice"), lambda pdf: engine.edit_vertices(pdf, page, xref, point, False) or True))
+    if info.type in ("Polygon", "Square", "Circle") and info.kind not in engine.MEASURE_KINDS:
+        cl = menu.addMenu(_("Bordo a nuvola"))
+        for n, label in ((0, "Nessuno"), (1, "Intensità 1"), (2, "Intensità 2")):
+            cl.addAction(_(label), lambda _c=False, n=n: ctrl.apply(
+                _("Bordo a nuvola"), lambda pdf: engine.set_cloud_intensity(pdf, page, xref, n) or True))
+    if len(ctrl.selection) > 1 and (page, xref) in ctrl.selection:
+        al = menu.addMenu(_("Allinea"))
+        for key, label in (("left", "A sinistra"), ("hcenter", "Al centro orizzontale"), ("right", "A destra"),
+                           ("top", "In alto"), ("vcenter", "Al centro verticale"), ("bottom", "In basso")):
+            al.addAction(_(label), lambda _c=False, k=key: ctrl.align(k))
+        di = menu.addMenu(_("Distribuisci"))
+        di.addAction(_("In orizzontale"), lambda: ctrl.align("hdist"))
+        di.addAction(_("In verticale"), lambda: ctrl.align("vdist"))
     menu.addSeparator()
     if not info.irt:
         menu.addAction(_("Porta in primo piano"), lambda: ctrl.restack(True, [(page, xref)]))

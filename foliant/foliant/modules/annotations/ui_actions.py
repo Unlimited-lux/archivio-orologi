@@ -290,11 +290,10 @@ def export_measures(ctrl: "Controller") -> str | None:
 
 
 def set_scale(ctrl: "Controller") -> engine.Scale | None:
-    scale = dialogs.ask_scale(ctrl.view(), ctrl.scale)
+    view = ctrl.view()
+    scale = dialogs.ask_scale(view, ctrl.scale)
     if scale is not None:
-        ctrl.scale = scale
-        ctrl.page_scales.clear()
-        ctrl.ctx.status(_("Scala: {s}").format(s=scale.text()))
+        ctrl.set_scale(scale, view.current_page if view is not None else None)
     return scale
 
 

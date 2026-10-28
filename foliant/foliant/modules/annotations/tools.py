@@ -320,8 +320,11 @@ class SelectAnnotTool(SelectTextTool):
     def key(self, view, event):
         key = event.key()
         ctrl_mod = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-        if ctrl_mod and key == Qt.Key.Key_V and self.ctrl.clipboard:
-            self.ctrl.paste()
+        if ctrl_mod and key == Qt.Key.Key_V:
+            if self.ctrl.clipboard:
+                self.ctrl.paste()
+            else:
+                self.ctrl.paste_system()
             return True
         if not self.ctrl.selection:
             return False
@@ -1195,9 +1198,7 @@ class CalibrateTool(_DragTool):
         scale = dialogs.ask_scale(view, self.ctrl.scale, calibrate_points=length)
         if scale is None:
             return
-        self.ctrl.scale = scale
-        self.ctrl.page_scales.clear()
-        self.ctrl.ctx.status(_("Scala: {s}").format(s=scale.text()))
+        self.ctrl.set_scale(scale, page)
         self.ctrl.ctx.set_tool(SelectAnnotTool.shared(self.ctrl))
 
     def paint(self, view, painter, page):
