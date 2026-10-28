@@ -188,3 +188,69 @@ def test_placeholders_match():
 def test_translations_are_non_empty_strings():
     bad = [k for k, v in EN.items() if not isinstance(v, str) or not v.strip()]
     assert not bad, f"traduzioni vuote: {bad}"
+
+
+# ------------------------------------------------------------------ voci delle combo in inglese (NFR-25)
+def _italian_only_words() -> set[str]:
+    """Parole (≥ 4 lettere) presenti nei testi italiani del catalogo e assenti da quelli inglesi."""
+    word = re.compile(r"[a-zàèéìòù]{4,}")
+    it = {w for k in EN for w in word.findall(k.lower())}
+    en = {w for v in EN.values() for w in word.findall(v.lower())}
+    return it - en
+
+
+def _module_texts(window, services, view, monkeypatch, lang):
+    """Voci delle combo e testi dei campi dei dialoghi e del pannello del modulo, nella lingua `lang`."""
+    from PySide6.QtWidgets import QComboBox, QDialog, QLineEdit
+
+    from foliant import i18n
+    from foliant.modules.ai.dialogs import SettingsDialog
+    from foliant.modules.ai.panel import AIPanel
+    from foliant.modules.ai.ui import TranslatePdfDialog
+    i18n.set_language(lang)
+    widgets = []
+    try:
+        services.controller.exec_dialog = lambda dlg: widgets.append(dlg) or 0
+        monkeypatch.setattr(QDialog, "exec", lambda self: widgets.append(self) or 0)
+        ctl = services.controller
+        for open_fn in (ctl.open_tasks, ctl.open_writer, ctl.open_collection, ctl.open_ranking, ctl.open_contracts,
+                        ctl.open_product_sheet, ctl.open_bibliography, ctl.generate_graphic):
+            open_fn()
+        widgets += [TranslatePdfDialog(window.ctx, view.document, window),
+                    AIPanel(window.ctx, services, standalone=True), SettingsDialog(services.store, window)]
+        names = {type(w).__name__ for w in widgets}
+        assert {"GenerateGraphicDialog", "TasksDialog", "WriteDialog", "RankingDialog", "AIPanel"} <= names
+        texts = []
+        for w in widgets:
+            for combo in w.findChildren(QComboBox):
+                texts += [(type(w).__name__, combo.itemText(i)) for i in range(combo.count())]
+            for edit in w.findChildren(QLineEdit):
+                if not edit.isReadOnly() and edit.echoMode() == QLineEdit.EchoMode.Normal:
+                    texts += [(type(w).__name__, edit.text()), (type(w).__name__, edit.placeholderText())]
+        return texts
+    finally:
+        i18n.set_language("it")
+        for w in widgets:
+            w.deleteLater()
+
+
+# voci uguali nelle due lingue ammesse: nomi propri, sigle, valori tecnici
+SAME_IN_BOTH = re.compile(r"^(|[\d\s.,:x×%/+-]*|Anthropic.*|OpenAI.*|Claude.*|claude-.*|https?://.*|Markdown|JSON|CSV|PNG|SVG|"
+                          r"PDF|DOCX|BibTeX|RIS|APA|MLA|Chicago|IEEE|Harvard|Vancouver|ISO.*|vintage|Italiano|English|"
+                          r"Español|Français|Deutsch|Português|Hindi|Standard|Crossref|OpenAlex|\d+ token|.*\(.*\)|[A-Z]{1,4})$")
+
+
+def test_combo_items_and_defaults_have_no_italian_words(window, text_pdf, monkeypatch):
+    from .conftest import FakeProvider, make_active_profile
+    services = window.ctx.ai_services
+    services.provider_factory = lambda p: FakeProvider()
+    make_active_profile(services.store)
+    view = window.open_path(text_pdf(2))
+    it = _module_texts(window, services, view, monkeypatch, "it")
+    en = _module_texts(window, services, view, monkeypatch, "en")
+    italian = _italian_only_words()
+    same = {t for _w, t in it} & {t for _w, t in en}
+    found = sorted({f"{w}: «{t}»" for w, t in en
+                    if (t in same and not SAME_IN_BOTH.match(t) and re.search(r"[a-zà-ù]{3,}", t))
+                    or any(x in italian for x in re.findall(r"[a-zàèéìòù]{4,}", t.lower()))})
+    assert not found, "\n".join(found)

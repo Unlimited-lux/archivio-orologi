@@ -31,13 +31,18 @@ def extract_strings(directory: Path = MODULE_DIR) -> set[str]:
                     if s:
                         found.add(s)
                 elif name == "ActionSpec" and len(node.args) >= 2:
-                    s = _const_str(node.args[1])
-                    if s:
-                        found.add(s)
+                    for arg in node.args[1:3]:     # etichetta e suffisso dei nomi dei file
+                        s = _const_str(arg)
+                        if s:
+                            found.add(s)
                 elif name == "Param" and len(node.args) >= 2:
                     s = _const_str(node.args[1])
                     if s:
                         found.add(s)
+                    if len(node.args) >= 4 and _const_str(node.args[2]) == "str":
+                        d = _const_str(node.args[3])     # testo predefinito, tradotto a runtime
+                        if d and d != "ita+eng":
+                            found.add(d)
                     for arg in node.args[4:5]:
                         found |= _pair_labels(arg)
                     for kw in node.keywords:

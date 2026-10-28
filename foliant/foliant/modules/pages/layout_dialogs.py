@@ -28,6 +28,15 @@ from .engine import INCH, MM, PAPER_SIZES, PageOpError, RangeError, parse_ranges
 
 TRANSLATIONS = {
     "Annulla": "Cancel",
+    "In alto a sinistra": "Top left",
+    "In alto al centro": "Top center",
+    "In alto a destra": "Top right",
+    "Al centro a sinistra": "Center left",
+    "Al centro": "Center",
+    "Al centro a destra": "Center right",
+    "In basso a sinistra": "Bottom left",
+    "In basso al centro": "Bottom center",
+    "In basso a destra": "Bottom right",
     "Ritaglia pagine": "Crop pages",
     "Ripristina ritaglio": "Reset crop",
     "Rimuovi margini bianchi": "Remove white margins",
@@ -173,6 +182,16 @@ UNIT_LABELS = [("mm", "mm"), ("pt", "pt"), ("in", "in"), ("%", "%")]
 _UNIT_FACTOR = {"mm": MM, "pt": 1.0, "in": INCH}
 _ANCHOR_ORDER = ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"]
 _ANCHOR_ARROWS = ["↖", "↑", "↗", "←", "•", "→", "↙", "↓", "↘"]
+
+
+def anchor_label(key: str) -> str:
+    """Nome leggibile (tradotto) di un ancoraggio, per suggerimenti e lettori di schermo."""
+    return {
+        "top-left": _("In alto a sinistra"), "top": _("In alto al centro"), "top-right": _("In alto a destra"),
+        "left": _("Al centro a sinistra"), "center": _("Al centro"), "right": _("Al centro a destra"),
+        "bottom-left": _("In basso a sinistra"), "bottom": _("In basso al centro"),
+        "bottom-right": _("In basso a destra"),
+    }.get(key, key)
 
 
 # =========================================================================
@@ -1247,7 +1266,8 @@ class ResizeDialog(_LayoutDialog):
             b.setText(arrow)
             b.setCheckable(True)
             b.setFixedSize(28, 28)
-            b.setToolTip(key)
+            b.setToolTip(anchor_label(key))
+            b.setAccessibleName(anchor_label(key))
             self.anchor_group.addButton(b)
             self.anchor_buttons[key] = b
             agrid.addWidget(b, n // 3, n % 3)

@@ -924,7 +924,7 @@ def repair_file(input_path, output_path=None, password=None, progress=None, *,
     except OSError as e:
         raise ConversionError(_("Impossibile leggere «{n}»: {e}").format(n=src.name, e=e.strerror or e)) from e
     out, report = repair_pdf_bytes(data, password=password, progress=progress)
-    target = Path(output_path) if output_path else src.with_name(f"{src.stem}_riparato.pdf")
+    target = Path(output_path) if output_path else src.with_name(f"{src.stem}{_('_riparato')}.pdf")
     with OutputFiles(policy) as files:
         tmp = files.new(target)
         Path(tmp).write_bytes(out)
