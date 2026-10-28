@@ -224,6 +224,31 @@ def _version_tuple(text: str | None) -> tuple[int, int]:
     return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
 
+# Versione minima richiesta dalla cifratura scelta al salvataggio (AES-256: 1.7 con
+# l'estensione ADBE dichiarata dal modulo di protezione).
+_ENCRYPTION_VERSION = {pymupdf.PDF_ENCRYPT_AES_128: (1, 6), pymupdf.PDF_ENCRYPT_AES_256: (1, 7)}
+
+
+def _declared_version(pdf: pymupdf.Document) -> tuple[int, int]:
+    """Versione dichiarata: la maggiore fra intestazione e /Version del catalogo."""
+    version = _version_tuple((pdf.metadata or {}).get("format"))
+    kind, value = pdf.xref_get_key(pdf.pdf_catalog(), "Version")
+    if kind == "name":
+        version = max(version, _version_tuple(value))
+    return version
+
+
+def _raise_version(pdf: pymupdf.Document, opts: dict) -> None:
+    """Alza al minimo necessario la versione dichiarata della copia che si scrive (NFR-29):
+    livelli /OCProperties o flussi di oggetti → 1.5, AES-128 → 1.6, AES-256 → 1.7.
+    Imposta /Version nel catalogo, che prevale su un'intestazione più vecchia."""
+    need = _ENCRYPTION_VERSION.get(opts.get("encryption"), (1, 0))
+    if opts.get("use_objstms") or pdf.xref_get_key(pdf.pdf_catalog(), "OCProperties")[0] != "null":
+        need = max(need, (1, 5))
+    if need > _declared_version(pdf):
+        pdf.xref_set_key(pdf.pdf_catalog(), "Version", "/%d.%d" % need)
+
+
 def _file_stamp(path) -> tuple | None:
     try:
         st = os.stat(path)
@@ -837,6 +862,7 @@ class Document:
         try:
             if copy.needs_pass and self.password is not None:
                 copy.authenticate(self.password)
+            _raise_version(copy, opts)
             return copy.tobytes(**opts)
         finally:
             copy.close()
@@ -905,10 +931,7 @@ class Document:
             return True
         with self.lock:
             try:
-                version = _version_tuple((self._pdf.metadata or {}).get("format"))
-                kind, value = self._pdf.xref_get_key(self._pdf.pdf_catalog(), "Version")
-                if kind == "name":
-                    version = max(version, _version_tuple(value))
+                version = _declared_version(self._pdf)
             except Exception:
                 return True
         return version >= (1, 5)

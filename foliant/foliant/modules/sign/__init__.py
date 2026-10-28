@@ -11,9 +11,9 @@ ORDER = 90
 
 
 def _translations() -> dict:
-    from . import controller, digital, graphic, library, panel, store, tools, ui_create, ui_digital, ui_library
+    from . import controller, digital, graphic, library, panel, store, sync, tools, ui_create, ui_digital, ui_library
     merged: dict = {}
-    for mod in (graphic, library, digital, store, tools, ui_create, ui_library, ui_digital, panel, controller):
+    for mod in (graphic, library, sync, digital, store, tools, ui_create, ui_library, ui_digital, panel, controller):
         merged.update(getattr(mod, "TRANSLATIONS_EN", {}))
     merged.update({
         "Firma": "Sign", "Crea firma": "Create signature", "Crea iniziali": "Create initials",
@@ -121,6 +121,11 @@ def register(ctx: Context) -> None:
     c.panel = panel
     ctx.add_sidebar_panel("firme", _("Firme"), "file-badge", panel, order=90)
     ctx.add_view_menu_provider(c.menu_provider)
+    # per il modulo Moduli: clic su un campo firma vuoto → procedura di firma con quel campo
+    ctx.request_signature = c.request_signature
+    if hasattr(ctx, "add_preferences_page"):
+        from .ui_digital import SignPreferences
+        ctx.add_preferences_page(_("Firma"), lambda parent: SignPreferences(parent, c), 90)
     ctx.add_home_action(_("Firma un PDF"), "signature", lambda: _home(ctx), _("Firma grafica o digitale"), 90)
 
     def on_state(view) -> None:

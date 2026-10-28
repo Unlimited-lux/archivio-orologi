@@ -292,10 +292,79 @@ def test_verify_lists_broken(viewer_window, tmp_path, monkeypatch):
     with view.document.change("Elimina") as pdf:
         pdf.delete_pages(from_page=10, to_page=19)
     msgs = []
-    monkeypatch.setattr(viewer_window.ctx, "info", lambda t, m: msgs.append(m))
+    monkeypatch.setattr(panel, "ask_fix_broken", lambda text: msgs.append(text))   # Chiudi
     problems = panel.verify()
     assert {panel.items[i].title for i, why in problems if why == "broken"} == {"Sezione 3.3"}
-    assert "Sezione 3.3" in msgs[0]
+    assert "Sezione 3.3" in msgs[0] and "Correzione proposta" in msgs[0]
+
+
+def test_verify_broken_named_destination_redirect_or_remove(viewer_window, tmp_path, monkeypatch):
+    """Dato un segnalibro che punta a una destinazione nominata inesistente, la Verifica lo elenca
+    come rotto con la proposta di reindirizzarlo o rimuoverlo."""
+    path = tmp_path / "nominata.pdf"
+    doc = pymupdf.open()
+    for i in range(3):
+        doc.new_page().insert_text((72, 100), f"Pagina {i + 1}")
+    doc.set_toc([[1, "Buono", 1], [1, "Rotto", 2]])
+    xref = [x for x in range(1, doc.xref_length()) if "/Title (Rotto)" in doc.xref_object(x)][0]
+    doc.xref_set_key(xref, "Dest", "(inesistente)")
+    doc.save(str(path))
+    view, panel = _open(viewer_window, str(path))
+    asked = []
+    monkeypatch.setattr(panel, "ask_fix_broken", lambda text: (asked.append(text), "redirect")[1])
+    view.go_to_page(2)
+    problems = panel.verify()
+    assert problems == [(1, "broken")]                  # la seconda voce, «Rotto»
+    assert "Rotto" in asked[0]
+    assert [(b.title, b.page) for b in panel.items] == [("Buono", 0), ("Rotto", 2)]
+    view.document.undo()
+    monkeypatch.setattr(panel, "ask_fix_broken", lambda text: "remove")
+    panel.verify()
+    assert [b.title for b in panel.items] == ["Buono"]
+
+
+def test_generate_from_tagged_structure(viewer_window, tmp_path):
+    from .test_engine import _tagged_pdf
+    pdf = _tagged_pdf([[("H1", "Capitolo uno"), ("H2", "Sezione A")], [("H1", "Capitolo due")]])
+    path = tmp_path / "taggato.pdf"
+    pdf.save(str(path))
+    view, panel = _open(viewer_window, str(path))
+    assert panel.generate("structure", replace=True)
+    assert [(b.level, b.title, b.page) for b in panel.items] == [(1, "Capitolo uno", 0), (2, "Sezione A", 0),
+                                                                 (1, "Capitolo due", 1)]
+    assert view.document.undo_label == "Genera segnalibri"
+
+
+def test_generate_from_structure_untagged_message(viewer_window, tmp_path, monkeypatch):
+    view, panel = _open(viewer_window, _toc_pdf(tmp_path))
+    msgs = []
+    monkeypatch.setattr(viewer_window.ctx, "info", lambda t, m: msgs.append(m))
+    assert not panel.generate("structure", replace=True)
+    assert "titoli taggati" in msgs[0]
+
+
+def test_maintenance_tools(viewer_window, tmp_path):
+    """Unione dei duplicati, maiuscole e minuscole, trova e sostituisci nei titoli: un passo
+    annullabile ciascuno."""
+    path = tmp_path / "dup.pdf"
+    doc = pymupdf.open()
+    for i in range(3):
+        doc.new_page()
+    doc.set_toc([[1, "capitolo UNO", 1], [2, "sezione a", 1], [1, "capitolo UNO", 1], [1, "Indice", 3]])
+    doc.save(str(path))
+    view, panel = _open(viewer_window, str(path))
+    assert panel.merge_duplicates() == 1
+    assert [b.title for b in panel.items] == ["capitolo UNO", "sezione a", "Indice"]
+    assert panel.change_case("sentence")
+    assert [b.title for b in panel.items] == ["Capitolo uno", "Sezione a", "Indice"]
+    assert panel.change_case("title")
+    assert panel.items[1].title == "Sezione A"
+    assert panel.replace_in_titles("Capitolo", "Parte") == 1
+    assert panel.items[0].title == "Parte Uno"
+    assert panel.replace_in_titles(r"(\w+) (\w+)", r"\2 \1", regex=True) == 2
+    assert panel.items[0].title == "Uno Parte"
+    view.document.undo()
+    assert panel.items[0].title == "Parte Uno"
 
 
 def test_rename_by_editing_item(viewer_window, tmp_path):

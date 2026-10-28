@@ -322,3 +322,72 @@ def test_switching_views_updates_panel(viewer_window, attach_pdf, sample_pdf):
 def test_translations_registered(viewer_window):
     from foliant.modules.viewer.attachments import EN
     assert EN["Allegati"] == "Attachments"
+
+
+# ------------------------------------------------------------------ portfolio
+def _portfolio(tmp_path):
+    """Portfolio con 2 cartelle e 5 file; documento iniziale «<1>contratto.pdf»."""
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Pagina di copertina del portfolio")
+    small = pymupdf.open()
+    small.new_page().insert_text((72, 100), "Contratto")
+    pdf_bytes = small.tobytes()
+    files = [("<1>contratto.pdf", "contratto.pdf", pdf_bytes), ("<1>allegato A.txt", "allegato A.txt", b"A"),
+             ("<2>foto rolex.png", "foto rolex.png", b"\x89PNG"), ("<2>foto omega.png", "foto omega.png", b"\x89PNG"),
+             ("listino.txt", "listino.txt", b"prezzi")]
+    for key, name, data in files:
+        doc.embfile_add(key, data, filename=name, ufilename=name, desc=f"File {name}")
+    root = doc.get_new_xref()
+    f1 = doc.get_new_xref()
+    f2 = doc.get_new_xref()
+    doc.update_object(root, f"<< /Type /Folder /ID 0 /Name (Portfolio) /Child {f1} 0 R >>")
+    doc.update_object(f1, f"<< /Type /Folder /ID 1 /Name (Contratti) /Parent {root} 0 R /Next {f2} 0 R >>")
+    doc.update_object(f2, f"<< /Type /Folder /ID 2 /Name (Fotografie) /Parent {root} 0 R >>")
+    col = doc.get_new_xref()
+    doc.update_object(col, f"<< /Type /Collection /Folders {root} 0 R /D (<1>contratto.pdf) /View /D >>")
+    doc.xref_set_key(doc.pdf_catalog(), "Collection", f"{col} 0 R")
+    path = tmp_path / "portfolio.pdf"
+    doc.save(str(path))
+    return str(path)
+
+
+def test_portfolio_folders_and_initial_document(viewer_window, tmp_path):
+    """Dato un portfolio con 2 cartelle e 5 file, la vista mostra cartelle e file navigabili ed
+    evidenzia il documento iniziale indicato da /D."""
+    view, panel = _open(viewer_window, _portfolio(tmp_path))
+    assert panel.collection is not None and panel.collection.initial == "<1>contratto.pdf"
+    top = {panel.tree.topLevelItem(i).text(0): panel.tree.topLevelItem(i)
+           for i in range(panel.tree.topLevelItemCount())}
+    assert {"Contratti", "Fotografie", "listino.txt"} == set(top)
+    contracts = top["Contratti"]
+    assert sorted(contracts.child(i).text(0) for i in range(contracts.childCount())) == ["allegato A.txt",
+                                                                                       "contratto.pdf"]
+    photos = top["Fotografie"]
+    assert photos.childCount() == 2 and photos.isExpanded()
+    current = panel.current_item()
+    assert current is not None and current.filename == "contratto.pdf"
+    assert panel.tree.currentItem().font(0).bold()
+    assert len(panel.items()) == 5
+    # i PDF contenuti si aprono in schede
+    new_view = panel.open_item(current)
+    assert new_view is not None and new_view is not view
+    assert "Contratto" in new_view.document.pdf[0].get_text()
+
+
+def test_portfolio_search_by_name_inside_folders(viewer_window, tmp_path):
+    """Dato un portfolio con 5 file, cercando una parte del nome l'elenco mostra solo i file
+    corrispondenti, anche dentro le cartelle."""
+    view, panel = _open(viewer_window, _portfolio(tmp_path))
+    panel.filter_edit.setText("foto")
+    assert sorted(panel.visible_names()) == ["foto omega.png", "foto rolex.png"]
+    panel.filter_edit.setText("ROLEX")
+    assert panel.visible_names() == ["foto rolex.png"]
+    panel.filter_edit.setText("")
+    assert len(panel.visible_names()) == 5
+
+
+def test_plain_document_search_filter(viewer_window, attach_pdf):
+    view, panel = _open(viewer_window, attach_pdf)
+    assert panel.collection is None and not panel.tree.rootIsDecorated()
+    panel.filter_edit.setText("note")
+    assert panel.visible_names() == ["note.txt"]

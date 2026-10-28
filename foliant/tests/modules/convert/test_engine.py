@@ -1004,3 +1004,324 @@ def test_images_hide_unsigned_signature_placeholder(tmp_path):
     orange = sum(1 for r, g, b in img.getdata() if r > 200 and 80 < g < 200 and b < 80)
     assert orange == 0
     assert pymupdf.open(path)[0].first_widget is not None   # il file sorgente non cambia
+
+
+def _words(text: str) -> list[str]:
+    import unicodedata
+    return unicodedata.normalize("NFC", text).split()
+
+
+def test_docx_flow_similarity_ten_pages(tmp_path):
+    """CNV-03: PDF nativo di 10 pagine a colonna singola → similarità testuale ≥ 99%."""
+    import difflib
+    import docx
+    doc = pymupdf.open()
+    lorem = ("Il presente contratto di compravendita riguarda un orologio automatico con cassa in acciaio, "
+             "quadrante blu e bracciale originale. Il venditore garantisce la provenienza lecita del bene. ")
+    for i in range(10):
+        p = doc.new_page()
+        p.insert_textbox(pymupdf.Rect(72, 72, 523, 770), f"Articolo {i + 1}. " + lorem * 6, fontsize=11)
+    path = _save(doc, tmp_path / "dieci.pdf")
+    src = _words(" ".join(pymupdf.open(path)[i].get_text() for i in range(10)))
+    out = _words(" ".join(p.text for p in docx.Document(convert_pdf(path, tmp_path / "d.docx", "docx")[0]).paragraphs))
+    assert difflib.SequenceMatcher(None, src, out, autojunk=False).ratio() >= 0.99
+
+
+@pytest.mark.skipif(__import__("shutil").which("soffice") is None, reason="LibreOffice non installato")
+def test_docx_opens_in_office_suite(links_pdf, table_pdf, tmp_path):
+    """CNV-03: il DOCX prodotto è valido per un'applicazione d'ufficio indipendente (LibreOffice lo
+    apre e lo converte senza errori, con il testo atteso)."""
+    import subprocess
+    out = convert_pdf(table_pdf[0], tmp_path / "t.docx", "docx")[0]
+    profile = tmp_path / "lo-profile"
+    subprocess.run(["soffice", f"-env:UserInstallation=file://{profile}", "--headless", "--convert-to", "pdf",
+                    "--outdir", str(tmp_path / "rt"), out], capture_output=True, timeout=180)
+    back = tmp_path / "rt" / "t.pdf"
+    assert back.exists()
+    text = pymupdf.open(str(back))[0].get_text()
+    assert "Marca1" in text and "Prezzo" in text
+
+
+def test_docx_rotated_text_as_rotated_box(tmp_path):
+    """CNV-03: testo ruotato o verticale → casella di testo ruotata (fuori dal flusso)."""
+    import zipfile
+    import docx
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Fattura numero 42 del 3 marzo", fontsize=12)
+    p.insert_text((72, 130), "Orologio cronografo, cassa in acciaio, movimento automatico", fontsize=12)
+    p.insert_text((40, 700), "Codice modulo FT-2026", fontsize=8, rotate=90)
+    p.insert_text((560, 100), "Copia per il cliente", fontsize=8, rotate=270)
+    path = _save(doc, tmp_path / "ruotato.pdf")
+    out = convert_pdf(path, tmp_path / "r.docx", "docx")[0]
+    body = [q.text for q in docx.Document(out).paragraphs]
+    assert body == ["Fattura numero 42 del 3 marzo", "Orologio cronografo, cassa in acciaio, movimento automatico"]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert xml.count("<wps:txbx>") == 2
+    assert 'vert="vert270"' in xml and 'vert="vert"' in xml
+    assert "Codice modulo FT-2026" in xml and "Copia per il cliente" in xml
+    import shutil
+    import subprocess
+    if shutil.which("soffice"):
+        subprocess.run(["soffice", f"-env:UserInstallation=file://{tmp_path / 'lo'}", "--headless",
+                        "--convert-to", "pdf", "--outdir", str(tmp_path / "rt"), out],
+                       capture_output=True, timeout=180)
+        back = pymupdf.open(str(tmp_path / "rt" / "r.pdf"))[0]
+        dirs = {"".join(s["text"] for s in ln["spans"]): ln["dir"]
+                for b in back.get_text("dict")["blocks"] for ln in b.get("lines", [])}
+        assert dirs["Codice modulo FT-2026"] == (0.0, -1.0)
+        assert dirs["Copia per il cliente"] == (0.0, 1.0)
+
+
+def test_rotated_page_text_angle(tmp_path):
+    """L'angolo del testo è quello visualizzato: su una pagina con /Rotate 90 il testo orizzontale
+    della pagina non ruotata appare verticale."""
+    from foliant.modules.convert.extract import analyze_page
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Testo normale", fontsize=12)
+    p.set_rotation(90)
+    paras = [it for it in analyze_page(p).items if hasattr(it, "angle")]
+    assert [it.angle for it in paras] == [270]
+
+
+def test_docx_mostly_rotated_page_stays_in_flow(tmp_path):
+    """Pagina con /Rotate e testo tutto «ruotato»: il testo resta nel flusso del documento."""
+    import docx
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Listino prezzi autunno", fontsize=12)
+    p.insert_text((72, 130), "Cronografo in oro rosa", fontsize=12)
+    p.set_rotation(90)
+    path = _save(doc, tmp_path / "pagina_ruotata.pdf")
+    body = [q.text for q in docx.Document(convert_pdf(path, tmp_path / "p.docx", "docx")[0]).paragraphs]
+    assert body == ["Listino prezzi autunno", "Cronografo in oro rosa"]
+
+
+def test_txt_5000_pages_memory(tmp_path):
+    """CNV-01: 5 000 pagine in TXT restano sotto il limite di memoria di NFR-14 (2 GB),
+    misurato in un processo separato."""
+    import subprocess
+    import sys
+    script = tmp_path / "misura.py"
+    script.write_text(
+        "import resource, sys, pymupdf\n"
+        "import foliant\n"
+        "from foliant.modules.convert.engine import convert_pdf\n"
+        "doc = pymupdf.open()\n"
+        "for i in range(5000):\n"
+        "    p = doc.new_page()\n"
+        "    p.insert_text((72, 100), f'Pagina {i + 1} listino', fontsize=12)\n"
+        "    p.insert_text((72, 130), 'Referenza 1234 acciaio automatico 5.400 euro', fontsize=10)\n"
+        "data = doc.tobytes(); doc.close()\n"
+        "base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
+        "out = convert_pdf(data, sys.argv[1], 'txt')[0]\n"
+        "print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)\n"
+        "print(open(out, encoding='utf-8').read().count('\\f'))\n")
+    from pathlib import Path
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))
+    res = subprocess.run([sys.executable, str(script), str(tmp_path / "grande.txt")], capture_output=True,
+                         text=True, timeout=170, env=env)
+    assert res.returncode == 0, res.stderr[-2000:]
+    peak_mb, feeds = (int(v) for v in res.stdout.split())
+    assert peak_mb < 2048
+    assert feeds == 4999
+
+
+def _char_accuracy(ref: str, got: str) -> float:
+    """1 − distanza di edit sui caratteri / lunghezza del riferimento (definizione della specifica)."""
+    prev = list(range(len(got) + 1))
+    for i, a in enumerate(ref, 1):
+        cur = [i]
+        for j, b in enumerate(got, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a != b)))
+        prev = cur
+    return 1 - prev[-1] / max(1, len(ref))
+
+
+def _scan_of(lines: list[str], tmp_path, dpi: int = 300, name: str = "scan.pdf") -> str:
+    font = dict(fontname="dejavu", fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
+    src = pymupdf.open()
+    sp = src.new_page()
+    for k, line in enumerate(lines):
+        sp.insert_text((60, 90 + k * 26), line, fontsize=12, **font)
+    pix = sp.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_image(p.rect, stream=pix.tobytes("png"))
+    return _save(doc, tmp_path / name)
+
+
+CONTRACT_LINES = [
+    "Contratto di compravendita di orologio usato",
+    "Il venditore cede all'acquirente un cronografo automatico",
+    "con cassa in acciaio, quadrante nero e bracciale originale.",
+    "Il prezzo concordato è di quattromila euro, già versati.",
+    "Il venditore dichiara la provenienza lecita del bene e",
+    "garantisce il funzionamento per dodici mesi dalla consegna.",
+]
+
+
+def test_ocr_docx_accuracy_and_confidence_report(tmp_path):
+    """CNV-02: scansione a 300 dpi in italiano → DOCX con accuratezza per carattere ≥ 98%;
+    il report indica pagine, lingue e confidenza media."""
+    from foliant.modules.convert.engine import foliant_ocr_module
+    from foliant.modules.convert.extract import ocr_available
+    if foliant_ocr_module() is None or not ocr_available():
+        pytest.skip("modulo OCR o tesseract non disponibili")
+    import docx
+    path = _scan_of(CONTRACT_LINES, tmp_path)
+    res = run_conversion(path, tmp_path / "c.docx", "docx", language="ita")
+    got = " ".join(" ".join(p.text for p in docx.Document(res.paths[0]).paragraphs).split())
+    ref = " ".join(CONTRACT_LINES)
+    assert _char_accuracy(ref, got) >= 0.98, got
+    ocr = res.details["ocr"]
+    assert res.ocr_pages == [1] and ocr["languages"] == ["ita"]
+    assert ocr["mean_confidence"] is not None and ocr["mean_confidence"] > 80
+    report = res.report_text()
+    assert "Confidenza media OCR" in report and "Lingue OCR: ita" in report
+
+
+def test_ocr_illegible_page_flagged(tmp_path):
+    """Pagina illeggibile (scarabocchi): resta l'immagine e la pagina è segnalata nel report."""
+    from foliant.modules.convert.engine import foliant_ocr_module
+    from foliant.modules.convert.extract import ocr_available
+    if foliant_ocr_module() is None or not ocr_available():
+        pytest.skip("modulo OCR o tesseract non disponibili")
+    import random
+
+    from PIL import Image, ImageDraw
+    rnd = random.Random(4)
+    img = Image.new("L", (2480, 3508), 255)
+    d = ImageDraw.Draw(img)
+    for _k in range(300):
+        x, y = rnd.randrange(200, 2200), rnd.randrange(200, 3200)
+        d.line([(x, y), (x + rnd.randrange(-60, 60), y + rnd.randrange(-40, 40)),
+                (x + rnd.randrange(-60, 60), y + rnd.randrange(-40, 40))], fill=0, width=4)
+    import io
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_image(p.rect, stream=buf.getvalue())
+    path = _save(doc, tmp_path / "scarabocchi.pdf")
+    res = run_conversion(path, tmp_path / "s.txt", "txt", language="ita")
+    assert any("Pagina 1" in w and ("poco leggibile" in w or "non riuscito" in w) for w in res.warnings), res.warnings
+
+
+def test_undecodable_font_area_recognized_with_ocr(tmp_path):
+    """CNV-02: testo nativo con font senza /ToUnicode → OCR della sola area, con avviso;
+    il testo decodificabile della stessa pagina resta quello estratto."""
+    from foliant.modules.convert.extract import ocr_available
+    if not ocr_available():
+        pytest.skip("tesseract non installato")
+    doc = pymupdf.open()
+    p = doc.new_page()
+    p.insert_text((72, 100), "Garanzia internazionale valida", fontsize=16, fontname="dv",
+                  fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    p.insert_text((72, 200), "Testo normale leggibile", fontsize=12)
+    for xref, *_rest in p.get_fonts():
+        if doc.xref_get_key(xref, "ToUnicode")[0] == "xref":
+            doc.xref_set_key(xref, "ToUnicode", "null")
+    path = _save(doc, tmp_path / "senza_unicode.pdf")
+    assert "Garanzia" not in pymupdf.open(path)[0].get_text()
+    res = run_conversion(path, tmp_path / "u.txt", "txt", language="ita")
+    text = open(res.paths[0], encoding="utf-8").read()
+    assert "Garanzia internazionale valida" in text and "Testo normale leggibile" in text
+    assert any("non decodificabile" in w for w in res.warnings)
+    assert res.ocr_pages == [1]
+    # con OCR «mai» non si riconosce nulla
+    res = run_conversion(path, tmp_path / "n.txt", "txt", ocr="never")
+    assert "Garanzia" not in open(res.paths[0], encoding="utf-8").read()
+
+
+def test_ocr_low_resolution_scan_warns(tmp_path):
+    """Scansione sotto 150 dpi: OCR comunque eseguito e avviso di accuratezza ridotta nel report."""
+    from foliant.modules.convert.engine import foliant_ocr_module
+    from foliant.modules.convert.extract import ocr_available
+    if foliant_ocr_module() is None or not ocr_available():
+        pytest.skip("modulo OCR o tesseract non disponibili")
+    path = _scan_of(CONTRACT_LINES[:2], tmp_path, dpi=100, name="bassa.pdf")
+    res = run_conversion(path, tmp_path / "b.txt", "txt", language="ita")
+    assert res.ocr_pages == [1]
+    assert any("Pagina 1" in w and "isoluzione" in w for w in res.warnings), res.warnings
+
+
+def test_total_line_right_below_table_is_kept(tmp_path):
+    """Collaudo B, D2: la riga «Totale imponibile» 3-4 pt sotto l'ultimo bordo della tabella, che
+    MuPDF unisce all'ultima riga in un solo blocco, non deve sparire (DOCX, HTML, RTF, TXT)."""
+    import docx
+    doc = pymupdf.open()
+    p = doc.new_page()
+    rows = [["Articolo", "Qtà", "Prezzo", "Importo"], ["Cronografo", "1", "18.000,00", "18.000,00"],
+            ["Cinturino", "2", "193,25", "386,50"], ["Revisione", "1", "4.000,00", "4.000,00"]]
+    x0, y0, cw, rh = 90, 140, 90, 14
+    for r, row in enumerate(rows):
+        for c, v in enumerate(row):
+            rect = pymupdf.Rect(x0 + c * cw, y0 + r * rh, x0 + (c + 1) * cw, y0 + (r + 1) * rh)
+            p.draw_rect(rect, color=(0, 0, 0), width=0.8)
+            p.insert_text((rect.x0 + 4, rect.y1 - 3), v, fontsize=10)
+    bottom = y0 + len(rows) * rh
+    p.insert_text((x0 + 4, bottom + 3.5 + 8), "Totale imponibile 22.386,50 EUR", fontsize=10)
+    path = _save(doc, tmp_path / "fattura.pdf")
+    # precondizione: MuPDF mette tabella e totale nello stesso blocco
+    with pymupdf.open(path) as chk:
+        merged = [b for b in chk[0].get_text("dict")["blocks"]
+                  if any("Totale" in "".join(s["text"] for s in ln["spans"]) for ln in b["lines"])]
+        assert len(merged[0]["lines"]) > 1
+    d = docx.Document(convert_pdf(path, tmp_path / "f.docx", "docx")[0])
+    assert any("Totale imponibile 22.386,50 EUR" in q.text for q in d.paragraphs)
+    assert len(d.tables) == 1 and d.tables[0].cell(3, 0).text == "Revisione"
+    for fmt in ("html", "rtf", "txt"):
+        out = convert_pdf(path, tmp_path / f"f.{fmt}", fmt)[0]
+        text = open(out, encoding="utf-8", errors="replace").read()
+        assert "22.386,50" in text, fmt
+        assert text.count("Revisione") == 1, fmt
+
+
+def test_parse_cell_swiss_francs():
+    """Collaudo A2: importi in franchi svizzeri con codice ISO, «Fr.» e apostrofo delle migliaia."""
+    from foliant.modules.convert.export_office import detect_decimal, parse_cell
+    cells = ["CHF 7,250.00", "7'250.00", "Fr. 7'250.00", "7,250.00 CHF", "SFr. 7’250.00"]
+    dec = detect_decimal(cells)
+    assert dec == "."
+    for c in cells:
+        assert parse_cell(c, dec)[0] == 7250.0, c
+    assert parse_cell("CHF 950", ".")[0] == 950
+    assert parse_cell("€ 1.234,50", ",")[0] == 1234.5 and parse_cell("1.234,50 EUR", ",")[0] == 1234.5
+    assert parse_cell("ABC", ".")[0] == "ABC" and parse_cell("REF 00123", ".")[0] == "REF 00123"
+
+
+def test_txt_tagged_table_cells_and_artifacts(tmp_path):
+    """Collaudo B, D3: nel TXT di un PDF taggato le celle di una riga TR sono separate da
+    tabulazioni e l'intestazione /Artifact non finisce in fondo al testo."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "x", fontsize=1)
+    font = [f[4] for f in page.get_fonts()][0]
+    cells = [("Referenza", 72, 600), ("Prezzo", 250, 600), ("5513", 72, 580), ("9.800", 250, 580)]
+    content = [f"/Artifact <</Type/Pagination/Subtype/Header>> BDC BT /{font} 9 Tf 72 800 Td "
+               f"(Orologeria Verdi - Listino) Tj ET EMC",
+               f"/P <</MCID 0>> BDC BT /{font} 12 Tf 72 700 Td (Listino autunno) Tj ET EMC"]
+    for k, (text, x, y) in enumerate(cells, 1):
+        content.append(f"/TD <</MCID {k}>> BDC BT /{font} 11 Tf {x} {y} Td ({text}) Tj ET EMC")
+    doc.update_stream(page.get_contents()[0], "\n".join(content).encode())
+    root, docel, para, table, tr1, tr2 = (doc.get_new_xref() for _ in range(6))
+    tds = [doc.get_new_xref() for _ in cells]
+    for k, td in enumerate(tds):
+        parent = tr1 if k < 2 else tr2
+        doc.update_object(td, f"<</Type/StructElem/S/TD/P {parent} 0 R/Pg {page.xref} 0 R/K {k + 1}>>")
+    doc.update_object(tr1, f"<</Type/StructElem/S/TR/P {table} 0 R/K[{tds[0]} 0 R {tds[1]} 0 R]>>")
+    doc.update_object(tr2, f"<</Type/StructElem/S/TR/P {table} 0 R/K[{tds[2]} 0 R {tds[3]} 0 R]>>")
+    doc.update_object(table, f"<</Type/StructElem/S/Table/P {docel} 0 R/K[{tr1} 0 R {tr2} 0 R]>>")
+    doc.update_object(para, f"<</Type/StructElem/S/P/P {docel} 0 R/Pg {page.xref} 0 R/K 0>>")
+    doc.update_object(docel, f"<</Type/StructElem/S/Document/P {root} 0 R/K[{para} 0 R {table} 0 R]>>")
+    doc.update_object(root, f"<</Type/StructTreeRoot/K {docel} 0 R>>")
+    doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
+    doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<</Marked true>>")
+    path = _save(doc, tmp_path / "listino_taggato.pdf")
+    text = open(convert_pdf(path, tmp_path / "l.txt", "txt")[0], encoding="utf-8").read()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    assert "Referenza\tPrezzo" in lines and "5513\t9.800" in lines
+    assert lines[0] == "Listino autunno"
+    assert "Orologeria Verdi - Listino" not in lines[-1]

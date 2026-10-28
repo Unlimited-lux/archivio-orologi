@@ -52,6 +52,7 @@ class ConvertController:
         self.last_result = None
         self.last_batch = None
         self.scanner_backend = None   # None = SANE (scanimage); i test usano un dispositivo simulato
+        self.camera_backend = None    # None = webcam tramite OpenCV; i test usano una fotocamera simulata
 
     # ============================================================ utilità
     @property
@@ -193,24 +194,38 @@ class ConvertController:
             source = paths[0]
             name = Path(source).stem
             folder = str(Path(source).parent)
-            while True:
+            probed = self._probe_source(source, Path(source).name)
+            if probed is None:
+                return None
+            page_count, password = probed
+            current = 0
+        selected = self.selected_pages() if view is not None else None
+        # CNV-01: un portfolio si converte come documento di copertina o come uno dei PDF incorporati
+        try:
+            from .engine import portfolio_member_bytes, portfolio_members
+            members = portfolio_members(source, password)
+        except Exception:
+            members = []
+        if members:
+            cover = _("Documento di copertina")
+            labels = [label for _key, label in members]
+            choice, ok = QInputDialog.getItem(self.window, _("Portfolio PDF"),
+                                              _("Il documento è un portfolio. Che cosa vuoi convertire?"),
+                                              [cover] + labels, 0, False)
+            if not ok:
+                return None
+            if choice != cover and choice in labels:
+                key = members[labels.index(choice)][0]
                 try:
-                    with ENGINE_LOCK:
-                        from .common import open_source
-                        probe = open_source(source, password, need_extract=False)
-                        page_count = probe.page_count
-                        probe.close()
-                    break
-                except (PasswordRequired, WrongPassword) as e:
-                    if isinstance(e, WrongPassword):
-                        QMessageBox.warning(self.window, _("Password errata"), _("La password non è corretta. Riprova."))
-                    password = self._ask_password(Path(source).name)
-                    if password is None:
-                        return None
+                    source = portfolio_member_bytes(source, key, password)
                 except FoliantError as e:
                     self.ctx.error(_("Impossibile aprire il file"), str(e))
                     return None
-            current = 0
+                probed = self._probe_source(source, choice)
+                if probed is None:
+                    return None
+                page_count, password = probed
+                name, current, selected = Path(choice).stem, 0, None   # nome del file mostrato
         try:   # analisi in background (documenti grandi): basta un campione di pagine
             scanned = bool(self.ctx.run_task(_("Analisi del documento…"),
                                              lambda progress: scanned_pages(source, password, limit=50)))
@@ -220,8 +235,11 @@ class ConvertController:
         dlg = ExportDialog(self.window, page_count=page_count, current_page=current, name=name, folder=folder,
                            fmt=fmt or settings.value("convert/last_format", "docx") or "docx",
                            settings=settings, scanned=scanned,
-                           selected=self.selected_pages() if view is not None else None)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+                           selected=selected)
+        code = dlg.exec()
+        if code == ExportDialog.BATCH:
+            return self.batch_convert(dlg.fmt)
+        if code != QDialog.DialogCode.Accepted:
             return None
         fmt, out_path, options = dlg.values()
         if password:
@@ -249,6 +267,28 @@ class ConvertController:
         task = self._run_background(_("Conversione in corso…"), finished, run_conversion, source, out_path, fmt,
                                     **options)
         return task.result if task.done and task.error is None else None
+
+    def _probe_source(self, source, label: str):
+        """Apre il PDF per contarne le pagine, chiedendo la password se serve.
+        Restituisce (pagine, password) oppure None se l'utente rinuncia o il file non si apre."""
+        from .common import open_source
+        password = None
+        while True:
+            try:
+                with ENGINE_LOCK:
+                    probe = open_source(source, password, need_extract=False)
+                    page_count = probe.page_count
+                    probe.close()
+                return page_count, password
+            except (PasswordRequired, WrongPassword) as e:
+                if isinstance(e, WrongPassword):
+                    QMessageBox.warning(self.window, _("Password errata"), _("La password non è corretta. Riprova."))
+                password = self._ask_password(label)
+                if password is None:
+                    return None
+            except FoliantError as e:
+                self.ctx.error(_("Impossibile aprire il file"), str(e))
+                return None
 
     def _confirm_pdfa(self, source, fmt: str, password: str | None) -> bool:
         """CNV-14: analisi preliminare con l'elenco dei problemi e delle correzioni."""
@@ -310,6 +350,9 @@ class ConvertController:
                 + ";;" + _("Tutti i file (*)"))
         if not paths:
             return []
+        office = self._office_options(paths)
+        if office is None:
+            return []
         views = []
         for path in paths:
             ext = Path(path).suffix.lower()
@@ -321,7 +364,7 @@ class ConvertController:
             password = None
             while True:
                 try:
-                    extra = {"password": password} if password else {}
+                    extra = dict(office, paper=self.ctx.paper_size(), **({"password": password} if password else {}))
                     data, warnings = self.ctx.run_task(
                         _("Creazione del PDF…"), lambda progress, path=path, extra=extra: create.file_to_pdf(
                             path, progress=progress, **extra))
@@ -351,6 +394,32 @@ class ConvertController:
                 self.ctx.status("; ".join(warnings[:3]), 10000)
         return views
 
+    def _office_options(self, paths: list[str]) -> dict | None:
+        """Opzioni per i documenti d'ufficio tra i file scelti ({} se non ce ne sono, None se
+        l'utente annulla); conferma per i fogli di calcolo molto lunghi."""
+        from . import create
+        from .create_dialogs import OfficeOptionsDialog
+        exts = {Path(p).suffix.lower() for p in paths}
+        if not exts & set(create.OFFICE_EXTENSIONS):
+            return {}
+        kinds = set()
+        if exts & {".xlsx", ".xlsm", ".xls", ".ods", ".ots", ".xltx", ".csv"}:
+            kinds.add("sheet")
+        if exts & {".pptx", ".pptm", ".ppt", ".odp", ".otp", ".ppsx", ".pps", ".potx"}:
+            kinds.add("slides")
+        dlg = OfficeOptionsDialog(self.window, kinds=kinds, settings=self.ctx.settings())
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        options = dlg.values()
+        for p in paths:
+            if Path(p).suffix.lower() in (".xlsx", ".xlsm"):
+                n = create.estimate_sheet_pages(p)
+                if n > create.SHEET_PAGE_LIMIT and not self.ctx.confirm(
+                        _("Foglio di calcolo molto lungo"),
+                        _("«{f}» produrrà circa {n} pagine. Vuoi continuare?").format(f=Path(p).name, n=n)):
+                    return None
+        return options
+
     def create_from_images(self, paths: list[str] | None = None):
         """CNV-19: PDF da una o più immagini, con ordine, formato pagina e qualità."""
         from . import create
@@ -363,7 +432,7 @@ class ConvertController:
             paths = ask()
             if not paths:
                 return None
-        dlg = ImagesDialog(self.window, paths, ask_more=ask)
+        dlg = ImagesDialog(self.window, paths, ask_more=ask, paper=self.ctx.paper_size(), unit=self.ctx.measure_unit())
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         files = dlg.paths()
@@ -387,11 +456,13 @@ class ConvertController:
         if not ok or not url.strip():
             return None
         url = url.strip()
+        paper = self.ctx.paper_size()
 
         def work(progress):
             if os.path.exists(url):
                 html = Path(url).read_text(encoding="utf-8", errors="replace")
-                return create.html_to_pdf(html, base_dir=str(Path(url).parent), progress=progress), Path(url).stem
+                return (create.html_to_pdf(html, base_dir=str(Path(url).parent), progress=progress, page_size=paper),
+                        Path(url).stem)
             if "://" not in url:
                 full = "https://" + url
             else:
@@ -399,7 +470,7 @@ class ConvertController:
             html, final = create.url_to_html(full)
             progress.update(0.5, _("Impaginazione…"))
             stem = Path(final.rstrip("/").split("/")[-1] or "pagina").stem or "pagina"
-            return create.html_to_pdf(html, progress=progress), stem
+            return create.html_to_pdf(html, progress=progress, page_size=paper), stem
 
         ok, res = self._run(_("Caricamento della pagina…"), work)
         if not ok:
@@ -450,7 +521,7 @@ class ConvertController:
                           _("Gli appunti sono vuoti o contengono un formato non supportato. Copia un'immagine, "
                             "del testo o dei file e riprova."))
             return None
-        ok, data = self._run(_("Creazione del PDF…"), create.clipboard_to_pdf, **snap)
+        ok, data = self._run(_("Creazione del PDF…"), create.clipboard_to_pdf, page_size=self.ctx.paper_size(), **snap)
         if not ok or not data:
             return None
         return self.open_created(data, _("Appunti") + ".pdf")
@@ -469,7 +540,12 @@ class ConvertController:
                 "pacchetto «sane-utils» sia installato e che il tuo utente abbia i permessi sul dispositivo."))
             return None
         view = self.ctx.current_view()
-        dlg = ScannerDialog(self.window, devices, has_document=view is not None, refresh=backend.list_devices)
+        def show_preview(device, settings):
+            ok_p, img = self._run(_("Anteprima…"), scanner.preview, backend, device, settings)
+            return img if ok_p else None
+
+        dlg = ScannerDialog(self.window, devices, has_document=view is not None, refresh=backend.list_devices,
+                            settings=self.ctx.settings(), preview=show_preview)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         settings = dlg.settings()
@@ -553,12 +629,14 @@ class ConvertController:
         """CNV-26: foto di documenti con bordi rilevati, prospettiva corretta e filtri."""
         from . import photo
         from .create_dialogs import IMAGE_FILTER_EXT, PhotosDialog
+        def ask():
+            return self.ctx.ask_open_paths(_("Scegli le foto dei documenti"),
+                                           _("Immagini ({ext})").format(ext=IMAGE_FILTER_EXT + " *.heic"))
         if paths is None:
-            paths = self.ctx.ask_open_paths(_("Scegli le foto dei documenti"),
-                                            _("Immagini ({ext})").format(ext=IMAGE_FILTER_EXT + " *.heic"))
+            paths = ask()
         if not paths:
             return None
-        dlg = PhotosDialog(self.window, paths)
+        dlg = PhotosDialog(self.window, paths, paper=self.ctx.paper_size(), ask_more=ask)
         if not dlg.items:
             self.ctx.error(_("Crea PDF da foto"), _("Nessuna delle foto selezionate è leggibile."))
             return None
@@ -569,10 +647,43 @@ class ConvertController:
         if not ok:
             return None
         data, warnings = res
+        if dlg.wants_ocr():
+            data = self._with_ocr(data)
         view = self.open_created(data, _("Documento") + ".pdf")
         if warnings:
             self._notify_warnings(_("Crea PDF da foto"), "\n".join(warnings[:15]))
         return view
+
+    def create_from_camera(self):
+        """CNV-26: pagine scattate con la webcam, poi angoli, prospettiva, filtro e OCR facoltativo
+        come per le foto importate. Senza fotocamera (o senza permesso) propone l'importazione."""
+        import tempfile
+
+        from PIL import Image
+
+        from .camera import CvCamera
+        from .create_dialogs import CameraDialog
+        backend = self.camera_backend or CvCamera()
+        try:
+            devices = backend.list_devices()
+        except Exception:
+            devices = []
+        if not devices:
+            if self.ctx.confirm(_("Crea PDF da fotocamera"), _(
+                    "Nessuna fotocamera disponibile (non collegata o accesso negato: l'utente deve poter usare i "
+                    "dispositivi video). Vuoi importare invece le foto dei documenti scattate con il telefono?")):
+                return self.create_from_photos()
+            return None
+        dlg = CameraDialog(self.window, backend, devices)
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.frames:
+            return None
+        with tempfile.TemporaryDirectory(prefix="foliant-camera-") as tmp:
+            paths = []
+            for k, frame in enumerate(dlg.frames):
+                path = os.path.join(tmp, _("Scatto {n}").format(n=k + 1) + ".png")
+                Image.fromarray(frame).save(path, "PNG")
+                paths.append(path)
+            return self.create_from_photos(paths)
 
     def create_from_screen(self, delay_s: int | None = None):
         """CNV-25: catture dello schermo (intere o ritagliate) in pagine PDF senza perdita."""
@@ -629,7 +740,8 @@ class ConvertController:
             return None
         entries, opts = dlg.values()
         ok, res = self._run(_("Creazione del portfolio…"),
-                            lambda progress: create_portfolio(entries, progress=progress, **opts))
+                            lambda progress: create_portfolio(entries, progress=progress,
+                                                              **{"page_size": self.ctx.paper_size(), **opts}))
         if not ok:
             return None
         data, warnings = res
@@ -639,7 +751,8 @@ class ConvertController:
         return view
 
     def edit_portfolio(self):
-        """CNV-34: aggiunge o rimuove file del portfolio aperto (anche creato da altri programmi)."""
+        """CNV-34: aggiunge, rimuove e sposta file e rinomina cartelle del portfolio aperto (anche
+        creato da altri programmi), in un solo passo annullabile."""
         from . import portfolio
         from .portfolio_dialog import EditPortfolioDialog
         view = self.ctx.current_view()
@@ -652,19 +765,40 @@ class ConvertController:
                 info = doc.pdf.embfile_info(name)
                 files.append((name, int(info.get("size") or 0), info.get("description") or ""))
             folders = sorted(portfolio.folder_map(doc.pdf))
-        dlg = EditPortfolioDialog(self.window, files, folders,
+            file_folders = {name: portfolio.folder_of(doc.pdf, name) for name, _s, _d in files}
+            part = portfolio.pdfa_part(doc.pdf)
+        dlg = EditPortfolioDialog(self.window, files, folders, file_folders=file_folders,
                                   ask_files=lambda: self.ctx.ask_open_paths(_("Aggiungi file"), _("Tutti i file (*)")))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         added, removed = dlg.changes()
-        if not added and not removed:
+        moves = {k: f for k, f in dlg.moves.items() if f != file_folders.get(k, "")}
+        if not (added or removed or moves or dlg.renames):
             return []
+        if added and part in (1, 2) and not self.ctx.confirm(
+                _("Modifica portfolio"),
+                _("Il documento dichiara la conformità PDF/A-{n}, che non ammette questi allegati: dopo la modifica "
+                  "non sarà più conforme. Vuoi continuare?").format(n=part)):
+            return None
         try:
             with doc.change(_("Modifica portfolio")) as pdf:
+                for old, new in dlg.renames:
+                    portfolio.rename_folder(pdf, old, new)
+                by_target: dict[str, list[str]] = {}
+                for key, folder in moves.items():
+                    if key not in removed:
+                        by_target.setdefault(folder, []).append(key)
+                for folder, keys in by_target.items():
+                    portfolio.move_files(pdf, keys, folder)
                 portfolio.remove_files(pdf, removed)
                 names = portfolio.add_files(pdf, added)
+                if part >= 3 and names:
+                    portfolio.declare_associated_files(pdf, names)   # PDF/A-3: relazione /AF dichiarata
         except OSError as e:
             self.ctx.error(_("Modifica portfolio"), _("File non leggibile: {e}").format(e=e.strerror or e))
+            return None
+        except FoliantError as e:
+            self.ctx.error(_("Modifica portfolio"), str(e))
             return None
         except Exception as e:
             self.ctx.error(_("Modifica portfolio"), _("Errore imprevisto: {e}").format(e=e))
@@ -686,7 +820,7 @@ class ConvertController:
         """CNV-23: nuovo documento con pagine bianche o con stile carta."""
         from . import create
         from .create_dialogs import BlankDialog
-        dlg = BlankDialog(self.window)
+        dlg = BlankDialog(self.window, paper=self.ctx.paper_size(), unit=self.ctx.measure_unit())
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         ok, data = self._run(_("Creazione del documento…"), lambda progress, **kw: create.blank_pdf(**kw),
@@ -1060,10 +1194,45 @@ class ConvertController:
             return None
 
     # ============================================================ in blocco
-    def batch_convert(self):
-        """CNV-17: converte molti PDF verso un formato, con report finale."""
+    # formati di questa sezione che l'elaborazione in blocco di Strumenti (BAT-06) sa produrre
+    TOOLS_FORMATS = {"docx": "docx", "xlsx": "xlsx", "pptx": "pptx", "txt": "txt", "html": "html", "png": "png",
+                     "jpeg": "jpg", "pdfa-2b": "pdfa"}
+
+    def open_tools_batch(self, fmt: str):
+        """CNV-17: apre l'elaborazione in blocco di Strumenti (BAT-06) con la conversione nel
+        formato scelto come ultima operazione. None se il modulo o il formato non sono disponibili."""
+        tools = getattr(self.ctx, "tools_module", None)
+        target = self.TOOLS_FORMATS.get(fmt)
+        if tools is None or target is None or not hasattr(tools, "show_batch"):
+            return None
+        try:
+            batch = tools.show_batch()
+            steps = getattr(batch, "steps", [])
+            existing = [i for i, st in enumerate(steps) if st.action == "convert"]
+            if existing:
+                steps[existing[-1]].params["format"] = target
+                if hasattr(batch, "_refresh_steps"):
+                    batch._refresh_steps(existing[-1])
+            else:
+                batch.add_step("convert", {"format": target})
+        except Exception:
+            return None
+        return batch
+
+    def batch_convert(self, fmt: str | None = None):
+        """CNV-17: converte molti PDF verso un formato, con report finale. Da «Esporta come ›
+        Più file…» si apre l'elaborazione in blocco di Strumenti (BAT-06) se c'è e sa produrre il
+        formato; altrimenti (e dal menu, che offre tutti i formati) la finestra del modulo."""
         from .batch_dialog import BatchDialog, show_batch_report
+        if fmt is not None:
+            batch = self.open_tools_batch(fmt)
+            if batch is not None:
+                return batch
         dlg = BatchDialog(self.window, self.ctx)
+        if fmt is not None:
+            i = dlg.format_box.findData(fmt)
+            if i >= 0:
+                dlg.format_box.setCurrentIndex(i)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
         from .batch import batch_convert
@@ -1114,7 +1283,8 @@ class ConvertController:
             if not out_dir:
                 return None
         ok, report = self._run(_("Creazione dei PDF…"), lambda progress: create.batch_create(
-            paths, mode="single" if single else "separate", output_dir=out_dir, progress=progress))
+            paths, mode="single" if single else "separate", output_dir=out_dir, progress=progress,
+            paper=self.ctx.paper_size()))
         if not ok:
             return None
         if single and report.get("data"):

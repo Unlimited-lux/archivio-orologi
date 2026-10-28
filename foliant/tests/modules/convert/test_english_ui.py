@@ -78,7 +78,19 @@ def _dialogs(window, tmp_path):
     """Costruttori delle finestre del modulo (stessi argomenti nelle due lingue)."""
     from PIL import Image
     from foliant.modules.convert.batch_dialog import BatchDialog
-    from foliant.modules.convert.create_dialogs import BlankDialog, CaptureDialog, ImagesDialog, ScannerDialog
+    from foliant.modules.convert.create_dialogs import (
+        BlankDialog, CameraDialog, CaptureDialog, ImagesDialog, OfficeOptionsDialog, PhotosDialog, ScannerDialog,
+    )
+
+    class _Cam:
+        def open(self, index):
+            pass
+
+        def read(self):
+            return None
+
+        def close(self):
+            pass
     from foliant.modules.convert.export_dialog import FORMAT_ORDER, ExportDialog
     from foliant.modules.convert.optimize_dialogs import AdvancedDialog, CompressDialog, FlattenDialog
     from foliant.modules.convert.portfolio_dialog import EditPortfolioDialog, PortfolioDialog
@@ -93,7 +105,10 @@ def _dialogs(window, tmp_path):
     makers += [
         ("images", lambda: ImagesDialog(window, [str(img)])),
         ("blank", lambda: BlankDialog(window)),
-        ("scanner", lambda: ScannerDialog(window, [("sim:0", "Sim")], has_document=True)),
+        ("scanner", lambda: ScannerDialog(window, [("sim:0", "Sim")], has_document=True, preview=lambda d, s: None)),
+        ("office", lambda: OfficeOptionsDialog(window, kinds={"sheet", "slides"})),
+        ("camera", lambda: CameraDialog(window, _Cam(), [(0, "Sim")])),
+        ("photos", lambda: PhotosDialog(window, [str(img)], ask_more=lambda: [])),
         ("capture", lambda: CaptureDialog(window, QImage(80, 60, QImage.Format.Format_RGB32), 1)),
         ("compress", lambda: CompressDialog(window, before=1000, estimates={"lossless": 900, "high": 500,
                                                                              "medium": 400, "low": 300})),

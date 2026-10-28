@@ -1100,3 +1100,275 @@ def test_fill_parent_kids_field_in_window_keeps_signature_valid(window, monkeypa
     assert out.startswith(signed)
     st = digital.verify_pdf(out, trusted=[id_a[1]])[0]
     assert st.status == "valida" and "compilazione di campi modulo" in st.modifications
+
+
+def test_field_policy_filters_ids(window, qtbot, tmp_path, id_a, policy_id):
+    """SIG-19/20: un campo che richiede una policy rende selezionabile solo l'ID con quella policy."""
+    from foliant.modules.sign.ui_digital import DigitalSignDialog, FieldDialog
+    from tests.conftest import make_pdf
+
+    from .conftest import POLICY_OID
+    fd = FieldDialog(window)
+    qtbot.addWidget(fd)
+    fd.policies.setText("1.2.x")
+    fd._accept()
+    assert "OID" in fd.error.text() and not fd.result()
+    fd.policies.setText(f" {POLICY_OID} ;")
+    assert fd.allowed_policies() == [POLICY_OID]
+    data = Path(make_pdf(tmp_path / "policy.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Cliente", 0, (300, 700, 500, 760), allowed_policies=[POLICY_OID])
+    field = digital.signature_fields(data)[0]
+    store.IDRegistry().add(id_a[0], id_a[1])
+    store.IDRegistry().add(policy_id[0], policy_id[1])
+    dlg = DigitalSignDialog(window, _ctl(window), field=field)
+    qtbot.addWidget(dlg)
+    model = dlg.id_combo.model()
+    enabled = [dlg.id_combo.itemText(i) for i in range(dlg.id_combo.count()) if model.item(i).isEnabled()]
+    assert enabled == ["Giulia Verdi"]
+    assert POLICY_OID in dlg.cert_info.text()
+
+
+def test_no_compatible_id_offers_import_or_graphic_only(window, qtbot, monkeypatch, tmp_path, id_a, id_b):
+    """SIG-20: nessun ID conforme ai vincoli → requisiti spiegati, firma e «Crea…» disattivati,
+    «Solo firma grafica» inserisce la firma della libreria dentro il campo, che resta da firmare."""
+    from foliant.modules.sign import ui_digital
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "vincolo.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Cliente", 0, (300, 600, 500, 680), allowed_issuers=[id_b[1]],
+                                           tooltip="Firma del cliente")
+    path = tmp_path / "vincolo2.pdf"
+    path.write_bytes(data)
+    store.IDRegistry().add(id_a[0], id_a[1])
+    view = window.open_path(str(path))
+    c = _ctl(window)
+    field = digital.signature_fields(data)[0]
+    dlg = ui_digital.DigitalSignDialog(window, c, field=field)
+    qtbot.addWidget(dlg)
+    assert dlg.no_compatible and not dlg.ok.isEnabled() and not dlg.create_id.isEnabled()
+    assert "requisiti" in dlg.error.text() and dlg.graphic_btn is not None
+    dlg._reload_ids(str(id_b[0]))           # «Sfoglia…» con un ID adatto riattiva la firma
+    assert dlg.ok.isEnabled()
+    lib = c.library(interactive=False)
+    lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (90, 15, 1), (150, 0, 1)]]))),
+            "Mario")
+    infos = []
+    monkeypatch.setattr(window.ctx, "info", lambda title, text: infos.append(text))
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", lambda d: (d._graphic_only(), False)[1])
+    assert not c.digital_sign(view, field=field)
+    with view.document.lock:
+        [placed] = g.placed_signatures(view.document.pdf, 0)
+        r = pymupdf.Rect(placed.rect)
+    box = pymupdf.Rect(field.rect)
+    assert box.contains(r) and (abs(r.width - box.width) < 1 or abs(r.height - box.height) < 1)
+    assert infos and "Firma del cliente" in infos[0]
+    assert [f.name for f in c.empty_fields(view)] == ["Cliente"]
+
+
+def test_after_signing_field_goes_to_next(window, monkeypatch, tmp_path, id_a):
+    """SIG-20 punto 4: firmato un campo, la vista passa al campo successivo da firmare."""
+    from foliant.modules.sign import ui_digital
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "due.pdf", pages=2)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Venditore", 0, (60, 600, 260, 680))
+    data, _n = digital.add_signature_field(data, "Acquirente", 1, (300, 600, 500, 680), tooltip="Acquirente")
+    path = tmp_path / "due2.pdf"
+    path.write_bytes(data)
+    view = window.open_path(str(path))
+    c = _ctl(window)
+    field = [f for f in digital.signature_fields(data) if f.name == "Venditore"][0]
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(reason="Vendita")
+        return True
+    went = []
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(tmp_path / "due_firmato.pdf"))
+    monkeypatch.setattr(type(c), "go_to_field", lambda self, v, page, rect: went.append(page))
+    assert c.digital_sign(view, field=field)
+    assert went == [1]
+
+
+def test_banner_explains_missing_sign_permission(window, tmp_path):
+    """SIG-20: documento cifrato senza permesso di firma → spiegazione al posto di «Firma ora»."""
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "base.pdf", pages=1)).read_bytes()
+    data, _n = digital.add_signature_field(data, "Cliente", 0, (300, 600, 500, 680))
+    doc = pymupdf.open(stream=data)
+    out = tmp_path / "cifrato.pdf"
+    doc.save(str(out), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="proprietario", user_pw="",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(out))
+    c = _ctl(window)
+    calls = []
+    real = window.ctx.show_banner
+    window.ctx.show_banner = lambda v, bid, text, actions=(), **k: (calls.append((text, [a[0] for a in actions])),
+                                                                   real(v, bid, text, actions, **k))
+    c.update_banner(view)
+    text, actions = calls[-1]
+    assert "password del proprietario" in text and "Firma ora" not in actions
+
+
+def test_on_save_preference_keep_or_embed(window, qtbot, tmp_path):
+    """SIG-05 punto 5: al salvataggio vale «Mantieni come annotazione» (predefinita) o «Incorpora»."""
+    from foliant.modules.sign.ui_digital import SignPreferences
+    from tests.conftest import make_pdf
+    path = Path(make_pdf(tmp_path / "pref.pdf", pages=1))
+    view = window.open_path(str(path))
+    c = _ctl(window)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    c.place(view, 0, pymupdf.Rect(400, 700, 500, 730), item)
+    assert c.on_save_mode() == "keep"
+    assert window.ctx.save_current()
+    assert len(g.placed_signatures(pymupdf.open(str(path)), 0)) == 1      # annotazione salvata
+    page = SignPreferences(None, c)
+    qtbot.addWidget(page)
+    page.on_save.setCurrentIndex(page.on_save.findData("embed"))
+    page.apply()
+    assert c.on_save_mode() == "embed"
+    c.place(view, 0, pymupdf.Rect(100, 700, 200, 730), item)
+    assert window.ctx.save_current()
+    saved = pymupdf.open(str(path))
+    assert not g.placed_signatures(saved, 0) and saved[0].get_drawings()   # incorporate nel contenuto
+    view.document.undo()                                                   # un solo passo annullabile
+    with view.document.lock:
+        assert len(g.placed_signatures(view.document.pdf, 0)) == 2
+
+
+def test_on_save_embed_skips_digitally_signed(window, monkeypatch, tmp_path, id_a):
+    """Con «Incorpora» un documento firmato digitalmente mantiene le firme grafiche come annotazioni."""
+    from tests.conftest import make_pdf
+    src = Path(make_pdf(tmp_path / "s.pdf", pages=1))
+    signed = tmp_path / "s_firmato.pdf"
+    signed.write_bytes(digital.sign_pdf(src.read_bytes(), id_a[2], digital.SignOptions()))
+    view = window.open_path(str(signed))
+    c = _ctl(window)
+    window.ctx.settings().setValue(c.ON_SAVE_KEY, "embed")
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1), (90, 0, 1)]])))
+    c.place(view, 0, pymupdf.Rect(400, 700, 500, 730), item)
+    assert c._embed_on_save_guard(view, {"event": "save"})
+    with view.document.lock:
+        assert len(g.placed_signatures(view.document.pdf, 0)) == 1
+
+
+def test_library_export_import_commands(qtbot, monkeypatch, tmp_path):
+    """SIG-07: «Esporta…» e «Importa…» del dialogo Libreria: 5 elementi esportati e importati in un profilo
+    vuoto con nomi, tipi e impronte uguali; password sbagliata → niente importato; duplicati gestiti."""
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+    from foliant.modules.sign import ui_library
+    from foliant.modules.sign.library import SignatureLibrary
+    src = SignatureLibrary(tmp_path / "profilo1")
+    for i in range(5):
+        kind = "iniziali" if i == 4 else "firma"
+        src.add(g.SignatureItem(kind=kind, art=g.strokes_to_art(g.process_strokes(
+            [[(0, 0, 1), (40 + i * 10, 10, 1), (90, 0, 1)]]))), f"Elemento {i}")
+    pkg = tmp_path / "firme.foliant-signatures"
+    answers = []
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: answers.pop(0))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(pkg), ""))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(pkg), ""))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda _p, _t, text: warnings.append(text))
+    monkeypatch.setattr(ui_library.ExportPickDialog, "exec", lambda self: True)
+    dlg = ui_library.LibraryDialog(src)
+    qtbot.addWidget(dlg)
+    answers[:] = [("Pacchetto-2026", True), ("Pacchetto-2026", True)]
+    assert dlg.export_items() == 5 and pkg.is_file()
+
+    dst = SignatureLibrary(tmp_path / "profilo2")
+    dlg2 = ui_library.LibraryDialog(dst)
+    qtbot.addWidget(dlg2)
+    clicks = []
+
+    def fake_exec(box):
+        texts = {b.text(): b for b in box.buttons()}
+        clicks.append(sorted(texts))
+        box._chosen = texts.get(_choice[0])
+        return 0
+    _choice = ["Importa"]
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda box: box._chosen)
+    answers[:] = [("sbagliata", True)]
+    dlg2._do("import")                                   # password errata: messaggio, niente importato
+    assert dst.entries() == [] and "Password errata" in warnings[-1]
+    assert not [p for p in tmp_path.rglob("*") if p.suffix in (".svg", ".png", ".json") and "profilo2" in str(p)
+                and p.name != "manifest.json"]
+    answers[:] = [("Pacchetto-2026", True)]
+    res = dlg2.import_items()
+    assert res["added"] == 5
+    key = sorted((e.name, e.kind, e.sha256) for e in src.entries())
+    assert sorted((e.name, e.kind, e.sha256) for e in dst.entries()) == key
+    _choice[0] = "Mantieni entrambi"                     # di nuovo: tutti duplicati
+    answers[:] = [("Pacchetto-2026", True)]
+    res = dlg2.import_items()
+    assert "Sostituisci i duplicati" in clicks[-1] and res["added"] == 5 and len(dst.entries()) == 10
+
+
+def test_library_sync_dialog_and_periodic_cycle(window, qtbot, monkeypatch, tmp_path):
+    """SIG-07: «Sincronizza con cartella» collega la libreria; il secondo profilo collegato alla stessa
+    cartella riceve le firme nel ciclo successivo (≤ 60 s) senza riavvio; cartella irraggiungibile →
+    «sincronizzazione sospesa» e la libreria locale continua a funzionare."""
+    import keyring
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+    from foliant.modules.sign import sync, ui_library
+    from foliant.modules.sign.library import SignatureLibrary
+    saved = {}
+    monkeypatch.setattr(keyring, "set_password", lambda svc, u, p: saved.__setitem__((svc, u), p))
+    monkeypatch.setattr(keyring, "get_password", lambda svc, u: saved.get((svc, u)))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    folder = tmp_path / "cartella-condivisa"
+    folder.mkdir()
+    c = _ctl(window)
+    lib = c.library(interactive=False)
+    lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (60, 12, 1)]]))), "Firma negozio")
+    answers = [("Passphrase-Negozio", True), ("Passphrase-Negozio", True)]
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: answers.pop(0))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(folder))
+    dlg = ui_library.LibraryDialog(lib, window, controller=c)
+    qtbot.addWidget(dlg)
+    sd = ui_library.SyncDialog(lib, c, dlg)
+    qtbot.addWidget(sd)
+    sd.choose_folder()
+    assert sync.configured_folder(lib) == str(folder.resolve())
+    assert list(saved.values()) == ["Passphrase-Negozio"]
+    assert c._sync_timer.isActive() and c._sync_timer.interval() <= 60_000
+    assert "attiva" in c.sync_status and "attiva" in sd.state.text()
+    # secondo profilo (altro computer) collegato alla stessa cartella
+    other = SignatureLibrary(tmp_path / "portatile")
+    sync.connect(other, folder, "Passphrase-Negozio")
+    assert [e.name for e in other.entries()] == ["Firma negozio"]
+    other.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (80, 5, 1)]]))), "Dal portatile")
+    sync.sync(other, "Passphrase-Negozio")
+    with qtbot.waitSignal(c.librarySynced, timeout=2000):
+        c._sync_timer.timeout.emit()                      # ciclo periodico
+    assert sorted(e.name for e in lib.entries()) == ["Dal portatile", "Firma negozio"]
+    assert "Dal portatile" in [dlg.list.item(i).text().replace("  ★", "") for i in range(dlg.list.count())]
+    # cartella non raggiungibile: sospesa, la libreria locale funziona
+    folder.rename(tmp_path / "staccata")
+    c._sync_timer.timeout.emit()
+    assert c.sync_status.startswith("Sincronizzazione sospesa")
+    lib.add(g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (30, 9, 1)]]))), "Offline")
+    (tmp_path / "staccata").rename(folder)
+    c._sync_timer.timeout.emit()
+    assert "attiva" in c.sync_status
+    sync.sync(other, "Passphrase-Negozio")
+    assert "Offline" in [e.name for e in other.entries()]
+
+
+def test_ctx_request_signature_opens_dialog_with_field(window, monkeypatch, tmp_path):
+    """Per Moduli: ctx.request_signature(view, "Firma1") apre la firma con il campo preselezionato."""
+    from foliant.modules.sign import ui_digital
+    from tests.conftest import make_pdf
+    data = Path(make_pdf(tmp_path / "campo.pdf", pages=1)).read_bytes()
+    data, name = digital.add_signature_field(data, "Firma1", 0, (300, 600, 500, 680))
+    p = tmp_path / "campo2.pdf"
+    p.write_bytes(data)
+    view = window.open_path(str(p))
+    seen = []
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", lambda d: seen.append(d.field.name) or False)
+    assert window.ctx.request_signature(view, "Firma1") is True
+    assert seen == ["Firma1"]
+    assert window.ctx.request_signature(view, "Inesistente") is False

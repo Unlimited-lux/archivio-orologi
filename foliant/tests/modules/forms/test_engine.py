@@ -759,3 +759,101 @@ def test_blank_signature_appearance_has_border(rotation):
     stream = pdf.xref_stream(int(pdf.xref_get_key(x, "AP/N")[1].split()[0]))
     assert b"0.45 0.5 0.58 RG 1 w" in stream and b"re S" in stream
     assert b"1 1 1 rg" in stream
+
+
+def _png(color, size=(400, 300)):
+    import io
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _ap(pdf, xref, state):
+    t, v = pdf.xref_get_key(xref, f"AP/{state}")
+    return pdf.xref_stream(int(v.split()[0])) if t == "xref" else None
+
+
+def test_button_state_appearances_and_icons():
+    """FRM-18: icone e didascalie per stato → aspetti /N, /R, /D distinti; evidenziazione «push»."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 250, 110), "invia", caption="Invia")
+    E.update_properties(pdf, 0, x, icon_normal=_png((200, 30, 30)), icon_down=_png((30, 30, 200)),
+                        caption_rollover="Clicca", caption_down="Invio…", layout="icon_left")
+    again = reopen(pdf)
+    f = [g for g in E.list_fields(again) if g.name == "invia"][0]
+    assert f.layout == "icon_left" and set(f.icons) == {"normal", "down"} and not f.image
+    assert f.caption_rollover == "Clicca" and f.caption_down == "Invio…"
+    n, r, d = (_ap(again, f.xref, s) for s in "NRD")
+    assert b"(Invia)" in n and b"(Clicca)" in r and b"(Invio\x85)" in d   # «…» in WinAnsi
+    assert b"/Ic Do" in n and b"/Ic Do" in d
+    icon_n = again.xref_get_key(f.xref, "MK/I")[1]
+    icon_d = again.xref_get_key(f.xref, "MK/IX")[1]
+    assert icon_n != icon_d
+    assert again.xref_get_key(f.xref, "H") == ("name", "/P") and f.highlight == "push"
+    E.update_properties(pdf, 0, x, highlight="outline")
+    assert pdf.xref_get_key(x, "H") == ("name", "/O") and E.field_info(pdf, 0, x).highlight == "outline"
+    assert E.list_fields(pdf)[0].highlight == "outline"   # lettura veloce (scan.py)
+    # il lettore di prova disegna l'icona normale (rossa) a sinistra e la didascalia
+    pix = again[0].get_pixmap(clip=pymupdf.Rect(50, 50, 250, 110))
+    assert pix.pixel(20, 30)[0] > 150 and pix.pixel(20, 30)[2] < 80
+    assert "Invia" in again[0].get_text()
+
+
+@pytest.mark.parametrize("layout", E.BUTTON_LAYOUTS)
+def test_button_layouts(layout):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 200, 130), "b", caption="Ok")
+    E.update_properties(pdf, 0, x, icon_normal=_png((0, 160, 0), (60, 60)), layout=layout)
+    f = E.field_info(pdf, 0, x)
+    assert f.layout == layout and not f.image
+    stream = _ap(pdf, x, "N")
+    assert (b"(Ok)" in stream) == (layout != "icon")
+    assert (b"/Ic Do" in stream) == (layout != "text")
+
+
+def test_button_icon_from_pdf_page_and_duplicate():
+    src = pymupdf.open()
+    src.new_page(width=100, height=100).draw_rect(pymupdf.Rect(10, 10, 90, 90), fill=(0, 0, 1))
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 150), "logo", caption="")
+    E.update_properties(pdf, 0, x, icon_normal=src.tobytes(), layout="icon")
+    assert b"/Ic Do" in _ap(pdf, x, "N")
+    d = E.duplicate_field(pdf, 0, x, 120, 0)
+    g = E.field_info(pdf, 0, d)
+    assert g.icons == ("normal",) and g.layout == "icon"
+    assert pdf.xref_get_key(d, "MK/I") == pdf.xref_get_key(x, "MK/I")   # icona condivisa, non copiata
+    assert not E.is_image_field(pdf, x)   # pulsante con icona, non campo immagine
+
+
+def test_image_field_keeps_image_after_property_change():
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 250, 110), "foto")
+    E.mark_image_field(pdf, 0, x)
+    E.set_button_image(pdf, 0, x, _png((200, 30, 30)))
+    assert E.is_image_field(pdf, x)
+    E.update_properties(pdf, 0, x, tooltip="Foto dell'orologio")
+    assert b"Do" in _ap(pdf, x, "N") and E.field_info(pdf, 0, x).image
+
+
+def test_button_action_events():
+    """FRM-18: l'azione si può legare a un evento diverso dal rilascio; gli script restano."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(50, 50, 150, 80), "b", caption="b")
+    pdf.xref_set_key(x, "AA/Fo", "<</S/JavaScript/JS(app.alert(1))>>")
+    E.set_button_action(pdf, 0, x, {"type": "print", "event": "E"})
+    assert pdf.xref_get_key(x, "A")[0] == "null" and pdf.xref_get_key(x, "AA/E/S") == ("name", "/Named")
+    assert E.button_action(pdf, x) == {"type": "print", "name": "Print", "event": "E"}
+    assert E.button_action(pdf, x, "U") == {} and E.button_action(pdf, x, "E")["type"] == "print"
+    E.set_button_action(pdf, 0, x, {"type": "reset"})
+    assert E.button_action(pdf, x) == {"type": "reset", "fields": []}
+    assert E.button_action(pdf, x, "E") == {}
+    assert pdf.xref_get_key(x, "AA/Fo/S") == ("name", "/JavaScript")   # script non toccato
+    with pytest.raises(E.FormError):
+        E.set_button_action(pdf, 0, x, {"type": "reset", "event": "Z"})

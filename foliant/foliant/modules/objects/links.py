@@ -140,6 +140,7 @@ class LinkTarget:
     file: str = ""
     new_window: bool = False
     raw: str = ""                  # azione non gestita (sola lettura)
+    new_dest: tuple | None = None  # (pagina, alto, zoom): crea la destinazione con nome prima del collegamento
 
     def describe(self) -> str:
         if self.kind == URI:
@@ -224,6 +225,47 @@ def _dest_array(pdf: pymupdf.Document, t: LinkTarget, remote: bool = False) -> s
         return f"[{head} /{fit} {n(x if t.left is not None else None)}]"
     del page_h
     return f"[{head} /{fit}]"
+
+
+def named_destinations(pdf: pymupdf.Document) -> dict:
+    try:
+        if hasattr(pdf, "_resolved_names"):
+            del pdf._resolved_names      # cache del motore: i nomi possono essere cambiati
+    except Exception:
+        pass
+    try:
+        return pdf.resolve_names() or {}
+    except Exception:
+        return {}
+
+
+def add_named_destination(pdf: pymupdf.Document, name: str, page: int, top: float | None = None,
+                          zoom: float | None = None) -> None:
+    """Crea una destinazione con nome (OBJ-36) che punta alla pagina e alla posizione indicate."""
+    name = (name or "").strip()
+    if not name:
+        raise LinkError("Indica il nome della destinazione.")
+    if name in named_destinations(pdf):
+        raise LinkError("Il nome della destinazione è già usato: scegline un altro.")
+    dest = _dest_array(pdf, LinkTarget(kind=PAGE, page=page, fit="XYZ", left=0.0 if top is not None else None,
+                                       top=top, zoom=zoom))
+    cat = pdf.pdf_catalog()
+    typ, val = pdf.xref_get_key(cat, "Names/Dests/Names")
+    if typ == "array":
+        # albero dei nomi piatto: si aggiunge mantenendo l'ordine
+        inner = val.strip()[1:-1]
+        pdf.xref_set_key(cat, "Names/Dests/Names", "[" + inner + " " + _pdf_str(name) + " " + dest + "]")
+    else:
+        typ, val = pdf.xref_get_key(cat, "Dests")
+        if typ == "xref":
+            x = int(val.split()[0])
+        else:
+            x = pdf.get_new_xref()
+            pdf.update_object(x, val if typ == "dict" else "<<>>")
+            pdf.xref_set_key(cat, "Dests", f"{x} 0 R")
+        from .content import fmt_name
+        pdf.xref_set_key(x, fmt_name(name).decode()[1:], dest)
+    named_destinations(pdf)
 
 
 def relative_path(target: str, doc_path: str | None) -> str:
@@ -312,6 +354,10 @@ def write_link(pdf: pymupdf.Document, page_index: int, xref: int, rect: pymupdf.
     rp = r * P_inv
     rp.normalize()
     pdf.xref_set_key(xref, "Rect", f"[{fmt_num(round(rp.x0, 3))} {fmt_num(round(rp.y0, 3))} {fmt_num(round(rp.x1, 3))} {fmt_num(round(rp.y1, 3))}]")
+    if target is not None and target.kind == NAMED and target.new_dest is not None:
+        page, top, zoom = target.new_dest
+        add_named_destination(pdf, target.name, page, top, zoom)
+        target.new_dest = None
     if target is not None and target.kind != OTHER:
         a, d = action_string(pdf, target)
         pdf.xref_set_key(xref, "A", a or "null")

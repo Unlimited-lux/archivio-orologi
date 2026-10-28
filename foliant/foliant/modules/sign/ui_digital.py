@@ -3,6 +3,7 @@ gestione ID e certificati attendibili, ripetizione della firma grafica."""
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -53,6 +54,7 @@ class DigitalSignDialog(QDialog):
         self.field = field
         self.digital_id = None
         self.options = None
+        self.graphic_only = False     # SIG-20: l'utente ha scelto «Solo firma grafica»
         self._failures = 0
         self.setWindowTitle(_("Certifica il documento") if certify else _("Firma digitale"))
         self.resize(560, 0)
@@ -157,7 +159,7 @@ class DigitalSignDialog(QDialog):
         self.tsa.addItem(_("Nessuna marca temporale"), None)
         cfg = store.TSAConfig()
         for s in cfg.list():
-            self.tsa.addItem(f"{s.name} — {s.url}", (s.url, s.timeout, s.user))
+            self.tsa.addItem(f"{s.name} — {s.url}", (s.url, s.timeout, s.user, s.client_cert))
             if s.default:
                 self.tsa.setCurrentIndex(self.tsa.count() - 1)
         req_url = getattr(field, "timestamp_required_url", None)
@@ -166,6 +168,16 @@ class DigitalSignDialog(QDialog):
             self.tsa.addItem(req_url, (req_url, 15.0))
             self.tsa.setToolTip(_("Il campo richiede una marca temporale da questo server."))
         form.addRow(_("Marca temporale:"), self.tsa)
+        # SIG-22: livello PAdES (B-T predefinito se c'è una TSA, altrimenti B-B)
+        self.pades = QComboBox()
+        self.pades.setAccessibleName(_("Livello PAdES"))
+        for lvl, label in [("B-B", _("B-B — firma di base")), ("B-T", _("B-T — con marca temporale")),
+                           ("B-LT", _("B-LT — con dati di verifica (lungo termine)")),
+                           ("B-LTA", _("B-LTA — con marca temporale del documento (archivio)"))]:
+            self.pades.addItem(label, lvl)
+        form.addRow(_("Livello:"), self.pades)
+        self.tsa.currentIndexChanged.connect(lambda _i: self._update_pades())
+        self._update_pades()
         self.level = QComboBox()
         for lvl, label in LEVELS:
             self.level.addItem(_(label), lvl)
@@ -189,6 +201,12 @@ class DigitalSignDialog(QDialog):
         box = QDialogButtonBox()
         self.ok = box.addButton(_("Certifica e salva…") if certify else _("Firma e salva…"),
                                 QDialogButtonBox.ButtonRole.AcceptRole)
+        self.graphic_btn = None
+        if field is not None:
+            self.graphic_btn = box.addButton(_("Solo firma grafica…"), QDialogButtonBox.ButtonRole.ActionRole)
+            self.graphic_btn.setToolTip(_("Inserisce una firma grafica sopra il campo: non è una firma digitale e "
+                                          "il campo resta da firmare."))
+            self.graphic_btn.clicked.connect(self._graphic_only)
         box.addButton(_("Annulla"), QDialogButtonBox.ButtonRole.RejectRole)
         box.accepted.connect(self._accept)
         box.rejected.connect(self.reject)
@@ -208,7 +226,7 @@ class DigitalSignDialog(QDialog):
         self.id_combo.clear()
         allowed = self.allowed_issuers()
         for e in self.store.IDRegistry().list():
-            refused = allowed is not None and not self._issuer_allowed(e)
+            refused = (allowed is not None and not self._issuer_allowed(e)) or not self._policy_allowed(e)
             label = e.alias + (_(" (file non trovato)") if e.missing else "") + \
                 (_(" (non ammesso dal campo)") if refused else "")
             self.id_combo.addItem(label, e.path)
@@ -219,6 +237,27 @@ class DigitalSignDialog(QDialog):
         if allowed:
             self.cert_info.setText(_("Questo campo accetta solo certificati emessi da: {who}").format(
                 who="; ".join(sorted(c.subject for c in self.field.allowed_issuers))))
+        policies = getattr(self.field, "allowed_policies", None)
+        if policies:
+            text = _("Questo campo accetta solo certificati con una di queste policy: {oids}").format(
+                oids=", ".join(policies))
+            self.cert_info.setText((self.cert_info.text() + "\n" if allowed else "") + text)
+        restricted = bool(allowed or policies)
+        # i vincoli su emittente o policy non possono essere soddisfatti da un ID autofirmato
+        self.create_id.setEnabled(not restricted)
+        if restricted:
+            self.create_id.setToolTip(_("Il campo richiede un certificato di un emittente o di una policy precisa: "
+                                        "un ID autofirmato non è accettato."))
+        model = self.id_combo.model()
+        usable = bool(select_path) or any(model.item(i).isEnabled() for i in range(self.id_combo.count()))
+        self.no_compatible = self.field is not None and restricted and not usable
+        if self.no_compatible:
+            self.error.setText(_("Nessuno dei tuoi ID digitali soddisfa i requisiti del campo. Importa un ID "
+                                 "adatto con «Sfoglia…» oppure inserisci solo una firma grafica."))
+            self.id_combo.setCurrentIndex(-1)
+        elif select_path:
+            self.error.setText("")
+        self.ok.setEnabled(not self.no_compatible)
         if self.id_combo.count() == 0 and not select_path:
             self.id_combo.setPlaceholderText(_("Nessun ID digitale: usa «Sfoglia…» o «Crea…»"))
         if select_path and self.id_combo.findData(select_path) < 0:
@@ -234,6 +273,14 @@ class DigitalSignDialog(QDialog):
         issuer = getattr(entry_or_info, "issuer_dn", None) or getattr(entry_or_info, "issuer", "")
         fp = getattr(entry_or_info, "fingerprint", None) or getattr(entry_or_info, "sha256", "")
         return issuer in names or getattr(entry_or_info, "issuer", "") in names or fp in fps
+
+    def _graphic_only(self) -> None:
+        self.graphic_only = True
+        self.reject()
+
+    def _policy_allowed(self, entry_or_info) -> bool:
+        wanted = getattr(self.field, "allowed_policies", None)
+        return not wanted or bool(set(wanted) & set(getattr(entry_or_info, "policies", None) or []))
 
     def _create_id(self) -> None:
         dlg = SelfSignedDialog(self, self.c)
@@ -295,6 +342,10 @@ class DigitalSignDialog(QDialog):
         if not self._issuer_allowed(did.info):
             self.error.setText(_("Il campo non accetta certificati emessi da «{who}».").format(who=did.info.issuer))
             return
+        if not self._policy_allowed(did.info):
+            self.error.setText(_("Il campo richiede un certificato con una di queste policy: {oids}").format(
+                oids=", ".join(self.field.allowed_policies)))
+            return
         try:
             warnings = self.digital.check_usable(did, allow_expired=self.allow_expired.isChecked())
         except self.digital.CertificateNotUsable as e:
@@ -319,7 +370,10 @@ class DigitalSignDialog(QDialog):
             reason=self.reason.currentText().strip(), location=self.location.text().strip(),
             contact=self.contact.text().strip(), appearance=appearance,
             timestamp_url=tsa[0] if tsa else None, timestamp_timeout=float(tsa[1]) if tsa else 15.0,
-            timestamp_auth=self.tsa_auth(tsa),
+            timestamp_auth=self.tsa_auth(tsa), timestamp_client_cert=self.tsa_client_cert(tsa),
+            pades_level=self.pades.currentData() if tsa else "B-B",
+            validation_roots=self.c.trusted_certificates()
+            if self.pades.currentData() in ("B-LT", "B-LTA") else None,
             certify=self.certify, docmdp_level=int(self.level.currentData()),
             allow_expired=self.allow_expired.isChecked(),
             lock_fields=[f.strip() for f in self.lock.text().split(",") if f.strip()] or None)
@@ -342,6 +396,31 @@ class DigitalSignDialog(QDialog):
             if not ok:
                 return None
         return (tsa[2], pw)
+
+    def _update_pades(self) -> None:
+        has_tsa = self.tsa.currentData() is not None
+        model = self.pades.model()
+        for i in range(1, self.pades.count()):
+            model.item(i).setEnabled(has_tsa)
+        if not has_tsa:
+            self.pades.setCurrentIndex(0)
+        elif self.pades.currentIndex() == 0:
+            self.pades.setCurrentIndex(1)
+        self.pades.setToolTip("" if has_tsa else _("I livelli B-T, B-LT e B-LTA richiedono un server di marca "
+                                                   "temporale."))
+
+    def tsa_client_cert(self, tsa) -> tuple[str, str] | None:
+        """Certificato client della TSA: password dal portachiavi, altrimenti chiesta (mai salvata su file)."""
+        if not tsa or len(tsa) < 4 or not tsa[3]:
+            return None
+        pw = self.store.tsa_client_password(tsa[0])
+        if pw is None:
+            from PySide6.QtWidgets import QInputDialog
+            pw, ok = QInputDialog.getText(self, _("Server marca temporale"), _(
+                "Password del certificato client {f}:").format(f=Path(tsa[3]).name), QLineEdit.EchoMode.Password)
+            if not ok:
+                return None
+        return (tsa[3], pw)
 
     def current_profile(self, name: str = ""):
         return self.store.AppearanceProfile(
@@ -516,6 +595,9 @@ class FieldDialog(QDialog):
         irow.addWidget(b_issuer)
         form.addRow(_("Emittente ammesso:"), irow)
         self.issuers: list = []
+        self.policies = QLineEdit()
+        self.policies.setPlaceholderText(_("OID separati da virgola, es. 1.3.76.16.6 (facoltativo)"))
+        form.addRow(_("Policy del certificato:"), self.policies)
         self.mdp = QComboBox()
         self.mdp.addItem(_("Nessuno (firma di approvazione)"), None)
         for lvl, label in LEVELS:
@@ -563,6 +645,9 @@ class FieldDialog(QDialog):
             return
         self.issuer_label.setText(", ".join(c.subject for c in self.issuers) or _("Qualsiasi"))
 
+    def allowed_policies(self) -> list[str] | None:
+        return [o.strip() for o in self.policies.text().replace(";", ",").split(",") if o.strip()] or None
+
     def allowed_reasons(self) -> list[str] | None:
         return [r.strip() for r in self.reasons.text().split(";") if r.strip()] or None
 
@@ -594,6 +679,10 @@ class FieldDialog(QDialog):
         if self.tsa_required.isChecked() and not self.tsa.text().strip().startswith(("http://", "https://")):
             self.error.setText(_("Per rendere obbligatoria la marca temporale indica l'indirizzo del server "
                                  "(http:// o https://)."))
+            return
+        bad = [o for o in self.allowed_policies() or [] if not re.fullmatch(r"[0-2](\.\d+)+", o)]
+        if bad:
+            self.error.setText(_("OID di policy non valido: {oid}").format(oid=", ".join(bad)))
             return
         self.accept()
 
@@ -829,7 +918,8 @@ class IDsDialog(QDialog):
             self.trusted.addItem(it)
         self.tsas.clear()
         for s in self.store.TSAConfig().list():
-            it = QListWidgetItem(f"{s.name} — {s.url}" + ("  ★" if s.default else ""))
+            it = QListWidgetItem(f"{s.name} — {s.url}" + ("  🔑" if s.client_cert else "")
+                                 + ("  ★" if s.default else ""))
             it.setData(Qt.ItemDataRole.UserRole, s)
             self.tsas.addItem(it)
 
@@ -926,7 +1016,28 @@ class IDsDialog(QDialog):
                 QMessageBox.information(self, _("Server marca temporale"), _(
                     "Il portachiavi del sistema non è disponibile: la password non viene salvata e sarà "
                     "chiesta a ogni firma."))
-        self._run(lambda: self.store.TSAConfig().add(name, url, user=user))
+        client = ""
+        if url.strip().startswith("https://") and QMessageBox.question(
+                self, _("Server marca temporale"), _("Il server richiede un certificato client?"),
+                defaultButton=QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            client, _f = QFileDialog.getOpenFileName(self, _("Certificato client"), "",
+                                                     _("Certificato con chiave (*.p12 *.pfx *.pem)"))
+            if not client:
+                return
+            pw, ok = QInputDialog.getText(self, _("Server marca temporale"), _("Password del certificato client:"),
+                                          QLineEdit.EchoMode.Password)
+            if not ok:
+                return
+            try:
+                self.digital.tsa_ssl_context(client, pw)
+            except self.digital.SignError as e:
+                QMessageBox.warning(self, _("Server marca temporale"), str(e))
+                return
+            if pw and not self.store.store_tsa_client_password(url.strip(), pw):
+                QMessageBox.information(self, _("Server marca temporale"), _(
+                    "Il portachiavi del sistema non è disponibile: la password non viene salvata e sarà "
+                    "chiesta a ogni firma."))
+        self._run(lambda: self.store.TSAConfig().add(name, url, user=user, client_cert=client))
 
     def _default_tsa(self) -> None:
         s = self._cur(self.tsas)
@@ -1063,7 +1174,60 @@ class RepeatDialog(QDialog):
             self.accept()
 
 
+# ============================================================ preferenze
+class SignPreferences(QWidget):
+    """Pagina «Firma» delle Preferenze: comportamento delle firme grafiche al salvataggio (SIG-05)."""
+
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.c = controller
+        form = QFormLayout(self)
+        self.on_save = QComboBox()
+        self.on_save.setAccessibleName(_("Firme grafiche al salvataggio"))
+        self.on_save.addItem(_("Mantieni come annotazioni (modificabili)"), "keep")
+        self.on_save.addItem(_("Incorpora nel contenuto della pagina"), "embed")
+        self.on_save.setCurrentIndex(max(0, self.on_save.findData(controller.on_save_mode())))
+        form.addRow(_("Firme grafiche al salvataggio:"), self.on_save)
+        note = QLabel(_("Nei documenti firmati digitalmente le firme grafiche restano sempre annotazioni, "
+                        "perché incorporarle invaliderebbe le firme."))
+        note.setWordWrap(True)
+        form.addRow(note)
+
+    def apply(self) -> None:
+        self.c.ctx.settings().setValue(self.c.ON_SAVE_KEY, self.on_save.currentData())
+
+
 TRANSLATIONS_EN = {
+    "Livello PAdES": "PAdES level", "Livello:": "Level:", "B-B — firma di base": "B-B — basic signature",
+    "B-T — con marca temporale": "B-T — with timestamp",
+    "B-LT — con dati di verifica (lungo termine)": "B-LT — with validation data (long term)",
+    "B-LTA — con marca temporale del documento (archivio)": "B-LTA — with document timestamp (archival)",
+    "I livelli B-T, B-LT e B-LTA richiedono un server di marca temporale.":
+        "Levels B-T, B-LT and B-LTA require a timestamp server.",
+    "Firme grafiche al salvataggio": "Graphic signatures on save",
+    "Firme grafiche al salvataggio:": "Graphic signatures on save:",
+    "Mantieni come annotazioni (modificabili)": "Keep as annotations (editable)",
+    "Incorpora nel contenuto della pagina": "Embed into the page content",
+    "Nei documenti firmati digitalmente le firme grafiche restano sempre annotazioni, perché incorporarle "
+    "invaliderebbe le firme.": "In digitally signed documents graphic signatures always stay annotations, "
+                               "because embedding them would invalidate the signatures.",
+    "Solo firma grafica…": "Graphic signature only…",
+    "Inserisce una firma grafica sopra il campo: non è una firma digitale e il campo resta da firmare.":
+        "Places a graphic signature over the field: it is not a digital signature and the field stays unsigned.",
+    "Il campo richiede un certificato di un emittente o di una policy precisa: un ID autofirmato non è accettato.":
+        "The field requires a certificate from a specific issuer or policy: a self-signed ID is not accepted.",
+    "Nessuno dei tuoi ID digitali soddisfa i requisiti del campo. Importa un ID adatto con «Sfoglia…» oppure "
+    "inserisci solo una firma grafica.":
+        "None of your digital IDs meets the field's requirements. Import a suitable ID with “Browse…” or "
+        "place a graphic signature only.",
+    "Password del certificato client {f}:": "Password of client certificate {f}:",
+    "Il server richiede un certificato client?": "Does the server require a client certificate?",
+    "Certificato client": "Client certificate", "Certificato con chiave (*.p12 *.pfx *.pem)":
+        "Certificate with key (*.p12 *.pfx *.pem)", "Password del certificato client:": "Client certificate password:",
+    "Questo campo accetta solo certificati con una di queste policy: {oids}":
+        "This field only accepts certificates with one of these policies: {oids}",
+    "OID separati da virgola, es. 1.3.76.16.6 (facoltativo)": "comma-separated OIDs, e.g. 1.3.76.16.6 (optional)",
+    "Policy del certificato:": "Certificate policy:",
     "ID digitale (*.p12 *.pfx)": "Digital ID (*.p12 *.pfx)",
     "Certificati (*.cer *.crt *.pem *.der *.p7b *.p7c)": "Certificates (*.cer *.crt *.pem *.der *.p7b *.p7c)",
     "Approvo il documento": "I approve this document", "Sono l'autore del documento": "I am the author of this document",

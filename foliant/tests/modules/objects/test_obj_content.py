@@ -91,8 +91,9 @@ def test_parse_insert_image_draw_rect_and_text():
     pdf[0].insert_text((72, 500), "Testo di prova")
     parsed = parse_page(pdf, pdf[0])
     kinds = [o.kind for o in parsed.objects]
-    assert kinds == [IMAGE, PATH]  # il testo non è un oggetto
-    img, path = parsed.objects
+    assert kinds == [IMAGE, PATH, "testo"]  # il blocco di testo è un oggetto (OBJ-01)
+    img, path, text = parsed.objects
+    assert abs(text.rect.x0 - 72) < 1 and text.rect.y1 > 490
     assert img.rect == pymupdf.Rect(50, 100, 250, 200)
     assert img.xref == xref and img.width == 40 and img.height == 20
     assert img.name and not img.inline and img.wrapper is not None
@@ -166,7 +167,8 @@ def test_clip_only_path_is_not_object_and_text_paths_ignored():
     data = b"q 0 0 100 100 re W n 10 10 20 20 re f Q BT /F1 12 Tf 0 0 Td (x) Tj ET"
     _set_content(pdf, 0, data)
     parsed = parse_page(pdf, pdf[0])
-    assert [o.kind for o in parsed.objects] == [PATH]
+    # font /F1 inesistente: il blocco di testo non ha riquadro e non diventa un oggetto
+    assert [o.kind for o in parsed.objects if o.kind != "testo"] == [PATH]
     assert parsed.objects[0].paint == "f"
 
 

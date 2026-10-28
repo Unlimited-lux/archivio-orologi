@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import pymupdf
 
-from foliant.api import FoliantError, OperationCancelled, _
+from foliant.api import FoliantError, OperationCancelled, _, format_number
 from foliant.core.engine import ENGINE_LOCK
 
 from . import content
@@ -103,7 +103,7 @@ def action_title(action: str) -> str:
 
 def _percent(fraction: float) -> str:
     value = fraction * 100
-    return (f"{value:.2f}" if value < 1 else f"{value:.1f}").replace(".", ",")
+    return format_number(value, 2 if value < 1 else 1)     # separatore decimale della lingua (NFR-26)
 
 
 def _step(progress, fraction: float, text: str) -> None:

@@ -19,6 +19,8 @@ from typing import Callable, Iterable, NamedTuple
 
 import pymupdf
 
+from foliant.i18n import _ as tr  # «_» qui è usato anche per i valori scartati
+
 TEXT, CHECKBOX = "text", "checkbox"
 
 # Priorità per l'eliminazione dei doppioni (valore più basso = vince).
@@ -51,6 +53,7 @@ class Candidate:
     source: str = ""
     comb: int = 0          # caselle del pettine (0 = non è un pettine)
     angle: float = 0.0     # inclinazione stimata della scansione (gradi)
+    note: str = ""         # avviso per la revisione (es. contenuto già presente)
 
 
 class _Word(NamedTuple):
@@ -523,6 +526,16 @@ def _from_raster(page: int, pg: pymupdf.Page) -> list[Candidate]:
             return 0.0
         return float(ink[y0:y1, x0:x1].mean()) / 255.0
 
+    def has_marks(x0: int, y0: int, x1: int, y1: int) -> bool:
+        """Tratti dentro il riquadro (scrittura o spunta); macchie e rumore sotto i 2 pt no."""
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(ink.shape[1], x1), min(ink.shape[0], y1)
+        if x1 <= x0 or y1 <= y0:
+            return False
+        n, _l, stats, _c = cv2.connectedComponentsWithStats(np.ascontiguousarray(ink[y0:y1, x0:x1]))
+        return any(max(stats[i][2], stats[i][3]) >= 2 * zoom and stats[i][4] >= 4 * zoom
+                   for i in range(1, n))
+
     # Riquadri: contorni approssimati con 4 vertici, interno vuoto.
     boxes: list[tuple[int, int, int, int]] = []
     contours, _ = cv2.findContours(ink, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -536,26 +549,32 @@ def _from_raster(page: int, pg: pymupdf.Page) -> list[Candidate]:
         if cv2.contourArea(c) < 0.85 * w * h:
             continue
         m = max(3, int(min(w, h) * 0.15))
-        if ink_ratio(x + m, y + m, x + w - m, y + h - m) > 0.04:
+        inside = ink_ratio(x + m, y + m, x + w - m, y + h - m)
+        small = w < 30 * zoom and h < 30 * zoom and 0.6 < w / h < 1.6   # casella da spuntare
+        # riquadro già compilato a mano: proposto con l'avviso «contenuto presente» (caselle
+        # sempre, riquadri di testo solo con poco inchiostro: oltre è testo stampato)
+        if inside > (0.6 if small else 0.2):
             continue
-        if any(_iou_px((x, y, w, h), b) > 0.5 for b in boxes):
+        if any(_iou_px((x, y, w, h), b[:4]) > 0.5 for b in boxes):
             continue
-        boxes.append((x, y, w, h))
+        boxes.append((x, y, w, h, has_marks(x + m, y + m, x + w - m, y + h - m)))
 
     out: list[Candidate] = []
     disp_area = pix.width * pix.height
-    for x, y, w, h in boxes:
+    filled_note = tr("contenuto presente")
+    for x, y, w, h, filled in boxes:
         if w * h > 0.6 * disp_area:
             continue
         kind = _rect_kind(pymupdf.Rect(0, 0, w / zoom, h / zoom))
         if kind is None:
             continue
-        if kind == CHECKBOX:
+        note = filled_note if filled else ""
+        if kind == CHECKBOX:   # anche se già spuntata: proposta come casella non selezionata
             r = to_pt(x + zoom, y + zoom, x + w - zoom, y + h - zoom)
-            out.append(Candidate(page, r, CHECKBOX, "", False, "raster"))
+            out.append(Candidate(page, r, CHECKBOX, "", False, "raster", note=note))
         else:
             out.append(Candidate(page, to_pt(x, y, x + w, y + h), TEXT, "",
-                                 kind == "multi", "raster"))
+                                 kind == "multi", "raster", note=note))
 
     # Linee orizzontali e verticali per apertura morfologica.
     klen = max(40, int(_MIN_LINE * zoom))
@@ -577,11 +596,11 @@ def _from_raster(page: int, pg: pymupdf.Page) -> list[Candidate]:
             continue
         if any(bx - 3 <= x and x + w <= bx + bw + 3 and
                (abs(y - by) <= 3 or abs(y + h - by - bh) <= 3)
-               for bx, by, bw, bh in boxes):   # lato di un riquadro
+               for bx, by, bw, bh, _f in boxes):   # lato di un riquadro
             continue
         hlines.append(_HLine(float(x), float(x + w), y + h / 2))
 
-    box_rects = [pymupdf.Rect(x, y, x + w, y + h) for x, y, w, h in boxes]
+    box_rects = [pymupdf.Rect(x, y, x + w, y + h) for x, y, w, h, _f in boxes]
     for hl in hlines:
         if _is_grid_line(hl, vlines):
             continue
@@ -599,6 +618,54 @@ def _from_raster(page: int, pg: pymupdf.Page) -> list[Candidate]:
     for c in out:
         c.angle = angle
     return out
+
+
+def scan_quality(pdf: pymupdf.Document, page: int) -> dict:
+    """Qualità della scansione di una pagina (FRM-27): risoluzione effettiva dell'immagine più
+    grande (dpi) e inclinazione stimata (gradi, positiva = antioraria)."""
+    pg = pdf[page]
+    dpi = 0.0
+    best = 0.0
+    for info in pg.get_image_info():
+        bbox = pymupdf.Rect(info["bbox"])
+        if abs(bbox) > best and bbox.width > 0:
+            best = abs(bbox)
+            dpi = info["width"] / (bbox.width / 72.0)
+    return {"dpi": dpi, "skew": estimate_skew(pg)}
+
+
+def estimate_skew(pg: pymupdf.Page) -> float:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return 0.0
+    zoom = 2.0
+    pix = pg.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), colorspace=pymupdf.csGRAY, alpha=False)
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.stride)[:, :pix.width]
+    _, ink = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    if not ink.any():
+        return 0.0
+    return _skew_angle(ink, int(_MIN_LINE * zoom))
+
+
+def straighten_page(pdf: pymupdf.Document, page: int, angle: float) -> None:
+    """Raddrizza la pagina ruotandone il contenuto di `-angle` gradi attorno al centro
+    (l'immagine resta quella del file; cambia solo come è disegnata)."""
+    import math
+    pg = pdf[page]
+    pg.wrap_contents()
+    r = pg.mediabox
+    cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+    t = math.radians(-angle)   # antioraria nello spazio PDF (y verso l'alto)
+    a, b, c, d = math.cos(t), math.sin(t), -math.sin(t), math.cos(t)
+    e, f = cx - (a * cx + c * cy), cy - (b * cx + d * cy)
+    xrefs = pg.get_contents()
+    old = b"".join(pdf.xref_stream(x) or b"" for x in xrefs)
+    head = f"q {a:.6f} {b:.6f} {c:.6f} {d:.6f} {e:.4f} {f:.4f} cm\n".encode()
+    pdf.update_stream(xrefs[0], head + old + b"\nQ\n")
+    if len(xrefs) > 1:
+        pdf.xref_set_key(pg.xref, "Contents", f"{xrefs[0]} 0 R")
 
 
 def _skew_angle(ink, min_len: int) -> float:

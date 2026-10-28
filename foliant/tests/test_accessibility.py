@@ -194,3 +194,44 @@ def test_input_outline_is_visible_without_focus(qapp, qtbot):
             dlg.close()
     finally:
         theme.apply(qapp, "light")
+
+
+def test_menu_button_focus_keeps_arrow_space(qapp, qtbot):
+    """NFR-21: nei pulsanti con menu il fuoco non toglie lo spazio della freccia (l'icona resta ferma)."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QAction, QColor, QIcon, QPixmap
+    from PySide6.QtWidgets import QLineEdit, QMenu, QToolButton, QVBoxLayout, QWidget
+
+    from foliant.ui import theme
+
+    def red_columns(img):
+        xs = [x for y in range(img.height()) for x in range(img.width())
+              if (c := img.pixelColor(x, y)).red() > 200 and c.green() < 60 and c.blue() < 60]
+        return min(xs), max(xs)
+
+    try:
+        theme.apply(qapp, "light")
+        w = QWidget()
+        qtbot.addWidget(w)
+        layout = QVBoxLayout(w)
+        other = QLineEdit()
+        layout.addWidget(other)
+        pm = QPixmap(20, 20)
+        pm.fill(QColor(255, 0, 0))
+        button = QToolButton()              # come _menu_button del modulo annotazioni
+        button.setDefaultAction(QAction(QIcon(pm), "Evidenzia", w))
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        button.setIconSize(QSize(20, 20))
+        button.setAutoRaise(True)
+        menu = QMenu(button)
+        menu.addAction("Sottolinea")
+        button.setMenu(menu)
+        layout.addWidget(button)
+        w.show()
+        w.activateWindow()
+        qtbot.waitUntil(w.isActiveWindow)
+        before, after = _focus_change(qtbot, button, other)
+        assert abs(red_columns(after)[0] - red_columns(before)[0]) <= 1
+        w.close()
+    finally:
+        theme.apply(qapp, "light")

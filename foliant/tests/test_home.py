@@ -230,3 +230,54 @@ def test_clear_recent_asks_first(window, tmp_path, monkeypatch):
     ctx.pin_recent(b, False)
     assert ctx.clear_recent(ask=False) and ctx.recent_files() == []
     assert window.home.empty_recent.isVisibleTo(window.home)
+
+
+def test_module_submenu_is_not_extended(bare_window, tmp_path, monkeypatch):
+    """Solo il menu del modulo riceve le voci del nucleo, non un suo sottomenu figlio dell'elenco."""
+    win = bare_window
+    a = make_pdf(tmp_path / "a.pdf")
+    win._add_recent(a)
+    lst = win.home.recent
+    shown = []
+
+    def module_menu(pos):
+        menu = QMenu(lst)
+        sub = QMenu("Invia a", lst)
+        sub.addAction("Posta elettronica")
+        menu.addMenu(sub)
+        menu.popup(lst.viewport().mapToGlobal(pos))
+        sub.popup(lst.viewport().mapToGlobal(pos))             # come al passaggio del mouse
+        shown.extend([_texts(menu), _texts(sub)])
+        sub.close()
+        menu.close()
+    lst.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+    lst.customContextMenuRequested.connect(module_menu)
+    win.show_home()
+    QApplication.processEvents()
+    pos = lst.visualItemRect(_item(win.home, a)).center()
+    QApplication.sendEvent(lst.viewport(), QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos,
+                                                             lst.viewport().mapToGlobal(pos)))
+    assert shown[0] == ["Apri", "Fissa", "Invia a", "Rimuovi dall'elenco", "Svuota elenco"]
+    assert shown[1] == ["Posta elettronica"]
+
+
+def test_other_windows_home_follows_recent_changes(settings, tmp_path, qtbot):
+    from PySide6.QtCore import QEvent
+
+    from foliant.ui.main_window import MainWindow, app_windows, register_window
+    x, y, z = (make_pdf(tmp_path / f"{n}.pdf") for n in "xyz")
+    a = register_window(MainWindow(settings, load_modules=False))
+    try:
+        for p in (x, y, z):
+            a._add_recent(p)
+        b = register_window(MainWindow(settings, load_modules=False))
+        b.show_home()
+        assert b.home.visible_recent() == [z, y, x]
+        a.pin_recent(x)
+        assert b.home.visible_recent() == [x, z, y] and _item(b.home, x).data(PINNED_ROLE)
+        a.clear_recent(ask=False)
+        assert b.home.visible_recent() == [x]
+    finally:
+        for w in app_windows():
+            w.close()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

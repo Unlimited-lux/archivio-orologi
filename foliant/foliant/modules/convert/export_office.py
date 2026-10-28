@@ -145,6 +145,46 @@ def _write_runs(paragraph, para: Para, heading: bool) -> None:
                 run.font.name = s.clean_font
 
 
+_BOX_XML = (
+    '<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+    'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">'
+    '<w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" '
+    'behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
+    '<wp:positionH relativeFrom="page"><wp:posOffset>{x}</wp:posOffset></wp:positionH>'
+    '<wp:positionV relativeFrom="page"><wp:posOffset>{y}</wp:posOffset></wp:positionV>'
+    '<wp:extent cx="{cx}" cy="{cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>'
+    '<wp:docPr id="{id}" name="{name}"/><wp:cNvGraphicFramePr/>'
+    '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">'
+    '<wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm{rot}><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/>'
+    '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>'
+    '<wps:txbx><w:txbxContent><w:p/></w:txbxContent></wps:txbx>'
+    '<wps:bodyPr rot="0" vert="{vert}" wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t">'
+    '<a:noAutofit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>')
+# angolo del testo (antiorario) → direzione del testo nella casella e rotazione della forma
+_BOX_VERT = {90: ("vert270", ""), 270: ("vert", ""), 180: ("horz", ' rot="10800000"')}
+
+
+def _add_rotated_box(anchor_paragraph, para: Para, box_id: int) -> None:
+    """Testo ruotato o verticale come casella di testo ruotata, nella posizione della pagina."""
+    from docx.oxml import parse_xml
+    from docx.text.paragraph import Paragraph
+    emu = 12700
+    x0, y0, x1, y1 = para.bbox
+    vert, rot = _BOX_VERT[para.angle]
+    # un po' di margine per non spezzare le righe con un font sostitutivo più largo
+    w, h = (x1 - x0) * 1.15 + 2, (y1 - y0) * 1.15 + 2
+    if para.angle == 180:
+        w, h = (x1 - x0) * 1.15 + 2, (y1 - y0) + 2
+    run = parse_xml(_BOX_XML.format(
+        x=int(x0 * emu), y=int(y0 * emu), cx=int(w * emu), cy=int(h * emu), z=251659264 + box_id,
+        id=10000 + box_id, name=f"Testo ruotato {box_id}", vert=vert, rot=rot))
+    anchor_paragraph._p.append(run)
+    p_elm = run.xpath(".//w:txbxContent/w:p")[0]
+    _write_runs(Paragraph(p_elm, anchor_paragraph._parent), para, heading=False)
+
+
 def write_docx_flow(work: pymupdf.Document, path: str, job) -> None:
     """DOCX «testo scorrevole»: paragrafi, titoli, elenchi, tabelle, immagini e link."""
     import docx
@@ -167,13 +207,22 @@ def write_docx_flow(work: pymupdf.Document, path: str, job) -> None:
         skip = repeated_furniture(pages)
         _furniture_to_sections(document, pages, skip)
     bid = 0
+    boxes = 0
     n = len(pages)
     for pi, pc in enumerate(pages):
         check(job.progress, 0.8 + 0.18 * pi / max(1, n), _("Scrittura del documento…"))
         first = True
         placed: list[tuple[tuple, object]] = []
+        rotated: list[Para] = []
+        # caselle ruotate solo per il testo ruotato minoritario (note a margine, codici, timbri):
+        # se è ruotata quasi tutta la pagina il testo resta nel flusso, leggibile
+        chars = [(len(it.text), it.angle in _BOX_VERT) for it in pc.items if isinstance(it, Para)]
+        boxed = sum(n for n, r in chars if r) < 0.5 * sum(n for n, _r in chars)
         for it in pc.items:
             if id(it) in skip:
+                continue
+            if boxed and isinstance(it, Para) and it.angle in _BOX_VERT:
+                rotated.append(it)
                 continue
             if isinstance(it, Para):
                 if it.kind.startswith("h"):
@@ -213,6 +262,18 @@ def write_docx_flow(work: pymupdf.Document, path: str, job) -> None:
                 bid += 1
                 _add_bookmark(p, f"page_{pc.index + 1}", bid)
                 first = False
+        for it in rotated:
+            if placed:
+                anchor = placed[0][1]
+            else:
+                anchor = document.add_paragraph()
+                placed.append((it.bbox, anchor))
+                if first:
+                    bid += 1
+                    _add_bookmark(anchor, f"page_{pc.index + 1}", bid)
+                    first = False
+            boxes += 1
+            _add_rotated_box(anchor, it, boxes)
         if job.options.get("comments", True):
             _add_comments(document, work, pi, placed, job)
     if not any(pc.items for pc in pages):
@@ -345,12 +406,16 @@ def detect_decimal(cells: list[str]) -> str:
     """Separatore decimale prevalente nelle celle: «,» (italiano) o «.»."""
     comma = dot = 0
     for c in cells:
-        c = c.strip()
-        if re.search(r"\d\.\d{3},\d", c) or re.fullmatch(r"[-+(]?[€$£]?\s?\d+,\d{1,2}\)?%?", c):
+        c = _CURRENCY.sub("", c.strip()).strip()
+        if re.search(r"\d\.\d{3},\d", c) or re.fullmatch(r"[-+(]?\d+,\d{1,2}\)?%?", c):
             comma += 1
-        elif re.search(r"\d,\d{3}\.\d", c) or re.fullmatch(r"[-+(]?[€$£]?\s?\d+\.\d{1,2}\)?%?", c):
-            dot += 1
+        elif re.search(r"\d[,'’]\d{3}\.\d", c) or re.fullmatch(r"[-+(]?\d+\.\d{1,2}\)?%?", c):
+            dot += 1      # anche lo stile svizzero 7'250.00
     return "." if dot > comma else ","
+
+
+# simboli e codici di valuta prima o dopo l'importo: €, $, £, codici ISO (CHF, EUR…), Fr./SFr.
+_CURRENCY = re.compile(r"^(?:[€$£]|[A-Z]{3}|S?Fr\.)\s?|\s?(?:[€$£]|[A-Z]{3}|S?Fr\.)$")
 
 
 def parse_cell(text: str, decimal: str = ","):
@@ -377,13 +442,15 @@ def parse_cell(text: str, decimal: str = ","):
     percent = s.endswith("%")
     if percent:
         s = s[:-1].strip()
-    s = re.sub(r"^[€$£]\s?|\s?[€$£]$|\s?(EUR|USD)$", "", s).strip()
+    s = _CURRENCY.sub("", s).strip()
     if s.startswith(("-", "+")):
         neg = neg or s[0] == "-"
         s = s[1:].strip()
     if not s or not s[0].isdigit():
         return raw, None
     thousands = "." if decimal == "," else ","
+    if decimal == "." and re.fullmatch(r"\d{1,3}(['’]\d{3})+(\.\d+)?", s):
+        s = s.replace("'", ",").replace("’", ",")     # migliaia con l'apostrofo (Svizzera)
     if re.fullmatch(r"0\d+", s):
         return raw, None        # codice con zeri iniziali (CAP, articoli)
     pat = rf"\d{{1,3}}(\{thousands}\d{{3}})+(\{decimal}\d+)?|\d+(\{decimal}\d+)?"

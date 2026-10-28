@@ -11,3 +11,9 @@
 3. ~~Selezione delle miniature~~: adottato `ctx.selected_pages(view)` del nucleo. Nessuna richiesta aperta.
 4. ~~Barra «File danneggiato, riparato in memoria»~~ (CNV-32): adottati `document.repaired` e
    `ctx.show_banner(view, "riparato", …)` con «Salva copia riparata». Nessuna richiesta aperta.
+5. ~~Esclusione di `pymupdf.layout` e `find_tables()`~~: corretto nel nucleo (ab09e8d); l'aggiramento locale resta innocuo. `_NoLayoutAnalysis.find_spec` solleva
+   `ModuleNotFoundError`; PyMuPDF in `find_tables()` chiama `importlib.util.find_spec("pymupdf.layout")`
+   per suggerire il pacchetto, e l'eccezione fa fallire ogni ricerca di tabelle. Proposta: restituire
+   `None` per i nomi esclusi (l'import fallisce comunque) e impostare
+   `PYMUPDF_SUGGEST_LAYOUT_ANALYZER=0`. Nel modulo: `pymupdf._recommend_layout = False` prima di
+   `find_tables()` (`extract.find_tables`).

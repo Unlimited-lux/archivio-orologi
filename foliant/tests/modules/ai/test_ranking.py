@@ -109,3 +109,23 @@ def test_ranking_pdf_many_rows_spans_pages():
     pdf = pymupdf.open("pdf", ranking.to_pdf(ranking.rank(rows, crit), crit))
     assert pdf.page_count > 1
     assert "doc59.pdf" in " ".join(p.get_text() for p in pdf)
+
+
+def test_ranking_pdf_dates_and_numbers_follow_language():
+    import datetime as dt
+
+    import pymupdf
+
+    from foliant import i18n
+    crit = [Criterion("Esperienza", peso=3), Criterion("Lingue", peso=1)]
+    rows = ranking.rank(_rows([(8, 6), (5, 10)]), crit)
+    i18n.set_language("en")
+    try:
+        text = " ".join(" ".join(p.get_text(flags=0).split()) for p in pymupdf.open("pdf", ranking.to_pdf(rows, crit)))
+    finally:
+        i18n.set_language("it")
+    assert "7.50" in text and "7,50" not in text
+    today = dt.date.today()
+    assert f"{today.month:02d}/{today.day:02d}/{today.year}" in text and ("AM" in text or "PM" in text)
+    text_it = " ".join(" ".join(p.get_text(flags=0).split()) for p in pymupdf.open("pdf", ranking.to_pdf(rows, crit)))
+    assert "7,50" in text_it and f"{today.day:02d}/{today.month:02d}/{today.year}" in text_it

@@ -79,7 +79,10 @@ def test_replace_year_keeps_style_and_position(subset_pdf, tmp_path):
     out = reopen(doc, tmp_path)
     text = out[0].get_text()
     assert "scade nel 2027 o 2026" in text and "2024" not in text
-    after = span_with(out[0], "2027")
+    # le cifre presenti nel sottoinsieme riusano la risorsa originale, la «7» mancante un font installato
+    after = span_with(out[0], "contratto")
+    new_span = [sp for sp in spans(out[0]) if "7" in sp["text"]][0]
+    assert abs(new_span["size"] - before["size"]) <= 0.05 and new_span["color"] == before["color"]
     assert abs(after["size"] - before["size"]) <= 0.05
     assert after["color"] == before["color"]
     assert abs(after["origin"][0] - before["origin"][0]) <= 0.5
@@ -533,8 +536,9 @@ def test_subset_missing_glyph_uses_same_installed_font(subset_pdf, tmp_path):
     # Liberation Sans è installato: stesso font, nessun avviso
     assert res.substitutions == []
     out = reopen(d, tmp_path)
-    s = span_with(out[0], "Quadro")
-    assert analysis.normalize_font_name(s["font"]).startswith("liberationsans")
+    assert "Quadro" in out[0].get_text()
+    for s in spans(out[0]):
+        assert analysis.normalize_font_name(s["font"]).startswith("liberationsans")
 
 
 def test_font_not_installed_gets_substitute_and_warning(tmp_path):
@@ -843,3 +847,148 @@ def test_shared_form_xobject_only_this_page(tmp_path):
     for i in (0, 2, 3):
         assert "2024" in out[i].get_text()
         assert pixels(out[i], dpi=50) == before[i]
+
+
+def _font_count(path) -> int:
+    d = pymupdf.open(str(path))
+    return len({f[0] for i in range(d.page_count) for f in d[i].get_fonts(full=True)})
+
+
+def test_edit_reuses_original_font_resource_pymupdf(tmp_path):
+    """bug_10: con il font originale che contiene i glifi, nessun font nuovo nel file."""
+    doc, page = new_doc_with_font(SANS)
+    page.insert_text((72, 100), "Il contratto scade nel 2024", fontname="F1", fontsize=12)
+    path = save(doc, tmp_path / "orig.pdf")
+    d = Document.open(path)
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "2024", "2042"))
+    out = tmp_path / "out.pdf"
+    d.save(out)
+    assert _font_count(out) == _font_count(path)
+    assert out.stat().st_size - pymupdf.open(path).tobytes(garbage=3, deflate=True).__len__() < 2000
+    re_ = pymupdf.open(str(out))
+    assert "scade nel 2042" in re_[0].get_text()
+    s = span_with(re_[0], "2042")
+    assert s is not None and analysis.normalize_font_name(s["font"]).startswith("liberationsans")
+
+
+def test_edit_reuses_original_font_resource_libreoffice(tmp_path):
+    """bug_10: fattura LibreOffice (Carlito in sottoinsieme): sostituire un prezzo non aggiunge font."""
+    import shutil
+    import subprocess
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        pytest.skip("LibreOffice non disponibile")
+    src = tmp_path / "fattura.html"
+    src.write_text("<html><body style='font-family:Carlito; font-size:11pt'><p>Totale: € 9.950,00</p>"
+                   "<p>Pagamento a trenta giorni.</p></body></html>", encoding="utf-8")
+    subprocess.run([soffice, "--headless", f"-env:UserInstallation=file://{tmp_path}/lo", "--convert-to",
+                    "pdf:writer_pdf_Export", "--outdir", str(tmp_path), str(src)], capture_output=True, timeout=180)
+    path = tmp_path / "fattura.pdf"
+    if not path.exists():
+        pytest.skip("conversione LibreOffice non riuscita")
+    from foliant.modules.text_edit import search
+    d = Document.open(str(path))
+    before = len(d.to_bytes())
+    s = search.replace_all(d, "9.950,00", "9.590,00", search.SearchOptions(case_sensitive=True))
+    assert s.replaced == 1
+    out = tmp_path / "out.pdf"
+    d.save(out)
+    assert _font_count(out) == _font_count(path)
+    assert out.stat().st_size - before < 2000
+    re_ = pymupdf.open(str(out))
+    assert "9.590,00" in re_[0].get_text()
+    assert span_with(re_[0], "9.590,00")["font"].startswith("Carlito")
+
+
+def test_pdfa_document_never_uses_unembedded_fonts(tmp_path):
+    """TXT-20: in un documento dichiarato PDF/A il testo aggiunto usa solo font incorporati con /ToUnicode."""
+    from foliant.modules.text_edit.model import Style as _Style
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.set_xml_metadata('<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+                         '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+                         'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                         '<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">'
+                         '<pdfaid:part>2</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance>'
+                         '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>')
+    d = Document.open(save(doc, tmp_path / "pdfa.pdf"))
+    with d.change("Aggiungi") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(72, 100), [[Run("Testo in Helvetica", _Style(font="Helvetica"))]])
+    out = tmp_path / "out.pdf"
+    d.save(out)
+    re_ = pymupdf.open(str(out))
+    assert "Testo in Helvetica" in re_[0].get_text()
+    for f in re_[0].get_fonts(full=True):
+        assert f[1] != "n/a"                                               # incorporato
+        assert re_.xref_get_key(f[0], "ToUnicode")[0] != "null"
+    assert "pdfaid:part" in re_.get_xml_metadata()                        # dichiarazione conservata
+
+
+# ---------------------------------------------------------------- TXT-21
+def test_hebrew_insert_word_keeps_number_order(tmp_path):
+    from foliant.modules.text_edit.model import Style as _Style
+    doc = pymupdf.open()
+    doc.new_page()
+    d = Document.open(save(doc, tmp_path / "ebraico.pdf"))
+    st = _Style(font="DejaVu Sans", size=14)
+    with d.change("Crea") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(300, 100), [[Run("שלום 2026 עולם", st)]])
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+        right = block.bbox.x1
+    assert block.text == "שלום 2026 עולם" and block.align == "right"
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "2026", "יפה 2026"))
+    with d.lock:
+        nb = blocks_of(d.pdf)[0]
+    assert nb.text == "שלום יפה 2026 עולם"          # ordine logico, «2026» non invertito
+    assert abs(nb.bbox.x1 - right) <= 0.6           # margine destro fermo, la riga cresce a sinistra
+
+
+def test_arabic_letter_between_joined_letters(tmp_path):
+    from foliant.modules.text_edit.bidi import shape_arabic
+    from foliant.modules.text_edit.model import Style as _Style
+    doc = pymupdf.open()
+    doc.new_page()
+    d = Document.open(save(doc, tmp_path / "arabo.pdf"))
+    st = _Style(font="DejaVu Sans", size=14)
+    with d.change("Crea") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(300, 100), [[Run("مرحبا بالعالم", st)]])
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "مرحبا", "مرحتبا"))
+    with d.lock:
+        nb = blocks_of(d.pdf)[0]
+        raw = "".join(c["c"] for b in d.pdf[0].get_text("rawdict")["blocks"] for ln in b["lines"]
+                      for sp in ln["spans"] for c in sp["chars"])
+    assert nb.text == "مرحتبا بالعالم"                 # sequenza logica attesa
+    # forme contestuali: la «ت» inserita tra due lettere legate è in forma mediana
+    assert "ﺘ" in raw
+    assert shape_arabic("مرحتبا").count("ﺘ") == 1
+
+
+def test_images_have_text_lines_detects_single_line_not_photo():
+    """Proposta OCR (bug_09): anche un'immagine piccola con una sola riga di testo; non una foto."""
+    import numpy as np
+
+    from foliant.modules.text_edit.analysis import images_have_text_lines
+
+    from .conftest import render_text_image
+
+    def page_with(png, rect):
+        d = pymupdf.open()
+        p = d.new_page(width=595, height=842)
+        p.insert_image(pymupdf.Rect(rect), stream=png)
+        return d, p
+    _d1, p1 = page_with(render_text_image("Mario Rossi 2019", size=(495, 140), fontsize=40), (50, 100, 545, 240))
+    assert images_have_text_lines(p1)
+    rng = np.random.default_rng(1)
+    y, x = np.mgrid[0:300, 0:400]
+    a = (128 + 80 * np.sin(x / 37) * np.cos(y / 23) + rng.normal(0, 25, (300, 400))).clip(0, 255).astype(np.uint8)
+    png = pymupdf.Pixmap(pymupdf.csRGB, 400, 300, np.dstack([a, a, 255 - a]).copy().tobytes(), False).tobytes("png")
+    _d2, p2 = page_with(png, (50, 100, 450, 400))
+    assert not images_have_text_lines(p2)

@@ -428,3 +428,35 @@ def test_page_from_label():
     assert links.page_from_label(pdf, "3") == 2
     assert links.page_from_label(pdf, "9") is None
     assert links.page_from_label(pdf, "") is None
+
+
+def test_named_destination_created_and_followed():
+    doc = pymupdf.open()
+    for _k in range(5):
+        doc.new_page()
+    t = links.LinkTarget(kind=links.NAMED, name="cap3", new_dest=(2, 100.0, 2.0))
+    x = links.create_link(doc, 0, pymupdf.Rect(50, 50, 150, 70), t)
+    names = links.named_destinations(doc)
+    assert names["cap3"]["page"] == 2
+    info = links.read_link(doc, 0, x)
+    assert info.target.kind == links.NAMED and info.target.name == "cap3"
+    with pytest.raises(links.LinkError):
+        links.add_named_destination(doc, "cap3", 1)
+    # ridefinita su un'altra pagina: il collegamento porta alla nuova posizione
+    cat = doc.pdf_catalog()
+    dx = int(doc.xref_get_key(cat, "Dests")[1].split()[0])
+    doc.xref_set_key(dx, "cap3", f"[{doc.page_xref(4)} 0 R /Fit]")
+    assert links.named_destinations(doc)["cap3"]["page"] == 4
+    lk = doc.reload_page(doc[0]).get_links()[0]
+    assert lk.get("page") == 4 or lk.get("nameddest") == "cap3" or lk.get("name") == "cap3"
+
+
+def test_named_destination_appended_to_names_tree():
+    doc = pymupdf.open()
+    for _k in range(3):
+        doc.new_page()
+    cat = doc.pdf_catalog()
+    doc.xref_set_key(cat, "Names", f"<</Dests <</Names [(alfa) [{doc.page_xref(0)} 0 R /Fit]]>>>>")
+    links.add_named_destination(doc, "beta", 2)
+    names = links.named_destinations(doc)
+    assert names["alfa"]["page"] == 0 and names["beta"]["page"] == 2

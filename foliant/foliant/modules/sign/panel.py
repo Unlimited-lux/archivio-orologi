@@ -7,7 +7,7 @@ from xml.sax.saxutils import escape
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog, QLabel, QListWidget, QListWidgetItem, QPushButton, QTextBrowser, QVBoxLayout,
+    QFileDialog, QLabel, QListWidget, QListWidgetItem, QMenu, QPushButton, QTextBrowser, QVBoxLayout,
     QWidget,
 )
 
@@ -181,8 +181,18 @@ class SignaturesPanel(QWidget):
         self.btn_trust = QPushButton(_("Considera attendibile"))
         self.btn_copy = QPushButton(_("Copia dettagli"))
         self.btn_report = QPushButton(_("Esporta rapporto…"))
+        # SIG-22: validità a lungo termine dei documenti firmati
+        self.btn_ltv = QPushButton(_("Lungo termine"))
+        self.btn_ltv.setToolTip(_("Aggiunge dati di verifica o una marca temporale del documento perché le firme "
+                                  "restino verificabili negli anni"))
+        ltv_menu = QMenu(self.btn_ltv)
+        self.act_dss = ltv_menu.addAction(_("Aggiungi informazioni di verifica"))
+        self.act_doc_ts = ltv_menu.addAction(_("Aggiungi marca temporale al documento"))
+        self.act_dss.triggered.connect(lambda: self.view and self.c.add_long_term(self.view, "dss"))
+        self.act_doc_ts.triggered.connect(lambda: self.view and self.c.add_long_term(self.view, "ts"))
+        self.btn_ltv.setMenu(ltv_menu)
         self.action_buttons = ButtonFlow([self.btn_goto, self.btn_signed, self.btn_trust, self.btn_copy,
-                                          self.btn_report])
+                                          self.btn_report, self.btn_ltv])
         lay.addWidget(self.action_buttons)
         self._next_index = 0
         self.btn_verify.clicked.connect(lambda: self.view and self.c.verify(self.view, force=True))
@@ -312,6 +322,7 @@ class SignaturesPanel(QWidget):
         self.btn_trust.setEnabled(is_status and not cur[1].trusted and bool(cur[1].chain or cur[1].signer_cert))
         self.btn_copy.setEnabled(is_status)
         self.btn_report.setEnabled(bool(st and st.statuses))
+        self.btn_ltv.setEnabled(bool(st and st.statuses))
 
     # ----------------------------------------------------------------- azioni
     def _with_status(self, fn) -> None:
@@ -365,6 +376,9 @@ class SignaturesPanel(QWidget):
 
 
 TRANSLATIONS_EN = {
+    "Lungo termine": "Long term",
+    "Aggiunge dati di verifica o una marca temporale del documento perché le firme restino verificabili negli "
+    "anni": "Adds validation data or a document timestamp so that the signatures remain verifiable for years",
     "attestata da marca temporale": "certified by timestamp", "dichiarata dal firmatario": "declared by the signer",
     "Firmatario: {v}": "Signer: {v}", "Ora: {t} ({src})": "Time: {t} ({src})", "Tipo: {v}": "Type: {v}",
     "approvazione": "approval", "certificazione": "certification",

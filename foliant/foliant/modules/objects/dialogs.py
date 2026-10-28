@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 import pymupdf
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
@@ -17,12 +17,12 @@ from foliant.api import ENGINE_LOCK, _, theme
 
 from . import engine as E
 from . import links as L
-from .content import FORM, IMAGE, PATH, SHADING
+from .content import FORM, IMAGE, PATH, SHADING, TEXT
 
-IMAGE_FILTER_TEXT = "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.svg *.jp2 *.tga *.pnm *.ppm *.pgm *.pbm *.ico"
+IMAGE_FILTER_TEXT = "*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.heic *.heif *.avif *.svg *.jp2 *.tga *.pnm *.ppm *.pgm *.pbm *.ico"
 
 _session_style = L.LinkStyle()
-_filter_kinds = {IMAGE, PATH, FORM, SHADING}
+_filter_kinds = {IMAGE, PATH, FORM, SHADING, TEXT}
 
 
 def button_box() -> QDialogButtonBox:
@@ -39,7 +39,7 @@ def select_filter() -> set:
 
 def set_select_filter(kinds: set) -> None:
     global _filter_kinds
-    _filter_kinds = set(kinds) or {IMAGE, PATH, FORM, SHADING}
+    _filter_kinds = set(kinds) or {IMAGE, PATH, FORM, SHADING, TEXT}
 
 
 def remember_style(style: L.LinkStyle) -> None:
@@ -98,6 +98,11 @@ def ask_replace_options(parent, occurrences: int):
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return None
     return dlg.values()
+
+
+def ask_text(parent, title: str, label: str) -> str | None:
+    text, ok = QInputDialog.getText(parent, title, label)
+    return text.strip() if ok and text.strip() else None
 
 
 def ask_page(parent, title: str, count: int, current: int) -> int | None:
@@ -164,7 +169,7 @@ class LinkDialog(QDialog):
         self.top.setValue(t.top or 0)
         self.zoom = QSpinBox()
         self.zoom.setRange(0, 6400)
-        self.zoom.setSuffix(" %")
+        self.zoom.setSuffix("%")
         self.zoom.setSpecialValueText(_("ereditato"))
         self.zoom.setValue(int(round((t.zoom or 0) * 100)))
         from_view = QPushButton(_("Imposta dalla vista"))
@@ -190,7 +195,11 @@ class LinkDialog(QDialog):
                 names = []
         self.named.addItems(names)
         self.named.setCurrentText(t.name if t.kind == L.NAMED else "")
+        self.new_dest = None
         ln.addWidget(self.named)
+        new_named = QPushButton(_("Nuova dalla vista corrente…"))
+        new_named.clicked.connect(self._new_named)
+        ln.addWidget(new_named)
         self.stack.addWidget(w_named)
         # file
         w_file = QWidget()
@@ -273,6 +282,26 @@ class LinkDialog(QDialog):
         self.stack.setCurrentIndex(min(idx, self.stack.count() - 1))
         self.validate()
 
+    def _new_named(self) -> None:
+        """Nuova destinazione con nome: pagina, posizione e zoom della vista corrente."""
+        v = self.view
+        if v is None:
+            return
+        name = ask_text(self, _("Destinazione con nome"), _("Nome della nuova destinazione:"))
+        if not name:
+            return
+        with ENGINE_LOCK:
+            used = name in L.named_destinations(v.document.pdf)
+        if used:
+            self.error.setText(_("Il nome della destinazione è già usato: scegline un altro."))
+            return
+        page = v.current_page
+        hit = v.view_to_page(QPointF(0, 0), clamp=True)
+        top = hit[1].y if hit is not None and hit[0] == page else None
+        self.new_dest = (page, top, v.zoom)
+        self.named.setCurrentText(name)
+        self.validate()
+
     def _browse(self) -> None:
         path, _f = QFileDialog.getOpenFileName(self, _("Scegli il file"), os.path.dirname(self.doc_path or ""))
         if path:
@@ -308,7 +337,8 @@ class LinkDialog(QDialog):
             return L.LinkTarget(kind=L.PAGE, page=n, fit=fit, top=self.top.value() if fit in ("XYZ", "FitH") else None,
                                 zoom=(self.zoom.value() / 100.0) or None if fit == "XYZ" else None)
         if k == L.NAMED:
-            return L.LinkTarget(kind=L.NAMED, name=self.named.currentText().strip())
+            name = self.named.currentText().strip()
+            return L.LinkTarget(kind=L.NAMED, name=name, new_dest=self.new_dest if self.new_dest else None)
         if k == L.FILE:
             path = self.file.text().strip()
             if path and self.relative.isChecked() and os.path.isabs(path):
@@ -575,8 +605,8 @@ class TransformDialog(QDialog):
             s.setValue(val)
             s.setSuffix(suffix)
             return s
-        self.sx = spin(1, 10000, 100, " %")
-        self.sy = spin(1, 10000, 100, " %")
+        self.sx = spin(1, 10000, 100, "%")
+        self.sy = spin(1, 10000, 100, "%")
         self.rot = spin(-360, 360, 0, " °")
         self.kx = spin(-80, 80, 0, " °")
         self.ky = spin(-80, 80, 0, " °")
@@ -608,11 +638,23 @@ def ask_transform(parent):
 
 
 class AdjustDialog(QDialog):
-    def __init__(self, parent, occurrences: int):
+    def __init__(self, parent, occurrences: int, preview_png: bytes | None = None):
         super().__init__(parent)
         self.setWindowTitle(_("Regola immagine"))
         lay = QFormLayout(self)
         self.sliders = {}
+        self.preview = QLabel()
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setMinimumSize(240, 160)
+        self._base = None
+        if preview_png:
+            try:
+                from .imaging import preview_base
+                self._base = preview_base(preview_png)
+            except Exception:
+                self._base = None
+        if self._base is not None:
+            lay.addRow(self.preview)
         from PySide6.QtWidgets import QSlider
         for key, text in (("brightness", _("Luminosità:")), ("contrast", _("Contrasto:")),
                           ("saturation", _("Saturazione:"))):
@@ -629,6 +671,11 @@ class AdjustDialog(QDialog):
         reset.clicked.connect(lambda: [sl.setValue(0) for sl in self.sliders.values()])
         for w in (self.gray, self.invert, self.all, reset):
             lay.addRow("", w)
+        for sl in self.sliders.values():
+            sl.valueChanged.connect(self.update_preview)
+        self.gray.toggled.connect(self.update_preview)
+        self.invert.toggled.connect(self.update_preview)
+        self.update_preview()
         bb = button_box()
         bb.button(QDialogButtonBox.StandardButton.Ok).setText(_("Applica"))
         bb.accepted.connect(self.accept)
@@ -641,9 +688,22 @@ class AdjustDialog(QDialog):
                  all_occurrences=self.all.isChecked())
         return v
 
+    def update_preview(self, *_a) -> None:
+        if self._base is None:
+            return
+        from PySide6.QtGui import QImage, QPixmap
+        from .imaging import preview_adjusted
+        v = self.values()
+        v.pop("all_occurrences")
+        arr = preview_adjusted(self._base, **v)
+        h, w = arr.shape[:2]
+        self._preview_arr = arr
+        img = QImage(arr.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+        self.preview.setPixmap(QPixmap.fromImage(img))
 
-def ask_adjust(parent, occurrences: int):
-    dlg = AdjustDialog(parent, occurrences)
+
+def ask_adjust(parent, occurrences: int, preview_png: bytes | None = None):
+    dlg = AdjustDialog(parent, occurrences, preview_png)
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return None
     return dlg.values()

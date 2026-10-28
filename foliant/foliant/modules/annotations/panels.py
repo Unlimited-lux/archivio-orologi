@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import unicodedata
 from typing import TYPE_CHECKING
+
+import shiboken6
 
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
@@ -15,6 +18,16 @@ from PySide6.QtWidgets import (
 from foliant.api import _, bind_icon, theme
 
 from . import dialogs, engine, ui_actions
+
+
+def _alive(method):
+    """Slot che non fa nulla se il pannello è già stato distrutto (finestra chiusa con Ctrl+N aperte)."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        if not shiboken6.isValid(self):
+            return None
+        return method(self, *args, **kwargs)
+    return wrapper
 
 if TYPE_CHECKING:
     from .controller import Controller
@@ -30,7 +43,7 @@ KIND_ICONS = {
     engine.CALLOUT: "message-square-quote", engine.RECT: "square", engine.ELLIPSE: "circle", engine.LINE: "minus",
     engine.ARROW: "move-up-right", engine.POLYGON: "pentagon", engine.POLYLINE: "spline", engine.CLOUD: "cloud",
     engine.INK: "pencil", engine.STAMP: "stamp", engine.ATTACHMENT: "paperclip", engine.DISTANCE: "ruler",
-    engine.PERIMETER: "ruler", engine.AREA: "land-plot", engine.TYPEWRITER: "text-cursor-input",
+    engine.PERIMETER: "ruler", engine.AREA: "land-plot", engine.ANGLE: "triangle-right", engine.TYPEWRITER: "text-cursor-input",
     engine.CARET: "text-cursor", engine.REPLACE: "replace",
 }
 
@@ -257,6 +270,7 @@ class PropertiesPanel(QWidget):
             return set()
         return base
 
+    @_alive
     def refresh(self) -> None:
         self._loading = True
         try:
@@ -320,6 +334,7 @@ class PropertiesPanel(QWidget):
         finally:
             self._loading = False
 
+    @_alive
     def _fill_favorites(self) -> None:
         kind = self.ctrl.tool_kind
         show = bool(kind) and not self.ctrl.selection and kind != "eraser"
@@ -519,6 +534,7 @@ class CommentsPanel(QWidget):
         self.view = view
         self._refresh_when_visible()
 
+    @_alive
     def _on_doc_changed(self, view) -> None:
         if view is self.view:
             self._refresh_when_visible()
@@ -539,6 +555,7 @@ class CommentsPanel(QWidget):
 
     CHUNK = 30   # pagine lette per passo: la prima schermata compare subito anche con migliaia di commenti
 
+    @_alive
     def reload(self) -> None:
         self._generation = getattr(self, "_generation", 0) + 1
         if self.view is None or self.view.document.closed:
@@ -639,6 +656,7 @@ class CommentsPanel(QWidget):
             return sorted(infos, key=lambda i: (i.status, i.page, pos(i)))
         return sorted(infos, key=lambda i: (i.page, pos(i)))
 
+    @_alive
     def rebuild(self) -> None:
         query = _fold(self.search.text().strip())
         shown = [i for i in self._infos if self._matches(i, query)]
@@ -884,6 +902,7 @@ class CommentsPanel(QWidget):
     def _on_activated(self, item, _col) -> None:
         self._on_tree_selection()
 
+    @_alive
     def _sync_from_selection(self) -> None:
         if self._syncing:
             return
@@ -1025,6 +1044,8 @@ def build_annotation_menu(ctrl: "Controller", menu: QMenu, page: int, xref: int,
             _("Aggiungi vertice"), lambda pdf: engine.edit_vertices(pdf, page, xref, point, True) or True))
         menu.addAction(_("Rimuovi vertice"), lambda: ctrl.apply(
             _("Rimuovi vertice"), lambda pdf: engine.edit_vertices(pdf, page, xref, point, False) or True))
+    if info.kind in engine.CONVERTIBLE:
+        menu.addAction(_("Converti in misura"), lambda: ctrl.convert_to_measure(page, xref))
     if info.type in ("Polygon", "Square", "Circle") and info.kind not in engine.MEASURE_KINDS:
         cl = menu.addMenu(_("Bordo a nuvola"))
         for n, label in ((0, "Nessuno"), (1, "Intensità 1"), (2, "Intensità 2")):

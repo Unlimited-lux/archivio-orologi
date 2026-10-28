@@ -250,6 +250,7 @@ QToolButton#qt_toolbar_ext_button {{ padding: 0px; border: none; }}
 QToolButton[homeAction="true"] {{ border: 1px solid {h('border')}; border-radius: 10px; background: {h('surface')}; }}
 QToolButton[homeAction="true"]:hover {{ border-color: {h('accent')}; }}
 QToolButton:focus {{ border: 2px solid {h('accent')}; padding: 3px 5px; }}
+QToolButton[popupMode="1"]:focus {{ padding-right: 19px; }}  /* conserva lo spazio della freccia del menu */
 QToolButton[modeButton="true"]:focus {{ padding: 4px 9px; }}
 QToolButton[modeButton="true"]:checked:focus {{ border-color: {h('accent_text')}; }}
 QToolButton#qt_toolbar_ext_button:focus {{ border: 2px solid {h('accent')}; }}

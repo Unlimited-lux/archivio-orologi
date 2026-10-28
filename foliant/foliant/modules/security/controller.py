@@ -19,6 +19,7 @@ from foliant.api import CONTENT, ENGINE_LOCK, SAVED, Context, DocumentError, _
 
 from . import dialogs as D
 from . import patterns as PT
+from . import policies as POL
 from . import protection as P
 from . import redaction as R
 from . import sanitize as S
@@ -36,11 +37,39 @@ def default_codes() -> list[str]:
 # ------------------------------------------------- dialoghi (sostituibili)
 
 
-def ask_protection(parent, document) -> D.ProtectDialog | None:
+def ask_protection(parent, document, save_policy=None) -> D.ProtectDialog | None:
     i = P.info(document)
     dlg = D.ProtectDialog(P.settings_from_document(document), already_protected=i.protected,
-                          has_open_password=i.has_open_password, parent=parent)
+                          has_open_password=i.has_open_password, parent=parent, save_policy=save_policy)
     return dlg if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_policy_passwords(parent, policy) -> tuple[str, str] | None:
+    dlg = D.PolicyPasswordDialog(policy, parent)
+    return dlg.passwords() if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_envelope_password(parent) -> str | None:
+    dlg = D.PasswordPairDialog(_("Password degli allegati"),
+                               _("Le pagine restano leggibili da tutti; per aprire o estrarre gli allegati servirà "
+                                 "questa password. Nomi e descrizioni degli allegati restano visibili."), parent)
+    return dlg.pw.text() if dlg.exec() == QDialog.DialogCode.Accepted else None
+
+
+def choose_envelope_files(parent) -> list[str]:
+    from PySide6.QtWidgets import QFileDialog
+    files, _f = QFileDialog.getOpenFileNames(parent, _("File da mettere nella busta"), "", _("Tutti i file (*)"))
+    return files
+
+
+def choose_files(parent) -> tuple[list[str], str | None] | None:
+    """File PDF da proteggere e cartella di destinazione (None = accanto agli originali)."""
+    from PySide6.QtWidgets import QFileDialog
+    files, _f = QFileDialog.getOpenFileNames(parent, _("Scegli i PDF da proteggere"), "", _("PDF (*.pdf)"))
+    if not files:
+        return None
+    out = QFileDialog.getExistingDirectory(parent, _("Cartella per le copie protette"))
+    return files, out or None
 
 
 def ask_password(parent, title: str, text: str) -> str | None:
@@ -286,7 +315,7 @@ class SecurityController:
         if warnings and not confirm(self.parent, _("Proteggere comunque il documento?"), "\n\n".join(warnings),
                                     _("Continua")):
             return False
-        dlg = ask_protection(self.parent, doc)
+        dlg = ask_protection(self.parent, doc, save_policy=self.save_policy)
         if dlg is None:
             return False
         settings = dlg.settings()
@@ -306,6 +335,186 @@ class SecurityController:
         self.ctx.status(_("Protezione impostata: verrà applicata al salvataggio."))
         self.refresh_document_state(self.view())
         return True
+
+    # ------------------------------------------------------ blocco (SEC-32)
+    def lock_app(self) -> bool:
+        lock = getattr(self, "applock", None)
+        if lock is None:
+            return False
+        if not lock.configured:
+            self.lock_settings()
+            if not lock.configured:
+                return False
+        return lock.lock()
+
+    def lock_settings(self) -> bool:
+        """Impostazioni del blocco (SEC-32): codice, inattività, blocco all'avvio."""
+        from .applock import LockDialog
+        lock = getattr(self, "applock", None)
+        return lock is not None and run_dialog(LockDialog(lock, self.parent))
+
+    # ------------------------------------------------- busta di sicurezza (SEC-10)
+    def save_envelope(self) -> bool:
+        """Proteggi › Cifra solo gli allegati: salva una copia in cui solo i file
+        incorporati richiedono la password."""
+        from . import envelope as E
+        doc = self.document()
+        if doc is None:
+            return False
+        with ENGINE_LOCK:
+            has = E.has_attachments(doc.pdf)
+        if not has:
+            self.ctx.info(_("Cifra solo gli allegati"),
+                          _("Il documento non ha allegati. Con «Crea busta di sicurezza» puoi preparare un PDF con i "
+                            "file da inviare."))
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        pw = ask_envelope_password(self.parent)
+        if pw is None:
+            return False
+        path = self.ctx.ask_save_path(_("Salva busta di sicurezza"), f"{Path(doc.display_name).stem}{_('_busta')}.pdf")
+        if not path:
+            return False
+        with ENGINE_LOCK:
+            data = doc.pdf.tobytes(garbage=1, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
+        return self._write_envelope(data, pw, path)
+
+    def create_envelope(self, files: list[str] | None = None) -> bool:
+        """Proteggi › Crea busta di sicurezza: nuovo PDF con copertina e i file scelti."""
+        from . import envelope as E
+        files = files if files is not None else choose_envelope_files(self.parent)
+        if not files:
+            return False
+        pw = ask_envelope_password(self.parent)
+        if pw is None:
+            return False
+        path = self.ctx.ask_save_path(_("Salva busta di sicurezza"), _("busta.pdf"))
+        if not path:
+            return False
+        try:
+            cover = E.cover_document(files)
+            data = cover.tobytes(garbage=1, deflate=True)
+            cover.close()
+        except OSError as e:
+            self.ctx.error(_("Busta non creata"), _("Impossibile leggere il file: {e}").format(e=e.strerror))
+            return False
+        return self._write_envelope(data, pw, path)
+
+    def _write_envelope(self, data: bytes, password: str, path: str) -> bool:
+        from . import envelope as E
+        try:
+            out = E.encrypt_attachments(data, password)
+            with open(path, "wb") as f:
+                f.write(out)
+        except Exception as e:
+            self.ctx.error(_("Busta non creata"), str(e))
+            return False
+        self.ctx.status(_("Busta di sicurezza salvata: {n}").format(n=os.path.basename(path)))
+        return True
+
+    # ------------------------------------------------------------ policy
+    def policy_store(self) -> POL.PolicyStore:
+        return POL.PolicyStore(self.settings())
+
+    def save_policy(self, name: str, settings: P.ProtectionSettings) -> None:
+        self.policy_store().add(POL.Policy.from_settings(name, settings))
+
+    def manage_policies(self) -> bool:
+        doc = self.document()
+        dlg = D.PolicyDialog(self.policy_store(), doc is not None, self.parent)
+        if not run_dialog(dlg):
+            return False
+        name = dlg.current()
+        if dlg.choice == D.PolicyDialog.APPLY:
+            return self.apply_policy(name)
+        if dlg.choice == D.PolicyDialog.BATCH:
+            return bool(self.apply_policy_to_files(name))
+        return False
+
+    def apply_policy(self, name: str) -> bool:
+        """Applica la policy al documento corrente (le password si chiedono ora)."""
+        doc = self.document()
+        policy = self.policy_store().get(name)
+        if doc is None or policy is None:
+            return False
+        if P.needs_owner_password(doc) and not self.unlock(doc):
+            return False
+        warnings = []
+        if self._has_signatures(doc):
+            warnings.append(_("Il documento contiene firme digitali: la cifratura riscrive il file e le firme "
+                              "risulteranno non valide."))
+        if _declares_pdfa(doc):
+            warnings.append(_("Il documento dichiara la conformità PDF/A o PDF/X: la cifratura la fa decadere "
+                              "e la dichiarazione verrà rimossa."))
+        if warnings and not confirm(self.parent, _("Proteggere comunque il documento?"), "\n\n".join(warnings),
+                                    _("Continua")):
+            return False
+        pw = ask_policy_passwords(self.parent, policy)
+        if pw is None:
+            return False
+        try:
+            P.apply_protection(doc, policy.settings(*pw))
+        except P.ProtectionError as e:
+            self.ctx.error(_("Protezione non applicata"), str(e))
+            return False
+        if _declares_pdfa(doc):
+            with self._change(doc, _("Rimuovi dichiarazione PDF/A")) as pdf:
+                S.drop_conformance(pdf)
+        self.ctx.status(_("Policy «{n}» impostata: verrà applicata al salvataggio.").format(n=name))
+        self.refresh_document_state(self.view())
+        return True
+
+    def apply_policy_to_files(self, name: str, files: list[str] | None = None,
+                              out_dir: str | None = None) -> list[tuple[str, str]]:
+        """Elaborazione in blocco: salva una copia protetta di ogni file. Restituisce
+        [(file, errore)] per quelli non riusciti."""
+        policy = self.policy_store().get(name)
+        if policy is None:
+            return []
+        if files is None:
+            chosen = choose_files(self.parent)
+            if chosen is None:
+                return []
+            files, out_dir = chosen
+        pw = ask_policy_passwords(self.parent, policy)
+        if pw is None:
+            return []
+        settings = policy.settings(*pw)
+
+        def work(progress):
+            failed, done = [], 0
+            for k, path in enumerate(files):
+                progress.update(k / max(1, len(files)), os.path.basename(path))
+                try:
+                    POL.protect_file(path, POL.protected_name(path, out_dir), settings)
+                    done += 1
+                except Exception as e:
+                    failed.append((path, str(e)))
+            return done, failed
+
+        done, failed = self.ctx.run_task(_("Protezione dei file…"), work)
+        text = _("{n} file protetti con la policy «{p}».").format(n=done, p=name)
+        if failed:
+            text += "\n\n" + "\n".join(f"{os.path.basename(f)}: {e}" for f, e in failed)
+            self.ctx.error(_("Policy di protezione"), text)
+        else:
+            self.ctx.status(text)
+        return failed
+
+    def fill_policy_menu(self, menu) -> None:
+        """Sottomenu Proteggi › Policy: una voce per policy e la gestione."""
+        menu.clear()
+        store = self.policy_store()
+        has_doc = self.document() is not None
+        for name in store.names():
+            a = menu.addAction(name)
+            a.setToolTip(store.get(name).describe())
+            a.setEnabled(has_doc)
+            a.triggered.connect(lambda _c=False, n=name: self.apply_policy(n))
+        if store.names():
+            menu.addSeparator()
+        menu.addAction(_("Gestisci policy…")).triggered.connect(self.manage_policies)
 
     def remove_protection(self) -> bool:
         doc = self.document()
@@ -548,8 +757,9 @@ class SecurityController:
                                             whole_word=options.get("whole_word", False),
                                             ignore_accents=options.get("ignore_accents", False)))
         else:
+            saved = PT.SavedPatterns(self.settings())
             for pid in options.get("patterns", []):
-                p = PT.pattern_by_id(pid)
+                p = saved.pattern(pid[5:]) if pid.startswith("user:") else PT.pattern_by_id(pid)
                 if p is not None:
                     if options.get("include_invalid") and p.check is not None and p.id in ("iban", "cf", "vat",
                                                                                              "card"):
@@ -581,7 +791,8 @@ class SecurityController:
         doc = view.document
         items = [(p.id, p.label, p.id in ("email", "phone", "iban", "cf", "date", "iddoc"))
                  for p in PT.builtin_patterns()]
-        dlg = D.FindDialog(mode, lambda o: self.search(doc, o), items, self.parent)
+        dlg = D.FindDialog(mode, lambda o: self.search(doc, o), items, self.parent,
+                           saved=PT.SavedPatterns(self.settings()))
         if mode == "terms" and view.selected_text():
             dlg.terms.setPlainText(view.selected_text())
         if not run_dialog(dlg):
@@ -895,6 +1106,7 @@ class SecurityController:
             return False
         with ENGINE_LOCK:
             values = S.read_metadata(doc.pdf)
+            values["custom"] = S.read_custom(doc.pdf)
             version = (doc.pdf.metadata or {}).get("format", "")
         read_only = "modify" not in P.allowed_now(doc)
         info = [(_("Applicazione di origine"), values.get("creator", "")),
@@ -914,17 +1126,56 @@ class SecurityController:
         return True
 
     def flatten(self) -> bool:
+        """Proteggi › Appiattisci (SEC-24)."""
+        from . import flatten as F
         doc = self.document()
         if doc is None or not self.require_modify(doc):
             return False
-        if not confirm(self.parent, _("Appiattire commenti e moduli?"),
-                       _("Commenti e campi compilati diventeranno parte fissa delle pagine e non saranno più "
-                         "modificabili. Le annotazioni nascoste vengono eliminate."), _("Appiattisci")):
+        signed = self._has_signatures(doc)
+        dlg = D.FlattenDialog(doc.page_count, lambda o: self._flatten_preview(doc, o), signed, self.parent)
+        if not run_dialog(dlg):
             return False
-        with self._change(doc, _("Appiattisci"), kind="redaction") as pdf:
-            S.flatten(pdf)
+        opts = dlg.options()
+        if opts.signatures and not confirm(
+                self.parent, _("Appiattire le firme digitali?"),
+                _("L'aspetto delle firme diventa contenuto statico: le firme non saranno più verificabili."),
+                _("Appiattisci le firme")):
+            return False
+        text = _("Gli elementi scelti diventeranno parte fissa delle pagine. Puoi annullare finché il documento "
+                 "è aperto; dopo il salvataggio l'operazione è definitiva.")
+        if opts.crop or opts.layers:
+            text += "\n\n" + _("Il contenuto fuori dal ritaglio e quello dei livelli nascosti viene eliminato.")
+        if signed:
+            text += "\n\n" + _("Le firme digitali del documento risulteranno non valide.")
+        if not confirm(self.parent, _("Appiattire il documento?"), text, _("Appiattisci")):
+            return False
+        try:
+            with self._change(doc, _("Appiattisci"), kind="redaction") as pdf:
+                # ritaglio e rasterizzazione riscrivono il contenuto: i segni di redazione non
+                # applicati vengono messi da parte (non devono essere applicati qui) e ricreati
+                saved = []
+                if opts.crop or opts.rasterize:
+                    saved = _detach_marks(pdf, {(p, x) for p in F.pages_with_marks(pdf, opts.pages)
+                                                for x, t, _n in pdf[p].annot_xrefs()
+                                                if t == pymupdf.PDF_ANNOT_REDACT})
+                rep = F.flatten(pdf, opts)
+                _reattach_marks(pdf, saved)
+        except Exception as e:
+            self.ctx.error(_("Appiattimento non eseguito"),
+                           _("Si è verificato un errore: nessuna modifica è stata fatta.\n\n{e}").format(e=e))
+            return False
         self.ctx.status(_("Documento appiattito"))
+        if rep.warnings:
+            self.ctx.info(_("Appiattisci"), "\n".join(rep.warnings))
         return True
+
+    def _flatten_preview(self, doc, opts):
+        from . import flatten as F
+        with ENGINE_LOCK:
+            pages = list(range(doc.page_count)) if opts.pages is None else opts.pages
+            if not pages:
+                return None
+            return F.preview(doc.pdf, opts, pages[0], width=480)
 
     # ----------------------------------------------------- stato e avvisi
     def on_document_opened(self, view) -> None:
@@ -1293,6 +1544,13 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
         elif method:
             head += " — " + method
         rows.append((head, details))
+        from .envelope import is_envelope
+        with ENGINE_LOCK:
+            envelope = is_envelope(doc.pdf)
+        if envelope:
+            rows.append((_("Busta di sicurezza: solo gli allegati sono cifrati"),
+                         [_("Le pagine sono leggibili senza password."),
+                          _("Nomi e descrizioni degli allegati restano visibili.")]))
         if enc.get("perms_tampered"):
             rows.append((_("Permessi del documento alterati"),
                          [_("/P e /Perms non coincidono: valgono i permessi più restrittivi.")]))

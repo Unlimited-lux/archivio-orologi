@@ -401,3 +401,40 @@ def test_boxes_overlay_install_toggle(env, monkeypatch):
     assert not ld.boxes_overlay_installed(view)
     ld.remove_boxes_overlay(view)
     assert ld.BoxesDialog(ctx.window, view.document, [], 0).show_in_view.isEnabled() is False
+
+
+# ======================================================================== PAG-31
+def test_booklet_dialog_opens_new_document(env, monkeypatch):
+    ctx, view, messages = env
+    before = len(list(ctx.window.views()))
+
+    def conf(d):
+        d.scope.set_scope("all")
+        d.refresh()
+        assert "Facciate: 2" in d.info.text() and "aggiunte: 1" in d.info.text()   # 3 pagine → 1 vuota
+        assert "poco senso" not in d.info.text()
+
+    run_dialog(monkeypatch, conf)
+    assert ld.open_booklet_dialog(ctx, view, [])
+    views = list(ctx.window.views())
+    assert len(views) == before + 1
+    new = [v for v in views if v is not view][-1]
+    assert new.document.page_count == 2 and "opuscolo" in new.document.display_name
+    assert abs(new.document.pdf[0].rect.width - 841.89) < 0.5
+    assert not view.document.can_undo
+
+
+def test_booklet_dialog_signatures_and_warning(window, sample_pdf):
+    view = window.open_path(sample_pdf)
+    dlg = ld.BookletDialog(window, view.document, [], 0)
+    dlg.scope.set_scope("range", "1")
+    dlg.signatures.setChecked(True)
+    dlg.sig_sheets.setValue(2)
+    dlg.refresh()
+    assert "poco senso" in dlg.info.text()
+    o = dlg.options()
+    assert o["signature_sheets"] == 2 and o["pages"] == [0]
+    dlg.show()
+    QApplication.processEvents()
+    os.makedirs(SHOTS, exist_ok=True)
+    dlg.grab().save(f"{SHOTS}/BookletDialog-light.png")

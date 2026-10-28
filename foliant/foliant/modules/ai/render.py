@@ -164,7 +164,8 @@ class _Renderer:
 
         def placeholder(m):
             self.placeholders.append(m.group(1))
-            return slot(f"<span style='background:{self.colors['warning']};color:#ffffff' "
+            bg = self.colors['warning']
+            return slot(f"<span style='background:{bg};color:{text_on(bg)}' "
                         f"title='{html.escape(_('da completare'))}'>[{html.escape(m.group(1))}]</span>")
 
         def link(m):
@@ -253,6 +254,25 @@ class _Renderer:
             out.append("<p>" + "<br>".join(self.inline(p) for p in para) + "</p>")
         close_lists()
         return "".join(out)
+
+
+def _luminance(hex_color: str) -> float:
+    h = hex_color.lstrip("#")
+    rgb = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def contrast_ratio(a: str, b: str) -> float:
+    """Rapporto di contrasto WCAG tra due colori «#rrggbb»."""
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def text_on(background: str) -> str:
+    """Testo bianco o quasi nero, quello più leggibile sullo sfondo (NFR-23: contrasto ≥ 4,5:1)."""
+    light, dark = "#ffffff", "#1b1b1b"
+    return light if contrast_ratio(background, light) >= contrast_ratio(background, dark) else dark
 
 
 def _colors() -> dict:

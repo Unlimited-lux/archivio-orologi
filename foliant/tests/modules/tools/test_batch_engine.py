@@ -1193,7 +1193,12 @@ def test_defaults_and_names_in_english(tmp_path):
             assert "RISERVATO" not in pymupdf.open(out)[0].get_text()
             assert "Pagina" not in pymupdf.open(out)[0].get_text()
         assert be.default_pattern(be.JobSettings(steps=[be.Step("watermark")], destination_mode="same")) \
-            == "{nome}_watermark"
+            == "{name}_watermark"
+        assert be.Step("page_numbers").merged_params()["text"] == "Page {page} of {total}"
+        st = be.JobSettings(steps=[be.Step("compress")])
+        assert be.render_name("{name}_{operation}_{counter:2}", a, 0, st, __import__("datetime").datetime.now()) \
+            == "contratto_compressed_01.pdf"
+        assert not be.validate_pattern("{name}_{page:3}_{date}")
         assert be.Step("merge").merged_params()["name"] == "Merged"
         assert be.Step("ocr").merged_params()["languages"] == "ita+eng"
     finally:

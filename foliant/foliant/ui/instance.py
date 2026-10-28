@@ -18,14 +18,29 @@ MAX_REQUEST = 1 << 20          # byte: una richiesta più lunga viene scartata
 COMMANDS = ("create-pdf", "merge")
 
 
+def _private_dir(path: str) -> bool:
+    """Cartella dell'utente corrente che nessun altro può leggere o scrivere (0700)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    return os.path.isdir(path) and st.st_uid == os.getuid() and not st.st_mode & 0o077
+
+
 def instance_name() -> str:
-    """Canale dell'utente corrente: nella cartella di runtime privata (XDG_RUNTIME_DIR) se c'è."""
-    runtime = os.environ.get("XDG_RUNTIME_DIR")
-    path = os.path.join(runtime, "foliant-instance") if runtime else ""
-    if path and os.path.isdir(runtime) and len(os.fsencode(path)) < 100:     # limite dei socket Unix
-        return path
-    user = os.getuid() if hasattr(os, "getuid") else os.environ.get("USERNAME", "utente")
-    return f"foliant-instance-{user}"
+    """Canale dell'utente corrente, sempre in una cartella privata: XDG_RUNTIME_DIR o, se manca,
+    la cartella di runtime che Qt crea con permessi 0700. Un nome semplice finirebbe nella /tmp
+    condivisa, dove un altro utente potrebbe occuparlo prima e ricevere i percorsi dei file."""
+    if not hasattr(os, "getuid"):                   # Windows: le named pipe sono già per sessione
+        return f"foliant-instance-{os.environ.get('USERNAME', 'utente')}"
+    from PySide6.QtCore import QStandardPaths
+    candidates = [os.environ.get("XDG_RUNTIME_DIR") or "",
+                  QStandardPaths.writableLocation(QStandardPaths.StandardLocation.RuntimeLocation)]
+    for folder in candidates:
+        path = os.path.join(folder, "foliant-instance") if folder else ""
+        if path and _private_dir(folder) and len(os.fsencode(path)) < 100:   # limite dei socket Unix
+            return path
+    return ""                                       # nessun canale sicuro: niente istanza singola
 
 
 def clean_request(data) -> dict:

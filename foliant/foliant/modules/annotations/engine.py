@@ -52,13 +52,14 @@ ATTACHMENT = "attachment"
 DISTANCE = "distance"
 PERIMETER = "perimeter"
 AREA = "area"
+ANGLE = "angle"
 TYPEWRITER = "typewriter"
 CARET = "caret"
 REPLACE = "replace"
 
 MARKUP_KINDS = (HIGHLIGHT, UNDERLINE, STRIKEOUT, SQUIGGLY)
 SHAPE_KINDS = (RECT, ELLIPSE, LINE, ARROW, POLYGON, POLYLINE, CLOUD)
-MEASURE_KINDS = (DISTANCE, PERIMETER, AREA)
+MEASURE_KINDS = (DISTANCE, PERIMETER, AREA, ANGLE)
 
 # Tipi del motore che non sono commenti (non elencati né esportati).
 NON_COMMENT_TYPES = {pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_POPUP}
@@ -122,7 +123,7 @@ SUBJECTS = {
     NOTE: "Nota", FREETEXT: "Casella di testo", CALLOUT: "Richiamo", RECT: "Rettangolo", ELLIPSE: "Ellisse",
     LINE: "Linea", ARROW: "Freccia", POLYGON: "Poligono", POLYLINE: "Polilinea", CLOUD: "Nuvola",
     INK: "Disegno a mano libera", STAMP: "Timbro", ATTACHMENT: "Allegato", DISTANCE: "Distanza",
-    PERIMETER: "Perimetro", AREA: "Area", TYPEWRITER: "Commento di testo", CARET: "Inserimento",
+    PERIMETER: "Perimetro", AREA: "Area", ANGLE: "Angolo", TYPEWRITER: "Commento di testo", CARET: "Inserimento",
     REPLACE: "Sostituzione",
 }
 
@@ -301,20 +302,52 @@ def _placement():
         return None
 
 
+_MATRIX_CACHE: dict | None = None
+
+
+@contextmanager
+def bulk_geometry() -> Iterator[None]:
+    """Durante un'operazione su molte annotazioni (importazione, esportazione) le matrici di
+    `placement` sono calcolate una volta per pagina e rotazione invece che a ogni punto."""
+    global _MATRIX_CACHE
+    outer = _MATRIX_CACHE is not None
+    if not outer:
+        _MATRIX_CACHE = {}
+    try:
+        yield
+    finally:
+        if not outer:
+            _MATRIX_CACHE = None
+
+
+def _page_matrix(page: pymupdf.Page, to_pdf: bool):
+    pl = _placement()
+    if pl is None:
+        return None
+    if _MATRIX_CACHE is None:
+        return pl.page_to_pdf_matrix(page) if to_pdf else pl.pdf_to_page_matrix(page)
+    key = (id(page.parent), page.number, page.rotation, to_pdf)
+    m = _MATRIX_CACHE.get(key)
+    if m is None:
+        m = pl.page_to_pdf_matrix(page) if to_pdf else pl.pdf_to_page_matrix(page)
+        _MATRIX_CACHE[key] = m
+    return m
+
+
 def to_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
     """Coordinate standard (area visibile, y verso il basso) → spazio utente PDF."""
-    pl = _placement()
-    if pl is not None:
-        p = pymupdf.Point(x, y) * pl.page_to_pdf_matrix(page)
+    m = _page_matrix(page, True)
+    if m is not None:
+        p = pymupdf.Point(x, y) * m
         return p.x, p.y
     mb = page.mediabox
     return x + mb.x0, mb.y1 - y
 
 
 def from_pdf_point(page: pymupdf.Page, x: float, y: float) -> tuple[float, float]:
-    pl = _placement()
-    if pl is not None:
-        p = pymupdf.Point(x, y) * pl.pdf_to_page_matrix(page)
+    m = _page_matrix(page, False)
+    if m is not None:
+        p = pymupdf.Point(x, y) * m
         return p.x, p.y
     mb = page.mediabox
     return x - mb.x0, mb.y1 - y
@@ -1106,8 +1139,18 @@ PAGE_UNITS = {"pt": 1.0, "mm": 72 / 25.4, "cm": 72 / 2.54, "in": 72.0}
 REAL_UNITS = ["mm", "cm", "m", "km", "in", "ft", "yd", "mi", "pt"]
 
 
+def _fmt_number(value: float, decimals: int | None = None) -> str:
+    """Numero nella lingua dell'interfaccia (NFR-26): «1.234,5» in italiano, «1,234.5» in inglese."""
+    try:
+        from foliant.i18n import format_number
+        return format_number(value, decimals)
+    except Exception:  # pragma: no cover - motore usato senza l'applicazione
+        txt = f"{value:g}" if decimals is None else f"{value:.{decimals}f}"
+        return txt.replace(".", ",")
+
+
 def _num(v: float) -> str:
-    return f"{v:g}".replace(".", ",")
+    return _fmt_number(v)
 
 
 def polyline_length(points: Sequence) -> float:
@@ -1126,11 +1169,39 @@ def polygon_area(points: Sequence) -> float:
 
 def format_measure(value: float, unit: str, square: bool = False) -> str:
     """Valore con due decimali e virgola decimale (lingua italiana)."""
-    txt = f"{value:.2f}".replace(".", ",")
+    txt = _fmt_number(value, 2)
     return f"{txt} {unit}²" if square else f"{txt} {unit}"
 
 
+def angle_degrees(points: Sequence) -> float:
+    """Angolo in gradi (0-180) al secondo vertice fra i lati verso il primo e il terzo."""
+    a, b, c = (pymupdf.Point(p) for p in points[:3])
+    u, v = a - b, c - b
+    nu, nv = abs(u), abs(v)
+    if nu == 0 or nv == 0:
+        return 0.0
+    cos = max(-1.0, min(1.0, (u.x * v.x + u.y * v.y) / (nu * nv)))
+    return math.degrees(math.acos(cos))
+
+
+def measure_number(kind: str, points: Sequence, scale: Scale) -> float:
+    """Valore numerico di una misura (unità reali; gradi per l'angolo)."""
+    if kind == DISTANCE:
+        return scale.length(polyline_length(points[:2]))
+    if kind == PERIMETER:
+        return scale.length(polyline_length(points))
+    if kind == AREA:
+        return scale.area(polygon_area(points))
+    if kind == ANGLE:
+        return angle_degrees(points)
+    raise AnnotationError("Misura sconosciuta.")
+
+
 def measure_value(kind: str, points: Sequence, scale: Scale) -> str:
+    if kind == ANGLE:
+        if len(points) < 3:
+            raise AnnotationError("Servono almeno 3 punti.")
+        return f"{_fmt_number(angle_degrees(points), 1)}°"
     if kind == DISTANCE:
         return format_measure(scale.length(polyline_length(points[:2])), scale.unit)
     if kind == PERIMETER:
@@ -1140,11 +1211,13 @@ def measure_value(kind: str, points: Sequence, scale: Scale) -> str:
     raise AnnotationError("Misura sconosciuta.")
 
 
-def _measure_dict(scale: Scale) -> str:
+def _measure_dict(scale: Scale, angle: bool = False) -> str:
     unit = scale.unit
     num = f"<</Type/NumberFormat/U{_pdf_string(unit)}/C {scale.factor:.10g}/D 100>>"
     area = f"<</Type/NumberFormat/U{_pdf_string(unit + '2')}/C {scale.factor * scale.factor:.10g}/D 100>>"
-    return f"<</Type/Measure/Subtype/RL/R{_pdf_string(scale.text())}/X[{num}]/D[{num}]/A[{area}]>>"
+    # angolo: formato angolare /T (gradi) del dizionario di misura (ANN-33)
+    ang = f"/T[<</Type/NumberFormat/U{_pdf_string('°')}/C 1/D 10>>]" if angle else ""
+    return f"<</Type/Measure/Subtype/RL/R{_pdf_string(scale.text())}/X[{num}]/D[{num}]/A[{area}]{ang}>>"
 
 
 def scale_of(pdf: pymupdf.Document, xref: int) -> Scale | None:
@@ -1234,16 +1307,216 @@ def create_measure(pdf: pymupdf.Document, page_no: int, kind: str, points: Seque
         annot = page.add_polygon_annot(pts)
         _apply_style(annot, st.copy(fill=st.fill), fill=st.fill is not None)
         intent = "PolygonDimension"
+    elif kind == ANGLE:
+        if len(pts) < 3:
+            raise AnnotationError("Servono almeno 3 punti.")
+        annot = page.add_polyline_annot(pts[:3])        # polilinea di tre vertici (ANN-33)
+        _apply_style(annot, st)
+        intent = "PolyLineDimension"
     else:
         raise AnnotationError("Misura sconosciuta.")
     pdf.xref_set_key(annot.xref, "IT", "/" + intent)
-    pdf.xref_set_key(annot.xref, "Measure", _measure_dict(scale))
+    pdf.xref_set_key(annot.xref, "Measure", _measure_dict(scale, angle=kind == ANGLE))
     if kind == DISTANCE:
         try:
             mupdf.pdf_set_annot_line_caption(annot.this, 1)
         except Exception:
             pass
     return _finish(annot, author, value, kind=kind)
+
+
+CONVERTIBLE = {LINE: DISTANCE, ARROW: DISTANCE, POLYLINE: PERIMETER, POLYGON: AREA, CLOUD: AREA, RECT: AREA}
+
+
+def convert_to_measure(pdf: pymupdf.Document, page_no: int, xref: int, scale: Scale) -> int:
+    """«Converti in misura» (ANN-33): linea → /IT /LineDimension, polilinea → /PolyLineDimension,
+    poligono → /PolygonDimension, con /Measure e il valore come testo. Un rettangolo diventa un
+    poligono di misura dell'area con lo stesso aspetto. Restituisce l'xref della misura."""
+    page = pdf[page_no]
+    annot = get_annot(page, xref)
+    kind = kind_of(pdf, annot)
+    target = CONVERTIBLE.get(kind)
+    if target is None:
+        raise AnnotationError("Questa annotazione non si può convertire in misura.")
+    if kind == RECT:
+        info = annot.info or {}
+        colors = annot.colors or {}
+        border = annot.border or {}
+        r = _freetext_inner(page, annot)           # riquadro della forma: /Rect meno /RD
+        style = Style(color=_rgb(colors.get("stroke")) if colors.get("stroke") else MEASURE_COLOR,
+                      fill=_rgb(colors.get("fill")) if colors.get("fill") else None,
+                      opacity=annot.opacity if annot.opacity is not None and annot.opacity >= 0 else 1.0,
+                      width=float(border.get("width", 1) if border.get("width", -1) >= 0 else 1))
+        new = create_measure(pdf, page_no, AREA, [r.tl, r.tr, r.br, r.bl], style, scale, info.get("title", ""))
+        delete_annot(pdf, page_no, xref, force=True)
+        return new
+    intent = {DISTANCE: "LineDimension", PERIMETER: "PolyLineDimension", AREA: "PolygonDimension"}[target]
+    pts = [pymupdf.Point(v) for v in annot.vertices or []]
+    value = measure_value(target, pts, scale)
+    pdf.xref_set_key(xref, "IT", "/" + intent)
+    pdf.xref_set_key(xref, "Measure", _measure_dict(scale))
+    if kind == CLOUD:
+        pdf.xref_set_key(xref, "BE", "null")
+    annot = get_annot(page, xref)
+    if target == DISTANCE:
+        try:
+            mupdf.pdf_set_annot_line_caption(annot.this, 1)
+        except Exception:
+            pass
+    annot.set_info(content=value, modDate=pdf_now())
+    _dirty_update(annot)
+    return xref
+
+
+# ------------------------------------------------------------------ aggancio (ANN-33)
+SNAP_END = "estremo"
+SNAP_MID = "punto medio"
+SNAP_CROSS = "intersezione"
+SNAP_PATH = "tracciato"
+SNAP_ANNOT = "annotazione"
+SNAP_KINDS = (SNAP_END, SNAP_MID, SNAP_CROSS, SNAP_PATH, SNAP_ANNOT)
+MAX_SNAP_SEGMENTS = 20000      # oltre: solo estremi e punti medi
+MAX_CROSS_SEGMENTS = 3000      # oltre: niente intersezioni (costo quadratico anche con la griglia)
+
+
+@dataclass
+class SnapTargets:
+    """Punti di aggancio di una pagina, in coordinate standard."""
+    points: list = field(default_factory=list)          # [(Point, tipo)]
+    segments: list = field(default_factory=list)        # [(Point, Point)] del contenuto vettoriale
+
+
+def _bezier(p0, p1, p2, p3, n: int = 8) -> list[pymupdf.Point]:
+    out = []
+    for i in range(n + 1):
+        t = i / n
+        u = 1 - t
+        out.append(p0 * (u ** 3) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + p3 * (t ** 3))
+    return out
+
+
+def _segment_cross(a, b, c, d) -> pymupdf.Point | None:
+    r = b - a
+    q = d - c
+    den = r.x * q.y - r.y * q.x
+    if abs(den) < 1e-9:
+        return None
+    t = ((c.x - a.x) * q.y - (c.y - a.y) * q.x) / den
+    u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / den
+    if -1e-9 <= t <= 1 + 1e-9 and -1e-9 <= u <= 1 + 1e-9:
+        return a + r * t
+    return None
+
+
+def snap_targets(pdf: pymupdf.Document, page_no: int) -> SnapTargets:
+    """Estremi, punti medi, intersezioni e segmenti del contenuto vettoriale della pagina e vertici
+    delle annotazioni. Pagina senza grafica vettoriale (scansione): solo le annotazioni."""
+    page = pdf[page_no]
+    res = SnapTargets()
+    straight: list[tuple[pymupdf.Point, pymupdf.Point]] = []
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        drawings = []
+    for d in drawings:
+        for item in d.get("items", ()):
+            op = item[0]
+            if op == "l":
+                straight.append((pymupdf.Point(item[1]), pymupdf.Point(item[2])))
+            elif op == "re":
+                r = pymupdf.Rect(item[1])
+                c = [r.tl, r.tr, r.br, r.bl]
+                straight += [(c[i], c[(i + 1) % 4]) for i in range(4)]
+            elif op == "qu":
+                q = item[1]
+                c = [q.ul, q.ur, q.lr, q.ll]
+                straight += [(c[i], c[(i + 1) % 4]) for i in range(4)]
+            elif op == "c":
+                pts = _bezier(*(pymupdf.Point(x) for x in item[1:5]))
+                res.points += [(pts[0], SNAP_END), (pts[-1], SNAP_END)]
+                res.segments += [(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
+            if len(straight) + len(res.segments) > MAX_SNAP_SEGMENTS:
+                break
+    for a, b in straight:
+        if abs(b - a) < 0.01:
+            continue
+        res.points += [(a, SNAP_END), (b, SNAP_END), ((a + b) * 0.5, SNAP_MID)]
+        res.segments.append((a, b))
+    if len(straight) <= MAX_CROSS_SEGMENTS:
+        res.points += [(p, SNAP_CROSS) for p in _crossings(straight)]
+    for a in iter_annots(page):
+        if a.type[0] in NON_COMMENT_TYPES or _silent(pdf, a):
+            continue
+        verts = a.vertices or []
+        if a.type[0] == pymupdf.PDF_ANNOT_INK:          # dei tratti a mano libera solo inizio e fine
+            verts = [v for stroke in verts for v in stroke[:1] + stroke[-1:]]
+        res.points += [(pymupdf.Point(v), SNAP_ANNOT) for v in verts]
+        if a.type[0] in (pymupdf.PDF_ANNOT_SQUARE, pymupdf.PDF_ANNOT_CIRCLE, pymupdf.PDF_ANNOT_FREE_TEXT,
+                         pymupdf.PDF_ANNOT_STAMP):
+            r = a.rect
+            res.points += [(p, SNAP_ANNOT) for p in (r.tl, r.tr, r.br, r.bl)]
+    return res
+
+
+def _crossings(segs: list) -> list[pymupdf.Point]:
+    """Intersezioni dei segmenti con una griglia (costo quasi lineare sui disegni tecnici)."""
+    cell = 40.0
+    grid: dict[tuple[int, int], list[int]] = {}
+    for i, (a, b) in enumerate(segs):
+        x0, x1 = sorted((a.x, b.x))
+        y0, y1 = sorted((a.y, b.y))
+        for gx in range(int(x0 // cell), int(x1 // cell) + 1):
+            for gy in range(int(y0 // cell), int(y1 // cell) + 1):
+                grid.setdefault((gx, gy), []).append(i)
+    seen: set[tuple[int, int]] = set()
+    out: list[pymupdf.Point] = []
+    for ids in grid.values():
+        for n, i in enumerate(ids):
+            for j in ids[n + 1:]:
+                key = (i, j) if i < j else (j, i)
+                if key in seen:
+                    continue
+                seen.add(key)
+                a, b = segs[i]
+                c, d = segs[j]
+                # gli estremi condivisi sono già punti di aggancio
+                p = _segment_cross(a, b, c, d)
+                if p is not None and min(abs(p - a), abs(p - b), abs(p - c), abs(p - d)) > 0.5:
+                    out.append(p)
+    return out
+
+
+def _nearest_on_segment(p, a, b) -> pymupdf.Point:
+    d = b - a
+    ln = d.x * d.x + d.y * d.y
+    if ln <= 0:
+        return pymupdf.Point(a)
+    t = max(0.0, min(1.0, ((p.x - a.x) * d.x + (p.y - a.y) * d.y) / ln))
+    return a + d * t
+
+
+def snap(targets: SnapTargets, point, tolerance: float, kinds=SNAP_KINDS) -> tuple[pymupdf.Point, str] | None:
+    """Punto di aggancio più vicino entro la tolleranza: prima i punti notevoli (estremi,
+    intersezioni, vertici delle annotazioni, punti medi), poi il tracciato più vicino."""
+    p = pymupdf.Point(point)
+    best = None
+    best_d = tolerance
+    priority = {SNAP_END: 0, SNAP_ANNOT: 0, SNAP_CROSS: 1, SNAP_MID: 2}
+    for q, kind in targets.points:
+        if kind not in kinds:
+            continue
+        dist = abs(q - p)
+        if dist <= tolerance and (best is None or (priority[kind], dist) < (priority[best[1]], best_d)):
+            best, best_d = (pymupdf.Point(q), kind), dist
+    if best is not None:
+        return best
+    if SNAP_PATH in kinds:
+        for a, b in targets.segments:
+            q = _nearest_on_segment(p, a, b)
+            dist = abs(q - p)
+            if dist <= best_d:
+                best, best_d = (q, SNAP_PATH), dist
+    return best
 
 
 # ------------------------------------------------------------------ timbri
@@ -1558,6 +1831,57 @@ STICKERS = {
 }
 
 
+def _circle(cx: float, cy: float, r: float) -> str:
+    """Cerchio come quattro curve di Bézier (operatori PDF)."""
+    k = 0.5523 * r
+    return (f"{cx + r} {cy} m {cx + r} {cy + k} {cx + k} {cy + r} {cx} {cy + r} c "
+            f"{cx - k} {cy + r} {cx - r} {cy + k} {cx - r} {cy} c {cx - r} {cy - k} {cx - k} {cy - r} {cx} {cy - r} c "
+            f"{cx + k} {cy - r} {cx + r} {cy - k} {cx + r} {cy} c h ")
+
+
+_THUMB = ("0.98 0.78 0.35 rg 0.55 0.35 0.1 RG 3 w 1 j 1 J 28 10 m 74 10 l 82 10 88 16 88 24 c 88 52 l "
+          "88 58 84 62 78 62 c 56 62 l 60 86 l 60 92 54 96 50 94 c 44 92 l 34 64 l 28 62 l h B "
+          "10 10 18 52 re B")
+STICKERS.update({
+    "completato": ("Completato", "0.10 0.62 0.25 rg " + _circle(50, 50, 44) + "f 1 1 1 RG 10 w 1 J 1 j "
+                                 "28 50 m 44 34 l 74 66 l S"),
+    "esclamativo": ("Punto esclamativo", "0.85 0.15 0.15 rg " + _circle(50, 50, 44) + "f 1 1 1 rg 44 40 12 40 re f "
+                                         "44 18 12 12 re f"),
+    "domanda": ("Punto interrogativo", "0.15 0.4 0.85 rg " + _circle(50, 50, 44) + "f 1 1 1 RG 10 w 1 J "
+                                       "34 64 m 34 76 42 82 50 82 c 60 82 66 76 66 66 c 66 54 50 52 50 40 c 50 36 l S "
+                                       "1 1 1 rg 45 16 10 10 re f"),
+    "divieto": ("Divieto", "0.85 0.12 0.12 RG 10 w " + _circle(50, 50, 40) + "S 22 22 m 78 78 l S"),
+    "in_corso": ("In corso", "0.95 0.6 0.1 rg " + _circle(50, 50, 44) + "f 1 1 1 RG 8 w 1 J 50 50 m 50 78 l S "
+                             "50 50 m 70 40 l S"),
+    "freccia_sinistra": ("Freccia a sinistra", "0.15 0.4 0.85 rg 94 38 m 44 38 l 44 14 l 6 50 l 44 86 l 44 62 l "
+                                               "94 62 l h f"),
+    "freccia_su": ("Freccia in alto", "0.15 0.4 0.85 rg 38 6 m 38 56 l 14 56 l 50 94 l 86 56 l 62 56 l 62 6 l h f"),
+    "freccia_giu": ("Freccia in basso", "0.15 0.4 0.85 rg 38 94 m 38 44 l 14 44 l 50 6 l 86 44 l 62 44 l "
+                                        "62 94 l h f"),
+    "faccina": ("Faccina sorridente", "0.99 0.82 0.2 rg 0.75 0.5 0.05 RG 3 w " + _circle(50, 50, 44) + "B "
+                                      "0.25 0.15 0.05 rg " + _circle(35, 62, 6) + "f " + _circle(65, 62, 6) + "f "
+                                      "0.25 0.15 0.05 RG 5 w 1 J 28 38 m 38 22 62 22 72 38 c S"),
+    "faccina_triste": ("Faccina triste", "0.99 0.82 0.2 rg 0.75 0.5 0.05 RG 3 w " + _circle(50, 50, 44) + "B "
+                                         "0.25 0.15 0.05 rg " + _circle(35, 62, 6) + "f " + _circle(65, 62, 6) + "f "
+                                         "0.25 0.15 0.05 RG 5 w 1 J 28 26 m 38 42 62 42 72 26 c S"),
+    "pollice_su": ("Pollice in su", _THUMB),
+    "pollice_giu": ("Pollice in giù", "q 1 0 0 -1 0 100 cm " + _THUMB + " Q"),
+    "cuore": ("Cuore", "0.88 0.15 0.3 rg 50 14 m 20 38 6 54 6 70 c 6 84 16 94 30 94 c 40 94 46 88 50 80 c "
+                       "54 88 60 94 70 94 c 84 94 94 84 94 70 c 94 54 80 38 50 14 c h f"),
+})
+
+# categorie della tavolozza degli adesivi (ANN-27)
+STICKER_CATEGORIES = [
+    ("Spunte e croci", ["spunta", "croce", "completato"]),
+    ("Simboli di stato", ["attenzione", "info", "esclamativo", "domanda", "divieto", "in_corso"]),
+    ("Frecce", ["freccia", "freccia_sinistra", "freccia_su", "freccia_giu"]),
+    ("Faccine e gesti", ["faccina", "faccina_triste", "pollice_su", "pollice_giu"]),
+    ("Stelle e cuori", ["stella", "cuore"]),
+]
+STICKER_SUBJECT = "Adesivo"
+STICKER_MIN = 8.0       # lato minimo di un adesivo ridimensionato (pt)
+
+
 def _sticker_ap(pdf: pymupdf.Document, xref: int, name: str, opacity: float) -> None:
     ops = STICKERS[name][1]
     ap = pdf.get_new_xref()
@@ -1577,13 +1901,20 @@ def create_sticker(pdf: pymupdf.Document, page_no: int, point, name: str, style:
     rect = pymupdf.Rect(p.x - size / 2, p.y - size / 2, p.x + size / 2, p.y + size / 2)
     with unrotated(page):
         annot = page.add_stamp_annot(rect, 0)
-    xref = _finish(annot, author, STICKERS[name][0], subject="Adesivo", kind=STAMP)
-    pdf.xref_set_key(xref, "Name", "/FoliantAdesivo" + name.title())
+    xref = _finish(annot, author, _(STICKERS[name][0]), subject=STICKER_SUBJECT, kind=STAMP)
+    pdf.xref_set_key(xref, "Name", "/FoliantAdesivo" + name.title().replace("_", ""))
     pdf.xref_set_key(xref, STICKER_KEY, "/" + name)
     _sticker_ap(pdf, xref, name, max(0.0, min(1.0, style.opacity)))
     pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*to_pdf_rect(page, rect)))
     _upright(pdf, page, xref)
     return xref
+
+
+def is_sticker(pdf: pymupdf.Document, xref: int) -> bool:
+    if pdf.xref_get_key(xref, STICKER_KEY)[0] == "name":
+        return True
+    k, v = pdf.xref_get_key(xref, "Subj")
+    return k == "string" and v in (STICKER_SUBJECT, _(STICKER_SUBJECT))
 
 
 def refresh_sticker(pdf: pymupdf.Document, page_no: int, xref: int) -> None:
@@ -1649,7 +1980,8 @@ def create_page_stamp(pdf: pymupdf.Document, page_no: int, point, src: pymupdf.D
 
 def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes, style: Style,
                        author: str | None = None, max_side: float = 160.0, name: str = "",
-                       intent: str = "StampImage") -> int:
+                       intent: str = "StampImage", sticker: bool = False) -> int:
+    """Timbro da immagine; con `sticker` è un adesivo personalizzato (/Subj «Adesivo», ANN-27)."""
     page = pdf[page_no]
     try:
         pix = pymupdf.Pixmap(image)
@@ -1664,7 +1996,8 @@ def create_image_stamp(pdf: pymupdf.Document, page_no: int, point, image: bytes,
     with unrotated(page):
         annot = page.add_stamp_annot(rect, image)
     annot.set_opacity(max(0.0, min(1.0, style.opacity)))
-    xref = _finish(annot, author, name or "Timbro immagine", kind=STAMP)
+    xref = _finish(annot, author, name or _("Timbro immagine"), kind=STAMP,
+                   subject=STICKER_SUBJECT if sticker else None)
     pdf.xref_set_key(xref, "IT", "/" + intent)
     _upright(pdf, page, xref)
     return xref
@@ -1962,8 +2295,8 @@ class AnnotInfo:
     def label(self) -> str:
         if self.kind == REPLACE:
             return SUBJECTS[REPLACE] if self.contents else "Cancellazione"
-        if self.kind == STAMP and self.subject in ("Adesivo", _("Adesivo")):
-            return "Adesivo"
+        if self.kind == STAMP and self.subject in (STICKER_SUBJECT, _(STICKER_SUBJECT)):
+            return STICKER_SUBJECT
         if self.kind in (CALLOUT, ARROW, CLOUD, DISTANCE, PERIMETER, AREA, TYPEWRITER):
             return SUBJECTS[self.kind]
         return TYPE_LABELS.get(self.type, self.type)
@@ -2010,7 +2343,9 @@ def kind_of(pdf: pymupdf.Document, annot: pymupdf.Annot) -> str:
             return AREA
         return CLOUD if intent == "PolygonCloud" or pdf.xref_get_key(annot.xref, "BE/S")[1] == "/C" else POLYGON
     if t == pymupdf.PDF_ANNOT_POLY_LINE:
-        return PERIMETER if intent == "PolyLineDimension" else POLYLINE
+        if intent == "PolyLineDimension":
+            return ANGLE if pdf.xref_get_key(annot.xref, "Measure/T")[0] == "array" else PERIMETER
+        return POLYLINE
     if t == pymupdf.PDF_ANNOT_INK:
         return INK
     if t == pymupdf.PDF_ANNOT_STAMP:
@@ -2069,6 +2404,11 @@ def page_annotations(pdf: pymupdf.Document, page_no: int) -> list[AnnotInfo]:
 
 def list_annotations(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[AnnotInfo]:
     """Commenti principali con risposte e stato (le risposte non compaiono in cima)."""
+    with bulk_geometry():
+        return _list_annotations(pdf, pages)
+
+
+def _list_annotations(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> list[AnnotInfo]:
     result: list[AnnotInfo] = []
     for page_no in (pages if pages is not None else range(pdf.page_count)):
         items = page_annotations(pdf, page_no)
@@ -2443,6 +2783,10 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         old = g["rect"]
         if old.width <= 0 or old.height <= 0:
             raise AnnotationError("Annotazione non valida.")
+        if t == pymupdf.PDF_ANNOT_STAMP and is_sticker(pdf, xref) and min(new_rect.width, new_rect.height) < STICKER_MIN:
+            k = STICKER_MIN / max(min(new_rect.width, new_rect.height), 0.01)   # minimo 8 pt, in proporzione
+            new_rect = pymupdf.Rect(new_rect.x0, new_rect.y0, new_rect.x0 + new_rect.width * k,
+                                    new_rect.y0 + new_rect.height * k)
         _angle, base = _rotation(pdf, xref)
         if base is not None:
             k = new_rect.width / old.width
@@ -3089,6 +3433,11 @@ def _export_rect(pdf: pymupdf.Document, page: pymupdf.Page, a: pymupdf.Annot) ->
 
 def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] | None = None) -> str:
     """Esporta i commenti in XFDF (XML standard di interscambio delle annotazioni)."""
+    with bulk_geometry():
+        return _export_xfdf(pdf, filename, pages)
+
+
+def _export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] | None = None) -> str:
     from xml.sax.saxutils import escape, quoteattr
 
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', f'<xfdf xmlns="{XFDF_NS}" xml:space="preserve">', "<annots>"]
@@ -3222,6 +3571,9 @@ def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] 
                 attrs["file"] = fi.get("filename", "")
                 attrs["icon"] = "PushPin"
             content = info.get("content", "")
+            rich = _rich_body(get_rich_text(pdf, a.xref))
+            if rich:     # testo formattato (/RC) accanto al testo semplice
+                children.insert(0, f"<contents-richtext>{rich}</contents-richtext>")
             if content:
                 children.insert(0, f"<contents>{escape(content)}</contents>")
             attr_txt = " ".join(f"{k}={quoteattr(str(v))}" for k, v in attrs.items())
@@ -3282,6 +3634,11 @@ def import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = Fal
     """Importa commenti da XFDF. Con `replace` elimina prima i commenti esistenti.
 
     I commenti già presenti con lo stesso nome (/NM) non vengono duplicati."""
+    with bulk_geometry():
+        return _import_xfdf(pdf, data, replace=replace)
+
+
+def _import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = False) -> ImportResult:
     import xml.etree.ElementTree as ET
 
     try:
@@ -3343,11 +3700,39 @@ def import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = Fal
         target = name_map.get((page_no, irt))
         if target is None or target[0] != page_no:
             continue
-        page = pdf[page_no]
-        annot = find_annot(page, xref)
-        if annot is not None:
-            annot.set_irt_xref(target[1])
+        pdf.xref_set_key(xref, "IRT", f"{target[1]} 0 R")
     return result
+
+
+def _rich_body(rich: str) -> str:
+    """Il <body> XHTML di /RC come XML ben formato (con lo spazio dei nomi XHTML), oppure ""."""
+    import xml.etree.ElementTree as ET
+    if not rich or "<body" not in rich:
+        return ""
+    m = re.search(r"<body.*</body>", rich, re.S)
+    if not m:
+        return ""
+    body = m.group(0)
+    if "xmlns=" not in body[:body.index(">")]:
+        body = body.replace("<body", '<body xmlns="http://www.w3.org/1999/xhtml"', 1)
+    try:
+        ET.fromstring(body)
+    except ET.ParseError:
+        return ""
+    return body
+
+
+def _el_rich(el) -> str:
+    """XHTML di <contents-richtext> (il <body> come testo XML), oppure ""."""
+    import xml.etree.ElementTree as ET
+    for child in el:
+        if child.tag.split("}")[-1] == "contents-richtext":
+            for body in child:
+                if body.tag.split("}")[-1] == "body":
+                    # spazio dei nomi XHTML come predefinito (senza prefisso), come lo scrivono i lettori
+                    ET.register_namespace("", "http://www.w3.org/1999/xhtml")
+                    return ET.tostring(body, encoding="unicode")
+    return ""
 
 
 def _el_text(el, name: str) -> str | None:
@@ -3497,24 +3882,26 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
             return None  # i dati del file non viaggiano nell'XFDF senza flusso incorporato
         else:
             return None
-    annot = find_annot(page, xref)
-    if annot is None:
-        return None
-    info = {}
-    if date:
-        info["creationDate"] = el.get("creationdate") or date
-        info["modDate"] = el.get("date") or date
-    if el.get("subject"):
-        info["subject"] = el.get("subject")
-    if info:
-        annot.set_info(**info)
-    flags = _parse_flags(el.get("flags"))
-    if flags != annot.flags:
-        annot.set_flags(flags)
-    if t != "Stamp":
-        annot.update()
-    else:
-        annot.update()
+    # date, soggetto e flag scritti direttamente nel dizionario: niente ricerca dell'annotazione
+    # (lineare nella pagina) né rigenerazione dell'aspetto per ogni elemento (D2)
+    # (_finish ha già scritto `date` in entrambe le date: si riscrive solo ciò che differisce)
+    if el.get("creationdate") and el.get("creationdate") != date:
+        pdf.xref_set_key(xref, "CreationDate", _pdf_string(el.get("creationdate")))
+    if el.get("date") and el.get("date") != date:
+        pdf.xref_set_key(xref, "M", _pdf_string(el.get("date")))
+    subject = el.get("subject")
+    if subject and pdf.xref_get_key(xref, "Subj")[1] != _pdf_string(subject):
+        pdf.xref_set_key(xref, "Subj", _pdf_string(subject))
+    flags = str(_parse_flags(el.get("flags")))
+    if pdf.xref_get_key(xref, "F")[1] != flags:
+        pdf.xref_set_key(xref, "F", flags)
+    rich = _el_rich(el)
+    if rich and t in ("Text", "FreeText", "Square", "Circle", "Line", "Polygon", "PolyLine", "Ink", "Highlight",
+                      "Underline", "StrikeOut", "Squiggly", "Caret"):
+        pdf.xref_set_key(xref, "RC", _pdf_string(rich))
+    if t == "FreeText":
+        refresh_freetext(pdf, page_no, xref)        # aspetto proprio: bordo colorato, testo formattato
+    elif t == "Stamp":
         refresh_stamp(pdf, page_no, xref)
     return xref
 
@@ -3610,11 +3997,9 @@ def measures_csv(pdf: pymupdf.Document, sep: str = ",") -> str:
         annot = find_annot(page, a.xref)
         scale = scale_of(pdf, a.xref) or Scale()
         pts = [pymupdf.Point(v) for v in (annot.vertices or [])] if annot else []
-        if a.kind == AREA:
-            value = scale.area(polygon_area(pts))
-        else:
-            value = scale.length(polyline_length(pts))
-        w.writerow([a.page + 1, _(SUBJECTS[a.kind]), f"{value:.4f}", a.contents, scale.unit, scale.text(), a.author,
+        value = measure_number(a.kind, pts, scale) if len(pts) >= (3 if a.kind == ANGLE else 2) else 0.0
+        unit = "°" if a.kind == ANGLE else scale.unit
+        w.writerow([a.page + 1, _(SUBJECTS[a.kind]), f"{value:.4f}", a.contents, unit, scale.text(), a.author,
                     format_date(a.created)])
     return buf.getvalue()
 

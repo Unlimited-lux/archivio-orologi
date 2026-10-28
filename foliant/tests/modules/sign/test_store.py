@@ -47,7 +47,8 @@ def test_id_registry_never_stores_secrets(id_a, tmp_path):
     assert PASSWORD.encode() not in raw
     assert b"PRIVATE" not in raw and b"BEGIN" not in raw
     data = json.loads(raw)
-    assert set(data["ids"][0]) <= {"path", "alias", "fingerprint", "subject", "not_after", "issuer", "default"}
+    assert set(data["ids"][0]) <= {"path", "alias", "fingerprint", "subject", "not_after", "issuer", "default",
+                                   "policies"}   # OID pubblici del certificato
     assert (reg.path.stat().st_mode & 0o777) == 0o600
     assert (reg.path.parent.stat().st_mode & 0o777) == 0o700
     [e] = reg.list()

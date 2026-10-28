@@ -64,8 +64,10 @@ def register(ctx) -> None:
     act_clipboard = ctx.action(_("Dagli appunti"), "clipboard-paste", lambda: c.create_from_clipboard(),
                                requires_document=False)
     act_scanner = ctx.action(_("Da scanner…"), "scan", lambda: c.create_from_scanner(), requires_document=False)
-    act_photos = ctx.action(_("Da foto di documenti…"), "camera", lambda: c.create_from_photos(),
+    act_photos = ctx.action(_("Da foto di documenti…"), "image", lambda: c.create_from_photos(),
                             requires_document=False)
+    act_camera = ctx.action(_("Da fotocamera…"), "camera", lambda: c.create_from_camera(), requires_document=False,
+                            tooltip=_("Scatta le pagine con la webcam"))
     act_screen = ctx.action(_("Da cattura schermo…"), "monitor", lambda: c.create_from_screen(),
                             requires_document=False)
     act_blank = ctx.action(_("PDF vuoto…"), "file", lambda: c.create_blank(), requires_document=False)
@@ -74,8 +76,8 @@ def register(ctx) -> None:
     act_edit_portfolio = ctx.action(_("Modifica portfolio…"), "folder-pen", lambda: c.edit_portfolio(),
                                     tooltip=_("Aggiungi o rimuovi i file del portfolio aperto"))
     act_batch_create = ctx.action(_("Crea in blocco…"), "files", lambda: c.batch_create(), requires_document=False)
-    for a in (act_from_file, act_from_images, act_from_url, act_clipboard, act_scanner, act_photos, act_screen,
-              act_blank):
+    for a in (act_from_file, act_from_images, act_from_url, act_clipboard, act_scanner, act_camera, act_photos,
+              act_screen, act_blank):
         create_menu.addAction(a)
     create_menu.addSeparator()
     create_menu.addAction(act_portfolio)
@@ -141,7 +143,7 @@ def register(ctx) -> None:
 
     c.actions = {"export": act_export, "from_file": act_from_file, "from_images": act_from_images,
                  "from_url": act_from_url, "clipboard": act_clipboard, "blank": act_blank,
-                 "scanner": act_scanner, "photos": act_photos, "screen": act_screen,
+                 "scanner": act_scanner, "photos": act_photos, "camera": act_camera, "screen": act_screen,
                  "compress": act_compress, "compress_many": act_compress_many, "advanced": act_advanced,
                  "repair": act_repair, "flatten": act_flatten, "batch": act_batch, "batch_create": act_batch_create}
     c.create_button = create_btn

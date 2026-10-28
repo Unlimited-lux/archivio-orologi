@@ -336,3 +336,25 @@ def test_table_with_merged_cells(job, fake_provider, report_pdf, tmp_path, monke
     assert "quaranta orologi" in t.cell(0, 0).text
     assert t.cell(1, 1).text == "Seconda sezione del testo."
     assert 'w:gridSpan w:val="2"' in _document_xml(out)
+
+
+def test_pick_graphic_public_api_handles_consent(window):
+    from .conftest import FakeProvider, make_active_profile
+    services = window.ctx.ai_services
+    services.provider_factory = lambda p: FakeProvider()
+    opened = []
+
+    def fake_exec(dlg):
+        opened.append(dlg.kind)
+        dlg.chosen_png = b"\x89PNG-prova"
+        return 1
+    services.controller.exec_dialog = fake_exec
+    assert services.pick_graphic("sticker") is None and not opened         # nessun profilo: niente finestra
+    p = make_active_profile(services.store)
+    p.consent = False
+    services.store.save(p)
+    services.panel.ask_consent = lambda profile: False
+    assert services.pick_graphic("sticker") is None and not opened         # informativa non accettata
+    services.panel.ask_consent = lambda profile: True
+    assert services.pick_graphic("sticker") == b"\x89PNG-prova" and opened == ["sticker"]
+    assert services.store.active().consent

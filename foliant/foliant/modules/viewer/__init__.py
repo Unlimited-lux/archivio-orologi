@@ -30,6 +30,7 @@ PARTS = (
     "presentation",   # presentazione
     "reading",        # modalità lettura, schermo intero, scorrimento automatico
     "tools",          # zoom area, istantanea
+    "zoomfit",        # adatta all'altezza e al contenuto
     "session",        # posizione per file, vista iniziale, schede, sessione
     "recovery",       # salvataggio automatico e recupero dopo crash
     "reload",         # ripristina e ricarica

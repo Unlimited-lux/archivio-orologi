@@ -346,10 +346,10 @@ class BatchWidget(QWidget):
         drow.addWidget(self.dest_folder)
         drow.addWidget(self.dest_path, 1)
         drow.addWidget(browse)
-        self.subfolder = QLineEdit("elaborati")
+        self.subfolder = QLineEdit(_("elaborati"))
         self.subfolder.textChanged.connect(self._settings_changed)
         self.keep_structure = QCheckBox(_("Mantieni la struttura delle sottocartelle"))
-        self.pattern = QLineEdit("{nome}")
+        self.pattern = QLineEdit(be.default_name_placeholder())
         self.pattern.textChanged.connect(self._settings_changed)
         ph = QToolButton()
         ph.setText("{ }")
@@ -442,6 +442,13 @@ class BatchWidget(QWidget):
         rbar = QHBoxLayout()
         rbar.addWidget(self.report_filter)
         rbar.addStretch(1)
+        self.resume_button = QPushButton(_("Riprendi i non elaborati"))
+        bind_icon(self.resume_button, "play")
+        self.resume_button.setToolTip(_("Rimette in coda solo i file non completati per l'annullamento e "
+                                        "riavvia il lavoro con le stesse impostazioni"))
+        self.resume_button.clicked.connect(lambda: self.resume_pending())
+        self.resume_button.hide()
+        rbar.addWidget(self.resume_button)
         for text, name, slot in ((_("Riprova i non riusciti"), "rotate-cw", self.retry_failed),
                                  (_("Esporta rapporto"), "file-output", self.export_report_dialog),
                                  (_("Indice Bates"), "list-ordered", self.export_bates_index_dialog),
@@ -862,7 +869,7 @@ class BatchWidget(QWidget):
         pw = self.common_password.text()
         return be.JobSettings(
             steps=list(self.steps), destination_mode=mode, destination=self.dest_path.text().strip(),
-            subfolder=self.subfolder.text().strip() or "elaborati", keep_structure=self.keep_structure.isChecked(),
+            subfolder=self.subfolder.text().strip() or _("elaborati"), keep_structure=self.keep_structure.isChecked(),
             input_root=root, pattern=self.pattern.text(), counter_start=self.counter_start.value(),
             conflict=self.conflict.currentData(), replace_originals=self.replace_originals.isChecked(),
             backup=self.backup.isChecked(), error_policy=self.error_policy.currentData(),
@@ -871,7 +878,8 @@ class BatchWidget(QWidget):
     def _suggest_pattern(self) -> None:
         """Modello predefinito: «{nome}» o «{nome}_<suffisso>» nella stessa cartella."""
         current = self.pattern.text()
-        if current == "{nome}" or current.startswith("{nome}_") and current.count("{") == 1:
+        if (current in ("{nome}", "{name}") or current.startswith(("{nome}_", "{name}_"))
+                and current.count("{") == 1):
             self.pattern.blockSignals(True)
             self.pattern.setText(be.default_pattern(self.settings()))
             self.pattern.blockSignals(False)
@@ -1010,6 +1018,7 @@ class BatchWidget(QWidget):
         if report is None:
             return
         self.report_summary.setText((_("Lavoro annullato.") + " " if report.cancelled else "") + report.summary())
+        self.resume_button.setVisible(bool(report.cancelled and report.pending_items()))
         flt = self.report_filter.currentData()
         rows = [r for r in report.results if not flt or r.status == flt]
         self.report_table.setSortingEnabled(False)
@@ -1040,6 +1049,20 @@ class BatchWidget(QWidget):
             self.ctx.open_path(path)
         else:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def resume_pending(self):
+        """Dopo un annullamento: riparte dai soli file non completati, con le stesse impostazioni."""
+        if self.report is None:
+            return None
+        pending = set(self.report.pending_items())
+        if not pending:
+            self.ctx.notify(_("Nessun file da riprendere."))
+            return None
+        self.items = [it for it in self.items if it.path in pending]
+        self.report = None
+        self.report_box.hide()
+        self._refresh_queue()
+        return self.run(confirm=False)
 
     def retry_failed(self) -> None:
         if self.report is None:
@@ -1229,7 +1252,7 @@ class WatchDialog(QWidget):
         exts = be.INPUT_EXTENSIONS + (be.CREATE_EXTENSIONS if any(s.action == "create_pdf" for s in steps) else ())
         cfg = WatchConfig(folder=folder, steps=steps, destination=destination, extensions=exts,
                           originals=self.originals.currentData(), stable_seconds=float(self.stable.value()),
-                          pattern=self.batch.pattern.text() or "{nome}", conflict=self.batch.conflict.currentData())
+                          pattern=self.batch.pattern.text() or be.default_name_placeholder(), conflict=self.batch.conflict.currentData())
         errors = self.service.add(cfg)
         self.refresh()
         return errors

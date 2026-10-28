@@ -376,6 +376,10 @@ class ThumbnailPanel(QWidget):
         if key in self._cache:
             return
         dpr = self.devicePixelRatioF() or 1.0
+        integrity = getattr(self.ctx, "viewer_parts", {}).get("integrity")
+        if integrity is not None and integrity.is_unreadable(view, row):
+            self.failed.add(row)          # pagina non ricostruibile (VIS-07): segnaposto
+            return
         try:
             page = view.document.pdf[row]
             g = page_geometry(page, 0)

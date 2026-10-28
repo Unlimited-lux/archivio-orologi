@@ -325,4 +325,31 @@ EN: dict[str, str] = {
         'The document is certified by {who} (signature field “{field}”) and does not allow changes.',
     'Il documento è certificato da {who} e non consente modifiche.':
         'The document is certified by {who} and does not allow changes.',
+    "Scegli l'icona": 'Choose the icon',
+    'Immagini e PDF': 'Images and PDF',
+    'Disposizione del pulsante non valida.': 'Invalid button layout.',
+    "Pagina inesistente nel PDF dell'icona.": 'The page does not exist in the icon PDF.',
+    'Evento del pulsante non valido.': 'Invalid button event.',
+    'dati': 'data',
+    'Aprire il programma di posta per inviare a {a} il file «{f}» con i dati del modulo?':
+        'Open the mail program to send the file “{f}” with the form data to {a}?',
+    'Dati del modulo {n}': 'Form data {n}',
+    'Messaggio preparato con i dati allegati.': 'Message prepared with the data attached.',
+    'Allega al messaggio il file dei dati: {p}': 'Attach the data file to the message: {p}',
+    'Apri cartella': 'Open folder',
+    'Comportamento al clic non valido.': 'Invalid click behavior.',
+    'Il campo «{n}» è bloccato da una firma.': 'The field “{n}” is locked by a signature.',
+    'contenuto presente': 'content present',
+    'Scansione a bassa risoluzione (meno di 150 dpi) nelle pagine {l}: il riconoscimento può essere meno preciso.':
+        'Low-resolution scan (under 150 dpi) on pages {l}: recognition may be less accurate.',
+    'Le pagine {l} sono inclinate di oltre 5°. Raddrizzarle prima del riconoscimento?':
+        'Pages {l} are skewed by more than 5°. Straighten them before recognition?',
+    'Raddrizza pagine': 'Straighten pages',
+    "Scartare i valori di prova inseriti durante l'anteprima?": 'Discard the test values entered during the preview?',
+    "Salvare nel file anche i valori di prova inseriti durante l'anteprima?":
+        'Also save the test values entered during the preview in the file?',
+    'calcoli personalizzati non eseguiti ({f}): calcoli non aggiornati':
+        'custom calculations not run ({f}): calculations not updated',
+    'azione del pulsante «{n}» non disponibile: contiene uno script, che Foliant non esegue':
+        'action of button “{n}” not available: it contains a script, which Foliant does not run',
 }

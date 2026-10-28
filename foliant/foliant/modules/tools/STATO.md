@@ -43,7 +43,7 @@ Test: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/modules/too
 | CMP-11 | P2 | fatto | cu: `test_review_statuses_filter_report_and_session` | Stati Accettata/Rifiutata/Da verificare e note (menu contestuale dell'elenco), filtro e contatori per stato, sessione con controllo della versione dello schema. Manca la richiesta della nuova posizione di un file spostato. |
 | CMP-12 | P1 | fatto | ce: `test_scan_preset_uses_ocr_in_memory`, `test_scan_preset_without_ocr_falls_back`, `test_swapped_pages_matched_by_content`; cu: `test_setup_proposes_active_document_and_swaps` | Preset Testo, Presentazione, Disegno tecnico, Scansione (OCR in memoria tramite `foliant.modules.ocr.engine.ocr_pdf_bytes`). Con il vero modulo OCR le differenze su parole a bassa affidabilità sono marcate «incerte», filtrabili, e il riepilogo indica la percentuale di parole incerte (ce: `test_scan_preset_marks_uncertain_differences`, `test_scan_preset_with_real_ocr_module`; cu: `test_uncertain_filter`). |
 | CMP-13 | P2 | fatto | tc: tutti | Confronto di testo semplice per riga/parola/carattere, diff unificato verificato con `patch`. |
-| CMP-14 | P2 | parziale | rv: tutti | Revisioni da `%%EOF`; data solo da /ModDate; versione firmata individuata dal /ByteRange (testata con un /ByteRange simulato). |
+| CMP-14 | P2 | fatto | rv: tutti | Revisioni da `%%EOF`; data della firma (/M) o /ModDate; firmatario (/Name) nell’elenco; più firme in successione; «versione firmata» = ultima revisione firmata seguita da modifiche. Testato con firme reali del modulo Firma. |
 
 ## Operazioni in blocco
 
@@ -71,7 +71,7 @@ Test: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/modules/too
 | BAT-20 | P1 | fatto | be: `test_sequences_roundtrip_without_secrets`, `test_step_failure_reports_step`; bu: `test_sequences_saved_without_passwords`, `test_ask_at_launch_once_for_all_files`, `test_disabled_step_is_skipped`, `test_export_import_duplicate_sequence`, `test_convert_then_watermark_blocked` | Parametri «chiedi all'avvio» (le password vuote sempre), passi disattivabili, importa/esporta/duplica, schema versionato. L'uscita (destinazione, nomi, conflitti, errori) è salvata nella sequenza (bu: `test_sequence_keeps_output_settings`). Manca il passo «Salva una copia intermedia». |
 | BAT-21 | P2 | fatto | wt: tutti | Scansione periodica (2 s) con attesa di fine copia, «originali»/«errori», registro cumulativo esportabile. Le password non sono conservate: le azioni che le richiedono non sono ammesse. |
 | BAT-22 | P2 | fatto | cli: tutti | `python -m foliant.modules.tools.cli`; codici di uscita 0–4; password solo da stdin o file. Un sottocomando `foliant batch` richiede una modifica al nucleo (CORE_REQUESTS.md). |
-| BAT-23 | P2 | parziale | bx: tutti | Ruota, elimina (anche pagine bianche), estrai, dividi, appiattisci, sanifica, metadati Info+XMP, vista iniziale, redazione per testo o schema, ottimizza per il web, esporta immagini. Mancano PDF/A con verifica e dati dei moduli. |
+| BAT-23 | P2 | fatto | bx: tutti | Ruota, elimina (anche pagine bianche), estrai, dividi, appiattisci, sanifica, metadati Info+XMP, vista iniziale, redazione per testo o schema, ottimizza per il web, esporta immagini, PDF/A con verifica (passo «pdfa»), esportazione dei dati dei moduli (CSV, JSON, XFDF, FDF, XML) e importazione (CSV con colonna «File» per riga per file). |
 
 ## Dipendenze
 
@@ -99,3 +99,32 @@ BAT-19, `patch` solo per un test di CMP-13.
   conforme va in errore (PDFA-02) oppure, a scelta, viene salvato con avviso
   (be: `test_pdfa_step_reports_conformance`, `test_pdfa_step_without_ghostscript_is_clear`).
   Serve Ghostscript (non installato nell'ambiente di test: verificato con un motore simulato).
+
+## Verifiche dei flussi reali
+
+- **Listino con prezzi cambiati** (celle di tabella come testi separati, 1 e 3 pagine): ogni prezzo
+  cambiato è una differenza a sé, la riga nuova e quella tolta sono intere; nessuna falsa regione
+  visiva dalle righe spostate. Corretti tre difetti: allineamento per righe PDF anziché visive
+  (f74d618), prime/ultime righe della tabella e colonna «EUR» scambiate per intestazioni ripetute,
+  prezzi nella fascia bassa scambiati per numeri di pagina (76f6daf).
+  Test: `test_price_list_rows_are_separate_changes`, `test_multi_page_price_list_table_rows_are_not_headers`.
+- **Contratto di compravendita** in due versioni (prezzo, termini, garanzia, clausola aggiunta):
+  quattro differenze esatte con il riflusso del testo.
+- **200 file misti** (148 validi, 10 troncati, 10 casuali, 10 vuoti, 10 cifrati, 10 non PDF,
+  2 da 400 pagine) con numeri di pagina + compressione, annullamento al 90° file e ripresa:
+  nessun file perso o doppio, esiti e messaggi coerenti per tipo, memoria Python < 30 MB, 200 file
+  in ~9 s. Corretti: la compressione di MuPDF teneva fermo l'interprete per 30 s su un file grande
+  (interfaccia bloccata, annullamento impossibile) e ricomprimeva l'immagine condivisa a ogni pagina
+  → ora un'immagine per volta, annullabile, 0,2 s (7fddfc0, b9773e7); «Annulla file» durante un passo
+  risultava errore; aggiunti «Riprendi i non elaborati» e il messaggio per i file vuoti (9aa9ee5).
+
+## Aperti alla chiusura (17:00 UTC)
+
+- NFR-26 formato carta: `create_pdf` (engine.py, `PAGE_SIZES`, predefinito "a4") e le misure in mm
+  dei dialoghi non usano ancora `ctx.paper_size()` / `ctx.measure_unit()` (disponibili da cb29e8f).
+- NFR-26 numeri e date: virgola decimale fissa (`replace(".", ",")`) nei testi dell'interfaccia
+  (engine.py «area variata», compare_engine.py, batch_ui.py) e date con formato fisso nei rapporti
+  (report.py): da passare a `foliant.api.format_number` / `format_date`.
+- C13 punto 2 (colonna destinazione oltre il bordo a 1280×800): il test con la finestra reale a
+  1280×800 e 1024×700 (`test_english_defaults_and_layout_fit`) passa in ambiente offscreen; non
+  verificato con i caratteri della macchina di collaudo.

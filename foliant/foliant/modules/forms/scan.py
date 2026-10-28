@@ -298,11 +298,18 @@ def _field_info(r: _Reader, E, page: int, xref: int, w: dict, names: set[str] | 
         info.caption = _text(mk.get("CA")) if mk.get("CA") is not None else ""
         info.caption_down = _text(mk.get("AC")) if mk.get("AC") is not None else ""
         info.value = info.caption
-        info.image = int(_number(mk.get("TP"), 0)) == 1
         info.action = E.button_action(r.pdf, xref) if ("A" in w or "AA" in w) else {}
+        tp = int(_number(mk.get("TP"), 0))
+        info.image = tp == 1 and E.is_image_field(r.pdf, xref)
+        info.caption_rollover = _text(mk.get("RC")) if mk.get("RC") is not None else ""
+        info.layout = E.BUTTON_LAYOUTS[tp] if 0 <= tp < len(E.BUTTON_LAYOUTS) else "text"
+        info.icons = tuple(state for state, key in E.ICON_KEYS.items() if mk.get(key) is not None)
+        h = str(w.get("H") or "I").lstrip("/")
+        info.highlight = {v: k for k, v in E.HIGHLIGHTS.items()}.get(h, "invert")
     elif kind == E.SIGNATURE:
         info.value = "firmato" if inh("V") is not None else ""
         info.lock = E._read_lock(r.pdf, xref) if inh("Lock") is not None else {}
+        info.sv = E.read_sv(r.pdf, xref) if inh("SV") is not None else {}
     return info
 
 
