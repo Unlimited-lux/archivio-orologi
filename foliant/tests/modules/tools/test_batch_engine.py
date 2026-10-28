@@ -14,7 +14,7 @@ import pytest
 from foliant.api import OperationCancelled
 from foliant.modules.tools import engine as be
 
-from .conftest import build_pdf
+from .conftest import build_pdf, page_lines
 
 STARTED = datetime(2026, 10, 28, 9, 30, 0)
 
@@ -1104,3 +1104,52 @@ def test_pdfa_step_without_ghostscript_is_clear(tmp_path):
                                                                destination=str(tmp_path / "out")))
     assert rep.results[0].status == "error" and rep.results[0].code == "PDFA-01"
     assert "Ghostscript" in rep.results[0].message
+
+
+def test_parallel_processing_same_results(tmp_path):
+    """BAT-04: Comprimi su 10 file con parallelismo 4 e 1 dà gli stessi risultati."""
+    src = tmp_path / "src"
+    src.mkdir()
+    items = [be.analyze_file(build_pdf(src / f"f{i}.pdf", [page_lines(i), page_lines(i + 1)])) for i in range(10)]
+    started = datetime(2026, 10, 28, 9, 0, 0)
+    steps = [be.Step("watermark", {"text": "COPIA"}), be.Step("compress")]
+    one = be.run_job(None, items, be.JobSettings(steps=steps, destination=str(tmp_path / "uno"),
+                                                 pattern="{nome}_{contatore:2}"), started)
+    four = be.run_job(None, items, be.JobSettings(steps=steps, destination=str(tmp_path / "quattro"),
+                                                  pattern="{nome}_{contatore:2}", workers=4), started)
+    assert [r.status for r in four.results] == [r.status for r in one.results]
+    assert all(r.status in ("ok", "warning") for r in four.results)
+    assert sorted(os.listdir(tmp_path / "uno")) == sorted(os.listdir(tmp_path / "quattro"))
+    for name in os.listdir(tmp_path / "uno"):
+        a = pymupdf.open(str(tmp_path / "uno" / name))
+        b = pymupdf.open(str(tmp_path / "quattro" / name))
+        assert [p.get_text() for p in a] == [p.get_text() for p in b]
+
+
+def test_parallel_errors_and_cancel(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    paths = [build_pdf(src / f"f{i}.pdf", [page_lines(i)]) for i in range(6)]
+    (src / "f3.pdf").write_bytes(b"%PDF-1.4 rotto")
+    items = [be.analyze_file(p) for p in paths]
+    rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "o"),
+                                                 workers=3))
+    assert [r.status for r in rep.results].count("error") == 1 and rep.results[3].status == "error"
+
+    class Cancel:
+        cancelled = False
+        n = 0
+
+        def update(self, f=None, t=None):
+            self.n += 1
+            if self.n == 3:
+                self.cancelled = True
+            self.check()
+
+        def check(self):
+            if self.cancelled:
+                raise OperationCancelled()
+    out = tmp_path / "c"
+    rep = be.run_job(Cancel(), items, be.JobSettings(steps=[be.Step("compress")], destination=str(out), workers=3))
+    assert rep.cancelled
+    assert all(not n.startswith(".") for n in (os.listdir(out) if out.exists() else []))

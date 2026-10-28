@@ -383,6 +383,11 @@ class BatchWidget(QWidget):
         self.common_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.common_password.setPlaceholderText(_("Password comune per i file protetti (facoltativa)"))
         self.open_folder = QCheckBox(_("Apri la cartella al termine"))
+        self.workers = QSpinBox()
+        self.workers.setRange(1, max(1, os.cpu_count() or 1))
+        self.workers.setValue(max(1, (os.cpu_count() or 2) // 2))
+        self.workers.setToolTip(_("File elaborati contemporaneamente (unione, stampa e conversione restano "
+                                  "sequenziali)"))
         self.preview = QTableWidget(0, 2)
         self.preview.setHorizontalHeaderLabels([_("Originale"), _("Risultato")])
         self.preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -407,6 +412,7 @@ class BatchWidget(QWidget):
         form.addRow(rep)
         form.addRow(_("In caso di errore"), self.error_policy)
         form.addRow(_("Password"), self.common_password)
+        form.addRow(_("File in parallelo"), self.workers)
         form.addRow(self.open_folder)
         ol = QVBoxLayout(out_box)
         ol.addLayout(form)
@@ -860,7 +866,7 @@ class BatchWidget(QWidget):
             input_root=root, pattern=self.pattern.text(), counter_start=self.counter_start.value(),
             conflict=self.conflict.currentData(), replace_originals=self.replace_originals.isChecked(),
             backup=self.backup.isChecked(), error_policy=self.error_policy.currentData(),
-            passwords=[pw] if pw else [])
+            passwords=[pw] if pw else [], workers=self.workers.value())
 
     def _suggest_pattern(self) -> None:
         """Modello predefinito: «{nome}» o «{nome}_<suffisso>» nella stessa cartella."""

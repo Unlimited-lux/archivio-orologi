@@ -788,4 +788,6 @@ EN: dict[str, str] = {
     "verifica PDF/A-{l}: conforme": "PDF/A-{l} check: compliant",
     "PDF/A-1b": "PDF/A-1b",
     "PDF/A-3b": "PDF/A-3b",
+    "File in parallelo": "Files in parallel",
+    "File elaborati contemporaneamente (unione, stampa e conversione restano sequenziali)": "Files processed at the same time (merge, print and conversion stay sequential)",
 }

@@ -378,3 +378,13 @@ def test_batch_runs_without_blocking_window(batch, folder, tmp_path, monkeypatch
     QApplication.processEvents()
     assert batch.report is not None and batch.report.counts()["ok"] == 5
     assert batch.act_run.isEnabled() and batch.task is None
+
+
+def test_parallel_setting_used(batch, folder, tmp_path):
+    batch.workers.setValue(min(3, batch.workers.maximum()))
+    assert batch.settings().workers == batch.workers.value()
+    batch.add_paths([str(folder)])
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "out"))
+    report = batch.run(confirm=False)
+    assert all(r.status in ("ok", "warning") for r in report.results) and len(os.listdir(tmp_path / "out")) == 5
