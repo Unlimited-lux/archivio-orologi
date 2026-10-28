@@ -154,6 +154,24 @@ LAYOUT_POSTER = "poster"
 MM = 72 / 25.4
 
 
+def bake_for_imposition(pdf: pymupdf.Document, annotations: bool) -> None:
+    """L'imposizione copia il contenuto delle pagine, non le annotazioni: sulla copia di stampa
+    si tolgono quelle che non vanno su carta (`not_printed`) e le altre diventano contenuto."""
+    for i in range(pdf.page_count):
+        page = pdf[i]
+        for xref in not_printed(pdf, i, annotations):
+            try:
+                annot = page.load_annot(xref)
+            except Exception:
+                annot = None
+            if annot is not None:
+                page.delete_annot(annot)
+    try:
+        pdf.bake(annots=True, widgets=True)
+    except Exception:
+        pass
+
+
 def booklet_sides(count: int, rtl: bool = False) -> list[tuple[int | None, int | None]]:
     """Facciate di un opuscolo per `count` pagine: coppie (sinistra, destra) di indici 0-based
     nell'ordine di stampa fronte/retro; None = pagina bianca aggiunta (multipli di 4).
@@ -326,6 +344,7 @@ def print_document(document, device: QPagedPaintDevice, options: PrintOptions, p
     if options.layout in (LAYOUT_BOOKLET, LAYOUT_POSTER):
         paint0 = device.pageLayout().paintRectPoints()
         with ENGINE_LOCK:
+            bake_for_imposition(work, options.annotations)
             if options.layout == LAYOUT_BOOKLET:
                 imposed = impose_booklet(work, list(options.pages), options.booklet_rtl)
             else:

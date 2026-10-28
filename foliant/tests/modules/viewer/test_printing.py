@@ -582,3 +582,31 @@ def test_dialog_layout_modes(viewer_window, sample_pdf):
     dlg.overlap.setValue(15)
     o = dlg.options()
     assert o.layout == LAYOUT_POSTER and o.poster_overlap_mm == 15 and dlg.overlap.isVisibleTo(dlg)
+
+
+def test_booklet_keeps_printable_annotations(qapp, tmp_path):
+    """Opuscolo e poster copiano il contenuto delle pagine: le annotazioni da stampare devono
+    restare (cotte nel contenuto), quelle senza /Print no."""
+    from foliant.modules.viewer.printing_engine import bake_for_imposition, impose_booklet
+    path = tmp_path / "note.pdf"
+    d = pymupdf.open()
+    for i in range(4):
+        d.new_page()
+    printed = d[0].add_rect_annot(pymupdf.Rect(100, 100, 300, 300))
+    printed.set_colors(stroke=(1, 0, 0), fill=(1, 0, 0))
+    printed.set_flags(pymupdf.PDF_ANNOT_IS_PRINT)
+    printed.update()
+    hidden = d[0].add_rect_annot(pymupdf.Rect(100, 400, 300, 600))
+    hidden.set_colors(stroke=(0, 0, 1), fill=(0, 0, 1))
+    hidden.set_flags(0)
+    hidden.update()
+    d.save(str(path))
+    work = pymupdf.open(str(path))
+    bake_for_imposition(work, annotations=True)
+    sheets = impose_booklet(work, list(range(4)))
+    # pagina 1 nella metà destra della prima facciata (4, 1)
+    pix = sheets[0].get_pixmap(dpi=36)
+    w = pix.width // 2
+    colors = {pix.pixel(x, y)[:3] for x in range(w, pix.width, 3) for y in range(0, pix.height, 3)}
+    assert any(r > 200 and g < 80 and b < 80 for r, g, b in colors)        # rosso: stampata
+    assert not any(b > 200 and r < 80 and g < 80 for r, g, b in colors)    # blu: senza /Print
