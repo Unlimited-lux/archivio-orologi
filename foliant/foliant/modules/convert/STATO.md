@@ -56,3 +56,16 @@ utilizzabile, alcuni punti della specifica mancanti (vedi note).
 - Il segnale globale degli appunti è collegato a un ricevitore figlio della finestra (nessun errore dopo la chiusura delle finestre). Nessuna scorciatoia registrata dal modulo.
 - Prestazioni: 2000 pagine in TXT in circa 5 s (ricerca tabelle senza il modello di layout facoltativo).
 - Revisione indipendente del codice eseguita; i 13 difetti trovati sono corretti e coperti da test.
+
+## Correzioni dei collaudi (28/10)
+
+| Difetto | Esito | Test | Commit |
+|---|---|---|---|
+| D2 · riga sotto la tabella persa (DOCX/HTML/RTF/TXT) | corretto | test_total_line_right_below_table_is_kept | 203a428 |
+| A2 · importi CHF/Fr./apostrofo come testo in XLSX | corretto | test_parse_cell_swiss_francs | cc6188c |
+| D3 · TXT taggato: celle TR e artefatti | corretto | test_txt_tagged_table_cells_and_artifacts | e93b3f2 |
+| C11 · separatore decimale fisso nelle dimensioni | corretto | test_sizes_use_language_decimal_separator | 04daf7c |
+| Sicurezza · bake elimina redazioni non applicate e annotazioni Hidden | corretto (conservate, avviso nel report) | test_flatten_keeps_pending_redactions_and_hidden | af3bd74 |
+| C12 · elenco vuoto di «Converti più file» senza spiegazione | corretto (segnaposto e trascinamento) | test_batch_dialog_empty_placeholder_and_drop | abbd00b |
+
+C11, bake e C12 sono successivi al taglio delle 17:12 UTC: da integrare nel nuovo repository.
