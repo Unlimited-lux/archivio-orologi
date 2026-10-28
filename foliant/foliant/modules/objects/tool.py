@@ -94,6 +94,47 @@ def resized_rect(start: pymupdf.Rect, handle: int, p: pymupdf.Point, proportiona
     return pymupdf.Rect(nx0, ny0, nx1, ny1)
 
 
+def fit_ratio(r: pymupdf.Rect, ratio: float) -> pymupdf.Rect:
+    """Il riquadro più grande con il rapporto dato, centrato in `r`."""
+    w, h = r.width, r.height
+    if w / h > ratio:
+        w = h * ratio
+    else:
+        h = w / ratio
+    cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+    return pymupdf.Rect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+
+
+def ratio_from_handle(r: pymupdf.Rect, handle: int, ratio: float, shrink: bool = False) -> pymupdf.Rect:
+    """Corregge il riquadro al rapporto dato tenendo fermo il lato/angolo opposto alla maniglia."""
+    w, h = r.width, r.height
+    if shrink:
+        if w / h > ratio:
+            w = h * ratio
+        else:
+            h = w / ratio
+    elif handle in (1, 5):
+        w = h * ratio
+    else:
+        h = w / ratio
+    x0, y0, x1, y1 = r.x0, r.y0, r.x1, r.y1
+    if handle in (0, 6, 7):
+        x0 = x1 - w
+    elif handle in (1, 5):
+        cx = (x0 + x1) / 2
+        x0, x1 = cx - w / 2, cx + w / 2
+    else:
+        x1 = x0 + w
+    if handle in (0, 1, 2):
+        y0 = y1 - h
+    elif handle in (3, 7):
+        cy = (y0 + y1) / 2
+        y0, y1 = cy - h / 2, cy + h / 2
+    else:
+        y1 = y0 + h
+    return pymupdf.Rect(x0, y0, x1, y1)
+
+
 def constrain(dx: float, dy: float) -> tuple[float, float]:
     """Vincola a orizzontale, verticale o 45°."""
     if abs(dx) > 2 * abs(dy):
@@ -436,11 +477,26 @@ class ObjectTool(Tool):
         if len(objs) != 1 or objs[0].kind != IMAGE:
             return False
         o = objs[0]
-        self.crop = {"page": self.c.sel_page, "index": o.index, "rect": pymupdf.Rect(o.rect), "full": o.quad.rect,
-                     "drag": None}
+        full = o.quad.rect
+        rect = pymupdf.Rect(o.rect)
+        ratio = self.crop_ratio(o)
+        if ratio:
+            rect = fit_ratio(rect, ratio)
+        self.crop = {"page": self.c.sel_page, "index": o.index, "rect": rect, "full": full,
+                     "drag": None, "ratio": ratio}
         view.viewport().update()
         self.c.status(_("Ritaglio: trascina le maniglie, Invio per confermare, Esc per annullare."))
         return True
+
+    def crop_ratio(self, obj) -> float | None:
+        """Rapporto larghezza/altezza scelto per il ritaglio (None = libero)."""
+        choice = getattr(self.c, "crop_ratio", "free")
+        if choice == "original":
+            if obj.width and obj.height:
+                return obj.width / obj.height
+            r = obj.quad.rect
+            return r.width / r.height if r.height else None
+        return {"1:1": 1.0, "4:3": 4 / 3, "3:4": 3 / 4, "16:9": 16 / 9}.get(choice)
 
     def _crop_press(self, view, ev):
         cr = self.crop
@@ -471,8 +527,14 @@ class ObjectTool(Tool):
             cr["rect"] = pymupdf.Rect(r.x0 + dx, r.y0 + dy, r.x1 + dx, r.y1 + dy)
         else:
             prop = bool(ev.modifiers & Qt.KeyboardModifier.ShiftModifier)
-            r = resized_rect(dd["start"], dd["handle"], p, prop, False)
-            cr["rect"] = r & full
+            ratio = cr.get("ratio")
+            r = resized_rect(dd["start"], dd["handle"], p, prop and not ratio, False)
+            if ratio:
+                r = ratio_from_handle(r, dd["handle"], ratio)
+            r = r & full
+            if ratio and r.width > 0 and r.height > 0:
+                r = ratio_from_handle(r, dd["handle"], ratio, shrink=True)
+            cr["rect"] = r
         view.viewport().update()
         return True
 

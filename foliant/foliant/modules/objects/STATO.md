@@ -20,7 +20,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-10 Ruotare | P0 | fatto | ui: test_rotation_handle_snaps_with_shift, test_rotate_buttons_and_flip; eng (4×90° = identità) | |
 | OBJ-11 Capovolgere | P1 | fatto | ui: test_rotate_buttons_and_flip; eng (A\|B → B\|A) | |
 | OBJ-12 Inclinare / reimposta | P2 | fatto | adv: test_skew_keeps_height, test_reset_transform_rotated_flipped_image; ui2: test_advanced_actions | Finestra «Trasforma…». |
-| OBJ-13 Ritagliare | P0 | fatto | ui: test_crop_by_double_click_and_handles, test_crop_escape_cancels; eng (ripristina, definitivo 200×400 px) | Rapporti predefiniti (1:1, 4:3…) non fatti. |
+| OBJ-13 Ritagliare | P0 | fatto | ui: test_crop_by_double_click_and_handles, test_crop_escape_cancels; ui2: test_crop_with_square_ratio, test_ratio_helpers; eng (ripristina, definitivo 200×400 px) | Proporzioni libere, originali, 1:1, 4:3, 3:4, 16:9 (menu Altro). |
 | OBJ-14 Sostituire | P0 | fatto | ui: test_replace_image_dialog_flow; eng (Adatta/Riempi/Deforma, ruotata 30°, opacità, tutte le occorrenze, ritaglio conservato) | |
 | OBJ-15 Eliminare | P0 | fatto | ui: test_delete_key_and_undo; eng (2 XObject dopo salvataggio, logo condiviso) | Pulizia dell'albero di struttura non fatta. |
 | OBJ-16 Opacità | P1 | fatto | ui: test_opacity_slider_single_step; eng (/ca 0.5, pixel 127–128, riuso ExtGState) | Avviso PDF/A non fatto. |

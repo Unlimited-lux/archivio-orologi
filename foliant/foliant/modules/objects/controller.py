@@ -49,6 +49,7 @@ class ObjectsController(QObject):
         self._pending: set = set()
         self._parsedReady.connect(self._on_parsed_ready)
         self.smart_guides = True
+        self.crop_ratio = "free"     # proporzioni del ritaglio: free, original, 1:1, 4:3, 3:4, 16:9
         self.links_follow = True     # i collegamenti che coincidono con l'oggetto si spostano con esso
         self.grid_on = False
         self.grid_snap = True

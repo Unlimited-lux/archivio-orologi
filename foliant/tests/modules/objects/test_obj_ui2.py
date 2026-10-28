@@ -371,3 +371,29 @@ def test_reinsert_image_after_save_is_correct(ui, tmp_path):
         pix = view.document.pdf[0].get_pixmap(dpi=72, clip=o.rect)
     r, g, b = pix.pixel(pix.width // 2, pix.height // 2)[:3]
     assert r > 200 and b < 60
+
+
+def test_crop_with_square_ratio(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(100, 200, 300, 300)]))
+    ui.c.crop_ratio = "1:1"
+    try:
+        ui.c.set_selection(view, 0, [0])
+        ui.c.start_crop(view)
+        r = ui.c.object_tool.crop["rect"]
+        assert abs(r.width - 100) < 0.01 and abs(r.height - 100) < 0.01 and abs(r.x0 - 150) < 0.01
+        drag(view, 0, (250, 300), (230, 300))   # maniglia in basso a destra verso sinistra
+        r = ui.c.object_tool.crop["rect"]
+        assert abs(r.width - r.height) < 0.01 and abs(r.x0 - 150) < 0.5 and abs(r.y0 - 200) < 0.5
+        QTest.keyClick(view, Qt.Key.Key_Return)
+        o = objs(view)[0]
+        assert abs(o.rect.width - o.rect.height) < 0.6
+    finally:
+        ui.c.crop_ratio = "free"
+
+
+def test_ratio_helpers():
+    from foliant.modules.objects.tool import fit_ratio, ratio_from_handle
+    r = fit_ratio(pymupdf.Rect(0, 0, 160, 90), 1.0)
+    assert (r.x0, r.width, r.height) == (35, 90, 90)
+    r = ratio_from_handle(pymupdf.Rect(0, 0, 160, 50), 4, 16 / 9)
+    assert abs(r.width / r.height - 16 / 9) < 1e-6 and r.x0 == 0 and r.y0 == 0

@@ -387,4 +387,7 @@ EN = {
     "Modifica esterna avviata: salva il file nell'editor per aggiornare il documento.": "External editing started: save the file in the editor to update the document.",
     "Il file temporaneo è stato eliminato o rinominato: la modifica esterna è terminata.": "The temporary file was deleted or renamed: external editing has ended.",
     "Modifica esterna dell'immagine": "External image edit",
+    "Proporzioni del ritaglio": "Crop aspect ratio",
+    "Libere": "Free",
+    "Originali": "Original",
 }

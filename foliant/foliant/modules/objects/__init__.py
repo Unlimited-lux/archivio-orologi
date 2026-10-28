@@ -140,6 +140,17 @@ def register(ctx: Context) -> None:
     for key in ("paste", "paste_in_place", "duplicate", "move_page", "replicate", "similar", "crop_reset",
                 "crop_apply", "replace_clip", "save_image", "copy_image", "make_link"):
         more.addAction(acts[key])
+    ratio_menu = more.addMenu(_("Proporzioni del ritaglio"))
+    from PySide6.QtGui import QActionGroup
+    group_r = QActionGroup(ratio_menu)
+    for code, text in (("free", _("Libere")), ("original", _("Originali")), ("1:1", "1:1"), ("4:3", "4:3"),
+                       ("3:4", "3:4"), ("16:9", "16:9")):
+        a = ratio_menu.addAction(text)
+        a.setCheckable(True)
+        a.setChecked(code == c.crop_ratio)
+        a.triggered.connect(lambda _c=False, k=code: setattr(c, "crop_ratio", k))
+        group_r.addAction(a)
+    _state["ratio_menu"] = ratio_menu
     more.addSeparator()
     for key in ("adjust", "external", "external_stop", "optimize", "path_style", "transform", "reset_tf", "group", "decompose"):
         more.addAction(acts[key])
