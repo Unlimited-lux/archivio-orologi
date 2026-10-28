@@ -198,6 +198,10 @@ EN = {
     "{n} oggetti copiati.": "{n} objects copied.",
     "{n} oggetti selezionati": "{n} objects selected",
     # tipi di oggetto
+    "Guide intelligenti": "Smart guides",
+    "Documento firmato": "Signed document",
+    "Il documento contiene firme digitali: modificarne il contenuto le renderà non valide. Continuare?": "The document contains digital signatures: editing its content will invalidate them. Continue?",
+    "Il documento non consente modifiche al contenuto. Aprilo con la password del proprietario per modificarlo.": "The document does not allow content changes. Open it with the owner password to edit it.",
     "Immagine": "Image",
     "Tracciato": "Path",
     "Oggetto composto": "Compound object",

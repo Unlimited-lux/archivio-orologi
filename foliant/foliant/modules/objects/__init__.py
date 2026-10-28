@@ -130,6 +130,32 @@ def register(ctx: Context) -> None:
     for key in ("paste", "paste_in_place", "duplicate", "move_page", "similar", "crop_reset", "crop_apply",
                 "replace_clip", "save_image", "copy_image", "make_link"):
         more.addAction(acts[key])
+    guides = ctx.action(_("Guide intelligenti"), None, None, checkable=True, requires_document=False)
+    guides.setChecked(str(ctx.settings().value("objects/smart_guides", "true")).lower() != "false")
+    c.smart_guides = guides.isChecked()
+
+    def set_guides(on):
+        c.smart_guides = on
+        ctx.settings().setValue("objects/smart_guides", "true" if on else "false")
+    guides.toggled.connect(set_guides)
+    acts["guides"] = guides
+    more.addAction(guides)
+    more.addSeparator()
+    from . import extras
+    capture_tool = extras.CaptureTool(ctx, c)
+    _state["capture_tool"] = capture_tool
+    cap = ctx.action(_("Cattura area"), "scan", None, checkable=True,
+                     tooltip=_("Copia, salva o inserisci un'area come immagine o testo"))
+    cap.triggered.connect(lambda checked=False: _toggle_tool(ctx, capture_tool, checked, switch=False))
+    acts["capture"] = cap
+    more.addAction(cap)
+    read_mode = ctx.mode("leggi")
+    if read_mode is not None:
+        read_mode.add_action(cap)
+    acts["extract_all"] = ctx.action(_("Estrai tutte le immagini…"), "images",
+                                     lambda: extras.extract_all(ctx, c, ctx.current_view()))
+    more.addAction(acts["extract_all"])
+    ctx.add_menu_action(acts["extract_all"], "Strumenti")
     more.addSeparator()
     more.addAction(acts["detect_urls"])
     more.addAction(acts["delete_links"])
@@ -153,12 +179,12 @@ def register(ctx: Context) -> None:
     _update_actions(ctx, c)
 
 
-def _toggle_tool(ctx: Context, tool, checked: bool) -> None:
+def _toggle_tool(ctx: Context, tool, checked: bool, switch: bool = True) -> None:
     view = ctx.current_view()
     if view is None:
         return
     if checked:
-        if ctx.current_mode() != "modifica":
+        if switch and ctx.current_mode() != "modifica":
             ctx.set_mode("modifica")
         view.set_tool(tool)
     elif view.tool is tool:
@@ -174,6 +200,8 @@ def _sync_tool_buttons(ctx: Context) -> None:
     if "objects" in acts:
         acts["objects"].setChecked(tool is c.object_tool)
         acts["links"].setChecked(tool is c.link_tool)
+    if "capture" in acts:
+        acts["capture"].setChecked(tool is _state.get("capture_tool"))
 
 
 def _on_mode_entered(ctx: Context, c: ObjectsController) -> None:
@@ -189,7 +217,7 @@ def _on_mode_entered(ctx: Context, c: ObjectsController) -> None:
 
 def _on_mode_left(ctx: Context, c: ObjectsController) -> None:
     view = ctx.current_view()
-    if view is not None and view.tool in (c.object_tool, c.link_tool):
+    if view is not None and view.tool in (c.object_tool, c.link_tool, _state.get("capture_tool")):
         view.set_tool(None)
     ctx.hide_properties()
     _sync_tool_buttons(ctx)
@@ -210,6 +238,9 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
     for key in ("crop", "crop_reset", "crop_apply", "replace", "replace_clip", "save_image", "copy_image"):
         if key in acts:
             acts[key].setEnabled(has_doc and single_image)
+    if single_image and not c.extract_allowed(view):
+        acts["save_image"].setEnabled(False)
+        acts["copy_image"].setEnabled(False)
     if single_image:
         w = objs[0].wrapper
         acts["crop_reset"].setEnabled(bool(w and w.clip_unit))
@@ -365,6 +396,7 @@ def _install_drop(ctx: Context, c: ObjectsController, view) -> None:
     view._objects_drop = f
     view.viewport().setAcceptDrops(True)
     view.viewport().installEventFilter(f)
+    view.toolChanged.connect(lambda _t: _sync_tool_buttons(ctx))
     view._objects_tab = _TabFilter(c, view)
     view.installEventFilter(view._objects_tab)
 

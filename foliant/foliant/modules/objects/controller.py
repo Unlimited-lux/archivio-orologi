@@ -43,6 +43,8 @@ class ObjectsController(QObject):
         self._cache: dict = {}
         self._link_cache: dict = {}
         self._paste_counts: dict = {}
+        self._signed_ok: set = set()
+        self.smart_guides = True
         ctx.documentChanged.connect(self._on_document_changed)
         ctx.currentViewChanged.connect(self._on_view_changed)
 
@@ -153,9 +155,34 @@ class ObjectsController(QObject):
         self.set_selection(view, page, [(cur + step) % n])
 
     # ================================================================ modifiche
+    def can_modify(self, view) -> bool:
+        """Permesso di modifica e conferma per i documenti firmati (una volta per documento)."""
+        doc = view.document
+        with ENGINE_LOCK:
+            pdf = doc.pdf
+            perms = pdf.permissions
+            encrypted = bool(doc.original_protection)
+            try:
+                sigflags = pdf.get_sigflags()
+            except Exception:
+                sigflags = -1
+        if encrypted and perms != -1 and not perms & pymupdf.PDF_PERM_MODIFY:
+            self.ctx.error(_("Modifica"), _("Il documento non consente modifiche al contenuto. "
+                                            "Aprilo con la password del proprietario per modificarlo."))
+            return False
+        if sigflags is not None and sigflags > 0 and id(doc) not in self._signed_ok:
+            if not self.ctx.confirm(_("Documento firmato"),
+                                    _("Il documento contiene firme digitali: modificarne il contenuto le "
+                                      "renderà non valide. Continuare?")):
+                return False
+            self._signed_ok.add(id(doc))
+        return True
+
     def run_change(self, view, label: str, fn: Callable, *args):
         """Esegue `fn(pdf, *args)` come passo annullabile. None se fallisce."""
         if view is None:
+            return None
+        if not self.can_modify(view):
             return None
         try:
             with view.document.change(label) as pdf:
@@ -254,6 +281,8 @@ class ObjectsController(QObject):
         self._run_maybe_nochange(view, _("Distribuisci oggetti"), fn, page, indices)
 
     def _run_maybe_nochange(self, view, label, fn, page, indices) -> None:
+        if not self.can_modify(view):
+            return
         try:
             with view.document.change(label) as pdf:
                 fn(pdf)
@@ -401,11 +430,16 @@ class ObjectsController(QObject):
         if result is not None:
             self.set_selection(view, self.sel_page, result)
 
-    def _extract_allowed(self, view) -> bool:
+    def extract_allowed(self, view) -> bool:
+        if view is None:
+            return False
         with ENGINE_LOCK:
-            pdf = view.document.pdf
-            perms = pdf.permissions
-        return bool(perms & pymupdf.PDF_PERM_COPY) or perms == -1 or perms == 0 and not pdf.is_encrypted
+            perms = view.document.pdf.permissions
+        if not view.document.original_protection or perms == -1:
+            return True
+        return bool(perms & pymupdf.PDF_PERM_COPY)
+
+    _extract_allowed = extract_allowed
 
     def save_image(self, view) -> None:
         objs = self.selected_objects(view)

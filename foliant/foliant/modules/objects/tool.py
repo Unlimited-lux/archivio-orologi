@@ -259,9 +259,10 @@ class ObjectTool(Tool):
             if d.get("cur_page") is not None and d["cur_page"] != d["page"] and d.get("cur_other") is not None:
                 self.c.move_to_page_at(view, d["cur_page"], d["cur_other"], d["start"])
                 return True
-            dx, dy = self._move_delta(view, d)
             s = view_scale(view, d["page"])
-            if abs(dx) * s < 1 and abs(dy) * s < 1:
+            raw = (d["cur"].x - d["start"].x, d["cur"].y - d["start"].y)
+            dx, dy = self._move_delta(view, d)
+            if (abs(raw[0]) * s < 2 and abs(raw[1]) * s < 2) or (abs(dx) * s < 0.5 and abs(dy) * s < 0.5):
                 if d.get("deselect") is not None:
                     self.c.set_selection(view, d["page"], [i for i in self.c.selection if i != d["deselect"]])
                 return True
@@ -358,8 +359,18 @@ class ObjectTool(Tool):
         if d["mods"] & Qt.KeyboardModifier.ShiftModifier:
             dx, dy = constrain(dx, dy)
         r = self._sel_rect(view)
+        d["guides"] = (None, None)
         if r is not None:
             page_rect = self.c.page_rect(view, d["page"])
+            if self.c.smart_guides and not (d["mods"] & Qt.KeyboardModifier.AltModifier):
+                parsed = self.c.parsed(view, d["page"], quiet=True)
+                if parsed is not None:
+                    if "targets" not in d:
+                        d["targets"] = E.snap_targets(parsed, set(self.c.selection), page_rect, r)
+                    xs, ys = d["targets"]
+                    tol = 5.0 / view_scale(view, d["page"])
+                    dx, dy, gx, gy = E.snap_delta(r, dx, dy, xs, ys, tol)
+                    d["guides"] = (gx, gy)
             dx, dy = E.clamp_translation(r, page_rect, dx, dy)
         return dx, dy
 
@@ -387,6 +398,8 @@ class ObjectTool(Tool):
         if d is None:
             return None
         if d["type"] == "move":
+            if d["cur"] == d["start"]:
+                return None
             dx, dy = self._move_delta(view, d)
             return pymupdf.Matrix(1, 0, 0, 1, dx, dy)
         if d["type"] == "resize":
@@ -509,6 +522,14 @@ class ObjectTool(Tool):
                         painter.drawPolygon(qpoly(o.quad * M))
                     painter.setBrush(Qt.BrushStyle.NoBrush)
                 self._paint_handles(painter, r, s)
+        if self.drag is not None and self.drag["type"] == "move" and self.drag["page"] == page:
+            gx, gy = self.drag.get("guides", (None, None))
+            pr = self.c.page_rect(view, page)
+            painter.setPen(QPen(theme.color("secondary"), 1 / s, Qt.PenStyle.DashLine))
+            if gx is not None:
+                painter.drawLine(QPointF(gx, pr.y0), QPointF(gx, pr.y1))
+            if gy is not None:
+                painter.drawLine(QPointF(pr.x0, gy), QPointF(pr.x1, gy))
         if self.drag is not None and self.drag["type"] == "band" and self.drag["page"] == page:
             r = pymupdf.Rect(self.drag["start"], self.drag["cur"])
             r.normalize()

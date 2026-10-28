@@ -126,3 +126,17 @@ def blank():
     pdf = new_pdf()
     yield pdf
     pdf.close()
+
+
+@pytest.fixture(autouse=True)
+def _clear_clipboard():
+    """Svuota gli appunti dopo ogni test: un'immagine rimasta negli appunti fa
+    terminare male il processo con la piattaforma Qt «offscreen»."""
+    yield
+    try:
+        from PySide6.QtGui import QGuiApplication
+        app = QGuiApplication.instance()
+        if app is not None:
+            QGuiApplication.clipboard().clear()
+    except Exception:
+        pass

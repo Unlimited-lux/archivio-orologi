@@ -1035,6 +1035,58 @@ def view_vector_to_page(page: pymupdf.Page, dx: float, dy: float) -> tuple[float
     return v.x, v.y
 
 
+# ================================================================ guide e aggancio
+def snap_targets(parsed: ParsedPage, exclude: set, page_rect: pymupdf.Rect, near: pymupdf.Rect | None = None,
+                 limit: int = 400) -> tuple[list[float], list[float]]:
+    """Bordi e centri di riferimento (x, y): pagina e oggetti vicini non selezionati."""
+    xs = [page_rect.x0, (page_rect.x0 + page_rect.x1) / 2, page_rect.x1]
+    ys = [page_rect.y0, (page_rect.y0 + page_rect.y1) / 2, page_rect.y1]
+    count = 0
+    for o in parsed.objects:
+        if o.index in exclude or o.hidden:
+            continue
+        r = o.rect if not o.rect.is_empty else o.quad.rect
+        if r.width >= page_rect.width * 0.98 and r.height >= page_rect.height * 0.98:
+            continue  # sfondi a tutta pagina
+        if near is not None:
+            grown = pymupdf.Rect(near.x0 - 200, near.y0 - 200, near.x1 + 200, near.y1 + 200)
+            if not grown.intersects(r):
+                continue
+        xs += [r.x0, (r.x0 + r.x1) / 2, r.x1]
+        ys += [r.y0, (r.y0 + r.y1) / 2, r.y1]
+        count += 1
+        if count >= limit:
+            break
+    return xs, ys
+
+
+def snap_delta(rect: pymupdf.Rect, dx: float, dy: float, xs: list[float], ys: list[float],
+               tol: float) -> tuple[float, float, float | None, float | None]:
+    """Aggancia bordi/centro del riquadro spostato al riferimento più vicino entro `tol`.
+
+    Restituisce (dx, dy, guida_x, guida_y)."""
+    def best(vals, cands):
+        found = None
+        for v in vals:
+            for c in cands:
+                d = c - v
+                if abs(d) <= tol and (found is None or abs(d) < abs(found[0])):
+                    found = (d, c)
+        return found
+    mx = [rect.x0 + dx, (rect.x0 + rect.x1) / 2 + dx, rect.x1 + dx]
+    my = [rect.y0 + dy, (rect.y0 + rect.y1) / 2 + dy, rect.y1 + dy]
+    gx = gy = None
+    bx = best(mx, xs)
+    if bx is not None:
+        dx += bx[0]
+        gx = bx[1]
+    by = best(my, ys)
+    if by is not None:
+        dy += by[0]
+        gy = by[1]
+    return dx, dy, gx, gy
+
+
 # ================================================================ tracciati simili
 def similar_paths(parsed: ParsedPage, index: int) -> list[int]:
     ref = parsed.objects[index]
