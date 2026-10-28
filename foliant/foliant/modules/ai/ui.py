@@ -638,6 +638,37 @@ class Controller:
         self.exec_dialog(dlg)
         return dlg
 
+    # ---------------------------------------------------------------- ricerca bibliografica (AI-26)
+    def open_bibliography(self):
+        from . import biblio
+        from .biblio_view import BiblioDialog
+        panel = self.services.panel
+        if panel is None or not panel._ensure_ready():
+            return None
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        def open_url(url):
+            if self.ctx.confirm(_("Collegamento esterno"),
+                                _("Aprire nel browser questo indirizzo?\n\n{u}").format(u=url)):
+                QDesktopServices.openUrl(QUrl(url))
+
+        def run_search(title, fn):
+            try:
+                return self.ctx.run_task(title, lambda progress: fn())
+            except OperationCancelled:
+                return None
+            except Exception as e:  # noqa: BLE001
+                from .providers import AIError
+                self.ctx.error(title, e.user_message() if isinstance(e, AIError) else str(e))
+                return None
+
+        dlg = BiblioDialog(self._run, biblio.service_from_settings(self.services.store), self.ctx.ask_save_path,
+                           open_url, self.ctx.window, store=self.services.store, run_search=run_search,
+                           on_error=lambda t, m: self.ctx.error(t, m))
+        self.exec_dialog(dlg)
+        return dlg
+
     # ---------------------------------------------------------------- comandi (AI-23)
     def tool_catalog(self):
         from . import commands
@@ -943,6 +974,7 @@ def register(ctx, *, provider_factory=None) -> Services:
                  lambda: (ctx.set_mode("ia"), show_panel(), panel.start_area_tool()))
     a_trpdf = act(_("Traduci in un nuovo PDF"), "file-output", lambda: controller.translate_pdf())
     a_coll = act(_("Più documenti"), "files", lambda: controller.open_collection(), requires=False)
+    a_bib = act(_("Ricerca bibliografica"), "library", lambda: controller.open_bibliography(), requires=False)
     a_cmd = act(_("Assistente comandi"), "terminal", lambda: controller.open_commands())
     a_ops = act(_("Operazioni in corso"), "activity", lambda: OperationsDialog(services, ctx.window).exec(),
                 requires=False)
@@ -961,7 +993,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
                             a_section, a_sem, a_cmd]
-    services.profile_actions = [a_tasks, a_write, a_coll]
+    services.profile_actions = [a_tasks, a_write, a_coll, a_bib]
     services.local_actions = [a_pages]   # funziona anche senza profilo (controlli locali)
     for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
         mode.add_action(a)
@@ -975,7 +1007,7 @@ def register(ctx, *, provider_factory=None) -> Services:
     more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     more.setAutoRaise(True)
     more_menu = QMenu(more)
-    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages), (a_coll, a_tasks, a_write, a_cmd),
+    for group in ((a_trpdf, a_out, a_extract, a_sem), (a_bm, a_section, a_pages), (a_coll, a_tasks, a_write, a_bib, a_cmd),
                   (a_ops, a_log)):
         for a in group:
             more_menu.addAction(a)

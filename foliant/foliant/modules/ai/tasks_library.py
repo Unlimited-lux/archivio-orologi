@@ -90,6 +90,38 @@ def _b(id_, name, cat, desc, instr, scope="document", params=None, output="text"
 
 
 BUILTIN = [
+    _b("generic", "Attività personalizzata", "Comunicazione", "Istruzioni libere sul documento o sulla selezione.",
+       "{istruzioni} Answer in {lingua}.", scope="any", params=[Param("istruzioni", "text", "")]),
+    _b("contract-summary", "Scheda di un contratto", "Legale",
+       "Parti, oggetto, prezzo, pagamenti, garanzie, scadenze e recesso in una tabella.",
+       "Extract from the contract a table with rows: parties, object, price, payment terms, warranty, delivery, "
+       "deadlines, termination/withdrawal, penalties, governing law; one column with the value and one with the "
+       "page citation [p. N]; write \"not found\" when missing. Then list clauses that deserve attention. "
+       "Answer in {lingua}.", output="table"),
+    _b("invoice-check", "Controllo di fatture e ricevute", "Finanza",
+       "Dati principali, totali, IVA e incongruenze.",
+       "For each invoice or receipt in the content, report number, date, supplier, VAT number, customer, lines, "
+       "taxable amount, VAT and total in a table with page citations, then check that the line amounts add up "
+       "to the taxable amount and that taxable amount + VAT equals the total, listing any inconsistency. "
+       "Answer in {lingua}.", output="table"),
+    _b("product-sheet", "Scheda prodotto", "Comunicazione",
+       "Scheda o annuncio di vendita dalle informazioni del documento.",
+       "Write a product sheet for {prodotto} using only information in the content: title, short description, "
+       "technical specifications table (brand, model, reference, year, material, size, movement, condition, "
+       "accessories, when available), selling points and a {canale} listing text. Do not invent data: mark "
+       "missing items as \"da verificare\". Answer in {lingua}.",
+       params=[Param("prodotto", "text", "l'articolo"), Param("canale", "choice", "e-commerce",
+                                                            ["e-commerce", "marketplace", "social"])]),
+    _b("customer-reply", "Comunicazione al cliente", "Comunicazione",
+       "Risposta o comunicazione al cliente basata sul documento.",
+       "Write a {tono} message to the customer about: {argomento}. Base facts only on the content and cite pages "
+       "[p. N] in a separate note for the operator (not in the message). Answer in {lingua}.", scope="any",
+       params=[Param("argomento", "text", ""), Param("tono", "choice", "cordiale",
+                                                     ["cordiale", "formale", "professionale"])]),
+    _b("compare", "Confronto di documenti o versioni", "Ricerca",
+       "Somiglianze e differenze tra le parti del contenuto.",
+       "Compare the documents or sections in the content: a table of the main points with the value in each one "
+       "and the page citations, then the relevant differences. Answer in {lingua}.", output="table"),
     _b("contract-risk", "Analisi dei rischi di un contratto", "Legale",
        "Clausole principali, obblighi, scadenze e rischi.",
        "Analyse the contract: parties, object, obligations, deadlines, penalties, termination, and list the main "

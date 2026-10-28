@@ -787,7 +787,7 @@ class AIPanel(QWidget):
         if fn == "image":
             return self._prepare_image_scope(profile, text)
         if kind == NONE or doc is None:
-            if fn in ("explain", "rewrite", "translate") and text:
+            if fn in ("explain", "rewrite", "translate", "summary") and text:
                 return Scope(kind=SELECTION, selection=text), [], ""
             if fn not in ("chat",):
                 raise FoliantError(_("Questa funzione richiede un documento o un testo."))
@@ -934,6 +934,8 @@ class AIPanel(QWidget):
                 q = text if not continue_from else _("Continua la risposta precedente da dove si è interrotta.")
                 return engine.chat(job, history_conv, scope, q)
             if fn == "summary":
+                if text and not scope.pages and not scope.selection:
+                    scope.selection = text
                 return engine.summarize(job, scope, options["summary"])
             if fn == "translate":
                 if text and not scope.pages and not scope.selection:

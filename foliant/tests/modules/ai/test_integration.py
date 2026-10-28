@@ -342,3 +342,42 @@ def test_shortcut_opens_assistant_mode(window, sample_pdf):
                if a.shortcut().toString() == "Ctrl+Alt+I")
     act.trigger()
     assert window.ctx.current_mode() == "ia"
+
+
+# ------------------------------------------------------------------ AI-26 / AI-20 / AI-05 integrazione
+def test_bibliography_dialog_disabled_without_service(window, ready):
+    ready.controller.exec_dialog = lambda dlg: 0
+    dlg = ready.controller.open_bibliography()
+    assert dlg is not None
+    assert "Nessun servizio bibliografico" in "".join(
+        w.text() for w in dlg.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel))
+
+
+@pytest.mark.parametrize("task_id", ["generic", "contract-summary", "invoice-check", "product-sheet",
+                                     "customer-reply", "compare"])
+def test_business_templates_build_instructions(task_id):
+    task = next(t for t in tasks_library.BUILTIN if t.id == task_id)
+    values = {p.name: (p.default or "valore di prova") for p in task.params}
+    instr = tasks_library.build_instructions(task, values, Scope(), "it")
+    assert "{" not in instr.replace("{{", "").replace("}}", "")
+    assert "Italian" in instr
+
+
+def test_product_sheet_runs_on_document(qtbot, window, ready, fake, sample_pdf):
+    window.open_path(sample_pdf)
+    fake.responses = ["## Scheda\n\n| Marca | da verificare |\n|---|---|"]
+    task = next(t for t in tasks_library.BUILTIN if t.id == "product-sheet")
+    ready.panel.run_template(task, {"prodotto": "orologio", "canale": "e-commerce"}, "document")
+    wait_done(qtbot, ready.panel)
+    req = fake.requests[0]
+    assert "Do not invent data" in req.system and "Orologeria Verdi" in req.messages[-1].content
+
+
+def test_summary_of_pasted_text(qtbot, window, ready, fake):
+    from foliant.modules.ai.ui import GeneralChatDialog
+    dlg = GeneralChatDialog(window.ctx, ready, window)
+    p = dlg.panel
+    p.set_function("summary")
+    p.send("Testo incollato da riassumere con varie informazioni sulla vendita di orologi.")
+    wait_done(qtbot, p)
+    assert "Testo incollato da riassumere" in fake.requests[0].messages[-1].content
