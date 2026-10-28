@@ -931,3 +931,21 @@ def test_merge_bookmarks_disambiguate_same_names(tmp_path):
     be.run_job(None, items, be.JobSettings(steps=[be.Step("merge")], destination=str(tmp_path / "out")))
     toc = pymupdf.open(str(tmp_path / "out" / "Unione.pdf")).get_toc()
     assert [t[1] for t in toc] == ["relazione (a)", "relazione (b)"]
+
+
+@pytest.mark.parametrize("rot", [0, 90])
+def test_bates_white_box_on_scan(tmp_path, rot):
+    import numpy as np
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.draw_rect(page.rect, fill=(0.3, 0.3, 0.3), width=0)     # «scansione» scura
+    page.set_rotation(rot)
+    data, last = be.add_bates(doc.tobytes(), 1, "FT-", 5, box=True)
+    out = pymupdf.open(stream=data, filetype="pdf")[0]
+    w = next(x for x in out.get_text("words") if x[4] == "FT-00001")
+    clip = pymupdf.Rect(w[:4]) * out.rotation_matrix
+    clip.normalize()
+    pix = out.get_pixmap(dpi=72, clip=clip)
+    a = np.frombuffer(pix.samples, np.uint8)
+    assert (a > 240).mean() > 0.5        # sfondo bianco attorno alle cifre
+    assert last == 1

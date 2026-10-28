@@ -63,7 +63,7 @@ Test: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q tests/modules/too
 | BAT-12 | P1 | fatto | be: `test_watermark_every_page_and_odd_pages`, `test_watermark_name_placeholder_and_replace`, `test_watermark_marked_and_removable` | |
 | BAT-13 | P1 | fatto | be: `test_background_letterhead` | |
 | BAT-14 | P1 | fatto | be: `test_page_numbers_per_file_and_continuous`, `test_header_mirror_and_skip_first` | |
-| BAT-15 | P1 | fatto | be: `test_bates_continuous_and_names`, `test_bates_insufficient_digits`, `test_bates_index_and_series`; bu: `test_bates_series_and_index_from_ui` | Indice CSV e «continua la serie» (serie salvate nella configurazione). Mancano font e riquadro bianco configurabili. |
+| BAT-15 | P1 | fatto | be: `test_bates_continuous_and_names`, `test_bates_insufficient_digits`, `test_bates_index_and_series`; bu: `test_bates_series_and_index_from_ui` | Indice CSV, «continua la serie» (serie salvate nella configurazione) e riquadro bianco dietro il numero per le scansioni (be: `test_bates_white_box_on_scan`). Manca la scelta del font. |
 | BAT-16 | P1 | parziale | be: `test_watermark_marked_and_removable`, `test_remove_marks_nothing_found` | Rimuove solo gli elementi aggiunti da Foliant (marcati). |
 | BAT-17 | P1 | fatto | be: `test_merge_order_and_bookmarks`, `test_merge_with_damaged_file_produces_nothing`, `test_merge_one_file_per_folder`, `test_merge_omit_failed_file` | Un unico file, un file per cartella, ogni N ingressi; politica interrompi/ometti. Segnalibri originali non annidati. |
 | BAT-18 | P1 | fatto | be: `test_insert_pages` | |
