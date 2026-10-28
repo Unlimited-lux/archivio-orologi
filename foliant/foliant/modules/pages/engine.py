@@ -499,10 +499,68 @@ def delete_pages(pdf: pymupdf.Document, indices: Iterable[int]) -> int:
         raise PageOpError(_("Nessuna pagina selezionata."))
     if len(sel) >= pdf.page_count:
         raise PageOpError(_("Impossibile eliminare tutte le pagine: il documento deve conservarne almeno una."))
+    for i in sel:
+        _detach_widgets(pdf, i)
     pdf.delete_pages(sel)
     _fix_open_action(pdf)
     prune_structure(pdf)
+    rebuild_form_fields(pdf)
     return len(sel)
+
+
+def _detach_widgets(pdf: pymupdf.Document, index: int) -> None:
+    """Toglie dalla pagina i widget dei campi e i riferimenti dai campi (/Kids), così
+    la pagina eliminata non resta nel file come oggetto orfano."""
+    page = pdf[index]
+    wx = [w.xref for w in page.widgets()]
+    if not wx:
+        return
+    for x in wx:
+        k, parent = pdf.xref_get_key(x, "Parent")
+        if k == "xref":
+            px = int(parent.split()[0])
+            kk, kids = pdf.xref_get_key(px, "Kids")
+            if kk == "array":
+                rest = [t for t in _split_array(kids) if _ref(t) != x]
+                pdf.xref_set_key(px, "Kids", "[" + " ".join(rest) + "]" if rest else "[]")
+        pdf.xref_set_key(x, "P", "null")
+        pdf.xref_set_key(x, "Parent", "null")
+    ka, annots = pdf.xref_get_key(page.xref, "Annots")
+    if ka == "array":
+        rest = [t for t in _split_array(annots) if _ref(t) not in wx]
+        pdf.xref_set_key(page.xref, "Annots", "[" + " ".join(rest) + "]" if rest else "null")
+
+
+def rebuild_form_fields(pdf: pymupdf.Document) -> None:
+    """/AcroForm/Fields = campi (radice) che hanno ancora almeno un widget sulle pagine."""
+    roots: list[int] = []
+    for i in range(pdf.page_count):
+        for w in pdf[i].widgets():
+            x = w.xref
+            seen = set()
+            while True:
+                k, parent = pdf.xref_get_key(x, "Parent")
+                if k != "xref" or x in seen:
+                    break
+                seen.add(x)
+                x = int(parent.split()[0])
+            if x not in roots:
+                roots.append(x)
+    cat = pdf.pdf_catalog()
+    k, form = pdf.xref_get_key(cat, "AcroForm")
+    if not roots:
+        if k == "xref":
+            pdf.xref_set_key(int(form.split()[0]), "Fields", "[]")
+        elif k == "dict":
+            pdf.xref_set_key(cat, "AcroForm/Fields", "[]")
+        return
+    fields = "[" + " ".join(f"{r} 0 R" for r in roots) + "]"
+    if k == "xref":
+        pdf.xref_set_key(int(form.split()[0]), "Fields", fields)
+    elif k == "dict":
+        pdf.xref_set_key(cat, "AcroForm/Fields", fields)
+    else:
+        pdf.xref_set_key(cat, "AcroForm", f"<</Fields{fields}/NeedAppearances true>>")
 
 
 # ---------------------------------------------------------------- struttura logica (PAG-03)
@@ -834,6 +892,7 @@ def extract_pages(pdf: pymupdf.Document, indices: Sequence[int], *, annots: bool
         else:
             out = _subset(copy, indices)
         prune_structure(out)
+        rebuild_form_fields(out)
         if not annots:
             for page in out:
                 for a in list(page.annots() or []):
@@ -958,18 +1017,18 @@ _BAD_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 
 
 def safe_filename(name: str, max_bytes: int = 200) -> str:
-    name = _BAD_CHARS.sub("_", name).strip().strip(".") or "documento"
+    name = _BAD_CHARS.sub("_", name).strip().strip(".") or "senza_nome"
     while len(name.encode("utf-8")) > max_bytes:
         name = name[:-1]
     return name
 
 
 def render_name(template: str, **fields) -> str:
-    """Compone il nome file dal modello: {nome}, {pagina}, {n}, {inizio}, {fine},
-    {segnalibro}, {match1}…; segnaposto sconosciuti restano vuoti."""
-    def sub(m: re.Match) -> str:
-        return str(fields.get(m.group(1), ""))
-    return safe_filename(re.sub(r"\{(\w+)\}", sub, template))
+    """Compone il nome file dal modello con i campi dinamici di PAG-32: {nome}, {pagina},
+    {pagina:3}, {n}, {inizio}, {fine}, {intervallo}, {segnalibro}, {match1}, {data:aaaa-MM-gg},
+    {titolo|nome}…; segnaposto mancanti restano vuoti, caratteri non ammessi sostituiti."""
+    from .fields import render_template
+    return safe_filename(render_template(template, fields))
 
 
 def unique_path(folder: str | os.PathLike, filename: str, overwrite: bool = False,
@@ -1209,6 +1268,11 @@ def write_parts(pdf: pymupdf.Document, parts: Sequence[SplitPart], folder: str |
 
     Se interrotta (eccezione da `progress`) i file già scritti restano."""
     folder = Path(folder)
+    from .fields import document_values, validate_template
+    err = validate_template(template)
+    if err:
+        raise PageOpError(err)
+    doc_values = {k: v for k, v in document_values(pdf).items() if k in ("titolo", "autore", "oggetto")}
     if not folder.is_dir():
         raise PageOpError(_("La cartella «{f}» non esiste.").format(f=folder))
     if not os.access(folder, os.W_OK):
@@ -1221,7 +1285,11 @@ def write_parts(pdf: pymupdf.Document, parts: Sequence[SplitPart], folder: str |
         if progress:
             progress((j - 1) / max(1, total), _("File {j} di {n}").format(j=j, n=total))
         fields = {"nome": base_name, "n": j, "pagina": part.indices[0] + 1,
-                  "inizio": part.indices[0] + 1, "fine": part.indices[-1] + 1}
+                  "inizio": part.indices[0] + 1, "fine": part.indices[-1] + 1,
+                  "intervallo": format_ranges(part.indices).replace(" ", "")}
+        if doc_values:
+            for k, v in doc_values.items():
+                fields.setdefault(k, v)
         fields.update(part.fields)
         name = render_name(template, **fields)
         target = unique_path(folder, name + ".pdf", overwrite, taken)

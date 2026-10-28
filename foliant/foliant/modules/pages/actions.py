@@ -36,13 +36,21 @@ def build_actions(ctx, c, mode) -> None:
     win = ctx.window
     structural: list[QAction] = []
 
-    def act(text, icon_name, slot, shortcut=None, structural_op=True, tip=None):
+    scoped: list[QAction] = []
+
+    def act(text, icon_name, slot, shortcut=None, structural_op=True, tip=None, key=None):
+        """`shortcut`: scorciatoia valida solo nella modalità Pagine; `key`: tasto gestito
+        dalla griglia quando ha il fuoco (Canc, Ctrl+C/X/V), mostrato solo nel suggerimento."""
         a = ctx.action(text, icon_name, slot, tooltip=tip)
+        base = tip or text
         if shortcut:
             a.setShortcut(QKeySequence(shortcut))
-            a.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            c.organizer.addAction(a)
-        a.setProperty("baseTip", tip or text)
+            scoped.append(a)
+        if key is not None:
+            seq = QKeySequence(key).toString(QKeySequence.SequenceFormat.NativeText)
+            base = f"{base} ({seq})"
+            a.setToolTip(base)
+        a.setProperty("baseTip", base)
         if structural_op:
             structural.append(a)
         c.all_actions.append(a)
@@ -70,9 +78,9 @@ def build_actions(ctx, c, mode) -> None:
     c.act_rotate_left = act(_("Ruota a sinistra"), "rotate-ccw", lambda: c.rotate(-90), "Ctrl+Shift+-")
     c.act_rotate_right = act(_("Ruota a destra"), "rotate-cw", lambda: c.rotate(90), "Ctrl+Shift++")
     c.act_rotate_180 = act(_("Ruota di 180°"), "refresh-cw", lambda: c.rotate(180))
-    c.act_delete = act(_("Elimina"), "trash-2", c.delete, QKeySequence.StandardKey.Delete,
+    c.act_delete = act(_("Elimina"), "trash-2", c.delete, key=QKeySequence.StandardKey.Delete,
                        tip=_("Elimina le pagine selezionate"))
-    c.act_duplicate = act(_("Duplica"), "copy-plus", lambda: c.duplicate(), "Ctrl+D",
+    c.act_duplicate = act(_("Duplica"), "copy-plus", lambda: c.duplicate(),
                           tip=_("Duplica le pagine selezionate"))
     c.act_duplicate_dlg = act(_("Duplica…"), "copy-plus", _dialog(c, "dialogs", "open_duplicate_dialog"))
     c.act_extract = act(_("Estrai…"), "file-output", _dialog(c, "dialogs", "open_extract_dialog"),
@@ -102,11 +110,11 @@ def build_actions(ctx, c, mode) -> None:
     c.act_collate = act(_("Fascicola fronte/retro…"), "book-copy", _dialog(c, "dialogs", "open_collate_dialog"))
 
     # --- appunti
-    c.act_copy = act(_("Copia pagine"), "copy", lambda: c.copy_pages(False), QKeySequence.StandardKey.Copy,
+    c.act_copy = act(_("Copia pagine"), "copy", lambda: c.copy_pages(False), key=QKeySequence.StandardKey.Copy,
                      structural_op=False)
-    c.act_cut = act(_("Taglia pagine"), "scissors", lambda: c.copy_pages(True), QKeySequence.StandardKey.Cut)
+    c.act_cut = act(_("Taglia pagine"), "scissors", lambda: c.copy_pages(True), key=QKeySequence.StandardKey.Cut)
     c.act_paste = act(_("Incolla pagine dopo"), "clipboard-paste", lambda: c.paste_pages(False),
-                      QKeySequence.StandardKey.Paste)
+                      key=QKeySequence.StandardKey.Paste)
     c.act_paste_before = act(_("Incolla pagine prima"), "clipboard-paste", lambda: c.paste_pages(True))
     c.act_share = act(_("Invia per posta"), "mail", lambda: c.share("mail"), structural_op=False)
     c.act_share_save = act(_("Salva una copia delle pagine…"), "share-2", lambda: c.share("save"),
@@ -143,6 +151,11 @@ def build_actions(ctx, c, mode) -> None:
     c.act_unlock = ctx.action(_("Sblocca"), "lock-open", c.unlock, tooltip=_("Sblocca con la password del proprietario"))
 
     c.structural_actions = structural
+    mode.scope_shortcuts(*scoped)
+    c.organizer.grid.keyCommands = {
+        QKeySequence.StandardKey.Delete: c.act_delete, QKeySequence.StandardKey.Copy: c.act_copy,
+        QKeySequence.StandardKey.Cut: c.act_cut, QKeySequence.StandardKey.Paste: c.act_paste,
+    }
 
     # --- barra contestuale
     mode.add_action(c.act_rotate_left)

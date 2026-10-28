@@ -99,6 +99,8 @@ class PagesController:
             act.setToolTip(tip if allowed or view is None else f"{tip}\n{reason}")
         if hasattr(self, "act_unlock"):
             self.act_unlock.setVisible(view is not None and not allowed)
+        if hasattr(self, "act_split"):
+            self.act_split.setEnabled(view is not None and view.page_count >= 2)
         if hasattr(self, "act_swap"):
             self.act_swap.setEnabled(view is not None and allowed and len(self.selected()) == 2)
         if hasattr(self, "act_paste"):
@@ -118,6 +120,7 @@ class PagesController:
         self.organizer._update_info()
 
     def on_mode_left(self) -> None:
+        self.ctx.window.statusBar().clearMessage()
         if self.ctx.central_widget() is self.organizer:
             self.ctx.set_central_widget(None)
 
@@ -275,7 +278,7 @@ class PagesController:
             else _("Eliminare la pagina {r}?").format(r=pages[0] + 1)
         if details:
             msg += "\n\n" + "\n".join("• " + d for d in details)
-        if self.ctx.settings().value("pages/confirm_delete", True, type=bool):
+        if self.ctx.settings().value("pages/confirm_delete", False, type=bool):   # UX-13: annullabile
             if not self.ctx.confirm(_("Elimina pagine"), msg):
                 return
         first = pages[0]
@@ -630,7 +633,8 @@ def send_by_mail(path: Path) -> bool:
 # ==================================================================== registrazione
 def register(ctx) -> PagesController:
     add_translations("en", EN)
-    for name in ("stamp", "stamp_dialogs", "layout", "layout_dialogs", "images", "images_dialogs", "dialogs"):
+    from pathlib import Path as _P
+    for name in sorted(p.stem for p in _P(__file__).parent.glob("*.py") if p.stem not in ("__init__", "module")):
         mod = _optional(name)
         tr = getattr(mod, "TRANSLATIONS", None) if mod else None
         if tr:

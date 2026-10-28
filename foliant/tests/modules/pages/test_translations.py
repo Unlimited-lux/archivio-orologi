@@ -5,13 +5,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import importlib
+
 import foliant.modules.pages as pkg
-from foliant.modules.pages import dialogs, images, images_dialogs, layout, layout_dialogs, stamp, stamp_dialogs
 from foliant.modules.pages.translations import EN
 
 ALL = {}
-for mod in (dialogs, images, images_dialogs, layout, layout_dialogs, stamp, stamp_dialogs):
-    ALL.update(getattr(mod, "TRANSLATIONS", {}))
+for _path in Path(pkg.__file__).parent.glob("*.py"):
+    if _path.stem != "__init__":
+        ALL.update(getattr(importlib.import_module(f"foliant.modules.pages.{_path.stem}"), "TRANSLATIONS", {}) or {})
 ALL.update(EN)
 ALL["…"] = "…"   # esempio nella docstring del motore
 

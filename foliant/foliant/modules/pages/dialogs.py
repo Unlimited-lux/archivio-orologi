@@ -156,6 +156,7 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Il documento ha una sola pagina: non c'è nulla da dividere.": "The document has only one page: there is nothing to split.",
     "Cerca il testo solo nel quarto superiore della pagina": "Search the text only in the top quarter of the page",
     "OK": "OK",
     "Attuali:": "Current:",
@@ -370,11 +371,11 @@ class PositionBox(QGroupBox):
         return selected[0] if where == "before" else selected[-1] + 1
 
 
-def _apply(ctx, label: str, fn, select=None):
+def _apply(ctx, label: str, fn, select=None, view=None):
     c = getattr(ctx, "pages_controller", None)
     if c is not None:
-        return c.apply(label, fn, select=select)
-    view = ctx.current_view()
+        return c.apply(label, fn, select=select, view=view)
+    view = view or ctx.current_view()
     try:
         with view.document.change(label) as pdf:
             return fn(pdf)
@@ -748,8 +749,9 @@ def open_extract_dialog(ctx, view, selected: list[int]) -> bool:
             ctx.info(_("Estrai pagine"), _("Le pagine estratte non sono state eliminate: il documento deve "
                                            "conservarne almeno una."))
         else:
+            # sul documento sorgente, non sul risultato appena aperto in un'altra scheda
             _apply(ctx, _("Elimina pagine estratte"), lambda pdf: E.delete_pages(pdf, pages),
-                   select=lambda r: [max(0, min(pages[0], pdf_count(document) - 1))])
+                   select=lambda r: [max(0, min(pages[0], pdf_count(document) - 1))], view=view)
     return True
 
 
@@ -916,7 +918,7 @@ def open_split_dialog(ctx, view, selected: list[int] | None = None) -> bool:
     document = view.document
     with ENGINE_LOCK:
         if document.pdf.page_count < 2:
-            ctx.error(_("Dividi documento"), _("Il documento non ha pagine."))
+            ctx.error(_("Dividi documento"), _("Il documento ha una sola pagina: non c'è nulla da dividere."))
             return False
     dlg = SplitDialog(ctx.window, document)
     dlg.ask_paths = ctx.ask_open_paths
@@ -989,6 +991,7 @@ class MergeDialog(BaseDialog):
                                (_("Ordina per nome"), "arrow-down-a-z", lambda: self.sort("name")),
                                (_("Ordina per data"), "calendar", lambda: self.sort("date"))):
             b = QPushButton(icon(ic), text)
+            b.setMinimumWidth(b.fontMetrics().horizontalAdvance(text) + 52)
             b.clicked.connect(slot)
             row.addWidget(b)
         row.addStretch(1)

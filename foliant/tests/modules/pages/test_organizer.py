@@ -60,7 +60,6 @@ def test_click_shift_click_selects_range(pages_window, qtbot):
     qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=r2)
     qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, pos=r5)
     assert grid.selected_pages() == [1, 2, 3, 4]
-    assert "4 pagine selezionate" in window.statusBar().currentMessage()
     assert "4 pagine selezionate" in ctrl(window).organizer.info_label.text()
     qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier, pos=r2)
     assert grid.selected_pages() == [2, 3, 4]
@@ -142,6 +141,42 @@ def test_delete_selected_and_undo(pages_window):
     view.document.undo()
     assert doc_texts(view) == [f"P{i}" for i in range(1, 11)]
     assert c.organizer.grid.page_count() == 10
+
+
+def test_status_not_left_after_mode_exit(pages_window):
+    window, view = pages_window
+    c = ctrl(window)
+    c.organizer.grid.select_pages([0, 1])
+    assert "selezionat" in c.organizer.info_label.text()
+    window.set_mode("leggi")
+    assert "selezionat" not in window.statusBar().currentMessage()
+
+
+def test_shortcuts_scoped_and_keys(pages_window, qtbot):
+    window, view = pages_window
+    c = ctrl(window)
+    assert not c.act_delete.shortcuts() and not c.act_copy.shortcuts()
+    assert c.act_duplicate.shortcuts()
+    window.set_mode("leggi")
+    assert not c.act_duplicate.shortcuts()
+    window.set_mode("pagine")
+    grid = c.organizer.grid
+    grid.select_pages([3])
+    grid.setFocus()
+    qtbot.keyClick(grid, Qt.Key.Key_Delete)
+    assert view.page_count == 9
+
+
+def test_no_duplicate_shortcuts_in_pages_mode(pages_window):
+    from collections import defaultdict
+    from PySide6.QtGui import QAction, QKeySequence
+    window, view = pages_window
+    seen = defaultdict(list)
+    for act in window.findChildren(QAction):
+        for seq in act.shortcuts():
+            if not seq.isEmpty():
+                seen[seq.toString(QKeySequence.SequenceFormat.PortableText)].append(act.text())
+    assert not {k: v for k, v in seen.items() if len(v) > 1}
 
 
 def test_delete_all_refused(window, tmp_path, qtbot):

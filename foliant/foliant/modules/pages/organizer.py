@@ -551,10 +551,18 @@ class PageGrid(QListView):
         super().wheelEvent(ev)
 
     # -------------------------------------------------------------- tastiera
+    keyCommands: dict = {}
+
     def keyPressEvent(self, ev) -> None:
         if ev.matches(QKeySequence.StandardKey.SelectAll):
             self.selectAll()
             return
+        for key, action in self.keyCommands.items():
+            if ev.matches(key):
+                if action.isEnabled():
+                    action.trigger()
+                ev.accept()
+                return
         super().keyPressEvent(ev)
 
     # -------------------------------------------------------------- trascinamento
@@ -762,7 +770,5 @@ class Organizer(QWidget):
 
     def _update_info(self, *_a) -> None:
         self.info_label.setText(self.status_text())
-        win = self.window()
-        if hasattr(win, "statusBar") and self.isVisible():
-            win.statusBar().showMessage(self.status_text())
+
 
