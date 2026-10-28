@@ -1451,7 +1451,8 @@ def _analyze_changes(reader, signed_rev: int) -> tuple[list[str], list[str]]:
             sigs += 1
             continue
         if sub == "/Widget" or "/FT" in obj:
-            ft = obj.get("/FT") or (obj.get("/Parent") or {}).get("/FT")
+            parent = obj["/Parent"] if "/Parent" in obj else None   # [] risolve il riferimento indiretto
+            ft = obj.get("/FT") or (parent.get("/FT") if isinstance(parent, generic.DictionaryObject) else None)
             if ft != "/Sig" and not is_new:
                 form_fill += 1
             continue
@@ -1568,9 +1569,53 @@ def _diff_policy():
                 for r in updates:
                     yield ModificationLevel.ANNOTATIONS, ReferenceUpdate(r)
 
+    class WidgetChildFillRule(QualifiedWhitelistRule):
+        """Compilazione di un campo con struttura padre + widget figlio (widget senza /T, con
+        /Parent): pyHanko giustifica il nuovo aspetto solo sul dizionario del campo. Qui si
+        accetta il widget figlio se, tolte le chiavi d'aspetto, è invariato, insieme alle nuove
+        dipendenze del suo aspetto (livello FORM_FILLING, come la compilazione del campo)."""
+
+        def apply_qualified(self, old, new):
+            from pyhanko.sign.diff_analysis.rules.form_field_rules import _allow_appearance_update
+            xc = old.reader.xrefs
+            for ref in new.explicit_refs_in_revision():
+                try:
+                    if xc.get_historical_ref(ref, old.revision) is None:
+                        continue
+                    obj_new = new(ref)
+                    obj_old = old(ref)
+                except Exception:  # noqa: BLE001
+                    continue
+                if not isinstance(obj_new, generic.DictionaryObject) or not isinstance(obj_old,
+                                                                                       generic.DictionaryObject):
+                    continue
+                if obj_new.get("/Subtype") != "/Widget" or "/T" in obj_new or "/Parent" not in obj_new:
+                    continue
+                parent = obj_new["/Parent"]
+                if not isinstance(parent, generic.DictionaryObject) or "/T" not in parent:
+                    continue
+                ft = parent.get("/FT")
+                if ft is None or ft == "/Sig" or "/Kids" not in parent:
+                    continue
+                # solo chiavi d'aspetto: /AP e /AS, più /BS e /MK che il motore riscrive
+                # rigenerando l'aspetto (es. /BS /W 0 → 1)
+                appearance_keys = {"/AP", "/AS", "/BS", "/MK"}
+                keys_old = set(obj_old.keys()) - appearance_keys
+                keys_new = set(obj_new.keys()) - appearance_keys
+                if keys_old != keys_new or any(repr(obj_old.raw_get(k)) != repr(obj_new.raw_get(k))
+                                               for k in keys_new):
+                    continue
+                try:
+                    deps = list(_allow_appearance_update(obj_old, obj_new, old, new))
+                except Exception:  # noqa: BLE001 - aspetto sospetto: decide pyHanko
+                    continue
+                yield ModificationLevel.FORM_FILLING, ReferenceUpdate(ref)
+                for dep in deps:
+                    yield ModificationLevel.FORM_FILLING, ReferenceUpdate(dep)
+
     base = DEFAULT_DIFF_POLICY
     _DIFF_POLICY = StandardDiffPolicy(
-        global_rules=list(base.global_rules) + [AnnotationRule()],
+        global_rules=list(base.global_rules) + [AnnotationRule(), WidgetChildFillRule()],
         form_rule=base.form_rule,
     )
     return _DIFF_POLICY
