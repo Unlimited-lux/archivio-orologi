@@ -111,3 +111,68 @@ def test_rotate_view_keeps_document(view):
     assert not view.document.is_modified
     w, h = view.page_size(0)
     assert w > h
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_link_click_on_rotated_page(qtbot, tmp_path, rotation):
+    """Il collegamento si trova dove è disegnato, anche su pagine ruotate."""
+    path = tmp_path / "link.pdf"
+    d = pymupdf.open()
+    d.new_page(); d.new_page()
+    p = d[0]
+    area = pymupdf.Rect(100, 200, 260, 230)
+    p.insert_link({"kind": pymupdf.LINK_GOTO, "from": area, "page": 1, "to": pymupdf.Point(72, 72)})
+    p.set_rotation(rotation)
+    d.save(str(path))
+    v = DocumentView(Document.open(path))
+    qtbot.addWidget(v)
+    v.resize(900, 900)
+    v.show()
+    qtbot.waitExposed(v)
+    hit = v.view_to_page(v.page_to_view(0, area).center())
+    assert hit is not None and hit[0] == 0
+    link = v.link_at(0, hit[1])
+    assert link is not None and link.get("page") == 1, (rotation, hit, v.links(0))
+
+
+def test_crop_larger_than_mediabox_mapping(qtbot, tmp_path):
+    """CropBox più grande del MediaBox su pagina ruotata: testo selezionabile dove si vede."""
+    path = tmp_path / "fuori.pdf"
+    d = pymupdf.open()
+    p = d.new_page(width=595, height=842)
+    p.insert_text((100, 300), "ALFA", fontsize=30)
+    d.xref_set_key(p.xref, "CropBox", "[-20 -30 620 857]")
+    d.xref_set_key(p.xref, "Rotate", "90")
+    d.save(str(path))
+    v = DocumentView(Document.open(path))
+    qtbot.addWidget(v)
+    v.resize(900, 900)
+    v.show()
+    qtbot.waitExposed(v)
+    v.set_zoom(1.0)
+    v.flush_rendering()
+    word = next(w for w in v.words(0) if w[4] == "ALFA")
+    centre = v.page_to_view(0, pymupdf.Rect(word[:4])).center()
+    img = v.grab().toImage()
+    dpr = img.devicePixelRatio()
+    # nel riquadro della parola c'è inchiostro (pixel scuri)
+    dark = 0
+    r = v.page_to_view(0, pymupdf.Rect(word[:4]))
+    for x in range(int(r.left()), int(r.right()), 2):
+        for y in range(int(r.top()), int(r.bottom()), 2):
+            if img.pixelColor(int(x * dpr), int(y * dpr)).lightness() < 100:
+                dark += 1
+    assert dark > 10, (r, dark)
+    assert v.word_at(0, v.view_to_page(centre)[1])[4] == "ALFA"
+
+
+def test_fit_width_has_no_horizontal_scroll(qtbot, sample_pdf):
+    from foliant.ui.document_view import FIT_WIDTH
+    v = DocumentView(Document.open(sample_pdf))
+    qtbot.addWidget(v)
+    for w in (640, 777, 858, 1001, 1333):
+        v.resize(w, 700)
+        v.show()
+        qtbot.waitExposed(v)
+        v.set_fit(FIT_WIDTH)
+        assert v.horizontalScrollBar().maximum() == 0, w

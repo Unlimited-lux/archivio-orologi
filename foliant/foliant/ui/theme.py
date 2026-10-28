@@ -164,6 +164,7 @@ def stylesheet(t: dict) -> str:
     close_icon = _asset("x", h("text_muted"))
     close_hover = _asset("x", h("text"))
     arrow = _asset("chevron-down", h("text_muted"))
+    arrow_up = _asset("chevron-up", h("text_muted"))
     return f"""
 QMainWindow, QDialog {{ background: {h('window')}; }}
 QTabBar::close-button {{ image: url({close_icon}); subcontrol-position: right; margin: 2px; width: 14px; height: 14px; }}
@@ -171,6 +172,15 @@ QTabBar::close-button:hover {{ image: url({close_hover}); background: {h('surfac
 QComboBox::drop-down {{ border: none; width: 20px; }}
 QComboBox::down-arrow {{ image: url({arrow}); width: 14px; height: 14px; }}
 QSpinBox#pageSpin {{ padding: 2px 4px; }}
+QSpinBox, QDoubleSpinBox {{ padding-right: 18px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-origin: border; subcontrol-position: top right;
+    width: 16px; border: none; border-left: 1px solid {h('border')}; border-top-right-radius: 6px; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-origin: border; subcontrol-position: bottom right;
+    width: 16px; border: none; border-left: 1px solid {h('border')}; border-bottom-right-radius: 6px; }}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {h('surface_alt')}; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({arrow_up}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({arrow}); width: 10px; height: 10px; }}
 QToolBar#header {{ background: {h('surface')}; border: none; border-bottom: 1px solid {h('border')};
     padding: 4px 8px; spacing: 4px; }}
 QToolBar#contextbar {{ background: {h('surface')}; border: none; border-bottom: 1px solid {h('border')};

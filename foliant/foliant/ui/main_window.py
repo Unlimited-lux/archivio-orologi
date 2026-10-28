@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
         self._props: dict[str, QWidget] = {}
         self._connected_view: DocumentView | None = None
         self.view_menu_providers: list = []
+        # Scorciatoie valide solo in una modalità: (azione, scorciatoie, id modalità)
+        self._mode_shortcuts: list[tuple[QAction, list, str]] = []
         self.module_results: list[tuple[str, Exception | None]] = []
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
@@ -354,6 +356,20 @@ class MainWindow(QMainWindow):
         if 0 <= index < len(ordered):
             self.set_mode(ordered[index].id)
 
+    def _apply_initial_splitter_sizes(self) -> None:
+        """Larghezze iniziali: pannello laterale e proprietà compatti, documento al centro."""
+        if getattr(self, "_splitter_ready", False):
+            return
+        state = self.settings.value("window/splitter")
+        if state is not None and self.splitter.restoreState(state):
+            self._splitter_ready = True
+            return
+        total = max(800, self.splitter.width())
+        side = 280 if self.sidebar.isVisible() else 0
+        props = 300 if self.properties.isVisible() else 0
+        self.splitter.setSizes([side, max(400, total - side - props), props])
+        self._splitter_ready = True
+
     def toggle_sidebar(self) -> None:
         if self.sidebar.isVisible():
             self.sidebar.hide()
@@ -424,6 +440,26 @@ class MainWindow(QMainWindow):
         mode.add_separator()
         mode.add_action(self.act_rotate_view)
         mode.add_action(self.act_fullscreen)
+
+    def scope_action_to_mode(self, act: QAction, mode_id: str) -> None:
+        """La scorciatoia di `act` resta attiva solo nella modalità `mode_id`."""
+        for i, (a, seqs, m) in enumerate(self._mode_shortcuts):
+            if a is act:
+                self._mode_shortcuts[i] = (a, seqs, mode_id)
+                break
+        else:
+            self._mode_shortcuts.append((act, list(act.shortcuts()), mode_id))
+        self._apply_mode_shortcuts()
+
+    def _apply_mode_shortcuts(self) -> None:
+        alive = []
+        for act, seqs, mode_id in self._mode_shortcuts:
+            try:
+                act.setShortcuts(seqs if mode_id == self.current_mode_id else [])
+            except RuntimeError:      # azione già distrutta
+                continue
+            alive.append((act, seqs, mode_id))
+        self._mode_shortcuts = alive
 
     def register_document_action(self, act: QAction) -> None:
         self._document_actions.append(act)
@@ -516,6 +552,7 @@ class MainWindow(QMainWindow):
             previous.button.setChecked(False)
             previous.left.emit()
         self.current_mode_id = mode_id
+        self._apply_mode_shortcuts()
         mode.button.setChecked(True)
         self.context_stack.setCurrentWidget(mode.toolbar)
         if previous is not None:
@@ -581,7 +618,12 @@ class MainWindow(QMainWindow):
         if widget is None:
             return
         self.properties.setCurrentWidget(widget)
-        self.properties.show()
+        if not self.properties.isVisible():
+            self.properties.show()
+            sizes = self.splitter.sizes()
+            if len(sizes) == 3 and sizes[2] < 240:
+                take = 300 - sizes[2]
+                self.splitter.setSizes([sizes[0], max(400, sizes[1] - take), 300])
 
     def hide_properties(self) -> None:
         self.properties.hide()
@@ -807,7 +849,9 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     self.statusBar().showMessage(_("Errore in un pannello: {e}").format(e=e), 8000)
         if view is not None and self._sidebar:
-            self.sidebar.show()
+            if not self.sidebar.isVisible():
+                self.sidebar.show()
+                self._apply_initial_splitter_sizes()
         elif view is None:
             self.sidebar.hide()
             self.properties.hide()
@@ -963,4 +1007,6 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.settings.setValue("window/geometry", self.saveGeometry())
+        if getattr(self, "_splitter_ready", False):
+            self.settings.setValue("window/splitter", self.splitter.saveState())
         event.accept()

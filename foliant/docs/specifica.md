@@ -10,27 +10,25 @@ criteri di accettazione verificabili («Dato…, quando…, allora…») e prior
 
 ## Indice e riepilogo priorità
 
-| Sezione | Funzioni | P0 | P1 | P2 |
-|---|---:|---:|---:|---:|
-| 1. Visualizzazione e navigazione | 53 | 17 | 21 | 15 |
-| 2. Gestione pagine | 41 | 12 | 25 | 4 |
-| 3. Modifica testo | 25 | 13 | 7 | 5 |
-| 4. Immagini, oggetti e collegamenti | 43 | 20 | 14 | 9 |
-| 5. Annotazioni e commenti | 44 | 15 | 25 | 4 |
-| 6. Conversione, creazione e ottimizzazione | 33 | 8 | 16 | 9 |
-| 7. OCR e PDF scannerizzati | 20 | 9 | 9 | 2 |
-| 8. Moduli | 36 | 16 | 15 | 5 |
-| 9. Firma | 25 | 11 | 9 | 5 |
-| 10. Protezione e sicurezza | 34 | 15 | 12 | 7 |
-| 11. Confronto e operazioni in blocco | 37 | 23 | 8 | 6 |
-| 12. Assistente IA | 27 | 0 | 16 | 11 |
-| **Totale** | **418** | **159** | **177** | **82** |
+| Sezione | Funzioni | P0 | P1 | P2 | Fuori ambito |
+|---|---:|---:|---:|---:|---:|
+| 1. Visualizzazione e navigazione | 54 | 18 | 25 | 10 | 1 |
+| 2. Gestione pagine | 41 | 13 | 24 | 4 | 0 |
+| 3. Modifica testo | 25 | 13 | 11 | 1 | 0 |
+| 4. Immagini, oggetti e collegamenti | 43 | 20 | 14 | 9 | 0 |
+| 5. Annotazioni e commenti | 44 | 15 | 27 | 2 | 0 |
+| 6. Conversione, creazione e ottimizzazione | 34 | 8 | 24 | 2 | 0 |
+| 7. OCR e PDF scannerizzati | 20 | 9 | 10 | 1 | 0 |
+| 8. Moduli | 36 | 16 | 15 | 5 | 0 |
+| 9. Firma | 25 | 11 | 9 | 3 | 2 |
+| 10. Protezione e sicurezza | 34 | 15 | 12 | 6 | 1 |
+| 11. Confronto e operazioni in blocco | 37 | 8 | 23 | 6 | 0 |
+| 12. Assistente IA | 32 | 0 | 29 | 3 | 0 |
+| **Totale** | **425** | **146** | **223** | **52** | **4** |
 
 ## 0. Sezioni generali
 
-# Foliant — Specifica funzionale · 0. Sezioni generali
-
-> Stato: bozza 1 · 28/10/2026. Questa parte vale per tutte le aree (sezioni 1–12): visione, ambito, glossario, requisiti non funzionali, modello di interfaccia e convenzioni. Metodo clean-room: redatta da fonti pubbliche, senza testo copiato e senza nomi di prodotti commerciali; il prodotto commerciale usato come termine di paragone è chiamato **editor di riferimento**.
+> Stato: bozza 2 · 28/10/2026 (con le correzioni della revisione indipendente). Questa parte vale per tutte le aree (sezioni 1–12): visione, ambito, glossario, requisiti non funzionali, modello di interfaccia e convenzioni. Metodo clean-room: redatta da fonti pubbliche, senza testo copiato e senza nomi di prodotti commerciali; il prodotto commerciale usato come termine di paragone è chiamato **editor di riferimento**.
 
 ## 0.1 Visione e obiettivi
 
@@ -49,7 +47,7 @@ criteri di accettazione verificabili («Dato…, quando…, allora…») e prior
 
 | ID | Obiettivo | Verifica |
 |---|---|---|
-| O1 | **Parità funzionale completa**: ogni funzione utente dell'editor di riferimento ha in Foliant un equivalente con risultato almeno pari, salvo le esclusioni motivate in 0.2. | Ogni voce dell'inventario di parità è coperta da almeno un requisito di area (0.6). |
+| O1 | **Parità funzionale completa**: ogni funzione utente dell'editor di riferimento ha in Foliant un equivalente con risultato almeno pari, salvo le esclusioni motivate in 0.2. | Ogni riga P in ambito del catalogo delle funzionalità (`docs/funzionalita.md`) è coperta da almeno un requisito P0 o P1 secondo la matrice di copertura della sezione 13 (0.6), salvo le righe 10.15 e 10.16, in ambito con priorità P2 per decisione di ambito (0.2). |
 | O2 | **Uso offline**: tutte le funzioni lavorano senza connessione, tranne l'assistente IA e le poche operazioni che per natura richiedono la rete (es. marca temporale, verifica online di un certificato, apertura di un indirizzo web). | NFR-19, NFR-30 |
 | O3 | **Nessun account obbligatorio**: nessuna registrazione, accesso o attivazione online; nessuna filigrana, quota giornaliera o limite al numero di file imposti dall'applicazione. | UX-21 |
 | O4 | **Documenti al sicuro**: l'originale non viene mai danneggiato; i file prodotti rispettano lo standard e si aprono correttamente in altri lettori. | NFR-08…NFR-12, NFR-28 |
@@ -60,7 +58,7 @@ criteri di accettazione verificabili («Dato…, quando…, allora…») e prior
 ### Principi di prodotto
 
 - **Semplice per le cose frequenti, completo per quelle rare**: le operazioni comuni richiedono uno o due gesti; quelle avanzate restano raggiungibili senza ingombrare.
-- **Reversibile finché possibile**: annulla illimitato; conferme solo dove il danno sarebbe definitivo.
+- **Reversibile finché possibile**: annulla di almeno 100 passi, nei limiti di memoria (NFR-11); conferme solo dove il danno sarebbe definitivo (UX-13).
 - **Stato sempre visibile**: l'utente vede se il documento è modificato, protetto, firmato, conforme a uno standard o riparato.
 - **L'IA aiuta, non è un requisito**: tutto ciò che si può fare in locale funziona senza IA.
 
@@ -71,16 +69,16 @@ criteri di accettazione verificabili («Dato…, quando…, allora…») e prior
 | Sez. | Area | Contenuto in sintesi |
 |---|---|---|
 | 0 | Sezioni generali | requisiti trasversali, interfaccia comune, stampa, invio per email, integrazione desktop |
-| 1 | Visualizzazione e navigazione | viste, zoom, ricerca, segnalibri, presentazione, lettura ad alta voce, proprietà |
+| 1 | Visualizzazione e navigazione | gestione dei file locali e archivi compressi, viste, zoom, ricerca, segnalibri, allegati e portfolio, presentazione, lettura ad alta voce, informazioni sul documento |
 | 2 | Pagine | inserire, estrarre, dividere, unire, ruotare, ritagliare, riordinare, etichettare |
 | 3 | Modifica testo | correggere e aggiungere testo, caratteri e formattazione, trova e sostituisci |
 | 4 | Immagini, oggetti, collegamenti | immagini, collegamenti, filigrana, sfondo, intestazioni e piè di pagina |
 | 5 | Annotazioni | evidenziazioni, note, forme, disegno, timbri, misure, gestione dei commenti |
-| 6 | Conversione, creazione, ottimizzazione | esportazione in altri formati, creazione da file, scanner e appunti, compressione |
+| 6 | Conversione, creazione, ottimizzazione | esportazione in altri formati, creazione da file, scanner, fotocamera del computer e appunti, portfolio, compressione |
 | 7 | OCR | riconoscimento del testo nelle scansioni, livello di testo, lingue |
 | 8 | Moduli | creazione, riconoscimento, compilazione, dati dei moduli |
 | 9 | Firma | firma grafica, firma digitale con certificato, marca temporale, verifica |
-| 10 | Protezione | password e permessi, redazione, sanitizzazione, appiattimento, PDF/A |
+| 10 | Protezione | password e permessi, redazione, rimozione dei dati nascosti, appiattimento, cartella protetta e blocco dell'applicazione |
 | 11 | Confronto e batch | confronto tra versioni, elaborazioni in blocco, numerazione Bates |
 | 12 | Assistente IA | riassunto, traduzione, domande sul documento, scrittura assistita (solo con fornitore configurato) |
 
@@ -92,18 +90,29 @@ Funzioni dell'editor di riferimento non legate a una singola area:
 | Invio del documento per email | In ambito: UX-16, tramite il programma di posta predefinito. |
 | Anteprima dei PDF nel gestore file | In ambito: NFR-33. |
 | Cartelle di rete (WebDAV, FTP/SFTP, SMB) e archivi di terze parti | In ambito in modo indiretto: si aprono e salvano file nelle posizioni di rete e nelle cartelle sincronizzate visibili nel selettore file del sistema (NFR-34). Nessun client proprio, che duplicherebbe funzioni del desktop. |
-| Gestione file (rinomina, sposta, cartelle, archivi compressi, preferiti) | Ridotta a recenti, documenti fissati, **Mostra nella cartella**, **Copia percorso** (UX-10, UX-16); il resto spetta al gestore file del sistema, che già lo fa. |
+| Gestione dei file locali (rinomina, duplica, sposta, cestino, cartelle, documenti fissati, archivi compressi) | In ambito, adattata al desktop: opera sui file e sulle cartelle reali del disco (VIS-03, VIS-04), oltre a recenti, documenti fissati, **Mostra nella cartella** e **Copia percorso** (UX-10, UX-16). |
+| Acquisizione con la fotocamera | In ambito, adattata al desktop: webcam del computer o foto di documenti importate, con rilevamento dei bordi e correzione prospettica (CNV-26). |
+| Cartella protetta e blocco dell'applicazione | In ambito, adattati al desktop: spazio cifrato locale (SEC-31) e blocco con codice o autenticazione del sistema, anche biometrica se il computer la offre (SEC-32); priorità P2. |
 
 ### Fuori ambito
 
+I requisiti che corrispondono a elementi fuori ambito restano nella specifica per tracciabilità, con l'indicazione «Fuori ambito» al posto della priorità (0.6); non vanno implementati.
+
 | Elemento escluso | Motivazione |
 |---|---|
-| Servizi cloud proprietari (spazio di archiviazione online, condivisione tramite link o codice QR) | Richiedono un server gestito e un account, in contrasto con uso offline e assenza di account; i file restano dove l'utente li salva. |
-| Sincronizzazione legata a un account (documenti, firme, preferenze tra dispositivi) | Presuppone account e server; l'alternativa locale è esportare e importare firme e preferenze come file. |
-| App mobili e funzioni solo mobili (scansione con fotocamera, cartella protetta, sblocco biometrico) | Foliant è un'applicazione desktop; l'acquisizione da scanner sul computer resta in ambito (area 6). |
-| Servizi online di raccolta firme da più persone | Sono servizi cloud; resta in ambito la firma locale, anche con più firme successive sullo stesso file (area 9). |
+| Servizi cloud proprietari: spazio di archiviazione online, cifratura dei file sincronizzati, condivisione tramite link o codice QR (catalogo 13.01, 13.03–13.05; requisiti VIS-46 e SEC-33) | Richiedono un server gestito e un account, in contrasto con uso offline e assenza di account; i file restano dove l'utente li salva. |
+| Sincronizzazione legata a un account: documenti, firme, preferenze tra dispositivi (catalogo 13.02) | Presuppone account e server; l'alternativa locale è esportare e importare firme e preferenze come file. |
+| Connettori interni verso archivi di terze parti e cartelle di rete (catalogo 13.06–13.09) | Le posizioni di rete montate dal desktop sono già raggiungibili dal selettore file del sistema (NFR-34). |
+| App per dispositivi mobili | Foliant è un'applicazione desktop; le funzioni mobili utili anche sul desktop sono in ambito in forma adattata (fotocamera del computer, cartella protetta, blocco dell'applicazione). |
+| Servizi di raccolta firme da più persone e firma per aziende, compreso il collegamento a servizi di firma remota (catalogo 13.10, 13.11; requisiti SIG-24 e SIG-25) | Richiedono un server, l'identificazione dei firmatari e la conformità del servizio; resta in ambito la firma locale, anche con più firme successive sullo stesso file (SIG-11). |
+| Aggiornamenti gestiti dall'applicazione, archiviazione remota, telemetria | Gli aggiornamenti passano dal sistema di pacchetti (NFR-30); niente archiviazione remota né telemetria (NFR-19). SEC-34 riguarda solo le connessioni delle funzioni in ambito. |
+| Esecuzione degli script dei documenti (catalogo 8.18) | Foliant non contiene un motore di script generale e non esegue gli script dei documenti (NFR-17); le funzioni di formato e calcolo comunemente presenti nei moduli sono eseguite in modo nativo (FRM-08). |
 | Altre piattaforme (altri sistemi desktop, versione web) | Fuori dall'obiettivo di questa specifica; le scelte di interfaccia e di formato non devono precluderle. |
 | Licenze, piani, periodi di prova, filigrane di prova | Foliant non limita le funzioni né marca i documenti prodotti. |
+
+### Aggiunte non specificate in questa versione
+
+Alcune righe A (aggiunte) del catalogo non hanno ancora requisiti e nessun requisito dipende da esse: criteri amministrativi e configurazioni imposte dall'amministratore (catalogo 10.19); creazione e verifica della struttura logica per l'accessibilità dei documenti (catalogo 6.45–6.50). I requisiti che producono livelli di conformità «a» o PDF/UA si applicano solo ai documenti che hanno già una struttura logica o la ottengono dall'OCR (OCR-17); l'accessibilità dell'applicazione è definita in NFR-21…NFR-24.
 
 ### Funzioni IA: solo con un fornitore configurato dall'utente
 
@@ -139,7 +148,7 @@ Foliant non include né gestisce un proprio servizio di intelligenza artificiale
 | **Firma elettronica grafica** | Immagine della firma (disegnata, digitata o importata) posta sulla pagina: esprime un'intenzione ma da sola non garantisce identità né integrità. |
 | **Flusso di contenuto** | Sequenza di istruzioni di disegno di una pagina («scrivi questo testo, con questo carattere, in questo punto», «traccia questa linea», «mostra questa immagine»). Il testo non è organizzato in paragrafi come in un elaboratore di testi ma in frammenti posizionati: per modificarlo bisogna ricostruire righe e paragrafi. |
 | **Identità digitale** | Certificato più la relativa chiave privata, pronti per firmare. |
-| **Linearizzazione** | Organizzazione del file che permette di mostrare la prima pagina prima di aver letto o scaricato tutto il file («visualizzazione web veloce»). |
+| **Linearizzazione** | Organizzazione del file che permette di mostrare la prima pagina prima di aver letto o scaricato tutto il file (file «ottimizzato per il web», CNV-31). |
 | **Livello** (contenuto opzionale) | Gruppo di contenuti che si può mostrare o nascondere, a schermo o in stampa (es. quote di un disegno, testo in un'altra lingua). Non è un ordine di sovrapposizione come nei programmi di grafica. |
 | **Livello di testo** | Testo invisibile collocato esattamente sopra l'immagine di una pagina scansionata dopo l'OCR: la pagina appare identica ma diventa ricercabile, selezionabile e copiabile. |
 | **Marca temporale** | Attestazione, firmata da un servizio esterno affidabile, che un documento o una firma esisteva in un certo momento; rende la data indipendente dall'orologio del computer. Richiede la rete. |
@@ -161,12 +170,12 @@ Foliant non include né gestisce un proprio servizio di intelligenza artificiale
 | **Redazione** | Rimozione definitiva di testo, immagini o aree. Diversa dal coprire con un rettangolo nero, che lascia il contenuto sotto e recuperabile. Avviene in due fasi: contrassegno (modificabile) e applicazione (definitiva). |
 | **Rendering** | Calcolo dell'immagine di una pagina per mostrarla a schermo o stamparla. |
 | **Revoca** | Annullamento di un certificato prima della scadenza; per verificarla di norma serve la rete. |
+| **Rimozione dei dati nascosti** | Eliminazione, prima di condividere un documento, dei contenuti non visibili o riservati: metadati, script, allegati, livelli nascosti, commenti, dati dei moduli, revisioni precedenti, oggetti inutilizzati (SEC-22). |
 | **Riquadri della pagina** | Rettangoli che delimitano il foglio intero, l'area visibile (ritaglio) e le aree di rifilo e stampa. Ritagliare una pagina di norma cambia solo l'area visibile, senza cancellare il contenuto esterno. |
 | **Risoluzione** (dpi) | Punti per pollice di un'immagine; 300 dpi è il valore tipico per scansioni e OCR. |
 | **Salvataggio completo** | Il file viene riscritto da zero: elimina revisioni precedenti e oggetti inutilizzati, ma invalida le firme digitali presenti. |
 | **Salvataggio incrementale** | Le modifiche vengono aggiunte in coda al file senza alterare i byte esistenti; ogni salvataggio crea una nuova **revisione**. Preserva le firme digitali, ma le revisioni precedenti restano nel file e possono contenere dati rimossi. |
-| **Sanitizzazione** | Rimozione dei contenuti nascosti: metadati, script, allegati, livelli nascosti, commenti, dati dei moduli, revisioni precedenti, oggetti inutilizzati. |
-| **Script del documento** | Piccolo programma inserito nel PDF (calcoli e controlli nei moduli, azioni automatiche all'apertura); può essere usato in modo malevolo, perciò Foliant non lo esegue senza consenso (NFR-17). |
+| **Script del documento** | Piccolo programma inserito nel PDF (ECMAScript per PDF, ISO 21757-1: calcoli e controlli nei moduli, azioni automatiche all'apertura); può essere usato in modo malevolo, perciò Foliant non lo esegue mai. Le funzioni di formato e calcolo comunemente presenti nei moduli sono riconosciute ed eseguite in modo nativo, senza interpretare codice (NFR-17, FRM-08). |
 | **Segnalibro** | Voce dell'indice navigabile del documento, anche a più livelli, che porta a una pagina o posizione; non fa parte del contenuto della pagina. |
 | **Struttura logica** (PDF con tag) | Descrizione nascosta dell'organizzazione del contenuto (titoli, paragrafi, elenchi, tabelle, testi alternativi delle immagini) e dell'ordine di lettura; serve ai lettori di schermo e alle conversioni fedeli. |
 | **Tabella dei riferimenti incrociati** | Indice che dice dove si trova ogni oggetto nel file; se è danneggiata, spesso il file si ripara ricostruendola. |
@@ -181,17 +190,19 @@ Foliant non include né gestisce un proprio servizio di intelligenza artificiale
 | **Banner** | Striscia in cima all'area documento che segnala una condizione del documento e propone un'azione (UX-14). |
 | **Barra contestuale** | Barra con gli strumenti della modalità attiva (UX-05). |
 | **Barra delle modalità** | Barra per passare da un'attività all'altra (UX-04). |
+| **Catalogo delle funzionalità** | Elenco delle funzioni dell'editor di riferimento (righe P, obbligatorie per la parità) e delle aggiunte (righe A), nel file `docs/funzionalita.md`; la matrice della sezione 13 collega ogni riga P ai requisiti che la coprono (0.6). |
 | **Corpus di prova** | Insieme di file di test usato per verificare i criteri (0.4). |
 | **Editor di riferimento** | Prodotto commerciale rispetto al quale si misura la parità funzionale; non viene nominato nella specifica. |
 | **Elaborazione in blocco** | Stessa operazione applicata a molti file in un'unica attività. |
 | **Fornitore IA** | Servizio remoto o modello locale, configurato dall'utente, che esegue le funzioni di intelligenza artificiale (0.2). |
+| **Fuori ambito** | Indicazione, al posto della priorità, di un requisito conservato per tracciabilità ma escluso dall'ambito (0.2): non va implementato (0.6). |
 | **Home** | Schermata iniziale con recenti, azioni rapide e zona di rilascio (UX-10). |
-| **Inventario di parità** | Elenco di lavoro delle funzioni utente dell'editor di riferimento, usato per la tracciabilità (0.6). |
 | **Macchina di riferimento** | Computer su cui si misurano i requisiti di prestazione (0.4). |
 | **Modalità** | Insieme di strumenti dedicati a un'attività (es. Commenta); cambiarla non modifica il documento. |
 | **Operazione irreversibile** | Operazione che rimuove contenuti in modo definitivo una volta salvato il file, o che modifica file diversi dal documento corrente (es. sovrascrittura); richiede conferma (UX-13). |
 | **Pannello laterale** | Pannello a sinistra con miniature, segnalibri, commenti e altri elenchi (UX-06). |
 | **Pannello proprietà** | Pannello a destra con le proprietà dell'elemento selezionato o dello strumento attivo (UX-08). |
+| **Requisito di riferimento** | Unico requisito che definisce un comportamento descritto anche altrove; gli altri requisiti vi rimandano e, in caso di differenza, vale il riferimento (0.6). |
 | **Scheda** | Linguetta che rappresenta un documento aperto nella finestra (UX-03). |
 | **Strumento attivo** | Strumento che interpreta clic e trascinamenti nell'area documento (es. Evidenzia); quello predefinito è **Seleziona**. |
 
@@ -203,6 +214,7 @@ Salvo diversa indicazione, i criteri numerici valgono nelle condizioni seguenti.
 
 - **Macchina di riferimento (MR)**: computer x86-64 di fascia media (processore a 4 core / 8 thread del 2021 circa), 8 GB di RAM, unità a stato solido, grafica integrata, schermo 1920 × 1080 a 60 Hz con scala 100%, versione LTS corrente di Ubuntu con sessione GNOME standard, nessun altro carico rilevante.
 - **Tempi**: mediana di 5 ripetizioni. «A freddo» = primo avvio dopo il riavvio del sistema; «a caldo» = avvii successivi.
+- **Validità per tutte le sezioni**: macchina di riferimento, corpus e condizioni di misura di questa sezione valgono per i criteri di tutte le aree. I preamboli d'area possono aggiungere file al corpus (fixture) e definire metriche proprie, ma non ridefiniscono la macchina di riferimento né le soglie già fissate in 0.4 e 0.5; dove un criterio d'area misura la stessa grandezza di un NFR o di un UX, vale la soglia della sezione 0.
 - **Corpus di prova**, mantenuto insieme alla specifica:
 
 | Sigla | Contenuto |
@@ -220,12 +232,12 @@ Salvo diversa indicazione, i criteri numerici valgono nelle condizioni seguenti.
 L'applicazione si avvia rapidamente e mostra la Home pronta all'uso.
 - **Dato** MR appena riavviata, **quando** avvio Foliant dal menu applicazioni, **allora** la Home è visibile e risponde all'input entro 3 s.
 - **Dato** Foliant già avviato almeno una volta dall'accensione, **quando** lo chiudo e lo riavvio, **allora** la Home risponde entro 1,5 s.
-- **Dato** Foliant chiuso, **quando** apro un file C-500 con doppio clic dal gestore file (a caldo), **allora** la prima pagina è leggibile entro 3 s.
+- **Dato** Foliant chiuso, **quando** apro un file C-500 con doppio clic dal gestore file (a caldo), **allora** la prima pagina è disegnata completamente, alla risoluzione dello schermo, entro 3 s.
 
 #### NFR-02 · Apertura di documenti grandi — P0
 All'apertura la prima pagina compare subito; miniature e preparazione della ricerca proseguono in background senza bloccare.
-- **Dato** C-500, **quando** lo apro, **allora** entro 1,5 s la prima pagina è leggibile e la barra di stato mostra «1 di 500».
-- **Dato** C-500 appena aperto, **quando** digito 500 nel campo pagina, **allora** l'ultima pagina è leggibile entro 1 s, anche se le miniature non sono ancora tutte pronte.
+- **Dato** C-500, **quando** lo apro, **allora** entro 1,5 s la prima pagina è disegnata completamente alla risoluzione dello schermo e la barra di stato mostra «1 di 500».
+- **Dato** C-500 appena aperto, **quando** digito 500 nel campo pagina, **allora** l'ultima pagina è disegnata completamente alla risoluzione dello schermo entro 1 s, anche se le miniature non sono ancora tutte pronte.
 - **Dato** C-BIG, **quando** lo apro, **allora** la prima pagina compare entro 3 s e l'interfaccia resta reattiva (NFR-05) per tutto il caricamento.
 
 #### NFR-03 · Rendering della pagina e zoom — P0
@@ -260,8 +272,8 @@ Le operazioni più comuni rispettano le soglie seguenti (MR, mediana di 5 ripeti
 |---|---|---|
 | Primo risultato della ricerca di una parola | C-500 | ≤ 0,5 s |
 | Conteggio completo dei risultati della ricerca | C-500 | ≤ 3 s |
-| Salvataggio incrementale dopo l'aggiunta di un commento | C-500 | ≤ 1 s |
-| Salvataggio completo | C-500 | ≤ 10 s |
+| Salvataggio dopo l'aggiunta di un commento a un documento firmato (incrementale, NFR-09) | C-500 con una firma digitale | ≤ 1 s |
+| Salvataggio (riscrittura completa, NFR-09) | C-500 | ≤ 10 s |
 | Miniature di tutte le pagine (in background) | C-500 | ≤ 20 s |
 | Rotazione, eliminazione o spostamento di 100 pagine | C-500 | ≤ 1 s |
 | Cambio di scheda o di modalità | qualsiasi | ≤ 200 ms |
@@ -277,9 +289,10 @@ Il salvataggio scrive prima un file temporaneo nella stessa cartella, ne verific
 - **Dato** un file con permessi personalizzati (es. leggibile solo dal proprietario) raggiunto tramite un collegamento simbolico, **quando** salvo, **allora** il collegamento resta tale, il file di destinazione è aggiornato e i permessi sono invariati.
 - **Dato** un salvataggio completato, **quando** riapro il file, **allora** si apre senza avvisi e contiene tutte le modifiche.
 
-#### NFR-09 · Salvataggio incrementale — P0
-**Salva** usa il salvataggio incrementale quando possibile; è obbligatorio se il documento contiene firme digitali. **Salva con nome** e le copie ottimizzate usano il salvataggio completo. Dopo una redazione o una sanitizzazione il salvataggio è sempre completo, perché i contenuti rimossi non restino recuperabili nelle revisioni precedenti.
-- **Dato** un PDF con una firma digitale valida, **quando** aggiungo un commento e salvo, **allora** i byte del file originale sono un prefisso identico del nuovo file e la firma risulta ancora integra.
+#### NFR-09 · Salvataggio completo e salvataggio incrementale — P0
+Il comportamento normale di **Salva** è la riscrittura completa del file, eseguita in modo atomico (NFR-08): il file salvato non contiene revisioni precedenti né oggetti inutilizzati. Se il documento contiene firme digitali (anche di certificazione o di diritti d'uso), il salvataggio incrementale è obbligatorio: le modifiche sono aggiunte in coda senza alterare i byte firmati, anche con **Salva con nome**, che copia i byte originali e vi aggiunge le modifiche. Le operazioni che richiedono la riscrittura completa (redazione, rimozione dei dati nascosti, cambio della protezione, appiattimento, linearizzazione, copie ottimizzate) su un documento firmato sono precedute dall'avviso che le firme saranno invalidate. Non esiste una preferenza che cambi queste regole. Questo requisito è il riferimento per il salvataggio (VIS-47, VIS-48, FRM-09, SIG-21 vi rimandano).
+- **Dato** un PDF non firmato che contiene 3 revisioni incrementali, **quando** aggiungo un commento e salvo, **allora** il file salvato ha una sola sezione dei riferimenti incrociati, senza `/Prev`, e nessun oggetto non referenziato.
+- **Dato** un PDF con una firma digitale valida, **quando** aggiungo un commento e salvo, oppure uso **Salva con nome**, **allora** i byte del file originale sono un prefisso identico del nuovo file e la firma risulta ancora integra.
 - **Dato** un documento su cui ho applicato una redazione, **quando** salvo, **allora** il file è riscritto per intero e il testo redatto non compare in nessuna parte del file, nemmeno nei dati decompressi.
 - **Dato** un documento firmato, **quando** un'operazione richiede il salvataggio completo, **allora** prima di salvare compare l'avviso che le firme saranno invalidate, con le scelte **Salva una copia** e **Annulla**.
 
@@ -291,9 +304,10 @@ A intervalli regolari (predefinito 2 minuti; configurabile da 1 a 30 minuti o di
 - **Dato** un documento cifrato, **allora** la sua copia di recupero non è leggibile senza la password del documento.
 - **Dato** un autosalvataggio in corso, **allora** digitazione e scorrimento non si bloccano per più di 100 ms.
 
-#### NFR-11 · Annulla e ripeti illimitati per sessione — P0
-Ogni scheda conserva la cronologia di tutte le operazioni che modificano il documento, dall'apertura alla chiusura, senza limite di numero se non la memoria e il disco disponibili. La cronologia sopravvive ai salvataggi; ogni comando, anche se agisce su molte pagine, è un solo passo; il comando indica cosa annulla (es. «Annulla Elimina 3 pagine»). Le operazioni che producono altri file (esportazioni, elaborazioni in blocco) non fanno parte della cronologia del documento.
-- **Dato** un documento su cui ho eseguito 500 operazioni eterogenee (testo, pagine, commenti, campi, immagini), **quando** annullo 500 volte, **allora** il documento è identico a quello appena aperto, per contenuto e aspetto di ogni pagina; **quando** poi ripeto 500 volte, **allora** torna allo stato finale.
+#### NFR-11 · Annulla e ripeti per sessione — P0
+Ogni scheda conserva la cronologia delle operazioni che modificano il documento, dall'apertura alla chiusura: almeno 100 passi e, oltre, quanti ne consente la memoria. Quando la memoria disponibile non basta, vengono scartati solo i passi più vecchi oltre il centesimo; se una singola operazione non potrebbe essere annullata per mancanza di memoria, l'utente ne è avvisato prima di eseguirla. La cronologia è unica per documento e condivisa da tutte le aree, sopravvive ai salvataggi (anche dopo operazioni come l'appiattimento o la redazione, che diventano definitive solo nel file salvato); ogni comando, anche se agisce su molte pagine, è un solo passo; il comando indica cosa annulla (es. «Annulla Elimina 3 pagine»). Le operazioni che producono altri file (esportazioni, elaborazioni in blocco) non fanno parte della cronologia del documento. Questo requisito è il riferimento per l'annullamento (TXT-17, OBJ-43, ANN-06 vi rimandano).
+- **Dato** un documento su cui ho eseguito 100 operazioni eterogenee (testo, pagine, commenti, campi, immagini), **quando** annullo 100 volte, **allora** il documento è identico a quello appena aperto, per contenuto e aspetto di ogni pagina; **quando** poi ripeto 100 volte, **allora** torna allo stato finale.
+- **Dato** un documento su cui ho eseguito 150 operazioni e una memoria che consente di conservarle tutte, **quando** annullo ripetutamente, **allora** posso annullarle tutte e 150; **dato** invece che la memoria si esaurisce, **allora** restano annullabili almeno gli ultimi 100 passi.
 - **Dato** un documento appena salvato, **quando** annullo, **allora** torno agli stati precedenti al salvataggio e il documento risulta modificato.
 - **Dato** un comando che ha agito su 200 pagine, **quando** annullo una volta, **allora** tutte le 200 pagine tornano allo stato precedente.
 - **Dato** una modifica su una pagina non visibile, **quando** la annullo, **allora** la vista si sposta sulla pagina interessata.
@@ -333,22 +347,23 @@ Foliant registra gli eventi tecnici in un registro locale a rotazione (al massim
 
 ### 0.4.4 Sicurezza e riservatezza
 
-#### NFR-17 · Nessuno script del documento senza consenso — P0
-Gli script contenuti nei PDF non vengono eseguiti senza consenso. Se un documento ne contiene, un banner lo segnala («Questo documento contiene script, disattivati per sicurezza») con **Attiva per questo documento**, valido fino alla chiusura. Anche se attivati, gli script agiscono solo sul documento (campi, navigazione, messaggi attribuiti al documento) e non accedono a file, rete o altri programmi.
-- **Dato** un PDF con uno script all'apertura che modifica un campo, **quando** lo apro con le impostazioni predefinite, **allora** il campo non cambia e compare il banner.
-- **Dato** che ho attivato gli script per un documento, **quando** lo chiudo e lo riapro, **allora** gli script sono di nuovo disattivati.
-- **Dato** uno script attivato che tenta di leggere un file locale, accedere alla rete o avviare un programma, **allora** il tentativo è bloccato e segnalato all'utente.
-- **Dato** un modulo con calcoli affidati a script disattivati, **allora** i campi restano compilabili e il banner spiega che i calcoli automatici non sono attivi.
+#### NFR-17 · Nessuna esecuzione degli script del documento — P0
+Foliant non contiene un motore di script generale. Gli script inseriti nei PDF (ECMAScript per PDF, ISO 21757-1: script a livello di documento, azioni di script all'apertura, sui collegamenti, sui segnalibri e sui pulsanti, calcoli e convalide personalizzati, script dei moduli XML) non vengono mai eseguiti e non esiste alcun comando, preferenza o elenco di documenti attendibili che ne permetta l'esecuzione. Se un documento ne contiene, un banner lo segnala («Questo documento contiene script, che Foliant non esegue») con **Dettagli**, che elenca gli script per posizione in sola lettura (SEC-26). Unica eccezione: le funzioni di formato, convalida e calcolo comunemente presenti nei moduli sono riconosciute dalla loro forma ed eseguite in modo nativo come regole predefinite, senza interpretare codice (FRM-08). Gli script restano nel file e sono conservati al salvataggio, salvo rimozione esplicita (SEC-22). Questo requisito è il riferimento per gli script (FRM-08, FRM-18, FRM-25, SEC-26, SEC-28, OBJ-41, VIS-19 vi rimandano).
+- **Dato** un PDF con uno script all'apertura che modifica un campo e tenta una connessione di rete, **quando** lo apro, **allora** il campo non cambia, non avviene alcuna connessione e compare il banner.
+- **Dato** un documento con script, **quando** apro **Dettagli** dal banner, **allora** vedo l'elenco degli script con la loro posizione e non è disponibile alcun comando per eseguirli.
+- **Dato** un modulo con un calcolo affidato a uno script personalizzato, **allora** i campi restano compilabili, il campo calcolato conserva l'ultimo valore salvato e la barra modulo indica che i calcoli personalizzati non sono eseguiti (FRM-08).
+- **Dato** un campo con una regola di formato comunemente presente nei moduli (es. numero con 2 decimali), **quando** lo compilo, **allora** la regola si applica (FRM-08), anche se il documento contiene altri script.
+- **Dato** un documento con script salvato dopo l'aggiunta di un commento, **allora** gli script sono ancora presenti nel file con lo stesso contenuto.
 
 #### NFR-18 · Collegamenti, azioni esterne e allegati — P0
-Ogni azione del documento che esce da Foliant (aprire un indirizzo web o un altro file, inviare i dati di un modulo, aprire un allegato con un altro programma) richiede conferma e mostra la destinazione completa. Foliant non avvia mai programmi indicati dal documento; gli allegati eseguibili si possono solo salvare.
-- **Dato** un collegamento a un indirizzo web, **quando** ci clicco, **allora** una finestra mostra l'indirizzo completo con il dominio in evidenza e lo apre nel browser predefinito solo dopo conferma; **Non chiedere più per questo dominio** è disponibile (P1).
-- **Dato** un'azione che chiede di avviare un programma, **allora** non viene eseguita e un banner lo segnala.
+Ogni azione del documento che esce da Foliant (aprire un indirizzo web o un altro file, comporre un messaggio di posta, inviare i dati di un modulo, aprire un allegato con un altro programma) richiede conferma nell'unica finestra definita in VIS-19, che mostra la destinazione completa. Foliant non avvia mai programmi, script o comandi indicati dal documento: le azioni di avvio verso file eseguibili o con parametri di avvio non vengono eseguite; gli allegati eseguibili si possono solo salvare. La finestra, le sue scelte e l'elenco dei domini consentiti sono definiti in VIS-19 (SEC-27 ne gestisce le preferenze).
+- **Dato** un collegamento a un indirizzo web, **quando** ci clicco, **allora** compare la finestra di VIS-19 con l'indirizzo completo e il dominio in evidenza, e il browser predefinito si apre solo dopo conferma; **Non chiedere più per questo dominio** è disponibile (P1).
+- **Dato** un'azione che chiede di avviare un programma o uno script, **allora** non viene eseguita, nemmeno su richiesta dell'utente, e un banner lo segnala.
 - **Dato** un allegato eseguibile o uno script (es. .sh, .exe, .desktop), **quando** provo ad aprirlo, **allora** è disponibile solo **Salva con nome**.
 - **Dato** un modulo con invio a un server, **quando** premo il pulsante di invio, **allora** vedo destinazione e dati da inviare, e l'invio parte solo dopo conferma.
 
 #### NFR-19 · Nessuna connessione di rete non richiesta — P0
-Foliant apre connessioni di rete solo come conseguenza diretta di un'azione dell'utente che le richiede: richieste al fornitore IA configurato, marca temporale durante una firma, verifica online della revoca (su richiesta o se abilitata), invio confermato di un modulo, file in posizioni di rete scelte dall'utente. Niente telemetria, statistiche d'uso, rapporti automatici, pubblicità, verifiche di licenza o controlli di aggiornamento (gli aggiornamenti passano dal sistema di pacchetti). Il documento non può caricare contenuti remoti senza conferma. Durante ogni attività di rete un indicatore è visibile.
+Foliant apre connessioni di rete solo come conseguenza diretta di un'azione dell'utente che le richiede: richieste al fornitore IA configurato, marca temporale durante una firma, verifica online della revoca (su richiesta o se abilitata), invio confermato di un modulo, file in posizioni di rete scelte dall'utente. Niente telemetria, statistiche d'uso, rapporti automatici, pubblicità, verifiche di licenza o controlli di aggiornamento (gli aggiornamenti passano dal sistema di pacchetti). Il documento non può caricare contenuti remoti senza conferma. Durante ogni attività di rete un indicatore è visibile. Le regole tecniche delle connessioni consentite (canali cifrati, certificati, proxy) sono in SEC-34.
 - **Dato** Foliant con le preferenze predefinite e il traffico monitorato, **quando** eseguo per 30 minuti lo scenario di prova di tutte le funzioni non IA su C-INT (apertura, modifica, OCR, conversione, confronto, firma senza marca temporale, salvataggio), **allora** non si registra alcuna connessione in uscita.
 - **Dato** un documento firmato, **quando** lo apro, **allora** la verifica della firma usa solo dati locali; la verifica online della revoca parte solo con **Verifica online** o se abilitata nelle preferenze.
 - **Dato** nessun fornitore IA configurato, **allora** nessun contenuto viene inviato all'esterno e i comandi IA sono disattivati con un invito alla configurazione.
@@ -369,6 +384,7 @@ Tutte le funzioni sono utilizzabili senza mouse. Ogni controllo è raggiungibile
 - **Dato** lo scenario di prova da tastiera (aprire un file, cercare, evidenziare un passaggio, aggiungere una nota, spostare una pagina, compilare un modulo, apporre una firma, stampare, salvare), **quando** lo eseguo senza mouse, **allora** completo tutti i passi.
 - **Dato** qualsiasi controllo con il fuoco, **allora** l'indicatore di fuoco è visibile con contrasto di almeno 3:1 rispetto allo sfondo.
 - **Dato** il fuoco in una regione, **quando** premo F6 ripetutamente, **allora** il fuoco visita ciclicamente tutte le regioni visibili; **quando** premo Esc in un menu o in un riquadro sovrapposto, **allora** questo si chiude e il fuoco torna all'elemento di partenza.
+- **Dato** l'elenco di tutti i comandi dei menu, delle barre e dei pannelli, **quando** un test automatico li percorre usando solo la tastiera, **allora** nessun comando risulta irraggiungibile.
 
 #### NFR-22 · Compatibilità con le tecnologie assistive — P1
 Ogni controllo espone nome, ruolo, stato e scorciatoia alle tecnologie assistive del desktop (lettore di schermo, ingranditore). Il testo del documento è leggibile dal lettore di schermo seguendo la struttura logica, se presente, altrimenti un ordine di lettura stimato. Avanzamenti ed errori vengono annunciati.
@@ -412,7 +428,7 @@ Visualizzazione, selezione, ricerca, copia e modifica sono corrette per qualsias
 
 #### NFR-28 · Interoperabilità dei file salvati — P0
 Ogni file prodotto da Foliant è conforme allo standard PDF e appare allo stesso modo in altri lettori diffusi: annotazioni e campi includono il proprio aspetto, i caratteri usati sono incorporati, e ciò che Foliant non modifica o non interpreta (oggetti sconosciuti, struttura logica, metadati, allegati, livelli, dati privati di altre applicazioni) viene preservato. Un documento non modificato non viene riscritto.
-- **Dato** il corpus C-INT, **quando** apro ogni file, aggiungo un commento e salvo (sia in modo incrementale sia completo), **allora** ogni file risultante: supera un validatore strutturale indipendente senza errori nuovi rispetto all'originale; si apre senza avvisi in almeno tre lettori indipendenti diffusi, incluso il visualizzatore integrato di un browser principale; ha le pagine non modificate identiche all'originale nel confronto a pixel a 150 dpi.
+- **Dato** il corpus C-INT, **quando** apro ogni file, aggiungo un commento e salvo (con riscrittura completa e, per i file firmati, in modo incrementale, NFR-09), **allora** ogni file risultante: supera un validatore strutturale indipendente senza errori nuovi rispetto all'originale; si apre senza avvisi in almeno tre lettori indipendenti diffusi, incluso il visualizzatore integrato di un browser principale; ha le pagine non modificate identiche all'originale nel confronto a pixel a 150 dpi.
 - **Dato** un file con struttura logica, allegati e metadati, **quando** modifico il testo di una pagina e salvo, **allora** struttura, allegati e metadati sono ancora presenti e aggiornati dove serve (es. data di modifica).
 - **Dato** un documento aperto e non modificato, **quando** lo chiudo, **allora** il file su disco è invariato, data di modifica compresa.
 
@@ -429,7 +445,7 @@ Foliant si installa sulle versioni LTS di Ubuntu supportate (l'attuale e la prec
 - **Dato** un'installazione pulita di Ubuntu LTS con GNOME, **quando** installo Foliant dal centro software o con un solo comando da terminale, **allora** l'installazione termina senza errori e Foliant compare tra le applicazioni e si avvia.
 - **Dato** Foliant installato e il computer senza rete, **allora** tutte le funzioni non IA sono utilizzabili, compreso l'OCR in italiano e inglese.
 - **Dato** la disinstallazione, **allora** non restano file di sistema dell'applicazione; i dati dell'utente restano solo nelle cartelle utente documentate.
-- **Dato** una sessione Wayland e una X11, **allora** in entrambe funzionano tutte le funzioni, comprese stampa, acquisizione da scanner e cattura dello schermo (con l'autorizzazione richiesta dal desktop).
+- **Dato** una sessione Wayland e una X11, **quando** eseguo in ciascuna lo scenario di prova da tastiera di NFR-21 e le funzioni di stampa, acquisizione da scanner (dispositivo di prova), cattura dello schermo (con l'autorizzazione richiesta dal desktop) e trascinamento verso il gestore file, **allora** tutti i passi si completano con lo stesso risultato nelle due sessioni.
 
 #### NFR-31 · Associazione ai file PDF e «Apri con» — P0
 Foliant si registra come applicazione per i file PDF (e, per «Apri con», per i formati che sa convertire in PDF). Non si imposta come predefinito senza consenso: lo propone nelle preferenze e una sola volta, in modo non invasivo, nella Home. Accetta file dal gestore file, dal browser e dalla riga di comando; se è già in esecuzione, apre i nuovi file in schede della finestra attiva (o in una nuova finestra, secondo le preferenze).
@@ -442,7 +458,7 @@ Foliant si registra come applicazione per i file PDF (e, per «Apri con», per i
 Foliant ha un'icona originale in tutte le dimensioni richieste dal desktop, con variante simbolica monocromatica, e una voce nel menu applicazioni con nome, descrizione generica («Editor PDF»), parole chiave in italiano e inglese (pdf, modifica, firma, OCR, modulo, unisci, converti) e azioni rapide.
 - **Dato** la panoramica delle attività, **quando** digito «firma pdf» oppure «ocr», **allora** Foliant compare tra i risultati.
 - **Dato** il menu dell'icona di Foliant nella barra delle applicazioni, **allora** offre almeno **Nuova finestra**, **Crea PDF da file…** e **Unisci file…**.
-- **Dato** la scala dello schermo al 100% o al 200% e il tema chiaro o scuro, **allora** l'icona è nitida e riconoscibile.
+- **Dato** la scala dello schermo al 100% o al 200% e il tema chiaro o scuro, **allora** per ogni dimensione richiesta dal desktop l'icona è vettoriale o disegnata per quella dimensione (mai un ingrandimento di una dimensione più piccola) e la variante simbolica assume il colore del tema.
 
 #### NFR-33 · Miniature dei PDF nel gestore file — P1
 Foliant fornisce un generatore di miniature per i PDF, usato dal gestore file quando non ne è disponibile un altro, che mostra la prima pagina. Il generatore funziona isolato, con limiti di tempo e memoria, e non chiede mai password.
@@ -488,11 +504,11 @@ Foliant usa i servizi del desktop invece di replicarli: selettore file del siste
 
 #### UX-01 · Interfaccia originale e coerente — P0
 L'interfaccia è un progetto originale basato su convenzioni diffuse; non imita prodotti esistenti. Uno stesso concetto ha sempre lo stesso nome (glossario), la stessa icona e la stessa posizione in tutte le modalità.
-- **Dato** la revisione di design prima del rilascio, **quando** ogni schermata viene confrontata con le schermate pubbliche dei prodotti concorrenti, **allora** nessuna ne riproduce in modo riconoscibile disposizione, icone, testi o combinazioni di colori distintive.
+- **Dato** la revisione di design prima del rilascio, eseguita da una persona diversa dall'autore del design con una lista di controllo a quattro voci (disposizione delle regioni, icone, testi ed etichette, combinazioni di colori), **quando** ogni schermata viene confrontata con le schermate pubbliche dei prodotti concorrenti, **allora** nessuna voce della lista risulta ripresa da un prodotto esistente.
 - **Dato** un comando presente in più punti (es. **Ruota pagine** nella barra contestuale e nel menu contestuale delle miniature), **allora** ha ovunque lo stesso nome, la stessa icona e la stessa scorciatoia.
 
 #### UX-02 · Finestra principale e barra di intestazione — P0
-Regioni dall'alto in basso: barra di intestazione, barra delle schede, barra delle modalità, barra contestuale, zona centrale (pannello laterale, area documento, pannello proprietà), barra di stato. La barra di intestazione contiene a sinistra **Apri** (con l'elenco dei recenti), **Annulla** e **Ripeti**; al centro il titolo (nome del file, con un indicatore se modificato) e sotto la cartella o lo stato (es. «Sola lettura»); a destra **Salva**, **Cerca** e il **menu principale** (Nuova finestra, Salva con nome, Esporta, Stampa, Invia per email, Proprietà documento, Preferenze, Scorciatoie da tastiera, Guida, Informazioni su Foliant, Esci). I controlli della finestra seguono le impostazioni del sistema.
+Regioni dall'alto in basso: barra di intestazione, barra delle schede, barra delle modalità, barra contestuale, zona centrale (pannello laterale, area documento, pannello proprietà), barra di stato. La barra di intestazione contiene a sinistra **Apri** (con l'elenco dei recenti), **Annulla** e **Ripeti**; al centro il titolo (nome del file, con un indicatore se modificato) e sotto la cartella o lo stato (es. «Sola lettura»); a destra **Salva**, **Cerca** e il **menu principale** (Nuova finestra, Salva con nome, Esporta, Stampa, Invia per email, Informazioni sul documento, Preferenze, Scorciatoie da tastiera, Guida, Informazioni su Foliant, Esci). I controlli della finestra seguono le impostazioni del sistema.
 - **Dato** un documento modificato, **allora** il titolo mostra l'indicatore di modifica; **quando** salvo, **allora** l'indicatore scompare.
 - **Dato** una finestra di almeno 1024 × 700 px a scala 100%, **allora** tutte le regioni sono visibili insieme, con i pannelli alla larghezza predefinita.
 - **Dato** la Home nella scheda attiva, **allora** i comandi che richiedono un documento (**Salva**, **Annulla**, **Stampa**…) sono disattivati, non nascosti.
@@ -512,35 +528,35 @@ Undici modalità con icona ed etichetta, in quest'ordine: **Leggi**, **Commenta*
 - **Dato** nessun fornitore IA configurato, **quando** scelgo **Assistente IA**, **allora** vedo una spiegazione e il pulsante **Configura un fornitore**, e nessun dato viene inviato.
 
 #### UX-05 · Barra contestuale per modalità — P0
-Mostra gli strumenti della modalità attiva, raggruppati e separati. Nelle modalità che agiscono sulla pagina i primi due strumenti sono **Seleziona** e **Mano**. Ogni strumento ha un suggerimento con nome e scorciatoia; quello attivo è evidenziato; Esc torna a **Seleziona**. Un clic singolo su uno strumento di creazione vale per un solo uso; il doppio clic lo blocca finché non si preme Esc. Gli strumenti non disponibili sono disattivati e il suggerimento spiega cosa manca. Nelle finestre strette gli strumenti in eccesso confluiscono in un menu. Il comportamento dei singoli strumenti è definito nella sezione d'area indicata.
+Mostra gli strumenti della modalità attiva, raggruppati e separati. Nelle modalità che agiscono sulla pagina i primi due strumenti sono **Seleziona** e **Mano**. Ogni strumento ha un suggerimento con nome e scorciatoia; quello attivo è evidenziato; Esc torna a **Seleziona**. Un clic singolo su uno strumento di creazione vale per un solo uso; il doppio clic lo blocca finché non si preme Esc. Gli strumenti non disponibili sono disattivati e il suggerimento spiega cosa manca. Nelle finestre strette gli strumenti in eccesso confluiscono in un menu. Il comportamento dei singoli strumenti è definito nella sezione d'area indicata. Questo requisito (P0) definisce la barra: posizione, raggruppamento, **Seleziona** e **Mano**, clic singolo e doppio, stato disattivato, menu di eccedenza. Ogni strumento della tabella compare con la priorità del requisito d'area che lo definisce: uno strumento il cui requisito non è ancora implementato non viene mostrato.
 
 | Modalità | Area | Strumenti della barra contestuale (sintesi) |
 |---|---|---|
 | Leggi | 1 | Cattura area (immagine o testo); Vista (pagina singola, continua, doppia, doppia con copertina); Adatta (pagina, larghezza); Ruota vista; Tema di lettura; Presentazione; Scorrimento automatico; Leggi ad alta voce |
 | Commenta | 5 | Evidenzia, Sottolinea, Barrato, Ondulato; Inserimento e Sostituzione testo; Nota, Casella di testo, Richiamo; Evidenzia area; Forme (rettangolo, ellisse, linea, freccia, poligono, polilinea, nuvola); Matita, Gomma; Timbro, Adesivo; Allega file; Misura (distanza, perimetro, area); Mostra/nascondi commenti; Riepilogo ed esportazione commenti |
-| Modifica | 3, 4 | Modifica testo e oggetti; Aggiungi testo; Aggiungi immagine; Collegamento; Trova e sostituisci; Filigrana; Sfondo; Intestazione e piè di pagina; formattazione nel pannello proprietà |
+| Modifica | 3, 4 (Filigrana, Sfondo, Intestazione e piè di pagina: area 2) | Modifica testo e oggetti; Aggiungi testo; Aggiungi immagine; Collegamento; Trova e sostituisci; Filigrana; Sfondo; Intestazione e piè di pagina; formattazione nel pannello proprietà |
 | Pagine | 2 | Inserisci (vuota, da file, da immagini, da scanner, dagli appunti); Sostituisci; Estrai; Dividi documento; Unisci file; Ruota; Elimina; Duplica; Ritaglia; Dividi pagina; Formato pagina; Etichette pagina; Riordina (inverti, pari/dispari); Dimensione miniature |
 | Moduli | 8 | Riconosci campi; Testo, Casella di controllo, Pulsante di scelta, Elenco a discesa, Casella di riepilogo, Pulsante, Immagine, Data, Firma; Allinea e distribuisci; Duplica su più pagine; Ordine di tabulazione; Anteprima compilazione; Importa/Esporta dati; Reimposta modulo |
-| OCR | 7 | Riconosci testo (tutte le pagine, intervallo, area); Lingue; Tipo di risultato (testo ricercabile, testo modificabile, solo immagine); Impostazioni di rilevamento; Correggi testo riconosciuto; Copia testo da area |
-| Converti | 6, 10 | Esporta come (documento di testo, foglio di calcolo, presentazione, immagine, immagine lunga, RTF, testo semplice, XML, HTML, CSV); Salva come PDF/A, PDF/X, PDF/E; Crea PDF (da file, immagini, scanner, appunti, cattura dello schermo, pagina vuota) |
-| Proteggi | 10 | Password di apertura; Permessi; Rimuovi protezione; Proprietà di sicurezza; Contrassegna per redazione (testo, area, pagine, risultati di ricerca); Applica redazioni; Sanitizza; Appiattisci |
+| OCR | 7 | Esegui OCR (tutte le pagine, intervallo, area); Lingue; Tipo di risultato (testo ricercabile, testo modificabile, solo immagine); Impostazioni di rilevamento; Correggi testo riconosciuto; Copia testo da area |
+| Converti | 6, 10 | Esporta come (documento di testo, foglio di calcolo, presentazione, immagine, immagine lunga, RTF, testo semplice, XML, HTML, CSV); Salva come PDF/A, PDF/X, PDF/E; Crea PDF (da file, immagini, scanner, fotocamera, appunti, cattura dello schermo, pagina vuota); Crea portfolio |
+| Proteggi | 10 | Password di apertura; Permessi; Rimuovi protezione; Proprietà di sicurezza; Contrassegna per redazione (testo, area, pagine, risultati di ricerca); Applica redazioni; Rimuovi dati nascosti; Appiattisci |
 | Firma | 9 | Firma grafica (disegna, digita, importa); Firma digitale; Aggiungi campo firma; Marca temporale; Verifica firme; Gestisci firme e identità digitali |
-| Strumenti | 6, 11 | Confronta documenti; Elaborazione in blocco; Comprimi e ottimizza; Numerazione Bates |
+| Strumenti | 2, 6, 11 | Confronta documenti; Elaborazione in blocco; Comprimi; Compressione personalizzata; Numerazione Bates |
 | Assistente IA | 12 | Chat sul documento; Riassumi; Traduci; Spiega; Mappa mentale; Riscrivi o correggi la selezione; Ricerca per significato; Comandi in linguaggio naturale; fornitore in uso |
 
-- **Dato** una modalità qualsiasi, **allora** la barra contestuale contiene gli strumenti indicati in tabella per quella modalità.
+- **Dato** una modalità qualsiasi, **allora** la barra contestuale contiene, nei gruppi e nell'ordine della tabella, tutti gli strumenti della modalità i cui requisiti d'area P0 sono implementati e nessuno strumento di un requisito non ancora implementato; gli strumenti dei requisiti P1 e P2 si aggiungono nella stessa posizione quando i rispettivi requisiti sono implementati.
 - **Dato** lo strumento **Rettangolo** scelto con un clic singolo, **quando** disegno un rettangolo, **allora** torna attivo **Seleziona**; **dato** lo stesso strumento scelto con doppio clic, **allora** posso disegnare più rettangoli finché non premo Esc.
 - **Dato** **Applica redazioni** senza redazioni contrassegnate, **quando** lo raggiungo con il puntatore o con il fuoco, **allora** è disattivato e il suggerimento dice «Nessuna area contrassegnata per la redazione».
 
 #### UX-06 · Pannello laterale sinistro — P0
-Pannello ridimensionabile e richiudibile (F9), con schede scelte da una colonna di icone. Ogni scheda mostra un contatore (es. «Commenti 12») e, se vuota, uno stato vuoto che spiega cosa conterrà e come aggiungere elementi. Il pannello segue il documento: la miniatura e il segnalibro della posizione corrente sono evidenziati; un clic su un elemento porta alla sua posizione. Larghezza e scheda attiva vengono ricordate.
+Pannello ridimensionabile e richiudibile (F9), con schede scelte da una colonna di icone. Il pannello è P0; ogni scheda compare con la priorità del requisito d'area che ne definisce il contenuto (es. Allegati con VIS-22 e VIS-54, P1). Ogni scheda mostra un contatore (es. «Commenti 12») e, se vuota, uno stato vuoto che spiega cosa conterrà e come aggiungere elementi. Il pannello segue il documento: la miniatura e il segnalibro della posizione corrente sono evidenziati; un clic su un elemento porta alla sua posizione. Larghezza e scheda attiva vengono ricordate.
 
 | Scheda | Contenuto | Azioni principali (dettaglio nell'area) |
 |---|---|---|
 | Miniature | anteprime delle pagine con numero ed etichetta | selezione multipla, trascinamento per riordinare, menu delle pagine (2) |
 | Segnalibri | albero dei segnalibri | aggiungi, rinomina, annida, elimina (1) |
 | Commenti | annotazioni per pagina con autore, data, stato e risposte | filtra, ordina, rispondi, esporta (5) |
-| Allegati | file allegati al documento e alle pagine | apri (NFR-18), salva, aggiungi, elimina (4) |
+| Allegati | file allegati al documento e alle pagine; file di un portfolio | aggiungi, apri, salva, modifica descrizione, elimina (VIS-54); consultazione e portfolio (VIS-22, CNV-34) |
 | Livelli | livelli del documento | mostra/nascondi a schermo e in stampa (1) |
 | Risultati ricerca | occorrenze con il testo intorno | vai all'occorrenza, opzioni di ricerca (1) |
 | Firme | firme e campi firma con lo stato di verifica | dettagli, verifica, vai alla firma (9) |
@@ -564,7 +580,7 @@ Pannello ridimensionabile e richiudibile (Maiusc+F9). Mostra le proprietà dell'
 - **Dato** lo strumento **Evidenzia** attivo senza selezione, **quando** cambio il colore nel pannello, **allora** il nuovo colore vale per le evidenziazioni successive e non modifica quelle esistenti.
 
 #### UX-09 · Barra di stato — P0
-Contiene: **Pagina [n] di N**, con campo modificabile che accetta numeri o etichette (se l'etichetta differisce dal numero mostra entrambi, es. «iv (4 di 120)»); il controllo dello zoom (riduci, valore modificabile con valori preimpostati e **Adatta pagina**/**Adatta larghezza**, ingrandisci); il selettore della vista (pagina singola, continua, doppia, doppia con copertina); le icone di stato del documento (cifrato, firmato, PDF/A, script disattivati, sola lettura) con suggerimento e azione al clic; l'avanzamento delle attività in background.
+Contiene: **Pagina [n] di N**, con campo modificabile che accetta numeri o etichette (se l'etichetta differisce dal numero mostra entrambi, es. «iv (4 di 120)»); il controllo dello zoom (riduci, valore modificabile con valori preimpostati e **Adatta pagina**/**Adatta larghezza**, ingrandisci); il selettore della vista (pagina singola, continua, doppia, doppia con copertina); le icone di stato del documento (cifrato, firmato, PDF/A, script non eseguiti, sola lettura) con suggerimento e azione al clic; l'avanzamento delle attività in background.
 - **Dato** un documento in cui le prime quattro pagine hanno etichette romane e la quinta l'etichetta «1», **quando** sono sulla quinta pagina, **allora** la barra mostra «1 (5 di 120)»; **quando** digito «iv», **allora** vado alla quarta pagina.
 - **Dato** il campo zoom, **quando** digito 137 e premo Invio, **allora** lo zoom diventa 137%.
 - **Dato** un'attività in background in corso (es. OCR), **allora** la barra ne mostra l'avanzamento; **quando** ci clicco, **allora** si apre un riquadro con il dettaglio e **Annulla**.
@@ -591,38 +607,38 @@ Le operazioni che durano più di 1 s mostrano avanzamento in percentuale, tempo 
 - **Dato** un'elaborazione in blocco terminata con errori su alcuni file, **allora** il riepilogo elenca i file riusciti e quelli falliti, con il motivo.
 
 #### UX-13 · Conferme e annullamento rapido — P0
-Le operazioni annullabili nella sessione (es. eliminare pagine o commenti) non chiedono conferma: un avviso temporaneo descrive l'esito e offre **Annulla** (es. «3 pagine eliminate · Annulla»). Le operazioni irreversibili o che agiscono fuori dal documento corrente chiedono conferma: applicare redazioni, appiattire, sanitizzare, rimuovere firme digitali, salvare invalidando firme, sovrascrivere un file esistente (Salva con nome, esportazioni, elaborazioni in blocco), chiudere senza salvare, svuotare i recenti. La finestra di conferma ha un titolo in forma di domanda specifica («Applicare 4 redazioni?»), spiega la conseguenza, ha il pulsante di conferma con il verbo dell'azione in stile distruttivo e il fuoco iniziale su **Annulla**. «Non chiedere più» è ammesso solo per conferme non critiche, mai per redazione, sanitizzazione, firme e sovrascritture.
+Le operazioni annullabili nella sessione (es. eliminare pagine o commenti) non chiedono conferma: un avviso temporaneo descrive l'esito e offre **Annulla** (es. «3 pagine eliminate · Annulla»). Le operazioni irreversibili o che agiscono fuori dal documento corrente chiedono conferma: applicare redazioni, appiattire, rimuovere i dati nascosti, rimuovere firme digitali, salvare invalidando firme, sovrascrivere un file esistente (Salva con nome, esportazioni, elaborazioni in blocco), chiudere senza salvare, svuotare i recenti. La finestra di conferma ha un titolo in forma di domanda specifica («Applicare 4 redazioni?»), spiega la conseguenza, ha il pulsante di conferma con il verbo dell'azione in stile distruttivo e il fuoco iniziale su **Annulla**. «Non chiedere più» è ammesso solo per conferme non critiche, mai per redazione, rimozione dei dati nascosti, firme e sovrascritture. Unica eccezione: in un documento con firme digitali, il primo uso di uno strumento che invalida le firme è preceduto, una sola volta, dall'avviso di SIG-21 con l'elenco delle firme interessate e le scelte **Annulla**, **Lavora su una copia senza firme** e **Procedi comunque**; il salvataggio segue poi NFR-09. Questo requisito è il riferimento per conferme e avvisi di annullamento: i requisiti d'area non aggiungono conferme alle operazioni annullabili nella sessione (es. eliminazione di pagine, commenti, segnalibri o campi, sostituzioni multiple).
 - **Dato** tre pagine selezionate, **quando** premo Canc, **allora** vengono eliminate senza conferma e un avviso con **Annulla** resta visibile per almeno 5 s.
 - **Dato** delle redazioni contrassegnate, **quando** scelgo **Applica redazioni**, **allora** la conferma indica quante aree e pagine sono coinvolte, e premendo Invio senza spostare il fuoco l'operazione viene annullata.
 - **Dato** un'esportazione verso un file già esistente, **allora** posso scegliere **Sostituisci**, **Mantieni entrambi** (nuovo nome numerato) o **Annulla**.
 
 #### UX-14 · Banner di stato del documento — P0
-Le condizioni persistenti del documento sono segnalate da un banner in cima all'area documento, con un'azione pertinente. Condizioni previste: sola lettura o permessi limitati (**Inserisci password dei permessi**, **Salva una copia**); file riparato; script disattivati (**Attiva per questo documento**); firme presenti, con esito della verifica (**Mostra firme**); conformità dichiarata a PDF/A o altri standard; modulo compilabile (**Evidenzia campi**); file modificato da un altro programma (**Ricarica**); documento scansionato senza testo (**Esegui OCR**). Si vede un banner alla volta, in ordine di importanza (sicurezza, integrità, informazione), con l'indicazione di quanti altri ce ne sono. Un banner chiuso non ricompare fino alla riapertura del documento; l'informazione resta come icona nella barra di stato.
+Le condizioni persistenti del documento sono segnalate da un banner in cima all'area documento, con un'azione pertinente. Condizioni previste: sola lettura o permessi limitati (**Inserisci password dei permessi**, **Salva una copia**); file riparato; script presenti e non eseguiti (**Dettagli**, NFR-17); firme presenti, con esito della verifica (**Mostra firme**); conformità dichiarata a PDF/A o altri standard; modulo compilabile (**Evidenzia campi**); file modificato da un altro programma (**Ricarica**); documento scansionato senza testo (**Esegui OCR**). Si vede un banner alla volta, in ordine di importanza (sicurezza, integrità, informazione), con l'indicazione di quanti altri ce ne sono. Un banner chiuso non ricompare fino alla riapertura del documento; l'informazione resta come icona nella barra di stato.
 - **Dato** un PDF scansionato senza livello di testo, **quando** lo apro, **allora** compare il banner con **Esegui OCR**; **quando** lo premo, **allora** si apre la modalità OCR.
 - **Dato** un documento firmato e con script, **allora** è visibile un solo banner, con l'indicazione «1 altro avviso» e il modo di vederlo.
 - **Dato** un banner chiuso, **allora** non ricompare finché il documento resta aperto e la stessa informazione è disponibile dall'icona nella barra di stato.
 
 #### UX-15 · Stampa — P0
-**Stampa** (Ctrl+P), disponibile in ogni modalità, apre la finestra di stampa del sistema con le stampanti configurate, completata dalle opzioni del documento: intervallo (tutte, pagina corrente, pagine selezionate, intervallo con numeri o etichette, solo pari o dispari); copie e fascicolazione; fronte/retro (se la stampante lo supporta); scala (adatta all'area stampabile, dimensioni reali, riduci solo se necessario, percentuale); orientamento automatico; contenuto (documento; documento e commenti; solo campi modulo); più pagine per foglio; stampa come immagine (per file problematici); opuscolo (P2). Un'anteprima si aggiorna a ogni cambio. La stampa non modifica il documento e procede in background. La stampa in blocco è nell'area 11.
+**Stampa** (Ctrl+P), disponibile in ogni modalità, apre la finestra di stampa del sistema con le stampanti configurate, completata dalle opzioni del documento: intervallo (tutte, pagina corrente, pagine selezionate, intervallo con numeri o etichette, solo pari o dispari); copie e fascicolazione; fronte/retro (se la stampante lo supporta); scala (adatta all'area stampabile, dimensioni reali, riduci solo se necessario, percentuale); orientamento automatico; contenuto (documento; documento e commenti; solo campi modulo); più pagine per foglio; stampa come immagine (per file problematici); opuscolo (P2). Un'anteprima si aggiorna a ogni cambio. La stampa non modifica il documento e procede in background. Questo requisito è il riferimento per la stampa: VIS-43 ne dettaglia le opzioni (compresa la stampa di più pagine per foglio), VIS-44 le modalità avanzate (P2); la stampa in blocco è BAT-19.
 - **Dato** un documento di 20 pagine con commenti, **quando** stampo «3-5, 8» con **Documento e commenti** e scala **Adatta**, **allora** escono 4 pagine con i commenti visibili, come mostrato dall'anteprima prima della conferma.
 - **Dato** un documento con stampa non consentita dai permessi, **allora** **Stampa** è disattivato e il suggerimento spiega il motivo.
 - **Dato** un documento con pagine A4 e A3 e la scala **Adatta** su carta A4, **allora** ogni pagina è stampata intera nel foglio, mantenendo le proporzioni.
 
 #### UX-16 · Invio per email e azioni sul file — P1
-Dal menu principale e dal menu della scheda: **Invia per email…** (apre il programma di posta predefinito con il documento allegato), **Mostra nella cartella**, **Copia percorso**, **Proprietà documento**. La condivisione tramite link o codice QR è fuori ambito (0.2).
+Dal menu principale e dal menu della scheda: **Invia per email…** (apre il programma di posta predefinito con il documento allegato), **Mostra nella cartella**, **Copia percorso**, **Informazioni sul documento** (VIS-40). La condivisione tramite link o codice QR è fuori ambito (0.2, VIS-46).
 - **Dato** un documento salvato, **quando** scelgo **Invia per email…**, **allora** si apre il programma di posta predefinito con un nuovo messaggio che ha il PDF in allegato.
 - **Dato** un documento con modifiche non salvate, **quando** scelgo **Invia per email…**, **allora** mi viene chiesto di salvare prima o di allegare una copia con le modifiche.
 - **Dato** nessun programma di posta configurato, **allora** un messaggio lo spiega e propone **Mostra nella cartella**.
 
 #### UX-17 · Preferenze — P1
-Finestra **Preferenze** (Ctrl+,) con le sezioni: **Generale** (cosa mostrare all'avvio, apertura dei file in scheda o finestra, recenti attivi o no); **Aspetto** (tema, tema di lettura predefinito, dimensione delle miniature); **Documenti** (vista e zoom predefiniti, unità di misura, formato carta, nome dell'autore per i commenti, predefinito il nome dell'account di sistema); **Salvataggio** (autosalvataggio e intervallo, modalità di salvataggio); **Sicurezza e riservatezza** (script, collegamenti esterni e domini consentiti, verifica online della revoca, servizio di marca temporale); **Assistente IA** (fornitori, modello, contenuti che possono essere inviati); **Lingua** (interfaccia, lingue OCR); **Scorciatoie** (P2, UX-19). Ogni sezione ha **Ripristina predefiniti**. Le preferenze si possono esportare e importare come file, escluse password e chiavi.
+Finestra **Preferenze** (Ctrl+,) con le sezioni: **Generale** (cosa mostrare all'avvio, apertura dei file in scheda o finestra, recenti attivi o no); **Aspetto** (tema, tema di lettura predefinito, dimensione delle miniature, barre e pannelli visibili, VIS-51); **Documenti** (vista e zoom predefiniti, unità di misura, formato carta, nome dell'autore per i commenti, predefinito il nome dell'account di sistema); **Salvataggio** (autosalvataggio e intervallo; il tipo di salvataggio segue NFR-09 e non è configurabile); **Sicurezza e riservatezza** (collegamenti esterni e domini consentiti, documenti attendibili, recenti e cache, funzioni di rete, verifica online della revoca, servizio di marca temporale, cartella protetta e blocco dell'applicazione); **Assistente IA** (fornitori, modello, contenuti che possono essere inviati); **Lingua** (interfaccia, lingue OCR); **Scorciatoie** (P2, UX-19). Ogni sezione ha **Ripristina predefiniti**. Le preferenze si possono esportare e importare come file, escluse password e chiavi.
 - **Dato** una preferenza modificata, **allora** l'effetto è immediato, salvo la lingua dell'interfaccia, per cui accanto all'opzione è indicato che serve il riavvio.
 - **Dato** un file di preferenze esportato, **quando** lo importo su un altro computer, **allora** tutte le preferenze sono ripristinate, tranne password e chiavi d'accesso.
 - **Dato** **Ripristina predefiniti** in una sezione, **allora** solo quella sezione torna ai valori iniziali.
 - **Dato** il primo commento creato, **allora** l'autore è il nome visualizzato dell'account di sistema, modificabile nelle preferenze.
 
 #### UX-18 · Scorciatoie da tastiera principali — P0
-Scorciatoie comuni a tutte le modalità. Quelle specifiche di un'area sono definite nella relativa sezione e non devono entrare in conflitto con questa tabella né con le scorciatoie globali del desktop. I tasti senza modificatori (lettere, Spazio, frecce) agiscono sull'area documento solo quando il fuoco non è in un campo di testo o in una modifica di testo.
+Questo requisito è l'unica fonte delle scorciatoie: le scorciatoie globali sono solo quelle della prima tabella; la seconda tabella riserva le combinazioni dei comandi d'area, che i requisiti d'area possono usare solo come indicato e che si attivano quando il relativo requisito è implementato. Nessun requisito d'area assegna altre combinazioni con Ctrl o Alt, né riusa per un altro comando una combinazione delle due tabelle, né usa combinazioni riservate dal desktop; i comandi senza combinazione si raggiungono da menu, barre e menu contestuali. I tasti di navigazione dei controlli (Tab, frecce, Invio, F2 per rinominare, Alt+Giù per aprire un elenco) seguono le convenzioni del desktop. I tasti senza modificatori (lettere, Spazio, frecce) agiscono sull'area documento solo quando il fuoco non è in un campo di testo o in una modifica di testo; in presentazione valgono i tasti di VIS-32.
 
 | Azione | Scorciatoia |
 |---|---|
@@ -660,17 +676,36 @@ Scorciatoie comuni a tutte le modalità. Quelle specifiche di un'area sono defin
 | Torna a Seleziona; interrompi l'azione in corso | Esc |
 | Mano temporanea | Spazio tenuto premuto durante il trascinamento |
 | Schermo intero / Presentazione | F11 / F5 |
-| Proprietà documento | Alt+Invio |
 | Preferenze | Ctrl+, |
 | Elenco delle scorciatoie / Guida | Ctrl+? / F1 |
 
-- **Dato** ciascuna riga della tabella, **quando** premo la combinazione nel contesto indicato, **allora** si esegue l'azione corrispondente.
+Combinazioni riservate ai comandi d'area:
+
+| Comando (requisito) | Contesto | Scorciatoia |
+|---|---|---|
+| Ruota vista in senso orario / antiorario (VIS-11) | area documento | Ctrl+Maiusc++ / Ctrl+Maiusc+- |
+| Aggiungi segnalibro (VIS-16) | area documento e pannello Segnalibri | Ctrl+B |
+| Ricerca avanzata (VIS-25, P2) | ovunque | Ctrl+Maiusc+F |
+| Selezione del testo con il cursore (VIS-28) | area documento | F7 |
+| Presentazione dalla pagina corrente (VIS-32) | ovunque | Maiusc+F5 |
+| Mostra/nascondi righelli (VIS-39) | area documento | Ctrl+R |
+| Informazioni sul documento (VIS-40) | ovunque | Alt+Invio |
+| Ricerca dei comandi (VIS-52, P2) | ovunque | Ctrl+K |
+| Incolla come testo semplice (TXT-18) | modifica del testo | Ctrl+Maiusc+V |
+| Porta in primo piano / avanti / indietro / in fondo (OBJ-20) | modalità Modifica, oggetti selezionati | Ctrl+Maiusc+] / Ctrl+] / Ctrl+[ / Ctrl+Maiusc+[ |
+| Differenza successiva / precedente (CMP-07) | sessione di confronto | Alt+↓ / Alt+↑ |
+
+I comandi **Duplica** (testo, oggetti, annotazioni, campi) e la creazione di collegamenti non hanno scorciatoia.
+
+- **Dato** ciascuna riga della prima tabella, **quando** premo la combinazione nel contesto indicato, **allora** si esegue l'azione corrispondente.
+- **Dato** ciascuna riga della seconda tabella il cui requisito è implementato, **quando** premo la combinazione nel contesto indicato, **allora** si esegue il comando; **dato** un requisito non ancora implementato, **allora** la combinazione non ha effetto.
+- **Dato** l'insieme delle scorciatoie predefinite dell'applicazione, **allora** nessuna combinazione è assegnata a due comandi nello stesso contesto e nessuna scorciatoia da tastiera con Ctrl o Alt è assente dalle due tabelle, esclusi i tasti di navigazione dei controlli.
 - **Dato** il fuoco in un campo di testo o in una modifica di testo, **quando** premo N, P, Spazio o le frecce, **allora** agiscono sul testo e non sulla navigazione.
 - **Dato** la finestra **Scorciatoie da tastiera** (Ctrl+?), **allora** elenca tutte le scorciatoie, comprese quelle delle aree, raggruppate per modalità e ricercabili per nome.
 - **Dato** un comando con scorciatoia, **allora** la scorciatoia è indicata nel suo suggerimento e nella voce di menu.
 
 #### UX-19 · Personalizzazione di scorciatoie e barre — P2
-L'utente può riassegnare le scorciatoie e scegliere quali strumenti mostrare, e in che ordine, nella barra contestuale di ogni modalità.
+L'utente può riassegnare le scorciatoie (le assegnazioni personali sostituiscono, solo per quell'utente, quelle predefinite di UX-18) e scegliere quali strumenti mostrare, e in che ordine, nella barra contestuale di ogni modalità. Mostrare o nascondere barre, etichette e pannelli è invece in VIS-51 (P1); la ricerca dei comandi è in VIS-52.
 - **Dato** la sezione **Scorciatoie**, **quando** assegno una combinazione già in uso, **allora** vengo avvisato del conflitto e posso sostituirla o annullare.
 - **Dato** una barra contestuale personalizzata, **quando** scelgo **Ripristina predefiniti**, **allora** torna alla composizione di UX-05.
 
@@ -699,20 +734,23 @@ Comportamento uniforme del trascinamento: file sulla Home o sulla barra delle sc
 |---|---|
 | ID | identificativo univoco (formato sotto) |
 | Titolo | frase breve che nomina il comportamento |
-| Priorità | P0, P1 o P2 |
+| Priorità | P0, P1 o P2; oppure «Fuori ambito» (vedi sotto) |
 | Descrizione | cosa fa il sistema, in termini osservabili dall'utente |
 | Criteri di accettazione | uno o più criteri nel formato «Dato…, quando…, allora…» |
-| Parità (facoltativo) | voci dell'inventario di parità coperte, come «area.numero» (es. «Parità: 2.4») |
+| Parità (facoltativo) | righe del catalogo delle funzionalità coperte, con il loro codice (es. «Parità: 2.04»); la fonte ufficiale del collegamento è la matrice della sezione 13 |
 | Dipendenze (facoltativo) | ID dei requisiti necessari |
 
-Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizione e criteri.
+Intestazione nel testo:
+- nelle sezioni generali (NFR, UX): `#### ID · Titolo — Priorità`, seguita da descrizione e criteri;
+- nelle sezioni d'area: `### ID — Titolo`, seguita dai campi **Descrizione:**, **Flusso:**, **Formati/strutture:**, **Casi limite:**, **Criteri di accettazione:** e **Priorità:**, in quest'ordine.
 
 ### Formato degli ID
 
 - Forma `PREFISSO-NN`: prefisso in maiuscolo, trattino, numero progressivo a due cifre (tre oltre il 99, es. `PAG-100`).
 - Prefissi delle sezioni generali: `NFR` (requisiti non funzionali, 0.4) e `UX` (interfaccia comune, 0.5); gli obiettivi di 0.1 sono `O1`…`O7`.
 - Ogni sezione d'area usa un proprio prefisso di 2–4 lettere, dichiarato all'inizio della sezione e unico nella specifica (es. `PAG` per Pagine).
-- Gli ID non si riusano: un requisito eliminato resta nell'elenco come «Ritirato», con il motivo; se un requisito viene diviso, la prima parte conserva l'ID originale.
+- Gli ID non si riusano: un requisito eliminato resta nell'elenco come «Ritirato», con il motivo; se un requisito viene diviso, la prima parte conserva l'ID originale. Le nuove funzioni si aggiungono in coda alla propria sezione, con il primo numero libero.
+- Un requisito escluso dall'ambito (0.2) resta nella specifica con «Fuori ambito» nel campo Priorità e la motivazione all'inizio della descrizione; non va implementato e non conta per gli obiettivi.
 - Riferimenti: si cita l'ID (es. «vedi NFR-08»); un intervallo si scrive NFR-08…NFR-12; un singolo criterio si cita con l'ID e la sua posizione (es. `NFR-08/2` = secondo criterio di NFR-08).
 
 ### Priorità
@@ -723,8 +761,9 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 | **P1** | Necessario per la prima versione completa, cioè per raggiungere la parità funzionale. | Tutti i P1 completati per dichiarare la parità (O1). |
 | **P2** | Successivo: miglioramenti, casi specialistici, estensioni oltre la parità. | Pianificato dopo la versione completa. |
 
-- Un requisito non può dipendere da uno di priorità inferiore (un P0 non dipende da un P1).
+- Un requisito non può dipendere da uno di priorità inferiore (un P0 non dipende da un P1). Se un requisito propone una funzione di priorità inferiore (es. un comando che apre uno strumento P1), il proprio comportamento resta completo senza di essa e la funzione compare solo quando il suo requisito è implementato.
 - Un singolo criterio può avere una priorità diversa da quella del requisito: la si indica tra parentesi alla fine del criterio, es. «(P1)».
+- Le operazioni in blocco (BAT) non hanno priorità più alta delle corrispondenti operazioni singole.
 
 ### Criteri di accettazione
 
@@ -745,36 +784,84 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 ### Neutralità e metodo clean-room
 
 - La specifica descrive comportamenti osservabili, non soluzioni tecniche: niente librerie, linguaggi di programmazione o strutture interne. Sono ammessi gli standard pubblici di file e protocolli (es. ISO 32000, PDF/A, PAdES).
-- Nessun nome di prodotto commerciale: l'editor di riferimento non viene nominato; i formati di terzi si indicano per tipo ed estensione (es. «documento di testo .docx», «foglio di calcolo .xlsx»), non con il nome del programma.
-- Nessun testo copiato da fonti esterne: le descrizioni sono scritte ex novo a partire da informazioni pubbliche.
+- Nessun nome di prodotto commerciale: l'editor di riferimento non viene nominato; i formati di terzi si indicano per tipo ed estensione (es. «documento di testo .docx», «foglio di calcolo .xlsx», «documenti d'ufficio (DOCX, XLSX, PPTX)»), non con il nome del programma. Il linguaggio degli script dei documenti si indica come «ECMAScript per PDF (ISO 21757-1)».
+- Nessun testo copiato da fonti esterne: le descrizioni sono scritte ex novo a partire da informazioni pubbliche. Etichette, nomi di finestre e diciture dell'interfaccia sono scelti in modo indipendente e non riprendono quelli dei prodotti esistenti.
+- Nessun dettaglio d'implementazione (percorsi di sistema, variabili d'ambiente, nomi di file di configurazione) e nessun rimando a documenti di lavoro che non fanno parte del repository: i rimandi ammessi sono agli ID della specifica, al catalogo delle funzionalità e alle norme pubbliche.
 - Per l'interfaccia valgono i principi di 0.5 e il requisito UX-01.
+
+### Precedenza e requisiti di riferimento
+
+- In caso di conflitto prevalgono i requisiti NFR e UX della sezione 0; quando un requisito d'area misura la stessa grandezza di un NFR o di un UX, vale la soglia della sezione 0.
+- Le scorciatoie da tastiera sono solo quelle di UX-18 (scorciatoie globali e combinazioni riservate ai comandi d'area); in caso di conflitto vale UX-18.
+- Ogni comportamento descritto in più requisiti ha un solo requisito di riferimento: gli altri vi rimandano e, se differiscono, vale il riferimento.
+
+| Comportamento | Requisito di riferimento | Requisiti che vi rimandano |
+|---|---|---|
+| Salvataggio: riscrittura completa atomica; incrementale obbligatorio per i documenti firmati | NFR-08, NFR-09 | VIS-47, VIS-48, FRM-09, SIG-21 |
+| Annulla e ripeti: almeno 100 passi, nei limiti di memoria | NFR-11 | TXT-17, OBJ-43, ANN-06 |
+| Autosalvataggio e recupero dopo un arresto | NFR-10 | VIS-50 |
+| Modifiche esterne al file e ricarica | NFR-12 | VIS-49 |
+| File malformati, riparazione, limiti sulle risorse | NFR-13, NFR-14 | VIS-05, VIS-07, CNV-32, SEC-29 |
+| Script del documento: mai eseguiti; funzioni comuni dei moduli in modo nativo | NFR-17 (e FRM-08) | FRM-18, FRM-25, SEC-26, SEC-28, OBJ-41, VIS-19 |
+| Conferma per l'apertura di collegamenti esterni e file: una sola finestra | VIS-19 (principi in NFR-18) | OBJ-40, OBJ-41, SEC-27, FRM-18, VIS-54 |
+| Connessioni di rete e telemetria | NFR-19 | SEC-34 |
+| Riservatezza di credenziali e dati locali | NFR-20 | SEC-30 |
+| Conferme e avvisi di annullamento | UX-13 | PAG-11, TXT-12, TXT-13, VIS-16, ANN-34, ANN-37, FRM-24, FRM-31 |
+| Avviso di invalidazione delle firme alla prima modifica | SIG-21 (eccezione di UX-13) | TXT-20, PAG-03, AI-09 |
+| Stampa | UX-15 | VIS-43, VIS-44, BAT-19 |
+| PDF/A (con PDF/X e PDF/E) | CNV-14 (estensioni in CNV-15) | SEC-25, BAT-06, BAT-23 |
+| Numerazione Bates | PAG-35 | BAT-15, BAT-16 |
+| Unione di documenti | PAG-24 | BAT-17 |
+| Compressione | CNV-29 (impostazioni personalizzate in CNV-30) | BAT-09, OBJ-18 |
+| Linearizzazione | CNV-31 | VIS-48, BAT-23 |
+| Appiattimento delle annotazioni | ANN-40 | SEC-24, CNV-33 |
+| Appiattimento dei moduli | FRM-32 | SEC-24, CNV-33 |
+| Appiattimento generale (annotazioni, campi, livelli, ritaglio, elementi aggiunti) | SEC-24, che rimanda ad ANN-40 e FRM-32 | CNV-33, BAT-23 |
+| Trova e sostituisci, trova ed elimina | TXT-12, TXT-13 | VIS-26 |
+| Pagine esportate come immagini | CNV-07 | PAG-13, BAT-06 |
+| Conversione in blocco | BAT-06 | CNV-17 |
+| Creazione di PDF in blocco | BAT-07 | CNV-28 |
+| OCR in blocco | BAT-08 | OCR-15 |
+| Filigrane, sfondi, intestazioni e piè di pagina, numeri di pagina | PAG-36, PAG-38, PAG-34, PAG-33 | BAT-12, BAT-13, BAT-14 |
+| Cattura di un'area come immagine o testo | VIS-29 | OBJ-29 |
+| Metadati descrittivi e proprietà personalizzate | SEC-23 | VIS-40, VIS-41 |
+| Allegati del documento | VIS-54 | VIS-22, UX-06, ANN-29 |
+| Livello di cifratura | SEC-06 | SEC-04, SEC-07, BAT-10 |
+| Fornitore IA, informativa e dati inviati | AI-01, AI-02 (con NFR-19) | tutte le funzioni IA delle altre aree |
+| Segnalibri generati e riassunto per sezione con IA | AI-22 | VIS-17, VIS-18 |
+| Ricerca per significato | AI-21 | VIS-27 |
+| Riscrittura e correzione del testo con IA | AI-09 | TXT-22…TXT-25 |
+| Generazione di immagini con IA (filigrane, sfondi, timbri, adesivi) | AI-25 | ANN-28, PAG-36, PAG-38 |
+| Conversione migliorata con IA | AI-27 | CNV-16 |
+| Dati di fatture e ricevute | AI-29 | AI-10 |
 
 ### Tracciabilità della parità
 
-- Ogni voce dell'inventario di parità è coperta da almeno un requisito di area (campo «Parità») oppure compare tra le esclusioni motivate di 0.2.
-- Una matrice di copertura (voce → ID) accompagna la specifica; una voce senza copertura impedisce di dichiarare raggiunto l'obiettivo O1.
+- Il riferimento per la parità (O1) è il catalogo delle funzionalità (`docs/funzionalita.md`): ogni riga P in ambito è coperta da almeno un requisito P0 o P1, oppure compare tra le esclusioni motivate di 0.2; fanno eccezione le righe 10.15 e 10.16 (cartella protetta e blocco dell'applicazione), in ambito con priorità P2 per decisione di ambito (0.2).
+- La matrice di copertura della sezione 13 (riga del catalogo → ID dei requisiti) è la fonte ufficiale della tracciabilità; il campo «Parità» nei requisiti è facoltativo e, se presente, deve coincidere con la matrice. Una riga P senza copertura impedisce di dichiarare raggiunto l'obiettivo O1.
+- Ogni nuova funzione o modifica di priorità aggiorna la matrice nello stesso intervento.
 
 
 ## 1. Visualizzazione e navigazione
 
-> Convenzioni per i criteri di accettazione: "macchina di riferimento" = CPU 4 core, 8 GB RAM, SSD, schermo 1920×1080 a 96 dpi; i tempi si misurano a cache fredda. "Corpus di prova" = insieme versionato di PDF campione (versioni 1.0–2.0, cifrati, danneggiati, pagine di dimensioni miste, documenti da 5.000+ pagine, testo RTL/CJK) usato dai test automatici. Le scorciatoie citate sono valori predefiniti modificabili (VIS-52).
+> Convenzioni per i criteri di accettazione: macchina di riferimento, corpus di prova e condizioni di misura sono quelli di 0.4 (schermo a scala 100%, cioè 96 dpi); questa sezione aggiunge al corpus file campione con pagine di dimensioni miste, documenti da oltre 5.000 pagine e testo da destra a sinistra o CJK. Dove un criterio misura la stessa grandezza di un NFR o di un UX vale la soglia della sezione 0. Le scorciatoie sono quelle di UX-18 (globali e riservate ai comandi di quest'area); la loro personalizzazione è in UX-19 e VIS-52 (P2).
 
 ### VIS-01 — Schermata Home
-**Descrizione:** all'avvio senza documenti (o con il comando "Home") l'utente vede una schermata iniziale con azioni rapide (Apri, Crea PDF, strumenti frequenti), file recenti, preferiti e un'area su cui trascinare i file, così da riprendere il lavoro con un clic.
-**Flusso:** 1. Avvio senza argomenti → si apre la Home (oppure la sessione precedente se l'utente ha scelto di ripristinarla, VIS-30). 2. L'utente sceglie un'azione: Apri, apri un recente o un preferito, trascina un file, avvia uno strumento (unisci, converti, crea: rimandano alle rispettive aree). 3. Il documento si apre in una nuova scheda; la Home resta raggiungibile da un pulsante fisso.
-**Formati/strutture:** elenchi recenti/preferiti nel profilo utente (percorso, data ultimo accesso, ultima pagina, zoom, miniatura in cache); nessuna modifica ai file.
-**Casi limite:** configurazione corrotta → Home con elenchi vuoti e avviso, file rigenerato e il vecchio conservato come backup; profilo non scrivibile → funzionamento senza persistenza con avviso; trascinamento di file non PDF → proposta di conversione (area Creazione) o messaggio "formato non supportato"; trascinamento di più file → una scheda per file.
+**Descrizione:** all'avvio senza documenti (o con il comando "Home") l'utente vede una schermata iniziale con azioni rapide (Apri, Crea PDF, strumenti frequenti), file recenti, documenti fissati e un'area su cui trascinare i file, così da riprendere il lavoro con un clic. La struttura della Home è definita in UX-10; questo requisito ne dettaglia il comportamento.
+**Flusso:** 1. Avvio senza argomenti → si apre la Home (oppure la sessione precedente se l'utente ha scelto di ripristinarla, VIS-30). 2. L'utente sceglie un'azione: Apri, apri un recente o un documento fissato, trascina un file, avvia uno strumento (unisci, converti, crea: rimandano alle rispettive aree). 3. Il documento si apre in una nuova scheda; la Home resta raggiungibile da un pulsante fisso.
+**Formati/strutture:** elenchi dei recenti e dei documenti fissati nel profilo utente (percorso, data ultimo accesso, ultima pagina, zoom, miniatura in cache); nessuna modifica ai file.
+**Casi limite:** configurazione corrotta → Home con elenchi vuoti e avviso, file rigenerato e il vecchio conservato come backup; profilo non scrivibile → funzionamento senza persistenza con avviso; trascinamento di file non PDF → proposta di conversione (area 6) o messaggio "formato non supportato"; trascinamento di più file → una scheda per file.
 **Criteri di accettazione:**
-- Dato l'avvio senza argomenti e senza sessione da ripristinare, quando l'applicazione è pronta, allora la Home è visibile entro 2 s sulla macchina di riferimento e mostra le azioni Apri e Crea, i recenti e i preferiti.
+- Dato l'avvio senza argomenti e senza sessione da ripristinare, quando l'applicazione è pronta, allora la Home è visibile e risponde all'input entro i tempi di NFR-01 (3 s a freddo, 1,5 s a caldo) e mostra le azioni Apri e Crea, i recenti e i documenti fissati.
 - Dato un PDF trascinato sull'area di rilascio, quando viene rilasciato, allora si apre in una nuova scheda alla pagina 1 o all'ultima posizione nota (VIS-02).
 - Dato un file di configurazione illeggibile, quando l'applicazione si avvia, allora la Home appare con elenchi vuoti, compare un avviso non bloccante e il file corrotto è conservato con suffisso di backup.
 **Priorità:** P0
 
-### VIS-02 — File recenti e preferiti
-**Descrizione:** elenco dei documenti aperti di recente con miniatura, nome, percorso, data e posizione di lettura, per riaprirli in un clic; l'utente può fissare i file più usati come preferiti.
-**Flusso:** 1. Ogni apertura o salvataggio porta la voce in cima all'elenco. 2. Dalla Home o dal menu File → Recenti l'utente vede l'elenco (vista elenco o griglia), lo filtra per nome e lo ordina per data o nome. 3. Clic → il file si apre alla pagina e allo zoom dell'ultima sessione. 4. Menu contestuale: aggiungi/rimuovi dai preferiti, rimuovi dall'elenco, mostra nella cartella, svuota elenco.
+### VIS-02 — File recenti e documenti fissati
+**Descrizione:** elenco dei documenti aperti di recente con miniatura, nome, percorso, data e posizione di lettura, per riaprirli in un clic; l'utente può fissare in cima all'elenco i file più usati (**Fissa**, UX-10).
+**Flusso:** 1. Ogni apertura o salvataggio porta la voce in cima all'elenco. 2. Dalla Home o dal menu File → Recenti l'utente vede l'elenco (vista elenco o griglia), lo filtra per nome e lo ordina per data o nome. 3. Clic → il file si apre alla pagina e allo zoom dell'ultima sessione. 4. Menu contestuale: Fissa/Sblocca, rimuovi dall'elenco, mostra nella cartella, svuota elenco (con conferma, UX-13).
 **Formati/strutture:** record nel profilo utente; miniatura in cache invalidata quando cambiano dimensione o data di modifica del file.
-**Casi limite:** file spostato, eliminato o su supporto rimosso → voce marcata "non disponibile", il clic propone Rimuovi o Individua; percorso di rete lento → miniature caricate in modo asincrono senza bloccare l'elenco; file cifrato → nessuna miniatura del contenuto (icona lucchetto); preferenza "non registrare la cronologia" → nessuna voce salvata; limite configurabile (predefinito 50) con rimozione delle voci più vecchie non preferite.
+**Casi limite:** file spostato, eliminato o su supporto rimosso → voce marcata "non disponibile", il clic propone Rimuovi o Individua; percorso di rete lento → miniature caricate in modo asincrono senza bloccare l'elenco; file cifrato → nessuna miniatura del contenuto (icona lucchetto); preferenza "non registrare la cronologia" → nessuna voce salvata; limite configurabile (predefinito 50) con rimozione delle voci più vecchie non fissate.
 **Criteri di accettazione:**
 - Dato un documento chiuso a pagina 37 con zoom 150%, quando viene riaperto dai recenti, allora si apre a pagina 37 con zoom 150%.
 - Dato un recente il cui file non esiste più, quando l'elenco viene mostrato, allora la voce è marcata non disponibile e il clic offre Rimuovi/Individua senza errori.
@@ -783,7 +870,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P0
 
 ### VIS-03 — Gestione dei file locali
-**Descrizione:** dalla Home, dai recenti e da un navigatore di cartelle integrato l'utente rinomina, duplica, copia o sposta in un'altra cartella, sposta nel cestino, mostra nella cartella, copia il percorso, stampa e invia i file; crea cartelle di lavoro e organizza i preferiti.
+**Descrizione:** gestione dei file locali adattata al desktop (0.2): dalla Home, dai recenti e da un navigatore di cartelle integrato l'utente rinomina, duplica, copia o sposta in un'altra cartella, sposta nel cestino, mostra nella cartella, copia il percorso, stampa e invia i file; crea cartelle di lavoro sul disco e vi organizza i documenti; fissa i documenti più usati. Opera sempre sui file e sulle cartelle reali, senza archivi propri.
 **Flusso:** 1. Selezione di uno o più file. 2. Scelta dell'operazione dal menu contestuale o dalla barra. 3. Conferma per le operazioni distruttive. 4. Aggiornamento immediato di elenchi e schede aperte.
 **Formati/strutture:** file system locale e posizioni montate dal sistema; eliminazione tramite il cestino del sistema quando disponibile.
 **Casi limite:** file aperto in una scheda rinominato o spostato → la scheda segue il nuovo percorso; nome già esistente → scelta tra sostituisci, rinomina automatica, annulla; caratteri non validi o nome troppo lungo → errore esplicito; permessi insufficienti o volume in sola lettura → messaggio con il motivo e file intatto; file con modifiche non salvate → avviso prima di spostarlo o eliminarlo; cestino non disponibile → conferma di eliminazione definitiva.
@@ -792,6 +879,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato un file in una cartella in sola lettura, quando si tenta di rinominarlo, allora l'operazione fallisce con un messaggio che indica il permesso mancante e il file resta invariato.
 - Dato un file selezionato, quando si sceglie Elimina e si conferma, allora il file si trova nel cestino del sistema e scompare dai recenti.
 - Dati 3 file selezionati, quando si sceglie Duplica, allora vengono creati 3 file "nome (copia).pdf" byte-identici agli originali.
+- Data una cartella di lavoro, quando l'utente sceglie Nuova cartella, la chiama "Pratiche 2026" e vi sposta 2 file, allora la cartella esiste sul disco con i 2 file e i recenti mostrano i nuovi percorsi.
 **Priorità:** P1
 
 ### VIS-04 — Archivi compressi
@@ -803,19 +891,19 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dati 2 PDF, quando vengono compressi in un archivio, allora l'estrazione dell'archivio restituisce 2 file byte-identici agli originali.
 - Dato un archivio con la voce "../../x.pdf", quando viene estratto, allora il file finisce dentro la cartella scelta e nulla viene scritto fuori.
 - Dato un archivio la cui dimensione estratta supera la soglia, quando si avvia l'estrazione, allora l'operazione si interrompe con avviso e senza file residui.
-**Priorità:** P2
+**Priorità:** P1
 
 ### VIS-05 — Apertura dei documenti
-**Descrizione:** apre file PDF dalla versione 1.0 alla 2.0 (inclusi PDF/A, PDF/X, PDF/E, PDF/UA) da finestra di dialogo, trascinamento, riga di comando, "Apri con" del sistema e recenti, ciascuno in una scheda, applicando la vista iniziale prevista dal documento.
-**Flusso:** 1. Comando Apri (Ctrl+O) → dialogo file del sistema con filtro PDF e selezione multipla. 2. Verifica rapida di intestazione e struttura. 3. Documento cifrato → VIS-06; danneggiato → VIS-07. 4. Vista iniziale: posizione ricordata (VIS-02) se la preferenza è attiva, altrimenti `/OpenAction`, `/PageLayout`, `/PageMode` (pannello aperto all'avvio) e `/ViewerPreferences` (es. `/DisplayDocTitle`, `/Direction`, `/FitWindow`); preferenza utente "ignora le impostazioni del documento". 5. Prima pagina visibile subito, resto caricato in modo progressivo. Da riga di comando: `foliant file.pdf`, frammenti `#page=N`, `#nameddest=nome`, `#zoom=N`, opzione nuova finestra; con un'istanza già attiva il file si apre in una nuova scheda di quell'istanza.
+**Descrizione:** apre file PDF dalla versione 1.0 alla 2.0 (inclusi PDF/A, PDF/X, PDF/E, PDF/UA) da finestra di dialogo, trascinamento, riga di comando, "Apri con" del sistema e recenti, ciascuno in una scheda, applicando le opzioni di apertura salvate nel documento (`/OpenAction`, `/PageLayout`, `/PageMode`; la loro modifica è in VIS-42). Il trattamento dei file danneggiati o non PDF segue NFR-13 (requisito di riferimento).
+**Flusso:** 1. Comando Apri (Ctrl+O) → dialogo file del sistema con filtro PDF e selezione multipla. 2. Verifica rapida di intestazione e struttura. 3. Documento cifrato → VIS-06; danneggiato → NFR-13 e VIS-07. 4. Apertura del documento: posizione ricordata (VIS-02) se la preferenza è attiva, altrimenti `/OpenAction`, `/PageLayout`, `/PageMode` (pannello aperto all'avvio) e `/ViewerPreferences` (es. `/DisplayDocTitle`, `/Direction`, `/FitWindow`); preferenza utente "ignora le impostazioni del documento". 5. Prima pagina visibile subito, resto caricato in modo progressivo. Da riga di comando: `foliant file.pdf`, frammenti `#page=N`, `#nameddest=nome`, `#zoom=N`, opzione nuova finestra; con un'istanza già attiva il file si apre in una nuova scheda di quell'istanza.
 **Formati/strutture:** intestazione `%PDF-x.y` e `/Version` del catalogo; xref tabellare e cross-reference stream, object stream, aggiornamenti incrementali (`/Prev`), file ibridi (`/XRefStm`), linearizzazione (`/Linearized`); frammenti URL per PDF (ISO 32000-2 Annex O).
-**Casi limite:** file già aperto → attiva la scheda esistente (opzione per una seconda vista); file non PDF con estensione .pdf o di 0 byte → "Il file non è un PDF valido" con il nome; file oltre 2 GB → supportati (offset a 64 bit); file senza permesso di scrittura → apertura in sola lettura con indicazione nel titolo; file su rete lenta → avanzamento annullabile; file non PDF convertibili → proposta "Crea PDF da file" (area Creazione); modulo XFA dinamico senza pagine statiche → messaggio esplicito (area Moduli); `/Requirements` non soddisfatti → barra informativa con le funzioni non supportate; azioni JavaScript in `/OpenAction` mai eseguite senza consenso.
+**Casi limite:** file già aperto → attiva la scheda esistente (opzione per una seconda vista); file di 0 byte → messaggio di file non leggibile con il nome (NFR-13/3); file di altro formato con estensione .pdf → riconoscimento del formato reale e proposta di crearne un PDF (NFR-13/4, P1); file oltre 2 GB → supportati (offset a 64 bit); file senza permesso di scrittura → apertura in sola lettura con indicazione nel titolo; file su rete lenta → avanzamento annullabile; file non PDF convertibili → proposta "Crea PDF da file" (area 6); modulo XFA dinamico senza pagine statiche → messaggio esplicito (FRM-33); `/Requirements` non soddisfatti → barra informativa con le funzioni non supportate; azioni di script (ECMAScript per PDF, ISO 21757-1) in `/OpenAction` mai eseguite (NFR-17).
 **Criteri di accettazione:**
 - Dato il corpus delle versioni PDF 1.0–2.0, quando ciascun file viene aperto, allora la prima pagina è visualizzata senza errori e il numero di pagine coincide con `/Count` dell'albero delle pagine.
-- Dato un PDF di 1.000 pagine e 50 MB, quando viene aperto, allora la prima pagina è visibile entro 1,5 s sulla macchina di riferimento.
+- Dato un PDF di 1.000 pagine e 50 MB, quando viene aperto, allora la prima pagina è disegnata completamente entro 1,5 s sulla macchina di riferimento (come C-500 in NFR-02).
 - Dato `foliant doc.pdf#page=12` con un'istanza già in esecuzione, quando il comando viene eseguito, allora doc.pdf si apre in una nuova scheda di quell'istanza a pagina 12.
 - Dato un PDF con `/OpenAction` verso la pagina 5 con `/FitH`, quando viene aperto per la prima volta, allora la vista mostra la pagina 5 adattata in larghezza.
-- Dato un file di testo rinominato in .pdf, quando viene aperto, allora compare il messaggio di file non valido e non resta aperta alcuna scheda vuota.
+- Dato un file di testo rinominato in .pdf, quando viene aperto, allora compare il messaggio che il file non è un PDF (NFR-13/3) e non resta aperta alcuna scheda vuota; la proposta di crearne un PDF segue NFR-13/4 (P1).
 **Priorità:** P0
 
 ### VIS-06 — PDF protetti: password e permessi
@@ -832,25 +920,25 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P0
 
 ### VIS-07 — File danneggiati e contenuti non supportati
-**Descrizione:** apre il più possibile anche file corrotti o non conformi, lo segnala e permette di salvarne una versione riparata; elenca le funzioni del documento che l'applicazione non supporta.
-**Flusso:** 1. Analisi tollerante: se xref o trailer non sono validi l'indice degli oggetti viene ricostruito per scansione del file. 2. Barra informativa "Il file era danneggiato ed è stato ricostruito" con il pulsante "Ripara e salva con nome" (salvataggio completo, VIS-48). 3. Pagine non ricostruibili → segnaposto "Pagina non leggibile", le altre visualizzate normalmente. 4. Errori nel contenuto di una pagina → resa parziale di quella sola pagina.
+**Descrizione:** apre il più possibile anche file corrotti o non conformi, lo segnala e permette di salvarne una versione riparata; elenca le funzioni del documento che l'applicazione non supporta. Il comportamento di base (nessun arresto, riparazione, messaggi, isolamento dei guasti e limiti sulle risorse) è definito da NFR-13 e NFR-14 (P0), requisiti di riferimento; questo requisito aggiunge l'elenco delle funzioni non supportate, le pagine segnaposto e il comando di riparazione esplicito.
+**Flusso:** 1. Analisi tollerante: se xref o trailer non sono validi l'indice degli oggetti viene ricostruito per scansione del file. 2. Banner di NFR-13 («Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto.») con il pulsante "Ripara e salva con nome" (salvataggio completo, VIS-48). 3. Pagine non ricostruibili → segnaposto "Pagina non leggibile", le altre visualizzate normalmente. 4. Errori nel contenuto di una pagina → resa parziale di quella sola pagina.
 **Formati/strutture:** xref e trailer, `/Prev`, `/XRefStm`, `/Length` degli stream (ricerca di `endstream`), `/Root`, `/ID`, `/Requirements`.
-**Casi limite:** file troncato (download interrotto) → pagine disponibili mostrate con avviso; `/Length` errati; oggetti duplicati con lo stesso numero; cicli in `/Parent`, `/Kids` o nei segnalibri → interrotti senza blocchi; riferimenti a oggetti mancanti trattati come null; font o immagini corrotti → font di ripiego o riquadro grigio; stream compressi danneggiati → decodifica della parte recuperabile; file ostili (annidamento estremo, stream che si espandono a dimensioni enormi) → limiti di risorse configurabili; il blocco nell'elaborazione di un documento non chiude le altre schede né l'applicazione; funzioni non supportate (es. 3D, XFA dinamico, multimedia) → elencate nella barra informativa.
+**Casi limite:** file troncato (download interrotto) → pagine disponibili mostrate con avviso; `/Length` errati; oggetti duplicati con lo stesso numero; cicli in `/Parent`, `/Kids` o nei segnalibri → interrotti senza blocchi; riferimenti a oggetti mancanti trattati come null; font o immagini corrotti → font di ripiego o riquadro grigio; stream compressi danneggiati → decodifica della parte recuperabile; file ostili (annidamento estremo, stream che si espandono a dimensioni enormi) → limiti di risorse di NFR-14; il blocco nell'elaborazione di un documento non chiude le altre schede né l'applicazione; funzioni non supportate (es. 3D, XFA dinamico, multimedia) → elencate nella barra informativa.
 **Criteri di accettazione:**
-- Dato un PDF del corpus con tabella xref volutamente errata, quando viene aperto, allora tutte le pagine sono visualizzate e compare la barra informativa di ricostruzione.
+- Dato un PDF del corpus con tabella xref volutamente errata, quando viene aperto, allora tutte le pagine sono visualizzate e compare il banner di riparazione di NFR-13.
 - Dato un PDF troncato al 60% della sua lunghezza, quando viene aperto, allora le pagine integre sono visualizzate e le altre mostrano il segnaposto.
-- Dato un file ricostruito, quando l'utente sceglie "Ripara e salva con nome", allora il nuovo file si riapre senza barra di ricostruzione e la sua tabella xref è coerente.
-- Dato il corpus di file malformati generati per fuzzing, quando ciascuno viene aperto, allora l'applicazione non termina in modo anomalo e ogni apertura si conclude (documento o errore) entro 30 s.
+- Dato un file ricostruito, quando l'utente sceglie "Ripara e salva con nome", allora il nuovo file si riapre senza banner di riparazione e la sua tabella xref è coerente.
+- Dato il corpus C-MAL di 0.4, quando ciascun file viene aperto, allora l'applicazione non termina in modo anomalo (NFR-13/1) e per i file non riparabili il messaggio compare entro 10 s (NFR-13/3).
 **Priorità:** P1
 
 ### VIS-08 — Resa delle pagine e documenti di grandi dimensioni
 **Descrizione:** le pagine sono mostrate fedelmente (testo, vettori, immagini, trasparenze, annotazioni con il loro aspetto, campi modulo, livelli nello stato corrente) e lo scorrimento resta fluido anche con migliaia di pagine o pagine di grande formato.
 **Flusso:** 1. Calcolo delle pagine visibili. 2. Anteprima immediata a bassa risoluzione, poi resa nitida a tasselli alla risoluzione dello zoom. 3. Pre-caricamento delle pagine adiacenti, cache con limite di memoria configurabile, annullamento delle rese per pagine uscite dalla vista. 4. Preferenze di qualità: risoluzione di resa personalizzabile (compromesso tra nitidezza e velocità), antialiasing di testo e grafica, levigatura immagini, ispessimento delle linee sottili, dpi del monitor (rilevati o impostati) usati per la dimensione reale.
 **Formati/strutture:** area mostrata = `/CropBox` (predefinita `/MediaBox`) intersecata con `/MediaBox`; `/Rotate`; `/UserUnit`; `/Annots` con `/AP` e flag `/F` (Hidden e NoView non mostrate, NoZoom e NoRotate rispettati); contenuto opzionale `/OC`; gruppi di trasparenza; spazi colore (ICCBased, Separation, DeviceN) convertiti per lo schermo; font incorporati o sostituiti in base a `/FontDescriptor`; immagini Flate, DCT, JPX, JBIG2, CCITT.
-**Casi limite:** pagine di dimensioni miste (A4, A3 orizzontale, scontrini lunghi) → ciascuna con le proprie proporzioni; pagine enormi (planimetrie oltre 200 pollici con `/UserUnit`) → resa a tasselli senza esaurire la memoria; `/MediaBox` assente o nulla → formato di ripiego secondo la lingua (A4 o Letter) con avviso; `/Rotate` non multiplo di 90 → arrotondato; pagina con milioni di oggetti vettoriali → resa annullabile e interfaccia reattiva; font non incorporati → sostituzione con metriche compatibili e segnalazione nelle proprietà (VIS-40); schermi HiDPI, scala frazionaria e più monitor con dpi diversi → resa nitida alla densità reale di ciascuno.
+**Casi limite:** pagine di dimensioni miste (A4, A3 orizzontale, scontrini lunghi) → ciascuna con le proprie proporzioni; pagine enormi (planimetrie oltre 200 pollici con `/UserUnit`) → resa a tasselli senza esaurire la memoria; `/MediaBox` assente o nulla → formato di ripiego secondo la lingua (A4 o Letter) con avviso; `/Rotate` non multiplo di 90 → arrotondato; pagina con milioni di oggetti vettoriali → resa annullabile e interfaccia reattiva; font non incorporati → sostituzione con metriche compatibili e segnalazione nella sezione Caratteri di Informazioni sul documento (VIS-40); schermi HiDPI, scala frazionaria e più monitor con dpi diversi → resa nitida alla densità reale di ciascuno.
 **Criteri di accettazione:**
 - Dato il corpus con immagini di riferimento approvate, quando ogni pagina è resa a 150 dpi, allora differisce dal riferimento per non più dell'1% dei pixel con tolleranza di colore ΔE ≤ 3.
-- Dato un documento di 5.000 pagine, quando l'utente lo scorre dall'inizio alla fine, allora il thread dell'interfaccia non resta bloccato per più di 100 ms e la memoria del processo non supera il limite configurato (predefinito 1 GB) più il 10%.
+- Dato un documento di 5.000 pagine (C-BIG), quando l'utente lo scorre dall'inizio alla fine, allora il thread dell'interfaccia non resta bloccato per più di 100 ms (NFR-05) e la memoria del processo non supera il limite di sicurezza di NFR-14 (predefinito 2 GB).
 - Dato un documento con pagine A4 verticali e A3 orizzontali alternate, quando è mostrato in modalità continua, allora ogni pagina ha il rapporto d'aspetto della propria `/CropBox` ruotata.
 - Data un'annotazione con flag Hidden o NoView, quando la pagina è resa a schermo, allora l'annotazione non è visibile.
 - Dato uno schermo con scala 200%, quando una pagina è mostrata al 100%, allora la resa avviene a densità doppia (identica alla resa a 192 dpi) e non è un ingrandimento della resa a 96 dpi.
@@ -894,7 +982,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### VIS-12 — Navigazione tra le pagine
 **Descrizione:** l'utente si sposta nel documento con pulsanti, campo "pagina N di M" (accetta numeri ed etichette), tastiera, rotella, barre di scorrimento, strumento mano e comandi prima/ultima/precedente/successiva; la barra di stato mostra pagina ed etichetta correnti.
-**Flusso:** 1. Campo pagina o Ctrl+G: si digita "12" o un'etichetta come "iv" o "A-3" e si salta. 2. Tastiera: PagSu/PagGiù (una schermata), Home/Fine (inizio/fine), frecce (scorrimento), Spazio e Maiusc+Spazio, Ctrl+PagSu/PagGiù (pagina precedente/successiva). 3. Strumento mano (o barra spaziatrice tenuta premuta) per trascinare la vista; clic centrale per lo scorrimento automatico locale.
+**Flusso:** 1. Campo pagina (fuoco con Ctrl+L, UX-18): si digita "12" o un'etichetta come "iv" o "A-3" e si salta. 2. Tastiera, secondo UX-18: Pag su/Pag giù e Spazio/Maiusc+Spazio (una schermata), Inizio/Fine (prima/ultima pagina), N/P (pagina successiva/precedente; → e ← quando la pagina è interamente visibile in larghezza), frecce (scorrimento). 3. Strumento mano (o barra spaziatrice tenuta premuta) per trascinare la vista; clic centrale per lo scorrimento automatico locale.
 **Formati/strutture:** `/PageLabels` (number tree con `/S` D, R, r, A, a, `/P` prefisso, `/St` valore iniziale) per mostrare e interpretare le etichette; il valore digitato è cercato prima tra le etichette e poi come numero fisico; il prefisso "#" forza il numero fisico.
 **Casi limite:** etichette duplicate → primo risultato, Invio ripetuto passa al successivo; numero fuori intervallo → campo segnalato in errore senza salto; documento di una pagina → precedente/successiva disabilitati; in doppia pagina "successiva" avanza di una coppia; verso RTL → frecce sinistra/destra invertite.
 **Criteri di accettazione:**
@@ -917,7 +1005,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### VIS-14 — Pannello miniature
 **Descrizione:** pannello laterale con le anteprime delle pagine per orientarsi e saltare rapidamente; mostra la pagina corrente e l'area visibile, ha dimensione regolabile ed è il punto di partenza delle operazioni sulle pagine (area Gestione pagine).
-**Flusso:** 1. Apertura del pannello (F4 o icona). 2. Miniature generate in modo asincrono solo per quelle visibili, con etichetta o numero sotto ciascuna. 3. Clic → salto registrato in cronologia. 4. Sulla miniatura corrente un rettangolo indica l'area visibile e si può trascinare per spostare la vista. 5. Ctrl+rotella o cursore per la dimensione; selezione multipla con Maiusc/Ctrl per le operazioni sulle pagine.
+**Flusso:** 1. Apertura del pannello laterale (F9, UX-06) sulla scheda Miniature, o clic sulla sua icona. 2. Miniature generate in modo asincrono solo per quelle visibili, con etichetta o numero sotto ciascuna. 3. Clic → salto registrato in cronologia. 4. Sulla miniatura corrente un rettangolo indica l'area visibile e si può trascinare per spostare la vista. 5. Ctrl+rotella o cursore per la dimensione; selezione multipla con Maiusc/Ctrl per le operazioni sulle pagine.
 **Formati/strutture:** `/Thumb` incorporate usate se presenti (opzione per ignorarle), altrimenti resa ridotta in cache; proporzioni da `/CropBox` e `/Rotate`.
 **Casi limite:** 10.000 pagine → solo le miniature visibili sono generate; dimensioni miste → miniature proporzionali in una griglia comune; pagina illeggibile → segnaposto; `/Thumb` non aggiornate rispetto alla pagina → rigenerate; documento cifrato → miniature solo in memoria.
 **Criteri di accettazione:**
@@ -942,9 +1030,9 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### VIS-16 — Segnalibri: creazione e modifica
 **Descrizione:** l'utente aggiunge segnalibri sulla vista corrente o dal testo selezionato, li rinomina, li elimina, li riordina e li annida per trascinamento, ne imposta stile, colore, destinazione o azione.
-**Flusso:** 1. Aggiungi segnalibro (Ctrl+B) → nuova voce dopo quella selezionata, con titolo uguale al testo selezionato o "Pagina N" e destinazione uguale alla vista corrente (pagina, posizione, zoom; preferenza "eredita lo zoom"). 2. Rinomina con F2 o doppio clic. 3. Trascinamento per riordinare o annidare; comandi Aumenta/Riduci livello. 4. Proprietà: titolo, colore, grassetto/corsivo, destinazione ("imposta sulla vista corrente"), azione (vai a pagina, apri URL, apri file; azioni avanzate nell'area Moduli). 5. Elimina, con i figli, previa conferma. 6. Annulla/Ripeti per ogni operazione; le modifiche si salvano con il documento.
+**Flusso:** 1. Aggiungi segnalibro (Ctrl+B) → nuova voce dopo quella selezionata, con titolo uguale al testo selezionato o "Pagina N" e destinazione uguale alla vista corrente (pagina, posizione, zoom; preferenza "eredita lo zoom"). 2. Rinomina con F2 o doppio clic. 3. Trascinamento per riordinare o annidare; comandi Aumenta/Riduci livello. 4. Proprietà: titolo, colore, grassetto/corsivo, destinazione ("imposta sulla vista corrente"), azione (vai a pagina, apri URL, apri file; le azioni di script non sono disponibili, NFR-17). 5. Elimina, con i figli, senza conferma: un avviso con **Annulla** riepiloga l'eliminazione (UX-13). 6. Annulla/Ripeti per ogni operazione (NFR-11); le modifiche si salvano con il documento.
 **Formati/strutture:** scrittura di `/Outlines` con `/Count` coerenti, `/Dest` esplicite o nominate, `/A`; titoli in PDFDocEncoding quando possibile, altrimenti UTF-16BE.
-**Casi limite:** documento senza segnalibri → creazione di `/Outlines`; pagina di destinazione eliminata in seguito → segnalibro marcato come rotto, mai rimosso in silenzio; titoli con emoji o testo RTL conservati; permessi che vietano la modifica → comandi disabilitati; documento firmato → avviso che la modifica sarà salvata come revisione incrementale e risulterà dopo la firma.
+**Casi limite:** documento senza segnalibri → creazione di `/Outlines`; pagina di destinazione eliminata in seguito → segnalibro marcato come rotto, mai rimosso in silenzio; titoli con emoji o testo RTL conservati; permessi che vietano la modifica → comandi disabilitati; documento firmato → avviso che la modifica sarà salvata come revisione incrementale (NFR-09) e risulterà dopo la firma.
 **Criteri di accettazione:**
 - Dato un documento a pagina 7, quando l'utente aggiunge un segnalibro, lo chiama "Introduzione" e salva, allora alla riapertura "Introduzione" porta alla pagina 7.
 - Dato un segnalibro trascinato sotto un altro, quando si salva e si riapre, allora risulta figlio di quest'ultimo e il `/Count` del genitore è coerente.
@@ -953,40 +1041,43 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### VIS-17 — Segnalibri: generazione automatica e strumenti avanzati
-**Descrizione:** crea automaticamente un albero di segnalibri multilivello dalla struttura logica (titoli taggati), dallo stile del testo (dimensione, grassetto, posizione), da un sommario presente nelle pagine, da un'espressione regolare, ogni N pagine oppure tramite analisi con modello linguistico (IA); offre strumenti di manutenzione: verifica e riparazione dei segnalibri rotti, unione dei duplicati, cambio maiuscole/minuscole, trova e sostituisci nei titoli, esportazione e importazione come testo, pagina di sommario cliccabile generata dai segnalibri, pannello delle destinazioni nominate.
-**Flusso:** 1. Segnalibri → Genera automaticamente → scelta del metodo → anteprima dell'albero proposto, modificabile. 2. Conferma: sostituisci o aggiungi all'albero esistente. 3. Strumenti → Verifica segnalibri → elenco dei problemi con correzione proposta. 4. Esporta/Importa in testo rientrato con numeri di pagina. 5. Crea pagina di sommario → pagina inserita in testa con link e stile configurabile. 6. Pannello Destinazioni: elenco, vai a, rinomina, elimina quelle inutilizzate, converti segnalibri in destinazioni nominate e viceversa. 7. Il metodo IA richiede consenso esplicito e un servizio di modelli linguistici configurato (locale o remoto) e mostra quali dati saranno inviati.
+**Descrizione:** crea automaticamente un albero di segnalibri multilivello dalla struttura logica (titoli taggati), dallo stile del testo (dimensione, grassetto, posizione), da un sommario presente nelle pagine, da un'espressione regolare, ogni N pagine oppure con l'IA (la generazione con IA è definita in AI-22, requisito di riferimento); offre strumenti di manutenzione: verifica e riparazione dei segnalibri rotti, unione dei duplicati, cambio maiuscole/minuscole, trova e sostituisci nei titoli, esportazione e importazione come testo, pagina di sommario cliccabile generata dai segnalibri, pannello delle destinazioni nominate.
+**Flusso:** 1. Segnalibri → Genera automaticamente → scelta del metodo → anteprima dell'albero proposto, modificabile. 2. Conferma: sostituisci o aggiungi all'albero esistente. 3. Strumenti → Verifica segnalibri → elenco dei problemi con correzione proposta. 4. Esporta/Importa in testo rientrato con numeri di pagina. 5. Crea pagina di sommario → pagina inserita in testa con link e stile configurabile. 6. Pannello Destinazioni: elenco, vai a, rinomina, elimina quelle inutilizzate, converti segnalibri in destinazioni nominate e viceversa. 7. Il metodo IA segue AI-22, con il fornitore e l'informativa di AI-01 e AI-02.
 **Formati/strutture:** `/StructTreeRoot` con elementi `/H`, `/H1`–`/H6`, `/Title`; attributi dei font del testo estratto; `/Outlines`; `/Dests` e `/Names /Dests`; formato testo di scambio "titolo<TAB>pagina" con rientro per livello.
-**Casi limite:** documento scansionato senza testo → proposta di OCR (area OCR); nessun titolo rilevato → messaggio e nessuna modifica; servizio IA non configurato o irraggiungibile → metodo disabilitato con spiegazione, gli altri metodi restano disponibili offline; preferenza "non inviare documenti a servizi remoti" → IA remota bloccata; righe di importazione con pagine fuori intervallo → segnalate e scartate.
+**Casi limite:** documento scansionato senza testo → proposta di OCR (OCR-01); nessun titolo rilevato → messaggio e nessuna modifica; fornitore IA non configurato, funzioni IA disattivate (AI-01) o fornitore irraggiungibile → metodo IA disabilitato con spiegazione, gli altri metodi restano disponibili offline; righe di importazione con pagine fuori intervallo → segnalate e scartate.
 **Criteri di accettazione:**
 - Dato un PDF taggato con 5 elementi H1 e 12 H2, quando si generano i segnalibri dalla struttura, allora l'albero ha 5 voci di primo livello e 12 di secondo con destinazioni sulle pagine corrette.
 - Dato un file di testo con righe rientrate su 3 livelli e numeri di pagina, quando viene importato, allora l'albero ha la stessa gerarchia e le stesse destinazioni.
 - Dato un segnalibro che punta a una destinazione nominata inesistente, quando si esegue Verifica, allora è elencato come rotto con la proposta di reindirizzarlo o rimuoverlo.
-- Data l'IA remota disabilitata nelle preferenze, quando si apre la generazione automatica, allora il metodo IA non è selezionabile e non avviene alcuna connessione di rete.
+- Dato l'interruttore «Funzioni IA» disattivato (AI-01), quando si apre la generazione automatica, allora il metodo IA non è selezionabile e non avviene alcuna connessione di rete.
 - Data "Crea pagina di sommario", quando l'operazione è completata, allora ogni riga del sommario è un link alla pagina del segnalibro corrispondente con numeri di pagina che tengono conto della pagina inserita.
-**Priorità:** P2
+- Dato un documento con 4 titoli in grassetto di corpo 18 pt e 9 di corpo 14 pt, quando si generano i segnalibri dallo stile del testo, allora l'albero proposto ha 4 voci di primo livello e 9 di secondo con destinazioni sulle pagine dei titoli.
+**Priorità:** P1
 
 ### VIS-18 — Riassunto di una sezione dal segnalibro (IA)
-**Descrizione:** dal menu contestuale di un segnalibro l'utente ottiene un riassunto sintetico della sezione corrispondente (dalla destinazione del segnalibro alla voce successiva di pari livello) e può salvarlo come nota.
-**Flusso:** 1. Clic destro sul segnalibro → Riassumi sezione. 2. Al primo uso: consenso e indicazione del servizio impiegato. 3. Estrazione del testo della sezione in ordine di lettura e invio al servizio di modelli linguistici configurato. 4. Riassunto in un pannello laterale con punti chiave e riferimenti alle pagine; azioni Copia, Inserisci come nota (area Annotazioni), Rigenera.
+**Descrizione:** dal menu contestuale di un segnalibro l'utente ottiene un riassunto sintetico della sezione corrispondente (dalla destinazione del segnalibro alla voce successiva di pari livello) e può salvarlo come nota. È l'accesso dal pannello Segnalibri alla funzione definita in AI-22 (requisito di riferimento), con fornitore e informativa di AI-01 e AI-02.
+**Flusso:** 1. Clic destro sul segnalibro → Riassumi sezione. 2. Al primo uso: informativa del fornitore (AI-02). 3. Estrazione del testo della sezione in ordine di lettura e invio al fornitore IA configurato. 4. Riassunto in un pannello laterale con punti chiave e riferimenti alle pagine; azioni Copia, Inserisci come nota (area Annotazioni), Rigenera.
 **Formati/strutture:** intervallo di pagine dalla destinazione del segnalibro a quella della voce successiva di pari livello (o fine documento); testo estratto come in VIS-28; lingua del riassunto = lingua dell'interfaccia o scelta dall'utente.
 **Casi limite:** sezione senza testo → proposta di OCR; sezione oltre il limite del servizio → riassunto a blocchi con avviso; servizio irraggiungibile → errore chiaro entro il timeout; documento con estrazione del contenuto non consentita → funzione disabilitata salvo password proprietario; ultimo segnalibro → sezione fino alla fine del documento.
 **Criteri di accettazione:**
 - Dato il segnalibro "Capitolo 2" a pagina 10 seguito da "Capitolo 3" a pagina 19, quando si chiede il riassunto, allora il testo inviato a un servizio simulato comprende solo le pagine 10–18.
 - Dato il servizio irraggiungibile, quando si chiede il riassunto, allora compare un messaggio d'errore entro il timeout configurato e l'interfaccia resta utilizzabile.
 - Dato un PDF con copia ed estrazione non consentite, quando si apre il menu del segnalibro, allora "Riassumi sezione" è disabilitato con il motivo.
-**Priorità:** P2
+**Priorità:** P1
 
 ### VIS-19 — Collegamenti e azioni di navigazione
-**Descrizione:** link interni ed esterni funzionano con un clic: salto a pagine e destinazioni, apertura di altri PDF o di allegati incorporati, URL nel browser predefinito, indirizzi e-mail; prima del clic l'utente vede dove porta il link; gli URL presenti come semplice testo possono diventare cliccabili.
-**Flusso:** 1. Passaggio del puntatore su un link → cursore a mano e suggerimento con la destinazione (pagina ed etichetta, URL completo o file). 2. Clic → esecuzione: GoTo → salto registrato in cronologia; URI → conferma per i domini non attendibili (consenti una volta, consenti sempre per il dominio, blocca), poi browser predefinito; mailto: → client di posta predefinito; GoToR → apre il file (percorso relativo al documento) in una nuova scheda sulla destinazione; GoToE → apre l'allegato incorporato; Named (NextPage, PrevPage, FirstPage, LastPage) → eseguite; Launch → bloccata per impostazione predefinita, sbloccabile per singolo documento con conferma; SetOCGState → applicata ai livelli; JavaScript → solo se abilitato (area Moduli). 3. Evidenziazione al clic secondo `/H`. 4. Tab e Maiusc+Tab spostano il fuoco tra i link della pagina, Invio li segue. 5. Preferenza "rileva URL nel testo" per rendere cliccabili indirizzi web ed e-mail non marcati come link.
+**Descrizione:** link interni ed esterni funzionano con un clic: salto a pagine e destinazioni, apertura di altri PDF o di allegati incorporati, URL nel browser predefinito, indirizzi e-mail; prima del clic l'utente vede dove porta il link; gli URL presenti come semplice testo possono diventare cliccabili. Questo requisito definisce l'**unica finestra di conferma** usata in tutta l'applicazione per le azioni che escono da Foliant (NFR-18): collegamenti, segnalibri, pulsanti dei moduli, URL rilevati nel testo, allegati aperti con altri programmi. OBJ-40, OBJ-41, SEC-27, FRM-18 e VIS-54 vi rimandano.
+**Flusso:** 1. Passaggio del puntatore su un link → cursore a mano e suggerimento con la destinazione (pagina ed etichetta, URL completo o file). 2. Clic → esecuzione: GoTo → salto registrato in cronologia; URI http/https, mailto: e altri schemi ammessi (SEC-27) → finestra di conferma, poi browser o client di posta predefinito; GoToR → finestra di conferma con il percorso completo, poi apertura del PDF (percorso relativo al documento) in una nuova scheda sulla destinazione; GoToE → apre l'allegato PDF incorporato in una nuova scheda; Named (NextPage, PrevPage, FirstPage, LastPage) → eseguite; Launch verso un file di dati (non eseguibile, senza parametri di avvio) → finestra di conferma, poi apertura con l'applicazione predefinita del sistema; Launch verso un programma, uno script o con parametri di avvio → mai eseguita, banner che lo spiega (NFR-18); SetOCGState → applicata ai livelli; azioni di script (ECMAScript per PDF, ISO 21757-1) → mai eseguite (NFR-17). 3. Finestra di conferma, unica per tutta l'applicazione: titolo in forma di domanda («Aprire questo indirizzo?», «Aprire questo file?», «Inviare i dati del modulo?»); destinazione completa (indirizzo con il dominio in evidenza e, per i domini internazionalizzati, anche la forma punycode; oppure percorso completo del file; oppure destinatario e dati da inviare); programma che verrà usato; avvisi di possibile contraffazione (dominio che imita un altro con caratteri di alfabeti diversi) e di testo visibile che indica un indirizzo diverso dalla destinazione; pulsanti **Apri** (o **Invia**), **Copia indirizzo**, **Annulla**, con il fuoco iniziale su **Annulla**; casella **Non chiedere più per questo dominio** (P1), solo per indirizzi http/https, il cui elenco si gestisce in Preferenze › Sicurezza e riservatezza (SEC-27). 4. Evidenziazione al clic secondo `/H`. 5. Tab e Maiusc+Tab spostano il fuoco tra i link della pagina, Invio li segue. 6. Preferenza "rileva URL nel testo" per rendere cliccabili indirizzi web ed e-mail non marcati come link.
 **Formati/strutture:** `/Subtype /Link` (`/Rect`, `/QuadPoints`, `/Dest`, `/A`, `/H` None/Invert/Outline/Push, `/PA`); azioni GoTo, GoToR (`/F`, `/D`, `/NewWindow`), GoToE (`/T`), GoToDp (PDF 2.0), Launch, URI (`/URI`, `/IsMap`, base `/URI /Base` del catalogo), Named, SetOCGState, catene `/Next`; ordine di tabulazione `/Tabs` della pagina.
-**Casi limite:** destinazione inesistente → "Destinazione non trovata" senza salto; file GoToR mancante → messaggio con il percorso e "Individua…"; URL malformati o con schemi pericolosi (file:, javascript:, data:) → bloccati con avviso; link sovrapposti → vince quello disegnato per ultimo; pagine ruotate → area cliccabile ruotata di conseguenza; `/QuadPoints` non valide → si usa `/Rect`; catene `/Next` cicliche → interrotte; link attivi anche in presentazione e schermo intero.
+**Casi limite:** destinazione inesistente → "Destinazione non trovata" senza salto; file GoToR mancante → messaggio con il percorso e "Individua…"; URL malformati o con schemi non ammessi (ogni schema diverso da quelli elencati in SEC-27, compresi `data:` e gli schemi che eseguono script nel browser) → bloccati con avviso; link sovrapposti → vince quello disegnato per ultimo; pagine ruotate → area cliccabile ruotata di conseguenza; `/QuadPoints` non valide → si usa `/Rect`; catene `/Next` cicliche → interrotte; link attivi anche in presentazione e schermo intero.
 **Criteri di accettazione:**
 - Dato un link GoTo verso la pagina 12 con `/FitH 500`, quando viene cliccato, allora la pagina 12 è adattata in larghezza con y = 500 sul bordo superiore e la cronologia contiene la posizione di partenza.
-- Dato un link URI verso un dominio non attendibile, quando viene cliccato, allora compare la conferma con l'URL completo e il browser non si apre finché l'utente non consente.
-- Dato un link con azione Launch, quando viene cliccato, allora nessun processo viene avviato e compare la spiegazione del blocco.
-- Dato un link GoToR a "altro.pdf" con destinazione nominata "capitolo2" e il file nella stessa cartella, quando viene cliccato, allora altro.pdf si apre in una nuova scheda sulla destinazione "capitolo2".
-- Data la preferenza "rileva URL nel testo" attiva e il testo "www.esempio.it" non marcato come link, quando l'utente vi fa clic, allora viene trattato come link URI con la stessa conferma.
+- Dato un link URI verso un dominio non presente tra quelli consentiti, quando viene cliccato, allora compare la finestra di conferma con l'URL completo e il dominio in evidenza, il fuoco è su **Annulla** e il browser non si apre finché l'utente non sceglie **Apri**.
+- Dato un link con azione Launch verso un programma o uno script, quando viene cliccato, allora nessun processo viene avviato e compare la spiegazione del blocco, senza alcuna possibilità di sbloccarlo.
+- Dato un link GoToR a "altro.pdf" con destinazione nominata "capitolo2" e il file nella stessa cartella, quando viene cliccato e l'utente conferma nella finestra che mostra il percorso completo, allora altro.pdf si apre in una nuova scheda sulla destinazione "capitolo2".
+- Dato **Non chiedere più per questo dominio** scelto per esempio.it, quando l'utente clicca un altro link verso esempio.it, allora il browser si apre senza conferma, mentre un link verso altro.it mostra ancora la finestra (P1).
+- Dato un link il cui testo visibile è "www.banca.it" e la cui destinazione è "https://altro.example", quando viene cliccato, allora la finestra segnala che il testo indica un indirizzo diverso dalla destinazione.
+- Data la preferenza "rileva URL nel testo" attiva e il testo "www.esempio.it" non marcato come link, quando l'utente vi fa clic, allora viene trattato come link URI con la stessa finestra di conferma.
 - Data una pagina con 5 link, quando l'utente preme Tab 5 volte, allora il fuoco visita i 5 link nell'ordine definito da `/Tabs` (o in ordine di lettura se assente).
 **Priorità:** P0
 
@@ -1005,7 +1096,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### VIS-21 — Livelli: gestione
 **Descrizione:** l'utente crea, rinomina, elimina, riordina e raggruppa i livelli; ne imposta le proprietà (visibile all'apertura, stampa, esportazione, blocco); salva lo stato corrente come predefinito; unisce più livelli e li appiattisce nel contenuto; assegna contenuti e annotazioni a un livello.
-**Flusso:** 1. Pannello Livelli → Gestisci. 2. Nuovo, Rinomina, Elimina (scelta: elimina il contenuto oppure spostalo nel contenuto di base), trascinamento per riordinare o annidare. 3. Proprietà: nome, visibile all'apertura, stampa (sempre, mai, se visibile), esportazione, bloccato. 4. "Salva la visibilità corrente come predefinita". 5. Unisci livelli selezionati; Appiattisci livelli (i visibili diventano contenuto di base, i nascosti sono rimossi, con conferma). 6. Sposta oggetti o annotazioni selezionati su un livello (in coordinamento con l'area Editing).
+**Flusso:** 1. Pannello Livelli → Gestisci. 2. Nuovo, Rinomina, Elimina (scelta: elimina il contenuto oppure spostalo nel contenuto di base), trascinamento per riordinare o annidare. 3. Proprietà: nome, visibile all'apertura, stampa (sempre, mai, se visibile), esportazione, bloccato. 4. "Salva la visibilità corrente come predefinita". 5. Unisci livelli selezionati; Appiattisci livelli (i visibili diventano contenuto di base, i nascosti sono rimossi, con conferma). 6. Sposta oggetti o annotazioni selezionati su un livello (oggetti secondo OBJ-01).
 **Formati/strutture:** scrittura di `/OCProperties`, OCG, `/D` (`/ON`, `/OFF`, `/Order`, `/Locked`, `/RBGroups`) e `/Usage`; riscrittura delle sequenze `BDC /OC … EMC` e delle chiavi `/OC` di XObject e annotazioni; vincoli PDF/A-2 e successivi (`/Name` obbligatorio per ogni configurazione, nessuna `/AS` in `/D`).
 **Casi limite:** livello usato da OCMD o da azioni SetOCGState → riferimenti aggiornati o segnalati prima dell'eliminazione; documento dichiarato PDF/A → avviso se la modifica viola il profilo; documento firmato → avviso sull'effetto per le firme; appiattimento di livelli bloccati → conferma esplicita; modifica non consentita dai permessi → comandi disabilitati.
 **Criteri di accettazione:**
@@ -1016,15 +1107,16 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P2
 
 ### VIS-22 — Allegati e portfolio: consultazione
-**Descrizione:** pannello Allegati con i file incorporati nel documento (a livello di documento e come annotazioni di pagina) con nome, descrizione, dimensione, date e relazione col documento; l'utente li apre o li salva; i portfolio PDF (collezioni) si aprono in una vista dedicata con l'elenco dei file.
-**Flusso:** 1. Apertura del pannello (automatica con `/PageMode /UseAttachments` o se il documento è una collezione). 2. Elenco con colonne ordinabili; per gli allegati di pagina è indicata la pagina (clic → salto). 3. Apri: i PDF in una nuova scheda; gli altri tipi, dopo un avviso di sicurezza, con l'applicazione predefinita del sistema su una copia temporanea. 4. Salva come / Salva tutti. 5. Portfolio: vista elenco o griglia con i campi dello schema, cartelle navigabili, documento iniziale, ricerca per nome; i PDF contenuti si aprono in schede. L'aggiunta e la modifica degli allegati appartengono all'area Annotazioni/Protezione.
+**Descrizione:** pannello Allegati con i file incorporati nel documento (a livello di documento e come annotazioni di pagina) con nome, descrizione, dimensione, date e relazione col documento; i portfolio PDF (collezioni) si aprono in una vista dedicata con l'elenco dei file, la ricerca, l'estrazione e la stampa dei file contenuti. Le operazioni sugli allegati di documento (aggiungi, apri, salva, modifica, elimina) sono definite in VIS-54 (requisito di riferimento); gli allegati sulla pagina in ANN-29; la creazione e la modifica dei portfolio in CNV-34.
+**Flusso:** 1. Apertura del pannello (automatica con `/PageMode /UseAttachments` o se il documento è una collezione). 2. Elenco con colonne ordinabili; per gli allegati di pagina è indicata la pagina (clic → salto). 3. Apri, Salva con nome, Salva tutti: come VIS-54 (apertura dei file non PDF con la finestra di conferma di VIS-19). 4. Portfolio: vista elenco o griglia con i campi dello schema, cartelle navigabili, documento iniziale, ricerca per nome; i PDF contenuti si aprono in schede. 5. Stampa dei file del portfolio: selezione di uno o più file PDF dell'elenco → **Stampa** apre la finestra di UX-15 e invia i file in un unico lavoro, nell'ordine dell'elenco; i file non PDF sono esclusi con un avviso.
 **Formati/strutture:** name tree `/Names /EmbeddedFiles`; file specification (`/F`, `/UF`, `/Desc`, `/EF`, `/AFRelationship`); embedded file stream (`/Subtype` tipo MIME, `/Params` con `/Size`, `/CreationDate`, `/ModDate`, `/CheckSum`); `/AF`; annotazioni `/FileAttachment`; `/Collection` (`/Schema`, `/D`, `/View`, `/Sort`, `/Folders`) e `/CI`.
-**Casi limite:** allegati eseguibili o script → apertura bloccata per impostazione predefinita, solo "Salva come"; nomi con percorsi o "../" → ripuliti al salvataggio; allegati cifrati con filtro dedicato (`/EFF`) → richiesta della password se necessaria; checksum non corrispondente → avviso; allegati molto grandi → salvataggio progressivo con avanzamento; collezione con navigatore deprecato → vista elenco standard; PDF/A-3 con dati strutturati (es. fattura XML) → relazione `/AFRelationship` mostrata.
+**Casi limite:** allegati eseguibili o script → apertura sempre bloccata, solo "Salva con nome" (NFR-18); nomi con percorsi o "../" → ripuliti al salvataggio; allegati cifrati con filtro dedicato (`/EFF`) → richiesta della password se necessaria; checksum non corrispondente → avviso; allegati molto grandi → salvataggio progressivo con avanzamento; collezione con navigatore deprecato → vista elenco standard; PDF/A-3 con dati strutturati (es. fattura XML) → relazione `/AFRelationship` mostrata.
 **Criteri di accettazione:**
 - Dato un PDF con 3 file incorporati, quando si apre il pannello, allora sono elencati 3 elementi con nome, dimensione e descrizione.
-- Dato un allegato PDF, quando si sceglie Apri, allora si apre in una nuova scheda; quando si sceglie Salva come, allora il file scritto è byte-identico al flusso incorporato decodificato.
-- Dato un allegato con estensione eseguibile, quando si sceglie Apri, allora l'apertura è bloccata ed è offerto solo "Salva come".
+- Dato un PDF con un allegato a livello di documento e uno sulla pagina 4, quando si apre il pannello, allora entrambi sono elencati e il clic sul secondo porta alla pagina 4.
 - Dato un portfolio con 2 cartelle e 5 file, quando viene aperto, allora la vista mostra cartelle e file navigabili ed evidenzia il documento iniziale indicato da `/D`.
+- Dato un portfolio con 5 file, quando l'utente cerca una parte del nome di un file, allora l'elenco mostra solo i file corrispondenti, anche dentro le cartelle.
+- Dato un portfolio con 3 PDF e 1 immagine selezionati, quando l'utente sceglie **Stampa** e stampa su file, allora il risultato contiene le pagine dei 3 PDF nell'ordine dell'elenco e un avviso indica che l'immagine è stata esclusa.
 **Priorità:** P1
 
 ### VIS-23 — Thread di articoli
@@ -1038,9 +1130,9 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P2
 
 ### VIS-24 — Ricerca nel documento
-**Descrizione:** barra di ricerca (Ctrl+F) che trova parole o frasi, evidenzia tutte le occorrenze, scorre tra i risultati e li elenca con il contesto, con opzioni maiuscole/minuscole, parola intera e accenti.
-**Flusso:** 1. Ctrl+F → barra con campo precompilato con l'eventuale selezione. 2. Ricerca incrementale durante la digitazione, su tutto il documento a partire dalla pagina corrente, con ripresa dall'inizio. 3. Invio o F3 → successivo; Maiusc+Invio o Maiusc+F3 → precedente; contatore "3 di 42". 4. Opzioni: Maiuscole/minuscole, Parola intera, Ignora accenti, Evidenzia tutti. 5. Pannello Risultati raggruppato per pagina con estratto di contesto e termine in grassetto, numero ed etichetta di pagina; clic → salto ed evidenziazione, registrato in cronologia. 6. Esc chiude la barra e toglie le evidenziazioni; il campo ricorda le ultime ricerche.
-**Formati/strutture:** testo estratto con mappatura Unicode (`/ToUnicode`, codifiche e `/Differences`, `/ActualText`); normalizzazione Unicode di compatibilità (legature come "ﬁ" → "fi", spazi speciali); ricomposizione delle parole sillabate a fine riga; ordine di lettura.
+**Descrizione:** barra di ricerca (Ctrl+F) che trova parole o frasi nel testo e, a scelta, nei commenti, evidenzia tutte le occorrenze, scorre tra i risultati e li elenca con il contesto, con opzioni maiuscole/minuscole, parola intera e accenti.
+**Flusso:** 1. Ctrl+F → barra con campo precompilato con l'eventuale selezione. 2. Ricerca incrementale durante la digitazione, su tutto il documento a partire dalla pagina corrente, con ripresa dall'inizio. 3. Invio o Ctrl+G → successivo; Maiusc+Invio o Ctrl+Maiusc+G → precedente (UX-18); contatore "3 di 42". 4. Opzioni: Maiuscole/minuscole, Parola intera, Ignora accenti, Evidenzia tutti, **Cerca anche nei commenti** (P1; testo dei commenti, delle risposte e delle note). 5. Pannello Risultati raggruppato per pagina con estratto di contesto e termine in grassetto, numero ed etichetta di pagina; i risultati nei commenti sono indicati con l'icona e il tipo del commento; clic → salto ed evidenziazione, registrato in cronologia; per un commento, selezione dell'annotazione e apertura della sua finestra di testo. 6. Esc chiude la barra e toglie le evidenziazioni; il campo ricorda le ultime ricerche.
+**Formati/strutture:** testo estratto con mappatura Unicode (`/ToUnicode`, codifiche e `/Differences`, `/ActualText`); normalizzazione Unicode di compatibilità (legature come "ﬁ" → "fi", spazi speciali); ricomposizione delle parole sillabate a fine riga; ordine di lettura. Con **Cerca anche nei commenti**: `/Contents` (e `/RC` come testo semplice) delle annotazioni di markup e delle risposte (`/IRT`), escluse le annotazioni di stato.
 **Casi limite:** 5.000 pagine → ricerca in background con avanzamento, risultati mostrati man mano e annullamento; pagine senza testo (scansioni) → "N pagine senza testo: esegui l'OCR per cercarvi" (area OCR); testo RTL e CJK (per le scritture senza spazi "Parola intera" non si applica e lo si indica); frase che prosegue alla riga o alla pagina successiva → trovata; documento con copia non consentita → la ricerca funziona comunque; nessun risultato → campo evidenziato senza finestre modali.
 **Criteri di accettazione:**
 - Dato un documento con "Contratto" 3 volte e "contratto" 2 volte, quando si cerca "contratto" senza opzioni, allora i risultati sono 5; con "Maiuscole/minuscole" sono 2.
@@ -1048,12 +1140,14 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato "perché" nel documento, quando si cerca "perche" con "Ignora accenti", allora l'occorrenza è trovata.
 - Dato "ﬁnanza" scritto con la legatura, quando si cerca "finanza", allora l'occorrenza è trovata.
 - Data la parola "infor-" a fine riga seguita da "mazione" a inizio riga, quando si cerca "informazione", allora l'occorrenza è trovata ed evidenziata su entrambe le righe.
-- Dato un documento di 2.000 pagine, quando si cerca una parola presente solo nell'ultima pagina, allora il risultato compare entro 5 s sulla macchina di riferimento e l'interfaccia resta reattiva.
+- Dato un documento di 2.000 pagine, quando si cerca una parola presente solo nell'ultima pagina, allora il risultato compare entro 5 s sulla macchina di riferimento e durante la ricerca ogni comando dà riscontro entro 100 ms (NFR-05).
+- Dato C-500, quando si cerca una parola, allora il primo risultato e il conteggio completo rispettano le soglie di NFR-07 (0,5 s e 3 s).
 - Dato un elemento del pannello Risultati, quando viene cliccato, allora la pagina corrispondente è mostrata con l'occorrenza evidenziata e visibile.
+- Dato un commento con il testo «verificare la scadenza» sulla pagina 4 e una risposta che contiene «scadenza», quando si cerca «scadenza» con **Cerca anche nei commenti** attivo, allora il pannello Risultati elenca il commento e la risposta con l'indicazione «commento, pagina 4» e il clic su una voce seleziona l'annotazione e ne apre la finestra di testo; con l'opzione disattivata i commenti non compaiono (P1).
 **Priorità:** P0
 
 ### VIS-25 — Ricerca avanzata e su più documenti
-**Descrizione:** ricerca con espressioni regolari e operatori (frase esatta, tutte le parole, almeno una), estesa a commenti, segnalibri, campi modulo, allegati e metadati, sui documenti aperti, su una cartella con le sottocartelle o su un indice full-text creato dall'utente per ricerche istantanee su grandi archivi.
+**Descrizione:** ricerca con espressioni regolari e operatori (frase esatta, tutte le parole, almeno una), estesa a commenti, segnalibri, campi modulo, allegati e metadati, sui documenti aperti, su una cartella con le sottocartelle o su un indice full-text creato dall'utente per ricerche immediate su grandi archivi.
 **Flusso:** 1. Ctrl+Maiusc+F → pannello Ricerca avanzata. 2. Ambito: documento corrente, documenti aperti, cartella, indice. 3. Modalità: frase, tutte le parole, almeno una, espressione regolare; opzioni di VIS-24 più "includi commenti, segnalibri, campi, allegati, metadati". 4. Risultati raggruppati per file e pagina con contesto; esportazione dei risultati in CSV. 5. Indici: crea, aggiorna (solo i file cambiati), elimina.
 **Formati/strutture:** testo estratto; `/Contents` e `/RC` delle annotazioni; titoli di `/Outlines`; valori `/V` dei campi; PDF incorporati; dizionario Info e XMP; indice locale nel profilo utente.
 **Casi limite:** espressione regolare non valida → errore nel campo; espressione con tempi patologici → limite di tempo per pagina; file cifrati o corrotti nella cartella → saltati ed elencati nel riepilogo; cartelle con 10.000 file → elaborazione in background annullabile; file indicizzati poi modificati o eliminati → risultati aggiornati o marcati; documenti cifrati non indicizzati salvo consenso esplicito.
@@ -1065,27 +1159,27 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P2
 
 ### VIS-26 — Trova e sostituisci, Trova ed elimina
-**Descrizione:** l'utente cerca un testo nel contenuto delle pagine e lo sostituisce con un altro oppure lo elimina, su una singola occorrenza o su tutte, mantenendo font, dimensione, colore e posizione.
-**Flusso:** 1. Ctrl+H → barra con "Trova" e "Sostituisci con" (vuoto = elimina) e le opzioni di VIS-24, inclusa l'espressione regolare. 2. Anteprima dei risultati in elenco, con casella per includere o escludere ogni occorrenza. 3. Sostituisci (corrente), Sostituisci tutto, Elimina tutto. 4. Riepilogo "N sostituzioni su M pagine, K non eseguite" con i motivi. 5. L'intera operazione si annulla con un solo Annulla.
+**Descrizione:** accesso dalla barra di ricerca alle funzioni Trova e sostituisci e Trova ed elimina, definite in TXT-12 (P0) e TXT-13 (P1), requisiti di riferimento: l'utente cerca un testo nel contenuto delle pagine e lo sostituisce con un altro oppure lo elimina, su una singola occorrenza o su tutte, mantenendo font, dimensione, colore e posizione. In caso di differenza valgono TXT-12 e TXT-13; le conferme seguono UX-13.
+**Flusso:** 1. Ctrl+H (UX-18) → la barra di ricerca si estende con "Sostituisci con" (vuoto = elimina) e le opzioni di VIS-24, inclusa l'espressione regolare. 2. Anteprima dei risultati in elenco, con casella per includere o escludere ogni occorrenza. 3. Sostituisci (corrente), Sostituisci tutto, Elimina tutto: eseguiti senza conferma, con un avviso che riporta il numero di modifiche e offre **Annulla** (UX-13). 4. Riepilogo "N sostituzioni su M pagine, K non eseguite" con i motivi. 5. L'intera operazione si annulla con un solo Annulla.
 **Formati/strutture:** riscrittura degli operatori di testo (`TJ`/`Tj`, `Td`/`Tm`, crenatura in `TJ`); mappatura inversa da Unicode ai codici tramite `/ToUnicode` ed `/Encoding`; aggiornamento di `/Widths`; incorporamento dei glifi mancanti nel sottoinsieme del font; conservazione di `/MCID` e della struttura logica; motore condiviso con l'area Editing testo.
-**Casi limite:** sottoinsieme del font privo dei glifi necessari → font equivalente o sostituzione non eseguita con avviso, mai glifi mancanti; testo sostitutivo più lungo → riflusso nel blocco o avviso di sovrapposizione; testo che fa parte di un'immagine → non sostituibile, segnalato; testo in annotazioni o campi → escluso salvo opzione; documento firmato → avviso sulla validità delle firme; modifica non consentita dai permessi → comando disabilitato.
+**Casi limite:** sottoinsieme del font privo dei glifi necessari → font equivalente o sostituzione non eseguita con avviso, mai glifi mancanti; testo sostitutivo più lungo → riflusso nel blocco o avviso di sovrapposizione; testo che fa parte di un'immagine → non sostituibile, segnalato; testo in annotazioni, campi modulo e segnalibri → escluso, come dichiarato nel dialogo (TXT-12); documento firmato → avviso sulla validità delle firme; modifica non consentita dai permessi → comando disabilitato.
 **Criteri di accettazione:**
 - Dato un documento con 10 occorrenze di "ACME S.r.l." in un font incorporato completo, quando si sostituisce tutto con "Beta S.p.A.", allora il testo estratto contiene 10 volte "Beta S.p.A." nello stesso font e corpo e nessuna volta "ACME S.r.l.".
-- Dato "Elimina tutto" sulla parola "BOZZA", quando è completato, allora la ricerca di "BOZZA" dà 0 risultati e il resto del testo delle righe interessate mantiene la posizione originale (±0,5 pt).
+- Dato "Elimina tutto" sulla parola "BOZZA", quando è completato, allora la ricerca di "BOZZA" dà 0 risultati e il resto del testo delle righe interessate mantiene la posizione originale (±0,5 pt) (P1, TXT-13).
 - Dato un sottoinsieme di font senza la lettera "Z" e un testo sostitutivo che la contiene, quando si sostituisce, allora l'occorrenza è resa con un font equivalente oppure segnalata come non eseguita, senza glifi mancanti.
-- Dato "Sostituisci tutto" con 50 sostituzioni, quando l'utente preme Annulla una volta, allora il documento torna identico allo stato precedente.
-**Priorità:** P1
+- Dato "Sostituisci tutto" con 50 sostituzioni, quando l'operazione termina, allora non è stata chiesta alcuna conferma, compare l'avviso con **Annulla** e un solo Annulla riporta il documento identico allo stato precedente.
+**Priorità:** P0
 
 ### VIS-27 — Ricerca semantica (IA)
-**Descrizione:** l'utente cerca per significato anziché per parole esatte (ad esempio "penali per ritardo" trova "sanzioni in caso di consegna tardiva") e ottiene passaggi ordinati per rilevanza, collegati alla pagina.
-**Flusso:** 1. Nel pannello di ricerca si sceglie la modalità "Per significato". 2. Al primo uso: consenso, scelta del servizio di modelli linguistici (locale o remoto) e indicazione dei dati inviati. 3. Indicizzazione semantica del documento in background con avanzamento. 4. Query → passaggi con punteggio di rilevanza; clic → pagina con il passaggio evidenziato. 5. Possibilità di combinare con la ricerca esatta.
+**Descrizione:** l'utente cerca per significato anziché per parole esatte (ad esempio "penali per ritardo" trova "sanzioni in caso di consegna tardiva") e ottiene passaggi ordinati per rilevanza, collegati alla pagina. È l'accesso dalla barra di ricerca alla funzione definita in AI-21 (requisito di riferimento), con fornitore e informativa di AI-01 e AI-02.
+**Flusso:** 1. Nel pannello di ricerca si sceglie la modalità "Per significato". 2. Al primo uso: informativa del fornitore configurato (AI-02), che indica i dati inviati. 3. Indicizzazione semantica del documento in background con avanzamento (AI-14). 4. Query → passaggi con punteggio di rilevanza; clic → pagina con il passaggio evidenziato. 5. Possibilità di combinare con la ricerca esatta.
 **Formati/strutture:** testo estratto diviso in passaggi con riferimento a pagina e coordinate; rappresentazioni vettoriali in cache locale legate all'identificativo del documento (`/ID`) e alla data di modifica.
-**Casi limite:** servizio non configurato → modalità non disponibile con spiegazione; documento modificato → indice semantico rigenerato; documento senza testo → proposta di OCR; documento cifrato → nessuna cache su disco salvo consenso; preferenza "nessun invio a servizi remoti" → solo servizio locale; lingua della domanda diversa da quella del documento → supportata se il servizio lo consente.
+**Casi limite:** fornitore non configurato o funzioni IA disattivate (AI-01) → modalità non disponibile con spiegazione; documento modificato → indice semantico rigenerato; documento senza testo → proposta di OCR (AI-15); documento cifrato → nessuna cache su disco salvo consenso; fornitore che elabora sul computer (AI-01) → nessun dato lascia il computer; lingua della domanda diversa da quella del documento → supportata se il fornitore lo consente.
 **Criteri di accettazione:**
-- Dato un documento di prova con il passaggio "sanzioni in caso di consegna tardiva", quando si cerca "penali per ritardo" con il servizio di riferimento, allora il passaggio è tra i primi 3 risultati.
-- Data la preferenza "nessun invio a servizi remoti" e solo un servizio remoto configurato, quando l'utente sceglie la modalità per significato, allora la modalità è disabilitata e non parte alcuna richiesta di rete.
+- Dato un documento di prova con il passaggio "sanzioni in caso di consegna tardiva" e il fornitore simulato per vettori che rende vicini i due concetti, quando si cerca "penali per ritardo", allora il passaggio è tra i primi 3 risultati.
+- Dato l'interruttore «Funzioni IA» disattivato (AI-01), quando l'utente apre la barra di ricerca, allora la modalità per significato non è disponibile e non parte alcuna richiesta di rete.
 - Dato un risultato semantico, quando viene cliccato, allora la vista mostra la pagina con il passaggio evidenziato.
-**Priorità:** P2
+**Priorità:** P1
 
 ### VIS-28 — Selezione e copia del testo
 **Descrizione:** l'utente seleziona testo con il mouse o la tastiera, anche su più colonne e più pagine, e lo copia negli appunti con caratteri Unicode corretti e nell'ordine di lettura; può selezionare una parola (doppio clic), una riga o un paragrafo (triplo clic), un'area rettangolare (Alt+trascinamento) o tutto (Ctrl+A).
@@ -1101,28 +1195,30 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato un Alt+trascinamento su una tabella, quando si copia, allora gli appunti contengono solo il testo interno al rettangolo, una riga per riga di tabella, con tabulazioni tra le colonne.
 **Priorità:** P0
 
-### VIS-29 — Istantanea di un'area
-**Descrizione:** l'utente cattura un'area rettangolare come immagine, negli appunti o su file, alla risoluzione scelta, oppure ne copia il testo, anche tramite OCR se l'area non contiene testo.
-**Flusso:** 1. Strumento Istantanea (o trascinamento con il tasto destro). 2. Tracciamento del rettangolo, con scorrimento automatico se supera la vista. 3. Menu: Copia immagine, Salva immagine (PNG, JPEG, TIFF), Copia testo, Estrai testo con OCR (area OCR). 4. Risoluzione: quella dello schermo o un valore tra 72 e 1200 dpi.
-**Formati/strutture:** resa raster dell'area con i livelli visibili e, a scelta, le annotazioni; PNG con sfondo trasparente opzionale; testo come in VIS-28.
-**Casi limite:** area a cavallo di due pagine in modalità continua → cattura della composizione visibile; vista ruotata → immagine come appare; area grande ad alta risoluzione → limite di 100 megapixel con avviso; copia ed estrazione non consentite dai permessi → strumento disabilitato con il motivo.
+### VIS-29 — Cattura area
+**Descrizione:** con lo strumento **Cattura area**, disponibile in ogni modalità e anche nei documenti in sola lettura, l'utente cattura un'area rettangolare come immagine, negli appunti o su file, alla risoluzione scelta, oppure ne copia il testo, anche tramite OCR se l'area non contiene testo; nei documenti modificabili può inserire la cattura come immagine in una pagina. È il requisito di riferimento per la cattura di aree (OBJ-29 vi rimanda).
+**Flusso:** 1. Strumento **Cattura area** (barra contestuale di Leggi, UX-05; anche trascinamento con il tasto destro). 2. Tracciamento del rettangolo, con scorrimento automatico se supera la vista; in vista continua può comprendere più pagine. 3. Menu: Copia immagine (predefinito), Salva immagine (PNG, JPEG, TIFF), Copia testo, Esegui OCR sull'area (OCR-11), Inserisci come immagine (in una pagina scelta, con le regole di OBJ-04). 4. Risoluzione: quella dello schermo oppure un valore tra 72 e 1200 dpi, con i valori rapidi 150, 300 e 600.
+**Formati/strutture:** resa raster dell'area con i livelli visibili e, a scelta, le annotazioni; PNG con sfondo trasparente opzionale; negli appunti `image/png` e, se l'area contiene testo, `text/plain`; testo come in VIS-28, in ordine di lettura.
+**Casi limite:** area a cavallo di due pagine in modalità continua → cattura della composizione visibile; vista ruotata → immagine come appare; area più piccola di 2 × 2 px → ignorata; immagine risultante oltre 100 megapixel → risoluzione ridotta fino al limite, con avviso; area senza testo (scansione) → "Copia testo" propone l'OCR dell'area; copia ed estrazione non consentite dai permessi → copia, salvataggio e inserimento disabilitati con il motivo; modifica non consentita → "Inserisci come immagine" disabilitato.
 **Criteri di accettazione:**
-- Dato un rettangolo di 2 × 1 pollici catturato a 300 dpi, quando si copia l'immagine, allora gli appunti contengono un'immagine di 600 × 300 px.
+- Dato un rettangolo di 2 × 1 pollici catturato a 300 dpi, quando si copia l'immagine, allora gli appunti contengono un'immagine di 600 × 300 px (±1 px).
 - Data un'area con testo, quando si sceglie Copia testo, allora gli appunti contengono lo stesso testo di una selezione rettangolare equivalente (VIS-28).
-- Dato un PDF con copia non consentita, quando l'utente sceglie lo strumento, allora l'istantanea è disabilitata con il motivo.
+- Dato un PDF con copia non consentita, quando l'utente sceglie lo strumento, allora la cattura è disabilitata con il motivo.
+- Data una cattura a cavallo di due pagine, quando la si salva, allora l'immagine contiene le porzioni di entrambe le pagine come appaiono a schermo.
+- Data una cattura e un documento modificabile, quando si sceglie "Inserisci come immagine" sulla pagina 3, allora la pagina 3 contiene una nuova immagine con il contenuto catturato e un solo Annulla la rimuove.
 **Priorità:** P1
 
 ### VIS-30 — Schede, finestre e sessioni
 **Descrizione:** più documenti aperti contemporaneamente in schede, con riordino, chiusura, trascinamento verso altre finestre o fuori per crearne una nuova, gruppi di schede, riapertura della scheda chiusa, ripristino della sessione all'avvio e seconda vista dello stesso documento.
-**Flusso:** 1. Ogni documento si apre in una scheda (preferenza: nuova finestra). 2. Ctrl+Tab e Ctrl+Maiusc+Tab per scorrere, Alt+1…9 per saltare. 3. Chiudi (Ctrl+W), Chiudi le altre, Chiudi quelle a destra, Chiudi tutte; Riapri scheda chiusa (Ctrl+Maiusc+T) nella stessa posizione. 4. Trascinamento per riordinare; fuori dalla barra → nuova finestra; su un'altra finestra → spostamento. 5. Gruppi di schede con nome e colore, comprimibili. 6. Suggerimento con il percorso completo, indicatore di modifiche non salvate, menu con l'elenco delle schede quando non stanno nella barra. 7. Preferenza "Ripristina la sessione all'avvio": finestre, schede, gruppi, pagina e zoom. 8. "Nuova vista del documento" → seconda scheda sullo stesso documento in memoria, con le modifiche visibili in entrambe.
+**Flusso:** 1. Ogni documento si apre in una scheda (preferenza: nuova finestra). 2. Ctrl+Pag giù/Ctrl+Pag su o Ctrl+Tab/Ctrl+Maiusc+Tab per scorrere, Alt+1…9 per saltare (UX-18). 3. Chiudi (Ctrl+W), Chiudi le altre, Chiudi quelle a destra, Chiudi tutte; Riapri scheda chiusa (Ctrl+Maiusc+T) nella stessa posizione. 4. Trascinamento per riordinare; fuori dalla barra → nuova finestra; su un'altra finestra → spostamento. 5. Gruppi di schede con nome e colore, comprimibili. 6. Suggerimento con il percorso completo, indicatore di modifiche non salvate, menu con l'elenco delle schede quando non stanno nella barra. 7. Preferenza "Ripristina la sessione all'avvio": finestre, schede, gruppi, pagina e zoom. 8. "Nuova vista del documento" → seconda scheda sullo stesso documento in memoria, con le modifiche visibili in entrambe.
 **Formati/strutture:** sessione salvata nel profilo utente (percorsi, posizioni, gruppi), senza password né contenuti.
-**Casi limite:** chiusura di una scheda con modifiche → Salva / Non salvare / Annulla (VIS-47); chiusura dell'applicazione con più documenti modificati → un solo dialogo con l'elenco; file della sessione non più esistente → scheda non ripristinata e notifica; documenti cifrati → la password viene richiesta di nuovo; 100 schede aperte → le schede inattive rilasciano la cache di resa; stesso file aperto due volte → si attiva la scheda esistente (VIS-05).
+**Casi limite:** chiusura di una scheda con modifiche → Salva / Non salvare / Annulla (NFR-12); chiusura dell'applicazione con più documenti modificati → un solo dialogo con l'elenco (NFR-12); file della sessione non più esistente → scheda non ripristinata e notifica; documenti cifrati → la password viene richiesta di nuovo; 100 schede aperte → le schede inattive rilasciano la cache di resa; stesso file aperto due volte → si attiva la scheda esistente (VIS-05).
 **Criteri di accettazione:**
 - Dati 3 documenti aperti alle pagine 5, 10 e 15 con "Ripristina la sessione" attivo, quando l'applicazione viene chiusa e riaperta, allora le 3 schede tornano nello stesso ordine e alle stesse pagine.
 - Data una scheda trascinata fuori dalla barra, quando viene rilasciata, allora si apre una nuova finestra con il documento nella stessa posizione e la scheda scompare dalla finestra d'origine.
 - Data una scheda chiusa per errore, quando l'utente preme Ctrl+Maiusc+T, allora la scheda riappare con la stessa pagina e lo stesso zoom.
 - Dati 2 documenti modificati, quando si chiude l'applicazione, allora compare un solo dialogo che li elenca entrambi con Salva tutti / Non salvare / Annulla.
-- Dati 50 documenti aperti in schede, quando si passa da una scheda all'altra, allora la pagina della scheda attivata è visibile entro 300 ms.
+- Dati 50 documenti aperti in schede, quando si passa da una scheda all'altra, allora la pagina della scheda attivata è visibile entro 200 ms (NFR-07).
 **Priorità:** P0
 
 ### VIS-31 — Modalità lettura e schermo intero
@@ -1138,7 +1234,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### VIS-32 — Presentazione
 **Descrizione:** mostra il PDF come presentazione a schermo intero, una pagina alla volta, con avanzamento da tastiera, mouse o telecomando, transizioni e tempi definiti nel documento o scelti dall'utente, schermo nero o bianco, puntatore laser, penna temporanea e vista relatore su un secondo monitor.
-**Flusso:** 1. Avvio dall'inizio (F5) o dalla pagina corrente (Maiusc+F5). 2. Avanti con clic, Spazio, Invio, frecce, PagGiù; indietro con frecce, PagSu, Backspace; numero + Invio per saltare a una pagina. 3. B schermo nero, W schermo bianco, L puntatore laser, P penna a mano libera temporanea, Esc per uscire. 4. Transizioni e avanzamento automatico da `/Trans` e `/Dur` del documento, oppure transizione e intervallo scelti dall'utente; ciclo continuo opzionale; passi all'interno della pagina (`/PresSteps`). 5. Vista relatore: pagina corrente e successiva, miniature, cronometro, ora, testo delle note della pagina.
+**Flusso:** 1. Avvio dall'inizio (F5) o dalla pagina corrente (Maiusc+F5) (UX-18). 2. Avanti con clic, Spazio, Invio, N, frecce, Pag giù; indietro con P, frecce, Pag su, Backspace; numero + Invio per saltare a una pagina. 3. B schermo nero, W schermo bianco, L puntatore laser, M penna a mano libera temporanea, Esc per uscire. 4. Transizioni e avanzamento automatico da `/Trans` e `/Dur` del documento, oppure transizione e intervallo scelti dall'utente; ciclo continuo opzionale; passi all'interno della pagina (`/PresSteps`). 5. Vista relatore: pagina corrente e successiva, miniature, cronometro, ora, testo delle note della pagina.
 **Formati/strutture:** `/Trans` (`/S` Split, Blinds, Box, Wipe, Dissolve, Glitter, R, Fly, Push, Cover, Uncover, Fade; `/D`, `/Dm`, `/M`, `/Di`, `/SS`, `/B`); `/Dur`; `/PresSteps` con `/NA`, `/PA`, `/Next`, `/Prev`; azioni SetOCGState per la comparsa progressiva dei livelli.
 **Casi limite:** un solo monitor → nessuna vista relatore; transizione non supportata → dissolvenza; pagine verticali e orizzontali miste → ciascuna adattata al monitor; link e contenuti multimediali attivi; monitor collegato o scollegato durante la presentazione → adattamento senza interruzione.
 **Criteri di accettazione:**
@@ -1160,9 +1256,9 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### VIS-34 — Temi di lettura e protezione degli occhi
-**Descrizione:** l'utente sceglie il tema dell'interfaccia (chiaro, scuro, come il sistema) e, separatamente, l'aspetto delle pagine a schermo: bianco, carta/seppia, verde menta, blu notte, scuro con inversione dei colori, alto contrasto o colori personalizzati di testo e sfondo, con filtro a tono caldo opzionale, per ridurre l'affaticamento visivo.
-**Flusso:** 1. Vista → Tema di lettura → preset o personalizzato (colore di sfondo della pagina, colore del testo). 2. Applicazione immediata a tutte le pagine, solo a schermo. 3. Opzioni: "non alterare le immagini" (si trasformano solo testo e grafica vettoriale), "applica anche alle scansioni", "sostituisci i colori del documento" per l'alto contrasto. 4. Tema dell'interfaccia indipendente. 5. Attivazione programmata opzionale (orario o modalità scura del sistema).
-**Formati/strutture:** trasformazione applicata solo alla resa a schermo; file, stampa, esportazioni e istantanee usano sempre i colori originali.
+**Descrizione:** l'utente sceglie l'aspetto delle pagine a schermo (tema di lettura): bianco, carta/seppia, verde menta, blu notte, scuro con inversione dei colori, alto contrasto o colori personalizzati di testo e sfondo, con filtro a tono caldo opzionale, per ridurre l'affaticamento visivo. Il tema dell'interfaccia è definito in UX-11 ed è indipendente dal tema di lettura.
+**Flusso:** 1. Vista → Tema di lettura → preset o personalizzato (colore di sfondo della pagina, colore del testo). 2. Applicazione immediata a tutte le pagine, solo a schermo. 3. Opzioni: "non alterare le immagini" (si trasformano solo testo e grafica vettoriale), "applica anche alle scansioni", "sostituisci i colori del documento" per l'alto contrasto. 4. Attivazione programmata opzionale (orario o modalità scura del sistema).
+**Formati/strutture:** trasformazione applicata solo alla resa a schermo; file, stampa, esportazioni e catture d'area usano sempre i colori originali.
 **Casi limite:** fotografie → invariate con l'opzione attiva; pagine con testo chiaro su fondo scuro → leggibili anche dopo la trasformazione; scansioni → trasformate solo con l'opzione dedicata; evidenziazioni e annotazioni colorate → restano distinguibili; colori personalizzati con contrasto insufficiente → avviso.
 **Criteri di accettazione:**
 - Dato il tema "scuro con inversione" con "non alterare le immagini", quando si visualizza una pagina con testo nero e una fotografia, allora il testo appare chiaro su fondo scuro e i pixel della fotografia coincidono con la resa normale.
@@ -1221,7 +1317,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### VIS-39 — Righelli, griglie, guide e coordinate
 **Descrizione:** righelli orizzontale e verticale nell'unità scelta, griglia configurabile e guide trascinate dai righelli, con aggancio opzionale per posizionare con precisione annotazioni, campi e oggetti; barra con le coordinate del cursore e le dimensioni della pagina; visualizzazione dei riquadri di pagina.
-**Flusso:** 1. Vista → Righelli (Ctrl+R). 2. Trascinamento dal righello → nuova guida; doppio clic → posizione numerica; trascinamento fuori dalla pagina → eliminazione; blocca guide; elimina tutte. 3. Vista → Griglia: passo, suddivisioni, colore, origine, sopra o sotto il contenuto. 4. Aggancio a griglia e guide (e alla geometria degli oggetti, in coordinamento con l'area Editing). 5. Barra di stato: X/Y del cursore e dimensioni della pagina in mm, cm, pollici, punti o pica; per i PDF geospaziali anche latitudine e longitudine. 6. Vista → Riquadri di pagina: contorni colorati con legenda.
+**Flusso:** 1. Vista → Righelli (Ctrl+R). 2. Trascinamento dal righello → nuova guida; doppio clic → posizione numerica; trascinamento fuori dalla pagina → eliminazione; blocca guide; elimina tutte. 3. Vista → Griglia: passo, suddivisioni, colore, origine, sopra o sotto il contenuto. 4. Aggancio a griglia e guide (e alla geometria degli oggetti, OBJ-23). 5. Barra di stato: X/Y del cursore e dimensioni della pagina in mm, cm, pollici, punti o pica; per i PDF geospaziali anche latitudine e longitudine. 6. Vista → Riquadri di pagina: contorni colorati con legenda.
 **Formati/strutture:** origine nell'angolo superiore sinistro della `/CropBox` (opzione: origine PDF in basso a sinistra); unità di 1/72 di pollice moltiplicata per `/UserUnit`; guide e griglia salvate per documento nel profilo utente, non nel file; riquadri `/MediaBox`, `/CropBox`, `/BleedBox`, `/TrimBox`, `/ArtBox`, `/BoxColorInfo`; viewport geospaziali `/VP` con `/Measure /Subtype /GEO` (`/GPTS`, `/LPTS`, `/GCS`).
 **Casi limite:** pagine di dimensioni diverse → righelli riferiti alla pagina sotto il cursore; pagine ruotate → coordinate nello spazio visualizzato (opzione: spazio PDF); `/UserUnit` diverso da 1 → misure scalate; più viewport geospaziali nella stessa pagina → coordinate del viewport sotto il cursore; griglia troppo fitta a zoom basso → linee diradate automaticamente.
 **Criteri di accettazione:**
@@ -1232,35 +1328,36 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Date griglia e guide visibili, quando si stampa, allora non compaiono nell'output.
 **Priorità:** P1
 
-### VIS-40 — Proprietà del documento
-**Descrizione:** finestra Proprietà con schede: Descrizione (titolo, autore, oggetto, parole chiave modificabili; applicazione di origine, produttore, date di creazione e modifica, nome, percorso e dimensione del file); Avanzate (versione PDF, numero di pagine, formato della pagina corrente, PDF con tag, visualizzazione web veloce, conformità dichiarata PDF/A, PDF/UA, PDF/X, PDF/E, lingua, identificativi); Sicurezza (metodo e livello di cifratura, permessi consentiti e negati); Font (tipo, codifica, stato incorporato/sottoinsieme/non incorporato, font sostitutivo); Vista iniziale (VIS-42); Personalizzate (VIS-41).
-**Flusso:** 1. File → Proprietà (Ctrl+D). 2. Lettura dei valori; i campi descrittivi sono modificabili e aggiornano in modo coerente dizionario Info e XMP. 3. OK → documento modificato, da salvare; Annulla → nessuna modifica.
-**Formati/strutture:** `/Info` (`/Title`, `/Author`, `/Subject`, `/Keywords`, `/Creator`, `/Producer`, `/CreationDate`, `/ModDate`, `/Trapped`); XMP `/Metadata` (dc:title, dc:creator, dc:description, pdf:Keywords, pdf:Producer, xmp:CreatorTool, xmp:CreateDate, xmp:ModifyDate, pdfaid, pdfuaid); date `D:YYYYMMDDHHmmSSOHH'mm'` mostrate nel fuso locale; `/MarkInfo`, `/StructTreeRoot`, `/Lang`; `/Encrypt` e `/P`; `/Linearized`; intestazione e `/Version`; font (`/Subtype`, `/BaseFont` con prefisso di sottoinsieme, `/FontFile`, `/FontFile2`, `/FontFile3`).
-**Casi limite:** Info e XMP discordanti → valore XMP mostrato con avviso; date malformate → mostrate come testo grezzo; PDF 2.0 → metadati scritti in XMP (Info deprecato salvo le date); PDF/A dichiarato → Info e XMP mantenuti sincronizzati come richiesto dal profilo; modifica non consentita dai permessi → campi in sola lettura; documenti grandi → elenco dei font calcolato in background.
+### VIS-40 — Informazioni sul documento
+**Descrizione:** la finestra **Informazioni sul documento** (Alt+Invio, UX-18; anche dal menu principale, dal menu della scheda e con un clic sul riepilogo del pannello proprietà) presenta in un'unica pagina scorrevole, con un indice laterale che porta a ciascuna parte, cinque sezioni: **File** (nome, cartella, dimensione su disco, date del file, versione PDF dichiarata, numero di revisioni salvate nel file); **Contenuto** (titolo, autore, oggetto e parole chiave, modificabili; programma che ha creato il documento e programma che lo ha prodotto; date di creazione e di ultima modifica del documento; numero di pagine e formato della pagina corrente; lingua; presenza della struttura logica; standard dichiarati: PDF/A, PDF/UA, PDF/X, PDF/E); **Protezione** (riepilogo di SEC-03: metodo di cifratura e lunghezza della chiave, tipo di accesso, azioni che il documento consente e azioni che non consente, firme presenti con rimando al pannello Firme); **Caratteri** (elenco dei caratteri con tipo, codifica e incorporamento: completo, parziale o assente; per quelli non incorporati, il carattere effettivamente usato a schermo); **Apertura** (organizzazione del file per l'apertura progressiva sul web, CNV-31, e riepilogo delle opzioni di apertura salvate nel file, modificabili con VIS-42). I metadati descrittivi e le proprietà personalizzate seguono SEC-23 (requisito di riferimento); l'editor completo dei metadati è VIS-41.
+**Flusso:** 1. Alt+Invio o **Informazioni sul documento**: la finestra si apre sulla sezione File con l'indice delle sezioni a lato; un campo di ricerca filtra le voci per nome. 2. Lettura dei valori; i campi descrittivi della sezione Contenuto sono modificabili e aggiornano in modo coerente dizionario Info e XMP (SEC-23). 3. **Applica** → documento modificato, da salvare, con un solo passo annullabile; **Chiudi** senza modifiche → nessun effetto. 4. Ogni voce ha il comando **Copia** per riportarne il valore negli appunti.
+**Formati/strutture:** `/Info` (`/Title`, `/Author`, `/Subject`, `/Keywords`, `/Creator`, `/Producer`, `/CreationDate`, `/ModDate`, `/Trapped`); XMP `/Metadata` (dc:title, dc:creator, dc:description, pdf:Keywords, pdf:Producer, xmp:CreatorTool, xmp:CreateDate, xmp:ModifyDate, pdfaid, pdfuaid); date `D:YYYYMMDDHHmmSSOHH'mm'` mostrate nel fuso locale; `/MarkInfo`, `/StructTreeRoot`, `/Lang`; `/Encrypt` e `/P`; `/Linearized`; intestazione e `/Version`; catene `/Prev` per il conteggio delle revisioni; caratteri (`/Subtype`, `/BaseFont` con prefisso di sottoinsieme, `/FontFile`, `/FontFile2`, `/FontFile3`); `/OpenAction`, `/PageLayout`, `/PageMode`, `/ViewerPreferences`.
+**Casi limite:** Info e XMP discordanti → valore XMP mostrato con avviso; date malformate → mostrate come testo grezzo; PDF 2.0 → metadati scritti in XMP (Info deprecato salvo le date); PDF/A dichiarato → Info e XMP mantenuti sincronizzati come richiesto dal profilo; modifica non consentita dai permessi → campi in sola lettura con il motivo; documenti grandi → elenco dei caratteri calcolato in background, con indicatore; documento non salvato → sezione File con «non ancora salvato».
 **Criteri di accettazione:**
-- Dato un PDF con titolo XMP "Bilancio 2025", quando si apre Proprietà, allora il titolo mostrato è "Bilancio 2025".
-- Dato il titolo cambiato in "Relazione — Città" e salvato, quando si rilegge il file, allora `/Info /Title` e `dc:title` contengono entrambi "Relazione — Città".
-- Dato un PDF AES-256 con stampa consentita e copia negata, quando si apre la scheda Sicurezza, allora indica "AES 256 bit", "Stampa: consentita", "Copia: non consentita".
-- Dato un PDF con un font non incorporato, quando si apre la scheda Font, allora il font è indicato come non incorporato insieme al nome del font usato in sostituzione.
-- Dato un PDF linearizzato e taggato, quando si apre la scheda Avanzate, allora indica "Visualizzazione web veloce: sì" e "PDF con tag: sì".
+- Dato un PDF con titolo XMP "Bilancio 2025", quando l'utente preme Alt+Invio, allora si apre la finestra Informazioni sul documento e la sezione Contenuto mostra il titolo "Bilancio 2025".
+- Dato il titolo cambiato in "Relazione — Città", applicato e salvato, quando si rilegge il file, allora `/Info /Title` e `dc:title` contengono entrambi "Relazione — Città".
+- Dato un PDF AES-256 con stampa consentita e copia negata, quando si apre la sezione Protezione, allora indica il metodo «AES, chiave a 256 bit», elenca la stampa tra le azioni consentite e la copia del contenuto tra quelle non consentite.
+- Dato un PDF con un carattere non incorporato, quando si apre la sezione Caratteri, allora il carattere è indicato come non incorporato insieme al nome del carattere effettivamente usato a schermo.
+- Dato un PDF linearizzato e con struttura logica, quando si apre la finestra, allora la sezione Apertura indica che il file è organizzato per l'apertura progressiva sul web e la sezione Contenuto che la struttura logica è presente.
+- Dato un PDF con 3 revisioni incrementali, quando si apre la sezione File, allora il numero di revisioni indicato è 3.
 **Priorità:** P1
 
 ### VIS-41 — Metadati avanzati
-**Descrizione:** proprietà personalizzate (chiave/valore), editor completo dei metadati XMP (Dublin Core, diritti d'autore, schemi PDF/A), importazione ed esportazione del pacchetto XMP, modelli di metadati riutilizzabili da applicare ai documenti aperti.
-**Flusso:** 1. Proprietà → Personalizzate: aggiungi, modifica, elimina coppie chiave/valore. 2. Proprietà → Metadati avanzati: albero per schema e proprietà, modifica e aggiunta; diritti (stato del copyright, avviso, URL). 3. Esporta XMP in un file .xmp; Importa sostituendo o unendo. 4. Salva come modello; applica il modello al documento corrente o a tutti quelli aperti.
+**Descrizione:** editor completo dei metadati XMP (Dublin Core, diritti d'autore, schemi PDF/A), importazione ed esportazione del pacchetto XMP, modelli di metadati riutilizzabili da applicare ai documenti aperti. Le proprietà personalizzate (coppie chiave/valore) e i metadati descrittivi sono definiti in SEC-23 (P1, requisito di riferimento); questo requisito aggiunge solo le funzioni avanzate.
+**Flusso:** 1. Le proprietà personalizzate si gestiscono come in SEC-23. 2. Informazioni sul documento → Contenuto → **Metadati avanzati**: albero per schema e proprietà, modifica e aggiunta; diritti (stato del copyright, avviso, URL). 3. Esporta XMP in un file .xmp; Importa sostituendo o unendo. 4. Salva come modello; applica il modello al documento corrente o a tutti quelli aperti.
 **Formati/strutture:** chiavi personalizzate nel dizionario `/Info` e nello XMP; XMP (ISO 16684-1) RDF/XML con involucro `xpacket`; `xmpRights`; schemi di estensione PDF/A (`pdfaExtension`) per le proprietà personalizzate nei documenti PDF/A.
 **Casi limite:** chiavi riservate (Title, Author, ecc.) non utilizzabili come personalizzate; XMP importato non valido → rifiutato indicando la riga dell'errore; PDF/A → l'aggiunta di una proprietà personalizzata crea anche lo schema di estensione richiesto; caratteri non ASCII nei nomi delle chiavi → codificati secondo la sintassi dei nomi PDF (#xx).
 **Criteri di accettazione:**
-- Data la proprietà personalizzata "Progetto = Orione" aggiunta e salvata, quando si rilegge il file, allora `/Info` contiene la chiave Progetto con valore "Orione" e la scheda Personalizzate la mostra.
+- Dato un modello di metadati con autore "Ufficio legale" e diritti "Riservato", quando viene applicato a 3 documenti aperti e questi vengono salvati, allora ciascuno contiene in XMP l'autore e lo stato dei diritti del modello.
 - Dato un XMP esportato da un documento e importato in un altro, quando si confrontano i due pacchetti, allora le proprietà Dublin Core sono identiche.
 - Dato un PDF/A-2b con una proprietà personalizzata aggiunta, quando viene salvato, allora il pacchetto XMP contiene la descrizione dello schema di estensione corrispondente.
 **Priorità:** P2
 
-### VIS-42 — Vista iniziale del documento
-**Descrizione:** l'utente stabilisce, dentro il file, come il documento si presenterà in qualunque lettore: layout, pannello visibile (segnalibri, miniature, livelli, allegati), pagina e zoom iniziali, schermo intero, adattamento e centratura della finestra, titolo del documento al posto del nome file, barre e menu nascosti, verso di lettura e preferenze di stampa (scala, fronte/retro, copie, intervallo, vassoio secondo il formato).
-**Flusso:** 1. Proprietà → Vista iniziale. 2. Scelte con riepilogo testuale dell'effetto. 3. OK → modifica del catalogo, da salvare. 4. Opzione "applica a tutti i documenti aperti".
+### VIS-42 — Apertura del documento
+**Descrizione:** con le opzioni di **Apertura del documento** l'utente stabilisce, dentro il file, come il documento si presenterà in qualunque lettore: layout, pannello visibile (segnalibri, miniature, livelli, allegati), pagina e zoom iniziali, schermo intero, adattamento e centratura della finestra, titolo del documento al posto del nome file, barre e menu nascosti, verso di lettura e preferenze di stampa (scala, fronte/retro, copie, intervallo, vassoio secondo il formato).
+**Flusso:** 1. Informazioni sul documento → Apertura → **Modifica opzioni di apertura**. 2. Scelte con riepilogo testuale dell'effetto. 3. OK → modifica del catalogo, da salvare. 4. Opzione "applica a tutti i documenti aperti".
 **Formati/strutture:** `/PageLayout`, `/PageMode`, `/OpenAction` (destinazione esplicita con pagina e zoom), `/ViewerPreferences` (`/HideToolbar`, `/HideMenubar`, `/HideWindowUI`, `/FitWindow`, `/CenterWindow`, `/DisplayDocTitle`, `/NonFullScreenPageMode`, `/Direction`, `/PrintScaling`, `/Duplex`, `/PickTrayByPDFSize`, `/PrintPageRange`, `/NumCopies`).
-**Casi limite:** `/OpenAction` esistente di tipo JavaScript → avviso prima di sostituirla; documento firmato → avviso sull'effetto per le firme; PDF/UA → `/DisplayDocTitle` deve restare attivo, con avviso se l'utente lo disattiva; pagina iniziale oltre il numero di pagine → valore rifiutato.
+**Casi limite:** `/OpenAction` esistente con un'azione di script (ECMAScript per PDF, mai eseguita, NFR-17) → avviso prima di sostituirla; documento firmato → avviso sull'effetto per le firme; PDF/UA → `/DisplayDocTitle` deve restare attivo, con avviso se l'utente lo disattiva; pagina iniziale oltre il numero di pagine → valore rifiutato.
 **Criteri di accettazione:**
 - Dati pagina iniziale 3, zoom "adatta larghezza" e pannello segnalibri salvati, quando il file viene riaperto con "rispetta le impostazioni del documento", allora si apre a pagina 3 adattata in larghezza con i segnalibri visibili.
 - Dato "mostra il titolo del documento" attivo e il titolo "Manuale", quando il file viene aperto, allora scheda e barra del titolo mostrano "Manuale" invece del nome file.
@@ -1268,7 +1365,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P2
 
 ### VIS-43 — Stampa
-**Descrizione:** stampa il documento con anteprima e impostazioni: stampante, copie e fascicolazione; intervallo (tutte, pagina corrente, area visibile, pagine selezionate nelle miniature, intervalli come "1-3, 7, 10-" anche per etichetta, solo pari o dispari, ordine inverso); dimensionamento (adatta all'area stampabile, riduci solo le pagine troppo grandi, dimensione reale, percentuale); orientamento automatico e centratura; carta scelta in base al formato della pagina PDF; fronte/retro sul lato lungo o corto; colore o scala di grigi; contenuto (documento; documento e annotazioni; documento e timbri; solo campi modulo); stampa come immagine per stampanti problematiche; stampa su file PDF o PostScript.
+**Descrizione:** dettaglio delle opzioni di stampa di UX-15 (requisito di riferimento): stampa il documento con anteprima e impostazioni: stampante, copie e fascicolazione; più pagine per foglio (2, 4, 6, 9 o 16, con ordine per righe o per colonne e bordo facoltativo); intervallo (tutte, pagina corrente, area visibile, pagine selezionate nelle miniature, intervalli come "1-3, 7, 10-" anche per etichetta, solo pari o dispari, ordine inverso); dimensionamento (adatta all'area stampabile, riduci solo le pagine troppo grandi, dimensione reale, percentuale); orientamento automatico e centratura; carta scelta in base al formato della pagina PDF; fronte/retro sul lato lungo o corto; colore o scala di grigi; contenuto (documento; documento e annotazioni; documento e timbri; solo campi modulo); stampa come immagine per stampanti problematiche; stampa su file PDF o PostScript.
 **Flusso:** 1. Ctrl+P → dialogo con anteprima scorribile aggiornata a ogni opzione e conteggio dei fogli. 2. Impostazioni precompilate dalle preferenze di stampa del documento e dalle ultime scelte per quella stampante. 3. Stampa → invio al sistema di stampa in background, con avanzamento, annullamento e notifica di esito.
 **Formati/strutture:** `/PrintScaling`, `/Duplex`, `/PickTrayByPDFSize`, `/PrintPageRange`, `/NumCopies`; annotazioni stampate solo con flag `/Print` e mai se `/Hidden`; widget dei campi con `/Print`; livelli secondo `/Usage /Print` o secondo lo stato a schermo (opzione); `/PageLabels` per gli intervalli per etichetta; permessi `/P` bit 3 e 12.
 **Casi limite:** pagine di dimensioni miste → ciascuna adattata e orientata, o stampata su carta del proprio formato con "carta in base al formato PDF"; pagina più grande della carta in dimensione reale → ritagliata, con avviso nell'anteprima; nessuna stampante configurata → solo stampa su file, con messaggio; stampante non raggiungibile → errore con il motivo, documento utilizzabile; intervallo non valido ("5-2", "0", oltre il totale) → campo in errore; stampa negata → VIS-06; stampa solo a bassa qualità → rasterizzazione a non più di 150 dpi; 5.000 pagine → invio progressivo senza esaurire la memoria; rotazione della vista (VIS-11) e temi di lettura (VIS-34) non influiscono sulla stampa.
@@ -1278,25 +1375,25 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Data un'annotazione senza flag Print, quando si stampa con "Documento e annotazioni", allora non compare nell'output.
 - Data una pagina A3, carta A4 e "adatta", quando si stampa su file, allora la pagina è ridotta proporzionalmente al 70,7% (±1%) e centrata.
 - Dato "fronte/retro sul lato corto", quando si invia il lavoro a una coda di stampa simulata, allora i parametri del lavoro contengono l'opzione fronte/retro sul lato corto.
-- Dato un documento di 5.000 pagine, quando si stampa su file, allora la memoria del processo resta sotto il limite configurato e l'interfaccia resta reattiva.
+- Dato un documento di 5.000 pagine, quando si stampa su file, allora la memoria del processo resta sotto il limite di sicurezza di NFR-14 e ogni comando dà riscontro entro 100 ms (NFR-05).
+- Dato "4 pagine per foglio" su un documento di 10 pagine, quando si stampa su file, allora l'output ha 3 fogli e l'ultimo contiene le pagine 9 e 10.
 **Priorità:** P0
 
 ### VIS-44 — Stampa avanzata
-**Descrizione:** più pagine per foglio (da 2 a 16, con ordine e bordi), opuscolo (imposizione per fogli piegati, fronte/retro anche manuale, rilegatura a sinistra o a destra), poster con pagine grandi divise su più fogli con sovrapposizione e segni di taglio, stampa speculare, formati carta personalizzati, stampa con riepilogo dei commenti accanto alla pagina, stampa di tutti i documenti aperti in un solo lavoro.
-**Flusso:** 1. Dialogo Stampa → modalità Pagine per foglio, Opuscolo, Poster o Riepilogo commenti. 2. Opzioni specifiche con anteprima del foglio. 3. Stampa o stampa su file.
+**Descrizione:** modalità di stampa avanzate oltre a quelle di UX-15 e VIS-43 (la stampa di più pagine per foglio è in VIS-43, P0): opuscolo (imposizione per fogli piegati, fronte/retro anche manuale, rilegatura a sinistra o a destra), poster con pagine grandi divise su più fogli con sovrapposizione e segni di taglio, stampa speculare, formati carta personalizzati, stampa con riepilogo dei commenti accanto alla pagina, stampa di tutti i documenti aperti in un solo lavoro.
+**Flusso:** 1. Dialogo Stampa → modalità Opuscolo, Poster o Riepilogo commenti. 2. Opzioni specifiche con anteprima del foglio. 3. Stampa o stampa su file.
 **Formati/strutture:** imposizione calcolata dall'applicazione; riepilogo dai dati delle annotazioni di markup (`/Contents`, `/T`, `/M`, risposte `/IRT`).
 **Casi limite:** opuscolo con pagine non multiple di 4 → pagine bianche aggiunte in fondo; pagina già più piccola del foglio in modalità poster → stampa normale; fronte/retro manuale → istruzioni per rigirare i fogli; pagine di formati diversi nell'opuscolo → ciascuna adattata alla propria metà del foglio.
 **Criteri di accettazione:**
 - Dato un documento di 8 pagine in modalità opuscolo, quando si stampa su file, allora si ottengono 4 facciate con le coppie (8,1), (2,7), (6,3), (4,5).
 - Dato un documento di 6 pagine in modalità opuscolo, quando si stampa su file, allora sono aggiunte 2 pagine bianche e si ottengono 4 facciate.
-- Dato "4 pagine per foglio" su 10 pagine, quando si stampa su file, allora l'output ha 3 fogli e l'ultimo contiene le pagine 9 e 10.
 - Data una pagina A1 stampata come poster su A4 al 100% con sovrapposizione di 10 mm, quando si stampa su file, allora ogni punto della pagina compare in almeno un foglio e i fogli adiacenti condividono una fascia di 10 mm.
 - Data una pagina con 3 commenti e il riepilogo attivo, quando si stampa su file, allora l'output mostra la pagina e i 3 commenti numerati con autore e data.
 **Priorità:** P2
 
 ### VIS-45 — Invio e condivisione locale
 **Descrizione:** l'utente invia il documento come allegato e-mail con il client di posta predefinito, lo passa ad altre applicazioni con la condivisione del sistema, apre la cartella che lo contiene, copia il percorso o il file negli appunti, trascina la scheda su un'altra applicazione per consegnarle il file.
-**Flusso:** 1. File → Condividi → Invia per e-mail, Condividi…, Mostra nella cartella, Copia percorso, Copia file. 2. Con modifiche non salvate → scelta tra inviare la versione salvata, salvare e inviare, inviare una copia con le modifiche (scritta in una cartella temporanea privata). 3. E-mail: client predefinito aperto con l'allegato e oggetto uguale al titolo o al nome del file. 4. File oltre una soglia configurabile (predefinita 20 MB) → proposta di compressione (area Ottimizzazione) o di link (VIS-46).
+**Flusso:** 1. File → Condividi → Invia per e-mail, Condividi…, Mostra nella cartella, Copia percorso, Copia file. 2. Con modifiche non salvate → scelta tra inviare la versione salvata, salvare e inviare, inviare una copia con le modifiche (scritta in una cartella temporanea privata). 3. E-mail: client predefinito aperto con l'allegato e oggetto uguale al titolo o al nome del file. 4. File oltre una soglia configurabile (predefinita 20 MB; la stessa soglia vale per PAG-17) → proposta di compressione (CNV-29). La condivisione tramite link è fuori ambito (VIS-46).
 **Formati/strutture:** file corrente o copia temporanea con il nome originale; richiesta di composizione e-mail con allegato tramite i servizi del sistema.
 **Casi limite:** nessun client di posta configurato → messaggio con l'alternativa "Mostra nella cartella"; documento mai salvato → salvataggio richiesto o copia temporanea; documento cifrato → promemoria di comunicare la password per un altro canale; copie temporanee eliminate alla chiusura dell'applicazione.
 **Criteri di accettazione:**
@@ -1307,7 +1404,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### VIS-46 — Condivisione tramite link e codice QR
-**Descrizione:** l'utente carica il documento su un servizio di condivisione configurato e ottiene un link e un codice QR da distribuire, con scadenza, password del link, permesso di scaricare e numero di visite; può revocare il link in qualsiasi momento.
+**Descrizione:** **Fuori ambito (0.2).** La condivisione tramite link o codice QR richiede un server che ospiti i file e un account presso un servizio, in contrasto con l'uso offline e l'assenza di account (O2, O3); corrisponde alle righe 13.04 e 13.05 del catalogo, fuori ambito. Il requisito resta per tracciabilità e non va implementato; per condividere un documento restano l'invio per e-mail e la condivisione del sistema (UX-16, VIS-45). Testo originario: l'utente carica il documento su un servizio di condivisione configurato e ottiene un link e un codice QR da distribuire, con scadenza, password del link, permesso di scaricare e numero di visite; può revocare il link in qualsiasi momento.
 **Flusso:** 1. File → Condividi → Crea link. 2. Al primo uso: scelta del servizio, accesso e consenso al caricamento. 3. Opzioni: scadenza, password, consenti download e stampa. 4. Caricamento con avanzamento → link e QR (copia link, salva QR come immagine). 5. Gestione dei link condivisi: elenco, revoca, modifica della scadenza.
 **Formati/strutture:** PDF caricato; codice QR (ISO/IEC 18004) contenente l'URL, esportabile in PNG o SVG.
 **Casi limite:** nessun servizio configurato → funzione disabilitata con spiegazione; rete assente → errore e Riprova; file oltre il limite del servizio → messaggio con il limite; documento cifrato → avviso; preferenza "nessun invio a servizi remoti" → funzione bloccata; caricamento interrotto → ripresa o annullamento senza link parziali.
@@ -1315,16 +1412,17 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato un servizio di condivisione simulato, quando si crea un link con scadenza a 7 giorni, allora sono mostrati link e data di scadenza e il QR decodificato contiene esattamente lo stesso URL.
 - Dato un link revocato, quando si interroga il servizio simulato, allora il link risulta non valido.
 - Data la preferenza "nessun invio a servizi remoti", quando si apre il menu Condividi, allora "Crea link" è disabilitato e non parte alcuna connessione.
-**Priorità:** P2
+**Priorità:** Fuori ambito (0.2): nessuna priorità.
 
 ### VIS-47 — Salvataggio
-**Descrizione:** Salva (Ctrl+S) scrive le modifiche sul file in modo sicuro, senza rischio di corrompere l'originale, preserva le firme digitali usando l'aggiornamento incrementale quando serve e segnala le modifiche non salvate alla chiusura.
-**Flusso:** 1. Indicatore di modifiche non salvate nella scheda e nel titolo. 2. Ctrl+S → aggiornamento incrementale se il documento contiene firme o se la preferenza "salvataggio rapido" è attiva, altrimenti riscrittura completa. 3. Scrittura su un file temporaneo nella stessa cartella, verifica della struttura, sostituzione atomica dell'originale conservandone permessi e proprietario; copia di sicurezza della versione precedente opzionale. 4. Aggiornamento di `/ModDate`, xmp:ModifyDate, del secondo elemento di `/ID` e del produttore (preferenza). 5. Chiusura con modifiche → Salva / Non salvare / Annulla.
+**Descrizione:** Salva (Ctrl+S) scrive le modifiche sul file in modo sicuro, senza rischio di corrompere l'originale, e segnala le modifiche non salvate alla chiusura. Il tipo di salvataggio segue NFR-08 e NFR-09 (requisiti di riferimento): riscrittura completa atomica come comportamento normale; aggiornamento incrementale obbligatorio se il documento contiene firme digitali; nessuna preferenza modifica questa regola.
+**Flusso:** 1. Indicatore di modifiche non salvate nella scheda e nel titolo. 2. Ctrl+S → aggiornamento incrementale se il documento contiene firme digitali, altrimenti riscrittura completa (NFR-09). 3. Scrittura su un file temporaneo nella stessa cartella, verifica della struttura, sostituzione atomica dell'originale conservandone permessi e proprietario; copia di sicurezza della versione precedente opzionale. 4. Aggiornamento di `/ModDate`, xmp:ModifyDate, del secondo elemento di `/ID` e del produttore (preferenza). 5. Chiusura con modifiche → Salva / Non salvare / Annulla (NFR-12).
 **Formati/strutture:** aggiornamento incrementale (nuova sezione xref con `/Prev`, dello stesso tipo dell'originale: tabella o stream); riscrittura completa con object stream e cross-reference stream per PDF 1.5 e successivi; versione in intestazione aggiornata se le funzioni usate lo richiedono; `/ID` con primo elemento invariato; cifratura conservata con lo stesso handler e la stessa password.
 **Casi limite:** file aperto in sola lettura → Salva propone Salva con nome; disco pieno o errore di I/O → originale intatto, messaggio, documento ancora segnato come modificato; file cambiato da un altro programma dopo l'apertura → avviso di conflitto (sovrascrivi, salva con nome, ricarica) prima di scrivere; modifica che invaliderebbe le firme → avviso esplicito; volumi senza rinomina atomica (alcune condivisioni di rete) → copia di sicurezza preventiva e scrittura diretta; documento ricostruito (VIS-07) → riscrittura completa obbligatoria; file oltre 2 GB → scrittura progressiva con avanzamento; nessuna modifica → nessuna scrittura.
 **Criteri di accettazione:**
 - Dato un documento modificato, quando il processo viene interrotto a metà del salvataggio, allora il file originale su disco è integro e apribile.
 - Dato un PDF firmato digitalmente con un'annotazione aggiunta, quando si salva, allora il salvataggio è incrementale e i byte coperti da `/ByteRange` sono invariati.
+- Dato un PDF non firmato con 2 revisioni incrementali e un'annotazione aggiunta, quando si salva, allora il file è riscritto per intero e non contiene `/Prev`.
 - Dato un documento modificato e il disco pieno, quando si salva, allora compare un errore, il file originale è invariato e l'indicatore di modifiche resta attivo.
 - Dato un file modificato da un altro programma dopo l'apertura, quando si salva, allora compare l'avviso di conflitto prima di qualsiasi scrittura.
 - Dato un documento cifrato AES-256, quando si salva, allora il file risultante è cifrato con lo stesso metodo e si apre con la stessa password.
@@ -1332,90 +1430,109 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P0
 
 ### VIS-48 — Salva con nome e Salva una copia
-**Descrizione:** salva il documento in un nuovo file, che diventa il documento corrente, oppure ne salva una copia lasciando corrente l'originale; offre le opzioni di riscrittura completa ottimizzata (rimozione delle revisioni precedenti e degli oggetti inutilizzati), compatibilità di versione e linearizzazione per la visualizzazione web veloce.
+**Descrizione:** salva il documento in un nuovo file, che diventa il documento corrente, oppure ne salva una copia lasciando corrente l'originale; offre le opzioni di riscrittura completa ottimizzata (rimozione delle revisioni precedenti e degli oggetti inutilizzati), compatibilità di versione e linearizzazione per il web (CNV-31, requisito di riferimento, P1). Per i documenti firmati vale NFR-09.
 **Flusso:** 1. Salva con nome (Ctrl+Maiusc+S) o File → Salva una copia. 2. Dialogo file del sistema: cartella, nome (predefinito: nome attuale o titolo), filtro PDF, opzioni. 3. File esistente → conferma della sovrascrittura. 4. Scrittura atomica come in VIS-47; con Salva con nome la scheda passa al nuovo file, con Salva una copia resta sull'originale; recenti aggiornati. 5. Altri formati: Esporta (area Conversione).
-**Formati/strutture:** riscrittura completa con nuova xref, rimozione degli oggetti non referenziati e delle revisioni precedenti, object stream; linearizzazione opzionale (dizionario `/Linearized` come primo oggetto, hint stream); per i documenti firmati l'opzione "copia esatta" duplica il file byte per byte.
+**Formati/strutture:** riscrittura completa con nuova xref, rimozione degli oggetti non referenziati e delle revisioni precedenti, object stream; linearizzazione opzionale secondo CNV-31 (dizionario `/Linearized` come primo oggetto, hint stream); per i documenti firmati il nuovo file è la copia esatta dei byte originali più l'aggiornamento incrementale con le modifiche (NFR-09).
 **Casi limite:** destinazione uguale a un file aperto in un'altra scheda → avviso; caratteri non validi nel nome → errore; estensione mancante → ".pdf" aggiunta; cartella senza permessi → errore e nuova scelta; documento firmato con riscrittura completa → avviso che le firme risulteranno non valide e proposta di copia esatta più aggiornamento incrementale; documento cifrato → cifratura conservata (la modifica della protezione appartiene all'area Protezione).
 **Criteri di accettazione:**
 - Dato un documento aperto come A.pdf, quando si usa Salva con nome come B.pdf, allora la scheda mostra B.pdf, i salvataggi successivi scrivono su B.pdf e A.pdf resta invariato.
 - Dato "Salva una copia" come C.pdf, quando l'operazione termina, allora la scheda resta su A.pdf e le modifiche non salvate restano indicate.
 - Dato un documento con 3 revisioni incrementali e la riscrittura completa, quando si salva con nome, allora il nuovo file ha una sola sezione xref e nessun oggetto non referenziato.
-- Data l'opzione di linearizzazione, quando si salva, allora il primo oggetto del file è il dizionario di linearizzazione e le Proprietà indicano "Visualizzazione web veloce: sì".
+- Data l'opzione di linearizzazione, quando si salva, allora il primo oggetto del file è il dizionario di linearizzazione e la sezione Apertura di Informazioni sul documento indica che il file è organizzato per l'apertura progressiva sul web (P1, CNV-31).
 - Dato il nome "relazione" senza estensione, quando si salva, allora il file creato si chiama "relazione.pdf".
 **Priorità:** P0
 
 ### VIS-49 — Ripristina e ricarica
-**Descrizione:** "Ripristina" scarta le modifiche non salvate e riapre l'ultima versione salvata; quando il file cambia su disco per opera di un'altra applicazione il documento si ricarica (automaticamente o su conferma) mantenendo pagina e zoom.
-**Flusso:** 1. File → Ripristina → conferma se ci sono modifiche → ricarica dal disco. 2. Monitoraggio del file: se cambia su disco e il documento non ha modifiche → ricarica secondo la preferenza (automatica, chiedi, mai) mantenendo la posizione; se ha modifiche → barra con "Ricarica e perdi le modifiche", "Ignora", "Salva con nome". 3. File eliminato o spostato su disco → barra informativa con "Salva" per ricrearlo.
+**Descrizione:** "Ripristina" scarta le modifiche non salvate e riapre l'ultima versione salvata; quando il file cambia su disco per opera di un'altra applicazione compare il banner di NFR-12 (requisito di riferimento) con **Ricarica**, che ricarica il documento mantenendo pagina e zoom. Non esiste una ricarica automatica senza azione dell'utente.
+**Flusso:** 1. File → Ripristina → conferma se ci sono modifiche (UX-13: l'operazione scarta modifiche non salvate) → ricarica dal disco. 2. Monitoraggio del file: se cambia su disco e il documento non ha modifiche → banner con **Ricarica** (NFR-12); la ricarica mantiene la posizione; se ha modifiche → banner con "Ricarica e perdi le modifiche", "Ignora", "Salva con nome". 3. File eliminato o spostato su disco → banner con "Salva" per ricrearlo o scegliere un'altra posizione (NFR-12).
 **Formati/strutture:** notifiche di modifica del file system o confronto periodico di data e dimensione; nessun effetto sul file.
-**Casi limite:** file riscritto a più riprese (es. da un compilatore di documenti) → ricarica solo dopo 500 ms senza variazioni; file temporaneamente non valido durante la scrittura → ricarica rimandata; file cifrato → password richiesta di nuovo solo se cambiata; meno pagine di prima → posizione limitata all'ultima pagina; percorsi di rete senza notifiche → controllo periodico.
+**Casi limite:** file riscritto a più riprese (es. da un compilatore di documenti) → banner mostrato solo dopo 500 ms senza variazioni; file temporaneamente non valido durante la scrittura → banner rimandato; file cifrato → password richiesta di nuovo solo se cambiata; meno pagine di prima → posizione limitata all'ultima pagina; percorsi di rete senza notifiche → controllo periodico.
 **Criteri di accettazione:**
 - Dato un documento con modifiche non salvate, quando si sceglie Ripristina e si conferma, allora il documento coincide con il file su disco e l'indicatore di modifiche scompare.
-- Dato un documento senza modifiche aperto a pagina 12 con ricarica automatica, quando un altro processo sovrascrive il file, allora entro 2 s la vista mostra il nuovo contenuto ancora a pagina 12.
-- Dato un documento con modifiche non salvate, quando il file cambia su disco, allora non avviene alcuna ricarica automatica e compare la barra con le tre scelte.
-- Dato un file scritto in 3 blocchi a 200 ms l'uno dall'altro, quando la scrittura termina, allora avviene una sola ricarica.
+- Dato un documento senza modifiche aperto a pagina 12, quando un altro processo sovrascrive il file, allora entro 2 s compare il banner con **Ricarica**; premendolo, la vista mostra il nuovo contenuto ancora a pagina 12.
+- Dato un documento con modifiche non salvate, quando il file cambia su disco, allora non avviene alcuna ricarica e compare il banner con le tre scelte.
+- Dato un file scritto in 3 blocchi a 200 ms l'uno dall'altro, quando la scrittura termina, allora compare un solo banner.
 **Priorità:** P1
 
 ### VIS-50 — Recupero dopo chiusura anomala
-**Descrizione:** le modifiche non salvate vengono conservate periodicamente in un'area di recupero privata; dopo un arresto anomalo, un blocco del sistema o un'interruzione di corrente l'utente le recupera al riavvio.
-**Flusso:** 1. Ogni N minuti (predefinito 2) e dopo modifiche rilevanti viene salvato lo stato del documento nel profilo utente. 2. Chiusura normale → dati di recupero eliminati. 3. Riavvio dopo chiusura anomala → dialogo "Documenti recuperabili" con nome, data e anteprima: Recupera (apre il documento come modificato e collegato all'originale), Salva con nome, Scarta. 4. Preferenze: attivazione e intervallo.
+**Descrizione:** le modifiche non salvate vengono conservate periodicamente in un'area di recupero privata; dopo un arresto anomalo, un blocco del sistema o un'interruzione di corrente l'utente le recupera al riavvio. Il comportamento di base (intervallo, ripristino, riservatezza delle copie di recupero) è definito da NFR-10 (P0), requisito di riferimento; questo requisito aggiunge anteprima, **Salva con nome** dal dialogo e gestione dei conflitti.
+**Flusso:** 1. Ogni N minuti (predefinito 2, configurabile da 1 a 30 o disattivabile, NFR-10) e dopo modifiche rilevanti viene salvato lo stato del documento nel profilo utente. 2. Chiusura normale → dati di recupero eliminati. 3. Riavvio dopo chiusura anomala → dialogo "Documenti recuperabili" con nome, data e anteprima: **Ripristina** (apre il documento come modificato e collegato all'originale), **Salva con nome**, **Scarta**. 4. Preferenze › Salvataggio: attivazione e intervallo (UX-17).
 **Formati/strutture:** copia di recupero come PDF completo o registro delle operazioni, accessibile solo all'utente; per i documenti cifrati il recupero è cifrato con la stessa protezione.
 **Casi limite:** originale modificato esternamente nel frattempo → avviso di conflitto al recupero; spazio insufficiente → un solo avviso, lavoro non bloccato; dati di recupero corrotti → scartati con avviso; più istanze dell'applicazione → aree di recupero separate senza conflitti; documenti molto grandi → salvataggio di recupero in background.
 **Criteri di accettazione:**
-- Dato un documento con un'annotazione aggiunta 3 minuti prima, quando il processo viene terminato forzatamente e l'applicazione riavviata, allora il dialogo propone il documento e Recupera mostra l'annotazione.
+- Dato un documento con un'annotazione aggiunta 3 minuti prima, quando il processo viene terminato forzatamente e l'applicazione riavviata, allora il dialogo propone il documento con l'anteprima e **Ripristina** mostra l'annotazione.
 - Data una chiusura normale con "Non salvare", quando l'applicazione viene riavviata, allora non compare alcun dialogo di recupero e l'area di recupero è vuota.
 - Dato un PDF cifrato con modifiche, quando si ispeziona l'area di recupero, allora il contenuto non è leggibile in chiaro.
-- Dato il salvataggio di recupero di un documento da 500 MB, quando avviene, allora il thread dell'interfaccia non resta bloccato per più di 100 ms.
+- Dato il salvataggio di recupero di un documento da 500 MB, quando avviene, allora il thread dell'interfaccia non resta bloccato per più di 100 ms (NFR-10).
+- Dato un documento recuperabile il cui originale è stato modificato da un altro programma dopo l'arresto, quando l'utente sceglie **Ripristina**, allora compare l'avviso di conflitto con le scelte di salvare con un altro nome o sovrascrivere.
 **Priorità:** P1
 
 ### VIS-51 — Barre strumenti, pannelli e preferenze di visualizzazione
-**Descrizione:** l'utente personalizza le barre degli strumenti (mostra/nascondi, aggiungi, rimuovi e riordina comandi, dimensione delle icone, etichette), la disposizione dei pannelli (a sinistra o a destra, ancorati o mobili, larghezza) e la barra di stato; imposta le preferenze predefinite di visualizzazione: layout e zoom, pannello iniziale, rispetto delle impostazioni del documento, ripristino dell'ultima posizione, dpi dello schermo, unità di misura, lingua dell'interfaccia, tema; esporta e importa le impostazioni.
-**Flusso:** 1. Clic destro su una barra → Personalizza; trascinamento dei comandi dalla raccolta. 2. Preferenze → Visualizzazione per i valori predefiniti. 3. "Ripristina predefiniti". 4. Esporta/Importa impostazioni su file.
-**Formati/strutture:** file di configurazione testuale e versionato nel profilo utente; importazione con convalida.
-**Casi limite:** comando rimosso da tutte le barre → sempre raggiungibile da menu e ricerca comandi (VIS-52); impostazioni di una versione diversa → migrazione o campi ignorati con avviso; schermo piccolo (1366×768) → comandi in eccesso in un menu di overflow; scala HiDPI → icone nitide; lingua RTL → interfaccia speculare.
+**Descrizione:** l'utente sceglie quali barre e pannelli mostrare (barra delle modalità, con o senza etichette; barra contestuale; barra di stato; pannello laterale sinistro di UX-06; pannello proprietà destro di UX-08), la dimensione delle icone e la larghezza dei pannelli. La posizione dei pannelli è fissa: il pannello laterale sta a sinistra e il pannello proprietà a destra (UX-06, UX-08). L'utente imposta inoltre le preferenze predefinite di visualizzazione: vista e zoom, scheda iniziale del pannello laterale, rispetto delle impostazioni di apertura del documento (VIS-42), ripristino dell'ultima posizione di lettura, risoluzione dello schermo usata per lo zoom al 100%, unità di misura e tema (UX-11). La composizione delle barre contestuali (aggiungere, togliere e riordinare strumenti) è in UX-19 (P2); l'esportazione e l'importazione delle preferenze sono in UX-17.
+**Flusso:** 1. Menu **Visualizza** (o clic destro su una barra) → voci per mostrare o nascondere ogni barra e pannello, **Mostra etichette**, **Dimensione icone**. 2. Preferenze › Aspetto (barre e pannelli visibili, dimensione delle miniature) e Preferenze › Documenti (vista e zoom predefiniti, unità di misura) per i valori predefiniti (UX-17). 3. **Ripristina predefiniti** nella sezione delle preferenze. 4. Esportazione e importazione delle preferenze come file (UX-17).
+**Formati/strutture:** file di configurazione testuale e versionato nel profilo utente, lo stesso delle preferenze (UX-17); importazione con convalida.
+**Casi limite:** barra o pannello nascosto → i comandi restano raggiungibili da menu e scorciatoie (NFR-21) e, quando disponibile, dalla ricerca dei comandi (VIS-52, P2); impostazioni di una versione diversa → migrazione o campi ignorati con avviso; schermo piccolo (1366×768) → comandi in eccesso in un menu di overflow (UX-20); scala HiDPI → icone nitide; pannello nascosto e selezione di un elemento → il pannello non si riapre da solo.
 **Criteri di accettazione:**
-- Dato un comando aggiunto a una barra, quando l'applicazione viene riavviata, allora il comando è nella stessa posizione.
-- Dato lo zoom predefinito "adatta larghezza" con "ripristina l'ultima posizione" disattivato, quando si apre un documento senza `/OpenAction`, allora la pagina 1 è mostrata adattata in larghezza.
-- Date impostazioni esportate da un computer e importate su un altro, quando l'applicazione si riavvia, allora barre e preferenze coincidono.
-- Dato "Ripristina predefiniti" confermato, quando la finestra si aggiorna, allora tutte le barre tornano alla configurazione iniziale.
+- Data la barra di stato nascosta e le etichette della barra delle modalità attivate, quando l'applicazione viene riavviata, allora la barra di stato resta nascosta e le etichette restano visibili.
+- Dato lo zoom predefinito "adatta larghezza" con "ripristina l'ultima posizione" disattivato, quando si apre un documento senza impostazioni di apertura (`/OpenAction`), allora la pagina 1 è mostrata adattata in larghezza.
+- Date preferenze esportate da un computer e importate su un altro, quando l'applicazione si riavvia, allora barre e pannelli visibili e preferenze di visualizzazione coincidono.
+- Dato **Ripristina predefiniti** nella sezione Aspetto, quando la finestra si aggiorna, allora barre e pannelli tornano alla configurazione iniziale e le altre sezioni delle preferenze non cambiano.
+- Dato il pannello proprietà nascosto, quando si seleziona un'annotazione, allora il pannello resta chiuso e Maiusc+F9 lo riapre mostrando le proprietà dell'annotazione.
 **Priorità:** P1
 
 ### VIS-52 — Scorciatoie da tastiera e ricerca dei comandi
-**Descrizione:** ogni funzione è raggiungibile da tastiera; le scorciatoie si personalizzano con rilevamento dei conflitti e si esportano o importano; una casella di ricerca comandi trova ed esegue qualsiasi comando per nome, mostrandone la scorciatoia.
-**Flusso:** 1. Preferenze → Scorciatoie: elenco ricercabile, assegna o rimuovi; in caso di conflitto avviso con possibilità di sostituire. 2. Schemi predefiniti selezionabili. 3. Ricerca comandi (Ctrl+K): si digita parte del nome, l'elenco si filtra (i comandi disabilitati mostrano il motivo), Invio esegue. 4. Aiuto → elenco stampabile delle scorciatoie.
-**Formati/strutture:** mappa delle scorciatoie nel profilo utente, esportabile in un file di testo.
-**Casi limite:** combinazioni riservate dal sistema o dal desktop → avviso; layout di tastiera non italiani o non latini → scorciatoie basate sul carattere prodotto, con alternative per i tasti assenti; scorciatoie a tasto singolo (es. B in presentazione) attive solo nel loro contesto.
+**Descrizione:** una casella di ricerca dei comandi trova ed esegue qualsiasi comando per nome, mostrandone la scorciatoia; le scorciatoie personali (UX-19) si esportano e importano e un elenco stampabile mostra quelle in vigore. Le scorciatoie predefinite sono solo quelle di UX-18; la raggiungibilità di ogni funzione da tastiera è garantita da NFR-21 (P0), indipendentemente da questo requisito.
+**Flusso:** 1. Ricerca dei comandi (Ctrl+K, riservata in UX-18): si digita parte del nome, l'elenco si filtra mostrando per ogni comando la modalità e la scorciatoia; i comandi non disponibili nel contesto mostrano il motivo; Invio esegue il comando selezionato. 2. Preferenze › Scorciatoie (UX-19): elenco ricercabile, assegna o rimuovi; in caso di conflitto avviso con possibilità di sostituire o annullare. 3. Aiuto → elenco stampabile delle scorciatoie in vigore.
+**Formati/strutture:** mappa delle scorciatoie personali nel profilo utente, esportabile in un file di testo; indice dei comandi costruito dai menu e dalle barre, con nomi in italiano e in inglese.
+**Casi limite:** combinazioni riservate dal sistema o dal desktop → avviso; layout di tastiera non italiani o non latini → scorciatoie basate sul carattere prodotto, con alternative per i tasti assenti; scorciatoie a tasto singolo (es. B in presentazione) attive solo nel loro contesto; ricerca senza risultati → messaggio e suggerimento di consultare la guida (F1); nome digitato in inglese con interfaccia italiana → il comando viene trovato comunque.
 **Criteri di accettazione:**
-- Data l'assegnazione di Ctrl+Alt+L a "Ruota vista in senso orario", quando l'utente preme la combinazione, allora la vista ruota.
+- Data l'assegnazione personale (UX-19) di Ctrl+Alt+L a "Ruota vista in senso orario", quando l'utente preme la combinazione, allora la vista ruota.
 - Data una combinazione già assegnata, quando si tenta di assegnarla a un altro comando, allora compare l'avviso di conflitto con il nome del comando esistente.
 - Dato il testo "ruota" nella ricerca comandi, quando si preme Invio sul primo risultato, allora il comando viene eseguito.
-- Dato un test automatico che percorre tutti i comandi dei menu, quando li raggiunge usando solo la tastiera, allora nessun comando risulta irraggiungibile.
+- Dato il comando **Incolla** con gli appunti vuoti, quando lo si cerca nella ricerca comandi, allora compare nell'elenco con il motivo per cui non è disponibile e Invio non esegue nulla.
+- Dato il testo "rotate" nella ricerca comandi con l'interfaccia in italiano, quando si osserva l'elenco, allora compaiono i comandi di rotazione con il nome italiano e la loro scorciatoia.
 **Priorità:** P2
 
 ### VIS-53 — Integrazione con il desktop
-**Descrizione:** l'applicazione si integra nel desktop Linux: compare in "Apri con" per i PDF, può diventare il lettore predefinito su richiesta, fornisce le miniature dei PDF al file manager, aggiunge azioni al menu contestuale dei file (apri, unisci, converti: rimandano alle rispettive aree), condivide i recenti con il sistema e offre azioni rapide dalla voce di menu dell'applicazione (nuova finestra, apri recenti).
-**Flusso:** 1. All'installazione: registrazione per il tipo MIME application/pdf (e per i formati di dati modulo) e del generatore di miniature. 2. Preferenze → "Imposta come lettore PDF predefinito", solo con conferma esplicita. 3. File manager: miniatura della prima pagina, azioni nel menu contestuale, trascinamento di file sull'icona dell'applicazione. 4. Istanza singola: un file aperto dal file manager va in una nuova scheda della finestra attiva (VIS-05).
-**Formati/strutture:** specifiche desktop condivise per voci di applicazione, associazioni MIME, miniature e file recenti; il generatore di miniature non esegue script né azioni, non mostra il contenuto dei file cifrati e lavora con limiti di tempo e memoria in un processo separato.
-**Casi limite:** installazione confinata → accesso ai file tramite i servizi di selezione file del sistema senza perdere funzioni (ad esempio il salvataggio sul file aperto); file manager diversi → funzioni di base garantite tramite gli standard; PDF malevolo in una cartella → il generatore di miniature si interrompe senza bloccare il file manager; PDF cifrato → icona generica con lucchetto.
+**Descrizione:** l'applicazione si integra nel desktop Linux secondo NFR-31, NFR-32 e NFR-33 (requisiti di riferimento): compare in "Apri con" per i PDF, può diventare il lettore predefinito solo con il consenso dell'utente, fornisce le miniature dei PDF al gestore file e offre azioni rapide dalla voce di menu dell'applicazione (almeno **Nuova finestra**, **Crea PDF da file…**, **Unisci file…**, NFR-32). Questo requisito aggiunge le azioni nel menu contestuale dei file (apri, unisci, converti: rimandano alle rispettive aree), il trascinamento di file sull'icona dell'applicazione e la condivisione dei file recenti con il sistema quando i recenti sono attivi (UX-17).
+**Flusso:** 1. All'installazione: registrazione per il tipo MIME application/pdf (e per i formati che l'applicazione sa convertire in PDF, NFR-31) e del generatore di miniature. 2. Preferenze › Generale (UX-17) → "Imposta come lettore PDF predefinito", solo con conferma esplicita; la proposta compare anche una sola volta, in modo non invasivo, nella Home (NFR-31). 3. Gestore file: miniatura della prima pagina, azioni nel menu contestuale, trascinamento di file sull'icona dell'applicazione. 4. Istanza singola: un file aperto dal gestore file va in una nuova scheda della finestra attiva o in una nuova finestra, secondo le preferenze (NFR-31, VIS-05).
+**Formati/strutture:** specifiche desktop condivise per voci di applicazione, associazioni MIME, miniature e file recenti; il generatore di miniature non esegue script né azioni, non mostra il contenuto dei file cifrati e lavora con limiti di tempo e memoria in un processo separato (NFR-33).
+**Casi limite:** installazione confinata → accesso ai file tramite i servizi di selezione file del sistema senza perdere funzioni (ad esempio il salvataggio sul file aperto); gestori file diversi → funzioni di base garantite tramite gli standard; PDF malevolo in una cartella → il generatore di miniature si interrompe senza bloccare il gestore file; PDF cifrato → icona generica dei PDF, senza richiesta di password (NFR-33); recenti disattivati nelle preferenze → nessun file condiviso con l'elenco dei recenti del sistema.
 **Criteri di accettazione:**
 - Data l'applicazione installata, quando si interrogano le applicazioni registrate per application/pdf, allora l'applicazione è elencata.
-- Dato un PDF valido, quando il file manager richiede la miniatura, allora riceve l'immagine della prima pagina entro 2 s.
-- Dato un PDF cifrato, quando il file manager richiede la miniatura, allora non viene prodotta alcuna immagine del contenuto.
-- Dato un PDF malformato che blocca la resa, quando viene richiesta la miniatura, allora il generatore termina entro 5 s senza bloccare il file manager.
+- Dato un PDF valido di C-INT, quando il gestore file richiede la miniatura, allora riceve l'immagine della prima pagina in meno di 1 s (NFR-33).
+- Dato un PDF cifrato, quando il gestore file richiede la miniatura, allora non viene prodotta alcuna immagine del contenuto e non viene chiesta alcuna password.
+- Dato un PDF malformato che blocca la resa, quando viene richiesta la miniatura, allora il generatore termina entro 5 s senza bloccare il gestore file.
 - Dato che l'utente non ha scelto di impostare l'applicazione come predefinita, quando l'applicazione viene installata o avviata, allora l'associazione predefinita del sistema non cambia.
+- Dati due PDF selezionati nel gestore file, quando si sceglie l'azione "Unisci" dal menu contestuale, allora si apre l'unione di PAG-24 con i due file nell'ordine della selezione.
+**Priorità:** P1
+
+### VIS-54 — Allegati del documento
+**Descrizione:** l'utente gestisce i file allegati a livello di documento (file incorporati nel PDF e non legati a una pagina): li aggiunge con una descrizione e una relazione con il documento, li apre, li salva su disco singolarmente o tutti insieme, ne modifica nome e descrizione e li elimina. Le operazioni si svolgono nella scheda **Allegati** del pannello laterale (UX-06). È il requisito di riferimento per le operazioni sugli allegati (0.6): la consultazione degli allegati di pagina e dei portfolio è in VIS-22, gli allegati sulla pagina in ANN-29, la creazione dei portfolio in CNV-34.
+**Flusso:** 1. Pannello laterale → **Allegati** → **Aggiungi…** (selettore file con selezione multipla) oppure trascinamento di file sulla scheda (UX-22) → finestra con nome, descrizione facoltativa e relazione con il documento (**Non specificata**, predefinita; **Dati**; **Origine**; **Alternativa**; **Supplemento**) → **Aggiungi**. Ogni aggiunta è un passo annullabile (NFR-11). 2. **Apri**: un allegato PDF si apre in una nuova scheda come copia temporanea (il salvataggio propone **Salva con nome**); un altro file si apre con l'applicazione predefinita del sistema dopo la finestra di conferma di VIS-19; un file eseguibile o uno script non si apre mai e offre solo **Salva con nome…** (NFR-18). 3. **Salva con nome…** e **Salva tutti…**: copia esatta dei byte dell'allegato su disco, con il nome dell'allegato ripulito come nome proposto. 4. **Proprietà**: nome e descrizione modificabili; dimensione, date, relazione, tipo di file e somma di controllo in sola lettura. 5. **Elimina**: senza conferma, annullabile (UX-13); al salvataggio il contenuto dell'allegato viene rimosso dal file, non solo il riferimento (NFR-09).
+**Formati/strutture:** albero dei nomi `/Names` → `/EmbeddedFiles` del catalogo; specifica del file (`/Type /Filespec`) con `/F` e `/UF` (nome Unicode), `/Desc` ed `/EF`; flusso del file incorporato (`/Type /EmbeddedFile`) con `/Subtype` (tipo MIME) e `/Params` (`/Size`, `/CreationDate`, `/ModDate`, `/CheckSum`); relazione `/AFRelationship` (`/Unspecified`, `/Data`, `/Source`, `/Alternative`, `/Supplement`) e array `/AF` del catalogo (PDF 2.0, PDF/A-3). Conformità (NFR-29): PDF/A-1 non ammette allegati; PDF/A-2 ammette solo allegati che siano a loro volta PDF/A; PDF/A-3 ammette qualsiasi file con `/AFRelationship`, `/Subtype` e riferimento in `/AF`. Allegati cifrati con un filtro dedicato (`/EFF` nel dizionario di cifratura) supportati con la password del documento.
+**Casi limite:** nome già presente → proposto un suffisso numerico (es. "dati (2).xml"); file oltre 100 MB → avviso sulla crescita del documento, con possibilità di proseguire; documento firmato → salvataggio incrementale (NFR-09) e avviso che la modifica risulterà successiva alla firma; firma di certificazione che non consente modifiche → aggiunta ed eliminazione bloccate con spiegazione (area 9); documento senza permesso di modifica → **Aggiungi**, **Elimina** e **Proprietà** disabilitati con il motivo, **Apri** e **Salva con nome…** disponibili; nome con percorsi, "../" o caratteri di controllo → al salvataggio si usa solo il nome finale ripulito; somma di controllo non corrispondente → avviso all'apertura e al salvataggio; allegato compresso che supera i limiti di NFR-14 → operazione interrotta con messaggio; documento PDF/A-1, oppure PDF/A-2 con un file che non è PDF/A → avviso che il documento perderà la conformità dichiarata, con possibilità di annullare (NFR-29).
+**Criteri di accettazione:**
+- Dato un documento senza allegati, quando si aggiunge `dati.xml` con descrizione "Dati della fattura" e si salva, allora il file contiene `/EmbeddedFiles` con una specifica che ha `/UF (dati.xml)` e `/Desc (Dati della fattura)` e un flusso `/EmbeddedFile` con `/Params /Size` uguale alla dimensione del file originale.
+- Dato un allegato PDF, quando si sceglie **Apri**, allora si apre in una nuova scheda; quando invece si sceglie **Salva con nome…**, allora il file su disco è identico byte per byte all'allegato.
+- Dato un allegato `script.sh`, quando lo si seleziona, allora **Apri** è disabilitato con il motivo, è disponibile solo **Salva con nome…** e nessun processo viene avviato.
+- Dato un documento PDF/A-3b, quando si aggiunge un file XML con relazione **Dati** e si salva, allora la specifica del file ha `/AFRelationship /Data`, il catalogo la elenca in `/AF` e un validatore PDF/A-3b non segnala errori.
+- Dato un documento PDF/A-1b, quando si sceglie **Aggiungi…**, allora compare l'avviso che il documento perderà la conformità PDF/A-1b, con la possibilità di annullare.
+- Dato un allegato eliminato, quando si preme Ctrl+Z, allora l'allegato ricompare con nome e descrizione; dato invece un documento non firmato salvato dopo l'eliminazione, quando si ispeziona il file, allora il flusso dell'allegato non è più presente.
+- Dato un allegato `relazione.odt`, quando si sceglie **Apri**, allora compare la finestra di conferma di VIS-19 con il nome del file e il programma che verrà usato, e il file si apre solo dopo la conferma.
 **Priorità:** P1
 
 
 ## 2. Gestione pagine
 
 ### PAG-01 — Organizzatore pagine a griglia
-**Descrizione:** Vista dedicata che mostra tutte le pagine del documento attivo come miniature in griglia e raccoglie i comandi di pagina (barra, menu contestuale, scorciatoie). Sotto ogni miniatura: numero fisico, etichetta di pagina se diversa (PAG-39), indicatori di rotazione, di formato diverso dalla maggioranza e di presenza di annotazioni. Dimensione delle miniature regolabile con cursore e zoom. Ogni operazione è annullabile e ripetibile; le modifiche al documento aperto sono scritte al salvataggio.
+**Descrizione:** Vista dedicata che mostra tutte le pagine del documento attivo come miniature in griglia e raccoglie i comandi di pagina (barra, menu contestuale, scorciatoie). Sotto ogni miniatura: numero fisico, etichetta di pagina se diversa (PAG-39), indicatori di rotazione, di formato diverso dalla maggioranza e di presenza di annotazioni. Dimensione delle miniature regolabile con cursore e zoom. Ogni operazione è annullabile e ripetibile (NFR-11); le modifiche al documento aperto sono scritte al salvataggio (NFR-09).
 **Flusso:** 1. L'utente apre l'organizzatore dal documento attivo (comando o scorciatoia). 2. Seleziona pagine con clic, Ctrl+clic (aggiunge/toglie), Maiusc+clic (intervallo), riquadro di trascinamento, Ctrl+A, o con i filtri (pari, dispari, verticali, orizzontali, intervallo testuale PAG-02). 3. Applica un comando (ruota, elimina, estrai, duplica, sposta…) da barra, menu contestuale o tastiera. 4. La griglia si aggiorna subito; Annulla/Ripeti ripristinano lo stato precedente/successivo.
 **Formati/strutture:** Albero delle pagine (`/Pages`, `/Kids`, `/Count`); attributi ereditabili (`/MediaBox`, `/CropBox`, `/Rotate`, `/Resources`) risolti per singola pagina; miniature generate al volo; eventuali miniature incorporate (`/Thumb`) rimosse o rigenerate quando la pagina cambia aspetto.
 **Casi limite:** Documento di migliaia di pagine → rendering pigro (solo miniature visibili più un margine) con segnaposto, interfaccia sempre reattiva; pagina non renderizzabile (contenuto corrotto) → miniatura segnaposto con icona di errore, pagina comunque selezionabile e gestibile; permesso di assemblaggio negato → comandi strutturali disabilitati con il motivo nel suggerimento e possibilità di sbloccare con password proprietario; documento firmato → avviso alla prima modifica strutturale (PAG-03); pagine di formati diversi → miniature in proporzione reale.
 **Criteri di accettazione:**
 - Dato un documento di 10 pagine, quando l'utente fa clic sulla pagina 2 e Maiusc+clic sulla pagina 5, allora sono selezionate esattamente le pagine 2–5 e la barra di stato indica "4 pagine selezionate".
-- Dato un documento di 5.000 pagine, quando si apre l'organizzatore e si scorre fino in fondo, allora il numero di miniature renderizzate contemporaneamente in memoria non supera quelle visibili più il margine configurato e la griglia risponde all'input entro i tempi dei requisiti non funzionali.
+- Dato un documento di 5.000 pagine, quando si apre l'organizzatore e si scorre fino in fondo, allora il numero di miniature renderizzate contemporaneamente in memoria non supera quelle visibili più il margine configurato e ogni azione sulla griglia produce un riscontro visivo entro 100 ms (NFR-05).
 - Dato un qualsiasi comando di pagina eseguito, quando l'utente esegue Annulla, allora il documento ha lo stesso numero, ordine e contenuto (rendering identico) di pagine di prima del comando.
 - Dato un PDF con permesso di assemblaggio negato aperto senza password proprietario, quando si apre l'organizzatore, allora i comandi elimina, inserisci, ruota e riordina sono disabilitati e il suggerimento ne indica il motivo.
 **Priorità:** P0
@@ -1434,15 +1551,15 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### PAG-03 — Integrità dei riferimenti nelle operazioni di pagina
 **Descrizione:** Regole trasversali che ogni operazione strutturale (sposta, inserisci, elimina, duplica, sostituisci, estrai, dividi, unisci) deve rispettare perché il documento risultante resti coerente: segnalibri, collegamenti, destinazioni nominate, campi modulo, struttura logica (tag), livelli, thread di articoli, etichette, azione di apertura, firme e permessi.
-**Flusso:** 1. Prima dell'operazione il sistema individua gli oggetti che fanno riferimento alle pagine coinvolte. 2. Se il documento è firmato o certificato mostra l'avviso di invalidazione e chiede conferma. 3. Esegue l'operazione aggiornando o rimuovendo i riferimenti secondo le regole sotto. 4. Registra un'unica voce di annullamento.
-**Formati/strutture:** `/Outlines` (`/Dest`, `/A` GoTo), `/Annots` di tipo Link, `/Dests` e `/Names /Dests`, `/AcroForm /Fields` e widget (`/P`), `/StructTreeRoot` e `/ParentTree` (`/StructParents`), `/OCProperties`, `/Threads` e bead, `/PageLabels`, `/OpenAction`, `/AA` di pagina, `/Perms` (`/DocMDP`), bit di assemblaggio in `/Encrypt /P`. Regole: i riferimenti seguono l'oggetto pagina, non il numero; verso pagine eliminate i segnalibri restano ma senza destinazione e marcati come interrotti (opzione: rimuoverli), link e destinazioni nominate vengono rimossi, `/OpenAction` torna alla prima pagina; un campo i cui widget erano tutti su pagine eliminate è tolto da `/Fields`; elementi di struttura rimasti senza contenuto vengono potati; i bead eliminati sono tolti e il thread ricucito; le risorse non più usate sono eliminate al salvataggio completo. Nella copia tra documenti: nomi di campo in conflitto rinominati con suffisso (predefinito) o fusi su scelta; destinazioni nominate duplicate rinominate con aggiornamento dei link; livelli omonimi mantenuti distinti; versione PDF del risultato pari alla massima delle sorgenti.
-**Casi limite:** Documento firmato → avviso esplicito che le firme risulteranno invalidate; documento certificato senza modifiche consentite → avviso bloccante con conferma esplicita; salvataggio incrementale dopo un'eliminazione → avviso che il contenuto eliminato resta nelle revisioni precedenti e proposta di salvataggio completo; permesso di assemblaggio negato → operazione rifiutata senza password proprietario; documento che dichiara conformità PDF/A → avviso se l'operazione introduce elementi non conformi.
+**Flusso:** 1. Prima dell'operazione il sistema individua gli oggetti che fanno riferimento alle pagine coinvolte. 2. Se il documento è firmato, alla prima modifica strutturale della sessione compare una sola volta l'avviso di invalidazione di SIG-21 (UX-13); il salvataggio segue poi NFR-09. Se una firma di certificazione non consente modifiche, le operazioni sono disattivate e resta disponibile "Lavora su una copia senza firme" (SIG-21). 3. Esegue l'operazione aggiornando o rimuovendo i riferimenti secondo le regole sotto. 4. Registra un'unica voce di annullamento.
+**Formati/strutture:** `/Outlines` (`/Dest`, `/A` GoTo), `/Annots` di tipo Link, `/Dests` e `/Names /Dests`, `/AcroForm /Fields` e widget (`/P`), `/StructTreeRoot` e `/ParentTree` (`/StructParents`), `/OCProperties`, `/Threads` e bead, `/PageLabels`, `/OpenAction`, `/AA` di pagina, `/Perms` (`/DocMDP`), bit di assemblaggio in `/Encrypt /P`. Regole: i riferimenti seguono l'oggetto pagina, non il numero; verso pagine eliminate i segnalibri restano ma senza destinazione e marcati come interrotti (opzione: rimuoverli), link e destinazioni nominate vengono rimossi, `/OpenAction` torna alla prima pagina; un campo i cui widget erano tutti su pagine eliminate è tolto da `/Fields`; elementi di struttura rimasti senza contenuto vengono potati; i bead eliminati sono tolti e il thread ricucito; le risorse non più usate sono eliminate dalla riscrittura completa del salvataggio (NFR-09). Nella copia tra documenti: nomi di campo in conflitto rinominati con suffisso (predefinito) o fusi su scelta; destinazioni nominate duplicate rinominate con aggiornamento dei link; livelli omonimi mantenuti distinti; versione PDF del risultato pari alla massima delle sorgenti.
+**Casi limite:** Documento firmato → avviso esplicito che le firme risulteranno invalidate; documento certificato senza modifiche consentite → operazioni strutturali disattivate con il motivo (SIG-21); documento firmato, quindi salvato in modo incrementale (NFR-09), dopo un'eliminazione → avviso che il contenuto eliminato resta nelle revisioni precedenti e proposta di salvare una copia riscritta per intero, in cui le firme non sono più valide; permesso di assemblaggio negato → operazione rifiutata senza password proprietario; documento che dichiara conformità PDF/A → avviso se l'operazione introduce elementi non conformi.
 **Criteri di accettazione:**
 - Dato un documento con un segnalibro verso la pagina 5, quando la pagina 5 viene spostata in posizione 1, allora il segnalibro apre la nuova pagina 1.
 - Dato un documento con un link verso la pagina 7, quando la pagina 7 viene eliminata e il file salvato, allora nessun link, segnalibro o destinazione nominata del file punta a un oggetto pagina inesistente (verifica con validatore strutturale).
 - Dati due PDF che contengono ciascuno un campo "Nome", quando vengono uniti con le impostazioni predefinite, allora il risultato contiene due campi distinti con valori indipendenti.
 - Dato un PDF taggato, quando si eliminano delle pagine, allora l'albero di struttura non contiene riferimenti a contenuti o pagine inesistenti.
-- Dato un documento con una firma valida, quando si tenta di ruotare una pagina, allora compare l'avviso di invalidazione prima che la modifica sia applicata.
+- Dato un documento con una firma valida, quando si tenta di ruotare una pagina, allora compare l'avviso di invalidazione prima che la modifica sia applicata; quando poi si ruota un'altra pagina nella stessa sessione, allora l'avviso non ricompare.
 **Priorità:** P0
 
 ### PAG-04 — Riordino pagine con trascinamento e comandi di spostamento
@@ -1506,7 +1623,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Descrizione:** Inserisce come nuove pagine il contenuto degli appunti di sistema: pagine PDF (copiate da Foliant o da altre applicazioni che forniscono dati PDF), immagini, testo (impaginato su pagine del formato scelto), elenchi di file (inseriti come in PAG-07 e PAG-08).
 **Flusso:** 1. L'utente sceglie "Inserisci > Dagli appunti" (abilitato solo se gli appunti contengono un tipo supportato). 2. Vede l'anteprima del contenuto rilevato e del numero di pagine risultanti. 3. Sceglie la posizione e, per testo e immagini, formato e margini. 4. Conferma.
 **Formati/strutture:** Tipi degli appunti in ordine di preferenza: `application/pdf` (pagine), immagini (`image/png`, `image/jpeg`…), elenco di file (`text/uri-list`), testo formattato (convertito in testo con stili di base), testo semplice UTF-8. Il testo è impaginato con a capo automatico, interruzioni di pagina e font incorporato in sottoinsieme, quindi resta ricercabile.
-**Casi limite:** Appunti vuoti o di tipo non supportato → comando disabilitato con suggerimento; testo molto lungo → più pagine, numero indicato in anteprima; caratteri non coperti dal font predefinito → font di sistema alternativo che li copre, altrimenti glifo sostitutivo e avviso; immagine più grande del formato → ridotta per adattarsi; appunti modificati durante il dialogo → si usa l'istantanea presa all'apertura.
+**Casi limite:** Appunti vuoti o di tipo non supportato → comando disabilitato con suggerimento; testo molto lungo → più pagine, numero indicato in anteprima; caratteri non coperti dal font predefinito → font di sistema alternativo che li copre, altrimenti glifo sostitutivo e avviso; immagine più grande del formato → ridotta per adattarsi; appunti modificati durante il dialogo → si usa la copia del contenuto letta all'apertura del dialogo.
 **Criteri di accettazione:**
 - Date 2 pagine copiate in Foliant da un documento A, quando si inseriscono dagli appunti nel documento B dopo la pagina 1, allora B contiene in posizione 2–3 due pagine con rendering identico alle sorgenti.
 - Dato uno screenshot negli appunti, quando si esegue il comando con dimensione "come l'immagine", allora viene creata 1 pagina che contiene l'immagine a piena pagina.
@@ -1525,13 +1642,14 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### PAG-11 — Elimina pagine
-**Descrizione:** Elimina le pagine selezionate o indicate per intervallo/filtro, con riepilogo degli elementi collegati coinvolti, conferma (disattivabile) e annullamento.
-**Flusso:** 1. L'utente seleziona le pagine e preme Canc, oppure usa "Elimina pagine…" con un intervallo (PAG-02). 2. Il riepilogo indica il numero di pagine e gli elementi collegati (segnalibri, link, campi). 3. Conferma. 4. I riferimenti vengono ripuliti secondo PAG-03.
+**Descrizione:** Elimina le pagine selezionate o indicate per intervallo/filtro, senza chiedere conferma: l'operazione è annullabile e un avviso temporaneo riepiloga le pagine e gli elementi collegati coinvolti e offre **Annulla** (UX-13, requisito di riferimento per le conferme).
+**Flusso:** 1. L'utente seleziona le pagine e preme Canc, oppure usa "Elimina pagine…" con un intervallo (PAG-02): la finestra mostra il numero di pagine risultante prima di premere **Elimina**. 2. Le pagine vengono eliminate subito e i riferimenti ripuliti secondo PAG-03. 3. Un avviso temporaneo (es. «3 pagine eliminate · 2 segnalibri e 1 link interessati · Annulla») resta visibile per almeno 5 s (UX-13).
 **Formati/strutture:** Rimozione da `/Kids` e aggiornamento di `/Count`; risorse orfane eliminate al salvataggio completo; `/PageLabels` aggiornate (PAG-39).
-**Casi limite:** Eliminazione di tutte le pagine → impedita, deve restarne almeno una; documento firmato → avviso (PAG-03); salvataggio incrementale → avviso che il contenuto eliminato resta recuperabile dalle revisioni precedenti e proposta di salvataggio completo; campo con widget su più pagine → rimossi solo i widget delle pagine eliminate, il campo resta.
+**Casi limite:** Eliminazione di tutte le pagine → impedita, deve restarne almeno una; documento firmato → avviso (PAG-03); documento firmato, quindi salvato in modo incrementale (NFR-09) → avviso che il contenuto eliminato resta recuperabile dalle revisioni precedenti e proposta di salvare una copia riscritta per intero, in cui le firme non sono più valide; campo con widget su più pagine → rimossi solo i widget delle pagine eliminate, il campo resta.
 **Criteri di accettazione:**
 - Dato un documento di 10 pagine, quando si elimina "2,4-6", allora restano 6 pagine nell'ordine [1,3,7,8,9,10].
-- Date pagine eliminate che contengono immagini non usate altrove, quando si salva con salvataggio completo, allora quelle immagini non sono più presenti nel file, nemmeno in revisioni precedenti.
+- Date pagine eliminate da un documento non firmato che contengono immagini non usate altrove, quando si salva (riscrittura completa, NFR-09), allora quelle immagini non sono più presenti nel file, nemmeno in revisioni precedenti.
+- Date 3 pagine selezionate, quando si preme Canc, allora sono eliminate senza alcuna finestra di conferma e **Annulla** nell'avviso le ripristina nella posizione originale.
 - Dato un documento di 3 pagine tutte selezionate, quando si preme Canc, allora il comando è rifiutato con un messaggio e il documento resta di 3 pagine.
 **Priorità:** P0
 
@@ -1548,15 +1666,15 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P0
 
 ### PAG-13 — Estrai pagine come immagini
-**Descrizione:** Esporta le pagine selezionate come file immagine (PNG, JPEG, TIFF anche multipagina, BMP, WebP) scegliendo risoluzione, colore/grigi/bianco e nero, qualità JPEG, sfondo trasparente (PNG), inclusione delle annotazioni e area esportata (pagina visibile o intero foglio).
-**Flusso:** 1. L'utente seleziona le pagine e sceglie "Estrai come immagini". 2. Imposta formato e opzioni. 3. Indica destinazione e modello del nome. 4. L'esportazione procede con avanzamento annullabile.
-**Formati/strutture:** Rendering della pagina con rotazione applicata, entro `/CropBox` (predefinito) o `/MediaBox`; risoluzione scritta nei metadati del file immagine; nel TIFF multipagina un fotogramma per pagina.
-**Casi limite:** Risoluzione che produce immagini oltre il limite configurato (pixel per lato o memoria) → avviso e proposta di risoluzione ridotta; pagina in parte non renderizzabile → immagine con quanto renderizzabile e voce nell'elenco errori; combinazione non supportata (trasparenza in JPEG) → opzione disabilitata.
+**Descrizione:** Esporta come file immagine le pagine selezionate nell'organizzatore. Formati (PNG, JPEG, TIFF anche multipagina, BMP, GIF), opzioni e comportamento sono quelli di CNV-07, requisito di riferimento per l'esportazione delle pagine come immagini (0.6); questo requisito aggiunge l'avvio dalla selezione dell'organizzatore e la scelta dell'area esportata (pagina visibile o intero foglio).
+**Flusso:** 1. L'utente seleziona le pagine e sceglie "Estrai come immagini" dal menu contestuale o dalla barra dell'organizzatore. 2. Si apre la finestra di CNV-07 con l'ambito già impostato sulle pagine selezionate. 3. Imposta formato e opzioni, l'area esportata, la destinazione e il modello del nome. 4. L'esportazione procede con avanzamento annullabile (UX-12).
+**Formati/strutture:** Come CNV-07; area esportata `/CropBox` (pagina visibile, predefinita) oppure `/MediaBox` (intero foglio), con la rotazione `/Rotate` applicata.
+**Casi limite:** Come CNV-07 (limiti di dimensione, memoria, trasparenza, pagine non renderizzabili); nessuna pagina selezionata → comando disabilitato; selezione non contigua → i nomi dei file usano il numero di pagina originale.
 **Criteri di accettazione:**
-- Data una pagina A4, quando viene esportata in PNG a 150 dpi, allora l'immagine misura 1240×1754 px ±1 e dichiara 150 dpi nei metadati.
+- Date le pagine A4 2, 5 e 7 selezionate nell'organizzatore, quando si esportano in PNG a 150 dpi, allora si ottengono 3 file di 1240×1754 px ±1 chiamati `{nome}_002.png`, `{nome}_005.png` e `{nome}_007.png`, con 150 dpi nei metadati.
 - Date 5 pagine esportate in TIFF multipagina, quando si apre il file prodotto, allora contiene 5 fotogrammi nell'ordine delle pagine.
-- Data l'opzione "includi annotazioni" disattivata, quando si esporta una pagina con un'evidenziazione, allora l'evidenziazione non compare nell'immagine.
-**Priorità:** P1
+- Data l'area "intero foglio" su una pagina il cui `/CropBox` è più piccolo del `/MediaBox`, quando la si esporta, allora l'immagine ha le proporzioni del `/MediaBox`.
+**Priorità:** P0
 
 ### PAG-14 — Trascinamento di pagine tra documenti e verso il file manager
 **Descrizione:** Trascinamento delle miniature: verso un altro documento aperto (altra scheda o finestra) per copiarle, o spostarle tenendo premuto un tasto modificatore; verso il desktop o una cartella del file manager per creare un PDF con le pagine trascinate; dal file manager verso la griglia per inserire PDF o immagini nel punto di rilascio.
@@ -1595,7 +1713,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Descrizione:** Invia solo le pagine selezionate senza doverle prima salvare a mano: genera un PDF temporaneo e lo passa al meccanismo di condivisione del sistema (client di posta come allegato o altre applicazioni) oppure lo salva come copia.
 **Flusso:** 1. L'utente seleziona le pagine e sceglie "Condividi pagine". 2. Sceglie la destinazione (posta, applicazione, salva copia). 3. Il sistema genera il PDF temporaneo (nome "{nome} - pagine {intervallo}.pdf") e lo consegna.
 **Formati/strutture:** PDF prodotto come in PAG-12; file temporaneo in un'area privata dell'utente, rimosso alla chiusura dell'applicazione o dopo un tempo configurabile.
-**Casi limite:** Nessun client di posta o servizio di condivisione disponibile → si offrono "Salva copia" e "Apri cartella"; allegato oltre una soglia configurabile (predefinito 25 MB) → avviso con proposta di compressione (area Output); documento cifrato → il PDF condiviso mantiene la protezione per impostazione predefinita, rimovibile solo se l'utente ne ha i diritti.
+**Casi limite:** Nessun client di posta o servizio di condivisione disponibile → si offrono "Salva copia" e "Apri cartella"; allegato oltre la soglia di VIS-45 (predefinita 20 MB) → avviso con proposta di compressione (CNV-29); documento cifrato → il PDF condiviso mantiene la protezione per impostazione predefinita, rimovibile solo se l'utente ne ha i diritti.
 **Criteri di accettazione:**
 - Date le pagine 2–4 selezionate, quando si sceglie "Posta", allora il client di posta predefinito (in test, un client fittizio registrato) riceve un allegato PDF di 3 pagine.
 - Dato un PDF con password di apertura, quando si condividono pagine con le impostazioni predefinite, allora l'allegato richiede la stessa password.
@@ -1668,20 +1786,23 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P2
 
 ### PAG-24 — Unisci più file
-**Descrizione:** Combina più file (PDF, immagini e altri formati convertibili) in un nuovo PDF. L'elenco mostra miniatura, numero di pagine e dimensione di ogni file; l'ordine si cambia trascinando, con pulsanti su/giù o ordinando per nome o data; per ogni file si può indicare un intervallo (PAG-02) e lo stesso file può comparire più volte. Opzioni: nomi file come segnalibri di primo livello con i segnalibri originali annidati; conserva o scarta segnalibri, annotazioni e campi; aggiungi una pagina vuota dopo i file con numero dispari di pagine (stampa fronte/retro); unione alternata di due file; metadati del risultato presi dal primo file o personalizzati.
-**Flusso:** 1. L'utente sceglie "Unisci" (dalla schermata iniziale, dal menu File o trascinando più file). 2. Aggiunge file o cartelle, con password per quelli cifrati. 3. Imposta ordine, intervalli e opzioni. 4. Sceglie se aprire il risultato in una nuova scheda o salvarlo direttamente. 5. L'unione procede con avanzamento annullabile.
+**Descrizione:** Combina più file (PDF, immagini e altri formati convertibili) in un nuovo PDF. L'elenco mostra miniatura, numero di pagine e dimensione di ogni file; l'ordine si cambia trascinando, con pulsanti su/giù o ordinando per nome o data; per ogni file si può indicare un intervallo (PAG-02) e lo stesso file può comparire più volte. Opzioni: nomi file come segnalibri di primo livello con i segnalibri originali annidati; conserva o scarta segnalibri, annotazioni e campi; aggiungi una pagina vuota dopo i file con numero dispari di pagine (stampa fronte/retro); unione alternata di due file; metadati del risultato presi dal primo file o personalizzati; «Ometti i file non utilizzabili». È il requisito di riferimento per l'unione (0.6): l'unione in blocco (BAT-17) applica le stesse regole a una coda di file.
+**Flusso:** 1. L'utente sceglie "Unisci" (dalla schermata iniziale, dal menu File o trascinando più file). 2. Aggiunge file o cartelle, con password per quelli cifrati. 3. Imposta ordine, intervalli e opzioni. 4. Sceglie se aprire il risultato in una nuova scheda o salvarlo direttamente. 5. Se un file non è utilizzabile (danneggiato e non riparabile, oppure cifrato senza password), l'unione non parte finché il file non viene escluso dall'elenco o non si attiva «Ometti i file non utilizzabili». 6. L'unione procede con avanzamento annullabile (UX-12) e un riepilogo finale elenca i file omessi.
 **Formati/strutture:** Fusione degli alberi delle pagine con deduplicazione delle risorse; `/AcroForm`, `/OCProperties` e struttura logica fusi secondo PAG-03 (risultato taggato solo se lo sono tutte le sorgenti, altrimenti avviso); `/Outlines` costruiti secondo le opzioni; `/PageLabels` delle sorgenti conservate per segmento (opzione); versione PDF pari alla massima delle sorgenti; nuovo `/ID` e metadati XMP coerenti.
-**Casi limite:** File cifrato senza password → richiesta, oppure esclusione con avviso; file danneggiato → tentativo di riparazione, altrimenti esclusione con elenco; un solo file → ammesso (equivale a un'estrazione dell'intervallo); file firmati → le firme non vengono mantenute, con avviso; sorgenti PDF/A → il risultato non dichiara conformità salvo conversione esplicita; centinaia di file o file molto grandi → elaborazione progressiva senza caricare tutto in memoria; file omonimi in cartelle diverse → segnalibri distinti.
+**Casi limite:** File cifrato → richiesta della password; senza password il file non è utilizzabile; file danneggiato → tentativo di riparazione (NFR-13), altrimenti il file non è utilizzabile; file non utilizzabili → unione non avviata finché non sono esclusi o finché non è attiva «Ometti i file non utilizzabili» (stessa regola in BAT-17); un solo file → ammesso (equivale a un'estrazione dell'intervallo); file firmati → nel risultato le firme non sono valide: i campi firma sono conservati come aspetto statico, non più come firme, e un avviso lo segnala prima dell'avvio; sorgenti PDF/A → il risultato non dichiara conformità salvo conversione esplicita (CNV-14); centinaia di file o file molto grandi → elaborazione progressiva senza caricare tutto in memoria, entro i limiti di NFR-14; file omonimi in cartelle diverse → segnalibri distinti.
 **Criteri di accettazione:**
 - Dati A (3 pagine), B (2 pagine) e un'immagine JPG, quando si uniscono nell'ordine B, A, JPG, allora il risultato ha 6 pagine nell'ordine [B1,B2,A1,A2,A3,img].
 - Data l'opzione "nomi file come segnalibri", quando si uniscono A.pdf e B.pdf, allora il risultato ha 2 segnalibri di primo livello "A" e "B" che puntano alle rispettive prime pagine, con i segnalibri originali annidati.
 - Dati A con intervallo "2-3" e B con intervallo "1", quando si uniscono, allora il risultato ha 3 pagine [A2,A3,B1].
 - Dati A di 3 pagine e B di 2 pagine con l'opzione "pagina vuota dopo i file dispari", quando si uniscono, allora il risultato ha 6 pagine con una pagina vuota in posizione 4.
-- Dati 200 file da 50 pagine, quando si uniscono, allora l'operazione termina senza errori con il picco di memoria entro la soglia dei requisiti non funzionali.
+- Dati 200 file da 50 pagine, quando si uniscono, allora l'operazione termina senza errori e la memoria usata non supera mai il limite di sicurezza di 2 GB (NFR-14).
+- Dati A.pdf, un file danneggiato non riparabile e B.pdf, quando si preme **Unisci**, allora l'unione non parte e il file danneggiato è evidenziato con le scelte **Escludi** e «Ometti i file non utilizzabili»; con l'opzione attiva il risultato contiene le pagine di A e B e il riepilogo indica il file omesso.
+- Dato un PDF con una firma visibile unito a un altro file, quando si apre il risultato, allora l'aspetto della firma è visibile sulla pagina, il pannello Firme non elenca alcuna firma e prima dell'avvio è comparso l'avviso.
+- Dato un solo file con intervallo "2-4", quando si preme **Unisci**, allora il risultato contiene le 3 pagine indicate.
 **Priorità:** P0
 
 ### PAG-25 — Ritaglia pagine
-**Descrizione:** Riduce l'area visibile delle pagine in modo non distruttivo: con margini numerici (alto, basso, sinistra, destra in mm, pt, pollici o %) e anteprima, oppure disegnando un rettangolo sulla pagina con maniglie di regolazione. Si applica a pagina corrente, selezione, intervallo, pari/dispari (con margini speculari per il fronte/retro) o tutte. "Ripristina ritaglio" riporta all'area originale. La rimozione definitiva del contenuto esterno spetta all'appiattimento/sanificazione (area Sicurezza), che viene proposta all'utente.
+**Descrizione:** Riduce l'area visibile delle pagine in modo non distruttivo: con margini numerici (alto, basso, sinistra, destra in mm, pt, pollici o %) e anteprima, oppure disegnando un rettangolo sulla pagina con maniglie di regolazione. Si applica a pagina corrente, selezione, intervallo, pari/dispari (con margini speculari per il fronte/retro) o tutte. "Ripristina ritaglio" riporta all'area originale. La rimozione definitiva del contenuto esterno all'area spetta all'appiattimento generale (SEC-24) o alla rimozione dei dati nascosti (SEC-22), proposti all'utente.
 **Flusso:** 1. L'utente attiva lo strumento "Ritaglia". 2. Disegna il rettangolo o inserisce i margini; vede le dimensioni risultanti. 3. Sceglie l'ambito di pagine. 4. Applica.
 **Formati/strutture:** `/CropBox` (predefinito) oppure, su richiesta, `/MediaBox` (ritaglio "rigido"); i valori si riferiscono alla pagina come visualizzata (conversione che tiene conto di `/Rotate` e dell'eventuale origine non nulla del `/MediaBox`); `/CropBox` sempre intersecato con `/MediaBox`.
 **Casi limite:** Area risultante sotto 3×3 pt o margini che si sovrappongono → errore; rettangolo esteso oltre la pagina → limitato ai bordi; pagine di formato diverso nell'ambito → margini in % applicati in proporzione, margini assoluti applicati tali e quali (pagine troppo piccole saltate, con avviso); annotazioni fuori dall'area → restano nel file ma non sono visibili, con avviso; pagina già ritagliata → margini calcolati rispetto al ritaglio attuale (opzione: rispetto alla pagina intera).
@@ -1770,7 +1891,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### PAG-33 — Numeri di pagina
-**Descrizione:** Strumento rapido per numerare le pagine: posizione (alto o basso × sinistra, centro, destra) con margini; formato (1; 1/N; "Pagina 1 di N"; "- 1 -"; i, ii; I, II; a, b); numero iniziale; pagina da cui iniziare ed esclusioni (es. copertina); posizione speculare per il fronte/retro (lato esterno o interno); font, corpo e colore; opzione "stampa l'etichetta di pagina" (PAG-39). È un caso particolare di PAG-34 e si modifica e rimuove allo stesso modo.
+**Descrizione:** Strumento rapido per numerare le pagine: posizione (alto o basso × sinistra, centro, destra) con margini; formato (1; 1/N; "Pagina 1 di N"; "- 1 -"; i, ii; I, II; a, b); numero iniziale; pagina da cui iniziare ed esclusioni (es. copertina); posizione speculare per il fronte/retro (lato esterno o interno); font, corpo e colore; opzione "stampa l'etichetta di pagina" (PAG-39). È un caso particolare di PAG-34 e si modifica e rimuove allo stesso modo. È il requisito di riferimento per i numeri di pagina (0.6): la versione in blocco è BAT-14.
 **Flusso:** 1. L'utente sceglie "Numeri di pagina". 2. Imposta i parametri con anteprima sulle miniature. 3. Indica l'ambito. 4. Applica. Se il documento contiene già numeri aggiunti da Foliant, lo strumento propone "Modifica" e "Rimuovi".
 **Formati/strutture:** Contenuto aggiunto in un Form XObject marcato come artefatto di paginazione (`/Artifact` con `/Type /Pagination`, `/Subtype /PageNum` in PDF 2.0, `/Footer` o `/Header` nelle versioni precedenti), riconoscibile tramite dati privati dell'applicazione (es. `/PieceInfo`) per modifica e rimozione; font incorporato in sottoinsieme.
 **Casi limite:** Numero sovrapposto a contenuto esistente → avviso facoltativo e opzione di ridurre in proporzione il contenuto della pagina per fare spazio; pagine ruotate → numero posizionato rispetto alla pagina visualizzata; pagine di formato diverso → posizione calcolata sui bordi di ciascuna; numeri preesistenti non creati da Foliant → non riconoscibili, l'utente è avvisato che non verranno rimossi.
@@ -1782,7 +1903,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### PAG-34 — Intestazioni e piè di pagina
-**Descrizione:** Aggiunge, modifica e rimuove intestazioni e piè di pagina in sei aree (alto e basso × sinistra, centro, destra), ciascuna con testo libero su più righe e campi dinamici (PAG-32: numero di pagina, totale, data, ora, nome file, titolo, autore, etichetta, Bates). Opzioni: font, corpo, colore, sottolineato, opacità, margini dai bordi; contenuti diversi per pagine pari e dispari e per la prima pagina; immagine o logo in un'area; ambito di pagine; modelli salvabili e riutilizzabili; anteprima pagina per pagina. L'applicazione a più file avviene tramite l'elaborazione in blocco.
+**Descrizione:** Aggiunge, modifica e rimuove intestazioni e piè di pagina in sei aree (alto e basso × sinistra, centro, destra), ciascuna con testo libero su più righe e campi dinamici (PAG-32: numero di pagina, totale, data, ora, nome file, titolo, autore, etichetta, Bates). Opzioni: font, corpo, colore, sottolineato, opacità, margini dai bordi; contenuti diversi per pagine pari e dispari e per la prima pagina; immagine o logo in un'area; ambito di pagine; modelli salvabili e riutilizzabili; anteprima pagina per pagina. È il requisito di riferimento per intestazioni e piè di pagina (0.6): l'applicazione a più file avviene con BAT-14, che ne usa le regole.
 **Flusso:** 1. L'utente sceglie "Intestazione e piè di pagina > Aggiungi". 2. Compila le aree e le opzioni, scorrendo l'anteprima tra le pagine. 3. Indica l'ambito. 4. Applica. "Modifica" riapre i parametri salvati; "Rimuovi" elimina tutto il contenuto aggiunto.
 **Formati/strutture:** Come PAG-33, con artefatti `/Subtype /Header` o `/Footer`; parametri di configurazione conservati nei dati privati dell'applicazione (es. `/PieceInfo`) per permettere la modifica; font incorporati in sottoinsieme.
 **Casi limite:** Aggiunta quando esiste già un'intestazione di Foliant → scelta tra "sostituisci" e "aggiungi"; testo più lungo dell'area → a capo o riduzione automatica del corpo, con avviso; caratteri non coperti dal font → font alternativo; pagine ruotate o di formati misti → posizionamento calcolato per ciascuna pagina; documento firmato → avviso (PAG-03).
@@ -1794,19 +1915,23 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### PAG-35 — Numerazione Bates
-**Descrizione:** Assegna a ogni pagina di uno o più documenti un identificativo progressivo univoco, per uso legale e archivistico: prefisso, numero con cifre minime (zeri iniziali, da 3 a 15 cifre), suffisso, numero iniziale, posizione (sei aree) e stile; numerazione continua tra più file nell'ordine scelto o ripartita per documento; aggiunta facoltativa dell'intervallo Bates al nome file (es. "{nome}_{bates_inizio}-{bates_fine}"); registro facoltativo dei numeri assegnati; rimozione.
-**Flusso:** 1. L'utente sceglie "Numerazione Bates". 2. Aggiunge i file (o usa il documento corrente) e ne stabilisce l'ordine. 3. Imposta i parametri e vede in anteprima il primo e l'ultimo numero di ogni file. 4. Esegue, salvando copie o sovrascrivendo, e ottiene il registro se richiesto.
-**Formati/strutture:** Artefatto di paginazione (`/Subtype /Bates` in PDF 2.0, `/Header` o `/Footer` nelle versioni precedenti) con dati privati per modifica e rimozione; registro CSV con colonne file, pagina, numero.
-**Casi limite:** Numerazione che supererebbe le cifre impostate (es. oltre 9999 con 4 cifre) → avviso prima di iniziare e proposta di aumentare le cifre; file cifrati → richiesta password, altrimenti saltati e riportati nel riepilogo; file con Bates di Foliant già presente → scelta tra sostituire e annullare; esecuzione interrotta → elenco dei file completati e indicazione del prossimo numero da usare per riprendere.
+**Descrizione:** Assegna a ogni pagina di uno o più documenti un identificativo progressivo univoco, per uso legale e archivistico: prefisso, numero con cifre minime (zeri iniziali, da 3 a 15 cifre), suffisso, numero iniziale oppure prosecuzione di una serie salvata, testo aggiuntivo facoltativo (es. {data}), posizione (sei aree), margini e stile, con riquadro bianco facoltativo dietro il numero per la leggibilità sulle scansioni; numerazione continua tra più file nell'ordine scelto oppure ricominciata per documento; intervallo Bates nel nome file (es. "{nome}_{bates_inizio}-{bates_fine}"); registro dei numeri assegnati per pagina e indice per file; serie di numerazione riutilizzabili tra produzioni successive; rimozione. È il requisito di riferimento per la numerazione Bates (0.6): la versione in blocco (BAT-15) applica queste regole alla coda di BAT-01 e la rimozione in blocco è in BAT-16.
+**Flusso:** 1. L'utente sceglie "Numerazione Bates". 2. Aggiunge i file (o usa il documento corrente) e ne stabilisce l'ordine, che determina la numerazione. 3. Imposta i parametri e sceglie un numero iniziale oppure "continua la serie" (es. "Serie ACME: ultimo numero usato 000456"); l'anteprima mostra il primo e l'ultimo numero di ogni file. 4. Esegue, salvando copie o sovrascrivendo (con la conferma di UX-13 per le sovrascritture); al termine la serie è aggiornata con l'ultimo numero usato e si possono esportare il registro per pagina e l'indice per file.
+**Formati/strutture:** Numero aggiunto come contenuto marcato come artefatto di paginazione: `/Type /Pagination /Subtype /Bates` in PDF 2.0; nelle versioni precedenti `/Subtype /Header` o `/Footer` secondo la posizione; in tutte le versioni dati privati dell'applicazione (`/PieceInfo`) che lo identificano come numerazione Bates, usati per la modifica e la rimozione (anche da BAT-16). Registro per pagina in CSV (file, pagina, numero); indice per file in CSV (file, primo, ultimo, pagine); registro locale delle serie (nome, ultimo numero, data, file) nel profilo utente.
+**Casi limite:** Numerazione che supererebbe le cifre impostate (es. inizio 999998 con 6 cifre e 5 pagine) → avvio impedito, con l'indicazione delle cifre necessarie e la proposta di aumentarle; file cifrati → richiesta password, altrimenti saltati e riportati nel riepilogo; file con una numerazione Bates riconoscibile già presente → scelta tra **Sostituisci**, **Salta il file** e **Annulla**; file in errore durante l'esecuzione → il suo intervallo resta riservato e indicato nel riepilogo, i file successivi mantengono i numeri dell'anteprima; esecuzione interrotta → elenco dei file completati e indicazione del prossimo numero da usare per riprendere; pagine ruotate o di formati diversi → posizione calcolata per pagina; prefisso con caratteri non validi nei nomi di file → mantenuti sulla pagina, sostituiti solo nei nomi di file; documento firmato → avviso (PAG-03).
 **Criteri di accettazione:**
 - Dati A di 3 pagine e B di 2 pagine con prefisso "ABC", 6 cifre, inizio 1 e numerazione continua, quando si applica, allora A riporta da ABC000001 a ABC000003 e B da ABC000004 a ABC000005.
 - Data l'opzione "ricomincia per documento", quando si applica agli stessi file, allora B riporta da ABC000001 a ABC000002.
-- Dato il registro attivo, quando l'operazione termina, allora il CSV contiene 5 righe con file, pagina e numero corretti.
+- Dati registro e indice attivi, quando l'operazione termina, allora il registro CSV contiene 5 righe con file, pagina e numero corretti e l'indice contiene 2 righe con il primo e l'ultimo numero di ciascun file.
+- Dato inizio 999998 con 6 cifre e 5 pagine complessive, quando l'utente avvia, allora l'avvio è impedito e il messaggio indica che servono 7 cifre, con la proposta di usarle.
+- Dato un file che ha già una numerazione Bates di Foliant, quando si avvia una nuova numerazione, allora compaiono le scelte **Sostituisci**, **Salta il file** e **Annulla**; con **Sostituisci** ogni pagina riporta solo il nuovo numero.
+- Data una serie con ultimo numero 000005, quando si avvia una nuova produzione con "continua la serie", allora la prima pagina riporta ABC000006.
+- Dato un file PDF 1.7 numerato, quando lo si analizza, allora il numero è marcato come artefatto di paginazione e i dati privati lo identificano come numerazione Bates; dato un file PDF 2.0, allora il sottotipo dell'artefatto è `/Bates`.
 - Dato un documento con Bates di Foliant, quando si rimuove la numerazione, allora il rendering delle pagine torna identico all'originale.
 **Priorità:** P1
 
 ### PAG-36 — Filigrane
-**Descrizione:** Aggiunge, modifica e rimuove filigrane di testo (con campi dinamici, PAG-32), di immagine (PNG, JPEG e altri formati supportati, anche prodotta dal generatore dell'area IA se configurato) o tratte da una pagina di un PDF. Parametri: font, corpo o scala relativa alla pagina, colore, opacità (0–100%), rotazione (angolo libero, con valori rapidi come 45°), posizione (9 ancoraggi più scostamenti) o disposizione a mosaico con spaziatura, sopra o sotto il contenuto della pagina, visibilità a schermo e/o in stampa, ambito di pagine, modelli salvabili, anteprima. L'applicazione a più file avviene tramite l'elaborazione in blocco.
+**Descrizione:** Aggiunge, modifica e rimuove filigrane di testo (con campi dinamici, PAG-32), di immagine (PNG, JPEG e altri formati supportati, anche generata con l'IA secondo AI-25, se un fornitore IA è configurato) o tratte da una pagina di un PDF. Parametri: font, corpo o scala relativa alla pagina, colore, opacità (0–100%), rotazione (angolo libero, con valori rapidi come 45°), posizione (9 ancoraggi più scostamenti) o disposizione a mosaico con spaziatura, sopra o sotto il contenuto della pagina, visibilità a schermo e/o in stampa, ambito di pagine, modelli salvabili, anteprima. È il requisito di riferimento per le filigrane (0.6): l'applicazione a più file avviene con BAT-12, che ne usa le regole.
 **Flusso:** 1. L'utente sceglie "Filigrana > Aggiungi". 2. Imposta tipo e sorgente, aspetto, posizione e livello (sopra/sotto). 3. Indica l'ambito. 4. Applica. "Modifica" e "Rimuovi" agiscono sulle filigrane create da Foliant, elencate singolarmente se più d'una.
 **Formati/strutture:** Form XObject con gruppo di trasparenza e stato grafico per l'opacità (`/ca`, `/CA`), inserito all'inizio (sotto) o alla fine (sopra) del contenuto della pagina e marcato `/Artifact` con `/Type /Pagination /Subtype /Watermark`; visibilità separata per schermo e stampa tramite contenuto opzionale (OCG con `/Usage` `/View` e `/Print`); dati privati dell'applicazione per modifica e rimozione. Filigrane di altra origine marcate come artefatto Watermark o presenti come annotazioni Watermark: rimozione proposta con anteprima, senza garanzia di completezza.
 **Casi limite:** Filigrana "sotto" su pagine con contenuto opaco a tutta pagina (scansioni) → invisibile: avviso e proposta "sopra con opacità ridotta"; immagine con trasparenza → trasparenza preservata; pagine di formato diverso con scala relativa → filigrana proporzionata a ciascuna; testo ruotato che uscirebbe dalla pagina → ridotto per restare nei bordi (opzione); documento firmato → avviso (PAG-03); documento PDF/A-1 → la trasparenza non è ammessa: avviso (opacità 100% oppure perdita della conformità).
@@ -1822,14 +1947,14 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Descrizione:** Variante non distruttiva basata su annotazione: la filigrana conserva dimensioni e posizione relative al foglio stampato indipendentemente dalla scala di stampa (es. "COPIA" sempre nell'angolo in alto a destra) ed è rimovibile come un'annotazione.
 **Flusso:** 1. L'utente sceglie "Filigrana > Aggiungi" con tipo "di stampa a posizione fissa". 2. Imposta aspetto e posizione come in PAG-36. 3. Applica all'ambito scelto.
 **Formati/strutture:** Annotazione `/Subtype /Watermark` con `/FixedPrint` (`/Matrix`, `/H` e `/V` come frazioni del foglio), aspetto `/AP` costituito da un Form XObject, flag Print attivo.
-**Casi limite:** Lettore che ignora `/FixedPrint` → la filigrana appare nella posizione nominale dell'annotazione; appiattimento (area Sicurezza) → convertita in contenuto della pagina; stampa in scala ridotta → posizione relativa al foglio conservata.
+**Casi limite:** Lettore che ignora `/FixedPrint` → la filigrana appare nella posizione nominale dell'annotazione; appiattimento (SEC-24) → convertita in contenuto della pagina; stampa in scala ridotta → posizione relativa al foglio conservata.
 **Criteri di accettazione:**
 - Data una filigrana con `/H` 0,9 e `/V` 0,9, quando si stampa al 50% verso un file, allora la filigrana appare al 90% della larghezza e dell'altezza del foglio.
 - Dato il file salvato, quando lo si analizza, allora l'annotazione Watermark contiene `/FixedPrint` e un aspetto valido.
 **Priorità:** P2
 
 ### PAG-38 — Sfondi
-**Descrizione:** Aggiunge, modifica e rimuove uno sfondo dietro il contenuto delle pagine: colore pieno, immagine (anche prodotta dal generatore dell'area IA se configurato) o pagina di un PDF, ad esempio una carta intestata, con scelta della pagina sorgente o alternanza (pagina 1 della carta intestata sulla prima pagina, pagina 2 sulle seguenti). Parametri: opacità, scala (adatta, riempi, percentuale, dimensione reale), posizione, rotazione, ambito di pagine, visibilità a schermo e/o in stampa, modelli salvabili. L'applicazione a più file avviene tramite l'elaborazione in blocco.
+**Descrizione:** Aggiunge, modifica e rimuove uno sfondo dietro il contenuto delle pagine: colore pieno, immagine (anche generata con l'IA secondo AI-25, se un fornitore IA è configurato) o pagina di un PDF, ad esempio una carta intestata, con scelta della pagina sorgente o alternanza (pagina 1 della carta intestata sulla prima pagina, pagina 2 sulle seguenti). Parametri: opacità, scala (adatta, riempi, percentuale, dimensione reale), posizione, rotazione, ambito di pagine, visibilità a schermo e/o in stampa, modelli salvabili. È il requisito di riferimento per gli sfondi (0.6): l'applicazione a più file avviene con BAT-13, che ne usa le regole.
 **Flusso:** 1. L'utente sceglie "Sfondo > Aggiungi". 2. Imposta tipo, sorgente, aspetto e ambito, con anteprima. 3. Applica. "Modifica" e "Rimuovi" agiscono sugli sfondi creati da Foliant.
 **Formati/strutture:** Form XObject inserito all'inizio del contenuto della pagina (sotto tutto il resto) e marcato `/Artifact` con `/Type /Background` e `/BBox`; la pagina PDF sorgente è incorporata una sola volta come Form XObject con le sue risorse; visibilità separata tramite contenuto opzionale come in PAG-36; dati privati dell'applicazione per modifica e rimozione.
 **Casi limite:** Pagine con contenuto opaco a tutta pagina (scansioni) → sfondo non visibile, con avviso; immagine con proporzioni diverse dalla pagina → resa secondo la scala scelta; carta intestata di formato diverso → scalata alla pagina (opzione: dimensione reale); sfondi non creati da Foliant → rimozione proposta solo per quelli marcati come artefatto Background, con anteprima.
@@ -1865,24 +1990,24 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Priorità:** P1
 
 ### PAG-41 — Pulizia guidata del documento
-**Descrizione:** Procedura guidata che analizza il documento e propone in un'unica revisione: pagine vuote o non valide (non renderizzabili o di dimensione nulla) da eliminare (PAG-40); pagine con orientamento del testo errato da raddrizzare con rotazioni di 90°, anche su scansioni; formati di pagina non uniformi da uniformare (PAG-28); pagine composte solo da immagini e prive di testo da inviare all'OCR; elenco delle annotazioni presenti da esportare o rimuovere. Ogni proposta si accetta o rifiuta singolarmente. Funziona con analisi locale; se il servizio di assistenza IA dell'applicazione è configurato e autorizzato (area IA), può usarlo per classificazioni più accurate.
+**Descrizione:** Procedura guidata che analizza il documento e propone in un'unica revisione: pagine vuote o non valide (non renderizzabili o di dimensione nulla) da eliminare (PAG-40); pagine con orientamento del testo errato da raddrizzare con rotazioni di 90°, anche su scansioni; formati di pagina non uniformi da uniformare (PAG-28); pagine composte solo da immagini e prive di testo da inviare all'OCR; elenco delle annotazioni presenti da esportare o rimuovere. Ogni proposta si accetta o rifiuta singolarmente. Funziona interamente con analisi locale; se un fornitore IA è configurato (AI-01), l'utente può aggiungere la classificazione con IA di AI-24 (P2, quando disponibile) per risultati più accurati, con l'informativa e il riepilogo dei dati inviati di AI-02; senza questa scelta nessun dato lascia il computer (NFR-19).
 **Flusso:** 1. L'utente sceglie "Pulizia guidata". 2. Seleziona i controlli da eseguire. 3. L'analisi procede con avanzamento annullabile. 4. L'utente rivede le proposte per categoria, con anteprime, e sceglie le correzioni. 5. Le correzioni sono applicate come una sola operazione annullabile, seguita da un riepilogo.
 **Formati/strutture:** Rotazioni tramite `/Rotate` (PAG-18); uniformazione tramite PAG-28; OCR delegato all'area OCR; annotazioni lette da `/Annots` ed esportate nel formato dell'area Annotazioni.
-**Casi limite:** Pagina con testo in più orientamenti (es. tabelle ruotate) → nessuna proposta se la confidenza è bassa; documento con permessi di modifica negati → analisi consentita, correzioni disabilitate; servizio IA assente o non autorizzato → solo analisi locale, nessun dato inviato all'esterno; uso del servizio IA → consenso esplicito richiesto per ogni documento.
+**Casi limite:** Pagina con testo in più orientamenti (es. tabelle ruotate) → nessuna proposta se la confidenza è bassa; documento con permessi di modifica negati → analisi consentita, correzioni disabilitate; fornitore IA non configurato o informativa non accettata → solo analisi locale, nessun dato inviato all'esterno; uso dell'IA → informativa, riepilogo "Verrà inviato" ed eventuale conferma prima dell'invio secondo AI-02.
 **Criteri di accettazione:**
 - Dato un documento di prova con una pagina vuota, una pagina capovolta, una pagina Letter tra pagine A4 e una pagina scansionata senza testo, quando si esegue la pulizia guidata, allora vengono proposte le quattro correzioni nelle rispettive categorie.
-- Dato il servizio IA non configurato, quando si esegue la procedura, allora tutte le categorie vengono analizzate localmente e non avviene alcuna connessione di rete (verificabile con monitoraggio del traffico).
+- Dato nessun fornitore IA configurato, quando si esegue la procedura, allora tutte le categorie vengono analizzate localmente e non avviene alcuna connessione di rete (verificabile con monitoraggio del traffico).
 - Date tutte le correzioni accettate e applicate, quando si esegue Annulla una volta, allora il documento torna allo stato precedente alla procedura.
 **Priorità:** P1
 
 
 ## 3. Modifica testo
 
-**Ambito e convenzioni (valgono per tutte le funzioni TXT).** La sezione riguarda il *testo di pagina*, cioè il testo disegnato dai flussi di contenuto (content stream) delle pagine e dai Form XObject; il testo di annotazioni e campi modulo è trattato nelle rispettive sezioni e qui è richiamato solo dove interagisce. *Blocco*: unità di modifica (paragrafo o riga) riconosciuta da TXT-01. *Run*: sequenza di caratteri di un blocco con stile identico. *Riquadro*: rettangolo del blocco, la cui larghezza governa il ritorno a capo. Nei criteri di accettazione: «testo estratto» è il testo Unicode estratto (ISO 32000-2 §9.10) da uno strumento indipendente dall'editor sul file salvato e riaperto; «rendering identico» significa rasterizzazione a 150 dpi con differenza non superiore a 2/255 per canale su ogni pixel; «dimensione effettiva» è la dimensione del font moltiplicata per la scala della matrice di testo e della CTM; le coordinate sono in punti PDF nello spazio utente della pagina; «PDF di prova» indica un file della suite di test del progetto con le caratteristiche descritte; «hardware di riferimento» è quello definito nei requisiti non funzionali. I riferimenti «parità», «standard» e «concorrenti» rimandano alla numerazione degli inventari di ricerca del progetto.
+**Ambito e convenzioni (valgono per tutte le funzioni TXT).** La sezione riguarda il *testo di pagina*, cioè il testo disegnato dai flussi di contenuto (content stream) delle pagine e dai Form XObject; il testo di annotazioni e campi modulo è trattato nelle rispettive sezioni e qui è richiamato solo dove interagisce. *Blocco*: unità di modifica (paragrafo o riga) riconosciuta da TXT-01. *Run*: sequenza di caratteri di un blocco con stile identico. *Riquadro*: rettangolo del blocco, la cui larghezza governa il ritorno a capo. Nei criteri di accettazione: «testo estratto» è il testo Unicode estratto (ISO 32000-2 §9.10) da uno strumento indipendente dall'editor sul file salvato e riaperto; «rendering identico» significa rasterizzazione a 150 dpi con differenza non superiore a 2/255 per canale su ogni pixel; «dimensione effettiva» è la dimensione del font moltiplicata per la scala della matrice di testo e della CTM; le coordinate sono in punti PDF nello spazio utente della pagina; «PDF di prova» indica un file con le caratteristiche descritte, che si aggiunge al corpus di prova di 0.4; macchina di riferimento (MR) e condizioni di misura sono quelle di 0.4 e, dove un criterio misura la stessa grandezza di un NFR, vale la soglia di 0.4. Il campo «Parità» indica le righe P del catalogo delle funzionalità coperte dal requisito (0.6, matrice della sezione 13); «Catalogo» indica le righe A (aggiunte).
 
 ### TXT-01 — Modalità Modifica e riconoscimento dei blocchi di testo
 
-**Descrizione:** La modalità Modifica analizza il testo di pagina e lo raggruppa in blocchi modificabili, mostrandone i contorni al passaggio del mouse. È il punto d'ingresso di tutte le funzioni TXT: stabilisce quali testi sono modificabili, con quali limiti, e spiega perché un testo non lo è. Rif.: parità 3.1; standard cap. 29, 31, 39.
+**Descrizione:** La modalità Modifica analizza il testo di pagina e lo raggruppa in blocchi modificabili, mostrandone i contorni al passaggio del mouse. È il punto d'ingresso di tutte le funzioni TXT: stabilisce quali testi sono modificabili, con quali limiti, e spiega perché un testo non lo è. Parità: 3.01.
 
 **Flusso:**
 1. L'utente attiva «Modifica» (barra strumenti o scorciatoia; opzionalmente doppio clic su un testo in lettura, se abilitato nelle preferenze).
@@ -1907,7 +2032,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato un PDF di prova con 3 paragrafi di 4 righe in una colonna, quando si attiva la modalità Modifica con granularità «Paragrafo», allora vengono riconosciuti esattamente 3 blocchi, ciascuno con tutte e sole le righe del proprio paragrafo.
 - Dato lo stesso PDF, quando si passa alla granularità «Riga», allora vengono riconosciuti 12 blocchi.
 - Dato un PDF a due colonne, quando si attiva la modalità Modifica, allora nessun blocco contiene righe di entrambe le colonne.
-- Dato un PDF di 300 pagine, quando si attiva la modalità Modifica, allora i blocchi della pagina corrente sono disponibili entro 500 ms su hardware di riferimento e l'interfaccia non resta mai senza risposta per più di 100 ms durante l'analisi delle altre pagine.
+- Dato un PDF di 300 pagine, quando si attiva la modalità Modifica, allora i blocchi della pagina corrente sono disponibili entro 500 ms su MR e l'interfaccia non resta mai senza risposta per più di 100 ms durante l'analisi delle altre pagine (NFR-05).
 - Dato un PDF la cui pagina è un'unica immagine scansionata, quando si attiva la modalità Modifica, allora non viene creato alcun blocco e compare la proposta di OCR.
 - Dato un PDF con un font privo di `/ToUnicode` e con codifica personalizzata non ricostruibile, quando si attiva la modalità Modifica, allora il blocco è marcato «non decodificabile» e il suggerimento ne indica il motivo.
 - Dato un documento aperto, quando si entra e si esce dalla modalità Modifica senza modificare nulla, allora il documento non risulta modificato.
@@ -1916,7 +2041,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-02 — Modifica in loco del testo esistente
 
-**Descrizione:** Dentro un blocco l'utente posiziona il cursore e inserisce, cancella o sostituisce caratteri come in un elaboratore di testi. Il testo nuovo eredita lo stile del contesto; font, dimensione, colore e posizione del blocco sono preservati; ciò che si vede durante la modifica coincide con il risultato salvato. Rif.: parità 3.1; standard cap. 29, 39, 40.
+**Descrizione:** Dentro un blocco l'utente posiziona il cursore e inserisce, cancella o sostituisce caratteri come in un elaboratore di testi. Il testo nuovo eredita lo stile del contesto; font, dimensione, colore e posizione del blocco sono preservati; ciò che si vede durante la modifica coincide con il risultato salvato. Parità: 3.01.
 
 **Flusso:**
 1. Clic nel blocco: il cursore si colloca nel punto del clic; doppio clic seleziona la parola, triplo clic il paragrafo.
@@ -1951,7 +2076,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-03 — Ritorno a capo e riflusso nel riquadro
 
-**Descrizione:** Durante la modifica il testo viene ricomposto entro la larghezza del riquadro: le parole vanno a capo, allineamento, interlinea e rientri rilevati sono rispettati e l'altezza si adatta al contenuto. Il riflusso è confinato al blocco: non sposta altri contenuti e non prosegue su altre pagine. Rif.: parità 3.1.
+**Descrizione:** Durante la modifica il testo viene ricomposto entro la larghezza del riquadro: le parole vanno a capo, allineamento, interlinea e rientri rilevati sono rispettati e l'altezza si adatta al contenuto. Il riflusso è confinato al blocco: non sposta altri contenuti e non prosegue su altre pagine. Parità: 3.01.
 
 **Flusso:**
 1. All'ingresso in modifica l'editor ricava dal blocco: larghezza del riquadro, allineamento (sinistra, centro, destra, giustificato), interlinea, rientri e tipo (a larghezza fissa se multiriga, a larghezza automatica se di una sola riga).
@@ -1981,7 +2106,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-04 — Formattazione dei caratteri
 
-**Descrizione:** Modifica delle proprietà del testo selezionato o dell'intero blocco: font (famiglia e stile), dimensione, colore, grassetto, corsivo, sottolineato, barrato, spaziatura tra caratteri, scala orizzontale, apice e pedice. Il pannello Proprietà mostra i valori del punto d'inserimento o della selezione, e «misto» quando sono eterogenei. Rif.: parità 3.3; standard cap. 29–30.
+**Descrizione:** Modifica delle proprietà del testo selezionato o dell'intero blocco: font (famiglia e stile), dimensione, colore, grassetto, corsivo, sottolineato, barrato, spaziatura tra caratteri, scala orizzontale, apice e pedice. Il pannello Proprietà mostra i valori del punto d'inserimento o della selezione, e «misto» quando sono eterogenei. Parità: 3.03.
 
 **Flusso:**
 1. L'utente seleziona testo in un blocco, oppure seleziona il blocco come oggetto per agire su tutto il suo testo.
@@ -2011,7 +2136,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-05 — Formattazione del paragrafo
 
-**Descrizione:** Proprietà di paragrafo: allineamento orizzontale (sinistra, centro, destra, giustificato), interlinea, spazio prima e dopo, rientro sinistro e di prima riga. Si applicano ai paragrafi toccati dalla selezione o a tutto il blocco selezionato. Rif.: parità 3.3.
+**Descrizione:** Proprietà di paragrafo: allineamento orizzontale (sinistra, centro, destra, giustificato), interlinea, spazio prima e dopo, rientro sinistro e di prima riga. Si applicano ai paragrafi toccati dalla selezione o a tutto il blocco selezionato. Parità: 3.03.
 
 **Flusso:**
 1. Il cursore o la selezione individuano uno o più paragrafi; il pannello mostra i valori rilevati.
@@ -2036,7 +2161,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-06 — Aggiunta di nuove caselle di testo
 
-**Descrizione:** Crea un nuovo blocco di testo in qualsiasi punto della pagina, scritto direttamente nel contenuto della pagina (non come annotazione): con un clic si ottiene un blocco a larghezza automatica, trascinando un rettangolo un blocco a larghezza fissa. Rif.: parità 3.2; standard cap. 29–30.
+**Descrizione:** Crea un nuovo blocco di testo in qualsiasi punto della pagina, scritto direttamente nel contenuto della pagina (non come annotazione): con un clic si ottiene un blocco a larghezza automatica, trascinando un rettangolo un blocco a larghezza fissa. Parità: 3.02.
 
 **Flusso:**
 1. L'utente sceglie «Aggiungi testo».
@@ -2066,29 +2191,29 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-07 — Spostamento, ridimensionamento, copia ed eliminazione dei blocchi
 
-**Descrizione:** In modalità Modifica un blocco può essere selezionato come oggetto per spostarlo, cambiarne la larghezza (con riflusso), copiarlo, duplicarlo, tagliarlo e incollarlo anche su un'altra pagina o in un altro documento, ed eliminarlo. Rif.: parità 3.1–3.2, 4.11.
+**Descrizione:** In modalità Modifica un blocco può essere selezionato come oggetto per spostarlo, cambiarne la larghezza (con riflusso), copiarlo, duplicarlo, tagliarlo e incollarlo anche su un'altra pagina o in un altro documento, ed eliminarlo. Parità: 3.01, 3.02, 4.07.
 
 **Flusso:**
 1. Clic sul contorno del blocco (o Esc con il cursore nel blocco): il blocco è selezionato come oggetto, con maniglie.
 2. Trascinamento: spostamento con anteprima; frecce: 1 pt per pressione (Maiusc: 10 pt).
 3. Maniglie laterali: cambiano la larghezza; il blocco diventa a larghezza fissa e il testo rifluisce. L'altezza segue sempre il contenuto.
-4. Ctrl+C / Ctrl+X / Ctrl+V: copia, taglia, incolla il blocco con stile e font (su un'altra pagina nella stessa posizione; sulla stessa pagina scostato di 10 pt); Ctrl+D duplica.
+4. Ctrl+C / Ctrl+X / Ctrl+V: copia, taglia, incolla il blocco con stile e font (su un'altra pagina nella stessa posizione; sulla stessa pagina scostato di 10 pt); **Duplica** dal menu contestuale (senza scorciatoia, UX-18) crea una copia scostata di 10 pt.
 5. Canc: elimina il blocco e gli elementi associati (sottolineature, barrati, elementi di struttura).
 6. Selezione multipla (Maiusc+clic o rettangolo di selezione): le operazioni valgono per tutti i blocchi selezionati.
 
-**Formati/strutture:** spostamento come traslazione della matrice `Tm` (o di una `cm` dedicata) e dei tracciati associati; eliminazione degli operatori di disegno del blocco; risorse font non più usate rimosse nel salvataggio completo; nei documenti taggati rimozione degli elementi di struttura rimasti vuoti e delle relative voci del `/ParentTree`; copia tra documenti con trasferimento del programma del font e della `/ToUnicode`; appunti con un formato interno ricco più `text/plain` e `text/html` per le altre applicazioni.
+**Formati/strutture:** spostamento come traslazione della matrice `Tm` (o di una `cm` dedicata) e dei tracciati associati; eliminazione degli operatori di disegno del blocco; risorse font non più usate rimosse dalla riscrittura completa del salvataggio (NFR-09); nei documenti taggati rimozione degli elementi di struttura rimasti vuoti e delle relative voci del `/ParentTree`; copia tra documenti con trasferimento del programma del font e della `/ToUnicode`; appunti con un formato interno ricco più `text/plain` e `text/html` per le altre applicazioni.
 
 **Casi limite:**
 - Blocco sotto un ritaglio condiviso con altro contenuto → avviso che lo spostamento può nasconderlo; un ritaglio che riguarda solo il blocco si sposta con esso.
 - Blocco spostato interamente fuori dall'area visibile → spostamento annullato con messaggio.
 - Blocco in un Form XObject usato da più pagine → TXT-20.
 - Annotazioni ancorate al testo del blocco (evidenziazioni, link) → riallineate secondo TXT-20.
-- Eliminazione per riservatezza → avviso che il salvataggio incrementale conserva la versione precedente; rimando alla Redazione e al salvataggio completo.
+- Eliminazione per riservatezza → rimando alla Redazione (area 10); nei documenti firmati, salvati in modo incrementale (NFR-09), la versione precedente resta nel file e l'utente ne è avvisato.
 
 **Criteri di accettazione:**
 - Dato un blocco con origine della prima linea di base in (72, 700), quando lo si sposta di +100 pt in orizzontale e −50 pt in verticale e si salva, allora l'origine è (172, 650) ±0,5 pt e il testo estratto è invariato.
 - Dato un paragrafo a larghezza fissa di 300 pt su 6 righe, quando lo si restringe a 150 pt, allora nessuna riga supera 150 pt e le righe diventano più di 6.
-- Dato un blocco, quando lo si elimina e si esegue un salvataggio completo, allora il testo estratto non contiene il suo testo e la risorsa font usata solo da esso non è più presente nella pagina.
+- Dato un blocco di un documento non firmato, quando lo si elimina e si salva (riscrittura completa, NFR-09), allora il testo estratto non contiene il suo testo e la risorsa font usata solo da esso non è più presente nella pagina.
 - Dato un blocco copiato dalla pagina 1 del documento A e incollato nella pagina 5 del documento B, quando si salva B, allora il blocco in B ha lo stesso nome base del font, la stessa dimensione effettiva e rendering identico a quello in A.
 - Dato un blocco con una parola sottolineata, quando lo si sposta, allora la sottolineatura si sposta dello stesso vettore (±0,1 pt).
 
@@ -2096,7 +2221,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-08 — Disposizione avanzata dei blocchi
 
-**Descrizione:** Strumenti d'impaginazione per i blocchi di testo: rotazione, allineamento e distribuzione di più blocchi, guide magnetiche durante lo spostamento, ordine di sovrapposizione, spostamento per trascinamento su un'altra pagina. Lo stesso comportamento vale per immagini e altri oggetti (sezione dedicata). Rif.: parità 4.11–4.12; concorrenti §17.
+**Descrizione:** Strumenti d'impaginazione per i blocchi di testo: rotazione, allineamento e distribuzione di più blocchi, guide magnetiche durante lo spostamento, ordine di sovrapposizione, spostamento per trascinamento su un'altra pagina. Lo stesso comportamento vale per immagini e altri oggetti (sezione dedicata). Parità: 4.07, 4.08.
 
 **Flusso:**
 1. Selezione di uno o più blocchi.
@@ -2124,7 +2249,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-09 — Unione e divisione dei blocchi
 
-**Descrizione:** Corregge il raggruppamento automatico quando non corrisponde all'intenzione dell'utente: unisce più blocchi in un unico blocco rifluibile oppure divide un blocco in due nel punto del cursore. Rif.: concorrenti §17; complemento di TXT-01.
+**Descrizione:** Corregge il raggruppamento automatico quando non corrisponde all'intenzione dell'utente: unisce più blocchi in un unico blocco rifluibile oppure divide un blocco in due nel punto del cursore. Complemento di TXT-01.
 
 **Flusso:**
 1. Unione: l'utente seleziona due o più blocchi della stessa pagina e sceglie «Unisci»; il testo è concatenato nell'ordine di lettura (struttura logica se presente, altrimenti dall'alto in basso e da sinistra a destra), separando i blocchi con uno spazio o con un nuovo paragrafo, a scelta.
@@ -2148,7 +2273,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-10 — Font non incorporati o incorporati come sottoinsieme
 
-**Descrizione:** Quando il testo modificato o aggiunto richiede glifi che il font originale non può fornire (font non incorporato, sottoinsieme privo dei caratteri, font Type 3, codifica limitata), l'editor sceglie un font sostitutivo con una regola deterministica, avvisa in modo non bloccante, evidenzia i caratteri interessati e lascia all'utente il controllo. Nessun file salvato contiene caratteri senza glifo. Rif.: parità 3.1, 3.3; standard cap. 30, 40; concorrenti §18.
+**Descrizione:** Quando il testo modificato o aggiunto richiede glifi che il font originale non può fornire (font non incorporato, sottoinsieme privo dei caratteri, font Type 3, codifica limitata), l'editor sceglie un font sostitutivo con una regola deterministica, avvisa in modo non bloccante, evidenzia i caratteri interessati e lascia all'utente il controllo. Nessun file salvato contiene caratteri senza glifo. Parità: 3.01, 3.03. Catalogo: 3.08.
 
 **Flusso:**
 1. All'ingresso in un blocco l'editor calcola la copertura di ogni font: per i font incorporati, i caratteri presenti nel programma del font e raggiungibili con la sua codifica; per quelli non incorporati, i caratteri esprimibili nella sua codifica.
@@ -2179,7 +2304,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-11 — Elenco dei font del documento e sostituzione globale
 
-**Descrizione:** Pannello con tutti i font usati dal documento (tipo, codifica, stato di incorporamento: completo, sottoinsieme, non incorporato; pagine d'uso; font usato per la visualizzazione) da cui sostituire un font in tutto il documento, incorporare un font non incorporato e gestire la tabella personale di corrispondenze usata da TXT-10. Rif.: standard cap. 30; concorrenti §18.
+**Descrizione:** Pannello con tutti i font usati dal documento (tipo, codifica, stato di incorporamento: completo, sottoinsieme, non incorporato; pagine d'uso; font usato per la visualizzazione) da cui sostituire un font in tutto il documento, incorporare un font non incorporato e gestire la tabella personale di corrispondenze usata da TXT-10. Catalogo: 3.08.
 
 **Flusso:**
 1. L'utente apre «Font del documento».
@@ -2206,13 +2331,13 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-12 — Trova e sostituisci
 
-**Descrizione:** Cerca testo in tutto il documento e lo sostituisce una occorrenza alla volta o tutte insieme, conservando per ciascuna stile, posizione e allineamento del testo originale. Rif.: parità 1.8; standard cap. 40.
+**Descrizione:** Cerca testo in tutto il documento e lo sostituisce una occorrenza alla volta o tutte insieme, conservando per ciascuna stile, posizione e allineamento del testo originale. È il requisito di riferimento per trova e sostituisci (0.6): VIS-26 ne è l'accesso dalla barra di ricerca. Parità: 3.06.
 
 **Flusso:**
-1. L'utente apre «Trova e sostituisci» (scorciatoia configurabile) e inserisce testo da cercare e testo sostitutivo.
+1. L'utente apre «Trova e sostituisci» (Ctrl+H, UX-18) e inserisce testo da cercare e testo sostitutivo.
 2. Opzioni: maiuscole/minuscole, parola intera, ignora accenti e diacritici, espressione regolare (con riferimenti ai gruppi `$1`… nel sostitutivo); ambito: documento, pagina corrente, intervallo di pagine, selezione.
 3. «Trova» produce l'elenco dei risultati con pagina e contesto, evidenziati sulla pagina; navigazione avanti/indietro.
-4. «Sostituisci» agisce sull'occorrenza corrente e passa alla successiva; «Sostituisci tutto» chiede conferma indicando il numero di occorrenze.
+4. «Sostituisci» agisce sull'occorrenza corrente e passa alla successiva; «Sostituisci tutto» agisce senza chiedere conferma: un avviso indica il numero di sostituzioni e offre **Annulla** (UX-13).
 5. Ogni sostituzione segue TXT-02 (stile del primo carattere dell'occorrenza), TXT-03 (riflusso del solo blocco interessato) e TXT-10 (copertura del font).
 6. Riepilogo finale: occorrenze sostituite, non sostituibili con il motivo, sostituzioni che hanno richiesto un font sostitutivo.
 
@@ -2233,20 +2358,21 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato il testo «data: 03/11/2025», quando si cerca l'espressione regolare `(\d{2})/(\d{2})/(\d{4})` e si sostituisce con `$3-$2-$1`, allora il testo estratto contiene «data: 2025-11-03».
 - Dato un «Sostituisci tutto» di 37 occorrenze, quando si esegue un solo Annulla, allora tutte le 37 sostituzioni vengono annullate.
 - Dato un PDF in cui «fine» è scritto con la legatura U+FB01, quando si cerca «fine», allora l'occorrenza viene trovata.
-- Dato un documento di 300 pagine di testo, quando si cerca una parola, allora i primi risultati compaiono entro 1 s e l'elenco completo entro 5 s su hardware di riferimento.
+- Dato C-500, quando si cerca una parola, allora il primo risultato compare entro 0,5 s e il conteggio completo entro 3 s su MR (NFR-07).
+- Dato «Sostituisci tutto» con 37 occorrenze, quando lo si esegue, allora non compare alcuna finestra di conferma e l'avviso con **Annulla** indica 37 sostituzioni.
 
 **Priorità:** P0
 
 ### TXT-13 — Trova ed elimina
 
-**Descrizione:** Variante di TXT-12 che rimuove dal testo di pagina le occorrenze trovate, gestendo gli spazi residui e la ricomposizione dei blocchi. Non sostituisce la Redazione: non agisce su immagini e grafica e, con il salvataggio incrementale, non elimina il testo dalle revisioni precedenti del file. Rif.: parità 1.9.
+**Descrizione:** Variante di TXT-12 che rimuove dal testo di pagina le occorrenze trovate, gestendo gli spazi residui e la ricomposizione dei blocchi. Non sostituisce la Redazione: non agisce su immagini e grafica e, nei documenti firmati salvati in modo incrementale (NFR-09), non elimina il testo dalle revisioni precedenti del file. È il requisito di riferimento per trova ed elimina (0.6), insieme a TXT-12. Parità: 3.07.
 
 **Flusso:**
 1. L'utente apre «Trova ed elimina» con le opzioni di ricerca e d'ambito di TXT-12.
 2. L'elenco dei risultati ha una casella per includere o escludere ogni occorrenza.
 3. Opzioni: «Rimuovi anche uno spazio adiacente» (attiva per default, evita doppi spazi); «Ricomponi il paragrafo» (attiva per default; se disattiva il testo restante non si sposta e resta un vuoto).
-4. Conferma con il numero di occorrenze; esecuzione come unico passo annullabile; riepilogo come in TXT-12.
-5. Il dialogo ricorda che i dati riservati vanno rimossi con la Redazione e il salvataggio completo.
+4. Esecuzione senza conferma come unico passo annullabile: un avviso indica il numero di eliminazioni e offre **Annulla** (UX-13); riepilogo come in TXT-12.
+5. Il dialogo ricorda che i dati riservati vanno rimossi con la Redazione (area 10).
 
 **Formati/strutture:** come TXT-12; con «Ricomponi» disattiva, eliminazione dei codici da `Tj`/`TJ` compensata da uno spostamento in `TJ` pari alla larghezza rimossa; dopo un salvataggio completo nessuna revisione precedente resta nel file (ISO 32000-2 §7.5.6).
 
@@ -2254,19 +2380,20 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Occorrenza che costituisce l'intero blocco → blocco rimosso.
 - Paragrafo rimasto vuoto → rimosso; i paragrafi successivi del blocco risalgono.
 - Occorrenze in blocchi non modificabili → elencate come non eliminabili.
-- Salvataggio incrementale dopo l'eliminazione → avviso che il testo resta recuperabile dalla revisione precedente, con proposta di salvataggio completo.
+- Documento firmato, quindi salvato in modo incrementale (NFR-09) → avviso che il testo resta recuperabile dalla revisione precedente, con la proposta di salvare una copia riscritta per intero, in cui le firme non sono più valide.
 
 **Criteri di accettazione:**
 - Dato un PDF con 12 occorrenze di «BOZZA», quando si eliminano tutte e si salva, allora il testo estratto non contiene «BOZZA» né doppi spazi nei punti di eliminazione.
 - Dato «Ricomponi il paragrafo» disattivato, quando si elimina una parola a metà riga, allora le parole successive della riga mantengono la posizione (±0,5 pt).
-- Data l'eliminazione seguita da salvataggio completo, quando si analizza il file, allora non contiene aggiornamenti incrementali e il testo estratto da tutti i flussi di contenuto presenti nel file non contiene «BOZZA».
+- Data l'eliminazione in un documento non firmato seguita dal salvataggio (riscrittura completa, NFR-09), quando si analizza il file, allora non contiene aggiornamenti incrementali e il testo estratto da tutti i flussi di contenuto presenti nel file non contiene «BOZZA».
 - Data l'eliminazione di tutte le occorrenze, quando si esegue Annulla, allora tutte ricompaiono nella posizione originale.
+- Dato «Elimina tutto» su 12 occorrenze, quando lo si esegue, allora non compare alcuna finestra di conferma e l'avviso con **Annulla** indica 12 eliminazioni.
 
 **Priorità:** P1
 
 ### TXT-14 — Controllo ortografico
 
-**Descrizione:** Durante la modifica le parole assenti dal dizionario della lingua del testo vengono sottolineate a schermo, con suggerimenti di correzione; un comando controlla l'ortografia dell'intero documento. Funziona offline con dizionari installabili. Rif.: concorrenti §20.
+**Descrizione:** Durante la modifica le parole assenti dal dizionario della lingua del testo vengono sottolineate a schermo, con suggerimenti di correzione; un comando controlla l'ortografia dell'intero documento. Funziona offline con dizionari installabili. Catalogo: 3.10.
 
 **Flusso:**
 1. Il controllo è attivo per default nei blocchi in modifica; la lingua è, nell'ordine, quella del run o dell'elemento di struttura (`/Lang`), quella del documento, quella dell'interfaccia; l'utente può cambiarla per la selezione o per il blocco.
@@ -2296,7 +2423,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-15 — Modifica del testo riconosciuto con OCR
 
-**Descrizione:** Dopo il riconoscimento ottico (sezione OCR) il testo è modificabile in due forme: correzione del livello di testo invisibile sovrapposto alla scansione, con l'immagine invariata, oppure conversione dell'area in testo reale modificabile, con rimozione del testo dall'immagine. Rif.: parità 7.1, 7.3; standard cap. 32; concorrenti §29.
+**Descrizione:** Dopo il riconoscimento ottico (sezione OCR) il testo è modificabile in due forme: correzione del livello di testo invisibile sovrapposto alla scansione, con l'immagine invariata, oppure conversione dell'area in testo reale modificabile, con rimozione del testo dall'immagine. Parità: 7.01.
 
 **Flusso:**
 1. In modalità Modifica, su una pagina con livello OCR invisibile, i blocchi riconosciuti sono mostrati con il testo in sovrimpressione semitrasparente (attivabile/disattivabile), allineato alle parole dell'immagine.
@@ -2325,7 +2452,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-16 — Revisione delle parole OCR incerte
 
-**Descrizione:** Elenco guidato delle parole riconosciute con bassa confidenza, mostrate accanto al ritaglio dell'immagine, per correggerle o confermarle rapidamente. Rif.: concorrenti §29; standard cap. 43.
+**Descrizione:** Elenco guidato delle parole riconosciute con bassa confidenza, mostrate accanto al ritaglio dell'immagine, per correggerle o confermarle rapidamente. Catalogo: 7.07.
 
 **Flusso:**
 1. Al termine dell'OCR l'editor conserva per ogni parola la confidenza del riconoscimento.
@@ -2333,7 +2460,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 3. Azioni, anche da tastiera: «Accetta», «Correggi» (applicata come in TXT-15), «Accetta tutte nella pagina», «Salta».
 4. Le voci confermate o corrette escono dall'elenco; lo stato di revisione viene salvato con il documento.
 
-**Formati/strutture:** confidenze e stato di revisione in un dizionario di dati privati dell'applicazione a livello di pagina (`/PieceInfo` con `/LastModified`, ISO 32000-2 §14.5), ignorato dagli altri lettori e rimosso dalla sanificazione.
+**Formati/strutture:** confidenze e stato di revisione in un dizionario di dati privati dell'applicazione a livello di pagina (`/PieceInfo` con `/LastModified`, ISO 32000-2 §14.5), ignorato dagli altri lettori e cancellato dalla rimozione dei dati nascosti (SEC-22).
 
 **Casi limite:**
 - OCR eseguito da un altro programma → confidenze non disponibili; il pannello propone le parole assenti dal dizionario.
@@ -2349,7 +2476,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-17 — Annulla e ripeti
 
-**Descrizione:** Tutte le operazioni della sezione sono annullabili e ripetibili tramite una cronologia per documento di almeno 100 passi (configurabile), che resta disponibile dopo il salvataggio e si azzera alla chiusura del documento. Rif.: requisito trasversale di parità 3.1–3.3 e 1.8–1.9.
+**Descrizione:** Tutte le operazioni della sezione sono annullabili e ripetibili secondo NFR-11, requisito di riferimento (0.6): cronologia per documento di almeno 100 passi e, oltre, quanti ne consente la memoria, che resta disponibile dopo il salvataggio e si azzera alla chiusura del documento. Questo requisito precisa come si formano i passi nella modifica del testo. Requisito trasversale per le righe 3.01–3.07 del catalogo.
 
 **Flusso:**
 1. Ctrl+Z annulla; Ctrl+Maiusc+Z e Ctrl+Y ripetono; le voci di menu descrivono l'operazione (es. «Annulla Sostituisci tutto (37)»).
@@ -2362,7 +2489,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 **Casi limite:**
 - Annullamento dell'operazione che aveva aggiunto un font → il font non compare nel file salvato.
-- Limite di memoria della cronologia (configurabile) → i passi più vecchi vengono scartati; prima di un'operazione che non potrebbe essere annullata l'utente riceve un avviso.
+- Memoria insufficiente → vengono scartati solo i passi più vecchi oltre il centesimo (NFR-11); prima di un'operazione che non potrebbe essere annullata l'utente riceve un avviso.
 - Operazioni di altre sezioni (pagine, annotazioni) → condividono la stessa cronologia, in ordine cronologico.
 - Annulla durante una composizione del metodo di input → annulla solo la composizione in corso.
 
@@ -2371,13 +2498,13 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato lo stato dopo i 20 annullamenti, quando si ripete 20 volte, allora testo estratto e rendering coincidono con lo stato precedente agli annullamenti.
 - Data la digitazione continua di «buongiorno a tutti» senza pause né spostamenti del cursore, quando si annulla una volta, allora l'intera frase viene rimossa.
 - Dato un documento salvato dopo 3 modifiche, quando si annulla una volta, allora la terza modifica è annullata e il documento risulta modificato.
-- Dati 101 passi con limite impostato a 100, quando si annulla ripetutamente, allora si annullano esattamente 100 passi.
+- Dati 120 passi di modifica del testo e memoria sufficiente, quando si annulla ripetutamente, allora si annullano tutti i 120 passi; dato invece che la memoria si esaurisce, allora restano annullabili almeno gli ultimi 100 (NFR-11).
 
 **Priorità:** P0
 
 ### TXT-18 — Selezione, copia e incolla del testo, anche tra pagine
 
-**Descrizione:** Selezione continua del testo attraverso righe, colonne e pagine; copia negli appunti come testo semplice e formattato; in modalità Modifica, taglia e incolla con o senza formattazione. Rif.: parità 3.5.
+**Descrizione:** Selezione continua del testo attraverso righe, colonne e pagine; copia negli appunti come testo semplice e formattato; in modalità Modifica, taglia e incolla con o senza formattazione. Parità: 3.05.
 
 **Flusso:**
 1. Con lo strumento di selezione del testo l'utente trascina dall'inizio alla fine, anche oltre il bordo della pagina in vista continua (scorrimento automatico); Maiusc+clic estende; doppio e triplo clic selezionano parola e riga; Ctrl+A seleziona il testo della pagina (in modifica, quello del blocco).
@@ -2405,7 +2532,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-19 — Inserimento di testo formattato da trascinamento o dagli appunti
 
-**Descrizione:** Il testo formattato trascinato da altre applicazioni o da file (RTF, HTML, testo semplice), o incollato dagli appunti, diventa un nuovo blocco di testo di pagina oppure viene inserito nel blocco in modifica, conservando la formattazione supportata. Rif.: parità 3.4; concorrenti §4.
+**Descrizione:** Il testo formattato trascinato da altre applicazioni o da file (RTF, HTML, testo semplice), o incollato dagli appunti, diventa un nuovo blocco di testo di pagina oppure viene inserito nel blocco in modifica, conservando la formattazione supportata. Parità: 3.04.
 
 **Flusso:**
 1. L'utente trascina sulla pagina una selezione da un'altra applicazione o un file `.rtf`, `.txt`, `.html`; durante il trascinamento compare l'anteprima del riquadro.
@@ -2433,12 +2560,12 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-20 — Salvaguardie d'integrità durante la modifica
 
-**Descrizione:** Regole che proteggono il documento quando si modifica il testo: rispetto dei permessi, avvisi su firme e certificazioni, mantenimento della conformità PDF/A e PDF/UA dichiarata, coerenza della struttura logica e delle annotazioni ancorate al testo, gestione del contenuto condiviso tra pagine, conservazione dei dati non toccati. Rif.: standard cap. 1, 11, 35, 39, 43, 45, 50; sezioni Sicurezza e Firma.
+**Descrizione:** Regole che proteggono il documento quando si modifica il testo: rispetto dei permessi, avvisi su firme e certificazioni, mantenimento della conformità PDF/A e PDF/UA dichiarata, coerenza della struttura logica e delle annotazioni ancorate al testo, gestione del contenuto condiviso tra pagine, conservazione dei dati non toccati. Vedi anche le aree 9 (Firma digitale) e 10 (Protezione).
 
 **Flusso:**
 1. All'ingresso in modalità Modifica l'editor verifica permesso di modifica, firme digitali e livello di certificazione, dichiarazione di conformità PDF/A o PDF/UA, presenza di moduli XFA dinamici.
 2. Permesso negato → modalità non disponibile, con il motivo e la possibilità di inserire la password del proprietario.
-3. Documento firmato → avviso che la modifica invaliderà le firme; se si prosegue, il primo salvataggio propone «Salva con nome» per lasciare intatto l'originale. Certificazione «nessuna modifica consentita» → serve un'ulteriore conferma esplicita.
+3. Documento firmato → avviso di invalidazione di SIG-21, una sola volta (UX-13); se si prosegue, il salvataggio segue NFR-09 (incrementale) e il primo salvataggio propone «Salva con nome» per lasciare intatto l'originale. Certificazione «nessuna modifica consentita» → modalità non disponibile, con il motivo e la scelta «Lavora su una copia senza firme» (SIG-21).
 4. Conformità PDF/A dichiarata → ogni font usato dalle modifiche viene incorporato con `/ToUnicode`; se un'operazione non può rispettare il profilo, l'utente sceglie tra annullarla e proseguire rimuovendo la dichiarazione di conformità (con avviso).
 5. Testo in un Form XObject usato da più pagine → alla prima modifica l'utente sceglie «solo questa pagina» (copia privata dell'oggetto) o «tutte le pagine».
 6. Annotazioni ancorate al testo modificato o spostato (evidenziazioni, sottolineature, barrati, collegamenti): se il testo esiste ancora, rettangoli e quadrilateri vengono ricalcolati; se è stato eliminato, l'annotazione resta al suo posto ed è segnalata come «orfana» nell'elenco commenti.
@@ -2466,7 +2593,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-21 — Scritture complesse: bidirezionali, con composizione dei glifi e verticali
 
-**Descrizione:** Modifica di testo in scritture da destra a sinistra (arabo, ebraico), anche miste a testo latino, in scritture che richiedono la composizione dei glifi (devanagari, thai e simili) e in scrittura verticale CJK, con cursore, selezione e riflusso corretti. Rif.: standard cap. 30; concorrenti §66.
+**Descrizione:** Modifica di testo in scritture da destra a sinistra (arabo, ebraico), anche miste a testo latino, in scritture che richiedono la composizione dei glifi (devanagari, thai e simili) e in scrittura verticale CJK, con cursore, selezione e riflusso corretti. Catalogo: 3.09.
 
 **Flusso:**
 1. TXT-01 riconosce direzione e scrittura del blocco (ordine visivo dei glifi, `/ActualText`, modo di scrittura del font).
@@ -2489,39 +2616,39 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 
 ### TXT-22 — Modifica del testo con istruzioni in linguaggio naturale (IA)
 
-**Descrizione:** L'utente seleziona testo in un blocco e descrive a parole la modifica voluta; un servizio linguistico configurato propone il nuovo testo che, se accettato, sostituisce la selezione nel PDF con le regole di TXT-02. Rif.: parità 3.6.
+**Descrizione:** L'utente seleziona testo in un blocco e descrive a parole la modifica voluta; il fornitore IA configurato (AI-01) propone il nuovo testo che, se accettato, sostituisce la selezione nel PDF con le regole di TXT-02. Applica al testo di pagina AI-09, requisito di riferimento per la riscrittura con IA (0.6), e ne segue le regole. Parità: 3.12.
 
 **Flusso:**
 1. Selezione del testo (o del blocco) e comando «Modifica con IA»; campo per l'istruzione.
-2. Alla prima esecuzione l'utente sceglie il servizio (modello locale o servizio remoto configurato) e dà il consenso esplicito all'invio del testo selezionato.
+2. Il fornitore e il modello sono quelli del profilo attivo (AI-01); informativa, riepilogo dei dati inviati ed eventuale conferma prima dell'invio seguono AI-02.
 3. La proposta viene mostrata con le differenze rispetto all'originale e con un indicatore d'ingombro rispetto al riquadro, calcolato localmente.
 4. L'utente accetta, ritocca la proposta prima di accettarla, chiede una nuova proposta o annulla.
 5. L'accettazione sostituisce la selezione come in TXT-02 (stile del primo carattere, riflusso, copertura dei font), in un unico passo annullabile.
 
-**Formati/strutture:** al servizio vengono inviati solo testo selezionato, istruzione e lingua; nessun invio senza consenso; configurazione (indirizzo, modello, credenziali conservate nel portachiavi del sistema) nelle preferenze; risposta in testo semplice UTF-8.
+**Formati/strutture:** al fornitore vengono inviati solo testo selezionato, istruzione e lingua; nessun invio prima dell'accettazione dell'informativa (AI-02); configurazione del fornitore secondo AI-01; risposta in testo semplice UTF-8.
 
 **Casi limite:**
-- Rete assente o servizio non configurato → comando disattivato con indicazione; documento invariato.
+- Nessun fornitore IA configurato → comando disattivato con indicazione (AI-01); rete assente o errore del fornitore → messaggio secondo AI-16; documento invariato.
 - Proposta più lunga del riquadro → crescita del blocco (TXT-03) con indicatore; azione rapida «Accorcia» (TXT-24).
-- Errore o tempo scaduto del servizio → messaggio; nessuna modifica parziale.
+- Errore o tempo scaduto del fornitore → messaggio (AI-16); nessuna modifica parziale.
 - Selezione su più blocchi → non consentita; si suggerisce di unire i blocchi (TXT-09).
 - Documento in sola lettura o con modifica non consentita → comando non disponibile.
 
 **Criteri di accettazione:**
-- Dato un servizio simulato che restituisce un testo prefissato, quando l'utente accetta la proposta e salva, allora il testo estratto contiene il testo restituito al posto della selezione e il resto del blocco è invariato.
-- Dato un servizio simulato con richieste intercettate, quando l'utente esegue il comando, allora la richiesta contiene solo testo selezionato, istruzione e lingua.
-- Dato un utente che non ha ancora dato il consenso, quando esegue il comando, allora nessuna richiesta di rete parte prima della conferma.
+- Dato il fornitore simulato (sezione 12) che restituisce un testo prefissato, quando l'utente accetta la proposta e salva, allora il testo estratto contiene il testo restituito al posto della selezione e il resto del blocco è invariato.
+- Dato il fornitore simulato, quando l'utente esegue il comando, allora la richiesta registrata contiene solo testo selezionato, istruzione e lingua.
+- Dato un profilo IA la cui informativa non è stata accettata (AI-02), quando l'utente esegue il comando, allora compare l'informativa e nessuna richiesta parte prima dell'accettazione.
 - Data una proposta accettata, quando si esegue Annulla, allora la selezione originale è ripristinata.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### TXT-23 — Correzione bozze con IA
 
-**Descrizione:** Il servizio linguistico analizza selezione, blocco, pagina o documento e propone correzioni di grammatica, ortografia e punteggiatura come elenco di modifiche puntuali, accettabili o rifiutabili singolarmente o tutte insieme. Rif.: parità 3.7.
+**Descrizione:** Il fornitore IA configurato (AI-01) analizza selezione, blocco, pagina o documento e propone correzioni di grammatica, ortografia e punteggiatura come elenco di modifiche puntuali, accettabili o rifiutabili singolarmente o tutte insieme. Segue le regole di AI-09, requisito di riferimento (0.6). Parità: 3.13.
 
 **Flusso:**
 1. Comando «Correzione bozze» con scelta dell'ambito.
-2. Servizio e consenso come in TXT-22; prima del consenso viene mostrato il volume di testo da inviare; per ambiti ampi l'invio avviene blocco per blocco, con avanzamento e possibilità d'interruzione.
+2. Fornitore, informativa e riepilogo dei dati inviati come in TXT-22 (AI-01, AI-02); il riepilogo indica il volume di testo da inviare; per ambiti ampi l'invio avviene blocco per blocco, con avanzamento e possibilità d'interruzione.
 3. Pannello delle proposte: originale, correzione, tipo (grammatica, ortografia, punteggiatura) e breve motivazione; evidenziazione sulla pagina.
 4. «Accetta», «Rifiuta», «Accetta tutte» (anche per tipo); ogni accettazione si applica come in TXT-02.
 
@@ -2530,23 +2657,23 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 **Casi limite:**
 - Proposta su testo a cavallo di due blocchi o in un blocco non modificabile → mostrata ma non applicabile.
 - Proposta su una parola del dizionario personale (TXT-14) → scartata localmente.
-- Servizio interrotto a metà elaborazione → le proposte già ricevute restano utilizzabili.
+- Elaborazione interrotta a metà (AI-16, AI-17) → le proposte già ricevute restano utilizzabili.
 
 **Criteri di accettazione:**
-- Dato un servizio simulato che propone 3 correzioni in un blocco, quando l'utente ne accetta 2, ne rifiuta 1 e salva, allora il testo estratto contiene esattamente le 2 correzioni accettate.
+- Dato il fornitore simulato che propone 3 correzioni in un blocco, quando l'utente ne accetta 2, ne rifiuta 1 e salva, allora il testo estratto contiene esattamente le 2 correzioni accettate.
 - Dato «Accetta tutte» su 10 proposte, quando si esegue Annulla, allora tutte le 10 correzioni vengono annullate.
 - Data una proposta su una parola del dizionario personale, quando arrivano le proposte, allora quella proposta non viene mostrata.
 - Dato un blocco modificato a mano dopo l'arrivo delle proposte, quando l'utente tenta di accettarne una su quel blocco, allora la proposta risulta invalidata e non viene applicata.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### TXT-24 — Espandi e condensa con IA
 
-**Descrizione:** Allunga o accorcia il testo selezionato mantenendone il significato, con lunghezza obiettivo regolabile e l'opzione «Adatta al riquadro», che condensa finché il testo non rientra nello spazio originale del blocco. Rif.: parità 3.8.
+**Descrizione:** Allunga o accorcia il testo selezionato mantenendone il significato, con lunghezza obiettivo regolabile e l'opzione «Adatta al riquadro», che condensa finché il testo non rientra nello spazio originale del blocco. Segue le regole di AI-09, requisito di riferimento (0.6), con il fornitore di AI-01. Parità: 3.14.
 
 **Flusso:**
 1. Selezione e comando «Espandi» o «Condensa»; lunghezza obiettivo (percentuale o numero di parole) oppure «Adatta al riquadro».
-2. Servizio e consenso come in TXT-22; anteprima con confronto e indicatore d'ingombro.
+2. Fornitore, informativa e riepilogo dei dati inviati come in TXT-22 (AI-01, AI-02); anteprima con confronto e indicatore d'ingombro.
 3. Con «Adatta al riquadro», se la proposta non rientra, la richiesta viene ripetuta fino a 3 volte; poi viene mostrata la proposta migliore con l'eccedenza.
 4. Accettazione come in TXT-22.
 
@@ -2558,41 +2685,41 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Proposta che non rientra dopo i tentativi → accettabile solo confermando il trabocco.
 
 **Criteri di accettazione:**
-- Dato un servizio simulato la cui prima risposta eccede il riquadro e la seconda rientra, quando si usa «Adatta al riquadro», allora viene proposta la seconda con l'indicazione «rientra» e, dopo l'accettazione, l'altezza del blocco non supera quella originale.
+- Dato il fornitore simulato la cui prima risposta eccede il riquadro e la seconda rientra, quando si usa «Adatta al riquadro», allora viene proposta la seconda con l'indicazione «rientra» e, dopo l'accettazione, l'altezza del blocco non supera quella originale.
 - Data una proposta che cambia l'importo «1.250 €», quando viene mostrato il confronto, allora l'importo è evidenziato come modificato.
 - Data una proposta accettata, quando si salva, allora il testo estratto contiene il nuovo testo e l'origine del blocco non si è spostata (±0,5 pt).
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### TXT-25 — Rifinisci e cambia tono con IA
 
-**Descrizione:** Migliora stile e scorrevolezza del testo selezionato o ne cambia il registro (formale, informale, professionale, cordiale, conciso, persuasivo o tono descritto dall'utente), mantenendo lingua e contenuto informativo. Rif.: parità 3.9.
+**Descrizione:** Migliora stile e scorrevolezza del testo selezionato o ne cambia il registro (formale, informale, professionale, cordiale, conciso, persuasivo o tono descritto dall'utente), mantenendo lingua e contenuto informativo. Segue le regole di AI-09, requisito di riferimento (0.6), con il fornitore di AI-01. Parità: 3.15.
 
 **Flusso:**
 1. Selezione e comando «Rifinisci» oppure «Cambia tono», con scelta del tono.
-2. Servizio e consenso come in TXT-22; anteprima con confronto e indicatore d'ingombro.
+2. Fornitore, informativa e riepilogo dei dati inviati come in TXT-22 (AI-01, AI-02); anteprima con confronto e indicatore d'ingombro.
 3. Accettazione come in TXT-22; possibilità di chiedere un'altra proposta con lo stesso tono.
 
 **Formati/strutture:** come TXT-22; tono e lingua rilevata inviati come parametri della richiesta.
 
 **Casi limite:**
-- Lingua non supportata dal servizio → avviso prima dell'invio.
+- Lingua non supportata dal fornitore → avviso prima dell'invio.
 - Nomi propri, cifre, riferimenti normativi modificati → evidenziati nel confronto.
 - Proposta in una lingua diversa da quella della selezione → avviso nel confronto.
 
 **Criteri di accettazione:**
-- Dato un servizio simulato con richieste intercettate, quando l'utente sceglie il tono «formale», allora la richiesta contiene il parametro di tono «formale» e la lingua rilevata della selezione.
+- Dato il fornitore simulato, quando l'utente sceglie il tono «formale», allora la richiesta contiene il parametro di tono «formale» e la lingua rilevata della selezione.
 - Data una proposta accettata, quando si salva, allora il testo estratto contiene la proposta e il rendering dei blocchi non selezionati è invariato.
 - Data una proposta in cui un numero dell'originale è stato cambiato, quando viene mostrato il confronto, allora il numero è evidenziato come modifica sensibile.
 
-**Priorità:** P2
+**Priorità:** P1
 
 
 ## 4. Immagini, oggetti e collegamenti
 
 ### OBJ-01 — Modalità di modifica degli oggetti
 
-**Descrizione:** Modalità in cui il contenuto della pagina viene scomposto in oggetti che si selezionano e si modificano direttamente nel contenuto, non come annotazioni: immagini, tracciati vettoriali, sfumature, oggetti composti (Form XObject) e blocchi di testo. In questa sezione i blocchi di testo partecipano a selezione, spostamento, allineamento, ordine di sovrapposizione, copia/incolla ed eliminazione. La loro modifica interna, il ridimensionamento e la rotazione sono specificati nella sezione sull'editing del testo. Tutte le funzioni OBJ che modificano il contenuto si basano su questa modalità.
+**Descrizione:** Modalità in cui il contenuto della pagina viene scomposto in oggetti che si selezionano e si modificano direttamente nel contenuto, non come annotazioni: immagini, tracciati vettoriali, sfumature, oggetti composti (Form XObject) e blocchi di testo. In questa sezione i blocchi di testo partecipano a selezione, spostamento, allineamento, ordine di sovrapposizione, copia/incolla ed eliminazione. La loro modifica interna, il ridimensionamento e la rotazione sono specificati nella sezione 3 (Modifica testo). Tutte le funzioni OBJ che modificano il contenuto si basano su questa modalità.
 
 **Flusso:** 1. L'utente attiva "Modifica" dalla barra strumenti o con la scorciatoia. 2. Le pagine visibili vengono analizzate per prime, le altre in background. 3. Al passaggio del mouse l'oggetto sotto il puntatore viene contornato, con un colore diverso per ogni tipo. 4. L'utente seleziona e modifica gli oggetti (OBJ-02 e seguenti). 5. Uscendo dalla modalità (Esc con selezione vuota, oppure scelta di un altro strumento) le modifiche restano nel documento aperto. Il file viene scritto solo al salvataggio.
 
@@ -2613,7 +2740,7 @@ Intestazione nel testo: `#### ID · Titolo — Priorità`, seguita da descrizion
 - Dato una pagina con 3 immagini, 10 tracciati e 2 blocchi di testo, quando passo il mouse su ciascun oggetto, allora viene contornato esattamente quell'oggetto, con il colore del suo tipo.
 - Dato un'immagine spostata e il documento salvato, quando confronto la pagina prima e dopo, allora tutte le aree esterne alla vecchia e alla nuova posizione dell'immagine sono identiche (confronto pixel) e l'albero di struttura ha lo stesso numero di elementi.
 - Dato un documento con una firma digitale valida, quando attivo la modalità e rifiuto la conferma, allora non è possibile alcuna modifica e la firma resta valida.
-- Dato una pagina con 20.000 tracciati, quando attivo la modalità, allora l'interfaccia non resta bloccata per più di 200 ms consecutivi e gli oggetti diventano selezionabili entro 3 s sulla macchina di riferimento del piano di test.
+- Dato una pagina con 20.000 tracciati, quando attivo la modalità, allora l'interfaccia non resta mai senza risposta per più di 100 ms (NFR-05) e gli oggetti diventano selezionabili entro 3 s su MR (0.4).
 
 **Priorità:** P0
 
@@ -2664,7 +2791,7 @@ Gli oggetti di livelli nascosti (`/OC`) sono esclusi.
 - Larghezza o altezza ≤ 0 → rifiutata; il minimo è 1 pt.
 - Oggetto inclinato → posizione e dimensioni riferite al riquadro non trasformato; angolo e inclinazione mostrati in campi separati.
 - Scala non uniforme → due valori di ppi distinti.
-- Testo alternativo in un documento non taggato → campo non disponibile, con rimando alla funzione di accessibilità.
+- Testo alternativo in un documento non taggato → campo non disponibile, con la spiegazione che serve un documento con struttura logica (la creazione della struttura non è specificata in questa versione, 0.2).
 
 **Criteri di accettazione:**
 - Dato un'immagine di 600×300 px disegnata a 200×100 pt, quando la seleziono, allora il pannello mostra 216 ppi in entrambe le direzioni.
@@ -3024,9 +3151,9 @@ Le maschere alfa restano invariate.
 
 ### OBJ-18 — Ricompressione e ricampionamento delle immagini selezionate
 
-**Descrizione:** Riduce il peso delle immagini selezionate cambiandone compressione e/o risoluzione, con una stima del risultato prima di applicare.
+**Descrizione:** Riduce il peso delle immagini selezionate cambiandone compressione e/o risoluzione, con una stima del risultato prima di applicare. I livelli predefiniti e i parametri sono quelli di CNV-29 e della sezione Immagini di CNV-30, requisiti di riferimento per la compressione (0.6), applicati alle sole immagini selezionate.
 
-**Flusso:** 1. Comando "Ottimizza immagine" su una o più immagini selezionate. 2. Opzioni:
+**Flusso:** 1. Comando "Ottimizza immagine" su una o più immagini selezionate. 2. Opzioni (un livello di CNV-29 oppure i parametri di CNV-30):
    - risoluzione massima in ppi effettivi (es. 150);
    - compressione: JPEG con qualità, senza perdita, JPEG 2000 (se il profilo la ammette) o CCITT G4 per il bianco e nero;
    - conversione in scala di grigi.
@@ -3042,6 +3169,7 @@ Le maschere alfa restano invariate.
 **Criteri di accettazione:**
 - Dato un'immagine di 3000×3000 px disegnata a 5×5 in (600 ppi), quando la ottimizzo a 150 ppi, allora l'XObject misura 750×750 px e le dimensioni disegnate non cambiano.
 - Dato un'immagine il cui risultato sarebbe più pesante, quando applico l'ottimizzazione, allora i suoi dati restano identici e compare l'avviso.
+- Date 3 immagini selezionate e il livello "Media" di CNV-29, quando l'anteprima mostra il peso stimato e poi applico, allora il peso effettivo delle 3 immagini differisce dalla stima di non oltre il 20 % (stesso scarto ammesso da CNV-29).
 
 **Priorità:** P2
 
@@ -3297,22 +3425,20 @@ Altre regole:
 
 ### OBJ-29 — Catturare un'area come immagine o testo
 
-**Descrizione:** Strumento che trasforma un'area rettangolare della vista in un'immagine (negli appunti, su file o nel documento) oppure ne estrae il testo.
+**Descrizione:** Accesso dalla modalità Modifica allo strumento **Cattura area** definito in VIS-29, requisito di riferimento per la cattura di aree (0.6): l'utente trasforma un'area rettangolare della vista in un'immagine (negli appunti, su file o inserita nel documento con le regole di OBJ-04) oppure ne copia il testo. Comportamento, formati e limiti sono quelli di VIS-29; in caso di differenza vale VIS-29.
 
-**Flusso:** 1. Strumento "Cattura", disponibile anche in sola lettura. 2. L'utente traccia un rettangolo sulla vista; in vista continua può comprendere più pagine. 3. La barra contestuale offre: "Copia immagine" (predefinito), "Salva come…" (PNG/JPEG), "Inserisci come immagine" (in una pagina scelta, con le regole di OBJ-04) e "Copia testo". 4. Risoluzione di cattura: quella dello schermo, oppure 150, 300 o 600 ppi.
+**Flusso:** 1. In modalità Modifica, strumento **Cattura area** dalla barra contestuale (UX-05). 2. Tracciamento del rettangolo e scelta dell'azione come in VIS-29. 3. "Inserisci come immagine" crea un'immagine nella pagina scelta, con le regole di OBJ-04, come un solo passo annullabile (NFR-11).
 
-**Formati/strutture:** la resa comprende le annotazioni visibili. Negli appunti finiscono `image/png` e `text/plain`. Il testo viene estratto dal livello di testo dell'area, in ordine di lettura.
+**Formati/strutture:** come VIS-29; l'immagine inserita è un image XObject con la risoluzione di cattura scelta.
 
 **Casi limite:**
-- Area senza livello di testo (scansione) → "Copia testo" propone il riconoscimento del testo (sezione OCR).
-- Permesso di estrazione negato → copia e salvataggio disattivati, come in OBJ-27.
-- Area più piccola di 2×2 px → ignorata.
-- Immagine risultante oltre 100 megapixel → risoluzione ridotta, con avviso.
+- Come VIS-29: area più piccola di 2 × 2 px ignorata; immagine oltre 100 megapixel ridotta, con avviso.
+- Area senza livello di testo (scansione) → "Copia testo" propone **Esegui OCR sull'area** (OCR-11).
+- Permessi di copia o di modifica negati → azioni corrispondenti disabilitate, con il motivo.
 
 **Criteri di accettazione:**
-- Dato un rettangolo di 2×1 in catturato a 300 ppi, quando scelgo "Copia immagine", allora gli appunti contengono un PNG di 600×300 px (±1 px).
+- Dato un'area di 2 × 1 pollici catturata a 300 ppi in modalità Modifica, quando scelgo "Inserisci come immagine" sulla stessa pagina, allora la pagina contiene un'immagine di 600 × 300 px (±1 px) disegnata con le dimensioni dell'area e un solo Annulla la rimuove.
 - Dato un'area che contiene la frase "Totale fattura", quando scelgo "Copia testo", allora gli appunti contengono esattamente quella frase.
-- Dato una cattura a cavallo di due pagine, quando la salvo, allora l'immagine contiene le porzioni di entrambe le pagine come appaiono a schermo.
 
 **Priorità:** P1
 
@@ -3320,7 +3446,7 @@ Altre regole:
 
 **Descrizione:** Copia o taglia gli oggetti selezionati e li incolla nella stessa pagina, in altre pagine o in altri documenti aperti, portando con sé tutte le risorse necessarie.
 
-**Flusso:** 1. Ctrl+C o Ctrl+X sulla selezione. 2. Ctrl+V nella pagina corrente, anche di un altro documento: gli oggetti mantengono le coordinate dell'originale rispetto all'angolo superiore sinistro della pagina. Se si incolla nella stessa posizione della pagina d'origine, ogni incolla successivo si sposta di (+10 pt, +10 pt). 3. "Incolla qui" (menu contestuale): selezione centrata nel punto cliccato. 4. "Incolla in posizione" (Ctrl+Maiusc+V): stesse coordinate, senza scostamento. 5. Ctrl+D duplica con scostamento (+10 pt, +10 pt) senza passare dagli appunti; Ctrl + trascinamento duplica nel punto di rilascio. 6. Gli oggetti incollati restano selezionati.
+**Flusso:** 1. Ctrl+C o Ctrl+X sulla selezione. 2. Ctrl+V nella pagina corrente, anche di un altro documento: gli oggetti mantengono le coordinate dell'originale rispetto all'angolo superiore sinistro della pagina. Se si incolla nella stessa posizione della pagina d'origine, ogni incolla successivo si sposta di (+10 pt, +10 pt). 3. "Incolla qui" (menu contestuale): selezione centrata nel punto cliccato. 4. "Incolla in posizione" (menu contestuale e menu Modifica, senza scorciatoia, UX-18): stesse coordinate, senza scostamento. 5. **Duplica** (menu contestuale, senza scorciatoia, UX-18) crea una copia con scostamento (+10 pt, +10 pt) senza passare dagli appunti; Ctrl + trascinamento duplica nel punto di rilascio. 6. Gli oggetti incollati restano selezionati.
 
 **Formati/strutture:** gli appunti contengono quattro formati:
 - formato interno: frammento di contenuto con tutte le risorse (immagini, font, spazi colore, stati grafici, motivi, sfumature, oggetti composti);
@@ -3343,7 +3469,7 @@ All'incolla le risorse vengono copiate nel documento di destinazione: quelle in 
 - Dato un'immagine copiata dalla pagina 1, dove si trova in (50 pt, 70 pt), quando la incollo con Ctrl+V nella pagina 5, allora compare in (50 pt, 70 pt) nella pagina 5.
 - Dato un oggetto vettoriale con testo e sfumature copiato dal documento A, quando lo incollo nel documento B e salvo B, allora B, aperto da solo, mostra l'oggetto identico all'originale (confronto pixel) e non contiene riferimenti a risorse mancanti.
 - Dato la stessa immagine incollata 10 volte nel documento B, quando salvo, allora B contiene un solo image XObject per quell'immagine.
-- Dato un oggetto selezionato, quando premo due volte Ctrl+D, allora esistono 3 oggetti uguali spostati di 0, 10 e 20 pt e gli appunti non sono cambiati.
+- Dato un oggetto selezionato, quando scelgo due volte **Duplica**, allora esistono 3 oggetti uguali spostati di 0, 10 e 20 pt e gli appunti non sono cambiati.
 - Dato una selezione copiata, quando la incollo in un'applicazione grafica esterna, allora vi arriva come PDF o, se l'applicazione non accetta il PDF, come immagine.
 
 **Priorità:** P0
@@ -3428,7 +3554,7 @@ Nei documenti taggati si crea l'elemento di struttura `/Link` con riferimento `O
 
 **Descrizione:** Trasforma in collegamento un testo selezionato. L'area cliccabile segue esattamente le righe del testo, anche quando sono più di una.
 
-**Flusso:** 1. L'utente seleziona del testo. 2. Sceglie "Crea collegamento…" dal menu contestuale, oppure preme Ctrl+K. 3. Si apre la finestra di OBJ-33. La descrizione predefinita è il testo selezionato; se il testo è un URL o un indirizzo e-mail, la destinazione è già compilata. 4. L'utente conferma.
+**Flusso:** 1. L'utente seleziona del testo. 2. Sceglie "Crea collegamento…" dal menu contestuale o dalla barra contestuale (la creazione di collegamenti non ha scorciatoia, UX-18). 3. Si apre la finestra di OBJ-33. La descrizione predefinita è il testo selezionato; se il testo è un URL o un indirizzo e-mail, la destinazione è già compilata. 4. L'utente conferma.
 
 **Formati/strutture:** annotazione `/Link` con `/QuadPoints` (un quadrilatero per riga) e `/Rect` pari al riquadro che li contiene. Stile predefinito: invisibile, oppure sottolineato a scelta.
 
@@ -3455,8 +3581,7 @@ Nei documenti taggati si crea l'elemento di struttura `/Link` con riferimento `O
 **Formati/strutture:** azione `/S /URI` con il valore `/URI` scritto in ASCII per la massima compatibilità: i domini internazionali in forma ASCII (punycode) e i caratteri non ASCII del percorso con codifica `%` (RFC 3986/3987). Gli indirizzi e-mail seguono RFC 6068. Gli URI relativi si risolvono rispetto a `/URI /Base` del catalogo, se presente, e la finestra mostra la base usata (ISO 32000-2 §12.6.4.8).
 
 **Casi limite:**
-- Schemi ammessi → http, https, mailto, ftp, tel.
-- `javascript:` e `data:` → rifiutati.
+- Schemi ammessi → solo quelli dell'elenco di SEC-27: http, https, mailto, tel e ftp; ogni altro schema è rifiutato, compresi `data:` e gli schemi che eseguono script nel browser.
 - `file:` → si propone il tipo "File" (OBJ-37).
 - Spazi → quelli iniziali e finali vengono tolti, quelli interni codificati.
 - URL incompleto (es. "http://") → conferma disattivata, con messaggio.
@@ -3466,7 +3591,7 @@ Nei documenti taggati si crea l'elemento di struttura `/Link` con riferimento `O
 **Criteri di accettazione:**
 - Dato l'input "esempio.it/pagina", quando confermo, allora l'azione salvata ha `/URI` uguale a "https://esempio.it/pagina".
 - Dato l'input "https://città.it/così", quando confermo, allora `/URI` vale "https://xn--citt-3na.it/cos%C3%AC".
-- Dato l'input "javascript:alert(1)", quando provo a confermare, allora il pulsante è disattivato e compare il messaggio "schema non ammesso".
+- Dato l'input "data:text/html,<b>prova</b>", quando provo a confermare, allora il pulsante è disattivato e compare il messaggio "schema non ammesso".
 - Dato l'input "mario.rossi@esempio.it", quando confermo, allora `/URI` vale "mailto:mario.rossi@esempio.it".
 
 **Priorità:** P0
@@ -3529,9 +3654,9 @@ Riferimenti: ISO 32000-2 §7.11, §12.6.4.3, §12.6.4.4, §12.6.4.6.
 
 **Descrizione:** Seleziona, sposta, ridimensiona, copia e modifica destinazione e aspetto dei collegamenti già presenti, anche se creati da altri programmi.
 
-**Flusso:** 1. Con lo strumento "Collegamento" tutti i collegamenti della pagina sono contornati. Un clic ne seleziona uno; Maiusc+clic ne aggiunge altri. 2. Il trascinamento sposta, le maniglie ridimensionano, le frecce spostano di 1 pt. 3. Un doppio clic o "Proprietà" apre la finestra di OBJ-33 con i valori correnti, dove si cambiano destinazione, descrizione o aspetto. 4. Con più collegamenti selezionati si cambia l'aspetto di tutti insieme. 5. Ctrl+C, Ctrl+V e Ctrl+D copiano, incollano e duplicano i collegamenti, anche tra documenti. 6. Al passaggio del mouse un suggerimento mostra la destinazione.
+**Flusso:** 1. Con lo strumento "Collegamento" tutti i collegamenti della pagina sono contornati. Un clic ne seleziona uno; Maiusc+clic ne aggiunge altri. 2. Il trascinamento sposta, le maniglie ridimensionano, le frecce spostano di 1 pt. 3. Un doppio clic o "Proprietà" apre la finestra di OBJ-33 con i valori correnti, dove si cambiano destinazione, descrizione o aspetto. 4. Con più collegamenti selezionati si cambia l'aspetto di tutti insieme. 5. Ctrl+C e Ctrl+V copiano e incollano i collegamenti, anche tra documenti; **Duplica** (menu contestuale, senza scorciatoia, UX-18) li duplica. 6. Al passaggio del mouse un suggerimento mostra la destinazione.
 
-**Formati/strutture:** si aggiornano `/Rect`, `/QuadPoints`, `/A` o `/Dest`, `/H`, `/BS` o `/Border`, `/C`, `/Contents` e `/M`, e si rigenera `/AP`. Le azioni che l'editor non gestisce restano intatte e compaiono in sola lettura, con una descrizione: JavaScript, invio modulo, azioni con nome, catene `/Next`. Si possono sostituire solo con conferma esplicita.
+**Formati/strutture:** si aggiornano `/Rect`, `/QuadPoints`, `/A` o `/Dest`, `/H`, `/BS` o `/Border`, `/C`, `/Contents` e `/M`, e si rigenera `/AP`. Le azioni che l'editor non gestisce restano intatte e compaiono in sola lettura, con una descrizione: azioni di script (mai eseguite, NFR-17), invio modulo, azioni con nome, catene `/Next`. Si possono sostituire solo con conferma esplicita.
 
 **Casi limite:**
 - Collegamento con `/QuadPoints` → spostandolo si traslano anche i quadrilateri; ridimensionandolo i quadrilateri vengono rimossi e diventa rettangolare, con avviso.
@@ -3542,7 +3667,7 @@ Riferimenti: ISO 32000-2 §7.11, §12.6.4.3, §12.6.4.4, §12.6.4.6.
 
 **Criteri di accettazione:**
 - Dato un collegamento URL esistente, quando cambio la destinazione in "pagina 3" e salvo, allora l'annotazione ha un'azione `/GoTo` verso la pagina 3 e nessuna azione `/URI`.
-- Dato un collegamento con azione JavaScript, quando ne cambio solo il colore del bordo e salvo, allora l'azione JavaScript è identica byte per byte.
+- Dato un collegamento con un'azione di script, quando ne cambio solo il colore del bordo e salvo, allora l'azione di script è identica byte per byte.
 - Dato 5 collegamenti selezionati, quando imposto "rettangolo invisibile", allora tutti e 5 hanno un bordo di spessore 0.
 - Dato un collegamento con `/QuadPoints`, quando lo sposto di 10 pt a destra, allora `/Rect` e tutti i quadrilateri risultano traslati di 10 pt.
 
@@ -3573,7 +3698,7 @@ Riferimenti: ISO 32000-2 §7.11, §12.6.4.3, §12.6.4.4, §12.6.4.6.
 
 **Descrizione:** Trova nel testo gli indirizzi web ed e-mail scritti in chiaro e li trasforma in collegamenti. In alternativa li rende cliccabili solo durante la lettura, senza modificare il file.
 
-**Flusso:** 1. Comando "Crea collegamenti dagli URL", con scelta dell'ambito (pagina, intervallo, documento) e dei tipi (web, e-mail). 2. L'app analizza il testo e mostra i risultati (pagina, testo trovato, destinazione proposta), ciascuno con una casella di selezione. Il testo già coperto da un collegamento viene escluso. 3. Alla conferma crea i collegamenti selezionati, con l'aspetto scelto (predefinito: invisibile), in un unico passo annullabile. 4. La preferenza di lettura "Rendi cliccabili gli URL del testo", attiva per impostazione predefinita, li riconosce al volo senza modificare il documento, con la stessa conferma di sicurezza di OBJ-41.
+**Flusso:** 1. Comando "Crea collegamenti dagli URL", con scelta dell'ambito (pagina, intervallo, documento) e dei tipi (web, e-mail). 2. L'app analizza il testo e mostra i risultati (pagina, testo trovato, destinazione proposta), ciascuno con una casella di selezione. Il testo già coperto da un collegamento viene escluso. 3. Alla conferma crea i collegamenti selezionati, con l'aspetto scelto (predefinito: invisibile), in un unico passo annullabile. 4. La preferenza di lettura "Rendi cliccabili gli URL del testo", attiva per impostazione predefinita, li riconosce al volo senza modificare il documento, con la finestra di conferma di VIS-19 (requisito di riferimento, 0.6).
 
 **Formati/strutture:** vengono riconosciuti:
 - indirizzi con schema (http, https, ftp);
@@ -3583,7 +3708,7 @@ Riferimenti: ISO 32000-2 §7.11, §12.6.4.3, §12.6.4.4, §12.6.4.6.
 Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi di chiusura non bilanciate. Un URL spezzato su due righe viene ricongiunto quando la prima riga termina, senza spazio, con un carattere valido negli URL e la seconda prosegue senza spazio. I collegamenti si creano come in OBJ-34 (`/QuadPoints` per riga) e le destinazioni si normalizzano come in OBJ-35.
 
 **Casi limite:**
-- Documento senza livello di testo → messaggio che suggerisce il riconoscimento del testo (OCR).
+- Documento senza livello di testo → messaggio che suggerisce **Esegui OCR** (area 7).
 - Trattino di sillabazione a fine riga → escluso se senza trattino si ottiene un dominio valido; altrimenti il risultato è segnalato come dubbio.
 - Domini con caratteri non ASCII → convertiti come in OBJ-35.
 - Migliaia di risultati → elaborazione con avanzamento, interrompibile.
@@ -3593,7 +3718,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Dato una pagina con i testi "Visita www.esempio.it." e "scrivi a info@esempio.it", quando eseguo il rilevamento, allora vengono proposti 2 collegamenti: "https://www.esempio.it" (senza il punto finale) e "mailto:info@esempio.it".
 - Dato il testo "(https://esempio.it/a_(b))", quando eseguo il rilevamento, allora la destinazione proposta è "https://esempio.it/a_(b)".
 - Dato un URL già coperto da un collegamento, quando eseguo il rilevamento, allora quell'URL non viene proposto.
-- Dato la preferenza di lettura attiva e nessun collegamento creato, quando clicco un URL del testo, allora compare la conferma di apertura e il documento non risulta modificato.
+- Dato la preferenza di lettura attiva e nessun collegamento creato, quando clicco un URL del testo, allora compare la finestra di conferma di VIS-19 e il documento non risulta modificato.
 - Dato 30 collegamenti creati con il rilevamento, quando premo una volta Ctrl+Z, allora vengono rimossi tutti e 30.
 
 **Priorità:** P1
@@ -3602,22 +3727,23 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Descrizione:** Comportamento al clic su un collegamento durante la lettura: navigazione interna, apertura di URL e file con conferme di sicurezza, ritorno alla vista precedente.
 
-**Flusso:** 1. Sopra un collegamento il puntatore diventa una mano e un suggerimento mostra la destinazione completa: URL, "Pagina 12" o nome del file. 2. Destinazione interna: la vista si imposta secondo la destinazione. "Indietro" (Alt+←) torna alla vista precedente, "Avanti" (Alt+→) la ripristina. 3. URL: una finestra di conferma mostra l'indirizzo completo con il dominio evidenziato e l'opzione "Consenti sempre per questo sito". Dopo la conferma l'indirizzo si apre nel browser predefinito; un `mailto:` si apre nel client di posta predefinito. 4. Collegamento a un PDF: si apre in una nuova scheda o nella stessa, secondo `/NewWindow` e le preferenze, alla destinazione indicata. 5. Collegamento a un file di altro tipo (`/Launch`): bloccato per impostazione predefinita. L'utente può autorizzarlo per il singolo documento dopo un avviso che mostra il percorso completo. 6. Negli strumenti di modifica il clic seleziona; Ctrl+clic segue il collegamento.
+**Flusso:** 1. Sopra un collegamento il puntatore diventa una mano e un suggerimento mostra la destinazione completa: URL, "Pagina 12" o nome del file. 2. Destinazione interna: la vista si imposta secondo la destinazione. "Indietro" (Alt+←) torna alla vista precedente, "Avanti" (Alt+→) la ripristina. 3. URL: compare la finestra di conferma di VIS-19, unica per tutta l'applicazione (NFR-18), con l'indirizzo completo e il dominio evidenziato; dopo **Apri** l'indirizzo si apre nel browser predefinito e un `mailto:` nel programma di posta predefinito. La casella **Non chiedere più per questo dominio** (P1) e l'elenco dei domini sono gestiti in SEC-27. 4. Collegamento a un PDF: si apre in una nuova scheda o nella stessa, secondo `/NewWindow` e le preferenze, alla destinazione indicata. 5. Collegamento a un file di altro tipo (`/Launch`): se è un file di dati (non eseguibile, senza parametri di avvio) compare la finestra di VIS-19 con il percorso completo e, dopo la conferma, il file si apre con l'applicazione predefinita del sistema; un programma, uno script o un'azione con parametri di avvio non viene mai eseguito, nemmeno su richiesta dell'utente (NFR-18). 6. Negli strumenti di modifica il clic seleziona; Ctrl+clic segue il collegamento.
 
-**Formati/strutture:** si gestiscono le azioni `/GoTo`, `/GoToR`, `/GoToE`, `/URI`, `/Launch` e `/Named` (pagina successiva, precedente, prima, ultima), comprese le catene `/Next`. Le azioni JavaScript seguono le impostazioni della sezione sullo scripting. I siti consentiti si memorizzano nelle preferenze dell'utente, dove si possono rivedere e revocare.
+**Formati/strutture:** si gestiscono le azioni `/GoTo`, `/GoToR`, `/GoToE`, `/URI`, `/Launch` e `/Named` (pagina successiva, precedente, prima, ultima), comprese le catene `/Next`. Le azioni di script non vengono mai eseguite (NFR-17). I domini per cui l'utente ha scelto **Non chiedere più** si gestiscono in Preferenze › Sicurezza e riservatezza (SEC-27).
 
 **Casi limite:**
 - Destinazione inesistente → messaggio "destinazione non trovata", nessuno spostamento.
 - File collegato mancante → messaggio con il percorso cercato.
-- Schema non ammesso (es. `javascript:`) → non eseguito, con avviso.
+- Schema non ammesso (ogni schema fuori dall'elenco di SEC-27, es. `data:`) → non eseguito, con avviso.
 - Testo visibile che mostra un dominio diverso da quello di destinazione → la conferma evidenzia la differenza.
 - Collegamenti sovrapposti → si attiva quello che sta sopra.
 
 **Criteri di accettazione:**
 - Dato un collegamento alla pagina 20, quando lo clicco dalla pagina 2 e poi premo Alt+←, allora la vista torna alla pagina 2 con lo stesso zoom e la stessa posizione.
-- Dato un collegamento a "https://esempio.it", quando lo clicco, allora compare la conferma con l'indirizzo completo; se annullo, il browser non si apre.
-- Dato "Consenti sempre per questo sito" scelto per esempio.it, quando clicco un altro collegamento verso esempio.it, allora il browser si apre senza conferma.
-- Dato un collegamento `/Launch` verso uno script, quando lo clicco, allora non viene eseguito nulla e compare l'avviso di blocco.
+- Dato un collegamento a "https://esempio.it", quando lo clicco, allora compare la finestra di VIS-19 con l'indirizzo completo; se scelgo **Annulla**, il browser non si apre.
+- Dato **Non chiedere più per questo dominio** scelto per esempio.it, quando clicco un altro collegamento verso esempio.it, allora il browser si apre senza conferma (P1).
+- Dato un collegamento `/Launch` verso uno script, quando lo clicco, allora non viene eseguito nulla e compare l'avviso di blocco, senza alcuna possibilità di sbloccarlo.
+- Dato un collegamento `/Launch` verso un file di testo senza parametri di avvio, quando lo clicco e confermo nella finestra di VIS-19, allora il file si apre con l'applicazione predefinita del sistema.
 - Dato un collegamento con testo visibile "www.banca.it" e destinazione "https://altro.example", quando lo clicco, allora la conferma segnala la differenza tra testo e destinazione.
 
 **Priorità:** P0
@@ -3645,16 +3771,16 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### OBJ-43 — Annulla e ripeti
 
-**Descrizione:** Cronologia, separata per ogni documento, che permette di annullare e ripetere un passo alla volta tutte le operazioni di questa sezione e delle altre sezioni di modifica.
+**Descrizione:** Cronologia, separata per ogni documento, che permette di annullare e ripetere un passo alla volta tutte le operazioni di questa sezione e delle altre sezioni di modifica. Segue NFR-11, requisito di riferimento per l'annullamento (0.6); questo requisito precisa come si formano i passi per gli oggetti.
 
 **Flusso:** 1. Ctrl+Z annulla l'ultima operazione; Ctrl+Maiusc+Z o Ctrl+Y la ripetono. 2. Le voci di menu indicano l'operazione, per esempio "Annulla Sposta immagine". 3. Contano come un solo passo un gesto continuo (trascinamento, cursore) e un comando su più oggetti o pagine (es. rilevamento degli URL, replica su pagine). 4. Una nuova operazione dopo un annullamento cancella i passi che si potevano ripetere.
 
-**Formati/strutture:** la cronologia è in memoria, separata per documento, con profondità minima di 100 passi (configurabile, entro un limite di memoria). Il salvataggio non la svuota. L'indicatore "modificato" riflette la differenza dall'ultimo salvataggio: se con Annulla si torna allo stato salvato, si spegne.
+**Formati/strutture:** la cronologia è in memoria, separata per documento: almeno 100 passi e, oltre, quanti ne consente la memoria (NFR-11). Il salvataggio non la svuota. L'indicatore "modificato" riflette la differenza dall'ultimo salvataggio: se con Annulla si torna allo stato salvato, si spegne.
 
 **Casi limite:**
 - Incolla da A a B → si annulla solo in B.
 - Operazione fallita a metà → nessun passo registrato e documento invariato (l'operazione è atomica).
-- Profondità massima raggiunta → si scartano i passi più vecchi.
+- Memoria insufficiente → si scartano solo i passi più vecchi oltre il centesimo (NFR-11).
 - Chiusura del documento → la cronologia viene eliminata.
 - Annulla durante un trascinamento → il trascinamento si interrompe.
 - Operazioni che non modificano il documento (estrazioni, verifiche) → non vengono registrate.
@@ -3672,7 +3798,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 ## 5. Annotazioni e commenti
 
 > **Ambito.** Strumenti di markup, commento, disegno, timbro, allegato e misura; gestione, revisione, interscambio, riepilogo e appiattimento delle annotazioni. Collegamenti, campi modulo (widget), redazione, filigrane, contenuti multimediali e 3D sono specificati in altre sezioni, ma il modello comune (ANN-01) deve conservarli intatti.
-> **Convenzioni.** Coordinate in punti (1/72 di pollice) nello spazio utente predefinito della pagina; "salva e riapre" indica un ciclo completo di scrittura su disco e nuova apertura del file; i riferimenti normativi sono a ISO 32000-2 (PDF 2.0) e, per l'interscambio, a ISO 19444-1 (XFDF); le soglie prestazionali valgono sulla configurazione di riferimento dei requisiti non funzionali; le verifiche "conformi all'immagine di riferimento" usano un rendering a risoluzione fissa con la tolleranza dichiarata nel piano di test.
+> **Convenzioni.** Coordinate in punti (1/72 di pollice) nello spazio utente predefinito della pagina; "salva e riapre" indica un ciclo completo di scrittura su disco e nuova apertura del file; i riferimenti normativi sono a ISO 32000-2 (PDF 2.0) e, per l'interscambio, a ISO 19444-1 (XFDF); macchina di riferimento (MR), corpus e condizioni di misura sono quelli di 0.4 e, dove un criterio misura la stessa grandezza di un NFR, vale la soglia di 0.4; le verifiche "conformi all'immagine di riferimento" e i "confronti pixel" usano un rendering a 150 dpi e sono superate se al massimo lo 0,5 % dei pixel differisce di oltre 8/255 in almeno un canale (tolleranza di antialiasing).
 
 ### ANN-01 — Modello comune e fedeltà delle annotazioni
 
@@ -3714,7 +3840,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-03 — Selezione, spostamento, ridimensionamento ed eliminazione
 
-**Descrizione:** Con lo strumento di selezione (o con un clic sull'annotazione usando lo strumento mano) l'utente seleziona una o più annotazioni (Maiusc/Ctrl+clic, rettangolo di selezione), le sposta trascinandole o con le frecce (1 pt; 10 pt con Maiusc), le ridimensiona con le maniglie (proporzioni vincolate con Maiusc), ruota forme, timbri e caselle di testo, modifica i vertici di linee, poligoni, polilinee e callout, allinea e distribuisce, cambia l'ordine di sovrapposizione ed elimina (Canc). Una mini-barra contestuale offre colore, commento, proprietà ed elimina.
+**Descrizione:** Con lo strumento di selezione (o con un clic sull'annotazione usando lo strumento mano) l'utente seleziona una o più annotazioni (Maiusc/Ctrl+clic, rettangolo di selezione), le sposta trascinandole o con le frecce (1 pt; 10 pt con Maiusc), le ridimensiona con le maniglie (proporzioni vincolate con Maiusc), ruota forme, timbri e caselle di testo, modifica i vertici di linee, poligoni, polilinee e richiami, allinea e distribuisce, cambia l'ordine di sovrapposizione ed elimina (Canc). Una mini-barra contestuale offre colore, commento, proprietà ed elimina.
 
 **Flusso:** 1. Clic sull'annotazione: compaiono riquadro, maniglie e mini-barra. 2. Trascinamento del corpo, di una maniglia o di un vertice con anteprima continua. 3. Al rilascio la geometria è aggiornata e l'operazione entra nella cronologia di annullamento. 4. Il menu contestuale offre "Porta in primo piano / Porta sullo sfondo", "Allinea", "Distribuisci", "Elimina".
 
@@ -3769,13 +3895,13 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-06 — Annulla e ripeti
 
-**Descrizione:** Tutte le operazioni sulle annotazioni (creazione, eliminazione, geometria, proprietà, testo, risposte, stati, importazione, gomma, appiattimento) sono annullabili e ripetibili con Ctrl+Z e Ctrl+Y / Ctrl+Maiusc+Z e dal menu Modifica, che nomina l'operazione (es. "Annulla Sposta rettangolo"). La cronologia è per documento, condivisa con le altre aree di modifica, con almeno 100 livelli.
+**Descrizione:** Tutte le operazioni sulle annotazioni (creazione, eliminazione, geometria, proprietà, testo, risposte, stati, importazione, gomma, appiattimento) sono annullabili e ripetibili con Ctrl+Z e Ctrl+Y / Ctrl+Maiusc+Z e dal menu Modifica, che nomina l'operazione (es. "Annulla Sposta rettangolo"). Segue NFR-11, requisito di riferimento per l'annullamento (0.6): la cronologia è per documento, condivisa con le altre aree di modifica, di almeno 100 passi e, oltre, quanti ne consente la memoria; sopravvive al salvataggio.
 
 **Flusso:** 1. L'utente esegue un'operazione: la cronologia registra un passo. 2. Annulla ripristina lo stato precedente e porta in vista la pagina interessata. 3. Ripeti riapplica il passo. 4. Una nuova operazione eseguita dopo uno o più Annulla elimina i passi ripetibili.
 
 **Formati/strutture:** nessuna struttura nel file; la cronologia è in memoria e si azzera alla chiusura del documento.
 
-**Casi limite:** digitazione in un campo di testo → Ctrl+Z agisce prima sul testo in modifica, poi l'intera sessione di scrittura vale un solo passo; operazioni di massa (importazione di 500 commenti, eliminazione multipla, appiattimento) → un solo passo; Annulla dopo il salvataggio → consentito, il documento torna "modificato"; superamento del limite di livelli → i passi più vecchi sono scartati.
+**Casi limite:** digitazione in un campo di testo → Ctrl+Z agisce prima sul testo in modifica, poi l'intera sessione di scrittura vale un solo passo; operazioni di massa (importazione di 500 commenti, eliminazione multipla, appiattimento) → un solo passo; Annulla dopo il salvataggio → consentito, il documento torna "modificato"; memoria insufficiente → sono scartati solo i passi più vecchi oltre il centesimo (NFR-11).
 
 **Criteri di accettazione:**
 - Dato la sequenza "crea rettangolo → cambia colore → sposta", quando l'utente esegue tre Annulla, allora la pagina non contiene il rettangolo; quando poi esegue tre Ripeti, allora il rettangolo ha colore e posizione finali.
@@ -3787,7 +3913,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-07 — Copia, taglia, incolla e duplica
 
-**Descrizione:** Le annotazioni selezionate si copiano, tagliano e incollano nella stessa pagina (con scostamento), in un'altra pagina (stessa posizione relativa) o in un altro documento aperto; Ctrl+trascinamento o Ctrl+D le duplicano. Copia+incolla crea annotazioni nuove dell'utente corrente; taglia+incolla è uno spostamento e conserva identità, autore, date e risposte. In modalità commento, incollare testo semplice dagli appunti di sistema crea un commento di testo (ANN-15), incollare un'immagine crea un timbro immagine. La copia espone anche il testo dei commenti agli altri programmi.
+**Descrizione:** Le annotazioni selezionate si copiano, tagliano e incollano nella stessa pagina (con scostamento), in un'altra pagina (stessa posizione relativa) o in un altro documento aperto; Ctrl+trascinamento o **Duplica** (menu contestuale, senza scorciatoia, UX-18) le duplicano. Copia+incolla crea annotazioni nuove dell'utente corrente; taglia+incolla è uno spostamento e conserva identità, autore, date e risposte. In modalità commento, incollare testo semplice dagli appunti di sistema crea un commento di testo (ANN-15), incollare un'immagine crea un timbro immagine. La copia espone anche il testo dei commenti agli altri programmi.
 
 **Flusso:** 1. Selezionare e copiare (Ctrl+C) o tagliare (Ctrl+X). 2. Spostarsi sulla pagina o sul documento di destinazione. 3. Incollare (Ctrl+V): nella posizione del puntatore se è sulla pagina, altrimenti nella stessa posizione relativa. 4. L'incolla è un passo annullabile.
 
@@ -3846,14 +3972,14 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Formati/strutture:** `/Subtype /Highlight`; `/QuadPoints` con un quadrilatero per riga (o segmento di riga), scritti nell'ordine dei vertici più interoperabile (superiore sinistro, superiore destro, inferiore sinistro, inferiore destro rispetto alla direzione del testo) e letti in modo tollerante anche nell'ordinamento antiorario descritto dalla norma; `/Rect` = ingombro dei quadrilateri; `/C`, `/CA`; aspetto con fusione moltiplicativa (`/BM /Multiply`); il testo marcato non è duplicato nel file ma ricavato dai quadrilateri quando serve (pannello, riepilogo, esportazione).
 
-**Casi limite:** pagina senza testo estraibile (scansione) → lo strumento passa all'evidenziazione ad area (ANN-11) con avviso che suggerisce l'OCR; testo ruotato o verticale → quadrilateri allineati alla linea di base; spaziatura irregolare o legature → parola coperta per intero; selezione su più colonne → quadrilateri solo sul testo selezionato, secondo l'ordine di lettura; nuova evidenziazione sopra una esistente → annotazione distinta; testo da destra a sinistra → quadrilateri corretti.
+**Casi limite:** pagina senza testo estraibile (scansione) → nessuna annotazione creata e un avviso spiega che la pagina non contiene testo e suggerisce **Esegui OCR**; quando l'evidenziazione ad area (ANN-11, P1) è disponibile, l'avviso propone anche di usarla; testo ruotato o verticale → quadrilateri allineati alla linea di base; spaziatura irregolare o legature → parola coperta per intero; selezione su più colonne → quadrilateri solo sul testo selezionato, secondo l'ordine di lettura; nuova evidenziazione sopra una esistente → annotazione distinta; testo da destra a sinistra → quadrilateri corretti.
 
 **Criteri di accettazione:**
 - Dato una riga contenente "Lorem ipsum", quando l'utente la evidenzia in giallo, salva e riapre, allora la pagina contiene un `/Highlight` con 8 valori in `/QuadPoints` che racchiudono i glifi della frase (tolleranza 1 pt) e `/C` [1 1 0].
 - Dato un paragrafo di tre righe, quando l'utente lo evidenzia, allora `/QuadPoints` contiene tre quadrilateri (24 valori).
 - Dato una selezione che inizia a fine pagina 2 e termina a inizio pagina 3, quando l'utente evidenzia, allora le pagine 2 e 3 contengono ciascuna un `/Highlight` e la concatenazione dei testi ricavati dai loro quadrilateri è uguale al testo selezionato.
 - Dato un'evidenziazione su testo nero, quando la pagina viene resa, allora i pixel dei glifi restano scuri quanto senza evidenziazione (tolleranza 10% di luminanza).
-- Dato una pagina composta solo da un'immagine, quando l'utente trascina con l'evidenziatore, allora viene creata un'evidenziazione ad area e compare l'avviso sull'OCR.
+- Dato una pagina composta solo da un'immagine, quando l'utente trascina con l'evidenziatore, allora non viene creata alcuna annotazione e compare l'avviso che suggerisce **Esegui OCR**; con ANN-11 disponibile l'avviso propone anche l'evidenziazione ad area (P1).
 
 **Priorità:** P0
 
@@ -3963,20 +4089,20 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Priorità:** P0
 
-### ANN-17 — Callout
+### ANN-17 — Richiamo
 
 **Descrizione:** Casella di testo collegata a un punto della pagina da una linea di richiamo, con gomito facoltativo e punta finale (freccia aperta per impostazione predefinita). Punta, gomito e casella si spostano indipendentemente; le proprietà del testo sono quelle di ANN-16.
 
-**Flusso:** 1. Attivare lo strumento callout. 2. Clic sul punto da indicare (punta). 3. Trascinare fino alla posizione della casella. 4. Digitare il testo e confermare.
+**Flusso:** 1. Attivare lo strumento **Richiamo**. 2. Clic sul punto da indicare (punta). 3. Trascinare fino alla posizione della casella. 4. Digitare il testo e confermare.
 
 **Formati/strutture:** `/Subtype /FreeText` con `/IT /FreeTextCallout`, `/CL` (4 o 6 numeri: punta, gomito, attacco), `/LE` per la punta, `/RD` (scostamento tra `/Rect` e la casella), `/BS`, `/DA`, `/DS`, `/RC`; `/Rect` racchiude casella, linea e punta.
 
-**Casi limite:** punta trascinata dentro la casella → linea non disegnata; callout di terze parti con `/CL` di 4 valori → linea senza gomito, modificabile; estremità "nessuna" → linea senza punta; ridimensionamento della casella → `/CL` e `/RD` ricalcolati.
+**Casi limite:** punta trascinata dentro la casella → linea non disegnata; richiami creati da altri programmi con `/CL` di 4 valori → linea senza gomito, modificabile; estremità "nessuna" → linea senza punta; ridimensionamento della casella → `/CL` e `/RD` ricalcolati.
 
 **Criteri di accettazione:**
-- Dato un callout con punta in (100,100) e casella da (200,200) a (350,260), quando l'utente salva, allora la pagina contiene un `/FreeText` con `/IT /FreeTextCallout`, `/CL` che inizia con 100 100, `/LE /OpenArrow` e `/Rect` che contiene punta e casella.
-- Dato un callout, quando l'utente sposta solo la punta, allora la casella non cambia posizione e cambiano solo i primi due valori di `/CL`.
-- Dato un file esterno con un callout il cui `/CL` ha 4 valori, quando viene aperto, allora la linea è visualizzata e la casella è modificabile.
+- Dato un richiamo con punta in (100,100) e casella da (200,200) a (350,260), quando l'utente salva, allora la pagina contiene un `/FreeText` con `/IT /FreeTextCallout`, `/CL` che inizia con 100 100, `/LE /OpenArrow` e `/Rect` che contiene punta e casella.
+- Dato un richiamo, quando l'utente sposta solo la punta, allora la casella non cambia posizione e cambiano solo i primi due valori di `/CL`.
+- Dato un file esterno con un richiamo il cui `/CL` ha 4 valori, quando viene aperto, allora la linea è visualizzata e la casella è modificabile.
 
 **Priorità:** P1
 
@@ -4120,13 +4246,13 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-26 — Timbri personalizzati e libreria timbri
 
-**Descrizione:** Creazione di timbri da immagine (PNG con trasparenza, JPEG, BMP, GIF, TIFF), da una pagina di un PDF (grafica vettoriale), da un'area selezionata del documento (istantanea) o da testo con stile; opzione per rendere trasparente uno sfondo uniforme. Libreria con categorie (Standard, Dinamici, Personalizzati, Preferiti, Recenti), ricerca, rinomina, riordino, eliminazione, esportazione e importazione.
+**Descrizione:** Creazione di timbri da immagine (PNG con trasparenza, JPEG, BMP, GIF, TIFF), da una pagina di un PDF (grafica vettoriale), da un'area selezionata del documento (cattura area, VIS-29) o da testo con stile; opzione per rendere trasparente uno sfondo uniforme. Libreria con categorie (Standard, Dinamici, Personalizzati, Preferiti, Recenti), ricerca, rinomina, riordino, eliminazione, esportazione e importazione.
 
 **Flusso:** 1. "Crea timbro" → scelta della sorgente (file immagine, PDF, area, testo). 2. Anteprima, ritaglio, nome e categoria. 3. Salvataggio in libreria. 4. Apposizione come per i timbri predefiniti.
 
-**Formati/strutture:** `/Stamp` con `/AP` Form XObject contenente un'immagine (con `/SMask` per la trasparenza) o il contenuto vettoriale della pagina sorgente; `/IT /StampImage` per le immagini e `/IT /StampSnapshot` per le istantanee (PDF 2.0); libreria nel profilo utente in formato documentato, esportabile come file unico.
+**Formati/strutture:** `/Stamp` con `/AP` Form XObject contenente un'immagine (con `/SMask` per la trasparenza) o il contenuto vettoriale della pagina sorgente; `/IT /StampImage` per le immagini e `/IT /StampSnapshot` per le catture d'area (PDF 2.0); libreria nel profilo utente in formato documentato, esportabile come file unico.
 
-**Casi limite:** immagine molto grande → ricampionata a una risoluzione massima configurabile (predefinita 300 ppi alla dimensione di apposizione) con avviso; file non supportato o corrotto → errore chiaro, libreria invariata; PDF sorgente con più pagine → scelta della pagina; istantanea di un'area con annotazioni → incluse solo se l'utente lo sceglie.
+**Casi limite:** immagine molto grande → ricampionata a una risoluzione massima configurabile (predefinita 300 ppi alla dimensione di apposizione) con avviso; file non supportato o corrotto → errore chiaro, libreria invariata; PDF sorgente con più pagine → scelta della pagina; cattura di un'area con annotazioni → incluse solo se l'utente lo sceglie.
 
 **Criteri di accettazione:**
 - Dato un PNG 400×200 con sfondo trasparente, quando l'utente crea un timbro e lo appone, allora la pagina contiene uno `/Stamp` il cui aspetto contiene un'immagine con `/SMask` e, nel rendering, le aree trasparenti mostrano il contenuto sottostante.
@@ -4150,40 +4276,41 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Dato l'adesivo "spunta verde" apposto e il file aperto su un sistema privo di caratteri emoji, quando la pagina viene resa, allora il risultato è conforme all'immagine di riferimento.
 - Dato un adesivo apposto, quando l'utente salva, allora la pagina contiene uno `/Stamp` con `/AP /N` non vuoto e `/Subj` "Adesivo" e il pannello commenti lo elenca con tipo "Adesivo".
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### ANN-28 — Generazione di adesivi e timbri con IA
 
-**Descrizione:** L'utente descrive a parole l'adesivo o il timbro desiderato (es. "timbro rotondo blu con la scritta Verificato"), sceglie uno stile e riceve alcune proposte grafiche da un servizio di generazione configurato; può rigenerare, scegliere, apporre e salvare in libreria. Richiede connessione e consenso esplicito; è disattivabile dalle preferenze e da criterio amministrativo; al servizio sono inviati solo il testo della richiesta e i parametri di stile, mai il contenuto del documento.
+**Descrizione:** L'utente descrive a parole l'adesivo o il timbro desiderato (es. "timbro rotondo blu con la scritta Verificato"), sceglie uno stile e riceve alcune proposte grafiche dalla generazione di immagini di AI-25, requisito di riferimento (0.6), con il fornitore configurato in AI-01; può rigenerare, scegliere, apporre e salvare in libreria. Richiede un fornitore che generi immagini; informativa e dati inviati seguono AI-02; l'interruttore «Funzioni IA» (AI-01) nasconde il comando. Al fornitore sono inviati solo il testo della richiesta e i parametri di stile, mai il contenuto del documento.
 
-**Flusso:** 1. "Genera con IA" dalla tavolozza adesivi o timbri. 2. Al primo uso, informativa e richiesta di consenso. 3. Inserimento di descrizione e stile; invio. 4. Visualizzazione delle proposte; scelta, apposizione ed eventuale salvataggio in libreria.
+**Flusso:** 1. "Genera con IA" dalla tavolozza adesivi o timbri. 2. Al primo uso del profilo, informativa (AI-02). 3. Inserimento di descrizione e stile; invio. 4. Visualizzazione delle proposte; scelta, apposizione ed eventuale salvataggio in libreria.
 
-**Formati/strutture:** immagine raster con trasparenza o grafica vettoriale restituita dal servizio, convertita in `/Stamp` (`/IT /StampImage` per le immagini); la voce di libreria registra l'origine "generato con IA".
+**Formati/strutture:** immagine raster con trasparenza o grafica vettoriale restituita dal fornitore, convertita in `/Stamp` (`/IT /StampImage` per le immagini); la voce di libreria registra l'origine "generato con IA".
 
-**Casi limite:** rete assente o servizio non configurato → funzione segnalata come non disponibile, tutti gli altri strumenti restano utilizzabili; richiesta rifiutata dal servizio → messaggio comprensibile; risposta oltre 60 s → operazione annullabile, nessuna annotazione creata; risposta non valida → scartata con errore.
+**Casi limite:** nessun fornitore che generi immagini, oppure rete assente → funzione segnalata come non disponibile (AI-25, AI-16), tutti gli altri strumenti restano utilizzabili; richiesta rifiutata dal fornitore → messaggio comprensibile (AI-16); risposta oltre 60 s → operazione annullabile (AI-17), nessuna annotazione creata; risposta non valida → scartata con errore.
 
 **Criteri di accettazione:**
-- Dato il servizio non raggiungibile, quando l'utente apre il generatore, allora compare un messaggio di indisponibilità e gli strumenti timbro e adesivo restano utilizzabili.
-- Dato il consenso non ancora espresso, quando l'utente avvia la prima generazione, allora il consenso è richiesto prima di qualsiasi trasmissione e, verificando con un servizio di prova, la richiesta contiene solo descrizione e parametri di stile.
+- Dato il fornitore non raggiungibile, quando l'utente avvia la generazione, allora compare un messaggio di indisponibilità e gli strumenti timbro e adesivo restano utilizzabili.
+- Dato un profilo la cui informativa non è stata accettata, quando l'utente avvia la prima generazione, allora l'informativa compare prima di qualsiasi trasmissione e, con il fornitore simulato (sezione 12), la richiesta contiene solo descrizione e parametri di stile.
 - Dato una proposta scelta, quando l'utente la appone e salva, allora la pagina contiene uno `/Stamp` con l'immagine generata nell'aspetto e la proposta è salvabile in libreria.
+- Dato l'interruttore «Funzioni IA» disattivato (AI-01), quando l'utente apre la tavolozza dei timbri, allora «Genera con IA» non è visibile e non parte alcuna richiesta di rete.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### ANN-29 — File allegato come annotazione
 
-**Descrizione:** Con lo strumento allegato l'utente fa clic su un punto della pagina e sceglie un file (oppure lo trascina dal gestore file sulla pagina in modalità commento), un'icona (puntina, graffetta, grafico, etichetta) e una descrizione. Il doppio clic apre il file con l'applicazione predefinita previa conferma; "Salva allegato con nome" lo estrae. L'allegato compare nel pannello commenti e nell'elenco allegati del documento.
+**Descrizione:** Con lo strumento allegato l'utente fa clic su un punto della pagina e sceglie un file (oppure lo trascina dal gestore file sulla pagina in modalità commento), un'icona (puntina, graffetta, grafico, etichetta) e una descrizione. Il doppio clic apre il file: un PDF in una nuova scheda, un altro file con l'applicazione predefinita dopo la finestra di conferma di VIS-19; "Salva allegato con nome" lo estrae. L'allegato compare nel pannello commenti e nella scheda Allegati (VIS-22); le regole di apertura, salvataggio e conformità sono quelle di VIS-54, requisito di riferimento per gli allegati (0.6).
 
 **Flusso:** 1. Attivare lo strumento e fare clic sulla pagina. 2. Scegliere il file. 3. Impostare icona, colore e descrizione. 4. Salvare il documento per incorporare il file.
 
 **Formati/strutture:** `/Subtype /FileAttachment` con `/FS` (specifica di file: `/F` e `/UF` in UTF-16, `/Desc`, `/EF /F` flusso `/Type /EmbeddedFile` con `/Subtype` tipo MIME e `/Params` con `/Size`, `/CreationDate`, `/ModDate`, `/CheckSum`), `/Name` (PushPin, Paperclip, Graph, Tag), `/Contents`; `/AF` e `/AFRelationship` quando richiesti dal profilo (PDF/A-3, PDF 2.0).
 
-**Casi limite:** file oltre 100 MB → avviso sull'aumento di dimensione, operazione consentita; file eseguibile o script → apertura diretta bloccata, solo salvataggio; PDF/A-1 → allegati vietati, operazione impedita con spiegazione; PDF/A-2 → ammessi solo file PDF/A; PDF/A-3 → ammessi con relazione dichiarata; modifica successiva del file originale sul disco → nessun effetto (l'allegato è una copia); nome con caratteri non latini → conservato.
+**Casi limite:** file oltre 100 MB → avviso sull'aumento di dimensione, operazione consentita; file eseguibile o script → apertura sempre bloccata, solo salvataggio (NFR-18); PDF/A-1, oppure PDF/A-2 con un file che non è PDF/A → avviso che il documento perderà la conformità dichiarata, con possibilità di annullare, e al salvataggio la scelta di NFR-29; PDF/A-3 → ammessi con relazione dichiarata; modifica successiva del file originale sul disco → nessun effetto (l'allegato è una copia); nome con caratteri non latini → conservato.
 
 **Criteri di accettazione:**
 - Dato il file "verbale.docx" allegato in (100,700), quando l'utente salva e riapre, allora la pagina contiene un `/FileAttachment` con `/FS /UF` "verbale.docx", `/Params /Size` uguale alla dimensione del file e un flusso incorporato con hash identico all'originale.
 - Dato un allegato, quando l'utente sceglie "Salva allegato con nome", allora il file salvato è identico byte per byte all'originale.
 - Dato un allegato "script.sh", quando l'utente vi fa doppio clic, allora il file non viene eseguito e viene proposto solo il salvataggio.
-- Dato un documento PDF/A-1b, quando l'utente tenta di allegare un file, allora l'operazione è impedita con un messaggio che spiega il vincolo del profilo.
+- Dato un documento PDF/A-1b, quando l'utente tenta di allegare un file, allora compare l'avviso che il documento perderà la conformità PDF/A-1b, con la possibilità di annullare.
 
 **Priorità:** P1
 
@@ -4258,20 +4385,21 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-34 — Pannello elenco commenti
 
-**Descrizione:** Pannello laterale con tutte le annotazioni del documento (esclusi collegamenti, campi modulo e popup), raggruppate per pagina. Ogni voce mostra icona del tipo, autore, data e ora di modifica, anteprima del commento, testo marcato per i markup testuali, valore per le misure, stato e numero di risposte. Clic su una voce → vista sulla pagina e selezione dell'annotazione; selezione in pagina → voce evidenziata. Modifica del commento direttamente nella voce, menu contestuale (rispondi, imposta stato, proprietà, copia testo, elimina), selezione multipla, comprimi/espandi tutto, comandi successivo/precedente, contatore totale, "Elimina tutti" con conferma, navigazione completa da tastiera.
+**Descrizione:** Pannello laterale con tutte le annotazioni del documento (esclusi collegamenti, campi modulo e popup), raggruppate per pagina. Ogni voce mostra icona del tipo, autore, data e ora di modifica, anteprima del commento, testo marcato per i markup testuali, valore per le misure, stato e numero di risposte. Clic su una voce → vista sulla pagina e selezione dell'annotazione; selezione in pagina → voce evidenziata. Modifica del commento direttamente nella voce, menu contestuale (rispondi, imposta stato, proprietà, copia testo, elimina), selezione multipla, comprimi/espandi tutto, comandi successivo/precedente, contatore totale, "Elimina tutti" senza conferma ma annullabile con l'avviso di UX-13, navigazione completa da tastiera.
 
 **Flusso:** 1. Aprire il pannello Commenti. 2. Scorrere o navigare con le frecce. 3. Clic o Invio su una voce per raggiungere l'annotazione. 4. Agire dal menu contestuale.
 
 **Formati/strutture:** lettura delle `/Annots` di tutte le pagine; esclusi `/Link`, `/Widget`, `/Popup` e le annotazioni di stato; risposte (`/IRT`) annidate sotto la voce principale; nessuna scrittura nel file oltre alle modifiche esplicite.
 
-**Casi limite:** 10.000 annotazioni → elenco virtualizzato, prima schermata entro 2 s, scorrimento fluido; pagine non ancora rese → annotazioni comunque elencate; annotazione senza autore → "(autore sconosciuto)"; senza data → in coda nell'ordinamento per data; testo lungo → anteprima su 3 righe con "mostra tutto"; annotazione nascosta (flag Hidden) → elencata con indicatore.
+**Casi limite:** 10.000 annotazioni → elenco virtualizzato, prima schermata entro 2 s, scorrimento fluido (NFR-04); pagine non ancora rese → annotazioni comunque elencate; annotazione senza autore → "(autore sconosciuto)"; senza data → in coda nell'ordinamento per data; testo lungo → anteprima su 3 righe con "mostra tutto"; annotazione nascosta (flag Hidden) → elencata con indicatore.
 
 **Criteri di accettazione:**
 - Dato un documento con 3 evidenziazioni a pagina 1 e 2 note a pagina 4, quando l'utente apre il pannello, allora sono elencate 5 voci in due gruppi, "Pagina 1" con 3 voci e "Pagina 4" con 2, ciascuna con autore e data.
 - Dato una voce del pannello, quando l'utente vi fa clic, allora la vista mostra la pagina dell'annotazione e l'annotazione risulta selezionata.
 - Dato un'annotazione selezionata in pagina, quando la selezione cambia, allora la voce corrispondente è evidenziata e portata in vista nel pannello.
 - Dato un documento con collegamenti e campi modulo, quando l'utente apre il pannello, allora essi non sono elencati.
-- Dato un documento con 10.000 annotazioni, quando l'utente apre il pannello, allora la prima schermata dell'elenco compare entro 2 s sulla configurazione di riferimento.
+- Dato un documento con 10.000 annotazioni, quando l'utente apre il pannello, allora la prima schermata dell'elenco compare entro 2 s su MR.
+- Dato "Elimina tutti" su 25 commenti, quando l'utente lo sceglie, allora non compare alcuna conferma, il pannello è vuoto e **Annulla** nell'avviso li ripristina tutti.
 
 **Priorità:** P0
 
@@ -4312,7 +4440,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-37 — Risposte ai commenti
 
-**Descrizione:** Risposta a qualsiasi annotazione di markup dal pannello o dalla popup; il thread mostra le risposte in ordine cronologico con autore e data, comprese le risposte a una risposta (con indicazione "in risposta a"). Le proprie risposte, e quelle altrui non bloccate, si modificano ed eliminano; eliminare un commento principale elimina, previa conferma, l'intero thread.
+**Descrizione:** Risposta a qualsiasi annotazione di markup dal pannello o dalla popup; il thread mostra le risposte in ordine cronologico con autore e data, comprese le risposte a una risposta (con indicazione "in risposta a"). Le proprie risposte, e quelle altrui non bloccate, si modificano ed eliminano; eliminare un commento principale elimina l'intero thread senza conferma: l'avviso di UX-13 indica il numero di risposte eliminate e offre **Annulla**.
 
 **Flusso:** 1. "Rispondi" sulla voce o nella popup. 2. Digitare il testo e confermare con Invio (Maiusc+Invio per andare a capo). 3. La risposta compare in fondo al thread.
 
@@ -4322,7 +4450,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Criteri di accettazione:**
 - Dato un'evidenziazione, quando l'utente risponde "D'accordo" e salva, allora la stessa pagina contiene un `/Text` con `/IRT` riferito all'evidenziazione, `/Contents` "D'accordo" e `/T` uguale all'autore corrente.
-- Dato un thread con 3 risposte, quando l'utente elimina il commento principale, conferma e salva, allora né il commento né le 3 risposte sono presenti.
+- Dato un thread con 3 risposte, quando l'utente elimina il commento principale e salva, allora non è stata chiesta alcuna conferma e né il commento né le 3 risposte sono presenti.
 - Dato un file con una catena ciclica di `/IRT`, quando viene aperto, allora l'apertura riesce e tutte le annotazioni coinvolte sono elencate.
 - Dato risposte create in momenti diversi, quando il thread viene mostrato, allora le risposte sono in ordine crescente di `/CreationDate`.
 
@@ -4365,20 +4493,21 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-40 — Appiattimento delle annotazioni
 
-**Descrizione:** Fonde l'aspetto delle annotazioni nel contenuto della pagina, rendendole parte fissa del documento. Ambito: tutto il documento, pagina corrente, intervallo, selezione o annotazioni filtrate per tipo. Opzioni: escludere i collegamenti, includere o meno le annotazioni non stampabili (predefinito: non appiattite e lasciate come annotazioni), eliminare popup e risposte; salvataggio sul documento o come copia.
+**Descrizione:** Fonde l'aspetto delle annotazioni nel contenuto della pagina, rendendole parte fissa del documento. Ambito: tutto il documento, pagina corrente, intervallo, selezione o annotazioni filtrate per tipo. Opzioni: escludere i collegamenti (predefinito); annotazioni nascoste o non stampabili: **lascia come annotazioni** (predefinito) oppure **elimina**; salvataggio sul documento o come copia. Popup e risposte delle annotazioni appiattite sono sempre rimossi. È il requisito di riferimento per l'appiattimento delle annotazioni (0.6): l'appiattimento generale (SEC-24) e CNV-33 ne applicano le regole; i campi modulo seguono FRM-32.
 
-**Flusso:** 1. "Appiattisci annotazioni" dal menu Commenti o dal menu contestuale della selezione. 2. Scelta di ambito e opzioni, con avviso di irreversibilità dopo il salvataggio. 3. Esecuzione con indicatore di avanzamento. 4. L'operazione è annullabile finché il documento resta aperto.
+**Flusso:** 1. "Appiattisci annotazioni" dal menu Commenti o dal menu contestuale della selezione. 2. Scelta di ambito e opzioni; la conferma di UX-13 (es. «Appiattire 12 annotazioni?») spiega che, una volta salvato il file, l'operazione è definitiva. 3. Esecuzione con indicatore di avanzamento (UX-12). 4. L'operazione è un solo passo annullabile nella sessione, anche dopo il salvataggio (NFR-11); nel file salvato è definitiva, perché il salvataggio è una riscrittura completa (NFR-09).
 
-**Formati/strutture:** per ogni annotazione, `/AP /N` inserito nel contenuto della pagina come Form XObject con la trasformazione derivata da `/Rect`, `/BBox` e `/Matrix` secondo ISO 32000-2 §12.5.5; rimozione da `/Annots` dell'annotazione, della sua popup e delle risposte; aggiornamento della struttura logica nei documenti taggati; i file incorporati degli allegati appiattiti sono rimossi, con avviso.
+**Formati/strutture:** per ogni annotazione, `/AP /N` inserito nel contenuto della pagina come Form XObject con la trasformazione derivata da `/Rect`, `/BBox` e `/Matrix` secondo ISO 32000-2 §12.5.5; rimozione da `/Annots` dell'annotazione, della sua popup e delle risposte; aggiornamento della struttura logica nei documenti taggati (contenuto fuso collegato alla struttura o marcato come artefatto); i file incorporati degli allegati appiattiti sono rimossi, con avviso. *Tolleranza dell'appiattimento*, usata anche da FRM-32, SEC-24 e CNV-33: rendering a 150 dpi con al massimo lo 0,5 % dei pixel che differiscono di oltre 8/255 in almeno un canale.
 
-**Casi limite:** annotazione senza `/AP` → aspetto generato prima dell'appiattimento; pagina ruotata → posizione e orientamento conservati; documento firmato → avviso che l'operazione invalida le firme e proposta di salvare una copia; testo di caselle e commenti di testo → resta testo reale, ricercabile ed estraibile; annotazioni nascoste o non stampabili → non appiattite salvo scelta esplicita; misure → il valore resta visibile come testo.
+**Casi limite:** annotazione senza `/AP` → aspetto generato prima dell'appiattimento; pagina ruotata → posizione e orientamento conservati; annotazioni NoZoom o NoRotate → fuse come appaiono a zoom 100% nell'orientamento corrente; documento firmato → avviso che l'operazione invalida le firme e proposta di salvare una copia (NFR-09); campi firma e altri widget → regole di FRM-32; testo di caselle e commenti di testo → resta testo reale, ricercabile ed estraibile; note (`/Text`) → si fonde l'icona e il testo della nota si perde, con avviso; annotazioni nascoste o non stampabili → mai fuse: lasciate come annotazioni o eliminate secondo l'opzione; misure → il valore resta visibile come testo; permesso di modifica negato → funzione non disponibile.
 
 **Criteri di accettazione:**
-- Dato una pagina con 5 annotazioni di tipi diversi, quando l'utente appiattisce tutto e salva, allora la pagina non ha più annotazioni (salvo i collegamenti esclusi) e il suo rendering coincide con quello precedente l'appiattimento (confronto pixel con tolleranza di antialiasing).
+- Dato una pagina con 5 annotazioni di tipi diversi, quando l'utente appiattisce tutto e salva, allora la pagina non ha più annotazioni (salvo i collegamenti esclusi) e il suo rendering coincide con quello precedente l'appiattimento entro la tolleranza dell'appiattimento.
 - Dato una casella di testo "Totale 100", quando viene appiattita, allora l'estrazione del testo della pagina contiene "Totale 100".
 - Dato una selezione di 2 annotazioni su 4, quando l'utente appiattisce la selezione, allora le altre 2 restano annotazioni modificabili.
 - Dato un'annotazione con il flag Print disattivato, quando l'utente appiattisce con le opzioni predefinite, allora essa non compare nel contenuto della pagina e resta come annotazione.
-- Dato un appiattimento appena eseguito, quando l'utente esegue Annulla, allora tutte le annotazioni tornano modificabili.
+- Dato un'annotazione con il flag Hidden e l'opzione **elimina**, quando l'utente appiattisce e salva, allora l'annotazione non compare nel rendering e non è più presente nel file.
+- Dato un appiattimento eseguito e il documento salvato, quando l'utente esegue Annulla, allora tutte le annotazioni tornano modificabili e il documento risulta modificato (NFR-11).
 
 **Priorità:** P1
 
@@ -4439,7 +4568,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### ANN-44 — Controllo ortografico nei commenti
 
-**Descrizione:** Durante la scrittura in note, caselle di testo, callout, commenti di testo e risposte, le parole non riconosciute sono sottolineate; il menu contestuale propone correzioni, "Aggiungi al dizionario" e "Ignora". Lingua predefinita = lingua dell'interfaccia, modificabile per singolo testo; più dizionari installabili; funzione disattivabile.
+**Descrizione:** Durante la scrittura in note, caselle di testo, richiami, commenti di testo e risposte, le parole non riconosciute sono sottolineate; il menu contestuale propone correzioni, "Aggiungi al dizionario" e "Ignora". Lingua predefinita = lingua dell'interfaccia, modificabile per singolo testo; più dizionari installabili; funzione disattivabile.
 
 **Flusso:** 1. L'utente scrive in un campo di commento. 2. Le parole sconosciute sono sottolineate in tempo reale. 3. Clic destro → scelta della correzione o dell'azione.
 
@@ -4457,7 +4586,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ## 6. Conversione, creazione e ottimizzazione
 
-*Convenzioni.* Le conversioni da PDF (CNV-03…CNV-15) ereditano opzioni e casi limite comuni da CNV-01 e la gestione delle scansioni da CNV-02. Termini usati nei criteri: *fixture* = file di prova versionato nel corpus di test, con risultato atteso documentato; *similarità testuale* = 1 − distanza di edit normalizzata sulla sequenza di parole, dopo normalizzazione Unicode NFC, espansione delle legature e compattazione degli spazi; *accuratezza per carattere* = 1 − distanza di edit sui caratteri divisa per la lunghezza del testo di riferimento; *differenza visiva* = percentuale di pixel che differiscono di oltre 8/255 in almeno un canale tra due rendering a 100 dpi; *validatore indipendente* = strumento di verifica conforme alla norma citata e distinto dal motore di Foliant; *hardware di riferimento* = configurazione fissata nel piano di test.
+*Convenzioni.* Le conversioni da PDF (CNV-03…CNV-15) ereditano opzioni e casi limite comuni da CNV-01 e la gestione delle scansioni da CNV-02. Termini usati nei criteri: *fixture* = file di prova che si aggiunge al corpus di 0.4, con risultato atteso documentato; *similarità testuale* = 1 − distanza di edit normalizzata sulla sequenza di parole, dopo normalizzazione Unicode NFC, espansione delle legature e compattazione degli spazi; *accuratezza per carattere* = 1 − distanza di edit sui caratteri divisa per la lunghezza del testo di riferimento; *differenza visiva* = percentuale di pixel che differiscono di oltre 8/255 in almeno un canale tra due rendering a 100 dpi; *validatore indipendente* = strumento di verifica conforme alla norma citata e distinto dal motore di Foliant. Macchina di riferimento (MR), corpus e condizioni di misura sono quelli di 0.4; dove un criterio misura la stessa grandezza di un NFR vale la soglia di 0.4.
 
 ### CNV-01 — Esporta come: finestra di conversione e opzioni comuni
 
@@ -4467,7 +4596,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Formati/strutture:** Ingresso PDF 1.0–2.0, inclusi PDF/A, file linearizzati e con aggiornamenti incrementali. Il documento aperto è convertito nello stato in memoria (modifiche non salvate comprese) senza alterare il file su disco. "Fedele": una pagina di uscita per ogni pagina, posizioni preservate; "scorrevole": paragrafi, titoli, elenchi e tabelle ricostruiti in ordine di lettura, preso dalla struttura logica (`/StructTreeRoot`) se presente, altrimenti dall'analisi geometrica; la scelta vale per DOCX, RTF, HTML, EPUB e TXT. Livelli (`/OCProperties`) nello stato di visibilità corrente. Le ultime opzioni sono ricordate per formato e salvabili come preset.
 
-**Casi limite:** PDF cifrato → richiesta della password di apertura; se `/P` vieta l'estrazione del contenuto serve la password proprietario, altrimenti la conversione è bloccata indicando il permesso mancante; intervallo non valido → errore in linea e nessun avvio; JavaScript del documento → mai eseguito; file enormi (> 1 GB o > 5 000 pagine) → elaborazione pagina per pagina a memoria limitata e scrittura su file temporaneo rinominato solo a fine lavoro, così annullamenti o crash non lasciano file parziali; spazio su disco insufficiente → interruzione con messaggio e pulizia dei temporanei; portfolio PDF → scelta tra documento di copertina e singoli PDF incorporati; allegati → non convertiti, elencati nel report; PDF firmato → il report avverte che le firme non sono trasferibili nel formato di uscita.
+**Casi limite:** PDF cifrato → richiesta della password di apertura; se `/P` vieta l'estrazione del contenuto serve la password proprietario, altrimenti la conversione è bloccata indicando il permesso mancante; intervallo non valido → errore in linea e nessun avvio; script del documento → mai eseguiti (NFR-17); file enormi (> 1 GB o > 5 000 pagine) → elaborazione pagina per pagina a memoria limitata e scrittura su file temporaneo rinominato solo a fine lavoro, così annullamenti o crash non lasciano file parziali; spazio su disco insufficiente → interruzione con messaggio e pulizia dei temporanei; portfolio PDF → scelta tra documento di copertina e singoli PDF incorporati; allegati → non convertiti, elencati nel report; PDF firmato → il report avverte che le firme non sono trasferibili nel formato di uscita.
 
 **Criteri di accettazione:**
 - Dato un PDF di 20 pagine, quando si imposta l'intervallo `2-4, 10` e si esporta in TXT, allora il file contiene solo il testo delle pagine 2, 3, 4 e 10, in quest'ordine.
@@ -4475,7 +4604,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Data una conversione in corso, quando l'utente preme Annulla, allora entro 2 s l'elaborazione si ferma e nella cartella di destinazione non resta alcun file nuovo né temporaneo.
 - Dato un file di destinazione già esistente e la politica "rinomina", quando si converte, allora il risultato viene salvato con suffisso ` (1)` e il file esistente resta byte-identico.
 - Dato un PDF con estrazione vietata e password proprietario non fornita, quando si sceglie DOCX, allora la conversione è bloccata con un messaggio che nomina il permesso mancante.
-- Dato un PDF di 5 000 pagine su hardware di riferimento, quando lo si converte in TXT, allora il picco di memoria del processo resta sotto 1 GB e l'interfaccia risponde agli input entro 200 ms per tutta la durata.
+- Dato un PDF di 5 000 pagine su MR, quando lo si converte in TXT, allora la memoria usata resta sotto il limite di sicurezza di NFR-14 (2 GB) e l'interfaccia risponde agli input entro 100 ms per tutta la durata (NFR-05).
 
 **Priorità:** P0
 
@@ -4571,7 +4700,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### CNV-07 — PDF → immagini (PNG, JPEG, TIFF, BMP, GIF)
 
-**Descrizione:** Esporta le pagine come immagini raster, un file per pagina o un TIFF multipagina, con risoluzione, colore e compressione configurabili.
+**Descrizione:** Esporta le pagine come immagini raster, un file per pagina o un TIFF multipagina, con risoluzione, colore e compressione configurabili. È il requisito di riferimento per l'esportazione delle pagine come immagini (0.6): PAG-13 (dall'organizzatore) e BAT-06 (in blocco) vi rimandano.
 
 **Flusso:** 1. Sceglie il formato in CNV-01. 2. Imposta risoluzione (72–1200 dpi; preset 96, 150, 300, 600), modalità colore (colore, scala di grigi, bianco e nero a soglia o con retinatura), opzioni di formato (qualità JPEG 1–100, compressione TIFF, sfondo trasparente per PNG, TIFF singolo o multipagina), inclusione di annotazioni e campi modulo, antialiasing. 3. Avvia; i file sono nominati secondo il modello (es. `{nome}_{pagina:03}.png`).
 
@@ -4602,7 +4731,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Dato un PDF di 5 pagine A4 verticali, quando lo si esporta come immagine lunga PNG a 96 dpi con spaziatura 0, allora l'immagine misura 794 × 5615 pixel (±5).
 - Dato un risultato JPEG che supererebbe 65 535 pixel di altezza, quando si sceglie la divisione, allora ogni parte rispetta il limite e la somma delle altezze delle parti è uguale all'altezza prevista.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### CNV-09 — PDF → testo semplice (TXT)
 
@@ -4636,7 +4765,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Dato un PDF con testo in grassetto, corsivo, lettere accentate e greche, quando lo si esporta in RTF, allora il file viene analizzato senza errori, la similarità testuale con il PDF è ≥ 99% e le parole in grassetto e corsivo mantengono lo stile.
 - Dato un PDF con 2 immagini, quando lo si esporta, allora l'RTF contiene 2 immagini incorporate con le stesse proporzioni (±1%).
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### CNV-11 — PDF → HTML
 
@@ -4671,7 +4800,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Dato un PDF di 2 pagine con dettaglio "parole", quando lo si esporta, allora la concatenazione delle parole di ogni pagina ha similarità testuale ≥ 99% con l'export TXT (CNV-09) e ogni riquadro di parola è contenuto nel riquadro della propria pagina.
 - Dato un PDF con 4 annotazioni, quando lo si esporta con le annotazioni, allora l'XML contiene 4 elementi annotazione con tipo e testo corretti.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### CNV-13 — PDF → EPUB
 
@@ -4692,76 +4821,77 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### CNV-14 — Conversione in PDF/A (1b, 2b, 3b)
 
-**Descrizione:** Converte il documento in PDF/A per l'archiviazione a lungo termine e la conservazione a norma: corregge automaticamente ciò che lo standard vieta e verifica il risultato.
+**Descrizione:** Converte il documento in PDF/A per l'archiviazione a lungo termine e la conservazione a norma: corregge automaticamente ciò che lo standard vieta e verifica il risultato. È il requisito di riferimento per PDF/A, PDF/X e PDF/E (0.6), con i profili aggiuntivi di CNV-15: SEC-25, BAT-06 e BAT-23 vi rimandano e, in caso di differenza, vale questo requisito.
 
-**Flusso:** 1. "Converti › PDF/A" o "Salva come › PDF/A"; scelta del livello: PDF/A-1b, 2b (default) o 3b. 2. Analisi preliminare con l'elenco dei problemi e la correzione prevista per ciascuno. 3. Conferma; il motore applica le correzioni e riscrive integralmente il file in una nuova copia. 4. Verifica automatica di conformità del risultato e report (esito, correzioni applicate, errori residui). 5. Se la conformità non è raggiunta, l'utente sceglie se annullare o salvare un PDF ordinario privo della dichiarazione di conformità.
+**Flusso:** 1. Converti › **Salva come PDF/A** (UX-05), oppure File › Salva con nome con il tipo PDF/A; scelta del livello: PDF/A-1b, 2b (default) o 3b. 2. Analisi preliminare con l'elenco dei problemi e la correzione prevista per ciascuno. 3. Conferma; il motore applica le correzioni e riscrive integralmente il file in una nuova copia. 4. Verifica automatica di conformità del risultato e report (esito, correzioni applicate, errori residui). 5. Se la conformità non è raggiunta, l'utente sceglie se annullare o salvare un PDF ordinario privo della dichiarazione di conformità.
 
-**Formati/strutture:** ISO 19005-1 (livello 1b, base PDF 1.4), ISO 19005-2 (2b, base ISO 32000-1), ISO 19005-3 (3b, allegati di qualsiasi tipo). Correzioni: incorporamento in subset di tutti i font, inclusi i 14 standard; `/OutputIntents` con profilo ICC (sRGB di default, CMYK se il documento usa CMYK dipendente dal dispositivo); metadati XMP con `pdfaid:part` e `pdfaid:conformance`, sincronizzati con il dizionario Info; `/ID` nel trailer; rimozione di cifratura, JavaScript, azioni vietate (`Launch`, `Sound`, `Movie`, `ResetForm`, `ImportData`), contenuti esterni (Reference XObject) e XFA; LZW → Flate; aspetti `/AP` generati dove richiesti, flag `Print` impostato e flag di occultamento rimossi sulle annotazioni. Per 1b inoltre: trasparenze appiattite, JPEG 2000 ricodificato, livelli e allegati rimossi. Per 2b: allegati ammessi solo se conformi a PDF/A. Per 3b: allegati con `/AF` e `/AFRelationship`.
+**Formati/strutture:** ISO 19005-1 (livello 1b, base PDF 1.4), ISO 19005-2 (2b, base ISO 32000-1), ISO 19005-3 (3b, allegati di qualsiasi tipo). Correzioni: incorporamento in subset di tutti i font, inclusi i 14 standard; `/OutputIntents` con profilo ICC (sRGB di default, CMYK se il documento usa CMYK dipendente dal dispositivo); metadati XMP con `pdfaid:part` e `pdfaid:conformance`, sincronizzati con il dizionario Info; `/ID` nel trailer; rimozione di cifratura, script del documento (azioni di script e albero dei nomi degli script), azioni vietate (`Launch`, `Sound`, `Movie`, `ResetForm`, `ImportData`), contenuti esterni (Reference XObject) e XFA; LZW → Flate; aspetti `/AP` generati dove richiesti, flag `Print` impostato e flag di occultamento rimossi sulle annotazioni. Per 1b inoltre: trasparenze appiattite, JPEG 2000 ricodificato, livelli e allegati rimossi. Per 2b: allegati ammessi solo se conformi a PDF/A. Per 3b: allegati con `/AF` e `/AFRelationship`.
 
 **Casi limite:** PDF cifrato → richiesta della password (quella proprietario se i permessi vietano la modifica), cifratura rimossa; font assente dal sistema o con licenza che vieta l'incorporamento → sostituzione con font metricamente compatibile e avviso, oppure, su scelta, rasterizzazione delle sole pagine coinvolte con OCR invisibile; PDF firmato → avviso che la firma sarà invalidata, con opzione (livello 3b) di allegare l'originale firmato come file associato con relazione `Source`; documento già dichiarato PDF/A → verifica e, se non conforme, proposta di correzione; modulo XFA dinamico → conversione possibile solo previo appiattimento, segnalato; PDF scansionato → ammesso (livello b) senza OCR obbligatorio; file enormi → elaborazione come in CNV-01.
 
 **Criteri di accettazione:**
-- Dato un PDF con font standard non incorporati, trasparenze e JavaScript, quando lo si converte in PDF/A-2b, allora il risultato supera un validatore indipendente ISO 19005-2 con zero errori, tutti i font risultano incorporati e non resta alcuna azione JavaScript.
+- Dato un PDF con font standard non incorporati, trasparenze e script del documento, quando lo si converte in PDF/A-2b, allora il risultato supera un validatore indipendente ISO 19005-2 con zero errori, tutti i font risultano incorporati e non resta alcuno script.
 - Dato un PDF con font standard non incorporati e trasparenze, quando lo si converte in PDF/A-1b, allora il validatore ISO 19005-1 riporta zero errori e la differenza visiva rispetto all'originale è ≤ 2% per pagina.
 - Dato un PDF/A-3b prodotto allegando un file XML, quando si ispeziona il file, allora l'allegato è referenziato da `/AF` con `/AFRelationship` valorizzato e il validatore ISO 19005-3 non riporta errori.
 - Dato un documento la cui conformità non è raggiungibile, quando l'utente sceglie "salva comunque", allora i metadati XMP del file salvato non contengono l'identificazione `pdfaid`.
 - Dato un PDF cifrato con password di apertura, quando lo si converte fornendo la password, allora il risultato non contiene il dizionario `/Encrypt`.
+- Dato un PDF con un carattere la cui licenza ne vieta l'incorporamento, quando lo si converte in PDF/A-2b con le opzioni predefinite, allora il carattere è sostituito da uno metricamente compatibile, il rapporto ne indica il nome e il risultato supera il validatore ISO 19005-2.
 
 **Priorità:** P0
 
 ### CNV-15 — Altri profili ISO: PDF/A livelli u e a, PDF/A-4, PDF/X, PDF/E
 
-**Descrizione:** Estende la conversione di CNV-14 ai livelli di conformità u (testo Unicode) e a (accessibile), a PDF/A-4, alla stampa professionale (PDF/X) e alla documentazione tecnica (PDF/E); permette inoltre di rimuovere una dichiarazione di conformità.
+**Descrizione:** Estende la conversione di CNV-14 (requisito di riferimento, 0.6) alla stampa professionale (PDF/X) e alla documentazione tecnica (PDF/E), che sono P1, e ai livelli di conformità u (testo Unicode) e a (accessibile) e a PDF/A-4, che sono P2; permette inoltre di rimuovere una dichiarazione di conformità. Analisi, correzioni, verifica e rapporto seguono CNV-14.
 
-**Flusso:** 1. Sceglie il profilo: PDF/A-2u, 3u, 1a, 2a, 3a, 4, 4f, 4e; PDF/X-1a, X-3, X-4; PDF/E-1. 2. Per PDF/X sceglie il profilo ICC della condizione di stampa (output intent) e la conversione dei colori, con anteprima prima/dopo. 3. Analisi, correzione, verifica e report come in CNV-14. 4. "Rimuovi dichiarazione di conformità" elimina le identificazioni dai metadati XMP lasciando invariato il contenuto.
+**Flusso:** 1. Sceglie il profilo: PDF/X-1a, X-3, X-4 e PDF/E-1; PDF/A-2u, 3u, 1a, 2a, 3a, 4, 4f, 4e (P2). 2. Per PDF/X sceglie il profilo ICC della condizione di stampa (output intent) e la conversione dei colori, con anteprima prima/dopo. 3. Analisi, correzione, verifica e report come in CNV-14. 4. "Rimuovi dichiarazione di conformità" elimina le identificazioni dai metadati XMP lasciando invariato il contenuto.
 
-**Formati/strutture:** Livello u: mappatura Unicode di tutto il testo (`/ToUnicode`); livello a: PDF taggato con struttura logica, `/Lang` e testi alternativi (richiede le funzioni di accessibilità); PDF/A-4 (ISO 19005-4, base PDF 2.0); PDF/X (ISO 15930: X-1a, X-3, X-4): output intent obbligatorio, `/TrimBox` o `/ArtBox` su ogni pagina, solo CMYK e tinte piatte in X-1a, trasparenza vietata in X-1a e X-3 e ammessa in X-4; PDF/E-1 (ISO 24517-1).
+**Formati/strutture:** PDF/X (ISO 15930: X-1a, X-3, X-4): output intent obbligatorio, `/TrimBox` o `/ArtBox` su ogni pagina, solo CMYK e tinte piatte in X-1a, trasparenza vietata in X-1a e X-3 e ammessa in X-4; PDF/E-1 (ISO 24517-1); livello u: mappatura Unicode di tutto il testo (`/ToUnicode`); livello a: PDF con struttura logica completa, `/Lang` e testi alternativi; PDF/A-4 (ISO 19005-4, base PDF 2.0).
 
-**Casi limite:** testo senza mappatura Unicode ricostruibile (livello u) → OCR della parte coinvolta o esito negativo motivato; documento non taggato (livello a) → tag automatici con invito alla revisione manuale; `/TrimBox` mancante (PDF/X) → impostato uguale al `/CropBox` con avviso; conversione RGB → CMYK → avviso sulla variazione dei colori; documento cifrato o firmato → come CNV-14.
+**Casi limite:** testo senza mappatura Unicode ricostruibile (livello u) → OCR della parte coinvolta o esito negativo motivato; documento senza struttura logica (livello a) → livello non disponibile, con la spiegazione che serve una struttura logica: Foliant non crea i tag in modo automatico (0.2) e per le scansioni la struttura si ottiene con OCR-17; la verifica dell'accessibilità dell'interfaccia segue NFR-21…NFR-24; `/TrimBox` mancante (PDF/X) → impostato uguale al `/CropBox` con avviso; conversione RGB → CMYK → avviso sulla variazione dei colori; documento cifrato o firmato → come CNV-14.
 
 **Criteri di accettazione:**
 - Dato un PDF RGB con trasparenze, quando lo si converte in PDF/X-4 con un profilo CMYK, allora un validatore indipendente PDF/X-4 non riporta errori e ogni pagina ha `/TrimBox`.
-- Dato un PDF con testo interamente mappabile, quando lo si converte in PDF/A-2u, allora il validatore ISO 19005-2 per il livello u non riporta errori.
+- Dato un PDF tecnico con livelli e grafica vettoriale, quando lo si converte in PDF/E-1, allora un validatore indipendente ISO 24517-1 non riporta errori e i livelli sono conservati.
 - Dato un PDF/A-2b, quando si usa "Rimuovi dichiarazione di conformità", allora i metadati XMP non contengono `pdfaid` e i flussi di contenuto delle pagine sono byte-identici all'originale.
+- Dato un PDF con testo interamente mappabile, quando lo si converte in PDF/A-2u, allora il validatore ISO 19005-2 per il livello u non riporta errori (P2).
+- Dato un documento senza struttura logica, quando si apre la scelta del profilo, allora i livelli «a» sono disattivati con la spiegazione (P2).
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### CNV-16 — Conversione avanzata assistita da IA
 
-**Descrizione:** Modalità facoltativa per DOCX, XLSX e PPTX che usa un modello di analisi del layout basato su apprendimento automatico per i documenti difficili (tabelle senza bordi, impaginazioni complesse, moduli, scansioni scadenti).
+**Descrizione:** Modalità facoltativa per DOCX, XLSX e PPTX che ricostruisce meglio la struttura dei documenti difficili (tabelle senza bordi, impaginazioni complesse, moduli, scansioni scadenti) con l'assistenza IA di AI-27, requisito di riferimento per la conversione con IA (0.6). Il fornitore è quello configurato dall'utente in AI-01 (servizio remoto o modello in esecuzione sul computer); informativa e dati inviati seguono AI-02; la conversione resta eseguita localmente.
 
-**Flusso:** 1. In CNV-01 attiva "Conversione avanzata (IA)". 2. Se il modello è installato localmente lo usa direttamente; se è un servizio remoto, chiede un consenso esplicito che indica quali pagine verranno inviate e a quale servizio configurato. 3. Converte; il report indica le pagine elaborate in modalità avanzata e quelle ricadute nella modalità standard.
+**Flusso:** 1. In CNV-01 attiva "Migliora la struttura con l'IA", visibile solo con un profilo IA attivo (AI-01). 2. Al primo uso del profilo compare l'informativa; il riepilogo "Verrà inviato" indica le pagine e i dati da inviare (AI-02). 3. Converte; il report indica le pagine elaborate con l'assistenza IA e quelle ricadute nella modalità standard.
 
-**Formati/strutture:** Stesse uscite di CNV-03, CNV-04 e CNV-06; il modello produce una descrizione strutturata (blocchi, ordine di lettura, tabelle con celle) che alimenta gli stessi generatori di formato. Servizio remoto configurabile dall'utente o dall'amministratore; nessun invio di dati predefinito.
+**Formati/strutture:** Stesse uscite di CNV-03, CNV-04 e CNV-06; il fornitore restituisce la descrizione strutturata di AI-27 (ruolo dei blocchi, ordine di lettura, tabelle con celle e celle unite), che alimenta gli stessi generatori di formato. Nessun invio senza un profilo attivo e un'informativa accettata.
 
-**Casi limite:** rete assente o servizio non configurato → ricaduta automatica sulla modalità standard con avviso; documento cifrato o riservato → invio remoto disattivato salvo conferma esplicita; limiti di pagine o di dimensione del servizio → suddivisione in blocchi o ricaduta locale; risposta del servizio non valida → pagina convertita con il motore standard.
+**Casi limite:** rete assente o fornitore non raggiungibile → ricaduta automatica sulla modalità standard con avviso (AI-16); permessi che vietano l'estrazione → opzione disattivata (AI-02); limiti di pagine o di dimensione del fornitore → suddivisione in blocchi (AI-14) o ricaduta locale; risposta non valida → pagina convertita con il motore standard.
 
 **Criteri di accettazione:**
-- Dato un modello solo remoto e la rete disattivata, quando si avvia una conversione avanzata, allora la conversione termina con il motore standard, il report lo segnala e non viene registrata alcuna connessione in uscita.
-- Dato il corpus di riferimento di tabelle senza bordi, quando lo si converte in XLSX in modalità avanzata e standard, allora l'accuratezza a livello di cella della modalità avanzata è maggiore o uguale a quella standard.
-- Dato un servizio remoto configurato, quando l'utente nega il consenso, allora nessun dato viene inviato e la conversione prosegue in modalità standard.
+- Dato un profilo IA con fornitore remoto e la rete disattivata, quando si avvia una conversione con l'opzione attiva, allora la conversione termina in modalità standard, il report lo segnala e non viene registrata alcuna connessione in uscita.
+- Data la fixture «tabelle senza bordi» (20 pagine con 30 tabelle senza bordi e il risultato atteso cella per cella) e il fornitore simulato (sezione 12) che restituisce la struttura attesa, quando la si converte in XLSX con e senza l'opzione, allora l'accuratezza a livello di cella con l'opzione è maggiore o uguale a quella senza.
+- Dato un profilo la cui informativa non è stata accettata, quando l'utente la rifiuta, allora nessun dato viene inviato e la conversione prosegue in modalità standard.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### CNV-17 — Conversione in blocco di più file
 
-**Descrizione:** Converte molti PDF in un'unica operazione verso uno qualsiasi dei formati di CNV-03…CNV-15, con coda di lavoro, elaborazione parallela e report finale.
+**Descrizione:** Accesso dall'area Conversione alla conversione in blocco di BAT-06, requisito di riferimento (0.6): converte molti PDF in un'unica operazione verso i formati di uscita P0 e P1 di questa sezione, con le opzioni di CNV-01 applicate a tutti i file, la coda di BAT-01, destinazione e nomi di BAT-02 e BAT-03, l'esecuzione di BAT-04 e il rapporto di BAT-05. In caso di differenza vale BAT-06.
 
-**Flusso:** 1. "Elaborazione in blocco › Converti": aggiunta di file, cartelle (con opzione ricorsiva) o trascinamento; riordino e rimozione delle voci. 2. Scelta del formato e delle opzioni (come CNV-01, applicate a tutti i file) e della destinazione (accanto all'originale o cartella scelta, con "mantieni la struttura delle sottocartelle"). 3. Avvio: per ogni file stato (in attesa, in corso, completato, con avvisi, errore) e avanzamento complessivo. 4. Fine: riepilogo con conteggi, report esportabile (CSV o testo) e accesso ai file prodotti.
+**Flusso:** 1. Converti › **Esporta come** › "Più file…" (oppure Strumenti › Elaborazione in blocco › Converti): si apre BAT-06 con il formato già scelto. 2. Il resto del flusso è quello di BAT-06.
 
-**Formati/strutture:** Ingresso PDF; i file non PDF aggiunti sono segnalati e saltati (la creazione in blocco è CNV-28). Numero di processi paralleli configurabile (default: core disponibili − 1). Impostazioni del lotto salvabili come profilo riutilizzabile.
+**Formati/strutture:** Come BAT-06; i file non PDF aggiunti sono segnalati e saltati (la creazione in blocco è BAT-07).
 
-**Casi limite:** file cifrato → messo in attesa con richiesta di password non bloccante (inserisci o salta), gli altri proseguono; file danneggiato → riparazione in memoria (CNV-32) o errore registrato; nomi in collisione → suffisso numerico; stesso file aggiunto due volte → duplicato ignorato; disco pieno → lotto sospeso, ripresa possibile dopo aver liberato spazio; annullamento → i file completati restano, quello in corso è scartato senza residui; migliaia di file → l'elenco resta reattivo.
+**Casi limite:** come BAT-01…BAT-06: file cifrato in attesa di password senza bloccare gli altri; file danneggiato riparato in memoria (CNV-32) o registrato come errore; nomi in collisione con suffisso numerico; annullamento senza file parziali.
 
 **Criteri di accettazione:**
-- Dati 50 PDF di cui 2 danneggiati in modo irreparabile e 1 cifrato, quando si avvia la conversione in DOCX e si salta il file cifrato, allora vengono prodotti 47 DOCX e il report elenca i 2 errori con la causa e il file saltato.
-- Data una cartella con 3 sottocartelle e l'opzione "mantieni la struttura", quando la si converte, allora l'uscita riproduce la stessa gerarchia con ogni file convertito nella sottocartella corrispondente.
-- Dato un lotto di 100 PDF su hardware di riferimento con 4 processi paralleli, quando lo si converte in TXT, allora il tempo totale è inferiore al 40% di quello dell'elaborazione sequenziale.
+- Dati 50 PDF di cui 2 danneggiati in modo irreparabile e 1 cifrato, quando si avvia la conversione in DOCX e si salta il file cifrato, allora vengono prodotti 47 DOCX e il rapporto elenca i 2 errori con la causa e il file saltato.
 - Dato un lotto annullato a metà, quando si ispeziona la cartella di uscita, allora contiene solo file completi e apribili e nessun file temporaneo.
 
 **Priorità:** P1
 
-### CNV-18 — Crea PDF da file Office
+### CNV-18 — Crea PDF da documenti d'ufficio (DOCX, XLSX, PPTX)
 
 **Descrizione:** Crea un PDF da documenti di videoscrittura, fogli di calcolo, presentazioni e diagrammi, conservando link, struttura e font.
 
@@ -4842,7 +4972,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Formati/strutture:** Immagine (PNG, JPEG, BMP) → pagina delle dimensioni dell'immagine, inserita senza perdita; testo formattato → come CNV-20 e CNV-21; testo semplice → come TXT in CNV-20; file copiati → CNV-18, CNV-19 o CNV-20 secondo il tipo, oppure apertura diretta se PDF; pagine copiate da un documento Foliant → nuovo documento con quelle pagine. L'incolla come pagine dentro un documento esistente appartiene alla gestione pagine.
 
-**Casi limite:** appunti vuoti o formato non supportato → comando disabilitato con suggerimento; immagine molto grande → come CNV-19; appunti modificati durante la creazione → si usa l'istantanea letta all'avvio.
+**Casi limite:** appunti vuoti o formato non supportato → comando disabilitato con suggerimento; immagine molto grande → come CNV-19; appunti modificati durante la creazione → si usa la copia del contenuto letta all'avvio.
 
 **Criteri di accettazione:**
 - Dato negli appunti uno screenshot di 1920 × 1080 pixel, quando si sceglie "Crea dagli appunti", allora si apre un nuovo documento non salvato di 1 pagina con l'immagine a 1920 × 1080 pixel senza compressione con perdita.
@@ -4900,7 +5030,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Data una cattura di un'area di 800 × 600 pixel, quando si crea il PDF, allora la pagina contiene un'immagine di 800 × 600 pixel compressa senza perdita.
 - Dato il permesso di cattura negato dal sistema, quando si avvia la funzione, allora l'app mostra un messaggio, non crea documenti e resta utilizzabile.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### CNV-26 — Crea PDF da fotocamera o da foto di documenti
 
@@ -4916,7 +5046,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Data una foto di prova di un foglio A4 ripreso in prospettiva, con angoli di riferimento noti, quando si esegue il rilevamento automatico, allora ciascuno dei 4 angoli rilevati dista dal riferimento meno del 2% della diagonale dell'immagine.
 - Dati gli angoli confermati e il formato A4, quando si crea il PDF, allora la pagina è A4 e le righe di testo della fixture risultano orizzontali con inclinazione residua ≤ 0,5°.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### CNV-27 — Stampante virtuale PDF
 
@@ -4936,13 +5066,13 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### CNV-28 — Creazione di PDF in blocco
 
-**Descrizione:** Crea PDF da molti file eterogenei (immagini, documenti Office, testo, HTML) in un'unica operazione, come PDF separati o come unico PDF combinato.
+**Descrizione:** Crea PDF da molti file eterogenei (immagini, documenti d'ufficio come DOCX, XLSX e PPTX, testo, HTML) in un'unica operazione, come PDF separati o come unico PDF combinato. È l'accesso dall'area Conversione alla creazione in blocco di BAT-07, requisito di riferimento (0.6); in caso di differenza vale BAT-07.
 
-**Flusso:** 1. "Elaborazione in blocco › Crea": aggiunta di file e cartelle. 2. Scelta tra "un PDF per file" (stesso nome base, cartella di uscita) e "un unico PDF" (nell'ordine dell'elenco, con opzione "segnalibri dai nomi dei file"). 3. Opzioni specifiche per tipo (CNV-18…CNV-21) e comuni facoltative (OCR, PDF/A, compressione). 4. Avvio con coda e report come in CNV-17.
+**Flusso:** 1. "Elaborazione in blocco › Crea": aggiunta di file e cartelle. 2. Scelta tra "un PDF per file" (stesso nome base, cartella di uscita) e "un unico PDF" (nell'ordine dell'elenco, con opzione "segnalibri dai nomi dei file"). 3. Opzioni specifiche per tipo (CNV-18…CNV-21) e comuni facoltative (OCR, PDF/A, compressione). 4. Avvio con coda, esecuzione e rapporto di BAT-01…BAT-05.
 
 **Formati/strutture:** Ingresso: tutti i formati di CNV-18, CNV-19, CNV-20 e CNV-21 (file locali), più PDF esistenti, inclusi così come sono nell'unione.
 
-**Casi limite:** file non supportato o danneggiato → saltato e registrato, gli altri proseguono; documento Office protetto da password → in attesa di password come in CNV-17; immagini di formati diversi in un unico PDF → ogni pagina mantiene il proprio formato, salvo opzione di uniformarlo; migliaia di file → coda elaborata in parallelo senza bloccare l'interfaccia.
+**Casi limite:** file non supportato o danneggiato → saltato e registrato, gli altri proseguono; documento d'ufficio protetto da password → errore "documento protetto" per quel file, gli altri proseguono (BAT-07); immagini di formati diversi in un unico PDF → ogni pagina mantiene il proprio formato, salvo opzione di uniformarlo; migliaia di file → coda elaborata in parallelo senza bloccare l'interfaccia.
 
 **Criteri di accettazione:**
 - Dati 10 file (4 immagini, 3 DOCX, 2 TXT, 1 non supportato) e l'opzione "un PDF per file", quando si avvia, allora vengono creati 9 PDF con lo stesso nome base dei sorgenti e il report segnala il file saltato.
@@ -4952,7 +5082,7 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 ### CNV-29 — Comprimi PDF
 
-**Descrizione:** Riduce la dimensione del file scegliendo un livello di qualità, con stima preventiva della dimensione e confronto prima/dopo; applicabile a uno o più file.
+**Descrizione:** Riduce la dimensione del file scegliendo un livello di qualità, con stima preventiva della dimensione e confronto prima/dopo; applicabile a uno o più file. È il requisito di riferimento per la compressione (0.6), con le impostazioni personalizzate di CNV-30: BAT-09 e OBJ-18 ne usano livelli e parametri.
 
 **Flusso:** 1. "Strumenti › Comprimi" (o "Elaborazione in blocco › Comprimi"). 2. La finestra mostra la dimensione attuale e, per ogni livello, la dimensione stimata, calcolata in background. 3. Anteprima affiancata originale/compresso di un dettaglio ingrandito della pagina scelta. 4. Conferma; salvataggio come nuovo file (suffisso configurabile) o sostituzione dell'originale previa conferma. 5. Risultato: dimensione prima e dopo e riduzione percentuale; in blocco, tabella per file con il totale risparmiato.
 
@@ -4962,19 +5092,19 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Criteri di accettazione:**
 - Dato un PDF di prova di 20 MB con fotografie a 300 ppi, quando lo si comprime al livello "Media", allora il risultato è ≤ 50% dell'originale, il testo estratto è identico e il numero di operatori di testo è invariato (nessuna pagina rasterizzata).
-- Dato il corpus di compressione, quando si confronta la stima con la dimensione effettiva per ciascun livello, allora lo scarto è ≤ 20% in almeno il 90% dei file.
+- Dato il corpus C-INT (0.4), quando si confronta la stima con la dimensione effettiva per ciascun livello, allora lo scarto è ≤ 20% in almeno il 90% dei file.
 - Dato un PDF già ottimizzato che nessun livello riduce, quando lo si comprime, allora il file originale resta byte-identico e compare il messaggio di nessuna riduzione.
 - Dato un PDF/A-2b, quando lo si comprime al livello "Bassa", allora il risultato supera ancora la validazione ISO 19005-2.
 - Dati 10 PDF compressi in blocco, quando l'operazione termina, allora la tabella riporta per ogni file dimensione prima e dopo e la riga dei totali è la somma delle righe.
-- Dato un PDF di 100 pagine e 50 MB su hardware di riferimento, quando si apre la finestra, allora le stime di tutti i livelli compaiono entro 5 s.
+- Dato un PDF di 100 pagine e 50 MB su MR, quando si apre la finestra, allora le stime di tutti i livelli compaiono entro 5 s.
 
 **Priorità:** P0
 
-### CNV-30 — Ottimizzazione avanzata e analisi dello spazio
+### CNV-30 — Compressione personalizzata e analisi dello spazio
 
 **Descrizione:** Per utenti esperti: controllo dettagliato di ricampionamento, compressione, font e oggetti da eliminare, preceduto da un'analisi che mostra quanto spazio occupa ogni categoria di contenuto.
 
-**Flusso:** 1. "Strumenti › Ottimizzazione avanzata". 2. "Analisi spazio": tabella e grafico con byte e percentuale per immagini, font, contenuti di pagina, annotazioni, moduli, struttura logica, segnalibri, metadati, allegati, miniature e altro. 3. Impostazioni per sezioni — Immagini: per colore, grigi e mono, metodo di ricampionamento (media, bicubico, sottocampionamento), ppi di destinazione e soglia, compressione (JPEG, JPEG 2000, senza perdita, bi-livello), qualità, conversione in scala di grigi; Font: subset dei font completi, deduplica, rimozione dei font standard incorporati (con avviso); Elimina: miniature, oggetti non referenziati, stream duplicati, metadati, dati privati delle applicazioni, allegati, JavaScript, azioni modulo, commenti, segnalibri, struttura logica, livelli nascosti, impostazioni di stampa e di visualizzazione; Pulizia: compressione degli stream non compressi, flussi di oggetti e xref compressi, rimozione di link e segnalibri non validi; Compatibilità: versione PDF di destinazione. 4. Salvataggio come preset ed esecuzione con confronto come in CNV-29.
+**Flusso:** 1. "Strumenti › Compressione personalizzata" (UX-05). 2. "Analisi spazio": tabella e grafico con byte e percentuale per immagini, font, contenuti di pagina, annotazioni, moduli, struttura logica, segnalibri, metadati, allegati, miniature e altro. 3. Impostazioni per sezioni — Immagini: per colore, grigi e mono, metodo di ricampionamento (media, bicubico, sottocampionamento), ppi di destinazione e soglia, compressione (JPEG, JPEG 2000, senza perdita, bi-livello), qualità, conversione in scala di grigi; Font: subset dei font completi, deduplica, rimozione dei font standard incorporati (con avviso); Elimina: miniature, oggetti non referenziati, stream duplicati, metadati, dati privati delle applicazioni, allegati, script del documento, azioni modulo, commenti, segnalibri, struttura logica, livelli nascosti, impostazioni di stampa e di visualizzazione; Pulizia: compressione degli stream non compressi, flussi di oggetti e xref compressi, rimozione di link e segnalibri non validi; Compatibilità: versione PDF di destinazione. 4. Salvataggio come preset ed esecuzione con confronto come in CNV-29.
 
 **Formati/strutture:** Filtri `FlateDecode`, `DCTDecode`, `JPXDecode`, `CCITTFaxDecode`, `JBIG2Decode` (senza perdita di default); `/ObjStm` e stream xref (PDF 1.5 o successivo); `/Thumb`, `/PieceInfo`, `/Metadata`, `/EmbeddedFiles`, `/StructTreeRoot`, `/OCProperties`.
 
@@ -4988,28 +5118,29 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 
 **Priorità:** P1
 
-### CNV-31 — Linearizzazione per la visualizzazione web veloce
+### CNV-31 — Linearizzazione per l'apertura progressiva sul web
 
-**Descrizione:** Salva il PDF in forma linearizzata, così che la prima pagina compaia subito durante lo scaricamento da web e le altre si carichino a richiesta.
+**Descrizione:** Salva il PDF in forma linearizzata ("ottimizzato per il web"), così che la prima pagina compaia subito durante lo scaricamento da web e le altre si carichino a richiesta. È il requisito di riferimento per la linearizzazione (0.6): VIS-48 e BAT-23 vi rimandano.
 
-**Flusso:** 1. Opzione "Ottimizza per la visualizzazione web veloce" in "Salva con nome", in CNV-29 e CNV-30 e come preferenza globale per i salvataggi completi. 2. Al salvataggio il file viene riscritto per intero in forma linearizzata. 3. Le proprietà del documento indicano "Visualizzazione web veloce: Sì/No".
+**Flusso:** 1. Opzione "Ottimizza per il web" in "Salva con nome" (VIS-48), in CNV-29 e in CNV-30. 2. Al salvataggio il file viene riscritto per intero in forma linearizzata. 3. La sezione Apertura di **Informazioni sul documento** (VIS-40) indica se il file è ottimizzato per il web.
 
 **Formati/strutture:** ISO 32000-2, Annex F: dizionario di linearizzazione come primo oggetto del file (`/Linearized`, `/L`, `/H`, `/O`, `/E`, `/N`, `/T`), hint stream, sezione xref della prima pagina in testa, oggetti della prima pagina prima di tutti gli altri.
 
-**Casi limite:** salvataggio incrementale successivo → la linearizzazione decade, le proprietà indicano "No" e l'app propone un salvataggio completo; documento firmato → la riscrittura invaliderebbe le firme, quindi l'opzione richiede conferma esplicita; documento cifrato → linearizzato mantenendo la stessa cifratura; documenti molto grandi → calcolo degli hint senza caricare tutto in memoria; file linearizzato con hint danneggiati → hint ignorati in lettura e ricostruiti al salvataggio.
+**Casi limite:** documento già linearizzato e non firmato → il salvataggio, che è una riscrittura completa (NFR-09), lo mantiene linearizzato; salvataggio incrementale successivo di un documento firmato (NFR-09) → la linearizzazione decade e Informazioni sul documento lo indica; documento firmato → la riscrittura invaliderebbe le firme, quindi l'opzione richiede la conferma di NFR-09; documento cifrato → linearizzato mantenendo la stessa cifratura; documenti molto grandi → calcolo degli hint senza caricare tutto in memoria; file linearizzato con hint danneggiati → hint ignorati in lettura e ricostruiti al salvataggio.
 
 **Criteri di accettazione:**
 - Dato un PDF di 100 pagine salvato con l'opzione attiva, quando lo si analizza con un verificatore di linearizzazione indipendente, allora non risultano errori, il primo oggetto è il dizionario di linearizzazione e il suo `/L` coincide con la lunghezza del file in byte.
-- Dato un file linearizzato, quando lo si modifica e lo si salva in modo incrementale, allora le proprietà indicano "Visualizzazione web veloce: No".
+- Dato un file linearizzato e firmato, quando lo si modifica e lo si salva (in modo incrementale, NFR-09), allora Informazioni sul documento indica che il file non è più ottimizzato per il web.
+- Dato un file linearizzato non firmato, quando vi si aggiunge un commento e lo si salva, allora il file salvato è ancora linearizzato e il verificatore indipendente non riporta errori.
 - Dato un PDF firmato, quando si attiva l'opzione e non si conferma l'avviso, allora il file non viene riscritto e le firme restano valide.
 
 **Priorità:** P1
 
 ### CNV-32 — Ripara PDF danneggiati
 
-**Descrizione:** Apre e recupera PDF danneggiati (tabella dei riferimenti incrociati errata, file troncati, oggetti corrotti) ricostruendone la struttura, e salva una copia valida con il resoconto di quanto recuperato.
+**Descrizione:** Apre e recupera PDF danneggiati (tabella dei riferimenti incrociati errata, file troncati, oggetti corrotti) ricostruendone la struttura, e salva una copia valida con il resoconto di quanto recuperato. Il comportamento all'apertura (riparazione in memoria, banner, nessun arresto, limiti sulle risorse) è definito da NFR-13 e NFR-14, requisiti di riferimento (0.6); questo requisito aggiunge la riparazione esplicita, il resoconto e il recupero delle revisioni.
 
-**Flusso:** 1. All'apertura di un file con errori strutturali Foliant tenta la ricostruzione in memoria e mostra una barra "File danneggiato, riparato in memoria" con i pulsanti "Salva copia riparata" e "Dettagli". 2. In alternativa "Strumenti › Ripara PDF" su uno o più file, anche senza aprirli. 3. Ricostruzione: scansione di tutti gli oggetti, nuova xref e nuovo trailer, individuazione di catalogo e albero delle pagine, correzione delle lunghezze degli stream, esclusione degli oggetti illeggibili. 4. Salvataggio con riscrittura completa in un nuovo file (suffisso `_riparato`), senza mai modificare l'originale; report con problemi rilevati, correzioni e contenuti persi. 5. Se il file contiene più revisioni e l'ultima è corrotta, proposta di recuperare l'ultima revisione integra.
+**Flusso:** 1. All'apertura di un file con errori strutturali Foliant tenta la ricostruzione in memoria e mostra il banner di NFR-13 («Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto.») con i pulsanti "Salva copia riparata" e "Dettagli". 2. In alternativa "Strumenti › Ripara PDF" su uno o più file, anche senza aprirli. 3. Ricostruzione: scansione di tutti gli oggetti, nuova xref e nuovo trailer, individuazione di catalogo e albero delle pagine, correzione delle lunghezze degli stream, esclusione degli oggetti illeggibili. 4. Salvataggio con riscrittura completa in un nuovo file (suffisso `_riparato`), senza mai modificare l'originale; report con problemi rilevati, correzioni e contenuti persi. 5. Se il file contiene più revisioni e l'ultima è corrotta, proposta di recuperare l'ultima revisione integra.
 
 **Formati/strutture:** ISO 32000-2 §7.5 (struttura del file, xref, trailer, aggiornamenti incrementali) e §7.3.8 (stream). Tolleranza a: byte estranei prima dell'intestazione o dopo `%%EOF`, offset xref errati, `/Length` errato, catene `/Prev` circolari, oggetti duplicati (prevale l'ultima definizione nel file), object stream danneggiati, `/Count` incoerente, `/Root` mancante (catalogo cercato per `/Type /Catalog`, oppure albero delle pagine ricostruito dalle pagine orfane in ordine di file), stringhe con codifica non valida; immagini e font corrotti sostituiti da segnaposto con avviso.
 
@@ -5020,26 +5151,43 @@ Dal risultato si escludono la punteggiatura finale (. , ; : ! ?) e le parentesi 
 - Dato un PDF di 10 pagine troncato al 60% della lunghezza, quando lo si ripara, allora sono recuperate tutte le pagine i cui oggetti sono interamente presenti e il report elenca per numero le pagine perse.
 - Dato un file JPEG rinominato con estensione .pdf, quando si tenta la riparazione, allora l'app indica che si tratta di un'immagine JPEG e propone di crearne un PDF.
 - Dato un file con tre revisioni incrementali di cui l'ultima troncata, quando si sceglie di recuperare la revisione precedente, allora il risultato coincide pagina per pagina con la seconda revisione.
-- Dato il corpus di file danneggiati, compresi quelli generati per fuzzing, quando ciascun file viene aperto o riparato, allora l'applicazione non termina in modo anomalo e non supera il limite di memoria configurato.
+- Dato il corpus C-MAL (0.4), quando ciascun file viene aperto o riparato, allora l'applicazione non termina in modo anomalo e non supera il limite di sicurezza della memoria di NFR-14 (2 GB).
 
 **Priorità:** P1
 
 ### CNV-33 — Appiattisci (flatten)
 
-**Descrizione:** Fonde nel contenuto di pagina annotazioni, campi modulo compilati, firme, filigrane, intestazioni e sfondi, livelli e ritagli, rendendoli parte fissa e non più modificabile del documento; in alternativa rasterizza pagine intere.
+**Descrizione:** Accesso dall'area Conversione all'appiattimento generale di SEC-24, requisito di riferimento (0.6), che applica le regole di ANN-40 alle annotazioni e di FRM-32 ai campi modulo: fonde nel contenuto della pagina annotazioni, campi modulo compilati, filigrane, intestazioni e sfondi aggiunti come elementi rimovibili, livelli e ritaglio; con l'opzione **Rasterizza le pagine** converte invece pagine intere in immagini. In caso di differenza vale SEC-24.
 
-**Flusso:** 1. "Strumenti › Appiattisci" e scelta degli elementi: annotazioni (tutte o per tipo, link esclusi di default), campi modulo, firme (con avviso), filigrane, intestazioni e sfondi aggiunti come elementi rimovibili, livelli (nello stato visibile corrente), ritaglio delle pagine (reso definitivo). 2. Ambito: tutto il documento o intervallo di pagine. 3. Resa "come a schermo" o "come in stampa" (secondo i flag di visibilità e di stampa). 4. Facoltativo: "Rasterizza le pagine" a una risoluzione scelta, con OCR per mantenere il testo ricercabile. 5. Applicazione; l'operazione è annullabile finché il documento non viene salvato e il salvataggio successivo è completo (non incrementale), così le versioni precedenti non restano nel file.
+**Flusso:** 1. Proteggi › **Appiattisci** (UX-05) e scelta degli elementi come in SEC-24. 2. Ambito: tutto il documento o intervallo di pagine. 3. Facoltativo: **Rasterizza le pagine** a una risoluzione scelta, con OCR per mantenere il testo ricercabile (SEC-24). 4. Applicazione dopo la conferma di UX-13; l'operazione è annullabile nella sessione (NFR-11) e il salvataggio è una riscrittura completa (NFR-09), così le versioni precedenti non restano nel file.
 
-**Formati/strutture:** Aspetti `/AP /N` delle annotazioni e dei widget (generati se mancanti) inseriti come Form XObject nel `/Contents` tramite `Do`; annotazioni rimosse da `/Annots`, campi da `/AcroForm /Fields` (dizionario `/AcroForm` eliminato se vuoto); livelli: contenuto visibile spostato nel contenuto base, contenuto nascosto eliminato, `/OCProperties` rimosso; ritaglio: `/MediaBox` = `/CropBox`, contenuto interamente esterno eliminato e immagini parzialmente esterne ritagliate; struttura logica aggiornata (contenuto appiattito marcato come artefatto o collegato alla struttura).
+**Formati/strutture:** Come SEC-24, ANN-40 e FRM-32.
 
-**Casi limite:** annotazioni senza aspetto → aspetto generato prima dell'appiattimento; campi con font non incorporato nell'aspetto → aspetto rigenerato con font sostitutivo incorporato; note e popup → si appiattisce l'icona e il testo della nota va perso, con avviso; campi firma firmati → l'aspetto diventa contenuto statico e la firma non è più verificabile; modulo XFA dinamico → appiattimento solo se il modulo è rappresentabile, altrimenti messaggio di impossibilità; annotazioni nascoste o non visualizzabili → escluse "come a schermo", incluse "come in stampa" se stampabili; PDF cifrato con modifica vietata → richiesta della password proprietario; PDF/A → risultato rivalidato; pagine rasterizzate → aumento di dimensione segnalato e testo non selezionabile senza OCR.
+**Casi limite:** come SEC-24: campi firma firmati esclusi per impostazione predefinita (FRM-32); annotazioni nascoste o non stampabili trattate secondo l'opzione di ANN-40; modulo XML dinamico appiattibile solo se rappresentabile; PDF/A rivalidato; pagine rasterizzate → aumento di dimensione segnalato e testo non selezionabile senza OCR.
 
 **Criteri di accettazione:**
-- Dato un PDF con 3 evidenziazioni, 1 timbro e un modulo con 5 campi compilati, quando si appiattisce tutto, allora il risultato non contiene annotazioni di markup né campi modulo e la differenza visiva di ogni pagina rispetto all'originale reso con le annotazioni è ≤ 0,5%.
-- Dato un PDF con 2 link e 1 commento, quando lo si appiattisce con le impostazioni predefinite, allora i 2 link restano attivi e il commento non è più un'annotazione.
-- Data una pagina con `/CropBox` più piccolo del `/MediaBox` e testo fuori dall'area visibile, quando si appiattisce il ritaglio, allora quel testo non è più estraibile e il `/MediaBox` coincide con il precedente `/CropBox`.
-- Dato un documento con un livello nascosto contenente testo, quando si appiattiscono i livelli, allora quel testo non è più presente e il documento non ha `/OCProperties`.
+- Dato un PDF con 3 evidenziazioni, 1 timbro e un modulo con 5 campi compilati, quando si appiattisce tutto, allora il risultato non contiene annotazioni di markup né campi modulo e il rendering di ogni pagina coincide con l'originale reso con le annotazioni, entro la tolleranza dell'appiattimento (ANN-40).
+- Dato un PDF con 2 collegamenti e 1 commento, quando lo si appiattisce con le impostazioni predefinite, allora i 2 collegamenti restano attivi e il commento non è più un'annotazione.
 - Data la rasterizzazione a 200 dpi con OCR attivo, quando si appiattisce, allora ogni pagina contiene un'immagine a 200 dpi e il testo resta ricercabile.
+
+**Priorità:** P1
+
+### CNV-34 — Crea portfolio PDF
+
+**Descrizione:** Crea un portfolio PDF, cioè un unico file che contiene più file di qualsiasi tipo (PDF, documenti d'ufficio, immagini e altri), conservati intatti come allegati, con un documento di copertina e le informazioni per mostrarli come raccolta: cartelle, colonne informative (nome, descrizione, dimensione, data di modifica e colonne personalizzate), ordinamento, vista all'apertura (elenco o miniature) e file mostrato per primo. Permette anche di modificare un portfolio esistente, creato da Foliant o da altri programmi. La consultazione, la ricerca, l'estrazione e la stampa dei file contenuti sono in VIS-22; le operazioni sui singoli file seguono VIS-54.
+
+**Flusso:** 1. Converti › **Crea portfolio** (UX-05). 2. Aggiunta di file e cartelle (selettore o trascinamento, UX-22), con creazione, rinomina e spostamento delle cartelle; per ogni file si possono modificare nome visualizzato e descrizione. 3. Impostazioni: vista all'apertura (elenco o miniature), colonne mostrate e loro ordine, colonne personalizzate (testo, numero o data), ordinamento (colonna e verso), file mostrato all'apertura. 4. Documento di copertina: generato automaticamente (titolo del portfolio ed elenco dei file con cartella, dimensione e descrizione) oppure scelto tra i PDF dell'utente. 5. Salvataggio come nuovo PDF. 6. Modifica di un portfolio aperto: le stesse operazioni dalla vista portfolio (VIS-22), ciascuna come passo annullabile (NFR-11).
+
+**Formati/strutture:** dizionario `/Collection` nel catalogo (ISO 32000-2 §12.3.5) con `/Schema` (campi con `/Subtype` S, N o D per i valori personalizzati, oppure F, Desc, Size, ModDate, CreationDate per le proprietà dei file; `/O` per l'ordine, `/V` per la visibilità), `/D` (file iniziale), `/View` (`/D` elenco, `/T` miniature), `/Sort` (`/S` campi, `/A` verso), `/Folders` (cartelle con `/Name`, `/Child`, `/Next`, `/ID`; i file di una cartella hanno nel nome il prefisso del suo identificativo); file come specifiche nell'albero `/Names /EmbeddedFiles` (VIS-54), con i valori delle colonne nel dizionario `/CI` di ciascuna specifica; copertina come normale contenuto del PDF, visibile anche nei lettori che non gestiscono i portfolio.
+
+**Casi limite:** file oltre 100 MB → avviso sulla dimensione, operazione consentita; file eseguibili → aggiunti come allegati e mai aperti (NFR-18); nomi duplicati nella stessa cartella → suffisso numerico; cartelle vuote → conservate; portfolio di altri programmi con navigatore personalizzato → aperto con la vista elenco standard (VIS-22), navigatore conservato ma non usato; documento PDF/A → portfolio ammesso solo da PDF/A-3 in su, con relazione dichiarata per ogni file (`/AF`, VIS-54), altrimenti la scelta di NFR-29; file cifrato aggiunto → conservato com'è, con avviso che per aprirlo servirà la sua password; portfolio protetto → i file contenuti sono cifrati con la protezione del portfolio.
+
+**Criteri di accettazione:**
+- Dati 4 file (2 PDF, 1 DOCX, 1 JPEG) distribuiti in 2 cartelle, quando si crea il portfolio e lo si salva, allora il file contiene `/Collection` con `/Folders` a 2 cartelle e ogni file estratto è identico byte per byte all'originale.
+- Data la vista all'apertura "miniature", quando si salva, allora `/Collection /View` vale `/T` e alla riapertura in Foliant il portfolio si presenta come griglia di miniature (VIS-22).
+- Dato un portfolio con copertina automatica, quando lo si apre in un lettore che non gestisce i portfolio, allora la pagina di copertina mostra i nomi dei 4 file.
+- Data una colonna personalizzata "Cliente" di tipo testo e l'ordinamento crescente su di essa, quando si salva, allora `/Schema` contiene il campo con `/Subtype /S`, ogni specifica di file ha il proprio valore in `/CI` e `/Sort` indica quel campo in ordine crescente.
+- Dato un portfolio creato da un altro programma, quando si aggiunge un file e si esegue Annulla, allora il file scompare dall'elenco; quando invece lo si aggiunge e si salva, allora il nuovo file compare nella raccolta e gli altri file sono byte-identici a prima.
 
 **Priorità:** P1
 
@@ -5055,24 +5203,24 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 - **Testo estraibile:** testo restituito dalla copia/estrazione di Foliant e, per conferma, da un estrattore indipendente conforme a ISO 32000.
 - **Pagina solo-immagine:** pagina il cui contenuto visibile è costituito da immagini raster e che produce meno di 10 caratteri di testo estraibile.
 - **IoU:** area dell'intersezione ÷ area dell'unione di due riquadri.
-- **Macchina di riferimento:** PC x86-64 con 4 core, 8 GB di RAM, SSD, senza accelerazione grafica dedicata (usata solo per i criteri di tempo e di memoria).
+- **Macchina di riferimento:** la macchina di riferimento (MR) di 0.4, con le stesse condizioni di misura (usata per i criteri di tempo e di memoria); dove un criterio misura la stessa grandezza di un NFR vale la soglia di 0.4.
 
 ### OCR-01 — Rilevamento automatico delle pagine senza testo e proposta di OCR all'apertura
 
 **Descrizione:** All'apertura di un documento Foliant analizza in background ogni pagina e la classifica come *con testo*, *con livello OCR* (testo invisibile già sovrapposto a una scansione), *solo-immagine*, *mista* (testo estraibile più immagini estese che contengono testo), *testo non estraibile* (testo presente ma privo di mappatura Unicode affidabile: la copia produce caratteri illeggibili) o *vuota*. Se trova pagine solo-immagine, miste o con testo non estraibile, mostra una proposta non bloccante di eseguire l'OCR. La proposta compare anche quando l'utente tenta di selezionare o modificare il testo di una pagina solo-immagine. Rilevamento e proposta sono regolabili nelle preferenze (attivo/disattivo, soglie, "non chiedere più per questo documento").
 
-**Flusso:** 1. L'utente apre un PDF; la prima pagina viene mostrata senza attendere l'analisi. 2. In background Foliant esamina gli oggetti di ogni pagina (testo e relativa modalità di resa, immagini con area coperta e risoluzione effettiva, mappatura Unicode dei font), dando precedenza alle pagine visibili. 3. Se trova pagine da riconoscere, mostra una barra informativa con il conteggio (aggiornato progressivamente) e le azioni *Riconosci testo*, *Dettagli*, *Non ora*, *Non chiedere più per questo documento*. 4. *Dettagli* evidenzia le pagine interessate nel pannello miniature, con categoria e risoluzione stimata. 5. *Riconosci testo* apre le impostazioni (OCR-04) con intervallo = pagine rilevate e lingue predefinite. 6. Se l'utente attiva lo strumento di modifica o di selezione del testo su una pagina solo-immagine, oppure lo strumento di modifica su una pagina che ha solo un livello OCR invisibile, Foliant propone l'OCR in modalità modificabile (OCR-06) per quella pagina o per tutte le pagine rilevate.
+**Flusso:** 1. L'utente apre un PDF; la prima pagina viene mostrata senza attendere l'analisi. 2. In background Foliant esamina gli oggetti di ogni pagina (testo e relativa modalità di resa, immagini con area coperta e risoluzione effettiva, mappatura Unicode dei font), dando precedenza alle pagine visibili. 3. Se trova pagine da riconoscere, mostra una barra informativa con il conteggio (aggiornato progressivamente) e le azioni *Esegui OCR*, *Dettagli*, *Non ora*, *Non chiedere più per questo documento*. 4. *Dettagli* evidenzia le pagine interessate nel pannello miniature, con categoria e risoluzione stimata. 5. *Esegui OCR* apre le impostazioni (OCR-04) con intervallo = pagine rilevate e lingue predefinite. 6. Se l'utente attiva lo strumento di modifica o di selezione del testo su una pagina solo-immagine, oppure lo strumento di modifica su una pagina che ha solo un livello OCR invisibile, Foliant propone l'OCR in modalità modificabile (OCR-06) per quella pagina o per tutte le pagine rilevate.
 
 **Formati/strutture:** analisi del content stream e dei Form XObject annidati: operatori di testo (`BT`/`ET`, `Tj`/`TJ`) e modalità di resa `Tr` (3 = invisibile, ISO 32000-2 §9.3.6); image XObject e immagini inline (§8.9) con area calcolata tramite la matrice di trasformazione corrente e confrontata con il CropBox; `/ToUnicode` e codifiche dei font (§9.10); `/Rotate`. Soglie predefinite: solo-immagine = immagini ≥ 50% dell'area visibile e < 10 caratteri estraibili; mista = testo estraibile più almeno un'immagine ≥ 20% dell'area in cui si rilevano righe di testo; testo non estraibile = oltre il 30% dei caratteri senza Unicode, in area d'uso privato o di controllo. Preferenze e scelta "non chiedere più" sono salvate nella configurazione utente (chiave: primo elemento di `/ID`, §14.4, o impronta del file), mai nel PDF.
 
-**Casi limite:** *pagine già con testo o con livello OCR* → nessuna proposta; nei Dettagli risultano "testo presente" o "livello OCR presente". *Pagina mista* → proposta di OCR delle sole aree immagine (OCR-14). *Scansione inclinata o ruotata* → la classificazione non dipende dall'orientamento. *Bassa risoluzione* (< 150 dpi effettivi) → nei Dettagli avviso "accuratezza ridotta". *Documento molto lungo* → analisi incrementale e interrompibile che non rallenta apertura e scorrimento; la barra compare alla prima pagina trovata e aggiorna il conteggio. *Lingue predefinite non installate* → la proposta lo indica e rimanda a OCR-03. *Pagina vuota* → ignorata. *Testo convertito in tracciati vettoriali* → considerato solo se l'utente abilita "includi grafica vettoriale" (predefinito: no, per evitare falsi positivi su disegni tecnici). *Permessi che vietano modifica o estrazione* → la proposta avvisa che servirà la password proprietario.
+**Casi limite:** *pagine già con testo o con livello OCR* → nessuna proposta; nei Dettagli risultano "testo presente" o "livello OCR presente". *Pagina mista* → inclusa nella proposta; il riconoscimento delle sole aree immagine è un'opzione di OCR-14 (P1), offerta quando OCR-14 è implementato. *Scansione inclinata o ruotata* → la classificazione non dipende dall'orientamento. *Bassa risoluzione* (< 150 dpi effettivi) → nei Dettagli avviso "accuratezza ridotta". *Documento molto lungo* → analisi incrementale e interrompibile che non rallenta apertura e scorrimento; la barra compare alla prima pagina trovata e aggiorna il conteggio. *Lingue predefinite non installate* → la proposta lo indica e rimanda a OCR-03. *Pagina vuota* → ignorata. *Testo convertito in tracciati vettoriali* → considerato solo se l'utente abilita "includi grafica vettoriale" (predefinito: no, per evitare falsi positivi su disegni tecnici). *Permessi che vietano modifica o estrazione* → la proposta avvisa che servirà la password proprietario.
 
 **Criteri di accettazione:**
-- Dato un PDF di 10 pagine in cui le pagine 3 e 7 sono solo-immagine e le altre hanno testo vettoriale, quando viene aperto con il rilevamento attivo, allora entro 3 s compare la proposta con "2 pagine" e *Riconosci testo* apre le impostazioni con intervallo "3, 7".
+- Dato un PDF di 10 pagine in cui le pagine 3 e 7 sono solo-immagine e le altre hanno testo vettoriale, quando viene aperto con il rilevamento attivo, allora entro 3 s compare la proposta con "2 pagine" e *Esegui OCR* apre le impostazioni con intervallo "3, 7".
 - Dato un PDF nativo digitale oppure un PDF già sottoposto a OCR, quando viene aperto, allora non compare alcuna proposta.
 - Dato il rilevamento disattivato nelle preferenze, oppure "Non chiedere più" scelto in precedenza per quel file, quando si apre un PDF solo-immagine, allora la proposta non compare e il comando OCR resta disponibile nel menu.
 - Dato un PDF solo-immagine di 2.000 pagine, quando viene aperto, allora il tempo di visualizzazione della prima pagina non supera di oltre il 10% quello misurato con il rilevamento disattivato.
-- Dato un PDF il cui testo non ha mappatura Unicode, quando viene aperto, allora le pagine sono classificate "testo non estraibile" e la proposta suggerisce l'OCR forzato (OCR-14).
+- Dato un PDF il cui testo non ha mappatura Unicode, quando viene aperto, allora le pagine sono classificate "testo non estraibile" e la proposta suggerisce di eseguire l'OCR su quelle pagine; con OCR-14 implementato, la proposta preseleziona la politica *Forza OCR* (P1).
 - Dato una pagina solo-immagine oppure una pagina con solo un livello OCR invisibile, quando l'utente attiva lo strumento di modifica del testo e fa clic sulla pagina, allora compare la proposta di OCR in modalità modificabile.
 
 **Priorità:** P0
@@ -5117,9 +5265,9 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 
 ### OCR-04 — Impostazioni di esecuzione e intervallo pagine
 
-**Descrizione:** Finestra unica per avviare l'OCR sul documento aperto: modalità di uscita (ricercabile OCR-05, modificabile OCR-06, solo testo OCR-07), lingue (OCR-03), intervallo pagine, pre-elaborazione e risoluzione di lavoro (OCR-08, OCR-09), analisi del layout (OCR-10), politica per le pagine con testo (OCR-14), formato di uscita (OCR-17, OCR-19) e destinazione (documento corrente oppure nuovo documento). Intervalli disponibili: *Tutte*, *Pagina corrente*, *Pagine selezionate nelle miniature*, *Personalizzato* con sintassi "1-3, 7, 10-" (trattino finale = fino all'ultima pagina), filtro *Pari/Dispari*, *Solo pagine senza testo* (predefinito quando la finestra è aperta dalla proposta di OCR-01). Le scelte vengono ricordate e possono essere salvate come profili riutilizzabili, anche nell'OCR in blocco (OCR-15).
+**Descrizione:** Finestra unica per avviare l'OCR sul documento aperto: modalità di uscita (ricercabile OCR-05, modificabile OCR-06, solo testo OCR-07), lingue (OCR-03), intervallo pagine, pre-elaborazione e risoluzione di lavoro (OCR-08, OCR-09), analisi del layout (OCR-10), politica per le pagine con testo (OCR-14), formato di uscita (OCR-17, OCR-19) e destinazione (documento corrente oppure nuovo documento). Intervalli disponibili: *Tutte*, *Pagina corrente*, *Pagine selezionate nelle miniature*, *Personalizzato* con sintassi "1-3, 7, 10-" (trattino finale = fino all'ultima pagina), filtro *Pari/Dispari*, *Solo pagine senza testo* (predefinito quando la finestra è aperta dalla proposta di OCR-01). Le scelte vengono ricordate e possono essere salvate come profili riutilizzabili, anche nell'OCR in blocco (BAT-08). Le opzioni definite da requisiti P1 o P2 (pulizia dell'immagine OCR-09, analisi del layout OCR-10, politica per le pagine con testo OCR-14, uscita PDF/A e PDF/UA OCR-17, immagine compressa OCR-19) compaiono solo quando il rispettivo requisito è implementato; senza OCR-14 le pagine che hanno già testo vengono saltate.
 
-**Flusso:** 1. L'utente sceglie *Riconosci testo (OCR)* dal menu o dalla proposta di OCR-01. 2. La finestra si apre con gli ultimi valori usati e un'anteprima della prima pagina dell'intervallo con l'effetto della pre-elaborazione. 3. L'utente imposta modalità, lingue, intervallo e opzioni. 4. Validazione immediata: intervallo corretto e interno al documento, lingue installate, permessi del documento. 5. Il riepilogo indica pagine da elaborare, pagine saltate (con motivo) e tempo stimato. 6. *Avvia* lancia l'elaborazione con avanzamento (OCR-13). Con destinazione *nuovo documento* il risultato si apre in una nuova scheda e l'originale non viene toccato.
+**Flusso:** 1. L'utente sceglie *Esegui OCR* dalla modalità OCR (UX-05) o dalla proposta di OCR-01. 2. La finestra si apre con gli ultimi valori usati e un'anteprima della prima pagina dell'intervallo con l'effetto della pre-elaborazione. 3. L'utente imposta modalità, lingue, intervallo e opzioni. 4. Validazione immediata: intervallo corretto e interno al documento, lingue installate, permessi del documento. 5. Il riepilogo indica pagine da elaborare, pagine saltate (con motivo) e tempo stimato. 6. *Avvia* lancia l'elaborazione con avanzamento (OCR-13). Con destinazione *nuovo documento* il risultato si apre in una nuova scheda e l'originale non viene toccato.
 
 **Formati/strutture:** i numeri dell'intervallo sono posizioni fisiche; se il documento ha etichette di pagina (`/PageLabels`, ISO 32000-2 §12.4.2) l'anteprima mostra entrambe. Profili salvati in formato testuale aperto nella configurazione utente, esportabili e importabili. Nessuna modifica al PDF prima di *Avvia*.
 
@@ -5254,19 +5402,19 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 
 ### OCR-11 — OCR di un'area selezionata e delle immagini incorporate
 
-**Descrizione:** Riconoscimento rapido di una porzione: l'utente traccia un rettangolo su una pagina qualsiasi (anche di un PDF nativo digitale che contiene immagini o schermate) oppure seleziona una o più immagini incorporate, e ottiene il testo. Azioni sul risultato: *Copia*, modifica del testo nel riquadro prima di copiarlo, *Aggiungi come testo ricercabile* (livello invisibile limitato all'area, come OCR-05), *Converti in testo modificabile* (come OCR-06, limitato all'area), *Salva come TXT*. Copre anche la cattura di un'area con estrazione del testo.
+**Descrizione:** Riconoscimento rapido di una porzione: l'utente traccia un rettangolo su una pagina qualsiasi (anche di un PDF nativo digitale che contiene immagini o schermate) oppure seleziona una o più immagini incorporate, e ottiene il testo. Azioni sul risultato: *Copia*, modifica del testo nel riquadro prima di copiarlo, *Aggiungi come testo ricercabile* (livello invisibile limitato all'area, come OCR-05), *Converti in testo modificabile* (come OCR-06, limitato all'area), *Salva come TXT*. Copre anche la cattura di un'area con estrazione del testo, insieme a VIS-29 (requisito di riferimento per la cattura di aree).
 
-**Flusso:** 1. L'utente attiva lo strumento *OCR area* (barra strumenti, menu contestuale o scorciatoia) oppure, con lo strumento di selezione, sceglie *Riconosci testo nell'immagine* dal menu contestuale di un'immagine. 2. Traccia il rettangolo, limitato a una pagina; la lingua è quella predefinita di OCR-04, modificabile nel riquadro dei risultati. 3. Il riconoscimento parte subito, con pre-elaborazione automatica e risoluzione di lavoro equivalente ad almeno 300 dpi. 4. Un riquadro mostra il testo riconosciuto, con le parole sospette sottolineate, e le azioni. 5. Con più immagini selezionate, queste vengono elaborate in sequenza e il testo è concatenato nell'ordine di lettura. 6. Le azioni che modificano il documento sono annullabili con un solo Annulla.
+**Flusso:** 1. L'utente attiva lo strumento *OCR area* (barra strumenti, menu contestuale o scorciatoia) oppure, con lo strumento di selezione, sceglie *Esegui OCR sull'immagine* dal menu contestuale di un'immagine. 2. Traccia il rettangolo, limitato a una pagina; la lingua è quella predefinita di OCR-04, modificabile nel riquadro dei risultati. 3. Il riconoscimento parte subito, con pre-elaborazione automatica e risoluzione di lavoro equivalente ad almeno 300 dpi. 4. Un riquadro mostra il testo riconosciuto, con le parole sospette sottolineate, e le azioni. 5. Con più immagini selezionate, queste vengono elaborate in sequenza e il testo è concatenato nell'ordine di lettura. 6. Le azioni che modificano il documento sono annullabili con un solo Annulla.
 
 **Formati/strutture:** area in coordinate della pagina; rendering della sola area alla risoluzione di lavoro; per le immagini incorporate il riconoscimento usa i pixel nativi dell'immagine quando possibile, con coordinate trasformate tramite la sua matrice di disegno; *Aggiungi come testo ricercabile* scrive testo `3 Tr` (ISO 32000-2 §9.3.6) solo dentro l'area, lasciando invariato il resto del contenuto.
 
-**Casi limite:** *area con testo già estraibile* → il riquadro mostra subito il testo esistente, con l'opzione *Riconosci comunque*. *Area inclinata o con testo verticale* → orientamento e inclinazione rilevati all'interno dell'area. *Area molto piccola* (caratteri alti meno di 8 pixel alla risoluzione nativa) → ingrandimento automatico e avviso se il testo resta illeggibile. *Bassa risoluzione* → avviso nel riquadro. *Pagina mista* → elaborata solo l'area tracciata. *Parole tagliate dal bordo* → incluse le parti visibili, marcate sospette. *Lingua non installata* → messaggio con offerta di installazione (OCR-03). *Area grande quanto la pagina* → equivale all'OCR della pagina, con indicatore di avanzamento. *Documento con copia vietata* → *Copia* e *Salva come TXT* richiedono la password proprietario.
+**Casi limite:** *area con testo già estraibile* → il riquadro mostra subito il testo esistente, con l'opzione *Esegui comunque l'OCR*. *Area inclinata o con testo verticale* → orientamento e inclinazione rilevati all'interno dell'area. *Area molto piccola* (caratteri alti meno di 8 pixel alla risoluzione nativa) → ingrandimento automatico e avviso se il testo resta illeggibile. *Bassa risoluzione* → avviso nel riquadro. *Pagina mista* → elaborata solo l'area tracciata. *Parole tagliate dal bordo* → incluse le parti visibili, marcate sospette. *Lingua non installata* → messaggio con offerta di installazione (OCR-03). *Area grande quanto la pagina* → equivale all'OCR della pagina, con indicatore di avanzamento. *Documento con copia vietata* → *Copia* e *Salva come TXT* richiedono la password proprietario.
 
 **Criteri di accettazione:**
 - Dato una pagina solo-immagine con la frase nota F a 300 dpi, quando l'utente traccia un rettangolo che contiene solo F e sceglie *Copia*, allora gli appunti contengono F con accuratezza caratteri ≥ 95% e nessun testo esterno all'area.
 - Dato un'area di mezza pagina A4 a 300 dpi, quando si esegue l'OCR dell'area sulla macchina di riferimento, allora il riquadro con il risultato compare entro 3 s.
-- Dato un PDF nativo digitale con una schermata incorporata che contiene testo, quando si sceglie *Riconosci testo nell'immagine* e poi *Aggiungi come testo ricercabile*, allora la ricerca di una parola della schermata la trova, il contenuto preesistente della pagina è invariato e un solo Annulla ripristina lo stato precedente.
-- Dato un'area che contiene testo già estraibile, quando si attiva l'OCR dell'area, allora il riquadro mostra il testo esistente identico a quello estraibile, senza eseguire il riconoscimento, e offre *Riconosci comunque*.
+- Dato un PDF nativo digitale con una schermata incorporata che contiene testo, quando si sceglie *Esegui OCR sull'immagine* e poi *Aggiungi come testo ricercabile*, allora la ricerca di una parola della schermata la trova, il contenuto preesistente della pagina è invariato e un solo Annulla ripristina lo stato precedente.
+- Dato un'area che contiene testo già estraibile, quando si attiva l'OCR dell'area, allora il riquadro mostra il testo esistente identico a quello estraibile, senza eseguire il riconoscimento, e offre *Esegui comunque l'OCR*.
 
 **Priorità:** P1
 
@@ -5294,9 +5442,9 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 
 **Descrizione:** L'OCR, soprattutto di documenti lunghi, si esegue in background senza bloccare l'interfaccia, con avanzamento dettagliato, pausa e annullamento in qualsiasi momento. Durante l'elaborazione il documento resta consultabile ma in sola lettura; gli altri documenti aperti restano pienamente utilizzabili. I risultati sono applicati progressivamente all'interno di un'unica operazione della cronologia, quindi annullabile e ripetibile in un solo passo.
 
-**Flusso:** 1. All'avvio compare l'avanzamento (nella scheda del documento e nel pannello attività): pagina corrente/totale, percentuale, fase (rendering, pre-elaborazione, riconoscimento, composizione), tempo trascorso e stimato residuo, pagine con avvisi. 2. Le pagine completate sono marcate nelle miniature e diventano subito ricercabili; l'utente può leggere, scorrere, ingrandire e cercare. 3. *Pausa*/*Riprendi* sospendono e riprendono il lavoro. 4. *Annulla* (pulsante o Esc) chiede: "Annulla tutto e ripristina il documento" (predefinito) oppure "Mantieni le pagine completate"; l'elaborazione si ferma entro 2 s. 5. Al termine compaiono una notifica (anche di sistema, se la finestra non è in primo piano) e un riepilogo: pagine elaborate, saltate con motivo, non riconosciute, a bassa risoluzione, parole sospette (collegamento a OCR-12), durata. 6. *Modifica › Annulla "Riconoscimento testo"* ripristina lo stato precedente in un passo; *Ripeti* lo riapplica senza rieseguire il riconoscimento. 7. Chiudere il documento o l'applicazione durante l'OCR richiede conferma (attendere oppure annullare).
+**Flusso:** 1. All'avvio compare l'avanzamento (nella scheda del documento e nel pannello attività): pagina corrente/totale, percentuale, fase (rendering, pre-elaborazione, riconoscimento, composizione), tempo trascorso e stimato residuo, pagine con avvisi. 2. Le pagine completate sono marcate nelle miniature e diventano subito ricercabili; l'utente può leggere, scorrere, ingrandire e cercare. 3. *Pausa*/*Riprendi* sospendono e riprendono il lavoro. 4. *Annulla* (pulsante o Esc) chiede: "Annulla tutto e ripristina il documento" (predefinito) oppure "Mantieni le pagine completate"; l'elaborazione si ferma entro 2 s. 5. Al termine compaiono una notifica (anche di sistema, se la finestra non è in primo piano) e un riepilogo: pagine elaborate, saltate con motivo, non riconosciute, a bassa risoluzione, parole sospette (collegamento a OCR-12), durata. 6. *Modifica › Annulla "Esegui OCR"* ripristina lo stato precedente in un passo (NFR-11); *Ripeti* lo riapplica senza rieseguire il riconoscimento. 7. Chiudere il documento o l'applicazione durante l'OCR richiede conferma (attendere oppure annullare).
 
-**Formati/strutture:** un'unica transazione nella cronologia delle modifiche del documento; nessuna scrittura sul file del documento finché l'utente non salva; risultati intermedi in file temporanei della sessione, eliminati alla chiusura; salvataggio successivo incrementale o completo secondo la scelta dell'utente.
+**Formati/strutture:** un'unica transazione nella cronologia delle modifiche del documento; nessuna scrittura sul file del documento finché l'utente non salva; risultati intermedi in file temporanei della sessione, eliminati alla chiusura; il salvataggio successivo segue NFR-09 (riscrittura completa; aggiornamento incrementale per i documenti firmati).
 
 **Casi limite:** *documento molto lungo* (es. 3.000 pagine) → memoria costante, dati intermedi su disco; prima di iniziare viene verificato lo spazio temporaneo stimato e, se insufficiente, l'utente è avvisato. *Pagina che fallisce* → saltata e riportata nel riepilogo, l'elaborazione prosegue. *Annullamento durante la composizione di una pagina* → quella pagina non viene applicata a metà. *Sospensione del computer* → al risveglio l'elaborazione riprende da dove era. *Chiusura forzata dell'applicazione* → il file su disco resta intatto. *Più OCR su documenti diversi* → in coda o in parallelo entro i limiti di risorse, ciascuno con il proprio avanzamento. *Pagine inclinate, a bassa risoluzione, miste o già con testo* → contate e mostrate per categoria nel riepilogo. *Lingua non installata* → l'avvio è già stato bloccato in OCR-04.
 
@@ -5331,25 +5479,21 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 
 ### OCR-15 — OCR in blocco su più file
 
-**Descrizione:** Applica l'OCR a molti file in un'unica operazione: file e cartelle (anche in modo ricorsivo, con filtro sul nome), PDF e immagini (TIFF anche multipagina, PNG, JPEG, BMP) che diventano PDF ricercabili o modificabili. Usa le stesse impostazioni di OCR-04 o un profilo salvato, con destinazione e nomi di uscita configurabili. L'elaborazione avviene in background, con avanzamento per file e complessivo; un errore su un file non ferma il lotto; al termine viene prodotto un rapporto esportabile.
+**Descrizione:** Accesso dall'area OCR all'OCR in blocco di BAT-08, requisito di riferimento (0.6): applica l'OCR a molti PDF e immagini (TIFF anche multipagina, PNG, JPEG, BMP) in un'unica operazione, con le impostazioni di OCR-04 o un profilo salvato, la coda di BAT-01, destinazione e nomi di BAT-02 e BAT-03, esecuzione e ripresa di BAT-04 e il rapporto di BAT-05. In caso di differenza vale BAT-08.
 
-**Flusso:** 1. *Strumenti › Elaborazione in blocco › OCR*, oppure trascinamento di file e cartelle nella finestra del lotto. 2. L'elenco mostra per ogni file pagine, dimensione e stato rilevato (solo-immagine, con testo, misto, protetto). 3. Impostazioni: profilo o opzioni di OCR-04 (modalità, lingue, intervallo applicato a ogni file, pre-elaborazione, politica OCR-14, modello di zone OCR-10). Uscita: *stessa cartella con suffisso* (predefinito "_ocr"), *cartella scelta* (ricreando le sottocartelle) oppure *sovrascrivi gli originali* (conferma esplicita, copia di sicurezza facoltativa); formato PDF, PDF/A (OCR-17) o TXT (OCR-07). File già ricercabili: saltati per predefinito. 4. *Avvia*: più file in parallelo secondo le risorse, avanzamento per file e complessivo, tempo residuo. 5. File protetti da password: password richiesta al termine oppure file saltati, secondo impostazione. 6. Rapporto: per ogni file esito (completato, saltato, errore con motivo), pagine elaborate, parole sospette, durata; esportazione CSV; apertura della cartella di uscita. 7. *Annulla* ferma il lotto: i file completati restano, quello in corso non lascia uscite parziali. 8. *Riprendi lotto* rielabora solo i file non completati di un lotto interrotto.
+**Flusso:** 1. Modalità OCR › *Esegui OCR su più file…*, oppure Strumenti › Elaborazione in blocco › OCR: si apre BAT-08 con il profilo OCR corrente. 2. Il resto del flusso è quello di BAT-08.
 
-**Formati/strutture:** ingresso PDF di qualsiasi versione e immagini TIFF/PNG/JPEG/BMP; uscita secondo la modalità; scrittura atomica (file temporaneo poi rinomina); collisioni di nome risolte con un suffisso numerico, mai sovrascrittura implicita; metadati del documento originale copiati nell'uscita; rapporto CSV UTF-8; profili e stato del lotto nella configurazione utente.
+**Formati/strutture:** Come BAT-08.
 
-**Casi limite:** *file protetto da password* → saltato con motivo o password richiesta, mai blocco del lotto. *File danneggiato o non PDF con estensione PDF* → errore riportato, il lotto prosegue. *File già ricercabili* → saltati e contati (oppure trattati secondo OCR-14). *Lingua non installata richiesta dal profilo* → verifica prima dell'avvio, lotto non avviato finché non risolto. *Lotto enorme* (es. 5.000 file) → memoria costante, elenco a scorrimento virtuale. *Spazio su disco insufficiente* → verifica preliminare stimata; se lo spazio finisce, arresto pulito con messaggio. *Pagine inclinate, a bassa risoluzione o miste* → gestite come nel singolo file, con conteggi nel rapporto. *Stesso file selezionato due volte* → elaborato una sola volta. *Cartella di uscita dentro quella di ingresso con ricorsione* → i file prodotti non vengono rielaborati.
+**Casi limite:** Come BAT-08 e BAT-01…BAT-05: file protetti saltati o in attesa di password senza bloccare il lotto; file danneggiati riportati come errore; file già ricercabili saltati e contati; lingua mancante verificata prima dell'avvio (OCR-03).
 
 **Criteri di accettazione:**
-- Dato una cartella con 15 PDF solo-immagine, 2 PDF nativi digitali, 1 PDF danneggiato, 1 PDF protetto da password e 1 TIFF di 3 pagine, quando si esegue l'OCR in blocco con uscita "stessa cartella con suffisso" e "salta i file protetti", allora vengono creati 16 file "_ocr.pdf" ricercabili, i 2 nativi risultano "saltati", il danneggiato e il protetto "errore" con motivo, e il rapporto CSV ha 20 righe.
-- Dato un lotto in corso, quando l'utente annulla, allora nella cartella di uscita non restano file parziali o temporanei e i file completati sono PDF validi.
-- Dato un file di uscita il cui nome esiste già, quando il lotto lo produce, allora il nuovo file riceve un suffisso numerico e quello esistente resta byte-identico.
-- Dato l'opzione "sovrascrivi gli originali" con copia di sicurezza, quando il lotto termina, allora ogni originale è sostituito dal risultato e la sua copia di sicurezza è byte-identica all'originale.
+- Dato una cartella con 15 PDF solo-immagine, 2 PDF nativi digitali, 1 PDF danneggiato, 1 PDF protetto da password e 1 TIFF di 3 pagine, quando si esegue l'OCR in blocco con il suffisso "_ocr" e "salta i file protetti", allora vengono creati 16 file "_ocr.pdf" ricercabili, i 2 nativi risultano "saltati", il danneggiato e il protetto "errore" con motivo, e il rapporto CSV ha 20 righe.
 - Dato un lotto interrotto a metà dalla chiusura dell'applicazione, quando l'utente sceglie *Riprendi lotto*, allora vengono elaborati solo i file non completati.
-- Dato un lotto di 1.000 file da 10 pagine, quando viene elaborato sulla macchina di riferimento, allora il picco di memoria resta entro il 20% di quello misurato con un lotto di 10 file.
 
 **Priorità:** P1
 
-### OCR-16 — OCR nella conversione verso formati Office e altri formati modificabili
+### OCR-16 — OCR nella conversione verso documenti d'ufficio (DOCX, XLSX, PPTX) e altri formati modificabili
 
 **Descrizione:** Le conversioni da PDF a documento di testo (DOCX), foglio di calcolo (XLSX), presentazione (PPTX), RTF, HTML, CSV e TXT applicano l'OCR alle pagine scannerizzate, così il file prodotto contiene testo modificabile (paragrafi, tabelle, caselle di testo) invece di sole immagini. Nella finestra di conversione: *Riconoscimento testo* = *Automatico* (solo pagine senza testo, predefinito), *Sempre* o *Mai*, più lingue e pre-elaborazione (OCR-03, OCR-08, OCR-09). Il PDF di origine non viene modificato. Vale sia per la conversione singola sia per quella in blocco.
 
@@ -5391,7 +5535,7 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 
 **Descrizione:** Operazioni inverse dell'OCR. (a) *Converti in PDF solo immagine*: ogni pagina selezionata viene rasterizzata alla risoluzione scelta (predefinita 300 dpi) e sostituita dalla sua immagine, eliminando testo e grafica vettoriale; serve a consegnare un documento "come scansione", a uniformare file problematici o a preparare un nuovo OCR. Non è una misura di protezione e l'interfaccia lo dichiara. (b) *Rimuovi il livello OCR*: elimina solo il testo invisibile prodotto da un OCR, lasciando intatti immagini e contenuto originale (es. per eliminare un riconoscimento errato o rifarlo da capo).
 
-**Flusso:** (a) 1. *Documento › Converti › PDF solo immagine*. 2. Scelta di intervallo, risoluzione (150/200/300/400/600 dpi), colore (colore, grigi, bianco e nero), compressione, annotazioni (appiattite nell'immagine, conservate come annotazioni o eliminate) e link (conservati come aree cliccabili oppure no). 3. Stima della dimensione del file risultante. 4. Avviso se il documento contiene firme digitali o campi modulo. 5. Esecuzione con avanzamento, annullabile in un passo. (b) 1. *Documento › OCR › Rimuovi livello OCR*. 2. Scelta dell'intervallo. 3. Riepilogo delle pagine in cui è stato trovato un livello OCR. 4. Rimozione, annullabile in un passo.
+**Flusso:** (a) 1. Modalità OCR › *Tipo di risultato* › *Solo immagine* (UX-05). 2. Scelta di intervallo, risoluzione (150/200/300/400/600 dpi), colore (colore, grigi, bianco e nero), compressione, annotazioni (appiattite nell'immagine, conservate come annotazioni o eliminate) e link (conservati come aree cliccabili oppure no). 3. Stima della dimensione del file risultante. 4. Avviso se il documento contiene firme digitali o campi modulo. 5. Esecuzione con avanzamento, annullabile in un passo. (b) 1. Modalità OCR › *Rimuovi livello OCR*. 2. Scelta dell'intervallo. 3. Riepilogo delle pagine in cui è stato trovato un livello OCR. 4. Rimozione, annullabile in un passo.
 
 **Formati/strutture:** (a) un image XObject per pagina, dimensionato sul riquadro visibile (CropBox), `/Rotate` conservato, compressione adeguata al tipo (`DCTDecode`, `FlateDecode`, `CCITTFaxDecode` per il bianco e nero; ISO 32000-2 §7.4), nessun operatore di testo; (b) rimozione degli operatori di testo del livello OCR identificato (OCR-05, OCR-14) ed eliminazione dalle risorse dei font rimasti inutilizzati.
 
@@ -5403,7 +5547,7 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 - Dato una pagina mista con livello OCR sulle immagini, quando si rimuove il livello OCR, allora il testo nativo estraibile è identico a prima e il testo riconosciuto non è più presente.
 - Dato un PDF firmato digitalmente, quando si avvia la conversione in solo immagine, allora compare l'avviso sull'invalidazione della firma e senza conferma nulla viene modificato.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### OCR-19 — Immagine ricercabile compressa (riduzione della dimensione)
 
@@ -5425,7 +5569,7 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 
 ### OCR-20 — Integrazione dell'OCR con le altre funzioni (ricerca, redazione, lettura, acquisizione)
 
-**Descrizione:** L'OCR è disponibile dove serve, senza passare dal menu. (a) *Ricerca*: se il documento ha pagine senza testo, il pannello dei risultati indica "N pagine non ricercabili" con l'azione *Esegui OCR e ripeti la ricerca*. (b) *Copia, lettura ad alta voce, traduzione, confronto documenti*: sulle pagine solo-immagine propongono l'OCR, oppure lo eseguono in sola lettura (risultato in memoria, documento non modificato) quando l'utente lo sceglie. (c) *Redazione*: sulle pagine con livello OCR o convertite, l'applicazione di una redazione rimuove sia i pixel dell'immagine sia il testo (invisibile o visibile) e i dati di revisione nell'area; la ricerca dei testi da redigere copre anche le pagine scannerizzate. (d) *Acquisizione da scanner e creazione da immagini*: opzione "Riconosci il testo dopo l'acquisizione" con il profilo OCR predefinito. (e) *Riconoscimento dei campi modulo* su moduli scannerizzati: usa le etichette riconosciute per nominare i campi.
+**Descrizione:** L'OCR è disponibile dove serve, senza passare dal menu. (a) *Ricerca*: se il documento ha pagine senza testo, il pannello dei risultati indica "N pagine non ricercabili" con l'azione *Esegui OCR e ripeti la ricerca*. (b) *Copia, lettura ad alta voce, traduzione, confronto documenti*: sulle pagine solo-immagine propongono l'OCR, oppure lo eseguono in sola lettura (risultato in memoria, documento non modificato) quando l'utente lo sceglie. (c) *Redazione*: sulle pagine con livello OCR o convertite, l'applicazione di una redazione rimuove sia i pixel dell'immagine sia il testo (invisibile o visibile) e i dati di revisione nell'area; la ricerca dei testi da redigere copre anche le pagine scannerizzate. (d) *Acquisizione da scanner e creazione da immagini*: opzione "Esegui OCR dopo l'acquisizione" con il profilo OCR predefinito. (e) *Riconoscimento dei campi modulo* su moduli scannerizzati: usa le etichette riconosciute per nominare i campi.
 
 **Flusso:** 1. L'utente usa una funzione (es. Cerca) su un documento con pagine solo-immagine. 2. La funzione rileva l'assenza di testo tramite la classificazione di OCR-01 e mostra la proposta nel proprio contesto. 3. Con *Esegui OCR* parte l'OCR con le impostazioni di OCR-04 precompilate, oppure l'OCR in sola lettura per lettura ad alta voce, traduzione e confronto. 4. Al termine la funzione riprende da sola (es. la ricerca viene ripetuta e i risultati aggiornati).
 
@@ -5436,12 +5580,12 @@ Questa sezione specifica il riconoscimento ottico dei caratteri (OCR) con cui Fo
 **Criteri di accettazione:**
 - Dato un PDF con 3 pagine solo-immagine che contengono la parola "contratto", quando l'utente cerca "contratto" prima dell'OCR, allora il pannello indica "3 pagine non ricercabili" con *Esegui OCR e ripeti la ricerca*; scelta l'azione, allora al termine i risultati includono le occorrenze su quelle pagine.
 - Dato una pagina con livello OCR che contiene un codice fiscale noto, quando vi si applica una redazione, allora né il testo estraibile né i dati di revisione contengono quel codice e nell'area dell'immagine non resta alcun pixel originale.
-- Dato l'opzione "Riconosci il testo dopo l'acquisizione" attiva, quando si acquisiscono 3 pagine dallo scanner (o si crea un PDF da 3 immagini), allora il PDF creato è ricercabile con le lingue predefinite.
+- Dato l'opzione "Esegui OCR dopo l'acquisizione" attiva, quando si acquisiscono 3 pagine dallo scanner (o si crea un PDF da 3 immagini), allora il PDF creato è ricercabile con le lingue predefinite.
 - Dato una pagina solo-immagine, quando l'utente avvia la lettura ad alta voce e accetta l'OCR in sola lettura, allora il testo viene letto e il documento non risulta modificato.
 
 **Priorità:** P1
 
-**Tracciabilità verso l'inventario di parità** (numerazione area.voce dell'inventario): 7.1 scansione → PDF ricercabile/modificabile → OCR-05, OCR-06 · 7.2 PDF → solo immagine → OCR-18 · 7.3 copia testo da PDF scansionato → OCR-07, OCR-11 · 7.4 esportazione OCR come PDF/UA → OCR-17 · 7.5 riconoscimento multilingue (38+ lingue) → OCR-03 · 7.6 impostazioni di rilevamento OCR → OCR-01 · 6.11 conversione con OCR → OCR-16 · 11.8 OCR in blocco → OCR-15 · 4.4 cattura di un'area con estrazione del testo → OCR-11 · 2.14 identificazione dei contenuti da sottoporre a OCR → OCR-01. Funzioni oltre la parità, dalle fonti `competitors.md` (§28 miglioramento scansioni, §29 OCR avanzato) e `standard.md` (cap. 31–32): OCR-08, OCR-09, OCR-10, OCR-12, OCR-14, OCR-19, OCR-20.
+**Parità.** Righe del catalogo coperte da questa sezione (la fonte ufficiale è la matrice della sezione 13): 7.01 → OCR-02, OCR-04, OCR-05, OCR-06 · 7.02 → OCR-03 · 7.03 → OCR-07, OCR-11, OCR-20 · 7.04 → OCR-18 · 7.05 → OCR-17 · 7.06 → OCR-01 · 6.30 → OCR-16 · 11.08 → BAT-08 (accesso da OCR-15) · 4.05 → VIS-29 (testo con OCR-11). Righe A (aggiunte): 7.07 → OCR-12; 7.08 → OCR-10, OCR-11; 7.09 → OCR-08, OCR-09. OCR-14 e OCR-19 completano le funzioni di parità.
 
 
 ## 8. Moduli
@@ -5623,18 +5767,18 @@ Termini usati nella sezione: *campo* = entità logica del modulo con nome comple
 
 ### FRM-08 — Formati, validazioni e calcoli dei moduli esistenti
 
-**Descrizione:** Durante la compilazione Foliant esegue in modo nativo le regole predefinite di battitura, formato, validazione e calcolo più diffuse nei moduli (le funzioni predefinite con prefisso `AF` della convenzione di scripting per PDF): numeri, valute, percentuali, date, ore, maschere speciali, intervalli di validità, somma, prodotto, media, minimo e massimo. I moduli esistenti funzionano quindi anche senza un motore di script generale. Gli script personalizzati sono affidati al motore di script del documento, se presente e abilitato; altrimenti la barra modulo lo segnala.
+**Descrizione:** Durante la compilazione Foliant applica in modo nativo le funzioni di formato e calcolo comunemente presenti nei moduli (in questa sezione: *funzioni predefinite*): filtri di battitura, formati di numeri, valute, percentuali, date, ore e maschere speciali (CAP, telefono, codici), validazione di intervallo e calcoli di somma, prodotto, media, minimo e massimo. Queste funzioni sono riconosciute dalla loro forma nelle azioni dei campi ed eseguite come regole predefinite, senza interpretare codice; i moduli esistenti funzionano quindi anche se Foliant non contiene un motore di script generale. Gli script personalizzati non vengono mai eseguiti e la barra modulo lo segnala (NFR-17, requisito di riferimento per gli script).
 
-**Flusso:** 1. All'apertura ogni azione di campo è classificata come predefinita riconosciuta, personalizzata o assente. 2. Durante la digitazione si applica il filtro di battitura (es. solo cifre, segno e separatore decimale). 3. Alla conferma si esegue la validazione; se fallisce, compare un messaggio e il valore precedente viene ripristinato. 4. Se il valore è valido, i campi calcolati vengono ricalcolati nell'ordine di calcolo del documento. 5. I campi cambiati vengono formattati e i loro aspetti aggiornati. 6. Se esistono script personalizzati non eseguiti, la barra lo segnala una sola volta con l'elenco dei campi interessati. 7. All'apertura i valori salvati non vengono ricalcolati; il comando "Ricalcola" forza il ricalcolo completo.
+**Flusso:** 1. All'apertura ogni azione di campo è classificata come predefinita riconosciuta, personalizzata o assente. 2. Durante la digitazione si applica il filtro di battitura (es. solo cifre, segno e separatore decimale). 3. Alla conferma si esegue la validazione; se fallisce, compare un messaggio e il valore precedente viene ripristinato. 4. Se il valore è valido, i campi calcolati vengono ricalcolati nell'ordine di calcolo del documento. 5. I campi cambiati vengono formattati e i loro aspetti aggiornati. 6. Se esistono script personalizzati, la barra segnala una sola volta che non vengono eseguiti («Calcoli personalizzati non eseguiti»), con l'elenco dei campi interessati. 7. All'apertura i valori salvati non vengono ricalcolati; il comando "Ricalcola" forza il ricalcolo completo.
 
-**Formati/strutture:** azioni aggiuntive del campo `/AA`: `/K` battitura, `/F` formato, `/V` validazione, `/C` calcolo (azioni JavaScript); `/CO` (ordine di calcolo) nel dizionario del modulo; modello a oggetti degli script secondo ISO 21757-1. Il riconoscimento è sintattico: l'azione deve contenere una sola chiamata a una funzione predefinita con argomenti letterali.
+**Formati/strutture:** azioni aggiuntive del campo `/AA`: `/K` battitura, `/F` formato, `/V` validazione, `/C` calcolo, espresse come azioni di script (ECMAScript per PDF, ISO 21757-1); `/CO` (ordine di calcolo) nel dizionario del modulo. Il riconoscimento è sintattico: l'azione deve contenere una sola chiamata a una funzione predefinita con argomenti letterali. Il comportamento delle funzioni predefinite (separatori, simboli di valuta, maschere, arrotondamenti) segue le convenzioni diffuse nei moduli esistenti, così che il risultato coincida con quello degli altri lettori.
 
 **Casi limite:**
-- Script che unisce una chiamata predefinita e altro codice → trattato come personalizzato.
+- Script che unisce una chiamata predefinita e altro codice → trattato come personalizzato, quindi non eseguito.
 - Argomenti non validi in una chiamata predefinita → regola ignorata (il campo si comporta come testo semplice) e anomalia registrata nel log.
 - Calcolo che cita campi inesistenti → questi valgono come vuoti; anomalia mostrata nell'Elenco campi (FRM-24).
 - Dipendenze circolari → ogni campo calcolato è ricalcolato al massimo una volta per evento.
-- Motore di script assente o disabilitato e campo con calcolo personalizzato → il campo conserva l'ultimo valore salvato; la barra indica "calcoli non aggiornati".
+- Campo con calcolo personalizzato → lo script non viene eseguito (NFR-17), il campo conserva l'ultimo valore salvato e la barra indica "calcoli non aggiornati".
 - Valore memorizzato dei campi numerici → forma canonica (punto decimale, senza separatori delle migliaia né simboli); la forma formattata compare solo nell'aspetto.
 - Campo percentuale → con il simbolo % l'input è inteso come percentuale (25% → 0.25); senza simbolo è il valore grezzo, come negli altri lettori (0.25 → 25,00%).
 
@@ -5643,16 +5787,16 @@ Termini usati nella sezione: *campo* = entità logica del modulo con nome comple
 - Dato un campo con filtro numerico, quando l'utente digita "12a3", allora la "a" è rifiutata e il testo è "123".
 - Dato A=2, B=3 e T calcolato come somma di A e B, quando l'utente cambia A in 5, allora T vale 8.
 - Dato un campo con validazione d'intervallo 0–100, quando l'utente digita 150, allora appare un messaggio, il valore precedente è ripristinato e nessun calcolo viene eseguito.
-- Dato un campo calcolato da uno script personalizzato e il motore di script disabilitato, quando l'utente modifica un campo sorgente, allora la barra segnala i calcoli non aggiornati e il campo calcolato conserva il valore.
+- Dato un campo calcolato da uno script personalizzato, quando l'utente modifica un campo sorgente, allora lo script non viene eseguito, la barra segnala i calcoli non aggiornati e il campo calcolato conserva il valore.
 - Dato un campo percentuale con 2 decimali e stile 1.234,56, quando l'utente digita "25%", allora `/V` vale 0.25 e il campo mostra "25,00%".
 
 **Priorità:** P0
 
 ### FRM-09 — Salvataggio dei valori compatibile con altri lettori
 
-**Descrizione:** I valori compilati sono salvati in modo che qualunque lettore conforme li mostri, li stampi e li legga in modo identico: valore memorizzato nel campo, aspetto rigenerato per ogni widget, caratteri tipografici disponibili, coerenza con gli eventuali dati XML, salvataggio incrementale quando serve a preservare firme o diritti d'uso.
+**Descrizione:** I valori compilati sono salvati in modo che qualunque lettore conforme li mostri, li stampi e li legga in modo identico: valore memorizzato nel campo, aspetto rigenerato per ogni widget, caratteri tipografici disponibili, coerenza con gli eventuali dati XML, tipo di salvataggio secondo NFR-09 (requisito di riferimento: incrementale quando il documento contiene firme, compresi i diritti d'uso estesi).
 
-**Flusso:** 1. Al salvataggio, per ogni campo modificato Foliant scrive `/V` (e `/I` per le scelte) sul nodo che porta il nome completo, condiviso da tutti i suoi widget, e `/AS` sui widget di caselle e opzioni. 2. Rigenera `/AP /N` (e `/AP /D` per i pulsanti) di ogni widget a partire da `/DA`, `/Q`, `/MK`, `/BS` e dal valore formattato. 3. Se il valore contiene caratteri non rappresentabili con il carattere tipografico di `/DA`, aggiunge in `/DR` un carattere incorporato (sottoinsieme) che li copre e aggiorna `/DA` del campo. 4. Dopo aver generato tutti gli aspetti, elimina la dipendenza dalla rigenerazione da parte del lettore (`/NeedAppearances` rimosso o falso). 5. Se il documento contiene un modulo XML statico, aggiorna anche i dati XML (FRM-34). 6. Usa il salvataggio incrementale se il documento contiene firme o diritti d'uso; altrimenti segue la preferenza dell'utente.
+**Flusso:** 1. Al salvataggio, per ogni campo modificato Foliant scrive `/V` (e `/I` per le scelte) sul nodo che porta il nome completo, condiviso da tutti i suoi widget, e `/AS` sui widget di caselle e opzioni. 2. Rigenera `/AP /N` (e `/AP /D` per i pulsanti) di ogni widget a partire da `/DA`, `/Q`, `/MK`, `/BS` e dal valore formattato. 3. Se il valore contiene caratteri non rappresentabili con il carattere tipografico di `/DA`, aggiunge in `/DR` un carattere incorporato (sottoinsieme) che li copre e aggiorna `/DA` del campo. 4. Dopo aver generato tutti gli aspetti, elimina la dipendenza dalla rigenerazione da parte del lettore (`/NeedAppearances` rimosso o falso). 5. Se il documento contiene un modulo XML statico, aggiorna anche i dati XML quando FRM-34 (P1) è implementato; altrimenti vale l'avviso di FRM-33. 6. Il salvataggio segue NFR-09: aggiornamento incrementale se il documento contiene firme digitali, compresi i diritti d'uso estesi; altrimenti riscrittura completa.
 
 **Formati/strutture:** `/V`, `/I`, `/AS`; `/AP` (`/N`, `/D`, sottodizionari per stato) come Form XObject con `/BBox`, `/Resources` e `/Matrix` coerente con la rotazione `/MK /R`; `/DA`, `/DR /Font`; `/NeedAppearances`, `/SigFlags`; stringhe di testo in PDFDocEncoding quando possibile, altrimenti UTF-16BE con BOM (massima compatibilità); aggiornamento incrementale (sezione xref aggiuntiva e trailer con `/Prev`).
 
@@ -5666,7 +5810,7 @@ Termini usati nella sezione: *campo* = entità logica del modulo con nome comple
 - Carattere standard non incorporato in `/DR` e valore rappresentabile → usato così com'è; se il documento va salvato in PDF/A, il carattere viene incorporato.
 
 **Criteri di accettazione:**
-- Dato un modulo compilato e salvato da Foliant, quando viene disegnato dal lettore di prova, allora tutti i valori sono visibili e il rendering coincide con quello di Foliant entro la tolleranza stabilita.
+- Dato un modulo compilato e salvato da Foliant, quando viene disegnato dal lettore di prova, allora tutti i valori sono visibili e il rendering coincide con quello di Foliant con al massimo lo 0,5 % dei pixel che differiscono di oltre 8/255 in almeno un canale, a 150 dpi (stessa tolleranza di ANN-40).
 - Dato un campo con carattere latino di base, quando l'utente inserisce "Ελληνικά 日本語" e salva, allora il file contiene un carattere incorporato che copre quei glifi, l'aspetto li mostra e la lettura di `/V` restituisce la stessa stringa.
 - Dato un PDF con una firma di approvazione e campi non bloccati, quando l'utente compila un campo e salva, allora il file originale è un prefisso byte per byte del file salvato e la firma risulta ancora valida.
 - Dato un PDF con `/NeedAppearances` vero e senza aspetti, quando Foliant lo apre e lo salva, allora ogni widget ha un aspetto normale e il flag non è più vero.
@@ -5712,7 +5856,7 @@ Termini usati nella sezione: *campo* = entità logica del modulo con nome comple
 - Nome con punto (es. "cliente.nome") → crea o riusa il nodo genitore "cliente", con avviso esplicito della gerarchia.
 - Nome vuoto o di soli spazi → rifiutato.
 - Unione di campi di tipo diverso → rifiutata.
-- Unione di campi con valori diversi → prevale il valore del campo di destinazione, previa conferma.
+- Unione di campi con valori diversi → prevale il valore del campo di destinazione, come indicato nella domanda di unione del passo 3.
 - Proprietà di campo modificata su un campo con più widget → il pannello indica che vale per tutte le copie.
 - Campo bloccato da una firma → proprietà in sola lettura.
 - Nomi con caratteri non ASCII → ammessi e salvati come stringhe di testo Unicode.
@@ -5764,12 +5908,12 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Casi limite:**
 - Pettine senza lunghezza massima → la conferma è bloccata finché non si indica N.
-- Lunghezza massima ridotta sotto la lunghezza del valore corrente → valore troncato previa conferma.
+- Lunghezza massima ridotta sotto la lunghezza del valore corrente → valore troncato, con l'avviso di UX-13 che offre **Annulla**.
 - Valore di esportazione con spazi, simboli o caratteri non ASCII → nome di stato codificato correttamente e `/Opt` scritto per compatibilità.
 - Due pulsanti dello stesso gruppo con lo stesso valore → avviso (si attiveranno insieme solo se l'opzione relativa è attiva).
 - Voce duplicata in un elenco → avviso, ma consentita.
 - Ordinamento alfabetico → secondo le regole di collazione della lingua, applicato all'elenco memorizzato.
-- Eliminazione della voce selezionata o predefinita → valore o predefinito azzerati previa conferma.
+- Eliminazione della voce selezionata o predefinita → valore o predefinito azzerati, con l'avviso di UX-13 che offre **Annulla**.
 
 **Criteri di accettazione:**
 - Dato un campo di testo, quando l'utente attiva il pettine con 5 caratteri, allora multiriga e password risultano disattivati e nel file `/MaxLen` vale 5.
@@ -5783,7 +5927,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Per i campi di testo l'utente sceglie una categoria di formato: Nessuno; Numero (decimali da 0 a 10, stile dei separatori 1.234,56 / 1234,56 / 1,234.56 / 1234.56 / 1'234.56, simbolo di valuta prima o dopo il numero, negativi con segno meno, in rosso, tra parentesi o rossi tra parentesi); Percentuale (decimali, separatori); Data (modelli predefiniti e personalizzati); Ora (24 ore o 12 ore con AM/PM, con o senza secondi); Speciale (CAP a 5 cifre, numero di telefono, codice numerico di N cifre, maschera libera con segnaposto per cifra, lettera, carattere alfanumerico o qualsiasi). Il formato determina il filtro di battitura e la visualizzazione; il valore memorizzato resta in forma canonica (FRM-08).
 
-**Flusso:** 1. L'utente apre la scheda Formato. 2. Sceglie categoria e parametri. 3. Un'anteprima mostra un valore d'esempio formattato. 4. Alla conferma Foliant scrive le azioni di battitura e di formato come chiamate alle funzioni predefinite (FRM-08), in modo che anche gli altri lettori dotati di supporto agli script ottengano lo stesso comportamento.
+**Flusso:** 1. L'utente apre la scheda Formato. 2. Sceglie categoria e parametri. 3. Un'anteprima mostra un valore d'esempio formattato. 4. Alla conferma Foliant scrive le azioni di battitura e di formato come chiamate alle funzioni predefinite (FRM-08), in modo che anche gli altri lettori che eseguono gli script dei moduli ottengano lo stesso comportamento.
 
 **Formati/strutture:** `/AA /K` e `/AA /F` con chiamate alle funzioni predefinite di numero, percentuale, data, ora e speciale/maschera, con parametri letterali; modelli di data e ora composti da segnaposto per giorno, mese, anno, ore, minuti, secondi e AM/PM.
 
@@ -5876,7 +6020,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Creazione di pulsanti con didascalia e/o icona e relativa disposizione (solo testo, solo icona, icona sopra, sotto, a sinistra o a destra del testo, testo sovrapposto), comportamento al clic (nessuno, inversione, contorno, pressione con aspetti distinti per passaggio del mouse e pressione) e azioni: reimposta il modulo (tutti o alcuni campi), importa dati, vai a pagina o vista, apri un indirizzo web, mostra/nascondi campi, stampa, invia il modulo a un indirizzo web o di posta nel formato scelto. In compilazione Foliant esegue anche le azioni dei pulsanti dei moduli esistenti.
 
-**Flusso:** 1. L'utente crea un pulsante (FRM-10). 2. Nella scheda Opzioni imposta disposizione, didascalie (normale, passaggio, pressione) e icone da immagine o pagina PDF. 3. Nella scheda Azioni sceglie l'evento (rilascio, pressione, ingresso o uscita del puntatore, focus) e un elenco ordinato di azioni. 4. In compilazione il clic esegue le azioni in ordine; quelle che escono dal documento (indirizzo web, invio) chiedono conferma.
+**Flusso:** 1. L'utente crea un pulsante (FRM-10). 2. Nella scheda Opzioni imposta disposizione, didascalie (normale, passaggio, pressione) e icone da immagine o pagina PDF. 3. Nella scheda Azioni sceglie l'evento (rilascio, pressione, ingresso o uscita del puntatore, focus) e un elenco ordinato di azioni. 4. In compilazione il clic esegue le azioni in ordine; quelle che escono dal documento (indirizzo web, invio, apertura di un file) passano per la finestra di conferma di VIS-19, che mostra destinazione e dati da inviare (NFR-18).
 
 **Formati/strutture:** `/FT /Btn` + Pushbutton; `/MK` (`/CA`, `/RC`, `/AC`, `/I`, `/RI`, `/IX`, `/TP`, `/IF`); `/H` (N, I, O, P); `/A` e `/AA` (`/U`, `/D`, `/E`, `/X`, `/Fo`, `/Bl`); azioni `/ResetForm` (`/Fields`, `/Flags` includi/escludi), `/ImportData`, `/GoTo`, `/URI`, `/Hide` (`/T`, `/H`), `/Named` (stampa), `/SubmitForm` (`/F`, `/Fields`, `/Flags`: formato FDF, XFDF, HTML o PDF, metodo, inclusione dei campi vuoti); catena `/Next`.
 
@@ -5884,14 +6028,15 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Invio verso un indirizzo non cifrato (non HTTPS) → avviso esplicito che i dati viaggiano in chiaro.
 - Errore di rete durante l'invio → messaggio e possibilità di salvare i dati in un file da inviare in seguito.
 - Invio a un indirizzo di posta → apre il programma di posta predefinito del sistema con il file dati allegato.
-- Azione di avvio di applicazioni o file → bloccata per impostazione predefinita.
-- Azione con script personalizzato → affidata al motore di script, se abilitato.
+- Azione di avvio verso un file di dati → finestra di conferma di VIS-19; verso un programma, uno script o con parametri di avvio → mai eseguita (NFR-18).
+- Azione con script personalizzato → mai eseguita (NFR-17); in modifica è mostrata in sola lettura e si può sostituire con un'azione predefinita.
 - Obbligatori vuoti prima dell'invio → invio bloccato con elenco (FRM-15).
 
 **Criteri di accettazione:**
 - Dato un pulsante con azione "reimposta i campi A e B", quando l'utente fa clic in compilazione, allora A e B tornano ai valori predefiniti e C resta invariato.
 - Dato un pulsante con azione "nascondi C", quando l'utente fa clic, allora il widget di C ha il flag Hidden e non è più visibile.
-- Dato un pulsante di invio verso un server di prova HTTPS in formato XFDF, quando l'utente fa clic e conferma, allora il server riceve un documento XFDF con i valori di tutti i campi non esclusi.
+- Dato un pulsante di invio verso un server di prova HTTPS in formato XFDF, quando l'utente fa clic e conferma nella finestra di VIS-19, allora il server riceve un documento XFDF con i valori di tutti i campi non esclusi.
+- Dato un pulsante con un'azione di script personalizzato, quando l'utente vi fa clic, allora lo script non viene eseguito e la barra modulo indica che l'azione non è disponibile.
 - Dato un pulsante con didascalie diverse per lo stato normale e per la pressione, quando si salva, allora il file contiene aspetti `/N` e `/D` distinti.
 
 **Priorità:** P1
@@ -5993,7 +6138,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Duplicazione di campi nella stessa pagina (con nome nuovo oppure come copia che condivide il valore), copia e incolla di campi tra pagine e tra documenti, replica di uno o più campi su un intervallo di pagine (tutte, pari, dispari, personalizzato) nella stessa posizione.
 
-**Flusso:** 1. L'utente seleziona i campi e sceglie Duplica (Ctrl+D) o "Copia su pagine…". 2. Sceglie "valore condiviso" (stesso campo con nuovi widget) o "campi indipendenti" (nuovi nomi con suffisso numerico). 3. Per la copia su pagine indica l'intervallo e il riferimento di posizione (stessa distanza dall'angolo superiore sinistro, predefinito, o posizione proporzionale alle dimensioni della pagina). 4. Incollando in un altro documento, i conflitti di nome si risolvono con rinomina automatica, unione o annullamento.
+**Flusso:** 1. L'utente seleziona i campi e sceglie **Duplica** (menu contestuale, senza scorciatoia, UX-18) o "Copia su pagine…". 2. Sceglie "valore condiviso" (stesso campo con nuovi widget) o "campi indipendenti" (nuovi nomi con suffisso numerico). 3. Per la copia su pagine indica l'intervallo e il riferimento di posizione (stessa distanza dall'angolo superiore sinistro, predefinito, o posizione proporzionale alle dimensioni della pagina). 4. Incollando in un altro documento, i conflitti di nome si risolvono con rinomina automatica, unione o annullamento.
 
 **Formati/strutture:** valore condiviso → nuovo widget aggiunto ai `/Kids` del campo esistente; campi indipendenti → nuovi campi con `/T` distinto; copia di `/MK`, `/DA`, `/AA`, `/AP`; caratteri di `/DR` copiati nel documento di destinazione; per i pulsanti di opzione la copia resta nello stesso gruppo e chiede il valore di esportazione.
 
@@ -6009,7 +6154,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Dato il campo "Nome" a pagina 1, quando l'utente lo copia su tutte le 10 pagine con valore condiviso, allora esiste un solo campo "Nome" con 10 widget e il testo digitato a pagina 5 compare in tutte.
 - Dato lo stesso campo, quando lo copia sulle pagine pari come campi indipendenti, allora sono creati 5 campi con nomi distinti e valori indipendenti.
 - Dato un campo incollato in un documento che ha già un campo con lo stesso nome, quando l'utente sceglie la rinomina automatica, allora il nuovo campo ha un nome univoco e quello esistente resta invariato.
-- Dato un campo selezionato, quando l'utente preme Ctrl+D, allora appare una copia con nome nuovo, spostata di 10 pt e selezionata.
+- Dato un campo selezionato, quando l'utente sceglie **Duplica**, allora appare una copia con nome nuovo, spostata di 10 pt e selezionata.
 
 **Priorità:** P1
 
@@ -6017,7 +6162,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Pannello laterale con tutti i campi del documento in un albero gerarchico (nomi con punti), con tipo, pagina, valore corrente e indicatori (obbligatorio, sola lettura, calcolato, script non eseguiti, anomalie). Offre ricerca per nome, filtri per tipo, pagina e stato, ordinamento per nome, pagina o ordine di tabulazione; dalle voci si può andare al campo, rinominarlo, eliminarlo, aprirne le proprietà (anche per più campi) e riordinare la tabulazione per trascinamento (FRM-21).
 
-**Flusso:** 1. L'utente apre il pannello: in compilazione funziona da indice navigabile, in modifica offre tutte le azioni. 2. Il clic su una voce porta la vista al widget e lo seleziona o gli dà il focus. 3. Doppio clic apre le proprietà, F2 rinomina, Canc elimina (con conferma se il campo ha un valore o è usato in calcoli). 4. La selezione sulla pagina evidenzia la voce corrispondente e viceversa.
+**Flusso:** 1. L'utente apre il pannello: in compilazione funziona da indice navigabile, in modifica offre tutte le azioni. 2. Il clic su una voce porta la vista al widget e lo seleziona o gli dà il focus. 3. Doppio clic apre le proprietà, F2 rinomina, Canc elimina senza conferma, con l'avviso di UX-13 che offre **Annulla** e, se il campo è usato in calcoli, elenca i campi dipendenti. 4. La selezione sulla pagina evidenzia la voce corrispondente e viceversa.
 
 **Formati/strutture:** lettura di `/AcroForm /Fields` e dei `/Kids`; composizione del nome completo; associazione widget → pagina.
 
@@ -6032,6 +6177,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Dato il testo di ricerca "tot", quando l'utente lo digita, allora restano visibili solo i campi il cui nome contiene "tot", senza distinzione tra maiuscole e minuscole.
 - Dato un campo a pagina 7, quando l'utente fa clic sulla sua voce, allora la vista mostra pagina 7 con il campo selezionato.
 - Dato un file con due campi omonimi di tipo diverso, quando si apre il pannello, allora entrambi sono marcati come anomalia e "Rendi univoci i nomi" assegna loro nomi distinti.
+- Dato un campo compilato usato in un calcolo, quando l'utente lo elimina con Canc, allora non compare alcuna conferma, l'avviso elenca il campo dipendente e **Annulla** ripristina il campo con il suo valore.
 
 **Priorità:** P1
 
@@ -6046,7 +6192,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 **Casi limite:**
 - Salvataggio durante l'anteprima → Foliant chiede se includere i valori di prova.
 - Azioni di navigazione o di visibilità eseguite in anteprima → annullate al ritorno in modifica.
-- Script personalizzati → eseguiti solo se il motore di script è abilitato, come in compilazione.
+- Script personalizzati → mai eseguiti, come in compilazione (NFR-17); l'anteprima segnala i calcoli personalizzati non eseguiti.
 
 **Criteri di accettazione:**
 - Dato un modulo in modifica, quando l'utente passa in anteprima, compila tre campi e torna in modifica scegliendo di scartare, allora i tre campi hanno i valori precedenti all'anteprima.
@@ -6105,7 +6251,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### FRM-28 — Esportazione dei dati del modulo
 
-**Descrizione:** Esportazione dei valori dei campi nei formati di interscambio FDF e XFDF, in CSV (anche delimitato da tabulazioni) e in JSON; opzioni: tutti i campi o una selezione, inclusione dei campi vuoti, nome del file proposto in base al documento. Un riepilogo finale indica campi esportati ed esclusi, con il motivo.
+**Descrizione:** Esportazione dei valori dei campi nei formati di interscambio FDF e XFDF, in XML semplice, in CSV, in testo delimitato da tabulazioni (TXT) e in JSON; opzioni: tutti i campi o una selezione, inclusione dei campi vuoti, nome del file proposto in base al documento. Un riepilogo finale indica campi esportati ed esclusi, con il motivo.
 
 **Flusso:** 1. L'utente sceglie Esporta dati, il formato e le opzioni. 2. Indica la destinazione. 3. Foliant scrive il file e mostra il riepilogo.
 
@@ -6113,11 +6259,13 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - FDF: intestazione FDF, dizionario `/FDF` con `/Fields` (gerarchia con `/T`, `/Kids`, `/V`), `/F` riferito al PDF di origine, `/ID` del documento; stringhe UTF-16BE con BOM quando non rappresentabili in PDFDocEncoding (ISO 32000-2 §12.7.8).
 - XFDF: XML UTF-8 conforme a ISO 19444-1 (XFDF 3.0): riferimento al file di origine e ai suoi identificatori, campi annidati per livello del nome, un elemento valore per ogni voce selezionata, valore formattato per il testo ricco.
 - CSV: UTF-8 (BOM facoltativo per l'apertura nei fogli di calcolo), quotatura secondo RFC 4180; prima riga con i nomi completi dei campi, seconda riga con i valori; separatore a scelta tra virgola, punto e virgola e tabulazione; scelte multiple unite con "|" (con escape del carattere se presente nei valori).
+- XML semplice: XML 1.0 in UTF-8 con elemento radice `fields`; ogni campo è un elemento con il nome parziale del campo, annidato secondo la gerarchia dei nomi ("cliente.nome" → `cliente` che contiene `nome`); se il nome non è un nome XML valido si usa l'elemento `field` con l'attributo `name`; le scelte multiple sono elementi `value` ripetuti; un campo vuoto è un elemento vuoto.
+- TXT: testo UTF-8 delimitato da tabulazioni, prima riga con i nomi completi dei campi e una riga di valori per ogni record; i valori che contengono tabulazioni, a capo o virgolette sono racchiusi tra virgolette, con le virgolette interne raddoppiate.
 - JSON (RFC 8259, UTF-8): oggetto con `format` = "foliant-form-data", `version` = 1, `source` (nome del file e identificatore del documento) e `fields` (nome completo → valore: stringa, array di stringhe per le scelte multiple, `null` se vuoto).
 - Regole comuni: sempre esclusi i campi con flag NoExport, i valori dei campi password, i campi firma, i pulsanti e i campi immagine; caselle e opzioni esportano il valore di esportazione o "Off"; i campi calcolati esportano il valore corrente.
 
 **Casi limite:**
-- Nomi o valori con separatori, virgolette o a capo → quotati (CSV) o sottoposti a escape (JSON, XFDF) senza perdita.
+- Nomi o valori con separatori, virgolette o a capo → quotati (CSV, TXT) o sottoposti a escape (JSON, XFDF, XML) senza perdita.
 - Caratteri non ASCII nei nomi o nei valori → preservati.
 - Documento senza campi → comando disattivato.
 - Modulo XML statico → si esportano i valori dei campi standard (già sincronizzati); i dati XML si esportano con FRM-35.
@@ -6126,15 +6274,17 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Dato un modulo con 10 campi compilati, di cui uno password e uno NoExport, quando si esporta in XFDF, allora il file è valido rispetto allo schema XFDF e contiene esattamente 8 campi con i valori correnti.
 - Dato un campo con valore `Rossi, "Mario"`, quando si esporta in CSV, allora la riga dei valori, riletta con un analizzatore conforme a RFC 4180, restituisce il valore identico.
 - Dato una casella di riepilogo con due voci selezionate, quando si esporta in JSON, allora il valore del campo è un array di due stringhe.
-- Dato un modulo compilato, quando si esporta in ciascuno dei quattro formati e si reimporta (FRM-29) in una copia vuota dello stesso modulo, allora tutti i valori coincidono.
+- Dato un modulo con "cliente.nome" = "Anna" e "totale" = "12.50", quando si esporta in XML semplice, allora il file è XML ben formato con radice `fields`, un elemento `cliente` che contiene `nome` con il testo "Anna" e un elemento `totale` con il testo "12.50".
+- Dato lo stesso modulo, quando si esporta in TXT, allora la prima riga contiene i nomi completi separati da tabulazioni e la seconda i valori nello stesso ordine.
+- Dato un modulo compilato, quando si esporta in ciascuno dei sei formati e si reimporta (FRM-29) in una copia vuota dello stesso modulo, allora tutti i valori coincidono.
 
 **Priorità:** P1
 
 ### FRM-29 — Importazione dei dati del modulo
 
-**Descrizione:** Importazione di valori da FDF, XFDF, CSV (con scelta della riga se ne contiene più d'una) e JSON (formato di FRM-28 oppure oggetto semplice nome → valore), associati ai campi per nome completo. Un rapporto finale distingue campi importati, ignorati perché inesistenti, rifiutati per valore incompatibile e saltati perché bloccati da una firma.
+**Descrizione:** Importazione di valori da FDF, XFDF, XML semplice, CSV e TXT delimitato da tabulazioni (con scelta della riga se ne contengono più d'una) e JSON (formato di FRM-28 oppure oggetto semplice nome → valore), associati ai campi per nome completo. Un rapporto finale distingue campi importati, ignorati perché inesistenti, rifiutati per valore incompatibile e saltati perché bloccati da una firma.
 
-**Flusso:** 1. L'utente sceglie Importa dati e il file. 2. Foliant rileva formato e codifica; per il CSV rileva il separatore (modificabile) e mostra un'anteprima tabellare per scegliere la riga. 3. Se il riferimento al documento d'origine (FDF/XFDF) non corrisponde, compare un avviso non bloccante. 4. I valori sono applicati in un'unica operazione annullabile. 5. Seguono ricalcolo e formattazione. 6. Viene mostrato il rapporto.
+**Flusso:** 1. L'utente sceglie Importa dati e il file. 2. Foliant rileva formato e codifica; per CSV e TXT rileva il separatore (modificabile) e mostra un'anteprima tabellare per scegliere la riga. 3. Se il riferimento al documento d'origine (FDF/XFDF) non corrisponde, compare un avviso non bloccante. 4. I valori sono applicati in un'unica operazione annullabile. 5. Seguono ricalcolo e formattazione. 6. Viene mostrato il rapporto.
 
 **Formati/strutture:** come FRM-28. Da FDF e XFDF si applicano solo i valori; le altre istruzioni eventualmente presenti nel file dati (modifica di flag, aspetti, azioni, script, annotazioni) non vengono applicate e sono elencate nel rapporto (le annotazioni si importano con le funzioni della sezione Annotazioni).
 
@@ -6145,13 +6295,16 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Campi in sola lettura → importati, come negli altri lettori; campi bloccati da una firma → saltati.
 - Campo password → valore accettato in memoria ma mai salvato (FRM-02).
 - CSV senza alcuna colonna corrispondente → errore e nessuna modifica.
-- Codifica del CSV → UTF-8 o UTF-16 con BOM riconosciute; altrimenti tentativo UTF-8 e ripiego Windows-1252, con anteprima per la correzione manuale.
+- Codifica del CSV → UTF-8 o UTF-16 con BOM riconosciute; altrimenti tentativo UTF-8 e ripiego sulla codifica a 8 bit dell'Europa occidentale (cp1252), con anteprima per la correzione manuale.
 - FDF cifrato (funzione deprecata) → non supportato, con messaggio.
-- JSON annidato (es. {"cliente": {"nome": "x"}}) → nomi composti con il punto ("cliente.nome").
+- JSON annidato (es. {"cliente": {"nome": "x"}}) o XML con elementi annidati → nomi composti con il punto ("cliente.nome").
+- XML semplice prodotto da altri programmi con radice `fields` e attributi aggiuntivi in altri spazi dei nomi (es. il nome originale di un campo il cui nome non è un nome XML valido) → attributi riconosciuti quando indicano il nome del campo, altrimenti ignorati e segnalati nel rapporto.
 
 **Criteri di accettazione:**
 - Dato un XFDF con 8 campi, di cui uno inesistente nel modulo, quando viene importato, allora 7 campi sono compilati e il rapporto elenca il campo non trovato.
 - Dato un CSV con 3 righe di dati, quando l'utente sceglie la seconda, allora i campi assumono i valori della seconda riga.
+- Dato un file TXT delimitato da tabulazioni con 3 righe di valori, quando l'utente sceglie la terza, allora i campi assumono i valori della terza riga.
+- Dato un file XML semplice con radice `fields` e l'elemento `cliente` che contiene `nome` con il testo "Anna", quando viene importato, allora il campo "cliente.nome" vale "Anna".
 - Dato un elenco non modificabile con le voci "A" e "B" e un dato "Z", quando si importa, allora il campo resta invariato e il rapporto indica il rifiuto.
 - Dato un'importazione appena eseguita, quando l'utente preme Annulla una volta, allora tutti i campi tornano ai valori precedenti.
 - Dato un FDF che contiene istruzioni di modifica dei flag, quando viene importato, allora i flag dei campi restano invariati e il rapporto le elenca come ignorate.
@@ -6181,9 +6334,9 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### FRM-31 — Reimpostare il modulo
 
-**Descrizione:** Riporta tutti i campi, o quelli selezionati, ai valori predefiniti (o a vuoto/non selezionato se non definiti), previa conferma. È disponibile dalla barra modulo, dal menu, dall'Elenco campi e come azione dei pulsanti (FRM-18).
+**Descrizione:** Riporta tutti i campi, o quelli selezionati, ai valori predefiniti (o a vuoto/non selezionato se non definiti), senza chiedere conferma: l'operazione è annullabile e un avviso offre **Annulla** (UX-13). È disponibile dalla barra modulo, dal menu, dall'Elenco campi e come azione dei pulsanti (FRM-18).
 
-**Flusso:** 1. L'utente sceglie Reimposta. 2. Nel dialogo indica "tutti i campi" oppure "campi selezionati" (elenco con caselle e filtro). 3. Conferma. 4. Foliant reimposta i valori, ricalcola i campi calcolati e aggiorna gli aspetti. 5. Annulla ripristina lo stato precedente.
+**Flusso:** 1. L'utente sceglie Reimposta. 2. Nel dialogo indica "tutti i campi" oppure "campi selezionati" (elenco con caselle e filtro). 3. Preme **Reimposta**. 4. Foliant reimposta i valori, ricalcola i campi calcolati e aggiorna gli aspetti. 5. L'avviso di UX-13 offre **Annulla**, che ripristina lo stato precedente.
 
 **Formati/strutture:** `/DV` di ogni campo (se assente: vuoto, `/Off` o nessuna selezione); azione `/ResetForm` con `/Fields` e flag includi/escludi per i pulsanti.
 
@@ -6197,7 +6350,8 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Criteri di accettazione:**
 - Dato un modulo con 5 campi compilati, uno dei quali con valore predefinito "Italia", quando l'utente reimposta tutti i campi, allora 4 campi sono vuoti o non selezionati e quello con predefinito vale "Italia".
-- Dato la scelta "campi selezionati" con 2 campi, quando l'utente conferma, allora cambiano solo quei 2 campi.
+- Dato la scelta "campi selezionati" con 2 campi, quando l'utente preme **Reimposta**, allora cambiano solo quei 2 campi.
+- Dato un pulsante del documento con azione di reimpostazione, quando l'utente vi fa clic, allora i campi sono reimpostati senza finestra di conferma e l'avviso con **Annulla** li ripristina.
 - Dato una reimpostazione appena eseguita, quando l'utente preme Annulla, allora tutti i valori tornano quelli precedenti.
 - Dato un campo bloccato da una firma, quando l'utente reimposta tutto, allora quel campo conserva il valore e la firma resta valida.
 
@@ -6205,11 +6359,11 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### FRM-32 — Appiattire il modulo
 
-**Descrizione:** Converte l'aspetto corrente dei campi in contenuto statico della pagina e rimuove i campi: i valori restano visibili, stampabili e, per il testo, selezionabili e ricercabili, ma non più modificabili. Ambito: tutti i campi, campi selezionati o intervallo di pagine. Opzione per i campi visibili solo a schermo o solo in stampa: appiattire secondo l'aspetto di stampa (predefinito) o di schermo.
+**Descrizione:** Converte l'aspetto corrente dei campi in contenuto statico della pagina e rimuove i campi: i valori restano visibili, stampabili e, per il testo, selezionabili e ricercabili, ma non più modificabili. Ambito: tutti i campi, campi selezionati o intervallo di pagine. Opzione per i campi visibili solo a schermo o solo in stampa: appiattire secondo l'aspetto di stampa (predefinito) o di schermo. È il requisito di riferimento per l'appiattimento dei moduli (0.6): l'appiattimento generale (SEC-24) e CNV-33 ne applicano le regole.
 
-**Flusso:** 1. L'utente sceglie Appiattisci modulo, l'ambito e le opzioni. 2. Foliant avvisa che dopo il salvataggio l'operazione è irreversibile e propone "Salva con nome" per conservare l'originale. 3. Esegue l'appiattimento. 4. L'operazione è annullabile finché il documento non viene salvato.
+**Flusso:** 1. L'utente sceglie Appiattisci modulo, l'ambito e le opzioni. 2. La conferma di UX-13 spiega che, una volta salvato il file, l'operazione è definitiva e propone "Salva con nome" per conservare l'originale. 3. Esegue l'appiattimento. 4. L'operazione è un solo passo annullabile nella sessione, anche dopo il salvataggio (NFR-11); nel file salvato è definitiva, perché il salvataggio è una riscrittura completa (NFR-09).
 
-**Formati/strutture:** `/AP /N` di ogni widget disegnato nel contenuto della pagina come Form XObject (matrice ricavata da `/Rect` e `/Matrix`), nel rispetto dei flag `/F` (Hidden, NoView, Print); rimozione dei widget da `/Annots` e dei campi da `/Fields`; rimozione delle voci di `/CO` e delle azioni riferite ai campi rimossi; se non resta alcun campo, rimozione del dizionario del modulo e dell'eventuale pacchetto XML; nei documenti con struttura logica, gli elementi di struttura dei campi sono convertiti in contenuto equivalente (coordinamento con la sezione Accessibilità).
+**Formati/strutture:** `/AP /N` di ogni widget disegnato nel contenuto della pagina come Form XObject (matrice ricavata da `/Rect` e `/Matrix`), nel rispetto dei flag `/F` (Hidden, NoView, Print); rimozione dei widget da `/Annots` e dei campi da `/Fields`; rimozione delle voci di `/CO` e delle azioni riferite ai campi rimossi; se non resta alcun campo, rimozione del dizionario del modulo e dell'eventuale pacchetto XML; nei documenti con struttura logica, gli elementi di struttura dei campi sono convertiti in contenuto equivalente collegato alla struttura, oppure il contenuto appiattito è marcato come artefatto.
 
 **Casi limite:**
 - Campi firma firmati → esclusi per impostazione predefinita; appiattirli richiede una conferma esplicita perché la firma non sarebbe più verificabile. In ogni caso Foliant avvisa che la modifica del contenuto risulterà successiva alle firme.
@@ -6221,11 +6375,12 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Script di altri campi che citano i campi appiattiti → riferimenti segnalati nel riepilogo.
 
 **Criteri di accettazione:**
-- Dato un modulo compilato, quando l'utente appiattisce tutto e salva, allora il file non contiene campi né widget, il dizionario del modulo è assente e il rendering della pagina coincide con quello precedente entro la tolleranza stabilita.
+- Dato un modulo compilato, quando l'utente appiattisce tutto e salva, allora il file non contiene campi né widget, il dizionario del modulo è assente e il rendering della pagina coincide con quello precedente entro la tolleranza dell'appiattimento (ANN-40).
 - Dato un campo di testo con valore "ABC123", quando viene appiattito, allora il testo estratto dalla pagina contiene "ABC123".
 - Dato un documento con un campo firma firmato, quando l'utente appiattisce con le opzioni predefinite, allora il campo firma resta un campo e compare l'avviso sulle firme.
 - Dato l'ambito "pagine 2–3", quando l'utente appiattisce, allora i campi di pagina 1 restano compilabili.
 - Dato un campo nascosto, quando viene appiattito, allora non compare nel contenuto della pagina.
+- Dato un modulo appiattito e salvato, quando l'utente esegue Annulla, allora i campi tornano compilabili con i loro valori e il documento risulta modificato (NFR-11).
 
 **Priorità:** P1
 
@@ -6233,19 +6388,20 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Riconosce i documenti che contengono un modulo basato su XML (architettura di moduli XML, deprecata in PDF 2.0 e vietata in PDF/A e PDF/UA) e ne determina la variante: statica (con campi standard equivalenti) o dinamica (impaginazione generata dal lettore, spesso con una sola pagina segnaposto che contiene un messaggio di compatibilità). Informa l'utente in modo chiaro sui limiti e propone le azioni possibili; non modifica mai il pacchetto XML senza una scelta esplicita.
 
-**Flusso:** 1. All'apertura Foliant rileva il pacchetto XML. 2. Variante statica → la barra modulo indica che il modulo è compilabile e che i dati XML saranno sincronizzati (FRM-34), con l'opzione "Converti in modulo standard" (FRM-36). 3. Variante dinamica → un banner spiega che il modulo non può essere visualizzato come previsto e propone: Esporta dati XML, Importa dati XML (FRM-35), Tenta la conversione (FRM-36), Continua in sola lettura; la pagina segnaposto viene mostrata così com'è. 4. Ogni funzione che altererebbe il pacchetto (modifica modulo, appiattimento, ottimizzazione, salvataggio come PDF/A o PDF/UA) chiede conferma prima di procedere.
+**Flusso:** 1. All'apertura Foliant rileva il pacchetto XML. 2. Variante statica → la barra modulo indica che il modulo è compilabile attraverso i campi standard; con FRM-34 (P1) implementato indica anche che i dati XML saranno sincronizzati, altrimenti avvisa che i dati XML non saranno aggiornati e che altri lettori potrebbero mostrare i valori precedenti. 3. Variante dinamica → un banner spiega che il modulo non può essere visualizzato come previsto e propone **Continua in sola lettura**; la pagina segnaposto viene mostrata così com'è. Le azioni Esporta e Importa dati XML (FRM-35) e Converti in modulo standard (FRM-36), entrambe P2, compaiono nel banner e nella barra solo quando i rispettivi requisiti sono implementati. 4. Ogni funzione che altererebbe il pacchetto (modifica modulo, appiattimento, ottimizzazione, salvataggio come PDF/A o PDF/UA) chiede conferma prima di procedere.
 
 **Formati/strutture:** `/AcroForm /XFA` (stream unico oppure array di coppie nome/stream: template, datasets, config, localeSet e altri); `/NeedsRendering` nel catalogo; `/Fields`. Regole: `/NeedsRendering` vero → dinamico; pacchetto presente e campi standard con widget → statico; pacchetto presente senza widget → trattato come dinamico; pacchetto XML non ben formato → avviso e trattamento come modulo standard (se vi sono campi), senza toccare il pacchetto.
 
 **Casi limite:**
 - Documento firmato con modulo XML → nessuna modifica che invaliderebbe le firme; salvataggio solo incrementale.
 - Modulo dinamico salvato senza modifiche → pacchetto conservato byte per byte.
-- Salvataggio richiesto in PDF/A o PDF/UA → avviso che il pacchetto va rimosso e proposta di conversione (FRM-36).
+- Salvataggio richiesto in PDF/A o PDF/UA → avviso che il pacchetto va rimosso; la conversione in modulo standard (FRM-36) è proposta quando disponibile.
 - Pacchetto in un documento cifrato → decifrato con la chiave del documento e ricifrato al salvataggio.
 
 **Criteri di accettazione:**
 - Dato un PDF con modulo XML dinamico, quando viene aperto, allora compare il banner con le azioni disponibili e la pagina segnaposto è mostrata invariata.
-- Dato un PDF con modulo XML statico, quando viene aperto, allora la barra indica la variante statica e i campi sono compilabili.
+- Dato un PDF con modulo XML statico, quando viene aperto, allora la barra indica la variante statica e i campi sono compilabili; se FRM-34 non è implementato, la barra avvisa che i dati XML non saranno aggiornati.
+- Dato un PDF con modulo XML dinamico e i requisiti FRM-35 e FRM-36 non implementati, quando viene aperto, allora il banner offre solo **Continua in sola lettura** e nessun comando inattivo è mostrato.
 - Dato un PDF dinamico aperto e salvato senza modifiche, quando si confrontano i pacchetti XML prima e dopo, allora sono identici byte per byte.
 - Dato un corpus di prova di PDF senza pacchetto XML, quando vengono aperti, allora nessun avviso relativo ai moduli XML compare.
 
@@ -6312,7 +6468,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Documento firmato → il risultato è un nuovo documento non firmato (avviso).
 
 **Criteri di accettazione:**
-- Dato un modulo XML statico, quando viene convertito, allora il nuovo file non contiene il pacchetto XML, ha gli stessi campi con gli stessi valori e le pagine hanno lo stesso aspetto entro la tolleranza stabilita.
+- Dato un modulo XML statico, quando viene convertito, allora il nuovo file non contiene il pacchetto XML, ha gli stessi campi con gli stessi valori e le pagine hanno lo stesso aspetto con al massimo lo 0,5 % dei pixel che differiscono di oltre 8/255 in almeno un canale, a 150 dpi (stessa tolleranza di ANN-40).
 - Dato un modulo dinamico di prova con 10 campi semplici e un sottomodulo ripetuto 3 volte nei dati, quando viene convertito, allora il risultato contiene campi standard per tutte e 3 le occorrenze, con i valori dei dati.
 - Dato un modulo con script non traducibili, quando la conversione termina, allora il rapporto elenca ogni script con il campo a cui appartiene.
 - Dato una conversione completata, quando si confronta il file originale, allora la sua impronta è identica a quella precedente.
@@ -6322,7 +6478,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ## 9. Firma
 
-> **Convenzioni dell'area.** *Firma grafica*: tracciato vettoriale o immagine che riproduce una firma autografa; non ha valore crittografico ed è salvata come annotazione, oppure incorporata nel contenuto della pagina su richiesta. *Firma digitale*: firma crittografica basata su certificato X.509, conforme a ISO 32000-2 §12.8 e ai profili PAdES (ETSI EN 319 142-1). *ID digitale*: certificato con la relativa chiave privata. *Revisione*: stato del file al termine di un salvataggio (iniziale o incrementale). Gli esiti di verifica sono tre — **Valida**, **Non valida**, **Indeterminata** — allineati a TOTAL-PASSED / TOTAL-FAILED / INDETERMINATE di ETSI EN 319 102-1, e non sono mai comunicati con il solo colore. I dati locali dell'area risiedono nella cartella dati dell'utente (es. `$XDG_DATA_HOME/foliant/`), accessibile solo al proprietario. Password e chiavi private non vengono mai scritte su disco, nei log o nei rapporti.
+> **Convenzioni dell'area.** *Firma grafica*: tracciato vettoriale o immagine che riproduce una firma autografa; non ha valore crittografico ed è salvata come annotazione, oppure incorporata nel contenuto della pagina su richiesta. *Firma digitale*: firma crittografica basata su certificato X.509, conforme a ISO 32000-2 §12.8 e ai profili PAdES (ETSI EN 319 142-1). *ID digitale*: certificato con la relativa chiave privata. *Revisione*: stato del file al termine di un salvataggio (iniziale o incrementale). Gli esiti di verifica sono tre — **Valida**, **Non valida**, **Indeterminata** — allineati a TOTAL-PASSED / TOTAL-FAILED / INDETERMINATE di ETSI EN 319 102-1, e non sono mai comunicati con il solo colore. I dati locali dell'area risiedono nella cartella dati privata dell'utente, accessibile solo al proprietario (NFR-20). Password e chiavi private non vengono mai scritte su disco, nei log o nei rapporti.
 
 ### SIG-01 — Firma disegnata a mano
 
@@ -6449,7 +6605,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Flusso:** 1. Strumento "Firma digitale": l'utente traccia un rettangolo, sceglie un campo firma vuoto o seleziona "Invisibile". 2. Sceglie un ID digitale registrato (SIG-14) o "Sfoglia…" un file `.p12`/`.pfx`. 3. Inserisce la password; il sistema mostra titolare, emittente, periodo di validità, usi della chiave ed eventuali avvisi. 4. Indica motivo (elenco modificabile più testo libero), luogo e contatto; sceglie il profilo di aspetto (SIG-09) e il livello (B-B, oppure B-T se è configurata una marca temporale, SIG-10). 5. "Firma e salva": nome file predefinito `<nome>_firmato.pdf`; la sovrascrittura dell'originale richiede conferma. 6. Il documento firmato si riapre con il pannello firme (SIG-18) aggiornato.
 
-**Formati/strutture:** Ingresso PKCS#12 (RFC 7292). Uscita in salvataggio incrementale: campo `/FT /Sig` con widget; dizionario di firma `/Type /Sig` con `/SubFilter /ETSI.CAdES.detached` (opzione di compatibilità `adbe.pkcs7.detached`), `/ByteRange [0 a b c]` che copre tutto il file tranne il valore di `/Contents`, `/Contents` = CMS SignedData distaccato (RFC 5652) in DER esadecimale con spazio riservato iniziale di 16 KB, ampliato automaticamente se insufficiente; attributi firmati content-type, message-digest e signing-certificate-v2, senza signing-time (l'ora dichiarata è in `/M`); `/Reason`, `/Location`, `/ContactInfo`, `/Name`, `/M`, `/Prop_Build` (nome e versione dell'applicazione). Hash SHA-256 (predefinito), SHA-384, SHA-512; firme RSA PKCS#1 v1.5, RSA-PSS, ECDSA P-256/P-384; catena dei certificati inclusa se presente nel file. `/AcroForm /SigFlags 3`. Firma invisibile: widget con `/Rect [0 0 0 0]`.
+**Formati/strutture:** Ingresso PKCS#12 (RFC 7292). Uscita in salvataggio incrementale: campo `/FT /Sig` con widget; dizionario di firma `/Type /Sig` con `/SubFilter /ETSI.CAdES.detached` (opzione di compatibilità: il SubFilter PKCS#7 distaccato di ISO 32000-2, Tabella 260), `/ByteRange [0 a b c]` che copre tutto il file tranne il valore di `/Contents`, `/Contents` = CMS SignedData distaccato (RFC 5652) in DER esadecimale con spazio riservato iniziale di 16 KB, ampliato automaticamente se insufficiente; attributi firmati content-type, message-digest e signing-certificate-v2, senza signing-time (l'ora dichiarata è in `/M`); `/Reason`, `/Location`, `/ContactInfo`, `/Name`, `/M`, `/Prop_Build` (nome e versione dell'applicazione). Hash SHA-256 (predefinito), SHA-384, SHA-512; firme RSA PKCS#1 v1.5, RSA-PSS, ECDSA P-256/P-384; catena dei certificati inclusa se presente nel file. `/AcroForm /SigFlags 3`. Firma invisibile: widget con `/Rect [0 0 0 0]`.
 
 **Casi limite:** Password errata → messaggio "Password errata", campo svuotato, nessuna scrittura, ritardo crescente dopo 5 tentativi; certificato scaduto o non ancora valido → firma bloccata con indicazione delle date (un'opzione avanzata permette di procedere solo per test, con conferma esplicita e avviso che la firma risulterà non valida); certificato senza uso chiave digitalSignature/nonRepudiation → blocco con spiegazione; file senza chiave privata → errore; più chiavi nel file → scelta dell'alias; modifiche non salvate → richiesta di salvarle prima, così entrano nella revisione firmata; documento cifrato → firma consentita solo se i permessi lo prevedono (o con password proprietario), mantenendo la stessa cifratura; errore di scrittura o disco pieno → scrittura su file temporaneo e rinomina atomica, quindi la destinazione non viene creata o resta invariata; marca temporale non ottenibile → SIG-10.
 
@@ -6466,7 +6622,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Profili di aspetto riutilizzabili per le firme digitali visibili: elementi testuali (nome, data, motivo, luogo, nome distinto, etichette), grafica (firma della libreria, logo o immagine), disposizione e caratteri.
 
-**Flusso:** 1. Impostazioni › Firme › "Aspetti", oppure "Nuovo aspetto" nel dialogo di firma. 2. Disposizione: solo grafica, solo testo, grafica a sinistra e testo a destra, nome grande più dettagli. 3. Scelta degli elementi testuali, del formato data (con fuso orario), della lingua delle etichette, di carattere e colore. 4. Grafica: elemento della libreria, immagine importata (con rimozione dello sfondo di SIG-03) o nessuna. 5. Anteprima a grandezza reale con i dati del certificato selezionato; salvataggio con nome; un profilo è predefinito.
+**Flusso:** 1. Firma › **Gestisci firme e identità digitali** › "Aspetti" (UX-05), oppure "Nuovo aspetto" nel dialogo di firma. 2. Disposizione: solo grafica, solo testo, grafica a sinistra e testo a destra, nome grande più dettagli. 3. Scelta degli elementi testuali, del formato data (con fuso orario), della lingua delle etichette, di carattere e colore. 4. Grafica: elemento della libreria, immagine importata (con rimozione dello sfondo di SIG-03) o nessuna. 5. Anteprima a grandezza reale con i dati del certificato selezionato; salvataggio con nome; un profilo è predefinito.
 
 **Formati/strutture:** Profili in JSON nella cartella dati. Nel PDF: `/AP /N` del widget come Form XObject statico (font incorporati in sottoinsieme, immagini con trasparenza solo se ammessa dal livello PDF/A dichiarato), `/MK` per bordo e sfondo; nessun sotto-livello di stato dinamico: lo stato di verifica compare solo nell'interfaccia, mai nel documento.
 
@@ -6483,7 +6639,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Aggiunge alla firma una marca temporale emessa da un server di marcatura temporale (TSA) configurabile, che attesta in modo verificabile l'ora della firma (livello PAdES B-T).
 
-**Flusso:** 1. Impostazioni › Firme › "Server marca temporale": aggiunta di uno o più server con nome, URL (HTTP o HTTPS), eventuali credenziali (utente/password o certificato client), algoritmo di hash, OID di policy facoltativo, timeout (predefinito 15 s); "Verifica" richiede una marca di prova e ne mostra emittente e ora. 2. Un server è predefinito; nel dialogo di firma se ne può scegliere un altro o disattivare la marca. 3. Dopo il calcolo del valore di firma il sistema invia la richiesta, controlla la risposta e incorpora il token. 4. Il pannello firme mostra l'ora "attestata dalla marca temporale" e l'identità della TSA.
+**Flusso:** 1. Preferenze › Sicurezza e riservatezza (UX-17) › "Servizio di marca temporale": aggiunta di uno o più server con nome, URL (HTTP o HTTPS), eventuali credenziali (utente/password o certificato client), algoritmo di hash, OID di policy facoltativo, timeout (predefinito 15 s); "Verifica" richiede una marca di prova e ne mostra emittente e ora. 2. Un server è predefinito; nel dialogo di firma se ne può scegliere un altro o disattivare la marca. 3. Dopo il calcolo del valore di firma il sistema invia la richiesta, controlla la risposta e incorpora il token. 4. Il pannello firme mostra l'ora "attestata dalla marca temporale" e l'identità della TSA.
 
 **Formati/strutture:** Protocollo RFC 3161: richiesta con impronta del valore di firma, nonce casuale e richiesta del certificato TSA (tipi MIME `application/timestamp-query` e `application/timestamp-reply`); token inserito come attributo non firmato signature-time-stamp del SignerInfo; credenziali conservate nel portachiavi di sistema; uso del proxy di sistema.
 
@@ -6504,7 +6660,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Formati/strutture:** Una revisione per firma (nuova sezione xref e trailer con `/Prev`, dello stesso tipo — tabella classica o stream — della revisione precedente); nelle revisioni nuove si riscrivono solo gli oggetti indispensabili (campo, widget, `/Annots` della pagina, `/AcroForm`); `/SigFlags` con bit AppendOnly impostato.
 
-**Casi limite:** Documento certificato "nessuna modifica" → nuove firme bloccate con spiegazione; campo bloccato da una firma precedente → non firmabile; campo già firmato → non riutilizzabile, si propone un nuovo campo; file danneggiato o con xref ricostruita in apertura → firma rifiutata, perché un salvataggio incrementale non garantirebbe l'integrità delle firme esistenti; operazioni che riscrivono l'intero file (ottimizza, comprimi, linearizza, sanifica) → disattivate o soggette all'avviso SIG-21; firme precedenti già non valide → avviso che la nuova firma non le ripristina.
+**Casi limite:** Documento certificato "nessuna modifica" → nuove firme bloccate con spiegazione; campo bloccato da una firma precedente → non firmabile; campo già firmato → non riutilizzabile, si propone un nuovo campo; file danneggiato o con xref ricostruita in apertura → firma rifiutata, perché un salvataggio incrementale non garantirebbe l'integrità delle firme esistenti; operazioni che riscrivono l'intero file (ottimizza, comprimi, linearizza, rimuovi dati nascosti) → disattivate o soggette all'avviso SIG-21; firme precedenti già non valide → avviso che la nuova firma non le ripristina.
 
 **Criteri di accettazione:**
 - Dato un documento firmato da A, quando B aggiunge una seconda firma, allora entrambe risultano "Valida" e la prima indica "modifiche successive consentite".
@@ -6551,7 +6707,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Gestione unica degli ID digitali dell'utente e dei certificati considerati attendibili (ancore di fiducia) per la verifica delle firme.
 
-**Flusso:** 1. Impostazioni › Firme › "ID digitali": aggiungi (file PKCS#12, dispositivo di SIG-23, creazione di SIG-13), rimuovi dall'elenco senza cancellare il file, dettagli, imposta predefinito. 2. "Certificati attendibili": importa da file, da una firma presente nel documento (con conferma e impronte visibili) o abilita l'archivio di certificati del sistema; per ciascuno, ambito di fiducia (firme, certificazioni, marche temporali). 3. Visualizzatore di certificati: soggetto, emittente, numero di serie, validità, usi della chiave, policy, punti di distribuzione della revoca, impronte SHA-256 e SHA-1, catena. 4. Esportazione di un certificato.
+**Flusso:** 1. Firma › **Gestisci firme e identità digitali** › "ID digitali" (UX-05): aggiungi (file PKCS#12, dispositivo di SIG-23, creazione di SIG-13), rimuovi dall'elenco senza cancellare il file, dettagli, imposta predefinito. 2. "Certificati attendibili": importa da file, da una firma presente nel documento (con conferma e impronte visibili) o abilita l'archivio di certificati del sistema; per ciascuno, ambito di fiducia (firme, certificazioni, marche temporali). 3. Visualizzatore di certificati: soggetto, emittente, numero di serie, validità, usi della chiave, policy, punti di distribuzione della revoca, impronte SHA-256 e SHA-1, catena. 4. Esportazione di un certificato.
 
 **Formati/strutture:** Elenco ID in JSON (percorso, alias, impronta del certificato; mai password né chiavi); archivio fiduciario locale in PEM con metadati di ambito; importazione da `.cer`, `.crt`, `.pem`, `.der`, `.p7b`/`.p7c`; certificati di sistema in sola lettura e disattivati per default, perché pensati per i siti web e non per le firme.
 
@@ -6570,13 +6726,13 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Flusso:** 1. All'apertura parte la verifica automatica in background (disattivabile), senza bloccare la lettura. 2. Per ogni firma: controllo di `/ByteRange`, calcolo dell'impronta e confronto con message-digest, verifica del valore di firma, controllo di signing-certificate-v2, costruzione della catena (certificati nel CMS, nel `/DSS` e fra gli attendibili), usi della chiave, algoritmi ammessi, ora di riferimento (quella della marca temporale se presente e valida, altrimenti `/M` con avvertenza "ora dichiarata"). 3. Controllo di revoca (SIG-16) e delle modifiche successive (SIG-17). 4. Esito e motivi pubblicati nel pannello (SIG-18).
 
-**Formati/strutture:** SubFilter verificati: `ETSI.CAdES.detached`, `adbe.pkcs7.detached`, `adbe.pkcs7.sha1` e `adbe.x509.rsa_sha1` (deprecati, solo verifica, segnalati), `ETSI.RFC3161` (marche di documento). Algoritmi: RSA (PKCS#1 v1.5, PSS), ECDSA, EdDSA; SHA-2 e SHA-3; MD5 rifiutato, SHA-1 segnalato come debole. Mappatura: Valida = TOTAL-PASSED; Non valida = TOTAL-FAILED (es. HASH_FAILURE, SIG_CRYPTO_FAILURE, REVOKED); Indeterminata = INDETERMINATE (es. NO_CERTIFICATE_CHAIN_FOUND, TRY_LATER, OUT_OF_BOUNDS_NO_POE).
+**Formati/strutture:** SubFilter verificati: `ETSI.CAdES.detached`; i SubFilter PKCS#7 di ISO 32000-2, Tabella 260 (distaccato; con SHA-1 e la variante X.509 RSA-SHA1, deprecati, solo verifica, segnalati); `ETSI.RFC3161` (marche di documento). Algoritmi: RSA (PKCS#1 v1.5, PSS), ECDSA, EdDSA; SHA-2 e SHA-3; MD5 rifiutato, SHA-1 segnalato come debole. Mappatura: Valida = TOTAL-PASSED; Non valida = TOTAL-FAILED (es. HASH_FAILURE, SIG_CRYPTO_FAILURE, REVOKED); Indeterminata = INDETERMINATE (es. NO_CERTIFICATE_CHAIN_FOUND, TRY_LATER, OUT_OF_BOUNDS_NO_POE).
 
 **Casi limite:** Documento modificato dopo la firma senza aggiornamento incrementale (byte firmati alterati) → Non valida, "il documento è stato alterato dopo la firma"; `/ByteRange` che non parte da 0, si sovrappone o lascia scoperto altro oltre a `/Contents` → Non valida per formato; certificato scaduto oggi ma valido all'ora attestata da una marca temporale → Valida con nota; certificato scaduto prima dell'ora attestata → Non valida; certificato scaduto senza prova dell'ora della firma → Indeterminata; catena incompleta o ancora non attendibile → Indeterminata "identità non verificata"; algoritmo non supportato → Indeterminata; CMS malformato → Non valida per formato; centinaia di firme → risultati pubblicati man mano.
 
 **Criteri di accettazione:**
 - Dato un insieme di file di prova (firma corretta; byte alterato nell'intervallo firmato; `/ByteRange` manipolato; certificato scaduto prima dell'ora della marca temporale; CA non attendibile), quando vengono aperti, allora gli esiti sono nell'ordine Valida, Non valida, Non valida, Non valida, Indeterminata.
-- Dato un documento con 10 firme corrette, quando viene aperto senza rete, allora le verifiche crittografiche terminano entro 3 s su hardware di riferimento e lo scorrimento resta fluido durante la verifica.
+- Dato un documento con 10 firme corrette, quando viene aperto senza rete, allora le verifiche crittografiche terminano entro 3 s su MR e durante la verifica lo scorrimento rispetta NFR-04 (media di almeno 55 fotogrammi al secondo, nessun fotogramma oltre 50 ms).
 - Dato un documento firmato con SHA-1, quando viene verificato, allora l'esito è accompagnato dall'avviso "algoritmo debole".
 
 **Priorità:** P0
@@ -6668,9 +6824,9 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### SIG-21 — Avviso di invalidazione nei documenti firmati
 
-**Descrizione:** Evita che l'utente invalidi le firme senza accorgersene: segnala che il documento è firmato, distingue le modifiche consentite da quelle che invalidano, salva sempre in modo incrementale e chiede conferma prima di ogni operazione invalidante.
+**Descrizione:** Evita che l'utente invalidi le firme senza accorgersene: segnala che il documento è firmato, distingue le modifiche consentite da quelle che invalidano, salva secondo NFR-09 (requisito di riferimento: sempre in modo incrementale per i documenti firmati) e chiede conferma prima della prima operazione invalidante. Definisce l'avviso di invalidazione richiamato da UX-13, TXT-20 e PAG-03.
 
-**Flusso:** 1. All'apertura di un documento firmato compare la barra: "Documento firmato: modificare il contenuto invaliderà le firme". 2. Ogni strumento è classificato rispetto alle firme presenti: consentito (annotazioni senza certificazione o con livello 3; compilazione di moduli non bloccati senza certificazione o con livello 2 o 3; nuove firme) oppure invalidante (modifica di testo o immagini, operazioni sulle pagine, redazione, OCR, filigrane, intestazioni, appiattimento, ottimizzazione, cifratura, conversione PDF/A, modifica dei metadati). 3. Al primo uso di uno strumento invalidante: finestra con le firme che diventeranno non valide e tre scelte — "Annulla", "Lavora su una copia senza firme", "Procedi comunque". 4. Un documento firmato si salva sempre in modo incrementale, anche con "Salva con nome" (copia dei byte originali più le modifiche in coda); le opzioni di riscrittura completa sono disattivate o soggette allo stesso avviso. 5. Con certificazione "nessuna modifica" gli strumenti di modifica sono disattivati con spiegazione e resta disponibile "Lavora su una copia senza firme".
+**Flusso:** 1. All'apertura di un documento firmato compare la barra: "Documento firmato: modificare il contenuto invaliderà le firme". 2. Ogni strumento è classificato rispetto alle firme presenti: consentito (annotazioni senza certificazione o con livello 3; compilazione di moduli non bloccati senza certificazione o con livello 2 o 3; nuove firme) oppure invalidante (modifica di testo o immagini, operazioni sulle pagine, redazione, OCR, filigrane, intestazioni, appiattimento, ottimizzazione, cifratura, conversione PDF/A, modifica dei metadati). 3. Al primo uso di uno strumento invalidante: finestra con le firme che diventeranno non valide e tre scelte — "Annulla", "Lavora su una copia senza firme", "Procedi comunque". 4. Il salvataggio segue NFR-09: un documento firmato si salva sempre in modo incrementale, anche con "Salva con nome" (copia dei byte originali più le modifiche in coda); le operazioni che richiedono la riscrittura completa sono precedute dall'avviso di NFR-09, con le scelte **Salva una copia** e **Annulla**. 5. Con certificazione "nessuna modifica" gli strumenti di modifica sono disattivati con spiegazione e resta disponibile "Lavora su una copia senza firme".
 
 **Formati/strutture:** Classificazione basata su `/Perms /DocMDP`, riferimenti FieldMDP, `/Lock` e `/SigFlags`. "Copia senza firme": nuovo file con salvataggio completo in cui i campi firma restano ma senza valore (`/V` rimosso, aspetto del campo vuoto) e senza `/Perms` e `/DSS`.
 
@@ -6705,7 +6861,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Firma con chiavi custodite in smart card, token USB o altri dispositivi crittografici, compresi i dispositivi per la firma qualificata; la chiave privata non lascia mai il dispositivo.
 
-**Flusso:** 1. Impostazioni › Firme › "Dispositivi": rilevamento dei moduli crittografici registrati nel sistema e aggiunta manuale del percorso di un modulo. 2. All'inserimento del dispositivo i certificati presenti compaiono come ID digitali. 3. Alla firma il PIN viene chiesto in una finestra dedicata (o sul tastierino del lettore, se presente). 4. L'operazione crittografica avviene sul dispositivo; il resto del flusso è come in SIG-08.
+**Flusso:** 1. Firma › **Gestisci firme e identità digitali** › "Dispositivi" (UX-05): rilevamento dei moduli crittografici registrati nel sistema e aggiunta manuale del percorso di un modulo. 2. All'inserimento del dispositivo i certificati presenti compaiono come ID digitali. 3. Alla firma il PIN viene chiesto in una finestra dedicata (o sul tastierino del lettore, se presente). 4. L'operazione crittografica avviene sul dispositivo; il resto del flusso è come in SIG-08.
 
 **Formati/strutture:** Interfaccia standard PKCS#11 (OASIS); meccanismi RSA PKCS#1 v1.5, RSA-PSS, ECDSA; lettori con tastierino per l'inserimento protetto del PIN; dispositivi rilevati a caldo.
 
@@ -6714,13 +6870,13 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 **Criteri di accettazione:**
 - Dato un token software di test esposto tramite PKCS#11, quando l'utente firma con il PIN corretto, allora la firma risulta "Valida" e l'applicazione non ha mai ottenuto il materiale della chiave privata.
 - Dato un PIN errato, quando si conferma, allora il messaggio riporta i tentativi residui comunicati dal dispositivo e nessun file viene scritto.
-- Dato un dispositivo rimosso a metà operazione (simulato), quando la firma fallisce, allora il file di destinazione non viene creato e compare un messaggio chiaro.
+- Dato un dispositivo rimosso a metà operazione (simulato), quando la firma fallisce, allora il file di destinazione non viene creato e compare il messaggio «Il dispositivo di firma è stato rimosso: la firma non è stata apposta. Reinserisci il dispositivo e riprova.» con il pulsante **Riprova**.
 
 **Priorità:** P2
 
 ### SIG-24 — Richiesta di firma a più firmatari
 
-**Descrizione:** Prepara un documento per la firma di più persone, lo invia e tiene traccia di chi ha firmato, senza dipendere da un servizio esterno obbligatorio; in alternativa si collega a un servizio di firma remota configurato dall'utente.
+**Descrizione:** **Fuori ambito (0.2).** La raccolta di firme da più persone con invio, tracciamento e collegamento a servizi di firma remota corrisponde alle righe 13.10 e 13.11 del catalogo, fuori ambito: nel prodotto di riferimento è un servizio online e richiede un server, l'identificazione dei firmatari e la conformità del servizio. Il requisito resta per tracciabilità e non va implementato; restano in ambito i campi firma per più persone (SIG-19), l'invito a firmare (SIG-20) e le firme multiple in sequenza sullo stesso file (SIG-11). Testo originario: prepara un documento per la firma di più persone, lo invia e tiene traccia di chi ha firmato, senza dipendere da un servizio esterno obbligatorio; in alternativa si collega a un servizio di firma remota configurato dall'utente.
 
 **Flusso:** 1. "Richiedi firme": firmatari (nome, e-mail, ruolo), ordine sequenziale o parallelo, messaggio, scadenza. 2. Assegnazione dei campi (firma, iniziali, data, testo) a ciascun firmatario trascinandoli sulle pagine; i campi firma sono creati come in SIG-19 con il firmatario nella descrizione. 3. Invio: il documento preparato è allegato a un messaggio nel client di posta del sistema (o salvato come pacchetto da consegnare) per il primo firmatario o per tutti. 4. Registro locale delle richieste con lo stato di ogni firmatario; quando un documento restituito viene aperto o importato, il sistema lo riconosce, ne verifica le firme e aggiorna lo stato; in modalità sequenziale propone l'inoltro al firmatario successivo. 5. Promemoria locali alla scadenza ed esportazione di un rapporto di tracciamento (eventi, firmatari, impronte SHA-256 di ogni versione) come file separato. 6. Facoltativo: connettore verso un servizio di firma remota tramite un'interfaccia configurabile (URL e credenziali) con gli stessi stati.
 
@@ -6733,15 +6889,15 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Dato un documento restituito il cui contenuto è stato modificato dopo la preparazione, quando viene importato, allora la richiesta lo segnala come "versione divergente".
 - Dato un flusso completato, quando si esporta il rapporto, allora contiene un evento per ogni passaggio con data, firmatario e impronta SHA-256 della versione corrispondente.
 
-**Priorità:** P2
+**Priorità:** Fuori ambito (0.2): nessuna priorità.
 
 ### SIG-25 — Gestione avanzata dei firmatari e criteri organizzativi
 
-**Descrizione:** Funzioni per le organizzazioni: modelli di flusso con ruoli riutilizzabili, rubrica dei firmatari, criteri di firma imposti dall'amministratore e registro locale delle firme apposte.
+**Descrizione:** **Fuori ambito (0.2).** Le funzioni di firma per le organizzazioni (catalogo 13.11) dipendono dalla raccolta di firme di SIG-24, fuori ambito, e i criteri imposti centralmente rientrano nelle configurazioni amministrative non specificate in questa versione (catalogo 10.19, 0.2). Il requisito resta per tracciabilità e non va implementato. Testo originario: funzioni per le organizzazioni: modelli di flusso con ruoli riutilizzabili, rubrica dei firmatari, criteri di firma imposti centralmente e registro locale delle firme apposte.
 
 **Flusso:** 1. "Modelli di richiesta": ruoli (es. "Richiedente", "Responsabile", "Direzione"), ordine e campi associati; al riuso si assegnano le persone ai ruoli. 2. Rubrica dei firmatari (nome, e-mail, organizzazione, certificato pubblico facoltativo) con importazione da CSV o vCard. 3. Criteri distribuiti dall'amministratore tramite un file di configurazione di sistema: marca temporale obbligatoria, livello PAdES minimo, algoritmi ammessi, ancore di fiducia predefinite, divieto di ID autofirmati, divieto di firme solo grafiche nei campi firma, controllo di revoca obbligatorio. 4. Le impostazioni imposte appaiono bloccate con la dicitura "Gestito dalla tua organizzazione". 5. Registro locale, in sola aggiunta, delle firme apposte (documento, impronta, ID usato, ora, esito).
 
-**Formati/strutture:** Modelli e rubrica in JSON; criteri in un file non modificabile dall'utente in una posizione di sistema (es. `/etc/foliant/policies.json`), con precedenza sulle preferenze personali; registro in righe JSON concatenate da impronte (ogni riga contiene l'impronta della precedente) per rilevare manomissioni.
+**Formati/strutture:** Modelli e rubrica in JSON; criteri in un file di sistema non modificabile dall'utente, con precedenza sulle preferenze personali; registro in righe JSON concatenate da impronte (ogni riga contiene l'impronta della precedente) per rilevare manomissioni.
 
 **Casi limite:** File dei criteri malformato → firma non consentita finché il file non viene corretto (comportamento prudente), con avviso e annotazione nel log; marca temporale obbligatoria e server irraggiungibile → firma impossibile, con invito a contattare l'amministratore; ID con certificato scaduto o vietato dai criteri → escluso con motivo; ruolo del modello senza persona assegnata → invio bloccato; registro non scrivibile → firma bloccata se il criterio lo rende obbligatorio, altrimenti avviso; riga del registro alterata → segnalazione di integrità compromessa.
 
@@ -6750,12 +6906,12 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Dato un registro in cui una riga è stata modificata a mano, quando l'applicazione lo controlla, allora segnala la riga alterata.
 - Dato un modello con 3 ruoli, quando l'utente lo applica a un documento e assegna le persone, allora vengono creati i campi e la richiesta nell'ordine definito dal modello.
 
-**Priorità:** P2
+**Priorità:** Fuori ambito (0.2): nessuna priorità.
 
 
 ## 10. Protezione e sicurezza
 
-> Convenzioni dell'area. I bit di permesso sono numerati da 1 (bit meno significativo) come in ISO 32000-2 §7.6.4.2, Tabella 22. "Accesso proprietario" = autenticazione con la password dei permessi (diritti completi); "accesso utente" = autenticazione con la password di apertura o apertura senza password (diritti limitati da /P). "Segno di redazione" = annotazione /Redact non ancora applicata; "applicazione" = rimozione definitiva del contenuto sottostante. Ogni salvataggio che cambia la protezione, applica redazioni, sanifica o appiattisce è un salvataggio completo (riscrittura del file), mai incrementale, e non conserva revisioni precedenti né oggetti non referenziati.
+> Convenzioni dell'area. I bit di permesso sono numerati da 1 (bit meno significativo) come in ISO 32000-2 §7.6.4.2, Tabella 22. "Accesso proprietario" = autenticazione con la password dei permessi (diritti completi); "accesso utente" = autenticazione con la password di apertura o apertura senza password (diritti limitati da /P). "Segno di redazione" = annotazione /Redact non ancora applicata; "applicazione" = rimozione definitiva del contenuto sottostante. Le operazioni che cambiano la protezione, applicano redazioni, rimuovono i dati nascosti o appiattiscono richiedono la riscrittura completa del file (NFR-09): il file salvato non conserva revisioni precedenti né oggetti non referenziati e, sui documenti firmati, l'operazione è preceduta dall'avviso che le firme saranno invalidate.
 
 ### SEC-01 — Apertura di documenti protetti da password
 
@@ -6782,7 +6938,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Flusso:** 1. All'apertura Foliant calcola l'insieme dei comandi consentiti dai bit di /P. 2. I comandi non consentiti appaiono disattivati con l'icona del lucchetto e un suggerimento che nomina il permesso mancante. 3. Una barra informativa non modale indica "Documento con restrizioni" e offre "Sblocca…". 4. Con "Sblocca…" l'utente inserisce la password dei permessi; se corretta, tutti i comandi diventano disponibili.
 
-**Formati/strutture:** /P intero a 32 bit con segno. Corrispondenze: bit 3 = stampa; bit 12 = stampa fedele (se 0 con bit 3 a 1 → solo bassa risoluzione); bit 4 = modifica del contenuto (testo, immagini, pagine, filigrane, OCR, metadati, redazione, sanificazione, appiattimento); bit 5 = copia ed estrazione di testo e grafica (appunti, esportazione e conversione, estrazione immagini e pagine, cattura area); bit 6 = commenti e compilazione dei campi (con bit 4 anche creazione e modifica di campi, incluse le firme); bit 9 = compilazione dei campi esistenti e firma anche con bit 6 a 0; bit 10 = estrazione per accessibilità (deprecato in PDF 2.0, che impone ai lettori di ignorarlo); bit 11 = assemblaggio (inserire, ruotare, eliminare, riordinare pagine, creare segnalibri e miniature) anche con bit 4 a 0. /Perms (R6) verificato con l'algoritmo 13 (ISO 32000-2 §7.6.4.4.12).
+**Formati/strutture:** /P intero a 32 bit con segno. Corrispondenze: bit 3 = stampa; bit 12 = stampa fedele (se 0 con bit 3 a 1 → solo bassa risoluzione); bit 4 = modifica del contenuto (testo, immagini, pagine, filigrane, OCR, metadati, redazione, rimozione dei dati nascosti, appiattimento); bit 5 = copia ed estrazione di testo e grafica (appunti, esportazione e conversione, estrazione immagini e pagine, cattura area); bit 6 = commenti e compilazione dei campi (con bit 4 anche creazione e modifica di campi, incluse le firme); bit 9 = compilazione dei campi esistenti e firma anche con bit 6 a 0; bit 10 = estrazione per accessibilità (deprecato in PDF 2.0, che impone ai lettori di ignorarlo); bit 11 = assemblaggio (inserire, ruotare, eliminare, riordinare pagine, creare segnalibri e miniature) anche con bit 4 a 0. /Perms (R6) verificato con l'algoritmo 13 (ISO 32000-2 §7.6.4.4.12).
 
 **Casi limite:** /Perms non coerente con /P → si applica l'AND bit a bit dei due valori e compare l'avviso "Permessi del documento alterati"; bit riservati con valori non conformi → ignorati; stampa a bassa risoluzione → pagine rasterizzate a non più di 150 dpi, senza testo né vettori nel flusso inviato alla stampante; "Salva con nome" di un documento protetto → protezione mantenuta (stesse password e permessi); estrazione o divisione di pagine consentita → i file derivati ereditano la stessa protezione; tecnologie assistive e lettura ad alta voce → sempre disponibili, coerentemente con PDF 2.0; firma di certificazione che limita le modifiche → restrizioni che si sommano a quelle di /P (area Firma); documento non cifrato → nessuna restrizione da /P.
 
@@ -6798,31 +6954,32 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### SEC-03 — Proprietà di sicurezza del documento
 
-**Descrizione:** La scheda "Sicurezza" delle proprietà del documento riassume metodo di protezione, algoritmo, compatibilità, password presenti, permessi e tipo di accesso corrente, segnalando le protezioni deboli.
+**Descrizione:** Il riepilogo **Protezione** mostra metodo di protezione, algoritmo, compatibilità, password presenti, azioni che il documento consente e non consente e tipo di accesso corrente, segnalando le protezioni deboli o superate. Si apre con un clic sul lucchetto della barra di stato (UX-09) e compare come sezione **Protezione** di **Informazioni sul documento** (VIS-40, P1) quando quella finestra è disponibile.
 
-**Flusso:** 1. L'utente apre Proprietà documento → Sicurezza, oppure fa clic sul lucchetto nella barra di stato. 2. La scheda mostra: metodo (nessuno, password, certificato, gestore non supportato), algoritmo e lunghezza della chiave, revisione, versione PDF minima per aprire il file, cifratura dei metadati sì/no, cifratura dei soli allegati, presenza della password di apertura e di una password dei permessi distinta, tipo di accesso. 3. Una tabella elenca ogni permesso con stato "Consentito", "Non consentito" o "Bassa risoluzione". 4. I pulsanti "Modifica protezione…" (SEC-07) e "Rimuovi protezione" (SEC-08) sono attivi solo con accesso proprietario; "Proteggi…" compare se il documento non è protetto.
+**Flusso:** 1. L'utente fa clic sul lucchetto nella barra di stato, oppure apre Informazioni sul documento (Alt+Invio) → Protezione. 2. Il riepilogo mostra: metodo (nessuno, password, certificato, gestore non supportato), algoritmo e lunghezza della chiave, revisione, versione PDF minima per aprire il file, cifratura dei metadati sì/no, cifratura dei soli allegati, presenza della password di apertura e di una password dei permessi distinta, tipo di accesso. 3. Due elenchi riportano le azioni consentite (es. «Stampare, solo a bassa risoluzione») e quelle non consentite (es. «Copiare testo e immagini»). 4. **Modifica protezione…** (SEC-07) e **Rimuovi protezione** (SEC-08) sono attivi solo con accesso proprietario; **Proteggi…** compare se il documento non è protetto.
 
-**Formati/strutture:** lettura di /Encrypt (/Filter, /SubFilter, /V, /R, /Length, /CF, /StmF, /StrF, /EFF, /EncryptMetadata, /P), dell'intestazione %PDF-x.y e di /Extensions; /Perms /DocMDP del catalogo per le restrizioni di certificazione; la presenza di una password dei permessi distinta è dedotta dall'esito delle autenticazioni (se la password di apertura concede anche l'accesso proprietario, la scheda indica "nessuna password dei permessi distinta").
+**Formati/strutture:** lettura di /Encrypt (/Filter, /SubFilter, /V, /R, /Length, /CF, /StmF, /StrF, /EFF, /EncryptMetadata, /P), dell'intestazione %PDF-x.y e di /Extensions; /Perms /DocMDP del catalogo per le restrizioni di certificazione; la presenza di una password dei permessi distinta è dedotta dall'esito delle autenticazioni (se la password di apertura concede anche l'accesso proprietario, il riepilogo indica che non esiste una password dei permessi distinta).
 
-**Casi limite:** RC4 di qualsiasi lunghezza o AES-256 revisione 5 → etichetta "Protezione debole" con spiegazione e pulsante "Aggiorna ad AES-256" (richiede accesso proprietario); documento non cifrato → "Nessuna protezione" e tutti i permessi consentiti; gestore non supportato → nome del gestore e "Dettagli non disponibili"; documento dichiarato PDF/A o PDF/X → nota che la cifratura lo renderebbe non conforme; documento certificato → riga aggiuntiva con le modifiche consentite dalla firma.
+**Casi limite:** RC4 di qualsiasi lunghezza o AES-256 revisione 5 → etichetta "Protezione debole" con spiegazione e pulsante **Aggiorna ad AES-256** (richiede accesso proprietario); AES a 128 bit → etichetta "Metodo superato in PDF 2.0" con lo stesso pulsante (SEC-06); documento non cifrato → "Nessuna protezione" e nessuna azione non consentita; gestore non supportato → nome del gestore e "Dettagli non disponibili"; documento dichiarato PDF/A o PDF/X → nota che la cifratura lo renderebbe non conforme; documento certificato → riga aggiuntiva con le modifiche consentite dalla firma.
 
 **Criteri di accettazione:**
-- Dato un file AES-256 R6 con stampa a bassa risoluzione e copia negata aperto con accesso utente, quando si apre la scheda Sicurezza, allora mostra "AES 256 bit", "Stampa: bassa risoluzione", "Copia: non consentita" e "Accesso: limitato".
-- Dato un file cifrato RC4 a 40 bit, quando si apre la scheda, allora compare l'etichetta "Protezione debole" con il pulsante di aggiornamento.
-- Dato un file non cifrato, quando si apre la scheda, allora riporta "Nessuna protezione" e tutti i permessi come consentiti.
-- Dato un file con /EncryptMetadata false, quando si apre la scheda, allora indica "Metadati non cifrati".
+- Dato un file AES-256 R6 con stampa a bassa risoluzione e copia negata aperto con accesso utente, quando si apre il riepilogo Protezione, allora indica il metodo «AES, chiave a 256 bit», l'accesso limitato, la stampa a bassa risoluzione tra le azioni consentite e la copia di testo e immagini tra quelle non consentite.
+- Dato un file cifrato RC4 a 40 bit, quando si apre il riepilogo, allora compare l'etichetta "Protezione debole" con il pulsante di aggiornamento.
+- Dato un file non cifrato, quando si apre il riepilogo, allora riporta "Nessuna protezione" e nessuna azione non consentita.
+- Dato un file con /EncryptMetadata false, quando si apre il riepilogo, allora indica che i metadati non sono cifrati.
+- Dato un documento protetto, quando l'utente fa clic sul lucchetto della barra di stato, allora si apre il riepilogo Protezione.
 
 **Priorità:** P0
 
 ### SEC-04 — Password di apertura
 
-**Descrizione:** Cifra il documento in modo che possa essere aperto solo da chi conosce la password; tutti i flussi e le stringhe vengono cifrati con l'algoritmo scelto (SEC-06, predefinito AES-256).
+**Descrizione:** Cifra il documento in modo che possa essere aperto solo da chi conosce la password; tutti i flussi e le stringhe vengono cifrati con AES a 256 bit (SEC-06).
 
-**Flusso:** 1. Strumenti → Proteggi → "Richiedi una password per aprire il documento". 2. L'utente digita e conferma la password; un indicatore mostra la robustezza (debole, media, forte) in base a lunghezza e varietà dei caratteri. 3. Facoltativamente imposta anche password dei permessi e restrizioni (SEC-05) e livello di cifratura (SEC-06). 4. "Applica" mostra un riepilogo e avvisa che una password dimenticata non è recuperabile. 5. Al salvataggio il file viene riscritto cifrato; il documento aperto resta modificabile.
+**Flusso:** 1. Proteggi › **Password di apertura** (UX-05). 2. L'utente digita e conferma la password; un indicatore mostra la robustezza (debole, media, forte) in base a lunghezza e varietà dei caratteri. 3. Facoltativamente imposta anche password dei permessi e restrizioni (SEC-05) e la cifratura dei metadati (SEC-06). 4. "Applica" mostra un riepilogo e avvisa che una password dimenticata non è recuperabile. 5. Al salvataggio il file viene riscritto cifrato; il documento aperto resta modificabile.
 
 **Formati/strutture:** /Encrypt con /Filter /Standard, /V 5, /R 6, /Length 256, /CF con crypt filter /StdCF a /CFM /AESV3, /StmF e /StrF /StdCF; /U e /O di 48 byte, /UE e /OE di 32 byte, /Perms di 16 byte, generati con sali casuali e hash dell'algoritmo 2.B (ISO 32000-2 §7.6.4.4, algoritmi 8–10); chiave del file casuale a 256 bit da generatore crittograficamente sicuro; vettore di inizializzazione casuale di 16 byte per ogni stringa e flusso; /ID obbligatorio nel trailer; non cifrati per norma: /Contents dei dizionari di firma, stringhe del dizionario /Encrypt, flussi di cross-reference.
 
-**Casi limite:** password vuota → "Applica" disattivato; conferma diversa → messaggio "Le password non coincidono" e "Applica" disattivato; password valutata debole → conferma esplicita "Usa comunque"; password oltre 127 byte UTF-8 → inserimento bloccato al limite con avviso; caratteri non ammessi dal livello di compatibilità scelto → vedi SEC-06; documento dichiarato PDF/A o PDF/X → avviso che la cifratura lo rende non conforme e rimozione della dichiarazione di conformità dai metadati XMP; documento con firme digitali → avviso che la riscrittura invalida le firme e conferma esplicita; nessuna password dei permessi distinta → la password del proprietario coincide con quella di apertura (mai vuota), quindi chi apre ha diritti completi; revisioni precedenti del file (aggiornamenti incrementali) → non conservate nel file cifrato.
+**Casi limite:** password vuota → "Applica" disattivato; conferma diversa → messaggio "Le password non coincidono" e "Applica" disattivato; password valutata debole → conferma esplicita "Usa comunque"; password oltre 127 byte UTF-8 → inserimento bloccato al limite con avviso; documento dichiarato PDF/A o PDF/X → avviso che la cifratura lo rende non conforme e rimozione della dichiarazione di conformità dai metadati XMP; documento con firme digitali → avviso che la riscrittura invalida le firme e conferma esplicita; nessuna password dei permessi distinta → la password del proprietario coincide con quella di apertura (mai vuota), quindi chi apre ha diritti completi; revisioni precedenti del file (aggiornamenti incrementali) → non conservate nel file cifrato.
 
 **Criteri di accettazione:**
 - Dato un documento non protetto, quando l'utente imposta la password di apertura "Apri-123!" e salva, allora il file contiene /Encrypt con /V 5 e /R 6, l'apertura senza password fallisce e l'apertura con "Apri-123!" riesce.
@@ -6837,50 +6994,50 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Imposta una password dei permessi (proprietario) e limita stampa, modifica, copia, commenti, compilazione di moduli, estrazione per accessibilità e assemblaggio; senza password di apertura il documento resta apribile da chiunque, ma solo per le operazioni consentite.
 
-**Flusso:** 1. Strumenti → Proteggi → "Limita modifica e stampa". 2. L'utente inserisce e conferma la password dei permessi, obbligatoria quando è attiva almeno una restrizione. 3. Sceglie la stampa ("Consentita ad alta risoluzione", "Solo bassa risoluzione", "Non consentita") e, con caselle indipendenti, modifica del contenuto, copia di testo e immagini, commenti, compilazione di moduli e firma, estrazione per accessibilità, assemblaggio delle pagine. 4. Preimpostazioni rapide: "Sola lettura", "Solo compilazione e firma", "Commenti, compilazione e firma", "Solo assemblaggio pagine". 5. "Applica" mostra il riepilogo in linguaggio semplice; il salvataggio produce il file cifrato.
+**Flusso:** 1. Proteggi › **Permessi** (UX-05). 2. L'utente inserisce e conferma la password dei permessi, obbligatoria quando è attiva almeno una restrizione. 3. Sceglie la stampa ("Consentita ad alta risoluzione", "Solo bassa risoluzione", "Non consentita") e, con caselle indipendenti, modifica del contenuto, copia di testo e immagini, commenti, compilazione di moduli e firma, estrazione per accessibilità, assemblaggio delle pagine. 4. Preimpostazioni rapide: "Sola lettura", "Solo compilazione e firma", "Commenti, compilazione e firma", "Solo assemblaggio pagine". 5. "Applica" mostra il riepilogo in linguaggio semplice; il salvataggio produce il file cifrato.
 
 **Formati/strutture:** /P: stampa alta = bit 3 e 12 a 1; bassa = bit 3 a 1 e bit 12 a 0; negata = bit 3 e 12 a 0; modifica = bit 4; copia = bit 5; commenti = bit 6; compilazione = bit 9; accessibilità = bit 10; assemblaggio = bit 11; bit 1–2 a 0, bit 7–8 e 13–32 a 1 (valore negativo come intero con segno); /O e /OE derivati dalla password dei permessi, /Perms che cifra /P e il flag /EncryptMetadata (ISO 32000-2 §7.6.4.2 Tabella 22, §7.6.4.4 algoritmi 9–10).
 
-**Casi limite:** password dei permessi uguale a quella di apertura → operazione bloccata con spiegazione (le restrizioni non avrebbero effetto); "Commenti" selezionato → "Compilazione moduli" selezionata automaticamente e non deselezionabile (il bit 6 la comprende); "Modifica" e "Commenti" entrambi selezionati → il riepilogo indica che è consentita anche la creazione di campi modulo; livello AES-256 → "Estrazione per accessibilità" sempre attiva e non modificabile, con nota che PDF 2.0 la rende obbligatoria; livelli di compatibilità → casella modificabile con nota che i lettori recenti la ignorano; nessuna restrizione e nessuna password di apertura → l'operazione non ha effetto e viene proposto di annullare; avviso informativo che, senza password di apertura, i permessi sono rispettati dai lettori conformi ma non impediscono crittograficamente la lettura del contenuto.
+**Casi limite:** password dei permessi uguale a quella di apertura → operazione bloccata con spiegazione (le restrizioni non avrebbero effetto); "Commenti" selezionato → "Compilazione moduli" selezionata automaticamente e non deselezionabile (il bit 6 la comprende); "Modifica" e "Commenti" entrambi selezionati → il riepilogo indica che è consentita anche la creazione di campi modulo; "Estrazione per accessibilità" → sempre attiva e non modificabile, con nota che PDF 2.0 la rende obbligatoria; documento con un metodo di cifratura più vecchio e permessi già impostati → valori letti e conservati, ma la nuova protezione è AES-256 (SEC-06); nessuna restrizione e nessuna password di apertura → l'operazione non ha effetto e viene proposto di annullare; avviso informativo che, senza password di apertura, i permessi sono rispettati dai lettori conformi ma non impediscono crittograficamente la lettura del contenuto.
 
 **Criteri di accettazione:**
 - Dato un documento non protetto, quando l'utente imposta stampa "Solo bassa risoluzione", modifica e copia negate, commenti consentiti, e salva, allora /P ha i bit 3, 6, 9 e 10 a 1, i bit 4, 5, 11 e 12 a 0, i bit 1–2 a 0 e i bit 7–8 e 13–32 a 1.
 - Dato il file prodotto, quando viene riaperto senza password, allora si apre con accesso limitato, i comandi Copia e Modifica testo sono disattivati e gli strumenti di commento sono attivi.
 - Dato il file prodotto, quando l'utente inserisce la password dei permessi in "Sblocca…", allora ottiene l'accesso completo.
 - Dato un campo password dei permessi uguale alla password di apertura, quando l'utente prova ad applicare, allora l'operazione è bloccata con un messaggio esplicativo.
-- Dato il livello AES-256 selezionato, quando si apre la finestra dei permessi, allora la casella "Estrazione per accessibilità" è selezionata e disattivata.
+- Dato un documento da proteggere, quando si apre la finestra dei permessi, allora la casella "Estrazione per accessibilità" è selezionata e disattivata.
 
 **Priorità:** P0
 
 ### SEC-06 — Livello di cifratura e compatibilità
 
-**Descrizione:** Permette di scegliere l'algoritmo di cifratura: AES a 256 bit (predefinito e consigliato), AES a 128 bit o "Compatibilità con vecchi lettori" (RC4 a 128 bit), e di lasciare in chiaro i metadati per l'indicizzazione. Foliant legge tutti i livelli ma non produce mai RC4 a 40 bit né AES-256 revisione 5.
+**Descrizione:** La nuova protezione con password usa sempre AES a 256 bit (revisione 6), con la possibilità di lasciare in chiaro i metadati per l'indicizzazione. Gli altri metodi previsti dalla norma (RC4 a 40 e 128 bit, AES a 128 bit, AES-256 revisione 5) sono supportati solo in lettura: Foliant apre questi documenti (SEC-01) e, quando li salva senza cambiarne la protezione, conserva la cifratura esistente (VIS-47); per proteggerli in modo robusto propone l'aggiornamento ad AES-256 (SEC-03, SEC-07). È il requisito di riferimento per il livello di cifratura (0.6): SEC-04, SEC-07, SEC-09, SEC-10, SEC-12 e BAT-10 vi rimandano.
 
-**Flusso:** 1. Nella finestra Proteggi, l'elenco "Livello di cifratura" mostra le tre voci, ciascuna con la versione PDF minima richiesta ai lettori. 2. La voce di compatibilità mostra un avviso permanente: algoritmo debole, da usare solo se il destinatario dispone di un lettore molto datato. 3. La casella "Cifra tutto tranne i metadati" è disponibile per i livelli AES. 4. Al salvataggio la versione dichiarata del file viene innalzata se inferiore al minimo richiesto.
+**Flusso:** 1. Nella finestra Proteggi il metodo è indicato come «AES, chiave a 256 bit», senza alternative per la scrittura. 2. La casella "Cifra tutto tranne i metadati" è disponibile. 3. Al salvataggio la versione dichiarata del file viene innalzata se inferiore al minimo richiesto. 4. Per un documento cifrato con un metodo più vecchio, il salvataggio senza modifiche della protezione conserva metodo, password e permessi; **Modifica protezione…** (SEC-07) o **Aggiorna ad AES-256** (SEC-03) lo cifrano di nuovo con AES-256.
 
-**Formati/strutture:** AES-256: /V 5, /R 6, /CFM /AESV3, versione 2.0 oppure 1.7 con /Extensions /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >>; AES-128: /V 4, /R 4, /Length 128, /CFM /AESV2 con chiave per oggetto derivata da MD5 e dal sale "sAlT", versione ≥ 1.6; compatibilità: /V 2, /R 3, /Length 128, RC4, versione ≥ 1.4; AES in modalità CBC con IV casuale di 16 byte in testa al dato e riempimento PKCS#5; /EncryptMetadata false → flusso /Metadata del catalogo non cifrato (solo con /V ≥ 4), flag replicato in /Perms per R6.
+**Formati/strutture:** scrittura: /V 5, /R 6, /CFM /AESV3, versione 2.0 oppure 1.7 con la dichiarazione dell'estensione di livello 8 prevista per AES-256 in PDF 1.7 (dizionario /Extensions con /BaseVersion /1.7 e /ExtensionLevel 8); AES in modalità CBC con IV casuale di 16 byte in testa al dato e riempimento PKCS#5; /EncryptMetadata false → flusso /Metadata del catalogo non cifrato, flag replicato in /Perms. Lettura, e conservazione al salvataggio senza modifica della protezione: /V 1–4 e /R 2–5 con RC4 o /AESV2 (ISO 32000-2 §7.6).
 
-**Casi limite:** documento PDF 2.0 con scelta AES-128 o RC4 → avviso che PDF 2.0 depreca questi algoritmi e proposta di AES-256; password con caratteri non rappresentabili in PDFDocEncoding nei livelli AES-128 e compatibilità → blocco con messaggio "Usare solo caratteri dell'alfabeto latino oppure AES-256"; password oltre 32 caratteri negli stessi livelli → avviso che i caratteri in eccesso verrebbero ignorati e richiesta di accorciarla; "Cifra tutto tranne i metadati" con livello di compatibilità → opzione disattivata; metadati XMP con dati personali e opzione attiva → avviso che titolo, autore e parole chiave resteranno leggibili senza password.
+**Casi limite:** documento cifrato con RC4 o AES-128 modificato e salvato → cifratura esistente conservata, con l'etichetta di SEC-03 che propone l'aggiornamento; cambio di password o di permessi su un documento con un metodo più vecchio → nuova protezione AES-256, con avviso che i lettori molto datati potrebbero non aprirlo; metadati XMP con dati personali e opzione "Cifra tutto tranne i metadati" attiva → avviso che titolo, autore e parole chiave resteranno leggibili senza password; password con caratteri non latini → ammessa (normalizzazione di SEC-01).
 
 **Criteri di accettazione:**
-- Dato un documento protetto con le impostazioni predefinite, quando si analizza il file, allora /V vale 5, /R vale 6, il crypt filter predefinito usa /CFM /AESV3 e l'intestazione è 2.0 oppure 1.7 con estensione ADBE di livello 8.
-- Dato il livello AES-128, quando si analizza il file, allora /V vale 4, /R vale 4, il filtro usa /CFM /AESV2 e la versione dichiarata è almeno 1.6.
-- Dato il livello di compatibilità, quando si salva, allora /V vale 2, /R vale 3, /Length vale 128, la versione dichiarata è almeno 1.4 e l'avviso di algoritmo debole è stato mostrato prima del salvataggio.
+- Dato un documento protetto con la finestra Proteggi, quando si analizza il file, allora /V vale 5, /R vale 6, il crypt filter predefinito usa /CFM /AESV3 e l'intestazione è 2.0 oppure 1.7 con l'estensione di livello 8.
+- Dato un documento cifrato AES-128 (R4) a cui si aggiunge un commento, quando lo si salva senza cambiare la protezione, allora il file è ancora cifrato con /V 4, /R 4 e /CFM /AESV2 e si apre con la stessa password.
+- Dato un documento cifrato RC4 a 128 bit aperto con accesso proprietario, quando l'utente sceglie **Aggiorna ad AES-256** nel riepilogo Protezione (SEC-03) e salva, allora il file è cifrato con /V 5 e /R 6 e si apre con la stessa password.
 - Dato "Cifra tutto tranne i metadati" attivo, quando si leggono senza password i byte del flusso /Metadata, allora il titolo è leggibile, mentre i flussi di contenuto delle pagine non lo sono.
-- Dato ciascun livello, quando il file prodotto viene aperto con la password da almeno due implementazioni di lettura indipendenti della suite di interoperabilità, allora l'apertura riesce e il rendering coincide con l'originale.
+- Dato un file prodotto con AES-256, quando viene aperto con la password da almeno due implementazioni di lettura indipendenti della suite di interoperabilità, allora l'apertura riesce e il rendering coincide con l'originale.
 - Dato un file cifrato in AES, quando si leggono i vettori di inizializzazione dei primi 100 flussi, allora sono tutti diversi tra loro.
 
 **Priorità:** P0
 
 ### SEC-07 — Cambio delle password e delle impostazioni di protezione
 
-**Descrizione:** Con accesso proprietario l'utente modifica, anche separatamente, la password di apertura, la password dei permessi, i permessi e il livello di cifratura di un documento già protetto; la chiave di cifratura viene rinnovata.
+**Descrizione:** Con accesso proprietario l'utente modifica, anche separatamente, la password di apertura, la password dei permessi e i permessi di un documento già protetto, che viene cifrato con AES-256 (SEC-06); la chiave di cifratura viene rinnovata.
 
-**Flusso:** 1. Proprietà → Sicurezza → "Modifica protezione…"; con accesso limitato viene chiesta prima la password dei permessi. 2. La finestra mostra le impostazioni correnti; le password esistenti non sono mai visualizzate: per ciascuna l'utente sceglie "Mantieni", "Cambia" o "Rimuovi". 3. L'utente modifica permessi o livello di cifratura. 4. "Applica" e salvataggio con una nuova chiave casuale: tutti i flussi e le stringhe vengono cifrati di nuovo.
+**Flusso:** 1. Riepilogo Protezione (SEC-03) → **Modifica protezione…**; con accesso limitato viene chiesta prima la password dei permessi. 2. La finestra mostra le impostazioni correnti; le password esistenti non sono mai visualizzate: per ciascuna l'utente sceglie "Mantieni", "Cambia" o "Rimuovi". 3. L'utente modifica i permessi; la nuova cifratura è sempre AES-256 (SEC-06). 4. "Applica" e salvataggio con una nuova chiave casuale: tutti i flussi e le stringhe vengono cifrati di nuovo.
 
 **Formati/strutture:** nuovo dizionario /Encrypt (/O, /U, /OE, /UE, /Perms con nuovi sali); per R6 nuova chiave del file casuale; per R ≤ 4 chiave derivata da password, /O, /P e /ID[0]; /ID: primo elemento conservato, secondo rigenerato (ISO 32000-2 §14.4).
 
-**Casi limite:** "Mantieni" la password di apertura su file R6 aperto con la sola password dei permessi (password di apertura non ricavabile) → Foliant chiede di digitarla o di sceglierne una nuova; per R ≤ 4 la password di apertura viene ricavata da /O e mantenuta; rimozione della password dei permessi con restrizioni ancora attive → non consentita; passaggio a un livello più debole → avviso come in SEC-06; documento con firme digitali → avviso di invalidazione e conferma; nuova password uguale alla precedente → accettata.
+**Casi limite:** "Mantieni" la password di apertura su file R6 aperto con la sola password dei permessi (password di apertura non ricavabile) → Foliant chiede di digitarla o di sceglierne una nuova; per R ≤ 4 la password di apertura viene ricavata da /O e mantenuta; rimozione della password dei permessi con restrizioni ancora attive → non consentita; documento cifrato con un metodo più vecchio → la nuova protezione usa AES-256 (SEC-06); documento con firme digitali → avviso di invalidazione e conferma; nuova password uguale alla precedente → accettata.
 
 **Criteri di accettazione:**
 - Dato un file protetto con password di apertura "vecchia", quando l'utente la cambia in "nuova-2026" e salva, allora "vecchia" non apre più il file e "nuova-2026" lo apre.
@@ -6894,7 +7051,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Chi conosce la password dei permessi (o la password di apertura, quando non esiste una password dei permessi distinta) rimuove cifratura e restrizioni, ottenendo un file in chiaro privo di residui della versione cifrata.
 
-**Flusso:** 1. Proprietà → Sicurezza → "Rimuovi protezione", oppure Strumenti → Proteggi → "Rimuovi protezione". 2. Con accesso limitato viene chiesta la password dei permessi. 3. Conferma con l'avviso che il file salvato sarà leggibile da chiunque. 4. Salvataggio completo senza /Encrypt: sovrascrittura dell'originale con conferma oppure "Salva con nome".
+**Flusso:** 1. Proteggi › **Rimuovi protezione** (UX-05), oppure dal riepilogo Protezione (SEC-03). 2. Con accesso limitato viene chiesta la password dei permessi. 3. Conferma con l'avviso che il file salvato sarà leggibile da chiunque. 4. Salvataggio completo senza /Encrypt: sovrascrittura dell'originale con conferma oppure "Salva con nome".
 
 **Formati/strutture:** eliminazione di /Encrypt dal trailer; scrittura in chiaro di tutti gli oggetti, inclusi gli allegati cifrati con filtro separato (/EFF); nessuna sezione di revisione precedente; /ID con primo elemento conservato e secondo rigenerato.
 
@@ -6912,9 +7069,9 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Cifra il documento per uno o più destinatari identificati da certificati X.509, senza password da condividere; ogni destinatario può avere permessi diversi e apre il file con la propria chiave privata.
 
-**Flusso:** 1. Strumenti → Proteggi → "Cifra con certificato". 2. L'utente aggiunge i destinatari da file di certificato (DER/PEM), dall'archivio di certificati dell'utente, da file PKCS#12 o da token crittografico (PKCS#11); il proprio certificato viene proposto per non perdere l'accesso. 3. Per ciascun destinatario sceglie i permessi come in SEC-05. 4. Sceglie AES-256 o AES-128 e se cifrare i metadati. 5. Salvataggio completo. 6. All'apertura Foliant cerca la chiave privata corrispondente negli archivi e nei token collegati, chiedendo PIN o password del contenitore.
+**Flusso:** 1. Proteggi › **Cifra con certificato**. 2. L'utente aggiunge i destinatari da file di certificato (DER/PEM), dall'archivio di certificati dell'utente, da file PKCS#12 o da token crittografico (PKCS#11); il proprio certificato viene proposto per non perdere l'accesso. 3. Per ciascun destinatario sceglie i permessi come in SEC-05. 4. Sceglie se cifrare i metadati; la cifratura è AES-256 (SEC-06). 5. Salvataggio completo. 6. All'apertura Foliant cerca la chiave privata corrispondente negli archivi e nei token collegati, chiedendo PIN o password del contenitore.
 
-**Formati/strutture:** /Filter /Adobe.PubSec con /SubFilter /adbe.pkcs7.s5 (crypt filter con /Recipients) o /adbe.pkcs7.s4; /Recipients come CMS EnvelopedData (RFC 5652) che trasportano un seme casuale di 20 byte e i permessi del destinatario; chiave del file derivata con SHA-256 (AESV3) o SHA-1 (AESV2) da seme e dati dei destinatari (ISO 32000-2 §7.6.5).
+**Formati/strutture:** gestore di sicurezza a chiave pubblica di ISO 32000-2 §7.6.5 (/Filter con il nome definito dalla norma), con il SubFilter «s5» (crypt filter con /Recipients) o «s4» della stessa norma; /Recipients come CMS EnvelopedData (RFC 5652) che trasportano un seme casuale di 20 byte e i permessi del destinatario; chiave del file derivata con SHA-256 (AESV3) da seme e dati dei destinatari; in sola lettura anche SHA-1 (AESV2) (ISO 32000-2 §7.6.5).
 
 **Casi limite:** certificato scaduto o con uso della chiave non adatto alla cifratura → avviso, aggiunta solo con conferma; nessuna chiave privata corrispondente all'apertura → messaggio con l'elenco degli emittenti e dei numeri di serie previsti; proprio certificato escluso → avviso "Non potrai più aprire il documento"; token rimosso dopo l'apertura → il documento resta utilizzabile e il salvataggio riusa la chiave già in memoria; certificato con algoritmo a curve ellittiche → supportato se il destinatario usa uno schema di trasporto della chiave previsto da CMS.
 
@@ -6929,9 +7086,9 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Cifra solo i file incorporati lasciando leggibile il documento, che diventa una "busta" di trasporto: chiunque vede la pagina di copertina, ma per aprire o estrarre gli allegati servono password o certificato.
 
-**Flusso:** 1. Strumenti → Proteggi → "Cifra solo gli allegati", oppure "Crea busta di sicurezza" (nuovo PDF da modello con la lista dei file da includere). 2. L'utente imposta password o destinatari. 3. Salvataggio. 4. All'apertura le pagine sono visibili; l'apertura o l'estrazione di un allegato richiede l'autenticazione.
+**Flusso:** 1. Proteggi › **Cifra solo gli allegati**, oppure "Crea busta di sicurezza" (nuovo PDF da modello con la lista dei file da includere). 2. L'utente imposta password o destinatari. 3. Salvataggio. 4. All'apertura le pagine sono visibili; l'apertura o l'estrazione di un allegato richiede l'autenticazione.
 
-**Formati/strutture:** /V 4 o 5 con /StmF e /StrF /Identity e /EFF che punta a un crypt filter AES con /AuthEvent /EFOpen; versione ≥ 1.6 (ISO 32000-2 §7.6.6).
+**Formati/strutture:** in scrittura /V 5 con /StmF e /StrF /Identity e /EFF che punta a un crypt filter AESV3 (SEC-06) con /AuthEvent /EFOpen; in lettura anche /V 4 (ISO 32000-2 §7.6.6).
 
 **Casi limite:** documento senza allegati → voce disattivata, eccetto "Crea busta di sicurezza"; lettori che non gestiscono /EFF → mostrano comunque la copertina; allegato aggiunto dopo la cifratura → cifrato con lo stesso filtro; nomi e descrizioni degli allegati → restano visibili, con avviso nel riepilogo.
 
@@ -6959,13 +7116,13 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### SEC-12 — Policy di protezione riutilizzabili
 
-**Descrizione:** Salva combinazioni di impostazioni di protezione (livello di cifratura, permessi, destinatari, cifratura dei metadati) come policy con nome, applicabili con un clic al documento corrente o all'elaborazione in blocco.
+**Descrizione:** Salva combinazioni di impostazioni di protezione (permessi, destinatari, cifratura dei metadati; la cifratura è sempre AES-256, SEC-06) come policy con nome, applicabili con un clic al documento corrente o all'elaborazione in blocco.
 
 **Flusso:** 1. Dopo aver configurato le opzioni in Proteggi, l'utente sceglie "Salva come policy" e assegna un nome. 2. Le policy compaiono nel menu Proteggi e tra le azioni dell'elaborazione in blocco. 3. Applicando una policy che prevede password, Foliant le chiede al momento, salvo che l'utente abbia scelto di custodirle nel portachiavi di sistema. 4. Gestione: rinomina, duplica, elimina, importa, esporta.
 
 **Formati/strutture:** file di policy in formato testuale strutturato (es. JSON) privo di password; certificati dei destinatari referenziati per impronta SHA-256.
 
-**Casi limite:** policy importata che fa riferimento a un certificato non disponibile → avviso e policy non applicabile finché il certificato non viene fornito; policy con livello di compatibilità → avviso di debolezza a ogni applicazione; esportazione → le password non compaiono mai nel file; policy applicata a un documento già protetto → richiede l'accesso proprietario come SEC-07.
+**Casi limite:** policy importata che fa riferimento a un certificato non disponibile → avviso e policy non applicabile finché il certificato non viene fornito; policy importata che indica un metodo di cifratura più vecchio → applicata con AES-256 (SEC-06), con avviso; esportazione → le password non compaiono mai nel file; policy applicata a un documento già protetto → richiede l'accesso proprietario come SEC-07.
 
 **Criteri di accettazione:**
 - Dato una policy "Riservato" (AES-256, stampa a bassa risoluzione, copia negata), quando viene applicata a un documento, allora il file risultante ha gli stessi /V, /R e /P di un documento protetto manualmente con le stesse opzioni.
@@ -6978,7 +7135,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Lo strumento "Segna area" consente di tracciare rettangoli sulla pagina per oscurare tutto ciò che contengono (testo, immagini, grafica vettoriale, annotazioni, campi); i segni non rimuovono nulla finché non vengono applicati (SEC-20).
 
-**Flusso:** 1. Strumenti → Redazione → "Segna area". 2. L'utente trascina un rettangolo: il segno appare con contorno colorato (predefinito rosso) e, al passaggio del mouse, mostra l'aspetto finale. 3. Il segno può essere spostato, ridimensionato con le maniglie, copiato o eliminato. 4. Il menu contestuale "Ripeti su più pagine…" replica il segno su un intervallo (tutte, pari, dispari, personalizzato), utile per intestazioni, loghi o timbri ricorrenti. 5. Ogni segno compare nel pannello Redazioni (SEC-19).
+**Flusso:** 1. Proteggi › **Contrassegna per redazione** › "Area" (UX-05). 2. L'utente trascina un rettangolo: il segno appare con contorno colorato (predefinito rosso) e, al passaggio del mouse, mostra l'aspetto finale. 3. Il segno può essere spostato, ridimensionato con le maniglie, copiato o eliminato. 4. Il menu contestuale "Ripeti su più pagine…" replica il segno su un intervallo (tutte, pari, dispari, personalizzato), utile per intestazioni, loghi o timbri ricorrenti. 5. Ogni segno compare nel pannello Redazioni (SEC-19).
 
 **Formati/strutture:** annotazione /Subtype /Redact con /Rect nello spazio utente della pagina, /C colore del contorno, /IC colore di riempimento, /OverlayText, /DA, /Q, /Repeat, /RO (Form XObject dell'aspetto dopo l'applicazione), /AP per l'aspetto del segno, /T autore, /M data (ISO 32000-2 §12.5.6.23).
 
@@ -7012,7 +7169,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Cerca nel documento una o più parole o frasi e propone le occorrenze come segni di redazione da confermare; facoltativamente include le occorrenze fuori dal contenuto delle pagine (metadati, segnalibri, commenti, campi, nomi degli allegati).
 
-**Flusso:** 1. Strumenti → Redazione → "Trova e segna". 2. L'utente inserisce un termine, un elenco (uno per riga) o importa un file di testo; opzioni: maiuscole/minuscole, parola intera, ignora accenti, ambito (tutto il documento o pagine scelte), "cerca anche in metadati, segnalibri, commenti, campi e allegati". 3. Il pannello dei risultati mostra per ciascuna occorrenza pagina e contesto, con casella di selezione (tutte selezionate per impostazione predefinita). 4. "Segna selezionati" crea i segni sulle pagine e registra le occorrenze esterne alle pagine come "da cancellare all'applicazione". 5. Seguono revisione (SEC-19) e applicazione (SEC-20).
+**Flusso:** 1. Proteggi › **Contrassegna per redazione** › "Risultati di ricerca" (UX-05). 2. L'utente inserisce un termine, un elenco (uno per riga) o importa un file di testo; opzioni: maiuscole/minuscole, parola intera, ignora accenti, ambito (tutto il documento o pagine scelte), "cerca anche in metadati, segnalibri, commenti, campi e allegati". 3. Il pannello dei risultati mostra per ciascuna occorrenza pagina e contesto, con casella di selezione (tutte selezionate per impostazione predefinita). 4. "Segna selezionati" crea i segni sulle pagine e registra le occorrenze esterne alle pagine come "da cancellare all'applicazione". 5. Seguono revisione (SEC-19) e applicazione (SEC-20).
 
 **Formati/strutture:** ricerca sul testo estratto (/ToUnicode, /ActualText, ordine di lettura) con mappatura inversa ai glifi per generare /QuadPoints; occorrenze esterne cercate in /Info, XMP, /Title delle voci di /Outlines, /Contents e /RC delle annotazioni, /V dei campi, nomi e descrizioni in /EmbeddedFiles.
 
@@ -7031,7 +7188,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Individua automaticamente dati personali ricorrenti tramite schemi predefiniti e personalizzati, con validazione delle cifre di controllo per ridurre i falsi positivi, e li propone come segni di redazione.
 
-**Flusso:** 1. Strumenti → Redazione → "Trova dati personali". 2. L'utente seleziona gli schemi: indirizzi email, numeri di telefono (italiani e internazionali), IBAN, codici fiscali, date; facoltativi: partita IVA, numeri di carte di pagamento, schemi personalizzati. 3. I risultati sono raggruppati per schema con conteggio e contesto; ogni voce è selezionabile. 4. "Segna selezionati" crea i segni; seguono revisione e applicazione.
+**Flusso:** 1. Proteggi › **Contrassegna per redazione** › "Dati personali". 2. L'utente seleziona gli schemi: indirizzi email, numeri di telefono (italiani e internazionali), IBAN, codici fiscali, date; facoltativi: partita IVA, numeri di carte di pagamento, schemi personalizzati. 3. I risultati sono raggruppati per schema con conteggio e contesto; ogni voce è selezionabile. 4. "Segna selezionati" crea i segni; seguono revisione e applicazione.
 
 **Formati/strutture:** schemi come espressioni regolari su testo normalizzato (spazi, trattini, a capo); IBAN: lunghezza e struttura per paese e controllo modulo 97 (ISO 13616); codice fiscale delle persone fisiche: 16 caratteri con carattere di controllo, comprese le varianti per omocodia; codice fiscale numerico e partita IVA: 11 cifre con cifra di controllo; telefono: prefisso +39 o 0039 facoltativo, numeri fissi che iniziano per 0, mobili per 3, formato internazionale E.164; date: gg/mm/aaaa, gg-mm-aa, gg.mm.aaaa, aaaa-mm-gg (ISO 8601), date in lettere con mesi italiani e abbreviazioni; carte di pagamento: 13–19 cifre con algoritmo di Luhn; schemi personalizzati con nome, salvabili ed esportabili.
 
@@ -7050,7 +7207,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Oscura completamente una o più pagine eliminandone contenuto e annotazioni, ma conservandone posizione, dimensioni e numerazione, con riempimento e testo sovrapposto facoltativo (es. "Pagina omessa").
 
-**Flusso:** 1. Strumenti → Redazione → "Segna pagine", oppure menu contestuale delle miniature. 2. L'utente sceglie le pagine: corrente, intervallo (es. "2,4-7"), pari, dispari, tutte. 3. Ogni pagina riceve un segno che copre l'intero riquadro della pagina. 4. Revisione e applicazione come per gli altri segni.
+**Flusso:** 1. Proteggi › **Contrassegna per redazione** › "Pagine" (UX-05), oppure menu contestuale delle miniature. 2. L'utente sceglie le pagine: corrente, intervallo (es. "2,4-7"), pari, dispari, tutte. 3. Ogni pagina riceve un segno che copre l'intero riquadro della pagina. 4. Revisione e applicazione come per gli altri segni.
 
 **Formati/strutture:** /Redact con /Rect uguale al /MediaBox; all'applicazione: nuovo /Contents con il solo riempimento e testo sovrapposto, /Resources ridotte al necessario, /Annots vuoto, /Thumb rimossa, contenuto della pagina rimosso dalla struttura logica (/StructParents, /ParentTree); /MediaBox, /CropBox, /Rotate ed etichette di pagina invariati.
 
@@ -7103,7 +7260,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Applica i segni rimuovendo realmente dal file tutto ciò che ricade nelle aree segnate — glifi di testo, porzioni di immagini, tracciati vettoriali, sfumature, annotazioni e campi — e disegnando il riquadro finale; il salvataggio successivo è sempre completo.
 
-**Flusso:** 1. L'utente conferma l'applicazione (SEC-19). 2. Per ogni pagina coinvolta Foliant: rimuove i glifi il cui riquadro interseca l'area, mantenendo invariata la posizione dei glifi restanti; sostituisce con il colore di riempimento i pixel delle immagini nell'area, eliminando le immagini coperte del tutto; taglia o elimina tracciati e sfumature nell'area; elabora ricorsivamente Form XObject, pattern e glifi Type 3; rimuove annotazioni e widget che intersecano l'area e cancella i valori dei campi interessati; disegna riempimento e testo sovrapposto; elimina il segno. 3. Cancella le occorrenze esterne alle pagine selezionate in SEC-15. 4. Aggiorna struttura logica, testi alternativi e miniature. 5. Propone "Salva con nome" con suffisso "_redatto"; la sovrascrittura dell'originale richiede conferma. 6. Facoltativamente propone la sanificazione (SEC-22).
+**Flusso:** 1. L'utente conferma l'applicazione (SEC-19). 2. Per ogni pagina coinvolta Foliant: rimuove i glifi il cui riquadro interseca l'area, mantenendo invariata la posizione dei glifi restanti; sostituisce con il colore di riempimento i pixel delle immagini nell'area, eliminando le immagini coperte del tutto; taglia o elimina tracciati e sfumature nell'area; elabora ricorsivamente Form XObject, pattern e glifi Type 3; rimuove annotazioni e widget che intersecano l'area e cancella i valori dei campi interessati; disegna riempimento e testo sovrapposto; elimina il segno. 3. Cancella le occorrenze esterne alle pagine selezionate in SEC-15. 4. Aggiorna struttura logica, testi alternativi e miniature. 5. Propone "Salva con nome" con suffisso "_redatto"; la sovrascrittura dell'originale richiede conferma. 6. Facoltativamente propone la rimozione dei dati nascosti (SEC-22).
 
 **Formati/strutture:** riscrittura degli operatori di testo (TJ, Tj, ', ") con compensazione degli spostamenti; immagini (XObject e inline BI…ID…EI): decodifica, sostituzione dei pixel inclusi /SMask e /Mask, ricodifica; tracciati: sottrazione geometrica dell'area o eliminazione del tracciato; Form XObject e immagini condivisi con aree non redatte → duplicati prima della modifica; rimozione dei /MCID orfani dal /ParentTree e degli elementi di struttura vuoti; rimozione di /Alt e /ActualText riferiti a contenuto rimosso; sottoinsiemi dei caratteri ricalcolati per eliminare i glifi non più usati; /Thumb rigenerate o rimosse; salvataggio completo con eliminazione degli oggetti non referenziati (ISO 32000-2 §12.5.6.23, §7.5.6).
 
@@ -7111,7 +7268,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Criteri di accettazione:**
 - Dato una pagina con "CONFIDENZIALE-4711" sotto un segno, quando si applica la redazione e si salva, allora l'estrazione del testo dell'intero file (contenuto delle pagine, Form XObject, aspetti delle annotazioni, valori dei campi) non restituisce la stringa né alcuna sua parte ricadente nell'area.
-- Dato un file con un'immagine coperta in parte da un segno, quando si applica e si salva, allora nell'immagine estratta dal file i pixel corrispondenti all'area hanno tutti il colore di riempimento e i pixel esterni coincidono con l'originale entro la tolleranza di ricompressione documentata.
+- Dato un file con un'immagine coperta in parte da un segno, quando si applica e si salva, allora nell'immagine estratta dal file i pixel corrispondenti all'area hanno tutti il colore di riempimento e i pixel esterni coincidono con l'originale entro la tolleranza di ricompressione: differenza non superiore a 8/255 per canale in almeno il 99 % dei pixel esterni all'area, a 150 dpi, e differenza nulla se l'immagine è ricompressa senza perdita.
 - Dato un tracciato vettoriale attraversato da un segno, quando si applica, allora nessun punto del tracciato risultante cade all'interno dell'area.
 - Dato una pagina redatta, quando si confronta il rendering fuori dalle aree segnate prima e dopo l'applicazione, allora non vi sono differenze oltre 1 px di antialiasing lungo i bordi dei riquadri.
 - Dato il testo non redatto sulla stessa riga di un segno, quando si confrontano le coordinate dei suoi glifi prima e dopo, allora coincidono entro 0,01 pt.
@@ -7122,11 +7279,11 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### SEC-21 — Ispezione del documento (informazioni nascoste)
 
-**Descrizione:** Analizza il documento senza modificarlo ed elenca, per categoria e con conteggi, i contenuti potenzialmente riservati o non visibili, come base per la sanificazione.
+**Descrizione:** Analizza il documento senza modificarlo ed elenca, per categoria e con conteggi, i contenuti potenzialmente riservati o non visibili, come base per la rimozione dei dati nascosti.
 
-**Flusso:** 1. Strumenti → Protezione → "Esamina documento". 2. Foliant mostra le categorie con conteggi ed esempi (es. "Metadati: autore 'M. Rossi'", "Script: 3", "File incorporati: 2", "Livelli nascosti: 1", "Testo nascosto: 14 frammenti su 3 pagine"). 3. Ogni voce consente di raggiungere l'elemento sulla pagina o di vederne i dettagli. 4. "Rimuovi…" apre la sanificazione (SEC-22) con le categorie già selezionate.
+**Flusso:** 1. Proteggi › **Esamina documento**, anche dalla finestra di **Rimuovi dati nascosti**. 2. Foliant mostra le categorie con conteggi ed esempi (es. "Metadati: autore 'M. Rossi'", "Script: 3", "File incorporati: 2", "Livelli nascosti: 1", "Testo nascosto: 14 frammenti su 3 pagine"). 3. Ogni voce consente di raggiungere l'elemento sulla pagina o di vederne i dettagli. 4. "Rimuovi…" apre la rimozione dei dati nascosti (SEC-22) con le categorie già selezionate.
 
-**Formati/strutture:** categorie rilevate: /Info, XMP del catalogo e /Metadata di pagine, immagini e caratteri; metadati EXIF, IPTC e XMP dentro i flussi JPEG e JPEG 2000 (es. coordinate GPS); /PieceInfo e dati applicativi privati; script (/Names /JavaScript, /OpenAction, /AA, azioni /JavaScript); file incorporati (/EmbeddedFiles, /FileAttachment, /AF, /Collection); livelli nascosti (/OCProperties con gruppi in /OFF o resi invisibili da /Usage); commenti e risposte; valori dei campi e dati XFA; testo nascosto (rendering invisibile non OCR, testo coperto da oggetti opachi, testo dello stesso colore dello sfondo, testo sotto 1 pt, contenuto fuori dal CropBox o escluso da tracciati di ritaglio); annotazioni con flag Hidden o NoView; pagine modello nascoste (/Names /Templates e /Pages); revisioni precedenti (aggiornamenti incrementali); oggetti non referenziati; miniature incorporate; collegamenti e azioni verso risorse esterne; firme digitali con dati personali dei firmatari; segnalibri.
+**Formati/strutture:** categorie rilevate: /Info, XMP del catalogo e /Metadata di pagine, immagini e caratteri; metadati EXIF, IPTC e XMP dentro i flussi JPEG e JPEG 2000 (es. coordinate GPS); /PieceInfo e dati applicativi privati; script (albero dei nomi degli script del documento, /OpenAction, /AA, azioni di script con la chiave /JS); file incorporati (/EmbeddedFiles, /FileAttachment, /AF, /Collection); livelli nascosti (/OCProperties con gruppi in /OFF o resi invisibili da /Usage); commenti e risposte; valori dei campi e dati XFA; testo nascosto (rendering invisibile non OCR, testo coperto da oggetti opachi, testo dello stesso colore dello sfondo, testo sotto 1 pt, contenuto fuori dal CropBox o escluso da tracciati di ritaglio); annotazioni con flag Hidden o NoView; pagine modello nascoste (/Names /Templates e /Pages); revisioni precedenti (aggiornamenti incrementali); oggetti non referenziati; miniature incorporate; collegamenti e azioni verso risorse esterne; firme digitali con dati personali dei firmatari; segnalibri.
 
 **Casi limite:** testo invisibile allineato a un'immagine di pagina (livello OCR) → classificato a parte come "Livello OCR", non come testo nascosto; documento molto grande → analisi annullabile con avanzamento; documento con accesso utente → ispezione consentita, rimozione disponibile solo con permesso di modifica; revisioni precedenti → elencate con data, se disponibile, e apribili in sola lettura per vedere cosa contengono; nessun elemento trovato → messaggio "Nessuna informazione nascosta rilevata".
 
@@ -7138,32 +7295,33 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Priorità:** P1
 
-### SEC-22 — Sanificazione del documento
+### SEC-22 — Rimozione dei dati nascosti
 
-**Descrizione:** Rimuove in un'unica operazione le informazioni nascoste e i contenuti attivi selezionati — metadati, script, file incorporati, livelli nascosti, commenti, dati dei moduli, contenuto nascosto, revisioni precedenti, dati privati — producendo una copia da condividere senza alterare l'aspetto visibile delle pagine.
+**Descrizione:** Il comando **Rimuovi dati nascosti** rimuove in un'unica operazione le informazioni nascoste e i contenuti attivi selezionati — metadati, script, file incorporati, livelli nascosti, commenti, dati dei moduli, contenuto nascosto, revisioni precedenti, dati privati — producendo una copia da condividere senza alterare l'aspetto visibile delle pagine.
 
-**Flusso:** 1. Strumenti → Protezione → "Sanifica documento". 2. Elenco di categorie con caselle, ciascuna con il conteggio rilevato da SEC-21; tutte selezionate per impostazione predefinita tranne "Livello OCR" e "Struttura di accessibilità". 3. Opzioni: per i moduli "azzera i valori" o "rimuovi i campi"; per i livelli "elimina il contenuto dei livelli nascosti e unisci quelli visibili"; per le firme "rimuovi le firme digitali". 4. Conferma, esecuzione e riepilogo di quanto rimosso. 5. Salvataggio completo proposto come nuovo file con suffisso "_sanificato".
+**Flusso:** 1. Proteggi › **Rimuovi dati nascosti** (UX-05). 2. Elenco di categorie con caselle, ciascuna con il conteggio rilevato da SEC-21; tutte selezionate per impostazione predefinita tranne "Livello OCR" e "Struttura logica". 3. Opzioni: per i moduli "azzera i valori" o "rimuovi i campi"; per i livelli "elimina il contenuto dei livelli nascosti e unisci quelli visibili"; per le firme "rimuovi le firme digitali". 4. Conferma (UX-13), esecuzione e riepilogo di quanto rimosso. 5. Salvataggio con riscrittura completa (NFR-09) proposto come nuovo file con suffisso "_ripulito".
 
-**Formati/strutture:** svuotamento di /Info (date conservate su richiesta) e di XMP (sostituito da un pacchetto minimo quando serve alla conformità); rimozione di /Metadata dagli oggetti e dei segmenti APPn nei flussi JPEG; rimozione di /Names /JavaScript, /OpenAction e /AA con azioni /JavaScript, /Launch, /URI, /SubmitForm, /ImportData, /GoToR; rimozione di /EmbeddedFiles, /FileAttachment, /AF, /Collection; rimozione di /OCProperties e del contenuto marcato con gruppi nascosti; rimozione delle annotazioni di markup e /Popup; azzeramento di /V e rigenerazione di /AP dei campi oppure rimozione di /AcroForm e /XFA; rimozione del contenuto nascosto (SEC-21), di /PieceInfo, /Thumb, /Names /Templates; per le firme rimozione di /Sig, /Perms e /DSS; nuovo /ID; nessun aggiornamento incrementale né oggetto non referenziato.
+**Formati/strutture:** svuotamento di /Info (date conservate su richiesta) e di XMP (sostituito da un pacchetto minimo quando serve alla conformità); rimozione di /Metadata dagli oggetti e dei segmenti APPn nei flussi JPEG; rimozione dell'albero dei nomi degli script, di /OpenAction e /AA con azioni di script, /Launch, /URI, /SubmitForm, /ImportData, /GoToR; rimozione di /EmbeddedFiles, /FileAttachment, /AF, /Collection; rimozione di /OCProperties e del contenuto marcato con gruppi nascosti; rimozione delle annotazioni di markup e /Popup; azzeramento di /V e rigenerazione di /AP dei campi oppure rimozione di /AcroForm e /XFA; rimozione del contenuto nascosto (SEC-21), di /PieceInfo, /Thumb, /Names /Templates; per le firme rimozione di /Sig, /Perms e /DSS; nuovo /ID; nessun aggiornamento incrementale né oggetto non referenziato.
 
 **Casi limite:** documento PDF/A → Foliant conserva un pacchetto XMP minimo con l'identificazione PDF/A e avvisa se una scelta farebbe perdere la conformità; PDF/A-3 con allegato che costituisce il dato principale (es. fattura elettronica ibrida con XML incorporato) → avviso specifico prima della rimozione; documento firmato → avviso che le firme saranno invalidate o rimosse; moduli con calcoli tramite script → avviso che calcoli e validazioni smetteranno di funzionare; documento taggato → struttura conservata e aggiornata per il contenuto rimosso; nessun elemento da rimuovere → nessuna modifica; permesso di modifica negato → funzione non disponibile.
 
 **Criteri di accettazione:**
-- Dato un file di prova con tutte le categorie, quando si sanifica con le impostazioni predefinite e si salva, allora l'ispezione (SEC-21) del file risultante riporta zero elementi per ogni categoria selezionata.
+- Dato un file di prova con tutte le categorie, quando si rimuovono i dati nascosti con le impostazioni predefinite e si salva, allora l'ispezione (SEC-21) del file risultante riporta zero elementi per ogni categoria selezionata.
 - Dato lo stesso file, quando si confronta il rendering delle pagine prima e dopo, escludendo i commenti rimossi, allora le pagine sono identiche (differenza di pixel nulla).
-- Dato un file con un livello nascosto che contiene la parola "segreto", quando si sanifica e si salva, allora il testo estratto con tutti i livelli resi visibili non contiene "segreto" e /OCProperties non contiene gruppi nascosti.
-- Dato un file PDF/A-2b con autore nei metadati, quando si sanifica, allora l'autore viene rimosso e l'identificazione PDF/A resta nei metadati XMP.
-- Dato un JPEG incorporato con coordinate GPS nei dati EXIF, quando si sanifica, allora il flusso dell'immagine non contiene più il segmento EXIF e l'immagine renderizzata è identica.
+- Dato un file con un livello nascosto che contiene la parola "segreto", quando si rimuovono i dati nascosti e si salva, allora il testo estratto con tutti i livelli resi visibili non contiene "segreto" e /OCProperties non contiene gruppi nascosti.
+- Dato un file PDF/A-2b con autore nei metadati, quando si rimuovono i dati nascosti, allora l'autore viene rimosso e l'identificazione PDF/A resta nei metadati XMP.
+- Dato un JPEG incorporato con coordinate GPS nei dati EXIF, quando si rimuovono i dati nascosti, allora il flusso dell'immagine non contiene più il segmento EXIF e l'immagine renderizzata è identica.
+- Dato un documento "contratto.pdf", quando l'operazione termina, allora il nome proposto per il nuovo file è "contratto_ripulito.pdf".
 
 **Priorità:** P1
 
 ### SEC-23 — Modifica dei metadati del documento
 
-**Descrizione:** Visualizza e modifica i metadati descrittivi — titolo, autore, oggetto, parole chiave — e le proprietà personalizzate, mantenendo sincronizzati il dizionario Info e i metadati XMP.
+**Descrizione:** Visualizza e modifica i metadati descrittivi — titolo, autore, oggetto, parole chiave — e le proprietà personalizzate, mantenendo sincronizzati il dizionario Info e i metadati XMP. È il requisito di riferimento per metadati descrittivi e proprietà personalizzate (0.6): VIS-40 (sezione Contenuto) e VIS-41 (metadati avanzati) vi rimandano.
 
-**Flusso:** 1. File → Proprietà → Descrizione. 2. Campi modificabili: Titolo, Autore, Oggetto, Parole chiave; in sola lettura: applicazione di origine, produttore, date di creazione e modifica, versione PDF, dimensione del file, numero di pagine. 3. Sezione "Proprietà personalizzate" con coppie nome/valore aggiungibili e rimovibili. 4. "OK" registra la modifica (annullabile); il salvataggio aggiorna la data di modifica.
+**Flusso:** 1. Informazioni sul documento (Alt+Invio, VIS-40) → sezione Contenuto, oppure il riepilogo del documento nel pannello proprietà (UX-08) → **Modifica metadati**. 2. Campi modificabili: Titolo, Autore, Oggetto, Parole chiave; gli altri valori (programma di origine, produttore, date, versione, dimensione, pagine) sono in sola lettura. 3. Riquadro "Proprietà personalizzate" con coppie nome/valore aggiungibili e rimovibili. 4. **Applica** registra la modifica come un solo passo annullabile; il salvataggio aggiorna la data di modifica.
 
-**Formati/strutture:** /Info: /Title, /Author, /Subject, /Keywords, /Creator, /Producer, /CreationDate, /ModDate e chiavi personalizzate; stringhe in PDFDocEncoding o UTF-16BE con BOM; date nel formato D:AAAAMMGGHHmmSSOHH'mm'; XMP (ISO 16684-1): dc:title (lang alt x-default), dc:creator (seq), dc:description, dc:subject (bag), pdf:Keywords, pdf:Producer, xmp:CreatorTool, xmp:CreateDate, xmp:ModifyDate, xmp:MetadataDate; per i file PDF 2.0 XMP è la fonte primaria (il dizionario Info è deprecato salvo le date); PDF/A richiede l'equivalenza tra Info e XMP.
+**Formati/strutture:** /Info: /Title, /Author, /Subject, /Keywords, /Creator, /Producer, /CreationDate, /ModDate e chiavi personalizzate; stringhe in PDFDocEncoding o UTF-16BE con BOM; date nel formato D:AAAAMMGGHHmmSSOHH'mm'; XMP (ISO 16684-1): dc:title (lang alt x-default), dc:creator (seq), dc:description, dc:subject (bag), pdf:Keywords, pdf:Producer, xmp:CreatorTool, xmp:CreateDate, xmp:ModifyDate, xmp:MetadataDate; per i file PDF 2.0 XMP è la fonte primaria (il dizionario Info è deprecato salvo le date); PDF/A richiede l'equivalenza tra Info e XMP. Proprietà personalizzate: chiave omonima in /Info e proprietà XMP in uno spazio dei nomi dedicato; nei documenti PDF/A lo spazio dei nomi è descritto con lo schema di estensione richiesto da ISO 19005 (pdfaExtension).
 
 **Casi limite:** più autori separati da ";" → elementi distinti in dc:creator; parole chiave separate da virgola o punto e virgola → elementi distinti in dc:subject e stringa unica in pdf:Keywords; caratteri non latini → Info in UTF-16BE, XMP in UTF-8; Info e XMP discordanti all'apertura → discrepanza segnalata e allineamento al valore confermato dall'utente; titolo in più lingue → modificata la voce x-default, le altre conservate; documento firmato → salvataggio incrementale con avviso che la modifica può risultare come cambiamento successivo alla firma; permesso di modifica negato → campi in sola lettura; il produttore viene impostato da Foliant al salvataggio, con preferenza per non indicarlo.
 
@@ -7173,101 +7331,106 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Dato un documento salvato dopo la modifica, quando si confrontano le date, allora /CreationDate è invariata e /ModDate e xmp:ModifyDate corrispondono all'istante del salvataggio con indicazione del fuso orario.
 - Dato un documento aperto con permesso di modifica negato, quando si apre la finestra delle proprietà, allora i campi sono in sola lettura.
 - Dato un file PDF/A-2b, quando si modificano i metadati e si salva, allora un validatore PDF/A indipendente non segnala discordanze tra Info e XMP.
+- Dato la proprietà personalizzata "Pratica" = "2026/118", quando si salva, allora /Info contiene la chiave /Pratica con quel valore e l'XMP contiene la stessa proprietà.
+- Dato un documento PDF/A-2b a cui si aggiunge la proprietà personalizzata "Pratica", quando si salva, allora l'XMP contiene la descrizione dello schema di estensione per quella proprietà e un validatore PDF/A indipendente non segnala errori.
 
 **Priorità:** P1
 
 ### SEC-24 — Appiattimento (flatten)
 
-**Descrizione:** Rende definitivi e non modificabili annotazioni, campi compilati, filigrane basate su annotazioni, livelli visibili e ritaglio delle pagine, fondendoli nel contenuto; ciò che non è visibile non viene fuso ma eliminato.
+**Descrizione:** Rende definitivi e non modificabili, fondendoli nel contenuto della pagina, gli elementi scelti: annotazioni (con le regole di ANN-40), campi modulo compilati (con le regole di FRM-32), filigrane basate su annotazioni, filigrane, sfondi, intestazioni e piè di pagina aggiunti come elementi rimovibili (PAG-33…PAG-38), livelli visibili e ritaglio delle pagine; con l'opzione **Rasterizza le pagine** converte invece pagine intere in immagini. È il requisito di riferimento per l'appiattimento generale (0.6): per annotazioni e campi rimanda ad ANN-40 e FRM-32, mentre CNV-33 e BAT-23 ne applicano le regole.
 
-**Flusso:** 1. Strumenti → Protezione → "Appiattisci". 2. L'utente sceglie cosa appiattire: commenti (tutti o per tipo), campi modulo, filigrane, livelli, ritaglio; pagine interessate (tutte o intervallo); opzione "conserva i collegamenti". 3. Anteprima della prima pagina interessata. 4. "Applica" (annullabile fino al salvataggio).
+**Flusso:** 1. Proteggi › **Appiattisci** (UX-05). 2. L'utente sceglie cosa appiattire: commenti (tutti o per tipo, con l'opzione di ANN-40 per le annotazioni nascoste o non stampabili), campi modulo (con le opzioni di FRM-32), filigrane, sfondi, intestazioni e piè di pagina, livelli, ritaglio; pagine interessate (tutte o intervallo); "conserva i collegamenti" (predefinito); facoltativo **Rasterizza le pagine** a una risoluzione scelta, con OCR per mantenere il testo ricercabile. 3. Anteprima della prima pagina interessata. 4. **Applica** dopo la conferma di UX-13; l'operazione è un solo passo annullabile nella sessione, anche dopo il salvataggio (NFR-11), e il salvataggio è una riscrittura completa (NFR-09).
 
-**Formati/strutture:** inserimento dell'aspetto normale (/AP /N) di ogni annotazione come Form XObject nel /Contents con matrice calcolata da /Rect, /BBox, /Matrix e /Rotate; rimozione da /Annots e da /AcroForm /Fields; rimozione di /AcroForm quando vuoto e di /XFA; livelli: contenuto dei gruppi visibili reso incondizionato, contenuto dei gruppi nascosti eliminato, /OCProperties rimosso; ritaglio: contenuto esterno al /CropBox eliminato definitivamente e /MediaBox posto uguale al /CropBox; annotazioni senza /AP → aspetto generato prima della fusione.
+**Formati/strutture:** annotazioni e widget come in ANN-40 e FRM-32 (aspetto /AP /N inserito come Form XObject con matrice calcolata da /Rect, /BBox, /Matrix e /Rotate; rimozione da /Annots e da /AcroForm /Fields; rimozione di /AcroForm quando vuoto e di /XFA); elementi aggiunti da Foliant: rimozione dei dati privati (/PieceInfo) che li rendono modificabili, con il contenuto che resta nella pagina; livelli: contenuto dei gruppi visibili reso incondizionato, contenuto dei gruppi nascosti eliminato, /OCProperties rimosso; ritaglio: contenuto interamente esterno al /CropBox eliminato, immagini parzialmente esterne ritagliate e /MediaBox posto uguale al /CropBox; rasterizzazione: un'immagine per pagina e, con OCR, livello di testo invisibile come in OCR-05; struttura logica aggiornata (contenuto fuso collegato alla struttura o marcato come artefatto). Tolleranza: quella dell'appiattimento di ANN-40.
 
-**Casi limite:** annotazioni con flag Hidden o NoView → eliminate senza fusione; annotazioni NoZoom o NoRotate → fuse come appaiono a zoom 100% nell'orientamento corrente; campi firma già firmati → esclusi per impostazione predefinita (l'appiattimento invaliderebbe la firma); popup → rimossi; documento taggato → contenuto fuso collegato alla struttura o marcato come artefatto; permesso di modifica negato → funzione non disponibile.
+**Casi limite:** annotazioni nascoste o non stampabili → mai fuse: lasciate o eliminate secondo l'opzione di ANN-40; annotazioni NoZoom o NoRotate → fuse come appaiono a zoom 100% nell'orientamento corrente; campi firma già firmati → esclusi per impostazione predefinita; appiattirli richiede una conferma esplicita perché l'aspetto diventa contenuto statico e la firma non è più verificabile (FRM-32); note e popup → si fonde l'icona e il testo della nota si perde, con avviso (ANN-40); campi con un carattere non incorporato nell'aspetto → aspetto rigenerato con un carattere sostitutivo incorporato; modulo XML dinamico → appiattimento solo se il modulo è rappresentabile, altrimenti messaggio; documento firmato → avviso di NFR-09; PDF/A → risultato rivalidato; pagine rasterizzate → aumento di dimensione segnalato e testo non selezionabile senza OCR; permesso di modifica negato → funzione non disponibile.
 
 **Criteri di accettazione:**
-- Dato un documento con 20 commenti e un modulo compilato, quando si appiattisce tutto e si salva, allora le pagine non hanno /Annots (salvo i collegamenti, se richiesto), il catalogo non contiene /AcroForm e il rendering differisce da quello precedente per non più dello 0,1% dei pixel.
+- Dato un documento con 20 commenti e un modulo compilato, quando si appiattisce tutto e si salva, allora le pagine non hanno /Annots (salvo i collegamenti, se richiesto), il catalogo non contiene /AcroForm e il rendering coincide con quello precedente entro la tolleranza dell'appiattimento (ANN-40).
 - Dato un file con una pagina ritagliata e testo fuori dal CropBox, quando si appiattisce il ritaglio e si salva, allora il testo esterno non è più estraibile e /MediaBox coincide con il CropBox precedente.
-- Dato un'annotazione con flag Hidden, quando si appiattisce, allora non compare nel rendering e non è più presente nel file.
+- Dato un'annotazione con flag Hidden e l'opzione predefinita di ANN-40, quando si appiattisce, allora l'annotazione non è fusa nel contenuto e resta come annotazione; con l'opzione **elimina**, allora non è più presente nel file.
+- Dato un documento con un livello nascosto che contiene testo, quando si appiattiscono i livelli, allora quel testo non è più presente e il documento non ha /OCProperties.
+- Dato una filigrana aggiunta da Foliant, quando si appiattiscono le filigrane e si salva, allora la filigrana resta visibile ma il comando di rimozione di PAG-36 non la trova più.
+- Dato un appiattimento eseguito e salvato, quando l'utente esegue Annulla, allora annotazioni e campi tornano modificabili e il documento risulta modificato (NFR-11).
 
 **Priorità:** P1
 
 ### SEC-25 — Salvataggio come PDF/A, PDF/E e PDF/X
 
-**Descrizione:** Converte e salva il documento in un formato standard per l'archiviazione a lungo termine (PDF/A), la documentazione tecnica (PDF/E) o lo scambio per la stampa (PDF/X), correggendo ciò che è correggibile, verificando il risultato e producendo un rapporto.
+**Descrizione:** Accesso al salvataggio in un formato standard per l'archiviazione a lungo termine (PDF/A), la documentazione tecnica (PDF/E) o lo scambio per la stampa (PDF/X). Comportamento, correzioni, verifica e rapporto sono definiti da CNV-14, requisito di riferimento (0.6), e dai profili aggiuntivi di CNV-15; in caso di differenza valgono quei requisiti.
 
-**Flusso:** 1. File → Salva come → "PDF/A, PDF/E, PDF/X…". 2. L'utente sceglie profilo e livello (PDF/A-1b, 2b, 2u, 3b, 3u, 4, 4e, 4f e i livelli "a" se il documento è taggato; PDF/X-1a, X-3, X-4; PDF/E-1) e, quando serve, il profilo colore di output. 3. Foliant analizza il documento e mostra le correzioni previste (incorporare i caratteri, convertire i colori, rimuovere cifratura, script e azioni vietate, appiattire la trasparenza dove vietata, aggiungere i metadati XMP di identificazione). 4. Conversione, verifica e rapporto (conforme o non conforme, con l'elenco dei motivi). 5. Salvataggio come nuovo file.
+**Flusso:** 1. Converti › **Salva come PDF/A, PDF/X, PDF/E** (UX-05), oppure File › Salva con nome con il tipo corrispondente. 2. Scelta del profilo e del livello: PDF/A-1b, 2b, 3b (CNV-14); PDF/X-1a, X-3, X-4 e PDF/E-1 (CNV-15, P1); livelli u e a e PDF/A-4 (CNV-15, P2). 3. Il resto del flusso è quello di CNV-14.
 
-**Formati/strutture:** ISO 19005-1/2/3/4 (identificazione pdfaid:part e pdfaid:conformance in XMP), ISO 15930 (PDF/X: identificazione in /Info o XMP secondo la versione), ISO 24517-1 (PDF/E); /OutputIntents con /S /GTS_PDFA1 o /GTS_PDFX e profilo ICC incorporato; incorporamento completo dei caratteri; assenza di /Encrypt in PDF/A e PDF/X; assenza di JavaScript e di azioni /Launch in PDF/A.
+**Formati/strutture:** Come CNV-14 e CNV-15.
 
-**Casi limite:** documento cifrato → richiede l'accesso proprietario e produce un file non cifrato, con avviso; carattere non incorporabile per restrizioni di licenza → rapporto con il nome del carattere e proposta di sostituzione o di conversione del testo in tracciati; livello "a" su documento non taggato → opzione disattivata con rimando alle funzioni di accessibilità; allegati non ammessi dal livello scelto → rimossi o convertiti, con avviso; trasparenza in PDF/A-1 o PDF/X-1a → appiattita con avviso di possibile perdita di qualità; errori non correggibili → il file non dichiara alcuna conformità e il rapporto li elenca.
+**Casi limite:** Come CNV-14 e CNV-15: carattere non incorporabile → sostituzione con un carattere metricamente compatibile, oppure rasterizzazione delle sole pagine coinvolte, e conformità raggiunta (CNV-14); livello «a» su un documento senza struttura logica → non disponibile (CNV-15); documento cifrato → serve l'accesso proprietario e il risultato non è cifrato.
 
 **Criteri di accettazione:**
-- Dato un documento con caratteri non incorporati e un'azione JavaScript, quando si salva come PDF/A-2b, allora il file risultante supera la validazione PDF/A-2b di un validatore indipendente e non contiene JavaScript.
+- Dato un documento con caratteri non incorporati e uno script del documento, quando si salva come PDF/A-2b, allora il file risultante supera la validazione PDF/A-2b di un validatore indipendente e non contiene script.
 - Dato un documento cifrato aperto con accesso utente, quando si sceglie "Salva come PDF/A", allora viene richiesta la password dei permessi.
-- Dato un documento con un carattere non incorporabile, quando si converte, allora il rapporto indica il nome del carattere e il file non dichiara conformità PDF/A.
 
 **Priorità:** P1
 
 ### SEC-26 — Avvisi all'apertura per script e contenuti attivi
 
-**Descrizione:** All'apertura Foliant rileva i contenuti attivi (script, azioni automatiche, collegamenti esterni, invio di moduli, avvio di file, contenuti multimediali, flussi esterni) e li segnala con una barra non modale; nei documenti non attendibili nessuna azione che esegue codice, contatta la rete o accede a file esterni viene eseguita automaticamente.
+**Descrizione:** All'apertura Foliant rileva i contenuti attivi (script, azioni automatiche, collegamenti esterni, invio di moduli, avvio di file, contenuti multimediali, flussi esterni) e li segnala con il banner di NFR-17 e UX-14. Gli script non vengono mai eseguiti (NFR-17, requisito di riferimento per gli script); le azioni che contattano la rete o aprono file esterni non partono mai in automatico e, su azione dell'utente, passano per la finestra di conferma di VIS-19.
 
-**Flusso:** 1. Durante l'apertura Foliant analizza staticamente azioni ed eventi. 2. Se trova contenuti attivi mostra una barra gialla, ad esempio: "Questo documento contiene script (3) e collegamenti esterni (5). Gli script sono disattivati." 3. "Dettagli" apre l'elenco per tipo e posizione (documento, pagina, campo, segnalibro, evento), con il codice degli script in sola lettura e gli indirizzi di destinazione completi. 4. Scelte disponibili: "Attiva per questa sessione", "Considera attendibile" (SEC-28), "Chiudi". 5. Le azioni automatiche all'apertura del documento o delle pagine che puntano a risorse esterne restano bloccate e vengono indicate nella barra.
+**Flusso:** 1. Durante l'apertura Foliant analizza staticamente azioni ed eventi. 2. Se trova contenuti attivi mostra il banner (UX-14), ad esempio: "Questo documento contiene script (3), che Foliant non esegue, e collegamenti esterni (5)." 3. **Dettagli** apre l'elenco per tipo e posizione (documento, pagina, campo, segnalibro, evento), con il codice degli script in sola lettura e gli indirizzi di destinazione completi; non esiste alcun comando per eseguire gli script. 4. Le azioni automatiche all'apertura del documento o delle pagine che puntano a risorse esterne restano bloccate e sono indicate nel banner. 5. Quando SEC-22 (P1) è implementato, **Rimuovi script** apre la rimozione dei dati nascosti con la sola categoria Script selezionata.
 
-**Formati/strutture:** rilevamento di /Names /JavaScript, /OpenAction, /AA di catalogo, pagine, annotazioni e campi; azioni /JavaScript, /Launch, /URI, /SubmitForm, /ImportData, /GoToR, /GoToE, /Rendition, /RichMediaExecute, /Sound, /Movie e catene /Next; /XFA con script; flussi con dati in file esterni (/F nel dizionario dello stream); Reference XObject (/Ref) verso file esterni; /Requirements con /EnableJavaScripts.
+**Formati/strutture:** rilevamento dell'albero dei nomi degli script del documento, di /OpenAction e /AA di catalogo, pagine, annotazioni e campi; azioni di script (chiave /JS), /Launch, /URI, /SubmitForm, /ImportData, /GoToR, /GoToE, /Rendition, /RichMediaExecute, /Sound, /Movie e catene /Next; /XFA con script; flussi con dati in file esterni (/F nel dizionario dello stream); Reference XObject (/Ref) verso file esterni; /Requirements che dichiarano la necessità di eseguire script.
 
-**Casi limite:** documento privo di contenuti attivi → nessuna barra; script compressi od offuscati → conteggiati comunque; catene /Next cicliche → rilevate e interrotte; preferenza globale "Script: mai / chiedi / solo documenti attendibili" (predefinita "chiedi"); Foliant senza motore di script o con script disattivati → la barra segnala che calcoli e convalide dei moduli non funzioneranno; flussi esterni → mai caricati senza consenso esplicito; più documenti aperti → decisione per singolo documento.
+**Casi limite:** documento privo di contenuti attivi → nessun banner; script compressi od offuscati → conteggiati comunque; catene /Next cicliche → rilevate e interrotte; moduli con calcoli personalizzati → il banner segnala che quei calcoli non saranno aggiornati, mentre le funzioni di formato e calcolo comuni restano attive (FRM-08); flussi esterni → mai caricati; documento attendibile (SEC-28, P1, quando implementato) → banner non mostrato, ma gli script restano non eseguiti; più documenti aperti → banner per singolo documento.
 
 **Criteri di accettazione:**
-- Dato un PDF con /OpenAction JavaScript che modificherebbe il valore di un campo e contatterebbe un indirizzo di rete, quando viene aperto con le impostazioni predefinite, allora il valore del campo resta invariato, il banco di prova non registra richieste di rete e la barra indica "script (1)".
-- Dato un PDF senza script né azioni esterne, quando viene aperto, allora non compare alcuna barra di avviso.
-- Dato un PDF con 3 script e 5 collegamenti URI, quando l'utente apre "Dettagli", allora l'elenco riporta 3 script con posizione e codice e 5 collegamenti con indirizzo completo.
-- Dato la preferenza "Script: mai", quando si apre un documento con script, allora l'opzione "Attiva per questa sessione" non è disponibile.
+- Dato un PDF con un'azione di script all'apertura che modificherebbe il valore di un campo e contatterebbe un indirizzo di rete, quando viene aperto, allora il valore del campo resta invariato, il banco di prova non registra richieste di rete e il banner indica "script (1)".
+- Dato un PDF senza script né azioni esterne, quando viene aperto, allora non compare alcun banner sui contenuti attivi.
+- Dato un PDF con 3 script e 5 collegamenti URI, quando l'utente apre **Dettagli**, allora l'elenco riporta 3 script con posizione e codice e 5 collegamenti con indirizzo completo, e non è disponibile alcun comando per eseguire gli script.
+- Dato un PDF con un'azione automatica all'apertura verso un indirizzo web, quando viene aperto, allora non parte alcuna connessione e il banner indica l'azione bloccata.
 
 **Priorità:** P0
 
 ### SEC-27 — Conferma dei collegamenti esterni e dell'apertura di file
 
-**Descrizione:** Ogni azione che porta fuori da Foliant — apertura di un indirizzo web, composizione di un'email, apertura di un altro file, avvio di un'applicazione — richiede una conferma che mostra la destinazione reale; i tipi pericolosi sono sempre bloccati.
+**Descrizione:** Definisce le regole di sicurezza delle azioni che portano fuori da Foliant: schemi ammessi, tipi di file bloccati, elenco dei domini per cui l'utente ha scelto **Non chiedere più** (P1) e politica generale. La finestra di conferma è quella unica di VIS-19 (requisito di riferimento, 0.6), con i principi di NFR-18; OBJ-35, OBJ-41 e FRM-18 usano lo stesso elenco di schemi.
 
-**Flusso:** 1. L'utente attiva un collegamento, un segnalibro o un pulsante. 2. Per indirizzi web ed email compare una finestra con l'indirizzo completo, il dominio evidenziato e le scelte "Apri", "Copia indirizzo", "Annulla", più la casella "Consenti sempre per questo dominio". 3. Per file locali o di rete viene mostrato il percorso completo: i PDF si aprono in una nuova scheda di Foliant, gli altri file solo con l'applicazione predefinita del sistema dopo conferma. 4. File eseguibili e schemi non ammessi vengono bloccati con un messaggio. 5. Preferenze → Sicurezza consente di gestire i domini consentiti e la politica ("chiedi sempre", "consenti domini attendibili", "blocca tutti").
+**Flusso:** 1. L'utente attiva un collegamento, un segnalibro o un pulsante. 2. Se lo schema è ammesso compare la finestra di VIS-19; se lo schema non è ammesso o il file è eseguibile, l'azione è bloccata con un messaggio. 3. Preferenze › Sicurezza e riservatezza (UX-17): elenco dei domini consentiti, con rimozione singola e **Rimuovi tutti** (P1), e politica: **Chiedi sempre** (predefinita), **Consenti i domini dell'elenco** (P1), **Blocca tutti i collegamenti esterni**.
 
-**Formati/strutture:** azioni /URI (indirizzi relativi risolti con /URI /Base del catalogo), /Launch (/F; parametri specifici di altri sistemi ignorati), /GoToR, /GoToE, /SubmitForm (/F); schemi ammessi con conferma: http, https, mailto, file per i PDF; schemi bloccati: javascript, data, vbscript e schemi di applicazioni locali non dichiarati sicuri; domini internazionalizzati mostrati anche in forma punycode.
+**Formati/strutture:** azioni /URI (indirizzi relativi risolti con /URI /Base del catalogo), /Launch (/F; parametri specifici di altri sistemi ignorati), /GoToR, /GoToE, /SubmitForm (/F). Schemi ammessi, sempre previa conferma: http, https, mailto, tel e ftp; file solo verso documenti PDF, che si aprono in Foliant (VIS-19). Ogni altro schema è bloccato, compresi data, gli schemi che eseguono script nel browser e quelli che avviano applicazioni locali. Domini internazionalizzati mostrati anche in forma punycode; elenco dei domini consentiti nel profilo utente, leggibile e scrivibile solo dal proprietario.
 
-**Casi limite:** dominio con caratteri di alfabeti diversi che imita un altro dominio → avviso di possibile contraffazione e forma punycode; testo visibile del collegamento che mostra un dominio diverso dalla destinazione → avviso "Il testo indica un indirizzo diverso dalla destinazione"; file eseguibili (binari, script con permesso di esecuzione, file .desktop, pacchetti di applicazioni, eseguibili di altri sistemi) → sempre bloccati; percorsi di rete (smb://, \\server\…) → conferma con avviso sul possibile invio di credenziali; allegato incorporato eseguibile → apertura bloccata, salvataggio su disco consentito; invio di un modulo a un indirizzo → conferma che indica i dati inviati e la destinazione; indirizzo relativo senza /Base → risolto rispetto alla posizione del file e mostrato per intero.
+**Casi limite:** dominio con caratteri di alfabeti diversi che imita un altro dominio → avviso di possibile contraffazione e forma punycode (VIS-19); testo visibile del collegamento con un dominio diverso dalla destinazione → avviso "Il testo indica un indirizzo diverso dalla destinazione" (VIS-19); file eseguibili (binari, script con permesso di esecuzione, file .desktop, pacchetti di applicazioni, eseguibili di altri sistemi) → sempre bloccati, senza possibilità di sblocco (NFR-18); percorsi di rete con schemi non ammessi (es. smb://) → bloccati, con il percorso mostrato nel messaggio e **Copia indirizzo**; allegato incorporato eseguibile → apertura bloccata, salvataggio su disco consentito (VIS-54); invio di un modulo a un indirizzo → finestra di VIS-19 con dati inviati e destinazione; indirizzo relativo senza /Base → risolto rispetto alla posizione del file e mostrato per intero; politica **Blocca tutti i collegamenti esterni** → nessuna finestra, messaggio con **Copia indirizzo**.
 
 **Criteri di accettazione:**
-- Dato un collegamento a "https://esempio.it/pagina", quando l'utente fa clic e sceglie "Annulla", allora nessun browser viene avviato (verificato con un gestore di indirizzi simulato).
-- Dato "Consenti sempre per esempio.it", quando l'utente fa clic su un altro collegamento a esempio.it, allora la destinazione si apre senza conferma, mentre un collegamento ad altro.it richiede ancora conferma.
+- Dato un collegamento a "https://esempio.it/pagina", quando l'utente fa clic e sceglie **Annulla** nella finestra di VIS-19, allora nessun browser viene avviato (verificato con un gestore di indirizzi simulato).
+- Dato **Non chiedere più per questo dominio** scelto per esempio.it con la politica **Consenti i domini dell'elenco**, quando l'utente fa clic su un altro collegamento a esempio.it, allora la destinazione si apre senza conferma, mentre un collegamento ad altro.it richiede ancora conferma (P1).
 - Dato un'azione /Launch verso un file eseguibile, quando l'utente fa clic, allora l'azione è bloccata con un messaggio e nessun processo viene avviato.
-- Dato un'azione /URI con schema "javascript:", quando l'utente fa clic, allora l'azione è bloccata.
+- Dato un'azione /URI con schema `data:`, quando l'utente fa clic, allora l'azione è bloccata e non compare la finestra di conferma.
 - Dato un collegamento a un dominio con caratteri cirillici che imita un dominio latino, quando l'utente fa clic, allora la finestra mostra la forma punycode e l'avviso di possibile contraffazione.
+- Dato esempio.it nell'elenco dei domini consentiti, quando l'utente sceglie **Rimuovi tutti** nelle preferenze, allora un nuovo clic verso esempio.it mostra di nuovo la finestra di conferma (P1).
 
 **Priorità:** P0
 
 ### SEC-28 — Documenti e posizioni attendibili
 
-**Descrizione:** L'utente può dichiarare attendibili singoli documenti o cartelle: per essi gli avvisi di SEC-26 non compaiono e gli script possono essere eseguiti secondo la preferenza; l'attendibilità di un documento decade se il file viene modificato fuori da Foliant.
+**Descrizione:** L'utente può dichiarare attendibili singoli documenti o cartelle: per essi il banner dei contenuti attivi di SEC-26 non compare. L'attendibilità non cambia le regole di sicurezza: gli script non vengono mai eseguiti (NFR-17) e le azioni esterne passano sempre per la finestra di VIS-19. L'attendibilità di un documento decade se il file viene modificato fuori da Foliant.
 
-**Flusso:** 1. Dalla barra di avviso l'utente sceglie "Considera attendibile" → "questo documento" oppure "questa cartella" (con o senza sottocartelle). 2. Preferenze → Sicurezza mostra gli elenchi di documenti e cartelle attendibili, con rimozione singola e "Revoca tutto". 3. All'apertura Foliant verifica percorso e impronta del contenuto.
+**Flusso:** 1. Dal banner l'utente sceglie "Considera attendibile" → "questo documento" oppure "questa cartella" (con o senza sottocartelle). 2. Preferenze › Sicurezza e riservatezza (UX-17) mostra gli elenchi di documenti e cartelle attendibili, con rimozione singola e "Revoca tutto". 3. All'apertura Foliant verifica percorso e impronta del contenuto.
 
-**Formati/strutture:** registro locale (percorso reale e impronta SHA-256 per i documenti; percorso reale per le cartelle) nel profilo utente, leggibile e scrivibile solo dal proprietario; eventuale configurazione di sistema dell'amministratore con elenchi imposti non modificabili dall'utente.
+**Formati/strutture:** registro locale (percorso reale e impronta SHA-256 per i documenti; percorso reale per le cartelle) nel profilo utente, leggibile e scrivibile solo dal proprietario (NFR-20).
 
-**Casi limite:** file modificato da un altro programma → impronta diversa, attendibilità revocata e barra di nuovo visibile; file salvato da Foliant → impronta aggiornata automaticamente; collegamenti simbolici → si considera il percorso reale; cartelle temporanee, di download, supporti rimovibili o percorsi di rete → dichiarabili solo dopo un avviso; elenchi imposti dall'amministratore → mostrati in sola lettura.
+**Casi limite:** file modificato da un altro programma → impronta diversa, attendibilità revocata e banner di nuovo visibile; file salvato da Foliant → impronta aggiornata automaticamente; collegamenti simbolici → si considera il percorso reale; cartelle temporanee, di download, supporti rimovibili o percorsi di rete → dichiarabili solo dopo un avviso.
 
 **Criteri di accettazione:**
-- Dato un documento con script reso attendibile, quando viene riaperto, allora la barra di avviso non compare.
-- Dato lo stesso documento modificato da un programma esterno, quando viene riaperto, allora la barra compare di nuovo.
-- Dato una cartella attendibile, quando si apre un PDF con script al suo interno, allora la barra non compare; aprendo una copia dello stesso file in un'altra cartella, la barra compare.
-- Dato il comando "Revoca tutto", quando si riaprono i documenti prima attendibili, allora mostrano di nuovo gli avvisi.
+- Dato un documento con script reso attendibile, quando viene riaperto, allora il banner non compare e gli script non vengono eseguiti.
+- Dato lo stesso documento modificato da un programma esterno, quando viene riaperto, allora il banner compare di nuovo.
+- Dato una cartella attendibile, quando si apre un PDF con script al suo interno, allora il banner non compare; aprendo una copia dello stesso file in un'altra cartella, il banner compare.
+- Dato il comando "Revoca tutto", quando si riaprono i documenti prima attendibili, allora mostrano di nuovo il banner.
 
 **Priorità:** P1
 
 ### SEC-29 — Robustezza e isolamento verso file malevoli
 
-**Descrizione:** Analisi e rendering dei PDF avvengono con privilegi ridotti e limiti di risorse, così che un file malformato o costruito ad arte non possa bloccare o terminare l'applicazione, esaurire la memoria, leggere file non scelti dall'utente o accedere alla rete.
+**Descrizione:** Applica NFR-13 e NFR-14, requisiti di riferimento (0.6), e ne precisa l'isolamento: analisi e rendering dei PDF avvengono con privilegi ridotti e limiti di risorse, così che un file malformato o costruito ad arte non possa bloccare o terminare l'applicazione, esaurire la memoria, leggere file non scelti dall'utente o accedere alla rete.
 
 **Flusso:** 1. All'apertura il documento viene analizzato in un contesto isolato, senza accesso alla rete e con accesso in lettura al solo file aperto. 2. In caso di superamento dei limiti o di errore, la scheda mostra "Il documento non può essere visualizzato completamente" con i dettagli; le altre schede restano operative. 3. Le pagine problematiche sono mostrate come segnaposto con il comando "Riprova".
 
@@ -7276,8 +7439,8 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 **Casi limite:** file troncato o con xref errata → ricostruzione in memoria senza crash; flusso che supera il limite di espansione → decodifica interrotta e pagina mostrata in parte con avviso; ciclo nell'albero delle pagine → pagine ripetute ignorate; immagine con dimensioni dichiarate enormi → non allocata, segnaposto; carattere incorporato malformato → carattere di ripiego; guasto del componente di rendering → errore limitato alla scheda interessata, la sessione prosegue e le modifiche non salvate delle altre schede sono preservate.
 
 **Criteri di accettazione:**
-- Dato un PDF con un flusso compresso che si espande oltre il limite configurato, quando viene aperto, allora la memoria del processo resta entro la quota, compare un avviso e l'applicazione non termina in modo anomalo.
-- Dato un corpus pubblico di almeno 10.000 PDF malformati o generati con tecniche di fuzzing, quando ciascun file viene aperto e renderizzato automaticamente, allora nessuno provoca la terminazione del processo principale e nessuno supera il tempo massimo per pagina più il 10%.
+- Dato un PDF con un flusso compresso che si espande oltre il limite configurato, quando viene aperto, allora la memoria resta sotto il limite di sicurezza di NFR-14 (2 GB), compare un avviso e l'applicazione non termina in modo anomalo.
+- Dato il corpus C-MAL (0.4) ampliato ad almeno 10.000 PDF malformati o generati automaticamente, quando ciascun file viene aperto e renderizzato automaticamente, allora nessuno provoca la terminazione del processo principale e nessuno supera il tempo massimo per pagina più il 10%.
 - Dato un PDF con albero delle pagine ciclico, quando viene aperto, allora l'apertura termina entro 5 secondi mostrando il numero corretto di pagine distinte.
 - Dato un PDF con un flusso che fa riferimento a un file locale esterno, quando viene aperto, allora il file referenziato non viene letto (verificato con il monitoraggio degli accessi al file system).
 
@@ -7285,9 +7448,9 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### SEC-30 — Riservatezza dei dati locali
 
-**Descrizione:** Foliant non lascia sul disco copie in chiaro dei documenti protetti e permette di controllare cronologia, miniature in cache, file di recupero e file temporanei.
+**Descrizione:** Applica NFR-20, requisito di riferimento (0.6): Foliant non lascia sul disco copie in chiaro dei documenti protetti e permette di controllare cronologia, miniature in cache, file di recupero e file temporanei.
 
-**Flusso:** 1. Preferenze → Privacy: "Mantieni l'elenco dei file recenti" (sì/no, numero di voci), "Escludi i documenti protetti dall'elenco", "Memorizza le miniature in cache", "Salvataggio automatico per il recupero", "Svuota gli appunti alla chiusura dei documenti protetti". 2. Il pulsante "Cancella cronologia e cache" elimina recenti, miniature e dati temporanei. 3. Alla chiusura di un documento i file temporanei associati vengono eliminati; all'avvio successivo a un arresto anomalo vengono eliminati i residui.
+**Flusso:** 1. Preferenze › Sicurezza e riservatezza (UX-17): "Mantieni l'elenco dei file recenti" (sì/no, numero di voci), "Escludi i documenti protetti dall'elenco", "Memorizza le miniature in cache", "Salvataggio automatico per il recupero", "Svuota gli appunti alla chiusura dei documenti protetti". 2. Il pulsante "Cancella cronologia e cache" elimina recenti, miniature e dati temporanei. 3. Alla chiusura di un documento i file temporanei associati vengono eliminati; all'avvio successivo a un arresto anomalo vengono eliminati i residui.
 
 **Formati/strutture:** cache e file temporanei nella cartella del profilo utente con permessi riservati al proprietario (0600 per i file, 0700 per le cartelle); file di recupero dei documenti cifrati salvati con la stessa protezione del documento oppure non creati; nessuna miniatura né testo estratto di documenti cifrati scritti in cache su disco; password memorizzate solo nel portachiavi di sistema e solo su richiesta esplicita.
 
@@ -7323,7 +7486,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 **Descrizione:** Protegge l'accesso a Foliant con un codice dell'applicazione o con l'autenticazione del sistema (impronta digitale inclusa, se disponibile) all'avvio e dopo un periodo di inattività, nascondendo il contenuto dei documenti aperti mentre l'applicazione è bloccata (equivalente desktop del blocco con biometria o codice delle app per dispositivi mobili).
 
-**Flusso:** 1. Preferenze → Sicurezza → "Blocca Foliant": metodo (codice dell'applicazione o autenticazione del sistema), blocco all'avvio, dopo N minuti di inattività, alla sospensione o al blocco dello schermo. 2. Da bloccata, ogni finestra mostra una schermata di blocco senza contenuti né nomi dei documenti. 3. Sblocco con il metodo scelto; dopo 5 tentativi errati il ritardo tra i tentativi aumenta progressivamente.
+**Flusso:** 1. Preferenze › Sicurezza e riservatezza (UX-17) › "Blocca Foliant": metodo (codice dell'applicazione o autenticazione del sistema), blocco all'avvio, dopo N minuti di inattività, alla sospensione o al blocco dello schermo. 2. Da bloccata, ogni finestra mostra una schermata di blocco senza contenuti né nomi dei documenti. 3. Sblocco con il metodo scelto; dopo 5 tentativi errati il ritardo tra i tentativi aumenta progressivamente.
 
 **Formati/strutture:** codice dell'applicazione conservato solo come impronta con sale calcolata da una funzione di derivazione lenta; uso del servizio di autenticazione del sistema operativo quando disponibile.
 
@@ -7338,9 +7501,9 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ### SEC-33 — Cifratura lato client dei documenti sincronizzati
 
-**Descrizione:** Quando l'utente sincronizza documenti con uno storage remoto (servizi cloud, WebDAV, SFTP, condivisioni di rete), può attivare la cifratura lato client: i file vengono cifrati sul dispositivo prima del caricamento e il servizio remoto non riceve mai contenuti né chiavi in chiaro (equivalente dell'archiviazione cloud cifrata).
+**Descrizione:** **Fuori ambito (0.2).** La cifratura dei file sincronizzati con uno spazio di archiviazione remoto presuppone servizi di archiviazione online e connettori interni (catalogo 13.03, che dipende da 13.01, e 13.06–13.09), fuori ambito: le posizioni di rete montate dal desktop sono raggiungibili dal selettore file del sistema e i documenti riservati si custodiscono nello spazio protetto locale (SEC-31). Il requisito resta per tracciabilità e non va implementato. Testo originario: quando l'utente sincronizza documenti con uno storage remoto (servizi cloud, WebDAV, SFTP, condivisioni di rete), può attivare la cifratura lato client: i file vengono cifrati sul dispositivo prima del caricamento e il servizio remoto non riceve mai contenuti né chiavi in chiaro (equivalente dell'archiviazione cloud cifrata).
 
-**Flusso:** 1. Impostazioni dell'account di storage → "Cifra i file prima del caricamento". 2. Creazione o importazione della chiave (passphrase con derivazione e chiave di recupero). 3. I file vengono cifrati al caricamento e decifrati in memoria allo scaricamento. 4. Su un secondo dispositivo l'utente importa la stessa chiave per accedere ai file.
+**Flusso:** 1. Impostazioni dello spazio di archiviazione remoto → "Cifra i file prima del caricamento". 2. Creazione o importazione della chiave (passphrase con derivazione e chiave di recupero). 3. I file vengono cifrati al caricamento e decifrati in memoria allo scaricamento. 4. Su un secondo dispositivo l'utente importa la stessa chiave per accedere ai file.
 
 **Formati/strutture:** cifratura autenticata per file (es. AES-256-GCM) con chiave per file protetta dalla chiave principale; cifratura facoltativa dei nomi dei file; metadati minimi in chiaro (dimensione approssimativa, data); trasporto su canale sicuro (SEC-34).
 
@@ -7351,15 +7514,15 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 - Dato la stessa chiave importata su un secondo dispositivo, quando si apre il file sincronizzato, allora il documento coincide byte per byte con l'originale.
 - Dato un file remoto alterato, quando viene scaricato, allora Foliant segnala l'errore di integrità e non ne apre il contenuto.
 
-**Priorità:** P2
+**Priorità:** Fuori ambito (0.2): nessuna priorità.
 
 ### SEC-34 — Trasmissione dati sicura e riservatezza di rete
 
-**Descrizione:** Tutte le funzioni di base di Foliant funzionano senza rete; le funzioni che la richiedono (aggiornamenti, storage remoto, marche temporali, verifica delle revoche, servizi facoltativi) comunicano solo su canali cifrati e autenticati, e nessun dato dei documenti lascia il dispositivo senza un'azione esplicita dell'utente.
+**Descrizione:** Tutte le funzioni di base di Foliant funzionano senza rete; le funzioni in ambito che la usano (richieste al fornitore IA, marche temporali, verifica delle revoche, invio confermato di moduli, verifica online dei collegamenti, scaricamento di pacchetti lingua OCR, apertura da un indirizzo web) comunicano solo su canali cifrati e autenticati, e nessun dato dei documenti lascia il computer senza un'azione esplicita dell'utente. Applica NFR-19, requisito di riferimento (0.6): niente telemetria, aggiornamenti gestiti dall'applicazione o archiviazione remota (0.2).
 
-**Flusso:** 1. Al primo avvio Foliant non stabilisce connessioni senza consenso; Preferenze → Rete elenca le funzioni che usano la rete, ognuna con il proprio interruttore, e un interruttore generale "Modalità non in linea". 2. Prima del primo invio di contenuti di un documento a un servizio remoto, una finestra indica quali dati vengono inviati e a chi. 3. Le connessioni usano il proxy di sistema, se configurato. 4. Un errore di certificato provoca il rifiuto della connessione con un messaggio comprensibile.
+**Flusso:** 1. Al primo avvio Foliant non stabilisce connessioni senza consenso; Preferenze › Sicurezza e riservatezza (UX-17) elenca le funzioni che usano la rete, ognuna con il proprio interruttore, e un interruttore generale "Modalità non in linea". 2. Prima del primo invio di contenuti di un documento a un servizio remoto, una finestra indica quali dati vengono inviati e a chi (per le funzioni IA, l'informativa di AI-02). 3. Le connessioni usano il proxy di sistema, se configurato. 4. Un errore di certificato provoca il rifiuto della connessione con un messaggio comprensibile.
 
-**Formati/strutture:** TLS 1.2 o superiore (1.3 preferito) con verifica della catena di certificati sull'archivio di certificati del sistema e verifica del nome host; nessun ripiego su HTTP in chiaro né su versioni di protocollo obsolete; autorità di certificazione aziendali riconosciute tramite l'archivio di sistema; telemetria e segnalazione degli errori disattivate per impostazione predefinita e attivabili solo con consenso; registro locale consultabile delle connessioni effettuate.
+**Formati/strutture:** TLS 1.2 o superiore (1.3 preferito) con verifica della catena di certificati sull'archivio di certificati del sistema e verifica del nome host; nessun ripiego su HTTP in chiaro né su versioni di protocollo obsolete; autorità di certificazione aziendali riconosciute tramite l'archivio di sistema; registro locale consultabile delle connessioni effettuate.
 
 **Casi limite:** certificato scaduto, autofirmato o con nome non corrispondente → connessione rifiutata, senza opzione "ignora" nelle impostazioni predefinite; proxy aziendale con ispezione del traffico → funziona se la sua autorità è nell'archivio di sistema; rete assente → funzioni locali pienamente utilizzabili e funzioni di rete in stato "non in linea"; reindirizzamento da HTTPS a HTTP → bloccato; servizi di marca temporale e di revoca che per protocollo usano HTTP con risposte firmate → ammessi perché l'integrità è garantita dalla firma, e annotati nel registro.
 
@@ -7374,7 +7537,7 @@ Elenco a discesa e casella di riepilogo: voci con testo visualizzato e valore di
 
 ## 11. Confronto e operazioni in blocco
 
-Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (precedente) e **B** la versione da verificare (nuova): *aggiunta* = contenuto presente solo in B, *eliminazione* = contenuto presente solo in A, *modifica* = tratto di A sostituito da un tratto diverso in B. Le funzioni BAT-06…BAT-23 usano l'infrastruttura comune BAT-01…BAT-05 (coda, destinazione, nomi, esecuzione, errori e rapporto), che non viene ripetuta nei singoli blocchi. Regole trasversali: i file sorgente non vengono mai modificati, salvo scelta esplicita di sostituzione (BAT-02); ogni scrittura su disco è atomica; le password non compaiono mai in rapporti, registri o file di sequenza; le soglie di tempo dei criteri si misurano sull'hardware di riferimento definito nel piano di test.
+Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (precedente) e **B** la versione da verificare (nuova): *aggiunta* = contenuto presente solo in B, *eliminazione* = contenuto presente solo in A, *modifica* = tratto di A sostituito da un tratto diverso in B. Le funzioni BAT-06…BAT-23 usano l'infrastruttura comune BAT-01…BAT-05 (coda, destinazione, nomi, esecuzione, errori e rapporto), che non viene ripetuta nei singoli blocchi. Regole trasversali: i file sorgente non vengono mai modificati, salvo scelta esplicita di sostituzione (BAT-02); ogni scrittura su disco è atomica; le password non compaiono mai in rapporti, registri o file di sequenza; le soglie di tempo dei criteri si misurano sulla macchina di riferimento (MR) nelle condizioni di 0.4 e, dove un criterio misura la stessa grandezza di un NFR, vale la soglia di 0.4. *Fixture di confronto*: almeno 20 coppie di documenti (testo, tabelle, immagini, impaginazioni diverse, scansioni) con l'elenco atteso delle differenze, che si aggiunge al corpus di 0.4. Le operazioni in blocco hanno priorità P1 e non superano mai quella delle operazioni singole corrispondenti (0.6).
 
 ### CMP-01 — Avvio del confronto e scelta delle versioni
 **Descrizione:** L'utente sceglie i due documenti da confrontare (A e B), eventualmente limitati a intervalli di pagine, e il tipo di confronto (automatico, solo testo, solo visivo). Il calcolo avviene in background e produce una *sessione di confronto* aperta in una scheda dedicata, senza modificare i documenti.
@@ -7397,7 +7560,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato due PDF selezionati come A e B, quando l'utente preme "Scambia" e avvia il confronto, allora le differenze riportate in precedenza come aggiunte risultano eliminazioni e viceversa.
 - Dato un PDF cifrato con password di apertura scelto come B, quando si avvia il confronto, allora la password viene richiesta prima di qualsiasi elaborazione e, se errata, non viene creata alcuna sessione.
-- Dato un confronto in corso tra documenti di 500 pagine, quando l'utente preme Annulla, allora il calcolo si interrompe entro 2 s, non si apre alcuna scheda di risultati e durante il calcolo nessun blocco dell'interfaccia supera 200 ms.
+- Dato un confronto in corso tra documenti di 500 pagine, quando l'utente preme Annulla, allora il calcolo si interrompe entro 2 s, non si apre alcuna scheda di risultati e durante il calcolo l'interfaccia risponde entro 100 ms (NFR-05).
 - Dato lo stesso file scelto come A e come B, quando si avvia il confronto, allora il risultato riporta zero differenze.
 **Priorità:** P0
 
@@ -7422,7 +7585,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato B uguale ad A con una pagina di testo nuova inserita dopo pagina 2, quando si confronta, allora le uniche differenze sono aggiunte che coprono il testo della pagina inserita e non viene riportata alcuna differenza sul testo delle pagine successive.
 - Dato A e B che differiscono solo per maiuscole/minuscole, quando l'opzione "ignora maiuscole/minuscole" è attiva, allora il numero di differenze è zero; quando è disattivata, allora ogni parola variata è riportata come modifica.
 - Dato A con "contrat-" a fine riga seguito da "to" e B con "contratto", quando si confronta, allora non viene riportata alcuna differenza.
-- Dato l'insieme di prova di riferimento (coppie di documenti con differenze note), quando si esegue il confronto, allora sono rilevate tutte le differenze attese e nessuna differenza non attesa.
+- Data la fixture di confronto (convenzioni della sezione), quando si esegue il confronto su ciascuna coppia, allora sono rilevate tutte le differenze attese e nessuna differenza non attesa.
 **Priorità:** P0
 
 ### CMP-03 — Confronto della formattazione del testo
@@ -7514,11 +7677,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Priorità:** P0
 
 ### CMP-07 — Elenco differenze navigabile
-**Descrizione:** Pannello laterale con tutte le differenze in ordine di documento: tipo (icona ed etichetta), pagina in A e in B, estratto "prima → dopo", stato di revisione (CMP-11). In testa i contatori per tipo; navigazione con clic, tastiera e comandi "differenza successiva/precedente".
+**Descrizione:** Pannello laterale con tutte le differenze in ordine di documento: tipo (icona ed etichetta), pagina in A e in B, estratto "prima → dopo" e, quando CMP-11 (P2) è implementato, stato di revisione. In testa i contatori per tipo; navigazione con clic, tastiera e comandi "differenza successiva/precedente".
 **Flusso:**
 1. Il pannello si apre con la sessione e mostra i totali, per esempio "12 aggiunte · 5 eliminazioni · 8 modifiche · 3 formattazione · 4 visive".
 2. Il clic su una voce porta entrambe le viste sulla differenza, centrata ed evidenziata brevemente.
-3. I comandi "Differenza successiva/precedente" (scorciatoie predefinite Alt+↓ e Alt+↑, configurabili) scorrono le voci in ordine di documento.
+3. I comandi "Differenza successiva/precedente" (Alt+↓ e Alt+↑, riservate in UX-18; personalizzabili con UX-19) scorrono le voci in ordine di documento.
 4. L'utente può raggruppare per pagina, ordinare per posizione in A o in B e cercare un testo all'interno delle differenze.
 5. Una voce può essere copiata negli appunti (tipo, pagine, testo prima e dopo).
 6. L'elenco è interamente usabile da tastiera; per ogni voce le tecnologie assistive annunciano tipo, pagine ed estratto.
@@ -7702,8 +7865,8 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato una coda con "doc10.pdf" e "doc2.pdf", quando l'utente ordina per nome, allora "doc2.pdf" precede "doc10.pdf".
 - Dato un PDF cifrato con password di apertura, quando viene aggiunto alla coda, allora prima dell'avvio la sua riga mostra lo stato "richiede password".
 - Dato un file già presente nella coda, quando l'utente lo aggiunge di nuovo, anche tramite un collegamento simbolico, allora la coda contiene una sola voce.
-- Dato una cartella con 10.000 PDF, quando l'utente la aggiunge alla coda, allora durante l'analisi preliminare nessun blocco dell'interfaccia supera 200 ms.
-**Priorità:** P0
+- Dato una cartella con 10.000 PDF, quando l'utente la aggiunge alla coda, allora durante l'analisi preliminare l'interfaccia risponde entro 100 ms (NFR-05).
+**Priorità:** P1
 
 ### BAT-02 — Cartella di destinazione e politica di sovrascrittura
 **Descrizione:** Scelta di dove scrivere i risultati: una cartella indicata, la stessa cartella di ciascun originale o una sottocartella con nome dato accanto a ciascun originale, con l'opzione di replicare la struttura delle sottocartelle di ingresso. Regola per i conflitti di nome. La sostituzione degli originali avviene solo su scelta esplicita, con conferma e copia di sicurezza facoltativa.
@@ -7727,7 +7890,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato un lavoro in corso, quando l'utente lo annulla o la scrittura di un file fallisce, allora nella destinazione non resta alcun file parziale o temporaneo.
 - Dato "mantieni struttura delle sottocartelle" attivo, quando si elaborano ingresso/a/x.pdf e ingresso/b/y.pdf, allora si ottengono destinazione/a/x.pdf e destinazione/b/y.pdf.
 - Dato "sostituisci gli originali" con copia di sicurezza, quando il lavoro termina, allora per ogni file elaborato esiste "<nome>.bak" identico byte per byte all'originale.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-03 — Schema dei nomi dei file di output
 **Descrizione:** Modello di nome composto da testo fisso e segnaposto: {nome} (nome originale senza estensione), {est} (estensione originale), {cartella} (cartella che contiene l'originale), {data} e {ora} (avvio del lavoro, formato configurabile), {contatore:N} (progressivo a N cifre con valore iniziale impostabile), {pagine}, {operazione}, {pagina:N} e {parte:N} per le operazioni che producono più file per ingresso, {bates_inizio} e {bates_fine} (BAT-15). L'estensione deriva dal formato di uscita. Anteprima dal vivo sui primi file della coda.
@@ -7736,7 +7899,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 2. Una tabella di anteprima mostra "originale → risultato" per i primi 5 file, con eventuali errori di validazione.
 3. Il sistema sostituisce i caratteri non validi con "_" e rimuove spazi e punti iniziali e finali.
 4. Se l'operazione produce più file per ingresso e il modello non contiene {pagina} o {parte}, aggiunge automaticamente "_{pagina:3}" o "_{parte:3}".
-5. I modelli possono essere salvati tra i preferiti.
+5. I modelli possono essere salvati e riutilizzati.
 **Formati/strutture:** segnaposto racchiusi tra parentesi graffe, parametro numerico facoltativo dopo i due punti; {data} predefinita AAAA-MM-GG, {ora} predefinita HH-MM-SS (senza caratteri vietati nei nomi); valori calcolati una sola volta all'avvio, così il risultato è deterministico.
 **Casi limite:**
 - Modello senza segnaposto variabili con più file verso la stessa destinazione → avviso preventivo "nomi non univoci" con proposta di aggiungere {contatore}; i conflitti sono poi risolti secondo BAT-02.
@@ -7749,7 +7912,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato il modello "Fattura/2026", quando l'anteprima calcola il nome, allora il nome risultante è "Fattura_2026.pdf".
 - Dato il segnaposto inesistente "{autore_x}" nel modello, quando l'utente preme Avvia, allora l'avvio è impedito con un messaggio che indica il segnaposto non valido.
 - Dato un file "nome.pdf" di 3 pagine e il modello "{nome}", quando lo si converte in PNG, allora i file prodotti sono nome_001.png, nome_002.png e nome_003.png.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-04 — Esecuzione, avanzamento, pausa e annullamento
 **Descrizione:** Il lavoro gira in background con avanzamento per file (pagina corrente su totale) e complessivo (file completati su totali, tempo trascorso, stima del residuo); prevede pausa e ripresa, annullamento del file corrente o dell'intero lavoro ed elaborazione parallela configurabile, mentre l'utente continua a usare l'editor.
@@ -7770,11 +7933,11 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Operazione sequenziale (unione) annullata → nessun file unito parziale.
 **Criteri di accettazione:**
 - Dato un lavoro su 20 file, quando l'utente sceglie "Annulla tutto" durante l'ottavo file, allora i file 1–7 restano completati e validi, l'ottavo non lascia risultati né temporanei e i file 9–20 risultano "Non elaborato" nel rapporto.
-- Dato un lavoro in corso, quando l'utente apre e scorre un altro documento, allora non si verificano blocchi dell'interfaccia superiori a 200 ms.
+- Dato un lavoro in corso, quando l'utente apre e scorre un altro documento, allora l'interfaccia risponde entro 100 ms (NFR-05).
 - Dato un lavoro in corso, quando l'utente lo mette in pausa e poi lo riprende, allora entro 5 s dalla pausa nessun file avanza e i risultati finali coincidono byte per byte con quelli di un'esecuzione senza pausa (operazioni deterministiche, data e identificativi fissati dal test).
 - Dato l'operazione Comprimi su 10 file, quando la si esegue con parallelismo 4 e con parallelismo 1, allora i risultati delle due esecuzioni coincidono.
 - Dato l'arresto forzato del processo a metà lavoro, quando l'applicazione viene riavviata, allora viene proposto di riprendere con i soli file non completati e nella destinazione non esiste alcun file corrotto.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-05 — Gestione degli errori per singolo file e rapporto finale
 **Descrizione:** Un errore su un file non interrompe il lavoro, salvo scelta diversa: il file riceve un esito con causa leggibile e il lavoro prosegue. Al termine, un rapporto riassume completati, avvisi, errori, saltati, annullati e durata, con il dettaglio per file (ingresso, uscita, esito, messaggio, pagine, dimensioni prima e dopo) e le azioni "riprova i non riusciti", "apri file/cartella", "esporta rapporto".
@@ -7797,16 +7960,16 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato un lavoro terminato, quando l'utente esporta il rapporto in CSV, allora il file contiene l'intestazione e una riga per ciascun file della coda, con esiti uguali a quelli mostrati a schermo.
 - Dato un lavoro con password impostate, quando termina e il rapporto viene esportato, allora né il rapporto (CSV, JSON, PDF) né il giornale né i registri dell'applicazione contengono alcuna password.
 - Dato un lavoro terminato con file in errore, quando l'utente sceglie "Riprova i non riusciti", allora viene creato un lavoro che contiene solo quei file, con le stesse impostazioni.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-06 — Conversione in blocco da PDF ad altri formati
-**Descrizione:** Converte ogni PDF della coda in uno dei formati di uscita dell'Area Conversione: videoscrittura (DOCX), foglio di calcolo (XLSX), presentazione (PPTX), CSV, immagini (PNG, JPEG, TIFF anche multipagina, BMP, GIF; una per pagina oppure un'unica immagine lunga), RTF, TXT, HTML, XML, PDF/A. Le opzioni della conversione singola valgono per tutti i file; il riconoscimento del testo può essere applicato automaticamente alle pagine senza testo.
+**Descrizione:** Converte ogni PDF della coda in uno dei formati di uscita P0 e P1 della sezione 6: videoscrittura (DOCX), foglio di calcolo (XLSX), presentazione (PPTX), CSV, immagini (PNG, JPEG, TIFF anche multipagina, BMP, GIF; una per pagina come in CNV-07, oppure un'unica immagine lunga come in CNV-08), RTF, TXT, HTML, XML, PDF/A-1b, 2b e 3b (CNV-14). È il requisito di riferimento per la conversione in blocco (0.6): CNV-17 vi rimanda; per ogni formato valgono opzioni e regole della conversione singola. Le opzioni della conversione singola valgono per tutti i file; il riconoscimento del testo può essere applicato automaticamente alle pagine senza testo.
 **Flusso:**
 1. L'utente sceglie il formato di uscita e le sue opzioni (es. per i documenti: conserva impaginazione o testo a flusso continuo; per le immagini: 72–600 dpi, qualità, colore, scala di grigi o bianco e nero).
 2. Indica le pagine da convertire per ogni file: tutte oppure un'espressione di intervallo (es. "1-3,5") applicata a ciascun file.
 3. Sceglie l'OCR: nessuno, solo pagine senza testo (predefinito), sempre; e le lingue.
 4. Imposta destinazione e nomi (BAT-02, BAT-03) e avvia; avanzamento ed esiti seguono BAT-04 e BAT-05.
-**Formati/strutture:** uscite DOCX, XLSX, PPTX (Office Open XML), CSV UTF-8 (un file per tabella, suffisso "_t01", "_t02"…), PNG, JPEG, TIFF, BMP, GIF, RTF, TXT UTF-8, HTML (file più cartella delle risorse), XML, PDF/A-1b, 2b, 2u, 3b. Per le uscite multiple per ingresso valgono i segnaposto {pagina} e {parte}.
+**Formati/strutture:** uscite DOCX, XLSX, PPTX (Office Open XML), CSV UTF-8 (un file per tabella, suffisso "_t01", "_t02"…), PNG, JPEG, TIFF, BMP, GIF, RTF, TXT UTF-8, HTML (file più cartella delle risorse), XML, PDF/A-1b, 2b, 3b. Per le uscite multiple per ingresso valgono i segnaposto {pagina} e {parte}.
 **Casi limite:**
 - Intervallo oltre la fine del file ("5-10" su un file di 3 pagine) → avviso e conversione delle sole pagine esistenti; se non ne resta nessuna, file saltato.
 - PDF che vieta la copia o l'estrazione del contenuto e password dei permessi non fornita → errore "conversione non consentita dai permessi del documento"; gli altri file proseguono.
@@ -7820,24 +7983,24 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato l'OCR "solo pagine senza testo" su un PDF misto e uscita TXT, quando il lavoro termina, allora il testo delle pagine scansionate compare nel risultato e il giornale del lavoro mostra che le pagine con testo nativo non sono state riconosciute.
 - Dato un PDF che vieta l'estrazione, senza password dei permessi, quando il lavoro termina, allora quel file risulta in errore con codice di permesso e gli altri file vengono convertiti.
 - Dato il formato PDF/A-2b, quando il lavoro termina, allora ogni risultato supera la validazione del profilo oppure il file è riportato in errore con le regole violate.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-07 — Creazione in blocco di PDF da altri formati
-**Descrizione:** Crea PDF da molti file non PDF (immagini, documenti di videoscrittura, fogli di calcolo, presentazioni, testo e Markdown): un PDF per ogni file oppure un unico PDF che li riunisce nell'ordine della coda. Opzioni per formato pagina, adattamento e margini delle immagini, OCR delle immagini e uscita PDF/A.
+**Descrizione:** Crea PDF da molti file (immagini, documenti di videoscrittura, fogli di calcolo, presentazioni, testo e Markdown, pagine HTML locali; nell'unico PDF anche PDF esistenti, inclusi così come sono): un PDF per ogni file oppure un unico PDF che li riunisce nell'ordine della coda. È il requisito di riferimento per la creazione di PDF in blocco (0.6): CNV-28 vi rimanda; per ogni formato valgono le opzioni della creazione singola (CNV-18…CNV-21). Opzioni per formato pagina, adattamento e margini delle immagini, OCR delle immagini e uscita PDF/A.
 **Flusso:**
 1. L'utente aggiunge i file (BAT-01) e sceglie la modalità: un PDF per file, oppure un unico PDF (con un segnalibro per file).
 2. Per le immagini sceglie il formato pagina (predefinito: formato carta delle impostazioni locali, A4 o Letter; in alternativa dimensione originale), adattamento (adatta mantenendo le proporzioni, riempi, centra a dimensione reale), margini, compressione (senza perdita o qualità JPEG).
 3. Per i documenti sceglie se conservare collegamenti e segnalibri ricavati dai titoli.
 4. Facoltativi: OCR delle immagini con lingue, uscita PDF/A-2b.
 5. Avvia; avanzamento ed esiti seguono BAT-04 e BAT-05.
-**Formati/strutture:** ingressi PNG, JPEG, TIFF anche multipagina, BMP, GIF (primo fotogramma), WebP, HEIC; DOCX, XLSX, PPTX, ODT, ODS, ODP, DOC, XLS, PPT; RTF, TXT, Markdown. Uscita PDF 1.7 o PDF/A-2b. Orientamento EXIF applicato; profili colore ICC delle immagini conservati; "dimensione originale" calcolata dalla risoluzione dichiarata nell'immagine (96 dpi se assente).
+**Formati/strutture:** ingressi PNG, JPEG, TIFF anche multipagina, BMP, GIF (primo fotogramma), WebP, HEIC; DOCX, XLSX, PPTX, ODT, ODS, ODP, DOC, XLS, PPT; RTF, TXT, Markdown; HTML locale; PDF (solo nell'unico PDF). Uscita PDF 1.7 o PDF/A-2b. Orientamento EXIF applicato; profili colore ICC delle immagini conservati; "dimensione originale" calcolata dalla risoluzione dichiarata nell'immagine (96 dpi se assente).
 **Casi limite:**
 - Foto con orientamento EXIF ruotato → pagina con l'immagine nel verso corretto.
 - JPEG CMYK con valori invertiti → colori corretti nel risultato.
 - Documento protetto da password → errore "documento protetto"; gli altri file proseguono.
-- Motore di conversione dei documenti non disponibile → quei formati sono segnalati come non convertibili prima dell'avvio; le immagini e il testo proseguono.
+- Componente di conversione dei documenti d'ufficio non disponibile (CNV-18) → quei formati sono segnalati come non convertibili prima dell'avvio; le immagini e il testo proseguono.
 - GIF animata → solo il primo fotogramma, con avviso.
-- Unico PDF con un file in errore → si applica la politica di BAT-17 (interrompi oppure ometti con avviso).
+- Unico PDF con un file non utilizzabile → si applica la regola di PAG-24 (unione non avviata salvo esclusione o «Ometti i file non utilizzabili»).
 **Criteri di accettazione:**
 - Dato 10 JPEG con modalità "un PDF per file" e "dimensione originale", quando il lavoro termina, allora vengono creati 10 PDF di una pagina, ciascuno con dimensioni pari a pixel/dpi dichiarati (tolleranza 1 pt).
 - Dato una foto con orientamento EXIF di 90°, quando il lavoro termina, allora la pagina mostra l'immagine nel verso corretto.
@@ -7847,13 +8010,13 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Priorità:** P1
 
 ### BAT-08 — OCR in blocco
-**Descrizione:** Applica il riconoscimento del testo a tutti i PDF e le immagini della coda e produce PDF ricercabili (immagine originale con testo invisibile sovrapposto) oppure con testo modificabile; più lingue insieme; le pagine che hanno già testo sono saltate per impostazione predefinita; pre-elaborazione facoltativa; uscita PDF/A facoltativa.
+**Descrizione:** È il requisito di riferimento per l'OCR in blocco (0.6), a cui OCR-15 rimanda; le impostazioni sono quelle di OCR-04 o di un profilo salvato. Applica il riconoscimento del testo a tutti i PDF e le immagini (TIFF anche multipagina, PNG, JPEG, BMP) della coda e produce PDF ricercabili (immagine originale con testo invisibile sovrapposto) oppure con testo modificabile; più lingue insieme; le pagine che hanno già testo sono saltate per impostazione predefinita; pre-elaborazione facoltativa; uscita PDF/A facoltativa.
 **Flusso:**
 1. L'utente sceglie una o più lingue (predefinite dalle preferenze).
 2. Sceglie il risultato: PDF ricercabile (predefinito) o testo modificabile.
 3. Per le pagine con testo esistente sceglie: salta (predefinito), sostituisci il livello di testo riconosciuto in precedenza, forza il riconoscimento.
 4. Pre-elaborazione: raddrizzamento, rotazione automatica delle pagine capovolte, riduzione del rumore; risoluzione di lavoro (predefinita 300 dpi).
-5. Uscita PDF, PDF/A-2b o PDF/A-2u; avvio con avanzamento per pagina.
+5. Uscita PDF oppure, quando OCR-17 è implementato, PDF/A-2b o PDF/A-2u; avvio con avanzamento per pagina; un lotto interrotto si riprende con i soli file non completati (BAT-04).
 **Formati/strutture:** testo invisibile (modalità di resa 3) con font incorporato e mappatura /ToUnicode; immagini originali conservate senza ricompressione, salvo scelta esplicita; rotazione automatica applicata tramite /Rotate senza ricampionare l'immagine; PDF/A-2u richiede la mappatura Unicode di tutto il testo.
 **Casi limite:**
 - Pagina bianca → nessun testo e nessun errore.
@@ -7868,12 +8031,12 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato un PDF già interamente ricercabile, quando il lavoro termina, allora l'esito è "Saltato: nessuna pagina da riconoscere".
 - Dato l'uscita PDF/A-2u, quando il lavoro termina, allora ogni risultato supera la validazione del profilo.
 - Dato una pagina capovolta con rotazione automatica attiva, quando il lavoro termina, allora la pagina risultante appare dritta e il testo riconosciuto è corretto.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-09 — Compressione in blocco
-**Descrizione:** Riduce la dimensione dei PDF con livelli predefiniti (minima perdita, bilanciata, massima compressione) o impostazioni personalizzate: ricampionamento e ricompressione delle immagini per tipo, rimozione di oggetti inutilizzati, deduplicazione di font e immagini, compattazione della struttura. Riporta la dimensione prima e dopo e non produce mai un file più grande dell'originale.
+**Descrizione:** Riduce la dimensione dei PDF con i livelli di CNV-29 (Senza perdita, Alta, Media, Bassa, con gli stessi parametri) o con le impostazioni personalizzate di CNV-30, requisiti di riferimento per la compressione (0.6): ricampionamento e ricompressione delle immagini per tipo, rimozione di oggetti inutilizzati, deduplicazione di font e immagini, compattazione della struttura. Riporta la dimensione prima e dopo e non produce mai un file più grande dell'originale.
 **Flusso:**
-1. L'utente sceglie un livello o le impostazioni personalizzate: immagini a colori e in grigio (ricampiona sopra X dpi a Y dpi, qualità), immagini monocromatiche (compressione bitonale senza perdita), rimozione di miniature incorporate, metadati e allegati (facoltative), oggetti non referenziati, compattazione in flussi di oggetti.
+1. L'utente sceglie un livello di CNV-29 o le impostazioni personalizzate di CNV-30: immagini a colori e in grigio (ricampiona sopra X dpi a Y dpi, qualità), immagini monocromatiche (compressione bitonale senza perdita), rimozione di miniature incorporate, metadati e allegati (facoltative), oggetti non referenziati, compattazione in flussi di oggetti.
 2. L'opzione "mantieni conformità PDF/A" (attiva per impostazione predefinita) limita le scelte ai metodi ammessi dal profilo dichiarato dal file.
 3. Avvia; il rapporto riporta per ogni file dimensione prima, dopo e percentuale di riduzione.
 **Formati/strutture:** filtri standard (Flate, DCT, JPX, JBIG2 senza perdita, CCITT G4); flussi di oggetti e flussi di riferimenti incrociati (PDF 1.5 e successivi); subset dei font; vincoli PDF/A-1 (nessun flusso di oggetti, nessun JPX).
@@ -7885,25 +8048,25 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Immagini con maschere o trasparenza → maschere conservate.
 - File firmato → avviso preliminare di invalidazione della firma.
 **Criteri di accettazione:**
-- Dato un PDF di 20 MB con immagini a 600 dpi e livello "bilanciata", quando il lavoro termina, allora il risultato è più piccolo dell'originale, nessuna immagine supera la risoluzione obiettivo del livello e il testo resta selezionabile e ricercabile.
+- Dato un PDF di 20 MB con immagini a colori a 600 dpi e il livello "Media" (CNV-29: 150 ppi, qualità 70), quando il lavoro termina, allora il risultato è più piccolo dell'originale, nessuna immagine a colori o in grigi supera 150 ppi effettivi (±1) e il testo resta selezionabile e ricercabile.
 - Dato un PDF per cui la compressione non porta riduzione, quando il lavoro termina, allora l'esito è "Avviso: nessuna riduzione ottenuta" e il risultato non è più grande dell'originale.
 - Dato un PDF/A-1b con "mantieni conformità PDF/A", quando il lavoro termina, allora il risultato supera la validazione PDF/A-1b.
 - Dato un PDF cifrato con password di apertura nota, quando il lavoro termina, allora il risultato si apre con la stessa password e presenta gli stessi permessi.
 - Dato un lavoro di compressione terminato, quando si confrontano i valori del rapporto con i file su disco, allora per ogni file le dimensioni prima e dopo coincidono.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-10 — Protezione con password in blocco
-**Descrizione:** Applica a tutti i file una password di apertura e/o una password dei permessi con le relative restrizioni (stampa: non consentita, bassa qualità, alta qualità; modifica; copia ed estrazione; annotazioni e moduli; compilazione dei moduli; assemblaggio delle pagine), con AES-256 come algoritmo predefinito o AES-128 per compatibilità. Le password possono essere uguali per tutti i file o diverse per file, lette da un CSV.
+**Descrizione:** Applica a tutti i file una password di apertura e/o una password dei permessi con le relative restrizioni (stampa: non consentita, bassa qualità, alta qualità; modifica; copia ed estrazione; annotazioni e moduli; compilazione dei moduli; assemblaggio delle pagine), sempre con AES-256 (SEC-06, requisito di riferimento per il livello di cifratura). Le password possono essere uguali per tutti i file o diverse per file, lette da un CSV.
 **Flusso:**
 1. L'utente inserisce la password di apertura (con conferma e indicatore di robustezza) e/o la password dei permessi con le restrizioni; almeno una delle due è obbligatoria.
-2. Sceglie l'algoritmo (AES-256 predefinito, AES-128) e l'opzione "non cifrare i metadati".
+2. Sceglie l'opzione "non cifrare i metadati"; la cifratura è AES-256 (SEC-06).
 3. Sceglie la fonte delle password: uguale per tutti, oppure CSV con colonne nome_file, password_apertura, password_permessi.
 4. Gli avvisi preliminari (BAT-04) elencano i file già cifrati (serve la password attuale; la protezione viene sostituita), i PDF/A (perdono la conformità) e i file firmati (le firme non saranno più valide).
 5. Avvia; avanzamento ed esiti seguono BAT-04 e BAT-05.
-**Formati/strutture:** gestore di sicurezza standard: /Encrypt con /Filter /Standard; AES-256 con /V 5, /R 6 e filtro /AESV3; AES-128 con /V 4, /R 4 e filtro /AESV2; RC4 mai prodotto; bit di /P secondo le restrizioni (l'estrazione per l'accessibilità resta sempre consentita); /EncryptMetadata false se richiesto. CSV UTF-8 con intestazione.
+**Formati/strutture:** gestore di sicurezza standard: /Encrypt con /Filter /Standard; AES-256 con /V 5, /R 6 e filtro /AESV3; AES-128 e RC4 mai prodotti (SEC-06); bit di /P secondo le restrizioni (l'estrazione per l'accessibilità resta sempre consentita); /EncryptMetadata false se richiesto. CSV UTF-8 con intestazione.
 **Casi limite:**
 - Password di apertura uguale alla password dei permessi → avvio impedito, perché le restrizioni non avrebbero effetto.
-- Password con caratteri non latini → con AES-256 normalizzata (SASLprep) e codificata in UTF-8, al massimo 127 byte; con AES-128 ammessi solo caratteri rappresentabili nella codifica del documento, al massimo 32 byte; se il limite è superato l'avvio è impedito (mai troncamenti silenziosi).
+- Password con caratteri non latini → normalizzata (SASLprep) e codificata in UTF-8, al massimo 127 byte; se il limite è superato l'avvio è impedito (mai troncamenti silenziosi).
 - File assente dal CSV → "Saltato: password non definita".
 - File già cifrato senza password attuale disponibile → errore "password richiesta".
 - PDF/A in ingresso → nel risultato la dichiarazione di conformità viene rimossa dai metadati XMP e il file riceve un avviso.
@@ -7913,7 +8076,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato un CSV con password diverse per 3 file, quando il lavoro termina, allora ciascun risultato si apre solo con la propria password e un quarto file assente dal CSV risulta "Saltato: password non definita".
 - Dato password di apertura e dei permessi uguali, quando l'utente preme Avvia, allora l'avvio è impedito con messaggio esplicativo.
 - Dato un PDF/A in ingresso, quando il lavoro termina, allora il risultato non dichiara più la conformità PDF/A e il rapporto riporta l'avviso.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-11 — Rimozione in blocco della password nota
 **Descrizione:** Rimuove cifratura e restrizioni dai file di cui l'utente conosce la password: una password per tutti, un elenco di password candidate provate in ordine (al massimo 20) o un CSV per file. Per togliere le restrizioni serve la password dei permessi; la sola password di apertura basta quando il file concede già tutti i permessi. Nessun tentativo di indovinare password oltre a quelle fornite.
@@ -7935,10 +8098,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato un file con password di apertura e stampa non consentita per il quale è fornita solo la password di apertura, quando il lavoro termina, allora il file risulta in errore "serve la password dei permessi" e non viene prodotto alcun risultato.
 - Dato un file non protetto nella coda, quando il lavoro termina, allora risulta "Saltato: non protetto".
 - Dato un elenco di 21 candidate, quando l'utente preme Avvia, allora l'avvio è impedito.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-12 — Filigrana in blocco
-**Descrizione:** Aggiunge a tutti i file una filigrana di testo (anche con segnaposto, es. {nome}, {data}), di immagine o di pagina PDF, con posizione (9 ancoraggi più scostamento), rotazione, opacità, scala relativa alla pagina, font e colore, sopra o sotto il contenuto, singola o a mosaico, su un intervallo di pagine. La filigrana è marcata in modo da poter essere sostituita o rimossa in seguito (BAT-16).
+**Descrizione:** Aggiunge a tutti i file una filigrana di testo (anche con segnaposto, es. {nome}, {data}), di immagine o di pagina PDF, con posizione (9 ancoraggi più scostamento), rotazione, opacità, scala relativa alla pagina, font e colore, sopra o sotto il contenuto, singola o a mosaico, su un intervallo di pagine. La filigrana è marcata in modo da poter essere sostituita o rimossa in seguito (BAT-16). Aspetto, marcatura e regole sono quelli di PAG-36, requisito di riferimento per le filigrane (0.6).
 **Flusso:**
 1. L'utente sceglie il tipo: testo, immagine o pagina N di un PDF.
 2. Imposta l'aspetto: font, dimensione (assoluta o in percentuale della larghezza di pagina), colore, opacità 0–100%, rotazione da −180° a 180°, posizione, mosaico con spaziatura orizzontale e verticale.
@@ -7959,10 +8122,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato il segnaposto {nome} nel testo, quando il lavoro termina, allora ogni risultato riporta il nome del proprio file.
 - Dato un risultato con filigrana, quando si esegue la rimozione (BAT-16), allora il documento ottenuto è visivamente identico all'originale (CMP-04 senza differenze).
 - Dato "sostituisci filigrane precedenti" su un file già filigranato da Foliant, quando il lavoro termina, allora ogni pagina contiene una sola filigrana.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-13 — Sfondo in blocco
-**Descrizione:** Aggiunge a tutti i file uno sfondo di colore pieno, immagine o pagina PDF (es. carta intestata) dietro il contenuto, con opacità, adattamento e intervallo di pagine; è possibile usare una pagina per la prima pagina e un'altra per le successive. Lo sfondo è marcato in modo da poter essere sostituito o rimosso (BAT-16).
+**Descrizione:** Aggiunge a tutti i file uno sfondo di colore pieno, immagine o pagina PDF (es. carta intestata) dietro il contenuto, con opacità, adattamento e intervallo di pagine; è possibile usare una pagina per la prima pagina e un'altra per le successive. Lo sfondo è marcato in modo da poter essere sostituito o rimosso (BAT-16). Aspetto, marcatura e regole sono quelli di PAG-38, requisito di riferimento per gli sfondi (0.6).
 **Flusso:**
 1. L'utente sceglie il tipo (colore, immagine, PDF) e, per un PDF di più pagine, "pagina 1 sulla prima pagina, pagina 2 sulle successive" oppure una pagina fissa.
 2. Sceglie l'adattamento (riempi la pagina, adatta mantenendo le proporzioni, dimensione reale centrata), la posizione e l'opacità.
@@ -7982,7 +8145,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Priorità:** P1
 
 ### BAT-14 — Intestazioni, piè di pagina e numerazione delle pagine in blocco
-**Descrizione:** Aggiunge testo in sei posizioni (sinistra, centro, destra in alto e in basso) con segnaposto: {pagina}, {totale} (pagine del file), {totale_coda} (pagine dell'intera coda), {etichetta} (etichetta di pagina), {data}, {ora}, {nome}, {titolo}, {autore}. Formati di numerazione 1, 001, i, I, a, A; numero iniziale; numerazione per file o continua su tutta la coda; esclusione delle prime pagine; posizioni speculari sulle pagine pari per la stampa fronte/retro.
+**Descrizione:** Aggiunge testo in sei posizioni (sinistra, centro, destra in alto e in basso) con segnaposto: {pagina}, {totale} (pagine del file), {totale_coda} (pagine dell'intera coda), {etichetta} (etichetta di pagina), {data}, {ora}, {nome}, {titolo}, {autore}. Formati di numerazione 1, 001, i, I, a, A; numero iniziale; numerazione per file o continua su tutta la coda; esclusione delle prime pagine; posizioni speculari sulle pagine pari per la stampa fronte/retro. Aspetto, marcatura e regole sono quelli di PAG-34 e PAG-33, requisiti di riferimento (0.6).
 **Flusso:**
 1. L'utente compila i testi delle sei posizioni inserendo i segnaposto da un menu.
 2. Imposta font (incorporato), dimensione, colore e margini in mm.
@@ -8002,31 +8165,24 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato "speculari sulle pagine pari" con testo in alto a destra, quando il lavoro termina, allora sulle pagine pari il testo compare in alto a sinistra.
 - Dato l'esclusione della prima pagina con "conta le pagine escluse" attiva, quando il lavoro termina, allora la prima pagina non contiene testo aggiunto e la seconda riporta il numero 2.
 - Dato un file elaborato due volte con l'opzione di sostituzione, quando il lavoro termina, allora ogni pagina contiene una sola intestazione e un solo piè.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-15 — Numerazione Bates
-**Descrizione:** Applica a tutte le pagine di un insieme ordinato di documenti un identificativo univoco e progressivo (prefisso, numero a N cifre, suffisso; es. "ACME-000123-RIS"), continuo tra i file nell'ordine della coda oppure ricominciato per ogni documento, in una delle sei posizioni e con stile configurabile. Gestisce serie di numerazione riutilizzabili tra produzioni successive, i numeri nei nomi dei file ({bates_inizio}, {bates_fine}) e un indice delle produzioni.
+**Descrizione:** Numerazione Bates di un insieme ordinato di documenti con la coda di BAT-01. Tutte le regole (formato del numero, serie riutilizzabili, registro per pagina e indice per file, cifre insufficienti, Bates già presente, marcatura) sono quelle di PAG-35, requisito di riferimento (0.6); questo requisito aggiunge l'esecuzione con l'infrastruttura in blocco (BAT-01…BAT-05). In caso di differenza vale PAG-35.
 **Flusso:**
 1. L'utente ordina la coda (l'ordine determina la numerazione e viene ricordato da un avviso).
-2. Imposta prefisso, numero di cifre (da 3 a 15), numero iniziale oppure "continua la serie" (es. "Serie ACME: ultimo numero usato 000456"), suffisso, testo aggiuntivo facoltativo (es. {data}), posizione, margini, font, colore e riquadro bianco opzionale dietro il numero per la leggibilità sulle scansioni.
-3. Sceglie la modalità: continua tra i documenti (predefinita) o ricomincia per documento.
-4. L'anteprima elenca per ogni file l'intervallo calcolato (primo–ultimo) prima dell'avvio.
-5. Avvia; al termine la serie viene aggiornata con l'ultimo numero usato e l'indice della produzione è esportabile.
-**Formati/strutture:** numero aggiunto come contenuto marcato come artefatto (/Type /Pagination, /Subtype /Bates in PDF 2.0; nei file PDF 1.7 riconoscibile tramite i dati di origine dell'applicazione); registro locale delle serie (nome, ultimo numero, data, file); indice CSV con colonne file, primo, ultimo, pagine.
+2. Imposta i parametri come in PAG-35; l'anteprima elenca per ogni file l'intervallo calcolato (primo–ultimo).
+3. Avvia; i numeri sono precalcolati all'avvio (BAT-04), quindi l'esecuzione in parallelo non produce salti né duplicati; al termine la serie è aggiornata con l'ultimo numero usato e l'indice è esportabile.
+**Formati/strutture:** come PAG-35; i segnaposto {bates_inizio} e {bates_fine} sono disponibili nei nomi dei file (BAT-03).
 **Casi limite:**
-- Cifre insufficienti (es. inizio 999998 con 6 cifre e 5 pagine) → avvio impedito dall'anteprima con il numero di cifre necessario.
+- Come PAG-35 (cifre insufficienti → avvio impedito; Bates già presente → Sostituisci, Salta il file o Annulla).
 - File in errore durante il lavoro → il suo intervallo resta riservato e indicato nel rapporto; i file successivi mantengono i numeri dell'anteprima.
-- File che ha già una numerazione Bates riconoscibile → scelta tra sostituisci, aggiungi comunque, salta.
-- Pagine ruotate o di formati diversi → posizione calcolata per pagina.
 - Prefisso con caratteri non validi nei nomi di file → mantenuti sulla pagina, sostituiti solo nei nomi di file (BAT-03).
-- Esecuzione in parallelo → numeri precalcolati all'avvio, quindi senza salti né duplicati.
 **Criteri di accettazione:**
 - Dato 3 file di 2, 3 e 1 pagina, prefisso "ACME-", 6 cifre e inizio 1, quando il lavoro termina, allora le pagine riportano in ordine da ACME-000001 a ACME-000006 senza salti né duplicati e l'indice CSV indica per il secondo file l'intervallo ACME-000003–ACME-000005.
-- Dato la modalità "ricomincia per documento", quando il lavoro termina, allora la prima pagina di ciascun file riporta il numero iniziale.
-- Dato inizio 999998 con 6 cifre e 5 pagine complessive, quando l'utente preme Avvia, allora l'avvio è impedito con il messaggio sulle cifre insufficienti.
 - Dato il modello di nome "{bates_inizio}_{bates_fine}", quando il lavoro termina, allora il secondo file si chiama "ACME-000003_ACME-000005.pdf".
-- Dato una serie con ultimo numero 000006, quando si avvia una nuova produzione con "continua la serie", allora la prima pagina riporta ACME-000007.
-**Priorità:** P0
+- Dato lo stesso lavoro eseguito con parallelismo 4 e con parallelismo 1, quando si confrontano i risultati, allora i numeri assegnati coincidono.
+**Priorità:** P1
 
 ### BAT-16 — Rimozione in blocco di filigrane, sfondi, intestazioni, piè di pagina e numeri Bates
 **Descrizione:** Rimuove da tutti i file gli elementi dei tipi selezionati (filigrana, sfondo, intestazione e piè di pagina, numerazione Bates). Per impostazione predefinita rimuove solo gli elementi aggiunti da Foliant; in alternativa anche gli elementi che altri programmi hanno marcato secondo lo standard. Il contenuto non marcato non viene mai rimosso.
@@ -8048,27 +8204,25 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Priorità:** P1
 
 ### BAT-17 — Unione in blocco
-**Descrizione:** Combina i file della coda in un unico PDF nell'ordine stabilito, oppure in più PDF raggruppando per cartella di origine o ogni N file. Opzioni per i segnalibri (uno per file, con gli eventuali segnalibri originali annidati), per la pagina bianca di separazione nella stampa fronte/retro e per i campi modulo con lo stesso nome. Gli ingressi non PDF ammessi da BAT-07 sono convertiti automaticamente.
+**Descrizione:** Unisce i file della coda in un unico PDF nell'ordine stabilito, oppure in più PDF raggruppando per cartella di origine o ogni N file. Le regole dell'unione (segnalibri, pagina bianca dopo i file con pagine dispari, etichette di pagina, campi omonimi, file non utilizzabili, file firmati, PDF/A, un solo file) sono quelle di PAG-24, requisito di riferimento (0.6); questo requisito aggiunge i raggruppamenti e l'esecuzione con l'infrastruttura in blocco (BAT-01…BAT-05). Gli ingressi non PDF ammessi da BAT-07 sono convertiti automaticamente. In caso di differenza vale PAG-24.
 **Flusso:**
 1. L'utente ordina la coda (BAT-01) e sceglie la modalità: un unico file, un file per cartella, un file ogni N ingressi.
-2. Sceglie i segnalibri: nessuno, uno per file (titolo dal nome del file o dal titolo nei metadati), uno per file con i segnalibri originali annidati (predefinito).
-3. Opzioni: pagina bianca dopo i file con numero di pagine dispari; conserva le etichette di pagina; campi modulo omonimi rinominati per mantenere valori distinti (predefinito) oppure uniti con valore condiviso.
-4. Sceglie la politica per un file in errore: interrompi l'unione (predefinita) oppure ometti il file e prosegui con avviso.
-5. Imposta destinazione e nome (predefinito "Unione_{data}.pdf") e avvia; l'elaborazione è sequenziale.
-**Formati/strutture:** albero delle pagine combinato; /Outlines con una voce per file che punta alla sua prima pagina; /PageLabels combinate; campi di /AcroForm rinominati in caso di conflitto; destinazioni con nome (/Dests) rinominate per evitare collisioni; struttura logica (/StructTreeRoot) unita quando tutti i file sono taggati, altrimenti non conservata e segnalata; allegati conservati; risorse identiche deduplicate.
+2. Sceglie le opzioni di PAG-24: segnalibri (nessuno, uno per file, uno per file con i segnalibri originali annidati, predefinito), pagina bianca dopo i file con pagine dispari, etichette di pagina, campi omonimi (rinominati, predefinito, oppure uniti).
+3. Per i file non utilizzabili vale la regola di PAG-24: l'unione non parte finché non sono esclusi o finché non è attiva «Ometti i file non utilizzabili».
+4. Imposta destinazione e nome (predefinito "Unione_{data}.pdf") e avvia; l'elaborazione è sequenziale.
+**Formati/strutture:** come PAG-24: albero delle pagine combinato; /Outlines con una voce per file; /PageLabels combinate; campi di /AcroForm e destinazioni con nome rinominati in caso di conflitto; struttura logica unita solo se tutti i file sono taggati, altrimenti non conservata e segnalata; allegati conservati; risorse identiche deduplicate.
 **Casi limite:**
-- Coda con un solo file → avvio impedito: servono almeno 2 file.
-- File in errore con politica "ometti" → il risultato non lo contiene e il rapporto lo indica; senza la politica "ometti" non viene prodotto alcun file unito.
-- File firmati → le firme non sono valide nel file unito: i campi firma sono conservati come aspetto statico e il rapporto lo segnala.
+- Un solo file → ammesso, come in PAG-24.
+- File non utilizzabile rilevato prima dell'avvio → unione non avviata salvo esclusione o «Ometti i file non utilizzabili»; file che fallisce durante l'elaborazione → senza l'opzione l'unione si interrompe e non viene prodotto alcun file; con l'opzione il file è omesso e indicato nel rapporto.
+- File firmati → firme non valide nel risultato, campi firma conservati come aspetto statico, con avviso (PAG-24).
 - File cifrati → serve la password di apertura; il risultato non è cifrato, salvo un passo successivo di protezione (BAT-10, BAT-20).
 - Pagine di formati diversi → conservati.
 **Criteri di accettazione:**
 - Dato 3 PDF di 2, 5 e 1 pagina nell'ordine C, A, B della coda, quando il lavoro termina, allora il risultato ha 8 pagine nell'ordine C, A, B e tre segnalibri di primo livello con i nomi dei file, ciascuno collegato alla prima pagina del proprio file.
-- Dato due moduli che contengono entrambi un campo "nome" e l'opzione predefinita, quando il lavoro termina, allora nel risultato i due campi mantengono valori distinti.
-- Dato "pagina bianca dopo i file con pagine dispari", quando il lavoro termina, allora nel risultato ogni file inizia su una pagina di numero dispari.
 - Dato la modalità "un file per cartella" su 2 sottocartelle, quando il lavoro termina, allora si ottengono 2 PDF uniti, ciascuno con i soli file della propria sottocartella.
-- Dato un file danneggiato nella coda e la politica predefinita, quando il lavoro termina, allora non viene prodotto alcun file unito e il rapporto indica il file responsabile.
-**Priorità:** P0
+- Dato un file danneggiato nella coda senza «Ometti i file non utilizzabili», quando l'utente preme Avvia, allora l'unione non parte e il file è indicato come non utilizzabile; con l'opzione attiva, allora il risultato non lo contiene e il rapporto lo indica.
+- Dato un solo file nella coda, quando il lavoro termina, allora il risultato contiene le sue pagine.
+**Priorità:** P1
 
 ### BAT-18 — Inserimento di pagine in blocco
 **Descrizione:** Inserisce in ogni file della coda le stesse pagine (da un PDF sorgente, pagine bianche o un'immagine) in una posizione data: all'inizio, alla fine, dopo la pagina N, prima dell'ultima pagina oppure dopo ogni gruppo di N pagine. Usi tipici: copertina, informativa, condizioni generali, pagine di separazione.
@@ -8091,7 +8245,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Priorità:** P1
 
 ### BAT-19 — Stampa in blocco
-**Descrizione:** Invia alla stampante i file della coda nell'ordine stabilito con impostazioni comuni: stampante, copie, intervallo di pagine per file, fronte/retro (lato lungo o corto), colore o bianco e nero, scala (adatta, dimensione reale, riduci se necessario), orientamento automatico, formato carta e vassoio, fascicolazione, contenuto da stampare (documento; documento e annotazioni; solo campi modulo).
+**Descrizione:** Invia alla stampante i file della coda nell'ordine stabilito con le impostazioni comuni di UX-15, requisito di riferimento per la stampa (0.6): stampante, copie, intervallo di pagine per file, fronte/retro (lato lungo o corto), colore o bianco e nero, scala (adatta, dimensione reale, riduci se necessario), orientamento automatico, formato carta e vassoio, fascicolazione, contenuto da stampare (documento; documento e annotazioni; solo campi modulo).
 **Flusso:**
 1. L'utente sceglie la stampante tra quelle del sistema e le impostazioni comuni.
 2. Sceglie se inviare ogni file come lavoro di stampa separato (predefinito) o tutti in un unico lavoro.
@@ -8109,7 +8263,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato un file con stampa non consentita e senza password dei permessi, quando il lavoro termina, allora quel file risulta in errore e gli altri vengono stampati.
 - Dato fronte/retro sul lato lungo, quando il lavoro termina, allora i lavori registrati riportano la corrispondente modalità fronte/retro.
 - Dato "pagine 1-2" su un file di 1 pagina, quando il lavoro termina, allora viene stampata la pagina esistente e il rapporto riporta l'avviso.
-**Priorità:** P0
+**Priorità:** P1
 
 ### BAT-20 — Sequenze di azioni riutilizzabili
 **Descrizione:** L'utente compone una sequenza ordinata di passi (es. OCR → Comprimi → Intestazione e piè → Bates → Proteggi con password), ciascuno con i propri parametri, la salva con nome e descrizione e la riesegue su nuove code; può modificarla, duplicarla, importarla ed esportarla come file. I parametri di un passo possono essere marcati "chiedi all'avvio". Le impostazioni di una singola operazione si salvano come preimpostazione, cioè una sequenza di un solo passo.
@@ -8176,7 +8330,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Priorità:** P2
 
 ### BAT-23 — Operazioni aggiuntive in blocco
-**Descrizione:** Altre funzioni dell'editor eseguibili in blocco e utilizzabili come passi di sequenza (BAT-20), con i parametri delle corrispondenti funzioni singole delle altre aree: ruota pagine; elimina pagine (intervallo o pagine bianche); dividi (ogni N pagine, per dimensione, per segnalibri di primo livello); estrai pagine; appiattisci annotazioni e moduli; sanifica (metadati, contenuti nascosti, script); imposta proprietà e metadati (titolo, autore, oggetto, parole chiave, anche con segnaposto); imposta la vista iniziale; converti in PDF/A con verifica di conformità; redigi per testo o schema (es. codice fiscale, IBAN, indirizzo e-mail); esporta e importa dati dei moduli; ottimizza per la visualizzazione web (linearizzazione); esporta tutte le immagini.
+**Descrizione:** Altre funzioni dell'editor eseguibili in blocco e utilizzabili come passi di sequenza (BAT-20), con i parametri delle corrispondenti funzioni singole delle altre aree: ruota pagine; elimina pagine (intervallo o pagine bianche); dividi (ogni N pagine, per dimensione, per segnalibri di primo livello); estrai pagine; appiattisci (SEC-24, con le regole di ANN-40 e FRM-32); rimuovi i dati nascosti (SEC-22); imposta proprietà e metadati (titolo, autore, oggetto, parole chiave, anche con segnaposto; SEC-23); imposta le opzioni di apertura del documento (VIS-42); converti in PDF/A con verifica di conformità (CNV-14); redigi per testo o schema (es. codice fiscale, IBAN, indirizzo e-mail); esporta e importa dati dei moduli; ottimizza per il web (linearizzazione, CNV-31); esporta tutte le immagini.
 **Flusso:**
 1. L'utente sceglie l'operazione dal catalogo e ne imposta i parametri.
 2. Coda, destinazione, nomi, esecuzione, errori e rapporto seguono BAT-01…BAT-05.
@@ -8200,10 +8354,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 
 ### AI-01 — Configurazione del fornitore di modelli e della chiave API
 
-**Descrizione:** L'utente collega Foliant a un fornitore di modelli linguistici di sua scelta tramite uno o più profili. Per ogni profilo sceglie un fornitore dal catalogo integrato oppure un endpoint personalizzato, anche in esecuzione sul proprio computer, poi sceglie il modello e salva la propria chiave API nel portachiavi di sistema. Finché non c'è un profilo attivo, tutte le funzioni IA restano disattivate e l'app non contatta alcun servizio IA.
+**Descrizione:** L'utente collega Foliant a un fornitore di modelli linguistici di sua scelta tramite uno o più profili. Per ogni profilo sceglie un fornitore dal catalogo integrato oppure un endpoint personalizzato, anche in esecuzione sul proprio computer, poi sceglie il modello e salva la propria chiave API nel portachiavi di sistema. Finché non c'è un profilo attivo, tutte le funzioni IA restano disattivate e l'app non contatta alcun servizio IA. AI-01 e AI-02 sono i requisiti di riferimento per fornitore, informativa e dati inviati di tutte le funzioni IA, anche di quelle delle altre aree (0.6).
 
 **Flusso:**
-1. Impostazioni › Assistente IA › "Aggiungi profilo".
+1. Preferenze › Assistente IA (UX-17) › "Aggiungi profilo".
 2. Scelta del fornitore dal catalogo oppure "Endpoint personalizzato" (URL base e protocollo tra quelli supportati).
 3. Inserimento della chiave API in un campo mascherato, che si può mostrare temporaneamente; gli spazi iniziali e finali vengono rimossi.
 4. Scelta del modello dall'elenco restituito dal fornitore oppure digitandone l'identificativo. Le capacità del modello (finestra di contesto, immagini in ingresso, generazione di immagini, vettori semantici) vengono rilevate o impostate a mano. Si possono indicare modelli dedicati alle immagini, alla generazione di immagini e ai vettori.
@@ -8266,7 +8420,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Descrizione:** Un pannello laterale riunisce le funzioni IA. L'utente sceglie l'ambito (documento, pagine, selezione, area o immagine, più documenti, oppure nessun documento per una chat generale), il modello del profilo attivo e la lingua di risposta. Le risposte arrivano man mano che vengono generate, con formattazione sicura, riferimenti di pagina cliccabili e azioni per riusarle. Le azioni principali sono disponibili anche nel menu contestuale della selezione.
 
 **Flusso:**
-1. L'utente apre il pannello dalla barra degli strumenti o con una scorciatoia, oppure sceglie un'azione rapida dal menu contestuale della selezione: Chiedi, Riassumi, Traduci, Spiega, Correggi, Riscrivi.
+1. L'utente apre il pannello dalla barra delle modalità o con Ctrl+Alt+I (UX-18), oppure sceglie un'azione rapida dal menu contestuale della selezione: Chiedi, Riassumi, Traduci, Spiega, Correggi, Riscrivi.
 2. Imposta l'ambito, il modello e la lingua di risposta (quella dell'interfaccia, quella del documento o una a scelta). Le opzioni "includi commenti" e "includi valori dei campi modulo" sono disattivate per impostazione predefinita.
 3. All'invio l'app fissa il contesto (selezione, pagine) così com'è in quel momento.
 4. La risposta compare progressivamente. Al termine sono disponibili: Copia (testo semplice o formattato), Inserisci come nota, Inserisci come casella di testo, Salva come file (testo o Markdown), Rigenera.
@@ -8320,28 +8474,33 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 
 ### AI-05 — Riassunto con lunghezza regolabile
 
-**Descrizione:** Riassume il documento intero, un intervallo di pagine o il testo selezionato, con lunghezza, forma e lingua scelte dall'utente e con i riferimenti alle pagine.
+**Descrizione:** Riassume il documento intero, un intervallo di pagine, il testo selezionato, un testo incollato oppure più documenti insieme (aperti o scelti da file), con lunghezza, forma e lingua scelte dall'utente e con i riferimenti alle pagine e, quando i documenti sono più d'uno, al documento.
 
 **Flusso:**
 1. L'utente sceglie "Riassumi" dal pannello, dal menu Documento o dal menu contestuale della selezione.
-2. Sceglie l'ambito (documento, pagine come "1-3, 7", selezione), la lunghezza (Breve, Media, Dettagliata, Personalizzata) e la forma (punti chiave, paragrafi, punti chiave + sintesi).
+2. Sceglie l'ambito (documento, pagine come "1-3, 7", selezione, **Testo incollato**, **Più documenti**), la lunghezza (Breve, Media, Dettagliata, Personalizzata) e la forma (punti chiave, paragrafi, punti chiave + sintesi). Con **Testo incollato** compare un campo in cui incollare il testo; con **Più documenti** l'utente sceglie i documenti aperti o aggiunge file e indica se vuole un riassunto unico con i temi comuni oppure anche una sezione per documento.
 3. Compare il riepilogo "Verrà inviato" e l'operazione parte. I documenti lunghi vengono elaborati a blocchi e i risultati poi combinati (AI-14), mostrando l'avanzamento.
-4. Il riassunto compare nel pannello con i riferimenti di pagina.
-5. Azioni disponibili: copia, salva come file, inserisci come nota, inserisci come nuova pagina all'inizio del documento.
+4. Il riassunto compare nel pannello con i riferimenti di pagina (per più documenti nella forma «documento, pagina»).
+5. Azioni disponibili: copia, salva come file, inserisci come nota, inserisci come nuova pagina all'inizio del documento (solo con un documento aperto).
 
-**Formati/strutture:** Preset: Breve ≈ 5 punti o al massimo 100 parole; Media ≈ 250 parole; Dettagliata ≈ 600 parole suddivise per sezioni; Personalizzata da 50 a 2.000 parole. La pagina inserita ha lo stesso formato della pagina corrente e contiene testo selezionabile con caratteri incorporati.
+**Formati/strutture:** Preset: Breve ≈ 5 punti o al massimo 100 parole; Media ≈ 250 parole; Dettagliata ≈ 600 parole suddivise per sezioni; Personalizzata da 50 a 2.000 parole. Testo incollato: fino a 100.000 caratteri, mai salvato nel documento. Più documenti: fino a 20 documenti; a ciascuno è assegnata un'etichetta neutra («Documento 1», «Documento 2»…) e i nomi dei file non vengono inviati (AI-02); nel risultato le etichette sono sostituite localmente dai nomi. La pagina inserita ha lo stesso formato della pagina corrente e contiene testo selezionabile con caratteri incorporati.
 
 **Casi limite:**
 - Intervallo non valido (sintassi errata o pagine inesistenti): errore mostrato accanto al campo, nessun invio.
-- Selezione vuota: il comando è disattivato. Selezione molto breve (meno di 30 parole): compare un avviso, ma si può procedere.
+- Selezione vuota o testo incollato vuoto: il comando è disattivato. Selezione o testo molto breve (meno di 30 parole): compare un avviso, ma si può procedere.
 - Risultato più lungo del richiesto: viene mostrato per intero indicandone la lunghezza effettiva, mai troncato senza avviso.
 - Pagine senza testo nell'ambito: si applica AI-15. Se vengono escluse, il riassunto è marcato "parziale" con l'elenco delle pagine escluse.
+- Più documenti con un documento cifrato di cui l'utente non fornisce la password, o con permessi che vietano l'estrazione: documento escluso, riassunto marcato "parziale" con il nome del documento escluso.
+- Più di 20 documenti: il comando chiede di ridurre la scelta.
 
 **Criteri di accettazione:**
 - Dato un PDF di 8 pagine, quando l'utente riassume le pagine «2-3», allora le richieste registrate dal fornitore simulato contengono il testo delle sole pagine 2 e 3.
 - Dato il preset «Breve», quando parte la richiesta, allora le istruzioni inviate riportano il limite del preset; con «Personalizzata 300» riportano 300 parole.
 - Dato l'intervallo «12-15» su un documento di 10 pagine, quando l'utente conferma, allora compare un errore di intervallo e il simulato non riceve richieste.
 - Dato un riassunto completato, quando l'utente sceglie «Inserisci come nuova pagina», allora il documento ha una pagina in più in prima posizione, il testo estratto di quella pagina coincide con il riassunto e «Annulla» la rimuove.
+- Dato un testo di 500 parole incollato con l'ambito «Testo incollato», quando parte il riassunto, allora le richieste registrate dal simulato contengono quel testo e nessun contenuto del documento aperto.
+- Dati 3 documenti scelti con l'ambito «Più documenti», quando il riassunto è completato, allora le richieste contengono il testo dei 3 documenti con le etichette neutre e non i nomi dei file, e ogni riferimento del riassunto mostra il nome del documento e la pagina.
+- Dati 2 documenti di cui uno cifrato, quando l'utente non fornisce la password, allora il riassunto riguarda il solo documento leggibile ed è marcato «parziale» con il nome del documento escluso.
 
 **Priorità:** P1
 
@@ -8428,7 +8587,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 
 ### AI-09 — Riscrittura e correzione del testo selezionato
 
-**Descrizione:** Sul testo selezionato l'utente può chiedere una correzione (grammatica, ortografia, punteggiatura), un miglioramento dello stile, un cambio di tono, un'espansione, una condensazione o un'istruzione libera. Esamina la proposta con le differenze evidenziate. Se la accetta, il testo viene sostituito nel documento tramite la funzione di modifica testo, mantenendo lo stile originale.
+**Descrizione:** Sul testo selezionato l'utente può chiedere una correzione (grammatica, ortografia, punteggiatura), un miglioramento dello stile, un cambio di tono, un'espansione, una condensazione o un'istruzione libera. È il requisito di riferimento per la riscrittura del testo con IA (0.6): TXT-22…TXT-25 vi rimandano. Esamina la proposta con le differenze evidenziate. Se la accetta, il testo viene sostituito nel documento tramite la funzione di modifica testo, mantenendo lo stile originale.
 
 **Flusso:**
 1. L'utente seleziona il testo, in lettura o in modalità modifica testo, e sceglie l'azione: Correggi, Migliora, Cambia tono (formale, informale, professionale, cordiale, persuasivo), Espandi, Condensa, Istruzione libera.
@@ -8452,7 +8611,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato il testo selezionato «Il documento e stato aprovato» e il fornitore simulato che restituisce «Il documento è stato approvato», quando l'utente accetta, allora il testo estratto della pagina contiene la frase corretta al posto dell'originale, con lo stesso carattere e lo stesso corpo, e un solo «Annulla» ripristina l'originale.
 - Dato un testo con una proposta visualizzata, quando l'utente sceglie «Scarta», allora il documento non risulta modificato.
 - Dato un testo selezionato su una pagina composta solo da un'immagine, quando l'utente apre le azioni, allora «Sostituisci nel documento» è disattivato e «Aggiungi come annotazione di sostituzione» crea un'annotazione con il testo proposto.
-- Dato un documento firmato digitalmente, quando l'utente accetta una proposta, allora compare l'avviso di invalidazione e la modifica avviene solo dopo la conferma.
+- Dato un documento firmato digitalmente, quando l'utente accetta la prima proposta della sessione, allora compare l'avviso di invalidazione di SIG-21 e la modifica avviene solo dopo la scelta **Procedi comunque** (UX-13).
 
 **Priorità:** P1
 
@@ -8462,12 +8621,12 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 
 **Flusso:**
 1. L'utente sceglie Strumenti › "Estrai dati" oppure la funzione dal pannello IA.
-2. Sceglie il tipo: Tabelle, Fattura/Ricevuta oppure Schema personalizzato (campi con nome, tipo e descrizione, salvabile come modello).
+2. Sceglie il tipo: Tabelle, Fattura/Ricevuta (modello e controlli di AI-29, requisito di riferimento per i dati di fatture e ricevute) oppure Schema personalizzato (campi con nome, tipo e descrizione, salvabile come modello).
 3. Sceglie l'ambito: documento, pagine, selezione, area o più file. Con più file si ottiene un record per documento oppure righe con una colonna "file d'origine".
 4. Il risultato compare in una griglia modificabile. Sono evidenziati i valori che non si ritrovano nel testo d'origine e i controlli non superati, ad esempio la somma delle righe diversa dal totale.
 5. Esportazione in CSV o JSON, oppure copia negli appunti. Le tabelle possono anche essere usate per la conversione in foglio di calcolo (area Conversione).
 
-**Formati/strutture:** CSV secondo la specifica standard: riga di intestazione, virgolette di protezione, UTF-8 predefinito, separatore virgola o punto e virgola. JSON = {origine: {documento, pagine}, data, modello, tipo, record: [...]}, con la pagina d'origine di ogni valore, date in formato ISO e numeri con il punto decimale. Schema fattura predefinito: numero, data, fornitore, partita IVA/codice fiscale, cliente, righe [descrizione, quantità, prezzo unitario, aliquota, importo], imponibile, imposta, totale, valuta.
+**Formati/strutture:** CSV secondo la specifica standard: riga di intestazione, virgolette di protezione, UTF-8 predefinito, separatore virgola o punto e virgola. JSON = {origine: {documento, pagine}, data, modello, tipo, record: [...]}, con la pagina d'origine di ogni valore, date in formato ISO e numeri con il punto decimale. Schema fattura: quello di AI-29.
 
 **Casi limite:**
 - Risposta non conforme allo schema: l'app fa un tentativo automatico di correzione; se fallisce mostra un errore e permette di consultare la risposta grezza.
@@ -8683,7 +8842,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 2. Quando si riapre un documento, il pannello propone di riprendere l'ultima conversazione. La scheda "Cronologia" elenca le conversazioni del documento, mentre la vista globale le elenca tutte; si possono cercare per testo, data e funzione.
 3. Azioni disponibili: rinomina, esporta (Markdown o JSON), elimina una conversazione, elimina tutte quelle del documento, elimina tutto.
 4. Se l'utente riprende una conversazione e fa una nuova domanda, i messaggi precedenti vengono inviati di nuovo; la riga "Verrà inviato" lo dichiara.
-5. Impostazioni: cronologia attiva o disattiva, scadenza automatica (mai, 30, 90 o 365 giorni), cifratura facoltativa con la chiave conservata nel portachiavi.
+5. Preferenze › Assistente IA (UX-17): cronologia attiva o disattiva, scadenza automatica (mai, 30, 90 o 365 giorni), cifratura facoltativa con la chiave conservata nel portachiavi.
 
 **Formati/strutture:** Archivio nella cartella dati dell'utente, leggibile solo dall'utente. Conversazione = {id, titolo, impronta del contenuto del documento, ultimo percorso noto, funzione, profilo, modello, data di creazione, data di aggiornamento, messaggi (struttura di AI-03)}. Nessuna sincronizzazione e nessun invio a terzi.
 
@@ -8722,37 +8881,61 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato il fornitore simulato che restituisce «Gentile cliente, …», quando l'utente sceglie «Inserisci nel documento» e fa clic su un punto della pagina 2, allora in quella posizione della pagina 2 compare una nuova casella di testo con quel testo, rimovibile con «Annulla».
 - Dato un testo generato, quando l'utente sceglie «Crea nuovo PDF», allora si apre un nuovo documento il cui testo estratto coincide con il testo generato.
+- Dato un documento aperto, quando l'utente genera un testo senza l'opzione «usa il documento come fonte», allora la richiesta registrata dal fornitore simulato non contiene alcun testo del documento; con l'opzione attiva, allora contiene il testo dell'ambito scelto.
 
-**Priorità:** P2
+**Priorità:** P1
 
-### AI-20 — Modelli di attività per analisi specialistiche
+### AI-20 — Modelli di attività: struttura comune e modelli predefiniti
 
-**Descrizione:** Una libreria di attività predefinite e personalizzabili applica istruzioni già pronte al documento, alle pagine o alla selezione. Copre esigenze specifiche: analisi di contratti e dei relativi rischi, bozza di contratto, spiegazione di bilanci e rendiconti finanziari, analisi dei flussi di cassa, analisi di articoli scientifici, riassunto di documentazione tecnica, lettura e valutazione di curricula rispetto a requisiti, generazione di quiz, soluzione guidata di esercizi di matematica, supporto allo studio, piano d'impresa, analisi strategica, contenuti per video (titoli, descrizioni, parole chiave, copione).
+**Descrizione:** Una libreria di modelli di attività applica istruzioni già pronte al documento, alle pagine, alla selezione, a un testo incollato o a nessun documento. Ogni modello ha parametri, ambito richiesto e forma dell'uscita verificabili. Comprende: (a) il **modello generico configurabile**, con cui l'utente crea, modifica e condivide i propri modelli; (b) i modelli predefiniti elencati in Formati/strutture, uno per ciascuna attività specialistica del catalogo. I modelli per contratti (AI-28), fatture e ricevute (AI-29), schede prodotto (AI-30), comunicazioni ai clienti (AI-31) e confronto e classifica di più documenti (AI-32) sono specificati a parte con la stessa struttura. Fornitore, informativa e dati inviati seguono AI-01 e AI-02.
 
 **Flusso:**
 1. Pannello IA › "Attività": elenco diviso per categoria (Studio, Ricerca, Legale, Finanza, Personale, Tecnico, Comunicazione), con ricerca.
-2. L'utente sceglie un'attività, compila gli eventuali parametri (ad esempio i requisiti del ruolo per i curricula, il numero e il tipo di domande per un quiz) e l'ambito.
-3. Il risultato compare nel pannello con i riferimenti di pagina e le azioni standard (AI-03). I quiz si possono anche esportare con le soluzioni in una sezione separata.
-4. Gestione delle attività personali: crea, duplica, modifica, elimina, importa ed esporta.
+2. L'utente sceglie un modello, compila i parametri (precompilati con i valori predefiniti) e l'ambito.
+3. Il risultato compare nel pannello con i riferimenti di pagina e le azioni standard (AI-03); le uscite strutturate (tabelle, quiz) si possono esportare.
+4. Modello generico: l'utente crea, duplica, modifica, elimina, importa ed esporta modelli personali indicando nome, categoria, istruzioni con segnaposto, parametri, ambito e forma dell'uscita.
 
-**Formati/strutture:** Attività = {nome, categoria, descrizione, istruzioni con segnaposto (selezione, pagine, lingua, parametri), ambito richiesto, parametri [{nome, tipo, valore predefinito}], forma dell'uscita (testo, tabella, elenco di domande)}. Il file di scambio è in JSON. Quiz = elenco di {domanda, opzioni, risposta corretta, spiegazione, pagina}.
+**Formati/strutture:** Modello = {nome, categoria, descrizione, istruzioni con segnaposto ({selezione}, {pagine}, {lingua}, {parametro:nome}), ambito richiesto (documento, pagine, selezione, testo incollato, nessuno, più documenti), parametri [{nome, tipo, valore predefinito}], forma dell'uscita (testo, tabella, elenco di domande, passaggi numerati, sezioni fisse)}; file di scambio in JSON. Modelli predefiniti, con la riga del catalogo:
+- *Riassunto tecnico* (12.03): conserva valori numerici, unità, parametri e procedure numerate; uscita a sezioni con la tabella dei parametri e la pagina d'origine.
+- *Contenuti per video* (12.12): titoli (numero scelto), descrizione, parole chiave e copione con durata indicativa.
+- *Analisi di un articolo scientifico* (12.15): obiettivi, metodo, risultati e limiti, ciascuno con riferimenti di pagina.
+- *Aiuto per i compiti* (12.16): spiegazione passo per passo, non il solo risultato finale.
+- *Quiz* (12.17): numero e tipo di domande (scelta multipla, vero/falso, risposta aperta), soluzioni in una sezione separata; Quiz = elenco di {domanda, opzioni, risposta corretta, spiegazione, pagina}.
+- *Problemi di matematica* (12.18): soluzione con tutti i passaggi numerati e risultato finale evidenziato.
+- *Piano d'impresa* (12.22): sezioni fisse Sintesi, Mercato, Offerta, Organizzazione, Piano economico, Rischi.
+- *Analisi strategica* (12.23): punti di forza, debolezze, opportunità e minacce, opzioni e raccomandazione motivata.
+- *Spiegazione del bilancio* (12.24): voci e indicatori spiegati in linguaggio semplice, con i valori citati dal documento e la pagina.
+- *Analisi dei flussi di cassa* (12.25): andamento dei flussi della gestione operativa, di investimento e di finanziamento, con le criticità.
+- *Lettura dei curriculum* (12.26): scheda ordinata (contatti, esperienze, formazione, competenze, lingue) senza dati personali non pertinenti.
 
 **Casi limite:**
-- Attività in ambito legale, finanziario, sanitario o di selezione del personale: il risultato riporta l'avviso che non sostituisce il parere di un professionista né una decisione presa da una persona.
-- Valutazione di curricula: l'attività esclude i dati personali non pertinenti al ruolo (età, stato civile, foto) e lo dichiara nelle istruzioni.
-- File di attività importato non valido o con segnaposto sconosciuti: l'importazione viene rifiutata, con il dettaglio dell'errore.
-- Attività che richiede immagini con un modello che non le accetta: disattivata, con una spiegazione.
+- Modelli in ambito legale, finanziario, sanitario o di selezione del personale: il risultato riporta l'avviso che non sostituisce il parere di un professionista né una decisione presa da una persona.
+- Modelli sui curriculum: esclusione dei dati personali non pertinenti al ruolo (età, stato civile, foto, origine), dichiarata nelle istruzioni; le immagini del documento non vengono inviate.
+- File di modello importato non valido o con segnaposto sconosciuti: importazione rifiutata, con il dettaglio dell'errore.
+- Modello che richiede immagini con un modello linguistico che non le accetta: disattivato, con una spiegazione.
+- Valori numerici citati nel risultato (bilanci, riassunti tecnici) che non si ritrovano nel documento: marcati "non verificato", come in AI-10.
+- Sezione fissa assente dalla risposta del fornitore: mostrata vuota con l'indicazione «da completare».
 
 **Criteri di accettazione:**
-- Dato il modello di attività «Quiz» impostato su 5 domande a scelta multipla e il fornitore simulato che restituisce 5 domande conformi, quando l'utente esporta, allora il file contiene 5 domande e le soluzioni in una sezione separata.
-- Dato un modello di attività personale esportato e poi reimportato su un'altra installazione, quando l'utente lo esegue, allora le istruzioni inviate sono identiche a quelle dell'originale.
-- Dato un modello di attività della categoria Legale, quando il risultato viene mostrato, allora contiene l'avviso che non sostituisce il parere di un professionista.
+- *Generico*: dato un modello personale con le istruzioni «Elenca le scadenze in {pagine}» e uscita a tabella, quando l'utente lo esegue sulle pagine 2–4, allora le istruzioni inviate al fornitore simulato contengono «pagine 2–4» al posto del segnaposto e il risultato è mostrato come tabella.
+- *Generico*: dato un modello personale esportato e poi reimportato su un'altra installazione, quando l'utente lo esegue, allora le istruzioni inviate sono identiche a quelle dell'originale; dato un file di modello con il segnaposto sconosciuto «{xyz}», quando l'utente lo importa, allora l'importazione è rifiutata e il messaggio indica il segnaposto.
+- *Riassunto tecnico*: dato un manuale con «Coppia di serraggio 25 Nm» a pagina 7 e il fornitore simulato che restituisce quel valore, quando il risultato è mostrato, allora la tabella dei parametri contiene «25 Nm» con il riferimento a pagina 7; un valore assente dal documento è marcato «non verificato».
+- *Contenuti per video*: dato il parametro «3 titoli», quando parte la richiesta, allora le istruzioni inviate chiedono 3 titoli, una descrizione, parole chiave e un copione, e il risultato è diviso in queste quattro sezioni.
+- *Analisi di un articolo scientifico*: dato il fornitore simulato che restituisce le quattro parti, quando il risultato è mostrato, allora compaiono le intestazioni Obiettivi, Metodo, Risultati e Limiti, ciascuna con almeno un riferimento di pagina cliccabile.
+- *Aiuto per i compiti*: dato un esercizio selezionato, quando parte la richiesta, allora le istruzioni inviate chiedono la spiegazione dei passaggi e il risultato mostra passaggi numerati.
+- *Quiz*: dato il modello impostato su 5 domande a scelta multipla e il fornitore simulato che restituisce 5 domande conformi, quando l'utente esporta, allora il file contiene 5 domande e le soluzioni in una sezione separata.
+- *Problemi di matematica*: dato il fornitore simulato che restituisce 4 passaggi e un risultato, quando il risultato è mostrato, allora i passaggi sono numerati da 1 a 4 e il risultato finale è evidenziato separatamente.
+- *Piano d'impresa*: dato il fornitore simulato che restituisce un piano senza la sezione Rischi, quando il risultato è mostrato, allora le sei sezioni compaiono nell'ordine del modello e Rischi è indicata «da completare».
+- *Analisi strategica*: dato il fornitore simulato, quando il risultato è mostrato, allora contiene le quattro parti dell'analisi e la raccomandazione, con l'avviso professionale.
+- *Spiegazione del bilancio*: dato un bilancio con «Utile netto 1.250.000» a pagina 4 citato dal fornitore simulato, quando il risultato è mostrato, allora il valore compare con il riferimento a pagina 4 e con l'avviso professionale.
+- *Analisi dei flussi di cassa*: dato un rendiconto finanziario, quando il risultato è mostrato, allora contiene le tre sezioni della gestione operativa, di investimento e di finanziamento e l'avviso professionale.
+- *Lettura dei curriculum*: dato un CV con data di nascita e foto, quando parte la richiesta, allora le istruzioni inviate chiedono di escludere età, stato civile, foto e origine, nessuna immagine è inviata e la scheda è mostrata con le sezioni del modello.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### AI-21 — Ricerca per significato nel documento
 
-**Descrizione:** Oltre alla ricerca testuale esatta, l'utente può cercare per concetto (sinonimi, termini correlati, parafrasi). Ottiene un elenco di passaggi ordinati per pertinenza, ciascuno con pagina ed estratto, e dai risultati può avviare azioni sul testo trovato.
+**Descrizione:** Oltre alla ricerca testuale esatta, l'utente può cercare per concetto (sinonimi, termini correlati, parafrasi). Ottiene un elenco di passaggi ordinati per pertinenza, ciascuno con pagina ed estratto, e dai risultati può avviare azioni sul testo trovato. È il requisito di riferimento per la ricerca per significato (0.6): VIS-27 vi rimanda.
 
 **Flusso:**
 1. Nella barra di ricerca l'utente attiva la modalità "Per significato" e scrive la ricerca.
@@ -8770,12 +8953,13 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato il fornitore simulato per vettori che rende vicini «automobile» e «vettura», quando l'utente cerca «automobile» in un documento che contiene solo «vettura», alla pagina 7, allora il primo risultato rimanda alla pagina 7.
 - Dato un risultato della ricerca, quando l'utente vi fa clic, allora viene visualizzata la pagina con il passaggio evidenziato.
+- Dato un profilo senza modello per vettori, quando l'utente cerca per significato, allora l'app usa la modalità alternativa con il modello di chat, mostra l'avviso sulle richieste aggiuntive e le richieste registrate dal simulato contengono solo i passaggi candidati.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### AI-22 — Segnalibri generati e riassunto per sezione
 
-**Descrizione:** Propone un albero di segnalibri a più livelli ricavato dalla struttura del contenuto (titoli, capitoli, sezioni) e permette di riassumere la sezione che corrisponde a un segnalibro.
+**Descrizione:** Propone un albero di segnalibri a più livelli ricavato dalla struttura del contenuto (titoli, capitoli, sezioni) e permette di riassumere la sezione che corrisponde a un segnalibro. È il requisito di riferimento per i segnalibri generati e il riassunto per sezione con IA (0.6): VIS-17 e VIS-18 vi rimandano.
 
 **Flusso:**
 1. Pannello Segnalibri › "Genera con IA": l'utente imposta l'ambito e la profondità massima.
@@ -8794,15 +8978,16 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato il fornitore simulato che propone 3 capitoli con 2 sottosezioni ciascuno, quando l'utente applica scegliendo «Sostituisci», allora il documento ha 3 segnalibri di primo livello e 6 di secondo livello con le destinazioni proposte, e «Annulla» ripristina i segnalibri precedenti.
 - Dato un documento di 12 pagine con segnalibri alle pagine 1, 5 e 9, quando l'utente riassume la sezione del secondo segnalibro, allora la richiesta contiene solo il testo delle pagine da 5 a 8.
+- Dato il fornitore simulato che propone una voce con destinazione a pagina 40 in un documento di 30 pagine, quando arriva la proposta, allora quella voce è scartata e segnalata nell'anteprima e le altre restano applicabili.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### AI-23 — Assistente comandi
 
 **Descrizione:** L'utente descrive a parole cosa vuole ottenere (ad esempio "ruota di 90° le pagine 3–5", "proteggi con password", "estrai le pagine pari"). L'assistente individua lo strumento di Foliant adatto, ne compila i parametri e lo apre. L'operazione viene eseguita solo quando l'utente la conferma nello strumento stesso.
 
 **Flusso:**
-1. L'utente scrive la richiesta nel campo comandi del pannello, aperto anche con una scorciatoia.
+1. L'utente scrive la richiesta nel campo comandi del pannello Assistente IA (Ctrl+Alt+I, UX-18).
 2. L'app invia la richiesta e il catalogo degli strumenti disponibili con i relativi parametri. Il contenuto del documento non viene inviato; si inviano solo il numero di pagine e le pagine della selezione corrente.
 3. L'assistente propone uno o più strumenti con i parametri; l'utente sceglie.
 4. Lo strumento si apre con i parametri già compilati. L'utente li controlla ed esegue; l'operazione si può annullare come qualsiasi altra.
@@ -8820,7 +9005,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Dato il simulato che propone le pagine 30–35 per un documento di 10 pagine, quando arriva la proposta, allora viene scartata con un messaggio e nessuno strumento si apre.
 - Dato un comando inviato all'assistente, quando si esamina la richiesta registrata dal simulato, allora non contiene testo del documento.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### AI-24 — Analisi e pulizia guidata delle pagine
 
@@ -8847,7 +9032,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 
 ### AI-25 — Generazione di elementi grafici
 
-**Descrizione:** Genera da una descrizione testuale immagini da usare come filigrana, sfondo, timbro o adesivo. L'utente sceglie tra alcune varianti, applica quella scelta con lo strumento corrispondente e la ritrova nella propria libreria.
+**Descrizione:** Genera da una descrizione testuale immagini da usare come filigrana, sfondo, timbro o adesivo. È il requisito di riferimento per la generazione di immagini con IA (0.6): ANN-28, PAG-36 e PAG-38 vi rimandano. L'utente sceglie tra alcune varianti, applica quella scelta con lo strumento corrispondente e la ritrova nella propria libreria.
 
 **Flusso:**
 1. Negli strumenti Filigrana, Sfondo, Timbri e Adesivi l'utente sceglie "Genera con IA".
@@ -8865,15 +9050,16 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato il fornitore simulato di immagini che restituisce 3 varianti, quando l'utente ne sceglie una per «Timbro», allora lo strumento Timbri si apre con quell'immagine e, dopo l'applicazione, la pagina contiene un'annotazione timbro con quell'aspetto.
 - Dato un profilo senza capacità di generazione di immagini, quando l'utente apre lo strumento Filigrana, allora «Genera con IA» è disattivato, con una spiegazione.
+- Dato un'immagine generata con sfondo bianco uniforme per un timbro, quando l'utente accetta di rimuovere lo sfondo, allora i pixel dello sfondo diventano trasparenti e il fornitore simulato non riceve richieste aggiuntive (elaborazione locale).
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### AI-26 — Ricerca bibliografica e revisione della letteratura
 
 **Descrizione:** A partire da un argomento o da una domanda di ricerca, l'assistente divide il quesito in sotto-domande e cerca pubblicazioni in un servizio bibliografico pubblico configurato dall'utente. Mostra metadati e sintesi dei risultati e permette di farvi domande. Produce poi una revisione della letteratura, con bibliografia, salvabile in PDF.
 
 **Flusso:**
-1. Pannello IA › "Ricerca bibliografica". L'utente sceglie il servizio bibliografico, configurato nelle impostazioni senza passare da server di Foliant, e scrive la domanda.
+1. Pannello IA › "Ricerca bibliografica". L'utente sceglie il servizio bibliografico, configurato in Preferenze › Assistente IA (UX-17) senza passare da server di Foliant, e scrive la domanda.
 2. L'assistente propone le sotto-domande, che l'utente può modificare. Per le ricerche l'app invia al servizio solo le parole chiave.
 3. Per ogni risultato compaiono titolo, autori, anno, sede di pubblicazione, identificativo, abstract, collegamento all'eventuale versione ad accesso aperto e un riassunto.
 4. L'utente salva le voci nella libreria locale e apre i PDF disponibili, che si possono poi usare anche con AI-13. Infine avvia "Genera revisione".
@@ -8890,12 +9076,13 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato il servizio bibliografico simulato con 4 voci e il fornitore simulato che cita anche una quinta voce inesistente, quando viene generata la revisione, allora la bibliografia contiene solo le 4 voci reali e la citazione inesistente è marcata «non verificata».
 - Dato un processo di ricerca bibliografica avviato con documenti aperti, quando si esaminano le richieste al servizio bibliografico, allora contengono solo le parole chiave delle sotto-domande e nessun contenuto dei documenti aperti.
+- Dato nessun servizio bibliografico configurato, quando l'utente apre «Ricerca bibliografica», allora la funzione è disattivata con la spiegazione e non parte alcuna connessione di rete.
 
-**Priorità:** P2
+**Priorità:** P1
 
 ### AI-27 — Conversione assistita dall'IA
 
-**Descrizione:** Nella conversione in documento di testo, foglio di calcolo o presentazione, l'utente può attivare l'assistenza IA per ricostruire meglio la struttura: titoli e relativi livelli, elenchi, ordine di lettura su più colonne, tabelle senza bordi, celle unite. La conversione resta eseguita localmente dal motore di conversione.
+**Descrizione:** Nella conversione in documento di testo, foglio di calcolo o presentazione, l'utente può attivare l'assistenza IA per ricostruire meglio la struttura: titoli e relativi livelli, elenchi, ordine di lettura su più colonne, tabelle senza bordi, celle unite. La conversione resta eseguita localmente dal motore di conversione. È il requisito di riferimento per la conversione con IA (0.6): CNV-16 vi rimanda.
 
 **Flusso:**
 1. Nel dialogo di conversione l'utente attiva l'opzione "Migliora la struttura con l'IA", visibile solo con un profilo attivo.
@@ -8912,17 +9099,326 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 **Criteri di accettazione:**
 - Dato il fornitore simulato che classifica un blocco come «titolo di livello 1», quando si converte in documento di testo, allora quel testo ha lo stile di titolo di livello 1 nel file prodotto.
 - Dato il simulato non raggiungibile, quando si converte con l'opzione attiva, allora il file viene prodotto comunque e il rapporto indica che l'assistenza IA non è stata usata.
+- Dato un PDF con permessi che vietano l'estrazione, quando l'utente apre il dialogo di conversione, allora l'opzione «Migliora la struttura con l'IA» è disattivata con il motivo (AI-02).
 
-**Priorità:** P2
+**Priorità:** P1
+
+### AI-28 — Contratti: bozza, revisione, rischi e ricerca giuridica
+
+**Descrizione:** Modelli di attività dedicati ai contratti, con la struttura di AI-20: (a) **Bozza di contratto** (catalogo 12.19) dalle indicazioni dell'utente (tipo, parti, oggetto, durata, corrispettivo, clausole richieste), come testo diviso in articoli numerati; (b) **Revisione del contratto** (12.21): esame del contratto aperto clausola per clausola con, per ciascuna, sintesi, punti critici, lacune e proposta di modifica, con i riferimenti di pagina; (c) **Rischi e ricerca giuridica** (12.20): valutazione dei rischi per la parte indicata dall'utente e ricerca delle norme e dei principi pertinenti, con le fonti citate. Le comunicazioni per i clienti sono in AI-31. Ogni risultato riporta l'avviso che non sostituisce il parere di un professionista. Fornitore e dati inviati secondo AI-01 e AI-02.
+
+**Flusso:**
+1. Pannello IA › Attività › Legale › Contratti.
+2. Bozza: modulo con i parametri; il testo generato compare nel pannello, si modifica e si esporta come nuovo PDF (creazione da testo, CNV-20) o si copia.
+3. Revisione: ambito documento o pagine; tabella delle clausole (numero, titolo, pagina, sintesi, criticità bassa/media/alta, lacune, proposta); il clic su una riga porta alla clausola; **Aggiungi come commenti** crea una nota (ANN-14) su ogni clausola di criticità media o alta.
+4. Rischi e ricerca giuridica: parte da tutelare e ordinamento (predefinito: italiano); elenco dei rischi con la clausola collegata; ricerca giuridica con le fonti, eseguita dal fornitore se offre la ricerca sul web, altrimenti con la sola conoscenza del modello e l'indicazione «fonti da verificare».
+5. Esportazione della revisione e dei rischi in CSV o PDF.
+
+**Formati/strutture:** Clausola = {numero, titolo, pagina, testo citato, sintesi, criticità (bassa, media, alta), lacune, proposta}; Rischio = {descrizione, clausola, probabilità, impatto, mitigazione}; Fonte = {riferimento normativo o giurisprudenziale, citazione, origine (ricerca web del fornitore o conoscenza del modello)}.
+
+**Casi limite:** contratto scansionato → OCR preventivo (AI-15); clausole non numerate → individuate per titolo o paragrafo, con riferimento di pagina; testo citato che non si ritrova nel documento → marcato «non verificato»; fonte senza riferimento verificabile → marcata «da verificare»; contratto in una lingua diversa da quella dell'interfaccia → analisi nella lingua scelta, citazioni nella lingua originale; documento firmato → le note di **Aggiungi come commenti** seguono SIG-21 (annotazioni consentite con le firme di approvazione); dati personali delle parti → inviati solo se compresi nell'ambito scelto, come dichiara il riepilogo «Verrà inviato» (AI-02).
+
+**Criteri di accettazione:**
+- Dato il tipo «locazione», due parti e la durata «4 anni», quando parte la richiesta di bozza, allora le istruzioni inviate al fornitore simulato contengono tutti i parametri e il testo restituito è mostrato diviso in articoli numerati con l'avviso professionale.
+- Dato un contratto di 6 clausole e il fornitore simulato che restituisce 6 voci conformi, quando il risultato è mostrato, allora la tabella ha 6 righe con pagina e criticità e il clic sulla riga 3 porta alla pagina della clausola 3.
+- Dato **Aggiungi come commenti** con 2 clausole di criticità alta, quando l'utente conferma, allora le pagine contengono 2 note collegate a quelle clausole e un solo Annulla le rimuove.
+- Dato un testo citato dal fornitore simulato che non compare nel documento, quando il risultato è mostrato, allora la voce è marcata «non verificato».
+- Dato un fornitore simulato senza ricerca sul web, quando l'utente avvia la ricerca giuridica, allora le fonti restituite sono marcate «da verificare» e il risultato riporta l'avviso professionale.
+
+**Priorità:** P1
+
+### AI-29 — Fatture e ricevute
+
+**Descrizione:** Modello di attività dedicato all'estrazione dei dati di fatture e ricevute, anche da più file e da scansioni: testata (numero, data, fornitore, partita IVA o codice fiscale, cliente), righe (descrizione, quantità, prezzo unitario, aliquota, importo), riepilogo (imponibile per aliquota, imposta, totale, valuta) e scadenze di pagamento. I controlli di coerenza sono eseguiti localmente. È il requisito di riferimento per i dati di fatture e ricevute (0.6): AI-10 usa questo modello per il tipo «Fattura/Ricevuta».
+
+**Flusso:**
+1. Pannello IA › Attività › Finanza › Fatture e ricevute (oppure AI-10, quando disponibile, con il tipo Fattura/Ricevuta).
+2. Ambito: documento, pagine o più file, con un record per fattura.
+3. Griglia modificabile con i valori e la pagina d'origine; controlli locali: somma delle righe = imponibile; imponibile + imposta = totale; formato della partita IVA italiana (11 cifre con cifra di controllo) e del codice fiscale; valori non ritrovati nel testo marcati «non verificato».
+4. Esportazione in CSV o JSON, oppure tabella riepilogativa di più fatture.
+
+**Formati/strutture:** Fattura = {numero, data, fornitore, partita IVA o codice fiscale, cliente, righe [descrizione, quantità, prezzo unitario, aliquota, importo], imponibile per aliquota, imposta, totale, valuta, scadenze [{data, importo}], pagine}. CSV: riga di intestazione, virgolette di protezione, UTF-8, separatore virgola o punto e virgola; JSON = {origine: {documento, pagine}, data, modello, tipo, record: [...]}, con date ISO, numeri con il punto decimale e valuta ISO 4217. Fatture elettroniche ibride (PDF/A-3 con il file XML della fattura allegato, VIS-54): i dati sono letti localmente dall'allegato, prevalgono su quelli ricavati dalle pagine e non viene inviata alcuna richiesta al fornitore.
+
+**Casi limite:** totale non coerente con le righe → evidenziato con la differenza; ricevuta senza righe → solo data, esercente e totale; più fatture nello stesso PDF → un record per fattura, con le pagine; importi in formato locale (es. 1.234,56) → normalizzati senza perdita; scansioni → OCR preventivo (AI-15); allegato XML non leggibile → si usano le pagine, con avviso.
+
+**Criteri di accettazione:**
+- Dato una fattura con righe da 100,00, 50,00 e 25,50 e imponibile 175,50 restituiti dal fornitore simulato, quando la griglia è mostrata, allora il controllo «somma delle righe = imponibile» risulta superato; dato invece un imponibile di 180,00, allora il controllo è segnalato con la differenza 4,50.
+- Dato una partita IVA con cifra di controllo errata nei dati restituiti, quando la griglia è mostrata, allora il campo è segnalato come formalmente non valido.
+- Dati 3 PDF di fatture, quando l'utente esporta in CSV, allora il file contiene 3 record, ciascuno con il nome del file d'origine.
+- Dato un PDF/A-3 con allegato il file XML di una fattura elettronica, quando si estraggono i dati, allora i valori provengono dall'allegato e il fornitore simulato non riceve alcuna richiesta.
+
+**Priorità:** P1
+
+### AI-30 — Schede prodotto
+
+**Descrizione:** Modello di attività che ricava da uno o più documenti tecnici o commerciali (schede tecniche, cataloghi, manuali) una scheda prodotto nella lingua e nel tono scelti: nome, descrizione breve e descrizione estesa, caratteristiche principali, specifiche tecniche in tabella con unità di misura, vantaggi per il cliente e parole chiave. Ogni specifica riporta la pagina d'origine.
+
+**Flusso:**
+1. Pannello IA › Attività › Comunicazione › Scheda prodotto.
+2. L'utente sceglie ambito (documento, pagine, più documenti), lingua, tono (tecnico o commerciale) e lunghezza della descrizione estesa.
+3. Il risultato compare con le sezioni del modello; la tabella delle specifiche è modificabile.
+4. Azioni: copia, esportazione come nuovo PDF (CNV-20), esportazione delle specifiche in CSV, inserimento nel documento come casella di testo (AI-19).
+
+**Formati/strutture:** Scheda = {nome, descrizione_breve (al massimo 300 caratteri), descrizione, caratteristiche [testo], specifiche [{nome, valore, unità, pagina}], vantaggi [testo], parole_chiave [testo]}.
+
+**Casi limite:** specifica restituita senza riscontro nel documento → marcata «non verificato»; unità diverse per la stessa grandezza → conservate come nel documento, con avviso; descrizione breve oltre il limite → segnalata con il conteggio dei caratteri; documento senza dati tecnici → scheda con le sole sezioni descrittive e avviso; scansioni → OCR preventivo (AI-15).
+
+**Criteri di accettazione:**
+- Dato una scheda tecnica con «Potenza 1200 W» a pagina 2 e il fornitore simulato che restituisce quella specifica, quando il risultato è mostrato, allora la tabella delle specifiche contiene nome «Potenza», valore 1200, unità «W» e pagina 2.
+- Dato il fornitore simulato che restituisce una descrizione breve di 350 caratteri, quando il risultato è mostrato, allora la descrizione è segnalata come più lunga del limite di 300 caratteri.
+- Dato una scheda completata, quando l'utente esporta le specifiche in CSV, allora il file contiene una riga per specifica con nome, valore, unità e pagina.
+
+**Priorità:** P1
+
+### AI-31 — Comunicazioni ai clienti
+
+**Descrizione:** Modello di attività che prepara una comunicazione per un cliente (lettera, e-mail, nota informativa) a partire dal documento aperto, dalle pagine scelte o dal risultato di un'altra attività, per esempio la revisione di un contratto (AI-28) o la spiegazione di un bilancio (AI-20). L'utente sceglie destinatario, scopo, tono, lunghezza e lingua; i contenuti tecnici sono spiegati in linguaggio semplice e la comunicazione cita le pagine del documento a cui si riferisce. Copre la preparazione di comunicazioni per i clienti della riga 12.20 del catalogo.
+
+**Flusso:**
+1. Pannello IA › Attività › Comunicazione › Comunicazione al cliente, oppure **Prepara comunicazione al cliente** dal risultato di AI-28.
+2. Parametri: destinatario, scopo, tono (formale o cordiale), lunghezza, lingua, punti da includere.
+3. Il testo compare nel pannello ed è modificabile; azioni di AI-19 (copia, inserisci nel documento, crea nuovo PDF).
+
+**Formati/strutture:** Comunicazione = {oggetto, saluto, corpo, punti chiave, chiusura, riferimenti di pagina}; segnaposto evidenziati per i dati del destinatario non forniti (es. «[nome del cliente]»).
+
+**Casi limite:** dati del destinatario non forniti → segnaposto evidenziati, mai inventati; contenuto legale o finanziario → avviso professionale nel pannello, non inserito nel testo salvo scelta dell'utente; comunicazione più lunga della lunghezza scelta → mostrata per intero con la lunghezza effettiva.
+
+**Criteri di accettazione:**
+- Dato il risultato di una revisione con 2 clausole critiche e la scelta **Prepara comunicazione al cliente**, quando parte la richiesta, allora le istruzioni inviate al fornitore simulato contengono le 2 clausole, il tono e la lingua scelti.
+- Dato il nome del cliente non indicato e il fornitore simulato che restituisce il testo con il segnaposto «[nome del cliente]», quando il testo è mostrato, allora il segnaposto è evidenziato come da completare.
+- Dato una comunicazione generata, quando l'utente sceglie «Crea nuovo PDF», allora si apre un nuovo documento il cui testo estratto coincide con la comunicazione.
+
+**Priorità:** P1
+
+### AI-32 — Confronto e classifica di più documenti
+
+**Descrizione:** Modello di attività che confronta più documenti dello stesso tipo rispetto a criteri dati dall'utente e ne produce una classifica motivata: per esempio più curriculum rispetto ai requisiti di una posizione (catalogo 12.27), più offerte rispetto a un capitolato, più contratti rispetto a un modello. Ogni criterio ha un peso; per ogni documento e criterio il risultato riporta punteggio, motivazione e riferimenti di pagina. Il punteggio totale è calcolato localmente da Foliant; la decisione resta all'utente.
+
+**Flusso:**
+1. Pannello IA › Attività › Confronta e classifica.
+2. L'utente sceglie i documenti (aperti o da file) e definisce i criteri (nome, descrizione, peso da 1 a 5, obbligatorio sì o no), oppure carica un elenco di criteri salvato.
+3. Il fornitore valuta ogni documento per ogni criterio; Foliant calcola il totale e ordina i documenti.
+4. Tabella documenti × criteri con punteggi e motivazioni; il clic su una motivazione apre il documento alla pagina citata.
+5. Esportazione in CSV o PDF.
+
+**Formati/strutture:** Criterio = {nome, descrizione, peso (1–5), obbligatorio}; Valutazione = {documento, criterio, punteggio (0–10), motivazione, pagine}; Totale = Σ(punteggio × peso) / Σ(pesi), con due decimali; un documento con punteggio 0 in un criterio obbligatorio è elencato in fondo come «escluso», con il motivo. Ai documenti sono assegnate etichette neutre e i nomi dei file non vengono inviati (AI-02).
+
+**Casi limite:** curriculum → esclusione dei dati personali non pertinenti (età, stato civile, foto, origine), dichiarata nelle istruzioni, nessuna immagine inviata e avviso che la classifica non sostituisce una decisione presa da una persona; documenti lunghi → elaborazione a blocchi (AI-14); documento non leggibile → escluso dalla classifica con il motivo, gli altri proseguono; parità di punteggio → stessa posizione; più di 50 documenti → avviso sui tempi e sul numero di richieste al fornitore.
+
+**Criteri di accettazione:**
+- Dati 3 CV, 2 criteri con pesi 3 e 1 e il fornitore simulato che restituisce i punteggi (8, 6), (5, 10) e (9, 2), quando la classifica è mostrata, allora i totali sono 7,50, 6,25 e 7,25 e l'ordine è: primo, terzo, secondo documento.
+- Dato un criterio obbligatorio con punteggio 0 per un documento, quando la classifica è mostrata, allora quel documento è in fondo come «escluso», con il motivo.
+- Dato un insieme di CV, quando partono le richieste, allora le istruzioni inviate al fornitore simulato chiedono di ignorare età, stato civile, foto e origine, nessuna immagine dei CV è inviata e il risultato riporta l'avviso sulla decisione umana.
+- Dato una classifica completata, quando l'utente esporta in CSV, allora il file contiene una riga per documento con i punteggi per criterio e il totale.
+
+**Priorità:** P1
+
+
+## 13. Matrice di copertura del catalogo
+
+Questa sezione è la fonte ufficiale della tracciabilità della parità (0.6): per ogni riga P (presente nell'editor di riferimento) del catalogo delle funzionalità (`docs/funzionalita.md`) indica i requisiti che la coprono, con la loro priorità. «Priorità più alta» è la priorità più alta tra i requisiti in ambito collegati. Le righe dell'area 13 sono fuori ambito (0.2): i requisiti collegati restano nella specifica per tracciabilità, con «Fuori ambito» al posto della priorità. Le righe A (aggiunte) non compaiono in questa tabella; i requisiti che le coprono le citano nel campo «Catalogo» o nella descrizione.
+
+Esito: tutte le righe P in ambito sono coperte da almeno un requisito P0 o P1, tranne 10.15 e 10.16, in ambito con priorità P2 per decisione di ambito (0.2).
+
+| Riga | Funzione | Requisiti che la coprono (priorità) | Copertura | Priorità più alta | Note |
+|---|---|---|---|---|---|
+| 1.01 | Schermata iniziale | VIS-01 (P0), UX-10 (P0), UX-17 (P1) | completa | P0 |  |
+| 1.02 | Documenti recenti | VIS-02 (P0), UX-10 (P0) | completa | P0 |  |
+| 1.03 | Gestione dei file | VIS-03 (P1) | completa | P1 | In ambito, adattata al desktop (0.2). |
+| 1.04 | Cartelle | VIS-03 (P1) | completa | P1 | In ambito, adattata al desktop (0.2). |
+| 1.05 | Archivi compressi | VIS-04 (P1) | completa | P1 |  |
+| 1.06 | Integrazione con il file manager | VIS-53 (P1), NFR-31 (P0), NFR-33 (P1) | completa | P0 |  |
+| 1.08 | Apertura dei documenti | VIS-05 (P0) | completa | P0 |  |
+| 1.09 | Schede e gruppi di schede | VIS-30 (P0), UX-03 (P0) | completa | P0 |  |
+| 1.10 | Modalità di visualizzazione | VIS-09 (P0) | completa | P0 |  |
+| 1.11 | Zoom e adattamento | VIS-10 (P0), VIS-51 (P1) | completa | P0 |  |
+| 1.12 | Miniature delle pagine | VIS-14 (P0) | completa | P0 |  |
+| 1.13 | Temi di lettura e protezione della vista | VIS-34 (P1) | completa | P1 |  |
+| 1.18 | Modalità presentazione | VIS-32 (P1) | completa | P1 |  |
+| 1.19 | Scorrimento automatico | VIS-33 (P1) | completa | P1 |  |
+| 1.22 | Lettura ad alta voce | VIS-35 (P1) | completa | P1 |  |
+| 1.23 | Segnalibri | VIS-15 (P0), VIS-16 (P1) | completa | P0 |  |
+| 1.24 | Segnalibri generati con IA | VIS-17 (P1), AI-22 (P1) | completa | P1 |  |
+| 1.27 | Ricerca nel documento | VIS-24 (P0), ANN-35 (P1), VIS-25 (P2) | completa | P0 | VIS-24 cerca anche nei commenti con l'opzione «Cerca anche nei commenti» (P1). |
+| 1.29 | Ricerca semantica | VIS-27 (P1), AI-21 (P1) | completa | P1 |  |
+| 1.31 | Proprietà del documento | VIS-40 (P1), SEC-23 (P1) | completa | P1 |  |
+| 1.33 | Barre degli strumenti e preferenze | VIS-51 (P1), UX-17 (P1) | completa | P1 |  |
+| 1.36 | Stampa | UX-15 (P0), VIS-43 (P0) | completa | P0 |  |
+| 1.38 | Invio per e-mail | VIS-45 (P1), UX-16 (P1) | completa | P1 |  |
+| 2.01 | Inserimento di pagine | PAG-06 (P0), PAG-07 (P0), PAG-08 (P1), PAG-09 (P1), PAG-10 (P1) | completa | P0 |  |
+| 2.02 | Sostituzione di pagine | PAG-19 (P1) | completa | P1 |  |
+| 2.03 | Estrazione di pagine | PAG-12 (P0), PAG-13 (P0), PAG-14 (P1) | completa | P0 |  |
+| 2.04 | Divisione del documento | PAG-20 (P0), PAG-21 (P1), PAG-22 (P1) | completa | P0 |  |
+| 2.06 | Unione di documenti | PAG-24 (P0), BAT-17 (P1) | completa | P0 | Riferimento: PAG-24. |
+| 2.07 | Rotazione delle pagine | PAG-18 (P0) | completa | P0 |  |
+| 2.08 | Eliminazione di pagine | PAG-11 (P0) | completa | P0 |  |
+| 2.09 | Riordino delle pagine | PAG-04 (P0), PAG-05 (P1) | completa | P0 |  |
+| 2.10 | Copia, incolla e duplicazione di pagine | PAG-15 (P0), PAG-16 (P1), PAG-17 (P1) | completa | P0 |  |
+| 2.11 | Ritaglio delle pagine | PAG-25 (P1), PAG-26 (P1) | completa | P1 |  |
+| 2.12 | Suddivisione di una pagina | PAG-29 (P1) | completa | P1 |  |
+| 2.13 | Etichette di pagina | PAG-39 (P1) | completa | P1 |  |
+| 2.14 | Dimensione della pagina | PAG-28 (P1) | completa | P1 |  |
+| 2.18 | Pulizia delle pagine con IA | PAG-41 (P1), AI-24 (P2) | completa | P1 | Analisi locale in PAG-41 (P1); classificazione con IA in AI-24 (P2). |
+| 3.01 | Modifica del testo esistente | TXT-01 (P0), TXT-02 (P0), TXT-03 (P0), TXT-07 (P0), TXT-10 (P0) | completa | P0 |  |
+| 3.02 | Aggiunta di testo | TXT-06 (P0), TXT-07 (P0) | completa | P0 |  |
+| 3.03 | Formattazione del testo | TXT-04 (P0), TXT-05 (P0), TXT-10 (P0) | completa | P0 |  |
+| 3.04 | Testo formattato per trascinamento | TXT-19 (P1) | completa | P1 |  |
+| 3.05 | Selezione e copia del testo | VIS-28 (P0), TXT-18 (P0) | completa | P0 |  |
+| 3.06 | Trova e sostituisci | TXT-12 (P0), VIS-26 (P0) | completa | P0 | Riferimento: TXT-12; VIS-26 è l'accesso dalla barra di ricerca. |
+| 3.07 | Trova ed elimina | TXT-13 (P1), VIS-26 (P0) | completa | P0 | Riferimento: TXT-13. |
+| 3.12 | Modifica del testo con IA | AI-09 (P1), TXT-22 (P1) | completa | P1 | Riferimento: AI-09. |
+| 3.13 | Correzione di bozze con IA | AI-09 (P1), TXT-23 (P1) | completa | P1 | Riferimento: AI-09. |
+| 3.14 | Espansione e sintesi con IA | AI-09 (P1), TXT-24 (P1) | completa | P1 | Riferimento: AI-09. |
+| 3.15 | Rifinitura e cambio di tono con IA | AI-09 (P1), TXT-25 (P1) | completa | P1 | Riferimento: AI-09. |
+| 4.01 | Inserimento di immagini | OBJ-04 (P0), OBJ-05 (P0), OBJ-06 (P0) | completa | P0 |  |
+| 4.02 | Modifica delle immagini | OBJ-08 (P0), OBJ-09 (P0), OBJ-10 (P0), OBJ-11 (P1), OBJ-13 (P0), OBJ-14 (P0), OBJ-15 (P0), OBJ-30 (P0) | completa | P0 |  |
+| 4.03 | Estrazione delle immagini | OBJ-27 (P0), OBJ-28 (P1) | completa | P0 |  |
+| 4.05 | Cattura di aree e testo | VIS-29 (P1), OBJ-29 (P1) | completa | P1 | Riferimento: VIS-29. |
+| 4.07 | Spostamento tra pagine | OBJ-31 (P1), TXT-07 (P0), TXT-08 (P1) | completa | P0 |  |
+| 4.08 | Allineamento automatico | OBJ-23 (P1), TXT-08 (P1) | completa | P1 |  |
+| 4.13 | Filigrana | PAG-36 (P1), BAT-12 (P1) | completa | P1 | Riferimento: PAG-36. |
+| 4.14 | Filigrana generata con IA | AI-25 (P1), PAG-36 (P1) | completa | P1 | Riferimento: AI-25. |
+| 4.16 | Sfondo | PAG-38 (P1), BAT-13 (P1) | completa | P1 | Riferimento: PAG-38. |
+| 4.17 | Sfondo generato con IA | AI-25 (P1), PAG-38 (P1) | completa | P1 | Riferimento: AI-25. |
+| 4.18 | Intestazione e piè di pagina | PAG-34 (P1), PAG-33 (P1), BAT-14 (P1) | completa | P1 | Riferimenti: PAG-34 e PAG-33. |
+| 4.21 | Collegamenti | OBJ-33 (P0), OBJ-34 (P1), OBJ-35 (P0), OBJ-36 (P0), OBJ-37 (P1), OBJ-38 (P0), OBJ-39 (P0) | completa | P0 |  |
+| 5.01 | Evidenziazione | ANN-10 (P0) | completa | P0 |  |
+| 5.02 | Evidenziazione di un'area | ANN-11 (P1) | completa | P1 |  |
+| 5.03 | Barrato | ANN-12 (P0) | completa | P0 |  |
+| 5.04 | Sottolineato | ANN-12 (P0) | completa | P0 |  |
+| 5.05 | Sottolineatura ondulata | ANN-12 (P0) | completa | P0 |  |
+| 5.06 | Segno di inserimento | ANN-13 (P1) | completa | P1 |  |
+| 5.07 | Segno di sostituzione | ANN-13 (P1) | completa | P1 |  |
+| 5.08 | Commento di testo | ANN-15 (P1) | completa | P1 |  |
+| 5.09 | Casella di testo | ANN-16 (P0) | completa | P0 |  |
+| 5.10 | Nota adesiva | ANN-14 (P0) | completa | P0 |  |
+| 5.11 | Richiamo | ANN-17 (P1) | completa | P1 |  |
+| 5.12 | Forme | ANN-18 (P0), ANN-19 (P0), ANN-20 (P1), ANN-21 (P1) | completa | P0 |  |
+| 5.13 | Disegno a mano libera | ANN-22 (P0), ANN-23 (P0) | completa | P0 |  |
+| 5.14 | Adesivi | ANN-27 (P1) | completa | P1 |  |
+| 5.15 | Adesivi generati con IA | ANN-28 (P1), AI-25 (P1) | completa | P1 | Riferimento: AI-25. |
+| 5.16 | File allegato sulla pagina | ANN-29 (P1) | completa | P1 |  |
+| 5.17 | Timbri | ANN-24 (P1), ANN-25 (P1), ANN-26 (P1) | completa | P1 |  |
+| 5.18 | Timbri generati con IA | ANN-28 (P1), AI-25 (P1) | completa | P1 | Riferimento: AI-25. |
+| 5.20 | Misurazioni | ANN-30 (P1), ANN-31 (P1), ANN-32 (P1) | completa | P1 |  |
+| 5.23 | Elenco delle annotazioni | ANN-34 (P0) | completa | P0 |  |
+| 5.24 | Risposte ai commenti | ANN-37 (P1) | completa | P1 |  |
+| 5.26 | Mostra o nascondi annotazioni | ANN-39 (P1) | completa | P1 |  |
+| 5.27 | Filtro e ricerca dei commenti | ANN-35 (P1) | completa | P1 |  |
+| 5.29 | Riepilogo dei commenti | ANN-43 (P1) | completa | P1 |  |
+| 6.01 | Nuovo documento vuoto | CNV-23 (P0) | completa | P0 |  |
+| 6.02 | Creazione da documenti d'ufficio | CNV-18 (P1) | completa | P1 |  |
+| 6.04 | Creazione da immagini | CNV-19 (P0) | completa | P0 |  |
+| 6.06 | Creazione da testo e Markdown | CNV-20 (P1) | completa | P1 |  |
+| 6.08 | Creazione da cattura dello schermo | CNV-25 (P1) | completa | P1 |  |
+| 6.09 | Creazione dagli appunti | CNV-22 (P1), PAG-09 (P1) | completa | P1 |  |
+| 6.10 | Acquisizione da scanner | CNV-24 (P1), PAG-10 (P1) | completa | P1 |  |
+| 6.12 | Acquisizione da fotocamera | CNV-26 (P1) | completa | P1 | In ambito, adattata al desktop: webcam del computer o foto importate (0.2). |
+| 6.16 | Portfolio PDF | CNV-34 (P1), VIS-22 (P1), VIS-54 (P1) | completa | P1 | Creazione e modifica in CNV-34; consultazione, ricerca, estrazione e stampa in VIS-22; allegati in VIS-54. |
+| 6.19 | Esportazione in DOCX | CNV-03 (P0) | completa | P0 |  |
+| 6.20 | Esportazione in foglio di calcolo | CNV-04 (P1) | completa | P1 |  |
+| 6.21 | Esportazione in presentazione | CNV-06 (P1) | completa | P1 |  |
+| 6.22 | Esportazione in CSV | CNV-05 (P1) | completa | P1 |  |
+| 6.23 | Esportazione in immagini | CNV-07 (P0), PAG-13 (P0) | completa | P0 | Riferimento: CNV-07. |
+| 6.24 | Esportazione in immagine unica | CNV-08 (P1) | completa | P1 |  |
+| 6.25 | Esportazione in RTF | CNV-10 (P1) | completa | P1 |  |
+| 6.26 | Esportazione in testo semplice | CNV-09 (P0) | completa | P0 |  |
+| 6.27 | Esportazione in XML | CNV-12 (P1) | completa | P1 |  |
+| 6.28 | Esportazione in HTML | CNV-11 (P1) | completa | P1 |  |
+| 6.30 | Conversione con OCR | CNV-02 (P1), OCR-16 (P1) | completa | P1 |  |
+| 6.31 | Conversione migliorata con IA | CNV-16 (P1), AI-27 (P1) | completa | P1 | Riferimento: AI-27. |
+| 6.32 | Salva con nome e in altri formati | VIS-48 (P0), VIS-47 (P0) | completa | P0 |  |
+| 6.34 | Compressione | CNV-29 (P0), CNV-30 (P1) | completa | P0 | Riferimento: CNV-29 (impostazioni personalizzate in CNV-30). |
+| 6.40 | Salvataggio in PDF/A, PDF/E, PDF/X | CNV-14 (P0), CNV-15 (P1), SEC-25 (P1) | completa | P0 | Riferimento: CNV-14; PDF/X e PDF/E in CNV-15 (P1); livelli u e a e PDF/A-4 P2. |
+| 7.01 | Riconoscimento del testo | OCR-02 (P0), OCR-04 (P0), OCR-05 (P0), OCR-06 (P0), TXT-15 (P0) | completa | P0 |  |
+| 7.02 | Riconoscimento multilingue | OCR-03 (P0) | completa | P0 |  |
+| 7.03 | Copia del testo da scansioni | OCR-07 (P0), OCR-11 (P1), OCR-20 (P1) | completa | P0 |  |
+| 7.04 | PDF di sole immagini | OCR-18 (P1) | completa | P1 |  |
+| 7.05 | Risultato OCR accessibile | OCR-17 (P1) | completa | P1 |  |
+| 7.06 | Impostazioni di rilevamento | OCR-01 (P0) | completa | P0 |  |
+| 8.01 | Creazione di campi | FRM-10 (P0), FRM-19 (P1), FRM-20 (P1) | completa | P0 |  |
+| 8.02 | Riconoscimento automatico dei campi | FRM-26 (P1), FRM-27 (P2) | completa | P1 |  |
+| 8.03 | Compilazione | FRM-01 (P0), FRM-02 (P0), FRM-03 (P0), FRM-04 (P0), FRM-05 (P0), FRM-09 (P0) | completa | P0 |  |
+| 8.04 | Modifica dei campi | FRM-11 (P0), FRM-12 (P0), FRM-13 (P0), FRM-14 (P0), FRM-22 (P1) | completa | P0 |  |
+| 8.05 | Duplicazione di un campo | FRM-23 (P1) | completa | P1 |  |
+| 8.06 | Campi su più pagine | FRM-23 (P1) | completa | P1 |  |
+| 8.07 | Elenco dei campi | FRM-24 (P1) | completa | P1 |  |
+| 8.08 | Anteprima del modulo | FRM-25 (P1) | completa | P1 |  |
+| 8.09 | Reimpostazione | FRM-31 (P0) | completa | P0 |  |
+| 8.10 | Importazione ed esportazione dei dati | FRM-28 (P1), FRM-29 (P1) | completa | P1 | Formati: FDF, XFDF, XML semplice, CSV, TXT delimitato da tabulazioni, JSON. |
+| 9.01 | Firma autografa elettronica | SIG-01 (P0), SIG-02 (P0), SIG-03 (P0) | completa | P0 |  |
+| 9.02 | Archivio delle firme | SIG-04 (P0) | completa | P0 |  |
+| 9.04 | Firma digitale con certificato | SIG-08 (P0) | completa | P0 |  |
+| 10.01 | Password di apertura | SEC-04 (P0), SEC-06 (P0) | completa | P0 |  |
+| 10.02 | Password dei permessi | SEC-05 (P0) | completa | P0 |  |
+| 10.03 | Proprietà di sicurezza | SEC-03 (P0) | completa | P0 |  |
+| 10.04 | Rimozione della protezione | SEC-08 (P0) | completa | P0 |  |
+| 10.10 | Redazione | SEC-13 (P0), SEC-14 (P0), SEC-15 (P0), SEC-19 (P0), SEC-20 (P0) | completa | P0 |  |
+| 10.13 | Rimozione dei dati nascosti | SEC-22 (P1), SEC-21 (P1) | completa | P1 | Riferimento: SEC-22. |
+| 10.14 | Appiattimento | SEC-24 (P1), ANN-40 (P1), FRM-32 (P1), CNV-33 (P1) | completa | P1 | Riferimento: SEC-24 (annotazioni ANN-40, moduli FRM-32). |
+| 10.15 | Cartella protetta | SEC-31 (P2) | completa | P2 | In ambito, adattata al desktop, con priorità P2 per decisione di ambito (0.2). |
+| 10.16 | Blocco dell'applicazione | SEC-32 (P2) | completa | P2 | In ambito, adattato al desktop, con priorità P2 per decisione di ambito (0.2). |
+| 10.17 | Connessioni di rete protette | SEC-34 (P0) | completa | P0 | Solo le connessioni delle funzioni in ambito: niente aggiornamenti, archiviazione remota o telemetria (0.2, NFR-19). |
+| 11.01 | Confronto di documenti | CMP-01 (P0), CMP-02 (P0), CMP-03 (P1), CMP-04 (P0), CMP-05 (P0), CMP-06 (P0), CMP-07 (P0) | completa | P0 |  |
+| 11.03 | In blocco: conversione | BAT-06 (P1), CNV-17 (P1) | completa | P1 | Riferimento: BAT-06. |
+| 11.04 | In blocco: creazione | BAT-07 (P1), CNV-28 (P1) | completa | P1 | Riferimento: BAT-07. |
+| 11.05 | In blocco: inserimento di pagine | BAT-18 (P1) | completa | P1 |  |
+| 11.06 | In blocco: stampa | BAT-19 (P1) | completa | P1 |  |
+| 11.07 | In blocco: cifratura | BAT-10 (P1) | completa | P1 |  |
+| 11.08 | In blocco: OCR | BAT-08 (P1), OCR-15 (P1) | completa | P1 | Riferimento: BAT-08. |
+| 11.09 | In blocco: compressione | BAT-09 (P1), CNV-29 (P0) | completa | P0 | Livelli e parametri di CNV-29. |
+| 11.10 | In blocco: filigrana | BAT-12 (P1) | completa | P1 |  |
+| 11.11 | In blocco: intestazione e piè di pagina | BAT-14 (P1) | completa | P1 |  |
+| 11.12 | In blocco: sfondo | BAT-13 (P1) | completa | P1 |  |
+| 11.13 | In blocco: rimozione di elementi | BAT-16 (P1) | completa | P1 |  |
+| 11.14 | Numerazione Bates | PAG-35 (P1), BAT-15 (P1) | completa | P1 | Riferimento: PAG-35. |
+| 12.01 | Riassunto | AI-05 (P1) | completa | P1 | Anche testo incollato e più documenti. |
+| 12.02 | Riassunto per sezione | VIS-18 (P1), AI-22 (P1) | completa | P1 | Riferimento: AI-22. |
+| 12.03 | Riassunto di documentazione tecnica | AI-20 (P1) | completa | P1 | Modello predefinito «Riassunto tecnico». |
+| 12.04 | Traduzione | AI-06 (P1), AI-07 (P1), AI-11 (P1) | completa | P1 |  |
+| 12.05 | Chat con il documento | AI-04 (P1) | completa | P1 |  |
+| 12.06 | Chat sulle immagini | AI-11 (P1) | completa | P1 |  |
+| 12.07 | Chat generica | AI-03 (P1) | completa | P1 |  |
+| 12.08 | Spiegazioni | AI-08 (P1) | completa | P1 |  |
+| 12.09 | Mappa mentale | AI-12 (P1) | completa | P1 |  |
+| 12.10 | Comandi in linguaggio naturale | AI-23 (P1) | completa | P1 |  |
+| 12.11 | Scrittura assistita | AI-19 (P1) | completa | P1 |  |
+| 12.12 | Contenuti per video online | AI-20 (P1) | completa | P1 | Modello predefinito «Contenuti per video». |
+| 12.13 | Ricerca bibliografica approfondita | AI-26 (P1) | completa | P1 |  |
+| 12.14 | Ricerca di articoli scientifici | AI-26 (P1) | completa | P1 |  |
+| 12.15 | Analisi di un articolo scientifico | AI-20 (P1) | completa | P1 | Modello predefinito «Analisi di un articolo scientifico». |
+| 12.16 | Aiuto per i compiti | AI-20 (P1) | completa | P1 | Modello predefinito «Aiuto per i compiti». |
+| 12.17 | Generatore di quiz | AI-20 (P1) | completa | P1 | Modello predefinito «Quiz». |
+| 12.18 | Problemi di matematica | AI-20 (P1) | completa | P1 | Modello predefinito «Problemi di matematica». |
+| 12.19 | Bozze di contratti | AI-28 (P1) | completa | P1 | Bozza di contratto. |
+| 12.20 | Assistente legale | AI-28 (P1), AI-31 (P1) | completa | P1 | Rischi e ricerca giuridica (AI-28); comunicazioni ai clienti (AI-31). |
+| 12.21 | Revisione dei contratti | AI-28 (P1) | completa | P1 | Revisione clausola per clausola. |
+| 12.22 | Piano d'impresa | AI-20 (P1) | completa | P1 | Modello predefinito «Piano d'impresa». |
+| 12.23 | Supporto alla strategia | AI-20 (P1) | completa | P1 | Modello predefinito «Analisi strategica». |
+| 12.24 | Spiegazione dei bilanci | AI-20 (P1) | completa | P1 | Modello predefinito «Spiegazione del bilancio». |
+| 12.25 | Analisi dei flussi di cassa | AI-20 (P1) | completa | P1 | Modello predefinito «Analisi dei flussi di cassa». |
+| 12.26 | Lettura dei curriculum | AI-20 (P1) | completa | P1 | Modello predefinito «Lettura dei curriculum». |
+| 12.27 | Selezione dei curriculum | AI-32 (P1) | completa | P1 | Confronto e classifica di più curriculum rispetto ai requisiti. |
+| 13.01 | Archivio cloud del produttore | — | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.02 | Sincronizzazione tra dispositivi | — | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.03 | Archiviazione cloud cifrata | SEC-33 (Fuori ambito) | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.04 | Condivisione tramite link | VIS-46 (Fuori ambito) | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.05 | Condivisione tramite codice QR | VIS-46 (Fuori ambito) | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.06 | Collegamento a un servizio di archiviazione online di terze parti | — | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.07 | Collegamento WebDAV | — | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.08 | Collegamento FTP/SFTP | — | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.09 | Collegamento SMB | — | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.10 | Richiesta di firme a più parti | SIG-24 (Fuori ambito) | fuori ambito (0.2) | — | Esclusa in 0.2. |
+| 13.11 | Firma per aziende | SIG-25 (Fuori ambito) | fuori ambito (0.2) | — | Esclusa in 0.2. |
 
 ## Appendice — Matrice delle priorità
 
 | ID | Funzione | Priorità | Sezione |
 |---|---|---|---|
 | VIS-01 | Schermata Home | P0 | 1. Visualizzazione e navigazione |
-| VIS-02 | File recenti e preferiti | P0 | 1. Visualizzazione e navigazione |
+| VIS-02 | File recenti e documenti fissati | P0 | 1. Visualizzazione e navigazione |
 | VIS-03 | Gestione dei file locali | P1 | 1. Visualizzazione e navigazione |
-| VIS-04 | Archivi compressi | P2 | 1. Visualizzazione e navigazione |
+| VIS-04 | Archivi compressi | P1 | 1. Visualizzazione e navigazione |
 | VIS-05 | Apertura dei documenti | P0 | 1. Visualizzazione e navigazione |
 | VIS-06 | PDF protetti: password e permessi | P0 | 1. Visualizzazione e navigazione |
 | VIS-07 | File danneggiati e contenuti non supportati | P1 | 1. Visualizzazione e navigazione |
@@ -8935,8 +9431,8 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | VIS-14 | Pannello miniature | P0 | 1. Visualizzazione e navigazione |
 | VIS-15 | Segnalibri: consultazione | P0 | 1. Visualizzazione e navigazione |
 | VIS-16 | Segnalibri: creazione e modifica | P1 | 1. Visualizzazione e navigazione |
-| VIS-17 | Segnalibri: generazione automatica e strumenti avanzati | P2 | 1. Visualizzazione e navigazione |
-| VIS-18 | Riassunto di una sezione dal segnalibro (IA) | P2 | 1. Visualizzazione e navigazione |
+| VIS-17 | Segnalibri: generazione automatica e strumenti avanzati | P1 | 1. Visualizzazione e navigazione |
+| VIS-18 | Riassunto di una sezione dal segnalibro (IA) | P1 | 1. Visualizzazione e navigazione |
 | VIS-19 | Collegamenti e azioni di navigazione | P0 | 1. Visualizzazione e navigazione |
 | VIS-20 | Livelli (contenuto opzionale): visualizzazione | P1 | 1. Visualizzazione e navigazione |
 | VIS-21 | Livelli: gestione | P2 | 1. Visualizzazione e navigazione |
@@ -8944,10 +9440,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | VIS-23 | Thread di articoli | P2 | 1. Visualizzazione e navigazione |
 | VIS-24 | Ricerca nel documento | P0 | 1. Visualizzazione e navigazione |
 | VIS-25 | Ricerca avanzata e su più documenti | P2 | 1. Visualizzazione e navigazione |
-| VIS-26 | Trova e sostituisci, Trova ed elimina | P1 | 1. Visualizzazione e navigazione |
-| VIS-27 | Ricerca semantica (IA) | P2 | 1. Visualizzazione e navigazione |
+| VIS-26 | Trova e sostituisci, Trova ed elimina | P0 | 1. Visualizzazione e navigazione |
+| VIS-27 | Ricerca semantica (IA) | P1 | 1. Visualizzazione e navigazione |
 | VIS-28 | Selezione e copia del testo | P0 | 1. Visualizzazione e navigazione |
-| VIS-29 | Istantanea di un'area | P1 | 1. Visualizzazione e navigazione |
+| VIS-29 | Cattura area | P1 | 1. Visualizzazione e navigazione |
 | VIS-30 | Schede, finestre e sessioni | P0 | 1. Visualizzazione e navigazione |
 | VIS-31 | Modalità lettura e schermo intero | P1 | 1. Visualizzazione e navigazione |
 | VIS-32 | Presentazione | P1 | 1. Visualizzazione e navigazione |
@@ -8958,13 +9454,13 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | VIS-37 | Contenuti multimediali e 3D incorporati | P2 | 1. Visualizzazione e navigazione |
 | VIS-38 | Lente, panoramica e vista divisa | P2 | 1. Visualizzazione e navigazione |
 | VIS-39 | Righelli, griglie, guide e coordinate | P1 | 1. Visualizzazione e navigazione |
-| VIS-40 | Proprietà del documento | P1 | 1. Visualizzazione e navigazione |
+| VIS-40 | Informazioni sul documento | P1 | 1. Visualizzazione e navigazione |
 | VIS-41 | Metadati avanzati | P2 | 1. Visualizzazione e navigazione |
-| VIS-42 | Vista iniziale del documento | P2 | 1. Visualizzazione e navigazione |
+| VIS-42 | Apertura del documento | P2 | 1. Visualizzazione e navigazione |
 | VIS-43 | Stampa | P0 | 1. Visualizzazione e navigazione |
 | VIS-44 | Stampa avanzata | P2 | 1. Visualizzazione e navigazione |
 | VIS-45 | Invio e condivisione locale | P1 | 1. Visualizzazione e navigazione |
-| VIS-46 | Condivisione tramite link e codice QR | P2 | 1. Visualizzazione e navigazione |
+| VIS-46 | Condivisione tramite link e codice QR | Fuori ambito | 1. Visualizzazione e navigazione |
 | VIS-47 | Salvataggio | P0 | 1. Visualizzazione e navigazione |
 | VIS-48 | Salva con nome e Salva una copia | P0 | 1. Visualizzazione e navigazione |
 | VIS-49 | Ripristina e ricarica | P1 | 1. Visualizzazione e navigazione |
@@ -8972,6 +9468,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | VIS-51 | Barre strumenti, pannelli e preferenze di visualizzazione | P1 | 1. Visualizzazione e navigazione |
 | VIS-52 | Scorciatoie da tastiera e ricerca dei comandi | P2 | 1. Visualizzazione e navigazione |
 | VIS-53 | Integrazione con il desktop | P1 | 1. Visualizzazione e navigazione |
+| VIS-54 | Allegati del documento | P1 | 1. Visualizzazione e navigazione |
 | PAG-01 | Organizzatore pagine a griglia | P0 | 2. Gestione pagine |
 | PAG-02 | Selezione e sintassi degli intervalli di pagine | P0 | 2. Gestione pagine |
 | PAG-03 | Integrità dei riferimenti nelle operazioni di pagina | P0 | 2. Gestione pagine |
@@ -8984,7 +9481,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | PAG-10 | Inserisci da scanner | P1 | 2. Gestione pagine |
 | PAG-11 | Elimina pagine | P0 | 2. Gestione pagine |
 | PAG-12 | Estrai pagine in PDF | P0 | 2. Gestione pagine |
-| PAG-13 | Estrai pagine come immagini | P1 | 2. Gestione pagine |
+| PAG-13 | Estrai pagine come immagini | P0 | 2. Gestione pagine |
 | PAG-14 | Trascinamento di pagine tra documenti e verso il file manager | P1 | 2. Gestione pagine |
 | PAG-15 | Duplica pagine | P0 | 2. Gestione pagine |
 | PAG-16 | Copia, taglia e incolla pagine | P1 | 2. Gestione pagine |
@@ -9034,10 +9531,10 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | TXT-19 | Inserimento di testo formattato da trascinamento o dagli appunti | P1 | 3. Modifica testo |
 | TXT-20 | Salvaguardie d'integrità durante la modifica | P0 | 3. Modifica testo |
 | TXT-21 | Scritture complesse: bidirezionali, con composizione dei glifi e verticali | P2 | 3. Modifica testo |
-| TXT-22 | Modifica del testo con istruzioni in linguaggio naturale (IA) | P2 | 3. Modifica testo |
-| TXT-23 | Correzione bozze con IA | P2 | 3. Modifica testo |
-| TXT-24 | Espandi e condensa con IA | P2 | 3. Modifica testo |
-| TXT-25 | Rifinisci e cambia tono con IA | P2 | 3. Modifica testo |
+| TXT-22 | Modifica del testo con istruzioni in linguaggio naturale (IA) | P1 | 3. Modifica testo |
+| TXT-23 | Correzione bozze con IA | P1 | 3. Modifica testo |
+| TXT-24 | Espandi e condensa con IA | P1 | 3. Modifica testo |
+| TXT-25 | Rifinisci e cambia tono con IA | P1 | 3. Modifica testo |
 | OBJ-01 | Modalità di modifica degli oggetti | P0 | 4. Immagini, oggetti e collegamenti |
 | OBJ-02 | Selezione di immagini e oggetti | P0 | 4. Immagini, oggetti e collegamenti |
 | OBJ-03 | Pannello proprietà e trasformazione numerica | P1 | 4. Immagini, oggetti e collegamenti |
@@ -9097,7 +9594,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | ANN-14 | Nota adesiva | P0 | 5. Annotazioni e commenti |
 | ANN-15 | Commento di testo sulla pagina | P1 | 5. Annotazioni e commenti |
 | ANN-16 | Casella di testo | P0 | 5. Annotazioni e commenti |
-| ANN-17 | Callout | P1 | 5. Annotazioni e commenti |
+| ANN-17 | Richiamo | P1 | 5. Annotazioni e commenti |
 | ANN-18 | Rettangolo ed ellisse | P0 | 5. Annotazioni e commenti |
 | ANN-19 | Linea e freccia | P0 | 5. Annotazioni e commenti |
 | ANN-20 | Poligono e polilinea | P1 | 5. Annotazioni e commenti |
@@ -9107,8 +9604,8 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | ANN-24 | Timbri predefiniti | P1 | 5. Annotazioni e commenti |
 | ANN-25 | Timbri dinamici | P1 | 5. Annotazioni e commenti |
 | ANN-26 | Timbri personalizzati e libreria timbri | P1 | 5. Annotazioni e commenti |
-| ANN-27 | Adesivi | P2 | 5. Annotazioni e commenti |
-| ANN-28 | Generazione di adesivi e timbri con IA | P2 | 5. Annotazioni e commenti |
+| ANN-27 | Adesivi | P1 | 5. Annotazioni e commenti |
+| ANN-28 | Generazione di adesivi e timbri con IA | P1 | 5. Annotazioni e commenti |
 | ANN-29 | File allegato come annotazione | P1 | 5. Annotazioni e commenti |
 | ANN-30 | Scala di misura e calibrazione | P1 | 5. Annotazioni e commenti |
 | ANN-31 | Misura di distanza | P1 | 5. Annotazioni e commenti |
@@ -9132,32 +9629,33 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | CNV-05 | PDF → CSV | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-06 | PDF → PPTX (presentazione) | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-07 | PDF → immagini (PNG, JPEG, TIFF, BMP, GIF) | P0 | 6. Conversione, creazione e ottimizzazione |
-| CNV-08 | PDF → immagine lunga | P2 | 6. Conversione, creazione e ottimizzazione |
+| CNV-08 | PDF → immagine lunga | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-09 | PDF → testo semplice (TXT) | P0 | 6. Conversione, creazione e ottimizzazione |
-| CNV-10 | PDF → RTF | P2 | 6. Conversione, creazione e ottimizzazione |
+| CNV-10 | PDF → RTF | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-11 | PDF → HTML | P1 | 6. Conversione, creazione e ottimizzazione |
-| CNV-12 | PDF → XML | P2 | 6. Conversione, creazione e ottimizzazione |
+| CNV-12 | PDF → XML | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-13 | PDF → EPUB | P2 | 6. Conversione, creazione e ottimizzazione |
 | CNV-14 | Conversione in PDF/A (1b, 2b, 3b) | P0 | 6. Conversione, creazione e ottimizzazione |
-| CNV-15 | Altri profili ISO: PDF/A livelli u e a, PDF/A-4, PDF/X, PDF/E | P2 | 6. Conversione, creazione e ottimizzazione |
-| CNV-16 | Conversione avanzata assistita da IA | P2 | 6. Conversione, creazione e ottimizzazione |
+| CNV-15 | Altri profili ISO: PDF/A livelli u e a, PDF/A-4, PDF/X, PDF/E | P1 | 6. Conversione, creazione e ottimizzazione |
+| CNV-16 | Conversione avanzata assistita da IA | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-17 | Conversione in blocco di più file | P1 | 6. Conversione, creazione e ottimizzazione |
-| CNV-18 | Crea PDF da file Office | P1 | 6. Conversione, creazione e ottimizzazione |
+| CNV-18 | Crea PDF da documenti d'ufficio (DOCX, XLSX, PPTX) | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-19 | Crea PDF da immagini | P0 | 6. Conversione, creazione e ottimizzazione |
 | CNV-20 | Crea PDF da testo, Markdown, RTF e CSV | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-21 | Crea PDF da HTML e pagine web | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-22 | Crea PDF dagli appunti | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-23 | Crea PDF vuoto | P0 | 6. Conversione, creazione e ottimizzazione |
 | CNV-24 | Crea PDF da scanner | P1 | 6. Conversione, creazione e ottimizzazione |
-| CNV-25 | Crea PDF da cattura dello schermo | P2 | 6. Conversione, creazione e ottimizzazione |
-| CNV-26 | Crea PDF da fotocamera o da foto di documenti | P2 | 6. Conversione, creazione e ottimizzazione |
+| CNV-25 | Crea PDF da cattura dello schermo | P1 | 6. Conversione, creazione e ottimizzazione |
+| CNV-26 | Crea PDF da fotocamera o da foto di documenti | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-27 | Stampante virtuale PDF | P2 | 6. Conversione, creazione e ottimizzazione |
 | CNV-28 | Creazione di PDF in blocco | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-29 | Comprimi PDF | P0 | 6. Conversione, creazione e ottimizzazione |
-| CNV-30 | Ottimizzazione avanzata e analisi dello spazio | P1 | 6. Conversione, creazione e ottimizzazione |
-| CNV-31 | Linearizzazione per la visualizzazione web veloce | P1 | 6. Conversione, creazione e ottimizzazione |
+| CNV-30 | Compressione personalizzata e analisi dello spazio | P1 | 6. Conversione, creazione e ottimizzazione |
+| CNV-31 | Linearizzazione per l'apertura progressiva sul web | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-32 | Ripara PDF danneggiati | P1 | 6. Conversione, creazione e ottimizzazione |
 | CNV-33 | Appiattisci (flatten) | P1 | 6. Conversione, creazione e ottimizzazione |
+| CNV-34 | Crea portfolio PDF | P1 | 6. Conversione, creazione e ottimizzazione |
 | OCR-01 | Rilevamento automatico delle pagine senza testo e proposta di OCR all'apertura | P0 | 7. OCR e PDF scannerizzati |
 | OCR-02 | Motore OCR locale e offline | P0 | 7. OCR e PDF scannerizzati |
 | OCR-03 | Lingue di riconoscimento: selezione multipla e gestione dei pacchetti | P0 | 7. OCR e PDF scannerizzati |
@@ -9173,9 +9671,9 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | OCR-13 | Avanzamento, esecuzione in background, annullamento e annulla/ripeti | P0 | 7. OCR e PDF scannerizzati |
 | OCR-14 | Pagine con testo già presente: salta, sostituisci livello OCR, solo aree immagine, forza | P1 | 7. OCR e PDF scannerizzati |
 | OCR-15 | OCR in blocco su più file | P1 | 7. OCR e PDF scannerizzati |
-| OCR-16 | OCR nella conversione verso formati Office e altri formati modificabili | P1 | 7. OCR e PDF scannerizzati |
+| OCR-16 | OCR nella conversione verso documenti d'ufficio (DOCX, XLSX, PPTX) e altri formati modificabili | P1 | 7. OCR e PDF scannerizzati |
 | OCR-17 | Uscita conforme PDF/A e PDF/UA dai risultati OCR | P1 | 7. OCR e PDF scannerizzati |
-| OCR-18 | Conversione in PDF solo immagine e rimozione del livello OCR | P2 | 7. OCR e PDF scannerizzati |
+| OCR-18 | Conversione in PDF solo immagine e rimozione del livello OCR | P1 | 7. OCR e PDF scannerizzati |
 | OCR-19 | Immagine ricercabile compressa (riduzione della dimensione) | P2 | 7. OCR e PDF scannerizzati |
 | OCR-20 | Integrazione dell'OCR con le altre funzioni (ricerca, redazione, lettura, acquisizione) | P1 | 7. OCR e PDF scannerizzati |
 | FRM-01 | Rilevamento del modulo e barra di compilazione | P0 | 8. Moduli |
@@ -9237,8 +9735,8 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | SIG-21 | Avviso di invalidazione nei documenti firmati | P0 | 9. Firma |
 | SIG-22 | Livelli PAdES, validazione a lungo termine e marca temporale di documento | P2 | 9. Firma |
 | SIG-23 | Firma con smart card o token crittografico | P2 | 9. Firma |
-| SIG-24 | Richiesta di firma a più firmatari | P2 | 9. Firma |
-| SIG-25 | Gestione avanzata dei firmatari e criteri organizzativi | P2 | 9. Firma |
+| SIG-24 | Richiesta di firma a più firmatari | Fuori ambito | 9. Firma |
+| SIG-25 | Gestione avanzata dei firmatari e criteri organizzativi | Fuori ambito | 9. Firma |
 | SEC-01 | Apertura di documenti protetti da password | P0 | 10. Protezione e sicurezza |
 | SEC-02 | Applicazione dei permessi del documento | P0 | 10. Protezione e sicurezza |
 | SEC-03 | Proprietà di sicurezza del documento | P0 | 10. Protezione e sicurezza |
@@ -9260,7 +9758,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | SEC-19 | Anteprima e revisione dei segni di redazione | P0 | 10. Protezione e sicurezza |
 | SEC-20 | Applicazione della redazione con rimozione definitiva | P0 | 10. Protezione e sicurezza |
 | SEC-21 | Ispezione del documento (informazioni nascoste) | P1 | 10. Protezione e sicurezza |
-| SEC-22 | Sanificazione del documento | P1 | 10. Protezione e sicurezza |
+| SEC-22 | Rimozione dei dati nascosti | P1 | 10. Protezione e sicurezza |
 | SEC-23 | Modifica dei metadati del documento | P1 | 10. Protezione e sicurezza |
 | SEC-24 | Appiattimento (flatten) | P1 | 10. Protezione e sicurezza |
 | SEC-25 | Salvataggio come PDF/A, PDF/E e PDF/X | P1 | 10. Protezione e sicurezza |
@@ -9271,7 +9769,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | SEC-30 | Riservatezza dei dati locali | P1 | 10. Protezione e sicurezza |
 | SEC-31 | Spazio protetto per documenti riservati | P2 | 10. Protezione e sicurezza |
 | SEC-32 | Blocco dell'applicazione | P2 | 10. Protezione e sicurezza |
-| SEC-33 | Cifratura lato client dei documenti sincronizzati | P2 | 10. Protezione e sicurezza |
+| SEC-33 | Cifratura lato client dei documenti sincronizzati | Fuori ambito | 10. Protezione e sicurezza |
 | SEC-34 | Trasmissione dati sicura e riservatezza di rete | P0 | 10. Protezione e sicurezza |
 | CMP-01 | Avvio del confronto e scelta delle versioni | P0 | 11. Confronto e operazioni in blocco |
 | CMP-02 | Confronto del contenuto testuale | P0 | 11. Confronto e operazioni in blocco |
@@ -9287,25 +9785,25 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | CMP-12 | Preset per tipo di documento e confronto di scansioni | P1 | 11. Confronto e operazioni in blocco |
 | CMP-13 | Confronto di testo semplice | P2 | 11. Confronto e operazioni in blocco |
 | CMP-14 | Confronto tra revisioni dello stesso file | P2 | 11. Confronto e operazioni in blocco |
-| BAT-01 | Coda dei file di input | P0 | 11. Confronto e operazioni in blocco |
-| BAT-02 | Cartella di destinazione e politica di sovrascrittura | P0 | 11. Confronto e operazioni in blocco |
-| BAT-03 | Schema dei nomi dei file di output | P0 | 11. Confronto e operazioni in blocco |
-| BAT-04 | Esecuzione, avanzamento, pausa e annullamento | P0 | 11. Confronto e operazioni in blocco |
-| BAT-05 | Gestione degli errori per singolo file e rapporto finale | P0 | 11. Confronto e operazioni in blocco |
-| BAT-06 | Conversione in blocco da PDF ad altri formati | P0 | 11. Confronto e operazioni in blocco |
+| BAT-01 | Coda dei file di input | P1 | 11. Confronto e operazioni in blocco |
+| BAT-02 | Cartella di destinazione e politica di sovrascrittura | P1 | 11. Confronto e operazioni in blocco |
+| BAT-03 | Schema dei nomi dei file di output | P1 | 11. Confronto e operazioni in blocco |
+| BAT-04 | Esecuzione, avanzamento, pausa e annullamento | P1 | 11. Confronto e operazioni in blocco |
+| BAT-05 | Gestione degli errori per singolo file e rapporto finale | P1 | 11. Confronto e operazioni in blocco |
+| BAT-06 | Conversione in blocco da PDF ad altri formati | P1 | 11. Confronto e operazioni in blocco |
 | BAT-07 | Creazione in blocco di PDF da altri formati | P1 | 11. Confronto e operazioni in blocco |
-| BAT-08 | OCR in blocco | P0 | 11. Confronto e operazioni in blocco |
-| BAT-09 | Compressione in blocco | P0 | 11. Confronto e operazioni in blocco |
-| BAT-10 | Protezione con password in blocco | P0 | 11. Confronto e operazioni in blocco |
-| BAT-11 | Rimozione in blocco della password nota | P0 | 11. Confronto e operazioni in blocco |
-| BAT-12 | Filigrana in blocco | P0 | 11. Confronto e operazioni in blocco |
+| BAT-08 | OCR in blocco | P1 | 11. Confronto e operazioni in blocco |
+| BAT-09 | Compressione in blocco | P1 | 11. Confronto e operazioni in blocco |
+| BAT-10 | Protezione con password in blocco | P1 | 11. Confronto e operazioni in blocco |
+| BAT-11 | Rimozione in blocco della password nota | P1 | 11. Confronto e operazioni in blocco |
+| BAT-12 | Filigrana in blocco | P1 | 11. Confronto e operazioni in blocco |
 | BAT-13 | Sfondo in blocco | P1 | 11. Confronto e operazioni in blocco |
-| BAT-14 | Intestazioni, piè di pagina e numerazione delle pagine in blocco | P0 | 11. Confronto e operazioni in blocco |
-| BAT-15 | Numerazione Bates | P0 | 11. Confronto e operazioni in blocco |
+| BAT-14 | Intestazioni, piè di pagina e numerazione delle pagine in blocco | P1 | 11. Confronto e operazioni in blocco |
+| BAT-15 | Numerazione Bates | P1 | 11. Confronto e operazioni in blocco |
 | BAT-16 | Rimozione in blocco di filigrane, sfondi, intestazioni, piè di pagina e numeri Bates | P1 | 11. Confronto e operazioni in blocco |
-| BAT-17 | Unione in blocco | P0 | 11. Confronto e operazioni in blocco |
+| BAT-17 | Unione in blocco | P1 | 11. Confronto e operazioni in blocco |
 | BAT-18 | Inserimento di pagine in blocco | P1 | 11. Confronto e operazioni in blocco |
-| BAT-19 | Stampa in blocco | P0 | 11. Confronto e operazioni in blocco |
+| BAT-19 | Stampa in blocco | P1 | 11. Confronto e operazioni in blocco |
 | BAT-20 | Sequenze di azioni riutilizzabili | P1 | 11. Confronto e operazioni in blocco |
 | BAT-21 | Cartelle monitorate | P2 | 11. Confronto e operazioni in blocco |
 | BAT-22 | Esecuzione da riga di comando | P2 | 11. Confronto e operazioni in blocco |
@@ -9328,12 +9826,240 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 | AI-16 | Errori di rete, di autenticazione e di quota | P1 | 12. Assistente IA |
 | AI-17 | Avanzamento e annullamento | P1 | 12. Assistente IA |
 | AI-18 | Cronologia locale delle conversazioni | P1 | 12. Assistente IA |
-| AI-19 | Scrittura assistita di nuovi testi | P2 | 12. Assistente IA |
-| AI-20 | Modelli di attività per analisi specialistiche | P2 | 12. Assistente IA |
-| AI-21 | Ricerca per significato nel documento | P2 | 12. Assistente IA |
-| AI-22 | Segnalibri generati e riassunto per sezione | P2 | 12. Assistente IA |
-| AI-23 | Assistente comandi | P2 | 12. Assistente IA |
+| AI-19 | Scrittura assistita di nuovi testi | P1 | 12. Assistente IA |
+| AI-20 | Modelli di attività: struttura comune e modelli predefiniti | P1 | 12. Assistente IA |
+| AI-21 | Ricerca per significato nel documento | P1 | 12. Assistente IA |
+| AI-22 | Segnalibri generati e riassunto per sezione | P1 | 12. Assistente IA |
+| AI-23 | Assistente comandi | P1 | 12. Assistente IA |
 | AI-24 | Analisi e pulizia guidata delle pagine | P2 | 12. Assistente IA |
-| AI-25 | Generazione di elementi grafici | P2 | 12. Assistente IA |
-| AI-26 | Ricerca bibliografica e revisione della letteratura | P2 | 12. Assistente IA |
-| AI-27 | Conversione assistita dall'IA | P2 | 12. Assistente IA |
+| AI-25 | Generazione di elementi grafici | P1 | 12. Assistente IA |
+| AI-26 | Ricerca bibliografica e revisione della letteratura | P1 | 12. Assistente IA |
+| AI-27 | Conversione assistita dall'IA | P1 | 12. Assistente IA |
+| AI-28 | Contratti: bozza, revisione, rischi e ricerca giuridica | P1 | 12. Assistente IA |
+| AI-29 | Fatture e ricevute | P1 | 12. Assistente IA |
+| AI-30 | Schede prodotto | P1 | 12. Assistente IA |
+| AI-31 | Comunicazioni ai clienti | P1 | 12. Assistente IA |
+| AI-32 | Confronto e classifica di più documenti | P1 | 12. Assistente IA |
+
+## Appendice — Registro delle modifiche dopo la revisione indipendente
+
+
+Bozza 2 · 28/10/2026 · correzioni della revisione indipendente (`revisione-specifica.md`) applicate alle sorgenti `foliant-analisi/aree/00-generale.spec.md` … `12-ia.spec.md`, più la nuova `13-copertura.spec.md`. Metodo clean-room: nessun testo copiato da prodotti commerciali e nessun nome di prodotto o di libreria.
+
+## Sintesi
+
+- **Funzioni:** 425 requisiti d'area (erano 418) e 56 requisiti generali (34 NFR, 22 UX).
+- **Priorità:** P0 146, P1 223, P2 52; 4 requisiti «Fuori ambito».
+- **Nuovi requisiti (7):** VIS-54 Allegati del documento; CNV-34 Crea portfolio PDF; AI-28 Contratti; AI-29 Fatture e ricevute; AI-30 Schede prodotto; AI-31 Comunicazioni ai clienti; AI-32 Confronto e classifica di più documenti. Tutti P1.
+- **Fuori ambito:** VIS-46, SEC-33, SIG-24 e SIG-25. Hanno la motivazione in testa alla descrizione e «Fuori ambito (0.2): nessuna priorità» al posto della priorità. Il testo originario è conservato.
+- **Matrice di copertura:** nuova sezione 13 con le 188 righe P del catalogo. 66 righe hanno priorità più alta P0 e 109 P1. Le 2 righe P2 sono 10.15 e 10.16, P2 per decisione di ambito. Le 11 righe dell'area 13 sono fuori ambito.
+
+### Cambi di priorità (47)
+
+| Cambio | Requisiti |
+|---|---|
+| P2 → P1 | VIS-04, VIS-17, VIS-18, VIS-27, TXT-22…TXT-25, ANN-27, ANN-28, CNV-08, CNV-10, CNV-12, CNV-15, CNV-16, CNV-25, CNV-26, OCR-18, AI-19…AI-23, AI-25…AI-27 |
+| P0 → P1 | BAT-01…BAT-06, BAT-08…BAT-12, BAT-14, BAT-15, BAT-17, BAT-19 (tutte le operazioni in blocco sono ora P1, tranne BAT-21…23, che restano P2) |
+| P1 → P0 | PAG-13 (unificata con CNV-07), VIS-26 (unificata con TXT-12) |
+| P2 → Fuori ambito | VIS-46, SEC-33, SIG-24, SIG-25 |
+
+## Modifiche per sezione
+
+### 0 — Sezioni generali
+
+- **0.1 Obiettivi:** O1 si misura sul catalogo e sulla matrice della sezione 13. Fanno eccezione dichiarata le righe 10.15 e 10.16, che restano P2.
+- **0.2 Ambito:** riscritto in coerenza con il catalogo.
+  - In ambito, adattate al desktop: gestione dei file (VIS-03, VIS-04), acquisizione da fotocamera (CNV-26), cartella protetta e blocco dell'applicazione (SEC-31, SEC-32, P2).
+  - Fuori ambito, con la motivazione: servizi cloud (VIS-46, SEC-33); sincronizzazione; connettori; raccolta firme e firma per aziende (SIG-24, SIG-25); aggiornamenti, archiviazione remota e telemetria; esecuzione degli script (8.18); altre piattaforme; licenze.
+  - Nuovo paragrafo «Aggiunte non specificate in questa versione»: catalogo 10.19 e 6.45–6.50.
+- **0.3 Glossario:** aggiunte le voci «Rimozione dei dati nascosti», «Catalogo delle funzionalità», «Fuori ambito» e «Requisito di riferimento». Aggiornate «Linearizzazione» e «Script del documento».
+- **0.4 Requisiti non funzionali:**
+  - Macchina di riferimento, corpus e condizioni di misura valgono per tutte le sezioni.
+  - NFR-09 riscritto: la riscrittura completa atomica è il comportamento normale; il salvataggio incrementale è obbligatorio per i documenti firmati, anche con Salva con nome.
+  - NFR-11 riscritto: almeno 100 passi di annullamento, nei limiti della memoria, conservati anche dopo il salvataggio.
+  - NFR-17 riscritto: nessun motore di script generale; gli script non vengono mai eseguiti, con il banner **Dettagli**; unica eccezione le funzioni comuni dei moduli (FRM-08).
+  - NFR-18 rimanda all'unica finestra di conferma di VIS-19.
+  - Criteri resi verificabili in NFR-01, NFR-02, NFR-21 (nessun comando irraggiungibile da tastiera), NFR-30 e NFR-32.
+- **0.5 Interfaccia comune:**
+  - UX-05: ogni strumento ha la priorità del requisito che lo definisce; nuove etichette nella tabella.
+  - UX-13: nessuna conferma per le operazioni annullabili. Unica eccezione: l'avviso di invalidazione di SIG-21, mostrato una sola volta.
+  - UX-18 è l'unica fonte delle scorciatoie: Alt+Invio per Informazioni sul documento; una seconda tabella riserva le combinazioni dei comandi d'area; Duplica e la creazione di collegamenti non hanno scorciatoia.
+  - UX-06: le schede del pannello hanno la priorità del requisito che ne definisce il contenuto.
+  - UX-01: criterio con un revisore indipendente.
+  - Aggiornati anche UX-15, UX-16, UX-17 e UX-19.
+- **0.6 Convenzioni:**
+  - Formati delle intestazioni; regola «Fuori ambito»; le nuove funzioni si aggiungono in coda.
+  - Le operazioni in blocco non hanno priorità più alta delle operazioni singole.
+  - Neutralità: documenti d'ufficio, ECMAScript per PDF.
+  - Nuovo paragrafo «Precedenza e requisiti di riferimento»: prevalgono NFR e UX; le scorciatoie sono solo quelle di UX-18; tabella di 37 comportamenti con il rispettivo requisito di riferimento.
+  - Tracciabilità tramite la matrice della sezione 13.
+
+### 1 — Visualizzazione
+
+- VIS-40 riscritta come finestra originale **Informazioni sul documento** (Alt+Invio), con le sezioni File, Contenuto, Protezione, Caratteri e Apertura. Non ha più le sei schede né le diciture segnalate dal revisore.
+- Etichette rinominate: VIS-42 «Apertura del documento»; VIS-29 «Cattura area», che diventa il riferimento anche per OBJ-29.
+- VIS-19 definisce l'unica finestra di conferma delle azioni esterne:
+  - pulsanti **Apri**, **Copia indirizzo** e **Annulla**, con il fuoco su Annulla;
+  - avvisi per i domini contraffatti e per il testo che non corrisponde alla destinazione;
+  - «Non chiedere più per questo dominio» (P1);
+  - avvio consentito solo per i file di dati; programmi e script mai.
+- VIS-24 ha la nuova opzione «Cerca anche nei commenti» (P1). VIS-26 diventa un accesso a TXT-12 e TXT-13, senza conferme.
+- Rimandi ai requisiti di riferimento:
+  - VIS-47 e VIS-48 → NFR-08 e NFR-09; VIS-49 → NFR-12, con il banner **Ricarica** e senza ricarica automatica; VIS-50 → NFR-10 (**Ripristina**).
+  - VIS-05 e VIS-07 → NFR-13 e NFR-14; VIS-53 → NFR-31 e NFR-33, con le miniature entro 1 s.
+- Soglie riallineate alla sezione 0: avvio 3 s, cambio scheda 200 ms, memoria 2 GB.
+- Scorciatoie in conflitto rimosse (Ctrl+G, Ctrl+Pag su/giù, Ctrl+D).
+- VIS-51: pannelli in posizione fissa; mostrare e nascondere barre e pannelli è P1, la loro composizione è in UX-19.
+- VIS-52: il criterio «nessun comando irraggiungibile da tastiera» è spostato in NFR-21; aggiunti criteri sulla ricerca dei comandi.
+- VIS-43 comprende la stampa di più pagine per foglio; VIS-46 è fuori ambito.
+- Nuova **VIS-54 Allegati del documento**: aggiungere, aprire, salvare ed eliminare file allegati, con `/AFRelationship` e i vincoli PDF/A.
+
+### 2 — Pagine
+
+- PAG-11: eliminazione senza conferma, con l'avviso di annullamento di UX-13.
+- PAG-03: avviso di invalidazione di SIG-21; per i documenti firmati il salvataggio è incrementale.
+- PAG-13 rimanda a CNV-07 e diventa P0.
+- PAG-24 è il riferimento per l'unione. Regole unificate con BAT-17:
+  - un file non utilizzabile blocca l'avvio, salvo esclusione o «Ometti i file non utilizzabili»;
+  - è ammesso un solo file;
+  - le firme diventano aspetto statico, con avviso;
+  - limite di memoria di 2 GB (NFR-14).
+- PAG-35 è il riferimento per la numerazione Bates. Assorbe BAT-15: registro per pagina e indice per file, serie riutilizzabili; le cifre insufficienti bloccano l'avvio; un Bates già presente offre Sostituisci, Salta il file o Annulla; marcatura unificata.
+- PAG-33, PAG-34, PAG-36 e PAG-38 sono i riferimenti per le versioni in blocco BAT-12…BAT-14.
+- PAG-17: soglia di 20 MB come in VIS-45; PAG-25 rimanda a SEC-22 e SEC-24; PAG-41 usa AI-24 e AI-02 come opzioni.
+
+### 3 — Testo
+
+- Il preambolo usa la macchina di riferimento di 0.4.
+- Le righe «Rif.:» (inventari, `standard`, `concorrenti`) sono sostituite dai codici del catalogo: «Parità:» per le righe P, «Catalogo:» per le righe A.
+- TXT-12 è il riferimento per Trova e sostituisci: Ctrl+H, nessuna conferma, soglie di NFR-07. TXT-13: nessuna conferma.
+- TXT-17 rimanda a NFR-11 (almeno 100 passi). TXT-07: Duplica senza Ctrl+D. TXT-20 è allineato a SIG-21.
+- TXT-22…TXT-25 sono P1 e rimandano ad AI-09, AI-01 e AI-02; tolti i riferimenti alle credenziali.
+
+### 4 — Oggetti e collegamenti
+
+- OBJ-29 rimanda a VIS-29.
+- OBJ-30, OBJ-34 e OBJ-38: tolte le scorciatoie Ctrl+D, Ctrl+K e Ctrl+Maiusc+V.
+- OBJ-35 usa l'elenco di schemi ammessi di SEC-27 (http, https, mailto, tel, ftp); il criterio usa `data:`.
+- OBJ-40 e OBJ-41 rimandano a VIS-19, NFR-17 e NFR-18; programmi e script non vengono mai avviati.
+- OBJ-43 rimanda a NFR-11; OBJ-18 a CNV-29 e CNV-30, con un criterio sulla stima.
+- OBJ-01 usa la macchina di riferimento e i 100 ms di NFR-05; OBJ-03 non rimanda più a funzioni di accessibilità inesistenti.
+
+### 5 — Annotazioni
+
+- Il preambolo usa la macchina di riferimento di 0.4 e una tolleranza numerica al posto del «piano di test».
+- ANN-17 diventa «Richiamo».
+- ANN-40 è il riferimento per l'appiattimento delle annotazioni:
+  - opzione per lasciare o eliminare le annotazioni nascoste o non stampabili;
+  - annullabile anche dopo il salvataggio (NFR-11);
+  - tolleranza: 0,5 % dei pixel oltre 8/255, a 150 dpi.
+- ANN-10 resta P0 senza dipendere da ANN-11. ANN-27 e ANN-28 sono P1 (ANN-28 rimanda ad AI-25, senza criteri amministrativi).
+- ANN-34 e ANN-37: nessuna conferma. ANN-06 rimanda a NFR-11; ANN-07: Duplica senza scorciatoia.
+- ANN-29 è allineato a VIS-54 e NFR-29.
+
+### 6 — Conversione
+
+- CNV-14 è il riferimento per PDF/A. CNV-15 diventa P1 per PDF/X e PDF/E; i livelli u e a e PDF/A-4 restano P2; niente tag automatici.
+- CNV-16 rimanda ad AI-27 (P1), senza amministratore e con una fixture definita.
+- CNV-17 rimanda a BAT-06; CNV-28 a BAT-07; CNV-33 a SEC-24; CNV-32 a NFR-13 e NFR-14.
+- CNV-29 è il riferimento per la compressione, misurata sul corpus C-INT. CNV-30 diventa «Compressione personalizzata».
+- CNV-31 diventa «Linearizzazione per l'apertura progressiva sul web», con l'opzione «Ottimizza per il web» e l'indicazione in Informazioni sul documento.
+- CNV-18 diventa «Crea PDF da documenti d'ufficio (DOCX, XLSX, PPTX)».
+- Diventano P1: CNV-08, CNV-10, CNV-12, CNV-25 e CNV-26.
+- Nuova **CNV-34 Crea portfolio PDF**: cartelle, colonne, ordinamento, vista all'apertura, copertina automatica e modifica dei portfolio esistenti.
+
+### 7 — OCR
+
+- «Riconosci testo» diventa «Esegui OCR».
+- OCR-01 e OCR-04 restano P0 senza dipendere da requisiti P1 o P2: le opzioni P1 e P2 compaiono solo quando sono implementate.
+- OCR-15 rimanda a BAT-08; OCR-18 è P1; OCR-16 cambia titolo; OCR-13 rimanda a NFR-09 e NFR-11.
+- Il riquadro finale cita i codici del catalogo invece degli inventari e dei file di ricerca.
+
+### 8 — Moduli
+
+- FRM-08 riscritto in modo neutro: le funzioni di formato e calcolo comunemente presenti nei moduli sono eseguite in modo nativo, senza motore di script. Gli script personalizzati non vengono mai eseguiti (NFR-17). Tolti il prefisso del fornitore e la parola vietata.
+- FRM-28 e FRM-29 aggiungono l'esportazione e l'importazione in XML semplice e in TXT delimitato da tabulazioni, con i relativi criteri.
+- FRM-32 è il riferimento per l'appiattimento dei moduli: annullabile anche dopo il salvataggio, tolleranza numerica, nessun rimando a sezioni inesistenti.
+- FRM-33 resta P0 senza dipendere da requisiti P1 o P2.
+- FRM-13, FRM-24 e FRM-31: nessuna conferma per le operazioni annullabili.
+- FRM-18 e FRM-25: script mai eseguiti; conferme tramite VIS-19.
+- FRM-09 rimanda a NFR-09. FRM-23: Duplica senza Ctrl+D.
+
+### 9 — Firma
+
+- Tolto `$XDG_DATA_HOME` dal preambolo.
+- SIG-21 definisce l'avviso di invalidazione e rimanda a NFR-09.
+- SIG-15 usa la macchina di riferimento e NFR-04; SIG-23 ha un messaggio di errore specifico.
+- SIG-24 e SIG-25 sono fuori ambito; tolto il percorso di sistema `/etc/…`.
+- Percorsi dei menu allineati a UX-05 e UX-17.
+- Gli identificativi con prefisso di sviluppatore sono descritti per riferimento alla norma (ISO 32000-2, Tabella 260).
+
+### 10 — Protezione
+
+- SEC-03 è il riepilogo **Protezione**, aperto dal lucchetto e mostrato in Informazioni sul documento.
+- SEC-06: la nuova cifratura è solo AES-256; AES-128 e RC4 sono solo in lettura e vengono conservati al salvataggio. SEC-04, SEC-07, SEC-09, SEC-10, SEC-12 e BAT-10 sono allineati.
+- SEC-22 diventa «Rimozione dei dati nascosti», con il suffisso `_ripulito`.
+- SEC-23 è il riferimento per i metadati, con criteri sulle proprietà personalizzate e sull'estensione PDF/A.
+- SEC-24 è il riferimento per l'appiattimento generale e assorbe CNV-33, compresa la rasterizzazione.
+- SEC-25 rimanda a CNV-14 e CNV-15.
+- SEC-26 è riscritto secondo NFR-17 (solo banner, nessuna attivazione); SEC-28 riguarda solo il banner, senza amministratore.
+- SEC-27 contiene le regole e l'elenco degli schemi ammessi; la finestra è quella di VIS-19.
+- SEC-29 e SEC-30 rimandano a NFR-13, NFR-14 e NFR-20.
+- SEC-33 è fuori ambito.
+- SEC-34 resta P0 per le sole connessioni delle funzioni in ambito: niente aggiornamenti, archiviazione remota o telemetria.
+- Percorsi dei menu allineati: Proteggi › … e Preferenze › Sicurezza e riservatezza.
+
+### 11 — Confronto e operazioni in blocco
+
+- Il preambolo usa la macchina di riferimento e definisce la fixture di confronto.
+- CMP-01, BAT-01 e BAT-04 usano la soglia di 100 ms. Nella colonna di CMP-07 lo stato di revisione compare solo con CMP-11.
+- Le operazioni in blocco sono tutte P1, tranne BAT-21…BAT-23, che restano P2.
+- Riferimenti alle operazioni singole:
+  - BAT-06 esclude PDF/A-2u; BAT-07 aggiunge HTML e PDF in ingresso.
+  - BAT-08 è il riferimento per l'OCR in blocco.
+  - BAT-09 usa i livelli di CNV-29, con un criterio misurabile; BAT-10 usa solo AES-256.
+  - BAT-12…BAT-14 rimandano ai requisiti PAG.
+  - BAT-15 rimanda a PAG-35 e BAT-17 a PAG-24.
+  - BAT-19 rimanda a UX-15; BAT-23 usa la nuova terminologia.
+
+### 12 — Assistente IA
+
+- AI-05 aggiunge il testo incollato e il riassunto di più documenti, con etichette neutre al posto dei nomi dei file.
+- AI-20 è scomposto in una struttura comune, un modello generico configurabile e 11 modelli predefiniti, ciascuno con un criterio. Le righe coperte sono 12.03, 12.12, 12.15–12.18 e 12.22–12.26.
+- Nuovi requisiti: **AI-28** Contratti (12.19–12.21), **AI-29** Fatture e ricevute (riferimento anche per AI-10), **AI-30** Schede prodotto, **AI-31** Comunicazioni ai clienti (12.20), **AI-32** Confronto e classifica di più documenti (12.27).
+- Diventano P1: AI-19, AI-21, AI-22, AI-23, AI-25, AI-26 e AI-27, ciascuno con un criterio in più.
+- Le preferenze sono indicate come Preferenze › Assistente IA; le scorciatoie seguono UX-18.
+
+### 13 — Matrice di copertura (nuova)
+
+- La tabella elenca ogni riga P → requisiti (con priorità) → copertura → priorità più alta → note. È costruita dall'Allegato A del revisore e aggiornata con le nuove funzioni e le nuove priorità.
+- Il campo «Parità» dei requisiti coincide con la matrice; la verifica è automatica.
+
+## Interpretazioni da confermare
+
+1. **Unione e requisito di riferimento:** la decisione 1 indica «unione → PAG-13», ma PAG-13 è «Estrai pagine come immagini». Come riferimento per l'unione è stato usato PAG-24; PAG-13 rimanda a CNV-07.
+2. **SEC-34 resta in ambito (P0):** la decisione 2 lo elenca tra i requisiti fuori ambito. È stata applicata come «togliere aggiornamenti, archiviazione remota e telemetria», come chiede il revisore al § 7.1 punto 2. Il motivo: SEC-34 copre la riga P 10.17 (connessioni di rete protette per IA, marche temporali e revoche).
+3. **SIG-25 è fuori ambito come SIG-24:** dipende da SIG-24 e dai criteri amministrativi (riga 13.11).
+4. **Priorità non cambiate:** CNV-07 era già P0 e SEC-23 già P1; VIS-41 resta P2 e rimanda a SEC-23 per le proprietà personalizzate.
+5. **Le righe P 10.15 e 10.16 restano coperte solo da requisiti P2** (SEC-31, SEC-32), come deciso. Per questo O1 e 0.6 le dichiarano eccezioni esplicite.
+6. **Avviso di invalidazione delle firme:** l'avviso di SIG-21, mostrato una sola volta al primo uso di uno strumento che invalida le firme, è l'unica eccezione a «nessuna conferma per le operazioni annullabili» (UX-13).
+7. **Identificativi con prefisso di sviluppatore:** gli identificativi standard che contengono il nome di un'azienda (SubFilter PKCS#7, gestore a chiave pubblica, estensione di livello 8) sono stati sostituiti da descrizioni con il rimando alla norma. I nomi di piattaforma di destinazione (Ubuntu, GNOME, Wayland, X11, Linux) restano.
+
+## Verifiche (script `correzioni/verifica.py`, esito in `correzioni/verifica.json`)
+
+| Controllo | Esito |
+|---|---|
+| Campi obbligatori dei 425 blocchi d'area, nell'ordine previsto; priorità valida; criteri nella forma «Dato… allora» | 0 errori |
+| ID duplicati, su 481 ID tra area, NFR e UX | 0 |
+| Termini vietati, senza distinzione tra maiuscole e minuscole: Istantanea, Riconosci testo, Sanifica, Sanitizza, Vista iniziale, Ottimizzazione avanzata, Ctrl+D, JavaScript, più «Office» come formato, piano di test, inventari, file di ricerca, XDG, /etc, callout, «motore di script del documento» e simili | 0 occorrenze |
+| Nomi di prodotti e librerie commerciali (elenco di circa 130 nomi) | 0. Solo falsi positivi: la parola «Zoom» come funzione di ingrandimento. Nomi di piattaforma ammessi: Ubuntu, GNOME, Wayland, X11, Linux |
+| Scorciatoie con Ctrl o Alt nelle aree assenti dalle tabelle di UX-18 | 0 (esclusa l'assegnazione personale d'esempio in VIS-52) |
+| Riferimenti a ID inesistenti | 0 |
+| Campo «Parità» non coerente con la matrice | 0 |
+| Prova di unione con `merge_spec.py` | riuscita: 425 funzioni (146 P0, 223 P1, 52 P2) e 4 «?» per i requisiti fuori ambito |
+
+## Indicazioni per lo script di unione (`merge_spec.py`, non modificato)
+
+- Aggiungere `("13-copertura", "13. Matrice di copertura del catalogo")` in fondo a `SECTIONS`.
+- Riconoscere «Fuori ambito»: per esempio `PRIO_RE = r"\*\*Priorità:\*\*\s*(P[012]|Fuori ambito)"`, contandolo in una colonna dedicata. Oggi i 4 requisiti fuori ambito compaiono con «?».
+- Aggiornare l'intestazione generata («priorità P0/P1/P2») con la possibilità «Fuori ambito».
