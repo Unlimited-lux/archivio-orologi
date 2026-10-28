@@ -143,3 +143,128 @@ def test_central_widget_override(window, sample_pdf):
     window.ctx.set_central_widget(None)
     assert window.docs_stack.currentWidget() is window.tabs
     assert window.ctx.central_widget() is None
+
+
+def test_english_translations_cover_core_strings():
+    import re
+    from pathlib import Path
+
+    from foliant import i18n
+    from foliant.ui.i18n_en import EN
+    root = Path(__file__).resolve().parent.parent / "foliant"
+    missing = set()
+    for f in list((root / "ui").glob("*.py")) + [root / "app.py"]:
+        if f.name == "i18n_en.py":
+            continue
+        for m in re.finditer(r'_\("((?:[^"\\]|\\.)*)"\)', f.read_text(encoding="utf-8")):
+            text = m.group(1).encode().decode("unicode_escape").encode("latin-1").decode("utf-8")
+            if text not in EN:
+                missing.add(text)
+    assert not missing, missing
+    i18n.set_language("en")
+    try:
+        assert i18n._("Salva") == "Save"
+    finally:
+        i18n.set_language("it")
+
+
+def test_no_duplicate_shortcuts(window):
+    """Due azioni con la stessa scorciatoia si annullano a vicenda in Qt: non devono esistere."""
+    from collections import defaultdict
+    from PySide6.QtGui import QAction, QKeySequence
+    seen = defaultdict(list)
+    for act in window.findChildren(QAction):
+        for seq in act.shortcuts():
+            if not seq.isEmpty():
+                seen[seq.toString(QKeySequence.SequenceFormat.PortableText)].append(act.text() or "(senza nome)")
+    dup = {k: v for k, v in seen.items() if len(v) > 1}
+    assert not dup, dup
+
+
+def test_ux18_core_shortcuts(window, sample_pdf, qtbot):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeySequence
+    assert window.act_fit_page.shortcut() == QKeySequence("Ctrl+0")
+    assert window.act_zoom_100.shortcut() == QKeySequence("Ctrl+1")
+    assert window.act_fit_width.shortcut() == QKeySequence("Ctrl+2")
+    view = window.open_path(sample_pdf)
+    view.setFocus()
+    qtbot.keyClick(view, Qt.Key.Key_N)
+    assert view.current_page == 1
+    qtbot.keyClick(view, Qt.Key.Key_P)
+    assert view.current_page == 0
+    view.set_tool(view.hand_tool)
+    qtbot.keyClick(view, Qt.Key.Key_Escape)
+    assert view.tool is view._default_tool
+    window._mode_by_index(0)
+    assert window.current_mode_id == "leggi"
+    window.toggle_sidebar()
+    path = str(view.document.path)
+    window.close_view(view)
+    window.reopen_closed()
+    assert window.current_view() is not None and str(window.current_view().document.path) == path
+
+
+def test_service_dialogs(window, monkeypatch):
+    from foliant.ui.dialogs import HelpDialog, PreferencesDialog, ShortcutsDialog, author_name
+    dlg = PreferencesDialog(window.settings, window)
+    dlg.author.setText("Mario Verdi")
+    dlg.theme.setCurrentIndex(dlg.theme.findData("dark"))
+    dlg.apply()
+    assert author_name(window.settings) == "Mario Verdi"
+    assert window.settings.value("theme") == "dark"
+    sd = ShortcutsDialog(window)
+    assert sd.table.rowCount() > 10
+    sd.filter.setText("salva")
+    assert 0 < sd.table.rowCount() < 10
+    HelpDialog(window).close()
+
+
+def test_link_handler_extension(window, sample_pdf):
+    from foliant.ui import tools
+    seen = []
+    first = lambda view, link: (seen.append(("prima", link.get("uri"))), False)[1]
+    last = lambda view, link: (seen.append(("ultima", link.get("uri"))), True)[1]
+    saved = list(tools.LINK_HANDLERS)        # il test verifica il meccanismo, senza i gestori dei moduli
+    tools.LINK_HANDLERS.clear()
+    window.ctx.add_link_handler(last, priority=-1000)
+    window.ctx.add_link_handler(first, priority=1000)
+    window.ctx.add_link_handler(first, priority=1000)      # doppia registrazione ignorata
+    try:
+        view = window.open_path(sample_pdf)
+        tools.follow_link(view, {"kind": 2, "uri": "https://example.org"})
+        assert seen == [("prima", "https://example.org"), ("ultima", "https://example.org")]
+    finally:
+        tools.LINK_HANDLERS[:] = saved
+
+
+def test_mode_scoped_shortcuts(window, sample_pdf):
+    from PySide6.QtGui import QKeySequence
+    ctx = window.ctx
+    m1 = ctx.add_mode("prova1", "Prova 1", "star", 990)
+    m2 = ctx.add_mode("prova2", "Prova 2", "star", 991)
+    a1 = ctx.action("Duplica pagina", None, lambda: None, shortcut="Ctrl+D", mode="prova1")
+    a2 = ctx.action("Duplica campo", None, lambda: None, shortcut="Ctrl+D")
+    m2.scope_shortcuts(a2)
+    window.set_mode("leggi")
+    assert a1.shortcut().isEmpty() and a2.shortcut().isEmpty()
+    window.set_mode("prova1")
+    assert a1.shortcut() == QKeySequence("Ctrl+D") and a2.shortcut().isEmpty()
+    window.set_mode("prova2")
+    assert a1.shortcut().isEmpty() and a2.shortcut() == QKeySequence("Ctrl+D")
+
+
+def test_module_disabled_action_survives_view_switch(window, sample_pdf, tmp_path):
+    """Un modulo che disattiva un'azione (es. permessi negati) non viene smentito dal nucleo."""
+    import shutil
+    act = window.ctx.action("Azione protetta", None, lambda: None)
+    window.ctx.currentViewChanged.connect(lambda v: act.setEnabled(v is not None and "b.pdf" not in str(v.document.path)))
+    window.open_path(sample_pdf)
+    assert act.isEnabled()
+    other = tmp_path / "b.pdf"
+    shutil.copy(sample_pdf, other)
+    view = window.open_path(other)
+    with view.document.change("x") as pdf:
+        pdf.delete_page(0)
+    assert not act.isEnabled()
+    view.document._saved_state = view.document._state     # chiusura senza domanda di salvataggio
