@@ -264,3 +264,15 @@ def test_visual_capture(viewer_window, tmp_path, request):
         viewer_window.grab().save(f"{out}/adv_win_{name}.png")
         ctl.panel.grab().save(f"{out}/adv_panel_{name}.png")
     theme.apply(QApplication.instance(), "light")
+
+
+def test_option_checkboxes_are_spaced(viewer_window, sample_pdf):
+    viewer_window.open_path(sample_pdf)
+    panel = _ctl(viewer_window).open()
+    from PySide6.QtWidgets import QApplication
+    QApplication.processEvents()
+    for boxes in ((panel.opt_case, panel.opt_word, panel.opt_accents),
+                  (panel.inc_comments, panel.inc_bookmarks, panel.inc_fields, panel.inc_metadata)):
+        for a, b in zip(boxes, boxes[1:]):
+            assert b.geometry().left() - a.geometry().right() >= 12
+    panel.hide()
