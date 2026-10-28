@@ -1167,3 +1167,18 @@ def test_convert_keeps_no_paths_in_settings(window, settings, tmp_path):
     dump = open(settings.fileName(), "rb").read()
     assert b"perizia-rossi" not in dump and b"Pratiche riservate" not in dump
     dlg.close()
+
+
+def test_export_settings_do_not_keep_document_title(window, settings, tmp_path):
+    """Riservatezza: titolo e autore EPUB del singolo documento non restano nelle impostazioni."""
+    dlg = ExportDialog(window, page_count=2, name="contratto_rossi", folder=str(tmp_path), fmt="epub",
+                       settings=settings)
+    dlg.panels["epub"].fields["title"].setText("Contratto Rossi")
+    dlg.panels["epub"].fields["author"].setText("Mario Rossi")
+    dlg.folder_edit.setText(str(tmp_path))
+    assert dlg.validate()
+    dlg.accept()
+    dlg.save_preset("Libri")
+    settings.sync()
+    dump = " ".join(str(settings.value(k)) for k in settings.allKeys())
+    assert "Rossi" not in dump

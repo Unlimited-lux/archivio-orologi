@@ -202,6 +202,10 @@ def build_options(fmt: str) -> _Options:
     return o
 
 
+# dati del singolo documento (titolo, autore): mai salvati nelle impostazioni (riservatezza)
+DOCUMENT_FIELDS = ("title", "author", "password")
+
+
 class ExportDialog(QDialog):
     """Scelta di formato, pagine, opzioni e destinazione. `values()` → (formato, percorso, opzioni).
     `exec()` restituisce `ExportDialog.BATCH` se l'utente sceglie «Più file…»."""
@@ -366,7 +370,8 @@ class ExportDialog(QDialog):
     def _save_settings(self, fmt: str, options: dict) -> None:
         if self.settings is None:
             return
-        keep = {k: v for k, v in options.items() if k not in ("pages", "policy", "selected", "current")}
+        keep = {k: v for k, v in options.items() if k not in ("pages", "policy", "selected", "current")
+                and k not in DOCUMENT_FIELDS}
         self.settings.setValue(self._settings_key(fmt), json.dumps(keep))
         self.settings.setValue("convert/last_format", fmt)
 
@@ -396,6 +401,7 @@ class ExportDialog(QDialog):
         opts = self.panels[self.fmt].values()
         opts.update(layout=self.layout_box.currentData(), ocr=self.ocr_box.currentData(),
                     language=self.lang_edit.text())
+        opts = {k: v for k, v in opts.items() if k not in DOCUMENT_FIELDS}
         presets[name] = {"format": self.fmt, "options": opts}
         self.settings.setValue("convert/presets", json.dumps(presets))
         self._reload_presets()
