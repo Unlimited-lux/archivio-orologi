@@ -109,9 +109,19 @@ def unit_bytes(parsed: ParsedPage, obj: PageObject, new_ctm: pymupdf.Matrix, out
     if clip_unit:
         x, y, cw, ch = clip_unit
         parts.append(" ".join(fmt_num(v) for v in (x, y, cw, ch)).encode() + b" re W n")
-    parts.append(body if body is not None else parsed.data[obj.start:obj.end])
+    original = parsed.data[obj.start:obj.end]
+    parts.append(body if body is not None else original)
     parts.append(b"Q")
+    if w is None and not include_state:
+        # gli operatori di stato interni all'oggetto valevano anche per i successivi
+        leak = [original[op.start:op.end] for op in tokenize_ops(original) if op.name in _LEAK_OPS]
+        if leak:
+            parts.append(b"\n".join(leak))
     return b"\n".join(parts)
+
+
+_LEAK_OPS = {"w", "J", "j", "M", "d", "ri", "i", "gs", "CS", "cs", "SC", "SCN", "sc", "scn", "G", "g",
+             "RG", "rg", "K", "k"}
 
 
 def page_to_pdf_transform(parsed: ParsedPage, T: pymupdf.Matrix) -> pymupdf.Matrix:

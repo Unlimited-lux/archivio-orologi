@@ -1045,3 +1045,18 @@ def test_resource_names_no_spurious_keys(blank):
     add_image(blank, 0, (0, 0, 50, 50))
     names = content.resource_names(blank, blank[0], "XObject")
     assert list(names) == [engine.objects(blank, 0).objects[0].name]
+
+
+def test_inner_state_ops_still_apply_to_following_objects():
+    import pymupdf as _p
+    from foliant.modules.objects import engine as _E
+    doc = _p.open()
+    page = doc.new_page()
+    x = doc.get_new_xref()
+    doc.update_object(x, "<<>>")
+    doc.update_stream(x, b"100 600 50 50 re 1 0 0 rg f\n300 600 50 50 re f", new=True)
+    doc.xref_set_key(page.xref, "Contents", f"{x} 0 R")
+    _E.translate(doc, 0, [0], 0, -100)
+    pix = doc[0].get_pixmap(dpi=72)
+    r, g, b = pix.pixel(325, 842 - 625)[:3]
+    assert r > 200 and g < 50 and b < 50
