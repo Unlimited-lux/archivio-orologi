@@ -133,3 +133,36 @@ def test_split_disabled_single_page(window, tmp_path):
     c = window.ctx.pages_controller
     c.update_actions()
     assert not c.act_split.isEnabled()
+
+
+@pytest.mark.parametrize("dialog_name", ["PageNumbersDialog", "HeaderFooterDialog", "BatesDialog"])
+def test_restamping_replaces_existing_series(window, tmp_path, dialog_name):
+    """Rinumerare dopo aver eliminato una pagina non lascia due serie sovrapposte (PAG-33/34/35)."""
+    from foliant.modules.pages import stamp
+    from foliant.modules.pages import stamp_dialogs as SD
+    view = window.open_path(save_numbered(tmp_path / "cinque.pdf", 5))
+    cls = getattr(SD, dialog_name)
+
+    def make():
+        dlg = cls(window, view.document, [0])
+        dlg.scope.set_all() if hasattr(dlg.scope, "set_all") else None
+        if dialog_name == "PageNumbersDialog":
+            dlg.fmt.setCurrentText("Pagina {n} di {total}")
+        elif dialog_name == "HeaderFooterDialog":
+            dlg.fields["footer_center"].setText("Pagina {n} di {total}")
+        return dlg
+    first = make()
+    assert first.replace_box is not None and first.replace_box.isHidden()
+    first.apply()
+    with view.document.change("elimina") as pdf:
+        E.delete_pages(pdf, [4])
+    second = make()
+    assert not second.replace_box.isHidden() and second.replace_box.isChecked()
+    second.apply()
+    with E.ENGINE_LOCK:
+        pdf = view.document.pdf
+        kinds = stamp.list_watermarks(pdf)
+        for i in range(pdf.page_count):
+            text = pdf[i].get_text()
+            assert "di 5" not in text
+            assert sum(1 for k in kinds.get(i, []) if k == cls.REPLACE_KIND) == 1

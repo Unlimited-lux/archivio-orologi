@@ -417,6 +417,18 @@ class StampDialog(QDialog):
         self._timer.timeout.connect(self.refresh_preview)
 
         self.build()
+        self.replace_box = None
+        if self.REPLACE_KIND:
+            # PAG-33/34/35: se il documento ha già questi elementi di Foliant, si sostituiscono
+            # (niente serie sovrapposte); la casella compare solo quando servono.
+            with ENGINE_LOCK:
+                present = any(self.REPLACE_KIND in kinds for kinds in stamp.list_watermarks(self.document.pdf).values())
+            self.replace_box = QCheckBox(_(self.REPLACE_TEXT))
+            self.replace_box.setChecked(True)
+            self.replace_box.setVisible(present)
+            self.replace_present = present
+            self.form.addWidget(self.replace_box)
+            self.replace_box.toggled.connect(self.on_changed)
         if self.scope is not None:
             self.scope.changed.connect(self.on_changed)
         self.on_changed()
@@ -460,11 +472,20 @@ class StampDialog(QDialog):
         for sig in signals:
             sig.connect(self.on_changed)
 
+    REPLACE_KIND: str | None = None
+    REPLACE_TEXT = ""
+
     def options(self) -> dict:
         opts = self.engine_options()
         if self.scope is not None:
             opts["pages"] = self.scope.pages() if self.scope.is_valid() else None
+        if self.REPLACE_KIND and getattr(self, "replace_box", None) is not None:
+            opts["replace_existing"] = self.replace_present and self.replace_box.isChecked()
         return opts
+
+    def _remove_existing(self, pdf, opts: dict) -> None:
+        if opts.pop("replace_existing", False) and self.REPLACE_KIND:
+            stamp.remove_watermarks(pdf, None, kind=self.REPLACE_KIND)
 
     def is_valid(self) -> bool:
         if self.scope is not None and not self.scope.is_valid():
@@ -784,6 +805,8 @@ def _text_style_rows(form: QFormLayout, font: str = "helv", size: int = 10, rgb=
 class PageNumbersDialog(StampDialog):
     TITLE = "Numeri di pagina"
     UNDO_LABEL = "Aggiungi numeri di pagina"
+    REPLACE_KIND = stamp.NUMBERS
+    REPLACE_TEXT = "Sostituisci i numeri di pagina già presenti"
 
     FORMATS = ("{n}", "Pagina {n}", "Pagina {n} di {total}", "{n} / {total}", "- {n} -", "{label}")
 
@@ -850,6 +873,7 @@ class PageNumbersDialog(StampDialog):
 
     def run(self, pdf, opts):
         opts = dict(opts)
+        self._remove_existing(pdf, opts)
         return stamp.add_page_numbers(pdf, opts.pop("pages", None), **opts)
 
 
@@ -858,6 +882,8 @@ class PageNumbersDialog(StampDialog):
 # =========================================================================
 
 class BatesDialog(StampDialog):
+    REPLACE_KIND = stamp.BATES
+    REPLACE_TEXT = "Sostituisci la numerazione Bates già presente"
     TITLE = "Numerazione Bates"
     UNDO_LABEL = "Aggiungi numerazione Bates"
 
@@ -920,6 +946,7 @@ class BatesDialog(StampDialog):
 
     def run(self, pdf, opts):
         opts = dict(opts)
+        self._remove_existing(pdf, opts)
         return stamp.add_bates(pdf, opts.pop("pages", None), **opts)
 
 
@@ -928,6 +955,8 @@ class BatesDialog(StampDialog):
 # =========================================================================
 
 class HeaderFooterDialog(StampDialog):
+    REPLACE_KIND = stamp.HEADERFOOTER
+    REPLACE_TEXT = "Sostituisci intestazioni e piè di pagina già presenti"
     TITLE = "Intestazione e piè di pagina"
     UNDO_LABEL = "Aggiungi intestazione e piè di pagina"
 
@@ -1010,6 +1039,7 @@ class HeaderFooterDialog(StampDialog):
 
     def run(self, pdf, opts):
         opts = dict(opts)
+        self._remove_existing(pdf, opts)
         return stamp.add_header_footer(pdf, opts.pop("pages", None), **opts)
 
 
