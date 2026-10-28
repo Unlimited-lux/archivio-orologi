@@ -130,6 +130,9 @@ EN = {
     "Pagine (es. 1-3, 8-):": "Pages (e.g. 1-3, 8-):",
     "Duplica": "Duplicate",
     "Organizza pagine": "Organize pages",
+    "Pagina non leggibile": "Unreadable page",
+    "Il documento è danneggiato: la struttura delle pagine non è valida e l'operazione non può essere eseguita. Prova a usare «Salva come» per riparare il file, poi riprova.":
+        "The document is damaged: its page structure is invalid and the operation cannot be performed. Try «Save as» to repair the file, then try again.",
     "Trova pagine vuote e duplicate…": "Find blank and duplicate pages…",
     "Ricerca di pagine vuote e duplicate…": "Searching for blank and duplicate pages…",
     "Pagine vuote e duplicate": "Blank and duplicate pages",

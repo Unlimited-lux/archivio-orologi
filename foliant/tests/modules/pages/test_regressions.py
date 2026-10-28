@@ -185,3 +185,43 @@ def test_page_numbers_pag33_criteria():
     stamp.add_page_numbers(doc, None, fmt="- {n} -", style="r")
     assert "- iii -" in doc[2].get_text()
     assert stamp.format_number(27, "A") == "AA" and stamp.format_number(4, "R") == "IV"
+
+
+def _cyclic_pdf(path):
+    d = numbered_pdf(2)
+    root = int(d.xref_get_key(d.pdf_catalog(), "Pages")[1].split()[0])
+    kids = d.xref_get_key(root, "Kids")[1]
+    d.xref_set_key(root, "Kids", kids[:-1] + f" {root} 0 R]")
+    d.xref_set_key(root, "Count", "3")
+    d.save(str(path), garbage=0)
+    return str(path)
+
+
+@pytest.mark.qt_no_exception_capture   # altri moduli (security, viewer) sollevano eccezioni su questo file
+def test_cyclic_page_tree_handled(window, tmp_path, monkeypatch):
+    """Ciclo nell'albero delle pagine: segnaposto «Pagina non leggibile», messaggi chiari, nessuna eccezione."""
+    errors = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: errors.append(a[2]))
+    view = window.open_path(_cyclic_pdf(tmp_path / "ciclo.pdf"))
+    window.sidebar.hide()        # le miniature del viewer non fanno parte di questo modulo
+    window.set_mode("pagine")
+    c = window.ctx.pages_controller
+    grid = c.organizer.grid
+    grid.flush_rendering()
+    assert grid.failed(2) or grid.thumbnail(2) is None
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    img = QImage(400, 400, QImage.Format.Format_RGB32)
+    painter = QPainter(img)
+    opt = QStyleOptionViewItem()
+    opt.rect = grid.visualRect(grid.model().index(2))
+    grid.itemDelegate().paint(painter, opt, grid.model().index(2))   # nessuna eccezione, stato ripristinato
+    assert painter.end()
+    grid.selectAll()
+    c.rotate(90)
+    grid.select_pages([2])
+    c.delete()
+    assert errors and all("danneggiato" in e for e in errors)
+    grid.select_pages([0, 1])
+    assert c.copy_pages()
+    assert view.page_count == 3

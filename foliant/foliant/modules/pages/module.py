@@ -226,7 +226,7 @@ class PagesController:
             self.ctx.error(label, str(e))
             return None
         except Exception as e:  # nessun errore deve chiudere l'applicazione
-            self.ctx.error(label, _("Operazione non riuscita: {e}").format(e=e))
+            self.ctx.error(label, friendly_error(e))
             return None
         if select is not None and view is self.organizer.view:
             try:
@@ -265,8 +265,11 @@ class PagesController:
             self.ctx.error(_("Elimina pagine"),
                            _("Impossibile eliminare tutte le pagine: il documento deve conservarne almeno una."))
             return
-        with ENGINE_LOCK:
-            info = E.linked_items(view.document.pdf, pages)
+        try:
+            with ENGINE_LOCK:
+                info = E.linked_items(view.document.pdf, pages)
+        except Exception:   # documento danneggiato: il riepilogo non è indispensabile
+            info = {"bookmarks": 0, "links": 0, "fields": 0}
         details = []
         if info["bookmarks"]:
             details.append(_("{n} segnalibri perderanno la destinazione").format(n=info["bookmarks"]))
@@ -343,8 +346,12 @@ class PagesController:
         if cut and len(pages) >= view.page_count:
             self.ctx.error(_("Taglia pagine"), _("Impossibile tagliare tutte le pagine del documento."))
             return False
-        with ENGINE_LOCK:
-            data = E.extract_pages(view.document.pdf, pages)
+        try:
+            with ENGINE_LOCK:
+                data = E.extract_pages(view.document.pdf, pages)
+        except Exception as e:
+            self.ctx.error(_("Copia pagine"), friendly_error(e))
+            return False
         mime = pages_mime(data, view, pages)
         QGuiApplication.clipboard().setMimeData(mime)
         if cut:
@@ -621,6 +628,15 @@ class PagesController:
         sub.addAction(_("Duplica"), lambda: run(self.duplicate))
         sub.addAction(_("Elimina"), lambda: run(self.delete))
         sub.addAction(_("Organizza pagine"), lambda: self.ctx.set_mode("pagine"))
+
+
+def friendly_error(e: Exception) -> str:
+    """Messaggio comprensibile per gli errori del motore su file danneggiati."""
+    text = str(e)
+    if "cycle in page tree" in text or "page tree" in text or "code=7" in text:
+        return _("Il documento è danneggiato: la struttura delle pagine non è valida e l'operazione non può "
+                 "essere eseguita. Prova a usare «Salva come» per riparare il file, poi riprova.")
+    return _("Operazione non riuscita: {e}").format(e=text)
 
 
 # ==================================================================== appunti
