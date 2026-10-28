@@ -76,46 +76,27 @@ Struttura, subagent (`.claude/agents/`), `.gitignore`.
 - ✅ Installazione: `packaging/install.sh` (dipendenze di sistema, ambiente Python, voce nel menu);
   pacchetto verificato in un ambiente pulito.
 
-### Problemi noti (da chiudere dopo la consegna)
+### Problemi noti
 
-Dal primo collaudo (verificati):
+Stato del 28/10 alle 14:20 (ora italiana 15:20). Dopo la consegna ci sono stati altri due giri di
+collaudo indipendente, oltre ai precedenti. I 99 script di riproduzione raccolti finora (un file
+`bug_NN.py` per ogni difetto confermato, che esce con 0 quando il difetto non c'è più) sono stati
+rieseguiti sulla versione integrata:
+- tutti i problemi elencati in precedenza, cioè il primo collaudo, i 28 confermati alle 09:10 e
+  quelli visivi, sono **corretti** e verificati con il loro script;
+- il collaudo delle 13:10 ha confermato 9 nuovi difetti, tutti corretti con un test. Il più grave
+  era una fuga di dati: una redazione su un PDF firmato veniva salvata in modo incrementale e il
+  testo restava nella revisione firmata. Ora il nucleo riscrive il file per intero e il modulo
+  Firma avvisa prima (NFR-09).
+
+Restano aperti:
 | Gravità | Area | Problema |
 |---|---|---|
-| bassa | Moduli | Il campo firma vuoto mostra il segnaposto del motore a schermo e in stampa da Foliant (nel file è vuoto). |
-| bassa | Modifica testo | La riga riscritta usa una nuova copia del font invece della risorsa originale (file un po' più grande). |
-| bassa | OCR | Durante l'OCR il documento non è consultabile (finestra di avanzamento modale, con annullamento). |
-| — | Specifica | Funzioni P1/P2 non completate: elencate per ID in `foliant/modules/*/STATO.md`. |
-
-Dal collaudo finale delle 09:10 (verificati da un verificatore indipendente: 28 confermati, 2 scartati).
-Già corretti nella consegna: perdita della modifica in corso con Salva/Chiudi (testo e campi modulo),
-barra delle modalità e menu ☰ nascosti a 1024–1366 px, pulsante dei comandi in eccesso invisibile.
-| Gravità | Modulo | Problema |
-|---|---|---|
-| alta | text_edit | In una fattura esportata da LibreOffice (Carlito in sottoinsieme, colonna Prezzo allineata a destra), sostituire «€ 9.500,00» con «€ 9.800,00» spezza il prezzo su due righe. Le cifre finiscono sopra i |
-| media | nucleo | Testi di Qt in inglese nell'interfaccia italiana. |
-| media | text_edit | Correggere l'importo nel paragrafo giustificato sotto la tabella di una fattura LibreOffice riscrive e sposta anche righe non modificate della tabella. Il paragrafo perde la giustificazione. |
-| media | pages | Rinumerare un documento già numerato da Foliant aggiunge una seconda serie di numeri sovrapposta. Lo strumento non propone Modifica/Rimuovi e non sostituisce i numeri esistenti. |
-| media | convert | Comprimi › livello «Senza perdita» › «Applica al documento aperto» annuncia una riduzione, ma il file salvato ha la stessa dimensione dell'originale. |
-| media | tools | Le filigrane di Operazioni in blocco (Strumenti) e quelle di Pagine › Filigrana usano marcature diverse e non si riconoscono tra loro. |
-| media | nucleo | Chiusura della finestra con più documenti modificati: viene fatta una domanda per ogni documento invece di un'unica finestra, e annullare l'uscita non annulla davvero (NFR-12/1; VIS-50, casi limite: « |
-| media | nucleo | File cambiato su disco da un altro programma mentre in Foliant ci sono modifiche non salvate: «Salva» lo sovrascrive senza chiedere e le modifiche esterne vanno perse (NFR-12/3, VIS-49). Passi: aprire |
-| media | security | Un PDF con un ciclo nell'albero delle pagine (/Pages /Kids [p1 p2 <Pages stesso>] /Count 3) fa sparire tutti gli avvisi di sicurezza all'apertura (NFR-17, SEC-26, SEC-02, NFR-13). Passi: PDF di 2 pagi |
-| media | security | «Salva con nome» su un PDF con ciclo nell'albero delle pagine scrive il file ma segnala un errore falso e tecnico (NFR-13/1, NFR-15, VIS-48). Passi: PDF di 2 pagine con /Pages /Kids [p1 p2 <Pages stes |
-| media | nucleo | Una pagina che il motore non riesce a caricare appare come una normale pagina bianca, senza il riquadro richiesto da NFR-14/1 («quella danneggiata mostra, nelle sue dimensioni, il riquadro «Impossibil |
-| media | objects | Il pannello «Collegamenti» non regge un PDF troncato e riparato: mostra i dati del documento precedente e un messaggio tecnico (NFR-13, NFR-15, OBJ-38/39). Passi: aprire links.pdf (1 pagina con 2 coll |
-| media | annotations | Su una pagina con 2000 annotazioni ogni ridisegno dopo l'apertura e dopo ogni modifica, annulla o ripeti blocca l'interfaccia per circa 4 s (NFR-05: riscontro entro 100 ms, nessuna operazione lunga bl |
-| media | security | Aprire un PDF con 2000 annotazioni blocca la finestra per circa 3,8 s, quasi tutti spesi nell'analisi sincrona dei contenuti attivi (NFR-02: prima pagina subito, il resto in background; NFR-05: interf |
-| bassa | nucleo | Etichetta illeggibile sui pulsanti principali (default/primary) quando sono disattivati. |
-| bassa | security | Dialogo «Proteggi con password»: l'etichetta di un permesso è tagliata. |
-| bassa | nucleo | La finestra «Scorciatoie da tastiera» (Ctrl+?) non elenca le scorciatoie delle altre modalità. |
-| bassa | viewer | Pannello Segnalibri di un documento senza segnalibri: impaginazione sbagliata e icone schiacciate. |
-| bassa | sign | Pannello Firme: le etichette di due pulsanti sono tagliate. |
-| bassa | viewer | Ricerca avanzata: le caselle delle righe «Opzioni» e «Includi» sono attaccate tra loro. |
-| bassa | ocr | Dialogo «Lingue di riconoscimento»: la colonna «Stato» è troncata in tutte le righe. |
-| bassa | convert | Crea PDF da immagini con Formato pagina «Come l'immagine»: il campo Margini viene disattivato ma il suo valore (10 mm predefiniti) viene applicato lo stesso. |
-| bassa | text_edit | Il font nuovo usato per il testo aggiunto o riscritto viene incorporato intero invece che come sottoinsieme, e il file cresce di centinaia di KB. |
-| bassa | viewer | Pannello Miniature con una pagina illeggibile: il delegato solleva un'eccezione non gestita a ogni disegno e la miniatura non mostra alcun segno d'errore (NFR-14, VIS-07/3). Passi: PDF di 2 pagine con |
-| bassa | text_edit | Entrando in «Modifica» mentre la pagina corrente è illeggibile, l'attivazione dello strumento solleva un'eccezione non gestita (NFR-14: un errore in una pagina non deve coinvolgere il resto). Passi: P |
+| media | annotations | Chiudendo l'ultima scheda in Commenta la mini barra viene distrutta e i cambi di scheda successivi sollevano un'eccezione; su un PDF firmato i commenti chiedono la conferma SIG-21 perché il modulo non li dichiara ancora `kind="annotation"`. In correzione. |
+| bassa | text_edit | La riga riscritta usa una nuova copia del font (in sottoinsieme) invece della risorsa originale: il file cresce di pochi KB. |
+| bassa | nucleo | Su documenti molto grandi (5.000 campi in una pagina) ogni modifica costa circa 0,2 s per la copia di annullamento; sui documenti comuni pochi millisecondi. |
+| — | specifica | Funzioni P1/P2 non completate: elencate per ID in `foliant/modules/*/STATO.md` (es. icone dei pulsanti per stato FRM-18). |
+| — | motore | «Cifra tutto tranne i metadati» (SEC-06) non disponibile: PyMuPDF/MuPDF cifrano sempre i metadati. |
 
 ## Log
 - 28/10 00:57 — Fase 0: struttura, subagent, `.gitignore`.
@@ -150,3 +131,11 @@ barra delle modalità e menu ☰ nascosti a 1024–1366 px, pulsante dei comandi
 - 28/10 09:39 — Suite completa sul branch finale: 2.654 test superati, 0 falliti.
 - 28/10 09:48 — Collaudo finale: corretti i 3 casi di perdita di dati con editor aperto.
 - 28/10 09:53 — Barra delle modalità a icone sulle finestre strette, menu dei comandi in eccesso visibile.
+- 28/10 12:55–14:20 — Dopo la consegna: nuove API del nucleo (avvisi in pagina, controlli prima
+  del salvataggio, notifiche non bloccanti, attività in background, blocco del documento,
+  permessi e sblocco, salvataggio incrementale dei PDF firmati) adottate da tutti i 12 moduli.
+  Collaudo indipendente 3 (sei aree) e 4 (sette gruppi di moduli). Corretti tra gli altri: la
+  redazione su PDF firmati che lasciava il testo nel file, i comandi che restavano disattivati dopo
+  lo sblocco con la password, le notifiche impilate schiacciate, il pulsante «»» invisibile nel
+  tema scuro, i nomi dei tasti in inglese nel menu e il doppio avviso per i file riparati.
+  Suite: 4.255 test superati.

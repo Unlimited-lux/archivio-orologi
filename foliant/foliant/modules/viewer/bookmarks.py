@@ -242,7 +242,13 @@ class BookmarksPanel(QWidget):
         del_act.triggered.connect(self.delete_selected)
         self.tree.addAction(del_act)
         theme.on_change(self._restyle)
+        ctx.documentAccessChanged.connect(self._on_access)
         self._update_empty()
+
+    def _on_access(self, view) -> None:
+        """Permessi cambiati (sblocco con password o blocco): segnalibri modificabili o no."""
+        if view is self.view:
+            self.reload()
 
     # ------------------------------------------------------------------ vista
     def set_view(self, view: DocumentView | None) -> None:
