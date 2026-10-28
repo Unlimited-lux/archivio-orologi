@@ -402,3 +402,53 @@ def test_control_panel_shows_disk_full(batch):
     panel.toggle_pause()
     assert not control.paused
     panel.close()
+
+
+def test_resume_after_cancel_only_unfinished_files(batch, folder, tmp_path):
+    bad = tmp_path / "rotto.pdf"
+    bad.write_bytes(b"")
+    paths = [str(folder / "alfa.pdf"), str(bad), str(folder / "doc2.pdf"), str(folder / "doc10.pdf")]
+    batch.add_paths(paths)
+    batch.add_step("compress")
+    batch.dest_path.setText(str(tmp_path / "out"))
+    items = list(batch.items)
+    report = be.JobReport([be.FileResult(it.path, status=s) for it, s in
+                           zip(items, ("ok", "error", "cancelled", "not_processed"))],
+                          [be.Step("compress")], __import__("datetime").datetime.now())
+    report.cancelled = True
+    batch.report = report
+    batch._fill_report()
+    assert not batch.resume_button.isHidden()
+    again = batch.resume_pending()
+    assert sorted(os.path.basename(r.input) for r in again.results) == ["doc10.pdf", "doc2.pdf"]
+    assert again.counts()["ok"] == 2
+    assert batch.resume_button.isHidden()
+
+
+def test_empty_file_has_clear_message(tmp_path):
+    empty = tmp_path / "vuoto.pdf"
+    empty.write_bytes(b"")
+    rep = be.run_job(None, [be.analyze_file(str(empty))], be.JobSettings(steps=[be.Step("compress")],
+                                                                         destination=str(tmp_path / "o")))
+    assert rep.results[0].status == "error" and "vuoto" in rep.results[0].message
+
+
+def test_english_defaults_and_layout_fit(window):
+    """C13: in inglese cartella «processed» e modello «{name}»; nessun campo oltre il bordo."""
+    from foliant.i18n import set_language
+    set_language("en")
+    try:
+        w = bu.BatchWidget(window.ctx)
+        assert w.subfolder.text() == "processed" and w.pattern.text() == "{name}"
+        window.ctx.set_central_widget(w)
+        from PySide6.QtWidgets import QLineEdit
+        for size in ((1280, 800), (1024, 700)):
+            window.resize(*size)
+            window.show()
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            for edit in w.findChildren(QLineEdit):
+                if edit.isVisible():
+                    assert edit.mapTo(window, edit.rect().topRight()).x() <= window.width(), (size, edit.objectName())
+    finally:
+        set_language("it")

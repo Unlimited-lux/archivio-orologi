@@ -117,3 +117,67 @@ def test_certified_fill_forms_allows_filling(qtbot, window, tmp_path, test_signe
     qtbot.keyClicks(f.editor, "Anna")
     f.commit_active()
     assert E.form_values(view.document.pdf)["nome"] == "Anna"
+
+
+def _lock_form(tmp_path, signer=None):
+    """Campi A, B, C e un campo firma che dopo la firma blocca solo A e B."""
+    import io
+    d = pymupdf.open()
+    d.new_page()
+    for i, n in enumerate("ABC"):
+        E.create_field(d, 0, E.TEXT, pymupdf.Rect(72, 80 + 30 * i, 272, 100 + 30 * i), n)
+    E.create_field(d, 0, E.SIGNATURE, pymupdf.Rect(300, 80, 500, 130), "Firma",
+                   lock={"action": "Include", "fields": ["A", "B"]})
+    data = d.tobytes()
+    if signer is not None:
+        from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+        from pyhanko.sign import signers
+        out = io.BytesIO()
+        signers.sign_pdf(IncrementalPdfFileWriter(io.BytesIO(data)), signers.PdfSignatureMetadata(field_name="Firma"),
+                         signer=signer[0], output=out)
+        data = out.getvalue()
+    path = tmp_path / ("bloccato_firmato.pdf" if signer else "bloccato.pdf")
+    path.write_bytes(data)
+    return path
+
+
+def test_signature_lock_makes_only_listed_fields_read_only(qtbot, window, tmp_path, test_signer):  # noqa: F811
+    """FRM-20: firma con blocco dei soli A e B → A e B in sola lettura, C compilabile."""
+    view = open_form(window, _lock_form(tmp_path, test_signer))
+    f = forms.instance().filler(view)
+    f.state.refresh(force=True)
+    assert f.state.signature_locked == {"A", "B"}
+    click_field(qtbot, view, "A")
+    assert f.editor is None
+    click_field(qtbot, view, "C")
+    assert f.editor is not None
+    qtbot.keyClicks(f.editor, "ok")
+    f.commit_active()
+    assert E.form_values(view.document.pdf)["C"] == "ok"
+    assert {x.name for x in f.state.fields if x.readonly} == {"A", "B"}
+
+
+def test_signature_lock_follows_renamed_field(tmp_path):
+    d = pymupdf.open(str(_lock_form(tmp_path)))
+    a = [f for f in E.list_fields(d) if f.name == "A"][0]
+    E.update_properties(d, a.page, a.xref, name="cliente.cognome")
+    sig = [f for f in E.list_fields(d) if f.kind == E.SIGNATURE][0]
+    assert sig.lock == {"action": "Include", "fields": ["cliente.cognome", "B"]}
+
+
+def test_signature_sv_constraints_round_trip(tmp_path):
+    """Vincoli per chi firma (/SV): motivi ammessi vincolanti, marca temporale e certificazione."""
+    d = pymupdf.open()
+    d.new_page()
+    x = E.create_field(d, 0, E.SIGNATURE, pymupdf.Rect(300, 80, 500, 130), "Firma")
+    sv = {"reasons": ["Venditore", "Acquirente"], "timestamp": "https://tsa.esempio.test", "certify": 2}
+    E.update_properties(d, 0, x, sv=sv)
+    again = pymupdf.open("pdf", d.tobytes())
+    f = E.list_fields(again)[0]
+    assert f.sv == sv and E.field_info(again, f.page, f.xref).sv == sv
+    raw = again.xref_object(f.field_xref, compressed=True)
+    assert "/Type/SV" in raw.replace(" ", "") and "/Ff 8" in raw
+    E.update_properties(again, f.page, f.xref, sv={})
+    assert again.xref_get_key(f.field_xref, "SV")[0] == "null"
+    dup = E.duplicate_field(d, 0, x, 0, 80)
+    assert E.field_info(d, 0, dup).sv == sv and E.field_info(d, 0, dup).name != "Firma"

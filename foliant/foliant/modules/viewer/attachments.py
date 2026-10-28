@@ -13,11 +13,12 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import pymupdf
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QStackedWidget,
-    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator, QVBoxLayout, QWidget,
 )
 
 from foliant.api import (
@@ -30,10 +31,16 @@ from .attachments_engine import Attachment
 
 ROLE_ITEM = Qt.ItemDataRole.UserRole
 ROLE_SORT = Qt.ItemDataRole.UserRole + 1
+ROLE_FOLDER = Qt.ItemDataRole.UserRole + 2
 
 COL_NAME, COL_DESC, COL_SIZE, COL_PAGE, COL_CREATED, COL_MODIFIED = range(6)
 
 EN = {
+    "Cerca per nome…": "Search by name…",
+    "Cartella": "Folder",
+    "Documento iniziale del portfolio": "Initial document of the portfolio",
+    "Il documento non consente modifiche: allegati in sola lettura.":
+        "The document does not allow changes: attachments are read-only.",
     "Allegati": "Attachments",
     "Apri": "Open",
     "Salva come…": "Save as…",
@@ -115,6 +122,7 @@ class AttachmentsPanel(QWidget):
         self.view = None
         self._doc = None
         self._items: list[Attachment] = []
+        self.collection: engine.Collection | None = None     # portfolio (VIS-22)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -143,6 +151,12 @@ class AttachmentsPanel(QWidget):
         bar.addWidget(self.btn_add)
         bar.addWidget(self.btn_delete)
         layout.addLayout(bar)
+
+        self.filter_edit = QLineEdit(self)
+        self.filter_edit.setPlaceholderText(_("Cerca per nome…"))
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.textChanged.connect(self.apply_filter)
+        layout.addWidget(self.filter_edit)
 
         self.stack = QStackedWidget()
         self.tree = QTreeWidget()
@@ -178,6 +192,7 @@ class AttachmentsPanel(QWidget):
         self._dirty = False          # elenco da rileggere alla prossima visualizzazione
         self._pending = False        # aggiornamento già programmato (raggruppa le modifiche)
         ctx.documentChanged.connect(self._on_document_changed)
+        ctx.documentAccessChanged.connect(lambda v: self._update_buttons() if v is self.view else None)
         ctx.documentOpened.connect(self._on_document_opened)
         app = QApplication.instance()
         if app is not None:
@@ -248,14 +263,48 @@ class AttachmentsPanel(QWidget):
     def refresh(self) -> None:
         self._dirty = False
         self._items = []
+        self.collection = None
         if self._doc is not None and not self._doc.closed:
             try:
                 with ENGINE_LOCK:
                     self._items = engine.list_attachments(self._doc.pdf)
+                    self.collection = engine.read_collection(self._doc.pdf)
             except Exception:
                 self._items = []
         self.tree.setSortingEnabled(False)
         self.tree.clear()
+        col = self.collection
+        folder_items: dict[int, QTreeWidgetItem] = {}
+
+        def folder_item(fid: int | None) -> QTreeWidgetItem | None:
+            """Riga della cartella (create con le cartelle che la contengono); None = radice."""
+            if col is None or fid is None or fid == col.root:
+                return None
+            if fid in folder_items:
+                return folder_items[fid]
+            parent = None
+            for f in col.path_of(fid):
+                item = folder_items.get(f.id)
+                if item is None:
+                    item = _Item()
+                    item.setText(COL_NAME, f.name or _("Cartella"))
+                    item.setIcon(COL_NAME, icon("folder"))
+                    item.setData(COL_NAME, ROLE_FOLDER, f.id)
+                    item.setData(COL_PAGE, ROLE_SORT, -2)          # cartelle prima dei file
+                    font = item.font(COL_NAME)
+                    font.setBold(True)
+                    item.setFont(COL_NAME, font)
+                    if parent is None:
+                        self.tree.addTopLevelItem(item)
+                    else:
+                        parent.addChild(item)
+                    item.setExpanded(True)
+                    folder_items[f.id] = item
+                parent = item
+            return parent
+
+        self.tree.setRootIsDecorated(bool(col and col.folders and len(col.folders) > 1))
+        initial_row = None
         for att in self._items:
             row = _Item()
             row.setText(COL_NAME, att.filename)
@@ -274,8 +323,23 @@ class AttachmentsPanel(QWidget):
             row.setText(COL_MODIFIED, _fmt_date(att.modified))
             row.setData(COL_MODIFIED, ROLE_SORT, att.modified.timestamp() if att.modified else 0.0)
             row.setData(COL_NAME, ROLE_ITEM, att)
-            self.tree.addTopLevelItem(row)
+            parent = folder_item(col.folder_of(att.key)) if col is not None and att.page is None else None
+            if parent is None:
+                self.tree.addTopLevelItem(row)
+            else:
+                parent.addChild(row)
+            if col is not None and col.initial and att.key == col.initial:
+                initial_row = row
+                font = row.font(COL_NAME)
+                font.setBold(True)
+                row.setFont(COL_NAME, font)
+                row.setToolTip(COL_NAME, att.filename + "\n" + _("Documento iniziale del portfolio"))
         self.tree.setSortingEnabled(True)
+        if initial_row is not None:
+            self.tree.setCurrentItem(initial_row)
+            self.tree.scrollToItem(initial_row)
+        if self.filter_edit.text().strip():
+            self.apply_filter(self.filter_edit.text())
         if self._doc is None:
             self.empty.setText(_("Nessun documento aperto."))
             self.stack.setCurrentWidget(self.empty)
@@ -297,23 +361,80 @@ class AttachmentsPanel(QWidget):
         return self.stack.currentWidget() is self.empty
 
     def selected_items(self) -> list[Attachment]:
-        return [r.data(COL_NAME, ROLE_ITEM) for r in self.tree.selectedItems()]
+        return [a for a in (r.data(COL_NAME, ROLE_ITEM) for r in self.tree.selectedItems()) if a is not None]
+
+    def rows(self) -> list[QTreeWidgetItem]:
+        """Tutte le righe dell'albero (cartelle comprese), in ordine."""
+        out = []
+        it = QTreeWidgetItemIterator(self.tree)
+        while it.value() is not None:
+            out.append(it.value())
+            it += 1
+        return out
 
     def select(self, att: Attachment) -> None:
         self.ensure_fresh()
-        for i in range(self.tree.topLevelItemCount()):
-            row = self.tree.topLevelItem(i)
-            if row.data(COL_NAME, ROLE_ITEM).key == att.key:
+        for row in self.rows():
+            item = row.data(COL_NAME, ROLE_ITEM)
+            if item is not None and item.key == att.key:
                 self.tree.setCurrentItem(row)
                 return
+
+    def current_item(self) -> Attachment | None:
+        row = self.tree.currentItem()
+        return row.data(COL_NAME, ROLE_ITEM) if row is not None else None
+
+    def apply_filter(self, text: str) -> None:
+        """Mostra solo i file il cui nome contiene il testo, anche dentro le cartelle (le cartelle
+        restano visibili se contengono qualcosa da mostrare)."""
+        needle = text.strip().casefold()
+
+        def visit(item: QTreeWidgetItem) -> bool:
+            att = item.data(COL_NAME, ROLE_ITEM)
+            if att is None:                       # cartella
+                shown = False
+                for i in range(item.childCount()):
+                    shown = visit(item.child(i)) or shown
+                item.setHidden(bool(needle) and not shown)
+                if needle and shown:
+                    item.setExpanded(True)
+                return shown
+            match = not needle or needle in att.filename.casefold() or needle in att.description.casefold()
+            item.setHidden(not match)
+            return match
+        for i in range(self.tree.topLevelItemCount()):
+            visit(self.tree.topLevelItem(i))
+
+    def visible_names(self) -> list[str]:
+        """Nomi dei file mostrati (filtro applicato), in ordine."""
+        out = []
+        for row in self.rows():
+            att = row.data(COL_NAME, ROLE_ITEM)
+            hidden = False
+            p = row
+            while p is not None:
+                hidden = hidden or p.isHidden()
+                p = p.parent()
+            if att is not None and not hidden:
+                out.append(att.filename)
+        return out
+
+    def can_modify(self) -> bool:
+        """Aggiungere ed eliminare allegati modifica il documento: serve il permesso (VIS-06)."""
+        return self._doc is not None and self._doc.allows(pymupdf.PDF_PERM_MODIFY)
 
     def _update_buttons(self) -> None:
         has_doc = self._doc is not None
         sel = bool(self.tree.selectedItems())
-        self.btn_add.setEnabled(has_doc)
+        editable = self.can_modify()
+        self.btn_add.setEnabled(editable)
         self.btn_save_all.setEnabled(bool(self._items))
-        for b in (self.btn_open, self.btn_save, self.btn_delete):
+        for b in (self.btn_open, self.btn_save):
             b.setEnabled(sel)
+        self.btn_delete.setEnabled(sel and editable)
+        reason = _("Il documento non consente modifiche: allegati in sola lettura.")
+        for b, text in ((self.btn_add, _("Aggiungi…")), (self.btn_delete, _("Elimina"))):
+            b.setToolTip(text if editable or not has_doc else f"{text}\n{reason}")
 
     def _context_menu(self, pos) -> None:
         row = self.tree.itemAt(pos)
@@ -335,15 +456,20 @@ class AttachmentsPanel(QWidget):
         if self._items:
             a = menu.addAction(_("Salva tutti…"), self.save_all)
             bind_icon(a, "save-all")
+        editable = self.can_modify()
         if self._doc is not None:
             a = menu.addAction(_("Aggiungi…"), self.add_files)
             bind_icon(a, "file-plus")
+            a.setEnabled(editable)
         if att is not None:
             a = menu.addAction(_("Elimina"), lambda: self.delete_item(att))
             bind_icon(a, "trash-2")
+            a.setEnabled(editable)
 
     def _double_clicked(self, row: QTreeWidgetItem, _col: int) -> None:
         att = row.data(COL_NAME, ROLE_ITEM)
+        if att is None:
+            return                     # cartella: si apre e si chiude
         if att.page is not None:
             self.go_to(att)
         else:
@@ -512,7 +638,7 @@ class AttachmentsPanel(QWidget):
 
     def add_files(self, paths: list[str] | None = None) -> list[str]:
         """Incorpora i file scelti come allegati del documento (un passo annullabile)."""
-        if self._doc is None:
+        if not self.can_modify():
             return []
         if paths is None:
             paths = self.ask_open_paths()
@@ -539,7 +665,7 @@ class AttachmentsPanel(QWidget):
         return keys
 
     def delete_item(self, att: Attachment, confirm: bool = True) -> bool:
-        if self._doc is None:
+        if not self.can_modify():
             return False
         if confirm and not self.confirm(_("Elimina allegato"), _(
                 "Eliminare l'allegato «{name}»? Puoi annullare con Annulla.").format(name=att.filename)):

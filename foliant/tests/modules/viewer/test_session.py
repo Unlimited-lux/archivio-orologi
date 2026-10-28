@@ -373,3 +373,53 @@ def test_session_not_restored_if_documents_already_open(viewer_window, tmp_path,
         assert win.views() == [other]
     finally:
         _cleanup(win)
+
+
+def test_switching_among_50_tabs_shows_page_quickly(viewer_window, tmp_path, qtbot):
+    """VIS-30/NFR-07: con 50 documenti aperti, la pagina della scheda attivata è visibile entro
+    200 ms (mediana; gli ascoltatori del viewer non devono rallentare il cambio di scheda)."""
+    import statistics
+    import time
+
+    from PySide6.QtWidgets import QApplication
+    views = []
+    for i in range(50):
+        path = tmp_path / f"doc{i}.pdf"
+        doc = pymupdf.open()
+        for p in range(5):
+            doc.new_page().insert_text((72, 100), f"Documento {i} pagina {p + 1}", fontsize=14)
+        doc.save(str(path))
+        views.append(viewer_window.open_path(str(path)))
+    QApplication.processEvents()
+    times = []
+    for i in (3, 17, 42, 8, 29, 49, 0, 33, 12, 21):
+        view = views[i]
+        t = time.perf_counter()
+        viewer_window.ctx.activate_view(view)
+        qtbot.waitUntil(lambda v=view: any(k[0] == v.current_page for k in v._cache), timeout=2000)
+        times.append(time.perf_counter() - t)
+    assert statistics.median(times) < 0.2, [round(x * 1000) for x in times]
+
+
+def test_closing_with_two_modified_documents_asks_once(viewer_window, tmp_path, monkeypatch):
+    """Dati 2 documenti modificati, alla chiusura dell'applicazione compare un solo dialogo che li
+    elenca entrambi (Salva tutti / Non salvare / Annulla)."""
+    from PySide6.QtWidgets import QMessageBox
+    a = viewer_window.open_path(_make(tmp_path, "uno.pdf", pages=2))
+    b = viewer_window.open_path(_make(tmp_path, "due.pdf", pages=2))
+    for v in (a, b):
+        with v.document.change("Testo") as pdf:
+            pdf[0].insert_text((72, 300), "x")
+    shown = []
+
+    def fake_exec(box):
+        shown.append((box.text(), [btn.text() for btn in box.buttons()]))
+        return 0
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    assert not viewer_window.close()                 # Annulla (nessun pulsante scelto)
+    assert len(shown) == 1
+    text, buttons = shown[0]
+    assert "uno.pdf" in text and "due.pdf" in text
+    assert "Salva tutti" in buttons
+    for v in (a, b):
+        v.document._saved_state = v.document._state

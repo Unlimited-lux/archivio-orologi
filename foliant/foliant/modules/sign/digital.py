@@ -115,6 +115,7 @@ class CertInfo:
     self_signed: bool
     email: str = ""
     der: bytes = field(default=b"", repr=False)
+    policies: list[str] = field(default_factory=list)   # OID delle policy del certificato
 
     def is_valid_now(self) -> bool:
         now = datetime.now(timezone.utc)
@@ -146,6 +147,12 @@ def _cert_info(cert: cx509.Certificate) -> CertInfo:
             email = mails[0]
     except cx509.ExtensionNotFound:
         pass
+    policies: list[str] = []
+    try:
+        ext = cert.extensions.get_extension_for_oid(ExtensionOID.CERTIFICATE_POLICIES).value
+        policies = [p.policy_identifier.dotted_string for p in ext]
+    except cx509.ExtensionNotFound:
+        pass
     if not email:
         attrs = cert.subject.get_attributes_for_oid(NameOID.EMAIL_ADDRESS)
         if attrs:
@@ -164,6 +171,7 @@ def _cert_info(cert: cx509.Certificate) -> CertInfo:
         self_signed=cert.subject == cert.issuer,
         email=email,
         der=der,
+        policies=policies,
     )
 
 
@@ -877,6 +885,7 @@ class SignOptions:
     timestamp_url: str | None = None
     timestamp_timeout: float = 15.0
     timestamp_auth: tuple[str, str] | None = None    # (utente, password) per la TSA; mai salvati
+    timestamp_client_cert: tuple[str, str] | None = None   # (file .p12/.pem, password) per la TSA; mai salvati
     timestamper: object | None = None
     certify: bool = False
     docmdp_level: int = 2
@@ -884,6 +893,73 @@ class SignOptions:
     md_algorithm: str = "sha256"
     allow_expired: bool = False
     password: str | None = None    # password del documento cifrato (mai salvata)
+    pades_level: str = ""          # "", "B-B", "B-T", "B-LT", "B-LTA" (SIG-22; "" = B-T se c'è una TSA)
+    validation_roots: list | None = None   # certificati attendibili per raccogliere i dati di verifica
+
+
+TSA_CAFILE: str | None = None   # certificati di CA per il TLS della TSA (None: archivio predefinito)
+
+
+def tsa_ssl_context(path: str, password: str | None):
+    """Contesto TLS con il certificato client per la TSA (SIG-10). Accetta .p12/.pfx oppure un .pem con
+    certificato e chiave. La chiave non viene mai scritta in chiaro: per il PKCS#12 si passa a `ssl`
+    un PEM cifrato con una password casuale, in una cartella privata cancellata subito dopo."""
+    import shutil
+    import ssl
+
+    try:
+        if TSA_CAFILE:
+            ctx = ssl.create_default_context(cafile=TSA_CAFILE)
+        else:
+            try:
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
+            except ImportError:
+                ctx = ssl.create_default_context()
+        raw = Path(path).read_bytes()
+        pw = password.encode() if password else None
+        if Path(path).suffix.lower() in (".p12", ".pfx") or not raw.lstrip().startswith(b"-----"):
+            key, cert, extra = c_pkcs12.load_key_and_certificates(raw, pw)
+            if key is None or cert is None:
+                raise ValueError("no key")
+            token = secrets.token_hex(24).encode()
+            tmp = tempfile.mkdtemp(prefix="foliant-tsa-")
+            try:
+                chain = cert.public_bytes(serialization.Encoding.PEM) + b"".join(
+                    c.public_bytes(serialization.Encoding.PEM) for c in extra or [])
+                Path(tmp, "c.pem").write_bytes(chain)
+                Path(tmp, "k.pem").write_bytes(key.private_bytes(
+                    serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                    serialization.BestAvailableEncryption(token)))
+                ctx.load_cert_chain(str(Path(tmp, "c.pem")), str(Path(tmp, "k.pem")), password=token)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            ctx.load_cert_chain(str(path), password=pw or (lambda: b""))
+    except (OSError, ValueError, TypeError, ssl.SSLError) as exc:
+        raise SignError(_("Certificato client per la marca temporale non leggibile o password errata")) from exc
+    return ctx
+
+
+def _client_cert_timestamper(base):
+    """HTTPTimeStamper che usa un contesto TLS proprio (certificato client)."""
+    from contextlib import asynccontextmanager
+
+    import aiohttp
+
+    class ClientCertTimeStamper(base):
+        def __init__(self, url, *, ssl_context, **kw):
+            super().__init__(url, **kw)
+            self._ssl_context = ssl_context
+
+        @asynccontextmanager
+        async def _acquire_session(self):
+            session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=self._ssl_context))
+            try:
+                yield session
+            finally:
+                await session.close()
+    return ClientCertTimeStamper
 
 
 def _timestamp_error(exc: BaseException) -> TimestampError:
@@ -917,16 +993,21 @@ def _timestamp_error(exc: BaseException) -> TimestampError:
 
 
 def _check_field_constraints(sv, digital_id: "DigitalID", options: "SignOptions") -> bool:
-    """Verifica i vincoli /SV del campo su motivo ed emittente. Restituisce True
-    se il campo ha un vincolo sull'emittente (che verifichiamo noi)."""
+    """Verifica i vincoli /SV del campo su motivo, policy ed emittente. Restituisce True
+    se il campo ha un vincolo sull'emittente o sulla policy (che verifichiamo noi)."""
     if sv is None:
         return False
     reasons = [str(r) for r in (_deref(sv.get("/Reasons")) or [])]
     if reasons and (options.reason or "") not in reasons:
         raise SigningNotAllowed(_("Il campo ammette solo questi motivi: {r}").format(r="; ".join(reasons)))
     cert = _deref(sv.get("/Cert"))
+    if cert is not None and "/OID" in cert:
+        oids = [str(o) for o in _deref(cert.get("/OID"))]
+        if oids and not set(oids) & set(digital_id.info.policies):
+            raise SigningNotAllowed(_("Il campo richiede un certificato con una di queste policy: {oids}").format(
+                oids=", ".join(oids)))
     if cert is None or "/Issuer" not in cert:
-        return False
+        return cert is not None and "/OID" in cert   # policy verificata qui: pyHanko non la gestisce
     allowed = [cert_info_from_der(bytes(_deref(x))) for x in _deref(cert.get("/Issuer"))]
     chain = [digital_id.info, *digital_id.chain]
     ok_dn = {c.subject_dn for c in allowed}
@@ -1056,13 +1137,18 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     timestamper = options.timestamper
     ts_url = options.timestamp_url or sv_ts_url
     if timestamper is None and ts_url:
-        timestamper = HTTPTimeStamper(ts_url, timeout=options.timestamp_timeout,
-                                      auth=tuple(options.timestamp_auth) if options.timestamp_auth else None)
+        auth = tuple(options.timestamp_auth) if options.timestamp_auth else None
+        if options.timestamp_client_cert:
+            ctx = tsa_ssl_context(*options.timestamp_client_cert)
+            timestamper = _client_cert_timestamper(HTTPTimeStamper)(
+                ts_url, timeout=options.timestamp_timeout, auth=auth, ssl_context=ctx)
+        else:
+            timestamper = HTTPTimeStamper(ts_url, timeout=options.timestamp_timeout, auth=auth)
     style = _FoliantStampStyle(digital_id.info, options, rotation)
     pdf_signer = signers.PdfSigner(meta, digital_id.signer, timestamper=timestamper, stamp_style=style,
                                    new_field_spec=new_field_spec)
     if own_sv_check:
-        # vincolo sull'emittente già verificato qui (pyHanko richiederebbe un percorso di
+        # vincoli su emittente e policy già verificati qui (pyHanko richiederebbe un percorso di
         # validazione completo); la marca temporale obbligatoria è gestita sopra con sv_ts_url
         pdf_signer._ignore_sv = True
     out = io.BytesIO()
@@ -1080,7 +1166,105 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     for w in style.warnings:
         if w not in warnings:
             warnings.append(w)
+    if options.pades_level in ("B-LT", "B-LTA"):
+        # SIG-22: dati di verifica in una revisione successiva, poi (B-LTA) la marca di documento.
+        # Se qualcosa non si ottiene il documento resta al livello raggiunto, con il motivo.
+        if timestamper is None:
+            warnings.append(_("Livello {lvl} non raggiunto: serve un server di marca temporale.").format(
+                lvl=options.pades_level))
+            return result, warnings
+        result, more = add_validation_info_pdf(result, trusted=options.validation_roots or (),
+                                               password=options.password)
+        warnings += more
+        if more:
+            return result, warnings + [_("Livello raggiunto: B-T.")]
+        if options.pades_level == "B-LTA":
+            try:
+                result = add_document_timestamp(result, timestamper, trusted=options.validation_roots or (),
+                                                password=options.password)
+            except TimestampError as e:
+                warnings.append(_("Marca temporale del documento non ottenuta ({e}): il documento resta a livello "
+                                  "B-LT; puoi aggiungerla più tardi dal pannello Firme.").format(e=e))
     return result, warnings
+
+
+def _collection_context(trusted, extra_roots=(), allow_fetching: bool = True):
+    from pyhanko_certvalidator import ValidationContext
+    roots = [asn1_x509.Certificate.load(d) for d in _trusted_der(trusted)] + list(extra_roots)
+    return ValidationContext(trust_roots=roots, allow_fetching=allow_fetching, revocation_mode="hard-fail")
+
+
+def add_validation_info_pdf(data: bytes, *, trusted=(), password: str | None = None,
+                            allow_fetching: bool = True) -> tuple[bytes, list[str]]:
+    """SIG-22 «Aggiungi informazioni di verifica»: per ogni firma raccoglie catena e risposte di revoca
+    (OCSP o CRL) e le aggiunge in /DSS con una revisione incrementale. Restituisce (byte, avvisi): una firma
+    per cui i dati non si ottengono resta com'è e produce un avviso con il motivo."""
+    from pyhanko.pdf_utils.reader import PdfFileReader
+    from pyhanko.sign.validation import add_validation_info
+
+    data = bytes(data)
+    warnings: list[str] = []
+    reader = PdfFileReader(io.BytesIO(data), strict=False)
+    if reader.encrypted:
+        _decrypt_with(reader, password)
+    count = len(reader.embedded_signatures)
+    for i in range(count):
+        reader = PdfFileReader(io.BytesIO(data), strict=False)
+        if reader.encrypted:
+            _decrypt_with(reader, password)
+        emb = reader.embedded_signatures[i]
+        name = emb.field_name
+        # un certificato autofirmato è la radice di sé stesso: non ha revoca da raccogliere
+        own = [emb.signer_cert] if emb.signer_cert.self_issued else []
+        try:
+            out = add_validation_info(emb, _collection_context(trusted, own), output=io.BytesIO())
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(_("Dati di verifica non ottenuti per «{name}»: {e}").format(
+                name=name, e=str(exc) or type(exc).__name__))
+            continue
+        new = out.getvalue()
+        if not new.startswith(data):
+            raise SignError(_("Firma non riuscita: il salvataggio non è incrementale"))
+        data = new
+    return data, warnings
+
+
+def add_document_timestamp(data: bytes, timestamper=None, *, url: str | None = None, timeout: float = 15.0,
+                           trusted=(), password: str | None = None) -> bytes:
+    """SIG-22 «Aggiungi marca temporale al documento» (/DocTimeStamp, ETSI.RFC3161) in una revisione
+    incrementale, con i dati di verifica della TSA quando si ottengono."""
+    from pyhanko.sign import signers
+    from pyhanko.sign.timestamps import HTTPTimeStamper
+
+    if timestamper is None:
+        if not url:
+            raise SignError(_("Nessun server di marca temporale configurato."))
+        timestamper = HTTPTimeStamper(url, timeout=timeout)
+    data = bytes(data)
+
+    def stamp(vc):
+        writer = _open_writer(data, password)
+        out = io.BytesIO()
+        signers.PdfTimeStamper(timestamper).timestamp_pdf(writer, "sha256", validation_context=vc, output=out)
+        return out.getvalue()
+
+    try:
+        try:
+            result = stamp(_collection_context(trusted, allow_fetching=True))
+        except Exception as exc:  # noqa: BLE001 - catena della TSA non verificabile: marca senza DSS
+            if _is_timestamp_failure(exc):
+                raise
+            result = stamp(None)
+    except SignError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if _is_timestamp_failure(exc):
+            raise _timestamp_error(exc) from exc
+        raise SignError(_("Marca temporale del documento non riuscita: {e}").format(
+            e=str(exc) or type(exc).__name__)) from exc
+    if not result.startswith(data):
+        raise SignError(_("Firma non riuscita: il salvataggio non è incrementale"))
+    return result
 
 
 def _is_timestamp_failure(exc: BaseException) -> bool:
@@ -1117,6 +1301,26 @@ class FieldInfo:
     allowed_issuers: list[CertInfo] | None = None   # /SV /Cert /Issuer
     certify_level: int | None = None                # /SV /MDP /P: il campo richiede una certificazione
     digest_methods: list[str] | None = None         # /SV /DigestMethod
+    allowed_policies: list[str] | None = None       # /SV /Cert /OID
+
+
+def _sig_locked_fields(sig, all_names: set[str]) -> set[str]:
+    """Campi bloccati dai riferimenti FieldMDP di un dizionario di firma."""
+    locked: set[str] = set()
+    for ref in (sig["/Reference"] if "/Reference" in sig else []):
+        ref = ref.get_object()
+        if ref.get("/TransformMethod") != "/FieldMDP":
+            continue
+        params = _deref(ref.get("/TransformParams")) or {}
+        action = str(params.get("/Action", "/All"))
+        fields_ = {str(f) for f in (params.get("/Fields") or [])}
+        if action == "/All":
+            locked |= all_names
+        elif action == "/Include":
+            locked |= fields_
+        elif action == "/Exclude":
+            locked |= all_names - fields_
+    return locked
 
 
 def _locked_field_names(reader) -> set[str]:
@@ -1128,21 +1332,8 @@ def _locked_field_names(reader) -> set[str]:
     try:
         for _name, sig_ref, _fref in enumerate_sig_fields(reader, filled_status=True):
             sig = sig_ref.get_object() if sig_ref is not None else None
-            if sig is None:
-                continue
-            for ref in (sig["/Reference"] if "/Reference" in sig else []):
-                ref = ref.get_object()
-                if ref.get("/TransformMethod") != "/FieldMDP":
-                    continue
-                params = _deref(ref.get("/TransformParams")) or {}
-                action = str(params.get("/Action", "/All"))
-                fields_ = {str(f) for f in (params.get("/Fields") or [])}
-                if action == "/All":
-                    locked |= all_names
-                elif action == "/Include":
-                    locked |= fields_
-                elif action == "/Exclude":
-                    locked |= all_names - fields_
+            if sig is not None:
+                locked |= _sig_locked_fields(sig, all_names)
     except Exception:  # noqa: BLE001
         pass
     return locked
@@ -1210,7 +1401,7 @@ def signature_fields(data: bytes, password: str | None = None) -> list[FieldInfo
         flags = int(widget.get("/F", 0) or 0)
         ff = int(fobj.get("/Ff", 0) or 0)
         ts_url = None
-        reasons = issuers = mdp = digests = None
+        reasons = issuers = mdp = digests = policies = None
         sv = _deref(fobj.get("/SV"))
         if sv is not None:
             ts = _deref(sv.get("/TimeStamp"))
@@ -1227,6 +1418,8 @@ def signature_fields(data: bytes, password: str | None = None) -> list[FieldInfo
                 cert = _deref(sv.get("/Cert"))
                 if cert is not None and "/Issuer" in cert:
                     issuers = [cert_info_from_der(bytes(_deref(x))) for x in _deref(cert.get("/Issuer"))] or None
+                if cert is not None and "/OID" in cert:
+                    policies = [str(o) for o in _deref(cert.get("/OID"))] or None
             except Exception:  # noqa: BLE001 - vincoli illeggibili: ignorati
                 pass
         out.append(FieldInfo(
@@ -1234,16 +1427,39 @@ def signature_fields(data: bytes, password: str | None = None) -> list[FieldInfo
             hidden=bool(flags & 2), required=bool(ff & 2), invisible=invisible,
             locked=name in locked, timestamp_required_url=ts_url, tooltip=str(fobj.get("/TU", "") or ""),
             allowed_reasons=reasons, allowed_issuers=issuers, certify_level=mdp, digest_methods=digests or None,
+            allowed_policies=policies,
         ))
     out.sort(key=lambda f: (f.page if f.page is not None else 1 << 30,
                             f.rect[1] if f.rect else 0, f.rect[0] if f.rect else 0))
     return out
 
 
+def _cert_constraints_class():
+    from pyhanko.pdf_utils import generic
+    from pyhanko.sign import fields as pfields
+
+    class CertConstraints(pfields.SigCertConstraints):
+        """/SV /Cert con anche /OID (le policy ammesse), che pyHanko non scrive."""
+        policies: list[str] = []
+
+        def as_pdf_object(self):
+            out = super().as_pdf_object()
+            if self.policies:
+                out[generic.NameObject("/OID")] = generic.ArrayObject(
+                    generic.TextStringObject(o) for o in self.policies)
+            return out
+    return CertConstraints
+
+
+def _CertConstraints(**kw):  # noqa: N802
+    return _cert_constraints_class()(**kw)
+
+
 def add_signature_field(data, name, page, rect, *, required=False, tooltip="", timestamp_url=None,
                         timestamp_required=False, lock_fields=None, lock_action="Include",
                         hidden=False, allowed_reasons=None, allowed_issuers=None,
-                        certify_level=None, digest_methods=None, password=None) -> tuple[bytes, str]:
+                        certify_level=None, digest_methods=None, allowed_policies=None,
+                        password=None) -> tuple[bytes, str]:
     from pyhanko.pdf_utils import generic
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
     from pyhanko.sign import fields as pfields
@@ -1272,17 +1488,27 @@ def add_signature_field(data, name, page, rect, *, required=False, tooltip="", t
         bad = [m for m in digest_methods if m not in ("sha256", "sha384", "sha512")]
         if bad:
             raise SignError(_("Algoritmo di hash non supportato: {alg}").format(alg=", ".join(bad)))
-    if timestamp_url or allowed_reasons or allowed_issuers or certify_level or digest_methods:
+    policies = [str(o).strip() for o in (allowed_policies or []) if str(o).strip()]
+    bad = [o for o in policies if not re.fullmatch(r"[0-2](\.\d+)+", o)]
+    if bad:
+        raise SignError(_("OID di policy non valido: {oid}").format(oid=", ".join(bad)))
+    if timestamp_url or allowed_reasons or allowed_issuers or certify_level or digest_methods or policies:
         flags = pfields.SigSeedValFlags(0)
         cert = None
         if allowed_reasons:
             flags |= pfields.SigSeedValFlags.REASONS
         if digest_methods:
             flags |= pfields.SigSeedValFlags.DIGEST_METHOD
-        if allowed_issuers:
-            cert = pfields.SigCertConstraints(
-                flags=pfields.SigCertConstraintFlags.ISSUER,
-                issuers=[_to_cert_info(c).to_asn1() for c in allowed_issuers])
+        if allowed_issuers or policies:
+            cflags = pfields.SigCertConstraintFlags(0)
+            if allowed_issuers:
+                cflags |= pfields.SigCertConstraintFlags.ISSUER
+            if policies:
+                cflags |= pfields.SigCertConstraintFlags.OID
+            cert = _CertConstraints(
+                flags=cflags, issuers=[_to_cert_info(c).to_asn1() for c in allowed_issuers] if allowed_issuers
+                else None)
+            cert.policies = policies
         sv = pfields.SigSeedValueSpec(
             flags=flags, reasons=list(allowed_reasons) if allowed_reasons else None,
             timestamp_server_url=timestamp_url or None,
@@ -1370,8 +1596,9 @@ def _plural(n: int, one: str, many: str) -> str:
     return (one if n == 1 else many).format(n=n)
 
 
-def _analyze_changes(reader, signed_rev: int) -> tuple[list[str], list[str]]:
-    """Descrive le modifiche dopo la revisione firmata: (consentite, non consentite)."""
+def _analyze_changes(reader, signed_rev: int, filled: set | None = None) -> tuple[list[str], list[str]]:
+    """Descrive le modifiche dopo la revisione firmata: (consentite, non consentite).
+    In `filled` (se dato) aggiunge i nomi dei campi modulo modificati."""
     total = reader.xrefs.total_revisions
     if signed_rev >= total - 1:
         return [], []
@@ -1457,6 +1684,10 @@ def _analyze_changes(reader, signed_rev: int) -> tuple[list[str], list[str]]:
             ft = obj.get("/FT") or (parent.get("/FT") if isinstance(parent, generic.DictionaryObject) else None)
             if ft != "/Sig" and not is_new:
                 form_fill += 1
+                if filled is not None:
+                    name = obj.get("/T") or (parent.get("/T") if isinstance(parent, generic.DictionaryObject) else None)
+                    if name is not None:
+                        filled.add(str(name))
             continue
         if sub == "/Popup":
             continue
@@ -1633,6 +1864,27 @@ def _trusted_der(trusted) -> list[bytes]:
     return out
 
 
+ARCHIVE_RENEWAL_DAYS = 90     # preavviso per il rinnovo della marca d'archivio (SIG-22)
+
+
+def _embedded_signature_class(base):
+    """EmbeddedPdfSignature che nasconde a pyHanko il vincolo /SV /Cert /OID (non supportato:
+    solleverebbe NotImplementedError); la policy la controlla `_verify_one`."""
+    import dataclasses
+
+    from pyhanko.sign.fields import SigCertConstraintFlags
+
+    class Embedded(base):
+        @property
+        def seed_value_spec(self):
+            spec = super().seed_value_spec
+            if spec is not None and spec.cert is not None and spec.cert.flags & SigCertConstraintFlags.OID:
+                spec = dataclasses.replace(spec, cert=dataclasses.replace(
+                    spec.cert, flags=spec.cert.flags & ~SigCertConstraintFlags.OID))
+            return spec
+    return Embedded
+
+
 def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
                revocation_mode: str = "mai", password: str | None = None) -> list[SignatureStatus]:
     from pyhanko.pdf_utils.reader import PdfFileReader
@@ -1678,7 +1930,7 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
             br = [int(v) for v in val("/ByteRange", [])]
             if len(br) == 4:
                 st.revision_end = br[2] + br[3]
-            emb = EmbeddedPdfSignature(reader, fref, name)
+            emb = _embedded_signature_class(EmbeddedPdfSignature)(reader, fref, name)
         except Exception as exc:  # noqa: BLE001
             _set_status(st, INVALID)
             st.reasons.append(_("Formato della firma non valido") + f" ({type(exc).__name__})")
@@ -1697,7 +1949,23 @@ def verify_pdf(data: bytes, *, trusted=(), allow_fetching: bool = False,
             _set_status(st, INVALID if not st.intact else INDETERMINATE)
             st.reasons.append(_("Impossibile verificare la firma: {detail}").format(
                 detail=str(exc) or type(exc).__name__))
+        fi = finfo.get(st.field_name)
+        wanted = getattr(fi, "allowed_policies", None)
+        if wanted and st.signer_cert is not None and not set(wanted) & set(st.signer_cert.policies):
+            # come per gli altri vincoli /SV, la firma che non li rispetta non è valida
+            _set_status(st, INVALID)
+            st.reasons.append(_("Il certificato non ha la policy richiesta dal campo ({oids})").format(
+                oids=", ".join(wanted)))
     results.sort(key=lambda s: s.revision_end)
+    # SIG-22: il certificato della TSA dell'ultima marca d'archivio sta per scadere → rinnovo
+    archive = [s for s in results if s.kind == "marca temporale del documento" and s.signer_cert is not None]
+    if archive:
+        last = archive[-1]
+        left = last.signer_cert.not_after - datetime.now(timezone.utc)
+        if left < timedelta(days=ARCHIVE_RENEWAL_DAYS):
+            last.reasons.append(_("Il certificato della TSA scade il {date}: aggiungi una nuova marca temporale al "
+                                  "documento per prolungare la verificabilità delle firme").format(
+                date=_fmt_date(last.signer_cert.not_after)))
     return results
 
 
@@ -1737,6 +2005,20 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
     st.intact = bool(status.intact)
     st.crypto_ok = bool(status.intact and status.valid)
     st.trusted = bool(status.trusted)
+    # SIG-16: con la verifica online «rigida» pyHanko non distingue la revoca non verificabile
+    # (responder irraggiungibile) da una catena non attendibile; si riprova senza revoca
+    revocation_unknown = False
+    if online and not st.trusted and not getattr(status, "revoked", False) and st.crypto_ok:
+        try:
+            soft = ValidationContext(trust_roots=list(roots), allow_fetching=False, revocation_mode="soft-fail")
+            if is_doc_ts:
+                retry = validate_pdf_timestamp(emb, validation_context=soft)
+            else:
+                retry = validate_pdf_signature(emb, signer_validation_context=soft, key_usage_settings=ku,
+                                               diff_policy=_diff_policy())
+            revocation_unknown = bool(retry.trusted)
+        except Exception:  # noqa: BLE001
+            revocation_unknown = False
     st.md_algorithm = getattr(emb, "md_algorithm", "") or ""
     reasons: list[str] = []
     # tempo
@@ -1779,14 +2061,21 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
         reasons.append(_("Algoritmo debole ({alg})").format(alg=st.md_algorithm.upper().replace("SHA", "SHA-")))
     # modifiche
     allowed, forbidden = [], []
+    filled: set[str] = set()
     try:
-        allowed, forbidden = _analyze_changes(reader, emb.signed_revision)
+        allowed, forbidden = _analyze_changes(reader, emb.signed_revision, filled)
     except Exception:  # noqa: BLE001
         pass
     docmdp_ok = getattr(status, "docmdp_ok", None)
     diff = getattr(status, "diff_result", None)
     mod_bad = docmdp_ok is False or isinstance(diff, SuspiciousModification)
     if mod_bad:
+        try:   # campi bloccati da questa firma (FieldMDP) e modificati dopo: si dice quali
+            touched = sorted(filled & _sig_locked_fields(emb.sig_object, _existing_field_names(reader)))
+        except Exception:  # noqa: BLE001
+            touched = []
+        forbidden = [_("campo bloccato modificato: «{name}»").format(name=n) for n in touched] + forbidden
+        allowed = [a for a in allowed if not (touched and a == _("compilazione di campi modulo"))]
         if not forbidden:
             forbidden = [_("modifiche al documento non ammesse")]
         st.modifications = _("Modifiche non consentite: ") + ", ".join(forbidden)
@@ -1844,7 +2133,7 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
         indic = getattr(status, "trust_problem_indic", None)
         indic_name = getattr(indic, "name", "") or ""
         now = datetime.now(timezone.utc)
-        if "REVOC" in indic_name or "TRY_LATER" in indic_name:
+        if revocation_unknown or "REVOC" in indic_name or "TRY_LATER" in indic_name:
             reasons.append(_("Stato di revoca non verificabile"))
         elif st.signer_cert and (now > st.signer_cert.not_after or "EXPIRED" in indic_name
                                  or "OUT_OF_BOUNDS" in indic_name):
@@ -1951,12 +2240,35 @@ def summary(statuses, empty_fields) -> str:
         if cert is not None and cert.docmdp_level:
             text = _("Certificato da {name} — consentito: {what}").format(
                 name=cert.signer, what=_(_DOCMDP_DESC.get(cert.docmdp_level, "")))
+            if len(statuses) > 1:       # es. contratto con venditore (certifica) e acquirente
+                text += " · " + _("tutte le {n} firme sono valide").format(n=len(statuses))
         else:
             text = _("Firmato: tutte le firme sono valide")
     return f"{text} — {req}" if req else text
 
 
 TRANSLATIONS_EN = {
+    "Il certificato della TSA scade il {date}: aggiungi una nuova marca temporale al documento per prolungare la "
+    "verificabilità delle firme": "The TSA certificate expires on {date}: add a new document timestamp to extend "
+                                  "the verifiability of the signatures",
+    "Livello {lvl} non raggiunto: serve un server di marca temporale.":
+        "Level {lvl} not reached: a timestamp server is required.",
+    "Livello raggiunto: B-T.": "Level reached: B-T.",
+    "Marca temporale del documento non ottenuta ({e}): il documento resta a livello B-LT; puoi aggiungerla più "
+    "tardi dal pannello Firme.": "Document timestamp not obtained ({e}): the document stays at level B-LT; you can "
+                                 "add it later from the Signatures panel.",
+    "Dati di verifica non ottenuti per «{name}»: {e}": "Validation data not obtained for “{name}”: {e}",
+    "Nessun server di marca temporale configurato.": "No timestamp server configured.",
+    "Marca temporale del documento non riuscita: {e}": "Document timestamp failed: {e}",
+    "campo bloccato modificato: «{name}»": "locked field changed: “{name}”",
+    "tutte le {n} firme sono valide": "all {n} signatures are valid",
+    "Certificato client per la marca temporale non leggibile o password errata":
+        "Client certificate for the timestamp server unreadable or wrong password",
+    "Il certificato non ha la policy richiesta dal campo ({oids})":
+        "The certificate does not have the policy required by the field ({oids})",
+    "Il campo richiede un certificato con una di queste policy: {oids}":
+        "The field requires a certificate with one of these policies: {oids}",
+    "OID di policy non valido: {oid}": "Invalid policy OID: {oid}",
     "I permessi del documento non consentono di firmarlo né di compilarne i moduli. Riaprilo con la password del "
     "proprietario per firmarlo": "The document permissions do not allow signing it or filling its forms. Reopen it "
                                   "with the owner password to sign it",

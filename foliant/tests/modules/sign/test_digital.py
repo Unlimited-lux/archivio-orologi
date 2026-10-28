@@ -691,3 +691,29 @@ def test_fill_parent_kids_field_after_signature(id_a, certify, level, expected):
     assert st.status == expected, (st.reasons, st.modifications)
     if expected == "valida":
         assert "compilazione di campi modulo" in st.modifications
+
+
+def test_field_certificate_policy_constraint(pdf_bytes, id_a, policy_id, monkeypatch):
+    """SIG-19: /SV /Cert /OID con la policy richiesta; solo un certificato con quella policy può firmare."""
+    from foliant.modules.sign import digital
+    from .conftest import POLICY_OID
+    assert policy_id[1].policies == [POLICY_OID] and id_a[1].policies == []
+    with pytest.raises(digital.SignError, match="OID"):
+        digital.add_signature_field(pdf_bytes, "Cliente", 0, (300, 700, 500, 760), allowed_policies=["abc"])
+    data, _n = digital.add_signature_field(pdf_bytes, "Cliente", 0, (300, 700, 500, 760),
+                                           allowed_policies=[POLICY_OID])
+    doc = pymupdf.open(stream=data)
+    xref = next(w.xref for w in doc[0].widgets())
+    sv = doc.xref_get_key(xref, "SV")
+    sv_text = doc.xref_object(int(sv[1].split()[0])) if sv[0] == "xref" else sv[1]
+    assert POLICY_OID in sv_text
+    assert digital.signature_fields(data)[0].allowed_policies == [POLICY_OID]
+    with pytest.raises(digital.SigningNotAllowed, match="policy"):
+        digital.sign_pdf(data, id_a[2], digital.SignOptions(field_name="Cliente"))
+    out = digital.sign_pdf(data, policy_id[2], digital.SignOptions(field_name="Cliente"))
+    assert digital.verify_pdf(out, trusted=[policy_id[1]])[0].status == "valida"
+    # firma di un altro programma che ignora il vincolo: non valida, con il motivo
+    monkeypatch.setattr(digital, "_check_field_constraints", lambda *a: True)
+    forced = digital.sign_pdf(data, id_a[2], digital.SignOptions(field_name="Cliente"))
+    st = digital.verify_pdf(forced, trusted=[id_a[1]])[0]
+    assert st.status == "non valida" and any("policy" in r for r in st.reasons), st.reasons

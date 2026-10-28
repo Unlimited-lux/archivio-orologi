@@ -44,6 +44,7 @@ class _Bridge(QObject):
 class SignController(QObject):
     stateChanged = Signal(object)            # vista
     statusSelected = Signal(object, object)  # vista, SignatureStatus da selezionare nel pannello
+    librarySynced = Signal()                 # SIG-07: la sincronizzazione ha cambiato la libreria
 
     def __init__(self, ctx):
         super().__init__(ctx)
@@ -58,9 +59,23 @@ class SignController(QObject):
         ctx.documentChanged.connect(self._on_changed)
         ctx.add_change_guard(self._change_guard)
         self.panel = None                     # SignaturesPanel, impostato in register()
+        # SIG-07: sincronizzazione periodica della libreria con la cartella scelta
+        from .sync import INTERVAL_S
+        self.sync_status = ""                 # testo per l'utente: «attiva…» o «sospesa…»
+        self._sync_pass: str | None = None    # passphrase della sessione (mai su file)
+        self._sync_timer = QTimer(self)
+        self._sync_timer.setInterval(INTERVAL_S * 1000)
+        self._sync_timer.timeout.connect(lambda: self.sync_library(interactive=False))
+        self._sync_start = QTimer(self)       # timer figlio: non scatta se il controller è già distrutto
+        self._sync_start.setSingleShot(True)
+        self._sync_start.timeout.connect(self._start_sync)
+        self._sync_start.start(3000)
         self.stateChanged.connect(self.update_banner)
         # SIG-20: avviso per le firme obbligatorie mancanti prima di stampa e «Salva con nome»
         if hasattr(ctx, "add_guard"):
+            # SIG-05: preferenza «Mantieni come annotazione» / «Incorpora» al salvataggio
+            ctx.add_guard("save", self._embed_on_save_guard)
+            ctx.add_guard("save_as", self._embed_on_save_guard)
             ctx.add_guard("print", lambda view, info: self._required_guard(view, _("Stampa")))
             # NFR-09: avviso prima di un salvataggio che riscrive per intero un documento firmato
             ctx.add_guard("save", lambda view, info: self._full_rewrite_guard(view, False, info))
@@ -142,7 +157,77 @@ class SignController(QObject):
         if lib is None:
             return
         from .ui_library import LibraryDialog
-        LibraryDialog(lib, self.ctx.window, self.default_name()).exec()
+        LibraryDialog(lib, self.ctx.window, self.default_name(), controller=self).exec()
+
+    # ------------------------------------------------- sincronizzazione (SIG-07)
+    SYNC_KEYRING = "foliant-sign-sync"
+
+    def sync_passphrase(self, folder: str) -> str | None:
+        if self._sync_pass:
+            return self._sync_pass
+        try:
+            import keyring
+            pw = keyring.get_password(self.SYNC_KEYRING, folder)
+        except Exception:  # noqa: BLE001 - portachiavi non disponibile
+            pw = None
+        self._sync_pass = pw
+        return pw
+
+    def remember_sync_passphrase(self, folder: str, passphrase: str) -> bool:
+        """Passphrase in memoria e nel portachiavi del desktop (False se non disponibile: andrà
+        reinserita a ogni avvio). Mai su file."""
+        self._sync_pass = passphrase
+        try:
+            import keyring
+            keyring.set_password(self.SYNC_KEYRING, folder, passphrase)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _start_sync(self) -> None:
+        lib = self.library(interactive=False)
+        from . import sync
+        if lib is not None and not lib.locked and sync.configured_folder(lib):
+            self.sync_library(interactive=False)
+            self._sync_timer.start()
+
+    def sync_library(self, interactive: bool = True):
+        """Un ciclo di sincronizzazione. Con la cartella irraggiungibile la libreria locale continua a
+        funzionare e lo stato diventa «sincronizzazione sospesa»."""
+        from . import sync
+        lib = self.library(interactive=interactive)
+        folder = sync.configured_folder(lib) if lib is not None else None
+        if not folder:
+            self._sync_timer.stop()
+            self.sync_status = ""
+            return None
+        pw = self.sync_passphrase(folder)
+        if not pw:
+            self.sync_status = _("Sincronizzazione sospesa: serve la passphrase della cartella.")
+            return None
+        was_suspended = self.sync_status.startswith(_("Sincronizzazione sospesa"))
+        try:
+            res = sync.sync(lib, pw)
+        except sync.SyncPassphraseError as e:
+            self._sync_pass = None
+            self.sync_status = _("Sincronizzazione sospesa: {e}").format(e=e)
+            return None
+        except (sync.SyncError, LibraryError) as e:
+            self.sync_status = _("Sincronizzazione sospesa: {e}").format(e=e)
+            if not was_suspended:
+                self.ctx.status(self.sync_status, 8000)
+            return None
+        from datetime import datetime
+        self.sync_status = _("Sincronizzazione attiva con {folder} (ultima alle {t}).").format(
+            folder=folder, t=datetime.now().strftime("%H:%M"))
+        if not self._sync_timer.isActive():
+            self._sync_timer.start()
+        if res.changed_local:
+            self.librarySynced.emit()
+        if res.conflicts:
+            self.ctx.status(_("Libreria firme: {n} conflitti, conservate entrambe le versioni.").format(
+                n=res.conflicts), 8000)
+        return res
 
     def start_placement(self, view, item: g.SignatureItem) -> None:
         if not self._annotations_allowed(view):
@@ -263,6 +348,29 @@ class SignController(QObject):
         self.tool_for(view).selected = None
         if n:
             self.ctx.status(_("Firme incorporate: {n}.").format(n=n), 5000)
+
+    ON_SAVE_KEY = "sign/on_save"     # "keep" (predefinito) | "embed"
+
+    def on_save_mode(self) -> str:
+        return "embed" if str(self.ctx.settings().value(self.ON_SAVE_KEY, "keep")) == "embed" else "keep"
+
+    def _embed_on_save_guard(self, view, info) -> bool:
+        """SIG-05: con la preferenza «Incorpora» le firme grafiche entrano nel contenuto al salvataggio
+        (un solo passo annullabile). Non vale per «Salva una copia» né per i documenti firmati
+        digitalmente, dove incorporare invaliderebbe le firme: lì restano annotazioni."""
+        if view is None or (info or {}).get("copy") or self.on_save_mode() != "embed":
+            return True
+        doc = view.document
+        with ENGINE_LOCK:
+            count = sum(len(g.placed_signatures(doc.pdf, p)) for p in range(doc.pdf.page_count))
+        if not count:
+            return True
+        if getattr(doc, "has_signatures", False) or self.state(view).statuses:
+            self.ctx.status(_("Documento firmato digitalmente: le firme grafiche restano annotazioni."), 6000)
+            return True
+        n = self._change(view, _("Incorpora le firme"), g.embed_all_signatures, kind="content")
+        self.tool_for(view).selected = None
+        return n is not None
 
     def set_opacity(self, view, page: int, xref: int) -> None:
         val, ok = QInputDialog.getInt(self.ctx.window, _("Opacità"), _("Opacità della firma (%):"), 100, 5, 100)
@@ -473,6 +581,12 @@ class SignController(QObject):
             actions.append((_("Dettagli"), lambda: self.ctx.show_sidebar_panel("firme")))
         if st.certification == 1:
             actions.append((_("Lavora su una copia senza firme"), lambda v=view: self.open_unsigned_copy(v)))
+        doc = view.document
+        if empties and not any(doc.allows(p) for p in (pymupdf.PDF_PERM_FORM, pymupdf.PDF_PERM_ANNOTATE)):
+            # SIG-20: documento cifrato senza permesso di firma → spiegazione al posto dell'invito
+            actions = [a for a in actions if a[0] not in (_("Firma ora"), _("Campo successivo"))]
+            text += " · " + _("I permessi del documento non consentono di firmarlo: serve la password del "
+                              "proprietario.")
         level = "error" if bad else ("warning" if empties else "info")
         self.ctx.show_banner(view, self.BANNER_ID, text, actions, level=level, priority=30)
 
@@ -699,6 +813,8 @@ class SignController(QObject):
         dlg = DigitalSignDialog(self.ctx.window, self, certify=certify, visible=not invisible and
                                 (rect is not None or (field is not None and not field.invisible)), field=field)
         if not dlg.exec():
+            if dlg.graphic_only and field is not None:
+                self.graphic_on_field(view, field)
             return False
         digital_id, options = dlg.digital_id, dlg.options
         options.password = doc.password
@@ -735,7 +851,9 @@ class SignController(QObject):
         except DocumentError as e:
             self.ctx.error(_("Firma digitale"), str(e))
             return False
-        self._reopen(view, target)
+        new_view = self._reopen(view, target)
+        if field is not None and new_view is not None:
+            self._go_to_next_unsigned(new_view, signed)
         skew = self.clock_skew_warning(signed) if options.timestamp_url or options.timestamper else None
         if skew:
             self.ctx.error(_("Marca temporale"), skew)
@@ -834,6 +952,149 @@ class SignController(QObject):
         new_view = self.ctx.open_path(target)
         if new_view is not None:
             self.verify(new_view, force=True)
+        return new_view
+
+    def request_signature(self, view, field_name: str) -> bool:
+        """`ctx.request_signature(view, nome_campo)`: apre la firma digitale con il campo preselezionato.
+        True se la procedura è partita (campo firma vuoto trovato)."""
+        if view is None:
+            return False
+        field = next((f for f in self.empty_fields(view) if f.name == field_name), None)
+        if field is None:
+            from . import digital
+            try:
+                with view.document.lock:
+                    data = view.document.to_bytes() if hasattr(view.document, "to_bytes") else None
+                fields = digital.signature_fields(data, view.document.password) if data else []
+            except Exception:  # noqa: BLE001
+                fields = []
+            field = next((f for f in fields if f.name == field_name and not f.signed), None)
+        if field is None:
+            return False
+        self.digital_sign(view, field=field)
+        return True
+
+    def trusted_certificates(self) -> list:
+        """Certificati attendibili dell'utente (più quelli di sistema se abilitati)."""
+        from . import store
+        trusted = store.TrustStore().certificates()
+        if str(self.ctx.settings().value("sign/system_certs", "false")).lower() == "true":
+            trusted = trusted + store.system_certificates()
+        return trusted
+
+    def add_long_term(self, view, what: str) -> bool:
+        """SIG-22 dal pannello: «dss» = «Aggiungi informazioni di verifica», «ts» = «Aggiungi marca
+        temporale al documento». Revisione incrementale sullo stesso file: le firme restano valide."""
+        from . import digital, store
+        title = _("Aggiungi informazioni di verifica") if what == "dss" else _("Aggiungi marca temporale al documento")
+        doc = view.document
+        if not self._ensure_saved(view) or not doc.path:
+            return False
+        timestamper = None
+        if what == "ts":
+            srv = store.TSAConfig().default()
+            if srv is None:
+                self.ctx.error(title, _("Configura un server di marca temporale in «ID digitali…» › Server marca "
+                                        "temporale."))
+                return False
+            from pyhanko.sign.timestamps import HTTPTimeStamper
+            auth = None
+            if srv.user:
+                pw = store.tsa_password(srv.url)
+                if pw is None:
+                    pw, ok = QInputDialog.getText(self.ctx.window, title, _("Password per «{u}» su {url}:").format(
+                        u=srv.user, url=srv.url), QLineEdit.EchoMode.Password)
+                    if not ok:
+                        return False
+                auth = (srv.user, pw)
+            if srv.client_cert:
+                pw = store.tsa_client_password(srv.url)
+                if pw is None:
+                    pw, ok = QInputDialog.getText(self.ctx.window, title, _(
+                        "Password del certificato client {f}:").format(f=Path(srv.client_cert).name),
+                        QLineEdit.EchoMode.Password)
+                    if not ok:
+                        return False
+                timestamper = digital._client_cert_timestamper(HTTPTimeStamper)(
+                    srv.url, timeout=srv.timeout, auth=auth, ssl_context=digital.tsa_ssl_context(srv.client_cert, pw))
+            else:
+                timestamper = HTTPTimeStamper(srv.url, timeout=srv.timeout, auth=auth)
+        try:
+            data = Path(doc.path).read_bytes()
+        except OSError as e:
+            self.ctx.error(title, str(e.strerror or e))
+            return False
+        trusted = self.trusted_certificates()
+        password = doc.password
+        try:
+            if what == "dss":
+                out, warnings = self.ctx.run_task(title, lambda progress: digital.add_validation_info_pdf(
+                    data, trusted=trusted, password=password), cancellable=False)
+            else:
+                out = self.ctx.run_task(title, lambda progress: digital.add_document_timestamp(
+                    data, timestamper, trusted=trusted, password=password), cancellable=False)
+                warnings = []
+        except digital.SignError as e:
+            self.ctx.error(title, str(e))
+            return False
+        if out == data:
+            self.ctx.info(title, "\n".join(warnings) or _("Nessun dato da aggiungere."))
+            return False
+        try:
+            atomic_write(doc.path, out)
+        except DocumentError as e:
+            self.ctx.error(title, str(e))
+            return False
+        self._reopen(view, doc.path)
+        if warnings:
+            self.ctx.info(title, "\n".join(warnings))
+        else:
+            self.ctx.status(_("{what}: fatto.").format(what=title), 6000)
+        return True
+
+    def _go_to_next_unsigned(self, view, data: bytes) -> None:
+        """SIG-20: dopo la firma di un campo si passa al successivo ancora da firmare."""
+        from . import digital
+        try:
+            rest = [f for f in digital.signature_fields(data, view.document.password)
+                    if not f.signed and not f.hidden and f.page is not None]
+        except Exception:  # noqa: BLE001
+            return
+        if rest:
+            self.go_to_field(view, rest[0].page, rest[0].rect)
+            self.ctx.status(_("Prossimo campo da firmare: «{name}»").format(name=rest[0].tooltip or rest[0].name),
+                            8000)
+
+    def graphic_on_field(self, view, field) -> int | None:
+        """SIG-20: firma grafica sopra un campo firma (nessun ID compatibile). Usa la firma predefinita
+        della libreria o ne fa creare una; il campo resta da firmare digitalmente."""
+        if field.page is None or not field.rect or not self._annotations_allowed(view):
+            return None
+        item = None
+        lib = self.library()
+        entry = lib.default("firma") if lib is not None else None
+        if entry is not None:
+            try:
+                item = lib.load_item(entry.id)
+            except Exception:  # noqa: BLE001
+                item = None
+        if item is None:
+            from .ui_create import CreateSignatureDialog
+            dlg = CreateSignatureDialog(self.ctx.window, kind="firma", default_name=self.default_name())
+            if not dlg.exec() or dlg.item is None:
+                return None
+            item = dlg.item
+        box = pymupdf.Rect(field.rect)
+        w, h = box.width, box.width / max(item.aspect, 0.01)
+        if h > box.height:
+            w, h = box.height * item.aspect, box.height
+        cx, cy = (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2
+        xref = self.place(view, field.page, pymupdf.Rect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), item)
+        if xref is not None:
+            self.ctx.info(_("Firma grafica"), _(
+                "La firma grafica è stata inserita sopra il campo «{name}». Non è una firma digitale: il campo "
+                "resta da firmare.").format(name=field.tooltip or field.name))
+        return xref
 
     # ============================================================ campi firma
     def start_add_field(self) -> None:
@@ -879,7 +1140,8 @@ class SignController(QObject):
                     timestamp_required=dlg.tsa_required.isChecked(), lock_fields=lock_fields,
                     lock_action=lock_action, allowed_reasons=dlg.allowed_reasons(),
                     allowed_issuers=dlg.issuers or None, certify_level=dlg.mdp.currentData(),
-                    digest_methods=dlg.digest.currentData(), password=doc.password)
+                    digest_methods=dlg.digest.currentData(), allowed_policies=dlg.allowed_policies(),
+                    password=doc.password)
                 names.append(name)
             name = names[0]
         except digital.SignError as e:
@@ -975,6 +1237,28 @@ class SignController(QObject):
 
 
 TRANSLATIONS_EN = {
+    "Aggiungi informazioni di verifica": "Add validation information",
+    "Aggiungi marca temporale al documento": "Add document timestamp",
+    "Configura un server di marca temporale in «ID digitali…» › Server marca temporale.":
+        "Configure a timestamp server in “Digital IDs…” › Timestamp servers.",
+    "Password per «{u}» su {url}:": "Password for “{u}” on {url}:",
+    "Password del certificato client {f}:": "Password of client certificate {f}:",
+    "Nessun dato da aggiungere.": "No data to add.", "{what}: fatto.": "{what}: done.",
+    "Sincronizzazione sospesa: serve la passphrase della cartella.":
+        "Sync suspended: the folder passphrase is needed.",
+    "Sincronizzazione sospesa": "Sync suspended", "Sincronizzazione sospesa: {e}": "Sync suspended: {e}",
+    "Sincronizzazione attiva con {folder} (ultima alle {t}).": "Sync active with {folder} (last at {t}).",
+    "Libreria firme: {n} conflitti, conservate entrambe le versioni.":
+        "Signature library: {n} conflicts, both versions kept.",
+    "Documento firmato digitalmente: le firme grafiche restano annotazioni.":
+        "Digitally signed document: graphic signatures stay as annotations.",
+    "Firma grafica": "Graphic signature",
+    "Prossimo campo da firmare: «{name}»": "Next field to sign: “{name}”",
+    "La firma grafica è stata inserita sopra il campo «{name}». Non è una firma digitale: il campo resta da "
+    "firmare.": "The graphic signature was placed over the field “{name}”. It is not a digital signature: the "
+                "field still has to be signed.",
+    "I permessi del documento non consentono di firmarlo: serve la password del proprietario.":
+        "The document permissions do not allow signing it: the owner password is required.",
     "Libreria firme": "Signature library",
     "Libreria protetta": "Protected library",
     "Inserisci la password della libreria delle firme:": "Enter the signature library password:",

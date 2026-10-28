@@ -1,1 +1,2 @@
-# Nessuna dipendenza nuova: Pillow e numpy sono già in requirements.txt
+# Pillow e numpy sono già in requirements.txt
+pillow-heif>=0.16   # HEIC/HEIF (OBJ-07), facoltativo: senza, quei file non si aprono

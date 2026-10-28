@@ -22,21 +22,39 @@ from .translations import EN
 
 ORDER = 31
 
-_state: dict = {}
+_state: dict = {}            # stato dell'ultima finestra registrata
+_by_ctx: dict[int, dict] = {}   # stato di ogni finestra (Ctrl+N apre più finestre nello stesso processo)
+
+
+def _st(ctx) -> dict:
+    return _by_ctx.get(id(ctx), {})   # finestra distrutta: nessuno stato, gli slot non fanno nulla
 
 
 def controller() -> ObjectsController | None:
     return _state.get("controller")
 
 
+def _forget_ctx(key: int) -> None:
+    global _state
+    st = _by_ctx.pop(key, None)
+    if st is not None and st is _state:
+        _state = next(iter(_by_ctx.values()), {})
+
+
 def register(ctx: Context) -> None:
+    global _state
     add_translations("en", EN)
     c = ObjectsController(ctx)
-    _state["controller"] = c
-    _state["ctx"] = ctx
+    st: dict = {}
+    _by_ctx[id(ctx)] = st
+    _state = st
+    key = id(ctx)
+    ctx.window.destroyed.connect(lambda *_a, k=key: _forget_ctx(k))
+    st["controller"] = c
+    st["ctx"] = ctx
     mode = ctx.add_mode("modifica", _("Modifica"), "pencil-line", 30)
     acts: dict = {}
-    _state["actions"] = acts
+    st["actions"] = acts
 
     def tool_action(key, text, icon_name, tool, tip):
         act = ctx.action(text, icon_name, None, checkable=True, tooltip=tip)
@@ -103,9 +121,9 @@ def register(ctx: Context) -> None:
                                       ("al_bottom", E.BOTTOM, _("Allinea in basso"), "align-end-horizontal")):
         sel_action(key, text, icon_name, lambda v, h=how: c.align(v, h))
     sel_action("dist_h", _("Distribuisci in orizzontale"), "align-horizontal-distribute-center",
-               lambda v: c.distribute(v, True))
+               lambda v: c.distribute(v, True, c.distribute_method))
     sel_action("dist_v", _("Distribuisci in verticale"), "align-vertical-distribute-center",
-               lambda v: c.distribute(v, False))
+               lambda v: c.distribute(v, False, c.distribute_method))
     acts["detect_urls"] = ctx.action(_("Crea collegamenti dagli URL…"), "link",
                                      lambda: c.detect_urls(ctx.current_view()))
     acts["delete_links"] = ctx.action(_("Elimina collegamenti…"), "unlink",
@@ -124,9 +142,29 @@ def register(ctx: Context) -> None:
     arrange.addSeparator()
     for key in ("al_left", "al_hc", "al_right", "al_top", "al_vc", "al_bottom"):
         arrange.addAction(acts[key])
+    from PySide6.QtGui import QActionGroup
+    ref_menu = arrange.addMenu(_("Allinea rispetto a"))
+    ref_group = QActionGroup(ref_menu)
+    for code, text in (("auto", _("Automatico (selezione o pagina)")), (E.REF_SELECTION, _("Selezione")),
+                       (E.REF_KEY, _("Oggetto chiave (il primo selezionato)")), (E.REF_PAGE, _("Pagina"))):
+        a = ref_menu.addAction(text)
+        a.setCheckable(True)
+        a.setChecked(code == c.align_reference)
+        a.triggered.connect(lambda _c=False, k=code: setattr(c, "align_reference", k))
+        ref_group.addAction(a)
+        acts["ref_" + code] = a
     arrange.addSeparator()
     arrange.addAction(acts["dist_h"])
     arrange.addAction(acts["dist_v"])
+    dist_menu = arrange.addMenu(_("Metodo di distribuzione"))
+    dist_group = QActionGroup(dist_menu)
+    for code, text in ((E.SPACING, _("Spaziatura uguale")), (E.CENTERS, _("Centri equidistanti"))):
+        a = dist_menu.addAction(text)
+        a.setCheckable(True)
+        a.setChecked(code == c.distribute_method)
+        a.triggered.connect(lambda _c=False, k=code: setattr(c, "distribute_method", k))
+        dist_group.addAction(a)
+        acts["dist_" + code] = a
     btn = QToolButton()
     btn.setText(_("Disponi"))
     btn.setToolTip(_("Ordine, allineamento e distribuzione"))
@@ -135,7 +173,7 @@ def register(ctx: Context) -> None:
     btn.setMenu(arrange)
     bind_icon(btn, "layers")
     mode.add_widget(btn)
-    _state["arrange_button"] = btn
+    st["arrange_button"] = btn
     add_opacity_widget(ctx, c, mode)
     more = QMenu(ctx.window)
     for key in ("paste", "paste_in_place", "duplicate", "move_page", "replicate", "similar", "crop_reset",
@@ -151,7 +189,7 @@ def register(ctx: Context) -> None:
         a.setChecked(code == c.crop_ratio)
         a.triggered.connect(lambda _c=False, k=code: setattr(c, "crop_ratio", k))
         group_r.addAction(a)
-    _state["ratio_menu"] = ratio_menu
+    st["ratio_menu"] = ratio_menu
     more.addSeparator()
     for key in ("adjust", "external", "external_stop", "optimize", "path_style", "transform", "reset_tf", "group", "decompose"):
         more.addAction(acts[key])
@@ -165,27 +203,27 @@ def register(ctx: Context) -> None:
     guides.toggled.connect(set_guides)
     acts["guides"] = guides
     more.addAction(guides)
-    st = ctx.settings()
+    qs = ctx.settings()
     grid = ctx.action(_("Griglia"), "grid-3x3", None, checkable=True, requires_document=False)
-    grid.setChecked(str(st.value("objects/grid", "false")).lower() == "true")
+    grid.setChecked(str(qs.value("objects/grid", "false")).lower() == "true")
     snap = ctx.action(_("Aggancia alla griglia"), None, None, checkable=True, requires_document=False)
-    snap.setChecked(str(st.value("objects/grid_snap", "true")).lower() != "false")
+    snap.setChecked(str(qs.value("objects/grid_snap", "true")).lower() != "false")
     try:
-        c.grid_step_mm = float(st.value("objects/grid_step_mm", 10.0))
+        c.grid_step_mm = float(qs.value("objects/grid_step_mm", 10.0))
     except (TypeError, ValueError):
         c.grid_step_mm = 10.0
     c.grid_on, c.grid_snap = grid.isChecked(), snap.isChecked()
 
     def set_grid(on):
         c.grid_on = on
-        st.setValue("objects/grid", "true" if on else "false")
+        qs.setValue("objects/grid", "true" if on else "false")
         v = ctx.current_view()
         if v is not None:
             v.viewport().update()
 
     def set_snap(on):
         c.grid_snap = on
-        st.setValue("objects/grid_snap", "true" if on else "false")
+        qs.setValue("objects/grid_snap", "true" if on else "false")
 
     def ask_step():
         from PySide6.QtWidgets import QInputDialog
@@ -193,7 +231,7 @@ def register(ctx: Context) -> None:
                                          c.grid_step_mm, 1, 200, 1)
         if ok:
             c.grid_step_mm = val
-            st.setValue("objects/grid_step_mm", val)
+            qs.setValue("objects/grid_step_mm", val)
             set_grid(c.grid_on)
     grid.toggled.connect(set_grid)
     snap.toggled.connect(set_snap)
@@ -209,7 +247,7 @@ def register(ctx: Context) -> None:
     more.addSeparator()
     from . import extras
     capture_tool = extras.CaptureTool(ctx, c)
-    _state["capture_tool"] = capture_tool
+    st["capture_tool"] = capture_tool
     # La cattura di un'area è del visualizzatore (VIS-29): lo strumento resta solo come logica testata.
     acts["extract_all"] = ctx.action(_("Estrai tutte le immagini…"), "images",
                                      lambda: extras.extract_all(ctx, c, ctx.current_view()))
@@ -246,10 +284,10 @@ def register(ctx: Context) -> None:
     lpanel.on_activate = on_link_activate
     ctx.add_sidebar_panel("collegamenti", _("Collegamenti"), "link", lpanel, order=60)
     ctx.documentChanged.connect(lambda v: lpanel.refresh() if v is ctx.current_view() and lpanel.isVisible() else None)
-    _state["link_panel"] = lpanel
+    st["link_panel"] = lpanel
     panel = ObjectPanel(ctx, c)
     ctx.add_properties_panel("oggetti", panel)
-    _state["panel"] = panel
+    st["panel"] = panel
     c.selectionChanged.connect(lambda: _update_actions(ctx, c))
     if hasattr(ctx, "documentAccessChanged"):   # sblocco con password dei permessi, fine dell'OCR…
         ctx.documentAccessChanged.connect(lambda v: _update_actions(ctx, c) if v is ctx.current_view() else None)
@@ -275,8 +313,12 @@ def _toggle_tool(ctx: Context, tool, checked: bool, switch: bool = True) -> None
 
 
 def _sync_tool_buttons(ctx: Context) -> None:
-    c = controller()
-    acts = _state.get("actions", {})
+    import shiboken6
+    st = _st(ctx)
+    c = st.get("controller")
+    acts = st.get("actions", {})
+    if c is None or not all(shiboken6.isValid(a) for a in acts.values()):
+        return
     view = ctx.current_view()
     tool = view.tool if view is not None else None
     if "objects" in acts:
@@ -298,14 +340,17 @@ def _on_mode_entered(ctx: Context, c: ObjectsController) -> None:
 
 def _on_mode_left(ctx: Context, c: ObjectsController) -> None:
     view = ctx.current_view()
-    if view is not None and view.tool in (c.object_tool, c.link_tool, _state.get("capture_tool")):
+    if view is not None and view.tool in (c.object_tool, c.link_tool, _st(ctx).get("capture_tool")):
         view.set_tool(None)
     ctx.hide_properties()
     _sync_tool_buttons(ctx)
 
 
 def _update_actions(ctx: Context, c: ObjectsController) -> None:
-    acts = _state.get("actions", {})
+    import shiboken6
+    acts = _st(ctx).get("actions", {})
+    if not acts or not all(shiboken6.isValid(a) for a in acts.values()):
+        return
     view = ctx.current_view()
     objs = c.selected_objects(view) if view is not None else []
     n = len(objs)
@@ -337,7 +382,7 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
     acts["optimize"].setEnabled(any(o.kind == IMAGE for o in objs))
     acts["path_style"].setEnabled(any(o.kind == PATH for o in objs))
     acts["decompose"].setEnabled(n == 1 and objs[0].kind == "composto")
-    panel = _state.get("panel")
+    panel = _st(ctx).get("panel")
     if panel is not None:
         panel.refresh()
         if n and view is not None and view.tool is c.object_tool:
@@ -346,7 +391,7 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
 
 
 def _context_menu(ctx: Context, c: ObjectsController, view, pe, menu: QMenu) -> None:
-    acts = _state["actions"]
+    acts = _st(ctx)["actions"]
     if view.tool is c.link_tool:
         if pe.page is not None:
             info = c.link_tool._hit(view, pe.page, pe.point)
@@ -477,6 +522,7 @@ def _release_view(ctx: Context, c: ObjectsController, view) -> None:
             view.viewport().removeEventFilter(f)
         except RuntimeError:
             pass
+        f._view = lambda: None   # il filtro non deve più raggiungere la vista chiusa
         view._objects_drop = None
     try:
         view.overlays.remove(c.paint_grid)
@@ -484,7 +530,7 @@ def _release_view(ctx: Context, c: ObjectsController, view) -> None:
         pass
     c.release_view(view)
     for key in ("panel", "link_panel"):
-        p = _state.get(key)
+        p = _st(ctx).get(key)
         if p is not None and getattr(p, "view", None) is view:
             p.set_view(None)
 

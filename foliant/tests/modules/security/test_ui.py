@@ -106,7 +106,7 @@ class _FakeDialog:
 def test_protect_flow(window, sec, sample_pdf, tmp_path, monkeypatch):
     view = window.open_path(sample_pdf)
     monkeypatch.setattr(C, "ask_protection",
-                        lambda parent, doc: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
+                        lambda parent, doc, **k: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
     assert sec.protect()
     out = tmp_path / "protetto.pdf"
     view.document.save(out)
@@ -175,7 +175,7 @@ def test_change_keeps_open_password(window, sec, tmp_path, sample_pdf, monkeypat
     view = window.open_path(str(first), "vecchia-1")
     s = P.ProtectionSettings(open_password="", permissions_password="Capo-1234", restrict=True,
                              allowed={"copy"})
-    monkeypatch.setattr(C, "ask_protection", lambda parent, doc: _FakeDialog(s, keep_open=True))
+    monkeypatch.setattr(C, "ask_protection", lambda parent, doc, **k: _FakeDialog(s, keep_open=True))
     assert sec.protect()
     view.document.save()
     pdf = pymupdf.open(first)
@@ -723,7 +723,7 @@ def test_metadata_read_only_when_restricted(window, sec, tmp_path, monkeypatch):
     assert seen == [True]
 
 
-def test_flatten_flow(window, sec, tmp_path, accept_all):
+def test_flatten_flow(window, sec, tmp_path, accept_all, monkeypatch):
     path = tmp_path / "commenti.pdf"
     src = pymupdf.open()
     page = src.new_page()
@@ -736,12 +736,52 @@ def test_flatten_flow(window, sec, tmp_path, accept_all):
     h.update()
     src.save(str(path))
     view = window.open_path(str(path))
+    seen = {}
+
+    def fake_run(dlg):
+        dlg.update_preview()
+        seen["preview"] = not dlg.preview_label.pixmap().isNull()
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
     assert sec.flatten()
+    assert seen["preview"]
     out = tmp_path / "piatto.pdf"
     view.document.save(out)
     pdf = pymupdf.open(out)
-    assert list(pdf[0].annots()) == []
+    # la nota nascosta non viene fusa: resta annotazione (opzione predefinita di ANN-40)
+    assert [a.info["content"] for a in pdf[0].annots()] == ["nascosta"]
     assert pdf[0].get_drawings()
+
+
+def test_flatten_dialog_options_and_marks(window, sec, tmp_path, accept_all, monkeypatch):
+    """Ritaglio con segni di redazione non applicati: il ritaglio viene appiattito, i segni
+    restano da applicare (non vengono applicati di nascosto)."""
+    path = tmp_path / "ritaglio.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((20, 30), "ESTERNO", fontsize=12)
+    page.insert_text((200, 400), "Codice cliente 4471", fontsize=12)
+    page.set_cropbox(pymupdf.Rect(100, 100, 500, 700))
+    src.save(str(path))
+    view = window.open_path(str(path))
+    sec.add_area_mark(0, pymupdf.Rect(90, 285, 250, 305))
+
+    def fake_run(dlg):
+        dlg.boxes["crop"].setChecked(True)
+        dlg.pages.setText("9")
+        dlg.accept()
+        assert dlg.error.text()                     # pagina inesistente: resta aperto
+        dlg.pages.setText("")
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    assert sec.flatten()
+    with view.document.lock:
+        pdf = view.document.pdf
+        assert "ESTERNO" not in pdf[0].get_text(clip=pymupdf.Rect(-999, -999, 999, 999))
+        assert "Codice cliente 4471" in pdf[0].get_text()
+    assert sec.has_marks(view.document)
 
 
 def test_upgrade_rc4_to_aes256(window, sec, tmp_path, monkeypatch):
@@ -835,7 +875,7 @@ def test_trusted_folder(window, sec, active_pdf, tmp_path, monkeypatch):
 def test_protect_undo_save_unencrypted(window, sec, sample_pdf, tmp_path, monkeypatch):
     view = window.open_path(sample_pdf)
     monkeypatch.setattr(C, "ask_protection",
-                        lambda parent, doc: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
+                        lambda parent, doc, **k: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
     assert sec.protect()
     view.document.undo()
     out = tmp_path / "annullato.pdf"
@@ -1151,3 +1191,79 @@ def test_restricted_disables_modifying_commands(window, sec, tmp_path, monkeypat
     for key in ("area", "find", "patterns", "sanitize", "flatten"):
         assert sec.actions[key].isEnabled(), key
     assert "Sblocca" not in sec.actions["area"].toolTip()
+
+
+class _FakeSettings(dict):
+    def value(self, key, default=None):
+        return self.get(key, default)
+
+    def setValue(self, key, value):
+        self[key] = value
+
+
+def test_saved_patterns_roundtrip(window, sec, tmp_path, qtbot, monkeypatch):
+    """Dato uno schema per le matricole salvato con un nome, quando riapro la ricerca
+    allora lo ritrovo, posso esportarlo e importarlo in un'altra installazione."""
+    from foliant.modules.security import patterns as PT
+    path = tmp_path / "matricole.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "Cassa n. SN-123456, scatola SN-654321", fontsize=11)
+    d.save(path)
+    store = _FakeSettings()
+    monkeypatch.setattr(type(sec), "settings", lambda self: store)
+    view = window.open_path(str(path))
+    saved = PT.SavedPatterns(store)
+    dlg = D.FindDialog("patterns", lambda o: sec.search(view.document, o), [("email", "Email", False)],
+                       saved=saved)
+    qtbot.addWidget(dlg)
+    dlg.custom.setText("")
+    assert not dlg.save_pattern("Vuoto")
+    dlg.custom.setText(r"SN-\d{6}")
+    assert dlg.save_pattern("Matricola")
+    assert dlg.pattern_boxes["user:Matricola"].isChecked()
+    dlg.run_search()
+    assert [m.text for m in dlg.matches] == ["SN-123456", "SN-654321"]
+    # nuova apertura: lo schema è ancora disponibile
+    dlg2 = D.FindDialog("patterns", lambda o: sec.search(view.document, o), [], saved=PT.SavedPatterns(store))
+    qtbot.addWidget(dlg2)
+    assert "user:Matricola" in dlg2.pattern_boxes
+    out = tmp_path / "schemi.json"
+    saved.export(str(out))
+    other = PT.SavedPatterns(_FakeSettings())
+    dlg3 = D.FindDialog("patterns", lambda o: o, [], saved=other)
+    qtbot.addWidget(dlg3)
+    dlg3.import_patterns(str(out))
+    assert other.items == {"Matricola": r"SN-\d{6}"} and "1" in dlg3.notice.text()
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"patterns": {"Rotto": "(abc", "Ok": "X\\\\d+"}}', encoding="utf-8")
+    done, errors = other.import_file(str(bad))
+    assert done == ["Ok"] and errors and errors[0].startswith("Rotto")
+
+
+def test_metadata_custom_properties_dialog(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    errors = []
+
+    def fake_run(dlg):
+        dlg.add_property("Numero pratica", "x")
+        dlg.accept()                       # nome non valido: il dialogo resta aperto
+        errors.append(dlg.error.text())
+        dlg.remove_selected()
+        dlg.props.clear()
+        dlg.add_property("Pratica", "2026/118")
+        dlg.add_property("", "")           # riga vuota ignorata
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    assert sec.edit_metadata()
+    assert errors and "Numero pratica" in errors[0]
+    from foliant.modules.security import sanitize as S
+    with view.document.lock:
+        assert S.read_custom(view.document.pdf) == {"Pratica": "2026/118"}
+    seen = []
+    monkeypatch.setattr(C, "run_dialog", lambda dlg: seen.append(dlg.custom()) or False)
+    sec.edit_metadata()
+    assert seen == [{"Pratica": "2026/118"}]
+    view.document.undo()
+    with view.document.lock:
+        assert S.read_custom(view.document.pdf) == {}

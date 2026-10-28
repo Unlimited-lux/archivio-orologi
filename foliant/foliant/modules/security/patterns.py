@@ -8,6 +8,7 @@ corrispondenza di un'espressione regolare si traduce in uno o più rettangoli
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -320,6 +321,72 @@ def custom_pattern(regex: str, case_sensitive: bool = False) -> Pattern:
     if re.fullmatch(regex, ""):
         raise ValueError(_("L'espressione trova anche il testo vuoto: rendila più specifica."))
     return Pattern("custom", _("Schema personalizzato"), regex, 0 if case_sensitive else re.IGNORECASE)
+
+
+SAVED_KEY = "security/patterns"
+
+
+class SavedPatterns:
+    """Schemi personalizzati con un nome, conservati nelle impostazioni ed
+    esportabili in JSON (per esempio i formati di matricola o di codice cliente
+    usati dall'azienda)."""
+
+    def __init__(self, settings=None):
+        self.settings = settings
+        self.items: dict[str, str] = {}
+        raw = settings.value(SAVED_KEY, "") if settings is not None else ""
+        try:
+            data = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            data = {}
+        if isinstance(data, dict):
+            self.items = {str(k): str(v) for k, v in data.items()}
+
+    def _store(self) -> None:
+        if self.settings is not None:
+            self.settings.setValue(SAVED_KEY, json.dumps(self.items, ensure_ascii=False))
+
+    def add(self, name: str, regex: str) -> None:
+        name = name.strip()
+        if not name:
+            raise ValueError(_("Dai un nome allo schema."))
+        custom_pattern(regex)
+        self.items[name] = regex
+        self._store()
+
+    def remove(self, name: str) -> None:
+        if self.items.pop(name, None) is not None:
+            self._store()
+
+    def pattern(self, name: str) -> Pattern | None:
+        regex = self.items.get(name)
+        if regex is None:
+            return None
+        p = custom_pattern(regex)
+        return Pattern("user:" + name, name, p.regex, p.flags)
+
+    def export(self, path: str) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"foliant_patterns": 1, "patterns": self.items}, f, ensure_ascii=False, indent=2)
+
+    def import_file(self, path: str) -> tuple[list[str], list[str]]:
+        """Importa gli schemi validi; restituisce (nomi importati, errori)."""
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            raise ValueError(_("Impossibile leggere il file: {e}").format(e=e)) from e
+        items = data.get("patterns") if isinstance(data, dict) else None
+        if not isinstance(items, dict):
+            raise ValueError(_("Il file non contiene schemi di Foliant."))
+        done, errors = [], []
+        for name, regex in items.items():
+            try:
+                self.add(str(name), str(regex))
+                done.append(str(name))
+            except ValueError as e:
+                errors.append(f"{name}: {e}")
+        return done, errors
 
 
 def fold_accents(text: str) -> str:

@@ -25,6 +25,9 @@ from .engine import AREA, DOCUMENT, NONE, PAGES, SELECTION, ChatMessage, Convers
 from .providers import AUTH, LIMIT, MODEL, QUOTA, AIError, ImagePart
 from .worker import Worker
 
+LONG_READ_PAGES = 40       # oltre, la prima lettura del testo avviene con avanzamento e Annulla
+
+
 FUNCTIONS = [
     ("chat", "Chiedi", "message-circle"),
     ("summary", "Riassumi", "scroll-text"),
@@ -832,7 +835,10 @@ class AIPanel(QWidget):
             return self._prepare_image_scope(profile, text)
         pages = list(range(doc.page_count)) if kind == DOCUMENT else content.parse_page_range(
             self.pages_edit.text(), doc.page_count)
-        textless = content.textless_pages(doc.pdf, pages)
+        texts = self._read_pages(doc, pages, fp)
+        if texts is None:
+            return None              # lettura annullata dall'utente
+        textless = content.textless_pages(doc.pdf, pages, texts)
         exclude: list[int] = []
         ocr_pages: list[int] = []
         ocr_lang = ""
@@ -866,6 +872,29 @@ class AIPanel(QWidget):
             scope.page_indices.append(p)
         scope.page_indices.sort()
         return scope, ocr_pages, ocr_lang
+
+    def _read_pages(self, doc, pages: list[int], fp: str) -> dict[int, str] | None:
+        """Testo delle pagine nell'indice in cache (letto una sola volta per contenuto).
+
+        Sui documenti lunghi non ancora letti la lettura avviene con avanzamento e Annulla.
+        None se l'utente annulla.
+        """
+        cache = self.services.cache
+        idx = cache.get(fp) if cache is not None else None
+        known = {p.index for p in idx.pages} if idx is not None else set()
+        missing = [p for p in pages if p not in known]
+
+        def read(progress=None):
+            return engine.load_pages(doc.pdf, pages, cache=cache, fingerprint=fp, progress=progress)
+        if len(missing) > LONG_READ_PAGES:
+            try:
+                loaded = self.ctx.run_task(_("Lettura del documento…"), read)
+            except OperationCancelled:
+                self.status.setText(_("Lettura annullata: nessun dato è stato inviato."))
+                return None
+        else:
+            loaded = read()
+        return {p.index: p.text for p in loaded}
 
     def _prepare_image_scope(self, profile: Profile, text: str):
         doc = self.document()
@@ -974,7 +1003,9 @@ class AIPanel(QWidget):
             raise FoliantError(_("Funzione non disponibile."))
 
         lang = options.get("target") if fn == "translate" else self._answer_language()
-        worker = Worker(self.services.gateway(), work, function=fn, document=doc, language=lang or "it", parent=self)
+        # anteprima dell'ambito già mostrata in `send()`: nessuna seconda conferma per richiesta
+        worker = Worker(self.services.gateway(confirm=False), work, function=fn, document=doc,
+                        language=lang or "it", parent=self)
         worker.text.connect(self._on_text)
         worker.progress.connect(self._on_progress)
         worker.waiting.connect(self._on_wait)

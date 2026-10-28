@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QFile, Qt, QTimer, QUrl
+from PySide6.QtCore import QFile, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QMessageBox
 
@@ -122,11 +122,9 @@ class FilesController:
         ctx.documentChanged.connect(lambda *_a: self.update_actions())
         w.main_menu.aboutToShow.connect(self.update_actions)
         self.update_actions()
-        # Menu contestuale sui recenti della Home.
-        recent = getattr(getattr(w, "home", None), "recent", None)
-        if recent is not None:
-            recent.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            recent.customContextMenuRequested.connect(self._home_menu)
+        # Voci del viewer nel menu contestuale dei recenti della Home (VIS-02/03): il nucleo vi
+        # mette Apri/Individua, Fissa/Sblocca, Rimuovi dall'elenco e Svuota elenco.
+        ctx.add_recent_menu_provider(self.fill_recent_menu)
 
     # ================================================================ stato
     def current_path(self) -> str | None:
@@ -404,8 +402,13 @@ class FilesController:
 
     # ======================================================= Home: recenti
     def path_menu(self, path: str, parent=None) -> QMenu:
-        """Menu delle operazioni su un file (usato dai recenti della Home)."""
-        menu = QMenu(parent or self.ctx.window)
+        """Menu completo di un recente della Home: voci del nucleo e operazioni sul file."""
+        return self.ctx.window.recent_menu(path)
+
+    def fill_recent_menu(self, path: str, menu: QMenu) -> None:
+        """Operazioni sul file nel menu di un recente (fornitore del nucleo)."""
+        if not os.path.exists(path):
+            return                          # file mancante: il nucleo offre Individua / Rimuovi
         entries = (
             (_("Rinomina…"), "pencil", lambda: self.rename_path(path)),
             (_("Duplica"), "copy", lambda: self.duplicate_paths([path])),
@@ -414,8 +417,6 @@ class FilesController:
             None,
             (_("Mostra nella cartella"), "folder-open", lambda: self.reveal_path(path)),
             (_("Copia percorso"), "clipboard-copy", lambda: self.copy_path(path)),
-            None,
-            (_("Rimuovi dall'elenco"), "x", lambda: self.ctx.remove_recent(path)),
         )
         for entry in entries:
             if entry is None:
@@ -425,16 +426,6 @@ class FilesController:
             act = menu.addAction(text)
             bind_icon(act, icon_name)
             act.triggered.connect(lambda _c=False, s=slot: s())
-        return menu
-
-    def _home_menu(self, pos) -> None:
-        lst = self.ctx.window.home.recent
-        item = lst.itemAt(pos)
-        if item is None:
-            return
-        path = item.data(Qt.ItemDataRole.UserRole)
-        if path:
-            self.path_menu(path, lst).exec(lst.viewport().mapToGlobal(pos))
 
 
 def install(ctx: Context) -> FilesController:

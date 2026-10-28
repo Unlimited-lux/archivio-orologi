@@ -541,6 +541,39 @@ def test_pdf_14_keeps_its_version_when_saved(tmp_path):
     assert new.uses_object_streams and b"/ObjStm" in new.save_bytes()
 
 
+def _saved_version(data: bytes, password: str | None = None) -> tuple:
+    head = re.match(rb"%PDF-(\d)\.(\d)", data)
+    version = (int(head.group(1)), int(head.group(2)))
+    pdf = pymupdf.open("pdf", data)
+    if password:
+        pdf.authenticate(password)
+    kind, value = pdf.xref_get_key(pdf.pdf_catalog(), "Version")
+    if kind == "name":
+        version = max(version, tuple(int(x) for x in value.strip("/").split(".")))
+    return version
+
+
+def test_pdf_14_version_raised_to_minimum_needed(tmp_path):
+    """NFR-29: se il contenuto richiede una versione più recente (livelli → 1.5, AES-128 → 1.6,
+    AES-256 → 1.7) il file salvato la dichiara, senza toccare il documento aperto."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Testo", fontsize=14)
+    path = tmp_path / "vecchio.pdf"
+    path.write_bytes(src.tobytes().replace(b"%PDF-1.7", b"%PDF-1.4", 1))
+    doc = Document.open(path)
+    assert _saved_version(doc.save_bytes()) == (1, 4)
+    with doc.change("Livello") as pdf:
+        pdf.add_ocg("Filigrana")
+    doc.save()
+    saved = path.read_bytes()
+    assert b"/OCProperties" in saved and b"/ObjStm" not in saved
+    assert _saved_version(saved) == (1, 5)
+    assert doc.pdf.xref_get_key(doc.pdf.pdf_catalog(), "Version")[0] == "null"   # solo la copia scritta
+    for enc, version in ((pymupdf.PDF_ENCRYPT_AES_128, (1, 6)), (pymupdf.PDF_ENCRYPT_AES_256, (1, 7))):
+        data = doc.save_bytes(encryption=enc, user_pw="u", owner_pw="o")
+        assert _saved_version(data, "u") == version
+
+
 def test_to_bytes_without_object_streams(sample_pdf):
     doc = Document.open(sample_pdf)
     assert b"/ObjStm" not in doc.to_bytes()            # i byte restano leggibili per chi cerca nel file

@@ -500,11 +500,12 @@ class ReloadController(QObject):
         return self.ctx.window.save_view(view, save_as=True)
 
     def save(self, view: DocumentView) -> bool:
-        """Ricrea il file eliminato o spostato al suo percorso."""
+        """Ricrea il file eliminato o spostato al suo percorso, senza domande (la scelta è già
+        stata fatta sull'avviso)."""
         path = view.document.path
         if path is not None:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        return self.ctx.window.save_view(view)
+        return self.ctx.window.save_view(view, recreate=True)
 
 
 def install(ctx: Context) -> ReloadController:

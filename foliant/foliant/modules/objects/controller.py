@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from foliant.api import Context, DocumentView
 
 IMAGE_FILTER = "Immagini (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp);;Tutti i file (*)"
-IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".pnm", ".ppm", ".pgm", ".pbm",
+IMAGE_EXTS = (".svg", ".heic", ".heif", ".avif", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".pnm", ".ppm", ".pgm", ".pbm",
               ".tga", ".ico", ".jp2", ".jpx", ".j2k")
 
 _last_payload: C.Payload | None = None       # copia locale degli appunti interni
@@ -46,9 +46,12 @@ class ObjectsController(QObject):
         self._link_cache: dict = {}
         self._paste_counts: dict = {}
         self._signed_ok: set = set()
+        self._pdfa_warned: set = set()
         self._pending: set = set()
         self._parsedReady.connect(self._on_parsed_ready)
         self.smart_guides = True
+        self.align_reference = "auto"          # auto, selection, key, page (OBJ-21)
+        self.distribute_method = E.SPACING     # spacing, centers (OBJ-22)
         self.crop_ratio = "free"     # proporzioni del ritaglio: free, original, 1:1, 4:3, 3:4, 16:9
         self.links_follow = True     # i collegamenti che coincidono con l'oggetto si spostano con esso
         self.grid_on = False
@@ -231,6 +234,18 @@ class ObjectsController(QObject):
             self.ctx.error(_("Modifica"), _("Il documento non consente modifiche al contenuto. "
                                             "Aprilo con la password del proprietario per modificarlo."))
             return False
+        with ENGINE_LOCK:
+            xfa = E.has_dynamic_xfa(doc.pdf)
+            part = E.pdfa_part(doc.pdf)
+        if xfa:
+            self.ctx.error(_("Modifica"), _("Il documento è un modulo XFA dinamico: il contenuto mostrato viene "
+                                            "generato dal modulo, quindi la modifica degli oggetti non è disponibile."))
+            return False
+        if part and id(doc) not in self._pdfa_warned:
+            self._pdfa_warned.add(id(doc))
+            self.ctx.info(_("Documento PDF/A"), _("Il documento dichiara la conformità PDF/A-{p}: alcune modifiche "
+                                                  "(per esempio la trasparenza) possono violare il profilo.")
+                          .format(p=part))
         return True
 
     def run_change(self, view, label: str, fn: Callable, *args, kind: str = "content"):
@@ -286,6 +301,14 @@ class ObjectsController(QObject):
         self._apply(view, _("Capovolgi oggetti"), E.flip, horizontal)
 
     def set_opacity(self, view, alpha: float) -> None:
+        if view is None:
+            return
+        with ENGINE_LOCK:
+            part = E.pdfa_part(view.document.pdf)
+        if part == "1" and alpha < 1 and not self.ctx.confirm(
+                _("Documento PDF/A-1"), _("Il documento dichiara la conformità PDF/A-1, che non ammette la "
+                                          "trasparenza: con questa opacità il file non sarà più conforme. Continuare?")):
+            return
         self._apply(view, _("Opacità"), E.set_opacity, alpha)
 
     def delete(self, view) -> None:
@@ -307,7 +330,9 @@ class ObjectsController(QObject):
         objs = self.selected_objects(view)
         if not objs:
             return
-        if reference is None:
+        if reference is None and self.align_reference != "auto":
+            reference = self.align_reference
+        if reference is None or (reference != E.REF_PAGE and len(objs) == 1):
             reference = E.REF_SELECTION if len(objs) > 1 else E.REF_PAGE
         page = self.sel_page
         indices = list(self.selection)
@@ -544,7 +569,13 @@ class ObjectsController(QObject):
         if o.xref:
             with ENGINE_LOCK:
                 occ = len(E.image_occurrences(view.document.pdf, o.xref))
-        vals = D.ask_adjust(self.ctx.window, occ)
+        preview = None
+        try:
+            with ENGINE_LOCK:
+                preview = E.extract_image(view.document.pdf, o, "png").data
+        except Exception:
+            preview = None
+        vals = D.ask_adjust(self.ctx.window, occ, preview)
         if vals is None:
             return
         page = self.sel_page
@@ -738,6 +769,11 @@ class ObjectsController(QObject):
             page = view.current_page
         if center is None and rect is None:
             center = self.visible_center(view, page)
+        big = [k for k, d in enumerate(images) if E.image_pixels(d) > E.MAX_PIXELS]
+        if big and self.ctx.confirm(_("Immagine molto grande"),
+                                    _("L'immagine supera i 100 megapixel e appesantirebbe molto il documento. "
+                                      "Ridurla a 100 megapixel prima di inserirla?")):
+            images = [E.downsample(d, E.MAX_PIXELS) if k in big else d for k, d in enumerate(images)]
         label = _("Inserisci immagine") if len(images) == 1 else _("Inserisci immagini")
         result = self.run_change(view, label, E.insert_images, page, images, center, rect)
         if result:

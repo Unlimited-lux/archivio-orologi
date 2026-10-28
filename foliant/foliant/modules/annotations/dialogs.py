@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QKeySequence, QTextCharFormat
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QPlainTextEdit, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 from foliant.api import _, bind_icon, theme
@@ -132,6 +132,9 @@ class CommentEditor(QDialog):
         else:
             self.edit.setPlainText(text)
         self.edit.setReadOnly(read_only)
+        if not read_only:
+            from . import spellcheck
+            spellcheck.attach(self.edit)          # ANN-44
         lay.addWidget(self.edit, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -178,9 +181,31 @@ def edit_comment(parent, title: str, header: str = "", text: str = "", rich: str
     return dlg.result_text()
 
 
+class TextDialog(QDialog):
+    """Testo su più righe con controllo ortografico (risposte, commenti di testo, inserimenti)."""
+
+    def __init__(self, parent, title: str, label: str, text: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(420, 240)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel(label))
+        self.edit = QPlainTextEdit()
+        self.edit.setPlainText(text)
+        from . import spellcheck
+        spellcheck.attach(self.edit)
+        lay.addWidget(self.edit, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.edit.setFocus()
+
+
 def ask_text(parent, title: str, label: str, text: str = "", multiline: bool = False) -> str | None:
     if multiline:
-        value, ok = QInputDialog.getMultiLineText(parent, title, label, text)
+        dlg = TextDialog(parent, title, label, text)
+        return dlg.edit.toPlainText() if dlg.exec() == QDialog.DialogCode.Accepted else None
     else:
         value, ok = QInputDialog.getText(parent, title, label, QLineEdit.EchoMode.Normal, text)
     return value if ok else None

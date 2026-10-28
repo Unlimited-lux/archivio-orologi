@@ -566,3 +566,44 @@ def test_technical_summary_marks_unverified_numbers(qtbot, window, ready, fake, 
     assert "25 Nm [p. 7]" in text and "25 Nm (non verificato)" not in text
     assert "40 bar (non verificato)" in text
     assert ready.panel.conversation().messages[-1].refs[0]["page"] == 6
+
+
+@pytest.mark.qt_no_exception_capture      # errori di altri moduli dopo la chiusura: controllati sotto, solo per ai
+def test_two_windows_independent_and_closing_second_keeps_first(qtbot, window, ready, fake, sample_pdf):
+    """Ctrl+N: ogni finestra ha i propri servizi dell'assistente; chiudere la seconda non tocca la prima."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    import traceback
+
+    from foliant.ui import theme
+    with qtbot.capture_exceptions() as caught:
+        _two_windows_body(qtbot, window, ready, fake, sample_pdf, theme, QApplication, QEvent)
+    # eccezioni di altri moduli (segnalate a parte) non riguardano l'assistente: nessuna deve venire da ai
+    ours = ["".join(traceback.format_exception(*e)) for e in caught]
+    ours = [t for t in ours if "modules/ai/" in t]
+    assert not ours, ours[0]
+
+
+def _two_windows_body(qtbot, window, ready, fake, sample_pdf, theme, QApplication, QEvent):
+    other = window.new_window()
+    try:
+        assert other.ctx.ai_services is not ready and other.ctx.ai_services.panel is not ready.panel
+        other_view = other.open_path(sample_pdf)
+        assert other_view is not None
+    finally:
+        for v in list(other.views()) if hasattr(other, "views") else []:
+            v.document.mark_saved() if hasattr(v.document, "mark_saved") else None
+        other.close()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # la prima finestra continua a funzionare: invio, risposta, cambio di tema
+    window.open_path(sample_pdf)
+    fake.responses = ["Ancora funzionante [p. 1]"]
+    ready.panel.send("domanda")
+    wait_done(qtbot, ready.panel)
+    assert ready.panel.conversation().messages[-1].text.startswith("Ancora funzionante")
+    app = QApplication.instance()
+    theme.apply(app, "dark")
+    theme.apply(app, "light")
+    ready.refresh()
+    assert ready.panel.isEnabled()
