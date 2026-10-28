@@ -199,6 +199,9 @@ EN = {
     "Rimuovi tutte le guide": "Remove all guides",
     "Trascina sulla pagina per creare una guida (con Ctrl: su tutte le pagine)":
         "Drag onto the page to create a guide (with Ctrl: on all pages)",
+    "Formato carta": "Paper size",
+    "Unità di misura": "Measurement units",
+    "Automatico ({v})": "Automatic ({v})",
 }
 
 add_translations("en", EN)

@@ -420,6 +420,19 @@ class Context(QObject):
     def ruler_unit(self) -> str:
         return self._w.ruler_unit()
 
+    # ------------------------------------------------------- formati locali
+    def paper_size(self) -> str:
+        """Formato carta predefinito per i nuovi documenti: "A4" o "Letter" (preferenza
+        «Formato carta», altrimenti dalle impostazioni locali, NFR-26)."""
+        from ..core.locale_defaults import paper_size
+        return paper_size(self._w.settings)
+
+    def measure_unit(self) -> str:
+        """Unità di misura dei dialoghi: "mm" o "in" (preferenza «Unità di misura»,
+        altrimenti dalle impostazioni locali, NFR-26)."""
+        from ..core.locale_defaults import measure_unit
+        return measure_unit(self._w.settings)
+
     # ----------------------------------------------------------------- dialoghi
     def status(self, message: str, timeout_ms: int = 5000) -> None:
         self._w.statusBar().showMessage(message, timeout_ms)

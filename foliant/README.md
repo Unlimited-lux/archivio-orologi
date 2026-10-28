@@ -72,6 +72,7 @@ foliant/
     engine.py     ENGINE_LOCK: unico lock per ogni accesso al motore PDF
     render.py     resa per stampa/immagini; annotations_hidden (flag Hidden temporaneo)
     errors.py     errori con messaggi per l'utente
+    locale_defaults.py formato carta e unità di misura predefiniti (impostazioni locali e preferenze)
   ui/          interfaccia Qt
     main_window.py  finestra: barra modalità, schede, pannelli, barra di stato
     document_view.py vista pagine: impaginazione, zoom, rendering, coordinate, strumenti, guide
@@ -210,6 +211,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `add_view_menu_provider(fn)` | voci nel menu del tasto destro sulle pagine: `fn(view, page_event, menu)`; la selezione di testo è `view.text_selections` (una per pagina: pagina, rettangoli, parole; `view.text_selection` = la prima) e `view.selected_text()` (il clic destro non la cancella) |
 | `set_rulers_visible(bool)` / `rulers_visible()` | righelli (VIS-39) su tutte le viste, anche future, come la voce «Righelli» del menu ☰ › Vista; la scelta resta tra le sessioni |
 | `set_ruler_unit(u)` / `ruler_unit()` | unità dei righelli per tutte le viste: `"mm"` (predefinita), `"pt"`, `"in"`; anche nelle Preferenze e nel menu del righello |
+| `paper_size()` / `measure_unit()` | formato carta (`"A4"` o `"Letter"`) e unità di misura (`"mm"` o `"in"`) predefiniti per nuovi documenti e dialoghi con misure (NFR-26): la preferenza «Formato carta» / «Unità di misura» (Automatico, A4/Letter, mm/pollici) se scelta, altrimenti le impostazioni locali (`QLocale.system().measurementSystem()`: sistema USA → Letter e pollici, altrimenti A4 e mm). Senza contesto: `foliant.api.locale_defaults.paper_size()` / `measure_unit()`; dimensioni in punti in `locale_defaults.PAPER_SIZES` |
 | `add_tab_menu_provider(fn)` | voci nel menu del tasto destro su una scheda: `fn(view, menu)`. Es. `ctx.add_tab_menu_provider(lambda v, m: m.addAction(_("Confronta con…"), lambda: confronta(v)))` |
 | `show_banner(view, id, testo, actions=[(etichetta, fn)], level="info", priority=0, closable=True, on_close=None)` / `hide_banner(view, id)` / `banners(view)` | barra di avviso sopra le pagine della scheda (UX-14): `level` = `"info"`, `"warning"` o `"error"`; un avviso alla volta (priorità più alta, poi livello) con «N altri avvisi» per scorrerli; lo stesso `id` aggiorna l'avviso; chiuso con × non ricompare finché il documento è aperto (resta nell'icona della barra di stato) o finché il modulo non chiama `hide_banner`. Es. `ctx.show_banner(view, "ocr", _("Documento senza testo"), [(_("Esegui OCR"), avvia)], level="warning", priority=20)` |
 | `notify(testo, actions=[(etichetta, fn)], duration_ms=None)` | avviso non bloccante in basso (6 s, 10 s con azioni, 0 = finché non si chiude) al posto delle finestre modali informative. Es. `ctx.notify(_("3 pagine eliminate"), [(_("Annulla"), doc.undo)])` |

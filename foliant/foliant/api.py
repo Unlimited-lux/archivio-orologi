@@ -3,7 +3,7 @@
     from foliant.api import Context, Document, Tool, PageEvent, ENGINE_LOCK, run_task, icon, _
 """
 
-from .core import placement
+from .core import locale_defaults, placement
 from .core.render import annotations_hidden, page_pixmap
 from .core.document import (
     ACCESS, CHANGE_KINDS, CLOSED, CONTENT, ENCRYPT_METADATA_SUPPORTED, LOCK, SAVED, Document, atomic_write,
@@ -29,7 +29,7 @@ from .ui.tools import (
 
 __all__ = [
     "page_pixmap", "annotations_hidden", "GUIDE_HORIZONTAL", "GUIDE_VERTICAL", "RULER_UNITS",
-    "placement", "CLOSED", "CONTENT", "SAVED", "ACCESS", "LOCK", "CHANGE_KINDS", "ENCRYPT_METADATA_SUPPORTED",
+    "placement", "locale_defaults", "CLOSED", "CONTENT", "SAVED", "ACCESS", "LOCK", "CHANGE_KINDS", "ENCRYPT_METADATA_SUPPORTED",
     "Document", "atomic_write", "IncrementalSaveError", "ENGINE_LOCK", "try_engine",
     "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
     "_", "add_translations", "language", "theme", "PDF_FILTER", "Context", "Mode", "GUARD_EVENTS", "Banner",
