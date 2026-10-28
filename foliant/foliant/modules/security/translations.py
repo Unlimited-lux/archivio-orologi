@@ -517,4 +517,8 @@ EN: dict[str, str] = {
     'Converti evidenziazioni in segni di redazione': 'Convert highlights to redaction marks',
     'Trascina sul testo da oscurare: il segno copre solo i caratteri scelti.': 'Drag over the text to redact: the mark covers only the chosen characters.',
     'Testo su più pagine ({p})': 'Text across pages ({p})',
+    'Modifica aspetto': 'Change appearance',
+    'Riempimento e testo sovrapposto dei segni selezionati': 'Fill and overlay text of the selected marks',
+    'Modifica aspetto dei segni': 'Change mark appearance',
+    '{cmd}: il documento non consente modifiche. Usa «Sblocca…» con la password dei permessi.': '{cmd}: the document does not allow changes. Use “Unlock…” with the permissions password.',
 }

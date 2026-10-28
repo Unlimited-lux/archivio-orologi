@@ -87,6 +87,10 @@ class RedactionPanel(QWidget):
         row2.addWidget(self.apply_selected_button)
         row2.addWidget(self.apply_all_button)
         lay.addLayout(row2)
+        self.style_button = QPushButton(icon("palette"), _("Modifica aspetto"))
+        self.style_button.setToolTip(_("Riempimento e testo sovrapposto dei segni selezionati"))
+        self.style_button.clicked.connect(lambda: self.controller.restyle_marks(self.selected()))
+        lay.addWidget(self.style_button)
         row3 = QHBoxLayout()
         self.export_button = QPushButton(icon("download"), _("Esporta XFDF"))
         self.export_button.clicked.connect(lambda: self.controller.export_marks())
@@ -167,7 +171,8 @@ class RedactionPanel(QWidget):
         has = bool(self.marks)
         self.empty.setVisible(not has)
         self.tree.setVisible(has)
-        for b in (self.remove_button, self.apply_selected_button, self.apply_all_button, self.export_button):
+        for b in (self.remove_button, self.apply_selected_button, self.apply_all_button, self.export_button,
+                  self.style_button):
             b.setEnabled(has)
         self.import_button.setEnabled(doc is not None)
         tip = "" if has else _("Nessuna area contrassegnata per la redazione")

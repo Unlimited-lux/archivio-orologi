@@ -694,6 +694,31 @@ class SecurityController:
         self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n))
         return n
 
+    def restyle_marks(self, marks: list[R.Mark], style: R.MarkStyle | None = None) -> int:
+        """Cambia l'aspetto (riempimento, testo sovrapposto) dei segni scelti (SEC-19)."""
+        doc = self.document()
+        if doc is None or not marks:
+            return 0
+        if style is None:
+            dlg = D.StyleDialog(self.style, self.apply_options, self.codes(), self.parent)
+            if not run_dialog(dlg):
+                return 0
+            style, _options = dlg.values()
+        n = 0
+        with self._change(doc, _("Modifica aspetto dei segni")) as pdf:
+            for m in marks:
+                page = pdf[m.page]
+                annot = page.load_annot(m.xref)
+                if annot is None:
+                    continue
+                info = dict(annot.info or {})
+                rect = pymupdf.Rect(annot.rect)
+                page.delete_annot(annot)
+                source = info.get("subject", "") or "area"
+                if R.add_mark(pdf, m.page, rect, style, source, info.get("content", "")) is not None:
+                    n += 1
+        return n
+
     def redaction_settings(self) -> bool:
         dlg = D.StyleDialog(self.style, self.apply_options, self.codes(), self.parent,
                             import_codes=self._import_codes_dialog, export_codes=self._export_codes_dialog)

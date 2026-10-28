@@ -1102,3 +1102,52 @@ def test_convert_highlights_to_marks(window, sec, sample_pdf, monkeypatch, accep
     monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
     assert sec.apply_redactions(None)
     assert "Orologeria" not in doc.page_text(0) and "Pagina 1" in doc.page_text(0)
+
+
+def test_restyle_selected_marks(window, sec, sample_pdf, monkeypatch, accept_all):
+    view = window.open_path(sample_pdf)
+    doc = view.document
+    with doc.change("Segna") as pdf:
+        for page in range(3):
+            R.add_mark(pdf, page, pymupdf.Rect(300, 400, 400, 500), R.MarkStyle())
+    sec.show_panel()
+    sec.panel.refresh()
+    first = [m for m in sec.panel.marks if m.page == 0]
+    style = R.MarkStyle(fill=(0x1F / 255, 0x3A / 255, 0x93 / 255), overlay_text="OMISSIS")
+    assert sec.restyle_marks(first, style) == 1
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert sec.apply_redactions(None)
+    with doc.lock:
+        r, g, b = doc.pdf[0].get_pixmap().pixel(350, 450)
+        other = doc.pdf[1].get_pixmap().pixel(350, 450)
+        text = doc.pdf[0].get_textbox(pymupdf.Rect(300, 400, 400, 500))
+    assert abs(r - 0x1F) <= 2 and abs(g - 0x3A) <= 2 and abs(b - 0x93) <= 2
+    assert other == (0, 0, 0) and "OMISSIS" in text
+
+
+def test_print_guard_registered(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    monkeypatch.setattr(C, "ask_unapplied", lambda parent, n: "cancel")
+    assert window.ctx.run_guards("print", view, {}) is False
+    monkeypatch.setattr(C, "ask_unapplied", lambda parent, n: "keep")
+    assert window.ctx.run_guards("print", view, {}) is True
+
+
+def test_restricted_disables_modifying_commands(window, sec, tmp_path, monkeypatch):
+    path = tmp_path / "solo-stampa.pdf"
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Listino riservato")
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="", owner_pw="capo",
+             permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(path))
+    window.ctx.window._update_state()
+    for key in ("area", "find", "patterns", "sanitize", "flatten", "apply"):
+        assert not sec.actions[key].isEnabled(), key
+    assert "Sblocca" in sec.actions["area"].toolTip()
+    monkeypatch.setattr(C, "ask_password", lambda *a: "capo")
+    assert sec.unlock(view.document)
+    for key in ("area", "find", "patterns", "sanitize", "flatten"):
+        assert sec.actions[key].isEnabled(), key
+    assert "Sblocca" not in sec.actions["area"].toolTip()
