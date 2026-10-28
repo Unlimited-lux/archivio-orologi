@@ -99,3 +99,21 @@ BAT-19, `patch` solo per un test di CMP-13.
   conforme va in errore (PDFA-02) oppure, a scelta, viene salvato con avviso
   (be: `test_pdfa_step_reports_conformance`, `test_pdfa_step_without_ghostscript_is_clear`).
   Serve Ghostscript (non installato nell'ambiente di test: verificato con un motore simulato).
+
+## Verifiche dei flussi reali
+
+- **Listino con prezzi cambiati** (celle di tabella come testi separati, 1 e 3 pagine): ogni prezzo
+  cambiato è una differenza a sé, la riga nuova e quella tolta sono intere; nessuna falsa regione
+  visiva dalle righe spostate. Corretti tre difetti: allineamento per righe PDF anziché visive
+  (f74d618), prime/ultime righe della tabella e colonna «EUR» scambiate per intestazioni ripetute,
+  prezzi nella fascia bassa scambiati per numeri di pagina (76f6daf).
+  Test: `test_price_list_rows_are_separate_changes`, `test_multi_page_price_list_table_rows_are_not_headers`.
+- **Contratto di compravendita** in due versioni (prezzo, termini, garanzia, clausola aggiunta):
+  quattro differenze esatte con il riflusso del testo.
+- **200 file misti** (148 validi, 10 troncati, 10 casuali, 10 vuoti, 10 cifrati, 10 non PDF,
+  2 da 400 pagine) con numeri di pagina + compressione, annullamento al 90° file e ripresa:
+  nessun file perso o doppio, esiti e messaggi coerenti per tipo, memoria Python < 30 MB, 200 file
+  in ~9 s. Corretti: la compressione di MuPDF teneva fermo l'interprete per 30 s su un file grande
+  (interfaccia bloccata, annullamento impossibile) e ricomprimeva l'immagine condivisa a ogni pagina
+  → ora un'immagine per volta, annullabile, 0,2 s (7fddfc0, b9773e7); «Annulla file» durante un passo
+  risultava errore; aggiunti «Riprendi i non elaborati» e il messaggio per i file vuoti (9aa9ee5).
