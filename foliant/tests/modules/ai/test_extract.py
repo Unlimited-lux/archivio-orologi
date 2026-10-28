@@ -15,7 +15,7 @@ from foliant.modules.ai.extract import Cell, ExtractError, ExtractResult, NoData
 
 INVOICE_TEXT = (
     "FATTURA N. 2024/17 del 15/03/2024\n"
-    "Fornitore: Officina Rossi srl  P.IVA 01234567890\n"
+    "Fornitore: Officina Rossi srl  P.IVA 01234567897\n"
     "Cliente: Studio Bianchi\n"
     "Revisione movimento  1  100,00  22  100,00\n"
     "Sostituzione vetro  2  100,00  22  200,00\n"
@@ -34,7 +34,7 @@ def invoice_json(total=1872.16, lines=None):
          "importo": 1234.56, "_page": 1},
     ]
     return json.dumps({"records": [{
-        "numero": "2024/17", "data": "15/03/2024", "fornitore": "Officina Rossi srl", "partita_iva": "01234567890",
+        "numero": "2024/17", "data": "15/03/2024", "fornitore": "Officina Rossi srl", "partita_iva": "01234567897",
         "cliente": "Studio Bianchi", "righe": lines, "imponibile": 1534.56, "imposta": "337,60",
         "totale": total, "valuta": "EUR", "_page": 1}]})
 

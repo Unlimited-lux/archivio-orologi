@@ -527,6 +527,53 @@ def _fmt(v: float) -> str:
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def partita_iva_valid(value) -> bool:
+    """Partita IVA italiana: 11 cifre con cifra di controllo (prefisso «IT» ammesso)."""
+    v = str(value or "").strip().upper().replace(" ", "")
+    if v.startswith("IT"):
+        v = v[2:]
+    if len(v) != 11 or not v.isdigit():
+        return False
+    total = 0
+    for i, ch in enumerate(v[:10]):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return (10 - total % 10) % 10 == int(v[10])
+
+
+_CF_ODD = {**{str(i): v for i, v in enumerate([1, 0, 5, 7, 9, 13, 15, 17, 19, 21])},
+           **dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                      [1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 2, 4, 18, 20, 11, 3, 6, 8, 12, 14, 16, 10, 22, 25, 24, 23]))}
+
+
+def codice_fiscale_valid(value) -> bool:
+    """Codice fiscale di persona fisica: 16 caratteri con carattere di controllo."""
+    v = str(value or "").strip().upper().replace(" ", "")
+    if len(v) != 16 or not v.isalnum():
+        return False
+    total = 0
+    for i, ch in enumerate(v[:15]):
+        if i % 2 == 0:
+            total += _CF_ODD[ch]
+        else:
+            total += int(ch) if ch.isdigit() else ord(ch) - ord("A")
+    return chr(ord("A") + total % 26) == v[15]
+
+
+def tax_id_valid(value) -> bool:
+    v = str(value or "").strip().upper().replace(" ", "")
+    if not v:
+        return True
+    digits = v[2:] if v.startswith("IT") else v
+    if digits.isdigit():
+        return partita_iva_valid(v)
+    return codice_fiscale_valid(v)
+
+
 def consistency_checks(result: ExtractResult) -> list[str]:
     """Controlli di coerenza delle fatture: somma righe, imponibile + imposta = totale."""
     checks: list[str] = []
@@ -543,13 +590,19 @@ def consistency_checks(result: ExtractResult) -> list[str]:
             s = sum(amounts)
             if net is not None:
                 if abs(s - net) > 0.01:
-                    checks.append(_("{r}: la somma delle righe ({s}) è diversa dall'imponibile ({t})")
-                                  .format(r=name, s=_fmt(s), t=_fmt(net)))
+                    checks.append(_("{r}: la somma delle righe ({s}) è diversa dall'imponibile ({t}): "
+                                    "differenza {d}").format(r=name, s=_fmt(s), t=_fmt(net),
+                                                            d=f"{abs(s - net):.2f}".replace(".", ",")))
             elif total is not None:
                 expected = s + (tax or 0.0)
                 if abs(expected - total) > 0.01:
                     checks.append(_("{r}: la somma delle righe ({s}) non corrisponde al totale ({t})")
                                   .format(r=name, s=_fmt(expected), t=_fmt(total)))
+        for key in ("partita_iva", "codice_fiscale", "partita_iva_cliente"):
+            cell = rec.get(key)
+            if isinstance(cell, Cell) and cell.value not in (None, "") and not tax_id_valid(cell.value):
+                checks.append(_("{r}: «{v}» non è formalmente valido ({k})").format(
+                    r=name, v=cell.value, k=key.replace("_", " ")))
         if net is not None and tax is not None and total is not None and abs(net + tax - total) > 0.01:
             checks.append(_("{r}: imponibile + imposta ({s}) è diverso dal totale ({t})")
                           .format(r=name, s=_fmt(net + tax), t=_fmt(total)))
