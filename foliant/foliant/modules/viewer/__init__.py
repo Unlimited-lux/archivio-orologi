@@ -36,6 +36,7 @@ PARTS = (
     "integrity",      # file danneggiati e funzioni non supportate
     "appearance",     # temi di lettura
     "measure",        # coordinate, griglia, riquadri di pagina
+    "share",          # invio per e-mail e copia del file
     "commands",       # ricerca dei comandi e scorciatoie (per ultima: vede tutte le azioni)
 )
 
