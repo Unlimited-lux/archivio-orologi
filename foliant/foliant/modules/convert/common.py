@@ -125,6 +125,15 @@ def expand_name_template(template: str, *, name: str, page: int | None = None, f
     return re.sub(r"\{(\w+)(:[^}]*)?\}", repl, template)
 
 
+def _current_umask() -> int:
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return mask
+
+
+_UMASK = _current_umask()
+
+
 class OutputFiles:
     """Raccoglie i file prodotti come temporanei e li rende definitivi solo con `commit()`.
 
@@ -141,13 +150,21 @@ class OutputFiles:
         self.policy = policy
         self._items: list[tuple[str, str]] = []   # (temporaneo, finale desiderato)
         self._done: list[str] = []
+        self._made_dirs: list[Path] = []           # cartelle create da noi (rimosse se restano vuote)
 
     def new(self, final_path: str | os.PathLike) -> str:
         final = Path(final_path)
         directory = final.parent if str(final.parent) else Path(".")
         try:
+            missing = []
+            d = directory
+            while not d.exists() and d != d.parent:
+                missing.append(d)
+                d = d.parent
             directory.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(prefix=f".{final.stem}.", suffix=f".part{final.suffix}", dir=directory)
+            self._made_dirs.extend(missing)
+            fd, tmp = tempfile.mkstemp(prefix=f".{final.stem[:32]}.", suffix=f".part{final.suffix[:16]}",
+                                       dir=directory)
         except OSError as e:
             raise ConversionError(_("Impossibile scrivere nella cartella «{d}»: {e}").format(
                 d=directory, e=e.strerror or e)) from e
@@ -163,6 +180,11 @@ class OutputFiles:
             while target in taken:
                 target = unique_path(Path(target).with_name(Path(target).stem + " (1)" + Path(target).suffix))
             taken.add(target)
+            try:
+                mode = os.stat(target).st_mode & 0o7777 if os.path.exists(target) else 0o666 & ~_UMASK
+                os.chmod(tmp, mode)
+            except OSError:
+                pass
             os.replace(tmp, target)
             self._done.append(target)
         self._items.clear()
@@ -175,6 +197,12 @@ class OutputFiles:
             except OSError:
                 pass
         self._items.clear()
+        for d in self._made_dirs:          # dalla più interna alla più esterna
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+        self._made_dirs.clear()
 
     def __enter__(self) -> "OutputFiles":
         return self

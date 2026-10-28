@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _
+from foliant.api import ENGINE_LOCK, OperationCancelled, _
 
 from .common import ConversionError, OutputFiles, RangeError, check, open_source, parse_page_range
 from .extract import NATIVE, SCANNED, PageContent, classify_page, ocr_available, ocr_languages
@@ -169,6 +169,12 @@ class Job:
                     p=self.source_index(i) + 1))
             return data
         doc = pymupdf.open(stream=data, filetype="pdf")
+        try:
+            return self._ocr_pages(doc, scanned)
+        finally:
+            doc.close()
+
+    def _ocr_pages(self, doc: pymupdf.Document, scanned: list[int]) -> bytes:
         lang = ocr_languages(self.language)
         for k, i in enumerate(scanned):
             check(self.progress, 0.1 * k / len(scanned), _("OCR della pagina {p}").format(p=self.source_index(i) + 1))
@@ -176,17 +182,17 @@ class Job:
                 page = doc[i]
                 pix = page.get_pixmap(dpi=300)
                 ocr_pdf = pymupdf.open(stream=pix.pdfocr_tobytes(language=lang), filetype="pdf")
-                rect = page.rect
-                doc.insert_pdf(ocr_pdf, start_at=i + 1)
-                doc.delete_page(i)
-                doc[i].set_mediabox(pymupdf.Rect(0, 0, ocr_pdf[0].rect.width, ocr_pdf[0].rect.height))
-                _ = rect
+                try:
+                    doc.insert_pdf(ocr_pdf, start_at=i + 1)
+                    doc.delete_page(i)
+                finally:
+                    ocr_pdf.close()
                 self.result.ocr_pages.append(self.source_index(i) + 1)
+            except OperationCancelled:
+                raise
             except Exception:
                 self.warn(_("OCR non riuscito a pagina {p}.").format(p=self.source_index(i) + 1))
-        out = doc.tobytes(garbage=0)
-        doc.close()
-        return out
+        return doc.tobytes(garbage=0)
 
 
 _LANGS = {"it": "ita", "en": "eng", "de": "deu", "fr": "fra", "es": "spa", "pt": "por", "nl": "nld"}
@@ -261,7 +267,19 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
         finally:
             src.close()
 
-    job = Job(fmt, name, page_list, progress, dict(options))
+    try:
+        return _run_job(work, Job(fmt, name, page_list, progress, dict(options)), fmt, output_path,
+                        src_bytes if work is None else None, signed if work is not None else False,
+                        embedded if work is not None else 0, progress, options)
+    finally:
+        if work is not None:
+            with ENGINE_LOCK:
+                work.close()
+
+
+def _run_job(work, job: Job, fmt: str, output_path: str, src_bytes, signed: bool, embedded: int, progress,
+             options: dict) -> ConversionResult:
+    from . import export_image, export_office, export_text
     if work is not None:
         if signed:
             job.warn(_("Il documento è firmato: le firme non sono trasferibili nel formato di uscita."))
@@ -315,10 +333,6 @@ def run_conversion(source, output_path: str | os.PathLike, fmt: str, progress=No
         if e.errno == 28:
             raise ConversionError(_("Spazio su disco insufficiente: conversione interrotta.")) from e
         raise ConversionError(_("Impossibile scrivere il file: {e}").format(e=e.strerror or e)) from e
-    finally:
-        if work is not None:
-            with ENGINE_LOCK:
-                work.close()
     job.result.ocr_pages = sorted(set(job.result.ocr_pages))
     return job.result
 
@@ -332,11 +346,15 @@ def convert_pdf(input_path, output_path, fmt, progress=None, **options) -> list[
     return run_conversion(input_path, output_path, fmt, progress, **options).paths
 
 
-def scanned_pages(source, password: str | None = None) -> list[int]:
-    """Pagine (base 0) senza testo e coperte da un'immagine: candidate all'OCR."""
+def scanned_pages(source, password: str | None = None, limit: int | None = None) -> list[int]:
+    """Pagine (base 0) senza testo e coperte da un'immagine: candidate all'OCR.
+
+    Con `limit` si esamina un campione distribuito di al massimo `limit` pagine."""
     with ENGINE_LOCK:
         src = open_source(source, password, need_extract=False)
         try:
-            return [i for i in range(src.page_count) if classify_page(src[i]) == SCANNED]
+            n = src.page_count
+            indices = range(n) if not limit or n <= limit else sorted({int(k * n / limit) for k in range(limit)})
+            return [i for i in indices if classify_page(src[i]) == SCANNED]
         finally:
             src.close()

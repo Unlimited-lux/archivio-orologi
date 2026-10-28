@@ -427,6 +427,15 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
             para = _block_to_para(block, links, dehyphenate)
             if para is not None:
                 boxes.append((bbox, para))
+    if page.rotation and textpage is None:
+        # coordinate della pagina come visualizzata (ruotata), coerenti con width/height
+        m = page.rotation_matrix
+        rotated = []
+        for bbox, item in boxes:
+            r = tuple(pymupdf.Rect(bbox) * m)
+            item.bbox = r
+            rotated.append((r, item))
+        boxes = rotated
     content.items = _xy_cut(boxes)
     return content
 

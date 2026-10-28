@@ -100,15 +100,22 @@ def write_images(work: pymupdf.Document, base_path: str, job, out) -> list[str]:
     created: list[str] = []
     if fmt == "tiff" and o.get("multipage", False):
         tmp = out.new(base.with_suffix(ext))
-        frames = []
-        for i in range(n):
-            check(job.progress, i / max(1, n), _("Pagina {i} di {n}").format(i=i + 1, n=n))
-            with ENGINE_LOCK:
-                img = render_page(work[i], dpi, color=color, alpha=alpha, annotations=annots)
-            frames.append(_prepare(img, fmt, o))
-        check(job.progress, 0.99, _("Scrittura del TIFF…"))
-        frames[0].save(tmp, format="TIFF", save_all=True, append_images=frames[1:],
-                       **_save_kwargs(fmt, dpi, o, frames[0]))
+        from PIL import TiffImagePlugin
+        # una pagina alla volta: la memoria non cresce con il numero di pagine
+        tf = TiffImagePlugin.AppendingTiffWriter(tmp, True)
+        try:
+            for i in range(n):
+                check(job.progress, i / max(1, n), _("Pagina {i} di {n}").format(i=i + 1, n=n))
+                with ENGINE_LOCK:
+                    img = render_page(work[i], dpi, color=color, alpha=alpha, annotations=annots)
+                img = _prepare(img, fmt, o)
+                img.encoderinfo = _save_kwargs(fmt, dpi, o, img)
+                img.encoderconfig = ()
+                TiffImagePlugin._save(img, tf, tmp)
+                tf.newFrame()
+        finally:
+            tf.close()
+            tf.close = lambda: None    # evita una seconda chiusura alla distruzione
         if Path(tmp).stat().st_size > 4 * 1024 ** 3:
             job.warn(_("Il TIFF supera 4 GB: alcuni programmi potrebbero non aprirlo."))
         return [tmp]
@@ -118,7 +125,12 @@ def write_images(work: pymupdf.Document, base_path: str, job, out) -> list[str]:
         with ENGINE_LOCK:
             img = render_page(work[i], dpi, color=color, alpha=alpha, annotations=annots)
         img = _prepare(img, fmt, o)
-        name = expand_name_template(template, name=base.stem, page=src + 1, fmt=fmt)
+        try:
+            name = expand_name_template(template, name=base.stem, page=src + 1, fmt=fmt)
+        except (ValueError, KeyError, IndexError) as e:
+            raise ConversionError(_("Modello del nome dei file non valido: «{t}».").format(t=template)) from e
+        if not name or "/" in name or "\\" in name:
+            raise ConversionError(_("Modello del nome dei file non valido: «{t}».").format(t=template))
         tmp = out.new(base.with_name(name + ext))
         img.save(tmp, format=fmt.upper(), **_save_kwargs(fmt, dpi, o, img))
         created.append(tmp)

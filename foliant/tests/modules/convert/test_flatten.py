@@ -76,9 +76,9 @@ def test_flatten_by_type_on_range(annotated):
 def test_flatten_crop():
     doc = pymupdf.open()
     p = doc.new_page(width=595, height=842)
-    p.insert_text((100, 100), "DENTRO", fontsize=14)
-    p.insert_text((100, 800), "FUORI", fontsize=14)
-    p.set_cropbox(pymupdf.Rect(50, 300, 545, 842))   # coordinate PDF: esclude la parte bassa
+    p.insert_text((100, 100), "FUORI", fontsize=14)
+    p.insert_text((100, 800), "DENTRO", fontsize=14)
+    p.set_cropbox(pymupdf.Rect(50, 300, 545, 842))   # coordinate di pagina: esclude la parte alta
     crop = pymupdf.Rect(p.cropbox)
     out, report = flatten_pdf_bytes(doc.tobytes(), annotations=False, forms=False, layers=False, crop=True)
     res = pymupdf.open(stream=out)
@@ -121,3 +121,34 @@ def test_rasterize_with_ocr(sample_pdf):
     if ocr_available():
         assert "Pagina" in res[0].get_text()
     assert res.page_count == 3 and "Pagina 2" in res[1].get_text()
+
+
+def test_flatten_crop_top_half_keeps_visible():
+    doc = pymupdf.open()
+    p = doc.new_page(width=400, height=400)
+    p.draw_rect(p.rect, color=None, fill=(0.9, 0.9, 1))
+    p.insert_text((50, 80), "Visibile", fontsize=14)
+    p.insert_text((50, 350), "Esterno", fontsize=14)
+    p.set_cropbox(pymupdf.Rect(0, 0, 400, 200))       # metà superiore (coordinate di pagina)
+    out, _r = flatten_pdf_bytes(doc.tobytes(), annotations=False, forms=False, layers=False, crop=True)
+    res = pymupdf.open(stream=out)
+    assert "Visibile" in res[0].get_text() and "Esterno" not in res[0].get_text()
+    assert abs(res[0].rect.height - 200) < 0.5
+    assert res[0].get_drawings()   # lo sfondo non viene eliminato
+
+
+def test_layers_whole_document_and_raster_keeps_toc():
+    doc = pymupdf.open()
+    hidden = doc.add_ocg("Nascosto", on=False)
+    for k in range(2):
+        p = doc.new_page()
+        p.insert_text((72, 100), f"NASCOSTO {k + 1}", fontsize=12, oc=hidden)
+        p.insert_text((72, 140), f"Testo {k + 1}", fontsize=12)
+    doc.set_toc([[1, "Cap 1", 1], [1, "Cap 2", 2]])
+    out, _r = flatten_pdf_bytes(doc.tobytes(), annotations=False, forms=False, layers=True, pages="1")
+    res = pymupdf.open(stream=out)
+    assert all("NASCOSTO" not in res[i].get_text() for i in range(2))
+    out2, _r = flatten_pdf_bytes(out, annotations=False, forms=False, layers=False, rasterize=True, dpi=72,
+                                 ocr=False, pages="1")
+    res2 = pymupdf.open(stream=out2)
+    assert res2.get_toc() == [[1, "Cap 1", 1], [1, "Cap 2", 2]]

@@ -77,6 +77,22 @@ def common_root(paths: list[str]) -> str | None:
         return None
 
 
+def plan_outputs(files: list[str], fmt: str, out_dir, root, keep_structure: bool) -> list[str]:
+    """Percorsi di uscita senza collisioni all'interno del lotto (es. a/doc.pdf e b/doc.pdf
+    nella stessa cartella diventano doc.txt e doc (2).txt)."""
+    taken: set[str] = set()
+    out = []
+    for path in files:
+        target = Path(output_for(path, fmt, out_dir, root, keep_structure))
+        cand, n = target, 1
+        while str(cand).lower() in taken:
+            n += 1
+            cand = target.with_name(f"{target.stem} ({n}){target.suffix}")
+        taken.add(str(cand).lower())
+        out.append(str(cand))
+    return out
+
+
 def default_workers() -> int:
     """Processi paralleli predefiniti: core disponibili − 1 (almeno 1)."""
     return max(1, (os.cpu_count() or 2) - 1)
@@ -95,7 +111,7 @@ def _convert_one(path: str, out: str, fmt: str, password: str | None, options: d
         return ERROR, [], _("Errore imprevisto: {e}").format(e=e)
 
 
-def _batch_parallel(items, fmt, out_dir, keep_structure, root, passwords, progress, workers, options):
+def _batch_parallel(items, outputs, fmt, progress, workers, passwords, options):
     import multiprocessing
     from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
     n = len(items)
@@ -104,7 +120,7 @@ def _batch_parallel(items, fmt, out_dir, keep_structure, root, passwords, progre
     with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
         futures = {}
         for k, item in enumerate(items):
-            out = output_for(item.path, fmt, out_dir, root, keep_structure)
+            out = outputs[k]
             futures[pool.submit(_convert_one, item.path, out, fmt, passwords.get(item.path), options)] = k
             item.status = "in attesa"
         pending = set(futures)
@@ -151,8 +167,9 @@ def batch_convert(files: list[str], fmt: str, *, out_dir: str | None = None, kee
     root = root or common_root(files)
     items = [BatchItem(p) for p in files]
     n = len(items)
+    outputs = plan_outputs(files, fmt, out_dir, root, keep_structure)
     if workers > 1 and n > 1:
-        return _batch_parallel(items, fmt, out_dir, keep_structure, root, passwords, progress, workers, options)
+        return _batch_parallel(items, outputs, fmt, progress, workers, passwords, options)
 
     class _Sub:
         """Avanzamento del singolo file riportato su quello complessivo."""
@@ -170,7 +187,7 @@ def batch_convert(files: list[str], fmt: str, *, out_dir: str | None = None, kee
 
     for k, item in enumerate(items):
         check(progress, k / max(1, n), _("File {i} di {n}: {name}").format(i=k + 1, n=n, name=Path(item.path).name))
-        out = output_for(item.path, fmt, out_dir, root, keep_structure)
+        out = outputs[k]
         try:
             result = run_conversion(item.path, out, fmt, _Sub(k), password=passwords.get(item.path), **options)
             item.outputs = result.paths

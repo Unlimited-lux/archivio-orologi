@@ -490,3 +490,14 @@ def test_remove_conformance_ui(window, ctrl, sample_pdf, tmp_path, messages):
     with pymupdf.open(stream=view.document.to_bytes()) as d:
         assert "pdfaid" not in (d.get_xml_metadata() or "")
     assert view.document.undo()
+
+
+def test_batch_same_names(tmp_path):
+    from tests.conftest import make_pdf
+    from foliant.modules.convert.batch import batch_convert
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    files = [make_pdf(tmp_path / "a" / "doc.pdf", text="A {n}"), make_pdf(tmp_path / "b" / "doc.pdf", text="B {n}")]
+    items = batch_convert(files, "txt", out_dir=str(tmp_path / "out"), policy="overwrite")
+    outs = sorted(o for i in items for o in i.outputs)
+    assert len(outs) == 2 and len(set(outs)) == 2

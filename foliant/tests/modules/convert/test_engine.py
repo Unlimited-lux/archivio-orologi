@@ -725,3 +725,67 @@ def test_ocr_rotated_page_accuracy(tmp_path):
         got = " ".join(text.split())
         results.append(difflib.SequenceMatcher(None, ref, got).ratio())
     assert results[0] >= 0.95 and abs(results[0] - results[1]) <= 0.01
+
+
+# ------------------------------------------------------------ regressioni
+def test_pptx_rotated_page_inside_slide(tmp_path):
+    from pptx import Presentation
+    doc = pymupdf.open()
+    p = doc.new_page(width=300, height=500)
+    p.insert_text((40, 450), "In fondo alla pagina", fontsize=12)
+    p.set_rotation(90)
+    path = _save(doc, tmp_path / "rot.pdf")
+    prs = Presentation(convert_pdf(path, tmp_path / "r.pptx", "pptx")[0])
+    assert prs.slide_width > prs.slide_height
+    for shape in prs.slides[0].shapes:
+        assert 0 <= shape.left <= prs.slide_width and 0 <= shape.top <= prs.slide_height
+
+
+def test_html_reexport_with_assets(image_pdf, tmp_path):
+    first = convert_pdf(image_pdf, tmp_path / "img.html", "html", single_file=False)
+    second = convert_pdf(image_pdf, tmp_path / "img.html", "html", single_file=False)
+    assert second[0].endswith("img (1).html")
+    html = open(second[0], encoding="utf-8").read()
+    import re
+    src = re.search(r'src="([^"]+)"', html).group(1)
+    assert os.path.exists(tmp_path / src) and src.startswith("img (1)_files/")
+    assert first[0].endswith("img.html")
+
+
+def test_xlsx_formula_like_text_and_file_mode(tmp_path):
+    from openpyxl import load_workbook
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for r, row in enumerate([["Formula", "Valore"], ["=A1+B2", "3"]]):
+        for c, val in enumerate(row):
+            rect = pymupdf.Rect(50 + c * 150, 50 + r * 25, 200 + c * 150, 75 + r * 25)
+            page.draw_rect(rect, color=(0, 0, 0))
+            page.insert_text((rect.x0 + 3, rect.y1 - 7), val, fontsize=10)
+    path = _save(doc, tmp_path / "f.pdf")
+    out = convert_pdf(path, tmp_path / "f.xlsx", "xlsx")[0]
+    ws = load_workbook(out).active
+    assert ws["A2"].value == "=A1+B2" and ws["A2"].data_type == "s"
+    mask = os.umask(0)
+    os.umask(mask)
+    assert os.stat(out).st_mode & 0o777 == 0o666 & ~mask
+
+
+def test_internal_links_on_page_subset(tmp_path):
+    doc = pymupdf.open()
+    for i in range(4):
+        doc.new_page().insert_text((72, 100), f"Pagina {i + 1}", fontsize=12)
+    doc[2].insert_text((72, 200), "Vai avanti", fontsize=12)
+    doc[2].insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(70, 188, 200, 204), "page": 3,
+                        "to": pymupdf.Point(72, 100)})
+    path = _save(doc, tmp_path / "l.pdf")
+    html = open(convert_pdf(path, tmp_path / "l.html", "html", pages="3-4")[0], encoding="utf-8").read()
+    assert 'href="#page-4"' in html and 'id="page-4"' in html
+
+
+def test_long_names_and_bad_template(sample_pdf, tmp_path):
+    name = "è" * 120
+    out = convert_pdf(sample_pdf, tmp_path / f"{name}.txt", "txt")
+    assert os.path.exists(out[0])
+    with pytest.raises(ConversionError):
+        convert_pdf(sample_pdf, tmp_path / "x.png", "png", dpi=72, name_template="{pagina:zz}")
+    assert list(tmp_path.glob("*.png")) == []

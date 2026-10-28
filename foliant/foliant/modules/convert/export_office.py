@@ -57,6 +57,15 @@ def analyze_document(work: pymupdf.Document, job, *, images: bool = True, tables
         pc.index = job.source_index(i)
         job.note_page(pc)
         pages.append(pc)
+    # i link interni puntano a pagine del documento di lavoro: riportati alla numerazione originale
+    exported = set(job.page_map)
+    for pc in pages:
+        for it in pc.items:
+            if isinstance(it, Para):
+                for sp in it.spans:
+                    if sp.link and sp.link.startswith("#page-"):
+                        target = job.source_index(int(sp.link[6:]) - 1)
+                        sp.link = f"#page-{target + 1}" if target in exported else None
     assign_headings(pages)
     return pages
 
@@ -370,6 +379,13 @@ def _header_rows(rows: list[list]) -> int:
     return 1
 
 
+def _set_text(cell, text: str) -> None:
+    """Testo letterale: un valore che inizia con «=» non deve diventare una formula."""
+    cell.value = text
+    if isinstance(text, str) and text.startswith("="):
+        cell.data_type = "s"
+
+
 def write_xlsx(work: pymupdf.Document, path: str, job) -> None:
     """Tabelle in fogli XLSX con celle tipizzate, intestazioni unite e larghezze adattate."""
     from openpyxl import Workbook
@@ -422,12 +438,15 @@ def write_xlsx(work: pymupdf.Document, path: str, job) -> None:
                 if val is None:
                     continue
                 if r < header:
-                    cell.value = val
+                    _set_text(cell, val)
                     cell.font = Font(bold=True)
                     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                 else:
                     value, fmt = parse_cell(val, decimal)
-                    cell.value = value
+                    if isinstance(value, str):
+                        _set_text(cell, value)
+                    else:
+                        cell.value = value
                     if fmt:
                         cell.number_format = fmt
                     elif isinstance(value, str):
@@ -458,7 +477,7 @@ def write_xlsx(work: pymupdf.Document, path: str, job) -> None:
             name, ws = sheet_for(src, 0) if sheets_mode != "single" else sheet_for(src, 0)
             r0 = cursor[name] + (1 if cursor[name] > 1 else 0)
             for k, line in enumerate(l for l in text.splitlines() if l.strip()):
-                ws.cell(row=r0 + k, column=1, value=normalize_text(line))
+                _set_text(ws.cell(row=r0 + k, column=1), normalize_text(line))
                 cursor[name] = r0 + k
     if not wb.sheetnames:
         if not tables:
@@ -587,14 +606,16 @@ def write_pptx(work: pymupdf.Document, path: str, job) -> None:
             if len(drawings) > max_shapes:
                 job.warn(_("Pagina {p}: grafica complessa non convertita in forme.").format(p=pc.index + 1))
                 drawings = []
+            with ENGINE_LOCK:
+                rot_m = work[pi].rotation_matrix
             for d in drawings:
                 for item in d.get("items", []):
                     try:
                         if item[0] == "re":
-                            r = item[1]
+                            r = pymupdf.Rect(item[1]) * rot_m
                             shp = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, *box((r.x0, r.y0, r.x1, r.y1)))
                         elif item[0] == "l":
-                            p1, p2 = item[1], item[2]
+                            p1, p2 = item[1] * rot_m, item[2] * rot_m
                             shp = slide.shapes.add_connector(
                                 MSO_CONNECTOR.STRAIGHT, Emu(int((ox + p1.x * scale) * _EMU)),
                                 Emu(int((oy + p1.y * scale) * _EMU)), Emu(int((ox + p2.x * scale) * _EMU)),

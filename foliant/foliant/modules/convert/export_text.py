@@ -216,14 +216,18 @@ def write_html(work: pymupdf.Document, path: str, job, out) -> list[str]:
     check(job.progress, 0.9, _("Scrittura del file HTML…"))
     body = items_html(pages, job, assets)
     doc = head + toc_html + body + "\n</body>\n</html>\n"
+    from .common import resolve_target, unique_path
+    final = resolve_target(path, out.policy)       # nome definitivo deciso prima delle risorse
+    tmp = out.new(final)
     if assets is not None and assets:
-        folder = Path(path).with_name(Path(path).stem + "_files")
+        folder = Path(final).with_name(Path(final).stem + "_files")
+        if folder.exists() and out.policy != "overwrite":
+            folder = Path(unique_path(folder))
         doc = re.sub(r'src="(img[^"]+)"', lambda m: f'src="{folder.name}/{m.group(1)}"', doc)
         for fname, data in assets.items():
             tmp_a = out.new(folder / fname)
             Path(tmp_a).write_bytes(data)
             created.append(tmp_a)
-    tmp = out.new(path)
     Path(tmp).write_text(doc, encoding="utf-8")
     created.insert(0, tmp)
     return created
@@ -455,7 +459,15 @@ def _repeated_furniture(pages: list[PageContent]) -> set[int]:
 
 
 def write_epub(work: pymupdf.Document, path: str, job) -> None:
-    """EPUB 3: scorrevole (capitoli XHTML) o a layout fisso (una pagina XHTML per pagina)."""
+    """EPUB 3: scorrevole (capitoli XHTML) o a layout fisso (una pagina XHTML per pagina).
+
+    Il contenitore è scritto man mano (le immagini di pagina non restano in memoria)."""
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        _write_epub(work, job, z)
+
+
+def _write_epub(work: pymupdf.Document, job, z: zipfile.ZipFile) -> None:
     meta = _doc_meta(work, job)
     fixed = job.options.get("layout", "flow") == "fixed" or job.options.get("layout") == "faithful"
     every = int(job.options.get("chapter_every", 10)) or 10
@@ -494,7 +506,7 @@ def write_epub(work: pymupdf.Document, path: str, job) -> None:
                 png = page.get_pixmap(dpi=job.options.get("dpi", 150)).tobytes("png")
                 text = normalize_text(page.get_text("text"))
             img = f"page{i + 1:04}.png"
-            files[f"OEBPS/{img}"] = png
+            z.writestr(f"OEBPS/{img}", png, compress_type=zipfile.ZIP_STORED)   # subito su disco
             manifest.append((f"img{i + 1}", img, "image/png", ""))
             doc_name = f"page{i + 1:04}.xhtml"
             alt = html.escape(clean_xml_chars(text)[0][:500].replace("\n", " "), quote=True)
@@ -590,9 +602,7 @@ def write_epub(work: pymupdf.Document, path: str, job) -> None:
                  'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n<rootfiles>\n'
                  '<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n'
                  "</rootfiles>\n</container>\n")
-    with zipfile.ZipFile(path, "w") as z:
-        z.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip", compress_type=zipfile.ZIP_STORED)
-        z.writestr("META-INF/container.xml", container, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("OEBPS/content.opf", opf, compress_type=zipfile.ZIP_DEFLATED)
-        for name, data in files.items():
-            z.writestr(name, data, compress_type=zipfile.ZIP_DEFLATED)
+    z.writestr("META-INF/container.xml", container, compress_type=zipfile.ZIP_DEFLATED)
+    z.writestr("OEBPS/content.opf", opf, compress_type=zipfile.ZIP_DEFLATED)
+    for name, data in files.items():
+        z.writestr(name, data, compress_type=zipfile.ZIP_DEFLATED)

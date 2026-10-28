@@ -680,3 +680,8 @@ EN.update({
     "PDF/A-2u": "PDF/A-2u",
     "PDF/A-3u": "PDF/A-3u",
 })
+
+EN.update({
+    "Analisi del documento…": "Analyzing the document…",
+    "Modello del nome dei file non valido: «{t}».": "Invalid file name template: “{t}”.",
+})

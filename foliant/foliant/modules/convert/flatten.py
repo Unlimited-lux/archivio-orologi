@@ -279,29 +279,35 @@ def flatten_layers(pdf: pymupdf.Document, pages: list[int], report: dict) -> Non
 # --------------------------------------------------------------------- ritaglio
 def flatten_crop(pdf: pymupdf.Document, pages: list[int], report: dict) -> None:
     """MediaBox = CropBox ed eliminazione del contenuto esterno all'area visibile."""
+    remove_art = getattr(pymupdf, "PDF_REDACT_LINE_ART_REMOVE_IF_COVERED", 0)
     count = 0
     for i in pages:
         page = pdf[i]
-        crop = pymupdf.Rect(page.cropbox)
-        media = pymupdf.Rect(page.mediabox)
-        if crop == media or crop.is_empty:
-            continue
         rot = page.rotation
         page.set_rotation(0)
-        page.set_cropbox(media)
-        # in coordinate di pagina (origine in alto a sinistra della MediaBox)
-        h = media.height
-        visible = pymupdf.Rect(crop.x0 - media.x0, h - (crop.y1 - media.y0), crop.x1 - media.x0, h - (crop.y0 - media.y0))
+        visible = pymupdf.Rect(page.cropbox)          # coordinate di pagina (origine in alto a sinistra)
+        media = pymupdf.Rect(page.mediabox)
+        if visible.is_empty or (abs(visible.width - media.width) < 0.01 and abs(visible.height - media.height) < 0.01):
+            page.set_rotation(rot)
+            continue
+        kind, val = pdf.xref_get_key(page.xref, "CropBox")
+        if kind == "array":   # valori originali (coordinate PDF, origine in basso a sinistra)
+            raw_crop = pymupdf.Rect([float(v) for v in val.strip("[]").split()])
+        else:
+            raw_crop = pymupdf.Rect(media.x0 + visible.x0, media.y0 + media.height - visible.y1,
+                                    media.x0 + visible.x1, media.y0 + media.height - visible.y0)
+        raw_crop.normalize()
+        page.set_cropbox(page.mediabox)
         full = page.rect
         outside = [pymupdf.Rect(full.x0, full.y0, full.x1, visible.y0), pymupdf.Rect(full.x0, visible.y1, full.x1, full.y1),
                    pymupdf.Rect(full.x0, visible.y0, visible.x0, visible.y1),
                    pymupdf.Rect(visible.x1, visible.y0, full.x1, visible.y1)]
         for r in outside:
+            r = r & full
             if not r.is_empty and r.width > 0.01 and r.height > 0.01:
                 page.add_redact_annot(r, fill=False)
-        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS, graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED
-                              if hasattr(pymupdf, "PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED") else 0, text=0)
-        page.set_mediabox(crop)
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS, graphics=remove_art, text=0)
+        page.set_mediabox(raw_crop)
         page.set_rotation(rot)
         count += 1
     report["cropped_pages"] = count
@@ -310,6 +316,7 @@ def flatten_crop(pdf: pymupdf.Document, pages: list[int], report: dict) -> None:
 # ------------------------------------------------------------------ rasterizza
 def rasterize_pages(pdf: pymupdf.Document, pages: list[int], dpi: int, ocr: bool, language: str | None,
                     report: dict, progress=None) -> None:
+    """Sostituisce il contenuto delle pagine con la loro immagine (sul posto: segnalibri e link restano)."""
     from .extract import ocr_available, ocr_languages
     use_ocr = ocr and ocr_available()
     if ocr and not use_ocr:
@@ -317,20 +324,31 @@ def rasterize_pages(pdf: pymupdf.Document, pages: list[int], dpi: int, ocr: bool
     for k, i in enumerate(pages):
         check(progress, 0.5 + 0.45 * k / max(1, len(pages)), _("Rasterizzazione pagina {p}").format(p=i + 1))
         page = pdf[i]
-        rect = page.rect
+        rot = page.rotation
+        page.set_rotation(0)
         pix = page.get_pixmap(dpi=dpi, annots=True)
+        src = None
         if use_ocr:
             src = pymupdf.open(stream=pix.pdfocr_tobytes(language=ocr_languages(language)), filetype="pdf")
+        links = [l for l in page.get_links()]
+        for annot in list(page.annots()):
+            page.delete_annot(annot)
+        for w in list(page.widgets()):
+            page.delete_widget(w)
+        for xref in page.get_contents():
+            pdf.update_stream(xref, b"")
+        if src is not None:
+            page.show_pdf_page(page.rect, src, 0)
+            src.close()
         else:
-            src = pymupdf.open()
-            sp = src.new_page(width=rect.width, height=rect.height)
-            sp.insert_image(sp.rect, pixmap=pix)
-        pdf.insert_pdf(src, from_page=0, to_page=0, start_at=i + 1)
-        pdf.delete_page(i)
-        new = pdf[i]
-        if abs(new.rect.width - rect.width) > 0.5 or abs(new.rect.height - rect.height) > 0.5:
-            new.set_mediabox(pymupdf.Rect(0, 0, new.rect.width, new.rect.height))
-        src.close()
+            page.insert_image(page.rect, pixmap=pix)
+        for link in links:
+            if not any(tuple(l["from"]) == tuple(link["from"]) for l in page.get_links()):
+                try:
+                    page.insert_link({k2: v for k2, v in link.items() if k2 != "xref"})
+                except Exception:
+                    pass
+        page.set_rotation(rot)
     report["rasterized_pages"] = len(pages)
     if pages:
         report["warnings"].append(_("Le pagine rasterizzate aumentano la dimensione del file."))
@@ -370,7 +388,8 @@ def flatten_pdf_bytes(data: bytes, *, annotations: bool = True, annotation_types
                                     include_links=include_links, forms=forms, report=report)
             check(progress, 0.3)
             if layers:
-                flatten_layers(pdf, page_list, report)
+                # i livelli sono del documento: si appiattiscono sempre su tutte le pagine
+                flatten_layers(pdf, list(range(pdf.page_count)), report)
             if crop:
                 flatten_crop(pdf, page_list, report)
             if rasterize:

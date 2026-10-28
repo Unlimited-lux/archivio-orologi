@@ -132,8 +132,9 @@ class ConvertController:
                     self.ctx.error(_("Impossibile aprire il file"), str(e))
                     return None
             current = 0
-        try:
-            scanned = bool(scanned_pages(source, password))
+        try:   # analisi in background (documenti grandi): basta un campione di pagine
+            scanned = bool(self.ctx.run_task(_("Analisi del documento…"),
+                                             lambda progress: scanned_pages(source, password, limit=50)))
         except Exception:
             scanned = False
         settings = self.ctx.settings()
@@ -174,10 +175,15 @@ class ConvertController:
 
     def _confirm_pdfa(self, source, fmt: str, password: str | None) -> bool:
         """CNV-14: analisi preliminare con l'elenco dei problemi e delle correzioni."""
-        try:
-            from . import pdfa
+        from . import pdfa
+
+        def analyze(progress):
             data = source if isinstance(source, (bytes, bytearray)) else Path(source).read_bytes()
-            problems = pdfa.analyze_pdfa(bytes(data), password=password)
+            return pdfa.analyze_pdfa(bytes(data), password=password)
+        try:
+            problems = self.ctx.run_task(_("Analisi del documento…"), analyze)
+        except OperationCancelled:
+            return False
         except Exception:
             return True
         if not problems:
@@ -800,7 +806,14 @@ class ConvertController:
                         _("Ripara PDF"), f"{e}\n\n" + _("Creare un PDF da questo file?")):
                     if detected in ("jpeg", "png", "tiff", "gif", "bmp", "webp"):
                         tmp_copy = self._copy_with_extension(p, detected)
-                        self.create_from_images([tmp_copy] if tmp_copy else [p])
+                        try:
+                            self.create_from_images([tmp_copy] if tmp_copy else [p])
+                        finally:
+                            if tmp_copy:
+                                try:
+                                    os.unlink(tmp_copy)
+                                except OSError:
+                                    pass
                     else:
                         self.create_from_files([p])
                 elif not detected or detected in ("pdf", "unknown"):
