@@ -76,24 +76,39 @@ def test_capture_insert_as_image(ui, tmp_path, monkeypatch):
     assert len(objs(view)) == 2
 
 
-def test_signed_document_confirmation(ui, tmp_path, monkeypatch):
-    path = tmp_path / "s.pdf"
-    doc = pymupdf.open()
-    doc.new_page().insert_image(pymupdf.Rect(50, 70, 250, 170), stream=png_bytes(20, 10))
-    cat = doc.pdf_catalog()
-    doc.xref_set_key(cat, "AcroForm", "<</Fields[]/SigFlags 3>>")
-    doc.save(str(path))
-    view = ui.open(str(path))
+from tests.test_document import _signed_pdf, _validate, test_signer  # noqa: E402,F401
+
+
+def _sign_guard_asks(monkeypatch):
+    """Registra le domande della guardia SIG-21 del modulo Firma (risposta: Annulla)."""
+    from foliant.modules.sign import controller as SC
     asked = []
-    monkeypatch.setattr(ui.ctx, "confirm", lambda *a: asked.append(1) or False)
-    ui.c.set_selection(view, 0, [0])
-    ui.c.translate(view, 10, 0)
-    assert asked and not view.document.can_undo
-    monkeypatch.setattr(ui.ctx, "confirm", lambda *a: asked.append(2) or True)
-    ui.c.translate(view, 10, 0)
-    ui.c.translate(view, 10, 0)
-    assert asked.count(2) == 1
-    assert abs(objs(view)[0].rect.x0 - 70) < 0.01
+    monkeypatch.setattr(SC.SignController, "_ask_invalidation",
+                        lambda self, view, what: asked.append(what) or "cancel")
+    return asked
+
+
+def test_link_on_signed_document_keeps_signature(ui, tmp_path, monkeypatch, test_signer):
+    asked = _sign_guard_asks(monkeypatch)
+    path = _signed_pdf(tmp_path, test_signer, objstm=False)
+    view = ui.open(str(path))
+    xref = ui.c.run_change(view, "Crea collegamento", L.create_link, 1, pymupdf.Rect(100, 500, 200, 520),
+                           L.LinkTarget(kind=L.URI, uri="https://esempio.it"), L.LinkStyle(), "", None,
+                           kind="annotation")
+    assert xref and not asked
+    view.document.save()
+    st = _validate(path.read_bytes(), test_signer)
+    assert st.intact and st.valid
+
+
+def test_image_on_signed_document_asks(ui, tmp_path, monkeypatch, test_signer):
+    asked = _sign_guard_asks(monkeypatch)
+    path = _signed_pdf(tmp_path, test_signer, objstm=False)
+    view = ui.open(str(path))
+    res = ui.c.insert_image_bytes(view, [png_bytes(20, 20)], 0, pymupdf.Point(300, 600))
+    assert asked and res is None
+    assert not view.document.can_undo
+    assert not any(t != "info" for t, _m in ui.errors)   # annullato: nessun messaggio d'errore
 
 
 def test_permission_denied_blocks_changes(ui, tmp_path):
