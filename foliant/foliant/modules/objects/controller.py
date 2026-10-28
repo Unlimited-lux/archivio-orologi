@@ -354,50 +354,49 @@ class ObjectsController(QObject):
         parsed = self.parsed(view, self.sel_page)
         self.set_selection(view, self.sel_page, E.similar_paths(parsed, objs[0].index))
 
-    # ---------------------------------------------------------------- guide dell'utente
-    def _guides_key(self, view) -> str | None:
+    # ---------------------------------------------------------------- guide (nucleo, VIS-39)
+    def _old_guides_key(self, view) -> str | None:
         p = view.document.path if view is not None else None
         if not p:
             return None
         import hashlib
         return "objects/guides/" + hashlib.sha1(str(os.path.abspath(str(p))).encode()).hexdigest()
 
-    def guides(self, view) -> dict:
-        """Guide dell'utente del documento: {"x": [...], "y": [...]} in punti (non scritte nel PDF)."""
+    def migrate_guides(self, view) -> None:
+        """Porta nelle guide del nucleo quelle salvate dalle versioni precedenti del modulo."""
+        key = self._old_guides_key(view)
+        if not key:
+            return
+        st = self.ctx.settings()
+        raw = st.value(key, "")
+        if not raw:
+            return
+        import json
+        try:
+            data = json.loads(str(raw))
+            for axis in ("x", "y"):
+                for v in data.get(axis, []):
+                    view.add_guide(axis, float(v))
+        except (ValueError, TypeError, AttributeError):
+            pass
+        st.remove(key)
+
+    def guides(self, view, page: int | None = None) -> dict:
+        """Guide valide per la pagina, in coordinate pagina: {"x": [...], "y": [...]}."""
         if view is None:
             return {"x": [], "y": []}
-        mem = getattr(view, "_objects_guides", None)
-        if mem is None:
-            mem = {"x": [], "y": []}
-            key = self._guides_key(view)
-            if key:
-                import json
-                try:
-                    data = json.loads(str(self.ctx.settings().value(key, "") or "{}"))
-                    mem = {"x": [float(v) for v in data.get("x", [])], "y": [float(v) for v in data.get("y", [])]}
-                except (ValueError, TypeError, AttributeError):
-                    pass
-            view._objects_guides = mem
-        return mem
-
-    def _store_guides(self, view) -> None:
-        key = self._guides_key(view)
-        if key:
-            import json
-            self.ctx.settings().setValue(key, json.dumps(self.guides(view)))
-        view.viewport().update()
+        if page is None:
+            page = self.sel_page if self.sel_page is not None else view.current_page
+        try:
+            return view.page_guide_lines(page)
+        except Exception:
+            return {"x": [], "y": []}
 
     def add_guide(self, view, axis: str, value: float) -> None:
-        g = self.guides(view)
-        if value not in g[axis]:
-            g[axis].append(float(value))
-        self._store_guides(view)
+        view.add_guide(axis, float(value))
 
     def clear_guides(self, view) -> None:
-        g = self.guides(view)
-        g["x"].clear()
-        g["y"].clear()
-        self._store_guides(view)
+        view.clear_guides()
 
     def ask_add_guide(self, view, axis: str) -> None:
         if view is None:
@@ -408,26 +407,8 @@ class ObjectsController(QObject):
         if ok:
             self.add_guide(view, axis, val * E.MM)
 
-    def paint_guides(self, view, painter, page: int) -> None:
-        if self.ctx.current_mode() != "modifica":
-            return
-        g = self.guides(view)
-        if not g["x"] and not g["y"]:
-            return
-        from PySide6.QtGui import QPen
-        from foliant.api import theme
-        from .tool import view_scale
-        r = self.page_rect(view, page)
-        s = view_scale(view, page)
-        painter.setPen(QPen(theme.color("secondary"), 1 / s))
-        for x in g["x"]:
-            painter.drawLine(QPointF(x, r.y0), QPointF(x, r.y1))
-        for y in g["y"]:
-            painter.drawLine(QPointF(r.x0, y), QPointF(r.x1, y))
-
     def paint_grid(self, view, painter, page: int) -> None:
         """Livello di disegno della griglia (solo in modalità Modifica, non scritta nel PDF)."""
-        self.paint_guides(view, painter, page)
         if not self.grid_on or self.ctx.current_mode() != "modifica":
             return
         from PySide6.QtGui import QPen
@@ -1072,13 +1053,29 @@ class ObjectsController(QObject):
                 r = pymupdf.Rect(r.x0, r.y0, max(r.x1, r.x0 + 4), max(r.y1, r.y0 + 4))
             self.create_link_interactive(view, self.sel_page, r)
             return
-        sel = view.text_selection
-        if sel is not None and sel.rects:
-            quads = [r.quad for r in sel.rects]
-            rect = pymupdf.Rect(sel.rects[0])
-            for r in sel.rects[1:]:
-                rect |= r
-            self.create_link_interactive(view, sel.page, rect, quads=quads, default_text=sel.text)
+        sels = [x for x in (getattr(view, "text_selections", None) or
+                            ([view.text_selection] if view.text_selection is not None else [])) if x.rects]
+        if sels:
+            text = " ".join(x.text for x in sels).strip()
+            target = L.suggest_from_text(text) if text else None
+            res = D.ask_link(self.ctx.window, view, sels[0].page, None, target=target, description=text)
+            if res is None:
+                return
+            target, style, desc = res
+            D.remember_style(style)
+            parts = [(x.page, line_quads(x)) for x in sels]
+
+            def fn(pdf):
+                out = []
+                for page, quads in parts:   # un collegamento per pagina, stessa destinazione
+                    rect = pymupdf.Rect(quads[0].rect)
+                    for q in quads[1:]:
+                        rect |= q.rect
+                    if rect.width < 4 or rect.height < 4:
+                        rect = pymupdf.Rect(rect.x0, rect.y0, max(rect.x1, rect.x0 + 4), max(rect.y1, rect.y0 + 4))
+                    out.append(L.create_link(pdf, page, rect, target, style, desc, quads))
+                return out
+            self.run_change(view, _("Crea collegamento"), fn)
             return
         self.status(_("Seleziona del testo o un oggetto, oppure usa lo strumento Collegamento."))
 
@@ -1219,6 +1216,24 @@ def _translate_with_links(pdf, page, indices, dx, dy):
     for x in attached:
         L.update_link(pdf, page, x, move=(dx, dy))
     return res
+
+
+def line_quads(sel) -> list:
+    """Un quadrilatero per riga di testo selezionata (OBJ-34)."""
+    words = getattr(sel, "words", None) or []
+    if not words:
+        return [pymupdf.Rect(r).quad for r in sel.rects]
+    lines: dict = {}
+    order = []
+    for w in words:
+        key = (w[5], w[6])
+        r = pymupdf.Rect(w[:4])
+        if key in lines:
+            lines[key] |= r
+        else:
+            lines[key] = r
+            order.append(key)
+    return [lines[k].quad for k in order]
 
 
 class _NoChange(Exception):
