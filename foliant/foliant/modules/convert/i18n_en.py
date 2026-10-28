@@ -786,3 +786,21 @@ EN.update({
     "Miniature": "Thumbnails",
     "Nessuno": "None",
 })
+
+# PDF/X (CNV-15)
+EN.update({
+    "PDF/X-3": "PDF/X-3",
+    "Colori convertiti in CMYK con il profilo della condizione di stampa: i colori possono variare.":
+        "Colors converted to CMYK with the printing condition profile: colors may change.",
+    "Conformità PDF/X non raggiunta: {e}": "PDF/X conformance not reached: {e}",
+    "Ghostscript non è riuscito a convertire il documento in PDF/X. {d}": "Ghostscript could not convert the document to PDF/X. {d}",
+    "La conversione in PDF/X richiede Ghostscript, che non è installato. Installalo (ad esempio con «sudo apt install ghostscript») e riprova.":
+        "PDF/X conversion requires Ghostscript, which is not installed. Install it (e.g. “sudo apt install ghostscript”) and try again.",
+    "Manca GTS_PDFXVersion «PDF/X-3» nel dizionario Info.": "GTS_PDFXVersion “PDF/X-3” is missing from the Info dictionary.",
+    "Manca l'OutputIntent /GTS_PDFX con il profilo della condizione di stampa.": "The /GTS_PDFX OutputIntent with the printing condition profile is missing.",
+    "Non è stato trovato un profilo colore CMYK per la condizione di stampa.": "No CMYK color profile was found for the printing condition.",
+    "Pagine senza TrimBox: {p}.": "Pages without TrimBox: {p}.",
+    "Profilo PDF/X non supportato: «{l}». È disponibile PDF/X-3.": "Unsupported PDF/X profile: “{l}”. PDF/X-3 is available.",
+    "Trasparenze non ammesse in PDF/X-3.": "Transparency is not allowed in PDF/X-3.",
+    "TrimBox impostato uguale al CropBox su {n} pagine.": "TrimBox set equal to the CropBox on {n} pages.",
+})
