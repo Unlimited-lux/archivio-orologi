@@ -217,7 +217,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `recent_files()`, `replace_recent(vecchio, nuovo)`, `remove_recent(p)` | elenco dei recenti: file rinominato/spostato (stessa posizione) o da togliere |
 | `add_change_guard(fn)` / `remove_change_guard(fn)` | guardia su tutti i documenti aperti e futuri: `fn(document, etichetta, kind) -> bool`, False annulla la modifica (vedi sotto) |
 | `status`, `error`, `info`, `confirm`, `ask_open_paths`, `ask_save_path`, `ask_directory` | messaggi e dialoghi |
-| segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `modeChanged`, `fullscreenChanged(bool)` | eventi |
+| segnali `currentViewChanged`, `documentOpened`, `documentClosed`, `documentChanged`, `documentAccessChanged`, `modeChanged`, `fullscreenChanged(bool)` | eventi; `documentAccessChanged(view)`: accesso o permessi cambiati (`unlock`) o documento bloccato/sbloccato (`set_locked`): ricalcolare i comandi che dipendono da `allows()`/`locked` |
 
 Ogni scheda è un contenitore (`window.tabs.page(view)`: barre di avviso sopra la vista), ma
 `window.tabs.widget(i)`, `currentWidget()`, `indexOf(view)` e `setCurrentWidget(view)` lavorano
