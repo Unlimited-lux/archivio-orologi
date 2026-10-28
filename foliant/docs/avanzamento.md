@@ -45,25 +45,38 @@ Architettura a **nucleo + moduli** (vedi `README.md`):
 ## Stato
 
 ### Fase 0 — Setup ✅
-- Struttura, subagent (`.claude/agents/`), `.gitignore`.
+Struttura, subagent (`.claude/agents/`), `.gitignore`.
 
-### Fase 1 — Specifica
-- ✅ Ricerca da fonti pubbliche: inventario di parità UPDF (189 funzioni in 16 aree),
-  concorrenti, standard aperto.
-- 🔄 `docs/funzionalita.md` (catalogo) e `docs/specifica.md` (13 sezioni scritte in parallelo).
-- Approvazione: delegata all'orchestratore (decisione del committente del 28/10, ore 02:50).
+### Fase 1 — Specifica ✅ (approvata dall'orchestratore su delega del committente)
+- Ricerca da fonti pubbliche: inventario di parità UPDF (189 funzioni), concorrenti, standard.
+- `docs/funzionalita.md`: catalogo di 312 funzioni (188 in parità, 124 aggiunte).
+- `docs/specifica.md`: 418 funzioni in 12 aree (159 P0, 177 P1, 82 P2), più 34 requisiti
+  non funzionali e 22 di interfaccia.
+- Revisione indipendente: «approvata con correzioni». Copertura parità: 158 righe su 177
+  coperte del tutto, 19 in parte, nessuna assente. Correzioni (originalità di VIS-40 ed
+  etichette, ambito, priorità, regole di precedenza, scorciatoie) comunicate alle sessioni
+  e in applicazione al documento.
 
-### Fase 2 — Implementazione
-- ✅ Nucleo: documento, vista, finestra, tema chiaro/scuro, Home, modalità Leggi,
-  installazione Ubuntu (`packaging/install.sh`). **32 test verdi.**
-- ⏳ Moduli in sessioni parallele: viewer, annotations, editing, pages, forms, ocr,
-  convert, security, sign, tools, ai.
-- ⏳ Integrazione, test end-to-end, rifinitura grafica.
+### Fase 2 — Implementazione 🔄
+- ✅ Nucleo (orchestratore): documento, vista, finestra, tema, Home, Preferenze, scorciatoie
+  UX-18, installazione Ubuntu verificata. Prestazioni: PDF di 500 pagine, modifica +
+  impaginazione in ~50 ms.
+- ✅ Revisione indipendente del nucleo: 24 bug riprodotti e corretti (cifratura, salvataggio,
+  coordinate su pagine ritagliate, stabilità), con test di regressione. 42 test verdi.
+- 🔄 12 moduli in sessioni parallele (viewer, annotations, text_edit, objects, pages, forms,
+  ocr, convert, security, sign, tools, ai): alle 03:20 UTC tutti avevano già pushato
+  (~80.000 righe, ~1.350 test); unione senza conflitti.
+- 🔄 Difetto del motore PDF su pagine ruotate/ritagliate (posizione dei contenuti inseriti):
+  misurato, `core/placement.py` in preparazione, sessioni interessate avvisate.
 
 ## Log
 - 28/10 00:57 — Fase 0: struttura, subagent, `.gitignore`.
 - 28/10 01:09 — Fase 1 avviata (workflow), poi ripensata a potenza massima.
-- 28/10 01:51 — Nuova scadenza ore 10:00. Ricerca chiusa; specifica scritta da 14 agenti
-  in parallelo; nucleo scritto e testato dall'orchestratore.
+- 28/10 01:51 — Nuova scadenza ore 10:00. Specifica scritta da 14 agenti in parallelo.
 - 28/10 02:10 — Bug trovato dai test e corretto: salvando un PDF protetto la cifratura
-  andava persa. Ora si mantengono metodo, permessi e password.
+  andava persa.
+- 28/10 02:30 — Avviate 12 sessioni di sviluppo, una per modulo.
+- 28/10 03:00 — Revisione della specifica e allineamento delle scorciatoie (UX-18).
+- 28/10 03:16 — Revisione del nucleo: 24 correzioni applicate e verificate.
+- 28/10 03:20 — Prima integrazione: 12 moduli uniti senza conflitti.
+- 28/10 03:35 — Rete di sicurezza nei test (nessun blocco per finestre modali, timeout).
