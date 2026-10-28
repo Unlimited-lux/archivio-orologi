@@ -685,3 +685,16 @@ def test_script_button_reports_unavailable_action(window, tmp_path):
     assert "calcoli personalizzati non eseguiti (sconto)" in f.text_of_bar()
     f.click_field([i for i in f.state.fields if i.name == "calcola"][0])
     assert "«calcola» non disponibile" in f.text_of_bar()
+
+
+def test_mail_attachment_removed_on_exit(window, tmp_path, monkeypatch, no_modal_boxes):
+    """Riservatezza: il file dei dati per la posta non resta dopo la chiusura di Foliant."""
+    from foliant.modules.forms import module as M
+    view = open_form(window, _submit_doc(tmp_path))
+    m = module()
+    paths = []
+    monkeypatch.setattr(m, "launch_mail", lambda addr, subject, path: paths.append(Path(path)) or True)
+    assert m.submit(filler_of(view), {"type": "submit", "url": "mailto:a@b.test", "format": "xfdf"})
+    assert paths[0].exists()
+    M.remove_temp_files()
+    assert not paths[0].exists() and not paths[0].parent.exists()
