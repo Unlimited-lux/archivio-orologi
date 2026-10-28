@@ -43,10 +43,7 @@ ROOT = Path(foliant.__file__).resolve().parent.parent      # cartella del proget
 
 # Tracce attribuite a moduli fuori dal nucleo e non ancora corrette: (file o cartella, prefisso
 # della chiave INI o "" per tutto il file, modulo responsabile). Vuoto quando le aree sono unite.
-PENDING = (
-    ("Foliant.conf", "viewer/", "modulo viewer (stato per documento: viewer/positions…)"),
-    ("recupero durante la sessione", "", "modulo viewer (metadati delle copie di recupero)"),
-)
+PENDING: tuple = ()        # tutti i moduli corretti: nessuna traccia ammessa
 
 CHILD = textwrap.dedent(r'''
     import json, os, sys, time, traceback
