@@ -1059,6 +1059,7 @@ def register(ctx, *, provider_factory=None) -> Services:
         return go
 
     a_chat = act(_("Chiedi"), "message-circle", run("chat"), "Ctrl+Shift+A")
+    mode.scope_shortcuts(a_chat)   # scorciatoia interna: vale solo nella modalità Assistente IA
     a_sum = act(_("Riassumi"), "scroll-text", run("summary"))
     a_tr = act(_("Traduci"), "languages", run("translate"))
     a_exp = act(_("Spiega"), "lightbulb", run("explain"))

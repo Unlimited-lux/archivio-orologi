@@ -408,3 +408,14 @@ def test_convert_to_docx_with_heading(window, ready, fake, tmp_path):
     assert report["ai_used"]
     xml = zipfile.ZipFile(out).read("word/document.xml").decode()
     assert "Heading1" in xml and "Titolo del contratto" in xml
+
+
+def test_chat_shortcut_scoped_to_ai_mode(window, sample_pdf):
+    from PySide6.QtGui import QKeySequence
+    window.open_path(sample_pdf)
+    act = window.ctx.mode("ia").toolbar.actions()[0]
+    assert act.text() == "Chiedi"
+    window.ctx.set_mode("leggi")
+    assert act.shortcut().isEmpty()
+    window.ctx.set_mode("ia")
+    assert act.shortcut() == QKeySequence("Ctrl+Shift+A")
