@@ -66,7 +66,10 @@ class ContractsDialog(QDialog):
             contracts.communication_source(self.clauses)))
         csv_btn = QPushButton(_("Esporta CSV…"))
         csv_btn.clicked.connect(lambda: self.export_csv())
-        for x in (rev, self.comments_btn, self.comm_btn, csv_btn):
+        pdf_btn = QPushButton(_("Esporta PDF…"))
+        bind_icon(pdf_btn, "file-output")
+        pdf_btn.clicked.connect(lambda: self.export_pdf())
+        for x in (rev, self.comments_btn, self.comm_btn, csv_btn, pdf_btn):
             row.addWidget(x)
         v.addLayout(row)
         self.table = QTableWidget(0, 7)
@@ -143,6 +146,15 @@ class ContractsDialog(QDialog):
         path = path or self.ask_save_path(_("Esporta revisione"), "revisione.csv", "CSV (*.csv)", ".csv")
         if path:
             atomic_write(path, contracts.review_to_csv(self.clauses).encode("utf-8"))
+
+    def export_pdf(self, path: str | None = None) -> str | None:
+        """Rapporto PDF della revisione (e dei rischi, se valutati): un nuovo file, il contratto resta com'è."""
+        if not self.clauses:
+            return None
+        path = path or self.ask_save_path(_("Esporta revisione"), "revisione-contratto.pdf", "PDF (*.pdf)", ".pdf")
+        if path:
+            atomic_write(path, contracts.review_pdf(self.clauses, getattr(self, "risks", None)))
+        return path
 
     # ----------------------------------------------------------------- rischi
     def assess(self) -> None:
