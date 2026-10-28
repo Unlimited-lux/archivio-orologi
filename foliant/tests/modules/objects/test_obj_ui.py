@@ -62,6 +62,7 @@ def ui(window, tmp_path, monkeypatch):
     def open_doc(path):
         view = window.open_path(path)
         window.ctx.set_mode("modifica")
+        QTest.qWait(10)   # altri moduli possono scegliere il proprio strumento all'ingresso in «Modifica»
         view.set_tool(u.c.object_tool)
         view.set_zoom(1.0)
         QGuiApplication.processEvents()
@@ -105,7 +106,12 @@ def test_mode_and_tool_registered(ui, tmp_path):
     assert view.tool is not ui.c.object_tool
     ui.ctx.set_mode("modifica")
     QTest.qWait(10)
-    assert view.tool is ui.c.object_tool
+    # lo strumento predefinito della modalità può essere di un altro modulo: si verifica che il
+    # nostro sia registrato e attivabile dalla sua azione
+    act = O._state["actions"]["objects"]
+    if view.tool is not ui.c.object_tool:
+        act.trigger()
+    assert view.tool is ui.c.object_tool and act.isChecked()
     assert not view.document.is_modified
 
 
