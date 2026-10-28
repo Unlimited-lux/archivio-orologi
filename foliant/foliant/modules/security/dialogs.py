@@ -811,6 +811,29 @@ class MetadataDialog(QDialog):
             self.edits[key] = e
             form.addRow(S.metadata_labels()[key] + ":", e)
         lay.addLayout(form)
+        lay.addWidget(QLabel(_("Proprietà personalizzate:")))
+        self.props = QTreeWidget()
+        self.props.setHeaderLabels([_("Nome"), _("Valore")])
+        self.props.setRootIsDecorated(False)
+        self.props.setMaximumHeight(130)
+        self.props.setColumnWidth(0, 160)
+        self._read_only = read_only
+        for name, value in (values.get("custom") or {}).items():
+            self.add_property(name, value)
+        lay.addWidget(self.props)
+        prow = QHBoxLayout()
+        self.add_button = QPushButton(_("Aggiungi"))
+        self.add_button.setIcon(icon("plus"))
+        self.add_button.clicked.connect(lambda: self._edit_new())
+        self.remove_button = QPushButton(_("Rimuovi"))
+        self.remove_button.clicked.connect(self.remove_selected)
+        for b in (self.add_button, self.remove_button):
+            b.setEnabled(not read_only)
+            prow.addWidget(b)
+        prow.addStretch(1)
+        lay.addLayout(prow)
+        self.error = _note("", "warning")
+        lay.addWidget(self.error)
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         lay.addWidget(sep)
@@ -829,8 +852,43 @@ class MetadataDialog(QDialog):
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
 
-    def values(self) -> dict[str, str]:
-        return {k: e.text() for k, e in self.edits.items()}
+    def add_property(self, name: str = "", value: str = "") -> QTreeWidgetItem:
+        item = QTreeWidgetItem(self.props, [name, value])
+        if not self._read_only:
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        return item
+
+    def _edit_new(self) -> None:
+        item = self.add_property()
+        self.props.setCurrentItem(item)
+        self.props.editItem(item, 0)
+
+    def remove_selected(self) -> None:
+        for item in self.props.selectedItems():
+            self.props.takeTopLevelItem(self.props.indexOfTopLevelItem(item))
+
+    def custom(self) -> dict[str, str]:
+        out = {}
+        for i in range(self.props.topLevelItemCount()):
+            item = self.props.topLevelItem(i)
+            name, value = item.text(0).strip(), item.text(1)
+            if name or value.strip():
+                out[name] = value
+        return out
+
+    def accept(self) -> None:
+        from . import sanitize as S
+        for name in self.custom():
+            err = S.check_property_name(name)
+            if err:
+                self.error.setText(err)
+                return
+        super().accept()
+
+    def values(self) -> dict:
+        out: dict = {k: e.text() for k, e in self.edits.items()}
+        out["custom"] = self.custom()
+        return out
 
 
 # ---------------------------------------------------------- elenco/rapporto

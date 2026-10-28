@@ -1198,3 +1198,32 @@ def test_saved_patterns_roundtrip(window, sec, tmp_path, qtbot, monkeypatch):
     bad.write_text('{"patterns": {"Rotto": "(abc", "Ok": "X\\\\d+"}}', encoding="utf-8")
     done, errors = other.import_file(str(bad))
     assert done == ["Ok"] and errors and errors[0].startswith("Rotto")
+
+
+def test_metadata_custom_properties_dialog(window, sec, sample_pdf, monkeypatch):
+    view = window.open_path(sample_pdf)
+    errors = []
+
+    def fake_run(dlg):
+        dlg.add_property("Numero pratica", "x")
+        dlg.accept()                       # nome non valido: il dialogo resta aperto
+        errors.append(dlg.error.text())
+        dlg.remove_selected()
+        dlg.props.clear()
+        dlg.add_property("Pratica", "2026/118")
+        dlg.add_property("", "")           # riga vuota ignorata
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    assert sec.edit_metadata()
+    assert errors and "Numero pratica" in errors[0]
+    from foliant.modules.security import sanitize as S
+    with view.document.lock:
+        assert S.read_custom(view.document.pdf) == {"Pratica": "2026/118"}
+    seen = []
+    monkeypatch.setattr(C, "run_dialog", lambda dlg: seen.append(dlg.custom()) or False)
+    sec.edit_metadata()
+    assert seen == [{"Pratica": "2026/118"}]
+    view.document.undo()
+    with view.document.lock:
+        assert S.read_custom(view.document.pdf) == {}

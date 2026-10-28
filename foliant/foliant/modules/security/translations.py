@@ -537,4 +537,11 @@ EN: dict[str, str] = {
     'Esporta schemi': 'Export patterns',
     'Schemi (*.json)': 'Patterns (*.json)',
     'Impossibile scrivere il file: {e}': 'Cannot write the file: {e}',
+    '«{n}» non è un nome valido: usa lettere, cifre, «_», «-» o «.», senza spazi, iniziando con una lettera.': '“{n}” is not a valid name: use letters, digits, “_”, “-” or “.”, without spaces, starting with a letter.',
+    '«{n}» è un metadato standard: modificalo nei campi sopra.': '“{n}” is a standard metadata field: edit it in the fields above.',
+    'Proprietà personalizzate:': 'Custom properties:',
+    'Nome': 'Name',
+    'Valore': 'Value',
+    'Aggiungi': 'Add',
+    'Rimuovi': 'Remove',
 }

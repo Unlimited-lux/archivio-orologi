@@ -897,6 +897,7 @@ class SecurityController:
             return False
         with ENGINE_LOCK:
             values = S.read_metadata(doc.pdf)
+            values["custom"] = S.read_custom(doc.pdf)
             version = (doc.pdf.metadata or {}).get("format", "")
         read_only = "modify" not in P.allowed_now(doc)
         info = [(_("Applicazione di origine"), values.get("creator", "")),

@@ -617,17 +617,87 @@ def read_metadata(pdf: pymupdf.Document) -> dict[str, str]:
     return out
 
 
-def write_metadata(pdf: pymupdf.Document, values: dict[str, str], *, update_mod_date: bool = True,
+STANDARD_INFO_KEYS = {"Title", "Author", "Subject", "Keywords", "Creator", "Producer",
+                      "CreationDate", "ModDate", "Trapped"}
+_PROP_NAME = re.compile(r"[^\W\d][\w.\-]{0,62}")
+
+
+def check_property_name(name: str) -> str:
+    """Nome valido per una proprietà personalizzata (chiave Info e nome XMP), oppure
+    il messaggio d'errore."""
+    if not _PROP_NAME.fullmatch(name or ""):
+        return _("«{n}» non è un nome valido: usa lettere, cifre, «_», «-» o «.», senza spazi, "
+                 "iniziando con una lettera.").format(n=name)
+    if name in STANDARD_INFO_KEYS:
+        return _("«{n}» è un metadato standard: modificalo nei campi sopra.").format(n=name)
+    return ""
+
+
+def _pdf_name(name: str) -> str:
+    return "".join(c if c.isascii() and c.isalnum() or c in "_-." else
+                   "".join(f"#{b:02X}" for b in c.encode("utf-8")) for c in name)
+
+
+def _from_pdf_name(name: str) -> str:
+    raw = re.sub(rb"#([0-9A-Fa-f]{2})", lambda m: bytes([int(m.group(1), 16)]), name.encode("latin-1", "replace"))
+    return raw.decode("utf-8", "replace")
+
+
+def _info_xref(pdf: pymupdf.Document) -> int:
+    kind, val = pdf.xref_get_key(-1, "Info")
+    return int(val.split()[0]) if kind == "xref" else 0
+
+
+def read_custom(pdf: pymupdf.Document) -> dict[str, str]:
+    """Proprietà personalizzate (chiavi non standard del dizionario Info, valori testo)."""
+    x = _info_xref(pdf)
+    out: dict[str, str] = {}
+    if not x:
+        return out
+    for key in pdf.xref_get_keys(x):
+        if key in STANDARD_INFO_KEYS:
+            continue
+        kind, val = pdf.xref_get_key(x, key)
+        if kind == "string":
+            out[_from_pdf_name(key)] = val
+    return out
+
+
+def write_custom(pdf: pymupdf.Document, props: dict[str, str]) -> None:
+    x = _info_xref(pdf)
+    if not x:
+        if not props:
+            return
+        pdf.set_metadata(pdf.metadata or {})
+        x = _info_xref(pdf)
+        if not x:
+            x = pdf.get_new_xref()
+            pdf.update_object(x, "<<>>")
+            pdf.xref_set_key(-1, "Info", f"{x} 0 R")
+    for key in pdf.xref_get_keys(x):
+        if key not in STANDARD_INFO_KEYS and pdf.xref_get_key(x, key)[0] == "string" \
+                and _from_pdf_name(key) not in props:
+            pdf.xref_set_key(x, key, "null")
+    for name, value in props.items():
+        pdf.xref_set_key(x, _pdf_name(name), pymupdf.get_pdf_str(value))
+
+
+def write_metadata(pdf: pymupdf.Document, values: dict, *, update_mod_date: bool = True,
                    remove_xmp: bool = False) -> None:
-    """Scrive i metadati (dentro `document.change()`). I campi assenti restano invariati."""
+    """Scrive i metadati (dentro `document.change()`). I campi assenti restano invariati;
+    `values["custom"]` sostituisce le proprietà personalizzate."""
     current = pdf.metadata or {}
     new = {k: current.get(k) or "" for k in METADATA_KEYS + ("creationDate", "modDate")}
     for k in METADATA_KEYS:
         if k in values:
             new[k] = (values[k] or "").strip()
     if update_mod_date:
-        new["modDate"] = pymupdf.get_pdf_now()
+        new["modDate"] = pdf_now()
+    custom = values.get("custom")
+    if custom is None:
+        custom = read_custom(pdf)
     pdf.set_metadata(new)
+    write_custom(pdf, custom)
     if remove_xmp:
         try:
             pdf.del_xml_metadata()
@@ -635,7 +705,16 @@ def write_metadata(pdf: pymupdf.Document, values: dict[str, str], *, update_mod_
             pass
     else:
         # XMP allineato al dizionario Info (identificazione PDF/A conservata)
-        pdf.set_xml_metadata(minimal_xmp(new, _pdfa_identification(_xml_metadata(pdf))))
+        pdf.set_xml_metadata(minimal_xmp(dict(new, custom=custom), _pdfa_identification(_xml_metadata(pdf))))
+
+
+def pdf_now() -> str:
+    """Data e ora attuali nel formato PDF, con il fuso orario locale (D:AAAAMMGGHHmmSS+HH'mm')."""
+    import datetime
+    now = datetime.datetime.now().astimezone()
+    off = int(now.utcoffset().total_seconds() // 60)
+    sign = "+" if off >= 0 else "-"
+    return now.strftime("D:%Y%m%d%H%M%S") + f"{sign}{abs(off) // 60:02d}'{abs(off) % 60:02d}'"
 
 
 def format_pdf_date(value: str) -> str:
@@ -663,6 +742,8 @@ def inspect_extra(pdf: pymupdf.Document, max_pages: int = 2000) -> dict:
     for k in METADATA_KEYS:
         if meta.get(k):
             out["metadata"].append(f"{labels[k]}: {meta[k]}")
+    for name, value in read_custom(pdf).items():
+        out["metadata"].append(f"{name}: {value}"[:120])
     if _xml_metadata(pdf):
         out["metadata"].append(_("Metadati XMP presenti"))
     try:
@@ -749,8 +830,13 @@ def _pdfa_identification(xmp: str) -> tuple[str, str] | None:
     return m.group(1), (c.group(1).upper() if c else "B")
 
 
-def minimal_xmp(values: dict[str, str], pdfa: tuple[str, str] | None = None) -> str:
-    """Pacchetto XMP coerente con il dizionario Info (ISO 16684-1)."""
+PDFX_NS = "http://ns.adobe.com/pdfx/1.3/"
+
+
+def minimal_xmp(values: dict, pdfa: tuple[str, str] | None = None) -> str:
+    """Pacchetto XMP coerente con il dizionario Info (ISO 16684-1). Le proprietà
+    personalizzate vanno nello spazio dei nomi pdfx; nei PDF/A sono descritte con lo
+    schema di estensione richiesto da ISO 19005."""
     from xml.sax.saxutils import escape as esc
 
     def bag(items, kind="Bag"):
@@ -783,14 +869,35 @@ def minimal_xmp(values: dict[str, str], pdfa: tuple[str, str] | None = None) -> 
         iso = pdf_date_to_iso(values["modDate"])
         if iso:
             parts.append(f"<xmp:MetadataDate>{iso}</xmp:MetadataDate>")
+    custom = {k: v for k, v in (values.get("custom") or {}).items() if not check_property_name(k)}
+    for name, value in custom.items():
+        parts.append(f"<pdfx:{name}>{esc(value)}</pdfx:{name}>")
     if pdfa:
         parts.append(f"<pdfaid:part>{pdfa[0]}</pdfaid:part><pdfaid:conformance>{pdfa[1]}</pdfaid:conformance>")
+        if custom:
+            props = "".join(
+                '<rdf:li rdf:parseType="Resource">'
+                f"<pdfaProperty:name>{name}</pdfaProperty:name>"
+                "<pdfaProperty:valueType>Text</pdfaProperty:valueType>"
+                "<pdfaProperty:category>external</pdfaProperty:category>"
+                f"<pdfaProperty:description>{esc(name)}</pdfaProperty:description></rdf:li>"
+                for name in custom)
+            parts.append(
+                '<pdfaExtension:schemas><rdf:Bag><rdf:li rdf:parseType="Resource">'
+                "<pdfaSchema:schema>Document custom properties</pdfaSchema:schema>"
+                f"<pdfaSchema:namespaceURI>{PDFX_NS}</pdfaSchema:namespaceURI>"
+                "<pdfaSchema:prefix>pdfx</pdfaSchema:prefix>"
+                f"<pdfaSchema:property><rdf:Seq>{props}</rdf:Seq></pdfaSchema:property>"
+                "</rdf:li></rdf:Bag></pdfaExtension:schemas>")
     body = "".join(parts)
     return ('<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>'
             '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
             '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" '
             'xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:xmp="http://ns.adobe.com/xap/1.0/" '
-            'xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">'
+            'xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" '
+            f'xmlns:pdfx="{PDFX_NS}" xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/" '
+            'xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#" '
+            'xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">'
             f"{body}</rdf:Description></rdf:RDF></x:xmpmeta>"
             '<?xpacket end="w"?>')
 
@@ -812,6 +919,7 @@ def drop_conformance(pdf: pymupdf.Document) -> None:
     """Toglie la dichiarazione PDF/A dai metadati XMP (es. prima di cifrare)."""
     meta = pdf.metadata or {}
     values = {k: meta.get(k) or "" for k in METADATA_KEYS + ("creationDate", "modDate")}
+    values["custom"] = read_custom(pdf)
     pdf.set_xml_metadata(minimal_xmp(values, None))
 
 
