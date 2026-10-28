@@ -723,7 +723,7 @@ def test_metadata_read_only_when_restricted(window, sec, tmp_path, monkeypatch):
     assert seen == [True]
 
 
-def test_flatten_flow(window, sec, tmp_path, accept_all):
+def test_flatten_flow(window, sec, tmp_path, accept_all, monkeypatch):
     path = tmp_path / "commenti.pdf"
     src = pymupdf.open()
     page = src.new_page()
@@ -736,12 +736,52 @@ def test_flatten_flow(window, sec, tmp_path, accept_all):
     h.update()
     src.save(str(path))
     view = window.open_path(str(path))
+    seen = {}
+
+    def fake_run(dlg):
+        dlg.update_preview()
+        seen["preview"] = not dlg.preview_label.pixmap().isNull()
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
     assert sec.flatten()
+    assert seen["preview"]
     out = tmp_path / "piatto.pdf"
     view.document.save(out)
     pdf = pymupdf.open(out)
-    assert list(pdf[0].annots()) == []
+    # la nota nascosta non viene fusa: resta annotazione (opzione predefinita di ANN-40)
+    assert [a.info["content"] for a in pdf[0].annots()] == ["nascosta"]
     assert pdf[0].get_drawings()
+
+
+def test_flatten_dialog_options_and_marks(window, sec, tmp_path, accept_all, monkeypatch):
+    """Ritaglio con segni di redazione non applicati: il ritaglio viene appiattito, i segni
+    restano da applicare (non vengono applicati di nascosto)."""
+    path = tmp_path / "ritaglio.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((20, 30), "ESTERNO", fontsize=12)
+    page.insert_text((200, 400), "Codice cliente 4471", fontsize=12)
+    page.set_cropbox(pymupdf.Rect(100, 100, 500, 700))
+    src.save(str(path))
+    view = window.open_path(str(path))
+    sec.add_area_mark(0, pymupdf.Rect(90, 285, 250, 305))
+
+    def fake_run(dlg):
+        dlg.boxes["crop"].setChecked(True)
+        dlg.pages.setText("9")
+        dlg.accept()
+        assert dlg.error.text()                     # pagina inesistente: resta aperto
+        dlg.pages.setText("")
+        return True
+
+    monkeypatch.setattr(C, "run_dialog", fake_run)
+    assert sec.flatten()
+    with view.document.lock:
+        pdf = view.document.pdf
+        assert "ESTERNO" not in pdf[0].get_text(clip=pymupdf.Rect(-999, -999, 999, 999))
+        assert "Codice cliente 4471" in pdf[0].get_text()
+    assert sec.has_marks(view.document)
 
 
 def test_upgrade_rc4_to_aes256(window, sec, tmp_path, monkeypatch):

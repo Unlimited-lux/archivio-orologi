@@ -917,17 +917,56 @@ class SecurityController:
         return True
 
     def flatten(self) -> bool:
+        """Proteggi › Appiattisci (SEC-24)."""
+        from . import flatten as F
         doc = self.document()
         if doc is None or not self.require_modify(doc):
             return False
-        if not confirm(self.parent, _("Appiattire commenti e moduli?"),
-                       _("Commenti e campi compilati diventeranno parte fissa delle pagine e non saranno più "
-                         "modificabili. Le annotazioni nascoste vengono eliminate."), _("Appiattisci")):
+        signed = self._has_signatures(doc)
+        dlg = D.FlattenDialog(doc.page_count, lambda o: self._flatten_preview(doc, o), signed, self.parent)
+        if not run_dialog(dlg):
             return False
-        with self._change(doc, _("Appiattisci"), kind="redaction") as pdf:
-            S.flatten(pdf)
+        opts = dlg.options()
+        if opts.signatures and not confirm(
+                self.parent, _("Appiattire le firme digitali?"),
+                _("L'aspetto delle firme diventa contenuto statico: le firme non saranno più verificabili."),
+                _("Appiattisci le firme")):
+            return False
+        text = _("Gli elementi scelti diventeranno parte fissa delle pagine. Puoi annullare finché il documento "
+                 "è aperto; dopo il salvataggio l'operazione è definitiva.")
+        if opts.crop or opts.layers:
+            text += "\n\n" + _("Il contenuto fuori dal ritaglio e quello dei livelli nascosti viene eliminato.")
+        if signed:
+            text += "\n\n" + _("Le firme digitali del documento risulteranno non valide.")
+        if not confirm(self.parent, _("Appiattire il documento?"), text, _("Appiattisci")):
+            return False
+        try:
+            with self._change(doc, _("Appiattisci"), kind="redaction") as pdf:
+                # ritaglio e rasterizzazione riscrivono il contenuto: i segni di redazione non
+                # applicati vengono messi da parte (non devono essere applicati qui) e ricreati
+                saved = []
+                if opts.crop or opts.rasterize:
+                    saved = _detach_marks(pdf, {(p, x) for p in F.pages_with_marks(pdf, opts.pages)
+                                                for x, t, _n in pdf[p].annot_xrefs()
+                                                if t == pymupdf.PDF_ANNOT_REDACT})
+                rep = F.flatten(pdf, opts)
+                _reattach_marks(pdf, saved)
+        except Exception as e:
+            self.ctx.error(_("Appiattimento non eseguito"),
+                           _("Si è verificato un errore: nessuna modifica è stata fatta.\n\n{e}").format(e=e))
+            return False
         self.ctx.status(_("Documento appiattito"))
+        if rep.warnings:
+            self.ctx.info(_("Appiattisci"), "\n".join(rep.warnings))
         return True
+
+    def _flatten_preview(self, doc, opts):
+        from . import flatten as F
+        with ENGINE_LOCK:
+            pages = list(range(doc.page_count)) if opts.pages is None else opts.pages
+            if not pages:
+                return None
+            return F.preview(doc.pdf, opts, pages[0], width=480)
 
     # ----------------------------------------------------- stato e avvisi
     def on_document_opened(self, view) -> None:

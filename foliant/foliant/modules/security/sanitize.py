@@ -800,17 +800,10 @@ def _covered_by_image(page: pymupdf.Page) -> bool:
 # ------------------------------------------------------------ appiattimento
 
 
-def flatten(pdf: pymupdf.Document, annots: bool = True, widgets: bool = True) -> None:
-    """Fonde commenti e campi nel contenuto delle pagine; quelli nascosti vengono eliminati."""
-    for page in pdf:
-        hidden = [a.xref for a in page.annots()
-                  if a.flags & (pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_NO_VIEW)
-                  or a.type[0] == pymupdf.PDF_ANNOT_REDACT]
-        for xref in hidden:
-            annot = page.load_annot(xref)
-            if annot is not None and annot.type[0] != pymupdf.PDF_ANNOT_REDACT:
-                page.delete_annot(annot)
-    pdf.bake(annots=annots, widgets=widgets)
+def flatten(pdf: pymupdf.Document, annots: bool = True, widgets: bool = True):
+    """Fonde commenti e campi nel contenuto delle pagine (vedi `flatten.flatten`)."""
+    from . import flatten as F
+    return F.flatten(pdf, F.FlattenOptions(annots=annots, widgets=widgets))
 
 
 def previous_revisions(path) -> int:

@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from foliant.api import _, icon, theme
@@ -791,6 +791,129 @@ class SanitizeDialog(QDialog):
         o = {k: cb.isChecked() for k, cb in self.boxes.items()}
         o["remove_fields"] = self.form_mode.currentData() == "remove" and o.get("form_data", False)
         return o
+
+
+# ------------------------------------------------------------ appiattimento
+
+
+class FlattenDialog(QDialog):
+    """Scelta di cosa appiattire (SEC-24), con anteprima della prima pagina interessata."""
+
+    def __init__(self, page_count: int, preview: Callable | None = None, has_signatures: bool = False,
+                 parent=None):
+        super().__init__(parent)
+        self.page_count = page_count
+        self._preview = preview
+        self.setWindowTitle(_("Appiattisci"))
+        lay = QHBoxLayout(self)
+        left = QVBoxLayout()
+        lay.addLayout(left, 1)
+        left.addWidget(_note(_("Gli elementi scelti diventano parte fissa delle pagine e non saranno più "
+                               "modificabili. Puoi annullare finché il documento è aperto.")))
+        what = QGroupBox(_("Cosa appiattire"))
+        wl = QVBoxLayout(what)
+        self.boxes: dict[str, QCheckBox] = {}
+        for key, label, on in (("annots", _("Commenti"), True), ("widgets", _("Campi modulo compilati"), True),
+                               ("stamps", _("Filigrane, sfondi, numeri e intestazioni aggiunti con Foliant"), True),
+                               ("layers", _("Livelli (il contenuto dei livelli nascosti viene eliminato)"), False),
+                               ("crop", _("Ritaglio delle pagine (il contenuto fuori dal ritaglio viene eliminato)"),
+                                False)):
+            cb = QCheckBox(label)
+            cb.setChecked(on)
+            self.boxes[key] = cb
+            wl.addWidget(cb)
+        left.addWidget(what)
+        form = QFormLayout()
+        self.hidden = QComboBox()
+        self.hidden.addItem(_("Lasciale come annotazioni"), "keep")
+        self.hidden.addItem(_("Eliminale"), "delete")
+        form.addRow(_("Annotazioni nascoste o non stampabili:"), self.hidden)
+        self.pages = QLineEdit()
+        self.pages.setPlaceholderText(_("tutte (oppure es. 1-3, 5)"))
+        form.addRow(_("Pagine:"), self.pages)
+        left.addLayout(form)
+        self.links = QCheckBox(_("Conserva i collegamenti"))
+        self.links.setChecked(True)
+        left.addWidget(self.links)
+        self.signatures = QCheckBox(_("Appiattisci anche le firme digitali"))
+        self.signatures.setToolTip(_("L'aspetto della firma diventa contenuto statico: la firma non sarà più "
+                                     "verificabile."))
+        self.signatures.setEnabled(has_signatures)
+        left.addWidget(self.signatures)
+        rrow = QHBoxLayout()
+        self.raster = QCheckBox(_("Rasterizza le pagine"))
+        self.raster.setToolTip(_("Ogni pagina diventa un'immagine: il testo non sarà selezionabile senza OCR e "
+                                 "il file può crescere."))
+        self.dpi = QSpinBox()
+        self.dpi.setRange(72, 600)
+        self.dpi.setValue(150)
+        self.dpi.setSuffix(" dpi")
+        self.dpi.setEnabled(False)
+        self.raster.toggled.connect(self.dpi.setEnabled)
+        rrow.addWidget(self.raster)
+        rrow.addWidget(self.dpi)
+        rrow.addStretch(1)
+        left.addLayout(rrow)
+        self.error = _note("", "warning")
+        left.addWidget(self.error)
+        left.addStretch(1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Appiattisci"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        left.addWidget(buttons)
+        right = QVBoxLayout()
+        lay.addLayout(right)
+        self.preview_label = QLabel()
+        self.preview_label.setFixedSize(240, 320)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setStyleSheet(f"border: 1px solid {theme.hex_color('border')};")
+        right.addWidget(self.preview_label)
+        self.preview_button = QPushButton(_("Anteprima"))
+        self.preview_button.setIcon(icon("eye"))
+        self.preview_button.clicked.connect(self.update_preview)
+        self.preview_button.setEnabled(preview is not None)
+        right.addWidget(self.preview_button)
+        right.addStretch(1)
+
+    def options(self):
+        from . import flatten as F
+        pages = parse_pages(self.pages.text(), self.page_count) if self.pages.text().strip() else None
+        return F.FlattenOptions(annots=self.boxes["annots"].isChecked(), widgets=self.boxes["widgets"].isChecked(),
+                                stamps=self.boxes["stamps"].isChecked(), layers=self.boxes["layers"].isChecked(),
+                                crop=self.boxes["crop"].isChecked(), hidden=self.hidden.currentData(),
+                                keep_links=self.links.isChecked(),
+                                signatures=self.signatures.isEnabled() and self.signatures.isChecked(),
+                                pages=pages, rasterize=self.raster.isChecked(), dpi=self.dpi.value())
+
+    def update_preview(self) -> None:
+        from PySide6.QtGui import QImage, QPixmap
+        try:
+            opts = self.options()
+            pix = self._preview(opts)
+        except ValueError as e:
+            self.error.setText(str(e))
+            return
+        if pix is None:
+            return
+        img = QImage(pix.samples, pix.width, pix.height, pix.stride,
+                     QImage.Format.Format_RGB888 if pix.n == 3 else QImage.Format.Format_RGBA8888).copy()
+        self.preview_label.setPixmap(QPixmap.fromImage(img).scaled(
+            self.preview_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation))
+        self.error.setText("")
+
+    def accept(self) -> None:
+        try:
+            opts = self.options()
+        except ValueError as e:
+            self.error.setText(str(e))
+            return
+        if not any((opts.annots, opts.widgets, opts.stamps, opts.layers, opts.crop, opts.rasterize)):
+            self.error.setText(_("Scegli almeno un elemento da appiattire."))
+            return
+        super().accept()
 
 
 # ----------------------------------------------------------------- metadati
