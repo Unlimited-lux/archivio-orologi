@@ -87,6 +87,23 @@ class ObjectsController(QObject):
             self._link_cache.clear()
             self.selectionChanged.emit()
 
+    def release_view(self, view) -> None:
+        """Dimentica una vista chiusa: selezione, cache, strumenti, modifica esterna."""
+        if getattr(self, "external", None) is not None and self.external.view is view:
+            self.stop_external()
+        if self.view is view:
+            self.view = None
+            self.sel_page = None
+            self.selection = []
+        self._cache.clear()
+        self._link_cache.clear()
+        self.object_tool.hover = None
+        self.object_tool.drag = None
+        self.object_tool.crop = None
+        self.link_tool.drag = None
+        self.link_tool.selection = []
+        self.link_tool.page = None
+
     def tool_activated(self, view) -> None:
         self.view = view
         for i in view.visible_pages():   # analisi anticipata delle pagine visibili

@@ -274,9 +274,6 @@ def test_move_one_of_two_images_under_shared_clip_other_unchanged(blank):
     assert render(blank, clip=clip_b) == before_b
 
 
-@pytest.mark.xfail(reason="OBJ-08: un ritaglio condiviso non viene copiato e traslato con l'oggetto spostato "
-                          "(transform_objects riscrive solo l'unità q cm Do Q dentro il ritaglio originale)",
-                   strict=False)
 def test_move_under_shared_clip_shows_same_portion_translated(blank):
     add_image(blank, 0, (0, 0, 10, 10), split_png(100, 50))
     name = engine.objects(blank, 0).objects[0].name.encode()
@@ -287,7 +284,7 @@ def test_move_under_shared_clip_shows_same_portion_translated(blank):
     _set_content(blank, 0, data)
     w0 = engine.objects(blank, 0).objects[0].rect.width
     engine.translate(blank, 0, [0], 100, 0)
-    moved = engine.objects(blank, 0).objects[0]
+    moved = [o for o in engine.objects(blank, 0).objects if o.rect.x0 > 120][0]
     assert moved.rect.width == pytest.approx(w0)  # resta visibile solo la metà destra (50 pt)
 
 
@@ -1060,3 +1057,25 @@ def test_inner_state_ops_still_apply_to_following_objects():
     pix = doc[0].get_pixmap(dpi=72)
     r, g, b = pix.pixel(325, 842 - 625)[:3]
     assert r > 200 and g < 50 and b < 50
+
+
+def test_clip_of_single_object_moves_with_it(blank):
+    add_image(blank, 0, (0, 0, 10, 10), split_png(100, 50))
+    name = engine.objects(blank, 0).objects[0].name.encode()
+    _set_content(blank, 0, b"q 0 0 50 842 re W n q 100 0 0 50 0 100 cm /" + name + b" Do Q Q")
+    w0 = engine.objects(blank, 0).objects[0].rect.width
+    assert w0 == pytest.approx(50)
+    engine.translate(blank, 0, [0], 200, 0)
+    o = engine.objects(blank, 0).objects[0]
+    assert o.rect.width == pytest.approx(50) and o.rect.x0 == pytest.approx(200)
+
+
+def test_page_wide_clip_keeps_drawing_order(blank):
+    add_image(blank, 0, (0, 0, 10, 10), split_png(100, 50))
+    name = engine.objects(blank, 0).objects[0].name.encode()
+    _set_content(blank, 0, b"q 0 0 595 842 re W n\n"
+                           b"q 100 0 0 50 0 100 cm /" + name + b" Do Q\n"
+                           b"q 100 0 0 50 300 100 cm /" + name + b" Do Q\nQ")
+    engine.translate(blank, 0, [0], 10, 0)
+    objs = engine.objects(blank, 0).objects
+    assert objs[0].rect.x0 == pytest.approx(10) and objs[1].rect.x0 == pytest.approx(300)

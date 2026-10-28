@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QBrush, QGuiApplication
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTextBrowser,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTextBrowser,
     QVBoxLayout,
 )
 
@@ -15,11 +15,17 @@ from .dialogs import language_combo
 
 
 class ProductSheetDialog(QDialog):
-    """`generate(language, tone, length) -> ProductSheet | None`; `open_document(bytes)`."""
+    """`generate(language, tone, length, photos) -> ProductSheet | None`; `open_document(bytes)`;
+    `insert(text)` inserisce la scheda nel documento come casella di testo (facoltativo).
 
-    def __init__(self, generate, ask_save_path, open_document, parent=None):
+    `photos`: numero di foto nel documento; `photos_reason`: perché non si possono usare (vuoto = si può).
+    """
+
+    def __init__(self, generate, ask_save_path, open_document, parent=None, *, insert=None, photos: int = 0,
+                 photos_reason: str = ""):
         super().__init__(parent)
         self.generate_fn, self.ask_save_path, self.open_document = generate, ask_save_path, open_document
+        self.insert_fn = insert
         self.sheet: product_sheet.ProductSheet | None = None
         self.setWindowTitle(_("Scheda prodotto"))
         self.resize(720, 640)
@@ -39,6 +45,12 @@ class ProductSheetDialog(QDialog):
         for w in (self.language, self.tone, self.length, go):
             row.addWidget(w)
         lay.addLayout(row)
+        self.use_photos = QCheckBox(_("Usa anche le foto del documento ({n})").format(n=photos))
+        self.use_photos.setEnabled(photos > 0 and not photos_reason)
+        self.use_photos.setChecked(False)          # le immagini si inviano solo se l'utente lo sceglie
+        self.use_photos.setToolTip(photos_reason or (_("Nel documento non ci sono foto.") if not photos else
+                                                     _("Le foto vengono inviate al fornitore insieme al testo.")))
+        lay.addWidget(self.use_photos)
         self.warnings = QLabel("")
         self.warnings.setWordWrap(True)
         self.warnings.setStyleSheet(f"color: {theme.hex_color('warning')};")
@@ -55,10 +67,13 @@ class ProductSheetDialog(QDialog):
         row = QHBoxLayout()
         for text, icon_name, fn in ((_("Copia"), "copy", self.copy), (_("Esporta specifiche CSV…"), "table",
                                                                       lambda: self.export_csv()),
-                                    (_("Crea nuovo PDF"), "file-plus", self.new_pdf)):
+                                    (_("Crea nuovo PDF"), "file-plus", self.new_pdf),
+                                    (_("Inserisci nel documento"), "text-cursor-input", self.insert)):
             b = QPushButton(text)
             bind_icon(b, icon_name)
             b.clicked.connect(fn)
+            if fn == self.insert and self.insert_fn is None:
+                b.setEnabled(False)
             row.addWidget(b)
         row.addStretch(1)
         close = QPushButton(_("Chiudi"))
@@ -67,7 +82,8 @@ class ProductSheetDialog(QDialog):
         lay.addLayout(row)
 
     def generate(self) -> None:
-        sheet = self.generate_fn(self.language.currentData(), self.tone.currentData(), self.length.value())
+        sheet = self.generate_fn(self.language.currentData(), self.tone.currentData(), self.length.value(),
+                                 self.use_photos.isEnabled() and self.use_photos.isChecked())
         if sheet is not None:
             self.set_sheet(sheet)
 
@@ -117,3 +133,8 @@ class ProductSheetDialog(QDialog):
             return
         from . import writer
         self.open_document(writer.text_to_new_pdf(product_sheet.to_markdown(self.sheet)))
+
+    def insert(self) -> None:
+        """Scheda nel documento come casella di testo (AI-19), un passo annullabile."""
+        if self.sheet is not None and self.insert_fn is not None:
+            self.insert_fn(render.plain_text(product_sheet.to_markdown(self.sheet)))

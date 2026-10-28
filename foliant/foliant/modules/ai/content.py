@@ -372,6 +372,37 @@ def render_area(pdf: pymupdf.Document, index: int, rect: pymupdf.Rect | None = N
     return pix.tobytes("png"), pix.width, pix.height
 
 
+def photo_areas(pdf: pymupdf.Document, pages: list[int], *, limit: int = 4,
+                min_fraction: float = 0.03) -> list[tuple[int, pymupdf.Rect]]:
+    """Foto delle pagine (immagini che occupano almeno `min_fraction` della pagina), dalla più grande.
+
+    Le pagine interamente scansionate non contano come foto: il loro testo va riconosciuto con l'OCR.
+    """
+    found = []
+    for i in pages:
+        with ENGINE_LOCK:
+            page = pdf[i]
+            parea = abs(page.rect)
+            infos = page.get_image_info()
+        for im in infos:
+            r = pymupdf.Rect(im["bbox"]) & page.rect
+            if r.is_empty or not parea:
+                continue
+            frac = abs(r) / parea
+            if min_fraction <= frac < 0.85:
+                found.append((frac, i, r))
+    found.sort(key=lambda t: -t[0])
+    out, seen = [], []
+    for _f, i, r in found:
+        if any(j == i and abs(r & q) > 0.8 * abs(r) for j, q in seen):
+            continue                     # stessa immagine ripetuta (es. livelli sovrapposti)
+        seen.append((i, r))
+        out.append((i, r))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def scale_image_bytes(data: bytes, max_side: int = 2048) -> tuple[bytes, int, int, str]:
     """Normalizza un'immagine esterna in PNG con lato massimo `max_side`."""
     from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt

@@ -1149,4 +1149,13 @@ EN: dict[str, str] = {
     'linea': 'line art',
     'fotografico': 'photographic',
     'minimalista': 'minimalist',
+    'Parziale: il documento è troppo lungo, è stato usato il testo fino alla pagina {p}. Scegli le pagine del prodotto per un risultato completo.': 'Partial: the document is too long, the text up to page {p} was used. Choose the product pages for a complete result.',
+    "Usate anche {n} foto: le caratteristiche ricavate solo dalle foto non hanno pagina d'origine e vanno controllate.": '{n} photos were also used: features taken only from photos have no source page and should be checked.',
+    'Usa anche le foto del documento ({n})': 'Also use the document photos ({n})',
+    'Nel documento non ci sono foto.': 'The document contains no photos.',
+    'Le foto vengono inviate al fornitore insieme al testo.': 'The photos are sent to the provider together with the text.',
+    'Il modello del profilo non accetta immagini: la scheda usa solo il testo.': "The profile's model does not accept images: the sheet uses only the text.",
+    'Inserisci scheda prodotto': 'Insert product sheet',
+    'Scheda inserita a pagina {p}.': 'Sheet inserted on page {p}.',
+    "Le pagine {p} non hanno testo (scansioni): esegui prima l'OCR per usarne i dati.": 'Pages {p} have no text (scans): run OCR first to use their data.',
 }
