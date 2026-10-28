@@ -231,6 +231,15 @@ def unrotated(page: pymupdf.Page) -> Iterator[pymupdf.Page]:
             page.set_rotation(rot)
 
 
+def iter_annots(page: pymupdf.Page, types: Sequence[int] | None = None) -> Iterator[pymupdf.Annot]:
+    """Annotazioni della pagina in costo lineare (``page.annots()`` del motore è quadratico)."""
+    annot = page.first_annot
+    while annot is not None:
+        current, annot = annot, annot.next
+        if types is None or current.type[0] in types:
+            yield current
+
+
 def find_annot(page: pymupdf.Page, xref: int) -> pymupdf.Annot | None:
     """Annotazione con questo xref nella pagina, oppure None."""
     try:
@@ -425,15 +434,26 @@ def marked_text(page: pymupdf.Page, annot: pymupdf.Annot, words: list | None = N
 
 
 def open_popups(pdf: pymupdf.Document, page_no: int) -> list[tuple[pymupdf.Rect, str, str, str]]:
-    """Popup aperte della pagina: (riquadro, autore, data, testo)."""
+    """Popup aperte della pagina: (riquadro, autore, data, testo). Costo lineare: si leggono
+    solo le chiavi /Popup e /Open dal dizionario (chiamata a ogni ridisegno)."""
     page = pdf[page_no]
     out = []
-    for a in page.annots():
-        if a.type[0] in NON_COMMENT_TYPES or a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
+    for xref, atype, _nm in page.annot_xrefs():
+        if atype in NON_COMMENT_TYPES:
+            continue
+        k, v = pdf.xref_get_key(xref, "Popup")
+        if k != "xref":
+            continue
+        pop = int(v.split()[0])
+        if pdf.xref_get_key(pop, "Open")[1] != "true":
+            continue
+        k_f, v_f = pdf.xref_get_key(xref, "F")
+        if k_f == "int" and int(v_f) & pymupdf.PDF_ANNOT_IS_HIDDEN:
+            continue
+        a = find_annot(page, xref)
+        if a is None:
             continue
         try:
-            if not a.popup_xref or not a.is_open:
-                continue
             info = a.info or {}
             out.append((pymupdf.Rect(a.popup_rect), info.get("title", ""),
                         format_date(info.get("modDate") or info.get("creationDate")), info.get("content", "")))
@@ -1712,14 +1732,42 @@ def list_annotations(pdf: pymupdf.Document, pages: Iterable[int] | None = None) 
     return result
 
 
+def _irt_of(pdf: pymupdf.Document, xref: int) -> int:
+    k, v = pdf.xref_get_key(xref, "IRT")
+    return int(v.split()[0]) if k == "xref" else 0
+
+
 def annotation(pdf: pymupdf.Document, page_no: int, xref: int) -> AnnotInfo | None:
-    for a in list_annotations(pdf, [page_no]):
-        if a.xref == xref:
-            return a
-        for r in a.replies:
-            if r.xref == xref:
-                return r
-    return None
+    """Una sola annotazione con risposte dirette e stato (costo lineare, usata a ogni ridisegno)."""
+    page = pdf[page_no]
+    annot = find_annot(page, xref)
+    if annot is None or annot.type[0] in NON_COMMENT_TYPES:
+        return None
+    info = _info(pdf, page_no, annot)
+    children = [x for x, t, _n in page.annot_xrefs() if t not in NON_COMMENT_TYPES and _irt_of(pdf, x) == xref]
+    states = []
+    for x in children:
+        c = find_annot(page, x)
+        if c is None:
+            continue
+        ci = _info(pdf, page_no, c)
+        if ci.is_state:
+            states.append(ci)
+        elif ci.reply_type == "Group":
+            info.group.append(ci)
+            if info.kind == CARET:
+                info.kind = REPLACE
+                info.marked_text = ci.marked_text
+        else:
+            info.replies.append(ci)
+    for st in sorted(states, key=lambda x: (x.created, x.xref)):
+        info.history.append(st)
+        if st.state_model.lower() == "marked":
+            info.marked = st.state.lower() == "marked"
+        else:
+            info.status = st.state or STATE_NONE
+    info.replies.sort(key=lambda x: (x.created, x.xref))
+    return info
 
 
 def _dist_to_segment(p: pymupdf.Point, a: pymupdf.Point, b: pymupdf.Point) -> float:
@@ -1731,12 +1779,41 @@ def _dist_to_segment(p: pymupdf.Point, a: pymupdf.Point, b: pymupdf.Point) -> fl
     return abs(p - (a + ab * t))
 
 
-def annot_at(pdf: pymupdf.Document, page_no: int, point, tolerance: float = 4.0) -> int | None:
+def annot_rects(pdf: pymupdf.Document, page_no: int) -> list[tuple[int, pymupdf.Rect | None]]:
+    """(xref, riquadro standard) delle annotazioni di commento, in ordine di sovrapposizione."""
+    page = pdf[page_no]
+    pl = _placement()
+    m = pl.pdf_to_page_matrix(page) if pl is not None else None
+    out = []
+    for x, t, _n in page.annot_xrefs():
+        if t in NON_COMMENT_TYPES:
+            continue
+        raw = _array(pdf, x, "Rect")
+        if not raw or len(raw) != 4:
+            out.append((x, None))
+        elif m is not None:
+            out.append((x, pymupdf.Rect(pymupdf.Point(raw[0], raw[1]) * m,
+                                        pymupdf.Point(raw[2], raw[3]) * m).normalize()))
+        else:
+            out.append((x, from_pdf_rect(page, raw)))
+    return out
+
+
+def annot_at(pdf: pymupdf.Document, page_no: int, point, tolerance: float = 4.0,
+             rects: list | None = None) -> int | None:
     """Xref dell'annotazione più in alto sotto il punto (None se nessuna)."""
     page = pdf[page_no]
     p = pymupdf.Point(point)
     hit = None
-    for annot in page.annots():
+    # preselezione dai riquadri (/Rect): si caricano solo le annotazioni vicine al punto
+    if rects is None:
+        rects = annot_rects(pdf, page_no)
+    near = [x for x, r in rects
+            if r is None or (r + (-tolerance - 2, -tolerance - 2, tolerance + 2, tolerance + 2)).contains(p)]
+    for x in near:
+        annot = find_annot(page, x)
+        if annot is None:
+            continue
         t = annot.type[0]
         if t in NON_COMMENT_TYPES or annot.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
             continue
@@ -2007,7 +2084,7 @@ def transform_annot(pdf: pymupdf.Document, page_no: int, xref: int, new_rect) ->
         if is_area_markup(pdf, xref):
             _fit_area_rect(pdf, page, xref)
     # sposta anche le risposte (stessa posizione del commento)
-    for a in page.annots():
+    for a in iter_annots(page):
         if a.irt_xref == xref and a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
             try:
                 r = a.rect
@@ -2166,7 +2243,7 @@ def delete_annot(pdf: pymupdf.Document, page_no: int, xref: int, force: bool = F
         victims.add(target.irt_xref)   # elemento di un gruppo: si elimina tutto il gruppo
     del target
     changed = True
-    annots = list(page.annots())
+    annots = list(iter_annots(page))
     while changed:
         changed = False
         for a in annots:
@@ -2268,7 +2345,7 @@ def delete_all(pdf: pymupdf.Document, pages: Iterable[int] | None = None) -> int
     n = 0
     for page_no in (pages if pages is not None else range(pdf.page_count)):
         page = pdf[page_no]
-        xrefs = [a.xref for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES]
+        xrefs = [a.xref for a in iter_annots(page) if a.type[0] not in NON_COMMENT_TYPES]
         for x in xrefs:
             a = find_annot(page, x)
             if a is not None:
@@ -2326,7 +2403,7 @@ def erase_ink(pdf: pymupdf.Document, page_no: int, point, radius: float = 6.0, w
     p = pymupdf.Point(point)
     touched = 0
     with unrotated(page):
-        for annot in list(page.annots(types=[pymupdf.PDF_ANNOT_INK])):
+        for annot in list(iter_annots(page, [pymupdf.PDF_ANNOT_INK])):
             r = annot.rect + (-radius, -radius, radius, radius)
             if not r.contains(p) or annot.flags & (pymupdf.PDF_ANNOT_IS_LOCKED | pymupdf.PDF_ANNOT_IS_READ_ONLY):
                 continue
@@ -2395,7 +2472,7 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
     count = 0
     for i in targets:
         page = pdf[i]
-        count += sum(1 for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES
+        count += sum(1 for a in iter_annots(page) if a.type[0] not in NON_COMMENT_TYPES
                      and (selected is None or (i, a.xref) in selected))
     if not count:
         return 0
@@ -2413,15 +2490,15 @@ def flatten(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
                 pdf.xref_set_key(xref, "Annots", "null")
                 page = pdf.reload_page(page)
                 continue
-            keep = [a.xref for a in page.annots()
+            keep = [a.xref for a in iter_annots(page)
                     if a.type[0] in NON_COMMENT_TYPES or a.flags & pymupdf.PDF_ANNOT_IS_PRINT
                     or a.type[0] == pymupdf.PDF_ANNOT_POPUP]
-            noprint = [a.xref for a in page.annots() if a.xref not in keep]
+            noprint = [a.xref for a in iter_annots(page) if a.xref not in keep]
             if selected is not None:
                 # solo le annotazioni scelte (e le loro popup); le altre restano annotazioni
                 chosen = {x for p, x in selected if p == i}
-                popups = {a.popup_xref for a in page.annots() if a.xref in chosen and a.popup_xref}
-                noprint = [a.xref for a in page.annots()
+                popups = {a.popup_xref for a in iter_annots(page) if a.xref in chosen and a.popup_xref}
+                noprint = [a.xref for a in iter_annots(page)
                            if a.xref not in chosen and a.xref not in popups
                            and a.type[0] not in (pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK)
                            or (a.xref in chosen and a.xref not in keep)]
@@ -2459,10 +2536,10 @@ def _flatten_selected(pdf: pymupdf.Document, selected: set[tuple[int, int]]) -> 
             tp = tmp[page_no]
             chosen = {x for p, x in selected if p == page_no}
             keep = set()
-            for a in tp.annots():
+            for a in iter_annots(tp):
                 if a.xref in chosen and a.flags & pymupdf.PDF_ANNOT_IS_PRINT and not a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN:
                     keep.add(a.xref)
-            for x in [a.xref for a in tp.annots() if a.xref not in keep
+            for x in [a.xref for a in iter_annots(tp) if a.xref not in keep
                       and a.type[0] not in (pymupdf.PDF_ANNOT_WIDGET,)]:
                 a = find_annot(tp, x)
                 if a is not None:
@@ -2491,7 +2568,7 @@ def _flatten_selected(pdf: pymupdf.Document, selected: set[tuple[int, int]]) -> 
 def _strip_hidden(pdf: pymupdf.Document, pages: Iterable[int]) -> None:
     for i in pages:
         page = pdf[i]
-        for a in list(page.annots()):
+        for a in list(iter_annots(page)):
             if a.flags & pymupdf.PDF_ANNOT_IS_HIDDEN and a.type[0] not in NON_COMMENT_TYPES:
                 page.delete_annot(a)
 
@@ -2521,7 +2598,7 @@ def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] 
     for page_no in (pages if pages is not None else range(pdf.page_count)):
         page = pdf[page_no]
         names: dict[int, str] = {}
-        annots = [a for a in page.annots() if a.type[0] not in NON_COMMENT_TYPES]
+        annots = [a for a in iter_annots(page) if a.type[0] not in NON_COMMENT_TYPES]
         for a in annots:
             names[a.xref] = (a.info or {}).get("id") or f"foliant-{page_no}-{a.xref}"
         for a in annots:
@@ -2723,7 +2800,7 @@ def import_xfdf(pdf: pymupdf.Document, data: str | bytes, *, replace: bool = Fal
     name_map: dict[str, tuple[int, int]] = {}
     for i in range(pdf.page_count):
         page = pdf[i]
-        for a in page.annots():
+        for a in iter_annots(page):
             nm = (a.info or {}).get("id")
             if nm:
                 name_map[(i, nm)] = (i, a.xref)
@@ -2942,7 +3019,7 @@ def export_fdf(pdf: pymupdf.Document, filename: str = "") -> bytes:
     next_num = 2
     for page_no in range(pdf.page_count):
         page = pdf[page_no]
-        for a in page.annots():
+        for a in iter_annots(page):
             if a.type[0] in NON_COMMENT_TYPES:
                 continue
             src = pdf.xref_object(a.xref, compressed=True)
