@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import threading
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
@@ -36,6 +37,7 @@ import numpy as np
 import pymupdf
 
 from foliant.core.engine import ENGINE_LOCK
+from foliant.core.errors import OperationCancelled
 from foliant.i18n import _
 
 from . import detect
@@ -47,8 +49,11 @@ EDITABLE = "editable"
 TEXT_ONLY = "text"
 MODES = (SEARCHABLE, EDITABLE, TEXT_ONLY)
 
-SKIP = "skip"      # pagine con testo: saltate
-FORCE = "force"    # pagine con testo: rasterizzate e riconosciute di nuovo
+SKIP = "skip"        # pagine con testo: saltate
+REPLACE = "replace"  # livello OCR esistente (testo invisibile) rimosso e rifatto; testo visibile intatto
+FORCE = "force"      # pagine con testo: rasterizzate e riconosciute di nuovo
+
+OCR_TAG = "FoliantOCR"   # sequenza marcata che identifica il livello di testo prodotto dall'OCR
 
 LOW_CONFIDENCE = 60.0
 MAX_PIXELS = 70_000_000     # oltre: risoluzione ridotta (pagine enormi)
@@ -108,6 +113,7 @@ class OcrOptions:
     font: str = "sans"          # famiglia del testo modificabile: sans, serif, mono
     timeout: float = 120.0
     psm: int = 3
+    apply_to_page: bool = False  # ricercabile: applica rotazione e raddrizzamento anche alla pagina visibile
 
     def worker_count(self) -> int:
         if self.workers > 0:
@@ -134,6 +140,8 @@ class PageResult:
     patches: list[tuple] = field(default_factory=list)   # pagine miste: (riquadro px, colore)
     notes: list[str] = field(default_factory=list)
     placed: list[tuple] = field(default_factory=list)    # dopo l'applicazione: (Rect pagina, Word)
+    existing_text: str = ""               # pagine saltate perché già con testo: testo estraibile
+    remove_layer: bool = False            # togliere il livello OCR invisibile esistente
 
     @property
     def ok(self) -> bool:
@@ -204,6 +212,14 @@ class OcrResult:
             if p.index == index:
                 return p
         return None
+
+
+class OcrInterrupted(OperationCancelled):
+    """Riconoscimento annullato: `partial` contiene le pagine già completate."""
+
+    def __init__(self, partial: "OcrResult"):
+        super().__init__()
+        self.partial = partial
 
 
 # ===================================================================== riconoscimento
@@ -281,11 +297,18 @@ def _render_job(pdf: pymupdf.Document, index: int, opts: OcrOptions) -> tuple[Pa
         if info.category == detect.EMPTY:
             res.status, res.message = "skipped", _("pagina vuota")
             return res, None
-        if info.category in (detect.TEXT, detect.OCR_LAYER) and opts.existing_text != FORCE:
+        # in modalità modificabile un livello OCR invisibile viene sempre convertito (OCR-06);
+        # con «sostituisci» il livello invisibile viene rifatto (OCR-14)
+        redo_layer = info.category == detect.OCR_LAYER and (opts.mode == EDITABLE or opts.existing_text == REPLACE)
+        if info.category in (detect.TEXT, detect.OCR_LAYER) and opts.existing_text != FORCE and not redo_layer:
             res.status = "skipped"
             res.message = _("livello OCR presente") if info.category == detect.OCR_LAYER else _("testo presente")
+            if opts.mode == TEXT_ONLY:
+                res.existing_text = page.get_text("text", sort=True)
             return res, None
-        res.rasterize = info.category in (detect.TEXT, detect.OCR_LAYER, detect.UNEXTRACTABLE)
+        res.remove_layer = redo_layer
+        res.rasterize = info.category in (detect.TEXT, detect.UNEXTRACTABLE) or (
+            info.category == detect.OCR_LAYER and not redo_layer)
         res.mixed = info.category == detect.MIXED and opts.existing_text != FORCE
         if info.category == detect.MIXED and opts.existing_text == FORCE:
             res.rasterize = True
@@ -434,10 +457,10 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
                 results[res.index] = res
                 done += 1
                 report(done, _("Riconoscimento: {d} di {t} pagine…").format(d=done, t=len(indices)))
-    except OcrCancelled:
+    except (OcrCancelled, OperationCancelled):
         cancel_event.set()
-        from foliant.core.errors import OperationCancelled
-        raise OperationCancelled()
+        result.pages = [results[i] for i in indices if i in results]
+        raise OcrInterrupted(result) from None
     except BaseException:
         cancel_event.set()
         raise
@@ -533,29 +556,77 @@ def _font_size_for_line(ln: Line, zoom: float, font: pymupdf.Font) -> float:
 
 
 def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: float) -> int:
+    """Livello di testo invisibile: una parola per oggetto di testo, con corpo della riga,
+    scala orizzontale (Tz) che fa coincidere la larghezza con la parola nell'immagine e
+    direzione (Tm) che segue l'inclinazione della riga.
+
+    Il font viene incorporato (con /ToUnicode) tramite TextWriter; il contenuto è poi
+    riscritto con gli operatori per parola."""
     font = get_font("sans")
-    placer = _Placer(page, mapper, zoom)
-    w = placer.writer(((0, 0, 0), "inv"))
-    n = 0
+    to_page = lambda x, y: (pymupdf.Point(*mapper(x, y)) * page.derotation_matrix)  # noqa: E731
+    items = []
+    tw = pymupdf.TextWriter(page.rect)
     for ln in res.lines:
         fs_line = _font_size_for_line(ln, zoom, font)
+        asc = font.ascender if font.ascender > 0 else 0.9
+        desc = -font.descender if font.descender < 0 else 0.2
         for word in ln.words:
             text = unicodedata.normalize("NFC", word.text)
             if not text:
                 continue
-            x0, _y0, x1, _y1 = word.bbox
-            base_y = ln.baseline_y(x0)
-            width_pt = (x1 - x0) / zoom
-            natural = font.text_length(text, fontsize=fs_line) or 1.0
-            fs = fs_line * width_pt / natural
-            fs = min(max(fs, fs_line * 0.6), fs_line * 1.4)
+            x0, y0, x1, y1 = word.bbox
+            # riquadro di selezione = riquadro della parola nell'immagine: corpo dall'altezza
+            # della parola (entro limiti ragionevoli rispetto alla riga), base sul fondo della parola
+            base = ln.baseline_y(x0)
+            fs_px = (y1 - y0) / (asc + desc)
+            fs = round(min(max(fs_px / zoom, fs_line * 0.6), fs_line * 1.15), 2)
+            shift = min(max(y1 - desc * fs * zoom, base - 0.25 * fs * zoom), base + 0.25 * fs * zoom) - base
+            p0 = to_page(x0, ln.baseline_y(x0) + shift)
+            p1 = to_page(x1, ln.baseline_y(x1) + shift)
+            length = math.hypot(p1.x - p0.x, p1.y - p0.y)
+            natural = font.text_length(text, fontsize=fs)
+            if length <= 0 or natural <= 0:
+                continue
+            gids = [font.has_glyph(ord(c)) for c in text]
+            if not all(gids):
+                text = "".join(c for c, g in zip(text, gids) if g)
+                gids = [g for g in gids if g]
+                if not text:
+                    continue
+                natural = font.text_length(text, fontsize=fs) or 1.0
             try:
-                w.append(placer.pos(x0, base_y), text, font=font, fontsize=fs)
+                tw.append(page.rect.tl, text + " ", font=font, fontsize=fs)
             except Exception:
                 continue
-            n += 1
-    placer.flush(render_mode=3)
-    return n
+            # spazio esplicito dopo la parola (tranne l'ultima della riga): copia e ricerca
+            # restituiscono parole separate anche quando sono molto vicine
+            space = font.has_glyph(32) if word is not ln.words[-1] else 0
+            items.append((p0, p1, length, natural, fs, gids + ([space] if space else [])))
+    if not items:
+        return 0
+    before = set(page.get_contents())
+    tw.write_text(page, render_mode=3)
+    doc = page.parent
+    new = [x for x in page.get_contents() if x not in before]
+    m = re.search(rb"/(\S+)\s+[\d.]+\s+Tf", b"".join(doc.xref_stream(x) or b"" for x in new))
+    if not m:
+        return len(items)
+    fname = m.group(1).decode()
+    inv = ~page.transformation_matrix     # coordinate pagina (y in basso) → spazio PDF
+    out = ["q", "BT", "3 Tr"]
+    for p0, p1, length, natural, fs, gids in items:
+        o = p0 * inv
+        e = p1 * inv
+        ux, uy = (e.x - o.x) / length, (e.y - o.y) / length
+        tz = 100.0 * length / natural
+        hexs = "".join(f"{g:04x}" for g in gids)
+        out.append(f"/{fname} {fs:g} Tf {tz:.2f} Tz {ux:.5f} {uy:.5f} {-uy:.5f} {ux:.5f} {o.x:.3f} {o.y:.3f} Tm "
+                   f"<{hexs}> Tj")
+    out += ["ET", "Q"]
+    doc.update_stream(new[0], ("\n".join(out) + "\n").encode())
+    for x in new[1:]:
+        doc.update_stream(x, b" ")
+    return len(items)
 
 
 def line_font_sizes(lines: list[Line], zoom: float, family: str) -> list[float]:
@@ -598,19 +669,33 @@ def _insert_lines_visible(page: pymupdf.Page, res: PageResult, mapper, zoom: flo
     return n
 
 
-def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = "sans") -> None:
+def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = "sans",
+               apply_to_page: bool = False) -> None:
     """Applica il risultato di una pagina al documento (dentro `document.change()`)."""
     if not res.ok or mode == TEXT_ONLY:
         return
     page = pdf[res.index]
+    if res.remove_layer:
+        remove_invisible_text(page)
     if mode == SEARCHABLE:
         if res.rasterize and res.background:
             _clear_page_content(page)
             page.insert_image(page.rect * page.derotation_matrix, stream=res.background, keep_proportion=False,
                               rotate=page.rotation)
-        _insert_words_invisible(page, res, res.processed_to_display, res.zoom)
-        der = page.derotation_matrix
-        res.placed = [(res.word_rect_display(w) * der, w) for w in res.words]
+        if apply_to_page and (res.rotation or res.skew) and not res.mixed:
+            _straighten_page(page, res)
+            sx = page.rect.width / max(1.0, res.size[0])
+            sy = page.rect.height / max(1.0, res.size[1])
+            with _marked(page):
+                _insert_words_invisible(page, res, lambda x, y: (x * sx, y * sy), 2.0 / (sx + sy))
+            der = page.derotation_matrix
+            res.placed = [(pymupdf.Rect(w.bbox[0] * sx, w.bbox[1] * sy, w.bbox[2] * sx, w.bbox[3] * sy) * der, w)
+                          for w in res.words]
+        else:
+            with _marked(page):
+                _insert_words_invisible(page, res, res.processed_to_display, res.zoom)
+            der = page.derotation_matrix
+            res.placed = [(res.word_rect_display(w) * der, w) for w in res.words]
         if res.rasterize:
             _drop_unused_images(page)
     elif mode == EDITABLE:
@@ -618,7 +703,8 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
             for box, color in res.patches:
                 r = _box_display(res, box) * page.derotation_matrix
                 page.draw_rect(r, color=None, fill=color, overlay=True)
-            _insert_lines_visible(page, res, res.processed_to_display, res.zoom, family)
+            with _marked(page):
+                _insert_lines_visible(page, res, res.processed_to_display, res.zoom, family)
             der = page.derotation_matrix
             res.placed = [(res.word_rect_display(w) * der, w) for w in res.words]
         else:
@@ -629,11 +715,84 @@ def apply_page(pdf: pymupdf.Document, res: PageResult, mode: str, family: str = 
             # l'immagine elaborata (raddrizzata) riempie la pagina visualizzata
             sx = page.rect.width / max(1.0, res.size[0])
             sy = page.rect.height / max(1.0, res.size[1])
-            _insert_lines_visible(page, res, lambda x, y: (x * sx, y * sy), 2.0 / (sx + sy), family)
+            with _marked(page):
+                _insert_lines_visible(page, res, lambda x, y: (x * sx, y * sy), 2.0 / (sx + sy), family)
             _drop_unused_images(page)
             der = page.derotation_matrix
             res.placed = [(pymupdf.Rect(w.bbox[0] * sx, w.bbox[1] * sy, w.bbox[2] * sx, w.bbox[3] * sy) * der, w)
                           for w in res.words]
+
+
+class _marked:
+    """Racchiude il contenuto aggiunto alla pagina in una sequenza marcata /FoliantOCR (ISO 32000 §14.6),
+    così il livello prodotto dall'OCR è riconoscibile (per sostituirlo o rimuoverlo)."""
+
+    def __init__(self, page: pymupdf.Page):
+        self.page = page
+
+    def __enter__(self):
+        self.before = set(self.page.get_contents())
+        return self
+
+    def __exit__(self, exc_type, *_a):
+        if exc_type is not None:
+            return False
+        doc = self.page.parent
+        for xref in self.page.get_contents():
+            if xref in self.before:
+                continue
+            data = doc.xref_stream(xref) or b""
+            doc.update_stream(xref, b"/" + OCR_TAG.encode() + b" BMC\n" + data + b"\nEMC\n")
+        return False
+
+
+_BT_ET = re.compile(rb"BT\b.*?\bET\b", re.S)
+_OCR_MC = re.compile(rb"/" + OCR_TAG.encode() + rb"\s+BMC\b.*?\bEMC\b", re.S)
+
+
+def remove_invisible_text(page: pymupdf.Page) -> int:
+    """Rimuove il livello di testo invisibile (OCR) lasciando intatti immagini e testo visibile.
+
+    Toglie le sequenze marcate /FoliantOCR e, per i livelli prodotti da altri
+    programmi, gli oggetti di testo BT…ET con modalità di resa 3.
+    """
+    doc = page.parent
+    removed = 0
+    page.clean_contents(sanitize=False)
+    for xref in page.get_contents():
+        data = doc.xref_stream(xref) or b""
+        new, n1 = _OCR_MC.subn(b"", data)
+
+        def drop(m):
+            return b"" if re.search(rb"\b3\s+Tr\b", m.group(0)) else m.group(0)
+        new2 = _BT_ET.sub(drop, new)
+        if new2 != data:
+            removed += 1
+            doc.update_stream(xref, new2)
+    return removed
+
+
+def _straighten_page(page: pymupdf.Page, res: PageResult) -> None:
+    """Applica alla pagina visibile la rotazione (/Rotate) e il raddrizzamento
+    (matrice «cm» attorno al centro) senza ricodificare l'immagine (OCR-08)."""
+    if res.rotation:
+        page.set_rotation((page.rotation + res.rotation) % 360)
+    if res.skew:
+        # rotazione attorno al centro della pagina, in coordinate PDF (y verso l'alto)
+        r = page.mediabox
+        cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+        # skew = rotazione antioraria (a vista) che raddrizza: nello spazio PDF (y in alto) è positiva
+        a = math.radians(res.skew)
+        ca, sa = math.cos(a), math.sin(a)
+        e = cx - ca * cx + sa * cy
+        f = cy - sa * cx - ca * cy
+        doc = page.parent
+        xrefs = page.get_contents()
+        if xrefs:
+            first, last = xrefs[0], xrefs[-1]
+            pre = f"q {ca:.6f} {sa:.6f} {-sa:.6f} {ca:.6f} {e:.4f} {f:.4f} cm\n".encode()
+            doc.update_stream(first, pre + (doc.xref_stream(first) or b""))
+            doc.update_stream(last, (doc.xref_stream(last) or b"") + b"\nQ\n")
 
 
 def _drop_unused_images(page: pymupdf.Page) -> None:
@@ -664,15 +823,52 @@ def _box_display(res: PageResult, box) -> pymupdf.Rect:
     return pymupdf.Rect(min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts), max(p[1] for p in pts))
 
 
+LANG_TAGS = {"ita": "it-IT", "eng": "en-US", "deu": "de-DE", "fra": "fr-FR", "spa": "es-ES", "por": "pt-PT",
+             "nld": "nl-NL", "pol": "pl-PL", "rus": "ru-RU", "ell": "el-GR", "ara": "ar", "heb": "he-IL",
+             "chi_sim": "zh-CN", "chi_tra": "zh-TW", "jpn": "ja-JP", "kor": "ko-KR", "hin": "hi-IN"}
+
+
+def _record_ocr(pdf: pymupdf.Document, result: OcrResult) -> None:
+    """Registra l'OCR nei metadati (strumento, lingue, data) e imposta /Lang se assente."""
+    import datetime
+    try:
+        meta = dict(pdf.metadata or {})
+        note = "Foliant OCR ({l}, {d})".format(l="+".join(result.options.languages),
+                                               d=datetime.date.today().isoformat())
+        kw = meta.get("keywords") or ""
+        if "Foliant OCR" not in kw:
+            meta["keywords"] = (kw + "; " if kw else "") + note
+        if not meta.get("creator"):
+            meta["creator"] = "Foliant"
+        clean = {k: v for k, v in meta.items() if k in ("author", "producer", "creator", "title", "format",
+                                                          "encryption", "creationDate", "modDate", "subject",
+                                                          "keywords", "trapped")}
+        clean.pop("format", None)
+        clean.pop("encryption", None)
+        pdf.set_metadata(clean)
+    except Exception:
+        pass
+    try:
+        cat = pdf.pdf_catalog()
+        kind, _val = pdf.xref_get_key(cat, "Lang")
+        main = result.options.languages[0] if result.options.languages else ""
+        if kind == "null" and main in LANG_TAGS:
+            pdf.xref_set_key(cat, "Lang", pymupdf.get_pdf_str(LANG_TAGS[main]))
+    except Exception:
+        pass
+
+
 def apply_result(pdf: pymupdf.Document, result: OcrResult, mode: str | None = None) -> int:
     """Applica tutte le pagine riconosciute. Restituisce il numero di pagine modificate."""
     mode = mode or result.options.mode
     n = 0
     for res in result.recognized:
-        if not res.lines and not res.rasterize:
+        if not res.lines and not res.rasterize and not res.remove_layer:
             continue
-        apply_page(pdf, res, mode, result.options.font)
+        apply_page(pdf, res, mode, result.options.font, result.options.apply_to_page)
         n += 1
+    if n:
+        _record_ocr(pdf, result)
     if n and mode == SEARCHABLE:
         try:
             pdf.subset_fonts()
@@ -842,17 +1038,18 @@ def parse_pages(text: str, count: int) -> list[int]:
         if not part:
             continue
         bits = [b.strip() for b in part.split("-")]
+        if len(bits) == 2 and bits[1] == "":
+            bits[1] = "fine"          # «10-» = fino all'ultima pagina
         try:
             ends = [count if b in ("fine", "end", "ultima") else int(b) for b in bits]
         except ValueError:
             raise ValueError(_("Intervallo non valido: «{p}».").format(p=part)) from None
         if len(ends) == 1:
             ends = ends * 2
-        if len(ends) != 2 or min(ends) < 1 or max(ends) > count:
+        if len(ends) != 2 or min(ends) < 1 or max(ends) > count or ends[0] > ends[1]:
             raise ValueError(_("Pagine fuori intervallo: «{p}» (il documento ha {n} pagine).").format(p=part, n=count))
         a, b = ends
-        step = 1 if b >= a else -1
-        for n in range(a, b + step, step):
+        for n in range(a, b + 1):
             if n - 1 not in out:
                 out.append(n - 1)
     if not out:

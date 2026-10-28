@@ -166,9 +166,17 @@ def test_solo_testo_e_ocr_area(window, scan_two, monkeypatch, tmp_path):
     view = window.open_path(scan_two)
     ctl = ocr_controller()
     shown = []
-    monkeypatch.setattr(dialogs.TextDialog, "exec", lambda dlg: shown.append(dlg.edit.toPlainText()) or 0)
+
+    def fake_exec(dlg):
+        if dlg.result is not None:
+            assert "— Pagina 1 —" in dlg.edit.toPlainText()
+            dlg.separator.setCurrentIndex(dlg.separator.findData("formfeed"))
+        shown.append(dlg.edit.toPlainText())
+        return 0
+    monkeypatch.setattr(dialogs.TextDialog, "exec", fake_exec)
     ctl.run(view, engine.OcrOptions(languages=["ita"], mode=engine.TEXT_ONLY), [0, 1])
-    assert engine.char_accuracy(shown[-1], "\n".join(FRASI[:6])) >= 0.95
+    assert shown[-1].count("\f") == 1
+    assert engine.char_accuracy(shown[-1].replace("\f", "\n"), "\n".join(FRASI[:6])) >= 0.95
     assert not view.document.is_modified
     ctl.ocr_area(view, 0, pymupdf.Rect(50, 75, 545, 100))
     assert engine.char_accuracy(shown[-1], FRASI[0]) >= 0.95

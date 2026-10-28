@@ -114,8 +114,9 @@ class OcrDialog(QDialog):
 
     def __init__(self, parent, *, page_count: int, current_page: int, detected: list[int],
                  settings=None, mode: str = engine.SEARCHABLE, pages_text: str | None = None,
-                 allow_text_mode: bool = True):
+                 allow_text_mode: bool = True, infos: dict | None = None):
         super().__init__(parent)
+        self.infos = infos or {}
         self.setWindowTitle(_("Riconoscimento del testo (OCR)"))
         self.setObjectName("ocrDialog")
         self.page_count = page_count
@@ -178,14 +179,16 @@ class OcrDialog(QDialog):
 
         self.existing = QComboBox(self)
         self.existing.addItem(_("Salta le pagine che hanno già testo"), engine.SKIP)
+        self.existing.addItem(_("Sostituisci il livello OCR esistente"), engine.REPLACE)
         self.existing.addItem(_("Riconosci anche quelle (la pagina diventa un'immagine)"), engine.FORCE)
         self.existing.setCurrentIndex(max(0, self.existing.findData(get("existing", engine.SKIP))))
         form.addRow(_("Pagine con testo:"), self.existing)
 
         self.dpi = QComboBox(self)
+        self.dpi.addItem(_("Automatica (300 dpi)"), 0)
         for d in DPI_CHOICES:
             self.dpi.addItem(f"{d} dpi", d)
-        self.dpi.setCurrentIndex(max(0, self.dpi.findData(int(get("dpi", 300)))))
+        self.dpi.setCurrentIndex(max(0, self.dpi.findData(int(get("dpi", 0)))))
         form.addRow(_("Risoluzione di lavoro:"), self.dpi)
 
         self.font = QComboBox(self)
@@ -194,6 +197,11 @@ class OcrDialog(QDialog):
         self.font.addItem(_("Monospaziato"), "mono")
         self.font.setCurrentIndex(max(0, self.font.findData(get("font", "sans"))))
         form.addRow(_("Carattere del testo modificabile:"), self.font)
+        self.destination = QComboBox(self)
+        self.destination.addItem(_("Documento corrente"), "current")
+        self.destination.addItem(_("Nuovo documento (l'originale resta invariato)"), "new")
+        self.destination.setCurrentIndex(max(0, self.destination.findData(get("destination", "current"))))
+        form.addRow(_("Destinazione:"), self.destination)
         lay.addLayout(form)
 
         # --- pre-elaborazione
@@ -208,30 +216,153 @@ class OcrDialog(QDialog):
             cb.setChecked(str(get(key, "true")).lower() in ("true", "1"))
             pl.addWidget(cb)
         lay.addWidget(pre)
+        self.cb_apply_page = QCheckBox(_("Raddrizza e ruota anche la pagina visibile (PDF ricercabile)"))
+        self.cb_apply_page.setChecked(str(get("apply_to_page", "false")).lower() in ("true", "1"))
+        lay.addWidget(self.cb_apply_page)
 
         self.cb_preview = QCheckBox(_("Mostra l'anteprima e le parole incerte prima di applicare"))
         self.cb_preview.setChecked(str(get("preview", "true")).lower() in ("true", "1"))
         lay.addWidget(self.cb_preview)
 
+        self.summary = QLabel(self)
+        self.summary.setWordWrap(True)
+        self.summary.setStyleSheet(f"color: {theme.hex_color('text_muted')};")
+        lay.addWidget(self.summary)
         self.error = QLabel(self)
         self.error.setStyleSheet(f"color: {theme.hex_color('danger')};")
         self.error.setWordWrap(True)
         lay.addWidget(self.error)
 
+        bottom = QHBoxLayout()
+        self.btn_save_profile = QPushButton(icon("save"), _("Salva profilo…"), self)
+        self.btn_load_profile = QPushButton(icon("folder-open"), _("Carica profilo…"), self)
+        bottom.addWidget(self.btn_save_profile)
+        bottom.addWidget(self.btn_load_profile)
+        bottom.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Riconosci"))
+        self.ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.ok_button.setText(_("Avvia"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        lay.addWidget(buttons)
+        bottom.addWidget(buttons)
+        lay.addLayout(bottom)
+        self.btn_save_profile.clicked.connect(self._save_profile_dialog)
+        self.btn_load_profile.clicked.connect(self._load_profile_dialog)
         self.mode_group.idToggled.connect(lambda *_a: self._update_mode())
+        self.range_edit.textChanged.connect(lambda _t: self.validate())
+        self.pages.currentIndexChanged.connect(lambda _i: self.validate())
+        self.existing.currentIndexChanged.connect(lambda _i: self.validate())
+        self.languages.changed.connect(self.validate)
         self._update_mode()
+        self.validate()
 
     def _update_mode(self) -> None:
         editable = self.rb_editable.isChecked()
         text = self.rb_text.isChecked()
         self.font.setEnabled(editable)
         self.cb_preview.setEnabled(not text)
+        self.cb_apply_page.setEnabled(self.rb_searchable.isChecked())
+        self.destination.setEnabled(not text)
+        self.validate()
+
+    def validate(self) -> bool:
+        """Controllo immediato: errore accanto ai campi e «Avvia» disattivato se non valido."""
+        if not hasattr(self, "ok_button"):
+            return True
+        error = ""
+        pages: list[int] = []
+        try:
+            pages = self.selected_pages()
+        except ValueError as e:
+            error = str(e)
+        if not error and not self.languages.selected():
+            error = _("Scegli almeno una lingua.")
+        self.error.setText(error)
+        self.ok_button.setEnabled(not error)
+        self.range_edit.setStyleSheet(f"border: 1px solid {theme.hex_color('danger')};"
+                                      if error and self.pages.currentData() == "custom" else "")
+        self._update_summary(pages if not error else [])
+        return not error
+
+    def _update_summary(self, pages: list[int]) -> None:
+        if not pages:
+            self.summary.setText("")
+            return
+        from . import detect
+        mode = self.mode()
+        policy = self.existing.currentData()
+        todo, skipped = 0, {}
+        for i in pages:
+            inf = self.infos.get(i)
+            cat = inf.category if inf is not None else detect.IMAGE_ONLY
+            skip = cat == detect.EMPTY or (cat == detect.TEXT and policy != engine.FORCE) or (
+                cat == detect.OCR_LAYER and policy == engine.SKIP and mode != engine.EDITABLE)
+            if skip:
+                label = detect.category_label(cat)
+                skipped[label] = skipped.get(label, 0) + 1
+            else:
+                todo += 1
+        workers = engine.OcrOptions().worker_count()
+        seconds = max(1, round(todo * 4.0 / workers))
+        est = _("{s} s").format(s=seconds) if seconds < 90 else _("{m} min").format(m=round(seconds / 60))
+        text = _("Da elaborare: {n} pagine · tempo stimato: circa {t}").format(n=todo, t=est)
+        if skipped:
+            text += " · " + _("saltate: {s}").format(
+                s=", ".join(f"{n} ({lab})" for lab, n in skipped.items()))
+        self.summary.setText(text)
+
+    # ------------------------------------------------------------- profili
+    def profile(self) -> dict:
+        o = self.options()
+        return {"format": "foliant-ocr-profile", "version": 1, "mode": o.mode, "languages": o.languages,
+                "dpi": self.dpi.currentData(), "existing_text": o.existing_text, "font": o.font,
+                "preprocess": o.preprocess.as_dict(), "apply_to_page": o.apply_to_page,
+                "destination": self.destination.currentData(), "preview": self.cb_preview.isChecked()}
+
+    def load_profile(self, data: dict) -> None:
+        if not isinstance(data, dict) or data.get("format") != "foliant-ocr-profile":
+            raise ValueError(_("Il file non è un profilo OCR di Foliant."))
+        {engine.SEARCHABLE: self.rb_searchable, engine.EDITABLE: self.rb_editable,
+         engine.TEXT_ONLY: self.rb_text}.get(data.get("mode"), self.rb_searchable).setChecked(True)
+        langs = [c for c in data.get("languages", []) if isinstance(c, str)]
+        self.languages.populate(langs)
+        for c in langs:
+            self.languages.set_checked(c, True)
+        for combo, key in ((self.dpi, "dpi"), (self.existing, "existing_text"), (self.font, "font"),
+                           (self.destination, "destination")):
+            i = combo.findData(data.get(key))
+            if i >= 0:
+                combo.setCurrentIndex(i)
+        pre = data.get("preprocess", {})
+        for cb, key in ((self.cb_deskew, "deskew"), (self.cb_rotate, "auto_rotate"),
+                        (self.cb_denoise, "denoise"), (self.cb_contrast, "contrast")):
+            if key in pre:
+                cb.setChecked(bool(pre[key]))
+        self.cb_apply_page.setChecked(bool(data.get("apply_to_page", False)))
+        self.cb_preview.setChecked(bool(data.get("preview", True)))
+        self.validate()
+
+    def _save_profile_dialog(self) -> None:
+        import json
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getSaveFileName(self, _("Salva profilo OCR"), "profilo-ocr.json",
+                                               _("Profilo OCR (*.json)"))
+        if path:
+            from foliant.core.document import atomic_write
+            atomic_write(path, json.dumps(self.profile(), ensure_ascii=False, indent=2).encode("utf-8"))
+
+    def _load_profile_dialog(self) -> None:
+        import json
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getOpenFileName(self, _("Carica profilo OCR"), "", _("Profilo OCR (*.json)"))
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                self.load_profile(json.load(f))
+        except (OSError, ValueError) as e:
+            self.error.setText(str(e))
 
     def _manage_languages(self) -> None:
         dlg = LanguagesDialog(self)
@@ -257,30 +388,31 @@ class OcrDialog(QDialog):
 
     def options(self) -> engine.OcrOptions:
         return engine.OcrOptions(
-            languages=self.languages.selected(), mode=self.mode(), dpi=int(self.dpi.currentData()),
+            languages=self.languages.selected(), mode=self.mode(), dpi=int(self.dpi.currentData()) or 300,
+            apply_to_page=self.cb_apply_page.isChecked() and self.mode() == engine.SEARCHABLE,
             preprocess=PreprocessOptions(deskew=self.cb_deskew.isChecked(), auto_rotate=self.cb_rotate.isChecked(),
                                          denoise=self.cb_denoise.isChecked(),
                                          contrast=self.cb_contrast.isChecked()),
             existing_text=self.existing.currentData(), font=self.font.currentData())
 
     @property
+    def new_document(self) -> bool:
+        return self.destination.currentData() == "new" and self.mode() != engine.TEXT_ONLY
+
+    @property
     def preview(self) -> bool:
         return self.cb_preview.isChecked() and self.mode() != engine.TEXT_ONLY
 
     def accept(self) -> None:
-        try:
-            self.selected_pages()
-        except ValueError as e:
-            self.error.setText(str(e))
-            return
-        if not self.languages.selected():
-            self.error.setText(_("Scegli almeno una lingua."))
+        if not self.validate():
             return
         if self.settings is not None:
             o = self.options()
             s = self.settings
             s.setValue("ocr/languages", ",".join(o.languages))
-            s.setValue("ocr/dpi", o.dpi)
+            s.setValue("ocr/dpi", self.dpi.currentData())
+            s.setValue("ocr/destination", self.destination.currentData())
+            s.setValue("ocr/apply_to_page", "true" if self.cb_apply_page.isChecked() else "false")
             s.setValue("ocr/font", o.font)
             s.setValue("ocr/existing", o.existing_text)
             for k, v in o.preprocess.as_dict().items():
@@ -427,21 +559,59 @@ class LanguagesDialog(QDialog):
 
 # ============================================================ testo riconosciuto
 class TextDialog(QDialog):
-    def __init__(self, parent, text: str, title: str | None = None, save_cb=None):
+    """Testo riconosciuto: copia, salvataggio TXT e, con un risultato OCR, opzioni ed export ALTO/hOCR."""
+
+    def __init__(self, parent, text: str, title: str | None = None, save_cb=None, result=None, save_path_cb=None,
+                 source_name: str = ""):
         super().__init__(parent)
         self.setWindowTitle(title or _("Testo riconosciuto"))
         self.setObjectName("ocrTextDialog")
-        self.resize(640, 520)
+        self.resize(720, 560)
         self._save_cb = save_cb
+        self._save_path_cb = save_path_cb   # (titolo, nome, filtro, suffisso) -> percorso | None
+        self.result = result
+        self.source_name = source_name
         lay = QVBoxLayout(self)
+        if result is not None:
+            opts = QHBoxLayout()
+            self.separator = QComboBox(self)
+            self.separator.addItem(_("Riga «— Pagina N —»"), "line")
+            self.separator.addItem(_("Salto pagina (U+000C)"), "formfeed")
+            self.cb_paragraphs = QCheckBox(_("Paragrafi ricomposti"), self)
+            self.cb_dehyphen = QCheckBox(_("Togli la sillabazione a fine riga"), self)
+            self.cb_crlf = QCheckBox(_("Fine riga Windows (CRLF)"), self)
+            opts.addWidget(QLabel(_("Separatore:")))
+            opts.addWidget(self.separator)
+            for w in (self.cb_paragraphs, self.cb_dehyphen, self.cb_crlf):
+                opts.addWidget(w)
+            opts.addStretch(1)
+            lay.addLayout(opts)
+            for w in (self.cb_paragraphs, self.cb_dehyphen, self.cb_crlf):
+                w.toggled.connect(lambda _c: self.regenerate())
+            self.separator.currentIndexChanged.connect(lambda _i: self.regenerate())
         self.edit = QPlainTextEdit(self)
         self.edit.setPlainText(text)
         lay.addWidget(self.edit, 1)
         row = QHBoxLayout()
-        self.btn_copy = QPushButton(icon("copy"), _("Copia"), self)
+        self.btn_copy = QPushButton(icon("copy"), _("Copia tutto"), self)
         self.btn_save = QPushButton(icon("save"), _("Salva come TXT…"), self)
         row.addWidget(self.btn_copy)
+        if result is not None:
+            self.page_box = QComboBox(self)
+            for res in result.pages:
+                self.page_box.addItem(_("Pagina {n}").format(n=res.index + 1), res.index)
+            self.btn_copy_page = QPushButton(icon("clipboard-copy"), _("Copia pagina"), self)
+            row.addWidget(self.page_box)
+            row.addWidget(self.btn_copy_page)
+            self.btn_copy_page.clicked.connect(self.copy_page)
         row.addWidget(self.btn_save)
+        if result is not None:
+            self.btn_alto = QPushButton(_("Salva ALTO…"), self)
+            self.btn_hocr = QPushButton(_("Salva hOCR…"), self)
+            row.addWidget(self.btn_alto)
+            row.addWidget(self.btn_hocr)
+            self.btn_alto.clicked.connect(lambda: self.save_xml("alto"))
+            self.btn_hocr.clicked.connect(lambda: self.save_xml("hocr"))
         row.addStretch(1)
         close = QPushButton(_("Chiudi"), self)
         row.addWidget(close)
@@ -449,15 +619,48 @@ class TextDialog(QDialog):
         self.btn_copy.clicked.connect(self.copy)
         self.btn_save.clicked.connect(self.save)
         close.clicked.connect(self.accept)
+        if result is not None:
+            self.regenerate()
+
+    def text_options(self) -> dict:
+        return {"separator": self.separator.currentData(), "paragraphs": self.cb_paragraphs.isChecked(),
+                "dehyphenate": self.cb_dehyphen.isChecked(), "newline": "\r\n" if self.cb_crlf.isChecked() else "\n"}
+
+    def regenerate(self) -> None:
+        from . import textexport
+        self.edit.setPlainText(textexport.result_text(self.result, **self.text_options()))
 
     def copy(self) -> None:
         from foliant.api import copy_text_to_clipboard
         copy_text_to_clipboard(self.edit.toPlainText())
         self.btn_copy.setText(_("Copiato"))
 
+    def copy_page(self) -> None:
+        from foliant.api import copy_text_to_clipboard
+
+        from . import textexport
+        res = self.result.page(self.page_box.currentData())
+        if res is not None:
+            o = self.text_options()
+            copy_text_to_clipboard(textexport.page_text(res, o["paragraphs"], o["dehyphenate"]))
+
     def save(self) -> None:
         if self._save_cb is not None:
             self._save_cb(self.edit.toPlainText())
+
+    def save_xml(self, kind: str) -> None:
+        from . import textexport
+        if self._save_path_cb is None:
+            return
+        base = os.path.splitext(self.source_name or "testo")[0]
+        if kind == "alto":
+            path = self._save_path_cb(_("Salva ALTO"), base + ".alto.xml", _("ALTO XML (*.xml)"), ".xml")
+            if path:
+                textexport.save_alto(path, self.result, self.source_name)
+        else:
+            path = self._save_path_cb(_("Salva hOCR"), base + ".hocr", _("hOCR (*.hocr *.html)"), ".hocr")
+            if path:
+                textexport.save_hocr(path, self.result, self.source_name)
 
 
 # ============================================================ anteprima e revisione

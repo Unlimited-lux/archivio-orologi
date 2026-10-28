@@ -560,18 +560,27 @@ class OcrController(QObject):
         text = engine.format_pages(pages) if pages and pages != detected else None
         dlg = OcrDialog(self.ctx.window, page_count=view.page_count, current_page=view.current_page,
                         detected=detected, settings=self.settings(),
-                        mode=mode or str(self.settings().value("ocr/mode", engine.SEARCHABLE)), pages_text=text)
+                        mode=mode or str(self.settings().value("ocr/mode", engine.SEARCHABLE)), pages_text=text,
+                        infos=dict(st.infos))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self.settings().setValue("ocr/mode", dlg.mode())
-        self.run(view, dlg.options(), dlg.selected_pages(), preview=dlg.preview)
+        self.run(view, dlg.options(), dlg.selected_pages(), preview=dlg.preview, new_document=dlg.new_document)
 
-    def run(self, view, opts: engine.OcrOptions, pages: list[int], preview: bool = True) -> engine.OcrResult | None:
+    def run(self, view, opts: engine.OcrOptions, pages: list[int], preview: bool = True,
+            new_document: bool = False) -> engine.OcrResult | None:
         doc = view.document
         missing = languages.missing_languages(opts.languages)
         if missing:
             opts.languages = self._resolve_missing(opts.languages, missing)
             if not opts.languages:
+                return None
+        if not self._check_permissions(view, opts.mode, new_document):
+            return None
+        if opts.mode != engine.TEXT_ONLY and not new_document and self._is_signed(view):
+            if not self.ctx.confirm(_("Documento firmato"), _(
+                    "Il documento è firmato digitalmente. Il riconoscimento del testo ne modifica il contenuto: "
+                    "le firme risulteranno non più valide per le modifiche successive. Continuare?")):
                 return None
         with ENGINE_LOCK:
             data = doc.pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_NONE)
@@ -586,6 +595,13 @@ class OcrController(QObject):
                     pdf.close()
         try:
             result = self.ctx.run_task(_("Riconoscimento del testo…"), work)
+        except engine.OcrInterrupted as e:
+            partial = e.partial
+            if opts.mode == engine.TEXT_ONLY or not partial.recognized or not self.ask_keep_partial(partial):
+                self.ctx.status(_("Riconoscimento annullato: il documento non è stato modificato."))
+                return None
+            result = partial
+            preview = False
         except OperationCancelled:
             self.ctx.status(_("Riconoscimento annullato: il documento non è stato modificato."))
             return None
@@ -606,7 +622,7 @@ class OcrController(QObject):
             self.ctx.info(_("Riconoscimento del testo"), msg)
             return result
         if opts.mode == engine.TEXT_ONLY:
-            self.show_text(result.text(), _("Testo riconosciuto"))
+            self.show_text(result.text(), _("Testo riconosciuto"), result=result)
             return result
         if preview:
             with ENGINE_LOCK:
@@ -620,8 +636,91 @@ class OcrController(QObject):
             if not accepted:
                 self.ctx.status(_("OCR non applicato."))
                 return None
-        self.apply(view, result)
+        if new_document:
+            self.apply_new_document(view, result, data)
+        else:
+            self.apply(view, result)
         return result
+
+    # ------------------------------------------------------------- controlli preliminari
+    @staticmethod
+    def _is_signed(view) -> bool:
+        with ENGINE_LOCK:
+            try:
+                return view.document.pdf.get_sigflags() > 0
+            except Exception:
+                return False
+
+    def _check_permissions(self, view, mode: str, new_document: bool) -> bool:
+        """Con permessi che vietano modifica (o estrazione, per il solo testo) serve la password proprietario."""
+        doc = view.document
+        with ENGINE_LOCK:
+            try:
+                perms = doc.pdf.permissions
+            except Exception:
+                return True
+        need = pymupdf.PDF_PERM_COPY if mode == engine.TEXT_ONLY else pymupdf.PDF_PERM_MODIFY
+        if perms & need:
+            return True
+        password = self.ask_owner_password()
+        if not password:
+            return False
+        ok = False
+        try:
+            data = doc.path.read_bytes() if doc.path is not None else None
+            if data is not None:
+                with ENGINE_LOCK:
+                    test = pymupdf.open(stream=data, filetype="pdf")
+                    ok = test.authenticate(password) in (4, 6)
+                    test.close()
+        except Exception:
+            ok = False
+        if not ok:
+            self.ctx.error(_("Password errata"), _("La password del proprietario non è corretta: "
+                                                   "il documento non è stato modificato."))
+        return ok
+
+    def ask_owner_password(self) -> str | None:
+        from PySide6.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(
+            self.ctx.window, _("Permessi del documento"),
+            _("Il documento non consente questa operazione. Inserisci la password del proprietario:"),
+            QLineEdit.EchoMode.Password)
+        return text if ok and text else None
+
+    def ask_keep_partial(self, partial: engine.OcrResult) -> bool:
+        box = QMessageBox(self.ctx.window)
+        box.setWindowTitle(_("Riconoscimento annullato"))
+        box.setText(_("Il riconoscimento è stato interrotto dopo {n} pagine.").format(n=len(partial.recognized)))
+        discard = box.addButton(_("Annulla tutto e ripristina il documento"), QMessageBox.ButtonRole.RejectRole)
+        keep = box.addButton(_("Mantieni le pagine completate"), QMessageBox.ButtonRole.AcceptRole)
+        box.setDefaultButton(discard)
+        box.exec()
+        return box.clickedButton() is keep
+
+    def apply_new_document(self, view, result: engine.OcrResult, data: bytes):
+        from foliant.api import Document
+        try:
+            with ENGINE_LOCK:
+                pdf = pymupdf.open(stream=data, filetype="pdf")
+                try:
+                    engine.apply_result(pdf, result)
+                    out = pdf.tobytes(garbage=3, deflate=True)
+                finally:
+                    pdf.close()
+            stem = os.path.splitext(view.document.display_name)[0]
+            new = Document.from_bytes(out, display_name=_("{n} (OCR).pdf").format(n=stem))
+        except Exception as e:
+            self.ctx.error(_("Riconoscimento non riuscito"),
+                           _("Impossibile applicare il testo riconosciuto: {e}").format(e=e))
+            return None
+        new_view = self.ctx.open_document(new)
+        st = self.state(new_view)
+        for res in result.recognized:
+            st.placed[res.index] = list(res.placed)
+        st.dismissed = True
+        self.ctx.status(_("Risultato aperto in una nuova scheda; l'originale è invariato."), 8000)
+        return new_view
 
     def apply(self, view, result: engine.OcrResult) -> None:
         label = _("Rendi modificabile (OCR)") if result.options.mode == engine.EDITABLE else _("Riconoscimento testo (OCR)")
@@ -682,7 +781,7 @@ class OcrController(QObject):
         return None
 
     # ------------------------------------------------------------- testo
-    def show_text(self, text: str, title: str) -> None:
+    def show_text(self, text: str, title: str, result: engine.OcrResult | None = None) -> None:
         def save(t: str) -> None:
             view = self.ctx.current_view()
             name = os.path.splitext(view.document.display_name)[0] + ".txt" if view else "testo.txt"
@@ -693,7 +792,10 @@ class OcrController(QObject):
                     self.ctx.status(_("Testo salvato in {p}").format(p=path))
                 except Exception as e:
                     self.ctx.error(_("Salvataggio non riuscito"), str(e))
-        self._text_dialog = TextDialog(self.ctx.window, text, title, save)
+        view = self.ctx.current_view()
+        self._text_dialog = TextDialog(self.ctx.window, text, title, save, result=result,
+                                       save_path_cb=self.ctx.ask_save_path,
+                                       source_name=view.document.display_name if view else "")
         self._text_dialog.exec()
 
     def extract_text(self) -> None:

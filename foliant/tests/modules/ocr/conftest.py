@@ -55,7 +55,7 @@ def image_pdf(path, images, dpi=300):
         page = doc.new_page(width=w * 72 / dpi, height=h * 72 / dpi)
         ok, buf = cv2.imencode(".png", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         page.insert_image(page.rect, stream=buf.tobytes())
-    doc.save(str(path))
+    doc.save(str(path), deflate=True)
     doc.close()
     return str(path)
 
@@ -83,3 +83,36 @@ def _no_modal_boxes(monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok))
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+
+
+def scan_words(lines=FRASI, fontsize=12, size=(595, 842), fontname="helv", top=90):
+    """Parole attese (riquadri in punti) della pagina generata da `scan_image` senza inclinazione."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=size[0], height=size[1])
+    y = top
+    for line in lines:
+        page.insert_text((60, y), line, fontsize=fontsize, fontname=fontname)
+        y += fontsize * 1.8
+    words = page.get_text("words")
+    lines_out = page.get_text("dict")["blocks"]
+    # riquadro «visibile» di ogni parola: estensione dell'inchiostro dentro il riquadro metrico
+    zoom = 300 / 72
+    pix = page.get_pixmap(dpi=300, colorspace=pymupdf.csGRAY)
+    g = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w)
+    ink = []
+    for w in words:
+        x0, y0, x1, y1 = (int(v * zoom) for v in w[:4])
+        ys, xs = np.nonzero(g[y0:y1 + 1, x0:x1 + 1] < 128)
+        if len(xs):
+            ink.append(((x0 + xs.min()) / zoom, (y0 + ys.min()) / zoom, (x0 + xs.max() + 1) / zoom,
+                        (y0 + ys.max() + 1) / zoom, w[4]))
+    doc.close()
+    return ink, lines_out
+
+
+def iou(a, b) -> float:
+    a, b = pymupdf.Rect(a), pymupdf.Rect(b)
+    inter = a & b
+    if inter.is_empty:
+        return 0.0
+    return abs(inter) / (abs(a) + abs(b) - abs(inter))
