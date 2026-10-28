@@ -157,6 +157,7 @@ class NavigationController(QObject):
         self.label_box.setProperty("muted", True)
         self.label_box.hide()
         w.statusBar().addPermanentWidget(self.label_box)
+        ctx.add_link_handler(self._link_handler, priority=-100)
         ctx.documentOpened.connect(self._attach)
         ctx.currentViewChanged.connect(lambda _v: self._refresh_later())
         ctx.documentChanged.connect(self._on_content)
@@ -394,14 +395,25 @@ class NavigationController(QObject):
         return links[i] if i < len(links) else None
 
     def activate_link(self, view: DocumentView, link: dict) -> None:
+        from foliant.api import follow_link
+        follow_link(view, link)    # stessa catena di gestori (e controlli di sicurezza) del clic
+
+    def _link_handler(self, view: DocumentView, link: dict) -> bool:
+        """Gestore di ultima istanza per i collegamenti verso altri file e i comandi di avvio:
+        i gestori a priorità più alta (es. Proteggi) possono bloccarli prima di arrivare qui."""
+        try:
+            if view not in self.ctx.views():
+                return False      # vista di un'altra finestra: la gestisce il suo controller
+        except RuntimeError:
+            return False          # finestra già distrutta
         kind = link.get("kind")
-        if kind == pymupdf.LINK_GOTOR:
-            self.open_remote(view, link)
-        elif kind == pymupdf.LINK_LAUNCH:
+        if kind == pymupdf.LINK_GOTOR and link.get("file"):
+            QTimer.singleShot(0, lambda v=view, l=dict(link): self.open_remote(v, l))
+            return True
+        if kind == pymupdf.LINK_LAUNCH:
             view.status(_("Il collegamento chiede di avviare un programma: azione bloccata per sicurezza."))
-        else:
-            from foliant.api import follow_link
-            follow_link(view, link)
+            return True
+        return False
 
     def _paint_focus(self, view, painter, page) -> None:
         st = self._states.get(view)
@@ -494,11 +506,8 @@ class NavigationController(QObject):
                     if not view.selected_text():
                         self._url_click(view, hit[0], hit[1])
                     return False
-                kind = link.get("kind")
-                if kind == pymupdf.LINK_GOTOR:
-                    QTimer.singleShot(0, lambda v=view, l=dict(link): self.open_remote(v, l))
-                elif kind == pymupdf.LINK_LAUNCH:
-                    view.status(_("Il collegamento chiede di avviare un programma: azione bloccata per sicurezza."))
+                # GoToR e Launch passano dalla catena dei gestori del nucleo (follow_link):
+                # vedi `_link_handler`, registrato con priorità bassa.
                 return False
             if t == QEvent.Type.ToolTip:
                 hit = view.view_to_page(QPointF(ev.pos()))

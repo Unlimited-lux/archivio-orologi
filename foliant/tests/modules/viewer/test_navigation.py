@@ -228,3 +228,43 @@ def test_detect_url_in_text(viewer_window, tmp_path, qtbot, monkeypatch):
     _click(qtbot, view, 0, point)
     qtbot.waitUntil(lambda: bool(asked), timeout=1000)
     assert "https://www.esempio.it" in asked[0]
+
+
+def _gotor_source(tmp_path):
+    other = tmp_path / "altro2.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 100), "Altro")
+    doc.save(str(other))
+    src = tmp_path / "sorgente2.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_link({"kind": pymupdf.LINK_GOTOR, "from": pymupdf.Rect(72, 200, 300, 230),
+                                "file": "altro2.pdf", "page": 0, "to": pymupdf.Point(0, 0)})
+    doc.save(str(src))
+    return str(src)
+
+
+def test_gotor_click_goes_through_link_handlers(viewer_window, tmp_path, qtbot):
+    view = viewer_window.open_path(_gotor_source(tmp_path))
+    _click(qtbot, view, 0, (100, 215))
+    qtbot.waitUntil(lambda: len(viewer_window.views()) == 2, timeout=2000)
+
+
+def test_gotor_blocked_by_higher_priority_handler(viewer_window, tmp_path, qtbot):
+    blocked = []
+
+    def guard(view, link):
+        if link.get("kind") == pymupdf.LINK_GOTOR:
+            blocked.append(link["file"])
+            return True
+        return False
+
+    viewer_window.ctx.add_link_handler(guard, priority=100)
+    try:
+        view = viewer_window.open_path(_gotor_source(tmp_path))
+        _click(qtbot, view, 0, (100, 215))
+        qtbot.wait(100)
+        assert blocked == ["altro2.pdf"]
+        assert len(viewer_window.views()) == 1   # nessuna nuova scheda
+    finally:
+        from foliant.ui.tools import remove_link_handler
+        remove_link_handler(guard)
