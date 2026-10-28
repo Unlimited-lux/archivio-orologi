@@ -209,6 +209,9 @@ def register(ctx: Context) -> None:
     acts["extract_all"] = ctx.action(_("Estrai tutte le immagini…"), "images",
                                      lambda: extras.extract_all(ctx, c, ctx.current_view()))
     more.addAction(acts["extract_all"])
+    acts["optimize_doc"] = ctx.action(_("Ottimizza le immagini del documento…"), "shrink",
+                                      lambda: c.optimize_document(ctx.current_view()))
+    more.addAction(acts["optimize_doc"])
     ctx.add_menu_action(acts["extract_all"], "Strumenti")
     more.addSeparator()
     more.addAction(acts["detect_urls"])

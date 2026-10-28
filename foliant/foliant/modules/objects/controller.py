@@ -508,6 +508,58 @@ class ObjectsController(QObject):
             self.status(_("Peso delle immagini: {a} KB → {b} KB").format(
                 a=round(r["before"] / 1024, 1), b=round(r["after"] / 1024, 1)))
 
+    def optimize_document(self, view) -> None:
+        """Ottimizza le immagini di tutte le pagine in un unico passo annullabile."""
+        from . import imaging as IM
+        if view is None:
+            return
+
+        def targets(pdf):
+            out = []
+            for i in range(pdf.page_count):
+                try:
+                    idx = [o.index for o in parse_page(pdf, pdf[i]).objects if o.kind == IMAGE and not o.inline]
+                except Exception:
+                    continue
+                if idx:
+                    out.append((i, idx))
+            return out
+        with ENGINE_LOCK:
+            pages = targets(view.document.pdf)
+        if not pages:
+            self.ctx.info(_("Ottimizza immagini"), _("Il documento non contiene immagini."))
+            return
+
+        def estimate(**kw):
+            before = after = 0
+            with ENGINE_LOCK:
+                for i, idx in pages:
+                    try:
+                        r = IM.estimate_optimization(view.document.pdf, i, idx, **kw)
+                    except E.ObjectError:
+                        continue
+                    before += r["before"]
+                    after += r["after"]
+            return {"before": before, "after": after}
+        vals = D.ask_optimize(self.ctx.window, estimate)
+        if vals is None:
+            return
+
+        def fn(pdf):
+            before = after = 0
+            for i, idx in targets(pdf):
+                try:
+                    r = IM.optimize_images(pdf, i, idx, **vals)
+                except E.ObjectError:
+                    continue
+                before += r["before"]
+                after += r["after"]
+            return {"before": before, "after": after}
+        r = self.run_change(view, _("Ottimizza le immagini del documento"), fn)
+        if r is not None:
+            self.status(_("Peso delle immagini: {a} KB → {b} KB").format(
+                a=round(r["before"] / 1024, 1), b=round(r["after"] / 1024, 1)))
+
     def path_style(self, view) -> None:
         from . import advanced as A
         objs = [o for o in self.selected_objects(view) if o.kind == PATH]

@@ -392,4 +392,6 @@ EN = {
     "Originali": "Original",
     "Salva immagine come appare": "Save image as shown",
     "Salva immagine come appare…": "Save image as shown…",
+    "Ottimizza le immagini del documento": "Optimize document images",
+    "Ottimizza le immagini del documento…": "Optimize document images…",
 }

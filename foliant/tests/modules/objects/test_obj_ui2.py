@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+
 import pymupdf
 import pytest
 from PySide6.QtCore import QSettings, Qt
@@ -414,3 +416,28 @@ def test_save_image_as_shown_cropped_rotated(ui, tmp_path, monkeypatch):
     o = objs(view)[0]
     assert abs(im.width / im.height - o.rect.width / o.rect.height) < 0.05
     assert im.width > im.height   # quarto sinistro (50×100 pt) ruotato di 90°: orizzontale
+
+
+def test_optimize_document_images(ui, tmp_path, monkeypatch):
+    import numpy as np
+    from PIL import Image as PImage
+    from foliant.modules.objects import dialogs as D
+    path = tmp_path / "foto.pdf"
+    doc = pymupdf.open()
+    rng = np.random.default_rng(0)
+    for k in range(2):
+        page = doc.new_page()
+        arr = (rng.random((600, 600, 3)) * 255).astype("uint8")
+        b = io.BytesIO()
+        PImage.fromarray(arr).save(b, "PNG")
+        page.insert_image(pymupdf.Rect(50, 50, 122, 122), stream=b.getvalue())   # 600 px su 1 in
+    doc.save(str(path))
+    view = ui.open(str(path))
+    monkeypatch.setattr(D, "ask_optimize", lambda parent, est: dict(max_ppi=150, mode="jpeg", quality=70))
+    O._state["actions"]["optimize_doc"].trigger()
+    for i in range(2):
+        o = objs(view, i)[0]
+        assert o.width <= 151 and abs(o.rect.width - 72) < 0.5
+    assert view.document.undo_label == "Ottimizza le immagini del documento"
+    view.document.undo()
+    assert objs(view, 0)[0].width == 600

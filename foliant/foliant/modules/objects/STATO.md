@@ -25,7 +25,7 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-15 Eliminare | P0 | fatto | ui: test_delete_key_and_undo; eng (2 XObject dopo salvataggio, logo condiviso) | Pulizia dell'albero di struttura non fatta. |
 | OBJ-16 Opacità | P1 | fatto | ui: test_opacity_slider_single_step; eng (/ca 0.5, pixel 127–128, riuso ExtGState) | Avviso PDF/A non fatto. |
 | OBJ-17 Regolazioni immagine | P2 | fatto | img; ui2: test_image_tools_actions | Anteprima in tempo reale non fatta. |
-| OBJ-18 Ottimizza immagini | P2 | fatto | img; ui2: test_image_tools_actions | JPEG/senza perdita; niente JPEG 2000/CCITT. |
+| OBJ-18 Ottimizza immagini | P2 | fatto | img; ui2: test_image_tools_actions, test_optimize_document_images | Immagini selezionate o tutto il documento (un passo annullabile); JPEG/senza perdita; niente JPEG 2000/CCITT. |
 | OBJ-19 Applicazione esterna | P2 | fatto | ui2: test_external_edit_roundtrip | |
 | OBJ-20 Ordine di sovrapposizione | P1 | fatto | ui: test_reorder_front_shortcut; eng | |
 | OBJ-21 Allineare | P1 | fatto | ui: test_arrange_actions; eng | Riferimento «Oggetto chiave» solo nel motore. |
