@@ -322,3 +322,12 @@ def test_files_does_not_use_recent_list(fwin, ctl, sample_pdf, tmp_path, monkeyp
     ctl.trash_paths([moved])
     assert calls == []
     assert not hasattr(ctl, "fill_recent_menu")
+    for name in ("act_pin", "act_unpin", "ask_missing_recent", "remove_missing_recent"):
+        assert not hasattr(ctl, name), name
+    # nulla viene salvato: nelle impostazioni non restano nomi o cartelle dei file
+    s = fwin.ctx.settings()
+    s.sync()
+    for key in s.allKeys():
+        text = f"{key}={s.value(key)}"
+        for trace in ("zq7k", "esempio.pdf", str(tmp_path)):
+            assert trace not in text, key

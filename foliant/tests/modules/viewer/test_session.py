@@ -138,7 +138,7 @@ def test_no_history_actions_and_preferences(viewer_window):
 
 def test_legacy_keys_removed_at_startup(qtbot, settings, tmp_path):
     """Chi aggiorna da una versione precedente: posizioni, sessione e cronologie salvate
-    vengono cancellate al primo avvio (una volta sola, senza riaprire nulla)."""
+    vengono cancellate all'avvio (senza riaprire nulla e senza scrivere marcatori)."""
     old = _make(tmp_path, "zq7k-vecchio.pdf", pages=3)
     settings.setValue("viewer/positions", json.dumps({old: {"page": 2, "zoom": 1.0, "t": 1}}))
     settings.setValue("viewer/session", json.dumps({"tabs": [{"path": old, "page": 1}], "current": 0}))
@@ -155,12 +155,14 @@ def test_legacy_keys_removed_at_startup(qtbot, settings, tmp_path):
         for key in LEGACY_KEYS:
             assert not settings.contains(key), key
         assert settings.value("viewer/reading_theme") == "sepia"
-        assert int(settings.value("viewer/privacy_cleanup")) >= 1
+        assert not settings.contains("viewer/privacy_cleanup")  # nessun marcatore
         assert "zq7k" not in _viewer_values(settings)
-        # una volta sola: una chiave rimessa da fuori non viene più cercata
-        settings.setValue("viewer/no_history", True)
+        # idempotente: ricontrolla a ogni avvio, ma senza nulla da togliere non fa nulla
         from foliant.modules.viewer import privacy
         assert privacy.run_once(settings) is False
+        settings.setValue("viewer/no_history", True)
+        assert privacy.run_once(settings) is True
+        assert not settings.contains("viewer/no_history")
     finally:
         _cleanup(win)
 

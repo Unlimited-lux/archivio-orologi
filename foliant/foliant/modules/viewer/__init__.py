@@ -58,7 +58,7 @@ def register(ctx: Context) -> None:
         from . import privacy
         privacy.startup_cleanup(ctx.settings())
     except Exception:
-        log.warning("viewer: pulizia di riservatezza non eseguita")
+        log.warning("viewer: privacy cleanup not run")
     # Per lo sviluppo: FOLIANT_VIEWER_PARTS="thumbnails,bookmarks" carica solo quelle parti.
     only = {p.strip() for p in os.environ.get("FOLIANT_VIEWER_PARTS", "").split(",") if p.strip()}
     for name in PARTS:
