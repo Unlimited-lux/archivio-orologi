@@ -818,3 +818,6 @@ EN.update({
     "Scegli un nome diverso dall'originale.": "Choose a name different from the original.",
     "Copia riparata salvata: {n}": "Repaired copy saved: {n}",
 })
+
+EN.update({"Avvisi: {n}": "Warnings: {n}", "Dettagli": "Details", "Mostra cartella": "Show folder",
+           "Saltati: {n}": "Skipped: {n}", "{t}: {n} avvisi": "{t}: {n} warnings"})
