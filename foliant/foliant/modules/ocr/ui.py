@@ -24,7 +24,8 @@ from . import detect, engine, languages
 from .dialogs import BatchDialog, LanguagesDialog, OcrDialog, ReportDialog, ReviewDialog, TextDialog
 from .tess import OcrError
 
-ANALYSIS_BUDGET_MS = 25      # tempo massimo di analisi per passo nel thread dell'interfaccia
+ANALYSIS_BUDGET_MS = 10      # tempo massimo di analisi per passo nel thread dell'interfaccia
+ANALYSIS_PAGES = 20          # pagine analizzate all'apertura per decidere se proporre l'OCR
 
 
 # =================================================================== stato per vista
@@ -32,6 +33,7 @@ ANALYSIS_BUDGET_MS = 25      # tempo massimo di analisi per passo nel thread del
 class ViewState:
     infos: dict[int, detect.PageInfo] = field(default_factory=dict)
     order: list[int] = field(default_factory=list)
+    deferred: list[int] = field(default_factory=list)   # oltre ANALYSIS_PAGES: analizzate su richiesta
     version: int = -1
     dismissed: bool = False             # «Non ora»: per questa sessione
     never: bool = False                 # «Non chiedere più per questo documento»
@@ -46,7 +48,7 @@ class ViewState:
 
     @property
     def complete(self) -> bool:
-        return not self.order
+        return not self.order and not self.deferred
 
 
 # =================================================================== barra proposta
@@ -621,7 +623,11 @@ class OcrController(QObject):
         except Exception:
             pass
         rest = [i for i in range(view.page_count) if i not in visible]
-        st.order = list(visible) + rest
+        # all'apertura bastano le prime pagine per decidere se proporre l'OCR: un PDF di 500 pagine
+        # non tiene occupato il thread dell'interfaccia mentre si scorre o si cerca (NFR-07)
+        order = list(visible) + rest
+        st.order = order[:ANALYSIS_PAGES]
+        st.deferred = order[ANALYSIS_PAGES:]
         st.version = view.document.version
         st.started = time.monotonic()
         if quiet and st.bar is not None and st.bar.page is None:
@@ -661,6 +667,35 @@ class OcrController(QObject):
             st.timer.stop()
         self._update_bar(view)
 
+    def complete_analysis(self, view) -> None:
+        """Completa l'analisi di tutte le pagine (azione dell'utente: impostazioni, dettagli)."""
+        st = self.state(view)
+        if st.complete:
+            return
+        with ENGINE_LOCK:
+            pdf = view.document.pdf
+            for i in st.order + st.deferred:
+                if i < pdf.page_count and i not in st.infos:
+                    try:
+                        st.infos[i] = detect.classify_page(pdf[i])
+                    except Exception:
+                        pass
+            st.order.clear()
+            st.deferred.clear()
+
+    def page_info(self, view, index: int):
+        """Classificazione di una pagina, calcolata al momento se l'analisi non ci è ancora arrivata."""
+        st = self.state(view)
+        inf = st.infos.get(index)
+        if inf is None and 0 <= index < view.page_count:
+            with try_engine() as ok:
+                if ok:
+                    try:
+                        inf = st.infos[index] = detect.classify_page(view.document.pdf[index])
+                    except Exception:
+                        inf = None
+        return inf
+
     def _update_bar(self, view) -> None:
         st = self.state(view)
         found = st.detected
@@ -693,6 +728,7 @@ class OcrController(QObject):
             st.bar.hide()
 
     def show_details(self, view) -> None:
+        self.complete_analysis(view)
         st = self.state(view)
         dlg = QDialog(self.ctx.window)
         dlg.setWindowTitle(_("Pagine da riconoscere"))
@@ -741,7 +777,7 @@ class OcrController(QObject):
                     editing = self.ctx.current_mode() == "modifica" or "edit" in tool_id or "modif" in tool_id
                     if tool_id == "select-text" or editing:
                         hit = view.view_to_page(ev.position())
-                        inf = st.infos.get(hit[0]) if hit is not None else None
+                        inf = self.page_info(view, hit[0]) if hit is not None else None
                         if inf is not None:
                             image_only = inf.category == detect.IMAGE_ONLY and not view.words(hit[0])
                             # testo solo invisibile (livello OCR): non si modifica, si propone di convertirlo
@@ -762,14 +798,7 @@ class OcrController(QObject):
         if view is None:
             return
         st = self.state(view)
-        if not st.complete:
-            # completa l'analisi per proporre le pagine senza testo
-            with ENGINE_LOCK:
-                pdf = view.document.pdf
-                for i in list(st.order):
-                    if i < pdf.page_count:
-                        st.infos[i] = detect.classify_page(pdf[i])
-                st.order.clear()
+        self.complete_analysis(view)
         detected = st.detected
         text = engine.format_pages(pages) if pages and pages != detected else None
         dlg = OcrDialog(self.ctx.window, page_count=view.page_count, current_page=view.current_page,

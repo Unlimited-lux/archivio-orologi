@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 import pymupdf
 import pytest
@@ -1103,3 +1104,31 @@ def test_pannello_parole_incerte_pulsanti_non_tagliati(window, qtbot, scan_two, 
         window.ctx.ocr.actions["review"].setChecked(False)
         if old is not None:
             i18n.set_language(old)
+
+
+def test_analisi_all_apertura_limitata_e_a_passi_brevi(window, qtbot, tmp_path, monkeypatch):
+    """NFR-07: aprendo un PDF di 500 pagine la classificazione nel thread dell'interfaccia si ferma
+    alle prime pagine, a passi brevi; il resto si analizza solo su richiesta (dialogo, clic)."""
+    doc = pymupdf.open()
+    for k in range(500):
+        doc.new_page().insert_text((72, 72), f"Pagina {k + 1} di un catalogo di orologi")
+    path = tmp_path / "lungo.pdf"
+    doc.save(path)
+    doc.close()
+    ctl = ocr_controller()
+    steps = []
+    original = ctl._analysis_step
+
+    def timed(view):
+        t0 = time.perf_counter()
+        original(view)
+        steps.append(time.perf_counter() - t0)
+    monkeypatch.setattr(ctl, "_analysis_step", timed)
+    view = window.open_path(str(path))
+    qtbot.waitUntil(lambda: not ctl.state(view).order, timeout=5000)
+    st = ctl.state(view)
+    assert len(st.infos) <= ui.ANALYSIS_PAGES and st.deferred
+    assert steps and max(steps) < 0.02, max(steps)
+    assert ctl.page_info(view, 400).category == detect.TEXT        # su richiesta
+    ctl.complete_analysis(view)
+    assert len(st.infos) == 500 and st.complete
