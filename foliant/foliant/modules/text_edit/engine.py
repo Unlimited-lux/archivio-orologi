@@ -14,6 +14,7 @@ posizione. Le righe la cui composizione non cambia restano intatte.
 from __future__ import annotations
 
 import math
+import zlib
 from dataclasses import dataclass, field
 
 import pymupdf
@@ -107,6 +108,7 @@ def remove_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | 
                 piece = Piece(x, part, w.style, choice, width)
                 writer.write_piece(piece, ln.baseline, render_mode=3 if inv else 0)
                 x += width
+    writer.flush()
 
 
 def _redact_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | None = None) -> None:
@@ -252,6 +254,41 @@ def _draw_line(page: pymupdf.Page, p0, p1, **kw) -> None:
         page.draw_line(p0, p1, **kw)
 
 
+_ACTIVE_WRITERS: list = []
+
+
+def flush_writers() -> None:
+    """Completa tutte le scritture in sospeso (da chiamare prima di rileggere la pagina)."""
+    for w in list(_ACTIVE_WRITERS):
+        w.flush()
+
+
+def _subset_font(data: bytes, chars: set[str]) -> bytes:
+    """Sottoinsieme del programma del font con i soli caratteri usati (fontTools); altrimenti intero."""
+    if not chars or len(data) < 20000:
+        return data
+    try:
+        import io
+
+        from fontTools import subset
+        from fontTools.ttLib import TTFont
+        font = TTFont(io.BytesIO(data), fontNumber=0)
+        opts = subset.Options()
+        opts.notdef_outline = True
+        opts.name_IDs = ["*"]
+        opts.name_languages = ["*"]
+        opts.drop_tables += ["DSIG"]
+        opts.hinting = True
+        sub = subset.Subsetter(opts)
+        sub.populate(unicodes={ord(c) for c in chars} | {32})
+        sub.subset(font)
+        out = io.BytesIO()
+        font.save(out)
+        return out.getvalue()
+    except Exception:
+        return data
+
+
 class _Writer:
     """Scrive righe composte nella pagina."""
 
@@ -261,18 +298,40 @@ class _Writer:
         self.rot = page.rotation
         self.unframe = unframe_matrix(page)
         self.frame = frame_matrix(page)
-        self._fonts: set[str] = set()
+        self._fonts: dict[str, str] = {}
+        # le scritture sono accodate: alla fine si incorporano i font come sottoinsieme dei soli
+        # caratteri usati (TXT-06/TXT-10), poi si scrive nell'ordine originale
+        self._queue: list[tuple] = []
+        self._chars: dict[str, set[str]] = {}
+        self._choices: dict[str, object] = {}
+        _ACTIVE_WRITERS.append(self)
 
     def _font(self, piece: Piece) -> str:
         choice = piece.choice
         if choice.base14:
             return choice.base14
-        if choice.key not in self._fonts:
-            existing = {f[4] for f in self.page.get_fonts(full=True)}
-            if choice.key not in existing:
-                self.page.insert_font(fontname=choice.key, fontbuffer=choice.data())
-            self._fonts.add(choice.key)
-        return choice.key
+        return self._fonts[choice.key]
+
+    def flush(self) -> None:
+        if self in _ACTIVE_WRITERS:
+            _ACTIVE_WRITERS.remove(self)
+        if not self._queue:
+            return
+        existing = {f[4] for f in self.page.get_fonts(full=True)}
+        for key, choice in self._choices.items():
+            chars = self._chars.get(key, set())
+            data = choice.data()
+            sub = _subset_font(data, chars)
+            alias = key
+            if sub is not data:
+                alias = "%s%06x" % (key[:10], zlib.crc32("".join(sorted(chars)).encode("utf-8")) & 0xFFFFFF)
+            if alias not in existing:
+                self.page.insert_font(fontname=alias, fontbuffer=sub)
+                existing.add(alias)
+            self._fonts[key] = alias
+        queue, self._queue = self._queue, []
+        for fn, args, kwargs in queue:
+            fn(*args, **kwargs)
 
     def _morph(self, origin: pymupdf.Point, m: pymupdf.Matrix) -> tuple:
         """Trasformazione `m` (riquadro di lavoro) attorno a `origin`, espressa nella pagina non ruotata."""
@@ -288,6 +347,14 @@ class _Writer:
 
     def write_piece(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
                     angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
+        choice = piece.choice
+        if not choice.base14:
+            self._choices.setdefault(choice.key, choice)
+            self._chars.setdefault(choice.key, set()).update(piece.text)
+        self._queue.append((self._write_piece_now, (piece, baseline, render_mode, hscale, angle, origin), {}))
+
+    def _write_piece_now(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
+                         angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
         st = piece.style
         fontname = self._font(piece)
         y = baseline - st.rise
@@ -447,6 +514,7 @@ def replace_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, para
     for pl in to_write:
         writer.write_line(pl)
     bbox = lay.bbox
+    flush_writers()
     orphans = reanchor(page, anchors, bbox | block.bbox) if anchors else 0
     area = visible_area(page)
     return EditResult(bbox=bbox, substitutions=_substitutions(resolver, paragraphs), changed=True,
@@ -594,6 +662,7 @@ def move_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, dx: flo
         for pl in lines:
             writer.write_line(pl)
     subs = _substitutions(resolver, block.paragraphs)
+    flush_writers()
     orphans = reanchor(dst, anchors, moved) if anchors else 0
     return EditResult(bbox=moved, substitutions=subs, changed=True, orphans=orphans)
 
@@ -866,3 +935,21 @@ def restack_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, fron
         else:
             writer.write_line(pl)
     return EditResult(bbox=block.bbox, changed=True)
+
+
+def _flushing(fn):
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            flush_writers()
+    return wrapper
+
+
+for _name in ("replace_block", "replace_invisible_block", "delete_block", "move_block", "resize_block",
+              "restyle_block", "add_text", "paste_block", "convert_invisible_block", "align_blocks",
+              "distribute_blocks", "rotate_block", "restack_block"):
+    globals()[_name] = _flushing(globals()[_name])

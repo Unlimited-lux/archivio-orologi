@@ -772,3 +772,17 @@ def test_price_in_subset_font_stays_on_one_line(tmp_path):
     assert "€ 9.800,00" in texts and len(lines) == 2
     price = [ln for ln in lines if "9.800" in ln.text][0]
     assert abs(price.x1 - 400) <= 1.5
+
+
+def test_new_font_embedded_as_subset(tmp_path):
+    """Un font aggiunto da Foliant viene incorporato come sottoinsieme, non intero."""
+    doc = pymupdf.open()
+    doc.new_page()
+    d = Document.open(save(doc, tmp_path / "vuoto.pdf"))
+    with d.change("Aggiungi") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(72, 100),
+                        [[Run("Totale — € 9.800,00", __import__("foliant.modules.text_edit.model", fromlist=["Style"]).Style(font="DejaVu Sans", size=12))]])
+    out = tmp_path / "sub.pdf"
+    d.save(out)
+    assert out.stat().st_size < 60_000          # DejaVu Sans intero supera 700 KB
+    assert "Totale — € 9.800,00" in pymupdf.open(str(out))[0].get_text()
