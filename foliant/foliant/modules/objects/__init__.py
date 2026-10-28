@@ -374,7 +374,8 @@ def _context_menu(ctx: Context, c: ObjectsController, view, pe, menu: QMenu) -> 
 
 
 def _has_internal() -> bool:
-    from . import controller as ctl
+    import importlib
+    ctl = importlib.import_module(__name__ + ".controller")   # il modulo, non la funzione controller()
     return ctl._last_payload is not None
 
 

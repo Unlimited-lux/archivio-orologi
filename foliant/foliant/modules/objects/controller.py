@@ -65,6 +65,10 @@ class ObjectsController(QObject):
     def _on_document_changed(self, view) -> None:
         self._cache.clear()
         self._link_cache.clear()
+        if view is not None and view.tool is self.link_tool and self.link_tool.drag is None:
+            # gli xref selezionati possono non essere più validi dopo una modifica esterna allo strumento
+            valid = {i.xref for i in self.links(view, self.link_tool.page)} if self.link_tool.page is not None else set()
+            self.link_tool.selection = [x for x in self.link_tool.selection if x in valid]
         if view is self.view and self.sel_page is not None:
             parsed = self.parsed(view, self.sel_page, quiet=True)
             n = len(parsed.objects) if parsed else 0

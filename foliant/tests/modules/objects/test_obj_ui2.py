@@ -317,3 +317,57 @@ def test_background_parse(ui, tmp_path, monkeypatch, qtbot):
     assert ui.c.parsed(view, 0, quiet=True, background=True) is None
     qtbot.waitUntil(lambda: ui.c.parsed(view, 0, quiet=True, background=True) is not None, timeout=5000)
     assert len(ui.c.parsed(view, 0).objects) == 1
+
+
+def test_context_menu_full_on_selected_object(ui, tmp_path):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QMenu
+    from foliant.api import PageEvent
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 70, 250, 170)]))
+    QGuiApplication.clipboard().setText("solo testo")
+    statuses = []
+    view.statusMessage.connect(statuses.append)
+    menu = QMenu()
+    pe = PageEvent(0, pymupdf.Point(100, 100), QPointF(0, 0), Qt.MouseButton.RightButton,
+                   Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier)
+    for provider in view.menu_providers:
+        provider(view, pe, menu)
+    texts = [a.text() for a in menu.actions()]
+    assert not any("Errore" in s for s in statuses), statuses
+    for t in ("Elimina", "Ruota a sinistra", "Capovolgi orizzontalmente", "Sostituisci immagine…",
+              "Salva immagine come…"):
+        assert t in texts, texts
+
+
+def test_link_selection_after_save(ui, tmp_path):
+    path = tmp_path / "l3.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    for k, name in enumerate(("uno", "due", "tre")):
+        L.create_link(doc, 0, pymupdf.Rect(50, 50 + 40 * k, 150, 70 + 40 * k), L.LinkTarget(kind=L.URI, uri=f"https://{name}.it"))
+    doc.save(str(path))
+    view = ui.open(str(path))
+    view.set_tool(ui.c.link_tool)
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, vpos(view, 0, 100, 60))
+    QTest.keyClick(view, Qt.Key.Key_Delete)
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, vpos(view, 0, 100, 100))
+    view.document.save()
+    QTest.keyClick(view, Qt.Key.Key_Delete)
+    with O.ENGINE_LOCK:
+        left = [i.target.uri for i in L.page_links(view.document.pdf, 0)]
+    assert left == ["https://tre.it"]
+
+
+def test_reinsert_image_after_save_is_correct(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[]))
+    red, blue = png_bytes(30, 30, (255, 0, 0)), png_bytes(30, 30, (0, 0, 255))
+    ui.c.insert_image_bytes(view, [red], 0, pymupdf.Point(200, 200))
+    ui.c.delete(view)
+    ui.c.insert_image_bytes(view, [blue], 0, pymupdf.Point(200, 200))
+    view.document.save()
+    ui.c.insert_image_bytes(view, [red], 0, pymupdf.Point(400, 400))
+    with O.ENGINE_LOCK:
+        o = objs(view)[-1]
+        pix = view.document.pdf[0].get_pixmap(dpi=72, clip=o.rect)
+    r, g, b = pix.pixel(pix.width // 2, pix.height // 2)[:3]
+    assert r > 200 and b < 60
