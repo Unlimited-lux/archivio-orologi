@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from foliant.i18n import pgettext
 from foliant.api import ENGINE_LOCK, Document, FoliantError, OperationCancelled, _, icon, theme
 
 from . import engine as E
@@ -39,7 +40,7 @@ TRANSLATIONS = {
     "Alla fine": "At the end",
     "Inserisci pagine vuote": "Insert blank pages",
     "Quantità:": "Count:",
-    "Formato:": "Size:",
+    "pagina\x04Formato:": "Size:",
     "Come la pagina adiacente": "Same as adjacent page",
     "Personalizzato": "Custom",
     "Larghezza:": "Width:",
@@ -413,7 +414,7 @@ class InsertBlankDialog(BaseDialog):
         for name in E.PAPER_SIZES:
             self.size.addItem(name, name)
         self.size.addItem(_("Personalizzato"), "custom")
-        form.addRow(_("Formato:"), self.size)
+        form.addRow(pgettext("pagina", "Formato:"), self.size)
         self.width = QDoubleSpinBox()
         self.height = QDoubleSpinBox()
         for sb in (self.width, self.height):

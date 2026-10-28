@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from foliant.i18n import pgettext
 from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, Document, _, icon, theme
 
@@ -52,8 +53,8 @@ TRANSLATIONS = {
     "Pari": "Even",
     "Dispari": "Odd",
     "es. 1-3, 8, 10-": "e.g. 1-3, 8, 10-",
-    "Nessuna pagina selezionata.": "No pages selected.",
-    "Nessuna pagina corrisponde ai criteri indicati.": "No pages match the given criteria.",
+    "Nessuna pagina selezionata.": "No page selected.",
+    "Nessuna pagina corrisponde ai criteri indicati.": "No page matches the given criteria.",
     "Anteprima": "Preview",
     "Anteprima: pagina {n}": "Preview: page {n}",
     "Margini": "Margins",
@@ -111,7 +112,7 @@ TRANSLATIONS = {
     "In {n} pagine il riquadro è stato limitato al supporto.": "On {n} pages the box was clipped to the media.",
     "Sono presenti sia il formato finito sia l'area grafica: i profili PDF/X ne richiedono uno solo.":
         "Both trim and art boxes are present: PDF/X profiles require only one.",
-    "Formato": "Size",
+    "pagina\x04Formato": "Size",
     "Orientamento": "Orientation",
     "Automatico (come la pagina)": "Automatic (as the page)",
     "Verticale": "Portrait",
@@ -1038,7 +1039,7 @@ class BoxesDialog(_LayoutDialog):
         self.trim_w = _spin(210, 3, 5000, 1, "mm")
         self.trim_h = _spin(297, 3, 5000, 1, "mm")
         self.bleed = _spin(3, 0, 100, 1, "mm")
-        tf.addWidget(QLabel(_("Formato")), 0, 0)
+        tf.addWidget(QLabel(pgettext("pagina", "Formato")), 0, 0)
         tf.addWidget(self.paper, 0, 1)
         tf.addWidget(QLabel(_("Abbondanza")), 0, 2)
         tf.addWidget(self.bleed, 0, 3)
@@ -1211,7 +1212,7 @@ class ResizeDialog(_LayoutDialog):
     ICON = "scaling"
 
     def build(self) -> None:
-        box = QGroupBox(_("Formato"))
+        box = QGroupBox(pgettext("pagina", "Formato"))
         f = QFormLayout(box)
         self.paper = _paper_combo("A4")
         self.width_mm = _spin(210, 3, 5080, 1, "mm")
@@ -1220,7 +1221,7 @@ class ResizeDialog(_LayoutDialog):
         for key, text in (("auto", _("Automatico (come la pagina)")), ("portrait", _("Verticale")),
                           ("landscape", _("Orizzontale"))):
             self.orientation.addItem(text, key)
-        f.addRow(_("Formato"), self.paper)
+        f.addRow(pgettext("pagina", "Formato"), self.paper)
         f.addRow(_("Larghezza"), self.width_mm)
         f.addRow(_("Altezza"), self.height_mm)
         f.addRow(_("Orientamento"), self.orientation)

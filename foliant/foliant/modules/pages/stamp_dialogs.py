@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from foliant.i18n import pgettext
 from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, _, icon, theme
 
@@ -829,7 +830,7 @@ class PageNumbersDialog(StampDialog):
         for key, text in (("none", _("Nessuna")), ("outer", _("Lato esterno (dispari a destra)")),
                           ("inner", _("Lato interno (dispari a sinistra)"))):
             self.mirror.addItem(text, key)
-        f.addRow(_("Formato:"), self.fmt)
+        f.addRow(pgettext("numero", "Formato:"), self.fmt)
         f.addRow(_("Stile:"), self.num_style)
         f.addRow(_("Fronte/retro:"), self.mirror)
         f.addRow("", _hint(_("{n} numero, {total} ultimo numero, {label} etichetta di pagina")))
@@ -1291,8 +1292,8 @@ TRANSLATIONS: dict[str, str] = {
     'i, ii, iii': 'i, ii, iii',
     'Aggiungi regola': 'Add rule',
     'Al centro': 'Center',
-    'Al centro a destra': 'Middle right',
-    'Al centro a sinistra': 'Middle left',
+    'Al centro a destra': "Center right",
+    'Al centro a sinistra': "Center left",
     'Annulla': 'Cancel',
     'Anteprima': 'Preview',
     'Anteprima non disponibile': 'Preview not available',
@@ -1320,7 +1321,7 @@ TRANSLATIONS: dict[str, str] = {
     'Filigrane': 'Watermarks',
     'Formato data:': 'Date format:',
     'Formato della data non valido.': 'Invalid date format.',
-    'Formato:': 'Format:',
+    "numero\x04Formato:": "Format:",
     'Il documento non contiene filigrane, sfondi o numerazioni aggiunti con Foliant.': 'The document contains no watermarks, backgrounds or numbering added with Foliant.',
     'Il formato del numero non può essere vuoto.': 'The number format cannot be empty.',
     'Immagine': 'Image',
