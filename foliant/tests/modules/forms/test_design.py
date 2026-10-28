@@ -275,3 +275,78 @@ def test_design_screenshot(qtbot, window, form_pdf, tmp_path):
     view.flush_rendering()
     QApplication.processEvents()
     assert not window.grab().isNull()
+
+
+def test_preview_discard(qtbot, window, form_pdf, monkeypatch):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    m.toggle_preview(True)
+    m.import_values({"nome": "a", "cognome": "b", "paese": "IT"}, view)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    m.toggle_preview(False)
+    assert values(view)["nome"] == "" and values(view)["paese"] == ""
+
+
+def test_tab_numbers_overlay(window, form_pdf):
+    view = open_form(window, form_pdf)
+    window.ctx.set_mode("moduli")
+    m = module()
+    m.toggle_tab_numbers(True)
+    view.flush_rendering()
+    img = view.viewport().grab().toImage()
+    nome = [f for f in fields(view) if f.name == "nome"][0]
+    r = view.page_to_view(0, pymupdf.Rect(nome.rect.x0 - 1, nome.rect.y0 - 1, nome.rect.x0 + 1, nome.rect.y0 + 1))
+    c = img.pixelColor(r.center().toPoint())
+    assert c.red() > c.blue() + 50  # cerchio nel colore secondario (arancio)
+    m.toggle_tab_numbers(False)
+
+
+def test_image_field_fit_and_size(window, blank_view, tmp_path, monkeypatch, no_modal_boxes):
+    from PIL import Image
+    view = blank_view
+    window.ctx.set_mode("moduli")
+    m = module()
+    m.create_field(view, 0, "image", pymupdf.Rect(50, 50, 250, 150))
+    img = Image.new("RGB", (4000, 3000), (200, 30, 30))
+    p = tmp_path / "foto.jpg"
+    img.save(p, quality=95)
+    before = len(view.document.to_bytes())
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [str(p)])
+    window.ctx.set_mode("leggi")
+    f = filler_of(view)
+    f.state.refresh(force=True)
+    info = [i for i in f.state.fields if i.kind == E.BUTTON][0]
+    f.click_field(info)
+    data = view.document.to_bytes()
+    assert not no_modal_boxes, no_modal_boxes
+    assert len(data) - before < 2_000_000
+    again = pymupdf.open("pdf", data)
+    pix = again[0].get_pixmap(dpi=72)
+    # al centro del campo il colore dell'immagine; ai lati (fuori dai 133 pt centrali) lo sfondo
+    cx = pix.pixel(150, 100)
+    side = pix.pixel(55, 100)
+    assert cx[0] > 150 and cx[1] < 80
+    assert side[1] > 200
+
+
+def test_button_actions_reset_and_hide(window, tmp_path):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    for i, n in enumerate("ABC"):
+        x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50 + 30 * i, 200, 70 + 30 * i), n)
+        E.set_value(pdf, 0, x, "v" + n)
+    b1 = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 50, 380, 70), "reset")
+    E.set_button_action(pdf, 0, b1, {"type": "reset", "fields": ["A", "B"]})
+    b2 = E.create_field(pdf, 0, E.BUTTON, pymupdf.Rect(300, 90, 380, 110), "hide")
+    E.set_button_action(pdf, 0, b2, {"type": "hide", "fields": ["C"]})
+    pdf.save(str(tmp_path / "b.pdf"))
+    view = open_form(window, tmp_path / "b.pdf")
+    f = filler_of(view)
+    f.click_field([i for i in f.state.fields if i.name == "reset"][0])
+    v = values(view)
+    assert v["A"] == "" and v["B"] == "" and v["C"] == "vC"
+    f.state.refresh()
+    f.click_field([i for i in f.state.fields if i.name == "hide"][0])
+    c = [i for i in fields(view) if i.name == "C"][0]
+    assert c.hidden

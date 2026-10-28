@@ -342,8 +342,27 @@ class FormFiller(QObject):
         view.horizontalScrollBar().valueChanged.connect(self.reposition)
         view.layoutChanged.connect(self.reposition)
         view.contentChanged.connect(self._on_content_changed)
+        self.document.add_listener(self._on_document_event)
         self.state.refresh(force=True)
         self.update_bar()
+        QTimer.singleShot(0, self.repair_on_open)
+
+    def repair_on_open(self) -> None:
+        """Aspetti mancanti (/NeedAppearances) o widget non collegati al modulo: si
+        generano/ricollegano subito, così il salvataggio li scrive (FRM-01, FRM-09)."""
+        doc = self.document
+        if doc.closed or self.state.xfa == "dynamic" or not self.state.fields:
+            return
+        with ENGINE_LOCK:
+            needed = E.needs_appearances(doc.pdf) or E.orphan_count(doc.pdf) > 0
+        if not needed:
+            return
+        try:
+            with doc.change(_("Ripara il modulo")) as pdf:
+                E.prepare_for_edit(pdf)
+        except Exception:
+            return
+        self.ctx.status(_("Modulo riparato: aspetti dei campi generati e campi ricollegati."))
 
     # ------------------------------------------------------------------ utilità
     @property
@@ -375,7 +394,27 @@ class FormFiller(QObject):
         self.update_bar()
         self.changed.emit()
 
+    def _on_document_event(self, _doc, kind: str) -> None:
+        """Il salvataggio compatta il file e può rinumerare gli oggetti: si rileggono i campi."""
+        if kind != "saved":
+            return
+        active = self.active
+        self.state.refresh(force=True)
+        if active is not None:
+            again = next((f for f in self.state.by_page.get(active.page, [])
+                          if f.name == active.name and f.rect == active.rect), None)
+            if again is None:
+                self.close_editor(commit=False)
+            else:
+                self.active = again
+        self.module.document_saved(self.view)
+        self.changed.emit()
+
     def dispose(self) -> None:
+        try:
+            self.document.remove_listener(self._on_document_event)
+        except Exception:
+            pass
         self.close_editor(commit=False)
         try:
             self.view.overlays.remove(self.paint_overlay)

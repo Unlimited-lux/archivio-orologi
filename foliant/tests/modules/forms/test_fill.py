@@ -364,3 +364,34 @@ def test_shared_widgets_same_value(qtbot, window, tmp_path):
     again = pymupdf.open(str(out))
     assert E.form_values(again) == {"Nome": "Lia"}
     assert all("Lia" in again[i].get_text() for i in range(3))
+
+
+def test_need_appearances_fixed_on_open_and_save(window, tmp_path):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "A")
+    E.set_value(pdf, 0, x, "valore")
+    pdf.xref_set_key(x, "AP", "null")
+    pdf.xref_set_key(pdf.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+    path = tmp_path / "na.pdf"
+    pdf.save(str(path))
+    view = open_form(window, path)
+    QApplication.processEvents()
+    out = tmp_path / "na2.pdf"
+    view.document.save(out)
+    again = pymupdf.open(str(out))
+    w = E.list_fields(again)[0]
+    assert again.xref_get_key(w.xref, "AP/N")[0] == "xref"
+    assert not E.needs_appearances(again)
+
+
+def test_reset_skips_signature_locked():
+    pdf = build_form()
+    s = E.create_field(pdf, 0, E.SIGNATURE, pymupdf.Rect(300, 300, 450, 340), "firma")
+    fx = E._field_xref(pdf, s)
+    pdf.xref_set_key(fx, "V", "<<>>")
+    pdf.xref_set_key(fx, "Lock", "<</Type/SigFieldLock/Action/Include/Fields[(nome)]>>")
+    E.apply_values(pdf, {"nome": "Bloccato", "cognome": "Libero"})
+    E.reset_form(pdf)
+    vals = E.form_values(pdf)
+    assert vals["nome"] == "Bloccato" and vals["cognome"] == ""

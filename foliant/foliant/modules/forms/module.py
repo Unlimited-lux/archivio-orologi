@@ -15,7 +15,7 @@ from foliant.api import ENGINE_LOCK, OperationCancelled, _, bind_icon, icon
 from . import detect as D
 from . import engine as E
 from . import interchange as X
-from .design import KIND_ICONS, FieldCreateTool, FieldSelectTool, paint_fields
+from .design import KIND_ICONS, FieldCreateTool, FieldSelectTool, paint_fields, paint_tab_numbers
 from .fill import FormFiller
 
 if TYPE_CHECKING:
@@ -123,6 +123,9 @@ class FormsModule(QObject):
         tab_menu.addAction(ctx.action(_("Per righe"), "list-ordered", lambda: self.tab_order("row")))
         tab_menu.addAction(ctx.action(_("Per colonne"), "list-ordered", lambda: self.tab_order("column")))
         tab_menu.addAction(ctx.action(_("Ordine della selezione"), "list-ordered", lambda: self.tab_order("selection")))
+        tab_menu.addSeparator()
+        self.act_tab_numbers = ctx.action(_("Mostra l'ordine sui campi"), "hash", self.toggle_tab_numbers, checkable=True)
+        tab_menu.addAction(self.act_tab_numbers)
         tb = QToolButton(mode.toolbar)
         tb.setText(_("Ordine di tabulazione"))
         bind_icon(tb, "list-ordered")
@@ -249,6 +252,13 @@ class FormsModule(QObject):
                 self.selection = [k for k in self.selection if k in keys]
         self._refresh_panels()
 
+    def document_saved(self, view) -> None:
+        """Dopo un salvataggio gli identificativi dei widget possono cambiare: si riseleziona per posizione."""
+        if view is not self.ctx.current_view() or not self.selection:
+            return
+        self.selection = []
+        self._refresh_panels()
+
     def highlight_changed(self, on: bool) -> None:
         for f in self.fillers.values():
             f.set_highlight(on)
@@ -270,6 +280,8 @@ class FormsModule(QObject):
         f = self.filler(view)
         if f.state.xfa == "dynamic":
             self.ctx.status(_("I moduli XML dinamici non si possono modificare."))
+        if f.state.blocked:
+            self.ctx.status(_("Modifica del modulo non disponibile: {r}").format(r=f.state.blocked))
         f.close_editor(commit=True)
         f.design = True
         f.update_bar()
@@ -296,6 +308,19 @@ class FormsModule(QObject):
             return
         f = self.filler(view)
         f.close_editor(commit=True)
+        doc = view.document
+        if on:
+            self._preview_start = (id(doc), len(doc._undo))
+        else:
+            start = getattr(self, "_preview_start", None)
+            self._preview_start = None
+            if start and start[0] == id(doc):
+                steps = len(doc._undo) - start[1]
+                if steps > 0 and not self.ctx.confirm(
+                        _("Anteprima compilazione"),
+                        _("Mantenere i valori inseriti durante l'anteprima?")):
+                    for _i in range(steps):
+                        doc.undo()
         f.design = self.design_active and not on
         if on:
             self.ctx.set_tool(None)
@@ -330,6 +355,9 @@ class FormsModule(QObject):
         if f.state.xfa == "dynamic":
             self.ctx.error(_("Moduli"), _("I moduli XML dinamici non si possono modificare."))
             return None
+        if f.state.blocked:
+            self.ctx.error(_("Moduli"), _("Modifica del modulo non disponibile: {r}").format(r=f.state.blocked))
+            return None
         if sticky is None:
             current = view.tool
             sticky = isinstance(current, FieldCreateTool) and current.kind == kind and not current.sticky \
@@ -343,6 +371,18 @@ class FormsModule(QObject):
 
     def paint_design(self, view, p, page: int, fields) -> None:
         paint_fields(view, p, page, fields, set(self.selection))
+        if self.show_tab_numbers:
+            with ENGINE_LOCK:
+                order = E.navigation_order(view.document.pdf, page)
+            paint_tab_numbers(p, order)
+
+    show_tab_numbers = False
+
+    def toggle_tab_numbers(self, on: bool) -> None:
+        self.show_tab_numbers = on
+        view = self.ctx.current_view()
+        if view is not None:
+            view.viewport().update()
 
     # ================================================================ selezione e modifiche
     def set_selection(self, keys: list[tuple[int, int]]) -> None:

@@ -799,10 +799,11 @@ def apply_values(pdf: pymupdf.Document, values: dict[str, Any], *, skip_readonly
 def reset_form(pdf: pymupdf.Document, names: Iterable[str] | None = None) -> int:
     """Riporta i campi al valore predefinito. Restituisce quanti campi sono cambiati."""
     wanted = set(names) if names is not None else None
+    locked = signature_locked_names(pdf)
     count = 0
     seen_radio: set[int] = set()
     for f in list_fields(pdf):
-        if f.kind not in FILLABLE or (wanted is not None and f.name not in wanted):
+        if f.kind not in FILLABLE or (wanted is not None and f.name not in wanted) or f.name in locked:
             continue
         if f.kind == RADIO:
             if f.field_xref in seen_radio:
@@ -813,8 +814,36 @@ def reset_form(pdf: pymupdf.Document, names: Iterable[str] | None = None) -> int
             target = bool(f.default and f.default != OFF)
         if export_value(f) != export_value(_with_value(f, target)):
             count += 1
-        set_value(pdf, f.page, f.xref, target if target is not None else "")
+            set_value(pdf, f.page, f.xref, target if target is not None else "")
     return count
+
+
+def signature_locked_names(pdf: pymupdf.Document) -> set[str]:
+    """Campi bloccati da una firma apposta (/Lock del campo firma)."""
+    fields = list_fields(pdf)
+    out: set[str] = set()
+    for f in fields:
+        if f.kind != SIGNATURE or not is_signed(pdf, f.xref):
+            continue
+        t, v = _inherited(pdf, f.xref, "Lock")
+        if t == "xref":
+            v, t = pdf.xref_object(int(v.split()[0]), compressed=True), "dict"
+        if t != "dict":
+            continue
+        try:
+            lock = ps.parse(v)
+        except ps.PdfSyntaxError:
+            continue
+        action = str(lock.get("Action", ""))
+        listed = {ps.text_of(n) or "" for n in lock.get("Fields", []) or []}
+        names = {g.name for g in fields if g.kind != SIGNATURE}
+        if action == "All":
+            out |= names
+        elif action == "Include":
+            out |= names & listed
+        elif action == "Exclude":
+            out |= names - listed
+    return out
 
 
 def _with_value(f: FieldInfo, value: Any) -> FieldInfo:

@@ -312,3 +312,18 @@ def paint_fields(view, p: QPainter, page: int, fields: list[E.FieldInfo], select
             for cx, cy in ((r.left(), r.top()), (r.right(), r.top()), (r.left(), r.bottom()), (r.right(), r.bottom())):
                 p.drawRect(QRectF(cx - HANDLE / 2, cy - HANDLE / 2, HANDLE, HANDLE))
             p.setBrush(Qt.BrushStyle.NoBrush)
+
+
+def paint_tab_numbers(p: QPainter, order: list[E.FieldInfo]) -> None:
+    """Numero d'ordine di tabulazione in un cerchio sull'angolo di ogni campo."""
+    font = QFont()
+    font.setPixelSize(7)
+    font.setBold(True)
+    p.setFont(font)
+    for i, f in enumerate(order, 1):
+        r = QRectF(f.rect.x0 - 5, f.rect.y0 - 5, 11, 11)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.color("secondary"))
+        p.drawEllipse(r)
+        p.setPen(theme.color("text") if not theme.is_dark() else QColor(20, 20, 20))
+        p.drawText(r, Qt.AlignmentFlag.AlignCenter, str(i))

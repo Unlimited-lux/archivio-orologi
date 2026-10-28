@@ -234,4 +234,9 @@ EN: dict[str, str] = {
     'Crea campi': 'Create fields',
     'Duplica, copia su più pagine, elimina': 'Duplicate, copy to several pages, delete',
     'Strumento bloccato: crea più campi, Esc per terminare.': 'Tool locked: create several fields, Esc to finish.',
+    'Ripara il modulo': 'Repair form',
+    'Modulo riparato: aspetti dei campi generati e campi ricollegati.': 'Form repaired: field appearances generated and fields relinked.',
+    'Modifica del modulo non disponibile: {r}': 'Form editing not available: {r}',
+    "Mantenere i valori inseriti durante l'anteprima?": 'Keep the values entered during the preview?',
+    "Mostra l'ordine sui campi": 'Show the order on the fields',
 }
