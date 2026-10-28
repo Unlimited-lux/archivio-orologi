@@ -103,9 +103,16 @@ class SignaturesPanel(QWidget):
         self.btn_sign_now = QPushButton(_("Firma ora"))
         self.btn_next = QPushButton(_("Campo successivo"))
         self.btn_verify = QPushButton(_("Verifica di nuovo"))
-        for b in (self.btn_sign_now, self.btn_next, self.btn_verify):
+        self.btn_online = QPushButton(_("Verifica online"))
+        self.btn_online.setToolTip(_("Controlla la revoca dei certificati presso i servizi indicati nei certificati "
+                                     "(richiede la rete)"))
+        for b in (self.btn_sign_now, self.btn_next):
             row.addWidget(b)
         lay.addLayout(row)
+        row2 = QHBoxLayout()
+        for b in (self.btn_verify, self.btn_online):
+            row2.addWidget(b)
+        lay.addLayout(row2)
         self.list = QListWidget()
         self.list.setAccessibleName(_("Firme e campi firma"))
         self.list.setWordWrap(True)
@@ -133,6 +140,7 @@ class SignaturesPanel(QWidget):
         self._next_index = 0
         self.btn_verify.clicked.connect(lambda: self.view and self.c.verify(self.view, force=True))
         self.btn_next.clicked.connect(self.next_field)
+        self.btn_online.clicked.connect(lambda: self.view and self.c.verify(self.view, force=True, online=True))
         self.btn_sign_now.clicked.connect(self.sign_now)
         self.btn_goto.clicked.connect(self.goto)
         self.btn_signed.clicked.connect(lambda: self._with_status(lambda s: self.c.open_signed_version(self.view, s)))
@@ -248,6 +256,7 @@ class SignaturesPanel(QWidget):
         is_status = cur is not None and cur[0] == "status"
         st = self.c.state(self.view) if self.view is not None else None
         self.btn_verify.setEnabled(self.view is not None)
+        self.btn_online.setVisible(bool(st and st.statuses))
         has_fields = bool(self.visible_empty_fields())
         self.btn_sign_now.setVisible(has_fields)
         self.btn_next.setVisible(has_fields)
@@ -319,7 +328,9 @@ TRANSLATIONS_EN = {
     "confermata": "confirmed", "non confermata": "not confirmed", "Algoritmo di hash: {v}": "Hash algorithm: {v}",
     "Catena dei certificati:": "Certificate chain:", "emesso da": "issued by", "scade il": "expires",
     "Nessuna firma": "No signatures", "Stato complessivo delle firme": "Overall signature status",
-    "Firma ora": "Sign now", "Campo successivo": "Next field", "Verifica di nuovo": "Verify again",
+    "Firma ora": "Sign now", "Verifica online": "Verify online",
+    "Controlla la revoca dei certificati presso i servizi indicati nei certificati (richiede la rete)":
+        "Check certificate revocation with the services listed in the certificates (requires network)", "Campo successivo": "Next field", "Verifica di nuovo": "Verify again",
     "Firme e campi firma": "Signatures and signature fields", "Dettagli della firma": "Signature details",
     "Vai al campo": "Go to field", "Versione firmata": "Signed version",
     "Apre il documento come era al momento della firma": "Opens the document as it was when signed",

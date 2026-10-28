@@ -139,8 +139,8 @@ class SignController(QObject):
         tool = self.tool_for(view)
         view.set_tool(tool)
         tool.set_pending(item)
-        self.ctx.status(_("Fai clic sulla pagina per posizionare la firma, o trascina per definirne la dimensione; "
-                          "Invio la posiziona al centro della pagina. Esc per annullare."), 8000)
+        self.ctx.status(_("Clic: posiziona la firma · trascina: dimensione · Invio: al centro · Esc: annulla"),
+                        8000)
 
     def _annotations_allowed(self, view) -> bool:
         with ENGINE_LOCK:
@@ -361,7 +361,7 @@ class SignController(QObject):
                 pass
         return doc.to_bytes()
 
-    def verify(self, view, force: bool = False) -> None:
+    def verify(self, view, force: bool = False, online: bool = False) -> None:
         doc = view.document
         st = self.state(doc)
         if st.running and not force:
@@ -382,6 +382,8 @@ class SignController(QObject):
         st.running = True
         st.source = data
         version = doc.version
+        if online:
+            self.ctx.status(_("Verifica online della revoca in corso…"), 5000)
         use_system = str(self.ctx.settings().value("sign/system_certs", "false")).lower() == "true"
         self.stateChanged.emit(view)
 
@@ -392,7 +394,7 @@ class SignController(QObject):
                 trusted = store.TrustStore().certificates()
                 if use_system:
                     trusted = trusted + store.system_certificates()
-                mode = self.revocation_mode()
+                mode = "sempre" if online else self.revocation_mode()
                 result["statuses"] = digital.verify_pdf(data, trusted=trusted, revocation_mode=mode,
                                                         allow_fetching=mode == "sempre")
                 result["fields"] = digital.signature_fields(data)
@@ -891,10 +893,8 @@ TRANSLATIONS_EN = {
     "Libreria firme": "Signature library",
     "Libreria protetta": "Protected library",
     "Inserisci la password della libreria delle firme:": "Enter the signature library password:",
-    "Fai clic sulla pagina per posizionare la firma, o trascina per definirne la dimensione; Invio la posiziona al "
-    "centro della pagina. Esc per annullare.":
-        "Click on the page to place the signature, or drag to set its size; Enter places it in the middle of the "
-        "page. Esc to cancel.",
+    "Clic: posiziona la firma · trascina: dimensione · Invio: al centro · Esc: annulla":
+        "Click: place the signature · drag: size · Enter: centre · Esc: cancel",
     "Firma": "Signature",
     "I permessi del documento non consentono di aggiungere annotazioni o firme grafiche. Apri il documento con "
     "la password del proprietario per modificarlo.":
@@ -971,6 +971,7 @@ TRANSLATIONS_EN = {
     "Versione firmata": "Signed version",
     "Dettagli copiati negli appunti.": "Details copied to the clipboard.",
     "Operazione non riuscita: {e}": "Operation failed: {e}",
+    "Verifica online della revoca in corso…": "Online revocation check in progress…",
     "L'elemento della libreria non è utilizzabile: {e}": "The library item cannot be used: {e}",
     "Impossibile leggere «{p}»: {e}. Il file è stato spostato o eliminato? Salvalo di nuovo e riprova.":
         "Cannot read “{p}”: {e}. Was the file moved or deleted? Save it again and retry.",

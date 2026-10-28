@@ -831,3 +831,24 @@ def test_guides_include_form_fields():
     page.add_widget(w)
     xs, ys, _lines = g.page_guides(pdf[0])
     assert 300 in [round(x) for x in xs] and 520 in [round(y) for y in ys]
+
+
+def test_online_revocation_only_on_request(window, monkeypatch, sample_pdf, tmp_path, id_a):
+    """NFR-19 / SIG-16: senza richiesta la verifica non usa la rete; «Verifica online» sì."""
+    data = digital.sign_pdf(Path(sample_pdf).read_bytes(), id_a[2], digital.SignOptions())
+    p = tmp_path / "online.pdf"
+    p.write_bytes(data)
+    calls = []
+    real = digital.verify_pdf
+
+    def spy(data, **kw):
+        calls.append((kw.get("revocation_mode"), kw.get("allow_fetching")))
+        return real(data, **{**kw, "allow_fetching": False, "revocation_mode": "mai"})
+
+    monkeypatch.setattr(digital, "verify_pdf", spy)
+    window.open_path(str(p))
+    assert calls == [("mai", False)]
+    panel = _panel(window)
+    assert not panel.btn_online.isHidden()
+    panel.btn_online.click()
+    assert calls[-1] == ("sempre", True)
