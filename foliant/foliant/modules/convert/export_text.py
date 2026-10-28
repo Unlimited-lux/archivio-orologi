@@ -233,6 +233,8 @@ def write_html(work: pymupdf.Document, path: str, job, out) -> list[str]:
                             f"{html.escape(t)}</a></li>" for lv, t, p in toc if p >= 1)
             toc_html = f'<nav><h2>{html.escape(_("Sommario"))}</h2><ul>{items}</ul></nav>\n'
     check(job.progress, 0.9, _("Scrittura del file HTML…"))
+    if job.options.get("per_page", False):
+        return _write_html_pages(pages, path, job, out, head, toc_html)
     body = items_html(pages, job, assets)
     doc = head + toc_html + body + "\n</body>\n</html>\n"
     from .common import resolve_target, unique_path
@@ -249,6 +251,34 @@ def write_html(work: pymupdf.Document, path: str, job, out) -> list[str]:
             created.append(tmp_a)
     Path(tmp).write_text(doc, encoding="utf-8")
     created.insert(0, tmp)
+    return created
+
+
+def _write_html_pages(pages, path: str, job, out, head: str, toc_html: str) -> list[str]:
+    """Un file HTML per pagina (immagini incorporate) più un indice con il sommario."""
+    from .common import resolve_target
+    index = resolve_target(path, out.policy)
+    stem = Path(index).stem
+    names = {pc.index + 1: f"{stem}_{pc.index + 1:03}.html" for pc in pages}
+
+    def fix_links(text: str) -> str:
+        return re.sub(r'href="#page-(\d+)"',
+                      lambda m: f'href="{names.get(int(m.group(1)), "")}#page-{m.group(1)}"', text)
+
+    created = [out.new(index)]
+    listing = "".join(f'<li><a href="{names[pc.index + 1]}">{html.escape(_("Pagina {p}").format(p=pc.index + 1))}'
+                      f"</a></li>" for pc in pages)
+    Path(created[0]).write_text(head + fix_links(toc_html) + f"<ol>{listing}</ol>\n</body>\n</html>\n",
+                                encoding="utf-8")
+    for k, pc in enumerate(pages):
+        prev = f'<a href="{names[pages[k - 1].index + 1]}">← {html.escape(_("Precedente"))}</a>' if k else ""
+        nxt = (f'<a href="{names[pages[k + 1].index + 1]}">{html.escape(_("Successiva"))} →</a>'
+               if k + 1 < len(pages) else "")
+        nav = f'<nav>{prev} <a href="{Path(index).name}">{html.escape(_("Indice"))}</a> {nxt}</nav>'
+        body = fix_links(items_html([pc], job, None))
+        tmp = out.new(Path(index).with_name(names[pc.index + 1]))
+        Path(tmp).write_text(head + nav + "\n" + body + "\n" + nav + "\n</body>\n</html>\n", encoding="utf-8")
+        created.append(tmp)
     return created
 
 

@@ -703,3 +703,6 @@ EN.update({
     "Scorrevole": "Reflowable",
     "Titolo": "Title",
 })
+
+EN.update({"Indice": "Index", "Precedente": "Previous", "Successiva": "Next",
+           "Un file per pagina (con indice)": "One file per page (with index)"})

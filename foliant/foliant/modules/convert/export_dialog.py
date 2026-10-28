@@ -177,6 +177,7 @@ def build_options(fmt: str) -> _Options:
         toc = QCheckBox()
         toc.setChecked(True)
         o.add("toc", _("Sommario dai segnalibri"), toc)
+        o.add("per_page", _("Un file per pagina (con indice)"), QCheckBox())
     elif fmt == "xml":
         o.add("detail", _("Dettaglio"), _combo([(_("Parole con coordinate"), "words"), (_("Righe"), "lines"),
                                                 (_("Blocchi"), "blocks")]))

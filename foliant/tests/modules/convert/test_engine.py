@@ -863,3 +863,11 @@ def test_encrypted_faithful_docx_and_pdfa(encrypted_pdf, tmp_path):
         pdf = convert_pdf(encrypted_pdf, tmp_path / "e.pdf", "pdfa-2b", password="segreta")[0]
         d = pymupdf.open(pdf)
         assert not d.needs_pass and "Riservato" in d[0].get_text()
+
+
+def test_html_per_page(links_pdf, tmp_path):
+    outs = convert_pdf(links_pdf, tmp_path / "s.html", "html", per_page=True)
+    names = [os.path.basename(p) for p in outs]
+    assert names == ["s.html", "s_001.html", "s_002.html", "s_003.html"]
+    first = open(outs[1], encoding="utf-8").read()
+    assert 'href="s_002.html#page-2"' in first and 'href="s_002.html"' in first
