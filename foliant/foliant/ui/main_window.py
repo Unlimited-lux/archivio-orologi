@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
         self.modes: dict[str, Mode] = {}
         self.current_mode_id: str | None = None
         self._document_actions: list[QAction] = []
+        self._actions_have_document = False
         self._menu_sections: "OrderedDict[str, list[QAction]]" = OrderedDict()
         self._sidebar: dict[str, tuple[str, str, QWidget, int, QAction]] = {}
         self._props: dict[str, QWidget] = {}
@@ -855,8 +856,8 @@ class MainWindow(QMainWindow):
         elif view is None:
             self.sidebar.hide()
             self.properties.hide()
+        self._update_state()                     # prima del segnale: i moduli hanno l'ultima parola
         self.ctx.currentViewChanged.emit(view)
-        self._update_state()
 
     def _on_tool_changed(self, tool) -> None:
         view = self.current_view()
@@ -880,8 +881,10 @@ class MainWindow(QMainWindow):
     def _update_state(self) -> None:
         view = self.current_view()
         has = view is not None
-        for act in self._document_actions:
-            act.setEnabled(has)
+        if has != self._actions_have_document:   # solo al passaggio nessun documento ↔ documento:
+            self._actions_have_document = has    # gli stati impostati dai moduli (permessi) restano
+            for act in self._document_actions:
+                act.setEnabled(has)
         self.context_stack.setVisible(has)
         self.page_box.setVisible(has)
         self.zoom_combo.setVisible(has)
