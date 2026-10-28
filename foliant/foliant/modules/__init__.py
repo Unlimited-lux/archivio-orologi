@@ -28,7 +28,7 @@ def discover() -> list[tuple[int, str, object]]:
             continue
         try:
             mod = importlib.import_module(f"{__name__}.{info.name}")
-        except Exception as e:  # pragma: no cover - riportato all'utente
+        except (Exception, SystemExit) as e:  # pragma: no cover - riportato all'utente
             log.exception("Modulo %s non importabile", info.name)
             found.append((10_000, info.name, e))
             continue
@@ -48,7 +48,7 @@ def load_modules(ctx) -> list[tuple[str, Exception | None]]:
         try:
             register(ctx)
             results.append((name, None))
-        except Exception as e:
+        except (Exception, SystemExit) as e:
             log.exception("Modulo %s: errore in register()", name)
             results.append((name, e))
     return results
