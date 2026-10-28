@@ -186,15 +186,11 @@ class SessionController(QObject):
 
     # ---------------------------------------------------------------- menu contestuale
     def _build_tab_menu(self) -> None:
-        bar = self.tabs.tabBar()
-        bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        bar.customContextMenuRequested.connect(self._on_tab_menu)
-        self.tab_menu: QMenu | None = None
+        # voci aggiunte al menu della scheda del nucleo (insieme a quelle degli altri moduli)
+        self.ctx.add_tab_menu_provider(self._tab_menu_provider)
 
-    def build_tab_menu(self, index: int) -> QMenu:
-        view = self.tabs.widget(index) if 0 <= index < self.tabs.count() else None
-        menu = QMenu(self.window)
-        menu.setObjectName("tabMenu")
+    def _tab_menu_provider(self, view: DocumentView, menu: QMenu) -> None:
+        index = self.tabs.indexOf(view)
         count = self.tabs.count()
 
         def add(text, icon_name, slot, enabled=True):
@@ -205,28 +201,20 @@ class SessionController(QObject):
             act.setEnabled(enabled)
             return act
 
-        has = isinstance(view, DocumentView)
-        add(_("Chiudi scheda"), "x", lambda: self.window.close_view(view), has)
-        add(_("Chiudi le altre schede"), "copy-x", lambda: self.close_other_tabs(view), has and count > 1)
+        add(_("Chiudi le altre schede"), "copy-x", lambda: self.close_other_tabs(view), count > 1)
         add(_("Chiudi le schede a destra"), "arrow-right-to-line", lambda: self.close_tabs_to_right(view),
-            has and index < count - 1)
+            0 <= index < count - 1)
         add(_("Chiudi tutte le schede"), "square-x", self.close_all_tabs, count > 0)
         menu.addSeparator()
         add(_("Riapri scheda chiusa"), "history", self.reopen_closed_tab, bool(self.closed_tabs))
-        path = view.document.path if has else None
+        path = view.document.path
         menu.addSeparator()
         add(_("Copia percorso"), "copy",
             lambda: QGuiApplication.clipboard().setText(str(path)), path is not None)
-        self.tab_menu = menu
-        return menu
 
-    def _on_tab_menu(self, pos) -> None:
-        bar = self.tabs.tabBar()
-        index = bar.tabAt(pos)
-        if index < 0:
-            return
-        menu = self.build_tab_menu(index)
-        menu.popup(bar.mapToGlobal(pos))
+    def build_tab_menu(self, index: int) -> QMenu | None:
+        """Menu completo della scheda (nucleo + moduli), per i test."""
+        return self.window.tab_menu(index)
 
     # ================================================================ posizione e vista iniziale
     def apply_state(self, view: DocumentView, state: ViewState) -> None:
