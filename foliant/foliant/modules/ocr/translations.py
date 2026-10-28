@@ -334,4 +334,5 @@ EN = {
     'Conversione non riuscita': 'Conversion failed',
     '{n} pagine convertite in immagine.': '{n} pages converted to images.',
     "Rende ogni pagina un'immagine, senza testo estraibile": 'Turns every page into an image, without extractable text',
+    '< 1 MB': '< 1 MB',
 }

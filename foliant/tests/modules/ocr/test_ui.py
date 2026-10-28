@@ -685,3 +685,21 @@ def test_pdf_solo_immagine(window, sample_pdf, monkeypatch):
     assert np.abs(before.astype(int) - after.astype(int)).mean() < 3
     view.document.undo()
     assert "Orologeria" in view.document.page_text(0)
+
+
+def test_dialogo_lingue_colonne_e_dimensioni(window, qtbot):
+    """Stato leggibile (colonna elastica + tooltip) e dimensioni sotto 1 MB non mostrate come «0 MB»."""
+    dlg = dialogs.LanguagesDialog(window)
+    dlg.resize(620, 520)
+    dlg.show()
+    qtbot.waitExposed(dlg)
+    t = dlg.table
+    from PySide6.QtWidgets import QHeaderView
+    assert t.horizontalHeader().sectionResizeMode(3) == QHeaderView.ResizeMode.Stretch
+    texts = [t.item(r, 3).text() for r in range(t.rowCount())]
+    assert all(t.item(r, 3).toolTip() == texts[r] for r in range(t.rowCount()))
+    assert not any(" 0 MB" in x for x in texts)
+    assert dialogs.size_label(0.4) == "< 1 MB" and dialogs.size_label(2.25) == "2.2 MB"
+    fm = t.fontMetrics()
+    longest = max(fm.horizontalAdvance(x) for x in texts)
+    assert t.columnWidth(3) + 40 >= longest or t.horizontalScrollBar().maximum() > 0

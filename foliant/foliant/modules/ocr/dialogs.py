@@ -438,6 +438,13 @@ class OcrDialog(QDialog):
         super().accept()
 
 
+def size_label(mb: float) -> str:
+    """Dimensione leggibile: «< 1 MB» sotto il megabyte, un decimale fino a 10 MB."""
+    if mb < 1:
+        return _("< 1 MB")
+    return f"{mb:.1f} MB" if mb < 10 else f"{mb:.0f} MB"
+
+
 # ============================================================ gestione lingue
 class LanguagesDialog(QDialog):
     """Catalogo delle lingue: installate, da installare da file o da scaricare."""
@@ -455,7 +462,10 @@ class LanguagesDialog(QDialog):
         lay.addWidget(info)
         self.table = QTableWidget(0, 4, self)
         self.table.setHorizontalHeaderLabels([_("Lingua"), _("Codice"), _("Scrittura"), _("Stato")])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
+        for col in (0, 1, 2):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -498,14 +508,15 @@ class LanguagesDialog(QDialog):
             elif code in installed:
                 state = _("installata (sistema)")
             else:
-                size = f" · {info.size_mb:.0f} MB" if info and info.size_mb else ""
+                size = " · " + size_label(info.size_mb) if info and info.size_mb else ""
                 state = _("non installata") + size
             values = [languages.language_name(code), code, info.script if info else "", state]
             for c, v in enumerate(values):
                 item = QTableWidgetItem(v)
                 item.setData(Qt.ItemDataRole.UserRole, code)
-                if code in installed:
-                    item.setIcon(icon("check")) if c == 3 else None
+                if code in installed and c == 3:
+                    item.setIcon(icon("check"))
+                item.setToolTip(state if c == 3 else v)
                 self.table.setItem(r, c, item)
         self._update_buttons()
 
@@ -540,7 +551,7 @@ class LanguagesDialog(QDialog):
         if not code:
             return
         info = languages.CATALOG.get(code)
-        size = f" ({info.size_mb:.0f} MB)" if info and info.size_mb else ""
+        size = f" ({size_label(info.size_mb)})" if info and info.size_mb else ""
         answer = QMessageBox.question(
             self, _("Scarica lingua"),
             _("Scaricare da Internet il pacchetto «{n}»{s}? Serve una connessione di rete; "
