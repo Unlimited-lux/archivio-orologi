@@ -128,7 +128,7 @@ def test_ann02_author_subject_dates(comments, tmp_path, monkeypatch):
 def test_ann02_non_latin_author_utf16(comments, tmp_path, monkeypatch):
     """ANN-02: nome autore greco salvato in UTF-16BE e mostrato identico nel pannello."""
     window, view, module = comments
-    window.ctx.settings().setValue("annotations/author", "Ελένη Παπαδοπούλου")
+    window.ctx.settings().setValue("author", "Ελένη Παπαδοπούλου")
     _ok_dialog(monkeypatch, "x")
     module.activate(engine.NOTE)
     click(view, 0, 200, 500)
@@ -145,7 +145,18 @@ def test_ann02_empty_author_restores_account_name(comments):
     """ANN-02: nome autore vuoto non accettato: si usa quello dell'account."""
     window, view, module = comments
     module.ctrl.set_author("   ")
-    assert module.ctrl.author() == (engine.default_author() or "Utente")
+    assert module.ctrl.author() == window.ctx.author_name()
+    assert module.ctrl.author().strip()
+
+
+def test_ann02_legacy_author_migrated(comments):
+    """Il nome autore della vecchia chiave del modulo passa nella preferenza del nucleo."""
+    window, view, module = comments
+    s = window.ctx.settings()
+    s.setValue("annotations/author", "Giulia Verdi")
+    assert module.ctrl.author() == "Giulia Verdi"
+    assert window.ctx.author_name() == "Giulia Verdi"
+    assert not s.value("annotations/author", "")
 
 
 def test_ann02_tolerant_dates():
