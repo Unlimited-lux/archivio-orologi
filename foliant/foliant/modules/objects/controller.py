@@ -45,6 +45,7 @@ class ObjectsController(QObject):
         self._paste_counts: dict = {}
         self._signed_ok: set = set()
         self.smart_guides = True
+        self.links_follow = True     # i collegamenti che coincidono con l'oggetto si spostano con esso
         self.grid_on = False
         self.grid_snap = True
         self.grid_step_mm = 10.0
@@ -209,7 +210,8 @@ class ObjectsController(QObject):
         return result
 
     def translate(self, view, dx: float, dy: float, label: str | None = None) -> None:
-        self._apply(view, label or _("Sposta oggetti"), E.translate, dx, dy)
+        self._apply(view, label or _("Sposta oggetti"), _translate_with_links if self.links_follow else E.translate,
+                    dx, dy)
 
     def nudge(self, view, vx: float, vy: float) -> None:
         with ENGINE_LOCK:
@@ -1006,6 +1008,22 @@ class ObjectsController(QObject):
 
     def selected_link_page(self) -> int | None:
         return self.link_tool.page
+
+
+def _translate_with_links(pdf, page, indices, dx, dy):
+    """Sposta gli oggetti e i collegamenti con lo stesso riquadro (±1 pt)."""
+    parsed = parse_page(pdf, pdf[page])
+    rects = [parsed.objects[i].rect for i in indices if 0 <= i < len(parsed.objects)]
+    attached = []
+    for info in L.page_links(pdf, page):
+        r = info.rect
+        if any(abs(r.x0 - o.x0) <= 1 and abs(r.y0 - o.y0) <= 1 and abs(r.x1 - o.x1) <= 1 and abs(r.y1 - o.y1) <= 1
+               for o in rects):
+            attached.append(info.xref)
+    res = E.translate(pdf, page, indices, dx, dy)
+    for x in attached:
+        L.update_link(pdf, page, x, move=(dx, dy))
+    return res
 
 
 class _NoChange(Exception):

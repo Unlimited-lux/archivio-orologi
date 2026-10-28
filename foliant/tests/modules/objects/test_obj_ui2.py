@@ -266,3 +266,45 @@ def test_external_edit_roundtrip(ui, tmp_path, monkeypatch):
     d = sess.dir
     ui.c.stop_external()
     assert not os.path.exists(d)
+
+
+def test_link_on_image_moves_with_it(ui, tmp_path):
+    path = tmp_path / "li.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_image(pymupdf.Rect(50, 70, 250, 170), stream=png_bytes(20, 10), keep_proportion=False)
+    L.create_link(doc, 0, pymupdf.Rect(50, 70, 250, 170), L.LinkTarget(kind=L.URI, uri="https://a.it"))
+    L.create_link(doc, 0, pymupdf.Rect(300, 300, 400, 320), L.LinkTarget(kind=L.URI, uri="https://b.it"))
+    doc.save(str(path))
+    view = ui.open(str(path))
+    ui.c.set_selection(view, 0, [0])
+    ui.c.translate(view, 30, 0)
+    with O.ENGINE_LOCK:
+        rects = sorted((round(i.rect.x0), i.target.uri) for i in L.page_links(view.document.pdf, 0))
+    assert rects == [(80, "https://a.it"), (300, "https://b.it")]
+    view.document.undo()
+    with O.ENGINE_LOCK:
+        assert sorted(round(i.rect.x0) for i in L.page_links(view.document.pdf, 0)) == [50, 300]
+
+
+def test_parser_fuzz_never_crashes():
+    import random
+    from foliant.modules.objects.content import parse_page
+    random.seed(7)
+    toks = [b"q", b"Q", b"cm", b"1", b"0", b"-3.5", b"re", b"f", b"S", b"m", b"l", b"c", b"h", b"W", b"n",
+            b"/Im0", b"Do", b"BT", b"ET", b"(abc", b")", b"<<", b">>", b"[", b"]", b"BI", b"ID", b"EI", b"gs",
+            b"/G0", b"rg", b"\x00\xff", b"%x\n", b"sh", b"1 0 0 1 10 10", b"10 10 50 50"]
+    for _k in range(120):
+        data = b" ".join(random.choice(toks) for _ in range(random.randint(1, 50)))
+        d = pymupdf.open()
+        p = d.new_page()
+        x = d.get_new_xref()
+        d.update_object(x, "<<>>")
+        d.update_stream(x, data, new=True)
+        d.xref_set_key(p.xref, "Contents", f"{x} 0 R")
+        pp = parse_page(d, d[0])
+        if pp.objects:
+            try:
+                E.translate(d, 0, [0], 5, 5)
+                E.delete_objects(d, 0, [0])
+            except E.ObjectError:
+                pass
