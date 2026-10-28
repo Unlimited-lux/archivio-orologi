@@ -103,9 +103,9 @@ def register(ctx: Context) -> None:
                                       ("al_bottom", E.BOTTOM, _("Allinea in basso"), "align-end-horizontal")):
         sel_action(key, text, icon_name, lambda v, h=how: c.align(v, h))
     sel_action("dist_h", _("Distribuisci in orizzontale"), "align-horizontal-distribute-center",
-               lambda v: c.distribute(v, True))
+               lambda v: c.distribute(v, True, c.distribute_method))
     sel_action("dist_v", _("Distribuisci in verticale"), "align-vertical-distribute-center",
-               lambda v: c.distribute(v, False))
+               lambda v: c.distribute(v, False, c.distribute_method))
     acts["detect_urls"] = ctx.action(_("Crea collegamenti dagli URL…"), "link",
                                      lambda: c.detect_urls(ctx.current_view()))
     acts["delete_links"] = ctx.action(_("Elimina collegamenti…"), "unlink",
@@ -124,9 +124,29 @@ def register(ctx: Context) -> None:
     arrange.addSeparator()
     for key in ("al_left", "al_hc", "al_right", "al_top", "al_vc", "al_bottom"):
         arrange.addAction(acts[key])
+    from PySide6.QtGui import QActionGroup
+    ref_menu = arrange.addMenu(_("Allinea rispetto a"))
+    ref_group = QActionGroup(ref_menu)
+    for code, text in (("auto", _("Automatico (selezione o pagina)")), (E.REF_SELECTION, _("Selezione")),
+                       (E.REF_KEY, _("Oggetto chiave (il primo selezionato)")), (E.REF_PAGE, _("Pagina"))):
+        a = ref_menu.addAction(text)
+        a.setCheckable(True)
+        a.setChecked(code == c.align_reference)
+        a.triggered.connect(lambda _c=False, k=code: setattr(c, "align_reference", k))
+        ref_group.addAction(a)
+        acts["ref_" + code] = a
     arrange.addSeparator()
     arrange.addAction(acts["dist_h"])
     arrange.addAction(acts["dist_v"])
+    dist_menu = arrange.addMenu(_("Metodo di distribuzione"))
+    dist_group = QActionGroup(dist_menu)
+    for code, text in ((E.SPACING, _("Spaziatura uguale")), (E.CENTERS, _("Centri equidistanti"))):
+        a = dist_menu.addAction(text)
+        a.setCheckable(True)
+        a.setChecked(code == c.distribute_method)
+        a.triggered.connect(lambda _c=False, k=code: setattr(c, "distribute_method", k))
+        dist_group.addAction(a)
+        acts["dist_" + code] = a
     btn = QToolButton()
     btn.setText(_("Disponi"))
     btn.setToolTip(_("Ordine, allineamento e distribuzione"))

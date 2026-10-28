@@ -417,4 +417,12 @@ EN = {
     "Il documento dichiara la conformità PDF/A-1, che non ammette la trasparenza: con questa opacità il file non sarà più conforme. Continuare?": "The document declares PDF/A-1 conformance, which does not allow transparency: with this opacity the file will no longer conform. Continue?",
     "Immagine molto grande": "Very large image",
     "L'immagine supera i 100 megapixel e appesantirebbe molto il documento. Ridurla a 100 megapixel prima di inserirla?": "The image exceeds 100 megapixels and would make the document very heavy. Reduce it to 100 megapixels before inserting it?",
+    "Allinea rispetto a": "Align relative to",
+    "Automatico (selezione o pagina)": "Automatic (selection or page)",
+    "Selezione": "Selection",
+    "Oggetto chiave (il primo selezionato)": "Key object (the first selected)",
+    "Pagina": "Page",
+    "Metodo di distribuzione": "Distribution method",
+    "Spaziatura uguale": "Equal spacing",
+    "Centri equidistanti": "Equidistant centers",
 }

@@ -578,3 +578,38 @@ def test_huge_image_proposes_resampling(ui, tmp_path, monkeypatch):
     ui.c.insert_image_bytes(view, [png_bytes(200, 100)], 0, pymupdf.Point(300, 400))
     o = objs(view)[-1]
     assert asked and o.width * o.height <= 10_000 and abs(o.width / o.height - 2) < 0.05
+
+
+def test_align_key_object_and_page_reference(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(50, 300, 70, 320), (80, 400, 100, 420),
+                                                         (120, 500, 140, 520)]))
+    ui.c.set_selection(view, 0, [2, 0, 1])          # oggetto chiave: il primo selezionato (indice 2)
+    O._state["actions"]["ref_key"].trigger()
+    try:
+        O._state["actions"]["al_bottom"].trigger()
+        ys = [round(o.rect.y1) for o in objs(view)]
+        assert ys == [520, 520, 520]
+        assert round(objs(view)[2].rect.y0) == 500   # l'oggetto chiave non si muove
+        ui.c.set_selection(view, 0, [0])
+        O._state["actions"]["ref_page"].trigger()
+        O._state["actions"]["al_hc"].trigger()
+        r = objs(view)[0].rect
+        with O.ENGINE_LOCK:
+            pw = view.document.pdf[0].rect.width
+        assert abs((r.x0 + r.x1) / 2 - pw / 2) < 0.1
+    finally:
+        O._state["actions"]["ref_auto"].trigger()
+
+
+def test_distribute_centers_method(ui, tmp_path):
+    view = ui.open(make_doc(tmp_path / "a.pdf", images=[(0, 300, 20, 320), (30, 300, 70, 320),
+                                                         (100, 300, 110, 320), (200, 300, 260, 320)]))
+    ui.c.set_selection(view, 0, [0, 1, 2, 3])
+    O._state["actions"]["dist_centers"].trigger()
+    try:
+        O._state["actions"]["dist_h"].trigger()
+        cs = sorted((o.rect.x0 + o.rect.x1) / 2 for o in objs(view))
+        gaps = [b - a for a, b in zip(cs, cs[1:])]
+        assert max(gaps) - min(gaps) < 0.1
+    finally:
+        O._state["actions"]["dist_spacing"].trigger()

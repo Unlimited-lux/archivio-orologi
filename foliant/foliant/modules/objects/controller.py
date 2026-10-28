@@ -50,6 +50,8 @@ class ObjectsController(QObject):
         self._pending: set = set()
         self._parsedReady.connect(self._on_parsed_ready)
         self.smart_guides = True
+        self.align_reference = "auto"          # auto, selection, key, page (OBJ-21)
+        self.distribute_method = E.SPACING     # spacing, centers (OBJ-22)
         self.crop_ratio = "free"     # proporzioni del ritaglio: free, original, 1:1, 4:3, 3:4, 16:9
         self.links_follow = True     # i collegamenti che coincidono con l'oggetto si spostano con esso
         self.grid_on = False
@@ -328,7 +330,9 @@ class ObjectsController(QObject):
         objs = self.selected_objects(view)
         if not objs:
             return
-        if reference is None:
+        if reference is None and self.align_reference != "auto":
+            reference = self.align_reference
+        if reference is None or (reference != E.REF_PAGE and len(objs) == 1):
             reference = E.REF_SELECTION if len(objs) > 1 else E.REF_PAGE
         page = self.sel_page
         indices = list(self.selection)

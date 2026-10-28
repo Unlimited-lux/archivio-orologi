@@ -28,8 +28,8 @@ File di test abbreviati: `ui` = test_obj_ui.py, `ui2` = test_obj_ui2.py, `eng` =
 | OBJ-18 Ottimizza immagini | P2 | fatto | img; ui2: test_image_tools_actions, test_optimize_document_images | Immagini selezionate o tutto il documento (un passo annullabile); JPEG/senza perdita; niente JPEG 2000/CCITT. |
 | OBJ-19 Applicazione esterna | P2 | fatto | ui2: test_external_edit_roundtrip | |
 | OBJ-20 Ordine di sovrapposizione | P1 | fatto | ui: test_reorder_front_shortcut; eng | |
-| OBJ-21 Allineare | P1 | fatto | ui: test_arrange_actions; eng | Riferimento «Oggetto chiave» solo nel motore. |
-| OBJ-22 Distribuire | P1 | fatto | eng | |
+| OBJ-21 Allineare | P1 | fatto | ui: test_arrange_actions; ui2: test_align_key_object_and_page_reference; eng | Riferimento scelto nel menu Disponi: automatico, selezione, oggetto chiave (il primo selezionato), pagina. |
+| OBJ-22 Distribuire | P1 | fatto | eng; ui2: test_distribute_centers_method | Spaziatura uguale o centri equidistanti (menu Disponi). |
 | OBJ-23 Guide e griglia | P1 | fatto | ui2: test_smart_guides_snap_to_other_object, test_snap_delta_pure, test_grid_snap, test_user_guides_snap_and_persist | Guide intelligenti (Alt sospende), griglia con passo e aggancio, guide del nucleo (VIS-39: righelli, trascinamento, salvate per documento) usate per disegno e aggancio tramite `page_guide_lines`; «Aggiungi guida…» da menu; migrazione delle guide salvate dal modulo (ui2: test_old_guides_migrated_to_core). |
 | OBJ-24 Tracciati vettoriali | P1 | fatto | eng; ui (riquadro, Canc) | «Seleziona simili». |
 | OBJ-25 Stile dei tracciati | P2 | fatto | adv: test_restyle_cmyk_fill_red, test_restyle_width_and_dash_and_no_fill | |
