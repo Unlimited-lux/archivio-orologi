@@ -312,7 +312,21 @@ def restyle_paths(pdf: pymupdf.Document, page_index: int, indices, stroke=None, 
         else:
             new_paint = "n"
         body = parsed.data[o.start:o.end]
-        assert body.rstrip().endswith(paint.encode())
+        drop = set()
+        if width is not None:
+            drop |= {"w"}
+        if dash is not None:
+            drop |= {"d"}
+        if stroke not in (None, NONE):
+            drop |= {"RG", "G", "K", "SC", "SCN", "CS"}
+        if fill not in (None, NONE):
+            drop |= {"rg", "g", "k", "sc", "scn", "cs"}
+        if drop:
+            from .content import tokenize_ops
+            cut = [(op.start, op.end, b"") for op in tokenize_ops(body) if op.name in drop]
+            body, _ = apply_edits(body, cut)
+        if not body.rstrip().endswith(paint.encode()):
+            raise ObjectError("Tracciato non modificabile.")
         body = body.rstrip()[: -len(paint)] + (b"h " if close else b"") + new_paint.encode()
         state = []
         if stroke not in (None, NONE):
