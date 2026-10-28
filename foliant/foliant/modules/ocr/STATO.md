@@ -5,9 +5,15 @@ composizione del PDF con PyMuPDF. API stabile in `engine.py`: `ocr_pdf_bytes`, `
 `available_languages` (più `recognize_document`, `apply_result`, `recognize_area`, `remove_ocr_layer`).
 Test: `tests/modules/ocr/` (engine, criteri, ui, languages, textexport).
 
+**Riservatezza**: il modulo non conserva su disco nomi, percorsi o impronte dei documenti tra un avvio e
+l'altro. «Non chiedere più» e lo stato di un lotto interrotto restano in memoria per la sessione; all'avvio
+si cancellano le chiavi delle versioni precedenti (`ocr/never_ask`, `ocr/batch_pending`) e le copie
+temporanee `foliant-ocr-*.pdf` lasciate da un arresto anomalo (quelle vive si cancellano anche all'uscita).
+Restano solo preferenze generali (lingue, dpi, modalità…), il dizionario delle parole e i modelli di zone.
+
 | ID | Priorità | Stato | Test | Note |
 |---|---|---|---|---|
-| OCR-01 Rilevamento e proposta | P0 | fatto (parziale: Dettagli in finestra, non nelle miniature) | test_ui: proposta_pagine_3_e_7, nessuna_proposta…, rilevamento_disattivato…, proposta_al_clic…; test_criteri: testo_non_estraibile, documento_lungo… | analisi incrementale a passi di 25 ms nel thread UI con `try_engine`; barra non bloccante sopra la vista; «non chiedere più» per /ID o impronta nelle preferenze |
+| OCR-01 Rilevamento e proposta | P0 | fatto (parziale: Dettagli in finestra, non nelle miniature) | test_ui: proposta_pagine_3_e_7, nessuna_proposta…, rilevamento_disattivato…, proposta_al_clic…; test_criteri: testo_non_estraibile, documento_lungo… | analisi incrementale a passi di 25 ms nel thread UI con `try_engine`; barra non bloccante sopra la vista; «non chiedere più in questa sessione» per /ID o impronta, solo in memoria |
 | OCR-02 Motore locale | P0 | fatto | test_engine: accuratezza…, pagina_che_fallisce…, deterministico; test_criteri: parallelismo… | pagine in parallelo (core−1, ridotto con poca memoria), timeout 120 s, pagina guasta = «non riconosciuta» |
 | OCR-03 Lingue | P0 | fatto (arabo non verificato: pacchetto non installato) | test_languages (11), test_engine: errori_chiari, test_ui: lingua_mancante, dialogo_lingue | 53 lingue in catalogo, installa da file con verifica, scarica su richiesta, rimuovi, manifest sha256 |
 | OCR-04 Impostazioni e intervallo | P0 | fatto | test_ui: dialogo_impostazioni, intervallo_pagine_selezionate, anteprima_preelaborazione, convalida_immediata…, profilo_esporta_importa, destinazione_nuovo_documento, permessi…, documento_firmato…; test_criteri: intervallo_altre_pagine_invariate, intervalli_non_validi | profili JSON, riepilogo con stima del tempo, password proprietario, avviso firme |
@@ -21,7 +27,7 @@ Test: `tests/modules/ocr/` (engine, criteri, ui, languages, textexport).
 | OCR-12 Revisione | P1 | fatto (sospetti solo per affidabilità: nessun dizionario di lingua) | test_ui: anteprima_con_correzione, pannello_parole_incerte, revisione_da_tastiera, dati_di_revisione_nel_file; test_criteri: parole_degradate_segnalate | anteprima prima di applicare, pannello con ritaglio, tastiera, accetta uguali, dizionario utente, dati di revisione facoltativi nel file (/PieceInfo) |
 | OCR-13 Avanzamento/annullamento | P0 | fatto | test_ui: ocr_in_background_documento_consultabile, …_modificato_nel_frattempo, …_annullato_o_chiuso, …_pausa_e_ripresa, annulla_mantieni…; test_criteri: annullamento_restituisce_pagine_completate | OCR non modale: lavora su una copia in un thread, barra di avanzamento con Pausa/Riprendi e Annulla nella vista, documento consultabile ma bloccato (`Document.set_locked`, sbloccato anche su errore o chiusura); alla fine un solo passo di annulla; senza blocco del nucleo, ripiego sulle pagine rimaste identiche (impronte) dopo conferma |
 | OCR-14 Pagine con testo | P1 | fatto | test_criteri: politiche_pagine_con_testo, pagina_mista…; test_ui: forza_ocr_chiede_conferma | salta / sostituisci livello / forza (con conferma); le miste: solo aree immagine |
-| OCR-15 In blocco | P1 | fatto | test_ui: ocr_in_blocco, riprendi_lotto_interrotto | cartelle, TIFF/immagini, già ricercabili saltati, protetti/danneggiati in errore, suffisso numerico, sovrascrittura con .bak, CSV, «Riprendi lotto» |
+| OCR-15 In blocco | P1 | fatto | test_ui: ocr_in_blocco, riprendi_lotto_interrotto, lotto_interrotto_solo_in_memoria | cartelle, TIFF/immagini, già ricercabili saltati, protetti/danneggiati in errore, suffisso numerico, sovrascrittura con .bak, CSV, «Riprendi lotto» nella stessa sessione (stato del lotto solo in memoria) |
 | OCR-16 Conversione Office | P1 | non fatto | — | modulo convert: può usare `ocr_page_text` / `recognize_document` |
 | OCR-17 PDF/A, PDF/UA | P1 | non fatto | — | |
 | OCR-18 Rimozione livello OCR / PDF solo immagine | P1 | fatto | test_ui: rimuovi_livello_ocr, pdf_solo_immagine | rimozione del livello invisibile; conversione in sole immagini con conferma, un passo di annulla |

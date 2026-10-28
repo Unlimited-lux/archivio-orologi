@@ -443,6 +443,81 @@ def _render_job(pdf: pymupdf.Document, index: int, opts: OcrOptions,
     return res, img
 
 
+# ------------------------------------------------------------------ copie temporanee (riservatezza)
+TEMP_PREFIX = "foliant-ocr-"
+_LIVE_TEMP: set[str] = set()      # copie del documento ancora in uso da questo processo
+_LIVE_LOCK = threading.Lock()
+_atexit_registered = False
+
+
+def _track_temp(path: str) -> None:
+    global _atexit_registered
+    with _LIVE_LOCK:
+        _LIVE_TEMP.add(path)
+        if not _atexit_registered:
+            import atexit
+            atexit.register(remove_live_temp)
+            _atexit_registered = True
+
+
+def _untrack_temp(path: str) -> None:
+    with _LIVE_LOCK:
+        _LIVE_TEMP.discard(path)
+
+
+def remove_live_temp() -> None:
+    """Cancella le copie temporanee del documento ancora presenti (uscita dall'app con un OCR in corso)."""
+    with _LIVE_LOCK:
+        paths = list(_LIVE_TEMP)
+        _LIVE_TEMP.clear()
+    for path in paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True         # esiste ma di un altro utente: non è nostro, meglio non toccarlo
+    return True
+
+
+def cleanup_leftovers(directory: str | None = None, min_age: float = 300.0) -> int:
+    """Cancella le copie temporanee dei documenti lasciate da un'esecuzione interrotta (crash).
+
+    Solo file `foliant-ocr-*.pdf` dell'utente; si salta la copia di un processo Foliant ancora vivo
+    (il PID è nel nome) e, per i nomi senza PID delle versioni precedenti, quelle recenti."""
+    import glob
+    import stat as _stat
+    import tempfile
+    directory = directory or tempfile.gettempdir()
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    removed = 0
+    for path in glob.glob(os.path.join(glob.escape(directory), TEMP_PREFIX + "*.pdf")):
+        try:
+            st = os.lstat(path)
+            if not _stat.S_ISREG(st.st_mode) or (uid is not None and st.st_uid != uid):
+                continue
+            m = re.match(re.escape(TEMP_PREFIX) + r"(\d+)-", os.path.basename(path))
+            if m:
+                if _pid_alive(int(m.group(1))):
+                    continue
+            elif time.time() - st.st_mtime < min_age:
+                continue
+            os.unlink(path)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 class ProcessRenderer:
     """Resa delle pagine in un processo separato (`render_worker`), per non tenere ENGINE_LOCK nel
     processo dell'interfaccia durante l'OCR in background. Se il processo non parte o si guasta,
@@ -455,7 +530,8 @@ class ProcessRenderer:
         self.proc = None
         self.path = None
         try:
-            fd, self.path = tempfile.mkstemp(prefix="foliant-ocr-", suffix=".pdf")
+            fd, self.path = tempfile.mkstemp(prefix=f"{TEMP_PREFIX}{os.getpid()}-", suffix=".pdf")
+            _track_temp(self.path)
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
             root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -500,6 +576,7 @@ class ProcessRenderer:
                 os.unlink(self.path)
             except OSError:
                 pass
+            _untrack_temp(self.path)
             self.path = None
 
 

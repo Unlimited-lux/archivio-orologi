@@ -14,6 +14,24 @@ from foliant.modules.ocr import detect, dialogs, engine, ui
 from .conftest import FRASI, image_pdf, scan_image
 
 
+def profile_traces(needle: str, *extra: str) -> list[str]:
+    """File del profilo isolato (configurazione, dati, stato) o `extra` che contengono `needle`."""
+    found = []
+    roots = [os.environ.get(v, "") for v in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME")]
+    files = [f for f in extra if os.path.isfile(f)]
+    for root in filter(None, roots):
+        for base, _dirs, names in os.walk(root):
+            files.extend(os.path.join(base, n) for n in names)
+    for f in files:
+        try:
+            with open(f, "rb") as fh:
+                if needle.encode() in fh.read() or needle in f:
+                    found.append(f)
+        except OSError:
+            pass
+    return found
+
+
 def ocr_controller():
     from foliant.modules import ocr
     return ocr.controller
@@ -90,7 +108,7 @@ def test_nessuna_proposta_per_pdf_digitale_o_gia_ocr(window, qtbot, sample_pdf, 
     assert ctl.state(view2).bar is None or not ctl.state(view2).bar.isVisible()
 
 
-def test_rilevamento_disattivato_e_non_chiedere_piu(window, qtbot, scan_two):
+def test_rilevamento_disattivato_e_non_chiedere_piu(window, qtbot, scan_two, settings):
     ctl = ocr_controller()
     ctl.actions["detect"].setChecked(False)
     view = window.open_path(scan_two)
@@ -100,13 +118,17 @@ def test_rilevamento_disattivato_e_non_chiedere_piu(window, qtbot, scan_two):
     ctl.actions["detect"].setChecked(True)
     ctl.start_analysis(view)
     qtbot.waitUntil(lambda: ctl.state(view).bar is not None and ctl.state(view).bar.isVisible(), timeout=3000)
-    ctl.state(view).bar.trigger("Non chiedere più per questo documento")
+    ctl.state(view).bar.trigger("Non chiedere più in questa sessione")
     view.document._saved_state = view.document._state
     window.close_view(view)
     view = window.open_path(scan_two)
     wait_analysis(qtbot, view)
     qtbot.wait(50)
     assert ctl.state(view).bar is None or not ctl.state(view).bar.isVisible()
+    # riservatezza: la scelta vale solo in memoria, nessuna impronta del documento nella configurazione
+    settings.sync()
+    assert not settings.contains("ocr/never_ask")
+    assert not any("never" in k for k in settings.allKeys())
 
 
 def test_proposta_al_clic_su_pagina_immagine(window, qtbot, scan_two):
@@ -851,6 +873,87 @@ def test_riprendi_lotto_interrotto(window, tmp_path, monkeypatch):
     assert [os.path.basename(i.path) for i in items] == ["s1.pdf", "s2.pdf"]
     assert (src / "s1_ocr.pdf").exists() and (src / "s2_ocr.pdf").exists() and not (src / "s0_ocr (2).pdf").exists()
     assert ctl.pending_batch() is None and not ctl.actions["resume"].isEnabled()
+
+
+def test_lotto_interrotto_solo_in_memoria(window, settings, tmp_path, monkeypatch):
+    """Riservatezza: i percorsi di un lotto interrotto non vanno nella configurazione e dopo il riavvio
+    «Riprendi lotto» non è disponibile."""
+    from foliant.api import OperationCancelled
+    from foliant.modules.ocr import batch
+    from foliant.modules.ocr.ui import OcrController
+    ctl = ocr_controller()
+    monkeypatch.setattr(dialogs.ReportDialog, "open", lambda d: None)
+    src = tmp_path / "zq7k-cartella"
+    src.mkdir()
+    for n in range(2):
+        image_pdf(src / f"zq7k-riservato{n}.pdf", [scan_image(lines=["Documento riservato"], dpi=72)], dpi=72)
+
+    def interrupt(item, *a, **k):
+        raise OperationCancelled()
+    monkeypatch.setattr(batch, "process_file", interrupt)
+    ctl.run_batch([str(src)], engine.SEARCHABLE, ["ita"], out_dir=str(tmp_path / "zq7k-uscita"))
+    assert ctl.pending_batch() and ctl.actions["resume"].isEnabled()    # nella sessione si riprende
+    settings.sync()
+    assert not settings.contains("ocr/batch_pending")
+    assert not profile_traces("zq7k", settings.fileName())
+    fresh = OcrController(window.ctx)       # come un nuovo avvio: nulla da riprendere
+    assert fresh.pending_batch() is None
+
+
+def test_pulizia_chiavi_delle_versioni_precedenti(qtbot, tmp_path):
+    """Le chiavi delle versioni precedenti (impronte dei documenti, percorsi del lotto) spariscono all'avvio."""
+    import json
+
+    from PySide6.QtCore import QSettings
+
+    from foliant.ui.main_window import MainWindow
+    path = tmp_path / "vecchia.ini"
+    old = QSettings(str(path), QSettings.Format.IniFormat)
+    old.setValue("ocr/never_ask", ["sha1:abc", "id:def"])
+    old.setValue("ocr/batch_pending", json.dumps({"files": ["/home/u/zq7k-riservato.pdf"], "mode": "searchable",
+                                                  "languages": ["ita"], "out_dir": "/home/u/zq7k-out"}))
+    old.setValue("ocr/detect", "true")
+    old.sync()
+    win = MainWindow(old)
+    qtbot.addWidget(win)
+    old.sync()
+    assert not old.contains("ocr/never_ask") and not old.contains("ocr/batch_pending")
+    assert old.value("ocr/detect") == "true"            # le preferenze generali restano
+    assert "zq7k" not in path.read_text(encoding="utf-8", errors="replace")
+    assert not ocr_controller().actions["resume"].isEnabled()
+    win.close()
+
+
+def test_copie_temporanee_lasciate_da_un_arresto(tmp_path):
+    """Le copie temporanee del documento per la resa (crash) si cancellano all'avvio; non quelle
+    di un processo vivo né i file di altri programmi."""
+    import time
+    dead = tmp_path / "foliant-ocr-999999999-abc.pdf"
+    alive = tmp_path / f"foliant-ocr-{os.getpid()}-abc.pdf"
+    legacy_old = tmp_path / "foliant-ocr-xyz.pdf"
+    legacy_new = tmp_path / "foliant-ocr-nuovo.pdf"
+    other = tmp_path / "altro.pdf"
+    for f in (dead, alive, legacy_old, legacy_new, other):
+        f.write_bytes(b"%PDF-1.4")
+    past = time.time() - 3600
+    os.utime(legacy_old, (past, past))
+    assert engine.cleanup_leftovers(str(tmp_path)) == 2
+    assert not dead.exists() and not legacy_old.exists()
+    assert alive.exists() and legacy_new.exists() and other.exists()
+
+
+def test_copia_temporanea_cancellata_alla_chiusura(tmp_path):
+    doc = pymupdf.open()
+    doc.new_page()
+    r = engine.ProcessRenderer(doc.tobytes())
+    try:
+        path = r.path
+        assert path and os.path.basename(path).startswith(f"foliant-ocr-{os.getpid()}-")
+        assert path in engine._LIVE_TEMP
+        engine.remove_live_temp()               # come all'uscita dell'app
+        assert not os.path.exists(path)
+    finally:
+        r.close()
 
 
 @pytest.mark.parametrize("keep", [True, False])
