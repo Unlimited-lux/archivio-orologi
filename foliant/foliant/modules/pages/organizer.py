@@ -145,6 +145,30 @@ class ThumbDelegate(QStyledItemDelegate):
                 (QRectF(cx + 3, y, size, size), 90, "rotate-cw")]
 
     def paint(self, p: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        p.save()
+        try:
+            self._paint(p, option, index)
+        except Exception:   # pagina danneggiata: segnaposto, mai un'eccezione dal disegno
+            p.restore()
+            p.save()
+            self._paint_unreadable(p, option, index)
+        finally:
+            p.restore()
+
+    def _paint_unreadable(self, p: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        cell = option.rect
+        s = self.grid.thumb_size
+        box = QRectF(cell.x() + (cell.width() - s * 0.7) / 2, cell.y() + CELL_PAD, s * 0.7, s)
+        p.setPen(QPen(theme.color("border"), 1))
+        p.setBrush(theme.color("surface"))
+        p.drawRect(box)
+        p.setPen(theme.color("danger"))
+        p.drawText(box, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, _("Pagina non leggibile"))
+        p.setPen(theme.color("text"))
+        p.drawText(QRectF(cell.x(), cell.y() + CELL_PAD + s + 2, cell.width(), LABEL_HEIGHT - 6),
+                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, str(index.row() + 1))
+
+    def _paint(self, p: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         grid = self.grid
         row = index.row()
         info = grid.model().infos[row]
@@ -152,7 +176,6 @@ class ThumbDelegate(QStyledItemDelegate):
         s = grid.thumb_size
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         # area della pagina in proporzione reale
         w, h = info.width, info.height
@@ -177,7 +200,10 @@ class ThumbDelegate(QStyledItemDelegate):
             p.setBrush(theme.color("surface"))
             p.drawRect(box)
             ic = icon("file-warning", theme.tokens()["danger"]).pixmap(28, 28)
-            p.drawPixmap(int(box.center().x() - 14), int(box.center().y() - 14), ic)
+            p.drawPixmap(int(box.center().x() - 14), int(box.center().y() - 26), ic)
+            p.setPen(theme.color("danger"))
+            p.drawText(box.adjusted(4, box.height() / 2, -4, 0), Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap,
+                       _("Pagina non leggibile"))
         else:
             p.setBrush(QColor("#FFFFFF") if not theme.is_dark() else QColor("#E9ECEF"))
             p.drawRect(box)
@@ -243,7 +269,6 @@ class ThumbDelegate(QStyledItemDelegate):
             label_rect = QRectF(text_rect.x(), text_rect.bottom() - fm2.height(), text_rect.width(), fm2.height())
             p.drawText(label_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
                        fm2.elidedText(f"({info.label})", Qt.TextElideMode.ElideRight, int(text_rect.width())))
-        p.restore()
 
 
 class PageGrid(QListView):

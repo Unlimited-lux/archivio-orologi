@@ -133,3 +133,95 @@ def test_split_disabled_single_page(window, tmp_path):
     c = window.ctx.pages_controller
     c.update_actions()
     assert not c.act_split.isEnabled()
+
+
+@pytest.mark.parametrize("dialog_name", ["PageNumbersDialog", "HeaderFooterDialog", "BatesDialog"])
+def test_restamping_replaces_existing_series(window, tmp_path, dialog_name):
+    """Rinumerare dopo aver eliminato una pagina non lascia due serie sovrapposte (PAG-33/34/35)."""
+    from foliant.modules.pages import stamp
+    from foliant.modules.pages import stamp_dialogs as SD
+    view = window.open_path(save_numbered(tmp_path / "cinque.pdf", 5))
+    cls = getattr(SD, dialog_name)
+
+    def make():
+        dlg = cls(window, view.document, [0])
+        dlg.scope.set_all() if hasattr(dlg.scope, "set_all") else None
+        if dialog_name == "PageNumbersDialog":
+            dlg.fmt.setCurrentText("Pagina {n} di {total}")
+        elif dialog_name == "HeaderFooterDialog":
+            dlg.fields["footer_center"].setText("Pagina {n} di {total}")
+        return dlg
+    first = make()
+    assert first.replace_box is not None and first.replace_box.isHidden()
+    first.apply()
+    with view.document.change("elimina") as pdf:
+        E.delete_pages(pdf, [4])
+    second = make()
+    assert not second.replace_box.isHidden() and second.replace_box.isChecked()
+    second.apply()
+    with E.ENGINE_LOCK:
+        pdf = view.document.pdf
+        kinds = stamp.list_watermarks(pdf)
+        for i in range(pdf.page_count):
+            text = pdf[i].get_text()
+            assert "di 5" not in text
+            assert sum(1 for k in kinds.get(i, []) if k == cls.REPLACE_KIND) == 1
+
+
+def test_page_numbers_pag33_criteria():
+    """PAG-33: dalla pagina 2 con numero 1; posizione speculare; stili romani/lettere."""
+    from foliant.modules.pages import stamp
+    doc = numbered_pdf(10)
+    stamp.add_page_numbers(doc, range(1, 10), fmt="{pagina}", start=1, position="bottom-center")
+    assert "1" not in doc[0].get_text().split()[1:]
+    assert doc[1].get_text().split()[-1] == "1" and doc[9].get_text().split()[-1] == "9"
+    doc = numbered_pdf(4)
+    stamp.add_page_numbers(doc, None, fmt="{n}", position="bottom-center", mirror="outer")
+    w = doc[0].rect.width
+    for i in range(4):
+        x = [b for b in doc[i].get_text("words") if b[4] == str(i + 1) and b[1] > 700][0][0]
+        assert (x > w / 2) == (i % 2 == 0)      # dispari (pagine 1, 3) a destra
+    doc = numbered_pdf(3)
+    stamp.add_page_numbers(doc, None, fmt="- {n} -", style="r")
+    assert "- iii -" in doc[2].get_text()
+    assert stamp.format_number(27, "A") == "AA" and stamp.format_number(4, "R") == "IV"
+
+
+def _cyclic_pdf(path):
+    d = numbered_pdf(2)
+    root = int(d.xref_get_key(d.pdf_catalog(), "Pages")[1].split()[0])
+    kids = d.xref_get_key(root, "Kids")[1]
+    d.xref_set_key(root, "Kids", kids[:-1] + f" {root} 0 R]")
+    d.xref_set_key(root, "Count", "3")
+    d.save(str(path), garbage=0)
+    return str(path)
+
+
+@pytest.mark.qt_no_exception_capture   # altri moduli (security, viewer) sollevano eccezioni su questo file
+def test_cyclic_page_tree_handled(window, tmp_path, monkeypatch):
+    """Ciclo nell'albero delle pagine: segnaposto «Pagina non leggibile», messaggi chiari, nessuna eccezione."""
+    errors = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: errors.append(a[2]))
+    view = window.open_path(_cyclic_pdf(tmp_path / "ciclo.pdf"))
+    window.sidebar.hide()        # le miniature del viewer non fanno parte di questo modulo
+    window.set_mode("pagine")
+    c = window.ctx.pages_controller
+    grid = c.organizer.grid
+    grid.flush_rendering()
+    assert grid.failed(2) or grid.thumbnail(2) is None
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    img = QImage(400, 400, QImage.Format.Format_RGB32)
+    painter = QPainter(img)
+    opt = QStyleOptionViewItem()
+    opt.rect = grid.visualRect(grid.model().index(2))
+    grid.itemDelegate().paint(painter, opt, grid.model().index(2))   # nessuna eccezione, stato ripristinato
+    assert painter.end()
+    grid.selectAll()
+    c.rotate(90)
+    grid.select_pages([2])
+    c.delete()
+    assert errors and all("danneggiato" in e for e in errors)
+    grid.select_pages([0, 1])
+    assert c.copy_pages()
+    assert view.page_count == 3

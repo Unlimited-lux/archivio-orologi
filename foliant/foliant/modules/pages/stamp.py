@@ -61,7 +61,7 @@ LABEL_STYLES = ("D", "r", "R", "a", "A", "")
 _NAME_PREFIX = "FolStamp_"
 _NAME_RE = re.compile(rb"/FolStamp_([a-z]+)_(\d+)\s+Do")
 _FZ_RE = re.compile(rb"/(fzFrm\d+)\s+Do")
-_PLACEHOLDER_RE = re.compile(r"\{(n|total|label|date|file)\}")
+_PLACEHOLDER_RE = re.compile(r"\{(n|total|label|date|file|pagina|totale|etichetta|nome|data)\}")
 
 
 def _layer_names() -> dict[str, str]:
@@ -506,8 +506,47 @@ def _apply_layers(pdf: pymupdf.Document, kind: str, targets: Sequence[int], buil
 # Segnaposto
 # =========================================================================
 
+_IT_ALIASES = {"pagina": "n", "totale": "total", "etichetta": "label", "nome": "file", "data": "date"}
+
+
 def _fill(template: str, values: dict[str, str]) -> str:
+    """Sostituisce i segnaposto; accetta anche i nomi italiani di PAG-32 ({pagina}, {totale}…)."""
+    values = dict(values)
+    for it, en in _IT_ALIASES.items():
+        if en in values and it not in values:
+            values[it] = values[en]
     return _PLACEHOLDER_RE.sub(lambda m: values.get(m.group(1), m.group(0)), template or "")
+
+
+def format_number(n: int, style: str = "D") -> str:
+    """Numero nello stile delle etichette: D arabi, r/R romani, a/A lettere (AA, BB… oltre la Z)."""
+    if style in ("r", "R"):
+        if n <= 0:
+            return str(n)
+        vals = [(1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+                (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")]
+        out = ""
+        for v, sym in vals:
+            while n >= v:
+                out += sym
+                n -= v
+        return out.upper() if style == "R" else out
+    if style in ("a", "A"):
+        if n <= 0:
+            return str(n)
+        letter = chr(ord("a") + (n - 1) % 26) * ((n - 1) // 26 + 1)
+        return letter.upper() if style == "A" else letter
+    return str(n)
+
+
+def _mirror_position(pos: str, pno: int, mirror: str) -> str:
+    """Lato esterno/interno per il fronte/retro: pagine dispari a destra (esterno), pari a sinistra."""
+    if mirror not in ("outer", "inner"):
+        return pos
+    vertical = pos.split("-")[0] if "-" in pos else "bottom"
+    odd = (pno + 1) % 2 == 1
+    right = odd if mirror == "outer" else not odd
+    return f"{vertical}-{'right' if right else 'left'}"
 
 
 def _label(pdf: pymupdf.Document, pno: int) -> str:
@@ -601,8 +640,10 @@ def _text_stamp_common(font_size, color, margin, position, font):
 def add_page_numbers(pdf: pymupdf.Document, pages: Iterable[int] | None = None, *, fmt: str = "{n}",
                      start: int = 1, position: str = "bottom-center", margin: float = 36, font_size: float = 10,
                      color=(0, 0, 0), font: str = "helv", skip_first: bool = False,
-                     opacity: float = 1.0) -> list[int]:
-    """Numera le pagine. Segnaposto: {n} numero, {total} ultimo numero, {label} etichetta.
+                     opacity: float = 1.0, style: str = "D", mirror: str = "none") -> list[int]:
+    """Numera le pagine. Segnaposto: {n}/{pagina} numero, {total}/{totale} ultimo numero,
+    {label}/{etichetta} etichetta. `style`: D, r, R, a, A; `mirror`: "outer"/"inner" per
+    mettere il numero sul lato esterno/interno nel fronte/retro (posizione verticale da `position`).
 
     La prima pagina indicata riceve il numero `start`; con `skip_first` la
     prima resta senza numero ma viene comunque contata.
@@ -618,16 +659,19 @@ def add_page_numbers(pdf: pymupdf.Document, pages: Iterable[int] | None = None, 
         raise PageOpError(_("Il numero iniziale non può essere negativo."))
     size, rgb, margin, pos, fnt = _text_stamp_common(font_size, color, margin, position, font)
     opacity = _check_opacity(opacity)
+    if style not in ("D", "r", "R", "a", "A"):
+        raise PageOpError(_("Stile di numerazione non valido."))
     numbers = {pno: start + k for k, pno in enumerate(targets)}
-    total = str(start + len(targets) - 1)
+    total = format_number(start + len(targets) - 1, style)
     if skip_first:
         targets = targets[1:]
         if not targets:
             raise PageOpError(_("Non ci sono pagine da numerare dopo aver saltato la prima."))
 
     def build(layer: _Layer, pno: int) -> None:
-        txt = _fill(fmt, {"n": str(numbers[pno]), "total": total, "label": _label(pdf, pno)})
-        layer.text_block(txt, pos=pos, margin=margin, font=fnt, size=size, color=rgb)
+        txt = _fill(fmt, {"n": format_number(numbers[pno], style), "total": total, "label": _label(pdf, pno)})
+        layer.text_block(txt, pos=_check_position(_mirror_position(pos, pno, mirror)), margin=margin, font=fnt,
+                         size=size, color=rgb)
 
     return _apply_layers(pdf, NUMBERS, targets, build, opacity=opacity)
 
@@ -896,6 +940,7 @@ def preview_labels(page_count: int, rules: Sequence[dict], limit: int = 12) -> l
 
 
 TRANSLATIONS = {
+    "Stile di numerazione non valido.": "Invalid numbering style.",
     "Foliant: filigrana": "Foliant: watermark",
     "Foliant: sfondo": "Foliant: background",
     "Foliant: numeri di pagina": "Foliant: page numbers",
