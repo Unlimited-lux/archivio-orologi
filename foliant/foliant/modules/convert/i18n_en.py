@@ -182,7 +182,8 @@ EN: dict[str, str] = {
     "Formato «{e}» non supportato.": "Unsupported format “{e}”.",
     "Ghostscript ha impiegato troppo tempo ed è stato interrotto.": "Ghostscript took too long and was stopped.",
     "Ghostscript non è riuscito a convertire il documento in PDF/A. {d}": "Ghostscript could not convert the document to PDF/A. {d}",
-    "Gli allegati del PDF ({n}) non sono stati convertiti.": "The PDF attachments ({n}) were not converted.",
+    "Gli allegati del PDF ({n}) non sono stati convertiti: {names}.":
+        "The PDF attachments ({n}) were not converted: {names}.",
     "Gli appunti non contengono dati utilizzabili per creare un PDF.": "The clipboard contains no usable data for creating a PDF.",
     "Gli appunti sono vuoti o contengono un formato non supportato. Copia un'immagine, del testo o dei file e riprova.": "The clipboard is empty or contains an unsupported format. Copy an image, text, or files and try again.",
     "Grafica vettoriale": "Vector graphics",
@@ -824,3 +825,85 @@ EN.update({"Avvisi: {n}": "Warnings: {n}", "Dettagli": "Details", "Mostra cartel
 
 # NFR-25: suffissi dei file e modello dei nomi
 EN.update({"_riparato": "_repaired", "{nome}_{pagina:03}": "{name}_{page:03}"})
+
+# CNV-01: portfolio come sorgente
+EN.update({"Documento di copertina": "Cover document", "Portfolio PDF": "PDF portfolio",
+           "Il documento è un portfolio. Che cosa vuoi convertire?":
+               "The document is a portfolio. What do you want to convert?",
+           "Il portfolio non contiene «{n}».": "The portfolio does not contain “{n}”.",
+           "«{n}» non è un PDF: si possono convertire solo i PDF del portfolio.":
+               "“{n}” is not a PDF: only the PDFs in the portfolio can be converted."})
+
+# CNV-24: preset e anteprima dello scanner
+EN.update({"Impostazioni personalizzate": "Custom settings", "Anteprima non riuscita: {e}": "Preview failed: {e}",
+           "Documento d'identità a colori": "Identity document in color",
+           "Il file non contiene un preset di acquisizione valido.": "The file does not contain a valid scan preset.",
+           "Esporta…": "Export…", "Importa…": "Import…", "Esporta preset": "Export preset",
+           "Importa preset": "Import preset", "Certificati e garanzie a colori": "Certificates and warranties in color",
+           "Documenti in bianco e nero (fatture, contratti)": "Black and white documents (invoices, contracts)",
+           "Bozza veloce in grigio": "Quick draft in grayscale", "Formato carta": "Paper size"})
+
+# CNV-02: dettaglio dell'OCR nel report
+EN.update({"Lingue OCR: {l}": "OCR languages: {l}", "Confidenza media OCR: {c:.0f}%": "Mean OCR confidence: {c:.0f}%",
+           "Pagina {p}: OCR non riuscito, la pagina resta un'immagine ({m}).":
+               "Page {p}: OCR failed, the page stays an image ({m}).",
+           "Pagina {p}: testo poco leggibile (scrittura a mano o scansione illeggibile), confidenza {c:.0f}%: "
+           "controlla il risultato.":
+               "Page {p}: hard-to-read text (handwriting or illegible scan), confidence {c:.0f}%: check the result.",
+           "Pagina {p}: testo non decodificabile (font senza mappatura Unicode) riconosciuto con OCR in {n} aree: "
+           "controlla il risultato.":
+               "Page {p}: undecodable text (font without Unicode mapping) recognized with OCR in {n} areas: "
+               "check the result.",
+           "Pagina {p}: parte del testo non è decodificabile e non è stato possibile riconoscerla con l'OCR.":
+               "Page {p}: part of the text cannot be decoded and could not be recognized with OCR."})
+
+# CNV-18: opzioni dei documenti d'ufficio
+EN.update({"Aggiungi le pagine delle note": "Add notes pages", "Commenti come annotazioni": "Comments as annotations",
+           "Segnalibri dai titoli": "Bookmarks from headings", "Solo il foglio attivo": "Active sheet only",
+           "Risoluzione massima delle immagini": "Maximum image resolution",
+           "Opzioni dei documenti d'ufficio": "Office document options",
+           "«{f}» produrrà circa {n} pagine. Vuoi continuare?": "“{f}” will produce about {n} pages. Continue?",
+           "Tutti i fogli": "All sheets",
+           "Revisioni: stampa lo stato finale senza marcature": "Tracked changes: print the final state without markup",
+           "PDF taggato (accessibile)": "Tagged PDF (accessible)",
+           "Adatta le colonne alla larghezza della pagina": "Fit columns to the page width",
+           "Foglio di calcolo molto lungo": "Very long spreadsheet", "PDF normale": "Regular PDF",
+           "Includi le diapositive nascoste": "Include hidden slides", "Fogli di calcolo": "Spreadsheets",
+           "Formato di uscita": "Output format", "Qualità delle immagini": "Image quality",
+           "Presentazioni": "Presentations",
+           "Font non installati, sostituiti con equivalenti (l'impaginazione può cambiare): {f}":
+               "Fonts not installed, replaced with equivalents (the layout may change): {f}"})
+
+# CNV-17: Esporta come › Più file…
+EN.update({"Più file…": "Multiple files…", "Converti molti PDF in questo formato": "Convert many PDFs to this format"})
+
+# CNV-26: fotocamera
+EN.update({"Da fotocamera…": "From camera…", "Scatta le pagine con la webcam": "Shoot the pages with the webcam",
+           "Crea PDF da fotocamera": "Create PDF from camera", "Fotocamera": "Camera", "Fotocamera {n}": "Camera {n}",
+           "Scatta": "Shoot", "Fine": "Done", "Aggiungi foto…": "Add photos…", "Scatto {n}": "Shot {n}",
+           "Trascina gli angoli per correggere il bordo del foglio.": "Drag the corners to fix the sheet edge.",
+           "Pagine scattate: {n}. Inquadra il foglio intero su uno sfondo scuro; dopo «Fine» potrai regolare gli "
+           "angoli.": "Pages shot: {n}. Frame the whole sheet on a dark background; after “Done” you can adjust the "
+                      "corners.",
+           "Impossibile aprire la fotocamera: è usata da un altro programma oppure l'accesso è negato (permessi del "
+           "dispositivo).": "Cannot open the camera: another program is using it or access is denied (device "
+                            "permissions).",
+           "Nessuna fotocamera disponibile (non collegata o accesso negato: l'utente deve poter usare i dispositivi "
+           "video). Vuoi importare invece le foto dei documenti scattate con il telefono?":
+               "No camera available (not connected or access denied: the user must be allowed to use video "
+               "devices). Do you want to import photos of the documents taken with your phone instead?"})
+
+# CNV-34: cartelle del portfolio e PDF/A
+EN.update({"Cartella:": "Folder:", "Cartella (vuota = radice del portfolio):": "Folder (empty = portfolio root):",
+           "Nome di cartella non valido.": "Invalid folder name.", "Il portfolio non ha cartelle.":
+               "The portfolio has no folders.", "Esiste già una cartella «{n}».": "A folder “{n}” already exists.",
+           "Nome di cartella non valido o già usato.": "Folder name invalid or already in use.",
+           "La cartella «{n}» non esiste.": "The folder “{n}” does not exist.", "Nuovo nome:": "New name:",
+           "Sposta in cartella": "Move to folder", "Sposta in cartella…": "Move to folder…",
+           "Rinomina cartella": "Rename folder", "Rinomina cartella…": "Rename folder…",
+           "Struttura del portfolio non supportata per questa modifica.":
+               "Portfolio structure not supported for this change.",
+           "Il documento dichiara la conformità PDF/A-{n}, che non ammette questi allegati: dopo la modifica non "
+           "sarà più conforme. Vuoi continuare?":
+               "The document declares PDF/A-{n} conformance, which does not allow these attachments: after the "
+               "change it will no longer conform. Continue?"})

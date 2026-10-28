@@ -505,3 +505,57 @@ def test_resize_small_text_warning():
     layout.resize_pages(doc, [0], (100, 141), report=rep)            # scala ~0,17 → 2 pt
     assert rep["small_text"] == [0]
     assert layout.min_font_size(new_doc()[0]) == pytest.approx(12, abs=0.1)
+
+
+# ======================================================================== PAG-31
+def _side_numbers(doc):
+    """Per ogni facciata: numeri «P{n}» a sinistra e a destra della piega."""
+    out = []
+    for p in doc:
+        mid = p.rect.width / 2
+        left = right = None
+        for w in p.get_text("words"):
+            if w[4].startswith("P") and w[4][1:].isdigit():
+                if w[0] < mid:
+                    left = int(w[4][1:])
+                else:
+                    right = int(w[4][1:])
+        out.append([left, right])
+    return out
+
+
+def test_booklet_8_a5_on_a4_saddle_stitch():
+    src = new_doc(8, size=PAPER_SIZES["A5"], text="P{n}")
+    out = pymupdf.open("pdf", layout.booklet(src, sheet_size=A4))
+    assert out.page_count == 4
+    for p in out:
+        assert abs(p.rect.width - A4[1]) < 0.5 and abs(p.rect.height - A4[0]) < 0.5
+    assert _side_numbers(out) == [[8, 1], [2, 7], [6, 3], [4, 5]]
+    # rilegatura a destra: coppie specchiate
+    out = pymupdf.open("pdf", layout.booklet(src, binding="right"))
+    assert _side_numbers(out) == [[1, 8], [7, 2], [3, 6], [5, 4]]
+
+
+def test_booklet_6_pages_adds_2_blanks():
+    src = new_doc(6, text="P{n}")
+    out = pymupdf.open("pdf", layout.booklet(src))
+    assert out.page_count == 4
+    assert _side_numbers(out) == [[None, 1], [2, None], [6, 3], [4, 5]]
+    out = pymupdf.open("pdf", layout.booklet(src, blank_position="before_last"))
+    assert _side_numbers(out) == [[6, 1], [2, None], [None, 3], [4, 5]]
+
+
+def test_booklet_signatures_gutter_creep():
+    order = layout.booklet_order(16, signature_sheets=2)
+    assert order[:4] == [(7, 0), (1, 6), (5, 2), (3, 4)] and order[4] == (15, 8)
+    src = new_doc(8, size=PAPER_SIZES["A5"], text="P{n}")
+    plain = pymupdf.open("pdf", layout.booklet(src))
+    shifted = pymupdf.open("pdf", layout.booklet(src, gutter=20, creep=6))
+    # foglio interno (facciata 3: P6 a sinistra): spostato verso la piega rispetto all'esterno
+    x_plain = plain[2].search_for("P6")[0].x0
+    x_creep = shifted[2].search_for("P6")[0].x0
+    x_outer_plain = plain[0].search_for("P8")[0].x0
+    x_outer = shifted[0].search_for("P8")[0].x0
+    assert x_creep - x_outer > x_plain - x_outer_plain + 3
+    with pytest.raises(PageOpError):
+        layout.booklet_order(0)

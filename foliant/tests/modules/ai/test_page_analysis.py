@@ -211,3 +211,15 @@ def test_dialog_empty_and_without_profile(qtbot, text_pdf):
     assert not dlg.classify_button.isEnabled()
     assert not dlg.empty.isHidden() and dlg.empty.text() == "Nessun problema trovato"
     assert not dlg.apply_button.isEnabled()
+
+
+def test_percent_and_amount_texts_follow_language():
+    from foliant import i18n
+    from foliant.modules.ai import extract, page_analysis
+    assert page_analysis._percent(0.0013) == "0,13" and extract._fmt(1234.5) == "1.234,50"
+    i18n.set_language("en")
+    try:
+        assert page_analysis._percent(0.0013) == "0.13" and page_analysis._percent(0.25) == "25.0"
+        assert extract._fmt(1234.5) == "1,234.50"
+    finally:
+        i18n.set_language("it")

@@ -35,7 +35,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
-from foliant.api import FoliantError, OperationCancelled, _
+from foliant.api import FoliantError, OperationCancelled, _, format_number
 
 from . import chunking, prompts
 from .engine import Job, Scope, _system, budget_for, parse_json_payload, scope_text
@@ -524,7 +524,7 @@ def _num(c) -> float | None:
 
 
 def _fmt(v: float) -> str:
-    return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return format_number(v, 2)          # testi dell'interfaccia: separatori della lingua (NFR-26)
 
 
 def partita_iva_valid(value) -> bool:
@@ -592,7 +592,7 @@ def consistency_checks(result: ExtractResult) -> list[str]:
                 if abs(s - net) > 0.01:
                     checks.append(_("{r}: la somma delle righe ({s}) è diversa dall'imponibile ({t}): "
                                     "differenza {d}").format(r=name, s=_fmt(s), t=_fmt(net),
-                                                            d=f"{abs(s - net):.2f}".replace(".", ",")))
+                                                            d=_fmt(abs(s - net))))
             elif total is not None:
                 expected = s + (tax or 0.0)
                 if abs(expected - total) > 0.01:

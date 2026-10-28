@@ -1,0 +1,1 @@
+pyspellchecker>=0.8   # controllo ortografico dei commenti (ANN-44), tramite il servizio del modulo text_edit

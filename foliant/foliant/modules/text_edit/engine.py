@@ -307,6 +307,7 @@ class _Writer:
         self._queue: list[tuple] = []
         self._chars: dict[str, set[str]] = {}
         self._choices: dict[str, object] = {}
+        self._raw: list[bytes] = []
         _ACTIVE_WRITERS.append(self)
 
     def _font(self, piece: Piece) -> str:
@@ -334,7 +335,10 @@ class _Writer:
             self._fonts[key] = alias
         queue, self._queue = self._queue, []
         for fn, args, kwargs in queue:
+            if fn != self._write_raw:
+                self._flush_raw()      # l'ordine nel flusso di contenuto segue l'ordine di lettura
             fn(*args, **kwargs)
+        self._flush_raw()
 
     def _morph(self, origin: pymupdf.Point, m: pymupdf.Matrix) -> tuple:
         """Trasformazione `m` (riquadro di lavoro) attorno a `origin`, espressa nella pagina non ruotata."""
@@ -351,10 +355,95 @@ class _Writer:
     def write_piece(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
                     angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
         choice = piece.choice
+        if getattr(choice, "resource", None) is not None:
+            # risorsa font originale: operatori di testo scritti direttamente, nessun font aggiunto
+            self._queue.append((self._write_raw, (piece, baseline, render_mode, hscale, angle, origin), {}))
+            return
         if not choice.base14:
             self._choices.setdefault(choice.key, choice)
             self._chars.setdefault(choice.key, set()).update(piece.text)
         self._queue.append((self._write_piece_now, (piece, baseline, render_mode, hscale, angle, origin), {}))
+
+    def _resource_name(self, xref: int) -> str:
+        """Nome della risorsa font `xref` nella pagina (aggiunta alle risorse se manca)."""
+        for f in self.page.get_fonts(full=True):
+            if f[0] == xref and (len(f) < 7 or not f[6]):
+                return f[4]
+        doc = self.page.parent
+        name = "FRs%d" % xref
+        kind, val = doc.xref_get_key(self.page.xref, "Resources")
+        if kind == "xref":
+            target, prefix = int(val.split()[0]), ""
+        else:
+            target, prefix = self.page.xref, "Resources/"
+        fkind, fval = doc.xref_get_key(target, prefix + "Font")
+        if fkind == "xref":
+            doc.xref_set_key(int(fval.split()[0]), name, f"{xref} 0 R")
+        elif fkind == "dict":
+            doc.xref_set_key(target, prefix + "Font/" + name, f"{xref} 0 R")
+        else:
+            doc.xref_set_key(target, prefix + "Font", f"<< /{name} {xref} 0 R >>")
+        return name
+
+    def _write_raw(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
+                   angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
+        st = piece.style
+        enc = piece.choice.resource
+        name = self._resource_name(enc.xref)
+        y = baseline - st.rise
+        m = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+        if hscale != 1.0:
+            m = pymupdf.Matrix(hscale, 0, 0, 1, 0, 0) * m
+        if angle:
+            m = m * pymupdf.Matrix(angle)
+        anchor = origin or pymupdf.Point(piece.x, y)
+        pt = pymupdf.Point(piece.x, y)
+        if angle or hscale != 1.0:
+            rel = pymupdf.Point(piece.x - anchor.x, y - anchor.y) * m
+            pt = pymupdf.Point(anchor.x + rel.x, anchor.y + rel.y)
+        try:
+            from ...core import placement
+            to_pdf = self.unframe * placement.page_to_pdf_matrix(self.page)
+        except ImportError:
+            to_pdf = self.unframe * ~pymupdf.Matrix(self.page.transformation_matrix)
+        lin = _lin(to_pdf)
+        u = pymupdf.Point(1, 0) * m * lin
+        v = pymupdf.Point(0, -1) * m * lin
+        o = pt * to_pdf
+        r, g, b = (max(0.0, min(1.0, c)) for c in st.color[:3])
+        ops = [b"BT", f"/{name} {st.size:g} Tf".encode(), f"{r:.4f} {g:.4f} {b:.4f} rg".encode(),
+               f"{3 if render_mode == 3 else 0} Tr".encode()]
+        if st.char_spacing:
+            ops.append(f"{st.char_spacing:.4f} Tc".encode())
+        ops.append(f"{u.x:.5f} {u.y:.5f} {v.x:.5f} {v.y:.5f} {o.x:.4f} {o.y:.4f} Tm".encode())
+        ops.append(b"<" + enc.encode(piece.text).hex().encode() + b"> Tj")
+        ops.append(b"ET")
+        self._raw.append(b" ".join(ops))
+        if (st.underline or st.strike) and render_mode != 3:
+            width = max(0.4, st.size * 0.06)
+            for flag, offset in ((st.underline, 0.12), (st.strike, -0.28)):
+                if flag:
+                    p0 = pymupdf.Point(piece.x, y + offset * st.size)
+                    p1 = pymupdf.Point(piece.x + piece.width, y + offset * st.size)
+                    if angle:
+                        p0 = anchor + (p0 - anchor) * pymupdf.Matrix(angle)
+                        p1 = anchor + (p1 - anchor) * pymupdf.Matrix(angle)
+                    _draw_line(self.page, p0 * self.unframe, p1 * self.unframe, color=st.color, width=width,
+                               overlay=self.overlay)
+
+    def _flush_raw(self) -> None:
+        if not self._raw:
+            return
+        data = b"q\n" + b"\n".join(self._raw) + b"\nQ\n"
+        self._raw = []
+        doc = self.page.parent
+        self.page.wrap_contents()
+        xref = doc.get_new_xref()
+        doc.update_object(xref, "<< >>")
+        doc.update_stream(xref, data)
+        contents = list(self.page.get_contents())
+        contents = contents + [xref] if self.overlay else [xref] + contents
+        doc.xref_set_key(self.page.xref, "Contents", "[" + " ".join(f"{c} 0 R" for c in contents) + "]")
 
     def _write_piece_now(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
                          angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:

@@ -157,24 +157,32 @@ class PortfolioDialog(QDialog):
 
 
 class EditPortfolioDialog(QDialog):
-    """Modifica di un portfolio aperto: aggiunta e rimozione di file (un passo annullabile)."""
+    """Modifica di un portfolio aperto: aggiunta, rimozione e spostamento di file, rinomina delle
+    cartelle (applicati insieme come un solo passo annullabile)."""
 
-    def __init__(self, parent, files: list[tuple[str, int, str]], folders: list[str], ask_files=None):
+    def __init__(self, parent, files: list[tuple[str, int, str]], folders: list[str], ask_files=None,
+                 file_folders: dict[str, str] | None = None):
         super().__init__(parent)
         self.setWindowTitle(_("Modifica portfolio"))
-        self.resize(640, 440)
+        self.resize(700, 460)
         self._ask_files = ask_files
         self.removed: list[str] = []
         self.added: list[dict] = []
+        self.moves: dict[str, str] = {}          # chiave → cartella di destinazione
+        self.renames: list[tuple[str, str]] = []  # (vecchio nome, nuovo nome) delle cartelle
+        self.folders = list(folders)
+        file_folders = file_folders or {}
         lay = QVBoxLayout(self)
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels([_("Nome"), _("Dimensione"), _("Descrizione")])
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels([_("Nome"), _("Cartella"), _("Dimensione"), _("Descrizione")])
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         lay.addWidget(self.table, 1)
         for name, size, desc in files:
-            self._row(name, f"{size:,}".replace(",", ".") + " B", desc)
+            shown = name[name.index(">") + 1:] if name.startswith("<") and ">" in name else name
+            self._row(shown, f"{size:,}".replace(",", ".") + " B", desc, folder=file_folders.get(name, ""),
+                      ref=("old", name))
         form = QFormLayout()
         self.folder = QComboBox()
         self.folder.setEditable(True)
@@ -185,7 +193,9 @@ class EditPortfolioDialog(QDialog):
         lay.addLayout(form)
         row = QHBoxLayout()
         for text, icon_name, slot in ((_("Aggiungi file…"), "file-plus", self._add),
-                                      (_("Rimuovi"), "trash-2", self._remove)):
+                                      (_("Rimuovi"), "trash-2", self._remove),
+                                      (_("Sposta in cartella…"), "folder-input", self._move),
+                                      (_("Rinomina cartella…"), "folder-pen", self._rename_folder)):
             b = QPushButton(text)
             bind_icon(b, icon_name)
             b.setAutoDefault(False)
@@ -200,32 +210,97 @@ class EditPortfolioDialog(QDialog):
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
 
-    def _row(self, name: str, size: str, desc: str, new_index: int | None = None) -> None:
+    def _row(self, name: str, size: str, desc: str, *, folder: str = "", ref=None) -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         item = QTableWidgetItem(name)
-        item.setData(256, ("new", new_index) if new_index is not None else ("old", name))
+        item.setData(256, ref)
         self.table.setItem(r, 0, item)
-        self.table.setItem(r, 1, QTableWidgetItem(size))
-        self.table.setItem(r, 2, QTableWidgetItem(desc))
+        self.table.setItem(r, 1, QTableWidgetItem(folder))
+        self.table.setItem(r, 2, QTableWidgetItem(size))
+        self.table.setItem(r, 3, QTableWidgetItem(desc))
 
     def add_paths(self, paths: list[str]) -> None:
+        folder = self.folder.currentText().strip()
         for p in paths:
-            self.added.append({"path": p, "folder": self.folder.currentText().strip()})
-            self._row(Path(p).name + "  " + _("(nuovo)"), "", "", len(self.added) - 1)
+            self.added.append({"path": p, "folder": folder})
+            self._row(Path(p).name + "  " + _("(nuovo)"), "", "", folder=folder, ref=("new", len(self.added) - 1))
 
     def _add(self) -> None:
         if self._ask_files is not None:
             self.add_paths(self._ask_files())
 
+    def _selected_rows(self) -> list[int]:
+        return sorted({i.row() for i in self.table.selectedIndexes()})
+
     def _remove(self) -> None:
-        for r in sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True):
+        for r in reversed(self._selected_rows()):
             kind, ref = self.table.item(r, 0).data(256)
             if kind == "old":
                 self.removed.append(ref)
+                self.moves.pop(ref, None)
             else:
                 self.added[ref] = None
             self.table.removeRow(r)
+
+    def _ask_folder(self, title: str, label: str, current: str = "") -> str | None:
+        from PySide6.QtWidgets import QInputDialog
+        items = [""] + self.folders
+        name, ok = QInputDialog.getItem(self, title, label, items, items.index(current) if current in items else 0,
+                                        True)
+        return name.strip() if ok else None
+
+    def move_rows(self, rows: list[int], folder: str) -> None:
+        for r in rows:
+            kind, ref = self.table.item(r, 0).data(256)
+            if kind == "old":
+                self.moves[ref] = folder
+            elif self.added[ref] is not None:
+                self.added[ref]["folder"] = folder
+            self.table.item(r, 1).setText(folder)
+        if folder and folder not in self.folders:
+            self.folders.append(folder)
+            self.folder.addItem(folder)
+
+    def _move(self) -> None:
+        rows = self._selected_rows()
+        if not rows:
+            return
+        folder = self._ask_folder(_("Sposta in cartella"), _("Cartella (vuota = radice del portfolio):"))
+        if folder is not None:
+            self.move_rows(rows, folder)
+
+    def rename(self, old: str, new: str) -> bool:
+        new = new.strip()
+        if not new or "/" in new or new in self.folders or old not in self.folders:
+            return False
+        self.renames.append((old, new))
+        self.folders[self.folders.index(old)] = new
+        i = self.folder.findText(old)
+        if i >= 0:
+            self.folder.setItemText(i, new)
+        for r in range(self.table.rowCount()):
+            if self.table.item(r, 1).text() == old:
+                self.table.item(r, 1).setText(new)
+        for k, f in list(self.moves.items()):
+            if f == old:
+                self.moves[k] = new
+        for a in self.added:
+            if a is not None and a["folder"] == old:
+                a["folder"] = new
+        return True
+
+    def _rename_folder(self) -> None:
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        if not self.folders:
+            QMessageBox.information(self, _("Rinomina cartella"), _("Il portfolio non ha cartelle."))
+            return
+        old, ok = QInputDialog.getItem(self, _("Rinomina cartella"), _("Cartella:"), self.folders, 0, False)
+        if not ok:
+            return
+        new, ok = QInputDialog.getText(self, _("Rinomina cartella"), _("Nuovo nome:"), text=old)
+        if ok and new.strip() != old and not self.rename(old, new):
+            QMessageBox.warning(self, _("Rinomina cartella"), _("Nome di cartella non valido o già usato."))
 
     def changes(self) -> tuple[list[dict], list[str]]:
         return [a for a in self.added if a], list(self.removed)

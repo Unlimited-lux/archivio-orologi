@@ -272,6 +272,24 @@ def _adjust_array(a: np.ndarray, brightness: float, contrast: float, saturation:
     return x.astype(np.uint8)
 
 
+def preview_base(png: bytes, max_side: int = 240) -> np.ndarray:
+    """Copia ridotta (RGB uint8) di un'immagine per l'anteprima delle regolazioni."""
+    from PIL import Image
+    with Image.open(io.BytesIO(png)) as im:
+        im = im.convert("RGB")
+        im.thumbnail((max_side, max_side))
+        return np.asarray(im, dtype=np.uint8).copy()
+
+
+def preview_adjusted(base: np.ndarray, brightness: float = 0, contrast: float = 0, saturation: float = 0,
+                     grayscale: bool = False, invert: bool = False) -> np.ndarray:
+    """Anteprima delle regolazioni sulla copia ridotta (stessa resa di `adjust_image`)."""
+    out = _adjust_array(base, brightness, contrast, saturation, grayscale, invert)
+    if out.shape[-1] == 1:
+        out = np.repeat(out, 3, axis=-1)
+    return out
+
+
 # ============================================================== scrittura
 NEW_MASK = -1                 # xref segnaposto: nuova maschera alfa
 _MASK_REF = "@MASK@"          # segnaposto nel dizionario dell'immagine che la usa

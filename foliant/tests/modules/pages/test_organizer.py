@@ -499,3 +499,20 @@ def test_bates_files_action_opens_dialog(pages_window, monkeypatch):
     monkeypatch.setattr(bates_dialogs, "open_bates_files_dialog", lambda ctx, v, sel: called.append((v, sel)) or False)
     c.act_bates_files.trigger()
     assert called and called[0][0] is view
+
+
+@pytest.mark.parametrize("act_name, module, func", [
+    ("act_cleanup", "cleanup_dialogs", "open_cleanup_dialog"),
+    ("act_detect_dlg", "detect_dialogs", "open_detect_dialog"),
+    ("act_booklet", "layout_dialogs", "open_booklet_dialog"),
+    ("act_fixedmark", "fixedmark_dialogs", "open_fixed_watermark_dialog"),
+])
+def test_new_actions_open_their_dialogs(pages_window, monkeypatch, act_name, module, func):
+    import importlib
+    window, view = pages_window
+    c = ctrl(window)
+    mod = importlib.import_module(f"foliant.modules.pages.{module}")
+    called = []
+    monkeypatch.setattr(mod, func, lambda ctx, v, sel: called.append(v) or False)
+    getattr(c, act_name).trigger()
+    assert called == [view]

@@ -86,7 +86,8 @@ def app_windows() -> list["MainWindow"]:
 def active_window() -> "MainWindow | None":
     """La finestra a cui vanno i file aperti da fuori (gestore file, riga di comando)."""
     current = QApplication.activeWindow()
-    windows = app_windows()
+    # non quella che si sta chiudendo: un file aperto lì sparirebbe con lei
+    windows = [w for w in app_windows() if not w._closing]
     if current in windows:
         return current
     return windows[-1] if windows else None
@@ -110,6 +111,23 @@ def open_window(settings: QSettings, near: "MainWindow | None" = None) -> "MainW
     return window
 
 
+_memory_timer: QTimer | None = None
+
+
+def schedule_memory_release(*_args) -> None:
+    """Dopo la chiusura di una o più schede: un solo `release_memory()` al prossimo giro del ciclo
+    degli eventi. Il timer è dell'applicazione, non della finestra: chiusa una finestra con dei
+    documenti, le sue schede vengono distrutte con lei e il rilascio deve avvenire lo stesso."""
+    global _memory_timer
+    import shiboken6
+    if _memory_timer is None or not shiboken6.isValid(_memory_timer):
+        _memory_timer = QTimer(QApplication.instance())
+        _memory_timer.setSingleShot(True)
+        _memory_timer.setInterval(0)
+        _memory_timer.timeout.connect(lambda: release_memory())
+    _memory_timer.start()
+
+
 def release_memory() -> bool:
     """Restituisce al sistema la memoria già liberata (NFR-06). Con glibc i blocchi delle
     immagini di pagina di una scheda chiusa restano all'allocatore e la memoria residente
@@ -127,8 +145,8 @@ def release_memory() -> bool:
 
 class MainWindow(QMainWindow):
     _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
-    _memory_timer: QTimer | None = None
     _closed = False             # chiusura confermata (closeEvent accettato)
+    _closing = False            # closeEvent in corso (domande aperte): non riceve file da fuori
 
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
@@ -935,14 +953,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, _("Password errata"), _("La password non è corretta. Riprova."))
             except DocumentError as e:
                 QMessageBox.warning(self, _("Impossibile aprire il file"), f"{Path(path).name}\n\n{e}")
-                self._forget_recent(path)
+                self._forget_unreadable(path)
                 return None
             except Exception as e:          # errore imprevisto del motore: un file non ferma gli altri
                 logging.getLogger(__name__).exception("apertura di %s", path)
                 QMessageBox.warning(self, _("Impossibile aprire il file"),
                                     f"{Path(path).name}\n\n" + _("Il file non è un PDF valido oppure è danneggiato.")
                                     + f"\n({type(e).__name__})")
-                self._forget_recent(path)
+                self._forget_unreadable(path)
                 return None
             password, ok = QInputDialog.getText(
                 self, _("Documento protetto"),
@@ -1110,20 +1128,11 @@ class MainWindow(QMainWindow):
             page.release()
             page.deleteLater()                  # contenitore con le barre di avviso
         # distrutte davvero vista e contenitore, la memoria liberata torna al sistema (NFR-06)
-        (page if page is not None else view).destroyed.connect(self._schedule_memory_release)
+        # (funzione del modulo: chiudendo la finestra le schede muoiono con lei, ma il rilascio resta)
+        (page if page is not None else view).destroyed.connect(schedule_memory_release)
         if self.tabs.count() == 0:
             self.show_home()
         self._on_current_changed()
-
-    def _schedule_memory_release(self, *_args) -> None:
-        """Dopo la chiusura di una o più schede: un solo `release_memory()` al prossimo giro
-        del ciclo degli eventi."""
-        if self._memory_timer is None:
-            self._memory_timer = QTimer(self)
-            self._memory_timer.setSingleShot(True)
-            self._memory_timer.setInterval(0)
-            self._memory_timer.timeout.connect(lambda: release_memory())
-        self._memory_timer.start()
 
     def save_view(self, view: DocumentView | None, save_as: bool = False, recreate: bool = False) -> bool:
         """Salva il documento (con `save_as` chiede dove). Se il file è stato eliminato o spostato
@@ -1640,6 +1649,11 @@ class MainWindow(QMainWindow):
             self._set_pinned([p for p in self.pinned_recent() if p != path])
         self._refresh_recent()
 
+    def _forget_unreadable(self, path: str) -> None:
+        # un fissato resta: l'errore può essere passeggero (rete, permessi, file in riscrittura)
+        if path not in self.pinned_recent():
+            self._forget_recent(path)
+
     def remove_recent(self, path: str) -> None:
         """Toglie `path` dai recenti (API pubblica: `ctx.remove_recent`)."""
         self._forget_recent(path)
@@ -1661,8 +1675,11 @@ class MainWindow(QMainWindow):
         self._refresh_recent()
 
     def _refresh_recent(self) -> None:
-        # anche i file che non esistono più: la Home li mostra attenuati («File non trovato»)
-        self.home.set_recent(self.recent_files(), self.pinned_recent())
+        # anche i file che non esistono più: la Home li mostra attenuati («File non trovato»);
+        # le impostazioni sono condivise, quindi si aggiorna la Home di tutte le finestre
+        paths, pinned = self.recent_files(), self.pinned_recent()
+        for window in {self, *app_windows()}:
+            window.home.set_recent(paths, pinned)
 
     def last_directory(self) -> str:
         d = self.settings.value("lastDirectory", "")
@@ -1782,6 +1799,14 @@ class MainWindow(QMainWindow):
                 m.button.setToolButtonStyle(style)
 
     def closeEvent(self, event) -> None:
+        # le domande qui sotto fanno girare il ciclo degli eventi: intanto la finestra è «in chiusura»
+        self._closing = True
+        try:
+            self._close_window(event)
+        finally:
+            self._closing = False
+
+    def _close_window(self, event) -> None:
         running = self.task_manager.running()
         if running and not self._confirm_stop_tasks(running):
             event.ignore()

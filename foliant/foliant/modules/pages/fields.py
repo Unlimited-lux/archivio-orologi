@@ -41,7 +41,31 @@ TRANSLATIONS = {
 KNOWN = {"pagina", "totale", "etichetta", "data", "ora", "nome", "titolo", "autore", "oggetto", "bates",
          "bates_inizio", "bates_fine", "n", "segnalibro", "intervallo", "inizio", "fine", "match"}
 # Alias accettati per compatibilità con modelli precedenti.
-ALIASES = {"total": "totale", "label": "etichetta", "date": "data", "file": "nome", "page": "pagina"}
+ALIASES = {"total": "totale", "label": "etichetta", "date": "data", "file": "nome", "page": "pagina",
+           # nomi inglesi (NFR-25): accettati sempre, proposti quando la lingua è l'inglese
+           "name": "nome", "start": "inizio", "end": "fine", "time": "ora", "title": "titolo", "author": "autore",
+           "subject": "oggetto", "part": "n", "range": "intervallo", "bookmark": "segnalibro",
+           "bates_start": "bates_inizio", "bates_end": "bates_fine"}
+_EN_NAMES = {"pagina": "page", "totale": "total", "etichetta": "label", "data": "date", "ora": "time", "nome": "name",
+             "titolo": "title", "autore": "author", "oggetto": "subject", "segnalibro": "bookmark",
+             "intervallo": "range", "inizio": "start", "fine": "end", "bates_inizio": "bates_start",
+             "bates_fine": "bates_end"}
+
+
+def display_code(code: str) -> str:
+    """Segnaposto nella lingua attiva: «{pagina}» → «{page}», «{data:gg/MM/aaaa}» → «{date:dd/MM/yyyy}»."""
+    from foliant.i18n import language
+    if language() == "it":
+        return code
+
+    def sub(m: re.Match) -> str:
+        names, _sep, fmt = m.group(1).partition(":")
+        names = "|".join(_EN_NAMES.get(n, n) for n in names.split("|"))
+        if _sep:
+            fmt = fmt.replace("gg", "dd").replace("aaaa", "yyyy")
+            return "{" + names + ":" + fmt + "}"
+        return "{" + names + "}"
+    return re.sub(r"\{([^{}]+)\}", sub, code)
 
 # Voci del menu «Inserisci campo»: (segnaposto, descrizione)
 MENU = [("{pagina}", "Numero di pagina"), ("{totale}", "Totale pagine"), ("{etichetta}", "Etichetta di pagina"),

@@ -630,3 +630,24 @@ def test_labels_follow_moved_page():
     E.move_pages(doc, [4], 1)
     labels = E.page_labels(doc)
     assert page_texts(doc)[1] == "P5" and labels[1] == "A"
+
+
+def test_split_text_with_ocr_on_scanned_pages():
+    """PAG-23: su pagine scannerizzate (solo immagine) il testo si cerca con l'OCR."""
+    import shutil
+    if not shutil.which("tesseract"):
+        pytest.skip("Tesseract non installato")
+    src = pymupdf.open()
+    for n in (101, 102):
+        for text in (f"Fattura n. {n}", "Allegato"):
+            p = src.new_page(width=595, height=842)
+            p.insert_text((72, 120), text, fontsize=28)
+    scans = pymupdf.open()
+    for i in range(src.page_count):
+        pix = src[i].get_pixmap(dpi=150)
+        page = scans.new_page(width=595, height=842)
+        page.insert_image(page.rect, pixmap=pix)
+    assert not scans[0].get_text().strip()
+    plan = E.split_document(scans, "separators", pattern=r"Fattura n\. (\d+)", ocr=True)
+    assert [p.fields.get("match1") for p in plan.parts] == ["101", "102"]
+    assert [len(p.indices) for p in plan.parts] == [2, 2]

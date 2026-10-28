@@ -16,7 +16,7 @@ from ...ui import theme
 from . import engine
 from .analysis import (
     REASON_UNDECODABLE, GroupingError, analyze_page, apply_grouping, frame_matrix, line_key, merge_blocks,
-    page_has_images, unframe_matrix,
+    images_have_text_lines, page_has_images, unframe_matrix,
 )
 from .fonts import FontResolver
 from .model import ALIGN_LEFT, GRANULARITY_PARAGRAPH, Run, Style, TextBlock, merge_runs
@@ -324,6 +324,8 @@ class TextEditController(QObject):
                         images = category in (detect.IMAGE_ONLY, detect.MIXED, detect.OCR_LAYER)
                     except ImportError:
                         pass
+                    # anche un'immagine piccola con una o due righe di testo merita la proposta
+                    images = images or images_have_text_lines(pg)
         except Exception:
             self.ctx.status(_("Pagina non leggibile: il file è danneggiato in questo punto."), 10000)
             return

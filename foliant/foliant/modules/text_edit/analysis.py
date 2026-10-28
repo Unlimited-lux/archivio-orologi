@@ -11,6 +11,7 @@ import statistics
 
 import pymupdf
 
+from .bidi import is_ltr_char, is_rtl_char, paragraph_is_rtl, unshape
 from .model import (
     ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT, GRANULARITY_LINE, SOFT_HYPHEN, Line, Run, Style,
     TextBlock, Word, color_from_int, merge_runs,
@@ -124,11 +125,15 @@ def _make_line(raw_line: dict, xrefs: dict[str, int], frame: pymupdf.Matrix) -> 
                 bx, by = x1 * fa + y1 * fc + fe, x1 * fb + y1 * fd + ff
                 x0, x1 = min(ax, bx), max(ax, bx)
                 y0, y1 = min(ay, by), max(ay, by)
+            if "\uFB50" <= c <= "\uFEFF":
+                c = unshape(c)          # forme di presentazione arabe -> lettere di base
             chars.append((c, ox, oy, x0, y0, x1, y1, style))
             if not visible_text and c.strip():
                 visible_text = True
         if visible_text:
             alphas.append(span.get("alpha", 255))
+    if any(is_rtl_char(c[0]) for c in chars):
+        chars = _logical_rtl_chars(chars)
     # elimina spazi iniziali e finali
     start, end = 0, len(chars)
     while start < end and not chars[start][0].strip():
@@ -149,17 +154,21 @@ def _make_line(raw_line: dict, xrefs: dict[str, int], frame: pymupdf.Matrix) -> 
     first = None
     last = None
     buf: list[str] = []
+    group: list = []
+
+    def close_word() -> None:
+        # x e x1 dai riquadri: nelle scritture da destra a sinistra l'ordine logico va verso sinistra
+        words.append(Word("".join(c[0] for c in group), min(min(c[1], c[3]) for c in group),
+                          max(c[5] for c in group), group[0][7]))
+
     for c in chars:
         if c[0].strip():
-            if first is None:
-                first = c
-            buf.append(c[0])
-            last = c
-        elif first is not None:
-            words.append(Word("".join(buf), first[1], last[5], first[7]))
-            first, buf = None, []
-    if first is not None:
-        words.append(Word("".join(buf), first[1], last[5], first[7]))
+            group.append(c)
+        elif group:
+            close_word()
+            group = []
+    if group:
+        close_word()
     bbox = pymupdf.Rect(min(c[3] for c in chars), min(c[4] for c in chars),
                         max(c[5] for c in chars), max(c[6] for c in chars))
     dx, dy = raw_line.get("dir", (1.0, 0.0))
@@ -167,6 +176,49 @@ def _make_line(raw_line: dict, xrefs: dict[str, int], frame: pymupdf.Matrix) -> 
     line = Line(bbox=bbox, origin=pymupdf.Point(chars[0][1], chars[0][2]), runs=runs, dir=fdir, words=words)
     invisible = bool(alphas) and all(a == 0 for a in alphas)
     return line, invisible
+
+
+def _logical_rtl_chars(chars: list[tuple]) -> list[tuple]:
+    """Riga con scrittura da destra a sinistra: ordine logico ricostruito dalle posizioni visive
+    (l'estrazione del motore non è affidabile con numeri e parole latine nella riga)."""
+    visible = sorted((c for c in chars if c[0].strip()), key=lambda c: (c[3] + c[5]) / 2)
+    if not visible:
+        return chars
+    size = max(c[7].size for c in visible)
+    words: list[list[tuple]] = [[visible[0]]]
+    for c in visible[1:]:
+        if c[3] - words[-1][-1][5] > 0.15 * size:
+            words.append([c])
+        else:
+            words[-1].append(c)
+
+    def kind(word) -> str:
+        text = "".join(c[0] for c in word)
+        if any(is_rtl_char(ch) for ch in text):
+            return "R"
+        return "L" if any(is_ltr_char(ch) for ch in text) else "N"
+
+    # gruppi visivi: sequenze L contigue restano nel loro ordine, il resto si legge da destra a sinistra
+    groups: list[tuple[str, list]] = []
+    for w in words:
+        k = kind(w)
+        if k == "L" and groups and groups[-1][0] == "L":
+            groups[-1][1].append(w)
+        else:
+            groups.append(("L" if k == "L" else "R", [w]))
+    logical_words: list[list[tuple]] = []
+    for g, ws in reversed(groups):
+        if g == "L":
+            logical_words.extend(ws)
+        else:
+            logical_words.extend(list(reversed(w)) for w in reversed(ws))
+    out: list[tuple] = []
+    for k, w in enumerate(logical_words):
+        if k:
+            ref = w[0]
+            out.append((" ", ref[1], ref[2], ref[3], ref[4], ref[3], ref[6], ref[7]))
+        out.extend(w)
+    return out
 
 
 def frame_matrix(page: pymupdf.Page) -> pymupdf.Matrix:
@@ -209,6 +261,18 @@ def _split_line(line: Line, index: int) -> tuple[Line, Line]:
     return make(line.words[:index]), make(line.words[index:])
 
 
+def _word_gaps(line: Line) -> list[float]:
+    return [b.x - a.x1 for a, b in zip(line.words, line.words[1:])]
+
+
+def _typical_gap(*lines: Line) -> float:
+    """Spazio tipico tra le parole (mediana), per distinguere un rientro di colonna da uno spazio giustificato."""
+    gaps = sorted(g for ln in lines for g in _word_gaps(ln) if g > 0)
+    if not gaps:
+        return 0.3 * max(ln.size for ln in lines)
+    return gaps[len(gaps) // 2]
+
+
 def _split_columns(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
     """Separa le celle di tabella che il motore ha messo nella stessa riga: una parola che inizia, dopo
     uno spazio largo, nello stesso punto in cui iniziano segmenti su altre linee di base."""
@@ -225,10 +289,11 @@ def _split_columns(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
             cut = None
             if _horizontal(ln) and len(ln.words) > 1:
                 b = round(ln.baseline, 1)
+                typical = _typical_gap(ln)
                 for k in range(1, len(ln.words)):
                     gap = ln.words[k].x - ln.words[k - 1].x1
-                    if gap < 0.6 * ln.size:
-                        continue
+                    if gap < 0.6 * ln.size or gap < 2.0 * typical:
+                        continue      # spazio normale o giustificato, non un salto di colonna
                     x = round(ln.words[k].x)
                     rows = set()
                     for d in (-1, 0, 1):
@@ -271,14 +336,27 @@ def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
                 return True
         return False
 
+    def end_aligned(line: Line) -> bool:
+        b = round(line.baseline, 1)
+        rows = set()
+        for d in (-1, 0, 1):
+            rows |= ends.get(round(line.bbox.x1) + d, set())
+        return len(rows - {b}) >= 1
+
     merged: list[tuple[Line, bool]] = []
     for line, inv in horiz:
         if merged:
             prev, pinv = merged[-1]
             size = max(prev.size, line.size)
             gap = line.bbox.x0 - prev.bbox.x1
+            typical = _typical_gap(prev, line)
+            justified_gap = gap <= max(1.6 * typical, 0.35 * size)   # come gli altri spazi della riga
+            # canaletta tra colonne: il segmento inizia dove iniziano altre righe e il precedente finisce
+            # dove finiscono altre righe
+            gutter = column(line) and end_aligned(prev)
             if (pinv == inv and abs(prev.baseline - line.baseline) < 0.3 and -0.5 <= gap <= 1.2 * size
-                    and 0.8 <= line.size / prev.size <= 1.25 and not column(line)):
+                    and 0.8 <= line.size / prev.size <= 1.25 and not gutter
+                    and (justified_gap or not column(line))):
                 runs = merge_runs(prev.runs + [Run(" ", prev.runs[-1].style)] + line.runs)
                 merged[-1] = (Line(bbox=prev.bbox | line.bbox, origin=prev.origin, runs=runs, dir=prev.dir,
                                    words=prev.words + line.words), inv)
@@ -341,17 +419,22 @@ def group_lines(lines: list[Line], rules: list | None = None) -> list[list[Line]
             gap = max(other.bbox.x0 - line.bbox.x1, line.bbox.x0 - other.bbox.x1)
             if gap <= 0:
                 continue
-            # vicino: a breve distanza, oppure una cella corta (quantità, prezzo) a qualsiasi distanza
-            if gap < 6 * line.size or other.bbox.width < 6 * other.size or line.bbox.width < 6 * line.size:
+            # vicino: una cella corta (quantità, prezzo, codice) sulla stessa linea di base, a qualsiasi
+            # distanza; due segmenti lunghi affiancati sono invece colonne di testo
+            if other.bbox.width < 6 * other.size or line.bbox.width < 6 * line.size:
                 return True
         return False
 
     neighbors = {id(ln): has_neighbor(ln) for ln in ordered}
     groups: list[list[Line]] = []
     for line in ordered:
+        if neighbors[id(line)]:
+            # cella di tabella: blocco a sé, così una modifica non rifluisce nella riga sotto
+            groups.append([line])
+            continue
         best, best_d = None, None
         for g in groups:
-            if neighbors[id(g[-1])] != neighbors[id(line)]:
+            if neighbors[id(g[-1])]:
                 continue
             if rules and _rule_between(g[-1], line, rules):
                 continue
@@ -401,7 +484,8 @@ def _detect_alignment(lines: list[Line]) -> tuple[str, float, float, float]:
     tol = max(1.0, 0.15 * size)
     x0, x1 = min(lefts), max(rights)
     if len(lines) == 1:
-        return ALIGN_LEFT, x0, x1 - x0, 0.0
+        # una riga sola: allineamento ambiguo; a destra per le scritture da destra a sinistra (TXT-05)
+        return (ALIGN_RIGHT if paragraph_is_rtl(lines[0].text) else ALIGN_LEFT), x0, x1 - x0, 0.0
     body_lefts = lefts[1:] if len(lines) > 2 else lefts
     indent = 0.0
     left_eq = _spread(body_lefts) <= tol
@@ -529,6 +613,69 @@ def page_has_images(page: pymupdf.Page) -> bool:
         return bool(page.get_images(full=False))
     except Exception:
         return False
+
+
+def images_have_text_lines(page: pymupdf.Page) -> bool:
+    """Indica se almeno un'immagine della pagina contiene anche solo una riga di testo.
+
+    Righe di testo: fasce orizzontali scure separate da righe chiare, con molte alternanze
+    chiaro/scuro lungo la fascia (le lettere); le foto non hanno righe chiare né questo ritmo."""
+    try:
+        import numpy as np
+    except ImportError:
+        return True
+    try:
+        infos = page.get_image_info()
+    except Exception:
+        return False
+    for info in infos:
+        r = pymupdf.Rect(info.get("bbox")) & page.rect
+        if r.is_empty or r.width < 20 or r.height < 8:
+            continue
+        zoom = max(1.0, min(4.0, 600.0 / max(r.width, 1.0)))
+        try:
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=r, colorspace=pymupdf.csGRAY, alpha=False)
+        except Exception:
+            continue
+        gray = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.stride)[:, :pix.width]
+        if gray.size == 0 or min(gray.shape) < 8:
+            continue
+        lo, hi = float(gray.min()), float(gray.max())
+        if hi - lo < 60:
+            continue   # nessun contrasto
+        dark = gray < (lo + hi) / 2
+        if dark.mean() > 0.5:
+            dark = ~dark   # testo chiaro su fondo scuro
+        row_ratio = dark.mean(axis=1)
+        inked = row_ratio > 0.01
+        if inked.mean() > 0.85:
+            continue   # nessuna riga di fondo tra le righe: foto o riempimento
+        # fasce di righe con inchiostro
+        y = 0
+        h = len(inked)
+        while y < h:
+            if not inked[y]:
+                y += 1
+                continue
+            y0 = y
+            while y < h and inked[y]:
+                y += 1
+            band = dark[y0:y]
+            bh = y - y0
+            if bh < 4 or bh > 0.6 * h and h > 40:
+                continue
+            cols = band.any(axis=0)
+            width = cols.nonzero()[0]
+            if len(width) == 0:
+                continue
+            span = width[-1] - width[0] + 1
+            # alternanze chiaro/scuro lungo la riga centrale della fascia: almeno una ogni ~1,5 altezze
+            mid = band[bh // 2]
+            changes = int(np.count_nonzero(mid[1:] != mid[:-1]))
+            fill = band[:, width[0]:width[-1] + 1].mean()
+            if span >= 3 * bh and changes >= max(6, 2 * span / (1.5 * bh)) * 0.5 and 0.08 <= fill <= 0.7:
+                return True
+    return False
 
 
 # ---------------------------------------------------------------- unione e divisione (TXT-09)

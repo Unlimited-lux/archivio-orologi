@@ -1030,3 +1030,26 @@ def test_dialogo_lingue_in_inglese(window):
         assert not any(t.item(r, 2).text() in italian for r in range(t.rowCount()))
     finally:
         i18n.set_language("it")
+
+
+def test_anteprima_preelaborazione(window, tmp_path, monkeypatch):
+    """OCR-04: l'anteprima mostra la pagina e l'immagine di lavoro con l'angolo rilevato."""
+    path = image_pdf(tmp_path / "i.pdf", [scan_image(lines=FRASI[:4], dpi=150, skew=4, noise=0.02)], dpi=150)
+    view = window.open_path(path)
+    ctl = ocr_controller()
+    shown = {}
+
+    def fake_exec(dlg):
+        if isinstance(dlg, dialogs.PreviewDialog):
+            shown["info"] = dlg.info.text()
+            shown["images"] = [lbl.pixmap().width() for lbl in dlg.images]
+            dlg.grab().save(str(tmp_path / "anteprima.png"))
+            return 0
+        dlg.show_preview()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(dialogs.OcrDialog, "exec", fake_exec)
+    monkeypatch.setattr(dialogs.PreviewDialog, "exec", fake_exec)
+    ctl.open_dialog(view)
+    assert "inclinazione corretta: -4.0°" in shown["info"] or "inclinazione corretta: -3.9°" in shown["info"] \
+        or "inclinazione corretta: -4.1°" in shown["info"], shown["info"]
+    assert shown["images"] == [460, 460]

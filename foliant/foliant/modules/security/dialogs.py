@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from foliant.api import _, icon, theme
@@ -100,8 +100,9 @@ class ProtectDialog(QDialog):
     """Password di apertura, password dei permessi, restrizioni e cifratura."""
 
     def __init__(self, current: P.ProtectionSettings, *, already_protected: bool, has_open_password: bool,
-                 parent=None):
+                 parent=None, save_policy: Callable[[str, P.ProtectionSettings], None] | None = None):
         super().__init__(parent)
+        self._save_policy = save_policy
         self.setWindowTitle(_("Proteggi con password"))
         self._already = already_protected
         self._had_open = has_open_password
@@ -176,6 +177,12 @@ class ProtectDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         self.buttons.accepted.connect(self._accept)
         self.buttons.rejected.connect(self.reject)
+        self.policy_button = None
+        if save_policy is not None:
+            self.policy_button = self.buttons.addButton(_("Salva come policy…"),
+                                                        QDialogButtonBox.ButtonRole.ActionRole)
+            self.policy_button.setToolTip(_("Conserva permessi e opzioni con un nome, senza le password"))
+            self.policy_button.clicked.connect(self._ask_policy_name)
         lay.addWidget(self.buttons)
 
         # stato iniziale
@@ -291,6 +298,24 @@ class ProtectDialog(QDialog):
     def keep_permissions_password(self) -> bool:
         return self._keep_perm()
 
+    def save_as_policy(self, name: str) -> bool:
+        if not self.require_open.isChecked() and not self.restrict.isChecked():
+            self.error.setText(_("Imposta una password di apertura oppure limita almeno un permesso."))
+            return False
+        try:
+            self._save_policy(name, self.settings())
+        except ValueError as e:
+            self.error.setText(str(e))
+            return False
+        self.error.setText("")
+        self.perm_note.setText(_("Policy «{n}» salvata.").format(n=name.strip()))
+        return True
+
+    def _ask_policy_name(self) -> None:
+        name, ok = QInputDialog.getText(self, _("Salva come policy"), _("Nome della policy:"))
+        if ok:
+            self.save_as_policy(name)
+
     def _accept(self) -> None:
         if self._problem():
             return
@@ -301,6 +326,190 @@ class ProtectDialog(QDialog):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self.accept()
+
+
+# ------------------------------------------------------------------ policy
+
+
+class PolicyPasswordDialog(QDialog):
+    """Password richieste da una policy al momento dell'applicazione."""
+
+    def __init__(self, policy, parent=None):
+        super().__init__(parent)
+        self.policy = policy
+        self.setWindowTitle(_("Applica la policy «{n}»").format(n=policy.name))
+        lay = QVBoxLayout(self)
+        lay.addWidget(_note(policy.describe()))
+        form = QFormLayout()
+        self.open_pw = self.open_pw2 = self.perm_pw = self.perm_pw2 = None
+        if policy.open_password:
+            self.open_pw, self.open_pw2 = PasswordField(), PasswordField()
+            form.addRow(_("Password di apertura:"), self.open_pw)
+            form.addRow(_("Conferma:"), self.open_pw2)
+        if policy.restrict:
+            self.perm_pw, self.perm_pw2 = PasswordField(), PasswordField()
+            form.addRow(_("Password dei permessi:"), self.perm_pw)
+            form.addRow(_("Conferma:"), self.perm_pw2)
+        lay.addLayout(form)
+        self.error = _note("", "danger")
+        lay.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Applica"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def passwords(self) -> tuple[str, str]:
+        return (self.open_pw.text() if self.open_pw else "", self.perm_pw.text() if self.perm_pw else "")
+
+    def problem(self) -> str:
+        if self.open_pw and self.open_pw.text() != self.open_pw2.text():
+            return _("Le password non coincidono")
+        if self.perm_pw and self.perm_pw.text() != self.perm_pw2.text():
+            return _("Le password dei permessi non coincidono")
+        try:
+            self.policy.settings(*self.passwords()).validate()
+        except P.ProtectionError as e:
+            return str(e)
+        return ""
+
+    def _accept(self) -> None:
+        problem = self.problem()
+        self.error.setText(problem)
+        if not problem:
+            self.accept()
+
+
+class PolicyDialog(QDialog):
+    """Gestione delle policy: applica, applica a più file, rinomina, duplica, elimina,
+    importa, esporta."""
+
+    APPLY, BATCH = 1, 2
+
+    def __init__(self, store, has_document: bool, parent=None):
+        super().__init__(parent)
+        self.store = store
+        self.choice = 0
+        self.setWindowTitle(_("Policy di protezione"))
+        self.resize(560, 360)
+        lay = QHBoxLayout(self)
+        left = QVBoxLayout()
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels([_("Policy"), _("Impostazioni")])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setColumnWidth(0, 150)
+        self.tree.itemSelectionChanged.connect(self._update)
+        left.addWidget(self.tree, 1)
+        self.detail = _note("", "text")          # descrizione completa della policy scelta
+        left.addWidget(self.detail)
+        self.notice = _note("")
+        left.addWidget(self.notice)
+        lay.addLayout(left, 1)
+        col = QVBoxLayout()
+        self.apply_button = QPushButton(_("Applica al documento"))
+        self.apply_button.setEnabled(has_document)
+        self.batch_button = QPushButton(_("Applica a più file…"))
+        self._has_document = has_document
+        self.apply_button.clicked.connect(lambda: self._finish(self.APPLY))
+        self.batch_button.clicked.connect(lambda: self._finish(self.BATCH))
+        self.buttons_needing_selection = [self.apply_button, self.batch_button]
+        for text, slot, needs in ((_("Rinomina…"), self._rename, True), (_("Duplica"), self._duplicate, True),
+                                  (_("Elimina"), self._remove, True), (_("Importa…"), self._import, False),
+                                  (_("Esporta…"), self._export, False)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            if needs:
+                self.buttons_needing_selection.append(b)
+            setattr(self, "button_" + slot.__name__.strip("_"), b)
+        for b in (self.apply_button, self.batch_button):
+            col.addWidget(b)
+        col.addSpacing(12)
+        for name in ("rename", "duplicate", "remove", "import", "export"):
+            col.addWidget(getattr(self, "button_" + name))
+        col.addStretch(1)
+        close = QPushButton(_("Chiudi"))
+        close.clicked.connect(self.reject)
+        col.addWidget(close)
+        lay.addLayout(col)
+        self.reload()
+
+    def reload(self, select: str | None = None) -> None:
+        self.tree.clear()
+        for name in self.store.names():
+            item = QTreeWidgetItem(self.tree, [name, self.store.get(name).describe()])
+            item.setToolTip(1, item.text(1))
+            if name == select:
+                self.tree.setCurrentItem(item)
+        if select is None and self.tree.topLevelItemCount():
+            self.tree.setCurrentItem(self.tree.topLevelItem(0))
+        if not self.tree.topLevelItemCount():
+            self.notice.setText(_("Nessuna policy salvata: configura la protezione in «Password e permessi» e "
+                                  "scegli «Salva come policy…»."))
+        self._update()
+
+    def current(self) -> str | None:
+        item = self.tree.currentItem()
+        return item.text(0) if item is not None else None
+
+    def _update(self) -> None:
+        on = self.current() is not None
+        self.detail.setText(self.store.get(self.current()).describe() if on else "")
+        for b in self.buttons_needing_selection:
+            b.setEnabled(on and (b is not self.apply_button or self._has_document))
+
+    def _finish(self, choice: int) -> None:
+        if self.current() is not None:
+            self.choice = choice
+            self.accept()
+
+    def rename(self, new: str) -> bool:
+        try:
+            self.store.rename(self.current(), new)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return False
+        self.reload(new.strip())
+        return True
+
+    def _rename(self) -> None:
+        name, ok = QInputDialog.getText(self, _("Rinomina policy"), _("Nuovo nome:"), text=self.current() or "")
+        if ok:
+            self.rename(name)
+
+    def _duplicate(self) -> None:
+        self.reload(self.store.duplicate(self.current()))
+
+    def _remove(self) -> None:
+        self.store.remove(self.current())
+        self.reload()
+
+    def import_from(self, path: str) -> None:
+        try:
+            done, notes = self.store.import_file(path)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return
+        self.reload(done[0] if done else None)
+        self.notice.setText("\n".join([_("{n} policy importate").format(n=len(done))] + notes))
+
+    def _import(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa policy"), "", _("Policy (*.json);;Tutti i file (*)"))
+        if path:
+            self.import_from(path)
+
+    def _export(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        if not self.store.names():
+            self.notice.setText(_("Non ci sono policy da esportare."))
+            return
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta policy"), "policy.json", _("Policy (*.json)"))
+        if path:
+            try:
+                self.store.export(path)
+            except OSError as e:
+                self.notice.setText(_("Impossibile scrivere il file: {e}").format(e=e.strerror))
 
 
 # -------------------------------------------------------- password singola
@@ -318,8 +527,10 @@ class FindDialog(QDialog):
     """Trova parole/frasi o dati personali e scegli le occorrenze da segnare."""
 
     def __init__(self, mode: str, search: Callable[[dict], tuple[list[Match], list[str]]],
-                 pattern_items: list[tuple[str, str, bool]] | None = None, parent=None):
+                 pattern_items: list[tuple[str, str, bool]] | None = None, parent=None,
+                 saved=None):
         super().__init__(parent)
+        self.saved = saved
         self.mode = mode
         self._search = search
         self.matches: list[Match] = []
@@ -349,14 +560,13 @@ class FindDialog(QDialog):
             lay.addWidget(self.outside)
         else:
             lay.addWidget(QLabel(_("Schemi da cercare:")))
-            grid = QGridLayout()
+            self.grid = QGridLayout()
             self.pattern_boxes: dict[str, QCheckBox] = {}
-            for n, (pid, label, checked) in enumerate(pattern_items or []):
-                cb = QCheckBox(label)
-                cb.setChecked(checked)
-                self.pattern_boxes[pid] = cb
-                grid.addWidget(cb, n // 2, n % 2)
-            lay.addLayout(grid)
+            for pid, label, checked in pattern_items or []:
+                self._add_box(pid, label, checked)
+            for name in (saved.items if saved is not None else {}):
+                self._add_box("user:" + name, name, False)
+            lay.addLayout(self.grid)
             self.invalid = QCheckBox(_("Includi valori con cifra di controllo non valida"))
             lay.addWidget(self.invalid)
             row = QHBoxLayout()
@@ -364,6 +574,16 @@ class FindDialog(QDialog):
             self.custom = QLineEdit()
             self.custom.setPlaceholderText(_("espressione regolare, es. SN-\\d{6}"))
             row.addWidget(self.custom, 1)
+            if saved is not None:
+                self.save_button = QPushButton(_("Salva…"))
+                self.save_button.setToolTip(_("Conserva lo schema con un nome per le prossime ricerche"))
+                self.save_button.clicked.connect(self._ask_save)
+                row.addWidget(self.save_button)
+                for text, slot in ((_("Importa schemi…"), self._import_patterns),
+                                   (_("Esporta schemi…"), self._export_patterns)):
+                    b = QPushButton(text)
+                    b.clicked.connect(slot)
+                    row.addWidget(b)
             lay.addLayout(row)
         scope = QHBoxLayout()
         scope.addWidget(QLabel(_("Pagine:")))
@@ -394,6 +614,64 @@ class FindDialog(QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
+
+    def _add_box(self, pid: str, label: str, checked: bool) -> QCheckBox:
+        cb = self.pattern_boxes.get(pid)
+        if cb is None:
+            n = len(self.pattern_boxes)
+            cb = QCheckBox(label)
+            self.pattern_boxes[pid] = cb
+            self.grid.addWidget(cb, n // 2, n % 2)
+        cb.setChecked(checked)
+        return cb
+
+    def save_pattern(self, name: str) -> bool:
+        """Salva lo schema personalizzato scritto con il nome dato e lo seleziona."""
+        regex = self.custom.text().strip()
+        try:
+            self.saved.add(name, regex)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return False
+        self._add_box("user:" + name.strip(), name.strip(), True)
+        self.custom.clear()
+        self.notice.setText("")
+        return True
+
+    def _ask_save(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, _("Salva schema"), _("Nome dello schema:"))
+        if ok:
+            self.save_pattern(name)
+
+    def import_patterns(self, path: str) -> None:
+        try:
+            done, errors = self.saved.import_file(path)
+        except ValueError as e:
+            self.notice.setText(str(e))
+            return
+        for name in done:
+            self._add_box("user:" + name, name, True)
+        msg = [_("{n} schemi importati").format(n=len(done))] + errors
+        self.notice.setText("\n".join(msg))
+
+    def _import_patterns(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _f = QFileDialog.getOpenFileName(self, _("Importa schemi"), "", _("Schemi (*.json);;Tutti i file (*)"))
+        if path:
+            self.import_patterns(path)
+
+    def _export_patterns(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        if not self.saved.items:
+            self.notice.setText(_("Non ci sono schemi salvati da esportare."))
+            return
+        path, _f = QFileDialog.getSaveFileName(self, _("Esporta schemi"), "schemi.json", _("Schemi (*.json)"))
+        if path:
+            try:
+                self.saved.export(path)
+            except OSError as e:
+                self.notice.setText(_("Impossibile scrivere il file: {e}").format(e=e.strerror))
 
     def _import_terms(self) -> None:
         from PySide6.QtWidgets import QFileDialog
@@ -724,6 +1002,129 @@ class SanitizeDialog(QDialog):
         return o
 
 
+# ------------------------------------------------------------ appiattimento
+
+
+class FlattenDialog(QDialog):
+    """Scelta di cosa appiattire (SEC-24), con anteprima della prima pagina interessata."""
+
+    def __init__(self, page_count: int, preview: Callable | None = None, has_signatures: bool = False,
+                 parent=None):
+        super().__init__(parent)
+        self.page_count = page_count
+        self._preview = preview
+        self.setWindowTitle(_("Appiattisci"))
+        lay = QHBoxLayout(self)
+        left = QVBoxLayout()
+        lay.addLayout(left, 1)
+        left.addWidget(_note(_("Gli elementi scelti diventano parte fissa delle pagine e non saranno più "
+                               "modificabili. Puoi annullare finché il documento è aperto.")))
+        what = QGroupBox(_("Cosa appiattire"))
+        wl = QVBoxLayout(what)
+        self.boxes: dict[str, QCheckBox] = {}
+        for key, label, on in (("annots", _("Commenti"), True), ("widgets", _("Campi modulo compilati"), True),
+                               ("stamps", _("Filigrane, sfondi, numeri e intestazioni aggiunti con Foliant"), True),
+                               ("layers", _("Livelli (il contenuto dei livelli nascosti viene eliminato)"), False),
+                               ("crop", _("Ritaglio delle pagine (il contenuto fuori dal ritaglio viene eliminato)"),
+                                False)):
+            cb = QCheckBox(label)
+            cb.setChecked(on)
+            self.boxes[key] = cb
+            wl.addWidget(cb)
+        left.addWidget(what)
+        form = QFormLayout()
+        self.hidden = QComboBox()
+        self.hidden.addItem(_("Lasciale come annotazioni"), "keep")
+        self.hidden.addItem(_("Eliminale"), "delete")
+        form.addRow(_("Annotazioni nascoste o non stampabili:"), self.hidden)
+        self.pages = QLineEdit()
+        self.pages.setPlaceholderText(_("tutte (oppure es. 1-3, 5)"))
+        form.addRow(_("Pagine:"), self.pages)
+        left.addLayout(form)
+        self.links = QCheckBox(_("Conserva i collegamenti"))
+        self.links.setChecked(True)
+        left.addWidget(self.links)
+        self.signatures = QCheckBox(_("Appiattisci anche le firme digitali"))
+        self.signatures.setToolTip(_("L'aspetto della firma diventa contenuto statico: la firma non sarà più "
+                                     "verificabile."))
+        self.signatures.setEnabled(has_signatures)
+        left.addWidget(self.signatures)
+        rrow = QHBoxLayout()
+        self.raster = QCheckBox(_("Rasterizza le pagine"))
+        self.raster.setToolTip(_("Ogni pagina diventa un'immagine: il testo non sarà selezionabile senza OCR e "
+                                 "il file può crescere."))
+        self.dpi = QSpinBox()
+        self.dpi.setRange(72, 600)
+        self.dpi.setValue(150)
+        self.dpi.setSuffix(" dpi")
+        self.dpi.setEnabled(False)
+        self.raster.toggled.connect(self.dpi.setEnabled)
+        rrow.addWidget(self.raster)
+        rrow.addWidget(self.dpi)
+        rrow.addStretch(1)
+        left.addLayout(rrow)
+        self.error = _note("", "warning")
+        left.addWidget(self.error)
+        left.addStretch(1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(_("Appiattisci"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        left.addWidget(buttons)
+        right = QVBoxLayout()
+        lay.addLayout(right)
+        self.preview_label = QLabel()
+        self.preview_label.setFixedSize(240, 320)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setStyleSheet(f"border: 1px solid {theme.hex_color('border')};")
+        right.addWidget(self.preview_label)
+        self.preview_button = QPushButton(_("Anteprima"))
+        self.preview_button.setIcon(icon("eye"))
+        self.preview_button.clicked.connect(self.update_preview)
+        self.preview_button.setEnabled(preview is not None)
+        right.addWidget(self.preview_button)
+        right.addStretch(1)
+
+    def options(self):
+        from . import flatten as F
+        pages = parse_pages(self.pages.text(), self.page_count) if self.pages.text().strip() else None
+        return F.FlattenOptions(annots=self.boxes["annots"].isChecked(), widgets=self.boxes["widgets"].isChecked(),
+                                stamps=self.boxes["stamps"].isChecked(), layers=self.boxes["layers"].isChecked(),
+                                crop=self.boxes["crop"].isChecked(), hidden=self.hidden.currentData(),
+                                keep_links=self.links.isChecked(),
+                                signatures=self.signatures.isEnabled() and self.signatures.isChecked(),
+                                pages=pages, rasterize=self.raster.isChecked(), dpi=self.dpi.value())
+
+    def update_preview(self) -> None:
+        from PySide6.QtGui import QImage, QPixmap
+        try:
+            opts = self.options()
+            pix = self._preview(opts)
+        except ValueError as e:
+            self.error.setText(str(e))
+            return
+        if pix is None:
+            return
+        img = QImage(pix.samples, pix.width, pix.height, pix.stride,
+                     QImage.Format.Format_RGB888 if pix.n == 3 else QImage.Format.Format_RGBA8888).copy()
+        self.preview_label.setPixmap(QPixmap.fromImage(img).scaled(
+            self.preview_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation))
+        self.error.setText("")
+
+    def accept(self) -> None:
+        try:
+            opts = self.options()
+        except ValueError as e:
+            self.error.setText(str(e))
+            return
+        if not any((opts.annots, opts.widgets, opts.stamps, opts.layers, opts.crop, opts.rasterize)):
+            self.error.setText(_("Scegli almeno un elemento da appiattire."))
+            return
+        super().accept()
+
+
 # ----------------------------------------------------------------- metadati
 
 
@@ -742,6 +1143,29 @@ class MetadataDialog(QDialog):
             self.edits[key] = e
             form.addRow(S.metadata_labels()[key] + ":", e)
         lay.addLayout(form)
+        lay.addWidget(QLabel(_("Proprietà personalizzate:")))
+        self.props = QTreeWidget()
+        self.props.setHeaderLabels([_("Nome"), _("Valore")])
+        self.props.setRootIsDecorated(False)
+        self.props.setMaximumHeight(130)
+        self.props.setColumnWidth(0, 160)
+        self._read_only = read_only
+        for name, value in (values.get("custom") or {}).items():
+            self.add_property(name, value)
+        lay.addWidget(self.props)
+        prow = QHBoxLayout()
+        self.add_button = QPushButton(_("Aggiungi"))
+        self.add_button.setIcon(icon("plus"))
+        self.add_button.clicked.connect(lambda: self._edit_new())
+        self.remove_button = QPushButton(_("Rimuovi"))
+        self.remove_button.clicked.connect(self.remove_selected)
+        for b in (self.add_button, self.remove_button):
+            b.setEnabled(not read_only)
+            prow.addWidget(b)
+        prow.addStretch(1)
+        lay.addLayout(prow)
+        self.error = _note("", "warning")
+        lay.addWidget(self.error)
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         lay.addWidget(sep)
@@ -760,8 +1184,43 @@ class MetadataDialog(QDialog):
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
 
-    def values(self) -> dict[str, str]:
-        return {k: e.text() for k, e in self.edits.items()}
+    def add_property(self, name: str = "", value: str = "") -> QTreeWidgetItem:
+        item = QTreeWidgetItem(self.props, [name, value])
+        if not self._read_only:
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        return item
+
+    def _edit_new(self) -> None:
+        item = self.add_property()
+        self.props.setCurrentItem(item)
+        self.props.editItem(item, 0)
+
+    def remove_selected(self) -> None:
+        for item in self.props.selectedItems():
+            self.props.takeTopLevelItem(self.props.indexOfTopLevelItem(item))
+
+    def custom(self) -> dict[str, str]:
+        out = {}
+        for i in range(self.props.topLevelItemCount()):
+            item = self.props.topLevelItem(i)
+            name, value = item.text(0).strip(), item.text(1)
+            if name or value.strip():
+                out[name] = value
+        return out
+
+    def accept(self) -> None:
+        from . import sanitize as S
+        for name in self.custom():
+            err = S.check_property_name(name)
+            if err:
+                self.error.setText(err)
+                return
+        super().accept()
+
+    def values(self) -> dict:
+        out: dict = {k: e.text() for k, e in self.edits.items()}
+        out["custom"] = self.custom()
+        return out
 
 
 # ---------------------------------------------------------- elenco/rapporto

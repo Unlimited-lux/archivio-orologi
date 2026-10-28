@@ -119,6 +119,13 @@ def build_actions(ctx, c, mode) -> None:
     c.act_paste_before = act(_("Incolla pagine prima"), "clipboard-paste", lambda: c.paste_pages(True))
     c.act_detect = act(_("Trova pagine vuote e duplicate…"), "scan-search", lambda: c.find_blank_and_duplicates(),
                        structural_op=False)
+    c.act_cleanup = act(_("Pulizia guidata…"), "wand-sparkles", _dialog(c, "cleanup_dialogs", "open_cleanup_dialog"))
+    c.act_detect_dlg = act(_("Pagine vuote e duplicate…"), "scan-search", _dialog(c, "detect_dialogs", "open_detect_dialog"),
+                           structural_op=False)
+    c.act_booklet = act(_("Opuscolo…"), "book-open", _dialog(c, "layout_dialogs", "open_booklet_dialog"),
+                        structural_op=False)
+    c.act_fixedmark = act(_("Filigrana di stampa a posizione fissa…"), "printer",
+                          _dialog(c, "fixedmark_dialogs", "open_fixed_watermark_dialog"))
     c.act_share = act(_("Invia per posta"), "mail", lambda: c.share("mail"), structural_op=False)
     c.act_share_save = act(_("Salva una copia delle pagine…"), "share-2", lambda: c.share("save"),
                            structural_op=False)
@@ -178,12 +185,13 @@ def build_actions(ctx, c, mode) -> None:
         c.act_collate, None, c.act_rotate_180]))
     mode.add_separator()
     mode.add_widget(menu_button(pgettext("menu", "Formato"), "crop", [
-        c.act_crop, c.act_margins, c.act_resize, c.act_boxes, None, c.act_nup]))
+        c.act_crop, c.act_margins, c.act_resize, c.act_boxes, None, c.act_nup, c.act_booklet]))
     mode.add_widget(menu_button(_("Timbri"), "stamp", [
-        c.act_numbers, c.act_bates, c.act_bates_files, c.act_header, None, c.act_watermark, c.act_background, c.act_remove_stamps,
+        c.act_numbers, c.act_bates, c.act_bates_files, c.act_header, None, c.act_watermark, c.act_fixedmark, c.act_background, c.act_remove_stamps,
         None, c.act_labels]))
     mode.add_widget(menu_button(_("Altro"), "ellipsis", [
-        c.act_copy, c.act_cut, c.act_paste, c.act_paste_before, None, c.act_detect, c.act_extract_images, c.act_share,
+        c.act_copy, c.act_cut, c.act_paste, c.act_paste_before, None, c.act_cleanup, c.act_detect_dlg,
+        c.act_extract_images, c.act_share,
         c.act_share_save, None, c.act_select_all, c.act_select_odd, c.act_select_even, c.act_select_portrait,
         c.act_select_landscape, c.act_select_range]))
     mode.add_action(c.act_unlock)

@@ -184,6 +184,9 @@ def test_images_dialog_sort_and_options(window, tmp_path):
 
 
 def test_create_blank_and_close_asks(window, ctrl, monkeypatch, messages):
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "A4")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "mm")
+
     def fake_exec(d):
         d.pages.setValue(3)
         d.paper_box.setCurrentIndex(d.paper_box.findData("grid"))
@@ -820,3 +823,296 @@ def test_batch_password_second_pass_keeps_unique_names(window, ctrl, tmp_path, m
     contents = {os.path.basename(p): open(p, encoding="utf-8").read() for p in outputs}
     assert "DOCUMENTO A" in contents["doc.txt"] and "DOCUMENTO B" in contents["doc (2).txt"]
     assert sorted(os.listdir(out)) == ["doc (2).txt", "doc.txt"]
+
+
+def test_scanner_dialog_presets_save_export_import(window, settings, tmp_path, monkeypatch):
+    """CNV-24: preset predefiniti, salvati, esportati e importati."""
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+    from foliant.modules.convert.create_dialogs import ScannerDialog
+    dlg = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings,
+                        preview=lambda dev, s: Image.new("RGB", (80, 110), "white"))
+    i = dlg.preset.findText("Documenti in bianco e nero (fatture, contratti)")
+    assert i > 0
+    dlg.preset.setCurrentIndex(i)
+    dlg.preset.activated.emit(i)
+    assert dlg.mode.currentData() == "bw" and dlg.ocr.isChecked() and dlg.source.currentData() == "adf"
+    assert not dlg.delete_preset.isEnabled()
+    dlg.dpi.setCurrentIndex(dlg.dpi.findData(400))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Fatture fornitori", True))
+    dlg.save_preset.click()
+    assert dlg.preset.currentText() == "Fatture fornitori" and dlg.delete_preset.isEnabled()
+    out = tmp_path / "preset.json"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(out), ""))
+    dlg.export_preset.click()
+    dlg.delete_preset.click()
+    assert dlg.preset.findText("Fatture fornitori") < 0
+    # nuova finestra: il preset importato torna disponibile con i suoi valori
+    dlg2 = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(out), ""))
+    dlg2.import_preset.click()
+    assert dlg2.preset.currentText() == "Fatture fornitori"
+    assert dlg2.dpi.currentData() == 400 and dlg2.mode.currentData() == "bw"
+    assert dlg2.settings().dpi == 400
+    dlg3 = ScannerDialog(window, [("sim:0", "Simulato")], settings=settings)
+    assert dlg3.preset.findText("Fatture fornitori") > 0
+    # file non valido: avviso, nessun preset nuovo
+    bad = tmp_path / "rotto.json"
+    bad.write_text("non json")
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(a[2]))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(bad), ""))
+    n = dlg3.preset.count()
+    dlg3.import_preset.click()
+    assert warned and dlg3.preset.count() == n
+    # anteprima
+    assert dlg.preview_button.isVisible() or not dlg.isVisible()
+    dlg.preview_button.click()
+    assert dlg.preview_label.pixmap() is not None and not dlg.preview_label.pixmap().isNull()
+
+
+@pytest.mark.skipif(__import__("shutil").which("soffice") is None, reason="LibreOffice non installato")
+def test_create_from_office_with_options(window, ctrl, settings, tmp_path, monkeypatch, messages):
+    """CNV-18: opzioni dei documenti d'ufficio (fogli di calcolo) ricordate; conferma per i fogli lunghi."""
+    import openpyxl
+
+    from foliant.modules.convert import create
+    from foliant.modules.convert.create_dialogs import OfficeOptionsDialog
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for r in range(1, 30):
+        for c in range(1, 26):
+            ws.cell(r, c, f"Ref{r}-{c}")
+    wb.create_sheet("Altro")["A1"] = "foglio da escludere"
+    path = tmp_path / "listino.xlsx"
+    wb.save(path)
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["sheet"] = dlg.sheet_box.isVisibleTo(dlg)
+        seen["slides"] = dlg.slide_box.isVisibleTo(dlg)
+        dlg.fit_width.setChecked(True)
+        dlg.sheets.setCurrentIndex(dlg.sheets.findData("active"))
+        dlg._accept()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(OfficeOptionsDialog, "exec", fake_exec)
+    views = ctrl.create_from_files([str(path)])
+    assert seen == {"sheet": True, "slides": False}
+    assert len(views) == 1 and views[0].document.page_count == 1
+    assert "foglio da escludere" not in views[0].document.page_text(0)
+    remembered = OfficeOptionsDialog(window, kinds={"sheet"}, settings=window.ctx.settings())
+    assert remembered.fit_width.isChecked() and remembered.sheets.currentData() == "active"
+    # foglio molto lungo: conferma; se rifiutata non si crea nulla
+    monkeypatch.setattr(create, "SHEET_PAGE_LIMIT", 1)
+    monkeypatch.setattr(window.ctx, "confirm", lambda t, m: messages["confirm"].append(m) or False)
+    assert ctrl.create_from_files([str(path)]) == []
+    assert "pagine" in messages["confirm"][-1]
+    # annullando le opzioni non si crea nulla
+    monkeypatch.setattr(OfficeOptionsDialog, "exec", lambda d: QDialog.DialogCode.Rejected)
+    assert ctrl.create_from_files([str(path)]) == []
+
+
+def test_export_more_files_opens_tools_batch(window, ctrl, sample_pdf, monkeypatch, messages):
+    """CNV-17: «Esporta come › Più file…» apre l'elaborazione in blocco (BAT-06) con il formato
+    scelto; i formati che BAT-06 non produce restano nella finestra del modulo."""
+    from foliant.modules.convert.batch_dialog import BatchDialog
+    window.open_path(sample_pdf)
+
+    def pick(fmt):
+        def fake_exec(dlg):
+            dlg.format_box.setCurrentIndex(dlg.format_box.findData(fmt))
+            return ExportDialog.BATCH
+        monkeypatch.setattr(ExportDialog, "exec", fake_exec)
+    if getattr(window.ctx, "tools_module", None) is None:
+        pytest.skip("modulo Strumenti non caricato")
+    pick("xlsx")
+    batch = ctrl.export()
+    converts = [s for s in batch.steps if s.action == "convert"]
+    assert len(converts) == 1 and converts[0].merged_params()["format"] == "xlsx"
+    pick("docx")
+    batch = ctrl.export()
+    converts = [s for s in batch.steps if s.action == "convert"]
+    assert len(converts) == 1 and converts[0].merged_params()["format"] == "docx"
+    seen = {}
+
+    def batch_exec(dlg):
+        seen["fmt"] = dlg.format_box.currentData()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(BatchDialog, "exec", batch_exec)
+    pick("epub")
+    assert ctrl.export() is None and seen["fmt"] == "epub"
+
+
+def test_batch_fifty_files_two_damaged_one_encrypted(tmp_path, encrypted_pdf):
+    """CNV-17: 50 PDF, 2 irreparabili e 1 cifrato saltato → 47 DOCX; il report elenca i 2 errori
+    con la causa e il file saltato; nessun temporaneo nella cartella di uscita."""
+    import docx
+    import shutil
+
+    from tests.conftest import make_pdf
+    from foliant.modules.convert.batch import ERROR, OK, SKIPPED, batch_convert, report_csv
+    src = tmp_path / "in"
+    src.mkdir()
+    files = [make_pdf(src / f"doc{k:02}.pdf", pages=1) for k in range(47)]
+    for name in ("rotto1.pdf", "rotto2.pdf"):
+        (src / name).write_bytes(b"%PDF-1.7\n garbage \x00\xff" * 3)
+        files.append(str(src / name))
+    files.append(shutil.copy(encrypted_pdf, src / "cifrato.pdf"))
+    out = tmp_path / "out"
+    items = batch_convert(files, "docx", out_dir=str(out), workers=1)
+    by = {os.path.basename(i.path): i for i in items}
+    assert sum(1 for i in items if i.status == OK) == 47
+    assert by["rotto1.pdf"].status == ERROR and by["rotto1.pdf"].message
+    assert by["cifrato.pdf"].status == SKIPPED
+    produced = sorted(os.listdir(out))
+    assert len(produced) == 47 and all(p.endswith(".docx") for p in produced)
+    docx.Document(str(out / produced[0]))      # file completi e apribili
+    report = report_csv(items)
+    assert "rotto1.pdf" in report and "rotto2.pdf" in report and "cifrato.pdf" in report
+    assert by["rotto2.pdf"].message in report
+
+
+def test_local_paper_size_and_unit(window, ctrl, tmp_path, monkeypatch, messages):
+    """NFR-26: con formato carta Letter e pollici i nuovi documenti e i dialoghi li propongono."""
+    from PIL import Image
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "Letter")
+    monkeypatch.setattr(window.ctx, "measure_unit", lambda: "in")
+    seen = {}
+
+    def blank_exec(d):
+        seen["unit"], seen["w"], seen["step"] = d.unit.currentData(), d.w.value(), d.step.suffix()
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(BlankDialog, "exec", blank_exec)
+    view = ctrl.create_blank()
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert (round(d[0].rect.width), round(d[0].rect.height)) == (612, 792)
+    assert seen == {"unit": "in", "w": 8.5, "step": " in"}
+    img = tmp_path / "foto.png"
+    Image.new("RGB", (300, 200), "white").save(img)
+
+    def images_exec(d):
+        seen["size"], seen["margin"] = d.size_box.currentData(), d.margin.suffix()
+        seen["margin_pt"] = d.options()["margin_pt"]
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ImagesDialog, "exec", images_exec)
+    view = ctrl.create_from_images([str(img)])
+    assert seen["size"] == "Letter" and seen["margin"] == " in" and abs(seen["margin_pt"] - 28.8) < 0.01
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert (round(d[0].rect.width), round(d[0].rect.height)) in ((612, 792), (792, 612))
+    txt = tmp_path / "note.txt"
+    txt.write_text("Ricevuta di consegna", encoding="utf-8")
+    view = ctrl.create_from_files([str(txt)])[0]
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert (round(d[0].rect.width), round(d[0].rect.height)) == (612, 792)
+
+
+def _camera_frame():
+    import cv2
+    import numpy as np
+
+    from tests.modules.convert.test_photo import _sheet
+    sheet = _sheet()
+    h, w = sheet.shape[:2]
+    corners = np.array([[380, 220], [1240, 300], [1300, 1560], [300, 1500]], dtype="float32")
+    m = cv2.getPerspectiveTransform(np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype="float32"),
+                                    corners)
+    bg = np.full((1800, 1600, 3), (60, 90, 70), np.uint8)
+    mask = cv2.warpPerspective(np.full((h, w), 255, np.uint8), m, (1600, 1800))
+    bg[mask > 0] = cv2.warpPerspective(sheet, m, (1600, 1800))[mask > 0]
+    return bg
+
+
+def test_create_from_camera_two_shots(window, ctrl, monkeypatch, messages):
+    """CNV-26: due scatti dalla webcam (simulata) → foto con angoli rilevati → PDF di 2 pagine A4."""
+    from foliant.modules.convert.create_dialogs import CameraDialog, PhotosDialog
+    frame = _camera_frame()
+    log = []
+
+    class FakeCamera:
+        def list_devices(self):
+            return [(0, "Webcam simulata")]
+
+        def open(self, index):
+            log.append(("open", index))
+
+        def read(self):
+            return frame
+
+        def close(self):
+            log.append("close")
+
+    ctrl.camera_backend = FakeCamera()
+    monkeypatch.setattr(window.ctx, "paper_size", lambda: "A4")
+
+    def cam_exec(dlg):
+        assert not dlg.done_button.isEnabled()
+        dlg.shoot()
+        dlg.shoot()
+        assert "2" in dlg.status.text() and dlg.done_button.isEnabled()
+        dlg.done(QDialog.DialogCode.Accepted)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(CameraDialog, "exec", cam_exec)
+    seen = {}
+
+    def photos_exec(dlg):
+        seen["found"] = [it["found"] for it in dlg.items]
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(PhotosDialog, "exec", photos_exec)
+    view = ctrl.create_from_camera()
+    assert seen["found"] == [True, True]
+    assert log[0] == ("open", 0) and log[-1] == "close"
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert d.page_count == 2 and abs(d[0].rect.width - 595) < 2
+
+
+def test_create_from_camera_without_device_offers_import(window, ctrl, monkeypatch, messages):
+    class NoCamera:
+        def list_devices(self):
+            return []
+    ctrl.camera_backend = NoCamera()
+    called = []
+    monkeypatch.setattr(ctrl, "create_from_photos", lambda paths=None: called.append(paths) or "importa")
+    assert ctrl.create_from_camera() == "importa" and called == [None]
+    assert "fotocamera" in messages["confirm"][0][1].lower()
+
+
+def test_camera_open_error_disables_shot(window):
+    from foliant.modules.convert.camera import CameraError
+    from foliant.modules.convert.create_dialogs import CameraDialog
+
+    class Busy:
+        def open(self, index):
+            raise CameraError("occupata")
+
+        def read(self):
+            return None
+
+        def close(self):
+            pass
+    dlg = CameraDialog(window, Busy(), [(0, "Webcam")])
+    assert not dlg.shot_button.isEnabled() and "occupata" in dlg.view.text()
+    dlg.reject()
+
+
+def test_cv_camera_lists_no_devices_here():
+    from foliant.modules.convert.camera import CvCamera
+    cam = CvCamera()
+    assert isinstance(cam.list_devices(), list)
+    assert cam.read() is None
+    cam.close()
+
+
+def test_photos_ocr_option(window, ctrl, tmp_path, monkeypatch, messages):
+    from foliant.modules.convert.create_dialogs import PhotosDialog
+    from PIL import Image
+    path = tmp_path / "garanzia.png"
+    Image.fromarray(_camera_frame()).save(path)
+    ocr = []
+    monkeypatch.setattr(ctrl, "_with_ocr", lambda data: ocr.append(len(data)) or data)
+
+    def photos_exec(dlg):
+        dlg.ocr.setChecked(True)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(PhotosDialog, "exec", photos_exec)
+    assert ctrl.create_from_photos([str(path)]) is not None and len(ocr) == 1
