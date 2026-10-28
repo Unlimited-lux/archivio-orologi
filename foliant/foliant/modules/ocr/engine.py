@@ -529,6 +529,23 @@ def recognize_document(pdf: pymupdf.Document, opts: OcrOptions, pages: list[int]
     return result
 
 
+def document_copy_bytes(pdf: pymupdf.Document) -> bytes:
+    """Copia non cifrata del documento aperto, senza alterarlo (da chiamare con ENGINE_LOCK).
+
+    Su un documento cifrato `tobytes()` altera lo stato di cifratura in memoria e il
+    salvataggio successivo perde immagini e protezione: lì si copiano le pagine in un
+    nuovo documento, lasciando intatto l'originale."""
+    encrypted = bool(getattr(pdf, "is_encrypted", False)) or bool((pdf.metadata or {}).get("encryption"))
+    if not encrypted:
+        return pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_NONE)
+    copy = pymupdf.open()
+    try:
+        copy.insert_pdf(pdf)
+        return copy.tobytes(garbage=0, deflate=False)
+    finally:
+        copy.close()
+
+
 def recognize_area(pdf: pymupdf.Document, index: int, clip: pymupdf.Rect, opts: OcrOptions,
                    cancelled: Callable[[], bool] | None = None) -> PageResult:
     """Riconosce un'area (punti della pagina visualizzata) e restituisce un risultato

@@ -686,7 +686,7 @@ class OcrController(QObject):
                     "le firme risulteranno non più valide per le modifiche successive. Continuare?")):
                 return None
         with ENGINE_LOCK:
-            data = doc.pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_NONE)
+            data = engine.document_copy_bytes(doc.pdf)
 
         def work(progress):
             with ENGINE_LOCK:
@@ -930,7 +930,7 @@ class OcrController(QObject):
 
         def work(progress):
             with ENGINE_LOCK:
-                data = view.document.pdf.tobytes(garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_NONE)
+                data = engine.document_copy_bytes(view.document.pdf)
                 pdf = pymupdf.open(stream=data, filetype="pdf")
             try:
                 return engine.recognize_area(pdf, page, clip, opts, lambda: progress.cancelled)

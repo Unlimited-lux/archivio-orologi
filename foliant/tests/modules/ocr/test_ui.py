@@ -582,3 +582,27 @@ def test_revisione_da_tastiera(window, scan_two, qtbot):
         assert w.text.lower() in ctl.user_dictionary()
     view.document.undo()
     assert "contratto" in view.document.page_text(0)
+
+
+@pytest.mark.parametrize("mode", [engine.SEARCHABLE, engine.TEXT_ONLY])
+def test_pdf_cifrato_ocr_e_salvataggio(window, tmp_path, monkeypatch, mode):
+    """bug_07: su PDF cifrato la scansione, il testo e la cifratura restano dopo OCR e salvataggio."""
+    import numpy as np
+    plain = image_pdf(tmp_path / "p.pdf", [scan_image(lines=FRASI[:2], dpi=150)], dpi=150)
+    enc = tmp_path / "cifrato.pdf"
+    with pymupdf.open(plain) as d:
+        d.save(str(enc), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="capo", user_pw="utente",
+               permissions=pymupdf.PDF_PERM_PRINT)
+    view = window.open_path(str(enc), password="capo")
+    ctl = ocr_controller()
+    monkeypatch.setattr(dialogs.TextDialog, "exec", lambda dlg: 0)
+    ctl.run(view, engine.OcrOptions(languages=["ita"], mode=mode), [0], preview=False)
+    with view.document.change("prova") as pdf:
+        pdf[0].set_rotation(0)
+    out = tmp_path / "salvato.pdf"
+    view.document.save(str(out))
+    with pymupdf.open(str(out)) as o:
+        assert o.needs_pass and o.authenticate("capo")
+        g = np.frombuffer(o[0].get_pixmap(dpi=50, colorspace=pymupdf.csGRAY).samples, np.uint8)
+        assert (g < 128).sum() > 100
+        assert ("compravendita" in o[0].get_text()) == (mode == engine.SEARCHABLE)
