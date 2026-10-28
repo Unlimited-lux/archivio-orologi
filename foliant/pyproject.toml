@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-qt>=4.4"]
+dev = ["pytest>=8", "pytest-qt>=4.4", "pytest-timeout>=2.3"]
 
 [project.scripts]
 foliant = "foliant.app:main"
@@ -40,3 +40,5 @@ foliant = ["resources/**/*"]
 qt_api = "pyside6"
 testpaths = ["tests"]
 addopts = "-q"
+timeout = 180
+faulthandler_timeout = 170

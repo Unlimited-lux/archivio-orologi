@@ -214,6 +214,9 @@ class Context(QObject):
             return None
         if default_suffix and not os.path.splitext(path)[1]:
             path += default_suffix
+            if os.path.exists(path) and not self.confirm(
+                    title or _("Salva"), _("«{name}» esiste già. Vuoi sostituirlo?").format(name=os.path.basename(path))):
+                return None
         self._w.remember_directory(path)
         return path
 
