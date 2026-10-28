@@ -376,4 +376,5 @@ EN = {
     'Pausa': 'Pause',
     'Riprendi': 'Resume',
     'In pausa: {d} di {t} pagine riconosciute.': 'Paused: {d} of {t} pages recognized.',
+    'Prospettiva (foto)': 'Perspective (photos)',
 }

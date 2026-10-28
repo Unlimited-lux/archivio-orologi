@@ -234,8 +234,10 @@ class OcrDialog(QDialog):
         self.cb_rotate = QCheckBox(_("Rotazione automatica"))
         self.cb_denoise = QCheckBox(_("Rimuovi rumore"))
         self.cb_contrast = QCheckBox(_("Migliora contrasto"))
+        self.cb_perspective = QCheckBox(_("Prospettiva (foto)"))
         for cb, key in ((self.cb_deskew, "deskew"), (self.cb_rotate, "auto_rotate"),
-                        (self.cb_denoise, "denoise"), (self.cb_contrast, "contrast")):
+                        (self.cb_denoise, "denoise"), (self.cb_contrast, "contrast"),
+                        (self.cb_perspective, "perspective")):
             cb.setChecked(str(get(key, "true")).lower() in ("true", "1"))
             pl.addWidget(cb)
         lay.addWidget(pre)
@@ -390,7 +392,8 @@ class OcrDialog(QDialog):
                 combo.setCurrentIndex(i)
         pre = data.get("preprocess", {})
         for cb, key in ((self.cb_deskew, "deskew"), (self.cb_rotate, "auto_rotate"),
-                        (self.cb_denoise, "denoise"), (self.cb_contrast, "contrast")):
+                        (self.cb_denoise, "denoise"), (self.cb_contrast, "contrast"),
+                        (self.cb_perspective, "perspective")):
             if key in pre:
                 cb.setChecked(bool(pre[key]))
         self.cb_apply_page.setChecked(bool(data.get("apply_to_page", False)))
@@ -455,7 +458,8 @@ class OcrDialog(QDialog):
             zones=list(self.zones), auto_tables=self.cb_tables.isChecked(),
             preprocess=PreprocessOptions(deskew=self.cb_deskew.isChecked(), auto_rotate=self.cb_rotate.isChecked(),
                                          denoise=self.cb_denoise.isChecked(),
-                                         contrast=self.cb_contrast.isChecked()),
+                                         contrast=self.cb_contrast.isChecked(),
+                                         perspective=self.cb_perspective.isChecked()),
             existing_text=self.existing.currentData(), font=self.font.currentData())
 
     @property
