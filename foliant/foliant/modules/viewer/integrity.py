@@ -113,6 +113,12 @@ class IntegrityController(QObject):
         return ok
 
     def _layout(self, view: DocumentView) -> None:
+        try:
+            self._do_layout(view)
+        except RuntimeError:
+            pass   # vista o finestra già distrutte
+
+    def _do_layout(self, view: DocumentView) -> None:
         bars = [b for b in self.bars.get(view, []) if not b.isHidden()]
         y = 0
         for b in bars:

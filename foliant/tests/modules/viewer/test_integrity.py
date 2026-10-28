@@ -35,3 +35,18 @@ def test_rebuilt_file_shows_bar_and_repair(viewer_window, tmp_path, monkeypatch)
 def test_healthy_file_has_no_bar(viewer_window, sample_pdf):
     view = viewer_window.open_path(sample_pdf)
     assert view not in viewer_window.ctx.viewer_parts["integrity"].bars
+
+
+def test_deferred_callbacks_after_window_destroyed(qtbot, settings, tmp_path):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+    from foliant.ui.main_window import MainWindow
+    win = MainWindow(settings)
+    view = win.open_path(_broken_pdf(tmp_path))
+    view.go_to_page(1)                       # programma un aggiornamento differito della navigazione
+    view.resize(500, 400)                    # e un'impaginazione differita della barra informativa
+    for v in win.views():
+        v.document._saved_state = v.document._state
+    win.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()             # nessuna eccezione dai callback tardivi

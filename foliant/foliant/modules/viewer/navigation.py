@@ -311,6 +311,12 @@ class NavigationController(QObject):
         QTimer.singleShot(0, self._refresh)
 
     def _refresh(self) -> None:
+        try:
+            self._do_refresh()
+        except RuntimeError:
+            pass   # finestra già distrutta: callback differito arrivato tardi
+
+    def _do_refresh(self) -> None:
         view = self.ctx.current_view()
         w = self.ctx.window
         if view is None:
