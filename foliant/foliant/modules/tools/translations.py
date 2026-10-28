@@ -820,4 +820,13 @@ EN: dict[str, str] = {
     "unito": "merged",
     "vista": "view",
     "web": "web",
+    "Ambito": "Scope",
+    "Saltato: nessun elemento riconoscibile (si può intervenire con la modifica manuale).": "Skipped: no recognizable element (you can edit it manually).",
+    "Solo elementi aggiunti da Foliant": "Only elements added by Foliant",
+    "Tutti gli elementi marcati come tali (anche da altri programmi)": "All elements marked as such (also by other programs)",
+    "filigrane": "watermarks",
+    "intestazioni/piè/numeri": "headers/footers/numbers",
+    "numeri Bates": "Bates numbers",
+    "rimossi: {d}": "removed: {d}",
+    "sfondi": "backgrounds",
 }

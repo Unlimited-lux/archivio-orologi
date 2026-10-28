@@ -394,6 +394,9 @@ def _build_actions() -> dict[str, ActionSpec]:
             Param("background", "Sfondi", "bool", False),
             Param("header_footer", "Intestazioni, piè e numeri di pagina", "bool", False),
             Param("bates", "Numeri Bates", "bool", False),
+            Param("scope", "Ambito", "choice", "foliant",
+                  [("foliant", "Solo elementi aggiunti da Foliant"),
+                   ("marked", "Tutti gli elementi marcati come tali (anche da altri programmi)")]),
         ]),
         ActionSpec("insert_pages", "Inserisci pagine", "inserito", [
             Param("file", "PDF da inserire (vuoto = pagina bianca)", "path", ""),
@@ -994,14 +997,103 @@ def _stamp_error(e: Exception) -> BatchError:
 
 
 def remove_marks(data: bytes, kinds: set[str] | list[str], check=None) -> tuple[bytes, int]:
+    out, counts = remove_marks_detailed(data, kinds)
+    return out, sum(counts.values())
+
+
+# sottotipi degli artefatti marcati secondo lo standard (BAT-16, ambito «tutti gli elementi marcati»)
+_ARTIFACT_SUBTYPES = {"watermark": ("Watermark",), "header_footer": ("Header", "Footer", "PageNum"),
+                      "bates": ("Bates",)}
+_BDC_RE = re.compile(rb"/Artifact\s*<<(.*?)>>\s*BDC", re.S)
+_MARK_TOKEN_RE = re.compile(rb"\b(BDC|BMC|EMC)\b")
+
+
+def _artifact_kind(props: bytes) -> str | None:
+    if re.search(rb"/Type\s*/Background", props):
+        return "background"
+    if not re.search(rb"/Type\s*/Pagination", props):
+        return None
+    m = re.search(rb"/Subtype\s*/(\w+)", props)
+    sub = m.group(1).decode() if m else ""
+    for kind, subs in _ARTIFACT_SUBTYPES.items():
+        if sub in subs:
+            return kind
+    return None
+
+
+def _strip_artifacts(stream: bytes, kinds: set[str]) -> tuple[bytes, dict[str, int]]:
+    """Toglie le sequenze /Artifact marcate dei tipi indicati (con le sequenze annidate)."""
+    counts: dict[str, int] = {}
+    out = bytearray()
+    pos = 0
+    while True:
+        m = _BDC_RE.search(stream, pos)
+        if m is None:
+            break
+        kind = _artifact_kind(m.group(1))
+        if kind is None or kind not in kinds or MARK_KEY.encode() in m.group(1):
+            out += stream[pos:m.end()]
+            pos = m.end()
+            continue
+        depth = 1
+        scan = m.end()
+        end = None
+        for t in _MARK_TOKEN_RE.finditer(stream, scan):
+            if t.group(1) in (b"BDC", b"BMC"):
+                depth += 1
+            else:
+                depth -= 1
+                if depth == 0:
+                    end = t.end()
+                    break
+        if end is None:   # sequenza non chiusa: non si tocca
+            out += stream[pos:m.end()]
+            pos = m.end()
+            continue
+        out += stream[pos:m.start()]
+        pos = end
+        counts[kind] = counts.get(kind, 0) + 1
+    out += stream[pos:]
+    return bytes(out), counts
+
+
+def remove_marks_detailed(data: bytes, kinds: set[str] | list[str], all_marked: bool = False
+                          ) -> tuple[bytes, dict[str, int]]:
+    """Rimuove filigrane, sfondi, intestazioni/piè e Bates; restituisce (dati, conteggio per tipo).
+
+    Predefinito: solo gli elementi aggiunti da Foliant (operazioni in blocco e modulo Pagine).
+    `all_marked`: anche quelli che altri programmi hanno marcato come artefatto secondo lo
+    standard e le annotazioni /Watermark. Il contenuto non marcato non viene mai toccato."""
     kinds = set(kinds)
+    counts: dict[str, int] = {}
+
+    def add(kind, n):
+        if n:
+            counts[kind] = counts.get(kind, 0) + n
+
     with ENGINE_LOCK:
         doc = _open(data)
         try:
-            n = _remove_stamps(doc, kinds)
+            for kind in kinds:
+                add(kind, _remove_stamps(doc, {kind}))
             for page in doc:
-                n += _remove_marks_page(doc, page, kinds)
-            return (_save(doc) if n else data), n
+                for kind in kinds:
+                    add(kind, _remove_marks_page(doc, page, {kind}))
+            if all_marked:
+                for page in doc:
+                    for xref in page.get_contents():
+                        stream = doc.xref_stream(xref) or b""
+                        cleaned, found = _strip_artifacts(stream, kinds)
+                        if found:
+                            doc.update_stream(xref, cleaned)
+                            for k, n in found.items():
+                                add(k, n)
+                    if "watermark" in kinds:
+                        for annot in list(page.annots() or []):
+                            if annot.type[1] == "Watermark":
+                                page.delete_annot(annot)
+                                add("watermark", 1)
+            return (_save(doc) if counts else data), counts
         finally:
             doc.close()
 
@@ -1717,9 +1809,13 @@ def _apply_step(step: Step, data: bytes, item: QueueItem, ctx: _Ctx, plan: dict,
         return out, protection
     if a == "remove_marks":
         kinds = {k for k in MARK_KINDS if p.get(k)}
-        out, n = remove_marks(data, kinds)
-        if not n:
-            raise BatchError("MRK-01", _("Nessun elemento riconoscibile da rimuovere."), status="skipped")
+        out, counts = remove_marks_detailed(data, kinds, p.get("scope") == "marked")
+        if not counts:
+            raise BatchError("MRK-01", _("Saltato: nessun elemento riconoscibile (si può intervenire con la "
+                                         "modifica manuale)."), status="skipped")
+        names = {"watermark": _("filigrane"), "background": _("sfondi"),
+                 "header_footer": _("intestazioni/piè/numeri"), "bates": _("numeri Bates")}
+        ctx.notes.append(_("rimossi: {d}").format(d=", ".join(f"{n} {names[k]}" for k, n in sorted(counts.items()))))
         return out, protection
     if a == "insert_pages":
         out, warns = insert_pages(data, p.get("file", ""), p.get("where", "start"), int(p.get("number", 1)))

@@ -399,7 +399,7 @@ def test_watermark_marked_and_removable(tmp_path):
 def test_remove_marks_nothing_found(tmp_path):
     a = mk(tmp_path / "in" / "a.pdf")
     rep = be.run_job(None, items_for([a]), job(tmp_path / "out", ("remove_marks", {"watermark": True})), STARTED)
-    assert rep.results[0].status == "skipped" and "Nessun elemento" in rep.results[0].message
+    assert rep.results[0].status == "skipped" and "nessun elemento riconoscibile" in rep.results[0].message
 
 
 def test_background_letterhead(tmp_path):
@@ -1204,3 +1204,55 @@ def test_defaults_and_names_in_english(tmp_path):
     finally:
         set_language("it")
     assert be.Step("watermark").merged_params()["text"] == "RISERVATO"
+
+
+# ----------------------------------------------------------------- BAT-16
+def _with_marked_header(path):
+    """PDF con intestazione marcata come artefatto da un «altro programma» e una filigrana-annotazione."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 300), "Corpo del contratto", fontsize=12)
+    xref = page.get_contents()[0]
+    body = doc.xref_stream(xref)
+    marked = (b"/Artifact <</Type /Pagination /Subtype /Header>> BDC BT /helv 9 Tf 72 30 Td (TESTATA ALTRUI) Tj ET EMC\n"
+              + body)
+    doc.update_stream(xref, marked)
+    page.clean_contents()
+    doc.save(str(path))
+    return str(path)
+
+
+def test_remove_marks_scope_and_counts(tmp_path):
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    data = be.add_header_footer(be.add_watermark(open(a, "rb").read(), "BOZZA"), {"bottom-center": "PIEDE"})
+    # solo la filigrana: il piè resta
+    w = tmp_path / "w.pdf"
+    w.write_bytes(data)
+    rep = be.run_job(None, [be.analyze_file(str(w))], be.JobSettings(
+        steps=[be.Step("remove_marks", {"watermark": True})], destination=str(tmp_path / "o1")))
+    out = pymupdf.open(rep.results[0].outputs[0])
+    assert all("BOZZA" not in p.get_text() and "PIEDE" in p.get_text() for p in out)
+    assert "2 filigrane" in rep.results[0].message
+    # intestazione marcata da un altro programma: rimossa solo con l'ambito «tutti»
+    other = _with_marked_header(tmp_path / "altro.pdf")
+    item = be.analyze_file(other)
+    rep = be.run_job(None, [item], be.JobSettings(steps=[be.Step("remove_marks", {"watermark": False,
+                                                                                 "header_footer": True})],
+                                                  destination=str(tmp_path / "o2")))
+    assert rep.results[0].status == "skipped" and "nessun elemento riconoscibile" in rep.results[0].message
+    rep = be.run_job(None, [item], be.JobSettings(steps=[be.Step("remove_marks", {
+        "watermark": False, "header_footer": True, "scope": "marked"})], destination=str(tmp_path / "o3")))
+    text = pymupdf.open(rep.results[0].outputs[0])[0].get_text()
+    assert "TESTATA ALTRUI" not in text and "Corpo del contratto" in text
+
+
+def test_remove_watermark_visually_identical(tmp_path):
+    from foliant.modules.tools import compare_engine as ce
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    original = open(a, "rb").read()
+    marked = be.add_watermark(original, "BOZZA")
+    cleaned, n = be.remove_marks(marked, {"watermark"})
+    assert n == 2
+    r = ce.run_compare(None, ce.SideInput(original, "a"), ce.SideInput(cleaned, "b"),
+                       ce.CompareOptions(mode=ce.MODE_VISUAL, dpi=72))
+    assert r.differences == []
