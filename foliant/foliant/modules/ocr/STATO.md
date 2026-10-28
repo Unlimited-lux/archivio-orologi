@@ -53,7 +53,7 @@ Percentuale di parole attese ritrovate (lingue ita+eng, impostazioni predefinite
 | Carta d'identità fotografata da lontano, luce non uniforme | 0.857 | 1.000 |
 | Passaporto con zona MRZ | 0.179 | 0.964 |
 | Testo piccolo 150 dpi in grigi (JPEG) | 0.681 | 1.000 |
-| Timbro rosso sopra il testo | 0.964 | 0.964 |
+| Timbro rosso sopra il testo (IBAN coperto) | 0.964 | 1.000 |
 | Scontrino termico sbiadito | 1.000 | 1.000 |
 
 Miglioramenti:
@@ -62,3 +62,5 @@ Miglioramenti:
    Prima le scansioni grigie a 150 dpi uscivano con lettere impastate e Tesseract non trovava righe.
 2. Rotazione OSD verificata leggendo la pagina nei due versi: la zona MRZ («<<<<») faceva proporre 180°
    e il passaporto veniva capovolto. Le pagine davvero capovolte si raddrizzano ancora.
+3. Timbri colorati sopra il testo nero attenuati prima del riconoscimento (canale più chiaro nei pixel
+   colorati del timbro); il testo stampato a colori lontano dal nero (titoli, loghi) resta intatto.

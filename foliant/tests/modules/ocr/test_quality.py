@@ -67,3 +67,22 @@ def test_scansione_grigia_150_non_viene_impastata(tmp_path):
     img, dpi, expected = small_gray_150()
     for flags in ({}, {"denoise": False}):
         assert word_accuracy(_ocr(tmp_path, img, dpi, **flags).text, expected) >= 0.95
+
+
+def test_timbro_colorato_sopra_il_testo_si_attenua_titolo_colorato_resta():
+    import cv2
+    import numpy as np
+
+    from foliant.modules.ocr.preprocess import ocr_gray
+
+    img = np.full((300, 900, 3), 255, np.uint8)
+    cv2.putText(img, "Titolo blu", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (20, 40, 200), 4)
+    cv2.putText(img, "IBAN 0000 0123", (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
+    stamp = np.full_like(img, 255)
+    cv2.rectangle(stamp, (300, 140), (700, 280), (200, 30, 30), 8)
+    cv2.putText(stamp, "PAGATO", (330, 250), cv2.FONT_HERSHEY_DUPLEX, 2, (200, 30, 30), 6)
+    scan = (img.astype(np.uint16) * stamp // 255).astype(np.uint8)
+    g = ocr_gray(scan)
+    assert g[140:146, 600:700].min() >= 190          # cornice del timbro attenuata (era ~80)
+    assert g[170:205, 20:290].min() < 60            # testo nero intatto
+    assert g[20:70, 20:300].min() < 120             # titolo colorato lontano dal nero: intatto

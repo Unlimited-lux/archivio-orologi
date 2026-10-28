@@ -233,14 +233,16 @@ def small_gray_150():
 
 
 def red_stamp_over_text():
-    """Timbro rosso pieno («PAGATO») sopra righe di testo nero."""
+    """Timbro rosso pieno («PAGATO») sopra righe di testo nero: l'inchiostro del timbro si somma a
+    quello della stampa (il nero sotto il rosso resta nero), come su carta."""
     img, dpi, expected = invoice(300)
     z = dpi / 72
-    over = img.copy()
-    cv2.rectangle(over, (int(320 * z), int(330 * z)), (int(520 * z), int(380 * z)), (200, 30, 30), int(3 * z))
-    cv2.putText(over, "PAGATO", (int(335 * z), int(368 * z)), cv2.FONT_HERSHEY_DUPLEX, 1.2 * z / 2, (200, 30, 30),
+    stamp = np.full_like(img, 255)
+    cv2.rectangle(stamp, (int(320 * z), int(330 * z)), (int(520 * z), int(380 * z)), (200, 30, 30), int(3 * z))
+    cv2.putText(stamp, "PAGATO", (int(335 * z), int(368 * z)), cv2.FONT_HERSHEY_DUPLEX, 1.2 * z / 2, (200, 30, 30),
                 max(1, int(2.2 * z)))
-    return cv2.addWeighted(over, 0.8, img, 0.2, 0), dpi, expected
+    stamp = cv2.addWeighted(stamp, 0.85, np.full_like(img, 255), 0.15, 0)
+    return (img.astype(np.uint16) * stamp // 255).astype(np.uint8), dpi, expected
 
 
 def thermal_receipt():
