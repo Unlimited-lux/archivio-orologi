@@ -345,6 +345,7 @@ class SearchController(QObject):
         self._texts_version = -1
         self._labels: list[str] | None = None
         self._pending_select = True
+        self._restart_pending = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._work)
@@ -391,9 +392,20 @@ class SearchController(QObject):
             return
         self._texts.clear()
         self._labels = None
-        if self.hits or self.job is not None:
+        if (self.hits or self.job is not None) and not self._restart_pending:
+            # una sola nuova ricerca per giro di eventi, anche dopo molte modifiche di fila
+            self._restart_pending = True
+            QTimer.singleShot(0, self._restart_after_change)
+
+    def _restart_after_change(self) -> None:
+        if not self._restart_pending:
+            return
+        self._restart_pending = False
+        try:
             self._pending_select = False
             self.restart()
+        except RuntimeError:
+            pass     # finestra già distrutta
 
     def labels(self) -> list[str]:
         if self.view is None:
@@ -550,6 +562,7 @@ class SearchController(QObject):
 
     def finish(self) -> None:
         """Completa subito la ricerca in corso (test)."""
+        self._restart_after_change()
         job = self.job
         while job is not None and not job.done:
             with ENGINE_LOCK:

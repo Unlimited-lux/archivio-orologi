@@ -13,7 +13,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QStackedWidget,
@@ -175,6 +175,8 @@ class AttachmentsPanel(QWidget):
         self.stack.addWidget(self.empty)
         layout.addWidget(self.stack, 1)
 
+        self._dirty = False          # elenco da rileggere alla prossima visualizzazione
+        self._pending = False        # aggiornamento già programmato (raggruppa le modifiche)
         ctx.documentChanged.connect(self._on_document_changed)
         ctx.documentOpened.connect(self._on_document_opened)
         app = QApplication.instance()
@@ -195,10 +197,36 @@ class AttachmentsPanel(QWidget):
     def set_view(self, view) -> None:
         self.view = view
         self._doc = view.document if view is not None else None
-        self.refresh()
+        if view is None or self.isVisible():
+            self.refresh()
+        else:
+            self._dirty = True
 
     def _on_document_changed(self, view) -> None:
-        if view is self.view:
+        """L'elenco si rilegge solo a pannello visibile, una volta per giro di eventi:
+        a pannello nascosto si rilegge quando viene mostrato (o quando lo si interroga)."""
+        if view is not self.view:
+            return
+        self._dirty = True
+        if self.isVisible() and not self._pending:
+            self._pending = True
+            QTimer.singleShot(0, self._flush)
+
+    def _flush(self) -> None:
+        try:
+            self._pending = False
+            if self._dirty and self.isVisible():
+                self.refresh()
+        except RuntimeError:
+            pass     # pannello già distrutto
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._dirty:
+            self.refresh()
+
+    def ensure_fresh(self) -> None:
+        if self._dirty:
             self.refresh()
 
     def _on_document_opened(self, view) -> None:
@@ -214,9 +242,11 @@ class AttachmentsPanel(QWidget):
 
     # ----------------------------------------------------------------- elenco
     def items(self) -> list[Attachment]:
+        self.ensure_fresh()
         return list(self._items)
 
     def refresh(self) -> None:
+        self._dirty = False
         self._items = []
         if self._doc is not None and not self._doc.closed:
             try:
@@ -263,12 +293,14 @@ class AttachmentsPanel(QWidget):
 
     @property
     def is_empty(self) -> bool:
+        self.ensure_fresh()
         return self.stack.currentWidget() is self.empty
 
     def selected_items(self) -> list[Attachment]:
         return [r.data(COL_NAME, ROLE_ITEM) for r in self.tree.selectedItems()]
 
     def select(self, att: Attachment) -> None:
+        self.ensure_fresh()
         for i in range(self.tree.topLevelItemCount()):
             row = self.tree.topLevelItem(i)
             if row.data(COL_NAME, ROLE_ITEM).key == att.key:

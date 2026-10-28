@@ -161,6 +161,7 @@ class NavigationController(QObject):
         self.label_box.setProperty("muted", True)
         self.label_box.hide()
         w.statusBar().addPermanentWidget(self.label_box)
+        self._refresh_pending = False
         ctx.add_link_handler(self._link_handler, priority=-100)
         self._assign_ux18_shortcuts()
         ctx.documentOpened.connect(self._attach)
@@ -359,9 +360,14 @@ class NavigationController(QObject):
         self._refresh_later()
 
     def _refresh_later(self) -> None:
+        """Un solo aggiornamento per giro di eventi, anche dopo molte modifiche di fila."""
+        if self._refresh_pending:
+            return
+        self._refresh_pending = True
         QTimer.singleShot(0, self._refresh)
 
     def _refresh(self) -> None:
+        self._refresh_pending = False
         try:
             self._do_refresh()
         except RuntimeError:

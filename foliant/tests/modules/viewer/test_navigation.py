@@ -318,3 +318,20 @@ def test_ux18_rotate_view_and_rulers_shortcuts(viewer_window, sample_pdf, qtbot)
         assert nav.act_rotate_ccw.shortcut().isEmpty()
         w.set_mode("leggi")
         assert nav.act_rotate_ccw.shortcut() == QKeySequence("Ctrl+Shift+-")
+
+
+def test_many_changes_refresh_navigation_once(viewer_window, sample_pdf, monkeypatch):
+    """Prestazioni: più modifiche nello stesso giro di eventi → un solo aggiornamento."""
+    from PySide6.QtWidgets import QApplication
+    view = viewer_window.open_path(sample_pdf)
+    nav = viewer_window.ctx.viewer_parts["navigation"]
+    QApplication.processEvents()
+    calls = []
+    real = nav._do_refresh
+    monkeypatch.setattr(nav, "_do_refresh", lambda: calls.append(1) or real())
+    for i in range(3):
+        with view.document.change("Testo") as pdf:
+            pdf[0].insert_text((72, 300 + 10 * i), "x")
+    QApplication.processEvents()
+    assert len(calls) == 1
+    view.document._saved_state = view.document._state

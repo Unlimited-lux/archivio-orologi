@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pymupdf
 import pytest
-from PySide6.QtWidgets import QCheckBox, QRadioButton
+from PySide6.QtWidgets import QApplication, QCheckBox, QRadioButton
 
 from foliant.modules.viewer import layers_engine as engine
 
@@ -242,3 +242,29 @@ def test_thumbnails_follow_layer_visibility(viewer_window, layers_pdf):
     assert thumbs.image(0) is None      # da rigenerare con il nuovo stato
     thumbs.flush()
     assert thumbs.image(0) is not None and thumbs.image(0) != before
+
+
+def test_hidden_panel_rebuilds_lazily(viewer_window, layers_pdf, monkeypatch):
+    """Prestazioni: a pannello nascosto le modifiche non ricostruiscono l'albero; a pannello
+    visibile più modifiche nello stesso giro di eventi lo ricostruiscono una volta."""
+    view, panel = _open(viewer_window, layers_pdf)
+    calls = []
+    real = panel.rebuild
+    monkeypatch.setattr(panel, "rebuild", lambda: calls.append(1) or real())
+    for i in range(3):
+        with view.document.change("Testo") as pdf:
+            pdf[0].insert_text((72, 300 + 10 * i), "x")
+    QApplication.processEvents()
+    assert len(calls) == 1
+    viewer_window.ctx.toggle_sidebar_panel("layers")
+    QApplication.processEvents()
+    assert not panel.isVisible()
+    calls.clear()
+    with view.document.change("Testo") as pdf:
+        pdf[0].insert_text((72, 400), "y")
+    QApplication.processEvents()
+    assert calls == []
+    viewer_window.ctx.show_sidebar_panel("layers")
+    QApplication.processEvents()
+    assert len(calls) == 1
+    view.document._saved_state = view.document._state
