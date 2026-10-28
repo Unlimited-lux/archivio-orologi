@@ -529,7 +529,8 @@ class MainWindow(QMainWindow):
         button.setProperty("modeButton", True)
         button.setCheckable(True)
         button.setAutoRaise(True)
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setToolButtonStyle(self._mode_button_style())
+        button.setToolTip(title)
         button.setIconSize(QSize(18, 18))
         bind_icon(button, icon_name, kind="mode")
         button.clicked.connect(lambda _c=False, m=mode_id: self.set_mode(m))
@@ -1031,6 +1032,18 @@ class MainWindow(QMainWindow):
             if url.isLocalFile():
                 self.open_path(url.toLocalFile())
         event.acceptProposedAction()
+
+    def _mode_button_style(self) -> Qt.ToolButtonStyle:
+        # sotto ~1500 px le modalità con il testo non entrano: solo icone (il nome resta nel suggerimento)
+        return (Qt.ToolButtonStyle.ToolButtonTextBesideIcon if self.width() >= 1500
+                else Qt.ToolButtonStyle.ToolButtonIconOnly)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        style = self._mode_button_style()
+        for m in getattr(self, "modes", {}).values():
+            if m.button.toolButtonStyle() != style:
+                m.button.setToolButtonStyle(style)
 
     def closeEvent(self, event) -> None:
         for view in list(self.views()):

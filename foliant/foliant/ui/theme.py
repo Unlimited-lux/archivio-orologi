@@ -199,6 +199,7 @@ QToolButton:checked {{ background: {h('accent_soft')}; color: {h('accent')}; }}
 QToolButton[modeButton="true"] {{ padding: 5px 10px; font-weight: 500; }}
 QToolButton[modeButton="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; }}
 QToolButton::menu-indicator {{ image: none; }}
+QToolButton#qt_toolbar_ext_button {{ padding: 0px; border: none; min-width: 16px; }}
 QToolButton[homeAction="true"] {{ border: 1px solid {h('border')}; border-radius: 10px; background: {h('surface')}; }}
 QToolButton[homeAction="true"]:hover {{ border-color: {h('accent')}; }}
 QPushButton {{ background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px;
