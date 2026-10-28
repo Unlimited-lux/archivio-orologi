@@ -117,7 +117,7 @@ def build_options(fmt: str) -> _Options:
         ann = QCheckBox()
         ann.setChecked(True)
         o.add("annotations", _("Includi annotazioni e campi"), ann)
-        name = QLineEdit("{nome}_{pagina:03}")
+        name = QLineEdit(_("{nome}_{pagina:03}"))
         name.setToolTip(_("Segnaposto: {nome}, {pagina}, {pagina:03}, {data}, {formato}"))
         o.add("name_template", _("Nome dei file"), name)
     elif fmt == "long-image":

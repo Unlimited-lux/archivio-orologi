@@ -442,7 +442,7 @@ EN: dict[str, str] = {
     "Scrittura della copia riparata…": "Writing repaired copy…",
     "Se il file esiste": "If the file exists",
     "Se la conformità non è raggiunta, salva un PDF ordinario": "If conformance is not achieved, save a regular PDF",
-    "Segnaposto: {nome}, {pagina}, {pagina:03}, {data}, {formato}": "Placeholders: {nome}, {pagina}, {pagina:03}, {data}, {formato}",
+    "Segnaposto: {nome}, {pagina}, {pagina:03}, {data}, {formato}": "Placeholders: {name}, {page}, {page:03}, {date}, {format}",
     "Selezionate": "Selected",
     "Sempre": "Always",
     "Senza bordi (allineamento)": "Borderless (alignment)",
@@ -821,3 +821,6 @@ EN.update({
 
 EN.update({"Avvisi: {n}": "Warnings: {n}", "Dettagli": "Details", "Mostra cartella": "Show folder",
            "Saltati: {n}": "Skipped: {n}", "{t}: {n} avvisi": "{t}: {n} warnings"})
+
+# NFR-25: suffissi dei file e modello dei nomi
+EN.update({"_riparato": "_repaired", "{nome}_{pagina:03}": "{name}_{page:03}"})
