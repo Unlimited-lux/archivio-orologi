@@ -991,3 +991,26 @@ def test_keyring_not_queried_at_startup(window, settings, monkeypatch):
     calls.clear()
     services.refresh()
     assert calls == []
+
+
+# ------------------------------------------------------------------ collaudo: larghezza e riga di stato
+def test_panel_fits_properties_area(window, ready, sample_pdf):
+    window.resize(1280, 820)
+    window.open_path(sample_pdf)
+    window.ctx.set_mode("ia")
+    panel = ready.panel
+    for key, _t, _i in __import__("foliant.modules.ai.panel", fromlist=["FUNCTIONS"]).FUNCTIONS:
+        panel.set_function(key)
+        assert panel.minimumSizeHint().width() <= 280, key
+    assert panel.minimumWidth() <= 260
+
+
+def test_status_after_interruption(qtbot, window, ready, fake, sample_pdf):
+    window.open_path(sample_pdf)
+    fake.responses = [{"chunks": ["a", "b", "c", "d"], "delay": 0.3}]
+    panel = ready.panel
+    panel.send("x")
+    qtbot.waitUntil(lambda: fake.chunks_sent >= 1, timeout=5000)
+    panel.stop()
+    wait_done(qtbot, panel)
+    assert panel.status.text() in ("Operazione interrotta.", "Operation interrupted.")

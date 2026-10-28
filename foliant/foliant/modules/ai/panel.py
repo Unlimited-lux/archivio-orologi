@@ -161,7 +161,7 @@ class AIPanel(QWidget):
         self._render_timer.timeout.connect(self._render)
         self.setObjectName("aiPanel")
         self.setAcceptDrops(True)
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(240)   # l'area proprietà del nucleo è larga ~300 px
         self._build()
         theme.on_change(_safe_callback(self, "_render"))
         self.refresh_state()
@@ -276,10 +276,15 @@ class AIPanel(QWidget):
         self.sum_form = QComboBox()
         for k, t in (("bullets", "Punti chiave"), ("paragraphs", "Paragrafi"), ("both", "Punti + sintesi")):
             self.sum_form.addItem(_(t), k)
-        wl.addWidget(self.sum_length)
-        wl.addWidget(self.sum_words)
-        wl.addWidget(self.sum_form)
-        self._opt_pages["summary"] = self.options.addWidget(w)
+        wl.addWidget(self.sum_length, 1)
+        wl.addWidget(self.sum_words, 1)
+        outer = QWidget()
+        ol2 = QVBoxLayout(outer)
+        ol2.setContentsMargins(0, 0, 0, 0)
+        ol2.setSpacing(4)
+        ol2.addWidget(w)
+        ol2.addWidget(self.sum_form)
+        self._opt_pages["summary"] = self.options.addWidget(outer)
         w = QWidget()
         wl = QHBoxLayout(w)
         wl.setContentsMargins(0, 0, 0, 0)
@@ -338,9 +343,9 @@ class AIPanel(QWidget):
         self.ext_btn = QPushButton(_("Immagine…"))
         bind_icon(self.ext_btn, "image-plus")
         self.ext_btn.clicked.connect(self.choose_external_image)
-        r.addWidget(self.image_action, 1)
-        r.addWidget(self.area_btn)
-        r.addWidget(self.ext_btn)
+        wl.addWidget(self.image_action)
+        r.addWidget(self.area_btn, 1)
+        r.addWidget(self.ext_btn, 1)
         wl.addLayout(r)
         self.thumb = QLabel()
         self.thumb.setVisible(False)
@@ -350,16 +355,17 @@ class AIPanel(QWidget):
         self._opt_pages["image"] = self.options.addWidget(w)
         ml.addWidget(self.options)
 
-        row = QHBoxLayout()
         self.answer_lang = language_combo("", with_auto=True)
         self.answer_lang.setToolTip(_("Lingua della risposta"))
-        row.addWidget(self.answer_lang, 1)
+        ml.addWidget(self.answer_lang)
+        row = QHBoxLayout()
         self.include_comments = QCheckBox(_("Commenti"))
         self.include_comments.setToolTip(_("Includi i commenti del documento"))
         self.include_forms = QCheckBox(_("Campi modulo"))
         self.include_forms.setToolTip(_("Includi i valori dei campi modulo"))
         row.addWidget(self.include_comments)
         row.addWidget(self.include_forms)
+        row.addStretch(1)
         ml.addLayout(row)
 
         row = QHBoxLayout()
@@ -461,6 +467,9 @@ class AIPanel(QWidget):
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, activated=self.stop,
                   context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.stack.addWidget(main)
+        for combo in main.findChildren(QComboBox):
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(6)
         self._set_actions_enabled(False)
         self._function_changed()
 
@@ -1032,21 +1041,23 @@ class AIPanel(QWidget):
             msg.flags.append(_("interrotto"))
         elif answer.status == "incomplete":
             msg.flags.append(_("incompleto"))
+        status_text = {"interrupted": _("Operazione interrotta."),
+                       "incomplete": _("Risposta incompleta.")}.get(answer.status, _("Risposta completata."))
         if self._last is not None and self._last.message is msg:
             self._last.answer = answer
             words = self._last.options.get("ocr_words")
             doc = self._last.document
             if words and doc is not None and not doc.closed:
                 if doc.version != self._last.options.get("doc_version"):
-                    self.status.setText(_("Il documento è cambiato durante l'operazione: il testo riconosciuto "
-                                          "non è stato salvato."))
+                    status_text = _("Il documento è cambiato durante l'operazione: il testo riconosciuto "
+                                    "non è stato salvato.")
                 else:
                     try:
                         compose.add_ocr_layer(doc, words)
                         self.ctx.status(_("Testo riconosciuto salvato nel documento."))
                     except Exception as e:  # noqa: BLE001
                         self.show_error(_("Salva il testo riconosciuto"), str(e))
-        self.status.setText(_("Risposta completata."))
+        self.status.setText(status_text)
         self._save_history(conv)
         self._render()
         self._set_actions_enabled(True)
