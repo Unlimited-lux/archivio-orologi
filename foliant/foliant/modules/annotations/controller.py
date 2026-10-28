@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import pymupdf
 from PySide6.QtCore import QObject, Signal
 
-from foliant.api import ENGINE_LOCK, FoliantError, _
+from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, _
 
 from . import dialogs, engine
 from .engine import AnnotationError, Style
@@ -271,16 +271,25 @@ class Controller(QObject):
     def view(self) -> "DocumentView | None":
         return self.ctx.current_view()
 
-    def apply(self, label: str, fn: Callable[..., Any], *args, view=None, **kwargs) -> Any:
-        """Esegue `fn(pdf, *args)` come passo annullabile. Gli errori diventano messaggi."""
+    def apply(self, label: str, fn: Callable[..., Any], *args, view=None, change_kind: str = "annotation",
+              **kwargs) -> Any:
+        """Esegue `fn(pdf, *args)` come passo annullabile. Gli errori diventano messaggi.
+
+        `change_kind` è il tipo di modifica per le guardie del nucleo: «annotation» lascia
+        valide le firme (aggiornamento incrementale); l'appiattimento passa «content»."""
         view = view or self.view()
         if view is None:
             return None
         if not self.can_comment(view):
             return None
         try:
-            with view.document.change(label) as pdf:
+            with view.document.change(label, kind=change_kind) as pdf:
                 return fn(pdf, *args, **kwargs)
+        except OperationCancelled:
+            reason = view.document.locked_reason
+            if reason:
+                self.ctx.error(_("Commenti"), str(reason))
+            # altrimenti l'ha annullata l'utente (per esempio all'avviso di un documento firmato)
         except AnnotationError as e:
             self.ctx.error(_("Commenti"), _(str(e)))
         except FoliantError as e:

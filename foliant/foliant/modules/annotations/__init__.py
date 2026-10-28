@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pymupdf
+import shiboken6
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QMenu, QToolButton
@@ -129,6 +130,7 @@ class AnnotationsModule:
         ctx.add_view_menu_provider(self._view_menu)
         ctx.documentOpened.connect(self._attach_view)
         ctx.currentViewChanged.connect(self._on_view_changed)
+        ctx.documentClosed.connect(self._on_document_closed)
         for view in ctx.views():
             self._attach_view(view)
         for text, slot in ((_("Esporta commenti…"), lambda: ui_actions.export_comments(self.ctrl, "xfdf")),
@@ -427,7 +429,8 @@ class AnnotationsModule:
             self._overlay = overlay
         if overlay not in view.overlays:
             view.overlays.append(overlay)
-        if getattr(self, "minibar", None) is None:
+        minibar = getattr(self, "minibar", None)
+        if minibar is None or not shiboken6.isValid(minibar):
             from .minibar import MiniBar
             self.minibar = MiniBar(self.ctrl)
         if not getattr(view, "_annotations_connected", False):
@@ -447,8 +450,17 @@ class AnnotationsModule:
             self.comments.reload()
         self.properties.refresh()
 
+    def _on_document_closed(self, view) -> None:
+        minibar = getattr(self, "minibar", None)
+        if minibar is not None and shiboken6.isValid(minibar) and minibar.view is view:
+            minibar.detach()        # altrimenti verrebbe distrutta insieme alla vista
+
     def _on_view_changed(self, view) -> None:
-        if view is not None:
+        if view is None:
+            minibar = getattr(self, "minibar", None)
+            if minibar is not None and shiboken6.isValid(minibar):
+                minibar.detach()
+        else:
             self._attach_view(view)
             self.minibar.attach(view)
             hidden = self.ctrl.annotations_hidden(view)

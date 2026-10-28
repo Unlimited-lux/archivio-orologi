@@ -15,7 +15,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QToolTip
 
-from foliant.api import ENGINE_LOCK, SelectTextTool, Tool, _, selection_from_words, theme
+from foliant.api import ENGINE_LOCK, OperationCancelled, SelectTextTool, Tool, _, selection_from_words, theme
 
 from . import dialogs, engine
 
@@ -1020,8 +1020,10 @@ class EraserTool(AnnotTool):
         if not has_ink:
             return 0
         try:
-            with view.document.change(_("Gomma")) as pdf:
+            with view.document.change(_("Gomma"), kind="annotation") as pdf:
                 return run(pdf)
+        except OperationCancelled:
+            return 0
         except _NothingToDo:
             return 0     # nessun tratto toccato: nessun passo di annullamento
 
