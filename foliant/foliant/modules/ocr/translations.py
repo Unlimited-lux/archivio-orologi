@@ -384,3 +384,21 @@ EN = {
     'Le pagine {p} sono vuote.': 'Pages {p} are empty.',
     'testo non estraibile: scegli «Forza OCR» per riconoscerlo': 'text cannot be extracted: choose "Force OCR" to recognize it',
 }
+
+
+# chiavi che il catalogo comune traduce in modi diversi a seconda del modulo
+# (es. «Annulla» = Undo/Cancel, «Copia» = Copying/Copy, «Correggi» = Proofread/Correct)
+AMBIGUOUS = ("Annulla", "Copia", "Correggi")
+
+
+def own(text: str) -> str:
+    """Traduzione del modulo per le chiavi ambigue del catalogo comune."""
+    from foliant.i18n import _, language
+    if text in AMBIGUOUS and language() == "en":
+        return EN[text]
+    return _(text)
+
+
+def cancel_text() -> str:
+    """«Annulla» nel senso di «rinuncia» (pulsanti dei dialoghi)."""
+    return own("Annulla")

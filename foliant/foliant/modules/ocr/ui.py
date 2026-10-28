@@ -23,6 +23,7 @@ from foliant.api import (
 from . import detect, engine, languages
 from .dialogs import BatchDialog, LanguagesDialog, OcrDialog, ReportDialog, ReviewDialog, TextDialog
 from .tess import OcrError
+from .translations import cancel_text, own
 
 ANALYSIS_BUDGET_MS = 25      # tempo massimo di analisi per passo nel thread dell'interfaccia
 
@@ -186,7 +187,7 @@ class JobBar(QFrame):
         if on_pause is not None:
             self.btn_pause.clicked.connect(on_pause)
         lay.addWidget(self.btn_pause)
-        self.btn_cancel = QPushButton(_("Annulla"), self)
+        self.btn_cancel = QPushButton(cancel_text(), self)
         self.btn_cancel.clicked.connect(on_cancel)
         lay.addWidget(self.btn_cancel)
         self.setStyleSheet(
@@ -333,7 +334,7 @@ class ReviewPanel(QWidget):
         row = QHBoxLayout()
         self.edit = QLineEdit(self)
         self.edit.setPlaceholderText(_("Correzione"))
-        self.btn_fix = QPushButton(icon("check"), _("Correggi"), self)
+        self.btn_fix = QPushButton(icon("check"), own("Correggi"), self)
         self.btn_fix.setToolTip(_("Correggi e passa alla successiva (Invio)"))
         row.addWidget(self.edit, 1)
         row.addWidget(self.btn_fix)
@@ -1183,7 +1184,7 @@ class OcrController(QObject):
         box.setText(_("Lingue non installate: {l}.").format(l=names))
         install = box.addButton(_("Installa…"), QMessageBox.ButtonRole.ActionRole)
         remove = box.addButton(_("Rimuovi dalla selezione"), QMessageBox.ButtonRole.AcceptRole)
-        box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.addButton(cancel_text(), QMessageBox.ButtonRole.RejectRole)
         box.exec()
         clicked = box.clickedButton()
         if clicked is install:
