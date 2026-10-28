@@ -496,6 +496,92 @@ def test_save_of_deleted_or_moved_file_asks_where(window, sample_pdf, tmp_path, 
     assert len(boxes) == 3 and moved.exists() and not doc.is_modified
 
 
+def _core_holders(obj) -> list[str]:
+    """Oggetti del nucleo (foliant.ui, foliant.core) che trattengono `obj`, anche tramite il loro
+    __dict__ o una lista/tupla/cella/funzione intermedia."""
+    import gc
+    import types
+    found, seen = [], set()
+
+    def walk(target, depth):
+        for ref in gc.get_referrers(target):
+            if id(ref) in seen or isinstance(ref, types.FrameType):
+                continue
+            seen.add(id(ref))
+            if isinstance(ref, dict) and "__builtins__" in ref:          # variabili globali di un modulo
+                continue
+            holder = ref if isinstance(ref, types.FunctionType) else type(ref)     # chiusure: modulo della funzione
+            if (holder.__module__ or "").startswith(("foliant.ui", "foliant.core")):
+                found.append(holder.__qualname__)
+            elif depth < 3 and isinstance(ref, (dict, list, tuple, set, types.CellType, types.MethodType)):
+                walk(ref, depth + 1)
+    walk(obj, 0)
+    return found
+
+
+def _flush_closed_tabs(qtbot):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qtbot.wait(20)
+
+
+def test_closed_tab_returns_memory_and_releases_view(qtbot, settings, sample_pdf, monkeypatch):
+    """NFR-06: chiusa una scheda, dopo la distruzione effettiva la memoria liberata torna al sistema
+    (malloc_trim su Linux/glibc) e nessun oggetto del nucleo trattiene la vista: vista e documento
+    vengono raccolti anche se qualcuno tiene ancora il contenitore della scheda con i suoi avvisi."""
+    import ctypes
+    import gc
+    import os
+    import sys
+    import weakref
+
+    from foliant.ui.main_window import MainWindow, release_memory
+    calls = []
+
+    class FakeLibc:
+        def malloc_trim(self, pad):
+            calls.append(pad)
+            return 1
+    real_cdll = ctypes.CDLL
+    monkeypatch.setattr(ctypes, "CDLL", lambda name, *a, **k: FakeLibc() if "libc" in str(name)
+                        else real_cdll(name, *a, **k))
+    win = MainWindow(settings, load_modules=False)
+    qtbot.addWidget(win)
+    win.show()
+    view = win.open_path(sample_pdf)
+    doc = weakref.ref(view.document)
+    page = win.tabs.page(view)                    # es. un modulo che trattiene il contenitore
+    win.ctx.show_banner(view, "prova", "Avviso", [("Vai", lambda v=view: v.go_to_page(1))])
+    ref = weakref.ref(view)
+    assert win.close_view(view)
+    del view
+    assert calls == []                            # differito: dopo la distruzione effettiva
+    _flush_closed_tabs(qtbot)
+    glibc = sys.platform.startswith("linux") and (os.confstr("CS_GNU_LIBC_VERSION") or "").startswith("glibc")
+    assert calls == ([0] if glibc else [])
+    assert release_memory() is glibc
+    gc.collect()
+    alive = ref()
+    assert alive is None and doc() is None, _core_holders(alive)
+    assert page.view is None and page.banners.banner("prova") is None
+
+
+def test_closed_tab_view_not_held_by_core_with_modules(window, sample_pdf, qtbot):
+    """Con tutti i moduli caricati: se la vista chiusa resta viva, non è per oggetti del nucleo."""
+    import gc
+    import weakref
+    view = window.open_path(sample_pdf)
+    ref = weakref.ref(view)
+    assert window.close_view(view)
+    del view
+    _flush_closed_tabs(qtbot)
+    gc.collect()
+    alive = ref()
+    if alive is not None:
+        assert _core_holders(alive) == []
+
+
 def test_shortcuts_dialog_lists_all_modes_in_italian(window):
     from foliant.ui.dialogs import ShortcutsDialog, collect_shortcuts
     m = window.ctx.add_mode("prova_sc", "Prova scorciatoie", "star", 996)

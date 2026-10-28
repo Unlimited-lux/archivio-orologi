@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import itertools
 import logging
 import os
+import sys
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
@@ -66,8 +68,24 @@ class PageField(QLineEdit):
 OPEN_FILTER = "Documenti (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.xps *.epub *.svg *.txt);;PDF (*.pdf);;Tutti i file (*)"
 
 
+def release_memory() -> bool:
+    """Restituisce al sistema la memoria già liberata (NFR-06). Con glibc i blocchi delle
+    immagini di pagina di una scheda chiusa restano all'allocatore e la memoria residente
+    resterebbe al picco: `malloc_trim(0)` li rende al sistema. Solo su Linux con glibc."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        if not os.confstr("CS_GNU_LIBC_VERSION").startswith("glibc"):
+            return False
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:           # altra libc o libreria non disponibile: nulla da fare
+        return False
+    return True
+
+
 class MainWindow(QMainWindow):
     _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
+    _memory_timer: QTimer | None = None
 
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
@@ -967,10 +985,23 @@ class MainWindow(QMainWindow):
             self.tabs.removeTab(index)
         view.deleteLater()
         if page is not None:
+            page.release()
             page.deleteLater()                  # contenitore con le barre di avviso
+        # distrutte davvero vista e contenitore, la memoria liberata torna al sistema (NFR-06)
+        (page if page is not None else view).destroyed.connect(self._schedule_memory_release)
         if self.tabs.count() == 0:
             self.show_home()
         self._on_current_changed()
+
+    def _schedule_memory_release(self, *_args) -> None:
+        """Dopo la chiusura di una o più schede: un solo `release_memory()` al prossimo giro
+        del ciclo degli eventi."""
+        if self._memory_timer is None:
+            self._memory_timer = QTimer(self)
+            self._memory_timer.setSingleShot(True)
+            self._memory_timer.setInterval(0)
+            self._memory_timer.timeout.connect(lambda: release_memory())
+        self._memory_timer.start()
 
     def save_view(self, view: DocumentView | None, save_as: bool = False, recreate: bool = False) -> bool:
         """Salva il documento (con `save_as` chiede dove). Se il file è stato eliminato o spostato
