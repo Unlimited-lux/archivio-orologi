@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pymupdf
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QMessageBox
 
 from foliant.api import ENGINE_LOCK, SAVED, Document, DocumentError, _, atomic_write
 
@@ -677,6 +677,15 @@ class SignController(QObject):
                 return self.ctx.run_task(_("Firma in corso…"), lambda progress: digital.sign_pdf(
                     data, digital_id, options), cancellable=False)
             except digital.TimestampError as e:
+                if e.kind == "credenziali" and options.timestamp_auth:
+                    pw, ok = QInputDialog.getText(
+                        self.ctx.window, _("Marca temporale"),
+                        _("{e}. Inserisci di nuovo la password per «{u}»:").format(e=e, u=options.timestamp_auth[0]),
+                        QLineEdit.EchoMode.Password)
+                    if ok:
+                        options.timestamp_auth = (options.timestamp_auth[0], pw)
+                        continue
+                    return None
                 if e.kind != "rete":
                     self.ctx.error(_("Marca temporale"), str(e))
                     return None
@@ -952,6 +961,7 @@ TRANSLATIONS_EN = {
     "Nessun file è stato scritto.": "No file has been written.",
     "Senza marca temporale l'ora della firma sarà quella dichiarata dal computer.":
         "Without a timestamp the signing time will be the one declared by the computer.",
+    "{e}. Inserisci di nuovo la password per «{u}»:": "{e}. Enter the password for “{u}” again:",
     "Riprova": "Retry", "Usa un altro server…": "Use another server…", "Server:": "Server:",
     "Server marca temporale": "Timestamp server",
     "L'orologio del computer differisce di {m} minuti dall'ora della marca temporale: controlla data e ora del "

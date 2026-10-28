@@ -155,7 +155,7 @@ class DigitalSignDialog(QDialog):
         self.tsa.addItem(_("Nessuna marca temporale"), None)
         cfg = store.TSAConfig()
         for s in cfg.list():
-            self.tsa.addItem(f"{s.name} — {s.url}", (s.url, s.timeout))
+            self.tsa.addItem(f"{s.name} — {s.url}", (s.url, s.timeout, s.user))
             if s.default:
                 self.tsa.setCurrentIndex(self.tsa.count() - 1)
         req_url = getattr(field, "timestamp_required_url", None)
@@ -317,6 +317,7 @@ class DigitalSignDialog(QDialog):
             reason=self.reason.currentText().strip(), location=self.location.text().strip(),
             contact=self.contact.text().strip(), appearance=appearance,
             timestamp_url=tsa[0] if tsa else None, timestamp_timeout=float(tsa[1]) if tsa else 15.0,
+            timestamp_auth=self.tsa_auth(tsa),
             certify=self.certify, docmdp_level=int(self.level.currentData()),
             allow_expired=self.allow_expired.isChecked(),
             lock_fields=[f.strip() for f in self.lock.text().split(",") if f.strip()] or None)
@@ -326,6 +327,19 @@ class DigitalSignDialog(QDialog):
         s.setValue("sign/location", self.location.text().strip())
         s.setValue("sign/contact", self.contact.text().strip())
         self.accept()
+
+    def tsa_auth(self, tsa) -> tuple[str, str] | None:
+        """Credenziali della TSA: password dal portachiavi, altrimenti chiesta (mai salvata su file)."""
+        if not tsa or len(tsa) < 3 or not tsa[2]:
+            return None
+        pw = self.store.tsa_password(tsa[0])
+        if pw is None:
+            from PySide6.QtWidgets import QInputDialog
+            pw, ok = QInputDialog.getText(self, _("Server marca temporale"), _(
+                "Password per «{u}» su {url}:").format(u=tsa[2], url=tsa[0]), QLineEdit.EchoMode.Password)
+            if not ok:
+                return None
+        return (tsa[2], pw)
 
     def current_profile(self, name: str = ""):
         return self.store.AppearanceProfile(
@@ -892,8 +906,20 @@ class IDsDialog(QDialog):
         if not ok or not url.strip():
             return
         name, ok = QInputDialog.getText(self, _("Server marca temporale"), _("Nome:"), text=url.strip())
-        if ok:
-            self._run(lambda: self.store.TSAConfig().add(name, url))
+        if not ok:
+            return
+        user, ok = QInputDialog.getText(self, _("Server marca temporale"),
+                                        _("Nome utente (vuoto se il server non lo richiede):"))
+        if not ok:
+            return
+        if user.strip():
+            pw, ok = QInputDialog.getText(self, _("Server marca temporale"), _("Password:"),
+                                          QLineEdit.EchoMode.Password)
+            if ok and pw and not self.store.store_tsa_password(url.strip(), pw):
+                QMessageBox.information(self, _("Server marca temporale"), _(
+                    "Il portachiavi del sistema non è disponibile: la password non viene salvata e sarà "
+                    "chiesta a ogni firma."))
+        self._run(lambda: self.store.TSAConfig().add(name, url, user=user))
 
     def _default_tsa(self) -> None:
         s = self._cur(self.tsas)
@@ -1137,6 +1163,10 @@ TRANSLATIONS_EN = {
     "In basso a destra": "Bottom right", "Stessa posizione assoluta": "Same absolute position",
     "Ancoraggio:": "Anchor:", "Applica": "Apply",
     "Nessuna pagina oltre a quella corrente.": "No pages other than the current one.",
+    "Password per «{u}» su {url}:": "Password for “{u}” on {url}:",
+    "Nome utente (vuoto se il server non lo richiede):": "User name (empty if the server does not require it):",
+    "Il portachiavi del sistema non è disponibile: la password non viene salvata e sarà chiesta a ogni firma.":
+        "The system keyring is not available: the password is not saved and will be asked at each signature.",
     "Anteprima delle pagine": "Page preview", "Pag. {n}": "P. {n}", "(ridotta)": "(shrunk)",
     "… e altre {n}": "… and {n} more",
 }

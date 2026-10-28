@@ -571,3 +571,19 @@ def test_latin_name_keeps_standard_font(pdf_bytes, id_a):
     out = d.sign_pdf(pdf_bytes, id_a[2], d.SignOptions(rect=(60, 600, 300, 680), appearance={"layout": "testo"}))
     doc = pymupdf.open(stream=out)
     assert not [x for x in range(1, doc.xref_length()) if "/Type0" in _obj(doc, x)]
+
+
+def test_timestamp_auth_passed_to_client(pdf_bytes, id_a, monkeypatch):
+    from pyhanko.sign import timestamps
+    seen = {}
+
+    class Fake(timestamps.HTTPTimeStamper):
+        def __init__(self, url, **kw):
+            seen.update(kw)
+            raise OSError("nessuna rete nei test")
+
+    monkeypatch.setattr(timestamps, "HTTPTimeStamper", Fake)
+    with pytest.raises(Exception):
+        d.sign_pdf(pdf_bytes, id_a[2], d.SignOptions(timestamp_url="https://tsa.example.org",
+                                                     timestamp_auth=("mario", "pw")))
+    assert seen.get("auth") == ("mario", "pw")

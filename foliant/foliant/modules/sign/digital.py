@@ -825,6 +825,7 @@ class SignOptions:
     appearance: dict | None = None
     timestamp_url: str | None = None
     timestamp_timeout: float = 15.0
+    timestamp_auth: tuple[str, str] | None = None    # (utente, password) per la TSA; mai salvati
     timestamper: object | None = None
     certify: bool = False
     docmdp_level: int = 2
@@ -841,6 +842,9 @@ def _timestamp_error(exc: BaseException) -> TimestampError:
     while e is not None and len(chain) < 10:
         chain.append(e)
         e = e.__cause__ or e.__context__
+    for e in chain:
+        if getattr(e, "status", None) in (401, 403) or " 401" in str(e) or "Unauthorized" in str(e):
+            return TimestampError(_("Il server di marca temporale ha rifiutato le credenziali"), "credenziali")
     for e in chain:
         if isinstance(e, TimestampRequestError):
             msg = str(e)
@@ -998,7 +1002,8 @@ def sign_pdf_ex(data: bytes, digital_id: DigitalID, options: SignOptions) -> tup
     timestamper = options.timestamper
     ts_url = options.timestamp_url or sv_ts_url
     if timestamper is None and ts_url:
-        timestamper = HTTPTimeStamper(ts_url, timeout=options.timestamp_timeout)
+        timestamper = HTTPTimeStamper(ts_url, timeout=options.timestamp_timeout,
+                                      auth=tuple(options.timestamp_auth) if options.timestamp_auth else None)
     style = _FoliantStampStyle(digital_id.info, options, rotation)
     pdf_signer = signers.PdfSigner(meta, digital_id.signer, timestamper=timestamper, stamp_style=style,
                                    new_field_spec=new_field_spec)
@@ -1811,6 +1816,7 @@ def summary(statuses, empty_fields) -> str:
 
 
 TRANSLATIONS_EN = {
+    "Il server di marca temporale ha rifiutato le credenziali": "The timestamp server rejected the credentials",
     "Nessun font disponibile copre tutti i caratteri del testo": "No available font covers all the characters of the text",
     "Il campo ammette solo questi motivi: {r}": "The field only allows these reasons: {r}",
     "Il campo non accetta certificati emessi da «{who}»": "The field does not accept certificates issued by “{who}”",

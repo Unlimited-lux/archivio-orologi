@@ -365,12 +365,35 @@ class TSAServer:
     hash_algorithm: str = "sha256"
     policy_oid: str = ""
     default: bool = False
+    user: str = ""          # nome utente (la password è solo nel portachiavi di sistema)
+
+
+KEYRING_SERVICE = "foliant-tsa"
+
+
+def tsa_password(url: str) -> str | None:
+    """Password della TSA dal portachiavi del desktop (None se assente o non disponibile)."""
+    try:
+        import keyring
+        return keyring.get_password(KEYRING_SERVICE, url)
+    except Exception:  # noqa: BLE001 - portachiavi non disponibile
+        return None
+
+
+def store_tsa_password(url: str, password: str) -> bool:
+    """Salva la password nel portachiavi; False se non disponibile (non viene scritta altrove)."""
+    try:
+        import keyring
+        keyring.set_password(KEYRING_SERVICE, url, password)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 class TSAConfig:
     """Elenco dei server TSA (mai credenziali su disco)."""
 
-    _FIELDS = ("name", "url", "timeout", "hash_algorithm", "policy_oid", "default")
+    _FIELDS = ("name", "url", "timeout", "hash_algorithm", "policy_oid", "default", "user")
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else _sign_dir() / "tsa.json"
@@ -399,12 +422,13 @@ class TSAConfig:
             raise StoreError(_("Il timeout deve essere compreso fra 1 e 300 secondi"))
 
     def add(self, name: str, url: str, timeout: float = 15.0, *, hash_algorithm: str = "sha256",
-            policy_oid: str = "", default: bool = False) -> TSAServer:
+            policy_oid: str = "", default: bool = False, user: str = "") -> TSAServer:
         url = url.strip()
         self._validate(url, timeout)
         servers = [s for s in self.list() if s.url != url]
         srv = TSAServer(name=name.strip() or url, url=url, timeout=float(timeout),
-                        hash_algorithm=hash_algorithm, policy_oid=policy_oid, default=default)
+                        hash_algorithm=hash_algorithm, policy_oid=policy_oid, default=default,
+                        user=user.strip())
         if default or not any(s.default for s in servers):
             for s in servers:
                 s.default = False

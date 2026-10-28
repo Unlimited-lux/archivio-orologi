@@ -852,3 +852,34 @@ def test_online_revocation_only_on_request(window, monkeypatch, sample_pdf, tmp_
     assert not panel.btn_online.isHidden()
     panel.btn_online.click()
     assert calls[-1] == ("sempre", True)
+
+
+def test_timestamp_wrong_credentials_asks_again(window, monkeypatch, sample_pdf, tmp_path, id_a, tsa):
+    from PySide6.QtWidgets import QInputDialog
+
+    from foliant.modules.sign import ui_digital
+    view = window.open_path(sample_pdf)
+    c = _ctl(window)
+    target = tmp_path / "cred.pdf"
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(timestamp_url="https://tsa.example.org", timestamp_auth=("mario", "sbagliata"))
+        return True
+
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(target))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("giusta", True))
+    attempts = []
+    real = digital.sign_pdf
+
+    def sign(data, did, opts):
+        attempts.append(opts.timestamp_auth)
+        if opts.timestamp_auth[1] != "giusta":
+            raise digital.TimestampError("Il server di marca temporale ha rifiutato le credenziali", "credenziali")
+        opts.timestamper = tsa[0]
+        return real(data, did, opts)
+
+    monkeypatch.setattr(digital, "sign_pdf", sign)
+    assert c.digital_sign(view, invisible=True)
+    assert attempts == [("mario", "sbagliata"), ("mario", "giusta")]

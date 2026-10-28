@@ -152,3 +152,16 @@ def test_system_certificates_optional(tmp_path, id_a):
     certs = store.system_certificates((str(tmp_path / "manca.crt"), str(bundle)))
     assert [c.sha256 for c in certs] == [id_a[1].sha256] * 2
     assert store.system_certificates((str(tmp_path / "manca.crt"),)) == []
+
+
+def test_tsa_credentials_only_in_keyring(tmp_path, monkeypatch):
+    import keyring
+    saved = {}
+    monkeypatch.setattr(keyring, "set_password", lambda svc, u, p: saved.__setitem__((svc, u), p))
+    monkeypatch.setattr(keyring, "get_password", lambda svc, u: saved.get((svc, u)))
+    cfg = store.TSAConfig()
+    cfg.add("Aziendale", "https://tsa.example.org", user="mario")
+    assert store.store_tsa_password("https://tsa.example.org", "segretissima")
+    assert cfg.list()[0].user == "mario"
+    assert b"segretissima" not in cfg.path.read_bytes()
+    assert store.tsa_password("https://tsa.example.org") == "segretissima"
