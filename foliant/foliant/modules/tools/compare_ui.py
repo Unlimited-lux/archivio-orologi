@@ -464,6 +464,7 @@ class DiffModel(QAbstractListModel):
         self.all: list[ce.Difference] = []
         self.visible: list[ce.Difference] = []
         self.kinds = set(ce.KINDS)
+        self.statuses: set[str] | None = None   # None = tutti gli stati
         self.search = ""
         self.order = "a"
 
@@ -475,7 +476,8 @@ class DiffModel(QAbstractListModel):
         self.beginResetModel()
         q = self.search.casefold().strip()
         vis = [d for d in self.all if d.kind in self.kinds
-               and (not q or q in (d.text_a + " " + d.text_b + " " + d.detail).casefold())]
+               and (self.statuses is None or d.status in self.statuses)
+               and (not q or q in (d.text_a + " " + d.text_b + " " + d.detail + " " + d.note).casefold())]
         if self.order == "b":
             vis.sort(key=lambda d: (d.locations("b")[0][0] if d.locations("b") else 0,
                                     d.locations("b")[0][2] if d.locations("b") else 0, d.id))
@@ -492,6 +494,10 @@ class DiffModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             pages = _("A p. {a} · B p. {b}").format(a=d.page_label("a"), b=d.page_label("b"))
             head = f"{d.id}. {ce.kind_label(d.kind)} — {pages}"
+            if d.status:
+                head += f" · {ce.status_label(d.status)}"
+            if d.note:
+                head += " · ✎"
             excerpt = d.excerpt(120)
             if d.kind == ce.FORMAT and d.detail:
                 excerpt = f"{d.text_b}: {d.detail}"
@@ -540,12 +546,18 @@ class DiffPanel(QWidget):
         self.order.addItem(_("Ordina per posizione in A"), "a")
         self.order.addItem(_("Ordina per posizione in B"), "b")
         self.order.currentIndexChanged.connect(self._order_changed)
+        self.status_filter = QComboBox()
+        self.status_filter.addItem(_("Tutti gli stati"), None)
+        for st in ce.STATUSES + ("",):
+            self.status_filter.addItem(ce.status_label(st, plural=True).capitalize(), st)
+        self.status_filter.currentIndexChanged.connect(self._status_filter_changed)
+        self.status_counts = QLabel()
         self.list = QListView()
         self.list.setModel(self.model)
         self.list.setUniformItemSizes(True)
         self.list.setWordWrap(False)
         self.list.setTextElideMode(Qt.TextElideMode.ElideRight)
-        self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.setAlternatingRowColors(True)
         self.list.clicked.connect(self._clicked)
         self.list.activated.connect(self._clicked)
@@ -578,7 +590,11 @@ class DiffPanel(QWidget):
         lay.addWidget(self.summary)
         lay.addLayout(fl)
         lay.addWidget(self.search)
-        lay.addWidget(self.order)
+        row = QHBoxLayout()
+        row.addWidget(self.order, 1)
+        row.addWidget(self.status_filter, 1)
+        lay.addLayout(row)
+        lay.addWidget(self.status_counts)
         lay.addLayout(nav)
         lay.addWidget(self.list, 1)
         lay.addWidget(self.empty, 1)
@@ -629,6 +645,42 @@ class DiffPanel(QWidget):
         self._update_state()
         self.filtersChanged.emit()
 
+    def _status_filter_changed(self) -> None:
+        st = self.status_filter.currentData()
+        self.model.statuses = None if self.status_filter.currentIndex() == 0 else {st}
+        self.model.refilter()
+        self._update_state()
+        self.filtersChanged.emit()
+
+    def selected_differences(self) -> list[ce.Difference]:
+        rows = sorted({i.row() for i in self.list.selectionModel().selectedIndexes()})
+        out = [self.model.visible[r] for r in rows if r < len(self.model.visible)]
+        if not out and self.current() is not None:
+            out = [self.current()]
+        return out
+
+    def set_status(self, status: str, diffs: list[ce.Difference] | None = None) -> None:
+        """Stato di revisione (non modifica A né B)."""
+        for d in diffs if diffs is not None else self.selected_differences():
+            d.status = status
+        self.model.refilter()
+        self._update_state()
+        self.filtersChanged.emit()
+
+    def set_note(self, note: str, diffs: list[ce.Difference] | None = None) -> None:
+        for d in diffs if diffs is not None else self.selected_differences():
+            d.note = note
+        self.model.refilter()
+        self._update_state()
+
+    def _ask_note(self) -> None:
+        diffs = self.selected_differences()
+        if not diffs:
+            return
+        text, ok = QInputDialog.getMultiLineText(self, _("Nota"), _("Nota per la differenza:"), diffs[0].note)
+        if ok:
+            self.set_note(text, diffs)
+
     def _order_changed(self) -> None:
         self.model.order = self.order.currentData()
         self.model.refilter()
@@ -648,6 +700,9 @@ class DiffPanel(QWidget):
         total = len(self.model.all)
         shown = len(self.model.visible)
         self.counter.setText(_("Visibili {v} di {t}").format(v=shown, t=total))
+        by = {st: sum(1 for d in self.model.all if d.status == st) for st in ce.STATUSES}
+        self.status_counts.setText(" · ".join(f"{n} {ce.status_label(st, plural=True)}" for st, n in by.items()))
+        self.status_counts.setVisible(any(by.values()))
         has = shown > 0
         self.list.setVisible(has)
         self.empty.setVisible(not has)
@@ -736,6 +791,12 @@ class DiffPanel(QWidget):
         menu = QMenu(self)
         act = menu.addAction(icon("copy"), _("Copia"))
         act.triggered.connect(self.copy_current)
+        menu.addSeparator()
+        for st, name in (("accepted", "check"), ("rejected", "x"), ("review", "circle-help")):
+            a = menu.addAction(icon(name), ce.status_label(st))
+            a.triggered.connect(lambda _c=False, s=st: self.set_status(s))
+        menu.addAction(_("Rimuovi stato")).triggered.connect(lambda: self.set_status(""))
+        menu.addAction(icon("sticky-note"), _("Nota…")).triggered.connect(self._ask_note)
         menu.exec(self.list.viewport().mapToGlobal(pos))
 
 
@@ -1551,11 +1612,15 @@ class CompareWidget(QWidget):
         if view.get("vertical"):
             self.act_vertical.setChecked(True)
             self._toggle_orientation()
-        statuses = data.get("status") or {}
-        for d in self.result.differences:
-            st = statuses.get(str(d.id))
-            if st:
-                d.status, d.note = st.get("status", ""), st.get("note", "")
+        lost = ce.restore_statuses(self.result, data)
+        self.panel.model.refilter()
+        self.panel._update_state()
+        if lost:
+            lines = "\n".join(f"• {ce.kind_label(x.get('kind', ce.MODIFIED))}: {x.get('text_a') or x.get('text_b') or ''}"
+                              f" ({ce.status_label(x.get('status', ''))})" for x in lost[:20])
+            self.ctx.info(_("Differenze non più presenti"),
+                          _("Dopo il ricalcolo queste differenze non esistono più e il loro stato è stato "
+                            "scartato:") + "\n" + lines)
         self.set_layout(view.get("layout", "side"))
         self.overlay.refresh()
 
@@ -1673,6 +1738,7 @@ class CompareController:
                 data = json.load(f)
             if data.get("format") != "foliant-compare":
                 raise ValueError(_("il file non è una sessione di confronto"))
+            ce.check_session_version(data)
         except Exception as e:
             self.ctx.error(_("Sessione non apribile"), str(e))
             return None

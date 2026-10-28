@@ -16,8 +16,8 @@ import pymupdf
 from foliant.api import ENGINE_LOCK, _
 
 from .compare_engine import (
-    ADDED, ANNOTATION, DELETED, FIELD, FORMAT, IMAGE, KINDS, MODIFIED, PAGE, VISUAL, CompareResult, Difference,
-    kind_label, open_side,
+    ADDED, ANNOTATION, DELETED, FIELD, FORMAT, IMAGE, KINDS, MODIFIED, PAGE, STATUSES, VISUAL, CompareResult,
+    Difference, kind_label, open_side, status_label,
 )
 
 CONTENT_SUMMARY = "summary"
@@ -224,6 +224,11 @@ def build_report(progress, result: CompareResult, data_a: bytes, data_b: bytes,
             counts = result.counts(diffs)
             writer.line(_("Differenze: {n}").format(n=len(diffs)), size=12, gap=6)
             writer.line(" · ".join(f"{counts[k]} {kind_label(k, plural=True)}" for k in KINDS), size=10, indent=10)
+            by_status = {st: sum(1 for d in diffs if d.status == st) for st in STATUSES}
+            if any(by_status.values()):
+                writer.line(" · ".join(f"{n} {status_label(st, plural=True)}" for st, n in by_status.items()) + " · "
+                            + f"{sum(1 for d in diffs if not d.status)} {status_label('', plural=True)}",
+                            size=9, indent=10)
             for w in result.warnings:
                 writer.line("⚠ " + w, size=8.5, indent=10, color=(0.6, 0.3, 0.0))
             if not can_show_text:
@@ -244,7 +249,9 @@ def build_report(progress, result: CompareResult, data_a: bytes, data_b: bytes,
                     if text:
                         row += f" · {text}"
                     if d.status:
-                        row += f" · {d.status}"
+                        row += f" · {status_label(d.status)}"
+                    if d.note:
+                        row += f" · {_('nota')}: {d.note}"
                     rect = writer.line(row, size=8.5, indent=10, color=tuple(c * 0.8 for c in COLORS[d.kind]))
                     if d.id in targets:
                         links.append((writer.page.number, rect, targets[d.id]))

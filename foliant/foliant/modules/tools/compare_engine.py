@@ -60,6 +60,20 @@ _STYLE_SUFFIX = re.compile(r"[-,]?(bold|italic|oblique|regular|roman|medium|semi
 _PUNCT = set(string.punctuation) | set("«»“”‘’„–—…·¡¿")
 
 
+STATUSES = ("accepted", "rejected", "review")
+SESSION_VERSION = 1
+
+
+def status_label(status: str, plural: bool = False) -> str:
+    labels = {
+        "accepted": (_("Accettata"), _("accettate")),
+        "rejected": (_("Rifiutata"), _("rifiutate")),
+        "review": (_("Da verificare"), _("da verificare")),
+        "": (_("Senza stato"), _("senza stato")),
+    }
+    return labels.get(status, (status, status))[1 if plural else 0]
+
+
 def kind_label(kind: str, plural: bool = False) -> str:
     labels = {
         ADDED: (_("Aggiunta"), _("aggiunte")),
@@ -1676,7 +1690,7 @@ def overlay_composite(img_a: np.ndarray | None, img_b: np.ndarray | None, opacit
 def session_to_dict(result: CompareResult, offsets: dict | None = None, view_state: dict | None = None) -> dict:
     return {
         "format": "foliant-compare",
-        "version": 1,
+        "version": SESSION_VERSION,
         "a": {"path": result.side_a.path, "label": result.side_a.label, "sha256": result.side_a.sha256,
               "pages": [result.side_a.pages[0], result.side_a.pages[-1]] if result.side_a.pages else None},
         "b": {"path": result.side_b.path, "label": result.side_b.label, "sha256": result.side_b.sha256,
@@ -1684,9 +1698,42 @@ def session_to_dict(result: CompareResult, offsets: dict | None = None, view_sta
         "options": result.options.to_dict(),
         "offsets": {f"{k[0]}:{k[1]}" if isinstance(k, tuple) else str(k): list(v) for k, v in (offsets or {}).items()},
         "pairs": [list(p) for p in result.pairs],
-        "status": {str(d.id): {"status": d.status, "note": d.note} for d in result.differences if d.status or d.note},
+        "status": {str(d.id): {"status": d.status, "note": d.note, "kind": d.kind, "text_a": d.text_a,
+                               "text_b": d.text_b, "pa": d.pages("a"), "pb": d.pages("b")}
+                   for d in result.differences if d.status or d.note},
         "view": view_state or {},
     }
+
+
+def restore_statuses(result: CompareResult, data: dict) -> list[dict]:
+    """Riapplica stati e note salvati. Le differenze si riconoscono per
+    identificativo (se tipo e testo coincidono) oppure per tipo, testo e pagine.
+    Restituisce le voci salvate che non corrispondono più (scartate)."""
+    saved = data.get("status") or {}
+    by_id = {str(d.id): d for d in result.differences}
+    lost = []
+    used = set()
+    for key, st in saved.items():
+        d = by_id.get(key)
+        ok = d is not None and d.kind == st.get("kind", d.kind) and d.text_a == st.get("text_a", d.text_a) \
+            and d.text_b == st.get("text_b", d.text_b)
+        if not ok:
+            d = next((x for x in result.differences if id(x) not in used and x.kind == st.get("kind")
+                      and x.text_a == st.get("text_a", "") and x.text_b == st.get("text_b", "")
+                      and (not st.get("pa") or x.pages("a") == st.get("pa"))), None)
+        if d is None:
+            lost.append(st)
+            continue
+        used.add(id(d))
+        d.status, d.note = st.get("status", ""), st.get("note", "")
+    return lost
+
+
+def check_session_version(data: dict) -> None:
+    version = int(data.get("version", 1) or 1)
+    if version > SESSION_VERSION:
+        raise DocumentError(_("La sessione è stata salvata da una versione più recente (schema {v}): serve una "
+                              "versione di Foliant che supporti lo schema {v}.").format(v=version))
 
 
 def parse_offsets(data: dict) -> dict:

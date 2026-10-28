@@ -308,3 +308,52 @@ def test_screenshot_renders(window, pdf_builder, tmp_path, theme_name):
     img = window.grab()
     assert img.save(str(tmp_path / f"confronto_{theme_name}.png"))
     theme.apply(QApplication.instance(), "light")
+
+
+# ----------------------------------------------------------------- CMP-11
+def test_review_statuses_filter_report_and_session(window, pdf_builder, tmp_path, monkeypatch):
+    import hashlib
+    import json
+    la, lb = _many(3, 2)
+    a, b = pdf_builder([la]), pdf_builder([lb])
+    hashes = [hashlib.sha256(open(p, "rb").read()).hexdigest() for p in (a, b)]
+    w = start(window, a, b, mode=ce.MODE_TEXT)
+    diffs = w.result.differences
+    assert len(diffs) == 5
+    w.panel.set_status("accepted", diffs[:3])
+    w.panel.set_status("rejected", [diffs[3]])
+    w.panel.set_note("controllare con il cliente", [diffs[3]])
+    w.panel.status_filter.setCurrentIndex(w.panel.status_filter.findData("rejected"))
+    assert w.panel.model.visible == [diffs[3]]
+    assert "3 accettate" in w.panel.status_counts.text()
+    w.panel.status_filter.setCurrentIndex(0)
+    out = tmp_path / "rapporto.pdf"
+    w.export_report(str(out), apply_filters=False)
+    text = pymupdf.open(str(out))[0].get_text()
+    assert text.count("Accettata") == 3 and text.count("Rifiutata") == 1
+    assert "controllare con il cliente" in text
+    assert [hashlib.sha256(open(p, "rb").read()).hexdigest() for p in (a, b)] == hashes
+    path = w.save_session(str(tmp_path / "rev.foliantcmp"))
+    w.panel.filters[ce.ADDED].setChecked(False)
+    w2 = controller(window).open_session(path)
+    assert [d.status for d in w2.result.differences] == ["accepted"] * 3 + ["rejected", ""]
+    assert w2.result.differences[3].note == "controllare con il cliente"
+    # B cambiato dopo il salvataggio: stati mantenuti per le differenze ancora presenti
+    lb2 = [x for x in lb if x != "aggiunta 1"]   # la differenza rifiutata scompare
+    from .conftest import build_pdf
+    build_pdf(b, [lb2])
+    infos = []
+    monkeypatch.setattr(window.ctx, "info", lambda t, m: infos.append((t, m)))
+    w3 = controller(window).open_session(path)
+    assert any("aggiunta 1" in m for _t, m in infos)
+    statuses = {d.text_b or d.text_a: d.status for d in w3.result.differences}
+    assert statuses == {"tolta 0": "accepted", "tolta 1": "accepted", "aggiunta 0": "accepted", "aggiunta 2": ""}
+    # schema più recente rifiutato
+    data = json.load(open(path, encoding="utf-8"))
+    data["version"] = 99
+    newer = tmp_path / "nuova.foliantcmp"
+    newer.write_text(json.dumps(data), encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: errors.append(m))
+    assert controller(window).open_session(str(newer)) is None
+    assert errors and "99" in errors[0]
