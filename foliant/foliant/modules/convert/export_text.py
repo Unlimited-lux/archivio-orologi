@@ -189,8 +189,10 @@ def _doc_meta(work: pymupdf.Document, job) -> dict:
                 lang = val
         except Exception:
             pass
-    return {"title": meta.get("title") or job.name, "author": meta.get("author") or "",
-            "lang": lang or job.options.get("lang") or "it"}
+    o = job.options
+    return {"title": (o.get("title") or "").strip() or meta.get("title") or job.name,
+            "author": (o.get("author") or "").strip() or meta.get("author") or "",
+            "lang": (o.get("lang") or "").strip() or lang or "it"}
 
 
 def write_html(work: pymupdf.Document, path: str, job, out) -> list[str]:

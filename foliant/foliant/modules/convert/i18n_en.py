@@ -687,3 +687,19 @@ EN.update({
 })
 
 EN.update({"Un commento non è stato convertito.": "A comment could not be converted."})
+
+# Preset ed EPUB
+EN.update({
+    "(nessuno)": "(none)",
+    "Autore": "Author",
+    "Dal documento": "From the document",
+    "Elimina": "Delete",
+    "Layout fisso": "Fixed layout",
+    "Lingua (es. it)": "Language (e.g. en)",
+    "Nome del preset:": "Preset name:",
+    "Preset": "Preset",
+    "Salva preset": "Save preset",
+    "Salva…": "Save…",
+    "Scorrevole": "Reflowable",
+    "Titolo": "Title",
+})

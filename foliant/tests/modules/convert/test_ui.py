@@ -501,3 +501,42 @@ def test_batch_same_names(tmp_path):
     items = batch_convert(files, "txt", out_dir=str(tmp_path / "out"), policy="overwrite")
     outs = sorted(o for i in items for o in i.outputs)
     assert len(outs) == 2 and len(set(outs)) == 2
+
+
+def test_export_presets(window, settings, tmp_path):
+    dlg = ExportDialog(window, page_count=3, name="x", folder=str(tmp_path), fmt="png", settings=settings)
+    dlg.panels["png"].fields["dpi"].setValue(600)
+    dlg.save_preset("Stampa")
+    dlg2 = ExportDialog(window, page_count=3, name="x", folder=str(tmp_path), fmt="txt", settings=settings)
+    assert dlg2.preset_box.findData("Stampa") >= 0
+    dlg2.apply_preset("Stampa")
+    assert dlg2.fmt == "png" and dlg2.panels["png"].fields["dpi"].value() == 600
+
+
+def test_epub_metadata_options(sample_pdf, tmp_path):
+    import zipfile
+    from foliant.modules.convert.engine import convert_pdf
+    out = convert_pdf(sample_pdf, tmp_path / "m.epub", "epub", title="Catalogo 2026", author="Verdi", lang="en")[0]
+    opf = zipfile.ZipFile(out).read("OEBPS/content.opf").decode()
+    assert "<dc:title>Catalogo 2026</dc:title>" in opf and "<dc:creator>Verdi</dc:creator>" in opf
+    assert "<dc:language>en</dc:language>" in opf
+
+
+def test_batch_asks_password_for_locked(window, ctrl, encrypted_pdf, sample_pdf, tmp_path, monkeypatch, messages):
+    from PySide6.QtWidgets import QInputDialog
+    from foliant.modules.convert import batch_dialog
+    from foliant.modules.convert.batch_dialog import BatchDialog
+
+    def fake_exec(d):
+        d.add_paths([sample_pdf, encrypted_pdf])
+        d.format_box.setCurrentIndex(d.format_box.findData("txt"))
+        d.dest_box.setCurrentIndex(1)
+        d.folder_edit.setText(str(tmp_path / "dest"))
+        d.workers.setValue(1)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(BatchDialog, "exec", fake_exec)
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("segreta", True))
+    monkeypatch.setattr(batch_dialog, "show_batch_report", lambda c, items: None)
+    items = ctrl.batch_convert()
+    assert [i.status for i in items] == ["completato", "completato"]
+    assert (tmp_path / "dest" / "protetto.txt").exists()

@@ -20,7 +20,7 @@ from .engine import FORMATS
 # ordine e gruppi del menu dei formati
 FORMAT_ORDER = ["docx", "xlsx", "pptx", "csv", "png", "jpeg", "tiff", "bmp", "gif", "long-image",
                 "txt", "rtf", "html", "xml", "epub", "pdfa-1b", "pdfa-2b", "pdfa-3b", "pdfa-2u", "pdfa-3u"]
-LAYOUT_FORMATS = {"docx", "html", "rtf", "epub"}
+LAYOUT_FORMATS = {"docx", "html", "rtf"}
 OCR_FORMATS = {"docx", "xlsx", "csv", "pptx", "txt", "rtf", "html", "xml", "epub"}
 
 
@@ -191,6 +191,11 @@ def build_options(fmt: str) -> _Options:
         rm = QCheckBox()
         rm.setChecked(True)
         o.add("remove_furniture", _("Rimuovi intestazioni e piè di pagina ripetuti"), rm)
+        o.add("layout", _("Impaginazione"), _combo([(_("Scorrevole"), "flow"), (_("Layout fisso"), "fixed")]))
+        for key, label in (("title", _("Titolo")), ("author", _("Autore")), ("lang", _("Lingua (es. it)"))):
+            edit = QLineEdit()
+            edit.setPlaceholderText(_("Dal documento"))
+            o.add(key, label, edit)
     elif fmt.startswith("pdfa"):
         o.add("save_anyway", _("Se la conformità non è raggiunta, salva un PDF ordinario"), QCheckBox())
     return o
@@ -217,6 +222,16 @@ class ExportDialog(QDialog):
         for key in FORMAT_ORDER:
             self.format_box.addItem(_(FORMATS[key][1]), key)
         top.addRow(_("Formato"), self.format_box)
+        preset_row = QHBoxLayout()
+        self.preset_box = QComboBox()
+        self.preset_box.setMinimumWidth(200)
+        preset_row.addWidget(self.preset_box, 1)
+        self.preset_save = QPushButton(_("Salva…"))
+        self.preset_del = QPushButton(_("Elimina"))
+        for b in (self.preset_save, self.preset_del):
+            b.setAutoDefault(False)
+            preset_row.addWidget(b)
+        top.addRow(_("Preset"), preset_row)
 
         range_row = QHBoxLayout()
         self.range_edit = QLineEdit()
@@ -294,6 +309,10 @@ class ExportDialog(QDialog):
         lay.addWidget(buttons)
 
         self.format_box.currentIndexChanged.connect(self._format_changed)
+        self._reload_presets()
+        self.preset_box.activated.connect(self._apply_preset)
+        self.preset_save.clicked.connect(self._save_preset_dialog)
+        self.preset_del.clicked.connect(self._delete_preset)
         self.range_edit.textChanged.connect(lambda _t: self.range_error.setVisible(False))
         _set_combo(self.format_box, fmt)
         self._format_changed()
@@ -341,6 +360,71 @@ class ExportDialog(QDialog):
         keep = {k: v for k, v in options.items() if k not in ("pages", "policy", "selected", "current")}
         self.settings.setValue(self._settings_key(fmt), json.dumps(keep))
         self.settings.setValue("convert/last_format", fmt)
+
+    # ------------------------------------------------------------------ preset
+    def presets(self) -> dict:
+        if self.settings is None:
+            return {}
+        try:
+            data = json.loads(self.settings.value("convert/presets", "") or "{}")
+            return data if isinstance(data, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    def _reload_presets(self) -> None:
+        self.preset_box.blockSignals(True)
+        self.preset_box.clear()
+        self.preset_box.addItem(_("(nessuno)"), None)
+        for name in sorted(self.presets()):
+            self.preset_box.addItem(name, name)
+        self.preset_box.blockSignals(False)
+        self.preset_del.setEnabled(len(self.presets()) > 0)
+        self.preset_box.setEnabled(self.settings is not None)
+        self.preset_save.setEnabled(self.settings is not None)
+
+    def save_preset(self, name: str) -> None:
+        presets = self.presets()
+        opts = self.panels[self.fmt].values()
+        opts.update(layout=self.layout_box.currentData(), ocr=self.ocr_box.currentData(),
+                    language=self.lang_edit.text())
+        presets[name] = {"format": self.fmt, "options": opts}
+        self.settings.setValue("convert/presets", json.dumps(presets))
+        self._reload_presets()
+        self.preset_box.setCurrentIndex(self.preset_box.findData(name))
+
+    def apply_preset(self, name: str) -> None:
+        preset = self.presets().get(name)
+        if not preset:
+            return
+        _set_combo(self.format_box, preset.get("format"))
+        opts = dict(preset.get("options") or {})
+        self.panels[self.fmt].load(opts)
+        if opts.get("layout"):
+            _set_combo(self.layout_box, opts["layout"])
+        if opts.get("ocr"):
+            _set_combo(self.ocr_box, opts["ocr"])
+        if opts.get("language"):
+            self.lang_edit.setText(opts["language"])
+
+    def _apply_preset(self, *_a) -> None:
+        name = self.preset_box.currentData()
+        if name:
+            self.apply_preset(name)
+
+    def _save_preset_dialog(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, _("Salva preset"), _("Nome del preset:"))
+        if ok and name.strip():
+            self.save_preset(name.strip())
+
+    def _delete_preset(self) -> None:
+        name = self.preset_box.currentData()
+        if not name or self.settings is None:
+            return
+        presets = self.presets()
+        presets.pop(name, None)
+        self.settings.setValue("convert/presets", json.dumps(presets))
+        self._reload_presets()
 
     def _browse(self) -> None:
         path = QFileDialog.getExistingDirectory(self, _("Scegli cartella"), self.folder_edit.text())

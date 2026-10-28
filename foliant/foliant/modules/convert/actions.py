@@ -867,6 +867,20 @@ class ConvertController:
                               keep_structure=keep, root=root, **options)
         if not ok:
             return None
+        # file protetti: password chiesta alla fine, senza bloccare gli altri (Annulla = salta)
+        locked = [it for it in items if it.status == "saltato" and it.message == _("Protetto da password")]
+        passwords = {}
+        for it in locked:
+            pw = self._ask_password(Path(it.path).name)
+            if pw:
+                passwords[it.path] = pw
+        if passwords:
+            options = {k: v for k, v in options.items() if k != "workers"}
+            ok, retried = self._run(_("Conversione in blocco…"), batch_convert, list(passwords), fmt,
+                                    out_dir=out_dir, keep_structure=keep, root=root, passwords=passwords, **options)
+            if ok:
+                by_path = {r.path: r for r in retried}
+                items = [by_path.get(it.path, it) for it in items]
         show_batch_report(self, items)
         return items
 
