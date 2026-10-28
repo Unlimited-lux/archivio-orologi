@@ -476,4 +476,6 @@ EN: dict[str, str] = {
     "Il file XFDF non è valido: {e}": "The XFDF file is not valid: {e}",
     "Includi valori con cifra di controllo non valida": "Include values with an invalid check digit",
     "Segni esportati in {p}": "Marks exported to {p}",
+    "Questo documento": "This document",
+    "Tutti i documenti di questa cartella": "All documents in this folder",
 }

@@ -783,7 +783,10 @@ class SecurityController:
                 text += " " + _("Gli script sono disattivati.")
             banner.set_notice(Notice("active", 0, text, [
                 (_("Dettagli"), lambda: self.show_active_details(view)),
-                (_("Considera attendibile"), lambda: self.trust_document(view)),
+                (_("Considera attendibile"), [
+                    (_("Questo documento"), lambda: self.trust_document(view)),
+                    (_("Tutti i documenti di questa cartella"), lambda: self.trust_document(view, folder=True)),
+                ]),
             ]))
         with ENGINE_LOCK:
             n = len(R.marks(doc.pdf))

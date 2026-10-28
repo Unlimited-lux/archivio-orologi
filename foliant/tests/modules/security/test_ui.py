@@ -771,3 +771,21 @@ def test_export_import_marks(window, sec, sample_pdf, tmp_path):
         R.clear_marks(pdf)
     assert sec.import_marks(str(out)) == 1
     assert sec.panel.count.text() == "1"
+
+
+def test_trusted_folder(window, sec, active_pdf, tmp_path):
+    import shutil
+    view = window.open_path(active_pdf)
+    actions = dict(sec.banners[view].current().actions)
+    menu = dict(actions["Considera attendibile"])
+    menu["Tutti i documenti di questa cartella"]()
+    import tempfile
+    from pathlib import Path
+    other = Path(tempfile.mkdtemp(prefix="foliant-altra-"))
+    copy = shutil.copy(active_pdf, other / "copia.pdf")
+    window.close_view(view)
+    view = window.open_path(active_pdf)
+    assert sec.banners[view].current() is None
+    view2 = window.open_path(str(copy))
+    assert sec.banners[view2].current().key == "active"
+    sec.revoke_trust()

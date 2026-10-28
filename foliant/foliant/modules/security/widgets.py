@@ -473,7 +473,14 @@ class Banner(QFrame):
                 w.deleteLater()
         for text, slot in n.actions:
             b = QPushButton(text)
-            b.clicked.connect(slot)
+            if isinstance(slot, list):        # pulsante con menu di scelte
+                from PySide6.QtWidgets import QMenu
+                menu = QMenu(b)
+                for sub_text, sub_slot in slot:
+                    menu.addAction(sub_text).triggered.connect(sub_slot)
+                b.setMenu(menu)
+            else:
+                b.clicked.connect(slot)
             self.buttons_box.addWidget(b)
         others = len(self.notices) - 1
         self.more.setVisible(others > 0)
