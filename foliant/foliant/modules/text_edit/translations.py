@@ -181,4 +181,7 @@ EN: dict[str, str] = {
     "Rientro sinistro": "Left indent",
     "Sposta il bordo sinistro del paragrafo (il bordo destro resta fermo)":
         "Moves the left edge of the paragraph (the right edge stays in place)",
+    "Contenuto condiviso": "Shared content",
+    "Questo testo fa parte di un contenuto usato anche da {n} altre pagine.\n\nApplicare la modifica a tutte le pagine? (No: solo questa pagina)":
+        "This text is part of content also used by {n} other pages.\n\nApply the change to all pages? (No: this page only)",
 }

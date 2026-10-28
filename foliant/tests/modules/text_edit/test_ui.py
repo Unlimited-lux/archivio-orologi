@@ -641,3 +641,31 @@ def test_panel_left_indent(window, paragraphs_pdf, quiet, qtbot):
         assert abs(ln.bbox.x0 - (x0 + 30)) <= 0.6 and ln.bbox.x1 <= x1 + 0.6
     assert len(nb.lines) > n
     assert ctrl.panel.left_indent.value() == 0
+
+
+@pytest.mark.parametrize("all_pages", [False, True])
+def test_shared_content_this_or_all_pages(window, tmp_path, quiet, qtbot, all_pages):
+    """TXT-20: testo in un Form XObject usato da più pagine: «solo questa pagina» o «tutte le pagine»."""
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Intestazione 2024", fontsize=14)
+    doc = pymupdf.open()
+    for _i in range(3):
+        p = doc.new_page()
+        p.show_pdf_page(p.rect, src, 0)
+    path = tmp_path / "condiviso.pdf"
+    doc.save(str(path))
+    view = open_in_edit_mode(window, str(path))
+    ctrl = ctrl_of(window)
+    quiet["answer"] = all_pages
+    block = block_with(ctrl, view, "Intestazione", page=1)
+    ed = ctrl.open_editor(view, 1, block)
+    ed.selectAll()
+    ed.insertPlainText("Intestazione 2026")
+    ctrl.commit_editor(view)
+    assert any("altre pagine" in m for _t, m in quiet["confirms"])
+    texts = [view.document.page_text(i) for i in range(3)]
+    assert "2026" in texts[1]
+    for i in (0, 2):
+        assert ("2026" in texts[i]) == all_pages
+    view.document.undo()
+    assert all("2024" in view.document.page_text(i) for i in range(3))
