@@ -278,4 +278,5 @@ EN: dict[str, str] = {
     'PDF creati: {n}': 'PDFs created: {n}',
     'Colonne senza campo corrispondente: {l}': 'Columns without a matching field: {l}',
     'Riga {r}, campo «{f}»: {m}': 'Row {r}, field “{f}”: {m}',
+    'Aspetto salvato come predefinito per i nuovi campi di questo tipo.': 'Appearance saved as the default for new fields of this type.',
 }

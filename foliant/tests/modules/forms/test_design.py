@@ -390,3 +390,14 @@ def test_detect_offers_ocr_on_scans(window, tmp_path, monkeypatch, no_modal_boxe
     module().detect_fields()
     assert any(c[0] == "question" for c in no_modal_boxes)
     assert window.ctx.current_mode() == "ocr"
+
+
+def test_kind_defaults_applied(window, blank_view):
+    view = blank_view
+    window.ctx.set_mode("moduli")
+    m = module()
+    m.set_kind_defaults(E.TEXT, {"font": "Courier", "fontsize": 14, "text_color": (0, 0, 1), "name": "ignorato"})
+    x = m.create_field(view, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 80))
+    with view.document.lock:
+        f = E.field_info(view.document.pdf, 0, x)
+    assert f.font == "Courier" and f.fontsize == 14 and f.name == "Testo1"

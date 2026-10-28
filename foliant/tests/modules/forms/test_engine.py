@@ -575,3 +575,20 @@ def test_formula_field():
     with pytest.raises(E.FormError):
         E.update_properties(pdf, 0, xs["Totale"], formula="Imponibile * Inesistente")
     assert E.find_cycle(pdf, "Imponibile", E.FX.parse("Totale + 1")) == ["Imponibile", "Totale", "Imponibile"]
+
+
+def test_unicode_value_embedded_font():
+    pdf = pymupdf.open()
+    pdf.new_page()
+    x = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 300, 72), "g")
+    before = len(pdf.tobytes(garbage=3, deflate=True))
+    E.set_value(pdf, 0, x, "Ελληνικά 日本語")
+    data = pdf.tobytes(garbage=3, deflate=True)
+    again = pymupdf.open("pdf", data)
+    f = E.list_fields(again)[0]
+    assert f.value == "Ελληνικά 日本語"
+    assert "Ελληνικά 日本語" in again[0].get_text()
+    fonts = [again.xref_object(i, compressed=True) for i in range(1, again.xref_length())]
+    assert any("/FontFile" in o for o in fonts)  # carattere incorporato
+    assert len(data) - before < 200_000  # sottoinsieme, non il carattere intero
+    assert again.page_count == 1

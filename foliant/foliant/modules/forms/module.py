@@ -202,7 +202,10 @@ class FormsModule(QObject):
         except Exception:  # pannello non disponibile: il resto del modulo funziona
             FieldPropertiesPanel = None
         if FieldPropertiesPanel is not None:
-            self.panel = FieldPropertiesPanel(self.apply_properties)
+            try:
+                self.panel = FieldPropertiesPanel(self.apply_properties, set_default=self.set_kind_defaults)
+            except TypeError:
+                self.panel = FieldPropertiesPanel(self.apply_properties)
             self.ctx.add_properties_panel("moduli", self.panel)
         try:
             from .fields_panel import FieldsPanel
@@ -522,9 +525,29 @@ class FormsModule(QObject):
         view.viewport().update()
         return True
 
+    # ---------------------------------------------------------------- predefiniti per tipo
+    _DEFAULT_KEYS = ("font", "fontsize", "text_color", "fill_color", "border_color", "border_width",
+                     "border_style", "align")
+
+    def set_kind_defaults(self, kind: str, props: dict) -> None:
+        import json
+        clean = {k: (list(v) if isinstance(v, tuple) else v) for k, v in props.items() if k in self._DEFAULT_KEYS}
+        self.ctx.settings().setValue(f"forms/defaults/{kind}", json.dumps(clean))
+        self.ctx.status(_("Aspetto salvato come predefinito per i nuovi campi di questo tipo."))
+
+    def kind_defaults(self, kind: str) -> dict:
+        import json
+        raw = self.ctx.settings().value(f"forms/defaults/{kind}", "")
+        try:
+            data = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            return {}
+        return {k: (tuple(v) if isinstance(v, list) else v) for k, v in data.items() if k in self._DEFAULT_KEYS}
+
     def create_field(self, view, page: int, kind: str, rect: pymupdf.Rect, *, sticky: bool = False,
                      name: str | None = None, **props) -> int | None:
         label = _("Crea campo")
+        props = {**self.kind_defaults(E.BUTTON if kind == "image" else kind), **props}
         if kind == E.RADIO and name is None and sticky and self.last_radio_group:
             name = self.last_radio_group
         if kind == "image":

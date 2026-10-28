@@ -237,6 +237,7 @@ class FieldInfo:
     caption: str = ""            # didascalia dei pulsanti
     action: dict = field(default_factory=dict)  # azione al clic dei pulsanti
     image: bool = False          # campo immagine
+    lock: dict = field(default_factory=dict)  # campi firma: {"action": "All|Include|Exclude", "fields": [...]}
     custom_scripts: list = field(default_factory=list)  # azioni personalizzate non eseguite
     maxlen: int = 0
     font: str = "Helvetica"
@@ -420,6 +421,8 @@ def _info(pdf: pymupdf.Document, page_index: int, w: pymupdf.Widget) -> FieldInf
         info.caption = _value_of(*pdf.xref_get_key(w.xref, "MK/CA")) or ""
         info.image = pdf.xref_get_key(w.xref, "MK/TP") == ("int", "1")
         info.action = button_action(pdf, w.xref)
+    if kind == SIGNATURE:
+        info.lock = _read_lock(pdf, w.xref)
     if kind in (CHECKBOX, RADIO):
         ca = _value_of(*pdf.xref_get_key(w.xref, "MK/CA"))
         info.check_style = next((k for k, c in CHECK_STYLES.items() if c == ca), "check" if kind == CHECKBOX else "circle")
@@ -716,13 +719,18 @@ def _regen_field(pdf: pymupdf.Document, fx: int, page: int, xref: int) -> None:
             if red and saved_da[0] == "string":
                 da = re.sub(r"[\d.]+\s+[\d.]+\s+[\d.]+\s+rg|[\d.]+\s+g\b", "", saved_da[1])
                 pdf.xref_set_key(fx, "DA", ps.encode_string("1 0 0 rg " + da.strip()))
+    shown = formatted if formatted is not None else (saved_v[1] if saved_v[0] == "string" else "")
+    embed = bool(shown) and needs_embedded_font(shown) and _inherited(pdf, xref, "FT")[1] == "/Tx"
     try:
         for k in kids:
             pi = page if k == xref else _page_index_of(pdf, k, page)
             if pi is None:
                 continue
             try:
-                regenerate(pdf, pi, k)
+                if embed:
+                    embedded_appearance(pdf, pi, k, shown)
+                else:
+                    regenerate(pdf, pi, k)
             except FormError:
                 continue
     finally:
@@ -835,6 +843,19 @@ def reset_form(pdf: pymupdf.Document, names: Iterable[str] | None = None) -> int
             count += 1
             set_value(pdf, f.page, f.xref, target if target is not None else "")
     return count
+
+
+def _read_lock(pdf: pymupdf.Document, xref: int) -> dict:
+    t, v = _inherited(pdf, xref, "Lock")
+    if t == "xref":
+        v, t = pdf.xref_object(int(v.split()[0]), compressed=True), "dict"
+    if t != "dict":
+        return {}
+    try:
+        lock = ps.parse(v)
+    except ps.PdfSyntaxError:
+        return {}
+    return {"action": str(lock.get("Action", "")), "fields": [ps.text_of(n) or "" for n in lock.get("Fields", []) or []]}
 
 
 def signature_locked_names(pdf: pymupdf.Document) -> set[str]:
@@ -1613,6 +1634,15 @@ def update_properties(pdf: pymupdf.Document, page: int, xref: int, **props) -> N
         if rot not in (0, 90, 180, 270):
             raise FormError(_("Rotazione non valida."))
         pdf.xref_set_key(xref, "MK/R", str(rot) if rot else "null")
+    if "lock" in props and kind == SIGNATURE:
+        lock = props["lock"] or {}
+        action = lock.get("action")
+        if action in ("All", "Include", "Exclude"):
+            names = [str(n) for n in lock.get("fields") or []]
+            value = f"<</Type/SigFieldLock/Action/{action}" + (f"/Fields{ps.serialize(names)}" if action != "All" else "") + ">>"
+            pdf.xref_set_key(fx, "Lock", value)
+        else:
+            pdf.xref_set_key(fx, "Lock", "null")
     if "action" in props and kind == BUTTON:
         set_button_action(pdf, page, xref, props["action"])
     if "check_style" in props and kind in (CHECKBOX, RADIO):
@@ -2547,3 +2577,90 @@ def _prune_empty_parents(pdf: pymupdf.Document, fx: int) -> None:
         nxt = _parent_node(pdf, parent)
         _remove_from_acroform(pdf, parent)
         parent = nxt
+
+
+# ====================================================================== caratteri incorporati
+def needs_embedded_font(text: str) -> bool:
+    """True se il testo contiene caratteri non rappresentabili con i caratteri standard (WinAnsi)."""
+    try:
+        text.replace("\r", "").replace("\n", "").encode("cp1252")
+        return False
+    except UnicodeEncodeError:
+        return True
+
+
+_FALLBACK_FONT = None
+
+
+def _fallback_font() -> pymupdf.Font:
+    global _FALLBACK_FONT
+    if _FALLBACK_FONT is None:
+        _FALLBACK_FONT = pymupdf.Font("cjk")
+    return _FALLBACK_FONT
+
+
+def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) -> None:
+    """Aspetto del campo con un carattere incorporato (sottoinsieme) che copre tutti i glifi
+    del valore: serve per testi in alfabeti non latini, che altri lettori potrebbero non
+    saper mostrare con i caratteri standard (FRM-09)."""
+    info = field_info(pdf, page, xref)
+    w, h = info.rect.width, info.rect.height
+    font = _fallback_font()
+    tmp = pymupdf.open()
+    try:
+        tp = tmp.new_page(width=w, height=h)
+        if info.fill_color:
+            tp.draw_rect(pymupdf.Rect(0, 0, w, h), color=None, fill=info.fill_color, width=0)
+        if info.border_color and info.border_width:
+            bw = info.border_width
+            tp.draw_rect(pymupdf.Rect(bw / 2, bw / 2, w - bw / 2, h - bw / 2), color=info.border_color,
+                         width=bw, dashes="[3 2] 0" if info.border_style == "D" else None)
+        tp.insert_font(fontname="FoliantU", fontbuffer=font.buffer)
+        color = tuple(info.text_color or (0, 0, 0))
+        lines = text.replace("\r\n", "\n").replace("\r", "\n")
+        if info.multiline:
+            size = info.fontsize or 10
+            box = pymupdf.Rect(2, 2, w - 2, h - 2)
+            while tp.insert_textbox(box, lines, fontname="FoliantU", fontsize=size, color=color,
+                                    align=info.align) < 0 and size > 4 and not info.fontsize:
+                size -= 1
+                tp.clean_contents()
+        else:
+            line = lines.replace("\n", " ")
+            size = info.fontsize or min(12.0, h * 0.7)
+            if not info.fontsize:
+                while size > 4 and font.text_length(line, size) > w - 4:
+                    size -= 0.5
+            if info.comb and info.maxlen:
+                cell = w / info.maxlen
+                for i, ch in enumerate(line[: info.maxlen]):
+                    cw = font.text_length(ch, size)
+                    tp.insert_text((i * cell + (cell - cw) / 2, h / 2 + size * 0.35), ch,
+                                   fontname="FoliantU", fontsize=size, color=color)
+            else:
+                tw = font.text_length(line, size)
+                x = {ALIGN_CENTER: (w - tw) / 2, ALIGN_RIGHT: w - 2 - tw}.get(info.align, 2)
+                tp.insert_text((x, h / 2 + size * 0.35), line, fontname="FoliantU", fontsize=size, color=color)
+        tmp.subset_fonts()
+        data = tmp.tobytes(garbage=3, deflate=True)
+    finally:
+        tmp.close()
+    src = pymupdf.open("pdf", data)
+    try:
+        before = pdf.page_count
+        pdf.insert_pdf(src)
+    finally:
+        src.close()
+    pno = before
+    pxref = pdf.page_xref(pno)
+    t, v = pdf.xref_get_key(pxref, "Contents")
+    refs = [int(r) for r in re.findall(r"(\d+) 0 R", v)] if t in ("array", "xref") else []
+    stream = b"\n".join(pdf.xref_stream(r) or b"" for r in refs)
+    t, v = pdf.xref_get_key(pxref, "Resources")
+    res = pdf.xref_object(int(v.split()[0]), compressed=True) if t == "xref" else (v if t == "dict" else "<<>>")
+    pdf.delete_page(pno)
+    form = pdf.get_new_xref()
+    # la pagina provvisoria ha l'origine in alto a sinistra: il contenuto è già in spazio PDF (h di altezza)
+    pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]/Resources{res}>>")
+    pdf.update_stream(form, b"/Tx BMC\n" + stream + b"\nEMC\n")
+    pdf.xref_set_key(xref, "AP", f"<</N {form} 0 R>>")
