@@ -407,4 +407,5 @@ EN = {
     "Annulla": "Cancel",
     "OK": "OK",
     "Operazione annullata.": "Operation cancelled.",
+    "Ctrl+clic per seguirlo": "Ctrl+click to follow it",
 }

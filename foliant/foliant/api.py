@@ -11,7 +11,7 @@ from .core.document import (
 from .core.incremental import IncrementalSaveError
 from .core.engine import ENGINE_LOCK, try_engine
 from .core.errors import DocumentError, FoliantError, OperationCancelled, PasswordRequired, WrongPassword
-from .i18n import _, add_translations, language
+from .i18n import _, add_translations, format_date, format_number, language
 from .ui import theme
 from .ui.banners import Banner
 from .ui.context import GUARD_EVENTS, PDF_FILTER, Context, Mode
@@ -32,7 +32,7 @@ __all__ = [
     "placement", "CLOSED", "CONTENT", "SAVED", "ACCESS", "LOCK", "CHANGE_KINDS", "ENCRYPT_METADATA_SUPPORTED",
     "Document", "atomic_write", "IncrementalSaveError", "ENGINE_LOCK", "try_engine",
     "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
-    "_", "add_translations", "language", "theme", "PDF_FILTER", "Context", "Mode", "GUARD_EVENTS", "Banner",
+    "_", "add_translations", "format_date", "format_number", "language", "theme", "PDF_FILTER", "Context", "Mode", "GUARD_EVENTS", "Banner",
     "FIT_PAGE", "FIT_WIDTH", "VIEW_CONTINUOUS", "VIEW_COVER", "VIEW_FACING", "VIEW_SINGLE", "DocumentView",
     "page_geometry", "bind_icon", "icon", "BackgroundTask", "Progress", "run_task", "HandTool", "PageEvent",
     "SelectTextTool", "TextSelection", "Tool", "copy_text_to_clipboard", "follow_link", "selection_from_words",
