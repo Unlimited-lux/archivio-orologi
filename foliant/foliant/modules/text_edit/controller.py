@@ -171,9 +171,13 @@ class TextEditController(QObject):
         key = (id(view.document), view.document.version, page)
         hit = self._frames.get(key)
         if hit is None:
-            with ENGINE_LOCK:
-                p = view.document.pdf[page]
-                hit = (frame_matrix(p), unframe_matrix(p))
+            try:
+                with ENGINE_LOCK:
+                    p = view.document.pdf[page]
+                    hit = (frame_matrix(p), unframe_matrix(p))
+            except Exception:
+                ident = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+                return ident, ident     # pagina non leggibile: nessuna trasformazione
             self._frames[key] = hit
         return hit
 
@@ -313,8 +317,12 @@ class TextEditController(QObject):
             return
         if self.blocks(view, page):
             return
-        with ENGINE_LOCK:
-            images = page_has_images(view.document.pdf[page])
+        try:
+            with ENGINE_LOCK:
+                images = page_has_images(view.document.pdf[page])
+        except Exception:
+            self.ctx.status(_("Pagina non leggibile: il file è danneggiato in questo punto."), 10000)
+            return
         if images:
             self.ctx.status(_("Questa pagina non contiene testo riconosciuto (forse è una scansione): "
                               "usa l'OCR per renderla modificabile."), 10000)
