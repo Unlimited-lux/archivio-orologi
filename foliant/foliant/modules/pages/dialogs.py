@@ -156,6 +156,19 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "Includi i segnalibri (sotto un segnalibro con il nome del file)": "Include bookmarks (under a bookmark named after the file)",
+    "Unione alternata di due file (fronti e retri)": "Alternate merge of two files (fronts and backs)",
+    "Secondo file in ordine inverso": "Second file in reverse order",
+    "L'unione alternata richiede esattamente due file.": "Alternate merge requires exactly two files.",
+    "Interpreta i valori come etichette di pagina": "Interpret values as page labels",
+    "Annulla": "Cancel",
+    "Acquisisci": "Scan",
+    "Estrai": "Extract",
+    "Dividi": "Split",
+    "Unisci": "Merge",
+    "Sposta": "Move",
+    "Sostituisci": "Replace",
+    "pagine": "pages",
 }
 
 
@@ -197,6 +210,12 @@ class PageScope(QGroupBox):
         row.addWidget(self.rb_range)
         row.addWidget(self.range_edit, 1)
         lay.addLayout(row)
+        self.use_labels = QCheckBox(_("Interpreta i valori come etichette di pagina"))
+        with ENGINE_LOCK:
+            self.labels = E.page_labels(document.pdf)
+            has_labels = bool(document.pdf.get_page_labels())
+        self.use_labels.setVisible(has_labels)
+        lay.addWidget(self.use_labels)
         frow = QHBoxLayout()
         self.filter_label = QLabel(_("Filtro:"))
         self.filter_combo = QComboBox()
@@ -216,6 +235,7 @@ class PageScope(QGroupBox):
         for rb in (self.rb_current, self.rb_selected, self.rb_all, self.rb_range):
             rb.toggled.connect(self._update)
         self.range_edit.textChanged.connect(self._on_text)
+        self.use_labels.toggled.connect(self._update)
         self.filter_combo.currentIndexChanged.connect(self._update)
         self._pages: list[int] = []
         self._error: str | None = None
@@ -243,7 +263,8 @@ class PageScope(QGroupBox):
             if self.rb_all.isChecked():
                 base = list(range(self.page_count))
             elif self.rb_range.isChecked():
-                base = E.parse_ranges(self.range_edit.text(), self.page_count, ordered=self.ordered)
+                base = E.parse_ranges(self.range_edit.text(), self.page_count, ordered=self.ordered,
+                                      labels=self.labels if self.use_labels.isChecked() else None)
             elif self.rb_selected.isChecked():
                 base = list(self.selected)
             else:
@@ -284,8 +305,8 @@ class BaseDialog(QDialog):
         self.setMinimumWidth(440)
         self.layout_ = QVBoxLayout(self)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        if ok_text:
-            self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text or _("OK"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         self.message = QLabel()
@@ -489,7 +510,8 @@ class InsertFileDialog(BaseDialog):
         self.annots.setChecked(True)
         self.widgets = QCheckBox(_("Includi campi modulo"))
         self.widgets.setChecked(True)
-        for cb in (self.reverse, self.annots, self.widgets):
+        self.bookmarks = QCheckBox(_("Includi i segnalibri (sotto un segnalibro con il nome del file)"))
+        for cb in (self.reverse, self.annots, self.widgets, self.bookmarks):
             self.layout_.addWidget(cb)
         self.finish_layout()
         self.src_range.textChanged.connect(self._update)
@@ -545,7 +567,8 @@ class InsertFileDialog(BaseDialog):
         return {"src_indices": self.source_pages(), "at": self.position.index(self.selected, n),
                 "interleave": self.every.value() if self.interleave.isChecked() else 0,
                 "reverse": self.reverse.isChecked(), "annots": self.annots.isChecked(),
-                "widgets": self.widgets.isChecked()}
+                "widgets": self.widgets.isChecked(),
+                "bookmark_title": Path(self.path).stem if self.bookmarks.isChecked() and self.path else None}
 
     def done(self, r) -> None:
         super().done(r)
@@ -562,7 +585,8 @@ def open_insert_file_dialog(ctx, view, selected: list[int], path: str | None = N
         src = dlg.source
         res = _apply(ctx, _("Inserisci pagine da file"),
                      lambda pdf: E.insert_pdf_pages(pdf, src, o["at"], o["src_indices"], interleave=o["interleave"],
-                                                    reverse=o["reverse"], annots=o["annots"], widgets=o["widgets"]),
+                                                    reverse=o["reverse"], annots=o["annots"], widgets=o["widgets"],
+                                                    bookmark_title=o["bookmark_title"]),
                      select=lambda r: r)
         return res is not None
     finally:
@@ -877,7 +901,10 @@ class MergeDialog(BaseDialog):
         self.keep_annots = QCheckBox(_("Conserva annotazioni e campi"))
         self.keep_annots.setChecked(True)
         self.blank_odd = QCheckBox(_("Pagina vuota dopo i file con pagine dispari"))
-        for cb in (self.bookmarks, self.keep_bookmarks, self.keep_annots, self.blank_odd):
+        self.alternate = QCheckBox(_("Unione alternata di due file (fronti e retri)"))
+        self.alternate_reverse = QCheckBox(_("Secondo file in ordine inverso"))
+        for cb in (self.bookmarks, self.keep_bookmarks, self.keep_annots, self.blank_odd, self.alternate,
+                   self.alternate_reverse):
             self.layout_.addWidget(cb)
         self.rb_open = QRadioButton(_("Apri il risultato in una nuova scheda"))
         self.rb_save = QRadioButton(_("Salva direttamente su file"))
@@ -886,6 +913,7 @@ class MergeDialog(BaseDialog):
         self.layout_.addWidget(self.rb_save)
         self.finish_layout()
         self.table.itemChanged.connect(lambda *_a: self._update())
+        self.alternate.toggled.connect(lambda *_a: self._update())
         for p in paths or []:
             self.add_path(p)
         self._update()
@@ -990,6 +1018,10 @@ class MergeDialog(BaseDialog):
         if not rows:
             self.set_error(_("Aggiungi almeno un file da unire."))
             return
+        self.alternate_reverse.setEnabled(self.alternate.isChecked())
+        if self.alternate.isChecked() and len(rows) != 2:
+            self.set_error(_("L'unione alternata richiede esattamente due file."))
+            return
         for path, pages, rng in rows:
             if rng and pages.isdigit():
                 try:
@@ -1005,7 +1037,8 @@ class MergeDialog(BaseDialog):
     def options(self) -> dict:
         return {"entries": self.entries(), "bookmarks": self.bookmarks.isChecked(),
                 "keep_bookmarks": self.keep_bookmarks.isChecked(), "annots": self.keep_annots.isChecked(),
-                "blank_after_odd": self.blank_odd.isChecked(), "open": self.rb_open.isChecked()}
+                "blank_after_odd": self.blank_odd.isChecked(), "open": self.rb_open.isChecked(),
+                "alternate": self.alternate.isChecked(), "alternate_reverse": self.alternate_reverse.isChecked()}
 
 
 def open_merge_dialog(ctx, view=None, selected=None, paths: list[str] | None = None) -> bool:
@@ -1018,6 +1051,10 @@ def open_merge_dialog(ctx, view=None, selected=None, paths: list[str] | None = N
     errors: list[str] = []
 
     def work(progress):
+        if o["alternate"]:
+            a, b = o["entries"]
+            return E.merge_alternate(a.path, b.path, reverse_b=o["alternate_reverse"], password_a=a.password,
+                                     password_b=b.password)
         return E.merge_files(o["entries"], bookmarks=o["bookmarks"], keep_bookmarks=o["keep_bookmarks"],
                              annots=o["annots"], widgets=o["annots"], blank_after_odd=o["blank_after_odd"],
                              progress=lambda f, t: progress.update(f, t), errors=errors)

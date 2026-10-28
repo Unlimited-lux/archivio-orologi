@@ -60,6 +60,7 @@ class PagesController:
         grid.contextRequested.connect(self.show_context_menu)
         grid.drag_payload = self.drag_mime
         grid.doubleClicked.connect(self.open_page_in_view)
+        grid.rotateRequested.connect(self.rotate_page)
         grid.selectionCountChanged.connect(lambda _n: self.update_actions())
 
     # ================================================================ stato
@@ -214,6 +215,12 @@ class PagesController:
         pages = self.selected()
         if pages:
             self.apply(_("Ruota pagine"), lambda pdf: E.rotate_pages(pdf, pages, degrees), select=lambda r: pages)
+
+    def rotate_page(self, page: int, degrees: int) -> None:
+        """Pulsante rapido sulla miniatura: ruota quella pagina (o la selezione che la contiene)."""
+        sel = self.organizer.selected_pages()
+        pages = sel if page in sel else [page]
+        self.apply(_("Ruota pagine"), lambda pdf: E.rotate_pages(pdf, pages, degrees), select=lambda r: pages)
 
     def delete(self) -> None:
         view = self.view()

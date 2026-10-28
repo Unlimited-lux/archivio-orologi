@@ -26,6 +26,7 @@ from . import layout
 from .engine import INCH, MM, PAPER_SIZES, PageOpError, RangeError, parse_ranges
 
 TRANSLATIONS = {
+    "Annulla": "Cancel",
     "Ritaglia pagine": "Crop pages",
     "Ripristina ritaglio": "Reset crop",
     "Rimuovi margini bianchi": "Remove white margins",
@@ -457,6 +458,7 @@ class _LayoutDialog(QDialog):
         root.addWidget(self.error_label)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(_("Annulla"))
         self.ok.setText(_(self.OK_TEXT))
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)

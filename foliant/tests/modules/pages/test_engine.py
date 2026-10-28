@@ -534,3 +534,19 @@ def test_merge_errors_collected(tmp_path):
     assert out.page_count == 1 and errors and "rotto.pdf" in errors[0]
     with pytest.raises(E.DocumentError):
         E.merge_files([str(bad)])
+
+
+def test_insert_with_source_bookmarks():
+    a = numbered_pdf(3, prefix="A")
+    a.set_toc([[1, "a1", 1], [1, "a3", 3]])
+    b = numbered_pdf(2, prefix="B")
+    b.set_toc([[1, "interno", 2]])
+    E.insert_pdf_pages(a, b, 1, bookmark_title="B")
+    assert a.get_toc() == [[1, "a1", 1], [1, "B", 2], [2, "interno", 3], [1, "a3", 5]]
+
+
+def test_merge_alternate(tmp_path):
+    f = save_numbered(tmp_path / "F.pdf", 3, prefix="F")
+    r = save_numbered(tmp_path / "R.pdf", 3, prefix="R")
+    out = pymupdf.open(stream=E.merge_alternate(f, r, reverse_b=True))
+    assert page_texts(out) == ["F1", "R3", "F2", "R2", "F3", "R1"]

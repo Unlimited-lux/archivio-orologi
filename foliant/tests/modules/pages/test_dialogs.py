@@ -48,6 +48,20 @@ def test_page_scope_validation(window, ten_pdf):
     assert scope.pages() == [0, 2, 4]
 
 
+def test_page_scope_labels(window, tmp_path):
+    from .conftest import numbered_pdf
+    d = numbered_pdf(24)
+    d.set_page_labels([{"startpage": 0, "style": "r"}, {"startpage": 4, "style": "D", "firstpagenum": 1}])
+    path = tmp_path / "etichette.pdf"
+    d.save(str(path))
+    view = window.open_path(str(path))
+    scope = D.PageScope(view.document, [0], 0)
+    assert not scope.use_labels.isHidden()
+    scope.use_labels.setChecked(True)
+    scope.set_range("ii-2")
+    assert scope.pages() == [1, 2, 3, 4, 5]
+
+
 def test_extract_dialog_disables_ok_on_error(window, ten_pdf):
     view = window.open_path(ten_pdf)
     dlg = D.ExtractDialog(window, view.document, [0])

@@ -370,3 +370,18 @@ def test_screenshots(pages_window, tmp_path):
     QApplication.processEvents()
     assert window.grab().save(str(tmp_path / "dark.png"))
     theme.apply(QApplication.instance(), "light")
+
+
+def test_quick_rotate_button(pages_window, qtbot):
+    window, view = pages_window
+    c = ctrl(window)
+    grid = c.organizer.grid
+    grid.flush_rendering()
+    idx = grid.model().index(3)
+    info = grid.model().infos[3]
+    rect, deg, _n = grid.itemDelegate().quick_buttons(grid.visualRect(idx), info)[1]
+    pos = rect.center().toPoint()
+    assert grid.quick_button_at(pos) == (3, 90)
+    qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=pos)
+    with E.ENGINE_LOCK:
+        assert view.document.pdf[3].rotation == 90

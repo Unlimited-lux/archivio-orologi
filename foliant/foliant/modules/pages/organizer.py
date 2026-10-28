@@ -129,6 +129,21 @@ class ThumbDelegate(QStyledItemDelegate):
         s = self.grid.thumb_size
         return QSize(s + CELL_PAD * 2, s + CELL_PAD + LABEL_HEIGHT)
 
+    def page_box(self, cell: QRect, info: PageInfo) -> QRectF:
+        s = self.grid.thumb_size
+        scale = s / max(info.width, info.height, 1)
+        pw, ph = max(8, info.width * scale), max(8, info.height * scale)
+        return QRectF(cell.x() + (cell.width() - pw) / 2, cell.y() + CELL_PAD + (s - ph) / 2, pw, ph)
+
+    def quick_buttons(self, cell: QRect, info: PageInfo) -> list[tuple[QRectF, int, str]]:
+        """Pulsanti rapidi (rettangolo, gradi, icona) mostrati al passaggio del puntatore."""
+        box = self.page_box(cell, info)
+        size = 26.0
+        y = box.bottom() - size - 6
+        cx = box.center().x()
+        return [(QRectF(cx - size - 3, y, size, size), -90, "rotate-ccw"),
+                (QRectF(cx + 3, y, size, size), 90, "rotate-cw")]
+
     def paint(self, p: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         grid = self.grid
         row = index.row()
@@ -195,6 +210,12 @@ class ThumbDelegate(QStyledItemDelegate):
                 p.setFont(f)
                 p.drawText(r.adjusted(20, 0, -2, 0), Qt.AlignmentFlag.AlignVCenter, text)
             bx = r.left() - 3
+        if hover and grid.quick_buttons_enabled:
+            for rect, _deg, name in self.quick_buttons(cell, info):
+                p.setPen(QPen(theme.color("border"), 1))
+                p.setBrush(theme.color("surface"))
+                p.drawEllipse(rect)
+                p.drawPixmap(int(rect.x() + 5), int(rect.y() + 5), icon(name, theme.tokens()["accent"]).pixmap(16, 16))
         # numero ed etichetta
         text_rect = QRectF(cell.x() + 4, cell.y() + CELL_PAD + s + 2, cell.width() - 8, LABEL_HEIGHT - 6)
         num = str(row + 1)
@@ -234,6 +255,7 @@ class PageGrid(QListView):
     selectionCountChanged = Signal(int)
     contextRequested = Signal(object)   # QPoint globale
     zoomStep = Signal(int)
+    rotateRequested = Signal(int, int)   # pagina, gradi (pulsanti rapidi)
 
     RENDER_MARGIN_ROWS = 2
 
@@ -272,6 +294,7 @@ class PageGrid(QListView):
         self._timer.timeout.connect(self._render_step)
         self._drop_index: int | None = None
         self.drag_payload: Callable[[list[int]], QMimeData | None] | None = None
+        self.quick_buttons_enabled = True
         self.verticalScrollBar().valueChanged.connect(lambda _v: self.schedule_render())
         self._apply_grid()
 
@@ -446,6 +469,28 @@ class PageGrid(QListView):
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
         self.schedule_render()
+
+    def quick_button_at(self, pos: QPoint) -> tuple[int, int] | None:
+        """(pagina, gradi) se `pos` cade su un pulsante rapido di rotazione."""
+        if not self.quick_buttons_enabled:
+            return None
+        idx = self.indexAt(pos)
+        if not idx.isValid():
+            return None
+        info = self._model.infos[idx.row()]
+        for rect, deg, _n in self.itemDelegate().quick_buttons(self.visualRect(idx), info):
+            if rect.contains(pos.x(), pos.y()):
+                return idx.row(), deg
+        return None
+
+    def mousePressEvent(self, ev) -> None:
+        if ev.button() == Qt.MouseButton.LeftButton:
+            hit = self.quick_button_at(ev.position().toPoint())
+            if hit is not None:
+                ev.accept()
+                self.rotateRequested.emit(*hit)
+                return
+        super().mousePressEvent(ev)
 
     def wheelEvent(self, ev) -> None:
         if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:

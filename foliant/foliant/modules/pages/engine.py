@@ -394,7 +394,7 @@ def _insert_runs(dst: pymupdf.Document, src: pymupdf.Document, indices: Sequence
 
 def insert_pdf_pages(pdf: pymupdf.Document, src: pymupdf.Document, at: int, src_indices: Sequence[int] | None = None,
                      *, interleave: int = 0, reverse: bool = False, annots: bool = True,
-                     widgets: bool = True) -> list[int]:
+                     widgets: bool = True, bookmark_title: str | None = None) -> list[int]:
     """Inserisce pagine di `src` prima della posizione `at` (PAG-07).
 
     Con `interleave=K` le pagine sorgente sono intercalate ogni K pagine del
@@ -414,7 +414,10 @@ def insert_pdf_pages(pdf: pymupdf.Document, src: pymupdf.Document, at: int, src_
         n = pdf.page_count
         at = max(0, min(n, at))
         if interleave <= 0:
+            src_toc = src.get_toc(simple=True) if bookmark_title else []
             count = _insert_runs(pdf, src, src_indices, at, annots, widgets)
+            if bookmark_title:
+                _add_source_bookmarks(pdf, bookmark_title, src_toc, src_indices, at)
             return list(range(at, at + count))
         # Intercalato: prima inseriamo in blocco in fondo (risorse copiate una volta),
         # poi riordiniamo.
@@ -437,6 +440,53 @@ def insert_pdf_pages(pdf: pymupdf.Document, src: pymupdf.Document, at: int, src_
     finally:
         if same:
             src.close()
+
+
+def _add_source_bookmarks(pdf: pymupdf.Document, title: str, src_toc: list, src_indices: Sequence[int],
+                          at: int) -> None:
+    """Segnalibro con il nome del file sulle pagine inserite, con i segnalibri della sorgente annidati."""
+    remap: dict[int, int] = {}
+    for pos, i in enumerate(src_indices):
+        remap.setdefault(i, at + pos)
+    toc = pdf.get_toc(simple=True)
+    new = [[1, title, at + 1]] + [[lvl + 1, t, remap[p - 1] + 1] for lvl, t, p in src_toc if p - 1 in remap]
+    # inserito prima del primo segnalibro di primo livello che punta oltre il punto di inserimento
+    pos = len(toc)
+    for k, (lvl, _t, p) in enumerate(toc):
+        if lvl == 1 and p - 1 > at:
+            pos = k
+            break
+    _set_toc_safe(pdf, toc[:pos] + new + toc[pos:])
+
+
+def merge_alternate(path_a: str, path_b: str, *, reverse_b: bool = False, password_a: str | None = None,
+                    password_b: str | None = None) -> bytes:
+    """Unione alternata di due file: A1, B1, A2, B2… (B eventualmente in ordine inverso);
+    le pagine eccedenti del file più lungo sono accodate."""
+    a = open_source(path_a, password_a)
+    b = open_source(path_b, password_b)
+    try:
+        with ENGINE_LOCK:
+            out = pymupdf.open()
+            out.insert_pdf(a)
+            base = out.page_count
+            out.insert_pdf(b)
+            bi = list(range(base, out.page_count))
+            if reverse_b:
+                bi.reverse()
+            ai = list(range(base))
+            order: list[int] = []
+            for x, y in zip(ai, bi):
+                order += [x, y]
+            k = min(len(ai), len(bi))
+            order += ai[k:] + bi[k:]
+            out.select(order)
+            data = out.tobytes(garbage=3, deflate=True)
+            out.close()
+            return data
+    finally:
+        a.close()
+        b.close()
 
 
 def delete_pages(pdf: pymupdf.Document, indices: Iterable[int]) -> int:
