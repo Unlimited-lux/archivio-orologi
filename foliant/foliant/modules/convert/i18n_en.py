@@ -715,3 +715,12 @@ EN.update({"Rendi il testo ricercabile (OCR)": "Make the text searchable (OCR)",
            "Il riconoscimento del testo richiede Tesseract (sudo apt install tesseract-ocr tesseract-ocr-ita).":
                "Text recognition requires Tesseract (sudo apt install tesseract-ocr tesseract-ocr-ita).",
            "Riconoscimento del testo…": "Recognizing text…"})
+
+# Nomi della specifica v2
+EN.update({
+    "Compressione personalizzata…": "Custom compression…",
+    "Compressione personalizzata": "Custom compression",
+    "Compressione personalizzata, riparazione e operazioni su più file": "Custom compression, repair and multi-file operations",
+    "Documenti d'ufficio (DOCX, XLSX, PPTX), testo, Markdown, CSV, HTML": "Office documents (DOCX, XLSX, PPTX), text, Markdown, CSV, HTML",
+    "_personalizzato": "_custom",
+})

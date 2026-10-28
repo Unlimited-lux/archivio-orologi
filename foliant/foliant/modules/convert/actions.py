@@ -750,8 +750,8 @@ class ConvertController:
             data, progress=progress, **values))
         if not ok:
             return None
-        return self._apply_optimized(out, len(data), doc, name, path, target, _("Ottimizzazione avanzata"),
-                                     suffix=_("_ottimizzato"))
+        return self._apply_optimized(out, len(data), doc, name, path, target, _("Compressione personalizzata"),
+                                     suffix=_("_personalizzato"))
 
     def flatten(self):
         """CNV-33: appiattisce annotazioni, campi, livelli e ritaglio del documento attivo (annullabile)."""

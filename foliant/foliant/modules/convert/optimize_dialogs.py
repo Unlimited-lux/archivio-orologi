@@ -127,7 +127,7 @@ class AdvancedDialog(QDialog):
 
     def __init__(self, parent, *, analysis: list[tuple[str, int]], has_document: bool = True):
         super().__init__(parent)
-        self.setWindowTitle(_("Ottimizzazione avanzata"))
+        self.setWindowTitle(_("Compressione personalizzata"))
         self.setMinimumWidth(600)
         lay = QVBoxLayout(self)
         box = QGroupBox(_("Analisi dello spazio"))

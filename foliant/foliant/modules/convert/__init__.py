@@ -96,7 +96,7 @@ def register(ctx) -> None:
                               tooltip=_("Riduci la dimensione del PDF"))
     act_compress_many = ctx.action(_("Comprimi più file…"), "shrink", lambda: c.compress_files(),
                                    requires_document=False)
-    act_advanced = ctx.action(_("Ottimizzazione avanzata…"), "sliders-horizontal", lambda: c.optimize_advanced(),
+    act_advanced = ctx.action(_("Compressione personalizzata…"), "sliders-horizontal", lambda: c.optimize_advanced(),
                               requires_document=False)
     act_flatten = ctx.action(_("Appiattisci…"), "layers", lambda: c.flatten(),
                              tooltip=_("Rendi fissi annotazioni, campi, livelli e ritaglio"))
@@ -111,7 +111,7 @@ def register(ctx) -> None:
         more_menu.addAction(a)
     more_btn = QToolButton()
     more_btn.setText(_("Altri strumenti"))
-    more_btn.setToolTip(_("Ottimizzazione avanzata, riparazione e operazioni su più file"))
+    more_btn.setToolTip(_("Compressione personalizzata, riparazione e operazioni su più file"))
     bind_icon(more_btn, "wrench")
     more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     more_btn.setMenu(more_menu)
@@ -125,7 +125,7 @@ def register(ctx) -> None:
     ctx.add_menu_action(act_batch_create, _("Converti"))
 
     ctx.add_home_action(_("Crea PDF da file"), "file-plus", lambda: c.create_from_files(),
-                        _("Documenti Office, testo, Markdown, CSV, HTML"), 30)
+                        _("Documenti d'ufficio (DOCX, XLSX, PPTX), testo, Markdown, CSV, HTML"), 30)
     ctx.add_home_action(_("Immagini in PDF"), "images", lambda: c.create_from_images(),
                         _("Una o più immagini, una per pagina"), 31)
     ctx.add_home_action(_("Converti PDF"), "file-output", lambda: c.export(),
