@@ -18,6 +18,7 @@ from foliant.api import (
 )
 
 TRANSLATIONS = {
+    "foliant-impostazioni.ini": "foliant-settings.ini",
     "Preferenze di visualizzazione…": "View preferences…",
     "Preferenze di visualizzazione": "View preferences",
     "Layout predefinito": "Default layout",
@@ -48,8 +49,16 @@ TRANSLATIONS = {
 
 LAYOUTS = ((VIEW_CONTINUOUS, "Scorrimento continuo"), (VIEW_SINGLE, "Pagina singola"),
            (VIEW_FACING, "Due pagine"), (VIEW_COVER, "Due pagine con copertina"))
-ZOOMS = ((FIT_WIDTH, "Adatta larghezza"), (FIT_PAGE, "Adatta pagina"), ("0.75", "75%"), ("1.0", "100%"),
-         ("1.25", "125%"), ("1.5", "150%"), ("2.0", "200%"))
+# Layout e zoom predefiniti usano le chiavi del nucleo (Preferenze > Generale), che il nucleo
+# applica a ogni documento nuovo: view/mode e view/zoom ("width", "page" o una percentuale).
+KEY_MODE = "view/mode"
+KEY_ZOOM = "view/zoom"
+ZOOMS = ((FIT_WIDTH, "Adatta larghezza"), (FIT_PAGE, "Adatta pagina"), ("75", "75%"), ("100", "100%"),
+         ("125", "125%"), ("150", "150%"), ("200", "200%"))
+CORE_ZOOMS = (FIT_WIDTH, FIT_PAGE, "100")      # quelle che il nucleo applica da sé
+# chiavi delle versioni precedenti del viewer, migrate su quelle del nucleo
+OLD_LAYOUT = "viewer/default_layout"
+OLD_ZOOM = "viewer/default_zoom"
 PANELS = (("", "Nessuno"), ("thumbnails", "Miniature"), ("bookmarks", "Segnalibri"))
 EXPORT_VERSION = 1
 # chiavi che non si esportano: dati personali o legati alla macchina
@@ -65,6 +74,20 @@ def _bool(v, default=False) -> bool:
     return str(v).lower() in ("true", "1", "yes")
 
 
+def zoom_key(value) -> str | None:
+    """Valore di zoom nel formato del nucleo: "width", "page" o percentuale intera ("100")."""
+    v = str(value or "").strip()
+    if v in (FIT_WIDTH, FIT_PAGE):
+        return v
+    try:
+        f = float(v)
+    except ValueError:
+        return None
+    if f <= 0:
+        return None
+    return str(round(f * 100)) if f < 10 else str(round(f))   # vecchio formato: fattore (1.0)
+
+
 class PrefsController:
     def __init__(self, ctx: Context):
         self.ctx = ctx
@@ -77,24 +100,34 @@ class PrefsController:
                                      requires_document=False)
         for a in (self.act, self.act_export, self.act_import):
             ctx.add_menu_action(a, _("Strumenti"))
+        self.migrate()
+
+    def migrate(self) -> None:
+        """Porta le vecchie chiavi viewer/default_layout e viewer/default_zoom su quelle del
+        nucleo (senza sovrascrivere un valore già scelto in Preferenze > Generale)."""
+        s = self.ctx.settings()
+        layout = s.value(OLD_LAYOUT)
+        if layout is not None:
+            if layout in dict(LAYOUTS) and s.value(KEY_MODE) is None:
+                s.setValue(KEY_MODE, layout)
+            s.remove(OLD_LAYOUT)
+        zoom = s.value(OLD_ZOOM)
+        if zoom is not None:
+            new = zoom_key(zoom)
+            if new is not None and s.value(KEY_ZOOM) is None:
+                s.setValue(KEY_ZOOM, new)
+            s.remove(OLD_ZOOM)
 
     # ---------------------------------------------------------------- valori
     def value(self, key: str, default=None):
         return self.ctx.settings().value(key, default)
 
     def apply_defaults(self, view: DocumentView) -> None:
-        layout = self.value("viewer/default_layout", VIEW_CONTINUOUS)
-        if layout in dict(LAYOUTS) and layout != view.view_mode:
-            view.set_view_mode(layout)
-        zoom = str(self.value("viewer/default_zoom", FIT_WIDTH) or FIT_WIDTH)
-        if zoom in (FIT_WIDTH, FIT_PAGE):
-            if view.fit_mode != zoom:
-                view.set_fit(zoom)
-        else:
-            try:
-                view.set_zoom(float(zoom))
-            except ValueError:
-                pass
+        """Completa i valori predefiniti che il nucleo ha già applicato al documento nuovo
+        (layout, larghezza, pagina, 100%): solo le altre percentuali e il pannello iniziale."""
+        zoom = zoom_key(self.value(KEY_ZOOM, FIT_WIDTH))
+        if zoom is not None and zoom not in CORE_ZOOMS:
+            view.set_zoom(int(zoom) / 100)
         panel = self.value("viewer/default_panel", "")
         if panel:
             self.ctx.show_sidebar_panel(panel)
@@ -150,8 +183,8 @@ class PrefsController:
         box.setCurrentIndex(max(0, i))
 
     def _load(self) -> None:
-        self._select(self.layout_box, self.value("viewer/default_layout", VIEW_CONTINUOUS))
-        self._select(self.zoom_box, str(self.value("viewer/default_zoom", FIT_WIDTH)))
+        self._select(self.layout_box, self.value(KEY_MODE, VIEW_CONTINUOUS))
+        self._select(self.zoom_box, zoom_key(self.value(KEY_ZOOM, FIT_WIDTH)) or FIT_WIDTH)
         self._select(self.panel_box, self.value("viewer/default_panel", ""))
         self.respect.setChecked(not _bool(self.value("viewer/ignore_document_view"), False))
         self.restore.setChecked(_bool(self.value("viewer/restore_position"), True))
@@ -159,8 +192,8 @@ class PrefsController:
 
     def save(self) -> None:
         s = self.ctx.settings()
-        s.setValue("viewer/default_layout", self.layout_box.currentData())
-        s.setValue("viewer/default_zoom", self.zoom_box.currentData())
+        s.setValue(KEY_MODE, self.layout_box.currentData())
+        s.setValue(KEY_ZOOM, self.zoom_box.currentData())
         s.setValue("viewer/default_panel", self.panel_box.currentData())
         s.setValue("viewer/ignore_document_view", not self.respect.isChecked())
         s.setValue("viewer/restore_position", self.restore.isChecked())
@@ -209,6 +242,7 @@ class PrefsController:
                 continue
             s.setValue(key, value)
             n += 1
+        self.migrate()          # file esportati da versioni precedenti
         # scorciatoie e temi si applicano subito se le parti sono caricate
         parts = getattr(self.ctx, "viewer_parts", {})
         if parts.get("commands") is not None:
@@ -216,7 +250,7 @@ class PrefsController:
         return n
 
     def export_dialog(self) -> None:
-        path = self.ctx.ask_save_path(_("Esporta impostazioni…"), "foliant-impostazioni.ini",
+        path = self.ctx.ask_save_path(_("Esporta impostazioni…"), _("foliant-impostazioni.ini"),
                                       _("Impostazioni (*.ini)"), ".ini")
         if path:
             atomic_write(path, self.export_text().encode("utf-8"))
@@ -239,6 +273,8 @@ class PrefsController:
         for key in s.allKeys():
             if key.startswith("viewer/") and not key.startswith(PRIVATE_PREFIXES):
                 s.remove(key)
+        s.remove(KEY_MODE)
+        s.remove(KEY_ZOOM)
         parts = getattr(self.ctx, "viewer_parts", {})
         if parts.get("commands") is not None:
             parts["commands"].restore_defaults()

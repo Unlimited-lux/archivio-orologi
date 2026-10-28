@@ -335,3 +335,23 @@ def test_many_changes_refresh_navigation_once(viewer_window, sample_pdf, monkeyp
     QApplication.processEvents()
     assert len(calls) == 1
     view.document._saved_state = view.document._state
+
+
+def test_ux18_rotate_tooltips_follow_language(settings, qtbot, monkeypatch):
+    """NFR-25: in inglese i suggerimenti di «Ruota vista» non mostrano «Maiusc»."""
+    from foliant import i18n
+    from foliant.ui.main_window import MainWindow
+    monkeypatch.setattr(i18n, "_language", "en")
+    win = MainWindow(settings)
+    qtbot.addWidget(win)
+    nav = win.ctx.viewer_parts["navigation"]
+    tips = [nav.act_rotate_ccw.toolTip()]
+    if getattr(win, "act_rotate_view", None) is not None:
+        tips.append(win.act_rotate_view.toolTip())
+    assert all("Maiusc" not in t and "Shift" in t for t in tips), tips
+    assert nav.act_rotate_ccw.toolTip().startswith("Rotate view")
+
+
+def test_ux18_rotate_tooltips_italian(viewer_window):
+    nav = viewer_window.ctx.viewer_parts["navigation"]
+    assert "Maiusc" in nav.act_rotate_ccw.toolTip()

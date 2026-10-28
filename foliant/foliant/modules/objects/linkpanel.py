@@ -34,7 +34,6 @@ add_translations("en", {
     "Verifica degli indirizzi in corso…": "Checking addresses…",
     "Esporta rapporto": "Export report",
     "File CSV (*.csv)": "CSV files (*.csv)",
-    "Impossibile scrivere il file.": "Unable to write the file.",
     "web": "web", "interno": "internal", "file": "file", "altro": "other",
     "OK": "OK", "rotto": "broken", "sospetto": "suspicious", "non verificato": "not checked",
     "non verificabile": "not checkable", "reindirizzato": "redirected", "non trovato": "not found",

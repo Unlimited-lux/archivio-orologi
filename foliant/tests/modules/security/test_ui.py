@@ -553,7 +553,21 @@ def test_redaction_settings_and_codes(window, sec, tmp_path, monkeypatch):
     sec.export_codes(str(out))
     sec.set_codes(["altro"])
     assert sec.import_codes(str(out))[-1] == "Riservato cliente"
-    assert sec.codes()[0] == C.DEFAULT_CODES[0]
+    assert sec.codes()[0] == C.default_codes()[0]
+
+
+def test_default_codes_translated(window, sec):
+    from foliant.i18n import set_language
+    sec.set_codes([])
+    window.settings.remove(C.CODES_KEY)
+    set_language("en")
+    try:
+        codes = sec.codes()
+        assert "Dato personale" not in codes and "Pagina omessa" not in codes
+        assert "Personal data" in codes and "Page omitted" in codes
+    finally:
+        set_language("it")
+    assert "Dato personale" in sec.codes()
 
 
 # ------------------------------------------------------- avvisi e collegamenti

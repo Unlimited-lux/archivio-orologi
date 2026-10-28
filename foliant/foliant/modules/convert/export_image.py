@@ -93,7 +93,7 @@ def write_images(work: pymupdf.Document, base_path: str, job, out) -> list[str]:
     annots = bool(o.get("annotations", True))
     base = Path(base_path)
     ext = base.suffix if base.suffix else EXTENSIONS[fmt]
-    template = o.get("name_template", "{nome}_{pagina:03}")
+    template = o.get("name_template") or _("{nome}_{pagina:03}")
     n = work.page_count
     with ENGINE_LOCK:
         for i in range(n):

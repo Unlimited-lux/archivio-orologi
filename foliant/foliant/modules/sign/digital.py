@@ -29,6 +29,7 @@ from cryptography.x509.oid import ExtensionOID, NameOID
 
 from foliant.core.engine import ENGINE_LOCK
 from foliant.core.errors import FoliantError
+from foliant import i18n
 from foliant.i18n import _
 
 if asn1_cms.ContentType._reverse_map is not None and "tst_info" not in asn1_cms.ContentType._reverse_map:
@@ -686,12 +687,13 @@ DATE_FORMATS = {
 
 def _appearance_lines(info: CertInfo, opts: "SignOptions", now: datetime, show: list[str],
                       app: dict | None = None) -> list[str]:
-    """Righe di testo dell'aspetto. `app` può indicare "label_language" ("it"/"en"),
-    "date_format" (chiave di DATE_FORMATS o formato strftime) e "utc" (bool)."""
+    """Righe di testo dell'aspetto. `app` può indicare "label_language" ("it"/"en"; se manca
+    vale la lingua dell'interfaccia), "date_format" (chiave di DATE_FORMATS o formato strftime)
+    e "utc" (bool)."""
     app = app or {}
     labels = "etichette" in show
-    lang = app.get("label_language") or "it"
-    lab = APPEARANCE_LABELS.get(lang, APPEARANCE_LABELS["it"])
+    lang = app.get("label_language") or i18n.language()
+    lab = APPEARANCE_LABELS.get(lang, APPEARANCE_LABELS["en"])
     fmt = app.get("date_format") or "%d/%m/%Y %H:%M:%S %z"
     fmt = DATE_FORMATS.get(fmt, fmt)
     if app.get("utc"):

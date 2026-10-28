@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from foliant.i18n import pgettext
 from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, _, icon, theme
 
@@ -66,9 +67,9 @@ TRANSLATIONS = {
     "Conserva i dati originali": "Keep original data",
     "Ricomprimi (JPEG)": "Recompress (JPEG)",
     "Posizione": "Position",
-    "Prima della selezione": "Before selection",
-    "Dopo la selezione": "After selection",
-    "All'inizio": "At the beginning",
+    "Prima della selezione": "Before the selection",
+    "Dopo la selezione": "After the selection",
+    "All'inizio": "At the start",
     "Alla fine": "At the end",
     "Inserisci": "Insert",
     "Aggiungi almeno un'immagine.": "Add at least one image.",
@@ -90,7 +91,7 @@ TRANSLATIONS = {
     "Formato pagina (testo)": "Page size (text)",
     "Dimensione carattere": "Font size",
     "Anteprima non disponibile: {e}": "Preview not available: {e}",
-    "Formato": "Format",
+    "file\x04Formato": "Format",
     "Risoluzione": "Resolution",
     "Colore": "Color",
     "A colori": "Color",
@@ -677,7 +678,7 @@ class ExportImagesDialog(QDialog):
         self.format_combo = QComboBox()
         for text, value in (("PNG", "png"), ("JPEG", "jpeg"), ("TIFF", "tiff"), ("BMP", "bmp"), ("WebP", "webp")):
             self.format_combo.addItem(text, value)
-        form.addRow(_("Formato"), self.format_combo)
+        form.addRow(pgettext("file", "Formato"), self.format_combo)
         self.dpi_spin = QSpinBox()
         self.dpi_spin.setRange(10, 2400)
         self.dpi_spin.setValue(150)

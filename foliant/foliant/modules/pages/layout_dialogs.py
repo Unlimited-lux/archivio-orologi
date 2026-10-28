@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from foliant.i18n import pgettext
 from foliant.api import OperationCancelled
 from foliant.api import ENGINE_LOCK, Document, _, icon, theme
 
@@ -28,6 +29,15 @@ from .engine import INCH, MM, PAPER_SIZES, PageOpError, RangeError, parse_ranges
 
 TRANSLATIONS = {
     "Annulla": "Cancel",
+    "In alto a sinistra": "Top left",
+    "In alto al centro": "Top center",
+    "In alto a destra": "Top right",
+    "Al centro a sinistra": "Center left",
+    "Al centro": "Center",
+    "Al centro a destra": "Center right",
+    "In basso a sinistra": "Bottom left",
+    "In basso al centro": "Bottom center",
+    "In basso a destra": "Bottom right",
     "Ritaglia pagine": "Crop pages",
     "Ripristina ritaglio": "Reset crop",
     "Rimuovi margini bianchi": "Remove white margins",
@@ -43,8 +53,8 @@ TRANSLATIONS = {
     "Pari": "Even",
     "Dispari": "Odd",
     "es. 1-3, 8, 10-": "e.g. 1-3, 8, 10-",
-    "Nessuna pagina selezionata.": "No pages selected.",
-    "Nessuna pagina corrisponde ai criteri indicati.": "No pages match the given criteria.",
+    "Nessuna pagina selezionata.": "No page selected.",
+    "Nessuna pagina corrisponde ai criteri indicati.": "No page matches the given criteria.",
     "Anteprima": "Preview",
     "Anteprima: pagina {n}": "Preview: page {n}",
     "Margini": "Margins",
@@ -102,7 +112,7 @@ TRANSLATIONS = {
     "In {n} pagine il riquadro è stato limitato al supporto.": "On {n} pages the box was clipped to the media.",
     "Sono presenti sia il formato finito sia l'area grafica: i profili PDF/X ne richiedono uno solo.":
         "Both trim and art boxes are present: PDF/X profiles require only one.",
-    "Formato": "Size",
+    "pagina\x04Formato": "Size",
     "Orientamento": "Orientation",
     "Automatico (come la pagina)": "Automatic (as the page)",
     "Verticale": "Portrait",
@@ -173,6 +183,16 @@ UNIT_LABELS = [("mm", "mm"), ("pt", "pt"), ("in", "in"), ("%", "%")]
 _UNIT_FACTOR = {"mm": MM, "pt": 1.0, "in": INCH}
 _ANCHOR_ORDER = ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"]
 _ANCHOR_ARROWS = ["↖", "↑", "↗", "←", "•", "→", "↙", "↓", "↘"]
+
+
+def anchor_label(key: str) -> str:
+    """Nome leggibile (tradotto) di un ancoraggio, per suggerimenti e lettori di schermo."""
+    return {
+        "top-left": _("In alto a sinistra"), "top": _("In alto al centro"), "top-right": _("In alto a destra"),
+        "left": _("Al centro a sinistra"), "center": _("Al centro"), "right": _("Al centro a destra"),
+        "bottom-left": _("In basso a sinistra"), "bottom": _("In basso al centro"),
+        "bottom-right": _("In basso a destra"),
+    }.get(key, key)
 
 
 # =========================================================================
@@ -1019,7 +1039,7 @@ class BoxesDialog(_LayoutDialog):
         self.trim_w = _spin(210, 3, 5000, 1, "mm")
         self.trim_h = _spin(297, 3, 5000, 1, "mm")
         self.bleed = _spin(3, 0, 100, 1, "mm")
-        tf.addWidget(QLabel(_("Formato")), 0, 0)
+        tf.addWidget(QLabel(pgettext("pagina", "Formato")), 0, 0)
         tf.addWidget(self.paper, 0, 1)
         tf.addWidget(QLabel(_("Abbondanza")), 0, 2)
         tf.addWidget(self.bleed, 0, 3)
@@ -1192,7 +1212,7 @@ class ResizeDialog(_LayoutDialog):
     ICON = "scaling"
 
     def build(self) -> None:
-        box = QGroupBox(_("Formato"))
+        box = QGroupBox(pgettext("pagina", "Formato"))
         f = QFormLayout(box)
         self.paper = _paper_combo("A4")
         self.width_mm = _spin(210, 3, 5080, 1, "mm")
@@ -1201,7 +1221,7 @@ class ResizeDialog(_LayoutDialog):
         for key, text in (("auto", _("Automatico (come la pagina)")), ("portrait", _("Verticale")),
                           ("landscape", _("Orizzontale"))):
             self.orientation.addItem(text, key)
-        f.addRow(_("Formato"), self.paper)
+        f.addRow(pgettext("pagina", "Formato"), self.paper)
         f.addRow(_("Larghezza"), self.width_mm)
         f.addRow(_("Altezza"), self.height_mm)
         f.addRow(_("Orientamento"), self.orientation)
@@ -1247,7 +1267,8 @@ class ResizeDialog(_LayoutDialog):
             b.setText(arrow)
             b.setCheckable(True)
             b.setFixedSize(28, 28)
-            b.setToolTip(key)
+            b.setToolTip(anchor_label(key))
+            b.setAccessibleName(anchor_label(key))
             self.anchor_group.addButton(b)
             self.anchor_buttons[key] = b
             agrid.addWidget(b, n // 3, n % 3)

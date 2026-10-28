@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from foliant.api import Context, _, add_translations, atomic_write
 
 TRANSLATIONS = {
+    "scorciatoie.txt": "shortcuts.txt",
     "Cerca un comando…": "Search for a command…",
     "Ricerca dei comandi": "Command search",
     "Scorciatoie da tastiera…": "Keyboard shortcuts…",
@@ -364,7 +365,7 @@ class CommandsController(QObject):
         return n
 
     def export_dialog(self) -> None:
-        path = self.ctx.ask_save_path(_("Scorciatoie da tastiera"), "scorciatoie.txt", _("Scorciatoie (*.txt)"), ".txt")
+        path = self.ctx.ask_save_path(_("Scorciatoie da tastiera"), _("scorciatoie.txt"), _("Scorciatoie (*.txt)"), ".txt")
         if path:
             atomic_write(path, self.export_text().encode("utf-8"))
 

@@ -633,7 +633,7 @@ class CreateSignatureDialog(QDialog):
 
 TRANSLATIONS_EN = {
     "Nero": "Black", "Blu": "Blue", "Rosso": "Red", "Personalizzato…": "Custom…",
-    "Colore:": "Colour:", "Colore della firma": "Signature colour",
+    "Colore:": "Color:", "Colore della firma": "Signature color",
     "Area di disegno della firma": "Signature drawing area",
     "Disegna qui la firma": "Draw your signature here",
     "Spessore:": "Width:", "Spessore del tratto": "Stroke width",

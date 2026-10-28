@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.api import ENGINE_LOCK, OperationCancelled, _, add_translations, theme
+from foliant.i18n import pgettext
 
 from .printing_engine import (
     ACTUAL_SIZE, FIT_PAGE, LAYERS_PRINT, LAYERS_SCREEN, PrintOptions, RangeError, document_print_capability,
@@ -39,7 +40,7 @@ EN = {
     "Copie": "Copies",
     "Fascicola": "Collate",
     "Dimensione": "Size",
-    "Adatta alla pagina": "Fit to page",
+    "stampa\x04Adatta alla pagina": "Fit to page",
     "Dimensione reale": "Actual size",
     "Opzioni": "Options",
     "Stampa annotazioni e commenti": "Print annotations and comments",
@@ -117,7 +118,7 @@ class PrintOptionsDialog(QDialog):
 
         size_box = QGroupBox(_("Dimensione"), self)
         sl = QVBoxLayout(size_box)
-        self.rb_fit = QRadioButton(_("Adatta alla pagina"), size_box)
+        self.rb_fit = QRadioButton(pgettext("stampa", "Adatta alla pagina"), size_box)
         self.rb_actual = QRadioButton(_("Dimensione reale"), size_box)
         self.rb_fit.setChecked(True)
         sl.addWidget(self.rb_fit)

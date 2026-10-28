@@ -950,7 +950,7 @@ TRANSLATIONS = {
     "Il documento non ha pagine.": "The document has no pages.",
     "Numero di pagina non valido.": "Invalid page number.",
     "La pagina {n} non esiste (il documento ha {tot} pagine).": "Page {n} does not exist (the document has {tot} pages).",
-    "Indica almeno una pagina.": "Specify at least one page.",
+    "Indica almeno una pagina.": "Enter at least one page.",
     "Colore non valido: servono tre valori tra 0 e 1.": "Invalid color: three values between 0 and 1 are required.",
     "L'opacità deve essere compresa tra 1% e 100%.": "Opacity must be between 1% and 100%.",
     "La dimensione del carattere deve essere tra 1 e 1000 punti.": "Font size must be between 1 and 1000 points.",

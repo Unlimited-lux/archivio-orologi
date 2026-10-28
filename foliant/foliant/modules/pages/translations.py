@@ -80,7 +80,7 @@ EN = {
     "Inserisci": "Insert",
     "Dividi e unisci": "Split and merge",
     "Disponi": "Arrange",
-    "Formato": "Layout",
+    "menu\x04Formato": "Layout",
     "Timbri": "Stamps",
     "Altro": "More",
     "Unisci PDF": "Merge PDFs",
@@ -131,6 +131,7 @@ EN = {
     "Duplica": "Duplicate",
     "Organizza pagine": "Organize pages",
     "Pagina non leggibile": "Unreadable page",
+    "senza_nome": "untitled",
     "Contenuto nascosto dal ritaglio": "Content hidden by cropping",
     "Alcune pagine sono ritagliate: il testo fuori dall'area visibile resta nel file e può essere copiato o cercato. Per eliminarlo davvero usa l'appiattimento o la sanificazione nella modalità Proteggi.\n\nSalvare comunque?":
         "Some pages are cropped: text outside the visible area stays in the file and can be copied or searched. To really remove it use flattening or sanitizing in Protect mode.\n\nSave anyway?",

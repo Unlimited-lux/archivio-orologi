@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from foliant import i18n
 from foliant.api import _, theme
 
 from . import graphic as g
@@ -113,10 +114,11 @@ class DigitalSignDialog(QDialog):
             show_row.addWidget(cb)
         self.date_combo = QComboBox()
         for key in digital.DATE_FORMATS:
-            self.date_combo.addItem(key, key)
+            self.date_combo.addItem(_(key), key)
         self.lang_combo = QComboBox()
         self.lang_combo.addItem("Italiano", "it")
         self.lang_combo.addItem("English", "en")
+        self.lang_combo.setCurrentIndex(max(0, self.lang_combo.findData(i18n.language())))
         self.preview = AppearancePreview(self)
         self.save_profile = QPushButton(_("Salva come aspetto…"))
         for p in store.AppearanceProfiles().list():
@@ -525,7 +527,7 @@ class FieldDialog(QDialog):
             self.digest.addItem(alg.upper().replace("SHA", "SHA-"), [alg])
         form.addRow(_("Algoritmo di hash richiesto:"), self.digest)
         self.pages = QLineEdit()
-        self.pages.setPlaceholderText(_("solo questa pagina; es. «tutte» o «1-3,7»"))
+        self.pages.setPlaceholderText(_("solo questa pagina; es. «tutte», «pari» o «1-3,7»"))
         form.addRow(_("Duplica sulle pagine:"), self.pages)
         self.lock_action = QComboBox()
         for key, label in [(None, _("Nessun campo")), ("All", _("Tutti i campi")),
@@ -1096,7 +1098,7 @@ TRANSLATIONS_EN = {
     "Titolare: {s}\nEmittente: {iss}\nValido dal {a} al {b}\nUsi della chiave: {ku}":
         "Holder: {s}\nIssuer: {iss}\nValid from {a} to {b}\nKey usage: {ku}",
     "Certificato autofirmato: gli altri non lo riconosceranno automaticamente.":
-        "Self-signed certificate: others will not recognise it automatically.",
+        "Self-signed certificate: others will not recognize it automatically.",
     "Certificato scaduto": "Expired certificate",
     "La firma risulterà non valida. Procedere solo per prova?": "The signature will be invalid. Proceed for testing only?",
     "Nuovo campo firma": "New signature field", "Firma": "Signature", "Nome:": "Name:",
@@ -1108,9 +1110,9 @@ TRANSLATIONS_EN = {
     "Crea ID digitale autofirmato": "Create self-signed digital ID",
     "Un ID autofirmato va bene per uso interno o per prova: gli altri non lo riconosceranno automaticamente "
     "finché non considerano attendibile il tuo certificato.":
-        "A self-signed ID is fine for internal use or testing: others will not recognise it automatically until "
+        "A self-signed ID is fine for internal use or testing: others will not recognize it automatically until "
         "they trust your certificate.",
-    "Nome e cognome:": "Full name:", "Organizzazione:": "Organisation:", "Unità:": "Unit:", "E-mail:": "E-mail:",
+    "Nome e cognome:": "Full name:", "Organizzazione:": "Organization:", "Unità:": "Unit:", "E-mail:": "E-mail:",
     "Paese (2 lettere):": "Country (2 letters):", "Algoritmo:": "Algorithm:", " anni": " years",
     "Validità:": "Validity:", "Conferma password:": "Confirm password:", "File:": "File:",
     "Crea": "Create", "Salva l'ID digitale": "Save the digital ID", "Il nome è obbligatorio.": "The name is required.",
@@ -1146,7 +1148,9 @@ TRANSLATIONS_EN = {
     "motivi separati da punto e virgola (facoltativo)": "reasons separated by semicolons (optional)",
     "Motivi ammessi:": "Allowed reasons:", "Algoritmo di hash richiesto:": "Required hash algorithm:", "Nessuno (firma di approvazione)": "None (approval signature)",
     "Certificazione richiesta:": "Required certification:", "Duplica sulle pagine:": "Duplicate on pages:",
-    "solo questa pagina; es. «tutte» o «1-3,7»": "this page only; e.g. “tutte” or “1-3,7”", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
+    "solo questa pagina; es. «tutte», «pari» o «1-3,7»": "this page only; e.g. “all”, “even” or “1-3,7”",
+    "gg/mm/aaaa hh:mm:ss": "dd/mm/yyyy hh:mm:ss", "gg/mm/aaaa hh:mm": "dd/mm/yyyy hh:mm",
+    "aaaa-mm-gg hh:mm:ss": "yyyy-mm-dd hh:mm:ss", "gg/mm/aaaa": "dd/mm/yyyy", "Qualsiasi": "Any", "Scegli certificato…": "Choose certificate…",
     "Emittente ammesso:": "Allowed issuer:", "Certificato dell'emittente ammesso": "Certificate of the allowed issuer",
     "Certificato non leggibile.": "Unreadable certificate.",
     "Questi campi del modulo non potranno più essere modificati senza invalidare la firma.":
