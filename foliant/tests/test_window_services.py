@@ -509,12 +509,14 @@ def test_preferences_pages_and_author_name(window):
             applied.append(self)
 
     created = []
-    ctx.add_preferences_page("Assistente IA", lambda parent: created.append(Page(parent)) or created[-1])
+    ctx.add_preferences_page("Pagina di prova", lambda parent: created.append(Page(parent)) or created[-1])
     ctx.add_preferences_page("Rotta", lambda: 1 / 0, order=200)
     dlg = PreferencesDialog(window.settings, window, pages=window.preference_pages())
-    assert [dlg.sections.item(i).text() for i in range(dlg.sections.count())] == ["Generale", "Assistente IA", "Rotta"]
-    assert dlg.show_page("Assistente IA") and dlg.stack.currentWidget() is created[0]
-    assert isinstance(dlg.module_pages[1], QLabel)                   # pagina difettosa: messaggio, non errore
+    names = [dlg.sections.item(i).text() for i in range(dlg.sections.count())]
+    # i moduli caricati possono aggiungere le loro pagine: contano la prima, l'ordine e l'ultima
+    assert names[0] == "Generale" and names[-1] == "Rotta" and "Pagina di prova" in names
+    assert dlg.show_page("Pagina di prova") and dlg.stack.currentWidget() is created[0]
+    assert isinstance(dlg.module_pages[names.index("Rotta") - 1], QLabel)   # pagina difettosa: messaggio
     dlg.author.setText("Anna Bianchi")
     dlg.apply()
     assert applied == [created[0]]
