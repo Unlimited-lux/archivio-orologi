@@ -472,6 +472,14 @@ class AnnotationsModule:
             self._sync_actions(view.tool)
 
     # ------------------------------------------------------------------ menu contestuale
+    def _note_on_selection(self, view) -> None:
+        """«Aggiungi nota» sul testo selezionato: evidenziazione con il commento scritto nell'editor."""
+        from . import dialogs
+        res = dialogs.edit_comment(view, _("Nota"), self.ctrl.author(), "")
+        if res is None:
+            return
+        self.tools[engine.HIGHLIGHT].apply_selection(view, contents=res[0])
+
     def _view_menu(self, view, pe, menu: QMenu) -> None:
         if pe.page is None:
             return
@@ -488,10 +496,13 @@ class AnnotationsModule:
             return
         sel = view.text_selection
         if sel is not None and sel.rects:
-            sub = menu.addMenu(_("Commenta il testo"))
+            # voci dirette, come nella specifica (UX-07): Evidenzia, Sottolinea, Barrato, Aggiungi nota
+            if not menu.isEmpty():
+                menu.addSeparator()
             for key, text in ((engine.HIGHLIGHT, _("Evidenzia")), (engine.UNDERLINE, _("Sottolinea")),
-                              (engine.STRIKEOUT, _("Barra")), (engine.SQUIGGLY, _("Ondulato"))):
-                sub.addAction(text, lambda _c=False, k=key: self.tools[k].apply_selection(view))
+                              (engine.STRIKEOUT, _("Barrato")), (engine.SQUIGGLY, _("Ondulato"))):
+                menu.addAction(text, lambda _c=False, k=key: self.tools[k].apply_selection(view))
+            menu.addAction(_("Aggiungi nota"), lambda: self._note_on_selection(view))
         if self.ctx.current_mode() != "commenta":
             return
         point = pe.point

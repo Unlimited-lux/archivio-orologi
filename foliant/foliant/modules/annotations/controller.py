@@ -284,7 +284,9 @@ class Controller(QObject):
             return None
         try:
             with view.document.change(label, kind=change_kind) as pdf:
-                return fn(pdf, *args, **kwargs)
+                result = fn(pdf, *args, **kwargs)
+                self._conform(pdf)
+                return result
         except OperationCancelled:
             reason = view.document.locked_reason
             if reason:
@@ -297,6 +299,13 @@ class Controller(QObject):
         except Exception as e:  # nessun errore del modulo deve chiudere l'applicazione
             self.ctx.error(_("Commenti"), _("Operazione non riuscita: {e}").format(e=e))
         return None
+
+    def _conform(self, pdf) -> None:
+        """Vincoli PDF/A e struttura logica dei documenti taggati (ANN-01), con avviso se l'opacità
+        è stata forzata a 1 (PDF/A-1)."""
+        res = engine.conform(pdf)
+        if res.opacity_forced:
+            self.ctx.status(_("Documento PDF/A-1: l'opacità delle annotazioni è stata portata al 100%."))
 
     def can_comment(self, view, warn: bool = True) -> bool:
         """Rispetta il permesso «commenti» del documento (bit 6 di /P)."""

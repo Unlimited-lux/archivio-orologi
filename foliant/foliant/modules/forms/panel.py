@@ -172,7 +172,7 @@ TRANSLATIONS: dict[str, str] = {
     "Casella di controllo": "Check box",
     "Pulsante di opzione": "Radio button",
     "Elenco a discesa": "Drop-down list",
-    "Elenco": "List box",
+    "tipo di campo\x04Elenco": "List box",   # pgettext: il tipo di campo, non il nome predefinito
     "Pulsante": "Button",
     "Campo firma": "Signature field",
     "Spunta": "Check",
@@ -1696,7 +1696,7 @@ class FieldPropertiesPanel(QWidget):
         self.fmt_currency.setText(f.currency)
         self.fmt_currency_before.setTristate(False)
         self.fmt_currency_before.setChecked(f.currency_before)
-        date_p = f.pattern if f.type == fm.DATE else fm.DATE_PATTERNS[0]
+        date_p = f.pattern if f.type == fm.DATE else fm.default_date_pattern()
         i = self.fmt_date.findData(date_p)
         if i < 0:
             self.fmt_date.addItem(fm.pattern_label(date_p), date_p)

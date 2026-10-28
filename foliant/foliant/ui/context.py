@@ -9,9 +9,9 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
-from PySide6.QtCore import QObject, QSettings, Signal
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QToolBar, QToolButton, QWidget
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QToolBar, QToolButton, QWidget, QWidgetAction
 
 from ..core.document import Document
 from ..i18n import _
@@ -24,6 +24,32 @@ if TYPE_CHECKING:
     from .main_window import MainWindow
 
 PDF_FILTER = "PDF (*.pdf)"
+
+
+def _tab_focusable(toolbar: QToolBar, action: QAction) -> None:
+    """Il QToolButton che una QToolBar crea per un'azione nasce con NoFocus: lo rende
+    raggiungibile con Tab (NFR-21). Il clic del mouse non sposta comunque il fuoco."""
+    if isinstance(action, QWidgetAction):
+        return                                   # widget del chiamante: decide lui
+    button = toolbar.widgetForAction(action)
+    if isinstance(button, QToolButton) and button.focusPolicy() == Qt.FocusPolicy.NoFocus:
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
+
+class ToolBar(QToolBar):
+    """Barra del nucleo con i pulsanti raggiungibili con Tab e Maiusc+Tab (NFR-21), compreso
+    quello dei comandi in eccesso («»»)."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        extension = self.findChild(QToolButton, "qt_toolbar_ext_button")
+        if extension is not None:
+            extension.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
+    def actionEvent(self, event) -> None:
+        super().actionEvent(event)
+        if event.type() == QEvent.Type.ActionAdded:
+            _tab_focusable(self, event.action())
 
 
 class Mode(QObject):
@@ -46,6 +72,7 @@ class Mode(QObject):
 
     def add_action(self, action: QAction) -> QAction:
         self.toolbar.addAction(action)
+        _tab_focusable(self.toolbar, action)
         return action
 
     def set_default_tool(self, tool_or_factory: "Tool | Callable[[DocumentView], Tool | None] | None") -> None:
@@ -330,6 +357,12 @@ class Context(QObject):
         """Aggiunge una voce al menu principale (☰), raggruppata per sezione."""
         self._w.add_menu_action(action, section)
 
+    def add_command(self, name: str, fn: Callable[[], Any]) -> None:
+        """Comando con nome per la riga di comando e le azioni del file .desktop: «create-pdf»
+        (`foliant --create`) e «merge» (`foliant --merge`). Senza, il nucleo usa l'azione
+        rapida della Home «Crea PDF da file» / «Unisci PDF»."""
+        self._w.add_command(name, fn)
+
     def add_home_action(self, title: str, icon_name: str, callback: Callable[[], Any],
                         description: str = "", order: int = 100) -> None:
         """Aggiunge un'azione rapida alla schermata Home."""
@@ -419,6 +452,19 @@ class Context(QObject):
 
     def ruler_unit(self) -> str:
         return self._w.ruler_unit()
+
+    # ------------------------------------------------------- formati locali
+    def paper_size(self) -> str:
+        """Formato carta predefinito per i nuovi documenti: "A4" o "Letter" (preferenza
+        «Formato carta», altrimenti dalle impostazioni locali, NFR-26)."""
+        from ..core.locale_defaults import paper_size
+        return paper_size(self._w.settings)
+
+    def measure_unit(self) -> str:
+        """Unità di misura dei dialoghi: "mm" o "in" (preferenza «Unità di misura»,
+        altrimenti dalle impostazioni locali, NFR-26)."""
+        from ..core.locale_defaults import measure_unit
+        return measure_unit(self._w.settings)
 
     # ----------------------------------------------------------------- dialoghi
     def status(self, message: str, timeout_ms: int = 5000) -> None:
@@ -512,3 +558,26 @@ class Context(QObject):
     def remove_recent(self, path: str) -> None:
         """Toglie un file dall'elenco dei recenti."""
         self._w.remove_recent(str(path))
+
+    def pin_recent(self, path: str, pinned: bool = True) -> None:
+        """Fissa (True) o sblocca (False) un documento in cima ai recenti della Home."""
+        self._w.pin_recent(str(path), pinned)
+
+    def is_pinned(self, path: str) -> bool:
+        return self._w.is_pinned(str(path))
+
+    def pinned_recent(self) -> list[str]:
+        """Documenti fissati, nell'ordine in cui compaiono in cima ai recenti."""
+        return self._w.pinned_recent()
+
+    def clear_recent(self, ask: bool = True) -> bool:
+        """«Svuota elenco»: toglie i recenti non fissati (con `ask`, dopo la conferma UX-13).
+        Restituisce False se l'utente annulla."""
+        return self._w.clear_recent(ask)
+
+    def add_recent_menu_provider(self, provider: Callable[[str, Any], Any]) -> None:
+        """Voci del menu contestuale di un recente della Home: `provider(percorso, menu)`
+        aggiunge azioni a `menu` (QMenu), tra quelle del nucleo (Apri, Fissa/Sblocca) e
+        Rimuovi dall'elenco / Svuota elenco."""
+        if provider not in self._w.recent_menu_providers:
+            self._w.recent_menu_providers.append(provider)

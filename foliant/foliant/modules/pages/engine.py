@@ -565,8 +565,81 @@ def delete_pages(pdf: pymupdf.Document, indices: Iterable[int]) -> int:
     pdf.delete_pages(sel)
     _fix_open_action(pdf)
     prune_structure(pdf)
+    prune_threads(pdf)
     rebuild_form_fields(pdf)
     return len(sel)
+
+
+def prune_threads(pdf: pymupdf.Document) -> int:
+    """Thread di articoli (PAG-03): toglie i bead delle pagine che non esistono più e ricuce
+    la catena; un thread rimasto senza bead viene eliminato. Restituisce i bead rimossi."""
+    cat = pdf.pdf_catalog()
+    kind, value = pdf.xref_get_key(cat, "Threads")
+    if kind == "xref":
+        holder, (kind, value) = int(value.split()[0]), ("array", pdf.xref_object(int(value.split()[0]), compressed=True))
+    else:
+        holder = None
+    if kind != "array":
+        return 0
+    live = {pdf[i].xref for i in range(pdf.page_count)}
+    removed = 0
+    kept_threads: list[str] = []
+    for t in _split_array(value):
+        tx = _ref(t)
+        if tx is None:
+            continue
+        k, first = pdf.xref_get_key(tx, "F")
+        beads: list[int] = []
+        bx = _ref(first) if k == "xref" else None
+        seen: set[int] = set()
+        while bx is not None and bx not in seen:
+            seen.add(bx)
+            beads.append(bx)
+            kn, nxt = pdf.xref_get_key(bx, "N")
+            bx = _ref(nxt) if kn == "xref" else None
+        alive = []
+        for b in beads:
+            kp, page = pdf.xref_get_key(b, "P")
+            if kp == "xref" and _ref(page) in live:
+                alive.append(b)
+            else:
+                removed += 1
+        if not alive:
+            continue
+        for i, b in enumerate(alive):   # catena circolare: /N successivo, /V precedente
+            pdf.xref_set_key(b, "N", f"{alive[(i + 1) % len(alive)]} 0 R")
+            pdf.xref_set_key(b, "V", f"{alive[i - 1]} 0 R")
+            pdf.xref_set_key(b, "T", f"{tx} 0 R")
+        pdf.xref_set_key(tx, "F", f"{alive[0]} 0 R")
+        kept_threads.append(f"{tx} 0 R")
+    # /B delle pagine: solo bead ancora vivi
+    for i in range(pdf.page_count):
+        kb, bl = pdf.xref_get_key(pdf[i].xref, "B")
+        if kb == "array":
+            rest = [t for t in _split_array(bl) if _bead_alive(pdf, _ref(t), live)]
+            pdf.xref_set_key(pdf[i].xref, "B", "[" + " ".join(rest) + "]" if rest else "null")
+    arr = "[" + " ".join(kept_threads) + "]"
+    if holder:
+        pdf.update_object(holder, arr)
+    else:
+        pdf.xref_set_key(cat, "Threads", arr if kept_threads else "null")
+    return removed
+
+
+def declares_pdfa(pdf: pymupdf.Document) -> bool:
+    """True se i metadati XMP dichiarano la conformità PDF/A (pdfaid:part)."""
+    try:
+        xmp = pdf.get_xml_metadata() or ""
+    except Exception:
+        return False
+    return "pdfaid:part" in xmp
+
+
+def _bead_alive(pdf: pymupdf.Document, bx: int | None, live: set[int]) -> bool:
+    if bx is None:
+        return False
+    kp, page = pdf.xref_get_key(bx, "P")
+    return kp == "xref" and _ref(page) in live
 
 
 def _detach_widgets(pdf: pymupdf.Document, index: int) -> None:

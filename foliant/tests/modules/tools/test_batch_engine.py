@@ -399,7 +399,7 @@ def test_watermark_marked_and_removable(tmp_path):
 def test_remove_marks_nothing_found(tmp_path):
     a = mk(tmp_path / "in" / "a.pdf")
     rep = be.run_job(None, items_for([a]), job(tmp_path / "out", ("remove_marks", {"watermark": True})), STARTED)
-    assert rep.results[0].status == "skipped" and "Nessun elemento" in rep.results[0].message
+    assert rep.results[0].status == "skipped" and "nessun elemento riconoscibile" in rep.results[0].message
 
 
 def test_background_letterhead(tmp_path):
@@ -724,11 +724,8 @@ def test_pause_and_resume_give_same_results(tmp_path):
     th.join(20)
     assert box["r"].counts()["ok"] == 4
     for name in os.listdir(tmp_path / "ref"):
-        # stesso contenuto (l'identificatore /ID del file è generato a ogni salvataggio)
-        ra, rb = pymupdf.open(str(tmp_path / "ref" / name)), pymupdf.open(str(out / name))
-        assert ra.page_count == rb.page_count
-        assert [p.get_text() for p in ra] == [p.get_text() for p in rb]
-        assert [p.read_contents() for p in ra] == [p.read_contents() for p in rb]
+        # identici byte per byte (operazioni deterministiche, data fissata)
+        assert (tmp_path / "ref" / name).read_bytes() == (out / name).read_bytes()
 
 
 def test_skip_current_file_only(tmp_path):
@@ -1121,9 +1118,7 @@ def test_parallel_processing_same_results(tmp_path):
     assert all(r.status in ("ok", "warning") for r in four.results)
     assert sorted(os.listdir(tmp_path / "uno")) == sorted(os.listdir(tmp_path / "quattro"))
     for name in os.listdir(tmp_path / "uno"):
-        a = pymupdf.open(str(tmp_path / "uno" / name))
-        b = pymupdf.open(str(tmp_path / "quattro" / name))
-        assert [p.get_text() for p in a] == [p.get_text() for p in b]
+        assert (tmp_path / "uno" / name).read_bytes() == (tmp_path / "quattro" / name).read_bytes()
 
 
 def test_parallel_errors_and_cancel(tmp_path):
@@ -1204,3 +1199,97 @@ def test_defaults_and_names_in_english(tmp_path):
     finally:
         set_language("it")
     assert be.Step("watermark").merged_params()["text"] == "RISERVATO"
+
+
+# ----------------------------------------------------------------- BAT-16
+def _with_marked_header(path):
+    """PDF con intestazione marcata come artefatto da un «altro programma» e una filigrana-annotazione."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 300), "Corpo del contratto", fontsize=12)
+    xref = page.get_contents()[0]
+    body = doc.xref_stream(xref)
+    marked = (b"/Artifact <</Type /Pagination /Subtype /Header>> BDC BT /helv 9 Tf 72 30 Td (TESTATA ALTRUI) Tj ET EMC\n"
+              + body)
+    doc.update_stream(xref, marked)
+    page.clean_contents()
+    doc.save(str(path))
+    return str(path)
+
+
+def test_remove_marks_scope_and_counts(tmp_path):
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    data = be.add_header_footer(be.add_watermark(open(a, "rb").read(), "BOZZA"), {"bottom-center": "PIEDE"})
+    # solo la filigrana: il piè resta
+    w = tmp_path / "w.pdf"
+    w.write_bytes(data)
+    rep = be.run_job(None, [be.analyze_file(str(w))], be.JobSettings(
+        steps=[be.Step("remove_marks", {"watermark": True})], destination=str(tmp_path / "o1")))
+    out = pymupdf.open(rep.results[0].outputs[0])
+    assert all("BOZZA" not in p.get_text() and "PIEDE" in p.get_text() for p in out)
+    assert "2 filigrane" in rep.results[0].message
+    # intestazione marcata da un altro programma: rimossa solo con l'ambito «tutti»
+    other = _with_marked_header(tmp_path / "altro.pdf")
+    item = be.analyze_file(other)
+    rep = be.run_job(None, [item], be.JobSettings(steps=[be.Step("remove_marks", {"watermark": False,
+                                                                                 "header_footer": True})],
+                                                  destination=str(tmp_path / "o2")))
+    assert rep.results[0].status == "skipped" and "nessun elemento riconoscibile" in rep.results[0].message
+    rep = be.run_job(None, [item], be.JobSettings(steps=[be.Step("remove_marks", {
+        "watermark": False, "header_footer": True, "scope": "marked"})], destination=str(tmp_path / "o3")))
+    text = pymupdf.open(rep.results[0].outputs[0])[0].get_text()
+    assert "TESTATA ALTRUI" not in text and "Corpo del contratto" in text
+
+
+def test_remove_watermark_visually_identical(tmp_path):
+    from foliant.modules.tools import compare_engine as ce
+    a = mk(tmp_path / "in" / "a.pdf", pages=2)
+    original = open(a, "rb").read()
+    marked = be.add_watermark(original, "BOZZA")
+    cleaned, n = be.remove_marks(marked, {"watermark"})
+    assert n == 2
+    r = ce.run_compare(None, ce.SideInput(original, "a"), ce.SideInput(cleaned, "b"),
+                       ce.CompareOptions(mode=ce.MODE_VISUAL, dpi=72))
+    assert r.differences == []
+
+
+# ----------------------------------------------------------------- BAT-02 disco pieno
+def test_disk_full_pauses_and_retries(tmp_path, monkeypatch):
+    import errno
+    import threading
+    import time as _t
+    items = _queue(tmp_path, 3)
+    real = be.atomic_write
+    fails = {"n": 1}
+
+    def flaky(path, data):
+        if fails["n"] and os.path.basename(str(path)) == "f1.pdf":
+            fails["n"] -= 1
+            raise be.DocumentError("Salvataggio non riuscito") from OSError(errno.ENOSPC, "No space left")
+        return real(path, data)
+    monkeypatch.setattr(be, "atomic_write", flaky)
+    control = be.JobControl()
+    box = {}
+    out = tmp_path / "out"
+    th = threading.Thread(target=lambda: box.setdefault("r", be.run_job(
+        None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(out)), control=control)))
+    th.start()
+    for _i in range(200):
+        if control.disk_full:
+            break
+        _t.sleep(0.02)
+    assert control.disk_full and control.paused
+    assert sorted(os.listdir(out)) == ["f0.pdf"]            # in pausa sul secondo file
+    control.resume()                                       # «spazio liberato»
+    th.join(20)
+    assert all(r.status in ("ok", "warning") for r in box["r"].results)
+    assert sorted(os.listdir(out)) == ["f0.pdf", "f1.pdf", "f2.pdf"]
+
+
+def test_disk_full_without_control_is_file_error(tmp_path, monkeypatch):
+    import errno
+    items = _queue(tmp_path, 2)
+    monkeypatch.setattr(be, "atomic_write", lambda p, d: (_ for _ in ()).throw(
+        OSError(errno.ENOSPC, "No space left")))
+    rep = be.run_job(None, items, be.JobSettings(steps=[be.Step("compress")], destination=str(tmp_path / "o")))
+    assert [r.code for r in rep.results] == ["DISK-01", "DISK-01"]

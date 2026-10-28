@@ -2,15 +2,81 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
+import os
+import re
 import sys
+from dataclasses import dataclass, field
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QUrl
 from PySide6.QtWidgets import QApplication
 
-from . import APP_NAME
+from . import APP_NAME, __version__
 from .core import engine
-from .i18n import detect_language, set_language
+from .i18n import _, detect_language, set_language
+
+PAGE_FRAGMENT = re.compile(r"^(?P<path>.+)#page=(?P<page>\d+)$", re.IGNORECASE)
+
+
+@dataclass
+class Options:
+    """Riga di comando analizzata (NFR-31)."""
+
+    files: list[tuple[str, int | None]] = field(default_factory=list)   # percorso assoluto, pagina da 1
+    new_window: bool = False
+    command: str | None = None
+    unknown: list[str] = field(default_factory=list)                    # opzioni sconosciute, ignorate
+
+    def request(self) -> dict:
+        """Richiesta per l'istanza già aperta (vedi ui/instance.py)."""
+        return {"files": [[p, n] for p, n in self.files], "new_window": self.new_window, "command": self.command}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="foliant", description=_("Editor PDF per Linux."), allow_abbrev=False)
+    parser.add_argument("files", nargs="*", metavar="FILE",
+                        help=_("file da aprire; «file.pdf#page=N» lo apre alla pagina N"))
+    parser.add_argument("-p", "--page", type=int, metavar="N", help=_("apre il primo file alla pagina N"))
+    parser.add_argument("--new-window", action="store_true",
+                        help=_("apre una nuova finestra anche se Foliant è già in esecuzione"))
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--create", dest="command", action="store_const", const="create-pdf",
+                       help=_("apre «Crea PDF da file»"))
+    group.add_argument("--merge", dest="command", action="store_const", const="merge",
+                       help=_("apre «Unisci file»"))
+    parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
+    return parser
+
+
+def _target(arg: str, cwd: str) -> tuple[str, int | None]:
+    """Percorso assoluto e pagina di un argomento: «a.pdf», «a.pdf#page=3» o «file:///a.pdf#page=3»."""
+    page = None
+    if arg.startswith("file:"):
+        url = QUrl(arg)
+        m = re.fullmatch(r"page=(\d+)", url.fragment(), re.IGNORECASE)
+        page = int(m.group(1)) if m else None
+        path = url.toLocalFile() or arg
+    else:
+        path = arg
+        m = PAGE_FRAGMENT.match(arg)
+        if m and not os.path.exists(os.path.join(cwd, os.path.expanduser(arg))):
+            path, page = m.group("path"), int(m.group("page"))
+    return os.path.abspath(os.path.join(cwd, os.path.expanduser(path))), (max(1, page) if page is not None else None)
+
+
+def parse_args(args: list[str], cwd: str | None = None) -> Options:
+    """Analizza gli argomenti (senza il nome del programma). Le opzioni sconosciute non diventano
+    file da aprire: finiscono in `unknown`. Opzioni errate (es. «--page x»): messaggio e uscita."""
+    parser = build_parser()
+    ns, unknown = parser.parse_known_intermixed_args(args)
+    if ns.page is not None and ns.page < 1:
+        parser.error(_("la pagina deve essere un numero maggiore di zero"))
+    cwd = cwd or os.getcwd()
+    files = [_target(a, cwd) for a in ns.files]
+    if ns.page is not None and files and files[0][1] is None:
+        files[0] = (files[0][0], ns.page)
+    return Options(files=files, new_window=ns.new_window, command=ns.command, unknown=list(unknown))
 
 
 def install_qt_translations(app: QApplication) -> None:
@@ -47,24 +113,42 @@ def install_qt_translations(app: QApplication) -> None:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
-    engine.configure()
     QApplication.setApplicationName(APP_NAME)
     QApplication.setOrganizationName(APP_NAME)
     QApplication.setDesktopFileName("foliant")
+    if any(a in ("-h", "--help", "--version") for a in argv[1:]):
+        set_language(QSettings().value("language") or detect_language())
+        parse_args(argv[1:])            # stampa l'aiuto o la versione e termina, senza interfaccia
+        return 0
+    engine.configure()
     app = QApplication(argv)
     settings = QSettings()
     set_language(settings.value("language") or detect_language())
     install_qt_translations(app)
+    options = parse_args(app.arguments()[1:])      # senza le opzioni di Qt (-platform, -style…)
+    for opt in options.unknown:
+        print(_("foliant: opzione sconosciuta ignorata: {o}").format(o=opt), file=sys.stderr)
+
+    # Istanza singola: se Foliant è già aperto gli si consegnano file e comandi e si esce.
+    from .ui.instance import InstanceServer, instance_name, open_request, send_request
+    name = instance_name()
+    if send_request(name, options.request()):
+        return 0
+    server = InstanceServer(name, app)
+    if not server.listen() and send_request(name, options.request()):
+        return 0                        # un'altra istanza è partita nel frattempo
 
     from .ui import theme
-    from .ui.main_window import MainWindow
+    from .ui.main_window import MainWindow, register_window
 
     theme.apply(app, settings.value("theme", "system"))
-    window = MainWindow(settings)
+    window = register_window(MainWindow(settings))
     window.show()
-    for arg in argv[1:]:
-        if not arg.startswith("-"):
-            window.open_path(arg)
+    open_request(options.request(), settings, window)
+    if options.unknown:
+        window.statusBar().showMessage(
+            _("Opzioni sconosciute ignorate: {o}").format(o=" ".join(options.unknown)), 10000)
+    server.requestReceived.connect(lambda request: open_request(request, settings))
     return app.exec()
 
 

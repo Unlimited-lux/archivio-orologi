@@ -61,3 +61,59 @@ def test_fill_signed_form_with_kid_widget_keeps_signature_intact(qtbot, window, 
     assert out.startswith(signed)
     st = _validate(out, test_signer)
     assert st.intact and st.valid
+
+
+def _certified_form(tmp_path, signer, perm):
+    """Modulo certificato con pyHanko (firma di certificazione con /DocMDP al livello `perm`)."""
+    import io
+
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import signers
+
+    from .conftest import build_form
+    out = io.BytesIO()
+    signers.sign_pdf(IncrementalPdfFileWriter(io.BytesIO(build_form().tobytes())),
+                     signers.PdfSignatureMetadata(field_name="Certificazione", certify=True,
+                                                  docmdp_permissions=perm),
+                     signer=signer[0], output=out)
+    path = tmp_path / f"certificato_{perm.name}.pdf"
+    path.write_bytes(out.getvalue())
+    return path
+
+
+def test_certification_info_levels(tmp_path, test_signer):  # noqa: F811
+    from pyhanko.sign.fields import MDPPerm
+    for perm, level in ((MDPPerm.NO_CHANGES, 1), (MDPPerm.FILL_FORMS, 2), (MDPPerm.ANNOTATE, 3)):
+        d = pymupdf.open(str(_certified_form(tmp_path, test_signer, perm)))
+        info = E.certification_info(d)
+        assert info["level"] == level and info["field"] == "Certificazione"
+        assert info["signer"] == "Firmatario di prova"
+        assert (E.fill_blocked_reason(d) is not None) == (level == 1)
+    assert E.certification_info(pymupdf.open()) is None
+
+
+def test_certified_no_changes_is_read_only_with_signer(qtbot, window, tmp_path, test_signer):  # noqa: F811
+    """FRM-01: documento certificato senza modifiche consentite → sola lettura, con riferimento
+    alla firma di certificazione; nessuna richiesta di password del proprietario."""
+    from pyhanko.sign.fields import MDPPerm
+    view = open_form(window, _certified_form(tmp_path, test_signer, MDPPerm.NO_CHANGES))
+    f = forms.instance().filler(view)
+    f.state.refresh(force=True)
+    f.update_bar()
+    assert "Firmatario di prova" in f.text_of_bar() and "Certificazione" in f.text_of_bar()
+    assert "Inserisci password del proprietario" not in f.banner_actions
+    assert "Modifica modulo" not in f.banner_actions
+    click_field(qtbot, view, "nome")
+    assert f.editor is None
+    assert E.form_values(view.document.pdf)["nome"] == ""
+
+
+def test_certified_fill_forms_allows_filling(qtbot, window, tmp_path, test_signer):  # noqa: F811
+    from pyhanko.sign.fields import MDPPerm
+    view = open_form(window, _certified_form(tmp_path, test_signer, MDPPerm.FILL_FORMS))
+    f = forms.instance().filler(view)
+    click_field(qtbot, view, "nome")
+    assert f.editor is not None
+    qtbot.keyClicks(f.editor, "Anna")
+    f.commit_active()
+    assert E.form_values(view.document.pdf)["nome"] == "Anna"

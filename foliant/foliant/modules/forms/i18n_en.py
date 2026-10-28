@@ -320,4 +320,9 @@ EN: dict[str, str] = {
     'Campi obbligatori vuoti: {n}': 'Empty required fields: {n}',
     'Vai al campo': 'Go to the field',
     'Modifica non consentita.': 'Change not allowed.',
+    'firmatario sconosciuto': 'unknown signer',
+    'Il documento è certificato da {who} (campo firma «{field}») e non consente modifiche.':
+        'The document is certified by {who} (signature field “{field}”) and does not allow changes.',
+    'Il documento è certificato da {who} e non consente modifiche.':
+        'The document is certified by {who} and does not allow changes.',
 }
