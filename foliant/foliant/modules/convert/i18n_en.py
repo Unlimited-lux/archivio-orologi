@@ -911,3 +911,6 @@ EN.update({"Cartella:": "Folder:", "Cartella (vuota = radice del portfolio):": "
 # CNV-33: redazioni non applicate
 EN.update({"{n} segni di redazione non applicati non sono stati appiattiti: restano da applicare.":
                "{n} unapplied redaction marks were not flattened: they still need to be applied."})
+
+# CNV-17: elenco vuoto della conversione in blocco
+EN.update({"Aggiungi file o cartelle, o trascinali qui": "Add files or folders, or drag them here"})
