@@ -90,7 +90,11 @@ class SignController(QObject):
         return lib
 
     def default_name(self) -> str:
-        return str(self.ctx.settings().value("user/name", "") or "")
+        """Nome dell'autore (preferenza del nucleo «Nome autore», altrimenti l'utente di sistema)."""
+        try:
+            return str(self.ctx.author_name() or "")
+        except Exception:
+            return ""
 
     # ========================================================== firma grafica
     def tool_for(self, view) -> SignatureTool:

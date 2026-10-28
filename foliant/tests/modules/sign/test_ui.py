@@ -1008,3 +1008,16 @@ def test_document_banner_for_signatures_and_fields(window, monkeypatch, sample_p
     assert pages == [0, 1]
     plain = window.open_path(make_pdf(tmp_path / "semplice.pdf"))
     assert "firme" not in window.ctx.banners(plain)
+
+
+def test_author_name_from_core_preference(window, sample_pdf):
+    """La firma digitata e l'autore delle firme grafiche usano il nome dell'autore del nucleo."""
+    window.settings.setValue("author", "Giulia Verdi")
+    c = _ctl(window)
+    assert c.default_name() == "Giulia Verdi"
+    view = window.open_path(sample_pdf)
+    item = g.SignatureItem(art=g.strokes_to_art(g.process_strokes([[(0, 0, 1), (50, 10, 1)]])))
+    xref = c.place(view, 0, pymupdf.Rect(100, 100, 200, 130), item)
+    with view.document.lock:
+        assert view.document.pdf.xref_get_key(xref, "T")[1] == "Giulia Verdi"
+    window.settings.remove("author")
