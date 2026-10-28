@@ -1087,7 +1087,7 @@ _BAD_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 
 
 def safe_filename(name: str, max_bytes: int = 200) -> str:
-    name = _BAD_CHARS.sub("_", name).strip().strip(".") or "senza_nome"
+    name = _BAD_CHARS.sub("_", name).strip().strip(".") or _("senza_nome")
     while len(name.encode("utf-8")) > max_bytes:
         name = name[:-1]
     return name

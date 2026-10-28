@@ -156,6 +156,7 @@ TRANSLATIONS = {
     "Acquisizione non riuscita: {e}": "Scan failed: {e}",
     "Inserisci da scanner": "Insert from scanner",
     "Riprova": "Retry",
+    "{nome}_parte{n}": "{nome}_part{n}",
     "Fattura n\\. (\\d+)": "Invoice no\\. (\\d+)",
     "Il documento ha una sola pagina: non c'è nulla da dividere.": "The document has only one page: there is nothing to split.",
     "Cerca il testo solo nel quarto superiore della pagina": "Search the text only in the top quarter of the page",
@@ -818,7 +819,7 @@ class SplitDialog(BaseDialog):
         self.top_only = QCheckBox(_("Cerca il testo solo nel quarto superiore della pagina"))
         self.layout_.addWidget(self.top_only)
         form = QFormLayout()
-        self.template = QLineEdit("{nome}_parte{n}")
+        self.template = QLineEdit(_("{nome}_parte{n}"))
         self.template.setToolTip(_("Segnaposto: {nome}, {n}, {inizio}, {fine}, {segnalibro}, {match1}"))
         form.addRow(_("Nome dei file:"), self.template)
         self.layout_.addLayout(form)
@@ -893,9 +894,10 @@ class SplitDialog(BaseDialog):
         m = self.method()
         self.collect.setEnabled(m == "ranges")
         self.top_only.setEnabled(m == "text")
+        part = _("{nome}_parte{n}")
         defaults = {"bookmarks": "{segnalibro}", "text": "{nome}_{match1}"}
-        if self.template.text() in ("{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
-            self.template.setText(defaults.get(m, "{nome}_parte{n}"))
+        if self.template.text() in (part, "{nome}_parte{n}", "{segnalibro}", "{nome}_{match1}"):
+            self.template.setText(defaults.get(m, part))
         if m in ("size", "blank"):
             self.preview.setText("")   # calcolo costoso: eseguito alla conferma
             self.set_error(None)
