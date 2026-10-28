@@ -123,3 +123,18 @@ def test_note_icon_under_click_on_rotated_page(rotation):
     assert abs(centre - shown) < 3
     assert engine.annot_at(pdf, 0, click, 1.0) == xref   # il clic sull'icona la seleziona
 
+
+@pytest.mark.parametrize("fmt", ["xfdf", "fdf"])
+@pytest.mark.parametrize("rotation", [0, 90])
+def test_note_roundtrip_on_rotated_page(fmt, rotation):
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=595, height=842)
+    page.set_rotation(rotation)
+    xref = engine.create_note(pdf, 0, (190, 280), "x", engine.Style(), "A")
+    raw = engine._array(pdf, xref, "Rect")
+    page = pdf[0]
+    shown = pymupdf.Rect(engine.find_annot(page, xref).rect)
+    _roundtrip(pdf, fmt)
+    a, = engine.list_annotations(pdf)
+    assert engine._array(pdf, a.xref, "Rect") == pytest.approx(raw, abs=0.01)
+    assert tuple(a.rect) == pytest.approx(tuple(shown), abs=0.01)

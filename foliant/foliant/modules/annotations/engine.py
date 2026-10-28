@@ -2819,6 +2819,14 @@ def _fmt(v: float) -> str:
     return s if s not in ("-0", "") else "0"
 
 
+def _export_rect(pdf: pymupdf.Document, page: pymupdf.Page, a: pymupdf.Annot) -> tuple:
+    """/Rect così com'è nel file (per le icone diritte su pagine ruotate differisce da annot.rect)."""
+    raw = _array(pdf, a.xref, "Rect")
+    if raw and len(raw) == 4:
+        return min(raw[0], raw[2]), min(raw[1], raw[3]), max(raw[0], raw[2]), max(raw[1], raw[3])
+    return to_pdf_rect(page, a.rect)
+
+
 def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] | None = None) -> str:
     """Esporta i commenti in XFDF (XML standard di interscambio delle annotazioni)."""
     from xml.sax.saxutils import escape, quoteattr
@@ -2836,7 +2844,7 @@ def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] 
                 continue
             info = a.info or {}
             attrs = {"page": str(page_no), "name": names[a.xref],
-                     "rect": ",".join(_fmt(v) for v in to_pdf_rect(page, a.rect)),
+                     "rect": ",".join(_fmt(v) for v in _export_rect(pdf, page, a)),
                      "flags": _xfdf_flags(a.flags)}
             if info.get("title"):
                 attrs["title"] = info["title"]
@@ -3123,6 +3131,8 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
             if rect is None:
                 return None
             annot = page.add_text_annot(rect.tl, contents, icon=el.get("icon") or "Comment")
+            pdf.xref_set_key(annot.xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*rect_vals))
+            annot = page.load_annot(annot.xref)
             if color:
                 annot.set_colors(stroke=color)
             annot.set_opacity(opacity)
