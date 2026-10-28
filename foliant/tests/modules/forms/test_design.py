@@ -296,9 +296,11 @@ def test_tab_numbers_overlay(window, form_pdf):
     view.flush_rendering()
     img = view.viewport().grab().toImage()
     nome = [f for f in fields(view) if f.name == "nome"][0]
-    r = view.page_to_view(0, pymupdf.Rect(nome.rect.x0 - 1, nome.rect.y0 - 1, nome.rect.x0 + 1, nome.rect.y0 + 1))
-    c = img.pixelColor(r.center().toPoint())
-    assert c.red() > c.blue() + 50  # cerchio nel colore secondario (arancio)
+    r = view.page_to_view(0, pymupdf.Rect(nome.rect.x0 - 5, nome.rect.y0 - 5, nome.rect.x0 + 5, nome.rect.y0 + 5))
+    rr = r.toAlignedRect()
+    orange = sum(1 for x in range(rr.left(), rr.right()) for y in range(rr.top(), rr.bottom())
+                 if (lambda c: c.red() > c.blue() + 80 and c.red() > 150)(img.pixelColor(x, y)))
+    assert orange > rr.width() * rr.height() * 0.2  # cerchio nel colore secondario (arancio)
     m.toggle_tab_numbers(False)
 
 
