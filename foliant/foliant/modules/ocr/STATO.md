@@ -10,7 +10,7 @@ Test: `tests/modules/ocr/` (engine, criteri, ui, languages, textexport).
 | OCR-01 Rilevamento e proposta | P0 | fatto (parziale: Dettagli in finestra, non nelle miniature) | test_ui: proposta_pagine_3_e_7, nessuna_proposta…, rilevamento_disattivato…, proposta_al_clic…; test_criteri: testo_non_estraibile, documento_lungo… | analisi incrementale a passi di 25 ms nel thread UI con `try_engine`; barra non bloccante sopra la vista; «non chiedere più» per /ID o impronta nelle preferenze |
 | OCR-02 Motore locale | P0 | fatto | test_engine: accuratezza…, pagina_che_fallisce…, deterministico; test_criteri: parallelismo… | pagine in parallelo (core−1, ridotto con poca memoria), timeout 120 s, pagina guasta = «non riconosciuta» |
 | OCR-03 Lingue | P0 | fatto (arabo non verificato: pacchetto non installato) | test_languages (11), test_engine: errori_chiari, test_ui: lingua_mancante, dialogo_lingue | 53 lingue in catalogo, installa da file con verifica, scarica su richiesta, rimuovi, manifest sha256 |
-| OCR-04 Impostazioni e intervallo | P0 | fatto (manca anteprima dell'immagine di lavoro) | test_ui: dialogo_impostazioni, intervallo_pagine_selezionate, convalida_immediata…, profilo_esporta_importa, destinazione_nuovo_documento, permessi…, documento_firmato…; test_criteri: intervallo_altre_pagine_invariate, intervalli_non_validi | profili JSON, riepilogo con stima del tempo, password proprietario, avviso firme |
+| OCR-04 Impostazioni e intervallo | P0 | fatto | test_ui: dialogo_impostazioni, intervallo_pagine_selezionate, anteprima_preelaborazione, convalida_immediata…, profilo_esporta_importa, destinazione_nuovo_documento, permessi…, documento_firmato…; test_criteri: intervallo_altre_pagine_invariate, intervalli_non_validi | profili JSON, riepilogo con stima del tempo, password proprietario, avviso firme |
 | OCR-05 PDF ricercabile | P0 | fatto | test_engine: ricercabile_aspetto_identico…; test_criteri: riquadri_parole_iou, marcato_metadati_lingua…, senza_correzioni_rendering_identico, pagina_mista… | una parola per oggetto di testo (Tz + Tm inclinato), sequenza marcata /FoliantOCR, metadati e /Lang |
 | OCR-06 PDF modificabile | P0 | fatto (testo su foto non escluso automaticamente) | test_engine: modificabile_testo_visibile…, redazione_e_reinserimento; test_criteri: righe_corpo_e_linea_di_base, inclinata_righe_orizzontali, sostituisce_livello…, stile_e_famiglia, conserva_originale… | sfondo ripulito, pagina raddrizzata, famiglia/grassetto/corsivo/colore stimati, originale in livello nascosto facoltativo |
 | OCR-07 Solo testo | P0 | fatto | test_textexport (17), test_ui: solo_testo_e_ocr_area, esportazione_alto… | TXT (separatore riga o U+000C, sillabazione, paragrafi, CRLF), ALTO v4, hOCR; sillabazione senza dizionario |
@@ -39,3 +39,28 @@ Note finali:
 - Correzioni del collaudo (08:00–08:20 UTC): bug_07, bug_01/02, bug_04, bug_05, bug_08, tabelle e stile.
 - Verifica visiva fatta con catture offscreen (temi chiaro e scuro) di barra di proposta, impostazioni,
   anteprima/revisione, pannello parole incerte e confronto scansione/risultato modificabile.
+
+## Qualità su scansioni realistiche (`tests/modules/ocr/test_quality.py`, generatori in `realistic.py`)
+
+Percentuale di parole attese ritrovate (lingue ita+eng, impostazioni predefinite):
+
+| Documento | Prima | Dopo |
+|---|---|---|
+| Carta d'identità fotografata di sbieco | 1.000 | 1.000 |
+| Fattura con tabella e importi in euro | 1.000 | 1.000 |
+| Garanzia con timbro e firma | 1.000 | 1.000 |
+| Ricevuta 150 dpi in grigi | 1.000 | 1.000 |
+| Carta d'identità fotografata da lontano, luce non uniforme | 0.857 | 1.000 |
+| Passaporto con zona MRZ | 0.179 | 0.964 |
+| Testo piccolo 150 dpi in grigi (JPEG) | 0.681 | 1.000 |
+| Timbro rosso sopra il testo (IBAN coperto) | 0.964 | 1.000 |
+| Scontrino termico sbiadito | 1.000 | 1.000 |
+
+Miglioramenti:
+1. Pre-elaborazione adattiva: normalizzazione dello sfondo solo con illuminazione davvero non uniforme;
+   contrasto stirato tra inchiostro e carta stimati con Otsu (non con i percentili) e solo se basso.
+   Prima le scansioni grigie a 150 dpi uscivano con lettere impastate e Tesseract non trovava righe.
+2. Rotazione OSD verificata leggendo la pagina nei due versi: la zona MRZ («<<<<») faceva proporre 180°
+   e il passaporto veniva capovolto. Le pagine davvero capovolte si raddrizzano ancora.
+3. Timbri colorati sopra il testo nero attenuati prima del riconoscimento (canale più chiaro nei pixel
+   colorati del timbro); il testo stampato a colori lontano dal nero (titoli, loghi) resta intatto.

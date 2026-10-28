@@ -387,4 +387,12 @@ EN = {
     'Compressa (bilanciata)': 'Compressed (balanced)',
     'Compressa (massima)': 'Compressed (maximum)',
     'Immagine della pagina:': 'Page image:',
+    'Anteprima…': 'Preview…',
+    'Anteprima della pre-elaborazione': 'Preprocessing preview',
+    'orientamento corretto: {r}°': 'orientation corrected: {r}°',
+    'inclinazione corretta: {a:.1f}°': 'skew corrected: {a:.1f}°',
+    'prospettiva raddrizzata': 'perspective straightened',
+    'risoluzione effettiva: {d} dpi': 'effective resolution: {d} dpi',
+    'Originale': 'Original',
+    'Immagine di lavoro': 'Working image',
 }
