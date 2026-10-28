@@ -86,7 +86,8 @@ def app_windows() -> list["MainWindow"]:
 def active_window() -> "MainWindow | None":
     """La finestra a cui vanno i file aperti da fuori (gestore file, riga di comando)."""
     current = QApplication.activeWindow()
-    windows = app_windows()
+    # non quella che si sta chiudendo: un file aperto lì sparirebbe con lei
+    windows = [w for w in app_windows() if not w._closing]
     if current in windows:
         return current
     return windows[-1] if windows else None
@@ -129,6 +130,7 @@ class MainWindow(QMainWindow):
     _exit_confirmed = False     # uscita già confermata: close_view non chiede più nulla
     _memory_timer: QTimer | None = None
     _closed = False             # chiusura confermata (closeEvent accettato)
+    _closing = False            # closeEvent in corso (domande aperte): non riceve file da fuori
 
     def __init__(self, settings: QSettings | None = None, *, load_modules: bool = True):
         super().__init__()
@@ -1782,6 +1784,14 @@ class MainWindow(QMainWindow):
                 m.button.setToolButtonStyle(style)
 
     def closeEvent(self, event) -> None:
+        # le domande qui sotto fanno girare il ciclo degli eventi: intanto la finestra è «in chiusura»
+        self._closing = True
+        try:
+            self._close_window(event)
+        finally:
+            self._closing = False
+
+    def _close_window(self, event) -> None:
         running = self.task_manager.running()
         if running and not self._confirm_stop_tasks(running):
             event.ignore()
