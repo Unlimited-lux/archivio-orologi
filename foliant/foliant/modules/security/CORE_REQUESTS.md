@@ -3,18 +3,10 @@
 Ogni richiesta indica il problema, la soluzione locale adottata nel modulo e la
 modifica proposta al nucleo.
 
-## 1. Annulla/ripeti delle opzioni di salvataggio (SEC-04…SEC-08)
+## 1. Annulla/ripeti delle opzioni di salvataggio (SEC-04…SEC-08) — risolta
 
-**Problema.** `Document.change()` salva e ripristina solo il contenuto PDF:
-`save_options` (password, permessi, cifratura) non segue annulla/ripeti.
-
-**Soluzione locale.** `protection._OptionsHistory` è un ascoltatore del
-documento che associa a ogni stato (`document._state`, attributo privato) le
-opzioni di salvataggio e le ripristina a ogni notifica `CONTENT`.
-
-**Proposta.** Includere `save_options` nello snapshot di `_Snapshot` (o esporre
-`document.state_id` pubblico) così che annulla/ripeti ripristini anche la
-protezione.
+Il nucleo ora include `save_options` in annulla/ripeti; il riallineamento locale
+del modulo è stato rimosso.
 
 ## 2. Tipo di accesso e permessi del documento (SEC-01, SEC-02, SEC-03)
 

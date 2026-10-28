@@ -2,9 +2,8 @@
 
 Logica pura. La protezione non cambia il contenuto del documento: vale al
 salvataggio tramite `document.save_options`. Il cambio avviene comunque dentro
-`document.change()`, così è un passo di annulla/ripeti; poiché il nucleo
-ripristina solo il contenuto, `_OptionsHistory` riallinea `save_options` allo
-stato del documento dopo annulla/ripeti (vedi CORE_REQUESTS.md).
+`document.change()`: il nucleo include `save_options` nei passi di
+annulla/ripeti, quindi anche la protezione si annulla e si ripete.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from pathlib import Path
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, CONTENT, Document, _
+from foliant.api import ENGINE_LOCK, Document, _
 
 # ------------------------------------------------------------------ costanti
 
@@ -309,11 +308,6 @@ def unlock(document: Document, password: str) -> bool:
         orig_owner = document.original_protection.get("owner_pw")
         if document.save_options.get("owner_pw") == orig_owner:
             document.save_options["owner_pw"] = password
-            hist = _histories.get(document)
-            if hist is not None:
-                for opts in hist.by_state.values():
-                    if opts.get("owner_pw") == orig_owner:
-                        opts["owner_pw"] = password
         document.original_protection["owner_pw"] = password
         return True
     return False
@@ -371,49 +365,7 @@ def verify_owner_password(document: Document, password: str) -> bool:
             pdf.close()
 
 
-# ---------------------------------------------------- annulla/ripeti opzioni
-
-
-class _OptionsHistory:
-    """Associa a ogni stato del documento le sue opzioni di salvataggio."""
-
-    def __init__(self, document: Document):
-        self.by_state: dict[int, dict] = {}
-        self.record(document)
-        document.add_listener(self)
-
-    @staticmethod
-    def _state(document: Document) -> int:
-        return getattr(document, "_state", 0)
-
-    def record(self, document: Document) -> None:
-        self.by_state.setdefault(self._state(document), dict(document.save_options))
-
-    def __call__(self, document: Document, kind: str) -> None:
-        if kind != CONTENT:
-            return
-        state = self._state(document)
-        if state in self.by_state:
-            if document.save_options != self.by_state[state]:
-                document.save_options = dict(self.by_state[state])
-        else:
-            self.by_state[state] = dict(document.save_options)
-
-
-_histories: "weakref.WeakKeyDictionary[Document, _OptionsHistory]" = weakref.WeakKeyDictionary()
-
-
-def track(document: Document) -> None:
-    """Attiva il riallineamento di `save_options` su annulla/ripeti."""
-    hist = _histories.get(document)
-    if hist is None:
-        _histories[document] = _OptionsHistory(document)
-    else:
-        hist.record(document)
-
-
 def _set_options(document: Document, options: dict, label: str) -> None:
-    track(document)
     with document.change(label):
         document.save_options = dict(options)
     # lo stato nuovo è registrato dal listener a fine blocco
@@ -422,7 +374,6 @@ def _set_options(document: Document, options: dict, label: str) -> None:
 def apply_protection(document: Document, settings: ProtectionSettings) -> None:
     """Imposta la protezione che verrà applicata al salvataggio (annullabile)."""
     opts = settings.save_options()
-    track(document)
     with document.change(_("Imposta protezione")) as pdf:
         document.save_options = dict(opts)
         if settings.method == AES256:

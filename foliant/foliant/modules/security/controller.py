@@ -717,7 +717,6 @@ class SecurityController:
     def on_document_opened(self, view) -> None:
         doc = view.document
         P.remember_open_state(doc)
-        P.track(doc)
         if self.preview not in view.overlays:
             view.overlays.append(self.preview)
         if view not in self.banners:

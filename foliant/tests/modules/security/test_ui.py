@@ -789,3 +789,19 @@ def test_trusted_folder(window, sec, active_pdf, tmp_path):
     view2 = window.open_path(str(copy))
     assert sec.banners[view2].current().key == "active"
     sec.revoke_trust()
+
+
+def test_protect_undo_save_unencrypted(window, sec, sample_pdf, tmp_path, monkeypatch):
+    view = window.open_path(sample_pdf)
+    monkeypatch.setattr(C, "ask_protection",
+                        lambda parent, doc: _FakeDialog(P.ProtectionSettings(open_password="Apri-123!")))
+    assert sec.protect()
+    view.document.undo()
+    out = tmp_path / "annullato.pdf"
+    view.document.save(out)
+    pdf = pymupdf.open(out)
+    assert not pdf.needs_pass and not pdf.is_encrypted
+    view.document.redo()
+    out2 = tmp_path / "ripetuto.pdf"
+    view.document.save(out2)
+    assert pymupdf.open(out2).needs_pass
