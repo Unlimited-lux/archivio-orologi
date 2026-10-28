@@ -37,6 +37,7 @@ PARTS = (
     "appearance",     # temi di lettura
     "measure",        # coordinate, griglia, riquadri di pagina
     "share",          # invio per e-mail e copia del file
+    "prefs",          # preferenze di visualizzazione
     "commands",       # ricerca dei comandi e scorciatoie (per ultima: vede tutte le azioni)
 )
 

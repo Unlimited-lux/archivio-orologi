@@ -273,11 +273,14 @@ class SessionController(QObject):
 
     def _on_opened(self, view: DocumentView) -> None:
         doc = view.document
-        if doc.path is not None:
+        if doc.path is not None and self.pref("viewer/restore_position", True):
             state = self.remembered(self._key(doc.path))
             if state is not None:
                 self.apply_state(view, state)
                 return
+        prefs = getattr(self.ctx, "viewer_parts", {}).get("prefs")
+        if prefs is not None:
+            prefs.apply_defaults(view)   # valori predefiniti dell'utente (VIS-51)
         if not self.pref(KEY_IGNORE_DOC_VIEW):
             self.apply_initial_view(view)
 
