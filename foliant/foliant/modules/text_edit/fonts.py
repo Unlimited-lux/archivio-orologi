@@ -246,6 +246,15 @@ class FontChoice:
         return bytes(self.font.buffer)
 
 
+def is_pdfa(pdf: pymupdf.Document) -> bool:
+    """True se il documento dichiara la conformità PDF/A nei metadati XMP."""
+    try:
+        xmp = pdf.get_xml_metadata() or ""
+    except Exception:
+        return False
+    return "pdfaid:part" in xmp
+
+
 @dataclass(eq=False)
 class ResourceChoice(FontChoice):
     """La risorsa font originale del PDF: il testo nuovo la riusa con la sua codifica (nessun font aggiunto)."""
@@ -286,6 +295,7 @@ class FontResolver:
         self._base14: dict[str, FontChoice] = {}
         self._embedded_info: dict[int, tuple] = {}
         self.forbidden: set[str] = set()
+        self.pdfa = is_pdfa(pdf)      # PDF/A: solo font incorporati (TXT-20)
 
     # ------------------------------------------------------------ costruttori
     def _from_file(self, path: str, kind: str, name: str | None = None, sim_bold: bool = False,
@@ -432,7 +442,7 @@ class FontResolver:
             if choice is not None and bool(choice.font.is_bold) == style.bold and \
                     bool(choice.font.is_italic) == style.italic:
                 return choice
-        alias = self._base14_alias(style)
+        alias = None if self.pdfa else self._base14_alias(style)
         if alias and not (style.font_xref and self.is_embedded(style.font_xref)):
             return self._base14_choice(alias)
         sf = find_system_font(style.font, style.bold, style.italic)
@@ -470,6 +480,10 @@ class FontResolver:
         choice = self._variant_from_families(families, style.bold, style.italic, KIND_SUBSTITUTE)
         if choice is not None:
             return choice
+        if self.pdfa:
+            last = self._variant_from_families(_LAST_RESORT, False, False, KIND_SUBSTITUTE)
+            if last is not None:
+                return last
         return self._base14_choice("tiro" if style.serif else "cour" if style.mono else "helv")
 
     def fallbacks(self, style: Style) -> list[FontChoice]:

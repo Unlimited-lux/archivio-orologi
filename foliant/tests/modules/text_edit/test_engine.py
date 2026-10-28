@@ -901,3 +901,27 @@ def test_edit_reuses_original_font_resource_libreoffice(tmp_path):
     re_ = pymupdf.open(str(out))
     assert "9.590,00" in re_[0].get_text()
     assert span_with(re_[0], "9.590,00")["font"].startswith("Carlito")
+
+
+def test_pdfa_document_never_uses_unembedded_fonts(tmp_path):
+    """TXT-20: in un documento dichiarato PDF/A il testo aggiunto usa solo font incorporati con /ToUnicode."""
+    from foliant.modules.text_edit.model import Style as _Style
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.set_xml_metadata('<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+                         '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+                         'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                         '<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">'
+                         '<pdfaid:part>2</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance>'
+                         '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>')
+    d = Document.open(save(doc, tmp_path / "pdfa.pdf"))
+    with d.change("Aggiungi") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(72, 100), [[Run("Testo in Helvetica", _Style(font="Helvetica"))]])
+    out = tmp_path / "out.pdf"
+    d.save(out)
+    re_ = pymupdf.open(str(out))
+    assert "Testo in Helvetica" in re_[0].get_text()
+    for f in re_[0].get_fonts(full=True):
+        assert f[1] != "n/a"                                               # incorporato
+        assert re_.xref_get_key(f[0], "ToUnicode")[0] != "null"
+    assert "pdfaid:part" in re_.get_xml_metadata()                        # dichiarazione conservata
