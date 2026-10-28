@@ -76,3 +76,21 @@ def test_fdf_keeps_replies_and_status():
     assert len(top) == 1
     assert [r.contents for r in top[0].replies] == ["Prima risposta", "Seconda risposta"]
     assert top[0].status == engine.STATE_ACCEPTED
+
+
+@pytest.mark.parametrize("fmt", ["xfdf", "fdf"])
+def test_freetext_roundtrip_keeps_border_and_rect(fmt):
+    pdf = pymupdf.open()
+    pdf.new_page()
+    style = engine.Style(color=(1.0, 0.0, 0.0), width=1.5, fill=(1.0, 1.0, 0.8))
+    style.autofit = False
+    xref = engine.create_freetext(pdf, 0, (250, 120, 450, 190), "Riquadro", style, "A")
+    page = pdf[0]
+    before = pymupdf.Rect(engine.find_annot(page, xref).rect)
+    _roundtrip(pdf, fmt)
+    a, = engine.list_annotations(pdf)
+    page = pdf[0]
+    after = engine.find_annot(page, a.xref).rect
+    assert tuple(after) == pytest.approx(tuple(before), abs=0.02)
+    assert engine._array(pdf, a.xref, engine.FT_BORDER_KEY) == pytest.approx([1.0, 0.0, 0.0])
+    assert a.contents == "Riquadro"

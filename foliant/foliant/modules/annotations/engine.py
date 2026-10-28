@@ -2918,6 +2918,11 @@ def export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int] 
                 k, v = pdf.xref_get_key(a.xref, "RD")
                 if k == "array":
                     attrs["fringe"] = ",".join(_fmt(float(x)) for x in v.strip("[]").split())
+                border_color = _array(pdf, a.xref, FT_BORDER_KEY)
+                if border_color and len(border_color) == 3:
+                    attrs["foliant-border-color"] = color_to_hex(border_color)
+                if pdf.xref_get_key(a.xref, AUTOFIT_KEY)[1] == "true":
+                    attrs["foliant-autofit"] = "true"
             elif t == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
                 fi = a.file_info or {}
                 attrs["file"] = fi.get("filename", "")
@@ -3111,7 +3116,8 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
             cm = re.search(r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", da)
             style.text_color = tuple(float(v) for v in cm.groups()) if cm else (0, 0, 0)
             style.fill = color
-            style.color = None
+            style.color = hex_to_color(el.get("foliant-border-color"))
+            style.autofit = el.get("foliant-autofit") == "true"
             style.width = float(el.get("width", "0") or 0)
             callout_vals = _floats(el.get("callout"))
             fringe = _floats(el.get("fringe"))
@@ -3124,6 +3130,9 @@ def _import_one(pdf: pymupdf.Document, page_no: int, tag: str, el) -> int | None
                 callout = [pymupdf.Point(*from_pdf_point(page, x, y)) for x, y in
                            zip(callout_vals[::2], callout_vals[1::2])]
             xref = create_freetext(pdf, page_no, inner, contents, style, author, callout=callout)
+            if not callout:     # /Rect esportato tal quale (create_freetext lo allarga del bordo)
+                pdf.xref_set_key(xref, "Rect", "[{:.3f} {:.3f} {:.3f} {:.3f}]".format(*rect_vals))
+                refresh_freetext(pdf, page_no, xref)
         elif t in ("Square", "Circle"):
             if rect is None:
                 return None
