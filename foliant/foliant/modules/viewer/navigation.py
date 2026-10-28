@@ -335,7 +335,6 @@ class NavigationController(QObject):
 
     def _do_refresh(self) -> None:
         view = self.ctx.current_view()
-        w = self.ctx.window
         if view is None:
             self.act_back.setEnabled(False)
             self.act_forward.setEnabled(False)
@@ -344,16 +343,7 @@ class NavigationController(QObject):
         st = self.state(view)
         self.act_back.setEnabled(st.history.can_back or self._origin(view) is not None)
         self.act_forward.setEnabled(st.history.can_forward)
-        # comandi di pagina coerenti con la posizione (VIS-12)
-        first = view.current_page <= 0
-        last = view.current_page >= view.page_count - 1
-        try:
-            w.act_prev.setEnabled(not first)
-            w.act_first.setEnabled(not first)
-            w.act_next.setEnabled(not last)
-            w.act_last.setEnabled(not last)
-        except AttributeError:
-            pass
+        # Prima/Precedente/Successiva/Ultima: le disattiva il nucleo ai bordi (VIS-12)
         try:
             labels = self.labels(view)
         except Exception:
