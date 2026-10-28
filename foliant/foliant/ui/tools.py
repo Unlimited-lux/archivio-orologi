@@ -111,12 +111,27 @@ def selection_from_words(page: int, words: list[tuple]) -> TextSelection:
 
 
 # Gestori registrati dai moduli (ctx.add_link_handler): callable(view, link) -> bool.
-# Il primo che restituisce True ha gestito il collegamento; altrimenti vale il comportamento base.
-LINK_HANDLERS: list = []
+# Interrogati per priorità decrescente (a pari priorità, in ordine di registrazione); il primo
+# che restituisce True ha gestito il collegamento, altrimenti vale il comportamento base.
+LINK_HANDLERS: list = []          # elementi: (priorità, progressivo, gestore)
+_link_seq = 0
+
+
+def add_link_handler(handler, priority: int = 0) -> None:
+    global _link_seq
+    if any(h is handler for _p, _s, h in LINK_HANDLERS):
+        return
+    _link_seq += 1
+    LINK_HANDLERS.append((priority, _link_seq, handler))
+    LINK_HANDLERS.sort(key=lambda t: (-t[0], t[1]))
+
+
+def remove_link_handler(handler) -> None:
+    LINK_HANDLERS[:] = [t for t in LINK_HANDLERS if t[2] is not handler]
 
 
 def follow_link(view: "DocumentView", link: dict) -> None:
-    for handler in list(LINK_HANDLERS):
+    for _prio, _seq, handler in list(LINK_HANDLERS):
         try:
             if handler(view, link):
                 return

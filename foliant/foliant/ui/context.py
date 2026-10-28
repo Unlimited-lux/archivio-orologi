@@ -166,15 +166,18 @@ class Context(QObject):
     def central_widget(self) -> QWidget | None:
         return self._w.central_override()
 
-    def add_link_handler(self, handler: Callable) -> None:
+    def add_link_handler(self, handler: Callable, priority: int = 0) -> None:
         """Gestisce l'apertura dei collegamenti cliccati nel documento.
 
         `handler(view, link) -> bool`: `link` è il dizionario del motore (`kind`, `uri`,
         `page`, `file`, …). Restituire True se il collegamento è stato gestito (anche
         rifiutato); False per lasciare il comportamento predefinito.
+        I gestori sono interrogati per priorità decrescente: usare una priorità negativa
+        (es. -100) per un controllo «di ultima istanza» prima del comportamento base.
+        Registrare lo stesso gestore più volte non ha effetto.
         """
-        from .tools import LINK_HANDLERS
-        LINK_HANDLERS.append(handler)
+        from .tools import add_link_handler
+        add_link_handler(handler, priority)
 
     def add_view_menu_provider(self, provider: Callable) -> None:
         """Voci del menu contestuale sulle pagine.

@@ -223,11 +223,15 @@ def test_service_dialogs(window, monkeypatch):
 def test_link_handler_extension(window, sample_pdf):
     from foliant.ui import tools
     seen = []
-    handler = lambda view, link: (seen.append(link.get("uri")), True)[1]
-    window.ctx.add_link_handler(handler)
+    first = lambda view, link: (seen.append(("prima", link.get("uri"))), False)[1]
+    last = lambda view, link: (seen.append(("ultima", link.get("uri"))), True)[1]
+    window.ctx.add_link_handler(last, priority=-1000)
+    window.ctx.add_link_handler(first, priority=1000)
+    window.ctx.add_link_handler(first, priority=1000)      # doppia registrazione ignorata
     try:
         view = window.open_path(sample_pdf)
         tools.follow_link(view, {"kind": 2, "uri": "https://example.org"})
-        assert seen == ["https://example.org"]
+        assert seen == [("prima", "https://example.org"), ("ultima", "https://example.org")]
     finally:
-        tools.LINK_HANDLERS.remove(handler)
+        tools.remove_link_handler(first)
+        tools.remove_link_handler(last)
