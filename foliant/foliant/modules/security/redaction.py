@@ -8,6 +8,7 @@ un riquadro pieno (con testo sovrapposto facoltativo).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
@@ -213,7 +214,10 @@ def apply(pdf: pymupdf.Document, options: ApplyOptions | None = None, pages: Ite
         for a in redacts:
             pdf.xref_set_key(a.xref, "IC", "null")
             pdf.xref_set_key(a.xref, "OverlayText", "null")
+        runs = _removed_runs(page, [b[0] for b in boxes])
         page.apply_redactions(images=images, graphics=graphics, text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        if runs:
+            _fix_text_advance(pdf, page, runs)
         _draw_boxes(page, boxes)
         if images == pymupdf.PDF_REDACT_IMAGE_PIXELS:
             _paint_image_pixels(pdf, page, fills)
@@ -221,6 +225,63 @@ def apply(pdf: pymupdf.Document, options: ApplyOptions | None = None, pages: Ite
         if pdf.xref_get_key(page.xref, "Thumb")[0] != "null":
             pdf.xref_set_key(page.xref, "Thumb", "null")
     return report
+
+
+def _removed_runs(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> list[tuple[float, float]]:
+    """Sequenze di glifi rimossi seguite da testo che resta sulla stessa riga.
+
+    Per ciascuna: (avanzamento totale, avanzamento del primo glifo) in millesimi di em."""
+    runs: list[tuple[float, float]] = []
+    try:
+        raw = page.get_text("rawdict", flags=0)
+    except Exception:
+        return runs
+    for block in raw.get("blocks", []):
+        for line in block.get("lines", []):
+            if tuple(round(v, 3) for v in line.get("dir", (1, 0))) != (1.0, 0.0):
+                continue
+            chars = [(ch, float(span.get("size") or 0)) for span in line.get("spans", [])
+                     for ch in span.get("chars", [])]
+            run: list[tuple[float, float]] = []
+            for ch, size in chars:
+                if size <= 0:
+                    run = []
+                    continue
+                box = pymupdf.Rect(ch["bbox"])
+                adv = box.width / size * 1000
+                if any(box.intersects(r) for r in rects):
+                    run.append((adv, size))
+                elif run:
+                    runs.append((sum(a for a, _s in run), run[0][0]))
+                    run = []
+    return runs
+
+
+_RX_TJ_NUMBER = re.compile(rb"(?<=[)>])\s*(-?\d+(?:\.\d+)?)\s*(?=[(<])")
+
+
+def _fix_text_advance(pdf: pymupdf.Document, page: pymupdf.Page, runs: list[tuple[float, float]]) -> None:
+    """Il motore, togliendo i glifi, compensa l'avanzamento senza il primo glifo rimosso:
+    il testo che segue sulla riga si sposta a sinistra (bug_06). Correggiamo il numero
+    inserito nell'array TJ quando corrisponde esattamente a questo errore."""
+    pending = list(runs)
+    for xref in page.get_contents():
+        data = pdf.xref_stream(xref)
+        out, last, changed = bytearray(), 0, False
+        for m in _RX_TJ_NUMBER.finditer(data):
+            value = float(m.group(1))
+            for k, (total, first) in enumerate(pending):
+                if abs(value + (total - first)) < 0.6:
+                    out += data[last:m.start(1)] + f"{-total:.3f}".encode()
+                    last = m.end(1)
+                    pending.pop(k)
+                    changed = True
+                    break
+        if changed:
+            out += data[last:]
+            pdf.update_stream(xref, bytes(out))
+        if not pending:
+            break
 
 
 def _box_of(pdf: pymupdf.Document, annot) -> tuple:

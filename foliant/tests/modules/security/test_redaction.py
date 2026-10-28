@@ -457,3 +457,27 @@ def test_bug05_rotated_cropbox_fill_position(tmp_path):
         pt = c * p.rotation_matrix
         assert pix.pixel(int(pt.x), int(pt.y)) == (0, 0, 0)
     doc.close()
+
+
+@pytest.mark.parametrize("font", [{"fontname": "helv"},
+                                  {"fontname": "F0", "fontfile": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"}])
+@pytest.mark.parametrize("margin", [0, 1])
+def test_bug06_following_text_keeps_position(tmp_path, font, margin):
+    import os
+    if "fontfile" in font and not os.path.exists(font["fontfile"]):
+        pytest.skip("font non disponibile")
+    path = tmp_path / "riga.pdf"
+    src = pymupdf.open()
+    src.new_page().insert_text((72, 100), "Prima parola CONFIDENZIALE-4711 ultima parola", fontsize=12, **font)
+    src.save(str(path))
+    doc = Document.open(path)
+    with doc.change("Redigi") as pdf:
+        words = pdf[0].get_text("words")
+        before = {w[4]: w[0] for w in words if w[4] in ("ultima", "Prima")}
+        R.add_mark(pdf, 0, pymupdf.Rect(words[2][:4]) + (-margin, -1, margin, 1), R.MarkStyle())
+        R.apply(pdf)
+        after = {w[4]: w[0] for w in pdf[0].get_text("words") if w[4] in ("ultima", "Prima")}
+        assert "CONFIDENZIALE" not in pdf[0].get_text()
+    assert abs(after["ultima"] - before["ultima"]) < 0.01
+    assert abs(after["Prima"] - before["Prima"]) < 0.01
+    doc.close()
