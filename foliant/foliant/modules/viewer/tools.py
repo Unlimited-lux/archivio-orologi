@@ -315,6 +315,7 @@ class ToolsController:
             mode.add_action(self.act_snapshot)
             mode.add_action(self.act_lens)
         ctx.currentViewChanged.connect(self._on_view)
+        ctx.documentAccessChanged.connect(self._on_access)
         self._connected: DocumentView | None = None
 
     @property
@@ -339,6 +340,11 @@ class ToolsController:
             view.set_tool(tool)
         elif view.tool is tool:
             view.set_tool(None)
+
+    def _on_access(self, view) -> None:
+        """Permessi cambiati (sblocco con password): aggiorna lo stato della cattura area."""
+        if view is self.ctx.current_view():
+            self._on_view(view)
 
     def _on_view(self, view) -> None:
         if self._connected is not None:

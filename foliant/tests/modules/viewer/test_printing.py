@@ -88,12 +88,12 @@ def annotated_pdf(tmp_path):
     return str(path)
 
 
-def _protected(tmp_path, name, permissions):
+def _protected(tmp_path, name, permissions, owner="o"):
     path = tmp_path / name
     doc = pymupdf.open()
     for i in range(2):
         doc.new_page().insert_text((72, 100), f"Pagina {i + 1}", fontsize=24)
-    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="o", user_pw="",
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw=owner, user_pw="",
              permissions=permissions)
     doc.close()
     return str(path)
@@ -224,6 +224,35 @@ def test_permission_state_follows_current_document(viewer_window, tmp_path, samp
     assert "non consentono" not in ctl.action.toolTip()
     viewer_window.tabs.setCurrentIndex(0)
     assert not ctl.action.isEnabled()
+
+
+def test_unlock_enables_print_without_switching_tab(viewer_window, tmp_path):
+    """SEC-02: «Sblocca…» con la password dei permessi riattiva subito Stampa, cattura area e
+    segnalibri, senza cambiare scheda né modificare il documento."""
+    viewer_window.open_path(_protected(tmp_path, "permessi.pdf", pymupdf.PDF_PERM_ACCESSIBILITY, owner="capo"))
+    view = viewer_window.current_view()
+    ctl = part(viewer_window, "printing")
+    bookmarks = part(viewer_window, "bookmarks").panel
+    bookmarks.set_view(view)
+    assert not ctl.action.isEnabled()
+    assert not bookmarks.editable
+    assert view.document.unlock("capo")
+    assert ctl.action.isEnabled()
+    assert "non consentono" not in ctl.action.toolTip()
+    assert bookmarks.editable and bookmarks.actions["add"].isEnabled()
+    assert "non consente" not in part(viewer_window, "tools").act_snapshot.toolTip()
+
+
+def test_unlock_of_background_tab_updates_state_when_shown(viewer_window, tmp_path, sample_pdf):
+    viewer_window.open_path(_protected(tmp_path, "permessi.pdf", pymupdf.PDF_PERM_ACCESSIBILITY, owner="capo"))
+    locked = viewer_window.current_view()
+    viewer_window.open_path(sample_pdf)
+    ctl = part(viewer_window, "printing")
+    assert ctl.action.isEnabled()
+    assert locked.document.unlock("capo")          # vista non corrente: lo stato della corrente non cambia
+    assert ctl.action.isEnabled()
+    viewer_window.ctx.activate_view(locked)
+    assert ctl.action.isEnabled()
 
 
 def test_permission_kept_after_edit(viewer_window, tmp_path):
