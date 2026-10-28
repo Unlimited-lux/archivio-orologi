@@ -601,6 +601,11 @@ class JobSettings:
 
 PLACEHOLDERS = {"nome", "est", "cartella", "data", "ora", "contatore", "pagine", "operazione", "pagina", "parte",
                 "bates_inizio", "bates_fine"}
+# segnaposti inglesi accettati accanto agli italiani (i modelli salvati restano validi)
+PLACEHOLDER_ALIASES = {"name": "nome", "ext": "est", "folder": "cartella", "date": "data", "time": "ora",
+                       "counter": "contatore", "pages": "pagine", "operation": "operazione", "page": "pagina",
+                       "part": "parte", "bates_start": "bates_inizio", "bates_end": "bates_fine",
+                       "total": "totale", "queue_total": "totale_coda"}
 _PH = re.compile(r"\{([^{}]*)\}")
 _INVALID = re.compile(r'[/\\\x00:*?"<>|\x01-\x1f]')
 
@@ -615,8 +620,14 @@ def _main_action(settings: JobSettings) -> ActionSpec | None:
 def default_pattern(settings: JobSettings) -> str:
     spec = _main_action(settings)
     if settings.destination_mode == "same" and spec is not None:
-        return "{nome}_" + _(spec.suffix)
-    return "{nome}"
+        return default_name_placeholder() + "_" + _(spec.suffix)
+    return default_name_placeholder()
+
+
+def default_name_placeholder() -> str:
+    """«{nome}» o «{name}» secondo la lingua dell'interfaccia."""
+    value = _("{nome}")
+    return value if value in ("{nome}", "{name}") else "{nome}"
 
 
 def validate_pattern(pattern: str) -> list[str]:
@@ -636,6 +647,7 @@ def validate_pattern(pattern: str) -> list[str]:
         return errors
     for m in _PH.finditer(pattern):
         name, _sep, arg = m.group(1).partition(":")
+        name = PLACEHOLDER_ALIASES.get(name, name)
         if name not in PLACEHOLDERS:
             errors.append(_("Segnaposto non valido: {{{p}}}").format(p=m.group(1)))
         elif arg and not arg.isdigit():
@@ -669,6 +681,7 @@ def render_name(pattern: str, path: str, index: int, settings: JobSettings, star
 
     def repl(m: re.Match) -> str:
         name, _sep, arg = m.group(1).partition(":")
+        name = PLACEHOLDER_ALIASES.get(name, name)
         if name == "contatore":
             n = settings.counter_start + index
             return str(n).zfill(int(arg)) if arg else str(n)
@@ -1283,7 +1296,7 @@ def remove_password(data: bytes, password: str) -> bytes:
 
 def _expand(text: str, values: dict) -> str:
     def repl(m):
-        key = m.group(1)
+        key = PLACEHOLDER_ALIASES.get(m.group(1), m.group(1))
         return str(values[key]) if key in values else m.group(0)
     return re.sub(r"\{(\w+)\}", repl, text or "")
 

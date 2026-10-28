@@ -431,3 +431,24 @@ def test_empty_file_has_clear_message(tmp_path):
     rep = be.run_job(None, [be.analyze_file(str(empty))], be.JobSettings(steps=[be.Step("compress")],
                                                                          destination=str(tmp_path / "o")))
     assert rep.results[0].status == "error" and "vuoto" in rep.results[0].message
+
+
+def test_english_defaults_and_layout_fit(window):
+    """C13: in inglese cartella «processed» e modello «{name}»; nessun campo oltre il bordo."""
+    from foliant.i18n import set_language
+    set_language("en")
+    try:
+        w = bu.BatchWidget(window.ctx)
+        assert w.subfolder.text() == "processed" and w.pattern.text() == "{name}"
+        window.ctx.set_central_widget(w)
+        from PySide6.QtWidgets import QLineEdit
+        for size in ((1280, 800), (1024, 700)):
+            window.resize(*size)
+            window.show()
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            for edit in w.findChildren(QLineEdit):
+                if edit.isVisible():
+                    assert edit.mapTo(window, edit.rect().topRight()).x() <= window.width(), (size, edit.objectName())
+    finally:
+        set_language("it")
