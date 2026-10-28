@@ -579,7 +579,8 @@ class SecurityController:
         if view is None or not self.require_modify(view.document):
             return 0
         doc = view.document
-        items = [(p.id, p.label, p.id in ("email", "phone", "iban", "cf", "date")) for p in PT.builtin_patterns()]
+        items = [(p.id, p.label, p.id in ("email", "phone", "iban", "cf", "date", "iddoc"))
+                 for p in PT.builtin_patterns()]
         dlg = D.FindDialog(mode, lambda o: self.search(doc, o), items, self.parent)
         if mode == "terms" and view.selected_text():
             dlg.terms.setPlainText(view.selected_text())

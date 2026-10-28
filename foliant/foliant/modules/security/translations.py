@@ -521,4 +521,5 @@ EN: dict[str, str] = {
     'Riempimento e testo sovrapposto dei segni selezionati': 'Fill and overlay text of the selected marks',
     'Modifica aspetto dei segni': 'Change mark appearance',
     '{cmd}: il documento non consente modifiche. Usa «Sblocca…» con la password dei permessi.': '{cmd}: the document does not allow changes. Use “Unlock…” with the permissions password.',
+    "Numeri di documenti d'identità": 'Identity document numbers',
 }

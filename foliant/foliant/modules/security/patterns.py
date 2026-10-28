@@ -239,6 +239,11 @@ def _date_ok(s: str) -> bool:
     return True
 
 
+def _iddoc_ok(s: str) -> bool:
+    # esclude le sigle di valuta/paese seguite da importi e i codici IBAN spezzati
+    return not s[:2] in ("IT", "EU", "EUR") or len(s) == 9 and s[-2:].isalpha()
+
+
 def _ip_ok(s: str) -> bool:
     return all(0 <= int(p) <= 255 for p in s.split("."))
 
@@ -294,6 +299,11 @@ def builtin_patterns() -> list[Pattern]:
         Pattern("url", _("Indirizzi web"), r"\b(?:https?://|www\.)[^\s<>\"']+[^\s<>\"'.,;:)]",
                 re.IGNORECASE, example="https://esempio.it"),
         Pattern("ip", _("Indirizzi IP"), r"\b(?:\d{1,3}\.){3}\d{1,3}\b", check=_ip_ok, example="192.168.1.10"),
+        # carta d'identità elettronica (CA12345XY), cartacea e passaporto (AX1234567),
+        # patente (MI1234567A, U1…): solo maiuscole, come stampati sui documenti
+        Pattern("iddoc", _("Numeri di documenti d'identità"),
+                r"\b(?:[A-Z]{2}\d{5}[A-Z]{2}|[A-Z]{2}\d{7}[A-Z]?|U1[A-Z0-9]{7}[A-Z])\b",
+                check=_iddoc_ok, example="CA12345XY"),
     ]
 
 
