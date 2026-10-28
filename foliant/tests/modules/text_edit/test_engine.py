@@ -925,3 +925,47 @@ def test_pdfa_document_never_uses_unembedded_fonts(tmp_path):
         assert f[1] != "n/a"                                               # incorporato
         assert re_.xref_get_key(f[0], "ToUnicode")[0] != "null"
     assert "pdfaid:part" in re_.get_xml_metadata()                        # dichiarazione conservata
+
+
+# ---------------------------------------------------------------- TXT-21
+def test_hebrew_insert_word_keeps_number_order(tmp_path):
+    from foliant.modules.text_edit.model import Style as _Style
+    doc = pymupdf.open()
+    doc.new_page()
+    d = Document.open(save(doc, tmp_path / "ebraico.pdf"))
+    st = _Style(font="DejaVu Sans", size=14)
+    with d.change("Crea") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(300, 100), [[Run("שלום 2026 עולם", st)]])
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+        right = block.bbox.x1
+    assert block.text == "שלום 2026 עולם" and block.align == "right"
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "2026", "יפה 2026"))
+    with d.lock:
+        nb = blocks_of(d.pdf)[0]
+    assert nb.text == "שלום יפה 2026 עולם"          # ordine logico, «2026» non invertito
+    assert abs(nb.bbox.x1 - right) <= 0.6           # margine destro fermo, la riga cresce a sinistra
+
+
+def test_arabic_letter_between_joined_letters(tmp_path):
+    from foliant.modules.text_edit.bidi import shape_arabic
+    from foliant.modules.text_edit.model import Style as _Style
+    doc = pymupdf.open()
+    doc.new_page()
+    d = Document.open(save(doc, tmp_path / "arabo.pdf"))
+    st = _Style(font="DejaVu Sans", size=14)
+    with d.change("Crea") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(300, 100), [[Run("مرحبا بالعالم", st)]])
+    with d.lock:
+        block = blocks_of(d.pdf)[0]
+    with d.change("Modifica") as pdf:
+        engine.replace_block(pdf, 0, block, replace_text(block, "مرحبا", "مرحتبا"))
+    with d.lock:
+        nb = blocks_of(d.pdf)[0]
+        raw = "".join(c["c"] for b in d.pdf[0].get_text("rawdict")["blocks"] for ln in b["lines"]
+                      for sp in ln["spans"] for c in sp["chars"])
+    assert nb.text == "مرحتبا بالعالم"                 # sequenza logica attesa
+    # forme contestuali: la «ت» inserita tra due lettere legate è in forma mediana
+    assert "ﺘ" in raw
+    assert shape_arabic("مرحتبا").count("ﺘ") == 1

@@ -11,6 +11,7 @@ import statistics
 
 import pymupdf
 
+from .bidi import is_ltr_char, is_rtl_char, paragraph_is_rtl, unshape
 from .model import (
     ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT, GRANULARITY_LINE, SOFT_HYPHEN, Line, Run, Style,
     TextBlock, Word, color_from_int, merge_runs,
@@ -124,11 +125,15 @@ def _make_line(raw_line: dict, xrefs: dict[str, int], frame: pymupdf.Matrix) -> 
                 bx, by = x1 * fa + y1 * fc + fe, x1 * fb + y1 * fd + ff
                 x0, x1 = min(ax, bx), max(ax, bx)
                 y0, y1 = min(ay, by), max(ay, by)
+            if "\uFB50" <= c <= "\uFEFF":
+                c = unshape(c)          # forme di presentazione arabe -> lettere di base
             chars.append((c, ox, oy, x0, y0, x1, y1, style))
             if not visible_text and c.strip():
                 visible_text = True
         if visible_text:
             alphas.append(span.get("alpha", 255))
+    if any(is_rtl_char(c[0]) for c in chars):
+        chars = _logical_rtl_chars(chars)
     # elimina spazi iniziali e finali
     start, end = 0, len(chars)
     while start < end and not chars[start][0].strip():
@@ -149,17 +154,21 @@ def _make_line(raw_line: dict, xrefs: dict[str, int], frame: pymupdf.Matrix) -> 
     first = None
     last = None
     buf: list[str] = []
+    group: list = []
+
+    def close_word() -> None:
+        # x e x1 dai riquadri: nelle scritture da destra a sinistra l'ordine logico va verso sinistra
+        words.append(Word("".join(c[0] for c in group), min(min(c[1], c[3]) for c in group),
+                          max(c[5] for c in group), group[0][7]))
+
     for c in chars:
         if c[0].strip():
-            if first is None:
-                first = c
-            buf.append(c[0])
-            last = c
-        elif first is not None:
-            words.append(Word("".join(buf), first[1], last[5], first[7]))
-            first, buf = None, []
-    if first is not None:
-        words.append(Word("".join(buf), first[1], last[5], first[7]))
+            group.append(c)
+        elif group:
+            close_word()
+            group = []
+    if group:
+        close_word()
     bbox = pymupdf.Rect(min(c[3] for c in chars), min(c[4] for c in chars),
                         max(c[5] for c in chars), max(c[6] for c in chars))
     dx, dy = raw_line.get("dir", (1.0, 0.0))
@@ -167,6 +176,49 @@ def _make_line(raw_line: dict, xrefs: dict[str, int], frame: pymupdf.Matrix) -> 
     line = Line(bbox=bbox, origin=pymupdf.Point(chars[0][1], chars[0][2]), runs=runs, dir=fdir, words=words)
     invisible = bool(alphas) and all(a == 0 for a in alphas)
     return line, invisible
+
+
+def _logical_rtl_chars(chars: list[tuple]) -> list[tuple]:
+    """Riga con scrittura da destra a sinistra: ordine logico ricostruito dalle posizioni visive
+    (l'estrazione del motore non è affidabile con numeri e parole latine nella riga)."""
+    visible = sorted((c for c in chars if c[0].strip()), key=lambda c: (c[3] + c[5]) / 2)
+    if not visible:
+        return chars
+    size = max(c[7].size for c in visible)
+    words: list[list[tuple]] = [[visible[0]]]
+    for c in visible[1:]:
+        if c[3] - words[-1][-1][5] > 0.15 * size:
+            words.append([c])
+        else:
+            words[-1].append(c)
+
+    def kind(word) -> str:
+        text = "".join(c[0] for c in word)
+        if any(is_rtl_char(ch) for ch in text):
+            return "R"
+        return "L" if any(is_ltr_char(ch) for ch in text) else "N"
+
+    # gruppi visivi: sequenze L contigue restano nel loro ordine, il resto si legge da destra a sinistra
+    groups: list[tuple[str, list]] = []
+    for w in words:
+        k = kind(w)
+        if k == "L" and groups and groups[-1][0] == "L":
+            groups[-1][1].append(w)
+        else:
+            groups.append(("L" if k == "L" else "R", [w]))
+    logical_words: list[list[tuple]] = []
+    for g, ws in reversed(groups):
+        if g == "L":
+            logical_words.extend(ws)
+        else:
+            logical_words.extend(list(reversed(w)) for w in reversed(ws))
+    out: list[tuple] = []
+    for k, w in enumerate(logical_words):
+        if k:
+            ref = w[0]
+            out.append((" ", ref[1], ref[2], ref[3], ref[4], ref[3], ref[6], ref[7]))
+        out.extend(w)
+    return out
 
 
 def frame_matrix(page: pymupdf.Page) -> pymupdf.Matrix:
@@ -428,7 +480,8 @@ def _detect_alignment(lines: list[Line]) -> tuple[str, float, float, float]:
     tol = max(1.0, 0.15 * size)
     x0, x1 = min(lefts), max(rights)
     if len(lines) == 1:
-        return ALIGN_LEFT, x0, x1 - x0, 0.0
+        # una riga sola: allineamento ambiguo; a destra per le scritture da destra a sinistra (TXT-05)
+        return (ALIGN_RIGHT if paragraph_is_rtl(lines[0].text) else ALIGN_LEFT), x0, x1 - x0, 0.0
     body_lefts = lefts[1:] if len(lines) > 2 else lefts
     indent = 0.0
     left_eq = _spread(body_lefts) <= tol
