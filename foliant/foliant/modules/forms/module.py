@@ -183,6 +183,8 @@ class FormsModule(QObject):
         ctx.documentClosed.connect(self._detach)
         ctx.modeChanged.connect(lambda _m: self._sync_tools())
         ctx.add_view_menu_provider(self.context_menu)
+        if hasattr(ctx, "add_pending_edit_hook"):
+            ctx.add_pending_edit_hook(self.commit_pending)
         self._install_panels()
         for view in ctx.views():
             self._attach(view)
@@ -260,6 +262,12 @@ class FormsModule(QObject):
                 keys = {(x.page, x.xref) for x in f.state.fields}
                 self.selection = [k for k in self.selection if k in keys]
         self._refresh_panels()
+
+    def commit_pending(self, view) -> None:
+        """Prima di salvare o chiudere: conferma il valore del campo in compilazione."""
+        f = self.fillers.get(id(view))
+        if f is not None and f.view is view and f.editor is not None:
+            f.commit_active()
 
     def document_saved(self, view) -> None:
         """Dopo un salvataggio gli identificativi dei widget possono cambiare: si riseleziona per posizione."""

@@ -476,3 +476,13 @@ def test_do_not_scroll_rejects_overflow(qtbot, window, tmp_path):
     click_field(qtbot, view, "libero")
     qtbot.keyClicks(f.editor, long_text)
     assert f.editor.text() == long_text  # senza divieto il testo scorre
+
+
+def test_value_committed_before_save(qtbot, window, form_pdf, tmp_path):
+    view = open_form(window, form_pdf)
+    click_field(qtbot, view, "cognome")
+    f = filler_of(view)
+    qtbot.keyClicks(f.editor, "NonConfermato")
+    window.save_view(view)
+    again = pymupdf.open(form_pdf)
+    assert E.form_values(again)["cognome"] == "NonConfermato"
