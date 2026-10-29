@@ -113,7 +113,11 @@ def test_pages_show_the_entries(viewer_window, sample_pdf):
     for page in ("informazioni", "apri", "condividi", "gestisci", "opzioni", "guida"):
         w.show_backstage(page)
         shown = [t.action for t in w.backstage.tiles]
-        expected = [e.action for e in w.backstage.entries(page) if e.action.isVisible()]
+        groups: dict[str, list] = {}                    # le voci si mostrano raggruppate, in ordine
+        for e in w.backstage.entries(page):
+            if e.action.isVisible():
+                groups.setdefault(e.group, []).append(e.action)
+        expected = [a for acts in groups.values() for a in acts]
         assert shown == expected, page
         for name, attr, p, _g in EXPECTED:
             act = getattr(part(w, name), attr)
@@ -135,23 +139,26 @@ def test_shortcuts_unchanged(viewer_window):
     assert part(viewer_window, "commands").act_palette.shortcut() == QKeySequence("Ctrl+K")
 
 
-def test_reload_mode_entry_opens_its_menu(viewer_window):
-    """La voce «Ricarica dei documenti modificati…» apre il menu Automatica/Chiedi/Mai."""
+def test_reload_mode_entry_opens_its_menu(viewer_window, monkeypatch):
+    """La voce «Ricarica dei documenti modificati…» apre il menu Automatica/Chiedi/Mai; la scelta
+    cambia la modalità e la scheda File resta aperta (sono opzioni attivabili)."""
     w = viewer_window
     ctl = part(w, "reload")
     opened = []
 
-    def shown():
-        opened.append([a.isChecked() for a in ctl.mode_actions.values()])
-        QTimer.singleShot(0, ctl.mode_menu.close)          # il menu aperto con exec() si chiude da sé
-    ctl.mode_menu.aboutToShow.connect(shown)
+    def fake_exec(proxy, _pos):
+        opened.append([a.isChecked() for a in proxy.actions() if not a.isSeparator()])
+        return next(a for a in proxy.actions() if not a.isSeparator() and not a.isChecked())
+    monkeypatch.setattr(w.backstage, "_exec_menu", fake_exec)
     ctl.set_mode("ask")
     w.show_backstage("opzioni")
     tile = next(t for t in w.backstage.tiles if t.action is ctl.act_mode)
     assert not tile.state_label.pixmap().isNull()          # freccia del sottomenu
     tile.click()
     assert opened == [[False, True, False]] and w.backstage_visible()
-    ctl.mode_menu.aboutToShow.disconnect(shown)
+    assert sum(a.isChecked() for a in ctl.mode_actions.values()) == 1
+    assert not ctl.mode_actions["ask"].isChecked()
+    ctl.set_mode("ask")
     w.hide_backstage()
 
 
