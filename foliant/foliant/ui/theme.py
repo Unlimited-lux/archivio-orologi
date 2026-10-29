@@ -6,7 +6,6 @@ scrivere valori fissi, così rispettano il tema attivo.
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -14,6 +13,8 @@ from typing import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle
+
+from ..core import platform
 
 LIGHT: dict[str, str | tuple] = {
     "accent": "#0F7C78",
@@ -190,7 +191,7 @@ _ICONS = Path(__file__).resolve().parent.parent / "resources" / "icons"
 
 def _asset(name: str, color: str) -> str:
     """Icona colorata scritta su disco (i fogli di stile Qt richiedono un file)."""
-    folder = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "foliant" / "theme"
+    folder = platform.app_dir("cache") / "theme"
     target = folder / f"{name}-{color.lstrip('#')}.svg"
     try:
         folder.mkdir(parents=True, exist_ok=True)

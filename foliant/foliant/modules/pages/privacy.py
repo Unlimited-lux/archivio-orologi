@@ -16,6 +16,8 @@ import shutil
 import tempfile
 import time
 
+from foliant.core import platform
+
 TEMP_PREFIX = "foliant-pagine-"
 TEMPLATES_KEY = "pages/headerfooter_templates"
 LEGACY_GRACE_SECONDS = 3600   # cartelle delle versioni precedenti: tolte dopo un'ora
@@ -27,19 +29,8 @@ def temp_prefix() -> str:
 
 
 def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if pid == os.getpid():
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+    """True se esiste un processo con questo pid (su Windows senza os.kill, che lo terminerebbe)."""
+    return platform.pid_alive(pid)
 
 
 def cleanup_temp_dirs(keep: str | None = None, base: str | None = None) -> list[str]:

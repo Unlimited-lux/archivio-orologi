@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from foliant.api import _
+from foliant.core import platform
 
 from . import providers
 
@@ -37,8 +38,7 @@ def data_dir() -> Path:
     env = os.environ.get("FOLIANT_AI_DIR")
     if env:
         return Path(env)
-    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    return Path(base) / "foliant" / "ai"
+    return platform.app_dir("data") / "ai"
 
 
 def ensure_private_dir(path: Path) -> Path:

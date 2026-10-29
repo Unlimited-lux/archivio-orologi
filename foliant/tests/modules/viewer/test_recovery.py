@@ -14,6 +14,7 @@ import pytest
 from PySide6.QtCore import Qt
 
 from foliant.api import Document
+from foliant.core import platform
 from foliant.modules.viewer import recovery as recovery_mod
 from foliant.modules.viewer import recovery_engine as engine
 from foliant.ui.main_window import MainWindow
@@ -90,8 +91,12 @@ def _cleanup(win):
 # ====================================================================== motore
 def test_recovery_dir_resolution(tmp_path):
     assert engine.recovery_dir({"FOLIANT_RECOVERY_DIR": "/x/rec"}) == Path("/x/rec")
-    assert engine.recovery_dir({"XDG_STATE_HOME": "/s"}) == Path("/s/foliant/recovery")
-    assert engine.recovery_dir({}) == Path.home() / ".local/state/foliant/recovery"
+    if platform.IS_WINDOWS:
+        assert engine.recovery_dir({"LOCALAPPDATA": r"C:\L"}) == Path(r"C:\L/foliant/recovery")
+        assert engine.recovery_dir({}) == Path.home() / "AppData/Local/foliant/recovery"
+    else:
+        assert engine.recovery_dir({"XDG_STATE_HOME": "/s"}) == Path("/s/foliant/recovery")
+        assert engine.recovery_dir({}) == Path.home() / ".local/state/foliant/recovery"
 
 
 def test_pid_alive():

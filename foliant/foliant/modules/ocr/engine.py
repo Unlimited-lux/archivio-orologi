@@ -37,7 +37,7 @@ import cv2
 import numpy as np
 import pymupdf
 
-from foliant.core import placement
+from foliant.core import placement, platform
 from foliant.core.engine import ENGINE_LOCK
 from foliant.core.errors import OperationCancelled
 from foliant.i18n import _
@@ -499,15 +499,8 @@ def remove_live_temp() -> None:
 
 
 def _pid_alive(pid: int) -> bool:
-    if pid == os.getpid():
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True         # esiste ma di un altro utente: non è nostro, meglio non toccarlo
-    return True
+    """True se esiste un processo con questo pid (su Windows senza os.kill, che lo terminerebbe)."""
+    return platform.pid_alive(pid)
 
 
 def cleanup_leftovers(directory: str | None = None, min_age: float = 300.0) -> int:

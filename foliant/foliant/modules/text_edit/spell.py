@@ -34,6 +34,7 @@ from typing import Iterable
 
 import pymupdf
 
+from ...core import platform
 from ...core.errors import FoliantError
 from ...i18n import _
 from ...i18n import language as ui_language
@@ -281,13 +282,11 @@ class _NothingApplied(Exception):
 
 # ====================================================================== servizio
 def _default_personal_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return Path(base) / "foliant" / "dizionario_personale.txt"
+    return platform.app_dir("config") / "dizionario_personale.txt"
 
 
 def default_user_dict_dir() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    return Path(base) / "foliant" / "dictionaries"
+    return platform.app_dir("data") / "dictionaries"
 
 
 def dic_language(path: str | os.PathLike) -> str:

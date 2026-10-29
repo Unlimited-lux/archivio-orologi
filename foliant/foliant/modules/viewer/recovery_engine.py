@@ -28,6 +28,7 @@ from typing import Callable, Mapping
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, _, atomic_write
+from foliant.core import platform
 
 FORMAT_VERSION = 1
 DIR_MODE = 0o700
@@ -43,8 +44,7 @@ def recovery_dir(env: Mapping[str, str] | None = None) -> Path:
     explicit = env.get("FOLIANT_RECOVERY_DIR")
     if explicit:
         return Path(explicit).expanduser()
-    state = env.get("XDG_STATE_HOME")
-    base = Path(state).expanduser() if state else Path.home() / ".local" / "state"
+    base = platform.state_home(env)
     return base / "foliant" / "recovery"
 
 
@@ -63,24 +63,8 @@ def new_entry_id() -> str:
 
 
 def pid_alive(pid: int) -> bool:
-    """True se esiste un processo con questo pid (anche di un altro utente)."""
-    try:
-        pid = int(pid)
-    except (TypeError, ValueError):
-        return False
-    if pid <= 0:
-        return False
-    if pid == os.getpid():
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except (OverflowError, OSError):
-        return False
-    return True
+    """True se esiste un processo con questo pid (su Windows senza os.kill, che lo terminerebbe)."""
+    return platform.pid_alive(pid)
 
 
 def make_meta(*, page: int, pid: int | None = None, timestamp: float | None = None) -> dict:

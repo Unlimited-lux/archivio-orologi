@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pymupdf
 
+from ...core import platform
 from ...i18n import _
 from . import engine, fonts
 from .analysis import analyze_page, normalize_font_name, strip_subset
@@ -127,8 +127,7 @@ def embed_font(pdf: pymupdf.Document, font_name: str, pages=None) -> ReplaceFont
 
 # ---------------------------------------------------------------- corrispondenze
 def mappings_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return Path(base) / "foliant" / "corrispondenze_font.json"
+    return platform.app_dir("config") / "corrispondenze_font.json"
 
 
 def _clean_mapping(mapping: dict) -> dict[str, str]:

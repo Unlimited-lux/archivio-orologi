@@ -18,6 +18,7 @@ from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 
 from foliant.api import ENGINE_LOCK, _
+from foliant.core import platform
 
 from . import engine as E
 from .content import IMAGE
@@ -45,15 +46,8 @@ def remove_live_dirs() -> None:
 
 
 def _pid_alive(pid: int) -> bool:
-    if pid == os.getpid():
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True
-    return True
+    """True se esiste un processo con questo pid (su Windows senza os.kill, che lo terminerebbe)."""
+    return platform.pid_alive(pid)
 
 
 def cleanup_leftovers(directory: str | None = None, min_age: float = 300.0) -> int:

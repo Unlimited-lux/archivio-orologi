@@ -28,6 +28,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from foliant.core import platform
+
 log = logging.getLogger("foliant.modules.viewer")
 
 # marcatore scritto dalle versioni precedenti della pulizia: ora si cancella e non si scrive più
@@ -73,8 +75,8 @@ def _owner_pid(name: str) -> int | None:
 
 
 def _pid_alive(pid: int) -> bool:
-    from .recovery_engine import pid_alive
-    return pid_alive(pid)
+    """True se esiste un processo con questo pid (su Windows senza os.kill, che lo terminerebbe)."""
+    return platform.pid_alive(pid)
 
 
 def remove_orphan_temp_dirs(tmpdir: str | None = None, now: float | None = None,
@@ -115,7 +117,7 @@ def remove_orphan_temp_dirs(tmpdir: str | None = None, now: float | None = None,
 def legacy_thumbnailer_paths(env=None) -> list[Path]:
     """Dove una versione precedente avrebbe installato la voce del generatore di miniature."""
     env = os.environ if env is None else env
-    base = env.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    base = platform.data_home(env)
     return [Path(base) / "thumbnailers" / "foliant.thumbnailer"]
 
 

@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pymupdf
 
+from foliant.core import platform
+
 from . import advsearch_engine as eng
 from .engine import extract_page_text
 
@@ -59,7 +61,7 @@ def clear_indexes() -> None:
 def legacy_index_dir(env=None) -> Path:
     """Cartella in cui le versioni precedenti salvavano gli indici (solo per cancellarli)."""
     env = os.environ if env is None else env
-    base = env.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    base = platform.data_home(env)
     return Path(base) / "foliant" / "indici"
 
 

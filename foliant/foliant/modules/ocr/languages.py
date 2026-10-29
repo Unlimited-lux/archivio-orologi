@@ -26,6 +26,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from foliant.core import platform
 from foliant.i18n import _
 
 
@@ -235,8 +236,7 @@ def user_tessdata_dir() -> Path:
     override = os.environ.get("FOLIANT_TESSDATA_DIR")
     if override:
         return Path(override)
-    base = os.environ.get("XDG_DATA_HOME") or os.path.join(Path.home(), ".local", "share")
-    return Path(base) / "foliant" / "tessdata"
+    return platform.app_dir("data") / "tessdata"
 
 
 def _system_packs() -> dict[str, Path]:

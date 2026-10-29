@@ -33,8 +33,11 @@ def _isolated_user_dirs(monkeypatch, tmp_path_factory):
     file lasciati da altri test o da una sessione vera (es. il recupero dopo un arresto
     anomalo, che mostrerebbe un avviso). La cache resta condivisa (fontconfig è lento)."""
     base = tmp_path_factory.mktemp("utente")
+    # Linux: XDG_*; Windows: %APPDATA% (dati e configurazione) e %LOCALAPPDATA% (stato), letti da
+    # foliant.core.platform. La cache resta quella vera anche su Windows (LOCALAPPDATA/foliant/cache
+    # sarebbe dentro lo stato isolato: costa solo le icone del tema).
     for var, name in (("XDG_DATA_HOME", "dati"), ("XDG_STATE_HOME", "stato"),
-                      ("XDG_CONFIG_HOME", "config")):
+                      ("XDG_CONFIG_HOME", "config"), ("APPDATA", "roaming"), ("LOCALAPPDATA", "locale")):
         monkeypatch.setenv(var, str(base / name))
     monkeypatch.setenv("FOLIANT_RECOVERY_DIR", str(base / "recupero"))
 

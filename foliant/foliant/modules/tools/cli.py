@@ -24,6 +24,7 @@ import sys
 import threading
 
 from foliant.api import OperationCancelled, _, atomic_write
+from foliant.core import platform
 
 from . import engine as be
 
@@ -34,8 +35,7 @@ def config_dir() -> str:
     """Cartella di configurazione condivisa con l'applicazione grafica."""
     if os.environ.get("FOLIANT_CONFIG_DIR"):
         return os.environ["FOLIANT_CONFIG_DIR"]
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(base, "Foliant")
+    return str(platform.settings_dir())
 
 
 class CliError(Exception):

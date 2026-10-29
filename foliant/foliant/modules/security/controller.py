@@ -16,6 +16,7 @@ import pymupdf
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from foliant.api import CONTENT, ENGINE_LOCK, SAVED, Context, DocumentError, _
+from foliant.core import platform
 
 from . import dialogs as D
 from . import patterns as PT
@@ -620,9 +621,8 @@ class SecurityController:
         if s is not None:
             folder = s.value(self.VAULT_FOLDER_KEY, "") or None
         if folder is None:
-            from PySide6.QtCore import QStandardPaths
-            base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-            folder = os.path.join(base, "spazio-protetto")
+            # come AppDataLocation di Qt (…/Foliant/Foliant), ma isolabile nei test anche su Windows
+            folder = str(platform.data_home() / "Foliant" / "Foliant" / "spazio-protetto")
         current = getattr(self, "_vault", None)
         if current is None or str(current.folder) != str(folder):
             if current is not None:

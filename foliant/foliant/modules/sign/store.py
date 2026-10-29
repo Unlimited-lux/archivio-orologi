@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from foliant import i18n
+from foliant.core import platform
 from foliant.i18n import _
 
 from .digital import CertInfo, SignError, cert_info_from_der
@@ -27,10 +28,8 @@ class StoreError(SignError):
 
 
 def data_dir() -> Path:
-    """Cartella dati dell'utente per Foliant (es. ~/.local/share/foliant), privata (0700)."""
-    from PySide6.QtCore import QStandardPaths
-    loc = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericDataLocation)
-    base = (Path(loc) if loc else Path.home() / ".local" / "share") / "foliant"
+    """Cartella dati dell'utente per Foliant (es. ~/.local/share/foliant o %APPDATA%\\foliant), privata (0700)."""
+    base = platform.app_dir("data")
     _ensure_dir(base)
     return base
 

@@ -19,7 +19,6 @@ import base64
 import copy
 import io
 import datetime as _dt
-import fcntl
 import hashlib
 import json
 import os
@@ -29,6 +28,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from foliant.core import platform
 from foliant.i18n import _
 
 from .graphic import SignatureItem, art_to_svg, style_by_id, svg_to_art, text_to_art
@@ -144,14 +144,8 @@ class SignatureLibrary:
 
     @contextmanager
     def _lock(self):
-        lock_path = self.root / ".lock"
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+        with platform.file_lock(self.root / ".lock"):
             yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
 
     def _parse(self, raw: bytes) -> tuple[list[LibraryEntry], dict | None]:
         data = json.loads(raw.decode("utf-8"))

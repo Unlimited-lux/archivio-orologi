@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.api import OperationCancelled, _, atomic_write, bind_icon, format_date, format_number, icon, theme
+from foliant.core import platform
 
 from . import engine as be
 
@@ -515,7 +516,10 @@ class BatchWidget(QWidget):
 
     # ================================================================ coda
     def _base_dir(self) -> str:
-        return os.path.dirname(self.ctx.settings().fileName()) or os.path.expanduser("~/.config/foliant")
+        s = self.ctx.settings()
+        if platform.IS_WINDOWS and s.format() == s.Format.NativeFormat:
+            return str(platform.settings_dir())      # le QSettings sono nel registro, non in un file
+        return os.path.dirname(s.fileName()) or str(platform.settings_dir())
 
     def sequences_dir(self) -> str:
         return os.path.join(self._base_dir(), "foliant-sequenze")
