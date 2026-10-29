@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import os
 import re
+import sys
 import time
 import unicodedata
 
@@ -493,8 +495,8 @@ def test_batch_separate(tmp_path):
     out = tmp_path / "uscita"
     rep = create.batch_create(files + [str(bad), str(broken)], mode="separate", output_dir=str(out))
     assert len(rep["created"]) == len(files)
-    assert sorted(p.split("/")[-1] for p in rep["created"]) == sorted(
-        f.split("/")[-1].rsplit(".", 1)[0] + ".pdf" for f in files)
+    assert sorted(os.path.basename(p) for p in rep["created"]) == sorted(
+        os.path.basename(f).rsplit(".", 1)[0] + ".pdf" for f in files)
     assert [s[0] for s in rep["skipped"]] == [str(bad), str(broken)]
     assert not [p for p in out.iterdir() if p.name.startswith(".")]   # nessun temporaneo rimasto
 
@@ -506,7 +508,7 @@ def test_batch_single(tmp_path):
     pdf = pymupdf.open(rep["output"])
     toc = pdf.get_toc()
     assert len(toc) == len(files) and all(t[0] == 1 for t in toc)
-    assert [t[1] for t in toc] == [f.split("/")[-1].rsplit(".", 1)[0] for f in files]
+    assert [t[1] for t in toc] == [os.path.basename(f).rsplit(".", 1)[0] for f in files]
     assert [t[2] for t in toc] == list(range(1, len(files) + 1))
     assert "Nota di prova" in pdf[3].get_text()
     assert rep["data"] == rep["pdf"]
@@ -597,7 +599,8 @@ def test_office_missing_soffice(tmp_path, monkeypatch):
     p = tmp_path / "x.docx"
     p.write_bytes(b"PK")
     monkeypatch.setattr(create, "soffice_path", lambda: None)
-    with pytest.raises(ConversionError, match="libreoffice-writer"):
+    hint = "www.libreoffice.org" if sys.platform == "win32" else "libreoffice-writer"
+    with pytest.raises(ConversionError, match=hint):
         create.office_to_pdf(str(p))
 
 

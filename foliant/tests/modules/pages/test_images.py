@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 import re
 
 import pymupdf
@@ -360,7 +361,7 @@ def test_clipboard_text_and_html_and_uris(tmp_path):
     p.new_page()
     p.new_page()
     p.save(pdfp)
-    doc = images.clipboard_payload_to_pdf({"uris": ["file://" + img, str(pdfp)], "text": "x"})
+    doc = images.clipboard_payload_to_pdf({"uris": [Path(img).as_uri(), str(pdfp)], "text": "x"})
     assert doc.page_count == 3
     assert images.clipboard_payload_to_pdf({}) is None
     assert images.clipboard_payload_to_pdf({"text": "  "}) is None

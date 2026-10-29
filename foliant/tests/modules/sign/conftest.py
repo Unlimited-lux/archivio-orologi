@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import make_pdf
+from tests.conftest import make_pdf, set_data_home
 
 PASSWORD = "Prova-Firma-2026!"
 
@@ -15,7 +15,7 @@ PASSWORD = "Prova-Firma-2026!"
 @pytest.fixture(autouse=True)
 def _foliant_data_dir(tmp_path, monkeypatch):
     """Ogni test usa una cartella dati isolata."""
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dati"))   # letta da QStandardPaths
+    set_data_home(monkeypatch, tmp_path / "dati")
 
 
 @pytest.fixture(scope="session")

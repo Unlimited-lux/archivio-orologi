@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -20,7 +21,7 @@ def test_command_line_pages_files_and_unknown_options(tmp_path):
     assert parse_args([a, "-p", "2", b]).files == [(a, 2), (b, None)]         # opzioni tra i file
     assert parse_args(["--page=4", a]).files == [(a, 4)]
     assert parse_args([a + "#page=5", b + "#PAGE=2"]).files == [(a, 5), (b, 2)]
-    assert parse_args(["file://" + a + "#page=2"]).files == [(a, 2)]
+    assert parse_args([Path(a).as_uri() + "#page=2"]).files == [(a, 2)]   # file:///… anche con «C:\\»
     assert parse_args(["a.pdf", "../b.pdf"], cwd=str(tmp_path / "x")).files == [
         (str(tmp_path / "x" / "a.pdf"), None), (str(tmp_path / "b.pdf"), None)]
     hashed = tmp_path / "scheda#page=1.pdf"                                   # un nome vero con «#page=»

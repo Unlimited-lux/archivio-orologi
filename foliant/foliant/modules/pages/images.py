@@ -27,7 +27,6 @@ import os
 import re
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 import pymupdf
 
@@ -632,7 +631,8 @@ def uri_to_path(uri: str) -> str | None:
     if not uri or uri.startswith("#"):
         return None
     if uri.startswith("file:"):
-        return unquote(urlparse(uri).path) or None
+        from PySide6.QtCore import QUrl
+        return QUrl(uri).toLocalFile() or None      # anche «file:///C:/…» e cartelle di rete su Windows
     if "://" in uri:
         return None
     return uri

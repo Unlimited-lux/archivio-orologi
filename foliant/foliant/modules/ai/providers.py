@@ -332,8 +332,8 @@ class OpenAICompatProvider(Provider):
         reason = e.reason
         if isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(reason):
             return AIError(CERT, str(reason), host=self.host)
-        if isinstance(reason, (TimeoutError, socket.timeout)):
-            return AIError(TIMEOUT, str(reason), host=self.host)
+        # URLError arriva prima di qualsiasi risposta: anche un tempo scaduto qui è una connessione
+        # mai riuscita (su Windows una porta chiusa risponde così, dopo i tentativi di collegamento)
         return AIError(NETWORK, mask_secret(str(reason), self.api_key), host=self.host)
 
     def _http_error(self, e: urllib.error.HTTPError) -> AIError:

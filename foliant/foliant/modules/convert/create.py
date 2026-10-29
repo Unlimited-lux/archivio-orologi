@@ -523,11 +523,7 @@ def images_to_pdf(paths: list[str], *, page_size=None, orientation: str = "auto"
 
 
 # ======================================================================= font
-_FONT_DIRS = [
-    "/usr/share/fonts", "/usr/local/share/fonts", os.path.expanduser("~/.fonts"),
-    os.path.expanduser("~/.local/share/fonts"), "/Library/Fonts", "/System/Library/Fonts",
-    os.path.expanduser("~/Library/Fonts"), os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts"),
-]
+_FONT_DIRS = platform.font_dirs() + ["/Library/Fonts", "/System/Library/Fonts", os.path.expanduser("~/Library/Fonts")]
 
 # famiglie con buona copertura (latino, greco, cirillico, arabo, ebraico)
 _FONT_CANDIDATES = {
@@ -558,7 +554,7 @@ def _font_index() -> dict[str, str]:
 
 @functools.lru_cache(maxsize=8)
 def _font_bytes(path: str) -> bytes:
-    return Path(path).read_bytes()
+    return Path(platform.nbsp_safe_font(path)).read_bytes()     # Windows: spazi veri, non U+00A0
 
 
 def _find_family(kind: str) -> tuple[str | None, ...] | None:

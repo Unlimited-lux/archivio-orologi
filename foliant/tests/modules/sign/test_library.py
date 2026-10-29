@@ -6,14 +6,14 @@ import math
 
 import pytest
 
-from tests.conftest import has_mode
+from tests.conftest import has_mode, set_data_home
 from foliant.modules.sign import graphic as g
 from foliant.modules.sign.library import LibraryError, LibraryLocked, SignatureLibrary
 
 
 @pytest.fixture
 def lib_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dati"))
+    set_data_home(monkeypatch, tmp_path / "dati")
     return tmp_path / "dati" / "foliant" / "signatures"
 
 

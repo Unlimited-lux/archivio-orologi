@@ -8,6 +8,8 @@ numeri, codici e nomi propri) o che contengono parole italiane.
 
 from __future__ import annotations
 
+import os
+
 import re
 
 import pytest
@@ -65,7 +67,7 @@ def _suspicious(it: list[str], en: list[str]) -> list[str]:
         plain = re.sub(r"\{[^}]*\}|[\d.,:%]+", " ", t).strip()
         if not re.search(r"[A-Za-zÀ-ÿ]{3,}", plain) or t in ALLOWED or t in TEST_DATA:
             continue
-        if t.startswith(("/", "#")) or re.fullmatch(r"[\w.-]+\.\w{2,4}", t):
+        if t.startswith(("/", "#")) or os.path.isabs(t) or re.fullmatch(r"[\w.-]+\.\w{2,4}", t):
             continue      # percorsi, colori, nomi di file
         if t in it_set and not all(w in ALLOWED or w.isupper() for w in re.findall(r"[A-Za-zÀ-ÿ/+-]+", plain)):
             bad.append(t)
@@ -181,7 +183,7 @@ def test_generated_names_and_reports_english(sample_pdf, tmp_path):
     assert "completed" in csv_text and not ITALIAN_WORDS.search(csv_text.splitlines()[0])
     assert suffixes == ["_compressed", "_custom", "_repaired"]
     assert template == "{name}_{page:03}"
-    assert [p.rsplit("/", 1)[-1] for p in images] == ["doc_001.png", "doc_002.png", "doc_003.png"]
+    assert [os.path.basename(p) for p in images] == ["doc_001.png", "doc_002.png", "doc_003.png"]
 
 
 def test_sizes_use_language_decimal_separator():

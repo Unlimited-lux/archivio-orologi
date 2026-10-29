@@ -6,6 +6,10 @@ import os
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if sys.platform == "win32":
+    # la piattaforma «offscreen» di Qt su Windows cerca i font solo in QT_QPA_FONTDIR (altrimenti
+    # nessuno: niente famiglie, misure dei testi sbagliate); con una finestra vera sono quelli di sistema
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 os.environ.setdefault("FOLIANT_SYNC_TASKS", "1")
 
 import warnings
@@ -47,6 +51,17 @@ def _isolated_user_dirs(monkeypatch, tmp_path_factory):
         from PySide6.QtCore import QSettings
         QSettings.setDefaultFormat(QSettings.Format.IniFormat)
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(base / "config"))
+
+
+@pytest.fixture(autouse=True)
+def _neutral_system_locale(monkeypatch):
+    """Formato carta e unità predefiniti come con la localizzazione «C» dei server Linux (A4, mm),
+    anche su un Windows in inglese statunitense (Letter, pollici): i test che riguardano le
+    impostazioni locali le simulano da sé (test_locale_defaults.py)."""
+    from PySide6.QtCore import QLocale
+
+    from foliant.core import locale_defaults
+    monkeypatch.setattr(locale_defaults, "system_locale", lambda: QLocale(QLocale.Language.C))
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +108,18 @@ def system_font(rel: str) -> str:
         if os.path.exists(candidate):
             return candidate
     return linux
+
+
+def set_data_home(monkeypatch, path) -> None:
+    """Cartella dei dati dell'utente per un test: XDG_DATA_HOME su Linux, %APPDATA% su Windows
+    (vedi foliant.core.platform.data_home)."""
+    monkeypatch.setenv("APPDATA" if sys.platform == "win32" else "XDG_DATA_HOME", str(path))
+
+
+def perf_limit(seconds: float) -> float:
+    """Soglia di un test di velocità moltiplicata per FOLIANT_PERF_FACTOR (predefinito 1: soglie
+    invariate). La CI su Windows lo imposta perché vi girano 4 processi di lavoro su 4 processori."""
+    return seconds * float(os.environ.get("FOLIANT_PERF_FACTOR") or 1)
 
 
 def has_mode(path, mode: int) -> bool:

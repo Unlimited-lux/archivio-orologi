@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def test_startup_loads_no_telemetry_component(tmp_path):
     env = dict(os.environ, XDG_CACHE_HOME=str(tmp_path / "cache"), HOME=str(tmp_path / "home"),
@@ -87,8 +89,11 @@ def test_file_dialog_leaves_no_history_and_keeps_other_apps(window, tmp_path):
         dialog.deleteLater()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         path = QSettings(QSettings.Scope.UserScope, "QtProject").fileName()
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
+        if sys.platform == "win32":             # nel registro (HKCU\\Software\\QtProject): il gruppo letto
+            text = repr(_qt_file_dialog_group())
+        else:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
         assert "zq7" not in text and "altra/app" in text
         state = _qt_file_dialog_group()
         assert state.get("lastVisited") == "file:///altra/app"
@@ -120,6 +125,7 @@ def test_legacy_settings_are_removed(tmp_path, qtbot):
     assert not s.contains("recent")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="documenti recenti di KDE: cronologie dei desktop Linux")
 def test_legacy_shared_files_cleaned_once(tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
 
@@ -215,6 +221,8 @@ sys.exit(app.exec())
 '''
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="QtProject.conf in XDG_CONFIG_HOME: su Windows la cronologia "
+                    "di Qt è nel registro, verificata da tests/test_no_file_traces.py")
 def test_other_app_history_survives_foliant_exit(tmp_path):
     """Processo vero: un'altra «app» scrive la cronologia dei dialoghi mentre Foliant è aperto;
     dopo l'uscita di Foliant i suoi valori restano e le cartelle dei dialoghi di Foliant no."""

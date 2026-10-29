@@ -9,6 +9,7 @@ import pymupdf
 import pytest
 from PySide6.QtWidgets import QApplication, QLabel
 
+from tests.conftest import perf_limit
 from foliant.api import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE
 from foliant.modules.viewer import session_engine as engine
 from foliant.ui.main_window import MainWindow
@@ -380,7 +381,7 @@ def test_switching_among_50_tabs_shows_page_quickly(viewer_window, tmp_path, qtb
         viewer_window.ctx.activate_view(view)
         qtbot.waitUntil(lambda v=view: any(k[0] == v.current_page for k in v._cache), timeout=2000)
         times.append(time.perf_counter() - t)
-    assert statistics.median(times) < 0.2, [round(x * 1000) for x in times]
+    assert statistics.median(times) < perf_limit(0.2), [round(x * 1000) for x in times]
 
 
 def test_closing_with_two_modified_documents_asks_once(viewer_window, tmp_path, monkeypatch):

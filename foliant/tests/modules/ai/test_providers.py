@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from tests.conftest import perf_limit
 from foliant.modules.ai import providers
 from foliant.modules.ai.providers import (
     AUTH, MODEL, NETWORK, QUOTA, RATE, SERVER, AIError, ChatRequest, ImagePart, Message, OpenAICompatProvider,
@@ -142,7 +143,7 @@ def test_cancel_closes_connection_quickly(server):
 
     res = provider(server).complete(ChatRequest("", [Message("user", "x")]), mark, cancel)
     assert res.interrupted and got == ["a", "b", "c"]
-    assert time.monotonic() - t0 < 1.0
+    assert time.monotonic() - t0 < perf_limit(1.0)
 
 
 def test_network_unreachable():

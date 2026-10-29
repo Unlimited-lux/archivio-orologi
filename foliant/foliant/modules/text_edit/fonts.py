@@ -44,28 +44,30 @@ _BASE14_NAMES = {
     "cour": "Courier", "cobo": "Courier-Bold", "coit": "Courier-Oblique", "cobi": "Courier-BoldOblique",
 }
 
-# famiglie metricamente compatibili (prefisso normalizzato -> famiglie candidate)
+# famiglie metricamente compatibili (prefisso normalizzato -> famiglie candidate; in coda quelle di Windows)
 _COMPATIBLE = [
-    ("helvetica", ["Liberation Sans", "Arimo", "DejaVu Sans"]),
-    ("arial", ["Liberation Sans", "Arimo", "DejaVu Sans"]),
+    ("helvetica", ["Liberation Sans", "Arimo", "DejaVu Sans", "Arial"]),
+    ("arial", ["Liberation Sans", "Arimo", "DejaVu Sans", "Arial"]),
     ("arimo", ["Liberation Sans", "DejaVu Sans"]),
-    ("timesnewroman", ["Liberation Serif", "Tinos", "DejaVu Serif"]),
-    ("times", ["Liberation Serif", "Tinos", "DejaVu Serif"]),
+    ("timesnewroman", ["Liberation Serif", "Tinos", "DejaVu Serif", "Times New Roman"]),
+    ("times", ["Liberation Serif", "Tinos", "DejaVu Serif", "Times New Roman"]),
     ("tinos", ["Liberation Serif", "DejaVu Serif"]),
-    ("couriernew", ["Liberation Mono", "Cousine", "DejaVu Sans Mono"]),
-    ("courier", ["Liberation Mono", "Cousine", "DejaVu Sans Mono"]),
+    ("couriernew", ["Liberation Mono", "Cousine", "DejaVu Sans Mono", "Courier New"]),
+    ("courier", ["Liberation Mono", "Cousine", "DejaVu Sans Mono", "Courier New"]),
     ("calibri", ["Carlito", "Liberation Sans", "DejaVu Sans"]),
     ("cambria", ["Caladea", "Liberation Serif", "DejaVu Serif"]),
     ("georgia", ["Gelasio", "DejaVu Serif", "Liberation Serif"]),
     ("verdana", ["DejaVu Sans", "Liberation Sans"]),
     ("tahoma", ["DejaVu Sans", "Liberation Sans"]),
     ("garamond", ["EB Garamond", "Liberation Serif"]),
-    ("glyphless", ["Liberation Sans", "DejaVu Sans"]),
+    ("glyphless", ["Liberation Sans", "DejaVu Sans", "Arial"]),
 ]
-_FALLBACK_SANS = ["Liberation Sans", "DejaVu Sans", "Noto Sans", "FreeSans"]
-_FALLBACK_SERIF = ["Liberation Serif", "DejaVu Serif", "Noto Serif", "FreeSerif"]
-_FALLBACK_MONO = ["Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", "FreeMono"]
-_LAST_RESORT = ["DejaVu Sans", "Noto Sans", "FreeSans", "Liberation Sans"]
+# in coda gli equivalenti di Windows (stesse misure di Liberation; Segoe UI e Arial coprono anche
+# ebraico, arabo, greco e cirillico): sui sistemi dove mancano non hanno effetto
+_FALLBACK_SANS = ["Liberation Sans", "DejaVu Sans", "Noto Sans", "FreeSans", "Arial", "Segoe UI"]
+_FALLBACK_SERIF = ["Liberation Serif", "DejaVu Serif", "Noto Serif", "FreeSerif", "Times New Roman"]
+_FALLBACK_MONO = ["Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono", "FreeMono", "Courier New", "Consolas"]
+_LAST_RESORT = ["DejaVu Sans", "Noto Sans", "FreeSans", "Liberation Sans", "Segoe UI", "Arial", "Tahoma"]
 
 _STYLE_WORDS = re.compile(r"(bold|italic|oblique|regular|roman|book|medium|semibold|demibold|light|black|"
                           r"heavy|condensed|narrow|mt|ps|psmt|it|bd|bi)$")
@@ -117,16 +119,20 @@ def system_fonts() -> list[SystemFont]:
         if _index is not None:
             return _index
         fonts: list[SystemFont] = []
-        try:
-            out = subprocess.run(
-                ["fc-list", "--format", "%{file}\t%{family[0]}\t%{style[0]}\t%{postscriptname}\n"],
-                capture_output=True, text=True, timeout=10).stdout
-            for row in out.splitlines():
-                parts = row.split("\t")
-                if len(parts) == 4 and parts[0].lower().endswith((".ttf", ".otf")):
-                    fonts.append(SystemFont(*parts))
-        except Exception:
-            fonts = []
+        if platform.IS_WINDOWS:          # niente fontconfig: registro dei font di Windows
+            fonts = [SystemFont(path, family, style, (family + style).replace(" ", ""))
+                     for path, family, style in platform.installed_fonts()]
+        else:
+            try:
+                out = subprocess.run(
+                    ["fc-list", "--format", "%{file}\t%{family[0]}\t%{style[0]}\t%{postscriptname}\n"],
+                    capture_output=True, text=True, timeout=10).stdout
+                for row in out.splitlines():
+                    parts = row.split("\t")
+                    if len(parts) == 4 and parts[0].lower().endswith((".ttf", ".otf")):
+                        fonts.append(SystemFont(*parts))
+            except Exception:
+                fonts = []
         if not fonts:
             for d in _FONT_DIRS:
                 for path in Path(d).rglob("*") if os.path.isdir(d) else []:
@@ -307,7 +313,7 @@ class FontResolver:
         base = self._files.get((path, None, False, False))
         if base is None:
             try:
-                data = Path(path).read_bytes()
+                data = Path(platform.nbsp_safe_font(path)).read_bytes()   # Windows: spazi veri, non U+00A0
                 if not embedding_allowed(data):
                     self.forbidden.add(name or path)
                     return None

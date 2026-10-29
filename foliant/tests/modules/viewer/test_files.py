@@ -164,8 +164,9 @@ def test_trash_moves_file_to_system_trash_and_closes_tab(fwin, ctl, sample_pdf, 
         fwin.ctx.remove_guard("close_document", guard)
     assert done == [sample_pdf] and asked and guarded == []
     assert not os.path.exists(sample_pdf)
-    trashed = data / "Trash" / "files" / os.path.basename(sample_pdf)
-    assert trashed.read_bytes() == content
+    if sys.platform != "win32":               # su Windows va nel Cestino del sistema, non in XDG_DATA_HOME
+        trashed = data / "Trash" / "files" / os.path.basename(sample_pdf)
+        assert trashed.read_bytes() == content
     assert view not in fwin.views()
 
 
@@ -294,7 +295,7 @@ def test_reveal_and_copy_path(fwin, ctl, sample_pdf, monkeypatch):
     urls = []
     monkeypatch.setattr(ctl, "open_folder_url", lambda url: urls.append(url) or True)
     ctl.act_reveal.trigger()
-    assert urls and urls[0].toLocalFile() == os.path.dirname(sample_pdf)
+    assert urls and os.path.normpath(urls[0].toLocalFile()) == os.path.dirname(sample_pdf)
     ctl.act_copy_path.trigger()
     assert QApplication.clipboard().text() == sample_pdf
 

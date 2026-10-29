@@ -5,6 +5,11 @@ elenca tutte le stringhe che devono comparire qui.
 """
 
 EN: dict[str, str] = {
+    "Per stampare in blocco su Windows serve Ghostscript, che non è stato trovato. Reinstalla Foliant "
+    "(Ghostscript è incluso).": "Batch printing on Windows requires Ghostscript, which was not found. Reinstall "
+                                "Foliant (Ghostscript is included).",
+    "Nessuna stampante predefinita: scegline una nelle impostazioni di Windows.":
+        "No default printer: choose one in Windows Settings.",
     "(documento in memoria)": "(in-memory document)",
     "(non disponibile)": "(not available)",
     "(non salvato)": "(unsaved)",

@@ -37,5 +37,9 @@ class _NoLayoutAnalysis(importlib.abc.MetaPathFinder):
         return None
 
 
+if sys.platform == "win32":                  # OCR di PyMuPDF: lingue del Tesseract installato
+    from .core import platform as _platform
+    _platform.configure_tessdata()
+
 if os.environ.get("FOLIANT_LAYOUT") != "1" and not any(isinstance(f, _NoLayoutAnalysis) for f in sys.meta_path):
     sys.meta_path.insert(0, _NoLayoutAnalysis())

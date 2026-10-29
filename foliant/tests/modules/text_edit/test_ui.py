@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QTextCursor
 
+from tests.conftest import set_data_home
 from foliant.core.platform import find_tool
 from foliant.modules.text_edit.ui_tool import AddTextTool, EditTextTool
 
@@ -294,7 +295,7 @@ def test_signed_document_single_warning(window, tmp_path, quiet, qtbot, monkeypa
     sign = getattr(window.ctx, "sign_controller", None)
     if sign is None:
         pytest.skip("modulo Firma non caricato")
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "dati"))
+    set_data_home(monkeypatch, tmp_path / "dati")
     path = _signed_pdf(tmp_path)
     asked = []
     monkeypatch.setattr(sign, "_ask_invalidation", lambda v, what: asked.append(what) or "cancel")

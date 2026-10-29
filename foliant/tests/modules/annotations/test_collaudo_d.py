@@ -5,6 +5,7 @@ import time
 import pymupdf
 import pytest
 
+from tests.conftest import perf_limit
 from foliant.modules.annotations import engine, ui_actions
 from foliant.modules.annotations.controller import FACTORY_STYLES
 
@@ -68,5 +69,5 @@ def test_import_1000_comments_fast():
     5 s su questa macchina: /NM senza scansione della pagina, nessuna ricerca per elemento, una sola
     pagina caricata alla volta (MuPDF rallenta ogni creazione in proporzione alle annotazioni delle
     pagine aperte)."""
-    assert _import_time(1000) < 6
-    assert _import_time(3000, pages=30) < 20
+    assert _import_time(1000) < perf_limit(6)
+    assert _import_time(3000, pages=30) < perf_limit(20)

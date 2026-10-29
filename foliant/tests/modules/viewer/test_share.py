@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 
 import pymupdf
 from PySide6.QtGui import QGuiApplication
@@ -61,4 +62,4 @@ def test_copy_file_to_clipboard(viewer_window, sample_pdf):
     viewer_window.open_path(sample_pdf)
     assert _ctl(viewer_window).copy_file()
     urls = QGuiApplication.clipboard().mimeData().urls()
-    assert urls and urls[0].toLocalFile() == sample_pdf
+    assert urls and os.path.normpath(urls[0].toLocalFile()) == sample_pdf

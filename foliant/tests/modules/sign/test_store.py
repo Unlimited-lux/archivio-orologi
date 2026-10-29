@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID
 
-from tests.conftest import has_mode
+from tests.conftest import has_mode, set_data_home
 from foliant.modules.sign import digital as d
 from foliant.modules.sign import store
 from tests.modules.sign.conftest import PASSWORD
@@ -35,7 +34,7 @@ def test_data_dir_private(tmp_path):
 
 
 def test_data_dir_follows_standard_paths(tmp_path, monkeypatch):
-    monkeypatch.setenv("APPDATA" if sys.platform == "win32" else "XDG_DATA_HOME", str(tmp_path / "xdg"))
+    set_data_home(monkeypatch, tmp_path / "xdg")
     assert store.data_dir() == tmp_path / "xdg" / "foliant"
 
 

@@ -91,7 +91,7 @@ def test_install_use_verify_remove(tmp_path, user_dir):
     assert "ita" in L.available_languages()
 
     proc = subprocess.run(
-        ["tesseract", str(_probe_png(tmp_path)), "stdout", "--tessdata-dir",
+        [find_tool("tesseract"), str(_probe_png(tmp_path)), "stdout", "--tessdata-dir",
          L.tessdata_dir(), "-l", f"ita+{code}"],
         capture_output=True, timeout=60,
     )

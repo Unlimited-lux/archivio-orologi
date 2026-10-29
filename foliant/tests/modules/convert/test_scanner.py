@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pymupdf
 import pytest
 from PIL import Image, ImageDraw
@@ -149,6 +151,8 @@ def test_preview_low_resolution():
     assert settings.dpi == 600     # le impostazioni scelte non cambiano
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="SANE (scanimage) simulato con uno script sh: solo Linux; "
+                    "su Windows lo scanner è WIA")
 def test_sane_paper_size_arguments(tmp_path):
     from foliant.modules.convert.scanner import SaneBackend
     log = tmp_path / "args.txt"

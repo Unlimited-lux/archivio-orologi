@@ -1826,7 +1826,7 @@ class SecurityController:
         digest = _file_hash(real)
         if trusted["files"].get(real) == digest and digest:
             return True
-        return any(real.startswith(folder.rstrip("/") + "/") for folder in trusted["folders"])
+        return any(_inside(real, folder) for folder in trusted["folders"])
 
     def trust_document(self, view, folder: bool = False) -> None:
         doc = view.document
@@ -1865,6 +1865,16 @@ def _declares_pdfa(doc) -> bool:
         except Exception:
             return False
     return "pdfaid:part" in xmp or "pdfxid:" in xmp or "GTS_PDFXVersion" in xmp
+
+
+def _inside(path: str, folder: str) -> bool:
+    """True se `path` sta dentro `folder` (anche in sottocartelle), con i separatori e le maiuscole
+    del sistema: su Windows «C:\\Documenti» e «c:/documenti» sono la stessa cartella."""
+    p, f = os.path.normcase(os.path.normpath(path)), os.path.normcase(os.path.normpath(folder))
+    try:
+        return p != f and os.path.commonpath([p, f]) == f
+    except ValueError:               # unità diverse su Windows
+        return False
 
 
 def _file_hash(path: str) -> str:

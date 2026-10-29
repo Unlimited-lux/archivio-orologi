@@ -618,7 +618,7 @@ def test_ocr_convert_to_visible_text(ocr_pdf, tmp_path):
     if find_tool("tesseract"):
         png = tmp_path / "area.png"
         out[0].get_pixmap(dpi=150, clip=pymupdf.Rect(40, 40, 740, 210)).save(str(png))
-        res = subprocess.run(["tesseract", str(png), "-", "--psm", "7"], capture_output=True, text=True, timeout=60)
+        res = subprocess.run([find_tool("tesseract"), str(png), "-", "--psm", "7"], capture_output=True, text=True, timeout=60)
         assert "2026" in res.stdout and "2019" not in res.stdout
 
 

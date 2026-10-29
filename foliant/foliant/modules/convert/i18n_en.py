@@ -1,6 +1,8 @@
 """Traduzioni inglesi del modulo Converti."""
 
 EN: dict[str, str] = {
+    "Lo scanner non risponde: controlla che sia acceso e collegato, poi riprova.":
+        "The scanner does not respond: check that it is on and connected, then try again.",
     "Nessuno scanner trovato. Verifica che sia acceso e collegato (o raggiungibile in rete) e che compaia in "
     "Impostazioni › Bluetooth e dispositivi › Stampanti e scanner. Foliant usa i driver WIA: per uno scanner con "
     "solo driver TWAIN acquisisci con il programma del produttore e apri il file.":

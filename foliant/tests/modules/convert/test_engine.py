@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import csv
 import io
 import os
@@ -1100,6 +1102,7 @@ def test_docx_mostly_rotated_page_stays_in_flow(tmp_path):
     assert body == ["Listino prezzi autunno", "Cronografo in oro rosa"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="picco di memoria misurato con il modulo resource (solo POSIX)")
 def test_txt_5000_pages_memory(tmp_path):
     """CNV-01: 5 000 pagine in TXT restano sotto il limite di memoria di NFR-14 (2 GB),
     misurato in un processo separato."""

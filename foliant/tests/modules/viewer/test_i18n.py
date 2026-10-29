@@ -215,7 +215,8 @@ def test_viewer_ui_is_english(qtbot, tmp_path):
     italian = {t for _w, t in texts["it"]}
     same, words = set(), set()
     for where, text in texts["en"]:
-        if text in italian and _wordy(text) and text not in SAME_OK:
+        voice = "speech" in where and re.fullmatch(r".+ \([a-z]{2,3}(-[A-Za-z]{2,4})?\)", text)
+        if text in italian and _wordy(text) and text not in SAME_OK and not voice:   # voci di sistema: nomi propri
             same.add(f"{where}: {text!r}")
         if ITALIAN.search(text):
             words.add(f"{where}: {text!r}")

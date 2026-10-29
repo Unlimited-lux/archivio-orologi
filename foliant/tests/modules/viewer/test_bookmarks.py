@@ -8,6 +8,7 @@ import pymupdf
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor
 
+from tests.conftest import perf_limit
 from foliant.api import Document
 
 
@@ -227,7 +228,7 @@ def test_large_outline_loads_fast(viewer_window, tmp_path):
     panel.set_view(None)
     t = time.perf_counter()
     panel.set_view(view)
-    assert time.perf_counter() - t < 1.5   # 5.000 voci (margine per la macchina di test)
+    assert time.perf_counter() - t < perf_limit(1.5)   # 5.000 voci (margine per la macchina di test)
     assert panel.tree.topLevelItemCount() == 1000
 
 

@@ -255,3 +255,34 @@ def test_regex_guard_times_out_without_select():
         assert guard.check(["aaaa"])                       # e riavviato alla richiesta successiva
     finally:
         guard.close()
+
+
+def test_nbsp_safe_font_gives_real_spaces(tmp_path, monkeypatch):
+    """Font come Arial (stesso glifo per U+0020 e U+00A0): il testo inserito da Foliant deve
+    estrarsi con spazi veri. Su Windows si usa una copia del font senza la voce U+00A0."""
+    import pymupdf
+    from fontTools.ttLib import TTFont
+    source = platform.font_file("sans")
+    font = TTFont(source)
+    for table in font["cmap"].tables:
+        if table.isUnicode():
+            table.cmap[0xA0] = table.cmap[0x20]
+    shared = tmp_path / "condiviso.ttf"
+    font.save(str(shared))
+    monkeypatch.setattr(platform, "IS_WINDOWS", True)
+
+    def text_with(path):
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_font(fontname="F", fontfile=path)
+        page.insert_text((50, 50), "Solo testo", fontname="F")
+        return page.get_text()
+
+    fixed = platform.nbsp_safe_font(str(shared))
+    assert fixed != str(shared) and "utente" in fixed                     # copia nella cache isolata
+    assert text_with(fixed).strip() == "Solo testo"
+    assert platform.nbsp_safe_font(str(shared)) == fixed                  # riusata
+    plain = tmp_path / "normale.ttf"
+    TTFont(source).save(str(plain))
+    if 0xA0 not in TTFont(str(plain)).getBestCmap():
+        assert platform.nbsp_safe_font(str(plain)) == str(plain)          # nessun problema: invariato

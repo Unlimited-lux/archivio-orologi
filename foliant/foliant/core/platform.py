@@ -449,6 +449,18 @@ def prepare_environment(settings_cls=None) -> None:
     tessdata = bundle / "tesseract" / "tessdata"
     if tessdata.is_dir() and not os.environ.get("TESSDATA_PREFIX"):
         os.environ["TESSDATA_PREFIX"] = str(tessdata)
+    configure_tessdata()
+
+
+def configure_tessdata() -> None:
+    """Windows: l'OCR di PyMuPDF trova le lingue solo con TESSDATA_PREFIX o in posizioni fisse; se
+    manca lo si ricava dal Tesseract trovato (Program Files, registro o pacchetto di Foliant)."""
+    if not IS_WINDOWS or os.environ.get("TESSDATA_PREFIX"):
+        return
+    exe = find_tool("tesseract")
+    tessdata = os.path.join(os.path.dirname(exe), "tessdata") if exe else ""
+    if tessdata and os.path.isdir(tessdata):
+        os.environ["TESSDATA_PREFIX"] = tessdata
 
 
 # ------------------------------------------------------------------ strumenti esterni
@@ -614,7 +626,13 @@ def default_printer() -> str | None:
 
 # ------------------------------------------------------------------ font
 def font_dirs() -> list[str]:
-    """Cartelle dei font del sistema e dell'utente."""
+    """Cartelle dei font del sistema e dell'utente, più quelle in FOLIANT_FONT_DIRS (separate da
+    os.pathsep: font aggiuntivi non installati nel sistema, es. nei test su Windows)."""
+    extra = [d for d in os.environ.get("FOLIANT_FONT_DIRS", "").split(os.pathsep) if d]
+    return extra + _system_font_dirs()
+
+
+def _system_font_dirs() -> list[str]:
     if IS_WINDOWS:
         windir = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or r"C:\Windows"
         dirs = [os.path.join(windir, "Fonts")]
@@ -673,7 +691,7 @@ def font_file(role: str = "sans") -> str | None:
     «mono-bold», «unicode»), o None."""
     for path in font_candidates(role):
         if os.path.isfile(path):
-            return path
+            return nbsp_safe_font(path)
     return None
 
 
@@ -686,13 +704,45 @@ _WINDOWS_METRIC_FONTS = {
 }
 
 
+def nbsp_safe_font(path: str) -> str:
+    """Windows: Arial, Times New Roman, Courier New e altri font di sistema usano lo stesso glifo
+    per lo spazio (U+0020) e lo spazio unificatore (U+00A0); PyMuPDF allora scrive U+00A0 nella
+    tabella ToUnicode e il testo inserito si copia e si cerca con spazi «strani». Per questi font
+    si usa una copia nella cache di Foliant senza la voce U+00A0 (fatta una volta, poi riusata).
+    Altrove, o se il font non ha il problema, restituisce `path` invariato."""
+    if not IS_WINDOWS or not str(path).lower().endswith((".ttf", ".otf")) or not os.path.isfile(path):
+        return path
+    try:
+        st = os.stat(path)
+        stem, ext = os.path.splitext(os.path.basename(path))
+        target = app_dir("cache") / "fonts" / f"{stem}-{st.st_size}-{int(st.st_mtime)}{ext}"
+        if target.is_file():
+            return str(target)
+        from fontTools.ttLib import TTFont
+        font = TTFont(path, lazy=True)
+        changed = False
+        for table in font["cmap"].tables:
+            if table.isUnicode() and 0xA0 in table.cmap and table.cmap.get(0x20) == table.cmap[0xA0]:
+                del table.cmap[0xA0]
+                changed = True
+        if not changed:
+            return path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + f".{os.getpid()}.tmp")
+        font.save(str(tmp))
+        replace_file(tmp, target)
+        return str(target)
+    except Exception:                 # font illeggibile o cache non scrivibile: il font originale
+        return path
+
+
 def windows_fonts(key: str) -> tuple[str, ...]:
     """Su Windows i file dei font di sistema per `key` («sans», «serif-bold-italic», «unicode»…),
     da aggiungere in coda ai font Linux; tupla vuota altrove."""
     if not IS_WINDOWS or key not in _WINDOWS_METRIC_FONTS:
         return ()
     names = [_WINDOWS_METRIC_FONTS[key]] + (["arial.ttf"] if key == "unicode" else [])
-    return tuple(os.path.join(d, n) for n in names for d in font_dirs())
+    return tuple(nbsp_safe_font(os.path.join(d, n)) for n in names for d in _system_font_dirs())
 
 
 _STYLE_WORDS = ("regular", "bold", "italic", "oblique", "light", "semibold", "semilight", "black", "medium",
@@ -727,6 +777,30 @@ def _windows_font_registry() -> tuple[tuple[str, str], ...]:
                         out.append((part.strip(), path))
         except OSError:
             continue
+    return tuple(out) + _extra_font_labels()
+
+
+def _extra_font_labels() -> tuple[tuple[str, str], ...]:
+    """(«Famiglia Stile», file) dei font in FOLIANT_FONT_DIRS, letti con fontTools."""
+    dirs = [d for d in os.environ.get("FOLIANT_FONT_DIRS", "").split(os.pathsep) if d]
+    out = []
+    for d in dirs:
+        for root, _dirs, files in os.walk(d):
+            for name in sorted(files):
+                if not name.lower().endswith((".ttf", ".otf")):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    from fontTools.ttLib import TTFont
+                    with TTFont(path, lazy=True) as font:
+                        names = font["name"]
+                        family = names.getDebugName(1) or ""
+                        style = names.getDebugName(2) or ""
+                except Exception:
+                    continue
+                if family:
+                    label = family if style.lower() in ("", "regular", "normal") else f"{family} {style}"
+                    out.append((label, path))
     return tuple(out)
 
 
@@ -735,6 +809,20 @@ def _family_of(label: str) -> str:
     while len(words) > 1 and words[-1].lower() in _STYLE_WORDS:
         words.pop()
     return " ".join(words)
+
+
+def installed_fonts() -> list[tuple[str, str, str]]:
+    """Windows: font installati (registro, più FOLIANT_FONT_DIRS) come (file, famiglia, stile),
+    senza aprire i file. Altrove lista vuota (su Linux si usa fontconfig)."""
+    if not IS_WINDOWS:
+        return []
+    out = []
+    for label, path in _windows_font_registry():
+        if not path.lower().endswith((".ttf", ".otf")):
+            continue
+        family = _family_of(label)
+        out.append((path, family, label[len(family):].strip() or "Regular"))
+    return out
 
 
 def installed_font_families() -> frozenset:
@@ -760,9 +848,9 @@ def font_file_for_family(family: str) -> str | None:
     if IS_WINDOWS:
         exact = [p for label, p in _windows_font_registry() if label.lower() in (want, want + " regular")]
         if exact:
-            return exact[0]
+            return nbsp_safe_font(exact[0])
         same = [p for label, p in _windows_font_registry() if _family_of(label).lower() == want]
-        return same[0] if same else None
+        return nbsp_safe_font(same[0]) if same else None
     if not shutil.which("fc-match"):
         return None
     try:

@@ -411,10 +411,11 @@ def test_unlock_after_changes_keeps_owner_through_undo_and_protection(tmp_path):
     assert doc.redo() and doc.page_count == 2
     out = tmp_path / "salvato.pdf"
     doc.save(out)
-    check = pymupdf.open(out)
-    assert check.authenticate("cliente") == 2
-    assert not check.permissions & pymupdf.PDF_PERM_MODIFY           # stessa protezione: permessi invariati
-    assert pymupdf.open(out).authenticate("notaio") & 4
+    with pymupdf.open(out) as check:          # chiuso subito: su Windows un file aperto non si sostituisce
+        assert check.authenticate("cliente") == 2
+        assert not check.permissions & pymupdf.PDF_PERM_MODIFY       # stessa protezione: permessi invariati
+    with pymupdf.open(out) as check:
+        assert check.authenticate("notaio") & 4
     # cambio di protezione dopo lo sblocco: la password dei permessi resta quella vera
     with doc.change("Proteggi", kind="metadata"):
         doc.save_options = dict(doc.save_options, permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_COPY)

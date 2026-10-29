@@ -10,6 +10,7 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QMessageBox
 
+from tests.conftest import perf_limit
 from foliant.api import PageEvent, TextSelection
 from foliant.modules import security
 from foliant.modules.security import controller as C
@@ -384,7 +385,7 @@ def test_find_dialog_invalid_regex(window, sec, sample_pdf, qtbot):
 
 
 def test_mark_pages_even(window, sec, tmp_path, monkeypatch):
-    from tests.conftest import make_pdf
+    from tests.conftest import make_pdf, perf_limit
     path = make_pdf(tmp_path / "sei.pdf", pages=6)
     view = window.open_path(path)
 
@@ -1006,10 +1007,10 @@ def test_scan_many_fields_fast(tmp_path):
     pdf = pymupdf.open(build_many_fields(tmp_path / "campi.pdf"))
     t = time.perf_counter()
     rep = S.scan(pdf)
-    assert time.perf_counter() - t < 0.5 and rep.form_fields == 5000
+    assert time.perf_counter() - t < perf_limit(0.5) and rep.form_fields == 5000
     t = time.perf_counter()
     assert R.marks(pdf) == [] and not R.has_marks(pdf)
-    assert time.perf_counter() - t < 0.3
+    assert time.perf_counter() - t < perf_limit(0.3)
 
 
 def test_listener_cost_on_large_document(window, sec, tmp_path):

@@ -126,17 +126,17 @@ def test_folder_with_encrypted_files(viewer_window, tmp_path):
     ctl = _ctl(viewer_window)
     ctl.open()
     n = ctl.search("orologio", scope=advsearch.SCOPE_FOLDER, folder=str(folder))
-    files = sorted({h.file.rsplit("/", 1)[1] for h in ctl.hits})
+    files = sorted({os.path.basename(h.file) for h in ctl.hits})
     assert files == ["doc0.pdf", "doc2.pdf", "doc4.pdf"] and n == 3
     assert ctl.summary.files == 6
-    assert sorted(p.rsplit("/", 1)[1] for p, _r in ctl.summary.skipped) == ["cifrato1.pdf", "cifrato2.pdf"]
+    assert sorted(os.path.basename(p) for p, _r in ctl.summary.skipped) == ["cifrato1.pdf", "cifrato2.pdf"]
     assert "2 file saltati" in ctl.summary_text and "cifrato1.pdf" in ctl.summary_text
     assert ctl.panel.tree.topLevelItemCount() == 3
     # senza sottocartelle
     assert ctl.search("orologio", recursive=False) == 2
     # clic su un risultato → apre il file alla pagina
     view = ctl.go_to(0)
-    assert view is not None and view.document.path.name == ctl.hits[0].file.rsplit("/", 1)[1]
+    assert view is not None and view.document.path.name == os.path.basename(ctl.hits[0].file)
     assert view.current_hit == (0, 0)
 
 

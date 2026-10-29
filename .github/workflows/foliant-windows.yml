@@ -28,6 +28,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"
+      FOLIANT_PERF_FACTOR: "2"     # soglie dei test di velocità: 4 processi di lavoro su 4 processori
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +58,8 @@ jobs:
           tar -xzf "$env:RUNNER_TEMP\scarico\liberation.tar.gz" -C "$env:RUNNER_TEMP\scarico"
           Get-ChildItem "$env:RUNNER_TEMP\scarico" -Recurse -Filter Liberation*.ttf | Copy-Item -Destination "$fonts\truetype\liberation"
           "FOLIANT_TEST_FONTS=$fonts" >> $env:GITHUB_ENV
+          # gli stessi font anche per Foliant (come se fossero installati, come su Ubuntu)
+          "FOLIANT_FONT_DIRS=$fonts" >> $env:GITHUB_ENV
           Get-ChildItem "$fonts" -Recurse -Filter *.ttf | Measure-Object | ForEach-Object { "$($_.Count) font" }
       - name: Dipendenze Python
         run: |

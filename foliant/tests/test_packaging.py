@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import pytest
+
 import configparser
 import shlex
 import shutil
@@ -54,6 +57,7 @@ def test_desktop_entry_has_keywords_and_quick_actions(tmp_path):
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="installazione per Ubuntu (install.sh, icone hicolor)")
 def test_symbolic_icon_is_monochrome_and_installed():
     from PySide6.QtSvg import QSvgRenderer
 

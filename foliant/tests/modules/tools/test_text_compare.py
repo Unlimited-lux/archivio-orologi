@@ -50,7 +50,8 @@ def test_unified_diff_applies_with_patch(tmp_path, a, b):
     src.write_text(a, encoding="utf-8", newline="")
     diff = tmp_path / "d.diff"
     diff.write_text(tc.unified_diff(a, b), encoding="utf-8", newline="")
-    subprocess.run(["patch", "-s", str(src), str(diff)], check=True)
+    # nomi relativi: il «patch» di Git per Windows (MSYS) non accetta sempre i percorsi «C:\\…»
+    subprocess.run(["patch", "-s", src.name, diff.name], check=True, cwd=tmp_path)
     assert src.read_text(encoding="utf-8") == b
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import zipfile
 
 import pytest
@@ -28,7 +29,7 @@ def test_path_traversal_stays_inside(tmp_path):
         zf.writestr("/assoluto/y.pdf", b"%PDF-1.4 finto")
     dest = tmp_path / "dest" / "dentro"
     out = A.extract_all(str(z), str(dest))
-    assert sorted(os.path.relpath(p, dest) for p in out) == ["assoluto/y.pdf", "x.pdf"]
+    assert sorted(Path(os.path.relpath(p, dest)).as_posix() for p in out) == ["assoluto/y.pdf", "x.pdf"]
     assert not (tmp_path / "x.pdf").exists() and not (tmp_path / "dest" / "x.pdf").exists()
 
 

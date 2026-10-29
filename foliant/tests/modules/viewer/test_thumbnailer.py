@@ -7,7 +7,11 @@ import subprocess
 import sys
 import time
 
+import pytest
 from PySide6.QtGui import QImage
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="generatore di miniature per i desktop Linux "
+                                "(freedesktop): su Windows non esiste")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
