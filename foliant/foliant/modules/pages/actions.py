@@ -1,15 +1,15 @@
-"""Azioni della modalità Pagine: barra contestuale, menu e scorciatoie."""
+"""Azioni della modalità Pagine: barra contestuale (gruppi Pagine, Inserisci e dividi, Formato),
+scheda File, menu contestuale e scorciatoie."""
 
 from __future__ import annotations
 
 import importlib
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMenu, QToolButton
 
 from foliant.i18n import pgettext
-from foliant.api import _, bind_icon
+from foliant.api import _
 
 from . import engine as E
 
@@ -34,7 +34,6 @@ def _dialog(ctrl, module: str, func: str, **kwargs):
 
 
 def build_actions(ctx, c, mode) -> None:
-    win = ctx.window
     structural: list[QAction] = []
 
     scoped: list[QAction] = []
@@ -58,22 +57,8 @@ def build_actions(ctx, c, mode) -> None:
         return a
 
     def menu_button(text, icon_name, actions, tip=None) -> QToolButton:
-        btn = QToolButton(win)
-        btn.setText(text)
-        btn.setToolTip(tip or text)
-        bind_icon(btn, icon_name)
-        btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        btn.setAutoRaise(True)
-        m = QMenu(btn)
-        for a in actions:
-            if a is None:
-                m.addSeparator()
-            else:
-                m.addAction(a)
-        btn.setMenu(m)
-        ctx.window.register_document_action(btn)
-        return btn
+        """Pulsante ▾ nel gruppo aperto per ultimo (disattivato senza documento)."""
+        return mode.add_menu_button(text, icon_name, actions, tooltip=tip)
 
     # --- comandi principali
     c.act_rotate_left = act(_("Ruota a sinistra"), "rotate-ccw", lambda: c.rotate(-90), "Ctrl+Shift+-")
@@ -169,33 +154,36 @@ def build_actions(ctx, c, mode) -> None:
         QKeySequence.StandardKey.Cut: c.act_cut, QKeySequence.StandardKey.Paste: c.act_paste,
     }
 
-    # --- barra contestuale
-    mode.add_action(c.act_rotate_left)
-    mode.add_action(c.act_rotate_right)
+    # --- barra contestuale: gruppi con nome, come nella barra multifunzione di Excel
+    mode.add_group(_("Pagine"), "pagine")
+    mode.add_action(c.act_rotate_left, compact=True)
+    mode.add_action(c.act_rotate_right, compact=True)
     mode.add_action(c.act_delete)
     mode.add_action(c.act_duplicate)
-    mode.add_separator()
-    mode.add_widget(menu_button(_("Inserisci"), "file-plus-2", [
-        c.act_insert_blank, c.act_insert_file, c.act_insert_images, c.act_insert_clipboard, c.act_insert_scanner]))
+    mode.add_group(_("Inserisci e dividi"), "inserisci")
+    c.btn_insert = menu_button(_("Inserisci"), "file-plus-2", [
+        c.act_insert_blank, c.act_insert_file, c.act_insert_images, c.act_insert_clipboard, c.act_insert_scanner])
     mode.add_action(c.act_extract)
-    mode.add_widget(menu_button(_("Dividi e unisci"), "split", [
-        c.act_split, c.act_merge, None, c.act_replace, c.act_split_page]))
-    mode.add_widget(menu_button(_("Disponi"), "move", [
+    c.btn_split = menu_button(_("Dividi e unisci"), "split", [
+        c.act_split, c.act_merge, None, c.act_replace, c.act_split_page])
+    c.btn_arrange = menu_button(_("Disponi"), "move", [
         c.act_move_to, c.act_move_start, c.act_move_end, None, c.act_reverse, c.act_swap, c.act_swap_pairs,
-        c.act_collate, None, c.act_rotate_180]))
-    mode.add_separator()
-    mode.add_widget(menu_button(pgettext("menu", "Formato"), "crop", [
-        c.act_crop, c.act_margins, c.act_resize, c.act_boxes, None, c.act_nup, c.act_booklet]))
-    mode.add_widget(menu_button(_("Timbri"), "stamp", [
+        c.act_collate, None, c.act_rotate_180])
+    mode.add_group(pgettext("gruppo", "Formato"), "formato")
+    c.btn_layout = menu_button(pgettext("menu", "Formato"), "crop", [
+        c.act_crop, c.act_margins, c.act_resize, c.act_boxes, None, c.act_nup, c.act_booklet])
+    c.btn_stamps = menu_button(_("Timbri"), "stamp", [
         c.act_numbers, c.act_bates, c.act_bates_files, c.act_header, None, c.act_watermark, c.act_fixedmark, c.act_background, c.act_remove_stamps,
-        None, c.act_labels]))
-    mode.add_widget(menu_button(_("Altro"), "ellipsis", [
+        None, c.act_labels])
+    c.btn_more = menu_button(_("Altro"), "ellipsis", [
         c.act_copy, c.act_cut, c.act_paste, c.act_paste_before, None, c.act_cleanup, c.act_detect_dlg,
         c.act_extract_images, c.act_share,
         c.act_share_save, None, c.act_select_all, c.act_select_odd, c.act_select_even, c.act_select_portrait,
-        c.act_select_landscape, c.act_select_range]))
+        c.act_select_landscape, c.act_select_range])
     mode.add_action(c.act_unlock)
     c.act_unlock.setVisible(False)
+    # altri moduli aggiungono qui le loro voci per le pagine (es. «Analizza pagine» dell'Assistente IA):
+    # mode.add_action(azione, group="formato")
 
     # --- menu contestuale della griglia
     insert_menu = QMenu(_("Inserisci"), c.organizer)
@@ -207,9 +195,9 @@ def build_actions(ctx, c, mode) -> None:
                          c.act_extract, c.act_extract_images, c.act_replace, None,
                          c.act_move_to, c.act_move_start, c.act_move_end, None, c.act_crop, c.act_split_page]
 
-    # --- menu principale e Home
-    ctx.add_menu_action(c.act_merge, _("Pagine"))
-    ctx.add_menu_action(c.act_split, _("Pagine"))
+    # --- scheda File e Home. «Unisci file…» crea un documento nuovo: File › Nuovo, gruppo «Crea» (resta
+    # anche in «Dividi e unisci ▾»); «Dividi documento…» è solo nella barra, in «Dividi e unisci ▾».
+    ctx.add_file_action(c.act_merge, "nuovo", _("Crea"), _("Più PDF o immagini in un solo documento"), order=30)
     ctx.add_home_action(_("Unisci PDF"), "combine", lambda: _merge(c),
                         _("Combina più file in un unico PDF"), order=40)
 

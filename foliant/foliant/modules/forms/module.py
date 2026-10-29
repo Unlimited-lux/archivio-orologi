@@ -58,6 +58,8 @@ class FormsModule(QObject):
         ctx = self.ctx
         mode = ctx.add_mode("moduli", _("Moduli"), "text-cursor-input", 50)
         self.mode = mode
+        # gruppi con nome, come nella barra multifunzione di Excel: Campi | Disposizione | Dati
+        mode.add_group(_("Campi"), "campi")
         self.act_select = ctx.action(_("Seleziona campi"), "mouse-pointer-2", self.activate_select_tool,
                                      checkable=True, tooltip=_("Seleziona, sposta e ridimensiona i campi"))
         mode.add_action(self.act_select)
@@ -87,10 +89,10 @@ class FormsModule(QObject):
         more.setMenu(create_menu)
         more.setToolButtonStyle(mode.toolbar.toolButtonStyle())
         mode.add_widget(more)
-        mode.add_separator()
         self.act_detect = ctx.action(_("Riconosci campi"), "scan-search", self.detect_fields,
                                      tooltip=_("Propone i campi su moduli piatti o scansionati"))
         mode.add_action(self.act_detect)
+        mode.add_group(_("Disposizione"), "disposizione")
         arrange = QMenu(_("Disponi"), ctx.window)
         self.arrange_actions = {}
         for key, text, ic in (
@@ -139,8 +141,9 @@ class FormsModule(QObject):
         tb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         tb.setToolButtonStyle(mode.toolbar.toolButtonStyle())
         mode.add_widget(tb)
-        mode.add_separator()
+        mode.add_group(_("Dati"), "dati")
         self.act_preview = ctx.action(_("Anteprima compilazione"), "eye", self.toggle_preview, checkable=True)
+        self.act_preview.setIconText(_("Anteprima"))       # nella barra; menu e ricerca usano il nome intero
         mode.add_action(self.act_preview)
         self.act_import = ctx.action(_("Importa dati…"), "file-input", self.import_data_dialog)
         self.act_export = ctx.action(_("Esporta dati…"), "file-output", self.export_data_dialog)
@@ -179,9 +182,9 @@ class FormsModule(QObject):
         eb.setMenu(edit_menu)
         eb.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         eb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        mode.add_widget(eb)
-        for a in (self.act_import, self.act_export, self.act_reset, self.act_flatten, self.act_collect, self.act_series):
-            ctx.add_menu_action(a, _("Moduli"))
+        mode.add_widget(eb, group="campi")          # modifica dei campi: accanto a crea e riconosci
+        # Importa, Esporta, Reimposta, Appiattisci, Raccogli e Compila in serie sono in «Dati e modulo ▾»
+        # (il pulsante resta attivo anche senza documento per «Raccogli dati da più PDF…»)
         mode.entered.connect(self.enter_design)
         mode.left.connect(self.leave_design)
         ctx.documentOpened.connect(self._attach)
