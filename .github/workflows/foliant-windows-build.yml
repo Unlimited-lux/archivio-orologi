@@ -80,11 +80,22 @@ jobs:
           & "$dir\foliant-cli.exe" --version
           $progid = Get-ItemProperty "HKCU:\Software\Classes\Foliant.PDF\shell\open\command"
           Write-Host "Apri con: $($progid.'(default)')"
-          # preferenze di prova da rimuovere con la disinstallazione
+          # «rimuovi-dati-utente» da solo: preferenze di prova nel registro e nel profilo
+          New-Item -Force "HKCU:\Software\Foliant\Foliant" | Out-Null
+          Set-ItemProperty "HKCU:\Software\Foliant\Foliant" -Name theme -Value dark
+          New-Item -ItemType Directory -Force "$env:APPDATA\foliant\ai" | Out-Null
+          & "$dir\foliant-cli.exe" rimuovi-dati-utente
+          if (Test-Path "HKCU:\Software\Foliant") { throw "rimuovi-dati-utente non ha tolto HKCU\Software\Foliant" }
+          if (Test-Path "$env:APPDATA\foliant") { throw "rimuovi-dati-utente non ha tolto %APPDATA%\foliant" }
+          # poi la disinstallazione, che deve fare lo stesso (il programma si rilancia da una copia
+          # temporanea: si aspetta che finisca anche quella)
           New-Item -Force "HKCU:\Software\Foliant\Foliant" | Out-Null
           Set-ItemProperty "HKCU:\Software\Foliant\Foliant" -Name theme -Value dark
           Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/RIMUOVIPREFERENZE=1" -Wait
-          Start-Sleep -Seconds 5
+          for ($i = 0; $i -lt 60 -and (Get-Process | Where-Object { $_.Name -like "_iu*" -or $_.Name -like "unins*" }); $i++) {
+            Start-Sleep -Seconds 1
+          }
+          Start-Sleep -Seconds 2
           if (Test-Path "$dir\Foliant.exe") { throw "la disinstallazione ha lasciato i file" }
           if (Test-Path "HKCU:\Software\Classes\Foliant.PDF") { throw "la disinstallazione ha lasciato il tipo di file" }
           if (Test-Path "HKCU:\Software\Foliant") { throw "le preferenze non sono state rimosse" }
