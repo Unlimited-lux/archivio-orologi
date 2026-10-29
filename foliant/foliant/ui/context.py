@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
-from PySide6.QtCore import QEvent, QObject, QRect, QSettings, Qt, Signal
+from PySide6.QtCore import SIGNAL, QEvent, QObject, QRect, QSettings, Qt, Signal
 from PySide6.QtGui import QAction, QFontMetrics, QKeySequence, QPainter
 from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QToolBar, QToolButton, QWidget, QWidgetAction
 
@@ -34,6 +34,14 @@ def _tab_focusable(toolbar: QToolBar, action: QAction) -> None:
     button = toolbar.widgetForAction(action)
     if isinstance(button, QToolButton) and button.focusPolicy() == Qt.FocusPolicy.NoFocus:
         button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
+
+def _has_slot(action: QAction) -> bool:
+    """True se qualcosa è collegato a `action.triggered`."""
+    try:
+        return action.receivers(SIGNAL("triggered(bool)")) > 0
+    except (TypeError, RuntimeError):
+        return True
 
 
 class ToolBar(QToolBar):
@@ -254,6 +262,7 @@ class Mode(QObject):
         """Aggiunge un pulsante. `group`: id o nome di un gruppo (`add_group`), altrimenti in fondo.
         `compact=True` mostra solo l'icona (il nome resta nel suggerimento), per le voci secondarie;
         per un'etichetta più corta di quella del menu usare `action.setIconText(...)`."""
+        own_slot = _has_slot(action)                   # prima di aggiungerla: la barra collega i suoi segnali
         before = self._insert_before(group)
         if before is None:
             self.toolbar.addAction(action)
@@ -264,8 +273,9 @@ class Mode(QObject):
         if isinstance(button, QToolButton):
             if compact:
                 button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            if action.menu() is not None:
-                # azione con menu: un clic apre il menu (la metà «pulsante» di MenuButtonPopup non fa nulla)
+            if action.menu() is not None and not own_slot:
+                # azione con menu e senza comando proprio: un clic apre il menu (con MenuButtonPopup la
+                # metà «pulsante» non farebbe nulla); con un comando restano pulsante e freccia separati
                 button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
                 button.style().unpolish(button)
                 button.style().polish(button)

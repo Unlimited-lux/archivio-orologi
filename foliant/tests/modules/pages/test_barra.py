@@ -19,7 +19,8 @@ def test_gruppi_con_nome_nella_barra(pages_window):
     window, _view = pages_window
     c = window.ctx.pages_controller
     bar = window.ctx.mode("pagine").toolbar
-    assert [title for title, _acts in bar.groups()] == ["Pagine", "Inserisci e dividi", "Formato"]
+    # i gruppi del modulo per primi; altri moduli possono aggiungerne dopo (es. «Analisi» dell'Assistente IA)
+    assert [title for title, _acts in bar.groups()][:3] == ["Pagine", "Inserisci e dividi", "Formato"]
     for act in (c.act_rotate_left, c.act_rotate_right, c.act_delete, c.act_duplicate):
         assert bar.group_title(act) == "Pagine"
     for button in (c.btn_insert, c.btn_split, c.btn_arrange):
@@ -28,10 +29,10 @@ def test_gruppi_con_nome_nella_barra(pages_window):
     for button in (c.btn_layout, c.btn_stamps, c.btn_more):
         assert bar.group_title(_widget_action(bar, button)) == "Formato"
     assert bar.group_title(c.act_unlock) == "Formato"
-    # le voci degli altri moduli per le pagine (es. «Analizza pagine» dell'Assistente IA) finiscono in Formato
+    # «Analizza pagine» dell'Assistente IA sta nel gruppo «Analisi», che quel modulo aggiunge in fondo
     for act in bar.actions():
         if not act.isSeparator() and act.text() == "Analizza pagine":
-            assert bar.group_title(act) == "Formato"
+            assert bar.group_title(act) == "Analisi"
     # ruota: solo l'icona, il nome resta nel suggerimento; gli altri pulsanti hanno il testo
     for act in (c.act_rotate_left, c.act_rotate_right):
         assert bar.widgetForAction(act).toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
@@ -86,7 +87,7 @@ def english_window(qtbot, settings):
 def test_gruppi_tradotti(english_window):
     win = english_window
     bar = win.ctx.mode("pagine").toolbar
-    assert [title for title, _acts in bar.groups()] == ["Pages", "Insert and split", "Format"]
+    assert [title for title, _acts in bar.groups()][:3] == ["Pages", "Insert and split", "Format"]
     c = win.ctx.pages_controller
     assert c.btn_layout.text() == "Layout"                     # il pulsante «Formato ▾» resta «Layout»
     entry = next(e for e in win.backstage.entries("nuovo") if e.action is c.act_merge)
