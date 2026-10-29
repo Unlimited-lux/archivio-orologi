@@ -6,8 +6,8 @@
    presuppone che nessun modulo aggiunga voci al menu delle pagine, quindi la voce
    "Confronta con…" non è registrata con `add_view_menu_provider`.
    Proposta: `ctx.add_tab_menu_provider(fn(view, menu))` e un test del nucleo che verifichi
-   solo la presenza della propria voce. Soluzione attuale: azione nella modalità Strumenti,
-   nel menu ☰ e nella Home; il documento attivo è proposto come A.
+   solo la presenza della propria voce. Soluzione attuale: azione nella modalità Strumenti
+   (gruppo «Confronta») e nella Home; il documento attivo è proposto come A.
 2. **Sessione di confronto come scheda.** La specifica parla di una scheda "A ↔ B"; il
    modulo usa `ctx.set_central_widget()`. Un'API per schede non documentali permetterebbe
    più sessioni aperte insieme.

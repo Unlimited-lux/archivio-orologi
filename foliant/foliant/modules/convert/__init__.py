@@ -10,9 +10,8 @@ from __future__ import annotations
 import shiboken6
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QMenu, QToolButton
 
-from foliant.api import _, add_translations, bind_icon
+from foliant.api import _, add_translations
 
 from .actions import ConvertController
 from .i18n_en import EN
@@ -44,21 +43,30 @@ def register(ctx) -> None:
     ctx.convert_controller = c   # per test e altri moduli
     ctx.documentOpened.connect(c.on_document_opened)
 
+    # scheda Converti divisa in gruppi come la barra multifunzione di Excel: Esporta | Crea | Ottimizza
     mode = ctx.add_mode("converti", _("Converti"), "file-output", 70)
+    mode.add_group(_("Esporta"), "esporta")
     act_export = ctx.action(_("Esporta come…"), "file-output", lambda: c.export(), requires_document=False,
                             tooltip=_("Converti il PDF in un altro formato"))
-    mode.add_action(act_export)
-    for label, icon_name, fmt in ((_("In Word"), "file-text", "docx"), (_("In Excel"), "file-spreadsheet", "xlsx"),
-                                  (_("In PowerPoint"), "presentation", "pptx"), (_("In immagini"), "file-image", "png"),
-                                  (_("In testo"), "file-type", "txt"), (_("In HTML"), "code-xml", "html"),
-                                  (_("In PDF/A"), "archive", "pdfa-2b")):
-        mode.add_action(ctx.action(label, icon_name, lambda _c=False, f=fmt: c.export(f), requires_document=False,
-                                   tooltip=_("Converti il documento: {f}").format(f=label)))
-    mode.add_separator()
+    mode.add_action(act_export, group="esporta")
+    # i formati più usati: nella barra basta il nome del formato (il gruppo dice già «Esporta»);
+    # menu, scheda File e ricerca dei comandi mostrano il nome intero («In Word»)
+    for label, short, icon_name, fmt in ((_("In Word"), "Word", "file-text", "docx"),
+                                         (_("In Excel"), "Excel", "file-spreadsheet", "xlsx"),
+                                         (_("In PowerPoint"), "PowerPoint", "presentation", "pptx"),
+                                         (_("In immagini"), _("Immagini"), "file-image", "png"),
+                                         (_("In testo"), _("Testo"), "file-type", "txt"),
+                                         (_("In HTML"), "HTML", "code-xml", "html"),
+                                         (_("In PDF/A"), "PDF/A", "archive", "pdfa-2b")):
+        act_format = ctx.action(label, icon_name, lambda _c=False, f=fmt: c.export(f), requires_document=False,
+                                tooltip=_("Converti il documento: {f}").format(f=label))
+        act_format.setIconText(short)
+        mode.add_action(act_format, group="esporta")
 
-    # menu «Crea PDF»
-    create_menu = QMenu(ctx.window)
-    act_from_file = ctx.action(_("Da file…"), "file-plus", lambda: c.create_from_files(), requires_document=False)
+    # gruppo «Crea»: il pulsante ▾ «Crea PDF» con tutte le origini
+    act_from_file = ctx.action(_("PDF da file…"), "file-plus", lambda: c.create_from_files(),
+                               requires_document=False)
+    act_from_file.setIconText(_("Da file…"))
     act_from_images = ctx.action(_("Da immagini…"), "images", lambda: c.create_from_images(), requires_document=False)
     act_from_url = ctx.action(_("Da pagina web…"), "globe", lambda: c.create_from_url(), requires_document=False)
     act_clipboard = ctx.action(_("Dagli appunti"), "clipboard-paste", lambda: c.create_from_clipboard(),
@@ -76,21 +84,14 @@ def register(ctx) -> None:
     act_edit_portfolio = ctx.action(_("Modifica portfolio…"), "folder-pen", lambda: c.edit_portfolio(),
                                     tooltip=_("Aggiungi o rimuovi i file del portfolio aperto"))
     act_batch_create = ctx.action(_("Crea in blocco…"), "files", lambda: c.batch_create(), requires_document=False)
-    for a in (act_from_file, act_from_images, act_from_url, act_clipboard, act_scanner, act_camera, act_photos,
-              act_screen, act_blank):
-        create_menu.addAction(a)
-    create_menu.addSeparator()
-    create_menu.addAction(act_portfolio)
-    create_menu.addAction(act_edit_portfolio)
-    create_menu.addAction(act_batch_create)
-    create_btn = QToolButton()
-    create_btn.setText(_("Crea PDF"))
-    create_btn.setToolTip(_("Crea un nuovo PDF da file, immagini, pagine web o appunti"))
-    bind_icon(create_btn, "file-plus-2")
-    create_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-    create_btn.setMenu(create_menu)
-    create_btn.setToolButtonStyle(mode.toolbar.toolButtonStyle())
-    mode.add_widget(create_btn)
+    mode.add_group(_("Crea"), "crea")
+    create_btn = mode.add_menu_button(
+        _("Crea PDF"), "file-plus-2",
+        [act_from_file, act_from_images, act_from_url, act_clipboard, act_scanner, act_camera, act_photos,
+         act_screen, act_blank, None, act_portfolio, act_edit_portfolio, act_batch_create],
+        group="crea", tooltip=_("Crea un nuovo PDF da file, immagini, pagine web o appunti"),
+        requires_document=False)
+    create_menu = create_btn.menu()
 
     watcher = _ClipboardWatcher(ctx.window, act_clipboard, c)
     clipboard = QGuiApplication.clipboard()
@@ -100,7 +101,7 @@ def register(ctx) -> None:
     create_menu.aboutToShow.connect(watcher.update)
     watcher.update()
 
-    mode.add_separator()
+    # gruppo «Ottimizza»: Comprimi e il pulsante ▾ con gli altri strumenti
     act_compress = ctx.action(_("Comprimi"), "shrink", lambda: c.compress(), requires_document=False,
                               tooltip=_("Riduci la dimensione del PDF"))
     act_compress_many = ctx.action(_("Comprimi più file…"), "shrink", lambda: c.compress_files(),
@@ -113,25 +114,22 @@ def register(ctx) -> None:
     act_repair = ctx.action(_("Ripara PDF…"), "wrench", lambda: c.repair(), requires_document=False)
     act_batch = ctx.action(_("Converti più file…"), "folder-output", lambda: c.batch_convert(),
                            requires_document=False)
-    mode.add_action(act_compress)
-    more_menu = QMenu(ctx.window)
-    for a in (act_advanced, act_flatten, act_unpdfa, act_compress_many, act_repair, act_batch,
-              act_batch_create):
-        more_menu.addAction(a)
-    more_btn = QToolButton()
-    more_btn.setText(_("Altri strumenti"))
-    more_btn.setToolTip(_("Compressione personalizzata, riparazione e operazioni su più file"))
-    bind_icon(more_btn, "wrench")
-    more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-    more_btn.setMenu(more_menu)
-    more_btn.setToolButtonStyle(mode.toolbar.toolButtonStyle())
-    mode.add_widget(more_btn)
+    mode.add_group(_("Ottimizza"), "ottimizza")
+    mode.add_action(act_compress, group="ottimizza")
+    more_btn = mode.add_menu_button(
+        _("Altri strumenti"), "wrench",
+        [act_advanced, act_flatten, act_unpdfa, act_compress_many, act_repair, act_batch, act_batch_create],
+        group="ottimizza", tooltip=_("Compressione personalizzata, riparazione e operazioni su più file"),
+        requires_document=False)
 
-    ctx.add_menu_action(act_export, _("Converti"))
-    ctx.add_menu_action(act_blank, _("Converti"))
-    ctx.add_menu_action(act_from_file, _("Converti"))
-    ctx.add_menu_action(act_compress_many, _("Converti"))
-    ctx.add_menu_action(act_batch_create, _("Converti"))
+    # scheda File: le stesse azioni della barra (niente doppioni), in Esporta e in Nuovo
+    ctx.add_file_action(act_export, "esporta", _("Esporta"),
+                        _("Word, Excel, PowerPoint, immagini, testo, HTML, PDF/A"), order=10)
+    ctx.add_file_action(act_blank, "nuovo", _("Crea"), _("Scegli formato, orientamento e numero di pagine"),
+                        order=20)
+    ctx.add_file_action(act_from_file, "nuovo", _("Crea"), _("Da Word, Excel, immagini e altri formati"),
+                        order=30)
+    ctx.add_file_action(act_batch_create, "nuovo", _("Crea"), _("Converte in PDF una cartella intera"), order=40)
 
     ctx.add_home_action(_("Crea PDF da file"), "file-plus", lambda: c.create_from_files(),
                         _("Documenti d'ufficio (DOCX, XLSX, PPTX), testo, Markdown, CSV, HTML"), 30)
@@ -147,3 +145,4 @@ def register(ctx) -> None:
                  "compress": act_compress, "compress_many": act_compress_many, "advanced": act_advanced,
                  "repair": act_repair, "flatten": act_flatten, "batch": act_batch, "batch_create": act_batch_create}
     c.create_button = create_btn
+    c.more_button = more_btn

@@ -1,9 +1,10 @@
 # Stato del modulo Strumenti (`tools`)
 
 Sezione 11 della specifica: confronto (CMP) e operazioni in blocco (BAT).
-Modalità `strumenti` (ordine 100, icona `wrench`) con le azioni Confronta documenti,
-Mostra confronto, Apri sessione di confronto, Confronta testo, Revisioni e Operazioni in
-blocco; le stesse azioni sono nel menu ☰ e nella Home.
+Modalità `strumenti` (ordine 100, icona `wrench`) con la barra in gruppi come in Excel:
+Confronta (Confronta documenti, Mostra confronto, Apri sessione di confronto, Confronta testo,
+Revisioni) | Automazione (Operazioni in blocco). Confronta documenti e Operazioni in blocco
+sono anche nella Home.
 
 **Riservatezza (regola del committente):** il modulo non conserva nel profilo nomi, percorsi o
 cartelle dei file elaborati. Cronologia dei lavori, stato di ripresa, cartelle monitorate e il
