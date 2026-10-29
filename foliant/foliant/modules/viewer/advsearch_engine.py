@@ -14,15 +14,15 @@ import io
 import json
 import os
 import re
-import select
+import queue
 import subprocess
-import sys
 import threading
 from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
 
 import pymupdf
 
+from foliant.core import platform
 from foliant.core.errors import OperationCancelled
 
 from .engine import (
@@ -217,12 +217,26 @@ class RegexGuard:
         if self.proc is not None and self.proc.poll() is None:
             return True
         try:
-            self.proc = subprocess.Popen([sys.executable, "-I", "-c", _GUARD_SCRIPT], stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+            self.proc = subprocess.Popen(platform.python_command("-I", "-c", _GUARD_SCRIPT), stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                                         **platform.subprocess_kwargs())
         except Exception:
             self.proc = None
             return False
+        # le risposte arrivano da un thread lettore: select() sulle pipe non esiste su Windows
+        self._replies = queue.Queue()
+        threading.Thread(target=self._read_replies, args=(self.proc, self._replies), daemon=True,
+                         name="foliant-regex-guard").start()
         return True
+
+    @staticmethod
+    def _read_replies(proc: subprocess.Popen, replies: "queue.Queue") -> None:
+        try:
+            for line in proc.stdout:
+                replies.put(line)
+        except (OSError, ValueError):
+            pass
+        replies.put(None)
 
     def check(self, texts: list[str]) -> bool:
         """True se l'espressione termina entro il limite su tutti i testi."""
@@ -233,8 +247,11 @@ class RegexGuard:
         try:
             proc.stdin.write(json.dumps({"p": self.pattern, "f": self.flags, "t": texts}) + "\n")
             proc.stdin.flush()
-            ready, _w, _x = select.select([proc.stdout], [], [], self.timeout)
-            if ready and proc.stdout.readline().strip() == "ok":
+            try:
+                line = self._replies.get(timeout=self.timeout)
+            except queue.Empty:
+                line = None
+            if line is not None and line.strip() == "ok":
                 return True
         except Exception:
             self.close()

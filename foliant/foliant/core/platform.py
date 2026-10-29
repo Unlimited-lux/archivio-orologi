@@ -49,10 +49,19 @@ def _windows_known(var: str, fallback: str, env=None) -> Path:
     return _env_path(var, env) or Path.home() / fallback
 
 
+def _portable(env, sub: str) -> Path | None:
+    """Versione portatile (Windows): tutto nella cartella indicata da FOLIANT_PORTABLE_DIR."""
+    base = _env_path("FOLIANT_PORTABLE_DIR", env)
+    return base / sub if base else None
+
+
 def data_home(env=None) -> Path:
     """Base dei dati dell'utente: $XDG_DATA_HOME o ~/.local/share; %APPDATA% su Windows.
 
     `env` (anche nelle funzioni seguenti): variabili d'ambiente al posto di os.environ."""
+    portable = _portable(env, "roaming")
+    if portable:
+        return portable
     if IS_WINDOWS:
         return _windows_known("APPDATA", "AppData/Roaming", env)
     return _env_path("XDG_DATA_HOME", env) or Path.home() / ".local" / "share"
@@ -60,6 +69,9 @@ def data_home(env=None) -> Path:
 
 def config_home(env=None) -> Path:
     """Base della configurazione: $XDG_CONFIG_HOME o ~/.config; %APPDATA% su Windows."""
+    portable = _portable(env, "roaming")
+    if portable:
+        return portable
     if IS_WINDOWS:
         return _windows_known("APPDATA", "AppData/Roaming", env)
     return _env_path("XDG_CONFIG_HOME", env) or Path.home() / ".config"
@@ -67,6 +79,9 @@ def config_home(env=None) -> Path:
 
 def state_home(env=None) -> Path:
     """Base dello stato (es. copie di recupero): $XDG_STATE_HOME o ~/.local/state; %LOCALAPPDATA% su Windows."""
+    portable = _portable(env, "local")
+    if portable:
+        return portable
     if IS_WINDOWS:
         return _windows_known("LOCALAPPDATA", "AppData/Local", env)
     return _env_path("XDG_STATE_HOME", env) or Path.home() / ".local" / "state"
@@ -74,6 +89,9 @@ def state_home(env=None) -> Path:
 
 def cache_home(env=None) -> Path:
     """Base della cache: $XDG_CACHE_HOME o ~/.cache; %LOCALAPPDATA% su Windows."""
+    portable = _portable(env, "local")
+    if portable:
+        return portable
     if IS_WINDOWS:
         return _windows_known("LOCALAPPDATA", "AppData/Local", env)
     return _env_path("XDG_CACHE_HOME", env) or Path.home() / ".cache"
@@ -285,6 +303,17 @@ def pipe_server_is_current_user(handle: int) -> bool:
         return False
 
 
+def python_command(*args: str) -> list[str]:
+    """Comando per eseguire Python con `args` («-m modulo …», «-I -c codice»): l'interprete
+    corrente, oppure nel pacchetto per Windows (PyInstaller) foliant-cli.exe, che accetta le
+    stesse opzioni (vedi packaging/windows/launcher.py)."""
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        cli = exe_dir / ("foliant-cli.exe" if IS_WINDOWS else "foliant-cli")
+        return [str(cli if cli.exists() else Path(sys.executable)), *args]
+    return [sys.executable, *args]
+
+
 def subprocess_kwargs(new_group: bool = False) -> dict:
     """Argomenti per `subprocess.run/Popen` di un programma esterno senza interfaccia.
 
@@ -388,6 +417,38 @@ def file_lock(path: str | os.PathLike):
                 fcntl.flock(fd, fcntl.LOCK_UN)
     finally:
         os.close(fd)
+
+
+# ------------------------------------------------------------------ avvio
+PORTABLE_MARKER = "portatile.txt"
+
+
+def prepare_environment(settings_cls=None) -> None:
+    """All'avvio dell'applicazione, prima di creare le finestre.
+
+    - Versione portatile (pacchetto per Windows con il file «portatile.txt» accanto a
+      Foliant.exe): impostazioni e dati nella sottocartella «dati», niente registro.
+    - Strumenti inclusi nel pacchetto (cartella «tools»): le loro cartelle vanno in testa al PATH
+      dei processi figli e TESSDATA_PREFIX indica le lingue OCR incluse (le usa anche PyMuPDF)."""
+    frozen_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None
+    if frozen_dir is not None and (frozen_dir / PORTABLE_MARKER).is_file():
+        portable = frozen_dir / "dati"
+        os.environ["FOLIANT_PORTABLE_DIR"] = str(portable)
+        if settings_cls is not None:
+            settings_cls.setDefaultFormat(settings_cls.Format.IniFormat)
+            settings_cls.setPath(settings_cls.Format.IniFormat, settings_cls.Scope.UserScope,
+                                 str(portable / "impostazioni"))
+    bundle = bundle_dir()
+    if bundle is None:
+        return
+    bins = [bundle / "tesseract", bundle / "ghostscript" / "bin", bundle / "qpdf" / "bin"]
+    extra = [str(b) for b in bins if b.is_dir()]
+    if extra:
+        os.environ["PATH"] = os.pathsep.join(extra + [os.environ.get("PATH", "")])
+        forget_tools()
+    tessdata = bundle / "tesseract" / "tessdata"
+    if tessdata.is_dir() and not os.environ.get("TESSDATA_PREFIX"):
+        os.environ["TESSDATA_PREFIX"] = str(tessdata)
 
 
 # ------------------------------------------------------------------ strumenti esterni
@@ -834,3 +895,74 @@ def _mapi_send(attachment: str, subject: str, to: str, body: str) -> bool:
 
     threading.Thread(target=run, name="foliant-mapi", daemon=True).start()
     return True
+
+
+# ------------------------------------------------------------------ disinstallazione
+CREDENTIAL_PREFIX = "foliant-"      # servizi del portachiavi: foliant-ai, foliant-tsa, foliant-sign-sync
+
+
+def _windows_credentials(prefix: str) -> list[str]:
+    """Credenziali generiche di Windows (Gestione credenziali) il cui nome contiene `prefix`."""
+    from ctypes import wintypes
+
+    class CREDENTIAL(ctypes.Structure):
+        _fields_ = [("Flags", wintypes.DWORD), ("Type", wintypes.DWORD), ("TargetName", wintypes.LPWSTR),
+                    ("Comment", wintypes.LPWSTR), ("LastWritten", wintypes.FILETIME),
+                    ("CredentialBlobSize", wintypes.DWORD), ("CredentialBlob", ctypes.c_void_p),
+                    ("Persist", wintypes.DWORD), ("AttributeCount", wintypes.DWORD), ("Attributes", ctypes.c_void_p),
+                    ("TargetAlias", wintypes.LPWSTR), ("UserName", wintypes.LPWSTR)]
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    count = wintypes.DWORD()
+    creds = ctypes.POINTER(ctypes.POINTER(CREDENTIAL))()
+    if not advapi32.CredEnumerateW(f"*{prefix}*", 0, ctypes.byref(count), ctypes.byref(creds)):
+        return []
+    try:
+        return [creds[i].contents.TargetName for i in range(count.value) if creds[i].contents.TargetName]
+    finally:
+        advapi32.CredFree(creds)
+
+
+def remove_user_data() -> list[str]:
+    """Cancella preferenze e dati di Foliant dell'utente corrente (scelta facoltativa della
+    disinstallazione): cartelle di Foliant, impostazioni (registro su Windows) e, su Windows, le
+    voci di Foliant in Gestione credenziali. Non tocca i documenti. Restituisce ciò che ha tolto."""
+    removed: list[str] = []
+    folders = {app_dir(k) for k in ("data", "config", "state", "cache")} | {settings_dir()}
+    if IS_WINDOWS:
+        folders.add(cache_home() / APP_DIR_NAME)
+    for folder in sorted(folders, key=lambda p: -len(str(p))):
+        if folder.is_dir() and not folder.is_symlink():
+            shutil.rmtree(folder, ignore_errors=True)
+            removed.append(str(folder))
+    if IS_WINDOWS:
+        import winreg
+
+        def delete_tree(root, path: str) -> None:
+            try:
+                with winreg.OpenKey(root, path) as key:
+                    subs = []
+                    i = 0
+                    while True:
+                        try:
+                            subs.append(winreg.EnumKey(key, i))
+                        except OSError:
+                            break
+                        i += 1
+                for sub in subs:
+                    delete_tree(root, path + "\\" + sub)
+                winreg.DeleteKey(root, path)
+            except OSError:
+                pass
+
+        for key in (r"Software\Foliant",):
+            delete_tree(winreg.HKEY_CURRENT_USER, key)
+            removed.append("HKCU\\" + key)
+        try:
+            advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+            for target in _windows_credentials(CREDENTIAL_PREFIX):
+                if advapi32.CredDeleteW(target, 1, 0):          # CRED_TYPE_GENERIC
+                    removed.append("credenziale " + target)
+        except (OSError, AttributeError):
+            pass
+    return removed

@@ -1,0 +1,6 @@
+Foliant - versione portatile
+
+Questo file attiva la modalità portatile: impostazioni e dati di Foliant restano nella
+sottocartella «dati» accanto a Foliant.exe, non nel registro né nel profilo di Windows.
+Puoi copiare l'intera cartella su una chiavetta USB e usarla su un altro PC.
+Per usare la cartella come installazione normale, elimina questo file.

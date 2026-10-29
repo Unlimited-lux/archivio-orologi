@@ -1,0 +1,108 @@
+# Foliant: pacchetto per Windows (PyInstaller + Inno Setup) e versione portatile, come artefatti.
+name: foliant-windows-build
+
+on:
+  push:
+    branches: ["claude/pdf-editor-updf-clone-iod4xs-windows"]
+    paths: ["foliant/**", ".github/workflows/foliant-windows-build.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: foliant-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Installatore Windows
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: foliant
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: foliant/requirements.txt
+      - name: Strumenti esterni e Inno Setup
+        run: |
+          choco install -y --no-progress tesseract ghostscript qpdf
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install -y --no-progress innosetup }
+      - name: Dipendenze Python e PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "pyinstaller>=6.10"
+      - name: Versione
+        id: ver
+        run: |
+          $v = python -c "import foliant; print(foliant.__version__)"
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Icona
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          python packaging/windows/make_icon.py build/foliant.ico
+      - name: Tesseract (ita, eng, osd), Ghostscript, qpdf e licenze
+        run: pwsh packaging/windows/collect_tools.ps1 -Out build/tools -Licenses build/licenze
+      - name: PyInstaller
+        run: |
+          pyinstaller packaging/windows/foliant.spec --noconfirm --distpath dist --workpath build/pyinstaller
+          Copy-Item build/tools dist/Foliant/tools -Recurse
+          Copy-Item build/licenze dist/Foliant/licenze -Recurse
+          Copy-Item packaging/windows/LEGGIMI.txt dist/Foliant/LEGGIMI.txt
+      - name: Prova del pacchetto
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $cli = "dist/Foliant/foliant-cli.exe"
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw "foliant-cli --version non riuscito" }
+          & $cli -I -c "exec(open('packaging/windows/check_bundle.py', encoding='utf-8').read())"
+          if ($LASTEXITCODE -ne 0) { throw "prova del pacchetto non riuscita" }
+      - name: Installatore (Inno Setup)
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\windows\foliant.iss `
+            "/DAppVersion=${{ steps.ver.outputs.version }}" /DSourceDir=..\..\dist\Foliant /DOutputDir=..\..\out /DIconFile=..\..\build\foliant.ico
+          if ($LASTEXITCODE -ne 0) { throw "ISCC non riuscito" }
+          Get-ChildItem out
+      - name: Prova di installazione e disinstallazione
+        run: |
+          $setup = (Get-ChildItem out -Filter *.exe | Select-Object -First 1).FullName
+          $dir = Join-Path $env:RUNNER_TEMP "FoliantProva"
+          Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/NORESTART", "/DIR=`"$dir`"", "/TASKS=desktopicon" -Wait
+          if (-not (Test-Path "$dir\Foliant.exe")) { throw "Foliant.exe non installato" }
+          & "$dir\foliant-cli.exe" --version
+          $progid = Get-ItemProperty "HKCU:\Software\Classes\Foliant.PDF\shell\open\command"
+          Write-Host "Apri con: $($progid.'(default)')"
+          # preferenze di prova da rimuovere con la disinstallazione
+          New-Item -Force "HKCU:\Software\Foliant\Foliant" | Out-Null
+          Set-ItemProperty "HKCU:\Software\Foliant\Foliant" -Name theme -Value dark
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/RIMUOVIPREFERENZE=1" -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path "$dir\Foliant.exe") { throw "la disinstallazione ha lasciato i file" }
+          if (Test-Path "HKCU:\Software\Classes\Foliant.PDF") { throw "la disinstallazione ha lasciato il tipo di file" }
+          if (Test-Path "HKCU:\Software\Foliant") { throw "le preferenze non sono state rimosse" }
+          Write-Host "installazione e disinstallazione: ok"
+      - name: Versione portatile (.zip)
+        run: |
+          $name = "Foliant-${{ steps.ver.outputs.version }}-portatile"
+          Copy-Item dist/Foliant "out/$name" -Recurse
+          Copy-Item packaging/windows/portatile.txt "out/$name/portatile.txt"
+          Compress-Archive -Path "out/$name" -DestinationPath "out/$name.zip"
+          Remove-Item "out/$name" -Recurse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Foliant-Windows-Setup-${{ steps.ver.outputs.version }}
+          path: foliant/out/*-Setup.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Foliant-Windows-portatile-${{ steps.ver.outputs.version }}
+          path: foliant/out/*-portatile.zip
+          if-no-files-found: error

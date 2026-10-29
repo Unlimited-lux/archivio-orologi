@@ -541,7 +541,6 @@ class ProcessRenderer:
 
     def __init__(self, data: bytes):
         import subprocess
-        import sys
         import tempfile
         self.proc = None
         self.path = None
@@ -553,9 +552,9 @@ class ProcessRenderer:
             root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             env = dict(os.environ)
             env["PYTHONPATH"] = root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-            self.proc = subprocess.Popen([sys.executable, "-m", "foliant.modules.ocr.render_worker", self.path],
+            self.proc = subprocess.Popen(platform.python_command("-m", "foliant.modules.ocr.render_worker", self.path),
                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                         stderr=subprocess.DEVNULL, env=env, cwd=root)
+                                         stderr=subprocess.DEVNULL, env=env, cwd=root, **platform.subprocess_kwargs())
         except Exception:
             self.close()
 

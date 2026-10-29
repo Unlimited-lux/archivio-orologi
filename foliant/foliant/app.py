@@ -120,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
         set_language(QSettings().value("language") or detect_language())
         parse_args(argv[1:])            # stampa l'aiuto o la versione e termina, senza interfaccia
         return 0
+    from .core import platform
+    platform.prepare_environment(QSettings)   # versione portatile, strumenti inclusi (Windows)
     engine.configure()
     from .ui import privacy
     privacy.prepare()                   # dialoghi di file di Qt: niente cronologia del desktop

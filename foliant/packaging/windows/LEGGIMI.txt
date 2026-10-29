@@ -1,0 +1,16 @@
+Foliant per Windows
+
+Foliant.exe       avvia l'editor PDF.
+foliant-cli.exe   riga di comando: «foliant-cli --help», elaborazione in blocco con
+                  «foliant-cli blocco --help».
+
+Strumenti inclusi (cartella «tools»), con le rispettive licenze nella cartella «licenze»:
+  Tesseract OCR (Apache-2.0) con le lingue italiano, inglese e il rilevamento dell'orientamento;
+  Ghostscript (AGPL-3.0) per PDF/A, PDF/X e la stampa in blocco;
+  qpdf (Apache-2.0) per la visualizzazione web veloce.
+Foliant e il motore PDF PyMuPDF sono distribuiti con licenza AGPL-3.0 (licenze/AGPL-3.0.txt).
+
+LibreOffice (facoltativo, gratuito: https://www.libreoffice.org) serve solo per creare PDF da
+documenti Office (Word, Excel, PowerPoint). Installalo quando vuoi: Foliant lo trova da solo.
+
+Guida completa: docs/windows.md nel codice sorgente di Foliant.

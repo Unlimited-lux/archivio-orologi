@@ -824,8 +824,11 @@ def send_by_mail(path: Path) -> bool:
 # ==================================================================== registrazione
 def register(ctx) -> PagesController:
     add_translations("en", EN)
-    from pathlib import Path as _P
-    for name in sorted(p.stem for p in _P(__file__).parent.glob("*.py") if p.stem not in ("__init__", "module")):
+    import pkgutil
+    import sys as _sys
+    # pkgutil e non un elenco dei file .py: nel pacchetto per Windows i sorgenti sono in un archivio
+    names = (m.name for m in pkgutil.iter_modules(_sys.modules[__package__].__path__) if not m.ispkg)
+    for name in sorted(n for n in names if n not in ("__init__", "module")):
         mod = _optional(name)
         tr = getattr(mod, "TRANSLATIONS", None) if mod else None
         if tr:
