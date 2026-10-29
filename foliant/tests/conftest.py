@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("FOLIANT_SYNC_TASKS", "1")
@@ -40,6 +41,12 @@ def _isolated_user_dirs(monkeypatch, tmp_path_factory):
                       ("XDG_CONFIG_HOME", "config"), ("APPDATA", "roaming"), ("LOCALAPPDATA", "locale")):
         monkeypatch.setenv(var, str(base / name))
     monkeypatch.setenv("FOLIANT_RECOVERY_DIR", str(base / "recupero"))
+    if sys.platform == "win32":
+        # le QSettings() di Foliant starebbero nel registro vero (HKCU\\Software\\Foliant), comune a
+        # tutti i test: qui vanno in un file INI della cartella del test, come su Linux con XDG
+        from PySide6.QtCore import QSettings
+        QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+        QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(base / "config"))
 
 
 @pytest.fixture(autouse=True)

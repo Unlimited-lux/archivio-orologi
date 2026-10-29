@@ -53,9 +53,10 @@ proposte. Non serve configurare nulla: al prossimo avvio Foliant lo trova da sol
 
 Il file `Foliant-<versione>-portatile.zip` (artefatto `Foliant-Windows-portatile-<versione>`)
 contiene la cartella completa. Estraila dove vuoi, anche su una chiavetta USB, e avvia
-`Foliant.exe`. Finché nella cartella c'è il file `portatile.txt`, impostazioni e dati restano
-nella sottocartella `dati` e niente viene scritto nel registro di Windows. La versione portatile
-non si registra per i file PDF.
+`Foliant.exe`. Finché nella cartella c'è il file `portatile.txt`, impostazioni e dati di
+Foliant restano nella sottocartella `dati`, non nel registro né nel profilo di Windows (resta
+solo l'aspetto del dialogo dei file, vista e colonne, che Qt tiene in `HKCU\Software\QtProject`).
+La versione portatile non si registra per i file PDF.
 
 ### Disinstallazione
 

@@ -48,9 +48,11 @@ jobs:
       - name: Dipendenze Python
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt pytest-xdist
       - name: Test
-        run: python -m pytest -p no:cacheprovider -rfEs --durations=25 --junitxml=risultati.xml
+        # processi di lavoro paralleli (xdist): su Windows pytest-timeout può solo terminare il
+        # processo, e così un test bloccato ferma un solo processo di lavoro e non tutta la suite
+        run: python -m pytest -p no:cacheprovider -n 4 --dist loadfile -rfEs --durations=25 --junitxml=risultati.xml
       - name: Riepilogo
         if: always()
         run: python ../.github/workflows/junit_summary.py risultati.xml
