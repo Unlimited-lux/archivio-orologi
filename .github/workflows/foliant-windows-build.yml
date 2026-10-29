@@ -1,9 +1,12 @@
-# Foliant: pacchetto per Windows (PyInstaller + Inno Setup) e versione portatile, come artefatti.
+# Foliant: pacchetto per Windows (PyInstaller + Inno Setup) e versione portatile, come artefatti
+# (conservati 30 giorni); poi la prova dell'installatore su una macchina Windows pulita.
 name: foliant-windows-build
 
 on:
   push:
-    branches: ["claude/pdf-editor-updf-clone-iod4xs-windows"]
+    branches:
+      - "claude/pdf-editor-updf-clone-iod4xs-windows"
+      - "claude/pdf-editor-updf-clone-iod4xs-windows-installer"
     paths: ["foliant/**", ".github/workflows/foliant-windows-build.yml"]
   workflow_dispatch:
 
@@ -22,6 +25,8 @@ jobs:
         working-directory: foliant
     env:
       PYTHONUTF8: "1"
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,8 +36,17 @@ jobs:
           cache-dependency-path: foliant/requirements.txt
       - name: Strumenti esterni e Inno Setup
         run: |
-          choco install -y --no-progress tesseract ghostscript qpdf
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install -y --no-progress innosetup }
+          # Chocolatey scarica dai siti dei progetti: fino a tre tentativi
+          function Installa-Pacchetti([string[]]$pacchetti) {
+            for ($i = 1; $i -le 3; $i++) {
+              choco install -y --no-progress @pacchetti
+              if ($LASTEXITCODE -eq 0) { return }
+              Start-Sleep -Seconds (20 * $i)
+            }
+            throw "choco install non riuscito: $pacchetti"
+          }
+          Installa-Pacchetti tesseract, ghostscript, qpdf
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { Installa-Pacchetti innosetup }
       - name: Dipendenze Python e PyInstaller
         run: |
           python -m pip install --upgrade pip
@@ -71,49 +85,64 @@ jobs:
             "/DAppVersion=${{ steps.ver.outputs.version }}" /DSourceDir=..\..\dist\Foliant /DOutputDir=..\..\out /DIconFile=..\..\build\foliant.ico
           if ($LASTEXITCODE -ne 0) { throw "ISCC non riuscito" }
           Get-ChildItem out
-      - name: Prova di installazione e disinstallazione
-        run: |
-          $setup = (Get-ChildItem out -Filter *.exe | Select-Object -First 1).FullName
-          $dir = Join-Path $env:RUNNER_TEMP "FoliantProva"
-          Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/NORESTART", "/DIR=`"$dir`"", "/TASKS=desktopicon" -Wait
-          if (-not (Test-Path "$dir\Foliant.exe")) { throw "Foliant.exe non installato" }
-          & "$dir\foliant-cli.exe" --version
-          $progid = Get-ItemProperty "HKCU:\Software\Classes\Foliant.PDF\shell\open\command"
-          Write-Host "Apri con: $($progid.'(default)')"
-          # «rimuovi-dati-utente» da solo: preferenze di prova nel registro e nel profilo
-          New-Item -Force "HKCU:\Software\Foliant\Foliant" | Out-Null
-          Set-ItemProperty "HKCU:\Software\Foliant\Foliant" -Name theme -Value dark
-          New-Item -ItemType Directory -Force "$env:APPDATA\foliant\ai" | Out-Null
-          & "$dir\foliant-cli.exe" rimuovi-dati-utente
-          if (Test-Path "HKCU:\Software\Foliant") { throw "rimuovi-dati-utente non ha tolto HKCU\Software\Foliant" }
-          if (Test-Path "$env:APPDATA\foliant") { throw "rimuovi-dati-utente non ha tolto %APPDATA%\foliant" }
-          # poi la disinstallazione, che deve fare lo stesso (il programma si rilancia da una copia
-          # temporanea: si aspetta che finisca anche quella)
-          New-Item -Force "HKCU:\Software\Foliant\Foliant" | Out-Null
-          Set-ItemProperty "HKCU:\Software\Foliant\Foliant" -Name theme -Value dark
-          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/RIMUOVIPREFERENZE=1" -Wait
-          for ($i = 0; $i -lt 60 -and (Get-Process | Where-Object { $_.Name -like "_iu*" -or $_.Name -like "unins*" }); $i++) {
-            Start-Sleep -Seconds 1
-          }
-          Start-Sleep -Seconds 2
-          if (Test-Path "$dir\Foliant.exe") { throw "la disinstallazione ha lasciato i file" }
-          if (Test-Path "HKCU:\Software\Classes\Foliant.PDF") { throw "la disinstallazione ha lasciato il tipo di file" }
-          if (Test-Path "HKCU:\Software\Foliant") { throw "le preferenze non sono state rimosse" }
-          Write-Host "installazione e disinstallazione: ok"
       - name: Versione portatile (.zip)
         run: |
-          $name = "Foliant-${{ steps.ver.outputs.version }}-portatile"
+          $name = "Foliant-portable-${{ steps.ver.outputs.version }}"
           Copy-Item dist/Foliant "out/$name" -Recurse
           Copy-Item packaging/windows/portatile.txt "out/$name/portatile.txt"
           Compress-Archive -Path "out/$name" -DestinationPath "out/$name.zip"
           Remove-Item "out/$name" -Recurse
+          Get-ChildItem out | ForEach-Object { "{0}  {1:N0} MB" -f $_.Name, ($_.Length / 1MB) }
       - uses: actions/upload-artifact@v4
         with:
-          name: Foliant-Windows-Setup-${{ steps.ver.outputs.version }}
-          path: foliant/out/*-Setup.exe
+          name: Foliant-Setup-${{ steps.ver.outputs.version }}
+          path: foliant/out/Foliant-Setup-*.exe
           if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
       - uses: actions/upload-artifact@v4
         with:
-          name: Foliant-Windows-portatile-${{ steps.ver.outputs.version }}
-          path: foliant/out/*-portatile.zip
+          name: Foliant-portable-${{ steps.ver.outputs.version }}
+          path: foliant/out/Foliant-portable-*.zip
           if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  test-installer:
+    name: Prova dell'installatore
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: foliant
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: foliant/packaging
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Strumenti della prova (PDF di prova e ricerca delle tracce)
+        run: python -m pip install --disable-pip-version-check pymupdf pillow
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Foliant-*-${{ needs.build.outputs.version }}
+          path: foliant/artefatti
+          merge-multiple: true
+      - name: Installazione, uso senza schermo, riservatezza, disinstallazione
+        run: |
+          ./packaging/windows/prova/prova_installatore.ps1 `
+            -Setup "artefatti/Foliant-Setup-${{ needs.build.outputs.version }}.exe" `
+            -Versione "${{ needs.build.outputs.version }}" -Lavoro "$env:RUNNER_TEMP\prova"
+      - name: Versione portatile
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP portatile
+          Expand-Archive "artefatti/Foliant-portable-${{ needs.build.outputs.version }}.zip" $dir
+          $cli = Get-ChildItem $dir -Recurse -Filter foliant-cli.exe | Select-Object -First 1
+          & $cli.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw "foliant-cli --version non riuscito nella versione portatile" }
+          if (-not (Test-Path (Join-Path $cli.DirectoryName portatile.txt))) { throw "portatile.txt mancante" }

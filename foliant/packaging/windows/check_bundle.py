@@ -11,6 +11,16 @@ print("strumenti:", tools)
 assert all(path and "\\tools\\" in path for path in tools.values()), tools
 langs = subprocess.run([tools["tesseract"], "--list-langs"], capture_output=True, text=True).stdout.split()
 assert all(code in langs for code in ("ita", "eng", "osd")), langs
+import foliant
+from pathlib import Path
+resources = Path(foliant.__file__).resolve().parent / "resources"
+assert (resources / "foliant.svg").is_file(), resources
+icons = len(list((resources / "icons").glob("*.svg")))
+print("icone:", icons)
+assert icons > 100, icons
+found = list(modules.discover())
+print("moduli:", len(found))
+assert len(found) >= 12, [name for _o, name, _m in found]
 broken = [name for _order, name, mod in modules.discover() if isinstance(mod, Exception)]
 print("moduli non importabili:", broken)
 assert not broken, broken

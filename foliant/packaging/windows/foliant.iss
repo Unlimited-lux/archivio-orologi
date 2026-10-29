@@ -15,6 +15,10 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+#ifndef FileVersion
+  ; versione numerica (fino a 4 numeri) per i metadati dei file; AppVersion può avere suffissi
+  #define FileVersion AppVersion
+#endif
 #ifndef SourceDir
   #define SourceDir "..\..\dist\Foliant"
 #endif
@@ -41,7 +45,14 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#OutputDir}
-OutputBaseFilename=Foliant-{#AppVersion}-Setup
+OutputBaseFilename=Foliant-Setup-{#AppVersion}
+VersionInfoVersion={#FileVersion}
+VersionInfoProductName=Foliant
+VersionInfoProductVersion={#FileVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoDescription=Installazione di Foliant {#AppVersion}
+VersionInfoCompany=Foliant
+VersionInfoCopyright=AGPL-3.0
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\Foliant.exe
 UninstallDisplayName=Foliant
@@ -110,10 +121,6 @@ Root: HKA; Subkey: "Software\Classes\.pdf"; ValueType: string; ValueData: "Folia
 Filename: "{code:DefaultAppsUri}"; Description: "{cm:DefaultPdfRun}"; Tasks: defaultpdf; Flags: shellexec postinstall nowait skipifsilent
 Filename: "{app}\Foliant.exe"; Description: "{cm:Launch}"; Flags: nowait postinstall skipifsilent unchecked
 
-[UninstallRun]
-; preferenze e dati dell'utente: solo se chiesto (domanda in InitializeUninstall o /RIMUOVIPREFERENZE=1)
-Filename: "{app}\foliant-cli.exe"; Parameters: "rimuovi-dati-utente"; Flags: runhidden waituntilterminated; Check: RemovePreferences; RunOnceId: "RimuoviDatiUtente"
-
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
@@ -138,7 +145,15 @@ begin
     RemovePrefs := MsgBox(CustomMessage('RemovePrefs'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
 end;
 
-function RemovePreferences(): Boolean;
+{ Preferenze e dati dell'utente: solo se chiesto (domanda sopra o /RIMUOVIPREFERENZE=1).
+  Non con una voce [UninstallRun] e Check: Inno Setup valuta quel Check durante l'installazione,
+  quando la scelta non esiste ancora, e la voce non verrebbe mai registrata. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
 begin
-  Result := RemovePrefs;
+  if (CurUninstallStep = usUninstall) and RemovePrefs then
+    if not Exec(ExpandConstant('{app}\foliant-cli.exe'), 'rimuovi-dati-utente', '', SW_HIDE,
+                ewWaitUntilTerminated, ResultCode) then
+      Log('rimuovi-dati-utente non avviato: ' + SysErrorMessage(ResultCode));
 end;

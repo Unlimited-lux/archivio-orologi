@@ -23,12 +23,20 @@ function First-Dir([string[]]$patterns) {
   throw "Cartella non trovata: $($patterns -join ', ')"
 }
 
-function Fetch([string]$url, [string]$target) {
-  for ($i = 1; $i -le 4; $i++) {
-    try { Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing; return }
-    catch { if ($i -eq 4) { throw }; Start-Sleep -Seconds (2 * $i) }
+# Scarica dal primo indirizzo che risponde, con più tentativi per ciascuno.
+function Fetch([string[]]$urls, [string]$target) {
+  foreach ($url in $urls) {
+    for ($i = 1; $i -le 3; $i++) {
+      try { Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 120; return }
+      catch { Write-Host "Download non riuscito ($i/3): $url"; Start-Sleep -Seconds (3 * $i) }
+    }
   }
+  throw "Download non riuscito: $target"
 }
+
+# testi delle licenze: nel repository (packaging/windows/licenses), nessun download
+$testi = Join-Path $PSScriptRoot 'licenses'
+
 
 # --- Tesseract: programma e librerie, solo le lingue italiana, inglese e rilevamento orientamento
 $tessSrc = First-Dir @("$env:ProgramFiles\Tesseract-OCR")
@@ -38,11 +46,17 @@ Copy-Item "$tessSrc\*.exe", "$tessSrc\*.dll" -Destination $tess
 foreach ($sub in 'configs', 'tessconfigs') {
   if (Test-Path "$tessSrc\tessdata\$sub") { Copy-Item "$tessSrc\tessdata\$sub" -Destination "$tess\tessdata" -Recurse }
 }
+# stessi modelli dei pacchetti di Ubuntu, su cui sono tarati i test OCR di Foliant:
+# tesseract-ocr-ita/eng da tessdata_fast (ita 2,7 MB, eng 4,1 MB), tesseract-ocr-osd da tessdata (10,5 MB)
+$modelli = @{ ita = 'tessdata_fast'; eng = 'tessdata_fast'; osd = 'tessdata' }
 foreach ($lang in 'ita', 'eng', 'osd') {
-  # stessi modelli dei pacchetti di Ubuntu (tessdata «standard», LSTM e motore classico)
-  Fetch "https://github.com/tesseract-ocr/tessdata/raw/main/$lang.traineddata" "$tess\tessdata\$lang.traineddata"
+  $repo = $modelli[$lang]
+  Fetch @("https://github.com/tesseract-ocr/$repo/raw/main/$lang.traineddata",
+          "https://raw.githubusercontent.com/tesseract-ocr/$repo/main/$lang.traineddata",
+          "https://cdn.jsdelivr.net/gh/tesseract-ocr/$repo@main/$lang.traineddata") "$tess\tessdata\$lang.traineddata"
 }
-Fetch 'https://raw.githubusercontent.com/tesseract-ocr/tesseract/main/LICENSE' "$Licenze\Tesseract-Apache-2.0.txt"
+Get-ChildItem "$tess\tessdata" -Filter *.traineddata | ForEach-Object { "{0}  {1:N0} byte" -f $_.Name, $_.Length }
+Copy-Item "$testi\Apache-2.0.txt" "$Licenze\Tesseract-Apache-2.0.txt"
 & "$tess\tesseract.exe" --version
 & "$tess\tesseract.exe" --tessdata-dir "$tess\tessdata" --list-langs
 
@@ -54,9 +68,7 @@ foreach ($sub in 'bin', 'lib', 'iccprofiles', 'Resource') {
   if (Test-Path "$gsSrc\$sub") { Copy-Item "$gsSrc\$sub" -Destination $gs -Recurse }
 }
 Remove-Item "$gs\bin\gswin64.exe" -ErrorAction SilentlyContinue        # versione con finestra: non serve
-$gsLicense = Get-ChildItem $gsSrc -Recurse -Include 'COPYING', 'LICENSE' -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($gsLicense) { Copy-Item $gsLicense.FullName "$Licenze\Ghostscript-AGPL-3.0.txt" }
-else { Fetch 'https://www.gnu.org/licenses/agpl-3.0.txt' "$Licenze\Ghostscript-AGPL-3.0.txt" }
+Copy-Item "$testi\AGPL-3.0.txt" "$Licenze\Ghostscript-AGPL-3.0.txt"
 & "$gs\bin\gswin64c.exe" --version
 
 # --- qpdf
@@ -67,10 +79,10 @@ $qpdfSrc = $qpdfExe.Directory.Parent.FullName
 $qpdf = Join-Path $Destinazione 'qpdf'
 New-Item -ItemType Directory -Force -Path $qpdf | Out-Null
 Copy-Item "$qpdfSrc\bin" -Destination $qpdf -Recurse
-Fetch 'https://raw.githubusercontent.com/qpdf/qpdf/main/LICENSE.txt' "$Licenze\qpdf-Apache-2.0.txt"
+Copy-Item "$testi\Apache-2.0.txt" "$Licenze\qpdf-Apache-2.0.txt"
 & "$qpdf\bin\qpdf.exe" --version
 
 # --- licenza di Foliant e di PyMuPDF
-Fetch 'https://www.gnu.org/licenses/agpl-3.0.txt' "$Licenze\AGPL-3.0.txt"
+Copy-Item "$testi\AGPL-3.0.txt" "$Licenze\AGPL-3.0.txt"
 Write-Host "Strumenti raccolti in $Destinazione"
 Get-ChildItem $Destinazione -Recurse | Measure-Object -Property Length -Sum | ForEach-Object { "{0:N0} MB" -f ($_.Sum / 1MB) }

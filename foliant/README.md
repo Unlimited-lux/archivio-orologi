@@ -31,13 +31,20 @@ finché nessun modulo lo registra, il nucleo usa l'azione rapida della Home con 
 («Crea PDF da file», «Unisci PDF») e, se manca anche quella, mostra la Home.
 L'installazione copia anche l'icona simbolica monocromatica (`foliant-symbolic.svg`, colore del tema).
 
-## Installazione (Windows 10 e 11)
+## Windows (10 e 11, 64 bit)
 
-Installatore `Foliant-<versione>-Setup.exe` (Tesseract con italiano e inglese, Ghostscript e qpdf
-inclusi; LibreOffice facoltativo) o versione portatile `.zip`, costruiti in GitHub Actions dal
-workflow `foliant-windows-build` (`packaging/windows/`). Guida passo per passo, dati, riservatezza
-e limiti noti: `docs/windows.md`. Stesso codice sorgente della versione Linux: le differenze tra i
-sistemi stanno solo in `foliant/core/platform.py` e `foliant/core/winscan.py`.
+Installatore `Foliant-Setup-<versione>.exe` e versione portatile `Foliant-portable-<versione>.zip`,
+costruiti in GitHub Actions dal workflow `foliant-windows-build` (*Actions › foliant-windows-build ›
+ultima esecuzione verde › Artifacts*, conservati 30 giorni) a partire da `packaging/windows/`
+(PyInstaller e Inno Setup). Inclusi Tesseract con italiano, inglese e orientamento (Apache-2.0),
+Ghostscript (AGPL-3.0) e qpdf (Apache-2.0), con le licenze; LibreOffice resta facoltativo, da
+installare a parte. L'installazione non richiede i permessi di amministratore; il programma non è
+firmato e Windows SmartScreen chiede la conferma («Ulteriori informazioni › Esegui comunque»).
+Ogni installatore viene provato su una macchina Windows pulita (installazione silenziosa, OCR in
+italiano, DOCX, Ghostscript, nessuna traccia dei file nel profilo, disinstallazione).
+Guida per l'utente passo per passo, dati, riservatezza e limiti noti: `docs/windows.md`. Stesso
+codice sorgente della versione Linux: le differenze tra i sistemi stanno in
+`foliant/core/platform.py` e `foliant/core/winscan.py`.
 
 ## Uso quotidiano
 
