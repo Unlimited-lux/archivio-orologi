@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from collections import Counter
 from dataclasses import dataclass, field
@@ -22,6 +21,7 @@ import pymupdf
 
 from foliant.i18n import format_number
 from foliant.api import _
+from foliant.core import platform
 
 from . import detect, layout
 from .engine import PageOpError, delete_pages
@@ -115,12 +115,12 @@ def text_orientation(page: pymupdf.Page) -> tuple[int, float, int] | None:
 
 
 def tesseract_available() -> bool:
-    return shutil.which("tesseract") is not None
+    return platform.find_tool("tesseract") is not None
 
 
 def scan_orientation(page: pymupdf.Page, timeout: float = 30.0) -> tuple[int, float] | None:
     """Rotazione oraria che raddrizza una scansione (tesseract locale), o None."""
-    exe = shutil.which("tesseract")
+    exe = platform.find_tool("tesseract")
     if exe is None:
         return None
     try:

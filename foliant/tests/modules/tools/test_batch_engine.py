@@ -11,6 +11,7 @@ from datetime import datetime
 import pymupdf
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.api import OperationCancelled
 from foliant.modules.tools import engine as be
 
@@ -1049,8 +1050,8 @@ def _scanned_letter(path, text):
 
 def test_ocr_step_with_real_ocr_module(tmp_path):
     """Integrazione con il vero modulo OCR (se tesseract è installato)."""
-    import shutil as _sh
-    if _sh.which("tesseract") is None or be._ocr_function() is None:
+
+    if find_tool("tesseract") is None or be._ocr_function() is None:
         pytest.skip("OCR non disponibile")
     src = _scanned_letter(tmp_path / "scansione.pdf", "Fattura numero 4521")
     report = be.run_job(None, [be.analyze_file(src)], be.JobSettings(
@@ -1115,8 +1116,8 @@ def test_pdfa_step_reports_conformance(tmp_path, monkeypatch):
 def test_pdfa_step_without_ghostscript_is_clear(tmp_path):
     if be._pdfa_function() is None:
         pytest.skip("modulo Converti non disponibile")
-    import shutil as _sh
-    if _sh.which("gs"):
+
+    if find_tool("gs"):
         pytest.skip("Ghostscript presente: verificato dal modulo Converti")
     a = mk(tmp_path / "in" / "a.pdf", pages=1)
     rep = be.run_job(None, [be.analyze_file(a)], be.JobSettings(steps=[be.Step("pdfa")],

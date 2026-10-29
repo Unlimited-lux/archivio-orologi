@@ -56,7 +56,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        platform.replace_file(tmp, path)
     except OSError as exc:
         try:
             os.unlink(tmp)

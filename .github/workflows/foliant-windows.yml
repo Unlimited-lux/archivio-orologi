@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: foliant-tests-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false     # una suite in corso arriva sempre in fondo; resta in coda solo la più recente
 
 jobs:
   test-windows:

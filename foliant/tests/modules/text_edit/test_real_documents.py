@@ -9,6 +9,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.api import Document
 from foliant.modules.text_edit import analysis, engine, search
 from foliant.modules.text_edit.model import Run
@@ -18,7 +19,7 @@ HERE = Path(__file__).parent
 
 @pytest.fixture(scope="module")
 def listino(tmp_path_factory) -> Path:
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    soffice = find_tool("soffice")
     if not soffice:
         pytest.skip("LibreOffice non disponibile")
     out = tmp_path_factory.mktemp("listino")

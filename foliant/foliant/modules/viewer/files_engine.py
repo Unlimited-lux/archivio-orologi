@@ -11,6 +11,7 @@ import os
 import shutil
 from pathlib import Path
 
+from foliant.core import platform
 from foliant.i18n import _
 
 MAX_NAME_BYTES = 255
@@ -153,7 +154,7 @@ def move(src: str, dst: str, overwrite: bool = False) -> str:
         elif not overwrite:
             raise NameConflict(dst)
     try:
-        os.replace(src, dst)
+        platform.replace_file(src, dst)
         return dst
     except OSError as e:
         if e.errno != errno.EXDEV:
@@ -162,7 +163,7 @@ def move(src: str, dst: str, overwrite: bool = False) -> str:
     tmp = dst + ".foliant-part"
     try:
         shutil.copy2(src, tmp)
-        os.replace(tmp, dst)
+        platform.replace_file(tmp, dst)
     except OSError as e:
         try:
             os.unlink(tmp)

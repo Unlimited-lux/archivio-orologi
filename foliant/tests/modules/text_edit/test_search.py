@@ -8,6 +8,7 @@ import re
 import pymupdf
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.core.document import Document
 from foliant.modules.text_edit import search as S
 from foliant.modules.text_edit.model import SOFT_HYPHEN, Line, Run, Style, TextBlock
@@ -433,13 +434,12 @@ salvo diversi accordi scritti tra le parti e fatte salve le condizioni generali 
 def test_invoice_replace_keeps_table_and_justification(tmp_path, bordered):
     """Fattura da LibreOffice: «9.950,00» → «9.960,00» non sposta le celle della tabella e il
     paragrafo resta giustificato con le stesse linee di base."""
-    import shutil
     import subprocess
     import pymupdf as _pm
     from foliant.api import Document as _Doc
     from foliant.modules.text_edit import analysis as _an
     from foliant.modules.text_edit import search as _search
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    soffice = find_tool("soffice")
     if not soffice:
         pytest.skip("LibreOffice non disponibile")
     html = INVOICE_HTML.replace("{border}", "; border:1px solid black" if bordered else "") \

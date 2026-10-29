@@ -60,7 +60,7 @@ def write_private(path: Path, text: str) -> None:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        platform.replace_file(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)

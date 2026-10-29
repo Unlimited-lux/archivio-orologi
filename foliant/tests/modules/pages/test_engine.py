@@ -5,6 +5,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.modules.pages import engine as E
 
 from .conftest import numbered_pdf, page_texts, save_numbered
@@ -634,8 +635,7 @@ def test_labels_follow_moved_page():
 
 def test_split_text_with_ocr_on_scanned_pages():
     """PAG-23: su pagine scannerizzate (solo immagine) il testo si cerca con l'OCR."""
-    import shutil
-    if not shutil.which("tesseract"):
+    if not find_tool("tesseract"):
         pytest.skip("Tesseract non installato")
     src = pymupdf.open()
     for n in (101, 102):

@@ -12,7 +12,6 @@ anche dopo annulla/ripeti perché le copie interne non rinumerano gli oggetti.
 
 from __future__ import annotations
 
-import getpass
 import math
 import re
 import uuid
@@ -22,6 +21,8 @@ from datetime import datetime, timezone
 from typing import Iterable, Iterator, Sequence
 
 import pymupdf
+
+from foliant.core import platform
 
 try:    # testi scritti nei documenti nella lingua dell'interfaccia (NFR-25)
     from foliant.i18n import _
@@ -103,18 +104,7 @@ class AnnotationError(Exception):
 
 def default_author() -> str:
     """Nome completo dell'account di sistema (o nome utente)."""
-    try:
-        import pwd
-
-        gecos = pwd.getpwuid(__import__("os").getuid()).pw_gecos.split(",")[0].strip()
-        if gecos:
-            return gecos
-    except Exception:
-        pass
-    try:
-        return getpass.getuser()
-    except Exception:
-        return ""
+    return platform.user_full_name()
 
 
 # Soggetto predefinito = nome del tipo di strumento (ANN-02).
@@ -4071,7 +4061,7 @@ def summary_csv(pdf: pymupdf.Document) -> str:
 
 
 _UNICODE_FONTS = ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                  "/usr/share/fonts/dejavu/DejaVuSans.ttf")
+                  "/usr/share/fonts/dejavu/DejaVuSans.ttf") + platform.windows_fonts("unicode")
 
 
 def _summary_font() -> tuple[str, str | None]:

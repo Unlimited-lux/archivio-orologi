@@ -18,6 +18,13 @@ Qt (QtProject.conf) è condivisa e non dice chi l'ha scritta: Foliant non tocca 
 (qui solo di un'altra applicazione) né quelle che un'altra applicazione scrive mentre Foliant è
 aperto, e toglie solo ciò che scrivono i suoi dialoghi.
 
+Su Windows le impostazioni di Foliant e la cronologia dei dialoghi di Qt stanno nel registro
+(HKCU\\Software\\Foliant, HKCU\\Software\\QtProject): il test ne salva una copia, le svuota, vi
+scrive i dati della «versione precedente» e alla fine le esporta in un file del profilo, cercato
+come gli altri, poi le rimette com'erano. Il profilo isolato è fatto da %APPDATA%, %LOCALAPPDATA% e
+%TEMP%; si cercano anche le cronologie della shell di Windows (elementi recenti, RecentDocs, MRU
+dei dialoghi comuni) e le Jump List.
+
 Le tracce dei moduli ancora da correggere (PENDING) non fanno fallire il test ma lo segnano come
 «xfail» con il loro elenco: quando i moduli saranno corretti il test passerà da solo, e PENDING
 andrà svuotato.
@@ -40,6 +47,13 @@ import pytest
 import foliant
 
 ROOT = Path(foliant.__file__).resolve().parent.parent      # cartella del progetto (contiene foliant/)
+WINDOWS = sys.platform == "win32"
+REG_FOLIANT = r"Software\Foliant"
+REG_QT = r"Software\QtProject"
+# cronologie della shell di Windows (condivise): esportate per cercarvi i nomi dei file
+REG_SHELL = (r"Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs",
+             r"Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32",
+             r"Software\Microsoft\Windows\CurrentVersion\Search\RecentApps")
 
 # Tracce attribuite a moduli fuori dal nucleo e non ancora corrette: (file o cartella, prefisso
 # della chiave INI o "" per tutto il file, modulo responsabile). Vuoto quando le aree sono unite.
@@ -243,7 +257,118 @@ def _legacy_profile(home: Path, old_file: Path, old_folder: Path) -> None:
     (data_home / "recently-used.xbel").write_text(_xbel(old_file), encoding="utf-8")
 
 
+# ------------------------------------------------------------------ registro (Windows)
+def _reg_export(path: str) -> dict:
+    """Albero HKCU\\`path` → {sottochiave relativa: {nome: (tipo, valore)}}; {} se manca."""
+    import winreg
+    out: dict = {}
+
+    def walk(rel: str) -> None:
+        full = path + ("\\" + rel if rel else "")
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, full)
+        except OSError:
+            return
+        with key:
+            values, i = {}, 0
+            while True:
+                try:
+                    name, value, kind = winreg.EnumValue(key, i)
+                except OSError:
+                    break
+                values[name] = (kind, value)
+                i += 1
+            out[rel] = values
+            subs, i = [], 0
+            while True:
+                try:
+                    subs.append(winreg.EnumKey(key, i))
+                except OSError:
+                    break
+                i += 1
+        for sub in subs:
+            walk(rel + "\\" + sub if rel else sub)
+
+    walk("")
+    return out
+
+
+def _reg_delete(path: str) -> None:
+    """Cancella HKCU\\`path` con tutte le sottochiavi (se esiste)."""
+    import winreg
+    for rel in sorted(_reg_export(path), key=lambda r: -r.count("\\")):   # prima le più profonde
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path + ("\\" + rel if rel else ""))
+        except OSError:
+            pass
+
+
+def _reg_import(path: str, tree: dict) -> None:
+    import winreg
+    for rel, values in sorted(tree.items()):
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, path + ("\\" + rel if rel else "")) as key:
+            for name, (kind, value) in values.items():
+                winreg.SetValueEx(key, name, 0, kind, value)
+
+
+def _reg_dump(target: Path, paths) -> None:
+    """Esporta le chiavi in un file «INI» del profilo: [chiave] e righe nome=valore; i valori
+    binari restano byte grezzi (es. nomi in UTF-16 nelle cronologie della shell)."""
+    with open(target, "wb") as fh:
+        for path in paths:
+            for rel, values in sorted(_reg_export(path).items()):
+                fh.write(f"[{path}\\{rel}]\n".replace("\\", "/").encode("utf-8"))
+                for name, (_kind, value) in values.items():
+                    if isinstance(value, bytes):
+                        data = value
+                    elif isinstance(value, list):
+                        data = "\x00".join(map(str, value)).encode("utf-8")
+                    else:
+                        data = str(value).encode("utf-8")
+                    fh.write(name.encode("utf-8") + b"=" + data + b"\n")
+
+
+def _legacy_registry(old_file: Path, old_folder: Path) -> None:
+    """Come `_legacy_profile`, ma nel registro: impostazioni di una versione precedente e
+    cronologia dei dialoghi di Qt di un'altra applicazione."""
+    from PySide6.QtCore import QSettings
+    old_sha1 = hashlib.sha1(str(old_file).encode("utf-8")).hexdigest()
+    s = QSettings("HKEY_CURRENT_USER\\" + REG_FOLIANT + "\\Foliant", QSettings.Format.NativeFormat)
+    for key, value in (("recent", str(old_file)), ("recentPinned", str(old_file)),
+                       ("lastDirectory", str(old_folder)), ("theme", "dark"),
+                       (f"view/guides/{old_sha1}", json.dumps([["h", 10.0, None]])), ("viewer/autosave_seconds", 1)):
+        s.setValue(key, value)
+    s.sync()
+    q = QSettings(QSettings.Scope.UserScope, "QtProject")
+    q.beginGroup("FileDialog")
+    q.setValue("history", "file:///altra/applicazione")
+    q.setValue("lastVisited", "file:///altra/applicazione")
+    q.setValue("viewMode", "Detail")
+    q.endGroup()
+    q.sync()
+
+
+def _windows_recent_dirs() -> list[Path]:
+    """Elementi recenti e Jump List dell'utente vero (la shell non segue %APPDATA%)."""
+    base = Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Recent"
+    return [base, base / "AutomaticDestinations", base / "CustomDestinations"]
+
+
 def test_no_traces_of_opened_or_saved_files(tmp_path):
+    if not WINDOWS:
+        return _run_scenario(tmp_path)
+    backup = {path: _reg_export(path) for path in (REG_FOLIANT, REG_QT)}
+    try:
+        for path in backup:
+            _reg_delete(path)
+        return _run_scenario(tmp_path)
+    finally:
+        for path, tree in backup.items():
+            _reg_delete(path)
+            _reg_import(path, tree)
+
+
+def _run_scenario(tmp_path):
     tok = {k: uuid.uuid4().hex for k in ("cartella", "documento", "secondo", "altra_cartella", "salvato", "copia",
                                          "vecchio", "vecchia_cartella")}
     folder = tmp_path / f"zq7 cartella {tok['cartella']}"
@@ -273,7 +398,17 @@ def test_no_traces_of_opened_or_saved_files(tmp_path):
     for d in (home / ".config" / "Foliant", profile / "run"):
         d.mkdir(parents=True, exist_ok=True)
     os.chmod(profile / "run", 0o700)
-    _legacy_profile(home, old_file, old_folder)
+    if WINDOWS:
+        # profilo isolato: dati e configurazione in %APPDATA%, stato e cache in %LOCALAPPDATA%,
+        # file temporanei in %TEMP% (cercati anch'essi); impostazioni nel registro
+        roaming, local, temp = home / "AppData" / "Roaming", home / "AppData" / "Local", profile / "temp"
+        for d in (roaming, local, temp):
+            d.mkdir(parents=True, exist_ok=True)
+        env.update(APPDATA=str(roaming), LOCALAPPDATA=str(local), TEMP=str(temp), TMP=str(temp))
+        _legacy_registry(old_file, old_folder)
+        recent_before = {p: set(os.listdir(p)) if p.is_dir() else set() for p in _windows_recent_dirs()}
+    else:
+        _legacy_profile(home, old_file, old_folder)
 
     snapshot = tmp_path / "recupero durante la sessione"
     other_app = ("from PySide6.QtCore import QSettings\n"
@@ -297,12 +432,34 @@ def test_no_traces_of_opened_or_saved_files(tmp_path):
 
     # i dati delle altre applicazioni e le preferenze generali restano: anche la cronologia dei
     # dialoghi di Qt che un'altra applicazione ha scritto mentre Foliant era aperto
-    qt = (home / ".config" / "QtProject.conf").read_text(encoding="utf-8")
-    assert "viewMode=Detail" in qt and "lastVisited=file:///altra/durante" in qt, qt
-    assert "history=file:///altra/applicazione, file:///altra/durante" in qt, qt
-    xbel = (home / ".local" / "share" / "recently-used.xbel").read_text(encoding="utf-8")
-    assert "altro-programma.txt" in xbel and "gedit" in xbel, xbel
-    assert "theme=dark" in (home / ".config" / "Foliant" / "Foliant.conf").read_text(encoding="utf-8")
+    if WINDOWS:
+        from PySide6.QtCore import QSettings
+        q = QSettings(QSettings.Scope.UserScope, "QtProject")
+        q.beginGroup("FileDialog")
+        assert q.value("viewMode") == "Detail" and q.value("lastVisited") == "file:///altra/durante"
+        assert list(q.value("history")) == ["file:///altra/applicazione", "file:///altra/durante"], q.value("history")
+        q.endGroup()
+        s = QSettings("HKEY_CURRENT_USER\\" + REG_FOLIANT + "\\Foliant", QSettings.Format.NativeFormat)
+        assert s.value("theme") == "dark"
+        # registro di Foliant e di Qt, cronologie della shell: esportati nel profilo e cercati
+        _reg_dump(profile / "registro-foliant.ini", (REG_FOLIANT, REG_QT))
+        _reg_dump(profile / "registro-shell.ini", REG_SHELL)
+        with open(profile / "elementi-recenti.txt", "w", encoding="utf-8") as fh:
+            for d, before in recent_before.items():
+                for name in sorted((set(os.listdir(d)) if d.is_dir() else set()) - before):
+                    fh.write(f"{d.name}/{name}\n")
+                    lnk = d / name
+                    if lnk.is_file():
+                        fh.flush()
+                        with open(lnk, "rb") as src, open(profile / f"recente-{len(name)}-{abs(hash(name))}.bin", "wb") as dst:
+                            dst.write(src.read())
+    else:
+        qt = (home / ".config" / "QtProject.conf").read_text(encoding="utf-8")
+        assert "viewMode=Detail" in qt and "lastVisited=file:///altra/durante" in qt, qt
+        assert "history=file:///altra/applicazione, file:///altra/durante" in qt, qt
+        xbel = (home / ".local" / "share" / "recently-used.xbel").read_text(encoding="utf-8")
+        assert "altro-programma.txt" in xbel and "gedit" in xbel, xbel
+        assert "theme=dark" in (home / ".config" / "Foliant" / "Foliant.conf").read_text(encoding="utf-8")
 
     paths = {"documento": first, "secondo": second, "cartella": folder, "altra cartella": other,
              "salvato": save_as, "copia": copy, "vecchio": old_file, "vecchia cartella": old_folder}

@@ -17,6 +17,7 @@ from PySide6.QtCore import QByteArray, QMimeData, Qt, QUrl
 from PySide6.QtGui import QAction, QGuiApplication, QImage, QKeySequence
 from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QToolButton
 
+from foliant.core import platform
 from foliant.i18n import pgettext
 from foliant.api import ENGINE_LOCK, Document, FoliantError, OperationCancelled, PasswordRequired, WrongPassword, _, add_translations, bind_icon
 
@@ -807,7 +808,9 @@ def clipboard_has_pages() -> bool:
 
 
 def send_by_mail(path: Path) -> bool:
-    """Apre il client di posta con l'allegato (xdg-email). False se non disponibile."""
+    """Apre il client di posta con l'allegato (xdg-email; MAPI su Windows). False se non disponibile."""
+    if platform.IS_WINDOWS:
+        return platform.compose_mail(str(path))
     exe = shutil.which("xdg-email")
     if not exe:
         return False

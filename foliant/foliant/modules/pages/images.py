@@ -32,6 +32,7 @@ from urllib.parse import unquote, urlparse
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, _
+from foliant.core import platform
 
 from .engine import (
     IMAGE_SUFFIXES,
@@ -486,7 +487,7 @@ _FALLBACK_FONT_FILES = (
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-)
+) + platform.windows_fonts("unicode")
 
 
 def _fonts() -> list[pymupdf.Font]:

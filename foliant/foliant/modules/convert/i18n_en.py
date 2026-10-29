@@ -1,6 +1,12 @@
 """Traduzioni inglesi del modulo Converti."""
 
 EN: dict[str, str] = {
+    "Nessuno scanner trovato. Verifica che sia acceso e collegato (o raggiungibile in rete) e che compaia in "
+    "Impostazioni › Bluetooth e dispositivi › Stampanti e scanner. Foliant usa i driver WIA: per uno scanner con "
+    "solo driver TWAIN acquisisci con il programma del produttore e apri il file.":
+        "No scanner found. Check that it is on and connected (or reachable on the network) and that it appears in "
+        "Settings › Bluetooth & devices › Printers & scanners. Foliant uses WIA drivers: for a scanner with TWAIN "
+        "drivers only, scan with the manufacturer's program and open the file.",
     "24 bit": "24-bit",
     "8 bit indicizzato": "8-bit indexed",
     "A punti": "Dotted",

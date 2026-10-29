@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QTextCursor
 
+from foliant.core.platform import find_tool
 from foliant.modules.text_edit.ui_tool import AddTextTool, EditTextTool
 
 from .conftest import span_with
@@ -370,8 +371,7 @@ def test_small_text_image_suggests_ocr(window, tmp_path, quiet, qtbot):
 
 def test_accepted_ocr_proposal_makes_page_editable(window, tmp_path, quiet, qtbot):
     """bug_09: accettando la proposta, l'OCR rende la pagina modificabile senza riaprire il documento."""
-    import shutil
-    if not shutil.which("tesseract") or getattr(window.ctx, "ocr", None) is None:
+    if not find_tool("tesseract") or getattr(window.ctx, "ocr", None) is None:
         pytest.skip("OCR non disponibile")
     from .conftest import render_text_image
     doc = pymupdf.open()

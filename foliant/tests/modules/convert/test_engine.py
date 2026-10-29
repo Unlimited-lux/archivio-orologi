@@ -10,6 +10,7 @@ import zipfile
 import pymupdf
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.api import OperationCancelled
 from foliant.modules.convert.common import ConversionError, RangeError, parse_page_range
 from foliant.modules.convert.engine import convert_pdf, run_conversion
@@ -657,7 +658,7 @@ def test_rtf_styles_and_images(tmp_path):
 
 
 # ------------------------------------------------------------------ CNV-14
-@pytest.mark.skipif(__import__("shutil").which("gs") is None, reason="Ghostscript non installato")
+@pytest.mark.skipif(find_tool("gs") is None, reason="Ghostscript non installato")
 def test_pdfa_through_engine(sample_pdf, tmp_path):
     from foliant.modules.convert import pdfa
     result = run_conversion(sample_pdf, tmp_path / "a.pdf", "pdfa-2b")
@@ -686,7 +687,7 @@ def test_ocr_language_from_catalog(tmp_path):
     assert _lang_to_tesseract(doc) == "deu+eng"
 
 
-@pytest.mark.skipif(__import__("shutil").which("gs") is None, reason="Ghostscript non installato")
+@pytest.mark.skipif(find_tool("gs") is None, reason="Ghostscript non installato")
 def test_pdfa_2u(sample_pdf, tmp_path):
     from foliant.modules.convert import pdfa
     result = run_conversion(sample_pdf, tmp_path / "u.pdf", "pdfa-2u")
@@ -859,7 +860,7 @@ def test_encrypted_faithful_docx_and_pdfa(encrypted_pdf, tmp_path):
     import docx
     out = convert_pdf(encrypted_pdf, tmp_path / "e.docx", "docx", layout="faithful", password="segreta")[0]
     assert "Riservato" in "\n".join(p.text for p in docx.Document(out).paragraphs)
-    if __import__("shutil").which("gs"):
+    if find_tool("gs"):
         pdf = convert_pdf(encrypted_pdf, tmp_path / "e.pdf", "pdfa-2b", password="segreta")[0]
         d = pymupdf.open(pdf)
         assert not d.needs_pass and "Riservato" in d[0].get_text()
@@ -1027,7 +1028,7 @@ def test_docx_flow_similarity_ten_pages(tmp_path):
     assert difflib.SequenceMatcher(None, src, out, autojunk=False).ratio() >= 0.99
 
 
-@pytest.mark.skipif(__import__("shutil").which("soffice") is None, reason="LibreOffice non installato")
+@pytest.mark.skipif(find_tool("soffice") is None, reason="LibreOffice non installato")
 def test_docx_opens_in_office_suite(links_pdf, table_pdf, tmp_path):
     """CNV-03: il DOCX prodotto è valido per un'applicazione d'ufficio indipendente (LibreOffice lo
     apre e lo converte senza errori, con il testo atteso)."""
@@ -1060,9 +1061,8 @@ def test_docx_rotated_text_as_rotated_box(tmp_path):
     assert xml.count("<wps:txbx>") == 2
     assert 'vert="vert270"' in xml and 'vert="vert"' in xml
     assert "Codice modulo FT-2026" in xml and "Copia per il cliente" in xml
-    import shutil
     import subprocess
-    if shutil.which("soffice"):
+    if find_tool("soffice"):
         subprocess.run(["soffice", f"-env:UserInstallation=file://{tmp_path / 'lo'}", "--headless",
                         "--convert-to", "pdf", "--outdir", str(tmp_path / "rt"), out],
                        capture_output=True, timeout=180)

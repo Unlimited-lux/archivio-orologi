@@ -24,6 +24,7 @@ from pathlib import Path
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _
+from foliant.core import platform
 
 from .common import ConversionError, OutputFiles, check
 
@@ -444,16 +445,24 @@ def _clean_for_pdfa(pdf: pymupdf.Document, part: int) -> list[str]:
 
 # ------------------------------------------------------------------ Ghostscript
 def ghostscript() -> str | None:
-    for name in ("gs", "gswin64c", "gswin32c"):
-        exe = shutil.which(name)
-        if exe:
-            return exe
-    return None
+    """Ghostscript: «gs» su Linux, «gswin64c.exe» su Windows (anche fuori dal PATH)."""
+    return platform.find_tool("gs")
+
+
+def ghostscript_icc_dir() -> str | None:
+    """Cartella «iccprofiles» accanto a Ghostscript (Windows: …\\gs10.x\\iccprofiles; anche nel pacchetto)."""
+    gs = ghostscript()
+    if not gs:
+        return None
+    d = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(gs))), "iccprofiles")
+    return d if os.path.isdir(d) else None
 
 
 def find_srgb_profile() -> str | None:
     """Cerca un profilo ICC sRGB installato nel sistema."""
+    gs_icc = ghostscript_icc_dir() if platform.IS_WINDOWS else None
     candidates = [
+        *([os.path.join(gs_icc, "srgb.icc"), os.path.join(gs_icc, "default_rgb.icc")] if gs_icc else []),
         "/usr/share/color/icc/ghostscript/srgb.icc",
         *sorted(glob.glob("/usr/share/ghostscript/*/iccprofiles/srgb.icc")),
         "/usr/share/color/icc/sRGB.icc", "/usr/share/color/icc/colord/sRGB.icc",
@@ -497,7 +506,8 @@ def _pdfa_def(icc: str, part: int) -> str:
 def _run_gs(cmd: list[str], progress, pages: int, log_path: str, timeout: float) -> int:
     """Esegue Ghostscript controllando l'annullamento e stimando l'avanzamento dal log."""
     with open(log_path, "wb") as log:
-        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                **platform.subprocess_kwargs())
         start = time.monotonic()
         try:
             while proc.poll() is None:
@@ -617,6 +627,8 @@ def convert_to_pdfa(data: bytes, level: str = "2b", password=None, progress=None
     """
     part, conf = _level(level)
     gs = ghostscript()
+    if not gs and platform.IS_WINDOWS:
+        raise ConversionError(platform.missing_tool_message("gs"))
     if not gs:
         raise ConversionError(_("La conversione in PDF/A richiede Ghostscript, che non è installato. "
                                 "Installalo (ad esempio con «sudo apt install ghostscript») e riprova."))

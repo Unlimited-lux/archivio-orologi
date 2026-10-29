@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import re
-import shutil
 import time
 import unicodedata
 
@@ -12,6 +11,7 @@ import pymupdf
 import pytest
 from PIL import Image
 
+from foliant.core.platform import find_tool
 from foliant.modules.convert import create
 from foliant.modules.convert.common import ConversionError
 
@@ -626,7 +626,7 @@ def test_cancel_images(tmp_path):
 
 
 def test_shutil_reference():
-    assert HAS_SOFFICE == (shutil.which("soffice") is not None or create.soffice_path() is not None)
+    assert HAS_SOFFICE == (find_tool("soffice") is not None or create.soffice_path() is not None)
 
 
 def test_add_ocr_layer_keeps_images(tmp_path):

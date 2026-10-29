@@ -9,6 +9,7 @@ import pymupdf
 import pytest
 from PySide6.QtWidgets import QDialog, QMessageBox
 
+from foliant.core.platform import find_tool
 from foliant.modules.convert.create_dialogs import BlankDialog, ImagesDialog
 from foliant.modules.convert.export_dialog import ExportDialog
 from foliant.modules.convert.optimize_dialogs import CompressDialog
@@ -499,7 +500,7 @@ def test_photos_dialog_manual_corners(window, ctrl, tmp_path, monkeypatch, messa
 
 
 def test_remove_conformance_ui(window, ctrl, sample_pdf, tmp_path, messages):
-    if __import__("shutil").which("gs") is None:
+    if find_tool("gs") is None:
         pytest.skip("Ghostscript non installato")
     from foliant.modules.convert.engine import convert_pdf
     out = convert_pdf(sample_pdf, tmp_path / "a.pdf", "pdfa-2b")[0]
@@ -875,7 +876,7 @@ def test_scanner_dialog_presets_save_export_import(window, settings, tmp_path, m
     assert dlg.preview_label.pixmap() is not None and not dlg.preview_label.pixmap().isNull()
 
 
-@pytest.mark.skipif(__import__("shutil").which("soffice") is None, reason="LibreOffice non installato")
+@pytest.mark.skipif(find_tool("soffice") is None, reason="LibreOffice non installato")
 def test_create_from_office_with_options(window, ctrl, settings, tmp_path, monkeypatch, messages):
     """CNV-18: opzioni dei documenti d'ufficio (fogli di calcolo) ricordate; conferma per i fogli lunghi."""
     import openpyxl

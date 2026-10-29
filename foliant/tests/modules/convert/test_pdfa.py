@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import os
-import shutil
 
 import pymupdf
 import pytest
 from PIL import Image, ImageChops
 
+from foliant.core import platform
+from foliant.core.platform import find_tool
 from foliant.api import OperationCancelled, PasswordRequired
 from foliant.modules.convert import pdfa
 from foliant.modules.convert.common import ConversionError
 
-needs_gs = pytest.mark.skipif(shutil.which("gs") is None, reason="Ghostscript non installato")
+needs_gs = pytest.mark.skipif(find_tool("gs") is None, reason="Ghostscript non installato")
 
 
 def _problem_pdf(**save) -> bytes:
@@ -65,10 +66,11 @@ def test_invalid_level():
 
 
 def test_missing_ghostscript(monkeypatch):
-    monkeypatch.setattr(pdfa.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pdfa, "ghostscript", lambda: None)
     with pytest.raises(ConversionError) as exc:
         pdfa.convert_to_pdfa(_problem_pdf(), "2b")
-    assert "Ghostscript" in str(exc.value) and "apt install ghostscript" in str(exc.value)
+    hint = "Reinstalla Foliant" if platform.IS_WINDOWS else "apt install ghostscript"
+    assert "Ghostscript" in str(exc.value) and hint in str(exc.value)
 
 
 @needs_gs
@@ -194,7 +196,7 @@ def test_cancel_kills_gs_and_cleans(tmp_path, monkeypatch):
     assert sorted(os.listdir(tmp_path)) == ["x.pdf"]
 
 
-@pytest.mark.skipif(shutil.which("gs") is None, reason="Ghostscript non installato")
+@pytest.mark.skipif(find_tool("gs") is None, reason="Ghostscript non installato")
 def test_pdfx3_rgb_document(tmp_path):
     """PDF/X-3: OutputIntent GTS_PDFX con profilo CMYK, TrimBox su ogni pagina, GTS_PDFXVersion, testo conservato."""
     import re

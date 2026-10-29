@@ -31,6 +31,8 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSettings, Qt
 from PySide6.QtWidgets import QFileDialog
 
+from ..core import platform
+
 CLEANUP_KEY = "privacy/cleanup"
 CLEANUP_VERSION = 1
 # chiavi di Foliant (QSettings) con percorsi o impronte di percorsi, scritte dalle versioni precedenti
@@ -197,7 +199,7 @@ def clean_recently_used(path: Path) -> bool:
             os.chmod(tmp, path.stat().st_mode & 0o777)
         except OSError:
             pass
-        os.replace(tmp, path)
+        platform.replace_file(tmp, path)
     except OSError:
         try:
             tmp.unlink()

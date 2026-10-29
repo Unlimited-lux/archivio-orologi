@@ -5,12 +5,12 @@ from __future__ import annotations
 import io
 import os
 import re
-import shutil
 
 import pymupdf
 import pytest
 from PIL import Image
 
+from foliant.core.platform import find_tool
 from foliant.api import OperationCancelled
 from foliant.modules.convert import optimize as opt
 from foliant.modules.convert.common import ConversionError
@@ -290,7 +290,7 @@ def test_analyze_space_objstm_and_categories(sample_pdf):
 
 
 # ------------------------------------------------------------------ linearizzazione
-@pytest.mark.skipif(shutil.which("qpdf") is None, reason="qpdf non installato")
+@pytest.mark.skipif(find_tool("qpdf") is None, reason="qpdf non installato")
 def test_linearize(twenty_pages):
     data = open(twenty_pages, "rb").read()
     assert not opt.is_linearized(data)
@@ -302,7 +302,7 @@ def test_linearize(twenty_pages):
     assert not opt.is_linearized(lin + b"\n% aggiornamento\n")
 
 
-@pytest.mark.skipif(shutil.which("qpdf") is None, reason="qpdf non installato")
+@pytest.mark.skipif(find_tool("qpdf") is None, reason="qpdf non installato")
 def test_compress_with_linearize(photo_pdf):
     out = opt.optimize_advanced(photo_pdf, image_ppi=150, linearize=True)
     assert opt.is_linearized(out)

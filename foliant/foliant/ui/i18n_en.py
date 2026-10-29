@@ -3,6 +3,22 @@
 from ..i18n import add_translations
 
 EN = {
+    "Lo scanner non risponde: controlla che sia acceso e collegato, poi riprova.":
+        "The scanner does not respond: check that it is on and connected, then try again.",
+    "L'alimentatore è vuoto: inserisci i fogli e riprova.": "The document feeder is empty: load the sheets and try again.",
+    "Carta inceppata nello scanner: liberala e riprova.": "Paper jam in the scanner: clear it and try again.",
+    "Lo scanner è occupato da un altro programma: chiudilo e riprova.":
+        "The scanner is busy with another program: close it and try again.",
+    "Il coperchio dello scanner è aperto: chiudilo e riprova.": "The scanner lid is open: close it and try again.",
+    "Acquisizione non riuscita: {e}": "Scan failed: {e}",
+    "nessuna risposta dallo scanner": "no response from the scanner",
+    "Reinstalla Foliant (Tesseract è incluso, con le lingue italiana e inglese) e riprova.":
+        "Reinstall Foliant (Tesseract is included, with the Italian and English languages) and try again.",
+    "Reinstalla Foliant (Ghostscript è incluso) e riprova.": "Reinstall Foliant (Ghostscript is included) and try again.",
+    "Reinstalla Foliant (qpdf è incluso) e riprova.": "Reinstall Foliant (qpdf is included) and try again.",
+    "Installa LibreOffice da https://www.libreoffice.org (gratuito) e riprova: Foliant lo trova da solo.":
+        "Install LibreOffice from https://www.libreoffice.org (free) and try again: Foliant finds it by itself.",
+    "Serve il programma {program}, che non è stato trovato.": "The {program} program is required but was not found.",
     "<p>Editor PDF per Linux.</p><p>Icone: set open source con licenza ISC.</p>":
         "<p>PDF editor for Linux.</p><p>Icons: open-source set under the ISC license.</p>",
     "Adatta alla larghezza": "Fit width",

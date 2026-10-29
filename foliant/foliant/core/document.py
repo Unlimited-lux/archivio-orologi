@@ -34,7 +34,7 @@ from typing import Callable, Iterator
 import pymupdf
 
 from ..i18n import _
-from . import security
+from . import platform, security
 from .engine import ENGINE_LOCK
 from .errors import DocumentError, DocumentWriteError, OperationCancelled, PasswordRequired, WrongPassword
 from .incremental import IncrementalSaveError, incremental_update, signed_fields
@@ -169,7 +169,7 @@ def atomic_write(target: str | os.PathLike, data: bytes) -> None:
                 os.chmod(tmp, 0o666 & ~umask)
         except OSError:
             pass
-        os.replace(tmp, target)
+        platform.replace_file(tmp, target)    # su Windows riprova se il file è aperto da un altro programma
         _OWN_WRITES[str(target)] = _file_stamp(target)   # scrittura di Foliant: non è una modifica esterna
     except BaseException as e:
         try:

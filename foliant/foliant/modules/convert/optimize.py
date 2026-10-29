@@ -13,7 +13,6 @@ import io
 import math
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import time
@@ -25,6 +24,7 @@ import pymupdf
 from PIL import Image
 
 from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _
+from foliant.core import platform
 from foliant.core.document import protection_options
 
 from .common import ConversionError, OperationCancelled, OutputFiles, check
@@ -704,7 +704,9 @@ def linearize_bytes(data: bytes, password: str | None = None, progress=None) -> 
 
     La cifratura eventuale è mantenuta (serve la password se il file la richiede).
     """
-    exe = shutil.which("qpdf")
+    exe = platform.find_tool("qpdf")
+    if not exe and platform.IS_WINDOWS:
+        raise ConversionError(platform.missing_tool_message("qpdf"))
     if not exe:
         raise ConversionError(_("Per ottimizzare il PDF per la visualizzazione web veloce serve il programma "
                                 "qpdf, che non è installato. Installalo (ad esempio con «sudo apt install "
@@ -726,7 +728,8 @@ def linearize_bytes(data: bytes, password: str | None = None, progress=None) -> 
 def _run(cmd: list[str], progress, timeout: float, fraction: float | None = None) -> tuple[int, str]:
     """Esegue un programma esterno controllando l'annullamento; termina il processo se annullato."""
     with tempfile.TemporaryFile() as errf:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=errf, stdin=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=errf, stdin=subprocess.DEVNULL,
+                                **platform.subprocess_kwargs())
         start = time.monotonic()
         try:
             while proc.poll() is None:

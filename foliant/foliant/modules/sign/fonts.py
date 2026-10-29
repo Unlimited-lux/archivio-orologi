@@ -14,13 +14,15 @@ import io
 from functools import lru_cache
 from pathlib import Path
 
+from foliant.core import platform
+
 SYSTEM_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/TTF/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-)
+) + platform.windows_fonts("unicode")
 
 
 def needs_unicode_font(lines) -> bool:

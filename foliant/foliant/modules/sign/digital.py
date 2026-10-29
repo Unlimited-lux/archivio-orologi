@@ -27,6 +27,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives.serialization import pkcs12 as c_pkcs12
 from cryptography.x509.oid import ExtensionOID, NameOID
 
+from foliant.core import platform
 from foliant.core.engine import ENGINE_LOCK
 from foliant.core.errors import FoliantError
 from foliant import i18n
@@ -303,7 +304,7 @@ def _atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        platform.replace_file(tmp, path)
     except OSError as exc:
         try:
             os.unlink(tmp)

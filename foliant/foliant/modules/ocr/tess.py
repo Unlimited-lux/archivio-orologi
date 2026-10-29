@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import time
@@ -20,6 +19,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
+from foliant.core import platform
 from foliant.i18n import _
 
 PAGE_TIMEOUT = 120.0   # secondi massimi per pagina
@@ -88,7 +88,7 @@ def logical_lines(lines: list[Line]) -> list[tuple[Line, str]]:
 
 
 def tesseract_cmd() -> str | None:
-    return shutil.which("tesseract")
+    return platform.find_tool("tesseract")
 
 
 def _tessdata_args() -> list[str]:
@@ -111,8 +111,11 @@ def _env() -> dict:
 def _run(args: list[str], cancelled: Callable[[], bool] | None, timeout: float) -> tuple[int, str]:
     cmd = tesseract_cmd()
     if cmd is None:
+        if platform.IS_WINDOWS:
+            raise OcrError(platform.missing_tool_message("tesseract"))
         raise OcrError(_("Il motore OCR (tesseract) non è installato. Installa il pacchetto «tesseract-ocr»."))
-    proc = subprocess.Popen([cmd, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_env())
+    proc = subprocess.Popen([cmd, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_env(),
+                            **platform.subprocess_kwargs())
     start = time.monotonic()
     try:
         while True:
@@ -293,7 +296,8 @@ def version() -> str | None:
     if not cmd:
         return None
     try:
-        out = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=10)
+        out = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=10,
+                             **platform.subprocess_kwargs())
         return (out.stdout or out.stderr).splitlines()[0].strip()
     except Exception:
         return None

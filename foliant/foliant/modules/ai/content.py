@@ -342,13 +342,15 @@ def sanitized_copy(document) -> bytes:
 
 
 def ocr_languages_available() -> list[str]:
-    import shutil
     import subprocess
-    exe = shutil.which("tesseract")
+
+    from foliant.core import platform
+    exe = platform.find_tool("tesseract")
     if not exe:
         return []
     try:
-        out = subprocess.run([exe, "--list-langs"], capture_output=True, text=True, timeout=10).stdout
+        out = subprocess.run([exe, "--list-langs"], capture_output=True, text=True, timeout=10,
+                             **platform.subprocess_kwargs()).stdout
     except (OSError, subprocess.SubprocessError):
         return []
     return [l.strip() for l in out.splitlines()[1:] if l.strip()]

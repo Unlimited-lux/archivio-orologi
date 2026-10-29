@@ -30,6 +30,7 @@ import pymupdf
 
 from foliant.api import (ENGINE_LOCK, DocumentError, OperationCancelled, _, atomic_write, format_date, format_number,
                          placement)
+from foliant.core import platform
 
 INPUT_EXTENSIONS = (".pdf",)
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp")
@@ -90,7 +91,9 @@ def _convert_function() -> Callable | None:
 
 def _print_command(path: str, printer: str | None, copies: int = 1, duplex: str = "none",
                    pages: str = "") -> list[str]:
-    """Comando di stampa (CUPS). Sostituibile nei test."""
+    """Comando di stampa (CUPS; su Windows Ghostscript con il driver della stampante). Sostituibile nei test."""
+    if platform.IS_WINDOWS:
+        return _windows_print_command(path, printer, copies, pages)
     lp = shutil.which("lp")
     if lp is None:
         raise BatchError("DEP-02", _("Il comando di stampa «lp» (CUPS) non è installato."))
@@ -107,9 +110,27 @@ def _print_command(path: str, printer: str | None, copies: int = 1, duplex: str 
     return cmd
 
 
+def _windows_print_command(path: str, printer: str | None, copies: int = 1, pages: str = "") -> list[str]:
+    """Windows: Ghostscript (mswinpr2) stampa sulla stampante indicata o su quella predefinita.
+    Il fronte/retro segue le preferenze del driver della stampante."""
+    gs = platform.find_tool("gs")
+    if gs is None:
+        raise BatchError("DEP-02", _("Per stampare in blocco su Windows serve Ghostscript, che non è stato trovato. "
+                                     "Reinstalla Foliant (Ghostscript è incluso)."))
+    name = printer or platform.default_printer()
+    if not name:
+        raise BatchError("PRN-01", _("Nessuna stampante predefinita: scegline una nelle impostazioni di Windows."))
+    cmd = [gs, "-dBATCH", "-dNOPAUSE", "-dQUIET", "-dSAFER", "-dNoCancel", "-sDEVICE=mswinpr2",
+           f"-dNumCopies={max(1, int(copies))}", f"-sOutputFile=%printer%{name}"]
+    if pages:
+        cmd.append(f"-sPageList={pages}")
+    cmd.append(path)
+    return cmd
+
+
 def _run_print(cmd: list[str]) -> None:
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=120, **platform.subprocess_kwargs())
     except (OSError, subprocess.SubprocessError) as e:
         raise BatchError("PRN-01", _("Stampa non riuscita: {e}").format(e=e)) from e
     if done.returncode != 0:
@@ -1688,7 +1709,7 @@ def _office_command(src: str, outdir: str) -> list[str] | None:
 
     Riservatezza: profilo di LibreOffice temporaneo accanto a `outdir` (niente elenco dei
     documenti recenti nel profilo dell'utente); il chiamante passa una copia con nome neutro."""
-    exe = shutil.which("soffice") or shutil.which("libreoffice")
+    exe = platform.find_tool("soffice")
     if not exe:
         return None
     profile = Path(os.path.dirname(os.path.abspath(outdir)), "profile").resolve().as_uri()
@@ -1776,7 +1797,7 @@ def to_pdf_bytes(path: str, params: dict, warnings: list | None = None) -> bytes
             try:
                 shutil.copyfile(path, safe)
                 subprocess.run(cmd, check=True, capture_output=True, timeout=300, cwd=tmp,
-                               stdin=subprocess.DEVNULL)
+                               stdin=subprocess.DEVNULL, **platform.subprocess_kwargs())
             except Exception as e:
                 raise BatchError("FMT-03", _("Documento non convertibile (forse protetto da password).")) from e
             out = os.path.join(outdir, "documento.pdf")
@@ -2287,7 +2308,7 @@ def run_job(progress, items: list[QueueItem], settings: JobSettings, started: da
                         bak = item.path + ".bak"
                         tmp = bak + ".tmp"
                         shutil.copy2(item.path, tmp)
-                        os.replace(tmp, bak)
+                        platform.replace_file(tmp, bak)
                     target = item.path
                 else:
                     name = render_name(settings.pattern, item.path, i, settings, started, res.pages, plan[i])
@@ -2581,7 +2602,7 @@ def _do_convert(data: bytes, step: Step, item: QueueItem, index: int, settings: 
             if target is None:
                 raise BatchError("EXIST-01", _("Saltato: esiste già."), status="skipped")
             reserved.add(target)
-            os.replace(path, target)
+            platform.replace_file(path, target)
             outputs.append(target)
         return outputs
     except BatchError:

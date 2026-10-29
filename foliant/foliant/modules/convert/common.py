@@ -18,6 +18,7 @@ from typing import Callable
 
 import pymupdf
 
+from foliant.core import platform
 from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, PasswordRequired, WrongPassword, _
 
 
@@ -185,7 +186,7 @@ class OutputFiles:
                 os.chmod(tmp, mode)
             except OSError:
                 pass
-            os.replace(tmp, target)
+            platform.replace_file(tmp, target)
             self._done.append(target)
         self._items.clear()
         return list(self._done)

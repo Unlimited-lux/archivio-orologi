@@ -14,6 +14,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations
+from foliant.core import platform
 
 TRANSLATIONS = {
     "Condividi": "Share",
@@ -56,7 +57,8 @@ class ShareController:
         return bool(ok)
 
     def mail_client(self) -> str | None:
-        return shutil.which("xdg-email")
+        """xdg-email su Linux; «MAPI» su Windows (il programma di posta predefinito)."""
+        return platform.mail_client()
 
     def ask_modified_choice(self) -> str | None:
         box = QMessageBox(QMessageBox.Icon.Question, _("Invio per e-mail"), _("Il documento ha modifiche non salvate."),
@@ -121,7 +123,10 @@ class ShareController:
             pass
         if view.document.is_protected:
             self.ctx.status(_("Il documento è protetto: comunica la password al destinatario per un altro canale."), 8000)
-        ok = self.launch(client, ["--subject", subject, "--attach", path])
+        if client == "MAPI":
+            ok = platform.compose_mail(path, subject=subject)
+        else:
+            ok = self.launch(client, ["--subject", subject, "--attach", path])
         if not ok:
             self.ctx.info(_("Invio per e-mail"), _("Nessun client di posta trovato. Puoi allegare il file manualmente: "
                                                    "usa «Mostra nella cartella»."))

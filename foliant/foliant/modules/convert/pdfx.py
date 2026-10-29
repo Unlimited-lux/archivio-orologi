@@ -16,6 +16,7 @@ from pathlib import Path
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, _
+from foliant.core import platform
 
 from .common import ConversionError, check
 from .pdfa import _open, _run_gs, _scan, ghostscript
@@ -24,7 +25,9 @@ PDFX_LEVELS = ("3",)
 
 
 def find_cmyk_profile() -> str | None:
-    for path in ("/usr/share/color/icc/ghostscript/default_cmyk.icc", "/usr/share/color/icc/ghostscript/ps_cmyk.icc",
+    from .pdfa import ghostscript_icc_dir
+    gs_icc = ghostscript_icc_dir() if platform.IS_WINDOWS else None
+    for path in (*([os.path.join(gs_icc, "default_cmyk.icc"), os.path.join(gs_icc, "ps_cmyk.icc")] if gs_icc else []),"/usr/share/color/icc/ghostscript/default_cmyk.icc", "/usr/share/color/icc/ghostscript/ps_cmyk.icc",
                  *sorted(str(p) for p in Path("/usr/share/ghostscript").glob("*/iccprofiles/default_cmyk.icc"))):
         if os.path.isfile(path):
             return path
@@ -116,6 +119,8 @@ def convert_to_pdfx(data: bytes, level: str = "3", password=None, progress=None)
     if str(level).lower().replace("pdf/x-", "").replace("pdfx-", "") not in PDFX_LEVELS:
         raise ConversionError(_("Profilo PDF/X non supportato: «{l}». È disponibile PDF/X-3.").format(l=level))
     gs = ghostscript()
+    if not gs and platform.IS_WINDOWS:
+        raise ConversionError(platform.missing_tool_message("gs"))
     if not gs:
         raise ConversionError(_("La conversione in PDF/X richiede Ghostscript, che non è installato. "
                                 "Installalo (ad esempio con «sudo apt install ghostscript») e riprova."))

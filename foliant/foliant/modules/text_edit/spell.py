@@ -814,7 +814,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
-    os.replace(tmp, path)
+    platform.replace_file(tmp, path)
 
 
 def _page_blocks(page: pymupdf.Page, p: int, granularity: str) -> list[TextBlock]:

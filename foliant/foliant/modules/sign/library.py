@@ -58,7 +58,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        platform.replace_file(tmp, path)
     except BaseException as e:
         try:
             os.unlink(tmp)

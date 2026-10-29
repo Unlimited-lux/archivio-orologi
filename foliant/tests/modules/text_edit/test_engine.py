@@ -5,6 +5,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.api import Document
 from foliant.modules.text_edit import analysis, engine
 from foliant.modules.text_edit.fonts import FontResolver
@@ -601,7 +602,6 @@ def test_ocr_correction_keeps_image(ocr_pdf, tmp_path):
 
 
 def test_ocr_convert_to_visible_text(ocr_pdf, tmp_path):
-    import shutil
     import subprocess
     d = Document.open(ocr_pdf)
     with d.lock:
@@ -615,7 +615,7 @@ def test_ocr_convert_to_visible_text(ocr_pdf, tmp_path):
         engine.replace_block(pdf, 0, nb, replace_text(nb, "2019", "2026"))
     out = reopen(d, tmp_path)
     assert "2026" in out[0].get_text() and "2019" not in out[0].get_text()
-    if shutil.which("tesseract"):
+    if find_tool("tesseract"):
         png = tmp_path / "area.png"
         out[0].get_pixmap(dpi=150, clip=pymupdf.Rect(40, 40, 740, 210)).save(str(png))
         res = subprocess.run(["tesseract", str(png), "-", "--psm", "7"], capture_output=True, text=True, timeout=60)
@@ -876,9 +876,8 @@ def test_edit_reuses_original_font_resource_pymupdf(tmp_path):
 
 def test_edit_reuses_original_font_resource_libreoffice(tmp_path):
     """bug_10: fattura LibreOffice (Carlito in sottoinsieme): sostituire un prezzo non aggiunge font."""
-    import shutil
     import subprocess
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    soffice = find_tool("soffice")
     if not soffice:
         pytest.skip("LibreOffice non disponibile")
     src = tmp_path / "fattura.html"

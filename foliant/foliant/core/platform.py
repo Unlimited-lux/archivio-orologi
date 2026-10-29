@@ -188,6 +188,103 @@ def _windows_pid_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
+def _win_api():
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.LocalFree.argtypes = (ctypes.c_void_p,)
+    kernel32.ProcessIdToSessionId.argtypes = (wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+    kernel32.GetNamedPipeServerProcessId.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.ULONG))
+    advapi32.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE))
+    advapi32.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.DWORD))
+    advapi32.ConvertSidToStringSidW.argtypes = (ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR))
+    return kernel32, advapi32
+
+
+def _process_sid(process_handle) -> str | None:
+    """SID (stringa) dell'utente proprietario del processo, o None."""
+    from ctypes import wintypes
+    kernel32, advapi32 = _win_api()
+    TOKEN_QUERY, TokenUser = 0x0008, 1
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(process_handle, TOKEN_QUERY, ctypes.byref(token)):
+        return None
+    try:
+        needed = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(needed))
+        buf = ctypes.create_string_buffer(needed.value or 256)
+        if not advapi32.GetTokenInformation(token, TokenUser, buf, len(buf), ctypes.byref(needed)):
+            return None
+        psid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]     # TOKEN_USER.User.Sid
+        text = wintypes.LPWSTR()
+        if not advapi32.ConvertSidToStringSidW(psid, ctypes.byref(text)):
+            return None
+        try:
+            return text.value
+        finally:
+            kernel32.LocalFree(text)
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def windows_user_sid() -> str | None:
+    """SID dell'utente corrente (Windows), o None."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        kernel32, _a = _win_api()
+        return _process_sid(kernel32.GetCurrentProcess())
+    except (OSError, AttributeError):
+        return None
+
+
+def windows_session_id() -> int | None:
+    """Sessione di accesso del processo corrente (Windows: Desktop remoto, cambio utente)."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        from ctypes import wintypes
+        kernel32, _a = _win_api()
+        sid = wintypes.DWORD()
+        if kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(sid)):
+            return int(sid.value)
+    except (OSError, AttributeError):
+        pass
+    return None
+
+
+def pipe_server_is_current_user(handle: int) -> bool:
+    """Windows: True se il server della named pipe collegata (`handle`) è un processo dell'utente
+    corrente. Impedisce di consegnare i percorsi dei file a una pipe con lo stesso nome creata
+    prima da un altro utente."""
+    if not IS_WINDOWS:
+        return True
+    try:
+        from ctypes import wintypes
+        kernel32, _a = _win_api()
+        pid = wintypes.ULONG()
+        if not kernel32.GetNamedPipeServerProcessId(wintypes.HANDLE(handle), ctypes.byref(pid)):
+            return False
+        if pid.value == os.getpid():
+            return True
+        process = kernel32.OpenProcess(0x1000, False, pid.value)     # PROCESS_QUERY_LIMITED_INFORMATION
+        if not process:
+            return False
+        try:
+            owner = _process_sid(process)
+        finally:
+            kernel32.CloseHandle(process)
+        mine = windows_user_sid()
+        return owner is not None and owner == mine
+    except (OSError, AttributeError, ValueError):
+        return False
+
+
 def subprocess_kwargs(new_group: bool = False) -> dict:
     """Argomenti per `subprocess.run/Popen` di un programma esterno senza interfaccia.
 
@@ -419,13 +516,39 @@ def forget_tools() -> None:
     _find_tool_cached.cache_clear()
 
 
-TOOL_HINTS_WINDOWS = {
-    "tesseract": "Reinstalla Foliant (Tesseract è incluso) oppure installa Tesseract-OCR da "
-                 "https://github.com/UB-Mannheim/tesseract/wiki con le lingue italiana e inglese.",
-    "gs": "Reinstalla Foliant (Ghostscript è incluso) oppure installa Ghostscript a 64 bit da https://ghostscript.com.",
-    "qpdf": "Reinstalla Foliant (qpdf è incluso) oppure installa qpdf da https://qpdf.org.",
-    "soffice": "Installa LibreOffice da https://www.libreoffice.org e riavvia Foliant.",
-}
+_TOOL_LABELS = {"tesseract": "Tesseract (OCR)", "gs": "Ghostscript", "qpdf": "qpdf", "soffice": "LibreOffice"}
+
+
+def missing_tool_message(name: str) -> str:
+    """Frase per l'utente di Windows quando manca lo strumento `name` (testo tradotto)."""
+    from ..i18n import _
+    hints = {
+        "tesseract": _("Reinstalla Foliant (Tesseract è incluso, con le lingue italiana e inglese) e riprova."),
+        "gs": _("Reinstalla Foliant (Ghostscript è incluso) e riprova."),
+        "qpdf": _("Reinstalla Foliant (qpdf è incluso) e riprova."),
+        "soffice": _("Installa LibreOffice da https://www.libreoffice.org (gratuito) e riprova: Foliant lo trova da "
+                     "solo."),
+    }
+    return _("Serve il programma {program}, che non è stato trovato.").format(
+        program=_TOOL_LABELS.get(name, name)) + " " + hints.get(name, "")
+
+
+def default_printer() -> str | None:
+    """Nome della stampante predefinita di Windows (None altrove o se non ce n'è)."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        winspool = ctypes.WinDLL("winspool.drv")
+        size = ctypes.c_ulong(0)
+        winspool.GetDefaultPrinterW(None, ctypes.byref(size))
+        if not size.value:
+            return None
+        buf = ctypes.create_unicode_buffer(size.value)
+        if winspool.GetDefaultPrinterW(buf, ctypes.byref(size)):
+            return buf.value or None
+    except (OSError, AttributeError):
+        pass
+    return None
 
 
 # ------------------------------------------------------------------ font
@@ -491,6 +614,104 @@ def font_file(role: str = "sans") -> str | None:
         if os.path.isfile(path):
             return path
     return None
+
+
+# Equivalenti metrici di Windows dei font Liberation (stesse larghezze dei caratteri).
+_WINDOWS_METRIC_FONTS = {
+    "sans": "arial.ttf", "sans-bold": "arialbd.ttf", "sans-italic": "ariali.ttf", "sans-bold-italic": "arialbi.ttf",
+    "serif": "times.ttf", "serif-bold": "timesbd.ttf", "serif-italic": "timesi.ttf",
+    "serif-bold-italic": "timesbi.ttf", "mono": "cour.ttf", "mono-bold": "courbd.ttf", "mono-italic": "couri.ttf",
+    "mono-bold-italic": "courbi.ttf", "unicode": "segoeui.ttf",
+}
+
+
+def windows_fonts(key: str) -> tuple[str, ...]:
+    """Su Windows i file dei font di sistema per `key` («sans», «serif-bold-italic», «unicode»…),
+    da aggiungere in coda ai font Linux; tupla vuota altrove."""
+    if not IS_WINDOWS or key not in _WINDOWS_METRIC_FONTS:
+        return ()
+    names = [_WINDOWS_METRIC_FONTS[key]] + (["arial.ttf"] if key == "unicode" else [])
+    return tuple(os.path.join(d, n) for n in names for d in font_dirs())
+
+
+_STYLE_WORDS = ("regular", "bold", "italic", "oblique", "light", "semibold", "semilight", "black", "medium",
+                "thin", "condensed", "narrow", "demibold", "extrabold", "extralight", "book")
+
+
+@lru_cache(maxsize=1)
+def _windows_font_registry() -> tuple[tuple[str, str], ...]:
+    """Font installati su Windows: (nome visualizzato, file) dal registro (sistema e utente)."""
+    try:
+        import winreg
+    except ImportError:
+        return ()
+    out = []
+    key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+    fonts_dir = font_dirs()[0]
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                i = 0
+                while True:
+                    try:
+                        name, value, _kind = winreg.EnumValue(key, i)
+                    except OSError:
+                        break
+                    i += 1
+                    if not isinstance(value, str) or not value.lower().endswith((".ttf", ".otf", ".ttc")):
+                        continue
+                    path = value if os.path.isabs(value) else os.path.join(fonts_dir, value)
+                    label = name.split(" (")[0].strip()
+                    for part in label.split(" & "):        # «Cambria & Cambria Math» (TrueType Collection)
+                        out.append((part.strip(), path))
+        except OSError:
+            continue
+    return tuple(out)
+
+
+def _family_of(label: str) -> str:
+    words = label.split()
+    while len(words) > 1 and words[-1].lower() in _STYLE_WORDS:
+        words.pop()
+    return " ".join(words)
+
+
+def installed_font_families() -> frozenset:
+    """Famiglie dei font installati, in minuscolo (fontconfig su Linux, registro su Windows)."""
+    if IS_WINDOWS:
+        return frozenset(_family_of(label).lower() for label, _p in _windows_font_registry())
+    exe = shutil.which("fc-list")
+    if not exe:
+        return frozenset()
+    try:
+        out = subprocess.run([exe, ":", "family"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(f.strip().lower() for line in out.splitlines() for f in line.split(",") if f.strip())
+
+
+def font_file_for_family(family: str) -> str | None:
+    """File del carattere normale della famiglia `family` se è installata (fc-match su Linux,
+    registro su Windows), altrimenti None."""
+    want = family.strip().lower()
+    if not want:
+        return None
+    if IS_WINDOWS:
+        exact = [p for label, p in _windows_font_registry() if label.lower() in (want, want + " regular")]
+        if exact:
+            return exact[0]
+        same = [p for label, p in _windows_font_registry() if _family_of(label).lower() == want]
+        return same[0] if same else None
+    if not shutil.which("fc-match"):
+        return None
+    try:
+        out = subprocess.run(["fc-match", "-f", "%{family}\t%{file}", family], capture_output=True,
+                             text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found, _tab, file = out.partition("\t")
+    names = [n.strip().lower() for n in found.split(",")]
+    return file if want in names and file.lower().endswith((".ttf", ".otf", ".ttc")) else None
 
 
 # ------------------------------------------------------------------ utente, posta

@@ -89,6 +89,8 @@ for _fam, _file in (("sans", "LiberationSans"), ("serif", "LiberationSerif"), ("
     for _suffix, _style in (("-italic", "Italic"), ("-bold-italic", "BoldItalic")):
         FONT_FILES[_fam + _suffix] = tuple(f"/usr/share/fonts/truetype/{d}/{_file}-{_style}.ttf"
                                            for d in ("liberation", "liberation2"))
+for _key in list(FONT_FILES):
+    FONT_FILES[_key] += platform.windows_fonts(_key)      # Windows: Arial, Times New Roman, Courier New
 _FALLBACK_BASE14 = {"sans": "helv", "sans-bold": "hebo", "serif": "tiro", "serif-bold": "tibo",
                     "mono": "cour", "mono-bold": "cobo", "sans-italic": "heit", "sans-bold-italic": "hebi",
                     "serif-italic": "tiit", "serif-bold-italic": "tibi", "mono-italic": "coit",

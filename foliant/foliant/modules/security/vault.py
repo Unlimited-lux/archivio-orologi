@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from foliant.api import _
+from foliant.core import platform
 
 FORMAT = "foliant-vault"
 VERSION = 1
@@ -99,7 +100,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        platform.replace_file(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)

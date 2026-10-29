@@ -1524,9 +1524,13 @@ def open_replace_dialog(ctx, view, selected: list[int], path: str | None = None)
 # =========================================================================
 
 def list_scanners() -> list[tuple[str, str]]:
-    """Dispositivi disponibili come (id, descrizione). Vuoto se SANE manca."""
+    """Dispositivi disponibili come (id, descrizione). Vuoto se SANE (o WIA su Windows) manca."""
     import shutil
     import subprocess
+
+    from foliant.core import platform, winscan
+    if platform.IS_WINDOWS:
+        return winscan.list_devices()
     exe = shutil.which("scanimage")
     if not exe:
         return []
@@ -1547,6 +1551,17 @@ def scan_pages(device: str, dpi: int = 300, mode: str = "Color", batch: bool = F
     import shutil
     import subprocess
     import tempfile
+
+    from foliant.core import platform, winscan
+    if platform.IS_WINDOWS:
+        wia_mode = {"Color": "color", "Gray": "gray", "Lineart": "bw"}.get(mode, "color")
+        with tempfile.TemporaryDirectory(prefix="foliant-scan-") as tmp:
+            try:
+                files = winscan.scan(device, tmp, dpi=dpi, mode=wia_mode, source="adf" if batch else "flatbed")
+            except (winscan.WiaError, TimeoutError) as e:
+                raise E.PageOpError(str(e) if isinstance(e, winscan.WiaError) else
+                                    _("Acquisizione non riuscita: {e}").format(e=e)) from e
+            return [Path(f).read_bytes() for f in files]
     exe = shutil.which("scanimage")
     if not exe:
         raise E.PageOpError(_("Nessuno scanner rilevato. Collega un dispositivo e riprova."))

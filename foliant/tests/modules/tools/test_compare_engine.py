@@ -6,6 +6,7 @@ import numpy as np
 import pymupdf
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.api import DocumentError, OperationCancelled, PasswordRequired, WrongPassword
 from foliant.modules.tools import compare_engine as ce
 
@@ -611,8 +612,7 @@ def test_cancel_within_two_seconds_on_500_pages(tmp_path):
 
 
 def test_scan_preset_with_real_ocr_module(tmp_path):
-    import shutil
-    if shutil.which("tesseract") is None or ce._ocr_function() is None:
+    if find_tool("tesseract") is None or ce._ocr_function() is None:
         pytest.skip("OCR non disponibile")
 
     def scan(name, amount):
@@ -631,8 +631,7 @@ def test_scan_preset_with_real_ocr_module(tmp_path):
 
 def test_scan_preset_marks_uncertain_differences(tmp_path):
     """CMP-12: con soglia di affidabilità altissima tutte le parole sono «incerte»."""
-    import shutil
-    if shutil.which("tesseract") is None or ce._ocr_function() is None:
+    if find_tool("tesseract") is None or ce._ocr_function() is None:
         pytest.skip("OCR non disponibile")
 
     def scan(name, amount):

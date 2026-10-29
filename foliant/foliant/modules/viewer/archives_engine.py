@@ -8,6 +8,8 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from foliant.core import platform
+
 MAX_EXTRACTED = 2 * 1024 * 1024 * 1024    # soglia predefinita: 2 GB
 MAX_RATIO = 200                            # rapporto di compressione anomalo
 
@@ -36,7 +38,7 @@ def compress(paths: list[str], target: str) -> None:
                     n += 1
                 names.add(name)
                 zf.write(p, name)
-        os.replace(tmp, target)
+        platform.replace_file(tmp, target)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -131,7 +133,7 @@ def extract_all(path: str, dest: str, password: str | None = None, limit: int = 
                 while final.exists():
                     final = final.with_name(f"{rel.stem} ({n}){rel.suffix}")
                     n += 1
-                os.replace(src, final)
+                platform.replace_file(src, final)
                 written.append(str(final))
         finally:
             shutil.rmtree(work, ignore_errors=True)

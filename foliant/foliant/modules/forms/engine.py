@@ -3247,19 +3247,8 @@ def system_font_file(family: str) -> str | None:
     """File del carattere di sistema con questo nome (fontconfig); None se non installato."""
     if family in _SYSTEM_FONT_CACHE:
         return _SYSTEM_FONT_CACHE[family]
-    import shutil
-    import subprocess
-    path = None
-    if shutil.which("fc-match"):
-        try:
-            out = subprocess.run(["fc-match", "-f", "%{family}\t%{file}", family], capture_output=True,
-                                 text=True, timeout=5).stdout
-            found, _tab, file = out.partition("\t")
-            names = [n.strip().lower() for n in found.split(",")]
-            if family.strip().lower() in names and file.lower().endswith((".ttf", ".otf", ".ttc")):
-                path = file
-        except (OSError, subprocess.SubprocessError):
-            path = None
+    from foliant.core import platform
+    path = platform.font_file_for_family(family)
     _SYSTEM_FONT_CACHE[family] = path
     return path
 

@@ -13,6 +13,8 @@ import os
 from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
+from ..core import platform
+
 TIMEOUT_MS = 3000
 MAX_REQUEST = 1 << 20          # byte: una richiesta più lunga viene scartata
 COMMANDS = ("create-pdf", "merge")
@@ -24,15 +26,20 @@ def _private_dir(path: str) -> bool:
         st = os.stat(path)
     except OSError:
         return False
-    return os.path.isdir(path) and st.st_uid == os.getuid() and not st.st_mode & 0o077
+    return os.path.isdir(path) and platform.owned_by_user(st) and not st.st_mode & 0o077
 
 
 def instance_name() -> str:
     """Canale dell'utente corrente, sempre in una cartella privata: XDG_RUNTIME_DIR o, se manca,
     la cartella di runtime che Qt crea con permessi 0700. Un nome semplice finirebbe nella /tmp
     condivisa, dove un altro utente potrebbe occuparlo prima e ricevere i percorsi dei file."""
-    if not hasattr(os, "getuid"):                   # Windows: le named pipe sono già per sessione
-        return f"foliant-instance-{os.environ.get('USERNAME', 'utente')}"
+    if platform.IS_WINDOWS:
+        # named pipe: lo spazio dei nomi è unico per la macchina, quindi nel nome vanno l'utente
+        # (SID) e la sessione di accesso; chi si collega verifica anche il proprietario del server
+        sid = platform.windows_user_sid()
+        if not sid:
+            return ""
+        return f"foliant-instance-{sid}-{platform.windows_session_id() or 0}"
     from PySide6.QtCore import QStandardPaths
     candidates = [os.environ.get("XDG_RUNTIME_DIR") or "",
                   QStandardPaths.writableLocation(QStandardPaths.StandardLocation.RuntimeLocation)]
@@ -80,7 +87,13 @@ def send_request(name: str, request: dict, timeout_ms: int = TIMEOUT_MS) -> bool
         if b"\n" in reply:
             done()
 
-    sock.connected.connect(lambda: sock.write(json.dumps(request).encode("utf-8") + b"\n"))
+    def connected() -> None:
+        if not platform.pipe_server_is_current_user(int(sock.socketDescriptor())):
+            done()                                  # pipe di un altro utente: niente percorsi
+            return
+        sock.write(json.dumps(request).encode("utf-8") + b"\n")
+
+    sock.connected.connect(connected)
     sock.readyRead.connect(read)
     sock.errorOccurred.connect(done)
     sock.disconnected.connect(done)

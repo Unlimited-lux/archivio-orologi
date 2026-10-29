@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import collections
 import re
-import shutil
 import unicodedata
 from dataclasses import dataclass, field
 
 import pymupdf
+
+from foliant.core import platform
 
 LIGATURES = {
     "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
@@ -143,7 +144,7 @@ def classify_page(page: pymupdf.Page) -> str:
 
 
 def ocr_available() -> bool:
-    if shutil.which("tesseract") is None:
+    if platform.find_tool("tesseract") is None:
         return False
     try:
         return bool(pymupdf.get_tessdata())
@@ -168,9 +169,12 @@ def detect_rotation(png: bytes) -> int:
     """Rotazione (0, 90, 180, 270) che raddrizza la pagina, stimata da Tesseract (OSD)."""
     import re
     import subprocess
+    exe = platform.find_tool("tesseract")
+    if exe is None:
+        return 0
     try:
-        res = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "0"], input=png, capture_output=True,
-                             timeout=60)
+        res = subprocess.run([exe, "stdin", "stdout", "--psm", "0"], input=png, capture_output=True,
+                             timeout=60, **platform.subprocess_kwargs())
     except (OSError, subprocess.SubprocessError):
         return 0
     text = (res.stdout or b"").decode(errors="replace")

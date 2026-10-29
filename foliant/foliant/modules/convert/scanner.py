@@ -2,7 +2,8 @@
 
 Il dispositivo è astratto da un «backend»: `SaneBackend` usa il programma
 `scanimage` (SANE, scanner locali e di rete, anche senza driver dedicati via
-eSCL/AirScan); i test usano un backend simulato con la stessa interfaccia:
+eSCL/AirScan), `WiaBackend` su Windows usa WIA; i test usano un backend simulato
+con la stessa interfaccia:
 
     list_devices() -> list[tuple[str, str]]          # (id, descrizione)
     scan(device, settings, progress) -> Iterator[PIL.Image]
@@ -21,6 +22,7 @@ from typing import Iterator
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, FoliantError, OperationCancelled, _
+from foliant.core import platform, winscan
 
 from .common import check
 
@@ -164,6 +166,59 @@ class SaneBackend:
                     proc.kill()
                     proc.communicate()
                     raise
+
+
+# ------------------------------------------------------------------ backend WIA (Windows)
+class WiaBackend:
+    """Scanner su Windows tramite WIA (`foliant.core.winscan`): piano, alimentatore, fronte/retro."""
+
+    @property
+    def available(self) -> bool:
+        return winscan.available()
+
+    def list_devices(self) -> list[tuple[str, str]]:
+        return winscan.list_devices()
+
+    def scan(self, device: str, settings: ScanSettings, progress=None) -> Iterator:
+        from PIL import Image
+
+        def cancelled() -> bool:
+            try:
+                check(progress, None, _("Acquisizione in corso…"))
+            except OperationCancelled:
+                return True
+            return False
+
+        with tempfile.TemporaryDirectory(prefix="foliant-scan-") as tmp:
+            try:
+                files = winscan.scan(device, tmp, dpi=settings.dpi, mode=settings.mode, source=settings.source,
+                                     cancelled=cancelled)
+            except winscan.WiaError as e:
+                raise ScannerError(str(e)) from e
+            except TimeoutError as e:
+                if str(e) == "cancelled":
+                    raise OperationCancelled() from e
+                raise ScannerError(_("Lo scanner non risponde: controlla che sia acceso e collegato, poi riprova.")) from e
+            for f in files:
+                with Image.open(f) as im:
+                    img = im.copy()
+                if settings.paper in PAPER_MM and settings.source == "flatbed":
+                    img = _crop_to_paper(img, settings.paper, settings.dpi)
+                yield img
+
+
+def _crop_to_paper(img, paper: str, dpi: int):
+    """Ritaglia l'area del formato scelto dall'angolo in alto a sinistra del piano (come `scanimage -x -y`)."""
+    w_mm, h_mm = PAPER_MM[paper]
+    w, h = int(round(w_mm / 25.4 * dpi)), int(round(h_mm / 25.4 * dpi))
+    if img.width <= w and img.height <= h:
+        return img
+    return img.crop((0, 0, min(w, img.width), min(h, img.height)))
+
+
+def default_backend():
+    """Backend del sistema: WIA su Windows, SANE (scanimage) altrove."""
+    return WiaBackend() if platform.IS_WINDOWS else SaneBackend()
 
 
 # ------------------------------------------------------------------ acquisizione

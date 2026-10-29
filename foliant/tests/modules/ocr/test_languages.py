@@ -11,9 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from foliant.core.platform import find_tool
 from foliant.modules.ocr import languages as L
 
-pytestmark = pytest.mark.skipif(not shutil.which("tesseract"), reason="Tesseract non installato")
+pytestmark = pytest.mark.skipif(not find_tool("tesseract"), reason="Tesseract non installato")
 
 
 @pytest.fixture(autouse=True)

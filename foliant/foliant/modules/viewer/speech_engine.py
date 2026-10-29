@@ -9,7 +9,8 @@
 - Motori: `SpeechEngine` astratto con `available()`, `voices()`, `speak()`,
   `stop()` e il segnale `finished` (fine frase). Implementazioni: QtTextToSpeech
   (se importabile), `spd-say` (speech-dispatcher) ed `espeak-ng`/`espeak` via
-  `QProcess` (mai bloccanti), `NullEngine` (nessun motore) e `FakeEngine` per i test.
+  `QProcess` (mai bloccanti), su Windows le voci di sistema (SAPI, System.Speech) tramite
+  PowerShell, `NullEngine` (nessun motore) e `FakeEngine` per i test.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import math
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 
 import pymupdf
@@ -412,6 +414,63 @@ class EspeakEngine(ProcessEngine):
         return voices
 
 
+_PS_PRELUDE = ("$ErrorActionPreference='Stop';[Console]::InputEncoding=[Text.Encoding]::UTF8;"
+               "[Console]::OutputEncoding=[Text.Encoding]::UTF8;Add-Type -AssemblyName System.Speech;"
+               "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;")
+
+
+def _ps_quote(text: str) -> str:
+    return "'" + text.replace("'", "''") + "'"
+
+
+class SapiEngine(ProcessEngine):
+    """Windows: voci di sistema (SAPI) con System.Speech, in un processo PowerShell per frase.
+    Il testo passa dallo standard input (mai sulla riga di comando); l'intonazione non è
+    regolabile."""
+
+    name = "sapi"
+
+    def __init__(self, parent=None):
+        super().__init__("powershell", parent)
+
+    def available(self) -> bool:
+        return sys.platform == "win32" and bool(shutil.which(self.program))
+
+    def _voice_args(self):
+        script = (_PS_PRELUDE + "foreach($v in $s.GetInstalledVoices()){if($v.Enabled){"
+                  "$i=$v.VoiceInfo;[Console]::Out.WriteLine($i.Name+[char]9+$i.Culture.Name)}}")
+        return ["-NoProfile", "-NonInteractive", "-Command", script]
+
+    def _parse_voices(self, out):
+        voices = []
+        for line in out.splitlines():
+            name, _tab, lang = line.strip().partition("\t")
+            if name:
+                voices.append(Voice(name, name, lang))
+        return voices
+
+    def _args(self, text, lang, rate, pitch, voice):
+        sapi_rate = max(-10, min(10, int(round((rate - 1.0) * 10))))
+        script = _PS_PRELUDE + f"$s.Rate={sapi_rate};"
+        if voice:
+            script += f"try{{$s.SelectVoice({_ps_quote(voice)})}}catch{{}};"
+        elif lang and re.fullmatch(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*", lang):
+            script += ("try{$s.SelectVoiceByHints('NotSet','NotSet',0,"
+                       f"[Globalization.CultureInfo]::new({_ps_quote(lang)}))}}catch{{}};")
+        script += "$t=[Console]::In.ReadToEnd();$s.Speak($t)"
+        return ["-NoProfile", "-NonInteractive", "-Command", script]
+
+    def speak(self, text, lang="", rate=1.0, pitch=0.0, voice=None) -> None:
+        self.stop()
+        proc = QProcess(self)
+        proc.finished.connect(lambda *_a, p=proc: self._on_finished(p))
+        proc.errorOccurred.connect(lambda err, p=proc: self._on_error(p, err))
+        self._proc = proc
+        proc.start(self.program, self._args("", lang, rate, pitch, voice))
+        proc.write(text.encode("utf-8"))
+        proc.closeWriteChannel()
+
+
 class QtSpeechEngine(SpeechEngine):
     """QTextToSpeech (modulo facoltativo, assente in PySide6-Essentials)."""
 
@@ -455,7 +514,8 @@ class QtSpeechEngine(SpeechEngine):
 
 
 def detect_engine(parent=None) -> SpeechEngine:
-    """Primo motore disponibile: QtTextToSpeech, spd-say, espeak-ng, espeak; altrimenti NullEngine."""
+    """Primo motore disponibile: QtTextToSpeech, SAPI (Windows), spd-say, espeak-ng, espeak;
+    altrimenti NullEngine."""
     try:
         eng = QtSpeechEngine(parent)
         if eng.available() and eng.voices():
@@ -463,6 +523,11 @@ def detect_engine(parent=None) -> SpeechEngine:
         eng.deleteLater()
     except Exception:
         pass
+    if sys.platform == "win32":
+        sapi = SapiEngine(parent)
+        if sapi.available():
+            return sapi
+        sapi.deleteLater()
     if shutil.which("spd-say"):
         return SpdSayEngine(parent)
     for prog in ("espeak-ng", "espeak"):

@@ -1406,9 +1406,13 @@ class FormsModule(QObject):
         return True
 
     def launch_mail(self, address: str, subject: str, attachment: str) -> bool:
-        """Apre il programma di posta con l'allegato (xdg-email). False se non disponibile."""
+        """Apre il programma di posta con l'allegato (xdg-email; MAPI su Windows). False se non disponibile."""
         import shutil
         import subprocess
+
+        from foliant.core import platform
+        if platform.IS_WINDOWS:
+            return platform.compose_mail(attachment, subject=subject, to=address)
         exe = shutil.which("xdg-email")
         if exe is None:
             return False

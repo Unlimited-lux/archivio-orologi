@@ -22,7 +22,6 @@ import math
 import os
 import re
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
@@ -35,6 +34,7 @@ from pathlib import Path
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _
+from foliant.core import platform
 
 from .common import ConversionError, OutputFiles, check
 
@@ -1440,17 +1440,7 @@ def csv_to_pdf(path_or_text, *, delimiter: str | None = None, page_size="A4", or
 # ======================================================================== Office
 def soffice_path() -> str | None:
     """Percorso dell'eseguibile di LibreOffice, se installato."""
-    for name in ("soffice", "libreoffice", "soffice.exe"):
-        p = shutil.which(name)
-        if p:
-            return p
-    for p in ("/usr/lib/libreoffice/program/soffice", "/opt/libreoffice/program/soffice",
-              "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-              r"C:\Program Files\LibreOffice\program\soffice.exe",
-              r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"):
-        if os.path.isfile(p):
-            return p
-    return None
+    return platform.find_tool("soffice")
 
 
 _INSTALL_HINT = ("LibreOffice non è installato: serve per convertire i documenti Office in PDF in locale. "
@@ -1506,10 +1496,7 @@ def _decrypt_office(path: str, password: str, tmpdir: str) -> str:
 
 def _kill(proc: subprocess.Popen) -> None:
     try:
-        if os.name == "posix":
-            os.killpg(proc.pid, signal.SIGKILL)
-        else:
-            proc.kill()
+        platform.kill_tree(proc)
     except Exception:
         try:
             proc.kill()
@@ -1688,19 +1675,7 @@ def office_fonts(path) -> list[str]:
 
 @functools.lru_cache(maxsize=1)
 def _installed_families() -> frozenset:
-    exe = shutil.which("fc-list")
-    if not exe:
-        return frozenset()
-    try:
-        out = subprocess.run([exe, ":", "family"], capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        return frozenset()
-    fams = set()
-    for line in out.splitlines():
-        for f in line.split(","):
-            if f.strip():
-                fams.add(f.strip().lower())
-    return frozenset(fams)
+    return platform.installed_font_families()
 
 
 def missing_fonts(path) -> list[str]:
@@ -1752,7 +1727,7 @@ def office_to_pdf(path, *, password: str | None = None, timeout: float = 180, pr
         return _mupdf_doc_to_pdf(path)
     exe = soffice_path()
     if not exe:
-        raise ConversionError(_(_INSTALL_HINT))
+        raise ConversionError(platform.missing_tool_message("soffice") if platform.IS_WINDOWS else _(_INSTALL_HINT))
     with tempfile.TemporaryDirectory(prefix="foliant-office-") as tmp:
         src = path
         if _office_encrypted(path):
@@ -1782,7 +1757,7 @@ def office_to_pdf(path, *, password: str | None = None, timeout: float = 180, pr
         check(progress, 0.05, _("Avvio di LibreOffice…"))
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
-                                    env=env, cwd=tmp, start_new_session=(os.name == "posix"))
+                                    env=env, cwd=tmp, **platform.subprocess_kwargs(new_group=True))
         except OSError as e:
             raise ConversionError(_("Impossibile avviare LibreOffice: {e}").format(e=e)) from e
         start = time.monotonic()

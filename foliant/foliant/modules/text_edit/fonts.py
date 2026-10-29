@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pymupdf
 
+from ...core import platform
 from .analysis import normalize_font_name, strip_subset
 from .model import Style
 
@@ -106,8 +107,7 @@ def user_mapping(name: str) -> str | None:
 _index_lock = threading.Lock()
 _index: list[SystemFont] | None = None
 
-_FONT_DIRS = ["/usr/share/fonts", "/usr/local/share/fonts", os.path.expanduser("~/.fonts"),
-              os.path.expanduser("~/.local/share/fonts")]
+_FONT_DIRS = platform.font_dirs()
 
 
 def system_fonts() -> list[SystemFont]:

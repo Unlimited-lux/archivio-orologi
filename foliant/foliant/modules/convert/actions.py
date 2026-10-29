@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QDialog, QInputDialog, QLineEdit, QMessageBox
 from foliant.api import (
     ENGINE_LOCK, Document, FoliantError, OperationCancelled, PasswordRequired, WrongPassword, _,
 )
+from foliant.core import platform
 
 from .common import ConversionError
 from .optimize_dialogs import human_size
@@ -51,7 +52,7 @@ class ConvertController:
         self.ctx = ctx
         self.last_result = None
         self.last_batch = None
-        self.scanner_backend = None   # None = SANE (scanimage); i test usano un dispositivo simulato
+        self.scanner_backend = None   # None = del sistema (SANE o WIA); i test usano un dispositivo simulato
         self.camera_backend = None    # None = webcam tramite OpenCV; i test usano una fotocamera simulata
 
     # ============================================================ utilità
@@ -531,9 +532,15 @@ class ConvertController:
         """CNV-24: acquisizione da scanner (piano, alimentatore, fronte/retro, documento d'identità)."""
         from . import scanner
         from .create_dialogs import ScannerDialog
-        backend = self.scanner_backend or scanner.SaneBackend()
+        backend = self.scanner_backend or scanner.default_backend()
         ok, devices = self._run(_("Ricerca degli scanner…"), lambda progress: backend.list_devices())
         if not ok:
+            return None
+        if not devices and platform.IS_WINDOWS:
+            self.ctx.info(_("Crea PDF da scanner"), _(
+                "Nessuno scanner trovato. Verifica che sia acceso e collegato (o raggiungibile in rete) e che "
+                "compaia in Impostazioni › Bluetooth e dispositivi › Stampanti e scanner. Foliant usa i driver WIA: "
+                "per uno scanner con solo driver TWAIN acquisisci con il programma del produttore e apri il file."))
             return None
         if not devices:
             self.ctx.info(_("Crea PDF da scanner"), _(
@@ -811,6 +818,9 @@ class ConvertController:
         """Livello di testo OCR invisibile (immagini intatte); se l'OCR non c'è, lo segnala."""
         from .extract import add_ocr_layer, ocr_available
         if not ocr_available():
+            if platform.IS_WINDOWS:
+                self.ctx.info(_("OCR non disponibile"), platform.missing_tool_message("tesseract"))
+                return data
             self.ctx.info(_("OCR non disponibile"), _("Il riconoscimento del testo richiede Tesseract "
                                                       "(sudo apt install tesseract-ocr tesseract-ocr-ita)."))
             return data

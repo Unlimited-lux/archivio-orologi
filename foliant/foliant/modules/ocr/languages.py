@@ -169,10 +169,18 @@ def _no_core_dump() -> None:  # pragma: no cover - eseguita nel processo figlio
 def _run(args: list[str], timeout: float = 15) -> subprocess.CompletedProcess | None:
     env = dict(os.environ, OMP_THREAD_LIMIT="1")
     # Un pacchetto danneggiato può far abortire il motore: evita i core dump (lenti).
-    preexec = _no_core_dump if os.name == "posix" else None
+    if args and args[0] == "tesseract":
+        exe = platform.find_tool("tesseract")
+        if exe is None:
+            return None
+        args = [exe, *args[1:]]
+    if os.name == "posix":
+        extra = {"preexec_fn": _no_core_dump}
+    else:
+        extra = platform.subprocess_kwargs()
     try:
         return subprocess.run(args, capture_output=True, text=True, timeout=timeout,
-                              env=env, check=False, preexec_fn=preexec)
+                              env=env, check=False, **extra)
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -269,7 +277,7 @@ def _write_manifest(packs: dict[str, dict]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump({"version": 1, "packs": packs}, fh, indent=2, sort_keys=True)
-        os.replace(tmp, udir / _MANIFEST)
+        platform.replace_file(tmp, udir / _MANIFEST)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -520,7 +528,7 @@ def install_from_file(path, code: str | None = None) -> str:
                     shutil.copyfile(staged, tmp_dst)
                     if _sha256(Path(tmp_dst)) != digest:
                         raise LanguagePackError(_("Copia del pacchetto non riuscita: dati alterati."))
-                    os.replace(tmp_dst, udir / (code + _SUFFIX))
+                    platform.replace_file(tmp_dst, udir / (code + _SUFFIX))
                 except BaseException:
                     Path(tmp_dst).unlink(missing_ok=True)
                     raise

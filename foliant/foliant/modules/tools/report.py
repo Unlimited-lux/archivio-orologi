@@ -14,6 +14,7 @@ from datetime import datetime
 import pymupdf
 
 from foliant.api import ENGINE_LOCK, _, format_date
+from foliant.core import platform
 
 from .compare_engine import (
     ADDED, ANNOTATION, DELETED, FIELD, FORMAT, IMAGE, KINDS, MODIFIED, PAGE, STATUSES, VISUAL, CompareResult,
@@ -41,7 +42,7 @@ _FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/TTF/DejaVuSans.ttf",
-)
+) + platform.windows_fonts("unicode")
 
 
 def _font_file() -> str | None:
