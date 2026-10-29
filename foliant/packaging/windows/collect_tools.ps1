@@ -17,7 +17,7 @@ $Licenze = (Resolve-Path $Licenze).Path
 
 function First-Dir([string[]]$patterns) {
   foreach ($p in $patterns) {
-    $found = Get-ChildItem -Path $p -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+    $found = Get-Item -Path $p -ErrorAction SilentlyContinue | Where-Object { $_.PSIsContainer } | Sort-Object Name -Descending | Select-Object -First 1
     if ($found) { return $found.FullName }
   }
   throw "Cartella non trovata: $($patterns -join ', ')"
