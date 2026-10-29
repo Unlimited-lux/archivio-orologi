@@ -9,6 +9,7 @@ import pymupdf
 import pytest
 
 from foliant.api import ENGINE_LOCK
+from foliant.core import platform
 from foliant.modules.viewer import reload_engine as E
 
 
@@ -303,7 +304,8 @@ def test_encrypted_reload_keeps_password(viewer_window, ctl, tmp_path, qtbot, mo
     monkeypatch.setattr(ctl, "ask_password", lambda v: asked.append(1) or "segreta")
     d = pymupdf.open(stream=_pdf_bytes(3, "Z"))
     d.save(str(path) + ".new", encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="segreta", owner_pw="segreta")
-    os.replace(str(path) + ".new", path)
+    # come un programma che salva bene: su Windows l'antivirus può tenere aperto per un attimo il file
+    platform.replace_file(str(path) + ".new", path)
     qtbot.waitUntil(lambda: ctl.reload_count == 1, timeout=3000)
     assert not asked
     assert "Z pagina 1" in _text(viewer_window.current_view(), 0)

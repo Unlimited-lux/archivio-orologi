@@ -120,8 +120,8 @@ def system_fonts() -> list[SystemFont]:
             return _index
         fonts: list[SystemFont] = []
         if platform.IS_WINDOWS:          # niente fontconfig: registro dei font di Windows
-            fonts = [SystemFont(path, family, style, (family + style).replace(" ", ""))
-                     for path, family, style in platform.installed_fonts()]
+            fonts = [SystemFont(path, family, style, psname)
+                     for path, family, style, psname in platform.installed_fonts()]
         else:
             try:
                 out = subprocess.run(
@@ -171,6 +171,9 @@ def find_family(family: str, bold: bool, italic: bool) -> tuple[SystemFont | Non
     candidates = [f for f in system_fonts() if normalize_font_name(f.family) == key]
     if not candidates:
         return None, False
+    # prima gli stili «normali»: una famiglia con molti pesi (DejaVu Sans ExtraLight, Arial Narrow…)
+    # non deve dare come regolare una variante sottile o stretta, spesso con meno caratteri
+    candidates.sort(key=lambda f: not _plain_style(f.style))
     for f in candidates:
         if f.bold == bold and f.italic == italic:
             return f, True
@@ -178,6 +181,14 @@ def find_family(family: str, bold: bool, italic: bool) -> tuple[SystemFont | Non
         if not f.bold and not f.italic:
             return f, False
     return candidates[0], False
+
+
+_PLAIN_STYLE_WORDS = {"regular", "book", "normal", "roman", "bold", "italic", "oblique"}
+
+
+def _plain_style(style: str) -> bool:
+    words = re.findall(r"[a-z]+", style.lower())
+    return all(w in _PLAIN_STYLE_WORDS for w in words)
 
 
 def family_of(name: str) -> str:

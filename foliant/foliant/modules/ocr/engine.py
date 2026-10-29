@@ -90,7 +90,10 @@ for _fam, _file in (("sans", "LiberationSans"), ("serif", "LiberationSerif"), ("
         FONT_FILES[_fam + _suffix] = tuple(f"/usr/share/fonts/truetype/{d}/{_file}-{_style}.ttf"
                                            for d in ("liberation", "liberation2"))
 for _key in list(FONT_FILES):
-    FONT_FILES[_key] += platform.windows_fonts(_key)      # Windows: Arial, Times New Roman, Courier New
+    # prima le cartelle di FOLIANT_FONT_DIRS, in coda gli equivalenti di Windows (Arial, Times New Roman,
+    # Courier New)
+    FONT_FILES[_key] = (platform.extra_font_paths(FONT_FILES[_key]) + FONT_FILES[_key]
+                        + platform.windows_fonts(_key))
 _FALLBACK_BASE14 = {"sans": "helv", "sans-bold": "hebo", "serif": "tiro", "serif-bold": "tibo",
                     "mono": "cour", "mono-bold": "cobo", "sans-italic": "heit", "sans-bold-italic": "hebi",
                     "serif-italic": "tiit", "serif-bold-italic": "tibi", "mono-italic": "coit",

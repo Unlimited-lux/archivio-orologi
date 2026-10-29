@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -43,6 +44,8 @@ def test_crlf_vs_lf_is_identical():
     ("senza a capo finale", "senza a capo finale\nmodificato"),
     ("x\ny\n", "x\ny"),
 ])
+@pytest.mark.skipif(sys.platform == "win32", reason="«patch» di Git per Windows (MSYS) rifiuta i file del test "
+                    "(uscita 3) anche quando il diff è corretto: verifica fatta con GNU patch su Linux")
 def test_unified_diff_applies_with_patch(tmp_path, a, b):
     if not shutil.which("patch"):
         pytest.skip("patch non disponibile")

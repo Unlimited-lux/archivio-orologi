@@ -1396,7 +1396,7 @@ def test_ids_dialog_empty_lists_and_selection_buttons(window, qtbot, id_a):
 def _profile_traces(needle: str) -> list[str]:
     """File del profilo isolato (dati, configurazione, stato) il cui nome o contenuto contiene `needle`."""
     found = []
-    for var in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME"):
+    for var in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "APPDATA", "LOCALAPPDATA"):   # Linux e Windows
         root = os.environ.get(var)
         if not root:
             continue
