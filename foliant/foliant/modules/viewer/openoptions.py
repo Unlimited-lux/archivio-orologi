@@ -1,7 +1,8 @@
 """Opzioni di apertura del documento (VIS-42): come il documento si presenterà in qualunque
 lettore — pagina e zoom iniziali, layout, pannello, schermo intero, finestra, barre nascoste,
 verso di lettura e preferenze di stampa. Le scelte si scrivono nel catalogo del PDF
-(`/OpenAction`, `/PageLayout`, `/PageMode`, `/ViewerPreferences`) con un passo annullabile."""
+(`/OpenAction`, `/PageLayout`, `/PageMode`, `/ViewerPreferences`) con un passo annullabile.
+Il comando è in File › Informazioni › «Proprietà»."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from foliant.api import (
     ENGINE_LOCK, FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, Context,
     DocumentView, _, add_translations,
 )
+from foliant.i18n import pgettext
 
 from . import session_engine as engine
 from .engine import page_labels
@@ -20,6 +22,7 @@ from .engine import page_labels
 TRANSLATIONS = {
     "Opzioni di apertura…": "Opening options…",
     "Opzioni di apertura": "Opening options",
+    "scheda File\x04Proprietà": "Properties",
     "Modifica opzioni di apertura…": "Edit opening options…",
     "Come il documento si presenta in qualunque lettore": "How the document opens in any reader",
     "Vista iniziale": "Initial view",
@@ -214,7 +217,8 @@ class OpenOptionsController:
         self.ctx = ctx
         self.dialog: OpenOptionsDialog | None = None
         self.act = ctx.action(_("Opzioni di apertura…"), "settings-2", self.open_dialog)
-        ctx.add_menu_action(self.act, _("File"))
+        ctx.add_file_action(self.act, "informazioni", pgettext("scheda File", "Proprietà"),
+                            _("Come il documento si presenta in qualunque lettore"), order=30)
 
     def read(self, view: DocumentView) -> engine.OpenOptions:
         with ENGINE_LOCK:

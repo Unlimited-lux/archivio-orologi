@@ -1,4 +1,6 @@
-"""Archivi ZIP (VIS-04): comprimi più PDF, apri un PDF contenuto, estrai tutto."""
+"""Archivi ZIP (VIS-04): comprimi più PDF, apri un PDF contenuto, estrai tutto.
+
+Apri ed Estrai sono in File › Apri › «Archivi ZIP», Comprimi in File › Condividi › «Invia»."""
 
 from __future__ import annotations
 
@@ -12,7 +14,11 @@ from . import archives_engine as A
 
 TRANSLATIONS = {
     "PDF (*.pdf);;Tutti i file (*)": "PDF (*.pdf);;All files (*)",
-    "Archivi": "Archives",
+    "Archivi ZIP": "ZIP archives",
+    "Apre un PDF contenuto in un archivio": "Open a PDF contained in an archive",
+    "Estrae tutti i file in una cartella": "Extract all the files to a folder",
+    "Invia": "Send",
+    "Riunisce più file in un unico archivio da inviare": "Bundle several files into one archive to send",
     "Comprimi in archivio ZIP…": "Compress into ZIP archive…",
     "Apri da archivio ZIP…": "Open from ZIP archive…",
     "Estrai archivio ZIP…": "Extract ZIP archive…",
@@ -42,8 +48,11 @@ class ArchivesController:
                                    requires_document=False)
         self.act_extract = ctx.action(_("Estrai archivio ZIP…"), "folder-output", self.extract_dialog,
                                       requires_document=False)
-        for act in (self.act_open, self.act_compress, self.act_extract):
-            ctx.add_menu_action(act, _("Archivi"))
+        zip_group = _("Archivi ZIP")
+        ctx.add_file_action(self.act_open, "apri", zip_group, _("Apre un PDF contenuto in un archivio"), order=50)
+        ctx.add_file_action(self.act_extract, "apri", zip_group, _("Estrae tutti i file in una cartella"), order=51)
+        ctx.add_file_action(self.act_compress, "condividi", _("Invia"),
+                            _("Riunisce più file in un unico archivio da inviare"), order=30)
 
     def _password(self, path: str) -> str | None:
         text, ok = QInputDialog.getText(self.ctx.window, _("Archivio protetto"),

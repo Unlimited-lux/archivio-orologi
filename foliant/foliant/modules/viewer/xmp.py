@@ -1,7 +1,8 @@
 """Metadati avanzati (VIS-41): editor del pacchetto XMP per schema, esportazione e importazione
 del pacchetto, modelli di metadati applicabili al documento corrente o a tutti quelli aperti.
 Le proprietà personalizzate e i metadati descrittivi di base sono del modulo Sicurezza
-(SEC-23); qui le funzioni avanzate. Ogni modifica è un passo annullabile («metadata»)."""
+(SEC-23); qui le funzioni avanzate. Ogni modifica è un passo annullabile («metadata»).
+Il comando è in File › Informazioni › «Proprietà»."""
 
 from __future__ import annotations
 
@@ -14,12 +15,15 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, atomic_write, bind_icon
+from foliant.i18n import pgettext
 
 from . import xmp_engine as engine
 
 TRANSLATIONS = {
     "Metadati avanzati…": "Advanced metadata…",
     "Metadati avanzati": "Advanced metadata",
+    "scheda File\x04Proprietà": "Properties",
+    "XMP, diritti d'autore e modelli di metadati": "XMP, copyright and metadata templates",
     "Schema": "Schema",
     "Proprietà": "Property",
     "Valore": "Value",
@@ -224,7 +228,8 @@ class MetadataController:
     def __init__(self, ctx: Context):
         self.ctx = ctx
         self.act = ctx.action(_("Metadati avanzati…"), "tags", self.open_dialog)
-        ctx.add_menu_action(self.act, _("File"))
+        ctx.add_file_action(self.act, "informazioni", pgettext("scheda File", "Proprietà"),
+                            _("XMP, diritti d'autore e modelli di metadati"), order=20)
 
     # ------------------------------------------------------------- documento
     def read(self, view: DocumentView) -> engine.Packet:

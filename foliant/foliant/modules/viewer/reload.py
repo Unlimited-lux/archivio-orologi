@@ -1,10 +1,11 @@
 """Ripristina e ricarica (VIS-49).
 
-- File → «Ripristina»: scarta le modifiche non salvate e riapre l'ultima versione
-  salvata nella stessa scheda, alla stessa pagina e con lo stesso zoom.
+- File › Informazioni › «Ripristina»: scarta le modifiche non salvate e riapre l'ultima
+  versione salvata nella stessa scheda, alla stessa pagina e con lo stesso zoom.
 - Monitoraggio del file su disco (QFileSystemWatcher + controllo periodico di data e
   dimensione come ripiego): quando un'altra applicazione cambia il file, il documento
-  si ricarica secondo la preferenza `viewer/reload_mode` ("auto", "ask", "never");
+  si ricarica secondo la preferenza `viewer/reload_mode` ("auto", "ask", "never"; in
+  File › Opzioni › «Apertura dei documenti»);
   con modifiche non salvate compare invece una barra non modale con tre scelte.
 - File eliminato o spostato → barra con «Salva» per ricrearlo.
 
@@ -41,8 +42,11 @@ KEY_MODE = "viewer/reload_mode"
 TRANSLATIONS = {
     "File modificato da un'altra applicazione": "File changed by another application",
     "File eliminato o spostato": "File deleted or moved",
-    "File": "File",
     "file su disco\x04Ripristina": "Revert",
+    "Versioni": "Versions",
+    "Torna all'ultima versione salvata": "Go back to the last saved version",
+    "Apertura dei documenti": "Opening documents",
+    "Scegli tra Automatica, Chiedi e Mai": "Choose between Automatic, Ask and Never",
     "Scarta le modifiche e riapri l'ultima versione salvata":
         "Discard changes and reopen the last saved version",
     "Ripristina il documento": "Revert document",
@@ -140,7 +144,8 @@ class ReloadController(QObject):
 
         self.act_revert = ctx.action(pgettext("file su disco", "Ripristina"), "rotate-ccw", self.revert,
                                      tooltip=_("Scarta le modifiche e riapri l'ultima versione salvata"))
-        ctx.add_menu_action(self.act_revert, _("File"))
+        ctx.add_file_action(self.act_revert, "informazioni", _("Versioni"), _("Torna all'ultima versione salvata"),
+                            order=60)
         self._build_mode_menu()
         ctx.documentOpened.connect(self._on_opened)
         ctx.documentClosed.connect(self._on_closed)
@@ -184,7 +189,8 @@ class ReloadController(QObject):
         self._sync_mode_menu()
         self.act_mode = self.mode_menu.menuAction()
         bind_icon(self.act_mode, "refresh-cw")
-        self.ctx.add_menu_action(self.act_mode, _("File"))
+        self.ctx.add_file_action(self.act_mode, "opzioni", _("Apertura dei documenti"),
+                                 _("Scegli tra Automatica, Chiedi e Mai"), order=60)
 
     def _sync_mode_menu(self) -> None:
         for key, act in self.mode_actions.items():

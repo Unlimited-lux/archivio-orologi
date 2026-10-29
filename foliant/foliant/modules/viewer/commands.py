@@ -1,10 +1,11 @@
 """Ricerca dei comandi e scorciatoie personalizzabili (VIS-52).
 
-- Ctrl+K apre una casella che trova qualsiasi comando dell'applicazione per
-  nome (anche dei moduli) e lo esegue con Invio; i comandi disabilitati sono
-  mostrati con il motivo.
-- Le scorciatoie si assegnano o rimuovono con rilevamento dei conflitti, sono
-  salvate nel profilo utente (`viewer/shortcuts`) e si esportano/importano in testo.
+- Ctrl+K (o «Cerca un comando» in alto a destra, o File › Guida) apre una casella
+  che trova qualsiasi comando dell'applicazione per nome (anche dei moduli) e lo
+  esegue con Invio; i comandi disabilitati sono mostrati con il motivo.
+- Le scorciatoie (File › Opzioni › «Personalizza le scorciatoie…») si assegnano o
+  rimuovono con rilevamento dei conflitti, sono salvate nel profilo utente
+  (`viewer/shortcuts`) e si esportano/importano in testo.
 """
 
 from __future__ import annotations
@@ -23,8 +24,10 @@ from foliant.api import Context, _, add_translations, atomic_write
 TRANSLATIONS = {
     "scorciatoie.txt": "shortcuts.txt",
     "Cerca un comando…": "Search for a command…",
+    "Cerca un comando": "Search commands",
     "Ricerca dei comandi": "Command search",
-    "Scorciatoie da tastiera…": "Keyboard shortcuts…",
+    "Personalizza le scorciatoie…": "Customize shortcuts…",
+    "Personalizza le scorciatoie": "Customize shortcuts",
     "Scorciatoie da tastiera": "Keyboard shortcuts",
     "Comando": "Command",
     "Scorciatoia": "Shortcut",
@@ -42,7 +45,10 @@ TRANSLATIONS = {
     "Nessun comando trovato": "No command found",
     "Scorciatoie (*.txt)": "Shortcuts (*.txt)",
     "Scorciatoie importate: {n}": "Shortcuts imported: {n}",
-    "Strumenti": "Tools",
+    "Guida": "Help",
+    "Trova qualsiasi funzione scrivendone il nome": "Find any feature by typing its name",
+    "Impostazioni": "Settings",
+    "Cambia i tasti dei comandi": "Change command keys",
 }
 
 
@@ -139,7 +145,7 @@ class ShortcutsDialog(QDialog):
     def __init__(self, controller: "CommandsController"):
         super().__init__(controller.ctx.window)
         self.c = controller
-        self.setWindowTitle(_("Scorciatoie da tastiera"))
+        self.setWindowTitle(_("Personalizza le scorciatoie"))
         self.resize(640, 520)
         layout = QVBoxLayout(self)
         self.filter = QLineEdit(self)
@@ -212,10 +218,15 @@ class CommandsController(QObject):
         self.act_palette = ctx.action(_("Cerca un comando…"), "command", self.open_palette, shortcut="Ctrl+K",
                                       requires_document=False)
         self.act_palette.setProperty("viewerCommandKey", "Ricerca dei comandi")
-        self.act_shortcuts = ctx.action(_("Scorciatoie da tastiera…"), "keyboard", self.open_shortcuts,
+        self.act_palette.setIconText(_("Cerca un comando"))   # testo del pulsante in alto a destra
+        # «Personalizza»: distinto dall'elenco «Scorciatoie da tastiera» del nucleo (File › Guida)
+        self.act_shortcuts = ctx.action(_("Personalizza le scorciatoie…"), "keyboard", self.open_shortcuts,
                                         requires_document=False)
-        ctx.add_menu_action(self.act_palette, _("Strumenti"))
-        ctx.add_menu_action(self.act_shortcuts, _("Strumenti"))
+        ctx.set_command_search(self.act_palette)            # pulsante in alto a destra
+        ctx.add_file_action(self.act_palette, "guida", _("Guida"), _("Trova qualsiasi funzione scrivendone il nome"),
+                            order=15)
+        ctx.add_file_action(self.act_shortcuts, "opzioni", _("Impostazioni"), _("Cambia i tasti dei comandi"),
+                            order=20)
         # le scorciatoie personalizzate si applicano quando tutti i moduli hanno registrato le azioni
         QTimer.singleShot(0, self.apply_saved)
 

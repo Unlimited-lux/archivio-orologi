@@ -1,6 +1,7 @@
 """Stampa (VIS-43, permessi VIS-06, orientamento VIS-11, livelli VIS-20).
 
-Flusso: dialogo opzioni di Foliant → dialogo di stampa del sistema →
+Il comando è nella colonna di sinistra della scheda File (File › Stampa) e nella barra di accesso
+rapido, con Ctrl+P. Flusso: dialogo opzioni di Foliant → dialogo di stampa del sistema →
 rendering pagina per pagina in un'attività annullabile.
 """
 
@@ -56,7 +57,6 @@ EN = {
     "Sul lato corto": "Short edge",
     "Scala di grigi": "Grayscale",
     "Stampa…": "Print…",
-    "File": "File",
     "Stampa": "Print",
     "Pagine": "Pages",
     "Tutte ({n})": "All ({n})",
@@ -335,10 +335,10 @@ class PrintController:
         self.action = ctx.action(_("Stampa…"), "printer", self.print_current, shortcut="Ctrl+P",
                                  requires_document=False)
         self._base_tooltip = self.action.toolTip()
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_action(self.action)
-        ctx.add_menu_action(self.action, _("File"))
+        # Stampa come in Excel: comando della colonna di sinistra della scheda File e pulsante della
+        # barra di accesso rapido (non più nella barra Leggi)
+        ctx.add_file_action(self.action, "stampa")
+        ctx.add_quick_access_action(self.action)
         ctx.currentViewChanged.connect(lambda _v: self.update_state())
         ctx.documentChanged.connect(lambda _v: self.update_state())
         ctx.documentAccessChanged.connect(lambda _v: self.update_state())   # sblocco/blocco (SEC-02)

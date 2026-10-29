@@ -252,11 +252,17 @@ def test_dialog_tabs_copy_and_no_modification(viewer_window, meta_pdf, qtbot):
     dlg.close()
 
 
-def test_action_menu_and_shortcut(viewer_window, sample_pdf):
+def test_action_in_file_tab_and_shortcut(viewer_window, sample_pdf):
+    """File › Informazioni, gruppo «Proprietà», con Alt+Invio; non più nella barra Leggi."""
     ctl = part(viewer_window, "properties")
     assert ctl.action.shortcut() == QKeySequence("Alt+Return")
-    assert ctl.action in viewer_window.modes["leggi"].toolbar.actions()
-    assert any(ctl.action in acts for acts in viewer_window._menu_sections.values())
+    assert ctl.action in viewer_window.actions()             # Alt+Invio senza pulsante nella barra
+    assert ctl.action not in viewer_window.modes["leggi"].toolbar.actions()
+    backstage = viewer_window.backstage
+    assert backstage.page_of(ctl.action) == "informazioni"
+    [entry] = [e for e in backstage.entries("informazioni") if e.action is ctl.action]
+    assert entry.group == "Proprietà"
+    assert entry.description == "Titolo, autore, parole chiave, pagine, versione"
     assert not ctl.action.isEnabled()
     assert ctl.show_dialog() is None
     viewer_window.open_path(sample_pdf)

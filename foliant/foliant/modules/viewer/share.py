@@ -1,6 +1,6 @@
 """Invio e condivisione locale (VIS-45): invio per e-mail con il client
-predefinito, copia del file negli appunti. («Mostra nella cartella» e «Copia
-percorso» sono nella parte `files`.)"""
+predefinito, copia del file negli appunti, in File › Condividi › «Invia».
+(«Mostra nella cartella» e «Copia percorso» sono nella parte `files`.)"""
 
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations
 from foliant.core import platform
 
 TRANSLATIONS = {
-    "Condividi": "Share",
+    "Invia": "Send",
+    "Allega il PDF a un nuovo messaggio": "Attach the PDF to a new message",
+    "Da incollare in una cartella, una chat o un messaggio": "To paste into a folder, a chat or a message",
     "Invia per e-mail…": "Send by e-mail…",
     "Copia file negli appunti": "Copy file to clipboard",
     "Il documento ha modifiche non salvate.": "The document has unsaved changes.",
@@ -44,8 +46,10 @@ class ShareController:
         self._temp_dirs: list[str] = []
         self.act_email = ctx.action(_("Invia per e-mail…"), "mail", self.send_email)
         self.act_copy = ctx.action(_("Copia file negli appunti"), "clipboard-copy", self.copy_file)
-        for act in (self.act_email, self.act_copy):
-            ctx.add_menu_action(act, _("Condividi"))
+        ctx.add_file_action(self.act_email, "condividi", _("Invia"), _("Allega il PDF a un nuovo messaggio"),
+                            order=10)
+        ctx.add_file_action(self.act_copy, "condividi", _("Invia"),
+                            _("Da incollare in una cartella, una chat o un messaggio"), order=20)
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self.cleanup)
