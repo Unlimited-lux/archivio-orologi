@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QLineEdit, QPlainTextEdit
 from foliant.modules import forms
 from foliant.modules.forms import engine as E
 from foliant.modules.forms import formats as fm
+from tests.conftest import perf_limit
 
 from .conftest import build_form
 
@@ -593,7 +594,7 @@ def test_large_form_bar_fast_and_commit_fast(qtbot, window, tmp_path, pages, per
     opened = time.time() - t0
     assert f.state.fields and "5000 campi" in f.text_of_bar()
     assert f"{pages} obbligatori" in f.text_of_bar() or "1 obbligatorio" in f.text_of_bar()
-    assert opened < 6.0  # apertura completa con analisi (lineare nel numero di campi)
+    assert opened < perf_limit(6.0)  # apertura completa con analisi (lineare nel numero di campi)
     info = [x for x in f.state.fields if x.name == "c0_37"][0]
     f.activate(info)
     f.editor.setText("veloce")
@@ -601,7 +602,7 @@ def test_large_form_bar_fast_and_commit_fast(qtbot, window, tmp_path, pages, per
     f.commit_active()
     # ≈ 0,5 s su 5.000 campi in una pagina: istantanea di annullamento del nucleo ≈ 0,2 s, modulo
     # ≈ 0,15 s (aspetto del campo e rilettura mirata), ascoltatori degli altri moduli ≈ 0,15 s
-    assert time.time() - t < 0.8
+    assert time.time() - t < perf_limit(0.8)
     assert [x for x in f.state.fields if x.name == "c0_37"][0].value == "veloce"
 
 

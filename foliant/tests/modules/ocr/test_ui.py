@@ -43,6 +43,8 @@ def ocr_controller():
 def wait_analysis(qtbot, view):
     ctl = ocr_controller()
     qtbot.waitUntil(lambda: ctl.state(view).complete and len(ctl.state(view).infos) == view.page_count, timeout=5000)
+    # la proposta si aggiorna dopo il controllo delle foto, fatto in un thread
+    qtbot.waitUntil(lambda: ctl.state(view).photo_job is None, timeout=5000)
 
 
 @pytest.fixture
@@ -84,7 +86,7 @@ def test_proposta_pagine_3_e_7(window, qtbot, ten_pages, monkeypatch):
     wait_analysis(qtbot, view)
     bar = ctl.state(view).bar
     assert ctl.state(view).detected == [2, 6]
-    assert "(2)" in bar.text
+    assert "(2)" in bar.text, bar.text
     seen = {}
 
     def fake_exec(dlg):
