@@ -6,11 +6,21 @@ on:
     branches: ["claude/pdf-editor-updf-clone-iod4xs-windows"]
     paths: ["foliant/**", ".github/workflows/foliant-windows.yml"]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit o ramo da provare (vuoto: quello del workflow); serve a confrontare con il ramo base"
+        required: false
+        default: ""
+      solo_ubuntu:
+        description: "Solo il lavoro su Ubuntu"
+        type: boolean
+        default: false
 
 
 jobs:
   test-windows:
     name: Windows (Python ${{ matrix.python }})
+    if: ${{ !inputs.solo_ubuntu }}
     runs-on: windows-latest
     timeout-minutes: 150
     # una suite in corso arriva sempre in fondo; resta in coda solo la più recente (per lavoro)
@@ -32,6 +42,8 @@ jobs:
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -92,6 +104,8 @@ jobs:
       QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -101,7 +115,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng tesseract-ocr-osd \
-            ghostscript qpdf fonts-dejavu-core libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 \
+            ghostscript qpdf fonts-dejavu-core fonts-liberation libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 \
             libxcb-cursor0 libfontconfig1 libdbus-1-3
       - name: Dipendenze Python
         run: |

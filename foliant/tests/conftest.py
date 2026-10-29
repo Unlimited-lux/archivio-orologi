@@ -54,6 +54,20 @@ def _isolated_user_dirs(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _restore_core_translations():
+    """Il catalogo del nucleo torna com'era dopo ogni test: un test che registra traduzioni
+    senza passare da un modulo (es. con una spia di add_translations) non le lascia ai successivi."""
+    from foliant import i18n
+    from foliant.ui import i18n_en  # noqa: F401  (catalogo inglese del nucleo, registrato una volta sola)
+    saved = {lang: dict(cat) for lang, cat in i18n._catalogs.items()}
+    yield
+    for lang in list(i18n._catalogs):
+        if lang in saved:
+            i18n._catalogs[lang].clear()
+            i18n._catalogs[lang].update(saved[lang])
+
+
+@pytest.fixture(autouse=True)
 def _neutral_system_locale(monkeypatch):
     """Formato carta e unità predefiniti come con la localizzazione «C» dei server Linux (A4, mm),
     anche su un Windows in inglese statunitense (Letter, pollici): i test che riguardano le
