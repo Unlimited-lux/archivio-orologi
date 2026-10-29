@@ -1423,7 +1423,6 @@ def register(ctx, *, provider_factory=None) -> Services:
                 requires=False)
     a_open = act(_("Assistente IA"), "sparkles", lambda: (ctx.set_mode("ia"), show_panel()), "Ctrl+Alt+I",
                  requires=False)
-    ctx.add_menu_action(a_open, _("Assistente IA"))
     a_tasks = act(_("Attività"), "briefcase", lambda: controller.open_tasks(), requires=False)
     a_write = act(_("Scrivi"), "pen-line", lambda: controller.open_writer(), requires=False)
     a_extract = act(_("Estrai dati"), "table", lambda: controller.choose_extraction())
@@ -1438,35 +1437,39 @@ def register(ctx, *, provider_factory=None) -> Services:
                             a_section, a_sem, a_cmd, a_docx, a_sheet]
     services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank, a_contracts]
     services.local_actions = [a_pages, a_gfx]   # la generazione spiega da sé se manca il modello   # funziona anche senza profilo (controlli locali)
-    for a in (a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
-        mode.add_action(a)
-    mode.add_separator()
-    from PySide6.QtWidgets import QToolButton
-    more = QToolButton()
-    more.setText(_("Altri strumenti"))
-    more.setToolTip(_("Altri strumenti dell'assistente"))
-    bind_icon(more, "ellipsis")
-    more.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-    more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-    more.setAutoRaise(True)
-    more_menu = QMenu(more)
-    for group in ((a_trpdf, a_out, a_extract, a_sheet, a_sem), (a_bm, a_section, a_pages, a_gfx, a_docx), (a_coll, a_rank, a_contracts, a_tasks, a_write, a_bib, a_cmd),
-                  (a_ops, a_log)):
-        for a in group:
-            more_menu.addAction(a)
-        more_menu.addSeparator()
-    more.setMenu(more_menu)
-    services.more_menu = more_menu
-    mode.add_widget(more)
-    mode.add_separator()
+    # scheda Assistente IA divisa in gruppi come la barra multifunzione di Excel:
+    # Assistente | Strumenti | Impostazioni
+    # «Assistente IA» resta distinto da «Chiedi»: funziona anche senza documento e senza fornitore
+    # (mostra il pannello con «Configura un fornitore») e Ctrl+Alt+I vale in tutte le schede,
+    # mentre «Chiedi» richiede documento e profilo e Ctrl+Maiusc+A vale solo in questa scheda
+    from foliant.ui.dialogs import key_text   # scorciatoia scritta nella lingua dell'interfaccia
+    a_open.setIconText(_("Pannello"))
+    open_tip = _("Mostra il pannello dell'Assistente IA")
+    a_open.setToolTip(f"{open_tip} ({key_text(a_open.shortcut())})")
+    mode.add_group(_("Assistente"), "assistente")
+    for a in (a_open, a_chat, a_sum, a_tr, a_exp, a_rw, a_map, a_area):
+        mode.add_action(a, group="assistente")
+    mode.add_group(_("Strumenti"), "strumenti")
+    more = mode.add_menu_button(
+        _("Altri strumenti"), "ellipsis",
+        [a_trpdf, a_out, a_extract, a_sheet, a_sem, None,
+         a_bm, a_section, a_pages, a_gfx, a_docx, None,
+         a_coll, a_rank, a_contracts, a_tasks, a_write, a_bib, a_cmd, None,
+         a_ops, a_log],
+        group="strumenti", tooltip=_("Altri strumenti dell'assistente"), requires_document=False)
+    services.more_button = more
+    services.more_menu = more.menu()
+    mode.add_group(_("Impostazioni"), "impostazioni")
     a_set.setIconText(_("Impostazioni"))
     for a in (a_hist, a_set):
-        mode.add_action(a)
+        mode.add_action(a, group="impostazioni")
     pages_mode = ctx.mode("pagine")
     if pages_mode is not None:
-        pages_mode.add_action(a_pages)
-    ctx.add_menu_action(a_set, _("Assistente IA"))
-    ctx.add_menu_action(a_trpdf, _("Assistente IA"))
+        # nella scheda Pagine un gruppo proprio, solo icona: è una voce secondaria di quella scheda
+        pages_mode.add_group(_("Analisi"), "ia-analisi")
+        pages_mode.add_action(a_pages, group="ia-analisi", compact=True)
+    # scheda File › Opzioni: la stessa azione del pulsante «Impostazioni» della barra
+    ctx.add_file_action(a_set, "opzioni", _("Assistente IA"), _("Fornitore, modello e riservatezza"), order=110)
     ctx.add_preferences_page(_("Assistente IA"), services.settings_page, 110)
     ctx.add_home_action(_("Assistente IA"), "sparkles", lambda: GeneralChatDialog(ctx, services, ctx.window).exec(),
                         _("Chat generale con il fornitore configurato"), 110)

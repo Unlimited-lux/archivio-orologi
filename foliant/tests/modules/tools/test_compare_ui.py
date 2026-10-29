@@ -39,6 +39,29 @@ def test_mode_and_actions_registered(window):
     assert "Confronta documenti" in texts and "Operazioni in blocco" in texts
 
 
+def test_ribbon_groups_like_excel(window):
+    """Scheda Strumenti in gruppi con nome (Confronta | Automazione); le voci dell'ex menu ☰ restano solo
+    nella barra: nessuna azione doppia e niente in File › Altri comandi."""
+    module = window.ctx.tools_module
+    acts = module.actions
+    bar = module.mode.toolbar
+    assert bar.groups() == [("Confronta", [acts["compare"], acts["show"], acts["session"], acts["text"],
+                                           acts["revisions"]]),
+                            ("Automazione", [acts["batch"]])]
+    assert bar.group_title(acts["compare"]) == "Confronta"
+    assert bar.group_title(acts["batch"]) == "Automazione"
+    assert acts["session"].text() == "Apri sessione di confronto" and acts["session"].iconText() == "Apri sessione"
+    assert all(window.backstage.page_of(a) is None for a in acts.values())
+
+
+def test_module_no_longer_uses_the_old_menu():
+    from pathlib import Path
+
+    import foliant.modules.tools as package
+    folder = Path(package.__file__).parent
+    assert not [p.name for p in folder.glob("*.py") if "add_menu_action" in p.read_text(encoding="utf-8")]
+
+
 def test_setup_proposes_active_document_and_swaps(window, pdf_builder):
     a = pdf_builder([page_lines(1)])
     b = pdf_builder([page_lines(2), page_lines(3)])

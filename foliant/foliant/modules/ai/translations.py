@@ -1172,4 +1172,10 @@ EN: dict[str, str] = {
     'Documento {l} troppo lungo: valutato sui passaggi più pertinenti ai criteri.': 'Document {l} too long: evaluated on the passages most relevant to the criteria.',
     ' token': ' tokens',
     'Nessun profilo: premi «Aggiungi profilo».': 'No profiles: press “Add profile”.',
+    # scheda Assistente IA in stile Excel: gruppi della barra e voce della scheda File › Opzioni
+    'Strumenti': 'Tools',
+    'Pannello': 'Panel',
+    "Mostra il pannello dell'Assistente IA": 'Show the AI Assistant panel',
+    'Analisi': 'Analysis',
+    'Fornitore, modello e riservatezza': 'Provider, model and privacy',
 }

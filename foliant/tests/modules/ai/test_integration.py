@@ -498,12 +498,81 @@ def test_convert_to_docx_with_heading(window, ready, fake, tmp_path):
 def test_chat_shortcut_scoped_to_ai_mode(window, sample_pdf):
     from PySide6.QtGui import QKeySequence
     window.open_path(sample_pdf)
-    act = window.ctx.mode("ia").toolbar.actions()[0]
-    assert act.text() == "Chiedi"
+    act = next(a for a in window.ctx.mode("ia").toolbar.actions() if a.text() == "Chiedi")
     window.ctx.set_mode("leggi")
     assert act.shortcut().isEmpty()
     window.ctx.set_mode("ia")
     assert act.shortcut() == QKeySequence("Ctrl+Shift+A")
+
+
+# ------------------------------------------------------------------ scheda in stile Excel (ex menu ☰)
+def _ia_action(window, text):
+    services = window.ctx.ai_services
+    acts = window.ctx.mode("ia").toolbar.actions() + services.more_menu.actions()
+    return next(a for a in acts if a.text() == text)
+
+
+def test_ribbon_groups_like_excel(window):
+    """Scheda Assistente IA in gruppi con nome: Assistente | Strumenti (Altri strumenti ▾) | Impostazioni."""
+    from PySide6.QtGui import QKeySequence
+    services = window.ctx.ai_services
+    bar = window.ctx.mode("ia").toolbar
+    groups = bar.groups()
+    assert [title for title, _acts in groups] == ["Assistente", "Strumenti", "Impostazioni"]
+    assistant, tools, settings = (acts for _title, acts in groups)
+    # primo pulsante: il pannello dell'assistente, con la scorciatoia globale di sempre
+    panel = assistant[0]
+    assert (panel.text(), panel.iconText()) == ("Assistente IA", "Pannello")
+    assert panel.shortcut() == QKeySequence("Ctrl+Alt+I") and "Ctrl+Alt+I" in panel.toolTip()
+    assert [a.text() for a in assistant[1:]] == ["Chiedi", "Riassumi", "Traduci", "Spiega", "Correggi e riscrivi",
+                                                 "Mappa concettuale", "Chiedi su un'area"]
+    assert [bar.widgetForAction(a) for a in tools] == [services.more_button]
+    assert services.more_button.text() == "Altri strumenti" and services.more_button.menu() is services.more_menu
+    assert [a.text() for a in settings] == ["Cronologia", "Impostazioni dell'Assistente IA"]
+    assert settings[1].iconText() == "Impostazioni"
+    # senza documento e senza fornitore il pannello si apre lo stesso (mostra «Configura un fornitore»)
+    assert window.current_view() is None and panel.isEnabled() and services.more_button.isEnabled()
+    panel.trigger()
+    assert window.ctx.current_mode() == "ia"
+
+
+def test_file_tab_positions(window, monkeypatch):
+    """Impostazioni dell'Assistente IA anche in File › Opzioni; «Traduci in un nuovo PDF» solo in Altri strumenti ▾;
+    nessuna voce dell'assistente in File › Altri comandi."""
+    b = window.backstage
+    services = window.ctx.ai_services
+    settings_act = _ia_action(window, "Impostazioni dell'Assistente IA")
+    assert b.page_of(settings_act) == "opzioni"
+    entry = next(e for e in b.entries("opzioni") if e.action is settings_act)
+    assert (entry.group, entry.description) == ("Assistente IA", "Fornitore, modello e riservatezza")
+    translate = _ia_action(window, "Traduci in un nuovo PDF")
+    assert translate in services.more_menu.actions() and b.page_of(translate) is None
+    assert b.page_of(_ia_action(window, "Assistente IA")) is None
+    mine = set(window.ctx.mode("ia").toolbar.actions()) | set(services.more_menu.actions())
+    assert not [e.action.text() for e in b.entries("altro") if e.action in mine]
+    shown = []
+    monkeypatch.setattr(window.ctx, "show_preferences", lambda page=None: shown.append(page))
+    window.show_backstage("opzioni")
+    tile = next(t for t in b.tiles if t.action is settings_act)
+    assert tile.isEnabled() and tile.desc_label.text() == "Fornitore, modello e riservatezza"
+    tile.click()
+    assert shown == ["Assistente IA"] and not window.backstage_visible()
+
+
+def test_page_analysis_has_its_own_group_in_the_pages_tab(window):
+    from PySide6.QtCore import Qt
+    bar = window.ctx.mode("pagine").toolbar
+    act = next(a for a in bar.actions() if a.text() == "Analizza pagine")
+    assert bar.group_title(act) == "Analisi"
+    assert bar.widgetForAction(act).toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+
+
+def test_module_no_longer_uses_the_old_menu():
+    from pathlib import Path
+
+    import foliant.modules.ai as package
+    folder = Path(package.__file__).parent
+    assert not [p.name for p in folder.glob("*.py") if "add_menu_action" in p.read_text(encoding="utf-8")]
 
 
 def test_customer_message_placeholders_highlighted(qtbot, window, ready, fake, sample_pdf):

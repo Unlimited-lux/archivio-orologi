@@ -77,15 +77,13 @@ def register(ctx) -> None:
                                tooltip=_("Confronta le revisioni salvate nello stesso file"))
     act_batch = ctx.action(_("Operazioni in blocco"), "layers", module.show_batch, requires_document=False,
                            tooltip=_("Applica operazioni a molti file"))
-    mode.add_action(act_compare)
-    mode.add_action(act_show)
-    mode.add_action(act_session)
-    mode.add_action(act_text)
-    mode.add_action(act_revisions)
-    mode.add_separator()
-    mode.add_action(act_batch)
-    ctx.add_menu_action(act_compare, _("Strumenti"))
-    ctx.add_menu_action(act_batch, _("Strumenti"))
+    # scheda Strumenti divisa in gruppi come la barra multifunzione di Excel: Confronta | Automazione
+    act_session.setIconText(_("Apri sessione"))
+    mode.add_group(_("Confronta"), "confronta")
+    for act in (act_compare, act_show, act_session, act_text, act_revisions):
+        mode.add_action(act, group="confronta")
+    mode.add_group(_("Automazione"), "automazione")
+    mode.add_action(act_batch, group="automazione")
     ctx.add_home_action(_("Confronta documenti"), "git-compare", lambda: module.start_compare(),
                         _("Trova le differenze tra due versioni"), order=100)
     ctx.add_home_action(_("Operazioni in blocco"), "layers", module.show_batch,

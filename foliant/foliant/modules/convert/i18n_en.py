@@ -922,3 +922,12 @@ EN.update({"{n} segni di redazione non applicati non sono stati appiattiti: rest
 
 # CNV-17: elenco vuoto della conversione in blocco
 EN.update({"Aggiungi file o cartelle, o trascinali qui": "Add files or folders, or drag them here"})
+
+# Scheda Converti in stile Excel (gruppi della barra) e voci della scheda File
+EN.update({"Esporta": "Export",
+           "PDF da file…": "PDF from file…",
+           "Word, Excel, PowerPoint, immagini, testo, HTML, PDF/A":
+               "Word, Excel, PowerPoint, images, text, HTML, PDF/A",
+           "Scegli formato, orientamento e numero di pagine": "Choose size, orientation and number of pages",
+           "Da Word, Excel, immagini e altri formati": "From Word, Excel, images and other formats",
+           "Converte in PDF una cartella intera": "Converts a whole folder to PDF"})

@@ -60,6 +60,72 @@ def test_mode_and_home_actions(window, ctrl):
     assert "Esporta come…" in texts and "Comprimi" in texts
 
 
+def test_ribbon_groups_like_excel(window, ctrl):
+    """Scheda Converti in gruppi con nome: Esporta | Crea (Crea PDF ▾) | Ottimizza (Comprimi, Altri strumenti ▾)."""
+    bar = window.modes["converti"].toolbar
+    groups = bar.groups()
+    assert [title for title, _acts in groups] == ["Esporta", "Crea", "Ottimizza"]
+    export, create, optimize = (acts for _title, acts in groups)
+    acts = ctrl.actions
+    assert export[0] is acts["export"] and bar.group_title(acts["export"]) == "Esporta"
+    # i formati: nome intero per menu e ricerca dei comandi, nome breve nella barra
+    assert [a.text() for a in export[1:]] == ["In Word", "In Excel", "In PowerPoint", "In immagini", "In testo",
+                                              "In HTML", "In PDF/A"]
+    assert [a.iconText() for a in export[1:]] == ["Word", "Excel", "PowerPoint", "Immagini", "Testo", "HTML",
+                                                  "PDF/A"]
+    assert [bar.widgetForAction(a) for a in create] == [ctrl.create_button]
+    assert optimize[0] is acts["compress"] and bar.group_title(acts["compress"]) == "Ottimizza"
+    assert [bar.widgetForAction(a) for a in optimize[1:]] == [ctrl.more_button]
+    assert ctrl.more_button.text() == "Altri strumenti"
+    create_items = ctrl.create_button.menu().actions()
+    more_items = ctrl.more_button.menu().actions()
+    for key in ("from_file", "from_images", "from_url", "clipboard", "scanner", "camera", "photos", "screen",
+                "blank", "batch_create"):
+        assert acts[key] in create_items
+    for key in ("advanced", "flatten", "compress_many", "repair", "batch", "batch_create"):
+        assert acts[key] in more_items
+    # i pulsanti ▾ funzionano anche senza documento aperto
+    assert window.current_view() is None and ctrl.create_button.isEnabled() and ctrl.more_button.isEnabled()
+
+
+def test_file_tab_positions(window, ctrl):
+    """Voci dell'ex menu ☰ nella scheda File: Esporta › Esporta come…, Nuovo › Crea; niente doppioni."""
+    b = window.backstage
+    acts = ctrl.actions
+    assert b.page_of(acts["export"]) == "esporta"
+    entry = next(e for e in b.entries("esporta") if e.action is acts["export"])
+    assert (entry.group, entry.description) == ("Esporta", "Word, Excel, PowerPoint, immagini, testo, HTML, PDF/A")
+    new = {e.action: e for e in b.entries("nuovo")}
+    expected = {"blank": "Scegli formato, orientamento e numero di pagine",
+                "from_file": "Da Word, Excel, immagini e altri formati",
+                "batch_create": "Converte in PDF una cartella intera"}
+    for key, description in expected.items():
+        assert b.page_of(acts[key]) == "nuovo"
+        assert (new[acts[key]].group, new[acts[key]].description) == ("Crea", description)
+    # stesso gruppo «Crea» del nucleo, dopo «Nuovo documento»
+    crea = [e.action for e in b.entries("nuovo") if e.group == "Crea"]
+    assert crea[0] is window.act_new
+    positions = [crea.index(acts[key]) for key in ("blank", "from_file", "batch_create")]
+    assert positions == sorted(positions)
+    assert acts["from_file"].text() == "PDF da file…" and acts["from_file"].iconText() == "Da file…"
+    # «Comprimi più file…» resta solo in Altri strumenti ▾; nessuna voce in File › Altri comandi
+    assert b.page_of(acts["compress_many"]) is None
+    assert all(b.page_of(a) != "altro" for a in acts.values())
+    window.show_backstage("nuovo")
+    tiles = {t.action: t for t in b.tiles}
+    assert tiles[acts["from_file"]].title_label.text() == "PDF da file…"
+    assert tiles[acts["blank"]].isEnabled()                 # senza documento aperto
+    window.hide_backstage()
+
+
+def test_module_no_longer_uses_the_old_menu():
+    from pathlib import Path
+
+    import foliant.modules.convert as module
+    folder = Path(module.__file__).parent
+    assert not [p.name for p in folder.glob("*.py") if "add_menu_action" in p.read_text(encoding="utf-8")]
+
+
 # ------------------------------------------------------------------ CNV-01
 def test_export_open_document_with_unsaved_changes(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
     view = window.open_path(sample_pdf)

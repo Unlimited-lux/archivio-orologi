@@ -1,7 +1,9 @@
 # Stato del modulo Converti (sezione 6, CNV-*)
 
 Modalità `converti` (ordine 70), azioni nella Home («Crea PDF da file», «Immagini in PDF», «Converti PDF»,
-«Comprimi PDF»), voci nel menu ☰ › Converti. Logica senza interfaccia in `engine.py` (`convert_pdf`,
+«Comprimi PDF»). Barra in gruppi come in Excel: Esporta («Esporta come…» e i formati) | Crea («Crea PDF» ▾) |
+Ottimizza («Comprimi», «Altri strumenti» ▾). Scheda File: Esporta › «Esporta come…»; Nuovo › Crea
+(«PDF vuoto…», «PDF da file…», «Crea in blocco…»). Logica senza interfaccia in `engine.py` (`convert_pdf`,
 `run_conversion`), `extract.py`, `export_*.py`, `create.py`, `optimize.py`, `pdfa.py`, `flatten.py`,
 `scanner.py`, `photo.py`, `batch.py`; finestre in `*_dialog(s).py`; comandi in `actions.py`.
 Test: `tests/modules/convert/` (pytest + pytest-qt, offscreen; oltre 180 test). Allineato alla specifica v2 (nomi e priorità; rimandi: CNV-16→AI-27, CNV-17→BAT-06, CNV-28→BAT-07, CNV-33→SEC-24). Dipendenze in `DEPS.txt`.

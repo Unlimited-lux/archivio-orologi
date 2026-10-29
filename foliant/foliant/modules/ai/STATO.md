@@ -1,7 +1,11 @@
 # Stato del modulo `ai` — Assistente IA (sezione 12)
 
 Modalità `ia` («Assistente IA», icona `sparkles`, ordine 110, scorciatoia Ctrl+Alt+I) con
-pannello conversazione a destra. Fornitori: Anthropic (SDK `anthropic`, modelli
+pannello conversazione a destra. Barra in gruppi come in Excel: Assistente («Pannello» =
+«Assistente IA», Chiedi, Riassumi, Traduci, Spiega, Correggi e riscrivi, Mappa concettuale, Chiedi
+su un'area) | Strumenti («Altri strumenti» ▾) | Impostazioni (Cronologia, Impostazioni);
+«Impostazioni dell'Assistente IA» anche in File › Opzioni, «Analizza pagine» anche nella scheda
+Pagine (gruppo «Analisi»). Fornitori: Anthropic (SDK `anthropic`, modelli
 `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) ed endpoint compatibile
 OpenAI (anche locale) via HTTP. Chiavi nel portachiavi di sistema (`keyring`), mai su
 disco. Nessuna funzione P0 nella sezione 12. Priorità aggiornate dall'orchestratore: AI-19,
