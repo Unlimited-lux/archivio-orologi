@@ -11,6 +11,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $Destinazione, $Licenze | Out-Null
+# percorsi assoluti: «& build/tools\…\tesseract.exe» sarebbe letto come il comando di un modulo «build»
+$Destinazione = (Resolve-Path $Destinazione).Path
+$Licenze = (Resolve-Path $Licenze).Path
 
 function First-Dir([string[]]$patterns) {
   foreach ($p in $patterns) {
