@@ -1,0 +1,7 @@
+Testi delle licenze inclusi nel pacchetto di Foliant per Windows (cartella «licenze»).
+Stanno nel repository perché la costruzione non dipenda da siti esterni.
+
+AGPL-3.0.txt     GNU Affero General Public License v3 (testo ufficiale della FSF):
+                 Foliant, PyMuPDF/MuPDF e Ghostscript.
+Apache-2.0.txt   Apache License 2.0 (testo ufficiale della Apache Software Foundation):
+                 Tesseract OCR e qpdf.
