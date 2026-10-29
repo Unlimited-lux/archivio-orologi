@@ -24,6 +24,7 @@ from .presentation_engine import (
     SCREEN_BLACK, SCREEN_WHITE, TRANSITION_FADE, TRANSITION_NONE, PageTiming, PresentationOptions,
     PresentationState, format_clock, parse_number, resolve_transition,
 )
+from .ribbon_place import place
 
 SETTINGS_PREFIX = "viewer/presentation/"
 
@@ -467,15 +468,14 @@ class PresentationController(QObject):
         self.clock: Callable[[], float] = time.monotonic
         self.act_start = ctx.action(_("Presenta dall'inizio"), "presentation", lambda: self.start(False),
                                     shortcut="F5")
-        self.act_current = ctx.action(_("Presenta dalla pagina corrente"), "presentation",
+        self.act_current = ctx.action(_("Presenta dalla pagina corrente"), "monitor-play",
                                       lambda: self.start(True), shortcut="Shift+F5")
         self.act_options = ctx.action(_("Opzioni presentazione…"), "settings", self.edit_options,
                                       requires_document=False)
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_action(self.act_start)
-        for act in (self.act_start, self.act_current, self.act_options):
-            ctx.add_menu_action(act, _("Vista"))
+        # Visualizza › Presentazione: «Presenta» con il nome, le altre due con la sola icona
+        place(ctx, "visualizza", self.act_start, "presentazione", 10, icon_text=_("Presenta"))
+        place(ctx, "visualizza", self.act_current, "presentazione", 20, compact=True)
+        place(ctx, "visualizza", self.act_options, "presentazione", 30, compact=True)
 
     # ------------------------------------------------------------- opzioni
     def options(self) -> PresentationOptions:
@@ -591,7 +591,7 @@ def install(ctx) -> PresentationController:
         "Presenta dalla pagina corrente": "Present from current page",
         "Opzioni presentazione…": "Presentation options…",
         "Opzioni presentazione": "Presentation options",
-        "Vista": "View",
+        "Presenta": "Present",
         "Vista relatore": "Presenter view",
         "Errore nel disegno della pagina: {e}": "Error drawing the page: {e}",
         "Pagina {n} di {t}": "Page {n} of {t}",

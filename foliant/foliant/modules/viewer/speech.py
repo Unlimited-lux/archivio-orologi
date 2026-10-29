@@ -1,6 +1,6 @@
 """Lettura ad alta voce (VIS-35).
 
-Vista → Leggi ad alta voce → Questa pagina / Da qui alla fine / Selezione (anche
+Visualizza › Lettura › Leggi ad alta voce ▾ → Questa pagina / Da qui alla fine / Selezione (anche
 dal menu contestuale). La lettura procede frase per frase (sintesi progressiva:
 si preparano solo le frasi della pagina in lettura), evidenzia la frase corrente
 con un livello della vista e la porta in vista; a fine pagina prosegue con la
@@ -26,6 +26,7 @@ from .speech_engine import (
     SPEEDS, Sentence, SpeechEngine, build_sentences, catalog_language, clamp_rate, detect_engine,
     primary_language, reading_allowed, sentence_index_at, structure_languages,
 )
+from .ribbon_place import place
 
 SETTINGS_PREFIX = "viewer/speech/"
 MODE_PAGE = "page"
@@ -35,7 +36,6 @@ MODE_SELECTION = "selection"
 NO_ENGINE_TEXT = "Installa speech-dispatcher o espeak-ng per la lettura ad alta voce"
 
 _EN = {
-    "Vista": "View",
     "Leggi ad alta voce": "Read aloud",
     "Leggi questa pagina": "Read this page",
     "Leggi da qui alla fine": "Read to the end",
@@ -143,7 +143,7 @@ class SpeechController(QObject):
         self.menu.addSeparator()
         self.menu.addAction(self.act_follow)
         self.menu.setToolTipsVisible(True)
-        ctx.add_menu_action(self.act_menu, _("Vista"))
+        place(ctx, "visualizza", self.act_menu, "lettura", 40, compact=True)   # pulsante ▾ con il menu
 
     def _build_toolbar(self) -> None:
         win = self.ctx.window

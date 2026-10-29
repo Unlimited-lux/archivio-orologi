@@ -19,6 +19,8 @@ from PySide6.QtWidgets import QColorDialog, QMenu
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations
 
+from .ribbon_place import place
+
 TRANSLATIONS = {
     "Tema di lettura": "Reading theme",
     "Bianco (originale)": "White (original)",
@@ -35,7 +37,7 @@ TRANSLATIONS = {
     "Colore di sfondo della pagina": "Page background color",
     "Contrasto insufficiente ({r}:1): il testo potrebbe essere poco leggibile.":
         "Insufficient contrast ({r}:1): text may be hard to read.",
-    "Vista": "View",
+    "Tema": "Theme",
 }
 
 # (testo, sfondo) per ciascun tema
@@ -117,7 +119,7 @@ class AppearanceController:
         from foliant.api import bind_icon
         bind_icon(self.menu_action, "palette")
         self.menu_action.setMenu(self.menu)
-        ctx.add_menu_action(self.menu_action, _("Vista"))
+        place(ctx, "visualizza", self.menu_action, "lettura", 20, icon_text=_("Tema"))   # pulsante ▾
         ctx.documentOpened.connect(self._attach)
         ctx.documentChanged.connect(lambda v: self._images.clear())
         for v in ctx.views():

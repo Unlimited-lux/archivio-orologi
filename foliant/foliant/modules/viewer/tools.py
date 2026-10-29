@@ -13,6 +13,8 @@ from foliant.api import (
     ENGINE_LOCK, Context, DocumentView, TextSelection, Tool, _, add_translations, theme, words_to_text,
 )
 
+from .ribbon_place import place
+
 TRANSLATIONS = {
     "istantanea.png": "snapshot.png",
     "Lente": "Magnifier",
@@ -309,12 +311,9 @@ class ToolsController:
                                    tooltip=_("Traccia un rettangolo per ingrandirlo a tutta la vista"), checkable=True)
         self.act_snapshot = ctx.action(_("Cattura area"), "camera", lambda on: self._toggle(self.snapshot_tool, on),
                                        tooltip=_("Cattura un'area come immagine o testo"), checkable=True)
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_separator()
-            mode.add_action(self.act_zoom)
-            mode.add_action(self.act_snapshot)
-            mode.add_action(self.act_lens)
+        place(ctx, "leggi", self.act_snapshot, "strumenti", 10)        # accanto a Seleziona e Mano
+        place(ctx, "leggi", self.act_zoom, "zoom", 30)
+        place(ctx, "leggi", self.act_lens, "zoom", 40, compact=True)
         ctx.currentViewChanged.connect(self._on_view)
         ctx.documentAccessChanged.connect(self._on_access)
         self._connected: DocumentView | None = None

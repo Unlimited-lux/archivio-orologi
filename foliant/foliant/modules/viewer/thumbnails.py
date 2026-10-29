@@ -24,6 +24,7 @@ from foliant.api import (
 )
 
 from .engine import page_labels
+from .ribbon_place import place
 
 TRANSLATIONS = {
     "Miniature": "Thumbnails",
@@ -31,7 +32,6 @@ TRANSLATIONS = {
     "Mostra/nascondi miniature": "Show/hide thumbnails",
     "Nessun documento aperto": "No document open",
     "Pagina non leggibile": "Unreadable page",
-    "Vista": "View",
 }
 
 CACHE_ITEMS = 600
@@ -522,7 +522,7 @@ class ThumbnailsController:
         ctx.add_sidebar_panel("thumbnails", _("Miniature"), "gallery-vertical-end", self.panel, order=10)
         self.act_toggle = ctx.action(_("Mostra/nascondi miniature"), "gallery-vertical-end", self.toggle,
                                      shortcut="F4")
-        ctx.add_menu_action(self.act_toggle, _("Vista"))
+        place(ctx, "visualizza", self.act_toggle, "mostra", 10, icon_text=_("Miniature"))
         if hasattr(ctx, "set_selected_pages_provider"):
             ctx.set_selected_pages_provider(self.selected_pages)
 

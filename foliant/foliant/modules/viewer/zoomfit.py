@@ -11,6 +11,8 @@ from PySide6.QtCore import QEvent, QObject, QPointF, QTimer
 
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations
 
+from .ribbon_place import place
+
 TRANSLATIONS = {
     "Adatta all'altezza": "Fit height",
     "Adatta al contenuto": "Fit content",
@@ -51,10 +53,11 @@ class ZoomFitController(QObject):
         self._applying = False
         self.act_height = ctx.action(_("Adatta all'altezza"), "move-vertical", lambda: self.set_fit(FIT_HEIGHT),
                                      tooltip=_("La pagina intera in altezza"))
-        self.act_content = ctx.action(_("Adatta al contenuto"), "scan", lambda: self.set_fit(FIT_CONTENT),
+        self.act_content = ctx.action(_("Adatta al contenuto"), "scan-text", lambda: self.set_fit(FIT_CONTENT),
                                       tooltip=_("L'ingombro del contenuto visibile della pagina riempie la vista"))
-        for a in (self.act_height, self.act_content):
-            ctx.add_menu_action(a, _("Vista"))
+        # Leggi › Zoom, con la sola icona dopo gli adattamenti del nucleo (prima di Zoom area e Lente)
+        for order, a in ((10, self.act_height), (11, self.act_content)):
+            place(ctx, "leggi", a, "zoom", order, compact=True)
         ctx.documentOpened.connect(self._watch)
         for v in ctx.views():
             self._watch(v)

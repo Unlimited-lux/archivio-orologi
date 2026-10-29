@@ -125,8 +125,11 @@ def test_ribbon_groups_have_captions_and_accept_actions_from_modules(window):
     extra = QAction("Prova di gruppo", window)
     view_mode.add_action(extra, group="ruota", compact=True)
     assert bar.group_title(extra) == _("Ruota")
+    # in fondo al gruppo Ruota (dopo Ruota vista e le voci già aggiunte dai moduli), non in fondo alla barra
+    ruota = next(acts for title, acts in bar.groups() if title == _("Ruota"))
+    assert window.act_rotate_view in ruota and ruota[-1] is extra
     acts = bar.actions()
-    assert acts.index(extra) == acts.index(window.act_rotate_view) + 1
+    assert acts[acts.index(extra) + 1].isSeparator()
     from PySide6.QtWidgets import QToolButton
     assert bar.widgetForAction(extra).toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
     button = view_mode.add_menu_button("Menu di prova", "star", [QAction("Uno", window), None,

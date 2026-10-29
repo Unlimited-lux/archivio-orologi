@@ -310,8 +310,11 @@ def test_ux18_rotate_view_and_rulers_shortcuts(viewer_window, sample_pdf, qtbot)
     assert view.view_rotation == 270
     w.act_rotate_view.trigger()
     assert view.view_rotation == 0
-    # in un'altra modalità le combinazioni restano libere (Pagine le usa per ruotare le pagine)
-    other = [m for m in w.modes if m != "leggi"]
+    # in Visualizza, dove ci sono i pulsanti, valgono come in Leggi
+    w.set_mode("visualizza")
+    assert nav.act_rotate_ccw.shortcut() == QKeySequence("Ctrl+Shift+-")
+    # nelle altre modalità le combinazioni restano libere (Pagine le usa per ruotare le pagine)
+    other = [m for m in w.modes if m not in ("leggi", "visualizza")]
     if other:
         w.set_mode(other[0])
         assert nav.act_rotate_ccw.shortcut().isEmpty()
