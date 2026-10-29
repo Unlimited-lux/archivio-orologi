@@ -17,6 +17,7 @@ import sys
 import docx
 import pymupdf
 
+sys.stdout.reconfigure(errors="replace")         # console di Windows in cp1252
 base = sys.argv[1]
 ATTESE = ("perizia", "orologio", "città", "perché", "garanzia", "ginevra")
 errori = []
@@ -61,13 +62,13 @@ if percorso:
         catalogo = doc.pdf_catalog()
         controlla(doc.xref_get_key(catalogo, "Metadata")[0] == "xref", "PDF/A: metadati XMP presenti")
     size = os.path.getsize(percorso)
-    print(f"        dimensione: {size_originale:,} → {size:,} byte")
+    print(f"        dimensione: {size_originale:,} -> {size:,} byte")
     controlla(size < size_originale, "PDF compresso più piccolo dell'originale")
 
 percorso = os.path.join(base, "gs-ebook.pdf")
 with pymupdf.open(percorso) as doc:
     controlla(doc.page_count == 1, "Ghostscript incluso: compressione /ebook leggibile")
-print(f"        Ghostscript /ebook: {size_originale:,} → {os.path.getsize(percorso):,} byte")
+print(f"        Ghostscript /ebook: {size_originale:,} -> {os.path.getsize(percorso):,} byte")
 controlla(os.path.getsize(percorso) < size_originale, "Ghostscript incluso: file più piccolo")
 
 # LibreOffice resta esterno e facoltativo: se manca, l'app spiega come installarlo
