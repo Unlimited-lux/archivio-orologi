@@ -61,16 +61,33 @@ def register(ctx: "Context") -> None:
                            tooltip=_("Riconosci il testo di più file PDF"))
     act_langs = ctx.action(_("Lingue"), "languages", ctrl.manage_languages, requires_document=False,
                            tooltip=_("Lingue di riconoscimento installate e disponibili"))
+    act_remove = ctx.action(_("Rimuovi livello OCR"), "eraser", ctrl.remove_layer,
+                            tooltip=_("Togli il testo invisibile riconosciuto, lasciando le immagini"))
+    act_remove.setIconText(_("Rimuovi livello"))
+    act_image = ctx.action(_("Converti in PDF solo immagine"), "image", ctrl.to_image_only,
+                           tooltip=_("Rende ogni pagina un'immagine, senza testo estraibile"))
+    act_image.setIconText(_("Solo immagine"))
+    act_resume = ctx.action(_("Riprendi lotto"), "rotate-ccw", ctrl.resume_batch, requires_document=False,
+                            tooltip=_("Elabora i file rimasti di un OCR in blocco interrotto in questa sessione"))
+    act_resume.setEnabled(ctrl.pending_batch() is not None)   # lotto solo in memoria: all'avvio è vuoto
+
+    # barra con i gruppi con nome, come nella barra multifunzione di Excel
+    mode.add_group(_("Riconosci"), "riconosci")
     for a in (act_run, act_edit, act_text):
         mode.add_action(a)
-    mode.add_separator()
+    mode.add_group(_("Correggi"), "correggi")
     mode.add_action(act_area)
     mode.add_action(act_review)
-    mode.add_separator()
+    mode.add_group(_("Livello di testo"), "livello")
+    mode.add_action(act_remove)
+    mode.add_action(act_image)
+    mode.add_group(_("Lotti"), "lotti")
     mode.add_action(act_batch)
+    mode.add_action(act_resume, compact=True)      # attiva solo dopo un OCR in blocco interrotto
     mode.add_action(act_langs)
     ctrl.actions = {"run": act_run, "edit": act_edit, "text": act_text, "area": act_area,
-                          "review": act_review, "batch": act_batch, "languages": act_langs}
+                    "review": act_review, "batch": act_batch, "languages": act_langs,
+                    "remove": act_remove, "image_only": act_image, "resume": act_resume}
 
     # lo strumento area si spegne quando un altro strumento prende il suo posto
     def tool_changed(*_a):
@@ -85,24 +102,14 @@ def register(ctx: "Context") -> None:
     ctx.documentOpened.connect(lambda v: v.toolChanged.connect(tool_changed))
     mode.left.connect(lambda: act_area.setChecked(False))
 
+    # opzione: File › Opzioni, gruppo «Apertura dei documenti» (l'OCR si avvia con «Esegui OCR» della barra)
     act_detect = ctx.action(_("Proponi l'OCR per i documenti scannerizzati"), "scan-search", None,
                             checkable=True, requires_document=False)
     act_detect.setChecked(ctrl.detection_enabled())
     act_detect.toggled.connect(ctrl.set_detection_enabled)
     ctrl.actions["detect"] = act_detect
-    menu_run = ctx.action(_("Esegui OCR…"), "scan-text", lambda: ctrl.open_dialog())
-    act_remove = ctx.action(_("Rimuovi livello OCR"), "eraser", ctrl.remove_layer,
-                            tooltip=_("Togli il testo invisibile riconosciuto, lasciando le immagini"))
-    ctrl.actions["remove"] = act_remove
-    act_image = ctx.action(_("Converti in PDF solo immagine"), "image", ctrl.to_image_only,
-                           tooltip=_("Rende ogni pagina un'immagine, senza testo estraibile"))
-    ctrl.actions["image_only"] = act_image
-    act_resume = ctx.action(_("Riprendi lotto"), "rotate-ccw", ctrl.resume_batch, requires_document=False,
-                            tooltip=_("Elabora i file rimasti di un OCR in blocco interrotto in questa sessione"))
-    act_resume.setEnabled(ctrl.pending_batch() is not None)   # lotto solo in memoria: all'avvio è vuoto
-    ctrl.actions["resume"] = act_resume
-    for a in (menu_run, act_remove, act_image, act_batch, act_resume, act_langs, act_detect):
-        ctx.add_menu_action(a, _("OCR"))
+    ctx.add_file_action(act_detect, "opzioni", _("Apertura dei documenti"),
+                        _("All'apertura di un PDF scannerizzato suggerisce di riconoscerne il testo"))
 
     ctx.add_view_menu_provider(ctrl.menu_provider)
     ctrl.review_panel = ReviewPanel(ctrl)
