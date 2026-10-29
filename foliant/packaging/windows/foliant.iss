@@ -121,10 +121,6 @@ Root: HKA; Subkey: "Software\Classes\.pdf"; ValueType: string; ValueData: "Folia
 Filename: "{code:DefaultAppsUri}"; Description: "{cm:DefaultPdfRun}"; Tasks: defaultpdf; Flags: shellexec postinstall nowait skipifsilent
 Filename: "{app}\Foliant.exe"; Description: "{cm:Launch}"; Flags: nowait postinstall skipifsilent unchecked
 
-[UninstallRun]
-; preferenze e dati dell'utente: solo se chiesto (domanda in InitializeUninstall o /RIMUOVIPREFERENZE=1)
-Filename: "{app}\foliant-cli.exe"; Parameters: "rimuovi-dati-utente"; Flags: runhidden waituntilterminated; Check: RemovePreferences; RunOnceId: "RimuoviDatiUtente"
-
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
@@ -149,7 +145,15 @@ begin
     RemovePrefs := MsgBox(CustomMessage('RemovePrefs'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
 end;
 
-function RemovePreferences(): Boolean;
+{ Preferenze e dati dell'utente: solo se chiesto (domanda sopra o /RIMUOVIPREFERENZE=1).
+  Non con una voce [UninstallRun] e Check: Inno Setup valuta quel Check durante l'installazione,
+  quando la scelta non esiste ancora, e la voce non verrebbe mai registrata. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
 begin
-  Result := RemovePrefs;
+  if (CurUninstallStep = usUninstall) and RemovePrefs then
+    if not Exec(ExpandConstant('{app}\foliant-cli.exe'), 'rimuovi-dati-utente', '', SW_HIDE,
+                ewWaitUntilTerminated, ResultCode) then
+      Log('rimuovi-dati-utente non avviato: ' + SysErrorMessage(ResultCode));
 end;
