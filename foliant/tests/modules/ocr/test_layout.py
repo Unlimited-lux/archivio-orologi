@@ -6,6 +6,7 @@ import numpy as np
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from foliant.modules.ocr import engine, layout
 
 from .conftest import image_pdf
@@ -117,7 +118,7 @@ def test_ordine_nelle_celle_con_simboli():
 @pytest.mark.parametrize("mode", ["editable", "searchable"])
 def test_importi_con_euro_in_tabella(tmp_path, mode):
     """«85,50 €» e «€ 9.500,00» in una tabella a 300 dpi: ordine del testo e riquadri come nell'immagine."""
-    sans = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    sans = system_font("truetype/liberation/LiberationSans-Regular.ttf")
     amounts = ["85,50 €", "€ 9.500,00", "1.250,00 €", "€ 45,90", "12,00 €"]
 
     def draw(page):

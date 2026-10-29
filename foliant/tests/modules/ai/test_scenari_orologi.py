@@ -17,6 +17,7 @@ import os
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from foliant.modules.ai import extract
 
 from .conftest import FakeProvider, make_active_profile
@@ -46,7 +47,7 @@ def _en(v: float) -> str:
     return f"{v:,.2f}"
 
 
-_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_FONT = system_font("truetype/dejavu/DejaVuSans.ttf")
 _FONT_ARGS = {"fontname": "dejavu", "fontfile": _FONT} if os.path.exists(_FONT) else {}   # con «€»
 
 

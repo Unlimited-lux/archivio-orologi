@@ -81,6 +81,20 @@ def _no_blocking_dialogs(monkeypatch):
     yield
 
 
+def system_font(rel: str) -> str:
+    """Percorso di un font dei pacchetti Linux usato dai test (es. «truetype/dejavu/DejaVuSans.ttf»):
+    in /usr/share/fonts o, su Windows, nella cartella FOLIANT_TEST_FONTS con la stessa struttura
+    (in GitHub Actions ci si scaricano DejaVu e Liberation). Se manca restituisce il percorso
+    Linux, che i test controllano con os.path.exists come prima."""
+    linux = "/usr/share/fonts/" + rel
+    extra = os.environ.get("FOLIANT_TEST_FONTS")
+    if not os.path.exists(linux) and extra:
+        candidate = os.path.join(extra, *rel.split("/"))
+        if os.path.exists(candidate):
+            return candidate
+    return linux
+
+
 def has_mode(path, mode: int) -> bool:
     """Permessi POSIX attesi (es. 0o700 per una cartella privata). Su Windows i permessi POSIX
     non esistono: cartelle e file nel profilo dell'utente sono privati per gli ACL di Windows,

@@ -5,9 +5,11 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-SERIF = "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"
-SANS = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-DEJAVU = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+from tests.conftest import system_font
+
+SERIF = system_font("truetype/liberation/LiberationSerif-Regular.ttf")
+SANS = system_font("truetype/liberation/LiberationSans-Regular.ttf")
+DEJAVU = system_font("truetype/dejavu/DejaVuSans.ttf")
 
 LOREM = [
     "Lorem ipsum dolor sit amet, consectetur",

@@ -10,6 +10,7 @@ import zipfile
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from tests.conftest import has_mode
 from foliant.core.platform import find_tool
 from foliant.api import OperationCancelled
@@ -196,7 +197,7 @@ def test_txt_ligature_and_form_feed(tmp_path):
     for i in range(3):
         p = doc.new_page()
         p.insert_text((72, 100), "la ﬁne del contratto" if i == 0 else f"pagina {i + 1}", fontsize=12,
-                      fontname="dejavu", fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+                      fontname="dejavu", fontfile=system_font("truetype/dejavu/DejaVuSans.ttf"))
     path = _save(doc, tmp_path / "lig.pdf")
     out = convert_pdf(path, tmp_path / "lig.txt", "txt", page_separator="ff")[0]
     raw = open(out, "rb").read()
@@ -935,7 +936,7 @@ def test_scan_to_docx_uses_ocr_module_both_layouts(scanned_mixed, tmp_path, monk
 
 
 def _scanned_quote(tmp_path):
-    font = dict(fontname="dejavu", fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    font = dict(fontname="dejavu", fontfile=system_font("truetype/dejavu/DejaVuSans.ttf"))
     src = pymupdf.open()
     p = src.new_page()
     p.insert_text((60, 80), "Preventivo di riparazione", fontsize=20, **font)
@@ -1141,7 +1142,7 @@ def _char_accuracy(ref: str, got: str) -> float:
 
 
 def _scan_of(lines: list[str], tmp_path, dpi: int = 300, name: str = "scan.pdf") -> str:
-    font = dict(fontname="dejavu", fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
+    font = dict(fontname="dejavu", fontfile=system_font("truetype/dejavu/DejaVuSerif.ttf"))
     src = pymupdf.open()
     sp = src.new_page()
     for k, line in enumerate(lines):
@@ -1219,7 +1220,7 @@ def test_undecodable_font_area_recognized_with_ocr(tmp_path):
     doc = pymupdf.open()
     p = doc.new_page()
     p.insert_text((72, 100), "Garanzia internazionale valida", fontsize=16, fontname="dv",
-                  fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+                  fontfile=system_font("truetype/dejavu/DejaVuSans.ttf"))
     p.insert_text((72, 200), "Testo normale leggibile", fontsize=12)
     for xref, *_rest in p.get_fonts():
         if doc.xref_get_key(xref, "ToUnicode")[0] == "xref":

@@ -12,9 +12,11 @@ import cv2
 import numpy as np
 import pymupdf
 
-SANS = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-SANS_B = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
-SERIF = "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"
+from tests.conftest import system_font
+
+SANS = system_font("truetype/liberation/LiberationSans-Regular.ttf")
+SANS_B = system_font("truetype/liberation/LiberationSans-Bold.ttf")
+SERIF = system_font("truetype/liberation/LiberationSerif-Regular.ttf")
 
 
 def _render(page, dpi):
@@ -200,7 +202,7 @@ def passport_mrz():
     page = doc.new_page(width=500, height=350)
     page.draw_rect(page.rect, color=None, fill=(0.93, 0.90, 0.95))
     page.insert_font(fontname="S", fontfile=SANS)
-    page.insert_font(fontname="M", fontfile="/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf")
+    page.insert_font(fontname="M", fontfile=system_font("truetype/liberation/LiberationMono-Bold.ttf"))
     expected = []
     for i, t in enumerate(["PASSAPORTO / PASSPORT", "Cognome / Surname: ROSSI", "Nome / Given names: MARIO",
                            "Data di nascita / Date of birth: 12 MAR 1975", "Numero / No.: YA1234567"]):
@@ -249,7 +251,7 @@ def thermal_receipt():
     """Scontrino termico sbiadito: testo grigio chiaro su carta leggermente grigia, stretto e lungo."""
     doc = pymupdf.open()
     page = doc.new_page(width=230, height=420)
-    page.insert_font(fontname="M", fontfile="/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf")
+    page.insert_font(fontname="M", fontfile=system_font("truetype/liberation/LiberationMono-Regular.ttf"))
     lines = ["OROLOGERIA VERDI", "VIA MONTENAPOLEONE 8", "SCONTRINO N. 0458", "PILA SR626SW 1 X 6,50",
              "CINTURINO 18MM 1 X 39,00", "TOTALE EURO 45,50", "CONTANTI 50,00", "RESTO 4,50"]
     expected = []

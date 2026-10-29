@@ -7,9 +7,10 @@ import os
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from foliant.modules.viewer import engine as E
 
-DEJAVU = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+DEJAVU = system_font("truetype/dejavu/DejaVuSans.ttf")
 
 
 def _page(lines, fontfile=None):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from foliant.modules.ocr import detect, engine, preprocess
 
 from .conftest import FRASI, image_pdf, iou, scan_image, scan_words
@@ -217,7 +218,7 @@ def test_testo_non_estraibile(tmp_path):
     doc = pymupdf.open()
     page = doc.new_page()
     # font senza mappatura Unicode affidabile: caratteri in area d'uso privato
-    font = pymupdf.Font(fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    font = pymupdf.Font(fontfile=system_font("truetype/dejavu/DejaVuSans.ttf"))
     tw = pymupdf.TextWriter(page.rect)
     tw.append((72, 100), "Testo con codifica illeggibile " * 2, font=font, fontsize=12)
     tw.write_text(page)
@@ -387,8 +388,8 @@ def test_modificabile_tabella_e_stile_sans(tmp_path):
     """Titolo grassetto 18 pt, paragrafi 11 pt senza grazie e tabella bordata a 3 colonne:
     colonne non fuse, testo nelle celle giuste, famiglia e grassetto corretti."""
     import numpy as np
-    sans = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-    bold = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+    sans = system_font("truetype/liberation/LiberationSans-Regular.ttf")
+    bold = system_font("truetype/liberation/LiberationSans-Bold.ttf")
     doc = pymupdf.open()
     page = doc.new_page()
     page.insert_font(fontname="S", fontfile=sans)

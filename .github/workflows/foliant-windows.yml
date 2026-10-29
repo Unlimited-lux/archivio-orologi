@@ -46,6 +46,18 @@ jobs:
             }
           }
           Get-ChildItem $tessdata -Filter *.traineddata | Select-Object Name
+      - name: Font dei test (DejaVu e Liberation, come in /usr/share/fonts di Ubuntu)
+        run: |
+          $fonts = Join-Path $env:RUNNER_TEMP "fonts"
+          New-Item -ItemType Directory -Force "$fonts\truetype\dejavu", "$fonts\truetype\liberation", "$env:RUNNER_TEMP\scarico" | Out-Null
+          Invoke-WebRequest "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip" -OutFile "$env:RUNNER_TEMP\scarico\dejavu.zip"
+          Expand-Archive "$env:RUNNER_TEMP\scarico\dejavu.zip" "$env:RUNNER_TEMP\scarico\dejavu"
+          Get-ChildItem "$env:RUNNER_TEMP\scarico\dejavu" -Recurse -Filter *.ttf | Copy-Item -Destination "$fonts\truetype\dejavu"
+          Invoke-WebRequest "https://github.com/liberationfonts/liberation-fonts/releases/download/2.1.5/liberation-fonts-ttf-2.1.5.tar.gz" -OutFile "$env:RUNNER_TEMP\scarico\liberation.tar.gz"
+          tar -xzf "$env:RUNNER_TEMP\scarico\liberation.tar.gz" -C "$env:RUNNER_TEMP\scarico"
+          Get-ChildItem "$env:RUNNER_TEMP\scarico" -Recurse -Filter Liberation*.ttf | Copy-Item -Destination "$fonts\truetype\liberation"
+          "FOLIANT_TEST_FONTS=$fonts" >> $env:GITHUB_ENV
+          Get-ChildItem "$fonts" -Recurse -Filter *.ttf | Measure-Object | ForEach-Object { "$($_.Count) font" }
       - name: Dipendenze Python
         run: |
           python -m pip install --upgrade pip

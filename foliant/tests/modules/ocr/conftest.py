@@ -7,6 +7,8 @@ import numpy as np
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
+
 FRASI = [
     "Il presente contratto di compravendita riguarda un orologio da polso",
     "in acciaio con cinturino in pelle e quadrante color crema.",
@@ -123,7 +125,7 @@ def unextractable_pdf(path, text="Contratto di vendita orologio numero 42"):
     la copia produce caratteri illeggibili (testo non estraibile)."""
     doc = pymupdf.open()
     page = doc.new_page()
-    font = pymupdf.Font(fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    font = pymupdf.Font(fontfile=system_font("truetype/dejavu/DejaVuSans.ttf"))
     tw = pymupdf.TextWriter(page.rect)
     tw.append((72, 100), text, font=font, fontsize=14)
     tw.append((72, 130), text, font=font, fontsize=14)

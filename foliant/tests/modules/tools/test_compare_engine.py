@@ -6,6 +6,7 @@ import numpy as np
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from foliant.core.platform import find_tool
 from foliant.api import DocumentError, OperationCancelled, PasswordRequired, WrongPassword
 from foliant.modules.tools import compare_engine as ce
@@ -141,7 +142,7 @@ def test_ignore_punctuation_and_whitespace(pdf_builder):
 
 
 def test_hyphenation_and_ligatures(pdf_builder):
-    font = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    font = system_font("truetype/dejavu/DejaVuSans.ttf")
 
     def lig(page):
         page.insert_text((72, 90), "Firma del contrat-", fontsize=12)

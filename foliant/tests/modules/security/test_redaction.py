@@ -5,6 +5,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from foliant.api import Document
 from foliant.modules.security import patterns as PT
 from foliant.modules.security import redaction as R
@@ -460,7 +461,7 @@ def test_bug05_rotated_cropbox_fill_position(tmp_path):
 
 
 @pytest.mark.parametrize("font", [{"fontname": "helv"},
-                                  {"fontname": "F0", "fontfile": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"}])
+                                  {"fontname": "F0", "fontfile": system_font("truetype/dejavu/DejaVuSans.ttf")}])
 @pytest.mark.parametrize("margin", [0, 1])
 def test_bug06_following_text_keeps_position(tmp_path, font, margin):
     import os

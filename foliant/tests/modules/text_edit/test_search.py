@@ -8,13 +8,14 @@ import re
 import pymupdf
 import pytest
 
+from tests.conftest import system_font
 from foliant.core.platform import find_tool
 from foliant.core.document import Document
 from foliant.modules.text_edit import search as S
 from foliant.modules.text_edit.model import SOFT_HYPHEN, Line, Run, Style, TextBlock
 
-DEJAVU = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-LIBERATION = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+DEJAVU = system_font("truetype/dejavu/DejaVuSans.ttf")
+LIBERATION = system_font("truetype/liberation/LiberationSans-Regular.ttf")
 COLOR = (0.2, 0.2, 0.6)
 
 
@@ -488,9 +489,9 @@ def test_invoice_row_just_above_justified_paragraph(tmp_path, rule):
     from foliant.modules.text_edit.layout import Composer
     from foliant.modules.text_edit.fonts import FontResolver
     from foliant.modules.text_edit.model import Run, Style
-    carlito = "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf"
+    carlito = system_font("truetype/crosextra/Carlito-Regular.ttf")
     import os
-    fontfile = carlito if os.path.exists(carlito) else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    fontfile = carlito if os.path.exists(carlito) else system_font("truetype/liberation/LiberationSans-Regular.ttf")
     doc = _pm.open()
     page = doc.new_page(width=595, height=842)
     page.insert_font(fontname="F1", fontfile=fontfile)
