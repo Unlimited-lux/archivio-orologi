@@ -120,16 +120,29 @@ def test_document_view_applies_on_every_open(viewer_window, tmp_path):
     assert viewer_window.open_path(path).current_page == 4
 
 
-def test_no_history_actions_and_preferences(viewer_window):
-    viewer_window._rebuild_menu()
+def _command_names(window) -> list[str]:
+    """Nomi delle voci della scheda File e dei pulsanti (anche nei menu ▾) di Leggi e Visualizza."""
+    from foliant.ui.backstage import PAGE_IDS
     names = []
 
-    def walk(menu):
-        for a in menu.actions():
+    def walk(actions):
+        for a in actions:
             names.append(a.text())
             if a.menu():
-                walk(a.menu())
-    walk(viewer_window.main_menu)
+                walk(a.menu().actions())
+    walk(a for page in PAGE_IDS for a in window.backstage.actions_of(page))
+    for mode_id in ("leggi", "visualizza"):
+        bar = window.ctx.mode(mode_id).toolbar
+        for act in bar.actions():
+            walk([act])
+            button = bar.widgetForAction(act)
+            if button is not None and hasattr(button, "menu") and button.menu() is not None:
+                walk(button.menu().actions())
+    return names
+
+
+def test_no_history_actions_and_preferences(viewer_window):
+    names = _command_names(viewer_window)
     for text in ("Ripristina la sessione all'avvio", "Non registrare la cronologia"):
         assert text not in names
     ctl = _session(viewer_window)
@@ -343,18 +356,17 @@ def test_tab_context_menu(viewer_window, tmp_path):
 
 
 def test_menu_contains_tab_actions(viewer_window):
-    viewer_window._rebuild_menu()
-    names = []
-
-    def walk(menu):
-        for a in menu.actions():
-            names.append(a.text())
-            if a.menu():
-                walk(a.menu())
-    walk(viewer_window.main_menu)
-    for text in ("Riapri scheda chiusa", "Chiudi le altre schede", "Chiudi le schede a destra",
-                 "Chiudi tutte le schede", "Ignora le impostazioni di apertura dei documenti"):
-        assert text in names
+    """Le voci delle schede sono nel pulsante Visualizza › Finestra › Schede ▾, la preferenza
+    sull'apertura dei documenti in File › Opzioni."""
+    ctl = _session(viewer_window)
+    texts = [a.text() for a in ctl.tabs_button.menu().actions() if not a.isSeparator()]
+    for text in ("Scheda successiva", "Scheda precedente", "Riapri scheda chiusa", "Chiudi le altre schede",
+                 "Chiudi le schede a destra", "Chiudi tutte le schede"):
+        assert text in texts
+    pref = ctl.pref_actions["viewer/ignore_document_view"]
+    assert pref.text() == "Ignora le impostazioni di apertura dei documenti"
+    assert viewer_window.backstage.page_of(pref) == "opzioni"
+    assert "Ignora le impostazioni di apertura dei documenti" in _command_names(viewer_window)
 
 
 def test_switching_among_50_tabs_shows_page_quickly(viewer_window, tmp_path, qtbot):

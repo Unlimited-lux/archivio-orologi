@@ -22,6 +22,8 @@ from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QToolBu
 
 from foliant.api import ENGINE_LOCK, VIEW_SINGLE, _, add_translations, bind_icon, theme
 
+from .ribbon_place import place, place_menu_button
+
 SETTINGS_PREFIX = "viewer/autoscroll/"
 MODE_CONTINUOUS = "continuous"
 MODE_PAGES = "pages"
@@ -263,12 +265,12 @@ class ReadingController(QObject):
                                    requires_document=False)
         self.act_loop.setChecked(self.loop)
         self.act_loop.toggled.connect(self.set_loop)
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_action(self.act_reading)
-            mode.add_action(self.act_autoscroll)
-        for act in (self.act_reading, self.act_autoscroll, self.act_pages, self.act_loop):
-            ctx.add_menu_action(act, _("Vista"))
+        # Visualizza › Lettura: Modalità lettura (poi Tema), Scorrimento automatico ▾ con le sue opzioni
+        place(ctx, "visualizza", self.act_reading, "lettura", 10)
+        self.autoscroll_button = place_menu_button(
+            ctx, "visualizza", _("Scorrimento automatico"), "chevrons-down",
+            [self.act_autoscroll, None, self.act_pages, self.act_loop], "lettura", 30,
+            compact=True, requires_document=False)     # le opzioni si scelgono anche senza documento
 
         self.esc_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), w)
         self.esc_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
@@ -735,7 +737,6 @@ def install(ctx) -> ReadingController:
         "Scorrimento automatico": "Auto scroll",
         "Scorrimento automatico a pagine": "Auto scroll by pages",
         "Ricomincia dall'inizio a fine documento": "Restart from the beginning at end of document",
-        "Vista": "View",
         "Pagina precedente": "Previous page",
         "Pagina successiva": "Next page",
         "Riduci zoom": "Zoom out",

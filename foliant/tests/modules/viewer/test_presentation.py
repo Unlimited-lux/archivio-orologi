@@ -114,7 +114,9 @@ def test_actions_registered(pres):
     window, view, ctrl = pres
     assert ctrl.act_start.shortcut().toString() == "F5"
     assert ctrl.act_current.shortcut().toString() == "Shift+F5"
-    assert ctrl.act_start in window.ctx.mode("leggi").toolbar.actions()
+    bar = window.ctx.mode("visualizza").toolbar        # Visualizza › Presentazione
+    assert ctrl.act_start in bar.actions() and ctrl.act_start not in window.ctx.mode("leggi").toolbar.actions()
+    assert bar.group_title(ctrl.act_current) == bar.group_title(ctrl.act_options) == "Presentazione"
     assert ctrl.act_start.isEnabled()
 
 

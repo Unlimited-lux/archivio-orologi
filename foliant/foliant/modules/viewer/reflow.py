@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QV
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, theme
 
 from .engine import page_blocks
+from .ribbon_place import place
 
 TRANSLATIONS = {
     "Riflusso": "Reflow",
@@ -25,7 +26,6 @@ TRANSLATIONS = {
     "Riflusso non disponibile: il documento non contiene testo. Esegui l'OCR per renderlo leggibile.":
         "Reflow not available: the document contains no text. Run OCR to make it readable.",
     "Pagina {n}": "Page {n}",
-    "Vista": "View",
 }
 
 
@@ -136,10 +136,7 @@ class ReflowController(QObject):
         self.widget = ReflowWidget(self)
         self.act = ctx.action(_("Riflusso"), "wrap-text", self.toggle, checkable=True,
                               tooltip=_("Mostra il testo in una colonna adattata alla finestra"))
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_action(self.act)
-        ctx.add_menu_action(self.act, _("Vista"))
+        place(ctx, "visualizza", self.act, "layout", 10)   # Visualizza › Layout pagina, dopo i modi di pagina
         for seq, delta in ((QKeySequence.StandardKey.ZoomIn, 1), ("Ctrl+=", 1), (QKeySequence.StandardKey.ZoomOut, -1)):
             sc = QShortcut(QKeySequence(seq), self.widget)
             sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)

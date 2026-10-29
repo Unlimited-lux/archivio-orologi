@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QLabel, QMenu
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, theme
 
 from .geo import format_latlon, geo_viewports, latlon_at
+from .ribbon_place import place
 
 TRANSLATIONS = {
     "Coordinate e griglia": "Coordinates and grid",
@@ -33,7 +34,6 @@ TRANSLATIONS = {
     "Passo della griglia…": "Grid spacing…",
     "Passo della griglia ({u}):": "Grid spacing ({u}):",
     "Riquadri: {legend}": "Boxes: {legend}",
-    "Vista": "View",
 }
 
 UNITS = {          # punti per unità
@@ -122,7 +122,7 @@ class MeasureController(QObject):
         from foliant.api import bind_icon
         bind_icon(self.menu_action, "ruler")
         self.menu_action.setMenu(self.menu)
-        ctx.add_menu_action(self.menu_action, _("Vista"))
+        place(ctx, "visualizza", self.menu_action, "mostra", 20, icon_text=_("Griglia"))   # pulsante ▾
         ctx.documentOpened.connect(self._attach)
         ctx.documentChanged.connect(lambda _v: (self._boxes_cache.clear(), self._geo_cache.clear()))
         ctx.currentViewChanged.connect(lambda v: self.label.hide() if v is None else None)

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations, bind_icon, follow_link, theme
 
 from . import engine as E
+from .ribbon_place import place
 
 TRANSLATIONS = {
     "Genera dalla struttura (titoli taggati)": "Generate from structure (tagged headings)",
@@ -113,7 +114,7 @@ TRANSLATIONS = {
     "senza titolo": "untitled",
     "duplicato": "duplicate",
     "Ricerca dei titoli…": "Looking for headings…",
-    "Vista": "View",
+    "Segnalibro": "Bookmark",
 }
 
 
@@ -954,7 +955,7 @@ class BookmarksController:
         self.panel = BookmarksPanel(ctx)
         ctx.add_sidebar_panel("bookmarks", _("Segnalibri"), "bookmark", self.panel, order=20)
         self.act_add = ctx.action(_("Aggiungi segnalibro"), "bookmark-plus", self.add, shortcut="Ctrl+B")
-        ctx.add_menu_action(self.act_add, _("Vista"))
+        place(ctx, "leggi", self.act_add, "vai", 30, icon_text=_("Segnalibro"))   # Leggi › Vai
         ctx.add_view_menu_provider(self._menu_provider)
 
     def add(self) -> None:

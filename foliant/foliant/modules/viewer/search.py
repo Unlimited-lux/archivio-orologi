@@ -25,6 +25,7 @@ from .engine import (
     PageText, SearchOptions, compile_query, context_snippet, extract_page_text, find_across_pages, find_hits,
     find_in_page_text, page_labels,
 )
+from .ribbon_place import place
 
 TRANSLATIONS = {
     "risultati.csv": "results.csv",
@@ -49,7 +50,7 @@ TRANSLATIONS = {
     "1 pagina senza testo: esegui l'OCR per cercarvi.": "1 page without text: run OCR to search it.",
     "Digita nella barra di ricerca (Ctrl+F).": "Type in the search bar (Ctrl+F).",
     "Nessun documento aperto": "No document open",
-    "Vista": "View",
+    "Cerca": "Search",
     "Espressione regolare": "Regular expression",
     "Cerca anche nei commenti": "Also search comments",
     "commento": "comment",
@@ -386,11 +387,7 @@ class SearchController(QObject):
         for act in (self.act_next, self.act_prev):
             keys = ", ".join(key_text(s) for s in act.shortcuts())
             act.setToolTip(f"{act.text()} ({keys})")
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_separator()
-            mode.add_action(self.act_find)
-        ctx.add_menu_action(self.act_find, _("Vista"))
+        place(ctx, "leggi", self.act_find, "trova", 10, icon_text=_("Cerca"))
         ctx.currentViewChanged.connect(self.set_view)
         ctx.documentChanged.connect(self._on_changed)
         self._refresh_completer()

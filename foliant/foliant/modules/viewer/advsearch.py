@@ -22,6 +22,7 @@ from foliant.api import ENGINE_LOCK, Context, OperationCancelled, _, add_transla
 from . import advsearch_engine as eng
 from . import fulltext
 from .advsearch_engine import AdvHit, AdvOptions, AdvSummary
+from .ribbon_place import place
 
 SCOPE_CURRENT = "current"
 SCOPE_OPEN = "open"
@@ -52,7 +53,7 @@ TRANSLATIONS = {
     "ricerca.csv": "search.csv",
     "Ricerca avanzata…": "Advanced search…",
     "Ricerca avanzata": "Advanced search",
-    "Vista": "View",
+    "Avanzata": "Advanced",
     "Cerca": "Search",
     "Testo da cercare…": "Text to search for…",
     "Ambito": "Scope",
@@ -342,10 +343,7 @@ class AdvancedSearchController(QObject):
         self._docs: dict[int, object] = {}   # chiave -> Document Foliant
         self.act_open = ctx.action(_("Ricerca avanzata…"), "search-code", self.open, shortcut="Ctrl+Shift+F",
                                    requires_document=False)
-        ctx.add_menu_action(self.act_open, _("Vista"))
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_action(self.act_open)
+        place(ctx, "leggi", self.act_open, "trova", 20, icon_text=_("Avanzata"))
 
     # ------------------------------------------------------------------ pannello
     def ensure_panel(self) -> AdvancedSearchPanel:

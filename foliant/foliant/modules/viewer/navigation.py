@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QInputDialog, QLabel, QToolTip
 from foliant.api import ENGINE_LOCK, Context, DocumentView, _, add_translations
 
 from .engine import NavigationHistory, Position, page_labels, resolve_page_input
+from .ribbon_place import place
 
 TRANSLATIONS = {
     "Indietro": "Back",
@@ -45,7 +46,6 @@ TRANSLATIONS = {
     "Allegato incorporato": "Embedded attachment",
     "File collegato non trovato: {p}": "Linked file not found: {p}",
     "Destinazione non trovata": "Destination not found",
-    "Vista": "View",
     "Ruota vista in senso orario": "Rotate view clockwise",
     "Ruota vista in senso antiorario": "Rotate view counterclockwise",
     "Rileva URL nel testo": "Detect URLs in text",
@@ -147,17 +147,15 @@ class NavigationController(QObject):
                                       requires_document=False)
         # UX-18: Ctrl+L porta al campo pagina del nucleo; Ctrl+G è «occorrenza successiva»
         self.act_goto = ctx.action(_("Vai a pagina…"), "hash", self.ask_go_to)
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_separator()
-            mode.add_action(self.act_back)
-            mode.add_action(self.act_forward)
+        # Leggi › Vai: Indietro, Avanti e Vai a pagina con la sola icona (Segnalibro dopo)
+        for order, act in ((10, self.act_back), (11, self.act_forward), (20, self.act_goto)):
+            place(ctx, "leggi", act, "vai", order, compact=True)
         self.act_detect_urls = ctx.action(_("Rileva URL nel testo"), "link", self._set_detect_urls,
                                           tooltip=_("Rende cliccabili indirizzi web ed e-mail scritti come semplice testo"),
                                           checkable=True, requires_document=False)
         self.act_detect_urls.setChecked(self.detect_urls)
-        for act in (self.act_back, self.act_forward, self.act_goto, self.act_detect_urls):
-            ctx.add_menu_action(act, _("Vista"))
+        # Visualizza › Mostra, dopo Miniature e Coordinate e griglia
+        place(ctx, "visualizza", self.act_detect_urls, "mostra", 90, compact=True)
         self.label_box = QLabel(w)
         self.label_box.setProperty("muted", True)
         self.label_box.hide()
@@ -240,8 +238,8 @@ class NavigationController(QObject):
 
     def _assign_ux18_shortcuts(self) -> None:
         """UX-18: «Ruota vista» in senso orario/antiorario con Ctrl+Maiusc++ / Ctrl+Maiusc+-
-        (valide solo in Leggi: in Pagine le stesse combinazioni ruotano le pagine) e Ctrl+R
-        per i righelli del nucleo."""
+        (valide in Leggi e in Visualizza, dove ci sono i pulsanti; in Pagine le stesse combinazioni
+        ruotano le pagine) e Ctrl+R per i righelli del nucleo."""
         w = self.ctx.window
         mode = self.ctx.mode("leggi")
         rotate = getattr(w, "act_rotate_view", None)
@@ -255,15 +253,24 @@ class NavigationController(QObject):
         self.act_rotate_ccw.setToolTip(
             f"{_('Ruota vista in senso antiorario')} ({key_text(self.act_rotate_ccw.shortcut())})")
         w.addAction(self.act_rotate_ccw)
-        self.ctx.add_menu_action(self.act_rotate_ccw, _("Vista"))
+        place(self.ctx, "visualizza", self.act_rotate_ccw, "ruota", 10, compact=True)   # accanto a «Ruota vista»
+        self._rotate_actions = [a for a in (rotate, self.act_rotate_ccw) if a is not None]
         if mode is not None:
-            if rotate is not None:
-                mode.scope_shortcuts(rotate, self.act_rotate_ccw)
-            else:
-                mode.scope_shortcuts(self.act_rotate_ccw)
+            mode.scope_shortcuts(*self._rotate_actions)
+            # i pulsanti sono in Visualizza › Ruota: lì le combinazioni valgono come in Leggi
+            self.ctx.modeChanged.connect(self._scope_rotate_shortcuts)
         rulers = getattr(w, "act_rulers", None)
         if rulers is not None:
             rulers.setShortcut(QKeySequence("Ctrl+R"))
+
+    def _scope_rotate_shortcuts(self, mode_id: str) -> None:
+        """Ruota vista con Ctrl+Maiusc++ / Ctrl+Maiusc+- in Leggi e in Visualizza; nelle altre schede
+        (es. Pagine, che le usa per ruotare le pagine) restano libere."""
+        if mode_id not in ("leggi", "visualizza"):
+            return
+        mode = self.ctx.mode(mode_id)
+        if mode is not None:
+            mode.scope_shortcuts(*self._rotate_actions)
 
     def _rotate_view(self, degrees: int) -> None:
         view = self.ctx.current_view()

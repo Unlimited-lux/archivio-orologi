@@ -85,7 +85,8 @@ def test_action_menu_and_non_modal_panel(viewer_window, sample_pdf):
     viewer_window.open_path(sample_pdf)
     panel = ctl.open()
     assert panel.isVisible() and not panel.isModal()
-    assert ctl.act_open in viewer_window.ctx.mode("leggi").toolbar.actions()
+    bar = viewer_window.ctx.mode("leggi").toolbar
+    assert ctl.act_open in bar.actions() and bar.group_title(ctl.act_open) == "Trova"
     assert ctl.act_open.isEnabled()
 
 

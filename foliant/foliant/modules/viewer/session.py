@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QMenu, QPushButton
 from foliant.api import Context, DocumentView, _, add_translations, bind_icon
 
 from . import session_engine as engine
+from .ribbon_place import place_menu_button
 from .session_engine import ViewState
 
 KEY_IGNORE_DOC_VIEW = "viewer/ignore_document_view"
@@ -91,11 +92,17 @@ class SessionController(QObject):
             act.toggled.connect(lambda on, k=key: self.settings().setValue(k, bool(on)))
             self.pref_actions[key] = act
 
-        section = _("Schede")
-        for act in (self.act_next_tab, self.act_prev_tab, self.act_reopen, self.act_close_others,
-                    self.act_close_right, self.act_close_all):
-            ctx.add_menu_action(act, section)
-        ctx.add_menu_action(self.pref_actions[KEY_IGNORE_DOC_VIEW], _("Apertura dei documenti"))
+        # Visualizza › Finestra: Schede ▾ (Riapri scheda chiusa vale anche senza documenti aperti)
+        self.tabs_button = place_menu_button(
+            ctx, "visualizza", _("Schede"), "square-stack",
+            [self.act_next_tab, self.act_prev_tab, None, self.act_reopen, None, self.act_close_others,
+             self.act_close_right, self.act_close_all], "finestra", 10, requires_document=False)
+        if self.tabs_button is not None:
+            self.tabs_button.menu().aboutToShow.connect(self._update_actions)
+        # File › Opzioni › Apertura dei documenti
+        ctx.add_file_action(self.pref_actions[KEY_IGNORE_DOC_VIEW], "opzioni", _("Apertura dei documenti"),
+                            _("Pagina, zoom, layout e pannello iniziali scelti dal documento non vengono applicati"),
+                            order=50)
         self.window.backstage.aboutToShow.connect(self._update_actions)
 
     def _update_actions(self) -> None:
@@ -318,6 +325,8 @@ def install(ctx: Context) -> SessionController:
         "Ignora le impostazioni di apertura dei documenti": "Ignore documents' opening settings",
         "Schede": "Tabs",
         "Apertura dei documenti": "Opening documents",
+        "Pagina, zoom, layout e pannello iniziali scelti dal documento non vengono applicati":
+            "The initial page, zoom, layout and panel chosen by the document are not applied",
         "Il file «{name}» non esiste più.": "The file “{name}” no longer exists.",
         "Nessuna scheda chiusa da riaprire.": "No closed tab to reopen.",
         "Schermo intero": "Full screen",
