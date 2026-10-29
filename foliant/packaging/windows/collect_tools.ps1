@@ -46,12 +46,16 @@ Copy-Item "$tessSrc\*.exe", "$tessSrc\*.dll" -Destination $tess
 foreach ($sub in 'configs', 'tessconfigs') {
   if (Test-Path "$tessSrc\tessdata\$sub") { Copy-Item "$tessSrc\tessdata\$sub" -Destination "$tess\tessdata" -Recurse }
 }
+# stessi modelli dei pacchetti di Ubuntu, su cui sono tarati i test OCR di Foliant:
+# tesseract-ocr-ita/eng da tessdata_fast (ita 2,7 MB, eng 4,1 MB), tesseract-ocr-osd da tessdata (10,5 MB)
+$modelli = @{ ita = 'tessdata_fast'; eng = 'tessdata_fast'; osd = 'tessdata' }
 foreach ($lang in 'ita', 'eng', 'osd') {
-  # stessi modelli dei pacchetti di Ubuntu (tessdata «standard», LSTM e motore classico)
-  Fetch @("https://github.com/tesseract-ocr/tessdata/raw/main/$lang.traineddata",
-          "https://raw.githubusercontent.com/tesseract-ocr/tessdata/main/$lang.traineddata",
-          "https://cdn.jsdelivr.net/gh/tesseract-ocr/tessdata@main/$lang.traineddata") "$tess\tessdata\$lang.traineddata"
+  $repo = $modelli[$lang]
+  Fetch @("https://github.com/tesseract-ocr/$repo/raw/main/$lang.traineddata",
+          "https://raw.githubusercontent.com/tesseract-ocr/$repo/main/$lang.traineddata",
+          "https://cdn.jsdelivr.net/gh/tesseract-ocr/$repo@main/$lang.traineddata") "$tess\tessdata\$lang.traineddata"
 }
+Get-ChildItem "$tess\tessdata" -Filter *.traineddata | ForEach-Object { "{0}  {1:N0} byte" -f $_.Name, $_.Length }
 Copy-Item "$testi\Apache-2.0.txt" "$Licenze\Tesseract-Apache-2.0.txt"
 & "$tess\tesseract.exe" --version
 & "$tess\tesseract.exe" --tessdata-dir "$tess\tessdata" --list-langs
