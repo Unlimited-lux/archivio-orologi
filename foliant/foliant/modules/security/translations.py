@@ -783,4 +783,26 @@ EN: dict[str, str] = {
     'metadati in chiaro': 'unencrypted metadata',
     'verifica di integrità': 'integrity protection',
     'Documento considerato attendibile fino alla chiusura di Foliant': 'Document trusted until Foliant is closed',
+    # barra Proteggi e scheda File (stile Excel)
+    "Protezione": "Protection",
+    "Oscuramento": "Redaction",
+    "Pulizia": "Cleanup",
+    "Cifratura con certificato, buste di sicurezza e spazio protetto": (
+        "Certificate encryption, security envelopes and protected space"
+    ),
+    "Proteggi il documento": "Protect document",
+    "Password di apertura, stampa e modifica": "Password to open, print and edit",
+    "Toglie password e permessi": "Removes passwords and permissions",
+    "PDF cifrato da inviare con allegati": "Encrypted PDF with attachments, ready to send",
+    "Controlla il documento": "Inspect document",
+    "Metadati, livelli, script e testo nascosto": "Metadata, layers, scripts and hidden text",
+    "Vedi e cancella i metadati del documento": "View and delete the document metadata",
+    "PDF cifrati con un certificato digitale": "PDFs encrypted with a digital certificate",
+    "Sicurezza": "Security",
+    "Dati personali": "Personal data",
+    "Password": "Password",
+    "Applica o gestisci le protezioni salvate": "Apply or manage saved protection settings",
+    "Torna a mostrare gli avvisi sui contenuti attivi": "Show the active content warnings again",
+    "Copre le finestre finché non inserisci il codice": "Covers the windows until you enter the code",
+    "Codice, blocco all'avvio e dopo un periodo di inattività": "Code, lock at startup and after a period of inactivity",
 }

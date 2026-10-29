@@ -474,7 +474,7 @@ class SecurityController:
 
     # ------------------------------------------------- busta di sicurezza (SEC-10)
     def save_envelope(self) -> bool:
-        """Proteggi › Cifra solo gli allegati: salva una copia in cui solo i file
+        """Proteggi › Cifratura › Cifra solo gli allegati: salva una copia in cui solo i file
         incorporati richiedono la password."""
         from . import envelope as E
         doc = self.document()
@@ -500,7 +500,7 @@ class SecurityController:
         return self._write_envelope(data, pw, path)
 
     def create_envelope(self, files: list[str] | None = None) -> bool:
-        """Proteggi › Crea busta di sicurezza: nuovo PDF con copertina e i file scelti."""
+        """Proteggi › Cifratura › Crea busta di sicurezza: nuovo PDF con copertina e i file scelti."""
         from . import envelope as E
         files = files if files is not None else choose_envelope_files(self.parent)
         if not files:
@@ -534,7 +534,7 @@ class SecurityController:
 
     # ------------------------------------------- cifratura con certificato (SEC-09)
     def encrypt_with_certificate(self) -> bool:
-        """Proteggi › Cifra con certificato: salva una copia cifrata per i destinatari."""
+        """Proteggi › Cifratura › Cifra con certificato: salva una copia cifrata per i destinatari."""
         from . import certenc as CE
         doc = self.document()
         if doc is None:
@@ -570,7 +570,7 @@ class SecurityController:
 
     def open_with_certificate(self, path: str | None = None, pkcs12: str | None = None,
                               password: str | None = None):
-        """Proteggi › Apri con certificato: decifra in memoria con la propria chiave privata."""
+        """Proteggi › Cifratura › Apri con certificato: decifra in memoria con la propria chiave privata."""
         from foliant.core.document import Document
         from . import certenc as CE
         path = path or choose_pdf(self.parent)
@@ -653,7 +653,7 @@ class SecurityController:
             self.vault_idle.stop()
 
     def manage_vault(self) -> bool:
-        """Proteggi › Spazio protetto: crea, sblocca e gestisce i documenti custoditi."""
+        """Proteggi › Cifratura › Spazio protetto: crea, sblocca e gestisce i documenti custoditi."""
         from . import vault_ui as VU
         v = self.vault()
         if not v.exists:
@@ -971,7 +971,7 @@ class SecurityController:
         return failed
 
     def fill_policy_menu(self, menu) -> None:
-        """Sottomenu Proteggi › Policy: una voce per policy e la gestione."""
+        """Menu di «Policy di protezione» (freccia nella barra, File › Opzioni): le policy e la gestione."""
         menu.clear()
         store = self.policy_store()
         has_doc = self.document() is not None
@@ -982,7 +982,11 @@ class SecurityController:
             a.triggered.connect(lambda _c=False, n=name: self.apply_policy(n))
         if store.names():
             menu.addSeparator()
-        menu.addAction(_("Gestisci policy…")).triggered.connect(self.manage_policies)
+        manage = getattr(self, "actions", {}).get("manage_policies")
+        if manage is not None:
+            menu.addAction(manage)          # azione stabile: la trova anche «Cerca un comando»
+        else:
+            menu.addAction(_("Gestisci policy…")).triggered.connect(self.manage_policies)
 
     def remove_protection(self) -> bool:
         doc = self.document()
