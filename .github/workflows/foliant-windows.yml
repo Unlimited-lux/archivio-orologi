@@ -3,7 +3,8 @@ name: foliant-windows
 
 on:
   push:
-    branches: ["claude/pdf-editor-updf-clone-iod4xs", "claude/pdf-editor-updf-clone-iod4xs-windows"]
+    branches: ["claude/pdf-editor-updf-clone-iod4xs", "claude/pdf-editor-updf-clone-iod4xs-windows",
+               "claude/pdf-editor-updf-clone-iod4xs-windows-apertura"]
     paths: ["foliant/**", ".github/workflows/foliant-windows.yml"]
   workflow_dispatch:
     inputs:
@@ -13,6 +14,10 @@ on:
         default: ""
       solo_ubuntu:
         description: "Solo il lavoro su Ubuntu"
+        type: boolean
+        default: false
+      apertura_unica:
+        description: "Solo le prove dell'apertura unica su Windows, eseguite anche se il nucleo non la implementa ancora"
         type: boolean
         default: false
 
@@ -82,7 +87,14 @@ jobs:
       - name: Test
         # processi di lavoro paralleli (xdist): su Windows pytest-timeout può solo terminare il
         # processo, e così un test bloccato ferma un solo processo di lavoro e non tutta la suite
-        run: python -m pytest -p no:cacheprovider -n 4 --dist loadfile -rfEs --durations=25 --junitxml=risultati.xml
+        run: |
+          if ("${{ inputs.apertura_unica }}" -eq "true") {
+            # verifica del banco di prova dell'apertura unica (tests/test_single_open_windows.py)
+            $env:FOLIANT_SINGLE_OPEN_FORCE = "1"
+            python -m pytest -p no:cacheprovider -v -rfEs --junitxml=risultati.xml tests/test_single_open_windows.py
+          } else {
+            python -m pytest -p no:cacheprovider -n 4 --dist loadfile -rfEs --durations=25 --junitxml=risultati.xml
+          }
       - name: Riepilogo
         if: always()
         run: python ../.github/workflows/junit_summary.py risultati.xml
@@ -94,6 +106,7 @@ jobs:
 
   test-ubuntu:
     name: Ubuntu (Python 3.12)
+    if: ${{ !inputs.apertura_unica }}
     runs-on: ubuntu-latest
     timeout-minutes: 150
     concurrency:
