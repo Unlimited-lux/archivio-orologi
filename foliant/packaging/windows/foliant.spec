@@ -5,6 +5,7 @@
 import os
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.win32 import versioninfo as vi
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))           # cartella foliant/ del repository
 ICON = os.path.join(ROOT, "build", "foliant.ico")
@@ -27,8 +28,27 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+
+def version_info(description: str, filename: str):
+    """Metadati di versione dell'eseguibile (Proprietà › Dettagli in Esplora file)."""
+    with open(os.path.join(ROOT, "foliant", "__init__.py"), encoding="utf-8") as fh:
+        version = next(line.split('"')[1] for line in fh if line.startswith("__version__"))
+    numbers = tuple(int("".join(c for c in n if c.isdigit()) or 0) for n in version.split("+")[0].split("."))
+    numbers = (numbers + (0, 0, 0, 0))[:4]
+    strings = [vi.StringStruct(k, v) for k, v in (
+        ("CompanyName", "Foliant"), ("FileDescription", description), ("FileVersion", version),
+        ("InternalName", filename), ("LegalCopyright", "AGPL-3.0"), ("OriginalFilename", filename + ".exe"),
+        ("ProductName", "Foliant"), ("ProductVersion", version))]
+    return vi.VSVersionInfo(
+        ffi=vi.FixedFileInfo(filevers=numbers, prodvers=numbers),
+        kids=[vi.StringFileInfo([vi.StringTable("041004B0", strings)]),     # italiano, Unicode
+              vi.VarFileInfo([vi.VarStruct("Translation", [0x0410, 1200])])])
+
+
 gui = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Foliant", console=False,
-          icon=ICON if os.path.exists(ICON) else None, upx=False)
+          icon=ICON if os.path.exists(ICON) else None, upx=False,
+          version=version_info("Foliant - editor PDF", "Foliant"))
 cli = EXE(pyz, a.scripts, [], exclude_binaries=True, name="foliant-cli", console=True,
-          icon=ICON if os.path.exists(ICON) else None, upx=False)
+          icon=ICON if os.path.exists(ICON) else None, upx=False,
+          version=version_info("Foliant - riga di comando", "foliant-cli"))
 coll = COLLECT(gui, cli, a.binaries, a.datas, name="Foliant", upx=False)

@@ -15,6 +15,10 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+#ifndef FileVersion
+  ; versione numerica (fino a 4 numeri) per i metadati dei file; AppVersion può avere suffissi
+  #define FileVersion AppVersion
+#endif
 #ifndef SourceDir
   #define SourceDir "..\..\dist\Foliant"
 #endif
@@ -41,7 +45,14 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#OutputDir}
-OutputBaseFilename=Foliant-{#AppVersion}-Setup
+OutputBaseFilename=Foliant-Setup-{#AppVersion}
+VersionInfoVersion={#FileVersion}
+VersionInfoProductName=Foliant
+VersionInfoProductVersion={#FileVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoDescription=Installazione di Foliant {#AppVersion}
+VersionInfoCompany=Foliant
+VersionInfoCopyright=AGPL-3.0
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\Foliant.exe
 UninstallDisplayName=Foliant
