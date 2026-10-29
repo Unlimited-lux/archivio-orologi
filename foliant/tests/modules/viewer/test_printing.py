@@ -443,11 +443,12 @@ def test_options_dialog_validation(viewer_window, long_pdf):
     assert "fuori intervallo" in dlg.error_label.text()
     dlg.range_edit.setText("3-1, 30")
     dlg.rb_actual.setChecked(True)
-    dlg.annotations.setChecked(False)
+    dlg.content.setCurrentIndex(dlg.content.findData("document"))      # «Solo il documento»
     dlg.copies.setValue(2)
     dlg.accept()
     o = dlg.result_options
     assert o.pages == [2, 1, 0, 29] and o.scaling == ACTUAL_SIZE and not o.annotations and o.copies == 2
+    assert o.content == "document"
     assert not dlg.layers.isVisible()   # nessun livello nel documento
 
 

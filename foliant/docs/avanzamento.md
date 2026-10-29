@@ -140,7 +140,7 @@ Restano aperti:
 | Gravità | Area | Problema |
 |---|---|---|
 | bassa | nucleo | Su documenti con centinaia di commenti ogni modifica costa circa 0,3 s per la copia di annullamento. Il salvataggio incrementale dei PDF firmati non alza la versione PDF. Un secondo avvio mentre Foliant è occupato da più di 6 s può aprire il file due volte. |
-| bassa | viewer | Stampa (VIS-43): mancano ancora anteprima, pari/dispari, ordine inverso e stampa dei soli campi o timbri. |
+| bassa | viewer | Stampa (VIS-43): mancano ancora la scala in percentuale e «riduci solo se necessario», «Documento e timbri», la carta scelta in base al formato della pagina e la stampa PostScript; l'anteprima usa la carta della stampante predefinita, non quella scelta poi nel dialogo del sistema. |
 | — | specifica | Funzioni P1/P2 non completate e richieste al nucleo ancora aperte: elencate per ID in `foliant/modules/*/STATO.md` e in `foliant/modules/viewer/CORE_REQUESTS.md`. |
 
 Non prioritari per il committente (non verranno trattati salvo nuova richiesta): importazione di
