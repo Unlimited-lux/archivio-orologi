@@ -37,7 +37,7 @@ jobs:
       - name: Strumenti esterni e Inno Setup
         run: |
           # Chocolatey scarica dai siti dei progetti: fino a tre tentativi
-          function Choco([string[]]$pacchetti) {
+          function Installa-Pacchetti([string[]]$pacchetti) {
             for ($i = 1; $i -le 3; $i++) {
               choco install -y --no-progress @pacchetti
               if ($LASTEXITCODE -eq 0) { return }
@@ -45,8 +45,8 @@ jobs:
             }
             throw "choco install non riuscito: $pacchetti"
           }
-          Choco tesseract, ghostscript, qpdf
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { Choco innosetup }
+          Installa-Pacchetti tesseract, ghostscript, qpdf
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { Installa-Pacchetti innosetup }
       - name: Dipendenze Python e PyInstaller
         run: |
           python -m pip install --upgrade pip
