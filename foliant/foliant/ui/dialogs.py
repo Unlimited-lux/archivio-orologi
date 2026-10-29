@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import getpass
 import inspect
 from typing import Callable
@@ -188,7 +190,9 @@ def key_text(seq: QKeySequence) -> str:
     """Scorciatoia leggibile nella lingua dell'interfaccia (in italiano: Maiusc, Invio, Pag su…)."""
     text = seq.toString(QKeySequence.SequenceFormat.PortableText)
     if language() != "it":
-        return seq.toString(QKeySequence.SequenceFormat.NativeText)
+        # Qt chiama «Return» il tasto Invio: su Windows e Linux si scrive «Enter»
+        native = seq.toString(QKeySequence.SequenceFormat.NativeText)
+        return re.sub(r"\bReturn\b", "Enter", native)
     out = []
     for chord in text.split(", "):
         keys = chord.split("+")

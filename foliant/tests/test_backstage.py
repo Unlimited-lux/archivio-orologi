@@ -221,3 +221,34 @@ def test_header_fits_with_command_search(qtbot, settings):
     QApplication.processEvents()
     assert all(m.button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly for m in win.modes.values())
     win.close()
+
+
+def test_rejected_change_shows_a_notice(window, sample_pdf, monkeypatch):
+    """Documento bloccato: la modifica rifiutata che nessuno intercetta diventa un avviso."""
+    import sys
+    from foliant.core.errors import OperationCancelled
+    from foliant.ui import notify
+    shown = []
+    seen = []
+    monkeypatch.setattr(sys, "excepthook", lambda *a: seen.append(a[1]))
+    notify.install_cancel_hook()
+    notify.install_cancel_hook()                            # una volta sola
+    monkeypatch.setattr(window.ctx, "notify", lambda text, *a, **k: shown.append(text))
+    monkeypatch.setattr("foliant.ui.main_window.active_window", lambda: window)
+    sys.excepthook(OperationCancelled, OperationCancelled("Versione firmata: sola lettura."), None)
+    sys.excepthook(ValueError, ValueError("altro"), None)
+    assert shown == ["Versione firmata: sola lettura."]
+    assert len(seen) == 1 and isinstance(seen[0], ValueError)
+
+
+def test_home_button_has_accessible_name_and_enter_key_in_english(window):
+    from PySide6.QtGui import QKeySequence
+    from foliant.i18n import language, set_language
+    from foliant.ui.dialogs import key_text
+    assert window.home_button.accessibleName() == _("Home")
+    previous = language()
+    set_language("en")
+    try:
+        assert key_text(QKeySequence("Alt+Return")) == "Alt+Enter"
+    finally:
+        set_language(previous)

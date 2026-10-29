@@ -126,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     from .ui import privacy
     privacy.prepare()                   # dialoghi di file di Qt: niente cronologia del desktop
     app = QApplication(argv)
+    from .ui.notify import install_cancel_hook
+    install_cancel_hook()               # modifiche rifiutate (documento bloccato): avviso, non errore muto
     settings = QSettings()
     # riservatezza: nessun nome o percorso di file su disco tra un avvio e l'altro; si cancellano
     # quelli lasciati dalle versioni precedenti (solo dati di Foliant) e i dialoghi di file di

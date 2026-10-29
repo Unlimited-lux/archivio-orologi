@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
 
         self.home_button = QToolButton(self)
         self.home_button.setToolTip(_("Home"))
+        self.home_button.setAccessibleName(_("Home"))
         self.home_button.setIcon(app_icon())
         self.home_button.setIconSize(QSize(26, 26))
         self.home_button.setAutoRaise(True)

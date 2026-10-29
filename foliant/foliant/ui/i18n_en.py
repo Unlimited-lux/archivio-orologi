@@ -302,6 +302,7 @@ EN = {
     "Nessun comando in questa pagina.": "No commands on this page.",
     "Attiva": "On",
     "Disattivata": "Off",
+    "Operazione annullata.": "Operation cancelled.",
 }
 
 add_translations("en", EN)

@@ -170,3 +170,26 @@ class NotificationArea(QWidget):
         if ev.type() == QEvent.Type.LayoutRequest and self._items:
             self._place()            # un avviso ha cambiato dimensioni: la pila si adegua
         return super().event(ev)
+
+
+def install_cancel_hook() -> None:
+    """Una modifica rifiutata che nessuno intercetta (documento bloccato, es. una versione firmata;
+    guardia di un modulo) non resta muta: invece di un errore nel terminale il motivo compare come
+    avviso nella finestra attiva. Le altre eccezioni vanno al gestore di prima."""
+    import sys
+    from ..core.errors import OperationCancelled
+    previous = sys.excepthook
+    if getattr(previous, "foliant_cancel_hook", False):
+        return
+
+    def hook(kind, value, tb):
+        if isinstance(value, OperationCancelled):
+            from .main_window import active_window
+            window = active_window()
+            if window is not None:
+                window.ctx.notify(str(value) or _("Operazione annullata."))
+                return
+        previous(kind, value, tb)
+
+    hook.foliant_cancel_hook = True
+    sys.excepthook = hook
