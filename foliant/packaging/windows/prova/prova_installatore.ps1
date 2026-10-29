@@ -151,5 +151,6 @@ Disinstalla @('/RIMUOVIPREFERENZE=1')
 Verifica (-not (Test-Path $app)) 'cartella del programma rimossa'
 Verifica (-not (Test-Path 'HKCU:\Software\Foliant')) 'preferenze HKCU\Software\Foliant rimosse'
 Verifica (-not (Test-Path (Join-Path $env:APPDATA 'foliant'))) 'dati di Foliant in %APPDATA% rimossi'
+Verifica (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'foliant'))) 'dati di Foliant in %LOCALAPPDATA% rimossi'
 Verifica (-not (Test-Path $uninstKey)) 'voce di disinstallazione rimossa'
 Write-Host "`nProva dell'installatore: tutto ok"
