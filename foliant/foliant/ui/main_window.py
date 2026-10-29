@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QContextMenuEvent, QIntValidator, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QContextMenuEvent, QFontMetrics, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QAbstractScrollArea, QApplication, QButtonGroup, QComboBox, QFormLayout, QFrame,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox,
@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, lambda: self.statusBar().showMessage(
                     _("Alcuni moduli non sono stati caricati: {m}").format(m=", ".join(failed)), 10000))
         self.set_mode("leggi")
+        self._fit_mode_buttons()
         self._update_state()
         geometry = self.settings.value("window/geometry")
         if geometry is not None:
@@ -585,7 +586,14 @@ class MainWindow(QMainWindow):
         if not target.hasFocus():
             target.focusNextChild()
 
+    def set_reopen_handler(self, fn: Callable) -> None:
+        self._reopen_handler = fn
+
     def reopen_closed(self) -> None:
+        handler = getattr(self, "_reopen_handler", None)
+        if handler is not None:
+            handler()
+            return
         while self._closed_paths:
             path = self._closed_paths.pop()
             if os.path.exists(path):
@@ -690,12 +698,14 @@ class MainWindow(QMainWindow):
         if action in self.header.actions():
             return
         self.header.insertAction(self.act_undo, action)
+        self._fit_mode_buttons()
 
     def set_command_search(self, action: QAction) -> None:
         """Il pulsante «Cerca un comando» in alto a destra avvia `action` (la ricerca dei comandi)."""
         self.command_button.setDefaultAction(action)
         self.command_button.setText(_("Cerca un comando"))
         self._command_slot.setVisible(True)
+        self._fit_mode_buttons()
 
     # ================================================================== scheda File
     def _build_backstage(self) -> None:
@@ -1770,24 +1780,54 @@ class MainWindow(QMainWindow):
                 self.open_path(url.toLocalFile())
         event.acceptProposedAction()
 
-    def _mode_button_style(self) -> Qt.ToolButtonStyle:
-        # schede con il solo nome, come in Excel, se entrano nella barra in alto; altrimenti solo
-        # icone (il nome resta nel suggerimento)
-        modes = getattr(self, "modes", {})
+    def _header_layout(self) -> tuple[Qt.ToolButtonStyle, bool]:
+        """Come far entrare la barra in alto: schede con il nome (come in Excel) e «Cerca un comando»
+        con il testo se c'è spazio; poi la ricerca con la sola icona; infine anche le schede con la sola
+        icona (il nome resta nel suggerimento)."""
+        modes = list(getattr(self, "modes", {}).values())
+        text_only, icon_only = Qt.ToolButtonStyle.ToolButtonTextOnly, Qt.ToolButtonStyle.ToolButtonIconOnly
         if not modes:
-            return Qt.ToolButtonStyle.ToolButtonTextOnly
-        fm = self.fontMetrics()
-        need = sum(fm.horizontalAdvance(m.title) + 26 for m in modes.values()) + 24
-        others = self.header.sizeHint().width() - self._mode_bar.sizeHint().width()
-        return (Qt.ToolButtonStyle.ToolButtonTextOnly if self.width() - others >= need
-                else Qt.ToolButtonStyle.ToolButtonIconOnly)
+            return text_only, True
+        bold = self.font()
+        bold.setWeight(bold.Weight.DemiBold)
+        fm = QFontMetrics(bold)
+        tabs_text = sum(fm.horizontalAdvance(m.title) + 28 for m in modes)
+        tabs_icon = len(modes) * 44
+        fixed = fm.horizontalAdvance(self.file_button.text()) + 32 + 24 + 24 + 28   # File, margini, «»»
+        search_text = search_icon = 0
+        for act in self.header.actions():
+            widget = self.header.widgetForAction(act)
+            if widget is None or widget is self._mode_bar or not act.isVisible():
+                continue
+            if widget is self.command_button:
+                search_icon = 40
+                search_text = 40 + QFontMetrics(self.font()).horizontalAdvance(_("Cerca un comando")) + 12
+            else:
+                fixed += widget.sizeHint().width() + 4
+        width = self.width()
+        if width >= fixed + tabs_text + search_text:
+            return text_only, True
+        if width >= fixed + tabs_text + search_icon:
+            return text_only, False
+        return icon_only, False
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        style = self._mode_button_style()
+    def _mode_button_style(self) -> Qt.ToolButtonStyle:
+        return self._header_layout()[0]
+
+    def _fit_mode_buttons(self) -> None:
+        style, search_text = self._header_layout()
         for m in getattr(self, "modes", {}).values():
             if m.button.toolButtonStyle() != style:
                 m.button.setToolButtonStyle(style)
+        if hasattr(self, "command_button"):
+            want = (Qt.ToolButtonStyle.ToolButtonTextBesideIcon if search_text
+                    else Qt.ToolButtonStyle.ToolButtonIconOnly)
+            if self.command_button.toolButtonStyle() != want:
+                self.command_button.setToolButtonStyle(want)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_mode_buttons()
 
     def closeEvent(self, event) -> None:
         # le domande qui sotto fanno girare il ciclo degli eventi: intanto la finestra è «in chiusura»

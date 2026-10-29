@@ -76,8 +76,10 @@ class SessionController(QObject):
         # qui solo le voci di menu, senza scorciatoia (scorciatoie duplicate si annullano in Qt).
         self.act_next_tab = ctx.action(_("Scheda successiva"), "chevron-right", self.next_tab)
         self.act_prev_tab = ctx.action(_("Scheda precedente"), "chevron-left", self.previous_tab)
-        self.act_reopen = ctx.action(_("Riapri scheda chiusa"), "history", self.reopen_closed_tab,
-                                     requires_document=False)
+        # una sola «Riapri scheda chiusa» (Ctrl+Maiusc+T, File › Apri, Schede ▾): l'azione del nucleo,
+        # che chiama reopen_closed_tab e ripristina anche pagina, zoom e posizione della scheda
+        self.act_reopen = self.window.act_reopen
+        ctx.set_reopen_handler(self.reopen_closed_tab)
         self.act_close_others = ctx.action(_("Chiudi le altre schede"), "copy-x", lambda: self.close_other_tabs())
         self.act_close_right = ctx.action(_("Chiudi le schede a destra"), "arrow-right-to-line",
                                           lambda: self.close_tabs_to_right())

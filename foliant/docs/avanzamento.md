@@ -106,6 +106,28 @@ esterni, salvataggio con file aperti da altri programmi, posta, font) e `core/wi
 - Guida per l'utente: `foliant/docs/windows.md`. Il programma non è firmato digitalmente: al
   primo avvio Windows SmartScreen chiede conferma.
 
+### Menu in stile Excel (29/10 sera)
+
+Su richiesta del committente («il menu a tre lineette è troppo caotico, userei la disposizione tipo
+Excel») il menu ☰ (143 voci in 21 sezioni, 65 raggiungibili solo da lì) è stato sostituito:
+- **Scheda File** (prima scheda, F10 o Alt+F, Esc per tornare): pagina a tutto schermo con colonna a
+  sinistra — Nuovo, Apri, Informazioni (riepilogo del documento, proprietà, protezione, controllo,
+  versioni), Salva, Salva con nome, Salva una copia, Stampa, Condividi, Esporta, Gestisci file,
+  Chiudi, Opzioni (tema, lingua, preferenze, apertura dei documenti, sicurezza, Assistente IA),
+  Guida, Esci. Ogni voce ha descrizione e scorciatoia; le scelte dai menu partono a scheda chiusa.
+- **Gruppi con il nome sotto i pulsanti** in tutte le schede, come la barra multifunzione; quando la
+  finestra si stringe i pulsanti passano alla sola icona da destra, senza nascondere comandi.
+- **Nuova scheda Visualizza** (layout pagina, rotazione, miniature, righelli, griglia, temi di
+  lettura, lettura ad alta voce, presentazione, schede); Leggi tiene Strumenti, Zoom, Vai, Trova.
+- Le altre voci sono tornate nella scheda della loro funzione (es. Cifratura ▾ in Proteggi, Crea ID
+  autofirmato in Firma, Rimuovi livello OCR in OCR); niente doppioni creati solo per il menu.
+- Barra di accesso rapido: Apri, Salva, Stampa, Annulla, Ripeti; «Cerca un comando» (Ctrl+K) al
+  posto del ☰. Le scorciatoie non cambiano. Una sola «Riapri scheda chiusa» (ripristina pagina e zoom).
+- API per i moduli: `ctx.add_file_action`, `add_quick_access_action`, `set_command_search`,
+  `set_reopen_handler`, `Mode.add_group`, `add_action(group=, compact=)`, `add_menu_button`
+  (README). `add_menu_action` è superata. Proposta con prototipo e mappa delle voci pubblicata come
+  pagina privata per il committente.
+
 ### Problemi noti
 
 Stato del 28/10 sera, dopo la riservatezza e le correzioni dei moduli unite: suite completa verde,
@@ -199,3 +221,6 @@ video nei PDF (VIS-37), firma con smart card (SIG-23, implementazione conservata
   li avrebbero terminati, la ricerca degli strumenti esterni, i font, la posta, lo scanner, la
   sintesi vocale e due difetti già presenti su Linux (pannello IA troppo largo con DejaVu, misura
   della memoria nel test da 5.000 pagine); resi stabili tutti i test con soglie di tempo.
+- 29/10 19:15–21:30 — Menu ☰ sostituito dalla disposizione in stile Excel (scheda File, gruppi con
+  nome, scheda Visualizza): studio, prototipo, nucleo e adeguamento dei 12 moduli con sei agenti in
+  parallelo.

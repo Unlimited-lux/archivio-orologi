@@ -66,6 +66,8 @@ class ContextBar(ToolBar):
         self._titles: dict[int, str] = {}        # id(separatore che apre il gruppo), 0 = primo gruppo
         self._captions = False
         self._syncing = False
+        self._squeezed: dict[QToolButton, Qt.ToolButtonStyle] = {}   # pulsanti ridotti alla sola icona
+        self._fitting = False
 
     def set_group_title(self, opener: QAction | None, title: str) -> None:
         self._titles[id(opener) if opener is not None else 0] = title
@@ -131,6 +133,47 @@ class ContextBar(ToolBar):
         finally:
             self._syncing = False
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.fit()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.fit()
+
+    def fit(self) -> None:
+        """Come la barra multifunzione di Excel quando la finestra si stringe: se i pulsanti non
+        entrano, quelli con il nome passano alla sola icona, partendo da destra, finché la barra
+        entra; con più spazio tornano come prima."""
+        if self._fitting or not self.isVisible():
+            return
+        self._fitting = True
+        try:
+            for button, style in list(self._squeezed.items()):
+                try:
+                    button.setToolButtonStyle(style)
+                except RuntimeError:          # pulsante già distrutto
+                    pass
+            self._squeezed.clear()
+            if self.sizeHint().width() <= self.width():
+                return
+            buttons = []
+            for act in self.actions():
+                if act.isSeparator() or not act.isVisible():
+                    continue
+                widget = self.widgetForAction(act)
+                if isinstance(widget, QToolButton) and not widget.icon().isNull():
+                    buttons.append(widget)
+            for button in reversed(buttons):
+                if button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly:
+                    continue
+                self._squeezed[button] = button.toolButtonStyle()
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+                if self.sizeHint().width() <= self.width():
+                    break
+        finally:
+            self._fitting = False
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         if not self._captions:
@@ -187,6 +230,7 @@ class Mode(QObject):
         if isinstance(self.toolbar, ContextBar):
             self.toolbar.set_group_title(opener, title)
         self._groups[group_id or title] = opener
+        self._groups.setdefault(title, opener)          # anche per titolo, se l'id è diverso
 
     def has_group(self, group_id: str) -> bool:
         return group_id in self._groups
@@ -216,10 +260,15 @@ class Mode(QObject):
         else:
             self.toolbar.insertAction(before, action)
         _tab_focusable(self.toolbar, action)
-        if compact:
-            button = self.toolbar.widgetForAction(action)
-            if isinstance(button, QToolButton):
+        button = self.toolbar.widgetForAction(action)
+        if isinstance(button, QToolButton):
+            if compact:
                 button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            if action.menu() is not None:
+                # azione con menu: un clic apre il menu (la metà «pulsante» di MenuButtonPopup non fa nulla)
+                button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+                button.style().unpolish(button)
+                button.style().polish(button)
         return action
 
     def add_menu_button(self, text: str, icon_name: str, actions: list, group: str | None = None, *,
@@ -552,6 +601,11 @@ class Context(QObject):
     def set_command_search(self, action: QAction) -> None:
         """Il pulsante «Cerca un comando» in alto a destra (dove c'era il menu ☰) avvia `action`."""
         self._w.set_command_search(action)
+
+    def set_reopen_handler(self, fn: Callable[[], Any]) -> None:
+        """«Riapri scheda chiusa» (Ctrl+Maiusc+T, File › Apri) chiama `fn()` invece di riaprire solo
+        l'ultimo file chiuso (es. il viewer ripristina anche pagina, zoom e posizione della scheda)."""
+        self._w.set_reopen_handler(fn)
 
     def show_file_tab(self, page: str | None = None) -> None:
         """Apre la scheda File, eventualmente sulla pagina `page` (es. "informazioni")."""

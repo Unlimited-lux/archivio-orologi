@@ -300,6 +300,8 @@ EN = {
     "Indietro": "Back",
     "Torna al documento (Esc)": "Back to the document (Esc)",
     "Nessun comando in questa pagina.": "No commands on this page.",
+    "Attiva": "On",
+    "Disattivata": "Off",
 }
 
 add_translations("en", EN)

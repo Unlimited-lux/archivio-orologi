@@ -281,6 +281,10 @@ QToolButton[homeAction="true"] {{ border: 1px solid {h('border')}; border-radius
 QToolButton[homeAction="true"]:hover {{ border-color: {h('accent')}; }}
 QToolButton:focus {{ border: 2px solid {h('accent')}; padding: 3px 5px; }}
 QToolButton[popupMode="1"]:focus {{ padding-right: 19px; }}  /* conserva lo spazio della freccia del menu */
+QToolBar#contextbar QToolButton[popupMode="2"] {{ padding-right: 16px; }}
+QToolBar#contextbar QToolButton[popupMode="2"]::menu-indicator {{ image: url({arrow}); width: 10px; height: 10px;
+    subcontrol-origin: padding; subcontrol-position: center right; right: 3px; }}
+QToolBar#contextbar QToolButton[popupMode="2"]:focus {{ padding-right: 15px; }}
 QToolButton[modeButton="true"]:focus {{ padding: 4px 9px; }}
 QToolButton[modeButton="true"]:checked:focus {{ border-color: {h('accent_text')}; }}
 QToolButton#qt_toolbar_ext_button:focus {{ border: 2px solid {h('accent')}; }}

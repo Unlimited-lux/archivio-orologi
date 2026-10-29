@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Callable
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QIcon, QPainter
 from PySide6.QtWidgets import (
-    QAbstractButton, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
-    QStackedWidget, QStyle, QStyleOption, QToolButton, QVBoxLayout, QWidget,
+    QAbstractButton, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QScrollArea, QSizePolicy,
+    QStyle, QStyleOption, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..i18n import _
@@ -127,12 +127,20 @@ class Tile(QAbstractButton):
         self.key_label.setVisible(bool(keys))
         ic = act.icon()
         mode = QIcon.Mode.Normal if act.isEnabled() else QIcon.Mode.Disabled
-        self.icon_label.setPixmap((ic if not ic.isNull() else icon("circle")).pixmap(QSize(22, 22), mode))
+        if ic.isNull():                          # azione senza icona: un segno generico, per allineare
+            ic = icon("square-check" if act.isCheckable() else "chevron-right")
+        self.icon_label.setPixmap(ic.pixmap(QSize(22, 22), mode))
         self.setEnabled(act.isEnabled())
         self.setCheckable(act.isCheckable())
         if act.isCheckable():
             self.setChecked(act.isChecked())
-            self.state_label.setPixmap(icon("check" if act.isChecked() else "circle-dashed").pixmap(QSize(18, 18)))
+            # interruttore: acceso (colore dell'accento) o spento
+            from . import theme
+            on = act.isChecked()
+            switch = icon("toggle-right" if on else "toggle-left",
+                          color=theme.hex_color("accent" if on else "text_muted"))
+            self.state_label.setPixmap(switch.pixmap(QSize(20, 20)))
+
         elif act.menu() is not None:
             self.state_label.setPixmap(icon("chevron-down").pixmap(QSize(16, 16)))
         else:
@@ -140,7 +148,8 @@ class Tile(QAbstractButton):
         tip = act.toolTip()
         self.setToolTip(tip if tip and tip.replace("&", "") != text else "")
         self.setAccessibleName(text)
-        self.setAccessibleDescription(" ".join(t for t in (self._description, keys) if t))
+        state = (_("Attiva") if act.isChecked() else _("Disattivata")) if act.isCheckable() else ""
+        self.setAccessibleDescription(" ".join(t for t in (state, self._description, keys) if t))
 
     def sizeHint(self) -> QSize:
         return self.layout().sizeHint().expandedTo(QSize(220, 56))
@@ -369,8 +378,19 @@ class Backstage(QWidget):
             return
         menu = act.menu()
         if menu is not None:
-            menu.exec(tile.mapToGlobal(QPoint(0, tile.height())))
-            tile.sync()
+            # copia del menu: la voce scelta parte dopo la chiusura della scheda File (salvo le opzioni
+            # attivabili, che cambiano solo la spunta), così i dialoghi compaiono sul documento
+            links: dict[QAction, QAction] = {}
+            proxy = self._proxy_menu(menu, links, tile)
+            chosen = self._exec_menu(proxy, tile.mapToGlobal(QPoint(0, tile.height())))
+            source = links.get(chosen)
+            proxy.deleteLater()
+            if source is not None and source.isEnabled():
+                if not source.isCheckable():
+                    self.closeRequested.emit()
+                source.trigger()
+            if self.isVisible():
+                tile.sync()
             return
         if act.isCheckable():
             act.trigger()
@@ -378,6 +398,33 @@ class Backstage(QWidget):
             return
         self.closeRequested.emit()
         act.trigger()
+
+    def _exec_menu(self, menu: QMenu, pos: QPoint) -> QAction | None:
+        return menu.exec(pos)
+
+    def _proxy_menu(self, menu: QMenu, links: dict, parent: QWidget) -> QMenu:
+        """Copia di `menu` (sottomenu compresi) con azioni che non eseguono nulla: `links` collega
+        ogni copia all'azione originale."""
+        menu.aboutToShow.emit()                 # i menu che si riempiono all'apertura (es. le policy)
+        proxy = QMenu(menu.title(), parent)
+        for src in menu.actions():
+            if src.isSeparator():
+                proxy.addSeparator()
+            elif src.menu() is not None:
+                sub = self._proxy_menu(src.menu(), links, proxy)
+                sub.setTitle(src.text())
+                sub.setIcon(src.icon())
+                sub.setEnabled(src.isEnabled())
+                proxy.addMenu(sub)
+            elif src.isVisible():
+                copy = proxy.addAction(src.icon(), src.text())
+                copy.setEnabled(src.isEnabled())
+                copy.setCheckable(src.isCheckable())
+                copy.setChecked(src.isChecked())
+                copy.setShortcut(src.shortcut())
+                copy.setToolTip(src.toolTip())
+                links[copy] = src
+        return proxy
 
     def refresh(self) -> None:
         for tile in self.tiles:

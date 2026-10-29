@@ -159,3 +159,65 @@ def test_command_search_button(window):
     window.ctx.show_file_tab("guida")
     assert window.backstage_visible() and window.backstage.current == "guida"
     window.hide_backstage()
+
+
+def test_menu_entries_run_after_the_file_tab_closes(window, monkeypatch):
+    from PySide6.QtWidgets import QMenu
+    ctx = window.ctx
+    holder = ctx.action("Con menu", "star", None, requires_document=False)
+    menu = QMenu(window)
+    run = menu.addAction("Esegui")
+    toggle = menu.addAction("Opzione")
+    toggle.setCheckable(True)
+    holder.setMenu(menu)
+    ctx.add_file_action(holder, "opzioni", "Prova")
+    seen = []
+    run.triggered.connect(lambda: seen.append(window.backstage_visible()))
+    window.show_backstage("opzioni")
+    tile = next(t for t in window.backstage.tiles if t.action is holder)
+    picks = iter(["Opzione", "Esegui"])
+
+    def fake_exec(proxy, _pos):
+        wanted = next(picks)
+        return next(a for a in proxy.actions() if a.text() == wanted)
+    monkeypatch.setattr(window.backstage, "_exec_menu", fake_exec)
+    tile.click()                                            # opzione attivabile: la scheda File resta
+    assert toggle.isChecked() and window.backstage_visible()
+    tile.click()                                            # comando: prima si chiude la scheda File
+    assert seen == [False] and not window.backstage_visible()
+
+
+def test_group_lookup_by_title_and_menu_actions_open_on_click(window):
+    from PySide6.QtWidgets import QMenu, QToolButton
+    mode = window.ctx.mode("visualizza")
+    act = QAction("Con menu nella barra", window)
+    act.setMenu(QMenu(window))
+    mode.add_action(act, group=_("Mostra"))                 # per titolo, anche se l'id è "mostra"
+    assert mode.toolbar.group_title(act) == _("Mostra")
+    button = mode.toolbar.widgetForAction(act)
+    assert isinstance(button, QToolButton)
+    assert button.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
+
+
+def test_reopen_handler_replaces_core_reopen(window):
+    calls = []
+    window.ctx.set_reopen_handler(lambda: calls.append(1))
+    window.act_reopen.trigger()
+    assert calls == [1]
+
+
+def test_header_fits_with_command_search(qtbot, settings):
+    from PySide6.QtWidgets import QToolButton
+    from foliant.ui.main_window import MainWindow
+    win = MainWindow(settings)
+    qtbot.addWidget(win)
+    win.resize(1366, 800)
+    win.show()
+    qtbot.waitExposed(win)
+    ext = win.header.findChild(QToolButton, "qt_toolbar_ext_button")
+    assert ext is None or not ext.isVisible()               # niente finisce nel «»» della barra in alto
+    assert win.command_button.isVisible()
+    win.resize(900, 700)
+    QApplication.processEvents()
+    assert all(m.button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly for m in win.modes.values())
+    win.close()
