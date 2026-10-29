@@ -53,11 +53,13 @@ jobs:
         run: |
           choco install -y --no-progress tesseract ghostscript qpdf
           $tessdata = "C:\Program Files\Tesseract-OCR\tessdata"
-          # stessi modelli dei pacchetti tesseract-ocr-ita/eng/osd di Ubuntu (tessdata «standard»)
-          foreach ($lang in "ita","eng","osd") {
-            Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata/raw/main/$lang.traineddata" -OutFile "$tessdata\$lang.traineddata"
+          # stessi modelli dei pacchetti di Ubuntu: tesseract-ocr-ita/eng da tessdata_fast
+          # (ita 2,7 MB, eng 4,1 MB), tesseract-ocr-osd da tessdata (10,5 MB)
+          foreach ($lang in "ita","eng") {
+            Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata" -OutFile "$tessdata\$lang.traineddata"
           }
-          Get-ChildItem $tessdata -Filter *.traineddata | Select-Object Name
+          Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata/raw/main/osd.traineddata" -OutFile "$tessdata\osd.traineddata"
+          Get-ChildItem $tessdata -Filter *.traineddata | Select-Object Name, Length
       - name: Font dei test (DejaVu e Liberation, come in /usr/share/fonts di Ubuntu)
         run: |
           $fonts = Join-Path $env:RUNNER_TEMP "fonts"
