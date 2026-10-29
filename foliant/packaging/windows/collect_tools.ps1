@@ -60,7 +60,10 @@ else { Fetch 'https://www.gnu.org/licenses/agpl-3.0.txt' "$Licenze\Ghostscript-A
 & "$gs\bin\gswin64c.exe" --version
 
 # --- qpdf
-$qpdfSrc = First-Dir @("$env:ProgramFiles\qpdf*", "${env:ProgramFiles(x86)}\qpdf*")
+$qpdfExe = Get-ChildItem "$env:ProgramFiles\qpdf*", "${env:ProgramFiles(x86)}\qpdf*", "$env:ChocolateyInstall\lib\qpdf" `
+  -Recurse -Filter qpdf.exe -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -eq 'bin' } | Select-Object -First 1
+if (-not $qpdfExe) { throw "qpdf.exe non trovato (Program Files o Chocolatey)" }
+$qpdfSrc = $qpdfExe.Directory.Parent.FullName
 $qpdf = Join-Path $Destinazione 'qpdf'
 New-Item -ItemType Directory -Force -Path $qpdf | Out-Null
 Copy-Item "$qpdfSrc\bin" -Destination $qpdf -Recurse

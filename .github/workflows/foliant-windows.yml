@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 150
     # una suite in corso arriva sempre in fondo; resta in coda solo la più recente (per lavoro)
     concurrency:
-      group: foliant-tests-windows-${{ matrix.python }}-${{ github.ref }}
+      group: foliant-tests-windows-${{ matrix.python }}-${{ github.ref }}-${{ inputs.ref }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
@@ -66,9 +66,10 @@ jobs:
           Invoke-WebRequest "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip" -OutFile "$env:RUNNER_TEMP\scarico\dejavu.zip"
           Expand-Archive "$env:RUNNER_TEMP\scarico\dejavu.zip" "$env:RUNNER_TEMP\scarico\dejavu"
           Get-ChildItem "$env:RUNNER_TEMP\scarico\dejavu" -Recurse -Filter *.ttf | Copy-Item -Destination "$fonts\truetype\dejavu"
-          Invoke-WebRequest "https://github.com/liberationfonts/liberation-fonts/releases/download/2.1.5/liberation-fonts-ttf-2.1.5.tar.gz" -OutFile "$env:RUNNER_TEMP\scarico\liberation.tar.gz"
-          tar -xzf "$env:RUNNER_TEMP\scarico\liberation.tar.gz" -C "$env:RUNNER_TEMP\scarico"
-          Get-ChildItem "$env:RUNNER_TEMP\scarico" -Recurse -Filter Liberation*.ttf | Copy-Item -Destination "$fonts\truetype\liberation"
+          # Liberation 2.1.5 come in Ubuntu (pacchetto fonts-liberation)
+          Invoke-WebRequest "http://archive.ubuntu.com/ubuntu/pool/main/f/fonts-liberation/fonts-liberation_2.1.5-3_all.deb" -OutFile "$env:RUNNER_TEMP\scarico\liberation.deb"
+          python -m pip install --quiet zstandard
+          python ../.github/workflows/deb_fonts.py "$env:RUNNER_TEMP\scarico\liberation.deb" "$fonts"
           "FOLIANT_TEST_FONTS=$fonts" >> $env:GITHUB_ENV
           # gli stessi font anche per Foliant (come se fossero installati, come su Ubuntu)
           "FOLIANT_FONT_DIRS=$fonts" >> $env:GITHUB_ENV
