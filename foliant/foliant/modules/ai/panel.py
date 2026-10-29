@@ -335,7 +335,9 @@ class AIPanel(QWidget):
         w = QWidget()
         wl = QVBoxLayout(w)
         wl.setContentsMargins(0, 0, 0, 0)
-        r = QHBoxLayout()
+        # pulsanti uno sotto l'altro: affiancati superano la larghezza del pannello con font più larghi
+        r = QVBoxLayout()
+        r.setSpacing(4)
         self.image_action = QComboBox()
         for k, t in IMAGE_ACTIONS:
             self.image_action.addItem(_(t), k)
@@ -346,8 +348,8 @@ class AIPanel(QWidget):
         bind_icon(self.ext_btn, "image-plus")
         self.ext_btn.clicked.connect(self.choose_external_image)
         wl.addWidget(self.image_action)
-        r.addWidget(self.area_btn, 1)
-        r.addWidget(self.ext_btn, 1)
+        r.addWidget(self.area_btn)
+        r.addWidget(self.ext_btn)
         wl.addLayout(r)
         self.thumb = QLabel()
         self.thumb.setVisible(False)

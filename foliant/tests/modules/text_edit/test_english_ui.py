@@ -67,14 +67,19 @@ def texts_of(widget: QWidget) -> list[tuple[str, str]]:
     return [(k, t) for k, t in out if t]
 
 
+def _font_families() -> set[str]:
+    from PySide6.QtGui import QFontDatabase
+    return set(QFontDatabase.families())
+
+
 def problems(items: list[tuple[str, str]]) -> list[tuple[str, str, list[str]]]:
     out = []
     for kind, text in items:
         # i percorsi dei file non sono testi dell'interfaccia
         text = re.sub(r"(?:[A-Za-z]:)?[/\\][^\s]+", "", text)
         bad = italian_words(text)
-        # nomi di font e campioni (es. «Liberation Serif») non sono testi dell'interfaccia
-        if bad:
+        # nomi di font e campioni (es. «Liberation Serif», «Microsoft Tai Le») non sono testi dell'interfaccia
+        if bad and text.strip() not in _font_families():
             out.append((kind, text, bad))
     return out
 

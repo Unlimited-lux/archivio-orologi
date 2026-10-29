@@ -1119,9 +1119,11 @@ def test_txt_5000_pages_memory(tmp_path):
         "    p.insert_text((72, 100), f'Pagina {i + 1} listino', fontsize=12)\n"
         "    p.insert_text((72, 130), 'Referenza 1234 acciaio automatico 5.400 euro', fontsize=10)\n"
         "data = doc.tobytes(); doc.close()\n"
-        "base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss\n"
         "out = convert_pdf(data, sys.argv[1], 'txt')[0]\n"
-        "print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)\n"
+        # ru_maxrss su Linux conserva il picco del processo padre (pytest) attraverso fork/exec:
+        # VmHWM misura solo questo processo
+        "hwm = [l for l in open('/proc/self/status') if l.startswith('VmHWM')]\n"
+        "print(int(hwm[0].split()[1]) // 1024 if hwm else resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)\n"
         "print(open(out, encoding='utf-8').read().count('\\f'))\n")
     from pathlib import Path
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))

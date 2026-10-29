@@ -53,22 +53,21 @@ jobs:
         run: |
           choco install -y --no-progress tesseract ghostscript qpdf
           $tessdata = "C:\Program Files\Tesseract-OCR\tessdata"
+          # stessi modelli dei pacchetti tesseract-ocr-ita/eng/osd di Ubuntu (tessdata «standard»)
           foreach ($lang in "ita","eng","osd") {
-            if (-not (Test-Path "$tessdata\$lang.traineddata")) {
-              Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata" -OutFile "$tessdata\$lang.traineddata"
-            }
+            Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata/raw/main/$lang.traineddata" -OutFile "$tessdata\$lang.traineddata"
           }
           Get-ChildItem $tessdata -Filter *.traineddata | Select-Object Name
       - name: Font dei test (DejaVu e Liberation, come in /usr/share/fonts di Ubuntu)
         run: |
           $fonts = Join-Path $env:RUNNER_TEMP "fonts"
-          New-Item -ItemType Directory -Force "$fonts\truetype\dejavu", "$fonts\truetype\liberation", "$env:RUNNER_TEMP\scarico" | Out-Null
-          Invoke-WebRequest "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip" -OutFile "$env:RUNNER_TEMP\scarico\dejavu.zip"
-          Expand-Archive "$env:RUNNER_TEMP\scarico\dejavu.zip" "$env:RUNNER_TEMP\scarico\dejavu"
-          Get-ChildItem "$env:RUNNER_TEMP\scarico\dejavu" -Recurse -Filter *.ttf | Copy-Item -Destination "$fonts\truetype\dejavu"
+          New-Item -ItemType Directory -Force "$fonts", "$env:RUNNER_TEMP\scarico" | Out-Null
+          # DejaVu 2.37 come in Ubuntu (pacchetto fonts-dejavu-core: senza le varianti oblique della Sans)
+          Invoke-WebRequest "http://archive.ubuntu.com/ubuntu/pool/main/f/fonts-dejavu/fonts-dejavu-core_2.37-8_all.deb" -OutFile "$env:RUNNER_TEMP\scarico\dejavu.deb"
           # Liberation 2.1.5 come in Ubuntu (pacchetto fonts-liberation)
           Invoke-WebRequest "http://archive.ubuntu.com/ubuntu/pool/main/f/fonts-liberation/fonts-liberation_2.1.5-3_all.deb" -OutFile "$env:RUNNER_TEMP\scarico\liberation.deb"
           python -m pip install --quiet zstandard
+          python ../.github/workflows/deb_fonts.py "$env:RUNNER_TEMP\scarico\dejavu.deb" "$fonts"
           python ../.github/workflows/deb_fonts.py "$env:RUNNER_TEMP\scarico\liberation.deb" "$fonts"
           "FOLIANT_TEST_FONTS=$fonts" >> $env:GITHUB_ENV
           # gli stessi font anche per Foliant (come se fossero installati, come su Ubuntu)

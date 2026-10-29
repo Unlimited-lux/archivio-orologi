@@ -264,7 +264,12 @@ def test_italic_simulated_when_missing(tmp_path):
     with d.lock:
         block = blocks_of(d.pdf)[0]
         choice = FontResolver(d.pdf).primary(block.style.with_(italic=True, font_xref=0))
-    assert choice.simulate_italic
+    from foliant.modules.text_edit import fonts as _fonts
+    real, exact = _fonts.find_family("DejaVu Sans", False, True)
+    if exact and real.italic:       # DejaVu Sans Oblique installato (es. fonts-dejavu-extra): niente simulazione
+        assert not choice.simulate_italic and "Oblique" in choice.name
+    else:
+        assert choice.simulate_italic
     with d.change("Corsivo") as pdf:
         engine.restyle_block(pdf, 0, block, italic=True)
     assert "Testo di prova" in d.page_text(0)

@@ -736,6 +736,14 @@ def nbsp_safe_font(path: str) -> str:
         return path
 
 
+def extra_font_paths(paths) -> tuple[str, ...]:
+    """Gli stessi font di `paths` («/usr/share/fonts/…») cercati nelle cartelle di
+    FOLIANT_FONT_DIRS con la stessa struttura; tupla vuota se non ce ne sono."""
+    dirs = [d for d in os.environ.get("FOLIANT_FONT_DIRS", "").split(os.pathsep) if d]
+    prefix = "/usr/share/fonts/"
+    return tuple(os.path.join(d, *p[len(prefix):].split("/")) for p in paths if p.startswith(prefix) for d in dirs)
+
+
 def windows_fonts(key: str) -> tuple[str, ...]:
     """Su Windows i file dei font di sistema per `key` («sans», «serif-bold-italic», «unicode»…),
     da aggiungere in coda ai font Linux; tupla vuota altrove."""
@@ -811,17 +819,36 @@ def _family_of(label: str) -> str:
     return " ".join(words)
 
 
-def installed_fonts() -> list[tuple[str, str, str]]:
-    """Windows: font installati (registro, più FOLIANT_FONT_DIRS) come (file, famiglia, stile),
-    senza aprire i file. Altrove lista vuota (su Linux si usa fontconfig)."""
+@lru_cache(maxsize=None)
+def font_names(path: str) -> tuple[str, str, str] | None:
+    """(famiglia, stile, nome PostScript) dalla tabella «name» del font (solo quella viene letta),
+    o None se il file non si legge."""
+    try:
+        from fontTools.ttLib import TTFont
+        with TTFont(path, lazy=True) as font:
+            names = font["name"]
+            family = names.getDebugName(16) or names.getDebugName(1) or ""
+            style = names.getDebugName(17) or names.getDebugName(2) or "Regular"
+            psname = names.getDebugName(6) or (family + style).replace(" ", "")
+    except Exception:
+        return None
+    return (family, style, psname) if family else None
+
+
+def installed_fonts() -> list[tuple[str, str, str, str]]:
+    """Windows: font installati (registro, più FOLIANT_FONT_DIRS) come (file, famiglia, stile,
+    nome PostScript) letti dalla tabella dei nomi di ogni font. Altrove lista vuota (su Linux si
+    usa fontconfig)."""
     if not IS_WINDOWS:
         return []
-    out = []
-    for label, path in _windows_font_registry():
-        if not path.lower().endswith((".ttf", ".otf")):
+    out, seen = [], set()
+    for _label, path in _windows_font_registry():
+        if not path.lower().endswith((".ttf", ".otf")) or path.lower() in seen:
             continue
-        family = _family_of(label)
-        out.append((path, family, label[len(family):].strip() or "Regular"))
+        seen.add(path.lower())
+        names = font_names(path)
+        if names:
+            out.append((path, *names))
     return out
 
 
