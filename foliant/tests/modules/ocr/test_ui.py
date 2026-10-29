@@ -12,6 +12,8 @@ from PySide6.QtWidgets import QDialog
 
 from foliant.modules.ocr import detect, dialogs, engine, ui
 
+from tests.conftest import perf_limit
+
 from .conftest import FRASI, image_pdf, scan_image
 
 
@@ -1231,7 +1233,7 @@ def test_analisi_all_apertura_limitata_e_a_passi_brevi(window, qtbot, tmp_path, 
     qtbot.waitUntil(lambda: not ctl.state(view).order, timeout=5000)
     st = ctl.state(view)
     assert len(st.infos) <= ui.ANALYSIS_PAGES and st.deferred
-    assert steps and max(steps) < 0.02, max(steps)
+    assert steps and max(steps) < perf_limit(0.02), max(steps)
     assert ctl.page_info(view, 400).category == detect.TEXT        # su richiesta
     ctl.complete_analysis(view)
     assert len(st.infos) == 500 and st.complete
