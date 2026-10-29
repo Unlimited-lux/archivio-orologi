@@ -428,4 +428,9 @@ EN = {
     "Nuova dalla vista corrente…": "New from current view…",
     "Nome della nuova destinazione:": "Name of the new destination:",
     "Il nome della destinazione è già usato: scegline un altro.": "The destination name is already used: choose another one.",
+    # gruppi della barra Modifica e voce della scheda File › Esporta
+    "Inserisci": "Insert",
+    "Esporta": "Export",
+    "Salva le immagini del PDF in una cartella": "Save the images of the PDF to a folder",
+    "Altri comandi per immagini e oggetti": "More commands for images and objects",
 }

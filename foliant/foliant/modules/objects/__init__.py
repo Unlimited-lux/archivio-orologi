@@ -63,16 +63,22 @@ def register(ctx: Context) -> None:
         act = ctx.action(text, icon_name, None, checkable=True, tooltip=tip)
         act.triggered.connect(lambda checked=False, t=tool: _toggle_tool(ctx, t, checked))
         acts[key] = act
-        mode.add_action(act)
         return act
 
-    tool_action("objects", _("Oggetti"), "mouse-pointer-2", c.object_tool,
-                _("Seleziona e modifica immagini e oggetti"))
+    objects_tool = tool_action("objects", _("Oggetti"), "mouse-pointer-2", c.object_tool,
+                               _("Seleziona e modifica immagini e oggetti"))
     a = ctx.action(_("Aggiungi immagine"), "image-plus", lambda: c.ask_insert_image(ctx.current_view()))
+    a.setIconText(_("Immagine"))                    # «Inserisci › Immagine», come in Excel
     acts["insert"] = a
-    mode.add_action(a)
-    tool_action("links", _("Collegamento"), "link", c.link_tool, _("Crea e modifica collegamenti"))
-    mode.add_separator()
+    links_tool = tool_action("links", _("Collegamento"), "link", c.link_tool, _("Crea e modifica collegamenti"))
+    # Gruppi con nome della scheda Modifica (condivisa con il modulo del testo, che apre «Testo» e
+    # «Inserisci»): Immagine e Collegamento vanno in «Inserisci», il resto nel gruppo «Oggetti».
+    if not mode.has_group("inserisci"):
+        mode.add_group(_("Inserisci"), "inserisci")
+    mode.add_action(a, group="inserisci")
+    mode.add_action(links_tool, group="inserisci")
+    mode.add_group(_("Oggetti"), "oggetti")
+    mode.add_action(objects_tool, group="oggetti")
 
     def sel_action(key, text, icon_name, fn, shortcut=None):
         act = ctx.action(text, icon_name, lambda: fn(ctx.current_view()))
@@ -133,11 +139,7 @@ def register(ctx: Context) -> None:
                                       lambda: c.delete_links_dialog(ctx.current_view()))
     from .panel import ObjectPanel, add_opacity_widget
     for key in ("rotate_ccw", "rotate_cw", "flip_h", "flip_v", "crop", "replace", "delete"):
-        b = QToolButton()
-        b.setDefaultAction(acts[key])
-        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        b.setAutoRaise(True)
-        mode.add_widget(b)
+        mode.add_action(acts[key], group="oggetti", compact=True)     # voci secondarie: solo l'icona
     # menu «Disponi»
     arrange = QMenu(ctx.window)
     for key in ("front", "forward", "backward", "back"):
@@ -175,7 +177,7 @@ def register(ctx: Context) -> None:
     btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     btn.setMenu(arrange)
     bind_icon(btn, "layers")
-    mode.add_widget(btn)
+    mode.add_widget(btn, group="oggetti")
     st["arrange_button"] = btn
     add_opacity_widget(ctx, c, mode)
     more = QMenu(ctx.window)
@@ -258,18 +260,21 @@ def register(ctx: Context) -> None:
     acts["optimize_doc"] = ctx.action(_("Ottimizza le immagini del documento…"), "shrink",
                                       lambda: c.optimize_document(ctx.current_view()))
     more.addAction(acts["optimize_doc"])
-    ctx.add_menu_action(acts["extract_all"], "Strumenti")
+    # anche nella scheda File › Esporta (la stessa azione)
+    ctx.add_file_action(acts["extract_all"], "esporta", _("Esporta"), _("Salva le immagini del PDF in una cartella"))
     more.addSeparator()
     more.addAction(acts["detect_urls"])
     more.addAction(acts["delete_links"])
     btn2 = QToolButton()
     btn2.setText(_("Altro"))
-    btn2.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    btn2.setToolTip(_("Altri comandi per immagini e oggetti"))
+    btn2.setAccessibleName(_("Altro"))
+    btn2.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)    # «…»: la barra entra a 1366 px
     btn2.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     btn2.setMenu(more)
     bind_icon(btn2, "ellipsis")
-    mode.add_widget(btn2)
-    ctx.add_menu_action(acts["detect_urls"], "Strumenti")
+    mode.add_widget(btn2, group="oggetti")
+    st["more_button"] = btn2
     ctx.add_view_menu_provider(lambda view, pe, menu: _context_menu(ctx, c, view, pe, menu))
     from .linkpanel import LinkCheckPanel
     lpanel = LinkCheckPanel(ctx)

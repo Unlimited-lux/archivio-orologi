@@ -318,5 +318,5 @@ def add_opacity_widget(ctx, controller, mode) -> None:
             value.setText(f"{slider.value()}%" if len(alphas) <= 1 else _("misto"))
     controller.selectionChanged.connect(sync)
     sync()
-    mode.add_widget(box)
+    mode.add_widget(box, group="oggetti" if mode.has_group("oggetti") else None)
     controller._opacity_slider = slider

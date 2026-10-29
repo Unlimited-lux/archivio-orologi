@@ -68,8 +68,6 @@ def register(ctx: Context) -> None:
                          tooltip=_("Aggiungi una casella di testo: clic per una riga, trascina per un riquadro"))
     act_find = ctx.action(_("Trova e sostituisci"), "replace", lambda: open_find_dialog(ctx),
                           shortcut="Ctrl+H", mode="modifica")
-    mode.add_action(act_edit)
-    mode.add_action(act_add)
     act_fonts = ctx.action(_("Font del documento"), "type-outline", lambda: open_fonts_dialog(ctx))
     def open_spell_dialog() -> None:
         view = ctx.current_view()
@@ -92,14 +90,19 @@ def register(ctx: Context) -> None:
 
     act_spell = ctx.action(_("Controlla ortografia del documento"), "spell-check", open_spell_dialog,
                            shortcut="F7", mode="modifica")
+    # Gruppi con nome, come nella barra multifunzione di Excel. La scheda è condivisa con il modulo
+    # degli oggetti, che aggiunge Immagine e Collegamento a «Inserisci» e poi il gruppo «Oggetti».
+    mode.add_group(_("Testo"), "testo")
+    mode.add_action(act_edit)
+    act_find.setIconText(_("Sostituisci"))           # come Ctrl+H in Word; «Trova» è in Leggi
     mode.add_action(act_find)
-    mode.add_action(act_spell)
-    mode.add_action(act_fonts)
-    ctx.add_menu_action(act_spell, _("Modifica"))
-    mode.add_separator()
+    mode.add_action(act_spell, compact=True)        # nome completo e F7 nel suggerimento
+    mode.add_action(act_fonts, compact=True)
+    mode.add_group(_("Inserisci"), "inserisci")
+    act_add.setIconText(_("Testo"))                 # «Inserisci › Testo», come in Excel
+    mode.add_action(act_add)
     ctrl.actions = {"edit": act_edit, "add": act_add, "find": act_find, "fonts": act_fonts,
                     "spell": act_spell}
-    ctx.add_menu_action(act_find, _("Modifica"))
 
     def sync_actions(*_a) -> None:
         view = ctx.current_view()

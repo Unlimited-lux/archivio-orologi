@@ -184,4 +184,7 @@ EN: dict[str, str] = {
     "Contenuto condiviso": "Shared content",
     "Questo testo fa parte di un contenuto usato anche da {n} altre pagine.\n\nApplicare la modifica a tutte le pagine? (No: solo questa pagina)":
         "This text is part of content also used by {n} other pages.\n\nApply the change to all pages? (No: this page only)",
+    # gruppi della barra Modifica ed etichette corte dei pulsanti
+    "Inserisci": "Insert",
+    "Sostituisci": "Replace",
 }

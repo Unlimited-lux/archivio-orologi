@@ -71,7 +71,7 @@ elenco commenti con risposte e stato, maniglie di selezione e vertici).
   test_placement.py::test_reread_rotated_crop_larger_than_media.
 - Prestazioni: ridisegno, informazioni e hit test lineari (test_performance.py: 2000 annotazioni, ridisegno < 300 ms).
 - Interfaccia inglese (NFR-25): test_english_ui.py costruisce la finestra in italiano e in inglese e confronta
-  i testi di barra, menu, pannelli, mini barra, menu contestuale, menu principale e dialoghi, e i testi scritti
+  i testi di barra (con i nomi dei gruppi), menu, pannelli, mini barra, menu contestuale, scheda File e dialoghi, e i testi scritti
   nei documenti (soggetto, stato, timbri, riepiloghi TXT/CSV/HTML/PDF, CSV delle misure), che seguono la lingua
   dell'interfaccia. I modelli dei timbri dinamici accettano anche i segnaposto inglesi
   ({author} {name} {date} {time} {file} {page} {counter}).
@@ -80,3 +80,8 @@ elenco commenti con risposte e stato, maniglie di selezione e vertici).
   cinque riepiloghi e salvataggio entro limiti larghi. Esportazioni, riepiloghi e lettura dei file da
   importare passano da `ctx.run_task`; durante importazione ed esportazione le matrici di `placement`
   sono calcolate una volta per pagina (importazione da 2,1 a 1,4 s su questo documento).
+- Barra in stile Excel (test_ribbon.py): gruppi con nome Selezione | Testo (Evidenzia, Sottolinea, Barra,
+  Ondulato) | Note (Nota, Casella di testo, Richiamo ▾) | Disegno (Forme, Matita, Gomma) | Inserisci (Timbro,
+  Allega file, Misura) | Gestisci (Commenti ▾). «Esporta commenti» è anche in File › Esporta (gruppo «Esporta»):
+  una voce con il menu XFDF/FDF fatto delle stesse azioni del menu «Commenti ▾»; Importa e Riepilogo restano
+  solo in «Commenti ▾». Il modulo non usa più il menu ☰ (`add_menu_action`).
