@@ -9,9 +9,9 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any, Callable
 
-from PySide6.QtCore import QEvent, QObject, QSettings, Qt, Signal
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QToolBar, QToolButton, QWidget, QWidgetAction
+from PySide6.QtCore import QEvent, QObject, QRect, QSettings, Qt, Signal
+from PySide6.QtGui import QAction, QFontMetrics, QKeySequence, QPainter
+from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QToolBar, QToolButton, QWidget, QWidgetAction
 
 from ..core.document import Document
 from ..i18n import _
@@ -52,6 +52,114 @@ class ToolBar(QToolBar):
             _tab_focusable(self, event.action())
 
 
+class ContextBar(ToolBar):
+    """Barra contestuale di una modalità, divisa in gruppi come la barra multifunzione di Excel.
+
+    I gruppi sono separati dai separatori; quelli aperti con `Mode.add_group(nome)` hanno il nome
+    scritto sotto i pulsanti. Il separatore di un gruppo vuoto (o con tutte le voci nascoste) sparisce.
+    """
+
+    CAPTION_GAP = 2
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self._titles: dict[int, str] = {}        # id(separatore che apre il gruppo), 0 = primo gruppo
+        self._captions = False
+        self._syncing = False
+
+    def set_group_title(self, opener: QAction | None, title: str) -> None:
+        self._titles[id(opener) if opener is not None else 0] = title
+        if not self._captions:
+            self._captions = True
+            m = self.contentsMargins()
+            self.setContentsMargins(m.left(), m.top(), m.right(), m.bottom() + self.caption_height())
+        self.update()
+
+    def caption_height(self) -> int:
+        return QFontMetrics(self._caption_font()).height() + self.CAPTION_GAP
+
+    def _caption_font(self):
+        font = self.font()
+        if font.pointSizeF() > 0:
+            font.setPointSizeF(max(7.0, font.pointSizeF() * 0.85))
+        else:
+            font.setPixelSize(max(9, int(font.pixelSize() * 0.85)))
+        return font
+
+    def groups(self) -> list[tuple[str, list[QAction]]]:
+        """(nome, azioni) di ogni gruppo nell'ordine della barra; nome vuoto per i gruppi senza nome."""
+        out: list[tuple[str, list[QAction]]] = [(self._titles.get(0, ""), [])]
+        for act in self.actions():
+            if act.isSeparator():
+                out.append((self._titles.get(id(act), ""), []))
+            else:
+                out[-1][1].append(act)
+        return out
+
+    def group_title(self, action: QAction) -> str:
+        """Nome del gruppo che contiene `action` ("" se senza nome o assente)."""
+        for title, acts in self.groups():
+            if action in acts:
+                return title
+        return ""
+
+    def actionEvent(self, event) -> None:
+        super().actionEvent(event)
+        if event.type() in (QEvent.Type.ActionAdded, QEvent.Type.ActionRemoved, QEvent.Type.ActionChanged):
+            self._sync_separators()
+
+    def _sync_separators(self) -> None:
+        """Nasconde i separatori dei gruppi senza voci visibili (niente doppie righe vuote)."""
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            acts = self.actions()
+            seen_visible = False
+            for i, act in enumerate(acts):
+                if not act.isSeparator():
+                    seen_visible = seen_visible or act.isVisible()
+                    continue
+                following = []
+                for nxt in acts[i + 1:]:
+                    if nxt.isSeparator():
+                        break
+                    following.append(nxt)
+                want = seen_visible and any(a.isVisible() for a in following)
+                if act.isVisible() != want:
+                    act.setVisible(want)
+        finally:
+            self._syncing = False
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._captions:
+            return
+        from . import theme
+        p = QPainter(self)
+        font = self._caption_font()
+        p.setFont(font)
+        p.setPen(theme.color("text_muted"))
+        fm = QFontMetrics(font)
+        h = self.caption_height()
+        top = self.height() - h
+        for title, acts in self.groups():
+            if not title:
+                continue
+            rects = []
+            for a in acts:
+                w = self.widgetForAction(a)
+                if w is not None and w.isVisible() and a.isVisible():
+                    rects.append(w.geometry())
+            if not rects:
+                continue
+            left = min(r.left() for r in rects)
+            right = max(r.right() for r in rects)
+            box = QRect(left - 4, top, right - left + 8, h)
+            p.drawText(box, int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop),
+                       fm.elidedText(title, Qt.TextElideMode.ElideRight, box.width()))
+
+
 class Mode(QObject):
     """Una modalità della barra in alto (Leggi, Commenta, Modifica, …)."""
 
@@ -69,11 +177,79 @@ class Mode(QObject):
         self.button = button
         self._window = window
         self.default_tool: Tool | Callable | None = None
+        self._groups: dict[str, QAction | None] = {}     # id del gruppo → separatore che lo apre
 
-    def add_action(self, action: QAction) -> QAction:
-        self.toolbar.addAction(action)
+    def add_group(self, title: str, group_id: str | None = None) -> None:
+        """Apre un gruppo con nome, come i gruppi della barra multifunzione di Excel: le azioni e i
+        widget aggiunti dopo finiscono qui e il nome compare sotto i pulsanti. Con `group_id`
+        (es. "zoom") anche altri moduli aggiungono voci al gruppo: `add_action(a, group="zoom")`."""
+        opener = self.toolbar.addSeparator() if self.toolbar.actions() else None
+        if isinstance(self.toolbar, ContextBar):
+            self.toolbar.set_group_title(opener, title)
+        self._groups[group_id or title] = opener
+
+    def has_group(self, group_id: str) -> bool:
+        return group_id in self._groups
+
+    def _insert_before(self, group: str | None) -> QAction | None:
+        """L'azione prima della quale si inserisce in fondo al gruppo `group` (None = fine barra)."""
+        if group is None or group not in self._groups:
+            return None
+        acts = self.toolbar.actions()
+        opener = self._groups[group]
+        try:
+            start = acts.index(opener) + 1 if opener is not None else 0
+        except ValueError:
+            return None
+        for act in acts[start:]:
+            if act.isSeparator():
+                return act
+        return None
+
+    def add_action(self, action: QAction, group: str | None = None, compact: bool = False) -> QAction:
+        """Aggiunge un pulsante. `group`: id o nome di un gruppo (`add_group`), altrimenti in fondo.
+        `compact=True` mostra solo l'icona (il nome resta nel suggerimento), per le voci secondarie;
+        per un'etichetta più corta di quella del menu usare `action.setIconText(...)`."""
+        before = self._insert_before(group)
+        if before is None:
+            self.toolbar.addAction(action)
+        else:
+            self.toolbar.insertAction(before, action)
         _tab_focusable(self.toolbar, action)
+        if compact:
+            button = self.toolbar.widgetForAction(action)
+            if isinstance(button, QToolButton):
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         return action
+
+    def add_menu_button(self, text: str, icon_name: str, actions: list, group: str | None = None, *,
+                        compact: bool = False, tooltip: str | None = None,
+                        requires_document: bool = True) -> QToolButton:
+        """Pulsante con un menu a tendina (la freccia ▾ della barra multifunzione). `actions`: QAction,
+        QMenu (sottomenu) o None (separatore). Restituisce il pulsante."""
+        button = QToolButton()
+        button.setText(text)
+        button.setToolTip(tooltip or text)
+        button.setAccessibleName(text)
+        bind_icon(button, icon_name)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly if compact
+                                  else Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setAutoRaise(True)
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        menu = QMenu(button)
+        for item in actions:
+            if item is None:
+                menu.addSeparator()
+            elif isinstance(item, QMenu):
+                menu.addMenu(item)
+            else:
+                menu.addAction(item)
+        button.setMenu(menu)
+        self.add_widget(button, group)
+        if requires_document and self._window is not None:
+            self._window.register_document_action(button)
+        return button
 
     def set_default_tool(self, tool_or_factory: "Tool | Callable[[DocumentView], Tool | None] | None") -> None:
         """Strumento attivato dal nucleo entrando nella modalità e sui documenti aperti mentre è attiva.
@@ -114,8 +290,11 @@ class Mode(QObject):
         for act in actions:
             win.scope_action_to_mode(act, self.id)
 
-    def add_widget(self, widget: QWidget) -> None:
-        self.toolbar.addWidget(widget)
+    def add_widget(self, widget: QWidget, group: str | None = None) -> QAction:
+        before = self._insert_before(group)
+        if before is None:
+            return self.toolbar.addWidget(widget)
+        return self.toolbar.insertWidget(before, widget)
 
     def add_separator(self) -> None:
         self.toolbar.addSeparator()
@@ -353,8 +532,35 @@ class Context(QObject):
             self._w.scope_action_to_mode(act, mode)
         return act
 
+    def add_file_action(self, action: QAction, page: str, group: str | None = None, description: str = "",
+                        order: int = 100) -> None:
+        """Voce della scheda File (la pagina a tutto schermo che si apre con «File», come in Excel).
+
+        `page`: "nuovo", "apri", "informazioni", "condividi", "esporta", "gestisci", "opzioni" o
+        "guida"; oppure "stampa", il comando Stampa della colonna di sinistra. `group` è il titolo del
+        gruppo nella pagina (es. "Proteggi il documento"), `description` la riga sotto il nome della
+        voce, `order` la posizione (prima i numeri più bassi). Le voci seguono testo, stato e spunta
+        dell'azione; una voce con `action.menu()` apre il menu, una attivabile cambia la spunta.
+        """
+        self._w.backstage.add_action(action, page, group, description, order)
+
+    def add_quick_access_action(self, action: QAction) -> None:
+        """Pulsante della barra di accesso rapido in alto a sinistra (dopo Apri e Salva, prima di
+        Annulla e Ripeti), come in Excel. Per i comandi di uso continuo, es. Stampa."""
+        self._w.add_quick_access_action(action)
+
+    def set_command_search(self, action: QAction) -> None:
+        """Il pulsante «Cerca un comando» in alto a destra (dove c'era il menu ☰) avvia `action`."""
+        self._w.set_command_search(action)
+
+    def show_file_tab(self, page: str | None = None) -> None:
+        """Apre la scheda File, eventualmente sulla pagina `page` (es. "informazioni")."""
+        self._w.show_backstage(page)
+
     def add_menu_action(self, action: QAction, section: str = "Strumenti") -> None:
-        """Aggiunge una voce al menu principale (☰), raggruppata per sezione."""
+        """Superata: il menu ☰ non c'è più. Usare `add_file_action` per i comandi sul file e
+        `Mode.add_action` per quelli di una scheda. Per compatibilità la voce finisce nella scheda
+        File, pagina «Altri comandi», nel gruppo `section`."""
         self._w.add_menu_action(action, section)
 
     def add_command(self, name: str, fn: Callable[[], Any]) -> None:

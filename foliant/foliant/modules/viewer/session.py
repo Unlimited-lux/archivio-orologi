@@ -96,7 +96,7 @@ class SessionController(QObject):
                     self.act_close_right, self.act_close_all):
             ctx.add_menu_action(act, section)
         ctx.add_menu_action(self.pref_actions[KEY_IGNORE_DOC_VIEW], _("Apertura dei documenti"))
-        self.window.main_menu.aboutToShow.connect(self._update_actions)
+        self.window.backstage.aboutToShow.connect(self._update_actions)
 
     def _update_actions(self) -> None:
         self.act_reopen.setEnabled(bool(self.closed_tabs))

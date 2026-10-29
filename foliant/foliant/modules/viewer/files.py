@@ -120,7 +120,7 @@ class FilesController:
             ctx.add_menu_action(act, _("File"))
         ctx.currentViewChanged.connect(lambda *_a: self.update_actions())
         ctx.documentChanged.connect(lambda *_a: self.update_actions())
-        w.main_menu.aboutToShow.connect(self.update_actions)
+        w.backstage.aboutToShow.connect(self.update_actions)
         self.update_actions()
 
     # ================================================================ stato

@@ -241,6 +241,35 @@ QToolButton:hover {{ background: {h('surface_alt')}; }}
 QToolButton:pressed {{ background: {h('border')}; }}
 QToolButton:checked {{ background: {h('accent_soft')}; color: {h('accent_hover')}; }}
 QToolButton[modeButton="true"] {{ padding: 5px 10px; font-weight: 500; }}
+QToolButton[fileButton="true"] {{ padding: 5px 12px; font-weight: 600; color: {h('accent')}; }}
+QToolButton[fileButton="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; }}
+QToolButton[fileButton="true"]:focus {{ padding: 4px 11px; }}
+QToolButton#commandSearch {{ border: 1px solid {h('border')}; border-radius: 7px; padding: 4px 10px;
+    color: {h('text_muted')}; background: {h('window')}; }}
+QToolButton#commandSearch:hover {{ border-color: {h('accent')}; color: {h('text')}; }}
+QWidget#backstage {{ background: {h('surface')}; }}
+QFrame#backstageNav {{ background: {h('accent')}; border: none; }}
+QFrame#backstageNavLine {{ background: {h('accent_hover')}; border: none; margin: 0 16px; }}
+QToolButton#backstageNavButton {{ color: {h('accent_text')}; border: 2px solid transparent; border-radius: 0;
+    padding: 8px 16px; text-align: left; font-size: 14px; }}
+QToolButton#backstageNavButton:hover {{ background: {h('accent_hover')}; }}
+QToolButton#backstageNavButton:checked {{ background: {h('accent_hover')}; color: {h('accent_text')}; font-weight: 600; }}
+QToolButton#backstageNavButton:focus {{ border: 2px solid {h('accent_text')}; padding: 8px 16px; }}
+QToolButton#backstageNavButton:disabled {{ color: {h('accent_soft')}; }}
+QScrollArea#backstagePage, QWidget#backstageBody {{ background: {h('surface')}; }}
+QLabel#backstageTitle {{ font-size: 26px; font-weight: 600; }}
+QLabel#backstageGroup {{ color: {h('text_muted')}; font-size: 11px; font-weight: 600; letter-spacing: 1px; }}
+QLabel#backstageNote {{ color: {h('text_muted')}; border-left: 3px solid {h('accent')}; padding: 4px 0 4px 12px; }}
+QFrame#backstageCard {{ background: {h('window')}; border: 1px solid {h('border')}; border-radius: 10px; }}
+QAbstractButton#backstageTile {{ background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 9px; }}
+QAbstractButton#backstageTile:hover {{ border-color: {h('accent')}; background: {h('accent_soft')}; }}
+QAbstractButton#backstageTile:focus {{ border: 2px solid {h('accent')}; }}
+QAbstractButton#backstageTile:disabled {{ background: {h('window')}; }}
+QLabel#backstageTileIcon {{ background: {h('accent_soft')}; border-radius: 8px; }}
+QLabel#backstageTileTitle {{ font-weight: 600; }}
+QToolButton[segment="true"] {{ border: 1px solid {h('border')}; border-radius: 0; padding: 4px 12px; }}
+QToolButton[segment="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; border-color: {h('accent')}; }}
+QToolButton[segment="true"]:focus {{ border: 2px solid {h('accent')}; padding: 3px 11px; }}
 QToolButton[modeButton="true"]:checked {{ background: {h('accent')}; color: {h('accent_text')}; }}
 QToolButton::menu-indicator {{ image: none; }}
 QToolButton[popupMode="1"] {{ padding-right: 20px; }}

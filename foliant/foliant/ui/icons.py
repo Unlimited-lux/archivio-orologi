@@ -71,7 +71,8 @@ def icon(name: str, color: str | None = None, checked_color: str | None = None) 
 def bind_icon(obj, name: str, kind: str = "default") -> None:
     """Imposta l'icona su un QAction/QAbstractButton e la aggiorna al cambio tema.
 
-    kind="mode" usa il colore del testo su sfondo accento quando selezionato.
+    kind="mode" usa il colore del testo su sfondo accento quando selezionato;
+    kind="onaccent" lo usa sempre (pulsanti su sfondo accento, es. la colonna della scheda File).
     """
     _bound[obj] = f"{kind}:{name}"
     _apply(obj, name, kind)
@@ -80,6 +81,8 @@ def bind_icon(obj, name: str, kind: str = "default") -> None:
 def _apply(obj, name: str, kind: str) -> None:
     if kind == "mode":
         ic = icon(name, checked_color=theme.hex_color("accent_text"))
+    elif kind == "onaccent":
+        ic = icon(name, color=theme.hex_color("accent_text"), checked_color=theme.hex_color("accent_text"))
     else:
         ic = icon(name)
     obj.setIcon(ic)

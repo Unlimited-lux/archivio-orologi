@@ -26,15 +26,6 @@ def bare_window(qtbot, settings):
     yield win
 
 
-def _menu_texts(menu) -> list[str]:
-    out = []
-    for act in menu.actions():
-        out.append(act.text())
-        if act.menu() is not None:
-            out += _menu_texts(act.menu())
-    return out
-
-
 def test_home_has_no_recent_documents(bare_window, tmp_path):
     win = bare_window
     pdf = make_pdf(tmp_path / "zq7-segreto.pdf")
@@ -54,12 +45,14 @@ def test_home_has_no_recent_documents(bare_window, tmp_path):
     assert home.recent.count() == 0 and home.visible_recent() == []
 
 
-def test_main_menu_has_no_open_recent(bare_window, sample_pdf):
+def test_file_tab_has_no_open_recent(bare_window, sample_pdf):
     win = bare_window
     win.open_path(sample_pdf)
-    win._rebuild_menu()
-    texts = _menu_texts(win.main_menu)
+    win.show_backstage("apri")
+    texts = [a.text() for a in win.backstage.all_actions()]
+    texts += [t.title_label.text() + " " + t.desc_label.text() for t in win.backstage.tiles]
     assert texts and not [t for t in texts if "recent" in t.lower() or "esempio" in t]
+    win.hide_backstage()
 
 
 def test_last_directory_only_in_memory(bare_window, settings, tmp_path, qtbot):

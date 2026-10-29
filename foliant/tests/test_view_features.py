@@ -407,7 +407,8 @@ def test_tab_goes_to_the_active_tool(qtbot, sample_pdf):
 def test_rulers_action_context_and_guides_per_document(window, sample_pdf):
     from foliant.i18n import _
     ctx = window.ctx
-    assert window.act_rulers in window._menu_sections[_("Vista")]
+    assert window.act_rulers in window.ctx.mode("visualizza").toolbar.actions()
+    assert window.ctx.mode("visualizza").toolbar.group_title(window.act_rulers) == _("Mostra")
     assert window.act_rulers.shortcut().toString() in ("", "Ctrl+R")   # la assegna il modulo viewer (UX-18)
     view = window.open_path(sample_pdf)
     assert not view.rulers_visible

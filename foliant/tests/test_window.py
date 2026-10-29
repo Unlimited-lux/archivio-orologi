@@ -100,8 +100,12 @@ def test_context_api(window, sample_pdf):
     panel = Panel()
     ctx.add_sidebar_panel("p", "Pannello", "star", panel)
     assert panel.view is ctx.current_view()
-    ctx.add_menu_action(ctx.action("Voce", None, lambda: None), "Prova")
-    window._rebuild_menu()
+    legacy = ctx.action("Voce", None, lambda: None)
+    ctx.add_menu_action(legacy, "Prova")                 # superata: finisce in File › Altri comandi
+    assert window.backstage.page_of(legacy) == "altro"
+    window.show_backstage("altro")
+    assert any(t.action is legacy for t in window.backstage.tiles)
+    window.hide_backstage()
 
 
 def test_broken_module_does_not_crash(window):
@@ -762,8 +766,7 @@ def test_ctrl_n_opens_a_new_window_on_home(window, sample_pdf, qtbot):
         assert other.current_view() is None and other.docs_stack.currentWidget() is other.home
         assert window.tabs.count() == 1                 # nessun «Nuovo documento» nella prima finestra
         assert window.act_new.shortcut().isEmpty()
-        window._rebuild_menu()
-        assert window.main_menu.actions()[0] is window.act_new_window
+        assert window.backstage.page_of(window.act_new_window) == "nuovo"
         assert window.act_new_window.shortcut().toString() == "Ctrl+N"
     finally:
         window.close_view(view)

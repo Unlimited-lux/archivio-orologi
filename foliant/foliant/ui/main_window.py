@@ -14,9 +14,9 @@ from typing import Callable
 from PySide6.QtCore import QEvent, QPoint, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QContextMenuEvent, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QAbstractScrollArea, QApplication, QComboBox, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox, QSplitter, QStackedWidget,
-    QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractScrollArea, QApplication, QButtonGroup, QComboBox, QFormLayout, QFrame,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QSizePolicy, QSpinBox,
+    QSplitter, QStackedWidget, QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import APP_NAME, __version__
@@ -24,8 +24,9 @@ from ..core.document import ACCESS, CONTENT, LOCK, Document, write_error
 from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
 from . import privacy, theme
+from .backstage import Backstage
 from .banners import Banner, BannerBar, DocumentTabs
-from .context import PDF_FILTER, Context, Mode, ToolBar
+from .context import PDF_FILTER, ContextBar, Context, Mode, ToolBar
 from .document_view import FIT_PAGE, FIT_WIDTH, VIEW_CONTINUOUS, VIEW_COVER, VIEW_FACING, VIEW_SINGLE, DocumentView
 from .home import HomeScreen
 from .icons import app_icon, bind_icon
@@ -223,6 +224,17 @@ class MainWindow(QMainWindow):
         self._mode_layout = QHBoxLayout(self._mode_bar)
         self._mode_layout.setContentsMargins(12, 0, 12, 0)
         self._mode_layout.setSpacing(2)
+        # «File» prima delle schede, come in Excel: apre la pagina con i comandi sul file (F10, Alt+F)
+        self.file_button = QToolButton(self._mode_bar)
+        self.file_button.setText(_("File"))
+        self.file_button.setProperty("fileButton", True)
+        self.file_button.setCheckable(True)
+        self.file_button.setAutoRaise(True)
+        self.file_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.file_button.setToolTip(_("File: nuovo, apri, salva, stampa, condividi, opzioni (F10)"))
+        self.file_button.setAccessibleName(_("File"))
+        self.file_button.clicked.connect(self.toggle_backstage)
+        self._mode_layout.addWidget(self.file_button)
 
         # Centro: barra contestuale + pannelli
         central = QWidget(self)
@@ -278,7 +290,14 @@ class MainWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setStretchFactor(2, 0)
-        self.setCentralWidget(central)
+        # scheda File (come in Excel): copre barra contestuale, pannelli e documento
+        self.central_stack = QStackedWidget(self)
+        self.central_stack.addWidget(central)
+        self.backstage = Backstage(self)
+        self.backstage.closeRequested.connect(self.hide_backstage)
+        self.central_stack.addWidget(self.backstage)
+        self.setCentralWidget(self.central_stack)
+        self._statusbar_before_backstage = True
         self._build_statusbar()
 
     def _build_statusbar(self) -> None:
@@ -361,7 +380,6 @@ class MainWindow(QMainWindow):
         # Righelli (VIS-39): niente scorciatoia, Ctrl+R è già di «Ruota vista».
         self.act_rulers = a(_("Righelli"), "ruler", self.set_rulers_visible, checkable=True)
         self.act_rulers.setChecked(self.rulers_visible())
-        self.add_menu_action(self.act_rulers, _("Vista"))
         self.act_hand = a(_("Mano (trascina)"), "hand", self._toggle_hand, "H", checkable=True, requires_document=True)
         self.act_select = a(_("Seleziona testo"), "text-cursor", lambda: self.ctx.set_tool(None), "V",
                             checkable=True, requires_document=True)
@@ -388,22 +406,24 @@ class MainWindow(QMainWindow):
         self.act_shortcuts = a(_("Scorciatoie da tastiera"), "keyboard", self.show_shortcuts, "Ctrl+?")
         self.act_help = a(_("Guida rapida"), "circle-help", self.show_help, "F1")
         self.act_reopen = a(_("Riapri scheda chiusa"), "history", self.reopen_closed, "Ctrl+Shift+T")
+        self.act_about = a(_("Informazioni su Foliant"), "info", self.about)
         self._build_navigation_shortcuts()
 
+        # barra di accesso rapido (Excel): Apri, Salva, [moduli: Stampa…], Annulla, Ripeti
         for act in (self.act_open, self.act_save, self.act_undo, self.act_redo):
             self.header.addAction(act)
         self.header.addWidget(self._mode_bar)
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.header.addWidget(spacer)
-        self.menu_button = QToolButton(self)
-        bind_icon(self.menu_button, "menu")
-        self.menu_button.setToolTip(_("Menu principale"))
-        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.main_menu = QMenu(self)
-        self.main_menu.aboutToShow.connect(self._rebuild_menu)
-        self.menu_button.setMenu(self.main_menu)
-        self.header.addWidget(self.menu_button)
+        # «Cerca un comando» in alto a destra, al posto del vecchio menu ☰ (l'azione è di un modulo)
+        self.command_button = QToolButton(self)
+        self.command_button.setObjectName("commandSearch")
+        self.command_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.command_button.setAutoRaise(True)
+        self._command_slot = self.header.addWidget(self.command_button)
+        self._command_slot.setVisible(False)          # compare quando un modulo collega la ricerca
+        self._build_backstage()
 
         # Barra di stato: pulsanti pagina
         sb = self.statusBar()
@@ -461,7 +481,8 @@ class MainWindow(QMainWindow):
             self._shortcut(f"Ctrl+Alt+{n}", lambda _c=False, n=n: self._mode_by_index(9 if n == 0 else n - 1))
         self._shortcut("F9", self.toggle_sidebar)
         self._shortcut("Shift+F9", self.toggle_properties)
-        self._shortcut("F10", lambda: self.menu_button.showMenu())
+        self._shortcut("F10", self.toggle_backstage)
+        self._shortcut("Alt+F", self.show_backstage)
         for seq in ("Shift+F10", "Menu"):      # su Linux Qt non li trasforma da sé in menu contestuale
             self._shortcut(seq, self.open_context_menu)
         self._shortcut("F6", lambda: self._cycle_focus(1))
@@ -602,18 +623,38 @@ class MainWindow(QMainWindow):
         HelpDialog(self).exec()
 
     def _build_read_mode(self) -> None:
+        """Schede Leggi (come Home di Excel) e Visualizza, con i gruppi in cui anche i moduli aggiungono
+        le loro voci (`ctx.mode("visualizza").add_action(azione, group="mostra")`)."""
+        self.act_select.setIconText(_("Seleziona"))
+        self.act_hand.setIconText(_("Mano"))
+        self.act_fit_width.setIconText(_("Larghezza"))
+        self.act_fit_page.setIconText(_("Pagina intera"))
         mode = self.add_mode("leggi", _("Leggi"), "book-open-text", 10)
+        mode.add_group(_("Strumenti"), "strumenti")
         for act in (self.act_select, self.act_hand):
             mode.add_action(act)
-        mode.add_separator()
-        for act in (self.act_zoom_out, self.act_zoom_in, self.act_fit_width, self.act_fit_page):
-            mode.add_action(act)
-        mode.add_separator()
+        mode.add_group(_("Zoom"), "zoom")
+        mode.add_action(self.act_zoom_out, compact=True)
+        mode.add_action(self.act_zoom_in, compact=True)
+        mode.add_action(self.act_fit_width)
+        mode.add_action(self.act_fit_page)
+        mode.add_action(self.act_zoom_100, compact=True)
+        mode.add_group(_("Vai"), "vai")
+        mode.add_group(_("Trova"), "trova")
+
+        view = self.add_mode("visualizza", _("Visualizza"), "eye", 15)
+        view.add_group(_("Layout pagina"), "layout")
         for act in self.view_mode_actions.values():
-            mode.add_action(act)
-        mode.add_separator()
-        mode.add_action(self.act_rotate_view)
-        mode.add_action(self.act_fullscreen)
+            view.add_action(act, compact=True)
+        view.add_group(_("Ruota"), "ruota")
+        view.add_action(self.act_rotate_view, compact=True)
+        view.add_group(_("Mostra"), "mostra")
+        view.add_action(self.act_rulers, compact=True)
+        view.add_group(_("Lettura"), "lettura")
+        view.add_group(_("Presentazione"), "presentazione")
+        view.add_group(_("Finestra"), "finestra")
+        view.add_action(self.act_fullscreen, compact=True)
+        view.add_action(self.act_new_window, compact=True)
 
     def scope_action_to_mode(self, act: QAction, mode_id: str) -> None:
         """La scorciatoia di `act` resta attiva solo nella modalità `mode_id`."""
@@ -640,49 +681,168 @@ class MainWindow(QMainWindow):
         act.setEnabled(self.current_view() is not None)
 
     def add_menu_action(self, action: QAction, section: str) -> None:
+        """Compatibilità con il vecchio menu ☰: la voce va nella scheda File, pagina «Altri comandi»."""
         self._menu_sections.setdefault(section, []).append(action)
+        self.backstage.add_action(action, "altro", section)
 
-    def _rebuild_menu(self) -> None:
-        m = self.main_menu
-        m.clear()
-        for act in (self.act_new_window, self.act_new, self.act_open):
-            m.addAction(act)
-        m.addSeparator()
-        for act in (self.act_save, self.act_save_as, self.act_save_copy, self.act_close, self.act_reopen):
-            m.addAction(act)
-        for section, actions in self._menu_sections.items():
-            m.addSeparator()
-            sub = m.addMenu(section) if len(actions) > 4 else m
-            for act in actions:
-                sub.addAction(act)
-        m.addSeparator()
-        theme_menu = m.addMenu(_("Tema"))
-        group = QActionGroup(theme_menu)
-        for key, label in (("system", _("Come il sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))):
-            act = theme_menu.addAction(label)
-            act.setCheckable(True)
-            act.setChecked(theme.mode() == key)
-            group.addAction(act)
-            act.triggered.connect(lambda _c=False, k=key: self.set_theme(k))
-        lang_menu = m.addMenu(_("Lingua"))
-        current_lang = self.settings.value("language", "")
-        for key, label in (("it", "Italiano"), ("en", "English")):
-            act = lang_menu.addAction(label)
-            act.setCheckable(True)
-            act.setChecked(current_lang == key)
-            act.triggered.connect(lambda _c=False, k=key: self.set_language(k))
-        m.addAction(self.act_preferences)
-        m.addAction(self.act_shortcuts)
-        m.addAction(self.act_help)
-        m.addAction(_("Informazioni su Foliant"), self.about)
-        m.addSeparator()
-        m.addAction(self.act_quit)
+    def add_quick_access_action(self, action: QAction) -> None:
+        """Barra di accesso rapido: dopo Apri e Salva (e i pulsanti già aggiunti), prima di Annulla."""
+        if action in self.header.actions():
+            return
+        self.header.insertAction(self.act_undo, action)
+
+    def set_command_search(self, action: QAction) -> None:
+        """Il pulsante «Cerca un comando» in alto a destra avvia `action` (la ricerca dei comandi)."""
+        self.command_button.setDefaultAction(action)
+        self.command_button.setText(_("Cerca un comando"))
+        self._command_slot.setVisible(True)
+
+    # ================================================================== scheda File
+    def _build_backstage(self) -> None:
+        b = self.backstage
+        for page, act in (("salva", self.act_save), ("salva_con_nome", self.act_save_as),
+                          ("salva_copia", self.act_save_copy), ("chiudi", self.act_close), ("esci", self.act_quit)):
+            b.set_command(page, act)
+        b.add_action(self.act_new, "nuovo", _("Crea"), _("Una pagina bianca in una nuova scheda"), order=10)
+        b.add_action(self.act_new_window, "nuovo", _("Finestra"), _("Un'altra finestra di Foliant"), order=900)
+        b.add_action(self.act_open, "apri", _("Apri"), _("Uno o più PDF, immagini o documenti dal computer"),
+                     order=10)
+        b.add_action(self.act_reopen, "apri", _("Apri"), _("Solo in questa sessione: non resta nulla su disco"),
+                     order=20)
+        b.set_note("apri", _("Foliant non tiene l'elenco dei file aperti: nessun nome di file resta sul computer."))
+        b.set_header("informazioni", self._backstage_info)
+        b.set_header("opzioni", self._backstage_appearance)
+        b.add_action(self.act_preferences, "opzioni", _("Impostazioni"),
+                     _("Tutte le impostazioni di Foliant e dei moduli"), order=10)
+        b.add_action(self.act_help, "guida", _("Guida"), _("Le funzioni principali in breve"), order=10)
+        b.add_action(self.act_shortcuts, "guida", _("Guida"), _("Elenco di tutti i tasti"), order=20)
+        b.add_action(self.act_about, "guida", _("Guida"), _("Versione e licenze"), order=90)
+
+    def backstage_visible(self) -> bool:
+        return self.central_stack.currentWidget() is self.backstage
+
+    def show_backstage(self, page: str | None = None) -> None:
+        """Apre la scheda File (sulla pagina `page`, es. "informazioni")."""
+        if not self.backstage_visible():
+            self._statusbar_before_backstage = self.statusBar().isVisible()
+        self.backstage.prepare(page)
+        self.central_stack.setCurrentWidget(self.backstage)
+        self.statusBar().hide()
+        self.file_button.setChecked(True)
+        for m in self.modes.values():
+            m.button.setChecked(False)
+        self.backstage.focus_nav()
+
+    def hide_backstage(self) -> None:
+        """Torna al documento (o alla Home) nella scheda di prima."""
+        if not self.backstage_visible():
+            self.file_button.setChecked(False)
+            return
+        self.central_stack.setCurrentIndex(0)
+        self.statusBar().setVisible(self._statusbar_before_backstage)
+        self.file_button.setChecked(False)
+        mode = self.modes.get(self.current_mode_id or "")
+        if mode is not None:
+            mode.button.setChecked(True)
+        view = self.current_view()
+        if view is not None and self.docs_stack.currentWidget() is self.tabs:
+            view.setFocus()
+
+    def toggle_backstage(self) -> None:
+        if self.backstage_visible():
+            self.hide_backstage()
+        else:
+            self.show_backstage()
+
+    def _backstage_info(self, lay: QVBoxLayout) -> None:
+        """Riepilogo del documento in cima alla pagina Informazioni."""
+        from ..i18n import format_date, format_number
+        view = self.current_view()
+        card = QFrame()
+        card.setObjectName("backstageCard")
+        form = QFormLayout(card)
+        form.setContentsMargins(16, 12, 16, 12)
+        form.setHorizontalSpacing(24)
+        form.setVerticalSpacing(6)
+        if view is None:
+            label = QLabel(_("Nessun documento aperto: apri un PDF per vederne le informazioni."))
+            label.setProperty("muted", True)
+            form.addRow(label)
+            lay.addWidget(card)
+            return
+        doc = view.document
+        try:
+            meta = dict(doc.pdf.metadata or {})
+        except Exception:             # documento in chiusura o motore occupato: solo i dati certi
+            meta = {}
+        rows = [(_("Nome"), doc.display_name), (_("Pagine"), format_number(doc.page_count))]
+        try:
+            size = doc.path.stat().st_size if doc.path is not None else None
+        except OSError:
+            size = None
+        if size is not None:
+            text = (format_number(size / (1024 * 1024), 1) + " MB" if size >= 1024 * 1024
+                    else format_number(max(1, round(size / 1024))) + " KB")
+            rows.append((_("Dimensione"), text))
+        version = (meta.get("format") or "").replace("PDF ", "")
+        if version:
+            rows.append((_("Versione PDF"), version))
+        rows.append((_("Protezione"), _("Password o permessi") if doc.is_protected else _("Nessuna")))
+        for key, label in (("title", _("Titolo")), ("author", _("Autore"))):
+            if meta.get(key):
+                rows.append((label, meta[key]))
+        if doc.is_modified:
+            rows.append((_("Stato"), _("Modifiche non salvate")))
+        for name, value in rows:
+            key = QLabel(name)
+            key.setProperty("muted", True)
+            val = QLabel(str(value))
+            val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            val.setWordWrap(True)
+            form.addRow(key, val)
+        lay.addWidget(card)
+
+    def _backstage_appearance(self, lay: QVBoxLayout) -> None:
+        """Tema e lingua in cima alla pagina Opzioni, come pulsanti a scelta singola."""
+        box = QFrame()
+        box.setObjectName("backstageCard")
+        form = QFormLayout(box)
+        form.setContentsMargins(16, 12, 16, 12)
+        form.setHorizontalSpacing(24)
+        from ..i18n import language
+        current_lang = self.settings.value("language", "") or language()
+        for title, choices, current, slot in (
+            (_("Tema"), (("system", _("Come il sistema")), ("light", _("Chiaro")), ("dark", _("Scuro"))),
+             theme.mode(), self.set_theme),
+            (_("Lingua"), (("it", "Italiano"), ("en", "English")), current_lang, self.set_language),
+        ):
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(0)
+            group = QButtonGroup(row)
+            group.setExclusive(True)
+            for key, label in choices:
+                btn = QToolButton(row)
+                btn.setText(label)
+                btn.setCheckable(True)
+                btn.setChecked(current == key)
+                btn.setProperty("segment", True)
+                btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+                btn.clicked.connect(lambda _c=False, k=key, f=slot, cur=current: f(k) if k != cur else None)
+                group.addButton(btn)
+                hl.addWidget(btn)
+            hl.addStretch(1)
+            name = QLabel(title)
+            name.setBuddy(group.buttons()[0])
+            form.addRow(name, row)
+        lay.addWidget(box)
 
     # ================================================================== modalità
     def add_mode(self, mode_id: str, title: str, icon_name: str, order: int = 100) -> Mode:
         if mode_id in self.modes:
             return self.modes[mode_id]
-        toolbar = ToolBar(title, self)
+        toolbar = ContextBar(title, self)
         toolbar.setObjectName("contextbar")
         toolbar.setIconSize(QSize(20, 20))
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -701,13 +861,15 @@ class MainWindow(QMainWindow):
         mode = Mode(mode_id, title, icon_name, order, toolbar, button, window=self)
         self.modes[mode_id] = mode
         ordered = sorted(self.modes.values(), key=lambda m: (m.order, m.title))
-        self._mode_layout.insertWidget(ordered.index(mode), button)
+        self._mode_layout.insertWidget(ordered.index(mode) + 1, button)      # 0 = «File»
+        button.setToolButtonStyle(self._mode_button_style())
         return mode
 
     def set_mode(self, mode_id: str) -> None:
         mode = self.modes.get(mode_id)
         if mode is None:
             return
+        self.hide_backstage()                                  # un clic su una scheda chiude la scheda File
         if self.docs_stack.currentWidget() is self.home and self.tabs.count():
             self._show_tabs()                                  # dalla Home si torna ai documenti aperti
         previous = self.modes.get(self.current_mode_id) if self.current_mode_id else None
@@ -1609,8 +1771,15 @@ class MainWindow(QMainWindow):
         event.acceptProposedAction()
 
     def _mode_button_style(self) -> Qt.ToolButtonStyle:
-        # sotto ~1500 px le modalità con il testo non entrano: solo icone (il nome resta nel suggerimento)
-        return (Qt.ToolButtonStyle.ToolButtonTextBesideIcon if self.width() >= 1500
+        # schede con il solo nome, come in Excel, se entrano nella barra in alto; altrimenti solo
+        # icone (il nome resta nel suggerimento)
+        modes = getattr(self, "modes", {})
+        if not modes:
+            return Qt.ToolButtonStyle.ToolButtonTextOnly
+        fm = self.fontMetrics()
+        need = sum(fm.horizontalAdvance(m.title) + 26 for m in modes.values()) + 24
+        others = self.header.sizeHint().width() - self._mode_bar.sizeHint().width()
+        return (Qt.ToolButtonStyle.ToolButtonTextOnly if self.width() - others >= need
                 else Qt.ToolButtonStyle.ToolButtonIconOnly)
 
     def resizeEvent(self, event) -> None:

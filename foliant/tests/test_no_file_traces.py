@@ -148,7 +148,10 @@ CHILD = textwrap.dedent(r'''
                 spin(150)
             window.show_home()
             spin(150)
-            window._rebuild_menu()
+            for page in ("nuovo", "apri", "informazioni", "gestisci", "opzioni"):
+                window.show_backstage(page)
+                spin(50)
+            window.hide_backstage()
             for view in window.views():
                 if view.document.is_modified:
                     window.save_view(view)
