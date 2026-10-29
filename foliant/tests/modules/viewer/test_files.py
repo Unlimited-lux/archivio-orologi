@@ -300,10 +300,38 @@ def test_reveal_and_copy_path(fwin, ctl, sample_pdf, monkeypatch):
     assert QApplication.clipboard().text() == sample_pdf
 
 
-def test_menu_section(fwin, ctl, sample_pdf):
-    fwin.show_backstage()
-    texts = [a.text() for a in fwin.backstage.all_actions()]
-    assert ctl.act_copy_path.text() in texts
+def test_file_tab_manage_page(fwin, ctl, sample_pdf):
+    """File › Gestisci file: «Questo file» e «Altri file», senza separatori né voci vuote."""
+    backstage = fwin.backstage
+    entries = backstage.entries("gestisci")
+    groups: dict[str, list] = {}
+    for e in entries:
+        groups.setdefault(e.group, []).append(e.action)
+    assert list(groups) == ["Questo file", "Altri file"]
+    assert groups["Questo file"] == list(ctl.current_actions)
+    assert groups["Altri file"] == [ctl.act_duplicate_many, ctl.act_move_many, ctl.act_trash_many]
+    assert all(not e.action.isSeparator() and e.action.text() and e.description for e in entries)
+    assert not {e.action for e in entries} & set(backstage.actions_of("altro"))
+    fwin.show_backstage("gestisci")
+    assert [t.action for t in backstage.tiles] == [e.action for e in entries]
+    fwin.hide_backstage()
+
+
+def test_states_refresh_when_the_file_tab_opens(fwin, ctl, sample_pdf):
+    """Lo stato delle voci si aggiorna aprendo la scheda File (backstage.aboutToShow)."""
+    fwin.open_path(sample_pdf)
+    for act in ctl.current_actions:
+        act.setEnabled(False)                       # stato vecchio, senza segnali del documento
+    fwin.show_backstage("gestisci")
+    assert all(a.isEnabled() for a in ctl.current_actions)
+    tiles = {t.action: t for t in fwin.backstage.tiles}
+    assert all(tiles[a].isEnabled() for a in ctl.current_actions)
+    fwin.hide_backstage()
+    fwin.new_document()
+    for act in ctl.current_actions:
+        act.setEnabled(True)
+    fwin.show_backstage("gestisci")
+    assert all(not a.isEnabled() for a in ctl.current_actions)   # documento mai salvato
     fwin.hide_backstage()
 
 

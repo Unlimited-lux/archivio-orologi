@@ -1,5 +1,5 @@
 """Informazioni sul documento (VIS-40), in sola lettura: sezioni File, Contenuto,
-Protezione, Caratteri, Apertura."""
+Protezione, Caratteri, Apertura. Il comando è in File › Informazioni › «Proprietà» (Alt+Invio)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from foliant.api import _, add_translations, bind_icon, theme
+from foliant.i18n import pgettext
 
 from .properties_engine import (
     DocumentInfo, collect_fonts, collect_info, content_rows, file_rows, info_to_text, opening_rows, security_rows,
@@ -21,6 +22,8 @@ EN = {
     "Metadati avanzati…": "Advanced metadata…",
     "Modifica opzioni di apertura…": "Edit opening options…",
     "Informazioni sul documento…": "Document information…",
+    "scheda File\x04Proprietà": "Properties",
+    "Titolo, autore, parole chiave, pagine, versione": "Title, author, keywords, pages, version",
     "Informazioni su «{name}»": "Information about “{name}”",
     "Contenuto": "Content",
     "Caratteri": "Fonts",
@@ -216,10 +219,9 @@ class PropertiesController:
         self.ctx = ctx
         self.dialog: PropertiesDialog | None = None
         self.action = ctx.action(_("Informazioni sul documento…"), "info", self.show_dialog, shortcut="Alt+Return")
-        mode = ctx.mode("leggi")
-        if mode is not None:
-            mode.add_action(self.action)
-        ctx.add_menu_action(self.action, _("File"))
+        # File › Informazioni, gruppo «Proprietà» (come le Proprietà della pagina Informazioni di Excel)
+        ctx.add_file_action(self.action, "informazioni", pgettext("scheda File", "Proprietà"),
+                            _("Titolo, autore, parole chiave, pagine, versione"), order=10)
         ctx.documentClosed.connect(self._on_closed)
 
     def collect(self, view) -> DocumentInfo:

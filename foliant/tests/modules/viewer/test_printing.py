@@ -150,14 +150,30 @@ def test_options_sequence_copies():
 
 
 # ---------------------------------------------------------------- interfaccia
-def test_action_in_read_mode_and_menu(viewer_window, sample_pdf):
+def test_action_in_file_tab_and_quick_access(viewer_window, sample_pdf, monkeypatch):
+    """Come in Excel: Stampa è un comando della colonna di sinistra della scheda File e un
+    pulsante della barra di accesso rapido; non sta più nella barra Leggi."""
     ctl = part(viewer_window, "printing")
+    backstage = viewer_window.backstage
     assert ctl.action.shortcut().toString() == "Ctrl+P"
-    assert ctl.action in viewer_window.modes["leggi"].toolbar.actions()
-    assert any(ctl.action in acts for acts in viewer_window._menu_sections.values())
+    assert backstage.pages["stampa"].command is ctl.action
+    assert backstage.page_of(ctl.action) == "stampa"
+    header = viewer_window.header.actions()
+    assert ctl.action in header and header.index(ctl.action) < header.index(viewer_window.act_undo)
+    assert ctl.action not in viewer_window.modes["leggi"].toolbar.actions()
+    assert backstage.page_of(ctl.action) != "altro"
     assert not ctl.action.isEnabled()            # nessun documento
+    viewer_window.show_backstage()
+    assert not backstage.nav_buttons["stampa"].isEnabled()
+    viewer_window.hide_backstage()
     viewer_window.open_path(sample_pdf)
     assert ctl.action.isEnabled()
+    viewer_window.show_backstage()
+    assert backstage.nav_buttons["stampa"].isEnabled()
+    fired = []
+    monkeypatch.setattr(ctl, "ask_options", lambda view: fired.append(viewer_window.backstage_visible()))
+    backstage.nav_buttons["stampa"].click()
+    assert fired == [False]                      # la scheda File si chiude prima del dialogo
 
 
 def test_print_range_to_pdf(viewer_window, long_pdf, tmp_path, monkeypatch):

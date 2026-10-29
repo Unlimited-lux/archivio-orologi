@@ -1,8 +1,8 @@
 """Gestione dei file locali (VIS-03): rinomina, duplica, sposta, cestino, mostra
 nella cartella, copia percorso; le schede aperte seguono il file.
 
-Comandi nel menu principale (sezione «File») sul documento corrente e su file
-scelti. I dialoghi passano per metodi `ask_*` sostituibili nei test.
+Comandi nella scheda File › Gestisci file: gruppo «Questo file» sul documento corrente,
+gruppo «Altri file» su file scelti. I dialoghi passano per metodi `ask_*` sostituibili nei test.
 Riservatezza: il modulo non usa l'elenco dei file recenti (né lo alimenta) e
 non conserva nomi o percorsi dei file tra un avvio e l'altro.
 """
@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QFile, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
 
 from foliant.api import Context, _, add_translations
@@ -23,7 +23,17 @@ from . import files_engine as F
 REPLACE, AUTO, CANCEL = "replace", "auto", "cancel"
 
 TRANSLATIONS = {
-    "File": "File",
+    "Questo file": "This file",
+    "Altri file": "Other files",
+    "Cambia il nome del file sul disco": "Change the name of the file on disk",
+    "Crea una copia accanto all'originale": "Create a copy next to the original",
+    "Sposta il file in un'altra cartella": "Move the file to another folder",
+    "Chiude il documento e mette il file nel cestino": "Close the document and move the file to the trash",
+    "Apre la cartella che contiene il file": "Open the folder that contains the file",
+    "Copia negli appunti la posizione del file": "Copy the location of the file to the clipboard",
+    "Copia uno o più file scelti dal computer": "Copy one or more files chosen from the computer",
+    "Sposta uno o più file in un'altra cartella": "Move one or more files to another folder",
+    "Mette nel cestino uno o più file": "Move one or more files to the trash",
     "Rinomina…": "Rename…",
     "Duplica": "Duplicate",
     "Sposta in…": "Move to…",
@@ -113,14 +123,21 @@ class FilesController:
         self.act_move_many = a(_("Sposta file in…"), "folder-output", self.move_dialog, requires_document=False)
         self.act_trash_many = a(_("Sposta file nel cestino…"), "trash", self.trash_dialog,
                                 requires_document=False)
-        separator = QAction(w)
-        separator.setSeparator(True)
-        for act in self.current_actions + (separator, self.act_duplicate_many, self.act_move_many,
-                                           self.act_trash_many):
-            ctx.add_menu_action(act, _("File"))
+        this_file, other_files = _("Questo file"), _("Altri file")
+        for order, (act, group, description) in enumerate((
+                (self.act_rename, this_file, _("Cambia il nome del file sul disco")),
+                (self.act_duplicate, this_file, _("Crea una copia accanto all'originale")),
+                (self.act_move, this_file, _("Sposta il file in un'altra cartella")),
+                (self.act_trash, this_file, _("Chiude il documento e mette il file nel cestino")),
+                (self.act_reveal, this_file, _("Apre la cartella che contiene il file")),
+                (self.act_copy_path, this_file, _("Copia negli appunti la posizione del file")),
+                (self.act_duplicate_many, other_files, _("Copia uno o più file scelti dal computer")),
+                (self.act_move_many, other_files, _("Sposta uno o più file in un'altra cartella")),
+                (self.act_trash_many, other_files, _("Mette nel cestino uno o più file")))):
+            ctx.add_file_action(act, "gestisci", group, description, order=10 + 10 * order)
         ctx.currentViewChanged.connect(lambda *_a: self.update_actions())
         ctx.documentChanged.connect(lambda *_a: self.update_actions())
-        w.backstage.aboutToShow.connect(self.update_actions)
+        w.backstage.aboutToShow.connect(self.update_actions)        # stato aggiornato aprendo la scheda File
         self.update_actions()
 
     # ================================================================ stato

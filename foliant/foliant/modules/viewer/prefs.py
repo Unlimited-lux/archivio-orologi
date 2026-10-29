@@ -1,6 +1,7 @@
 """Preferenze di visualizzazione (VIS-51, parte): layout e zoom predefiniti,
 pannello iniziale, rispetto delle impostazioni del documento, unità di misura;
 esportazione e importazione delle impostazioni; ripristino dei valori predefiniti.
+Le voci sono in File › Opzioni (gruppi «Aspetto» e «Impostazioni»).
 
 Riservatezza: si esportano e importano solo preferenze generali; le chiavi che
 contenevano (o potrebbero contenere) nomi, percorsi o cronologie dei documenti
@@ -46,7 +47,11 @@ TRANSLATIONS = {
     "Due pagine con copertina": "Two pages with cover",
     "Adatta alla larghezza": "Fit width",
     "Adatta alla pagina": "Fit page",
-    "Strumenti": "Tools",
+    "Aspetto": "Appearance",
+    "Layout, zoom e pannello predefiniti": "Default layout, zoom and panel",
+    "Impostazioni": "Settings",
+    "Salva le preferenze in un file": "Save the preferences to a file",
+    "Carica le preferenze da un file": "Load the preferences from a file",
 }
 
 LAYOUTS = ((VIEW_CONTINUOUS, "Scorrimento continuo"), (VIEW_SINGLE, "Pagina singola"),
@@ -122,8 +127,13 @@ class PrefsController:
                                      requires_document=False)
         self.act_import = ctx.action(_("Importa impostazioni…"), "upload", self.import_dialog,
                                      requires_document=False)
-        for a in (self.act, self.act_export, self.act_import):
-            ctx.add_menu_action(a, _("Strumenti"))
+        # File › Opzioni: «Aspetto» per la visualizzazione, «Impostazioni» (dopo Preferenze… del nucleo)
+        # per esportare e importare
+        ctx.add_file_action(self.act, "opzioni", _("Aspetto"), _("Layout, zoom e pannello predefiniti"), order=40)
+        ctx.add_file_action(self.act_export, "opzioni", _("Impostazioni"), _("Salva le preferenze in un file"),
+                            order=30)
+        ctx.add_file_action(self.act_import, "opzioni", _("Impostazioni"), _("Carica le preferenze da un file"),
+                            order=31)
         self.migrate()
 
     def migrate(self) -> None:
