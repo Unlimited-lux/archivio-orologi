@@ -147,7 +147,8 @@ def test_paste_into_other_document_pixel_identical_without_opacity():
     ref = render(a2, clip=region)
     b = new_pdf()
     clipboard.paste_payload(b, 0, clipboard.make_payload(a2, 0, [0, 1, 2]))
-    assert render(b, clip=region) == ref
+    identical = render(b, clip=region) == ref      # booleano: il diff di pytest su megabyte di pixel costa minuti
+    assert identical
 
 
 def test_paste_same_image_ten_times_single_xobject():
