@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "foliant"
 version = "0.1.0"
-description = "Editor PDF desktop per Linux"
+description = "Editor PDF desktop per Linux e Windows"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "AGPL-3.0-or-later" }

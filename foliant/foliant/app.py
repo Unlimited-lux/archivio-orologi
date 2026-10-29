@@ -34,7 +34,7 @@ class Options:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="foliant", description=_("Editor PDF per Linux."), allow_abbrev=False)
+    parser = argparse.ArgumentParser(prog="foliant", description=_("Editor PDF per Linux e Windows."), allow_abbrev=False)
     parser.add_argument("files", nargs="*", metavar="FILE",
                         help=_("file da aprire; «file.pdf#page=N» lo apre alla pagina N"))
     parser.add_argument("-p", "--page", type=int, metavar="N", help=_("apre il primo file alla pagina N"))

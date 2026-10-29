@@ -1,6 +1,6 @@
-# Foliant — editor PDF per Linux
+# Foliant — editor PDF per Linux e Windows
 
-Foliant è un editor PDF desktop per Ubuntu/Linux: lettura, commenti, modifica di
+Foliant è un editor PDF desktop per Ubuntu/Linux e Windows 10/11: lettura, commenti, modifica di
 testo e immagini, gestione pagine, OCR (anche per rendere modificabili i PDF
 scannerizzati), moduli, firma, protezione, conversione, confronto e operazioni in
 blocco. Funziona offline; l'assistente IA è facoltativo e usa un fornitore
@@ -30,6 +30,14 @@ Eseguono il comando registrato da un modulo con `ctx.add_command("create-pdf" | 
 finché nessun modulo lo registra, il nucleo usa l'azione rapida della Home con lo stesso scopo
 («Crea PDF da file», «Unisci PDF») e, se manca anche quella, mostra la Home.
 L'installazione copia anche l'icona simbolica monocromatica (`foliant-symbolic.svg`, colore del tema).
+
+## Installazione (Windows 10 e 11)
+
+Installatore `Foliant-<versione>-Setup.exe` (Tesseract con italiano e inglese, Ghostscript e qpdf
+inclusi; LibreOffice facoltativo) o versione portatile `.zip`, costruiti in GitHub Actions dal
+workflow `foliant-windows-build` (`packaging/windows/`). Guida passo per passo, dati, riservatezza
+e limiti noti: `docs/windows.md`. Stesso codice sorgente della versione Linux: le differenze tra i
+sistemi stanno solo in `foliant/core/platform.py` e `foliant/core/winscan.py`.
 
 ## Uso quotidiano
 
@@ -80,6 +88,9 @@ preferenze generali (tema, lingua, unità…) e i file che salvi tu dove scegli.
   mano (la cronologia del dialogo di Qt è nel gruppo `[FileDialog]` di
   `~/.config/QtProject.conf`; per il desktop, es. «Cancella cronologia» nelle impostazioni di
   riservatezza).
+- Su Windows valgono le stesse regole per il registro (`HKCU\Software\Foliant`, solo preferenze
+  generali; `HKCU\Software\QtProject` per la cronologia dei dialoghi di Qt), gli elementi recenti
+  e le Jump List: vedi `docs/windows.md`.
 - Nei messaggi di errore sul terminale (che possono finire nel giornale di sistema) non compaiono
   nomi né percorsi di file.
 
@@ -115,6 +126,8 @@ foliant/
     render.py     resa per stampa/immagini; annotations_hidden (flag Hidden temporaneo)
     errors.py     errori con messaggi per l'utente
     locale_defaults.py formato carta e unità di misura predefiniti (impostazioni locali e preferenze)
+    platform.py   differenze tra Linux e Windows: cartelle dell'utente, processi, strumenti esterni, font, posta
+    winscan.py    scanner su Windows (WIA)
   ui/          interfaccia Qt
     main_window.py  finestra: barra modalità, schede, pannelli, barra di stato
     document_view.py vista pagine: impaginazione, zoom, rendering, coordinate, strumenti, guide

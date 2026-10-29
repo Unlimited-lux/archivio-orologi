@@ -1,4 +1,4 @@
-"""Foliant: editor PDF desktop per Linux."""
+"""Foliant: editor PDF desktop per Linux e Windows."""
 
 import importlib.abc
 import importlib.machinery

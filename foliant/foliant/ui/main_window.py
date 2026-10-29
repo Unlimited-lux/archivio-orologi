@@ -1528,7 +1528,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, _("Informazioni su Foliant"),
             f"<h3>{APP_NAME} {__version__}</h3>"
-            + _("<p>Editor PDF per Linux.</p><p>Icone: set open source con licenza ISC.</p>"))
+            + _("<p>Editor PDF per Linux e Windows.</p><p>Icone: set open source con licenza ISC.</p>"))
 
     # ================================================================== menu della scheda
     def tab_menu(self, index: int) -> QMenu | None:

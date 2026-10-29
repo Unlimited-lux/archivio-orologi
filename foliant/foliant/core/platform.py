@@ -821,6 +821,10 @@ def mail_client() -> str | None:
 
 
 def _mapi():
+    """mapi32.dll se è configurato un programma di posta MAPI (registro «Clients\\Mail»): la
+    libreria esiste sempre, ma senza un programma registrato non apre nulla."""
+    if not (_windows_registry_value(r"SOFTWARE\Clients\Mail", "") or "").strip():
+        return None
     try:
         return ctypes.WinDLL("mapi32")
     except (OSError, AttributeError):

@@ -19,8 +19,8 @@ EN = {
     "Installa LibreOffice da https://www.libreoffice.org (gratuito) e riprova: Foliant lo trova da solo.":
         "Install LibreOffice from https://www.libreoffice.org (free) and try again: Foliant finds it by itself.",
     "Serve il programma {program}, che non è stato trovato.": "The {program} program is required but was not found.",
-    "<p>Editor PDF per Linux.</p><p>Icone: set open source con licenza ISC.</p>":
-        "<p>PDF editor for Linux.</p><p>Icons: open-source set under the ISC license.</p>",
+    "<p>Editor PDF per Linux e Windows.</p><p>Icone: set open source con licenza ISC.</p>":
+        "<p>PDF editor for Linux and Windows.</p><p>Icons: open-source set under the ISC license.</p>",
     "Adatta alla larghezza": "Fit width",
     "Adatta alla pagina": "Fit page",
     "Adatta larghezza": "Fit width",
@@ -70,7 +70,7 @@ EN = {
     "Nuovo PDF vuoto": "New blank PDF",
     "Nuovo documento": "New document",
     "Nuova finestra": "New window",
-    "Editor PDF per Linux.": "PDF editor for Linux.",
+    "Editor PDF per Linux e Windows.": "PDF editor for Linux and Windows.",
     "file da aprire; «file.pdf#page=N» lo apre alla pagina N": "files to open; «file.pdf#page=N» opens it at page N",
     "apre il primo file alla pagina N": "open the first file at page N",
     "apre una nuova finestra anche se Foliant è già in esecuzione":
