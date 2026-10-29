@@ -10,6 +10,7 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
 
+from tests.conftest import has_mode
 from foliant.modules import objects as O
 from foliant.modules.objects import engine as E
 from foliant.modules.objects import extract as X
@@ -246,7 +247,7 @@ def test_external_edit_roundtrip(ui, tmp_path, monkeypatch):
         before = view.document.pdf[0].get_pixmap(dpi=40).samples
     sess = ui.c.edit_external(view)
     assert sess is not None and launched and os.path.exists(launched[0])
-    assert oct(os.stat(sess.dir).st_mode)[-3:] == "700"
+    assert has_mode(sess.dir, 0o700)
     with open(launched[0], "wb") as f:
         f.write(png_bytes(200, 100, (0, 255, 0)))
     assert sess.reimport()

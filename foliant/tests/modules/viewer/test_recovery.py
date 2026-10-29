@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +12,7 @@ import pymupdf
 import pytest
 from PySide6.QtCore import Qt
 
+from tests.conftest import has_mode
 from foliant.api import Document
 from foliant.core import platform
 from foliant.modules.viewer import recovery as recovery_mod
@@ -145,9 +145,9 @@ def test_autosave_writes_modified_document(viewer_window, sample_pdf):
     assert "original_path" not in meta and "display_name" not in meta
     assert "esempio" not in raw and os.path.dirname(sample_pdf) not in raw
     assert meta["page"] == 2 and meta["pid"] == os.getpid() and meta["format"] == engine.FORMAT_VERSION
-    assert stat.S_IMODE(d.stat().st_mode) == 0o700
-    assert stat.S_IMODE((d / f"{entry_id}.pdf").stat().st_mode) == 0o600
-    assert stat.S_IMODE((d / f"{entry_id}.json").stat().st_mode) == 0o600
+    assert has_mode(d, 0o700)
+    assert has_mode((d / f"{entry_id}.pdf"), 0o600)
+    assert has_mode((d / f"{entry_id}.json"), 0o600)
     assert "MODIFICA DI PROVA" not in Document.open(sample_pdf).page_text(0)   # originale intatto
     assert "Copia di recupero salvata alle" in viewer_window.statusBar().currentMessage()
     # Nessuna nuova copia se il documento non è cambiato dall'ultima.
@@ -392,7 +392,7 @@ def test_legacy_metadata_sanitized_and_restored_without_path(viewer_window, samp
     raw = (d / f"{entry_id}.json").read_text()
     meta = json.loads(raw)
     assert "zq7k" not in raw and meta["page"] == 2 and meta["format"] == engine.FORMAT_VERSION
-    assert stat.S_IMODE((d / f"{entry_id}.json").stat().st_mode) == 0o600
+    assert has_mode((d / f"{entry_id}.json"), 0o600)
     assert not (d / ".foliant-abbandonato.tmp").exists()
     assert engine.sanitize_legacy(d) == 0                       # già pulito: nulla da fare
     views = rec.restore_entries(rec.orphans())

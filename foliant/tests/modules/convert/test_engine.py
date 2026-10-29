@@ -10,6 +10,7 @@ import zipfile
 import pymupdf
 import pytest
 
+from tests.conftest import has_mode
 from foliant.core.platform import find_tool
 from foliant.api import OperationCancelled
 from foliant.modules.convert.common import ConversionError, RangeError, parse_page_range
@@ -768,7 +769,7 @@ def test_xlsx_formula_like_text_and_file_mode(tmp_path):
     assert ws["A2"].value == "=A1+B2" and ws["A2"].data_type == "s"
     mask = os.umask(0)
     os.umask(mask)
-    assert os.stat(out).st_mode & 0o777 == 0o666 & ~mask
+    assert has_mode(out, 0o666 & ~mask)
 
 
 def test_internal_links_on_page_subset(tmp_path):

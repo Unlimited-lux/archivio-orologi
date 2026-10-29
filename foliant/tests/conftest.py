@@ -81,6 +81,16 @@ def _no_blocking_dialogs(monkeypatch):
     yield
 
 
+def has_mode(path, mode: int) -> bool:
+    """Permessi POSIX attesi (es. 0o700 per una cartella privata). Su Windows i permessi POSIX
+    non esistono: cartelle e file nel profilo dell'utente sono privati per gli ACL di Windows,
+    quindi il controllo non si applica."""
+    if sys.platform == "win32":
+        return True
+    import stat
+    return stat.S_IMODE(os.stat(path).st_mode) == mode
+
+
 def make_pdf(path, pages: int = 3, text: str = "Pagina {n}", size=(595, 842), extra=None) -> str:
     """Crea un PDF con testo noto su ogni pagina e lo salva in `path`."""
     doc = pymupdf.open()

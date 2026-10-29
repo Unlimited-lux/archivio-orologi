@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+import sys
 
 import pymupdf
 import pytest
@@ -109,6 +110,8 @@ def test_rename_from_current_document_uses_dialog(fwin, ctl, sample_pdf, tmp_pat
     assert fwin.ctx.current_document().display_name == "dal menu.pdf"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="su Windows chmod non rende una cartella di sola lettura "
+                                                    "(i permessi sono ACL): la prova vale per Linux")
 def test_rename_read_only_folder_reports_permission(fwin, ctl, tmp_path):
     folder = tmp_path / "solalettura"
     folder.mkdir()

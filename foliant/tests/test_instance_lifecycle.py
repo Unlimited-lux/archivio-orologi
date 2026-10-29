@@ -3,6 +3,10 @@ da fuori mentre una finestra si chiude, memoria restituita alla chiusura di una 
 documenti (NFR-06, NFR-31)."""
 from __future__ import annotations
 
+import sys
+
+import pytest
+
 
 def _close_all_windows():
     from PySide6.QtCore import QEvent
@@ -105,6 +109,8 @@ def test_closing_a_window_with_documents_returns_memory(qtbot, settings, sample_
     assert calls == [1]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="socket Unix in una cartella privata: su Windows il canale "
+                                                    "è una named pipe per SID e sessione (tests/test_platform.py)")
 def test_instance_channel_is_always_in_a_private_folder(tmp_path, monkeypatch):
     """Senza XDG_RUNTIME_DIR il canale non finisce nella /tmp condivisa (un altro utente potrebbe
     occuparlo prima e ricevere i percorsi dei file): va nella cartella di runtime privata di Qt."""

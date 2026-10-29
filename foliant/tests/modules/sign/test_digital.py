@@ -11,6 +11,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import pkcs12
 
+from tests.conftest import has_mode
 from foliant.modules.sign import digital as d
 from tests.modules.sign.conftest import PASSWORD
 
@@ -282,7 +283,7 @@ def test_create_self_signed_properties(tmp_path, monkeypatch):
     cert.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier)
     assert info.subject == "Zoë Ünal" and info.self_signed and info.email == "zoe@example.org"
     assert "digitalSignature" in info.key_usage and "nonRepudiation" in info.key_usage
-    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    assert has_mode(path, 0o600)
     assert b"Robusta#2026" not in blob
     did = d.load_pkcs12(path, "Robusta#2026")
     assert did.info.sha256 == info.sha256

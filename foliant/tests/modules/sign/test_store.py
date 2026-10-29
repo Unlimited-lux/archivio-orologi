@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
+import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID
 
+from tests.conftest import has_mode
 from foliant.modules.sign import digital as d
 from foliant.modules.sign import store
 from tests.modules.sign.conftest import PASSWORD
@@ -30,11 +31,11 @@ def _cert(cn: str) -> x509.Certificate:
 def test_data_dir_private(tmp_path):
     p = store.data_dir()
     assert p == tmp_path / "dati" / "foliant"
-    assert p.is_dir() and (p.stat().st_mode & 0o777) == 0o700
+    assert p.is_dir() and has_mode(p, 0o700)
 
 
 def test_data_dir_follows_standard_paths(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("APPDATA" if sys.platform == "win32" else "XDG_DATA_HOME", str(tmp_path / "xdg"))
     assert store.data_dir() == tmp_path / "xdg" / "foliant"
 
 
@@ -49,8 +50,7 @@ def test_id_registry_never_stores_secrets(id_a, tmp_path):
     data = json.loads(raw)
     assert set(data["ids"][0]) <= {"path", "alias", "fingerprint", "subject", "not_after", "issuer", "default",
                                    "policies"}   # OID pubblici del certificato
-    assert (reg.path.stat().st_mode & 0o777) == 0o600
-    assert (reg.path.parent.stat().st_mode & 0o777) == 0o700
+    assert has_mode(reg.path, 0o600) and has_mode(reg.path.parent, 0o700)
     [e] = reg.list()
     assert not e.missing and e.subject == "Mario Rossi"
     assert reg.default().fingerprint == info.sha256
@@ -108,7 +108,7 @@ def test_trust_store_formats_scope_and_errors(tmp_path):
     [t] = ts.list()
     assert t.scope == ["firme"] and t.subject == "Ancora"
     assert ts.certificates("firme") and not ts.certificates("marche temporali")
-    assert oct(next(ts.dir.glob("*.pem")).stat().st_mode & 0o777) == "0o600"
+    assert has_mode(next(ts.dir.glob("*.pem")), 0o600)
     bad = tmp_path / "rotto.crt"
     bad.write_bytes(b"non un certificato")
     with pytest.raises(store.StoreError):
@@ -144,7 +144,7 @@ def test_tsa_config(tmp_path):
     assert b"segreta" not in cfg.path.read_bytes()
     assert cfg.remove("https://tsa2.example.org")
     assert [s.name for s in cfg.list()] == ["Interno"] and cfg.default().name == "Interno"
-    assert (os.stat(cfg.path).st_mode & 0o777) == 0o600
+    assert has_mode(cfg.path, 0o600)
 
 
 def test_system_certificates_optional(tmp_path, id_a):

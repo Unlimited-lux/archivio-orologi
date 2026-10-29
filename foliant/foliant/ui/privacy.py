@@ -154,9 +154,10 @@ def cleanup_legacy(settings: QSettings) -> bool:
             return False
     except (TypeError, ValueError):
         pass
-    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    clean_recently_used(data / "recently-used.xbel")
-    clean_kde_recent(data / "RecentDocuments")
+    if not platform.IS_WINDOWS:       # cronologie dei desktop Linux (le versioni precedenti erano solo per Linux)
+        data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+        clean_recently_used(data / "recently-used.xbel")
+        clean_kde_recent(data / "RecentDocuments")
     settings.setValue(CLEANUP_KEY, CLEANUP_VERSION)
     return True
 

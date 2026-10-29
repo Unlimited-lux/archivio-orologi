@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-import stat
 
 import pymupdf
 from PySide6.QtWidgets import QApplication
 import pytest
 
+from tests.conftest import has_mode
 from foliant.modules.viewer import attachments_engine as engine
 
 from .conftest import part
@@ -145,7 +145,7 @@ def test_open_other_type_asks_and_uses_private_temp(viewer_window, attach_pdf, m
     try:
         assert opened == [path]
         assert open(path, "rb").read() == TEXT
-        assert stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode) == 0o700
+        assert has_mode(os.path.dirname(path), 0o700)
     finally:
         panel.cleanup_temp()
     assert not os.path.exists(path)

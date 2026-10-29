@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import math
-import os
-import stat
 
 import pytest
 
+from tests.conftest import has_mode
 from foliant.modules.sign import graphic as g
 from foliant.modules.sign.library import LibraryError, LibraryLocked, SignatureLibrary
 
@@ -38,9 +37,9 @@ def test_persistence_across_restart(lib_root):
 def test_permissions(lib_root):
     lib = SignatureLibrary()
     e = lib.add(_drawn())
-    assert stat.S_IMODE(os.stat(lib_root).st_mode) == 0o700
-    assert stat.S_IMODE(os.stat(lib_root / e.file).st_mode) == 0o600
-    assert stat.S_IMODE(os.stat(lib_root / "manifest.json").st_mode) == 0o600
+    assert has_mode(lib_root, 0o700)
+    assert has_mode(lib_root / e.file, 0o600)
+    assert has_mode(lib_root / "manifest.json", 0o600)
 
 
 def test_manage_rename_reorder_default_duplicate_remove(lib_root):
