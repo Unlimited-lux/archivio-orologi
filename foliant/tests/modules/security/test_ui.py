@@ -973,11 +973,11 @@ def test_many_annotations_scan_is_fast(tmp_path):
     pdf = pymupdf.open(path)
     t = time.perf_counter()
     rep = S.scan(pdf)
-    assert time.perf_counter() - t < 1.5
+    assert time.perf_counter() - t < perf_limit(1.5)
     assert rep.comments == 2000
     t = time.perf_counter()
     assert R.marks(pdf) == [] and not R.has_marks(pdf)
-    assert time.perf_counter() - t < 0.5
+    assert time.perf_counter() - t < perf_limit(0.5)
 
 
 def test_protect_dialog_not_truncated(qtbot):
@@ -997,7 +997,7 @@ def test_open_many_annotations_fast(window, sec, tmp_path):
     assert sec.scans[view.document].comments == 2000
     t = time.perf_counter()
     sec.on_document_opened(view)          # quota del modulo nell'apertura
-    assert time.perf_counter() - t < 0.5
+    assert time.perf_counter() - t < perf_limit(0.5)
 
 
 def test_scan_many_fields_fast(tmp_path):
@@ -1041,7 +1041,7 @@ def test_listener_cost_on_large_document(window, sec, tmp_path):
     elapsed = time.perf_counter() - t
     doc.add_listener(listener)
     doc.add_listener(panel_listener)
-    assert elapsed < 0.05, elapsed
+    assert elapsed < perf_limit(0.05), elapsed
     # i segni nuovi si vedono subito (cache invalidata dalle modifiche del modulo)
     sec.add_area_mark(3, pymupdf.Rect(100, 100, 200, 200))
     assert sec.has_marks(doc) and list(sec.marked_pages(doc)) == [3]

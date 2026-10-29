@@ -5,6 +5,7 @@ import time
 import pymupdf
 
 from foliant.modules.annotations import engine
+from tests.conftest import perf_limit
 
 
 def _many(tmp_path, n=2000):
@@ -35,16 +36,16 @@ def test_repaint_fast_with_2000_annotations(window, tmp_path, monkeypatch):
     note = ctrl.apply("n", engine.create_note, 0, (300, 780), "aperta", engine.Style(), "A")
     ctrl.toggle_popup(0, note)
     _repaint_ms(view)                         # primo disegno (cache delle immagini)
-    assert _repaint_ms(view) < 300
+    assert _repaint_ms(view) < perf_limit(300)
     some = ctrl.hit(view, 0, pymupdf.Point(14, 16), 2)
     assert some is not None
     ctrl.select([(0, some)], view)
     ctrl.set_style(color=(0, 0, 1))           # modifica
-    assert _repaint_ms(view) < 300
+    assert _repaint_ms(view) < perf_limit(300)
     view.document.undo()                      # annulla
-    assert _repaint_ms(view) < 300
+    assert _repaint_ms(view) < perf_limit(300)
     t = time.perf_counter()
     ctrl.hit(view, 0, pymupdf.Point(300, 300), 2)
     ctrl.hit(view, 0, pymupdf.Point(301, 301), 2)
-    assert (time.perf_counter() - t) < 0.3     # passaggio del mouse
+    assert (time.perf_counter() - t) < perf_limit(0.3)     # passaggio del mouse
     view.document._saved_state = view.document._state

@@ -59,16 +59,14 @@ def test_reading_mode_keeps_page_and_zoom_and_restores_bars(reading, qtbot):
     top = view.verticalScrollBar().value()
 
     ctrl.act_reading.trigger()
-    qtbot.wait(30)
+    qtbot.waitUntil(lambda: not any(_visibility(window).values()), timeout=3000)
     assert ctrl.reading_active and ctrl.act_reading.isChecked()
-    assert not any(_visibility(window).values())
     assert view.current_page == 7 and view.zoom == pytest.approx(1.2)
     assert ctrl.hint.isVisible()
 
     qtbot.keyClick(view, Qt.Key.Key_Escape)   # Esc esce
-    qtbot.wait(30)
+    qtbot.waitUntil(lambda: _visibility(window) == before, timeout=3000)
     assert not ctrl.reading_active and not ctrl.act_reading.isChecked()
-    assert _visibility(window) == before
     assert view.current_page == 7 and view.zoom == pytest.approx(1.2)
     assert abs(view.verticalScrollBar().value() - top) <= 2
 
@@ -81,8 +79,7 @@ def test_reading_mode_shortcut_toggles_and_survives_tab_change(reading, qtbot, s
     qtbot.wait(30)
     assert window.context_stack.isHidden() and window.sidebar.isHidden() and window.header.isHidden()
     ctrl.act_reading.trigger()
-    qtbot.wait(10)
-    assert not window.header.isHidden() and not window.context_stack.isHidden()
+    qtbot.waitUntil(lambda: not window.header.isHidden() and not window.context_stack.isHidden(), timeout=3000)
 
 
 def test_reading_restores_exact_previous_visibility(reading, qtbot):

@@ -6,7 +6,7 @@ import numpy as np
 import pymupdf
 import pytest
 
-from tests.conftest import system_font
+from tests.conftest import system_font, perf_limit
 from foliant.core.platform import find_tool
 from foliant.api import DocumentError, OperationCancelled, PasswordRequired, WrongPassword
 from foliant.modules.tools import compare_engine as ce
@@ -609,7 +609,7 @@ def test_cancel_within_two_seconds_on_500_pages(tmp_path):
     t0 = time.monotonic()
     progress.cancel()
     th.join(10)
-    assert "cancelled" in box and box["cancelled"] - t0 < 2.0
+    assert "cancelled" in box and box["cancelled"] - t0 < perf_limit(2.0)
 
 
 def test_scan_preset_with_real_ocr_module(tmp_path):

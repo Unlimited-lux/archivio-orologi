@@ -274,8 +274,7 @@ def test_gotor_blocked_by_higher_priority_handler(viewer_window, tmp_path, qtbot
     try:
         view = viewer_window.open_path(_gotor_source(tmp_path))
         _click(qtbot, view, 0, (100, 215))
-        qtbot.wait(100)
-        assert blocked == ["altro2.pdf"]
+        qtbot.waitUntil(lambda: blocked == ["altro2.pdf"], timeout=3000)
         assert len(viewer_window.views()) == 1   # nessuna nuova scheda
     finally:
         from foliant.ui.tools import remove_link_handler

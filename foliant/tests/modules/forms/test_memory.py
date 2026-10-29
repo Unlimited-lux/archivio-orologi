@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication
 from foliant.modules import forms
 
 from .test_fill import click_field, open_form
+from tests.conftest import perf_limit
 
 FORMS = "foliant.modules.forms"
 
@@ -130,7 +131,7 @@ def test_content_change_without_form_is_fast(window, tmp_path):
         d[0].add_text_annot((300, 300), "nuova")
     t = time.perf_counter()
     f._on_content_changed()
-    assert time.perf_counter() - t < 0.02
+    assert time.perf_counter() - t < perf_limit(0.02)
     assert not f.state.fields
 
 

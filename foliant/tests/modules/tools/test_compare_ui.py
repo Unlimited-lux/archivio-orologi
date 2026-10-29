@@ -14,6 +14,7 @@ from foliant.modules.tools import compare_ui as cu
 from foliant.modules.tools import report as rp
 
 from .conftest import page_lines
+from tests.conftest import perf_limit
 
 
 def controller(window):
@@ -388,13 +389,13 @@ def test_twenty_thousand_differences_list(qtbot):
     panel.show()
     t = time.monotonic()
     panel.set_result(result)
-    assert time.monotonic() - t < 1.0
+    assert time.monotonic() - t < perf_limit(1.0)
     assert panel.model.rowCount() == 20000
     t = time.monotonic()
     panel.list.scrollToBottom()
     panel.list.repaint()
     panel.filters[ce.DELETED].setChecked(False)
-    assert time.monotonic() - t < 1.0
+    assert time.monotonic() - t < perf_limit(1.0)
     assert panel.counter.text() == "Visibili 10000 di 20000"
 
 

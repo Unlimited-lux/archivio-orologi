@@ -12,7 +12,7 @@ import zipfile
 import pymupdf
 import pytest
 
-from tests.conftest import system_font
+from tests.conftest import system_font, perf_limit
 from tests.conftest import has_mode
 from foliant.core.platform import find_tool
 from foliant.api import OperationCancelled
@@ -856,7 +856,7 @@ def test_many_pages_fast(tmp_path):
     path = _save(doc, tmp_path / "grande.pdf")
     t = time.time()
     out = convert_pdf(path, tmp_path / "g.txt", "txt")[0]
-    assert time.time() - t < 30
+    assert time.time() - t < perf_limit(30)
     assert open(out, encoding="utf-8").read().count("\f") == 299
 
 

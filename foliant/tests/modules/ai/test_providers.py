@@ -152,7 +152,7 @@ def test_network_unreachable():
     with pytest.raises(AIError) as ei:
         p.list_models()
     assert ei.value.kind == NETWORK
-    assert time.monotonic() - t0 < 3
+    assert time.monotonic() - t0 < perf_limit(3)
     assert "Rete non disponibile" in ei.value.user_message()
 
 

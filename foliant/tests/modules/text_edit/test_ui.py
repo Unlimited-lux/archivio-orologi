@@ -472,9 +472,7 @@ def test_add_text_editor_wraps_at_page_edge(window, sample_pdf, quiet, qtbot):
     ctrl = ctrl_of(window)
     ed = ctrl.open_new_text(view, 0, pymupdf.Point(545, 300), None)
     ed.insertPlainText("Questa frase e lunga abbastanza da superare il bordo destro della pagina")
-    qtbot.wait(30)
-    r = ed.content_rect_points()
-    assert r.right() <= 595 + 1
+    qtbot.waitUntil(lambda: ed.content_rect_points().right() <= 595 + 1, timeout=3000)
     assert ed.document().begin().layout().lineCount() > 1
 
 

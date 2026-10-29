@@ -16,6 +16,7 @@ from PIL import Image
 from foliant.core.platform import find_tool
 from foliant.modules.convert import create
 from foliant.modules.convert.common import ConversionError
+from tests.conftest import perf_limit
 
 HAS_SOFFICE = create.soffice_path() is not None
 needs_soffice = pytest.mark.skipif(not HAS_SOFFICE, reason="LibreOffice non installato")
@@ -97,7 +98,7 @@ def test_blank_bad_size(size):
 def test_blank_1000_pages_fast():
     t = time.perf_counter()
     data = create.blank_pdf(size="A4", pages=1000, paper="dots", background=(1, 1, 0.9))
-    assert time.perf_counter() - t < 2
+    assert time.perf_counter() - t < perf_limit(2)
     assert _open(data).page_count == 1000
 
 

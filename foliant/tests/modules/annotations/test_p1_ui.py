@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 from foliant.modules.annotations import dialogs, engine, ui_actions
 
 from .conftest import annots, click, double_click, drag, key, key_of, saved
+from tests.conftest import perf_limit
 
 
 def _rect(module, a=(100, 400), b=(200, 500), page=0):
@@ -901,7 +902,7 @@ def test_ann34_many_annotations_first_screen_fast(window, tmp_path, qtbot):
     panel.set_view(view)
     t = time.perf_counter()
     panel.reload()
-    assert time.perf_counter() - t < 2.0
+    assert time.perf_counter() - t < perf_limit(2.0)
     assert panel.items()
     qtbot.waitUntil(lambda: len(panel._infos) == 6000, timeout=60000)
     qtbot.waitUntil(lambda: panel.count.text() == "6000 commenti", timeout=60000)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pymupdf
 import pytest
 
-from tests.conftest import system_font
+from tests.conftest import system_font, perf_limit
 from foliant.modules.ocr import detect, engine, preprocess
 
 from .conftest import FRASI, image_pdf, iou, scan_image, scan_words
@@ -245,7 +245,7 @@ def test_documento_lungo_analisi_incrementale(tmp_path):
     infos = [detect.classify_page(doc[i]) for i in range(50)]
     per_page = (time.monotonic() - t) / 50
     assert all(i.category == detect.IMAGE_ONLY for i in infos)
-    assert per_page < 0.02          # 25 ms per passo nell'interfaccia: almeno una pagina per passo
+    assert per_page < perf_limit(0.02)          # 25 ms per passo nell'interfaccia: almeno una pagina per passo
 
 
 def test_modificabile_stile_e_famiglia(tmp_path):
@@ -557,7 +557,7 @@ def test_resa_in_processo_separato_senza_lock(tmp_path):
         stop.set()
         th.join()
     assert len(res.recognized) == 2 and "compravendita" in res.pages[1].text
-    assert max(waits) < 0.06, max(waits)
+    assert max(waits) < perf_limit(0.06), max(waits)
 
 
 @pytest.mark.parametrize("skew", [0.0, 1.2])

@@ -17,7 +17,7 @@ import os
 import pymupdf
 import pytest
 
-from tests.conftest import system_font
+from tests.conftest import system_font, perf_limit
 from foliant.modules.ai import extract
 
 from .conftest import FakeProvider, make_active_profile
@@ -135,7 +135,7 @@ def test_twenty_mixed_invoices(window, services, tmp_path, monkeypatch):
     task = services.controller.extract_invoice_files(paths)
     assert task.wait() and task.error is None
     elapsed = time.monotonic() - t0
-    assert elapsed < 20, f"20 fatture in {elapsed:.1f} s"
+    assert elapsed < perf_limit(20), f"20 fatture in {elapsed:.1f} s"
     assert "20 fatture su 20" in notes[-1][0]
     notes[-1][1][0][1]()
     result = services.controller.last_dialog.result
@@ -199,7 +199,7 @@ def test_long_sales_contract_review_and_risks_chunked(window, services, tmp_path
     steps = []
     t0 = time.monotonic()
     clauses = contracts.review_contract(_small_window_job(services, lambda f, t: steps.append((f, t))), scope)
-    assert time.monotonic() - t0 < 30
+    assert time.monotonic() - t0 < perf_limit(30)
     n_chunks = len(fake.requests)
     assert n_chunks > 10 and len(steps) == n_chunks and steps[-1][1].startswith(f"Blocco {n_chunks} di")
     assert sorted(int(c.numero) for c in clauses) == list(range(1, 201))      # nessuna clausola persa o doppia
@@ -330,7 +330,7 @@ def test_long_document_summary_chunked_with_progress(qtbot, window, services, tm
     worker.progress.connect(lambda f, t: steps.append(t))
     wait_done(qtbot, panel, timeout=60000)
     elapsed = time.monotonic() - t0
-    assert elapsed < 30, f"riassunto di 200 pagine in {elapsed:.1f} s"
+    assert elapsed < perf_limit(30), f"riassunto di 200 pagine in {elapsed:.1f} s"
     assert reads == ["Lettura del documento…"]            # prima lettura con avanzamento e Annulla
     assert len(services.fake.requests) > 5                  # a blocchi
     assert panel.conversation().messages[-1].status == "complete"
@@ -340,7 +340,7 @@ def test_long_document_summary_chunked_with_progress(qtbot, window, services, tm
     panel.set_function("chat")
     panel.send("Ogni quanto va revisionato?")
     wait_done(qtbot, panel, timeout=60000)
-    assert reads == [] and time.monotonic() - t0 < 5
+    assert reads == [] and time.monotonic() - t0 < perf_limit(5)
     assert view.page_count == 200
 
 
@@ -387,7 +387,7 @@ def test_translate_long_watch_manual_to_english(window, services, tmp_path, monk
                                                   glossary=[], min_size=6.0), str(out))
     assert task.wait(120000) and task.error is None, task.error
     elapsed = time.monotonic() - t0
-    assert elapsed < 90, f"traduzione di 200 pagine in {elapsed:.1f} s"
+    assert elapsed < perf_limit(90), f"traduzione di 200 pagine in {elapsed:.1f} s"
     res = pymupdf.open(str(out))
     assert res.page_count == 200 and "Page 200" in res[199].get_text()
     assert not services.controller.last_translation["report"].failed_pages

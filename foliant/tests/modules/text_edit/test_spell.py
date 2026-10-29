@@ -16,6 +16,7 @@ from foliant.modules.text_edit.spell import (
 from foliant.modules.text_edit.spell_ui import (
     DictionaryDialog, SpellCheckDialog, SpellHighlighter, attach_spellcheck, build_context_menu,
 )
+from tests.conftest import perf_limit
 
 ERRORS = {
     "lavorazzione": "lavorazione",
@@ -69,7 +70,7 @@ def test_misspelled_word_flagged_with_suggestion_fast(service):
     elapsed = time.perf_counter() - t0
     assert found == [(3, 15, "lavorazzione")]
     assert "lavorazione" in sugg[:5]
-    assert elapsed < 0.3
+    assert elapsed < perf_limit(0.3)
 
 
 def test_suggestions_fast_for_long_and_unknown_words(service):
@@ -77,7 +78,7 @@ def test_suggestions_fast_for_long_and_unknown_words(service):
     for word in ("precipitevolissimevolmentx", "qwrtzpklmn", "Orologgio", "contrato"):
         t0 = time.perf_counter()
         service.suggestions(word, "it")
-        assert time.perf_counter() - t0 < 0.3, word
+        assert time.perf_counter() - t0 < perf_limit(0.3), word
     assert service.suggestions("Orologgio", "it")[0] == "Orologio"   # maiuscola mantenuta
     assert "contratto" in service.suggestions("contrato", "it")
 
@@ -319,7 +320,7 @@ def test_highlighter_marks_typed_word_without_touching_styles(window, quiet, qtb
     ed.moveCursor(QTextCursor.MoveOperation.End)
     t0 = time.perf_counter()
     qtbot.keyClicks(ed, " lavorazzione")
-    assert time.perf_counter() - t0 < 2.0
+    assert time.perf_counter() - t0 < perf_limit(2.0)
     text = ed.document().begin().text()
     start = text.index("lavorazzione")
     assert (start, len("lavorazzione")) in _spell_ranges(ed, start)

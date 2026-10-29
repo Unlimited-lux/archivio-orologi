@@ -6,6 +6,7 @@ import time
 
 import pymupdf
 from PySide6.QtCore import Qt
+from tests.conftest import perf_limit
 
 
 def _ctl(window):
@@ -189,7 +190,7 @@ def test_incremental_search_keeps_ui_responsive(viewer_window, tmp_path, qtbot):
     ctl = _ctl(viewer_window)
     t = time.perf_counter()
     ctl.search("patek", wait=False)
-    assert time.perf_counter() - t < 0.5        # l'avvio non blocca
+    assert time.perf_counter() - t < perf_limit(0.5)        # l'avvio non blocca
     qtbot.waitUntil(lambda: ctl.job is None, timeout=15000)
     assert len(ctl.hits) == 1 and ctl.hits[0].page == 399
 
@@ -269,7 +270,7 @@ def test_large_document_full_count_is_fast(viewer_window, tmp_path):
         QApplication.processEvents()
     elapsed = time.perf_counter() - t
     assert len(ctl.hits) == 18000
-    assert elapsed < 9, f"{elapsed:.1f} s"
+    assert elapsed < perf_limit(9), f"{elapsed:.1f} s"
     assert [h.page for h in ctl.hits] == sorted(h.page for h in ctl.hits)
     h = ctl.hits[3]
     assert h.found == "orologio" and h.before and h.after

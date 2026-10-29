@@ -11,6 +11,7 @@ import pymupdf
 import pytest
 
 from foliant.modules.viewer import advsearch, advsearch_engine as eng
+from tests.conftest import perf_limit
 
 
 def _ctl(window):
@@ -71,7 +72,7 @@ def test_regex_guard_stops_pathological_expression(tmp_path):
     import threading
     t0 = time.monotonic()
     hits, summary = eng.search_files(P(), [path], opts, threading.RLock(), page_timeout=0.5)
-    assert time.monotonic() - t0 < 10
+    assert time.monotonic() - t0 < perf_limit(10)
     assert summary.timed_out == [(path, 0)]
     assert [h.found for h in hits] == ["20121"]
 

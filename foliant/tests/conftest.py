@@ -136,6 +136,28 @@ def perf_limit(seconds: float) -> float:
     return seconds * float(os.environ.get("FOLIANT_PERF_FACTOR") or 1)
 
 
+def _scale_qtbot_timeouts() -> None:
+    """Con FOLIANT_PERF_FACTOR anche i tempi massimi di waitUntil/waitSignal crescono: sono limiti
+    superiori (un test che passa non rallenta) e nessun test conta sul loro scadere."""
+    factor = float(os.environ.get("FOLIANT_PERF_FACTOR") or 1)
+    if factor <= 1:
+        return
+    from pytestqt.qtbot import QtBot
+
+    def scaled(method):
+        def wrapper(self, *args, timeout: int = 5000, **kwargs):
+            return method(self, *args, timeout=int(timeout * factor) if timeout and timeout > 0 else timeout,
+                          **kwargs)
+        wrapper.__name__ = method.__name__
+        wrapper.__doc__ = method.__doc__
+        return wrapper
+    for name in ("waitUntil", "waitSignal", "waitSignals"):
+        setattr(QtBot, name, scaled(getattr(QtBot, name)))
+
+
+_scale_qtbot_timeouts()
+
+
 def has_mode(path, mode: int) -> bool:
     """Permessi POSIX attesi (es. 0o700 per una cartella privata). Su Windows i permessi POSIX
     non esistono: cartelle e file nel profilo dell'utente sono privati per gli ACL di Windows,

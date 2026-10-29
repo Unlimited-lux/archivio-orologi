@@ -655,7 +655,7 @@ def test_stop_streaming(qtbot, window, ready, fake, sample_pdf):
     t0 = time.monotonic()
     panel.stop()
     wait_done(qtbot, panel)
-    assert fake.closed_at is not None and fake.closed_at - t0 < 1.0
+    assert fake.closed_at is not None and fake.closed_at - t0 < perf_limit(1.0)
     msg = panel.conversation().messages[-1]
     assert msg.status == "interrupted" and "cinque" not in msg.text
     saved = ready.history().get(panel.conversation().id)
@@ -1109,6 +1109,7 @@ def test_rewrite_multipage_selection_not_replaceable(qtbot, window, ready, fake,
 
 # ------------------------------------------------------------------ documenti firmati (SIG-21)
 from tests.test_document import _signed_pdf, _validate, test_signer  # noqa: E402,F401 - fixture e utilità firmate
+from tests.conftest import perf_limit
 
 
 def test_ai_note_on_signed_pdf_keeps_signature(qtbot, window, ready, fake, tmp_path, test_signer, monkeypatch):

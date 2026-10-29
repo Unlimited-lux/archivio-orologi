@@ -232,9 +232,8 @@ def test_page_mode_fullscreen_is_only_offered(viewer_window, tmp_path, monkeypat
     else:
         monkeypatch.setattr(ctl, "_fullscreen_handled_elsewhere", lambda: False)
     viewer_window.open_path(_make(tmp_path, "fs.pdf", pages=3, catalog={"PageMode": "/FullScreen"}))
-    qtbot.wait(20)
+    qtbot.waitUntil(lambda: ctl.last_initial_view is not None and ctl.last_initial_view.fullscreen, timeout=3000)
     assert not viewer_window.isFullScreen()
-    assert ctl.last_initial_view.fullscreen
 
 
 def test_fullscreen_offer_button(viewer_window, tmp_path, monkeypatch):

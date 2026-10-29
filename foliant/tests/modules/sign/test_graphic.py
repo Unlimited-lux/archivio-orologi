@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from foliant.modules.sign import graphic as g
+from tests.conftest import perf_limit
 
 
 def _wave(pressure=lambda i: 1.0, n=80):
@@ -104,7 +105,7 @@ def test_typed_styles_at_least_eight(qapp):
     assert len(styles) >= 8
     assert len({s.id for s in styles}) == len(styles)
     assert all(a.width > 0 for a in arts)
-    assert time.perf_counter() - t0 < 3.0
+    assert time.perf_counter() - t0 < perf_limit(3.0)
 
 
 def test_typed_signature_has_no_fonts(qapp):

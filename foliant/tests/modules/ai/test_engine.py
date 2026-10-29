@@ -12,6 +12,7 @@ from foliant.api import Document, OperationCancelled
 from foliant.modules.ai import chunking, content, engine
 from foliant.modules.ai.engine import DOCUMENT, PAGES, SELECTION, Conversation, Scope, SummaryOptions
 from foliant.modules.ai.providers import AUTH, LIMIT, RATE, SERVER, AIError, ChatResult
+from tests.conftest import perf_limit
 
 
 def open_pdf(path):
@@ -391,7 +392,7 @@ def test_cancel_during_stream(job, fake_provider):
     ans = engine.chat(job, Conversation(), Scope(), "x")
     assert ans.status == "interrupted"
     assert got == ["a", "b", "c"]
-    assert time.monotonic() - t0 < 2.0
+    assert time.monotonic() - t0 < perf_limit(2.0)
 
 
 def test_local_usage_limit(store, fake_provider):
