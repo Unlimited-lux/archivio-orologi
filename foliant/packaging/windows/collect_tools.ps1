@@ -1,5 +1,5 @@
 # Raccoglie gli strumenti esterni da includere nel pacchetto di Foliant per Windows.
-#   pwsh packaging/windows/collect_tools.ps1 -Out build/tools -Licenses build/licenze
+#   ./packaging/windows/collect_tools.ps1 -Out build/tools -Licenses build/licenze   (da PowerShell)
 # Prerequisiti (sulla macchina di costruzione): Tesseract (UB Mannheim), Ghostscript e qpdf
 # installati, ad esempio con «choco install tesseract ghostscript qpdf».
 #   tools/tesseract/    tesseract.exe, librerie, tessdata con ita, eng, osd     (Apache-2.0)

@@ -49,7 +49,7 @@ jobs:
           New-Item -ItemType Directory -Force build | Out-Null
           python packaging/windows/make_icon.py build/foliant.ico
       - name: Tesseract (ita, eng, osd), Ghostscript, qpdf e licenze
-        run: pwsh packaging/windows/collect_tools.ps1 -Out build/tools -Licenses build/licenze
+        run: ./packaging/windows/collect_tools.ps1 -Out build/tools -Licenses build/licenze
       - name: PyInstaller
         run: |
           pyinstaller packaging/windows/foliant.spec --noconfirm --distpath dist --workpath build/pyinstaller
