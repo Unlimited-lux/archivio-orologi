@@ -3,17 +3,33 @@
 # Produce dist/Foliant/ con Foliant.exe (grafico) e foliant-cli.exe (console), vedi launcher.py.
 # L'icona viene da build/foliant.ico (packaging/windows/make_icon.py).
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 from PyInstaller.utils.win32 import versioninfo as vi
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))           # cartella foliant/ del repository
 ICON = os.path.join(ROOT, "build", "foliant.ico")
+sys.path.insert(0, ROOT)            # «foliant» importabile anche dalle funzioni di raccolta di PyInstaller
+
+
+def foliant_data_files():
+    """Tutti i file non Python del pacchetto foliant (icone, schemi XSD, JSON dei moduli…), presi
+    dalla cartella dei sorgenti: collect_data_files non li trova se il pacchetto non è installato."""
+    datas = []
+    package = os.path.join(ROOT, "foliant")
+    for folder, dirs, files in os.walk(package):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for name in files:
+            if not name.endswith((".py", ".pyc", ".md")):          # note per chi sviluppa escluse
+                datas.append((os.path.join(folder, name), os.path.relpath(folder, ROOT)))
+    return datas
+
 
 hidden = (collect_submodules("foliant")                 # i moduli sono scoperti a runtime (pkgutil)
           + collect_submodules("pyhanko") + collect_submodules("pyhanko_certvalidator")
           + ["keyring.backends.Windows", "win32ctypes.core", "spellchecker"])
-datas = collect_data_files("foliant")                   # icone, schemi XSD, JSON dei moduli
+datas = foliant_data_files()                            # icone, schemi XSD, JSON dei moduli
 for package in ("spellchecker", "docx", "pptx", "pyhanko", "pyhanko_certvalidator", "certifi"):
     datas += collect_data_files(package)
 
