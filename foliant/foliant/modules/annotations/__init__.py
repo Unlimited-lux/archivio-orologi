@@ -71,9 +71,11 @@ class AnnotationsModule:
         ctx = self.ctx
         mode = ctx.add_mode("commenta", _("Commenta"), "message-square-text", 20)
         self.mode = mode
+        # gruppi con nome, come nella barra multifunzione di Excel
+        mode.add_group(_("Selezione"), "selezione")
         sel = self._tool_action("select", _("Seleziona"), "mouse-pointer", None)
         mode.add_widget(self._button(sel, text=True))
-        mode.add_separator()
+        mode.add_group(_("Testo"), "testo")
         for key, text, icon_name, shortcut in (
                 (engine.HIGHLIGHT, _("Evidenzia"), "highlighter", "Ctrl+Shift+H"),
                 (engine.UNDERLINE, _("Sottolinea"), "underline", None),
@@ -81,7 +83,7 @@ class AnnotationsModule:
                 (engine.SQUIGGLY, _("Ondulato"), "spell-check", None)):
             mode.add_widget(self._button(self._tool_action(key, text, icon_name, self.tools[key], shortcut),
                                          text=key == engine.HIGHLIGHT))
-        mode.add_separator()
+        mode.add_group(_("Note"), "note")
         mode.add_widget(self._button(self._tool_action(engine.NOTE, _("Nota"), "sticky-note",
                                                        self.tools[engine.NOTE], "Ctrl+Shift+N"), text=True))
         mode.add_widget(self._button(self._tool_action(engine.FREETEXT, _("Casella di testo"), "type",
@@ -94,7 +96,7 @@ class AnnotationsModule:
             ("paragraph", "paragraph", _("Inserisci paragrafo"), "pilcrow"),
             ("replace", engine.REPLACE, _("Sostituisci testo"), "replace"),
         ]))
-        mode.add_separator()
+        mode.add_group(_("Disegno"), "disegno")
         mode.add_widget(self._menu_button(_("Forme"), [
             ("rect", engine.RECT, _("Rettangolo"), "square"),
             ("ellipse", engine.ELLIPSE, _("Ellisse"), "circle"),
@@ -110,7 +112,7 @@ class AnnotationsModule:
         ]))
         eraser_menu = [("eraser", "eraser", _("Gomma"), "eraser")]
         mode.add_widget(self._menu_button(_("Gomma"), eraser_menu, extra=self._eraser_options))
-        mode.add_separator()
+        mode.add_group(_("Inserisci"), "inserisci")
         mode.add_widget(self._stamp_button())
         mode.add_widget(self._button(self._tool_action(engine.ATTACHMENT, _("Allega file"), "paperclip",
                                                        self.tools[engine.ATTACHMENT])))
@@ -120,7 +122,7 @@ class AnnotationsModule:
             ("area-measure", engine.AREA, _("Area"), "land-plot"),
             ("angle", engine.ANGLE, _("Angolo"), "triangle-right"),
         ], extra=self._measure_extra))
-        mode.add_separator()
+        mode.add_group(_("Gestisci"), "gestisci")
         mode.add_widget(self._commands_button())
         mode.entered.connect(self._on_enter)
         mode.left.connect(self._on_leave)
@@ -137,10 +139,9 @@ class AnnotationsModule:
         ctx.documentClosed.connect(self._on_document_closed)
         for view in ctx.views():
             self._attach_view(view)
-        for text, slot in ((_("Esporta commenti…"), lambda: ui_actions.export_comments(self.ctrl, "xfdf")),
-                           (_("Importa commenti…"), lambda: ui_actions.import_comments(self.ctrl)),
-                           (_("Riepilogo commenti…"), lambda: ui_actions.export_summary(self.ctrl))):
-            ctx.add_menu_action(ctx.action(text, None, slot), _("Commenti"))
+        # scheda File › Esporta: la stessa voce del menu «Commenti ▾», con la scelta del formato;
+        # Importa e Riepilogo restano solo nel menu «Commenti ▾»
+        ctx.add_file_action(self.export_action, "esporta", _("Esporta"), _("In XFDF o FDF, da reimportare"))
 
     def _tool_action(self, key: str, text: str, icon_name: str, tool, shortcut: str | None = None) -> QAction:
         act = self.ctx.action(text, icon_name, lambda _c=False, k=key: self.activate(k), shortcut=shortcut,
@@ -274,8 +275,17 @@ class AnnotationsModule:
         self.ctrl.annotationsVisibilityChanged.connect(lambda h: (hide.blockSignals(True), hide.setChecked(h),
                                                                   hide.blockSignals(False)))
         menu.addSeparator()
-        menu.addAction(_("Esporta commenti (XFDF)…"), lambda: ui_actions.export_comments(self.ctrl, "xfdf"))
-        menu.addAction(_("Esporta commenti (FDF)…"), lambda: ui_actions.export_comments(self.ctrl, "fdf"))
+        self.export_actions: dict[str, QAction] = {}
+        for fmt, text in (("xfdf", _("Esporta commenti (XFDF)…")), ("fdf", _("Esporta commenti (FDF)…"))):
+            act = self.ctx.action(text, None, lambda _c=False, f=fmt: ui_actions.export_comments(self.ctrl, f))
+            menu.addAction(act)
+            self.export_actions[fmt] = act
+        # le stesse due azioni sotto un'unica voce che chiede il formato (scheda File › Esporta)
+        export_menu = QMenu(_("Esporta commenti"), menu)
+        export_menu.addActions(list(self.export_actions.values()))
+        self.export_action = export_menu.menuAction()
+        bind_icon(self.export_action, "message-square-share")
+        self.ctx.window.register_document_action(self.export_action)
         menu.addAction(_("Importa commenti…"), lambda: ui_actions.import_comments(self.ctrl))
         menu.addAction(_("Riepilogo commenti…"), lambda: ui_actions.export_summary(self.ctrl))
         menu.addSeparator()

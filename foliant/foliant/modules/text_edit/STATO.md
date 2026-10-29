@@ -39,4 +39,6 @@ Test in `tests/modules/text_edit/` (circa 145 test, offscreen). File principali:
 
 Più finestre (Ctrl+N): un controller per finestra in `ctx.text_edit` (`controller_for(ctx)`), nessuno stato globale del modulo; il pannello ignora i cambi di tema dopo la chiusura della sua finestra (`test_ui.py::test_second_window_closed_leaves_first_working`). Restano condivisi tra le finestre solo la cache dei font Qt, il servizio ortografico e le corrispondenze dei font dell'utente.
 
+Barra in stile Excel (`test_ribbon.py`): nella scheda Modifica, condivisa con il modulo `objects`, il gruppo «Testo» (Modifica testo, Sostituisci = Trova e sostituisci Ctrl+H, Controllo ortografico F7 e Font del documento solo icona) e il gruppo «Inserisci», che apre con «Testo» (Aggiungi testo); `objects` vi aggiunge Immagine e Collegamento. Controllo ortografico e Trova e sostituisci non sono più nel menu ☰ (stanno nella barra).
+
 Dipendenze facoltative in `DEPS.txt` (pyspellchecker, fonttools). Richieste al nucleo in `CORE_REQUESTS.md`.

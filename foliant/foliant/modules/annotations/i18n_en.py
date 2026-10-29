@@ -229,5 +229,8 @@ EN.update({
     "Documento PDF/A-1: l'opacità delle annotazioni è stata portata al 100%.":
         "PDF/A-1 document: annotation opacity was set to 100%.", "1 commento": "1 comment", "{state} impostato da {who}": "{state} set by {who}",
     "Riepilogo commenti — {title}": "Comment summary — {title}",
+    # gruppi della barra Commenta e voce della scheda File › Esporta
+    "Selezione": "Selection", "Note": "Notes", "Gestisci": "Manage", "Esporta": "Export",
+    "In XFDF o FDF, da reimportare": "As XFDF or FDF, to import again",
 })
 EN.pop("Gomma ", None)

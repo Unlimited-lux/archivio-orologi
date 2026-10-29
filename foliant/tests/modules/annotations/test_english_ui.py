@@ -29,7 +29,8 @@ def _italian_only_words() -> set[str]:
 
 
 # voci uguali nelle due lingue ammesse: nomi propri, sigle, valori tecnici
-SAME_IN_BOTH = re.compile(r"^(|[\d\s.,:x×%/+°'\"-]*|.*\b(pt|mm|cm|in|m|km|ft)\b.*|XFDF|FDF|CSV|PDF|HTML|PNG|"
+# («Note» è il gruppo «Note» in italiano e la traduzione di «Nota» in inglese)
+SAME_IN_BOTH = re.compile(r"^(|[\d\s.,:x×%/+°'\"-]*|.*\b(pt|mm|cm|in|m|km|ft)\b.*|XFDF|FDF|CSV|PDF|HTML|PNG|Note|"
                           r"Helvetica|Times|Courier|Maria Rossi|Anna|Bruno|.*\.pdf|\s*↳ .*|A|[A-Z]{1,4}|.*\(.*\)|Area|Standard|"
                           r"#[0-9A-Fa-f]{6}|\d+ ?%|{.*})$")
 
@@ -111,9 +112,12 @@ def _ui_texts(settings, text_pdf, monkeypatch, lang) -> list[tuple[str, str]]:
         menu = QMenu()
         build_annotation_menu(ctrl, menu, 0, note, pymupdf.Point(300, 300))
         texts += _menu_texts(menu, "menu contestuale", set())
-        for section in (_tr("Commenti"), "Commenti"):
-            for act in win._menu_sections.get(section, []):
-                texts.append(("menu principale", act.text()))
+        texts += [("gruppi della barra", title) for title, _acts in module.mode.toolbar.groups()]
+        for entry in win.backstage.entries("esporta"):      # scheda File › Esporta (al posto del menu ☰)
+            if entry.action is module.export_action:
+                texts += [("scheda File", entry.action.text()), ("scheda File", entry.group),
+                          ("scheda File", entry.description)]
+                texts += _menu_texts(entry.action.menu(), "scheda File", set())
         dialogs.edit_comment(view, _tr("Nota"), "A", "")
         dialogs.ask_scale(view, engine.Scale())
         for d in dialogs_seen:
