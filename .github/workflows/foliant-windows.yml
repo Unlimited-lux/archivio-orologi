@@ -3,7 +3,7 @@ name: foliant-windows
 
 on:
   push:
-    branches: ["claude/pdf-editor-updf-clone-iod4xs-windows"]
+    branches: ["claude/pdf-editor-updf-clone-iod4xs", "claude/pdf-editor-updf-clone-iod4xs-windows"]
     paths: ["foliant/**", ".github/workflows/foliant-windows.yml"]
   workflow_dispatch:
     inputs:

@@ -90,6 +90,22 @@ percorso, e vengono cancellate alla chiusura normale. Al primo avvio la nuova ve
 dati di questo tipo lasciati dalle versioni precedenti, solo quelli di Foliant. Lo verifica il
 test a scatola chiusa `tests/test_no_file_traces.py` sull'app completa con tutti i moduli.
 
+### Windows (29/10)
+
+Foliant funziona anche su Windows 10 (1809 o successivo) e 11 a 64 bit, con lo stesso codice: le
+differenze tra sistemi stanno in `foliant/foliant/core/platform.py` (cartelle, processi, strumenti
+esterni, salvataggio con file aperti da altri programmi, posta, font) e `core/winscan.py`
+(scanner WIA). Il lavoro è stato fatto da due sessioni dedicate (codice e installatore).
+- Suite completa su GitHub Actions (`.github/workflows/foliant-windows.yml`): Windows con Python
+  3.12 e 3.13 e Ubuntu, verdi in due esecuzioni consecutive sullo stesso commit (f3fdbc7).
+- Installatore `Foliant-Setup-<versione>.exe` (Inno Setup) e versione portatile `.zip`, costruiti
+  da `.github/workflows/foliant-windows-build.yml`, con Tesseract (ita, eng, osd), Ghostscript e
+  qpdf inclusi e le loro licenze. Una prova automatica su Windows pulito installa, apre, modifica
+  e salva un PDF, fa OCR → DOCX, PDF/A e compressione, controlla che non restino tracce dei file
+  (AppData, registro, Recenti di Windows) e disinstalla.
+- Guida per l'utente: `foliant/docs/windows.md`. Il programma non è firmato digitalmente: al
+  primo avvio Windows SmartScreen chiede conferma.
+
 ### Problemi noti
 
 Stato del 28/10 sera, dopo la riservatezza e le correzioni dei moduli unite: suite completa verde,
@@ -178,3 +194,8 @@ video nei PDF (VIS-37), firma con smart card (SIG-23, implementazione conservata
   un giro di rifinitura; le sessioni dei moduli hanno corretto in parallelo i casi segnalati
   (objects, forms, security, convert, ocr). Unite anche le correzioni dei moduli arrivate dopo la
   consegna.
+- 29/10 06:30–18:30 — Porting a Windows con due sessioni (codice e installatore) e controllo
+  orario automatico delle sessioni. Corretti tra l'altro i controlli dei processi che su Windows
+  li avrebbero terminati, la ricerca degli strumenti esterni, i font, la posta, lo scanner, la
+  sintesi vocale e due difetti già presenti su Linux (pannello IA troppo largo con DejaVu, misura
+  della memoria nel test da 5.000 pagine); resi stabili tutti i test con soglie di tempo.

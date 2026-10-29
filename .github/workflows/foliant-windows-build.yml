@@ -5,6 +5,7 @@ name: foliant-windows-build
 on:
   push:
     branches:
+      - "claude/pdf-editor-updf-clone-iod4xs"
       - "claude/pdf-editor-updf-clone-iod4xs-windows"
       - "claude/pdf-editor-updf-clone-iod4xs-windows-installer"
     paths: ["foliant/**", ".github/workflows/foliant-windows-build.yml"]
