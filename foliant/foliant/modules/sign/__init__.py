@@ -3,9 +3,7 @@ locale, firma digitale PAdES con pyHanko, verifica e pannello delle firme."""
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMenu, QToolButton
-
-from foliant.api import Context, _, add_translations, bind_icon
+from foliant.api import Context, _, add_translations
 
 ORDER = 90
 
@@ -32,6 +30,7 @@ def _translations() -> dict:
         "Firma un PDF": "Sign a PDF", "Firma grafica o digitale": "Graphic or digital signature",
         "Libreria bloccata": "Library locked", "Incorpora le firme": "Embed signatures",
         "Incorpora le firme grafiche nel contenuto delle pagine": "Embed the graphic signatures into the page content",
+        "Identità": "Identity", "ID digitali": "Digital IDs", "Incorpora": "Embed", "Nuovo ID": "New ID",
     })
     return merged
 
@@ -45,19 +44,16 @@ def register(ctx: Context) -> None:
     ctx.sign_controller = c   # accessibile ai test
     mode = ctx.add_mode("firma", _("Firma"), "signature", 90)
 
+    # --- Firme: firma grafica
+    mode.add_group(_("Firme"), "firme")
     act_create = ctx.action(_("Crea firma"), "signature", lambda: c.create_signature("firma"),
                             tooltip=_("Crea una firma disegnata, digitata o da immagine"))
     act_initials = ctx.action(_("Crea iniziali"), "type", lambda: c.create_signature("iniziali"))
     mode.add_action(act_create)
     mode.add_action(act_initials)
 
-    lib_button = QToolButton()
-    lib_button.setText(_("Firme salvate"))
-    lib_button.setToolButtonStyle(mode.toolbar.toolButtonStyle())
-    bind_icon(lib_button, "square-library")
-    lib_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-    menu = QMenu(lib_button)
-    lib_button.setMenu(menu)
+    lib_button = mode.add_menu_button(_("Firme salvate"), "square-library", [], requires_document=False)
+    menu = lib_button.menu()
 
     def fill_menu() -> None:
         menu.clear()
@@ -89,15 +85,18 @@ def register(ctx: Context) -> None:
         menu.addAction(_("Gestisci libreria…"), c.manage_library)
 
     menu.aboutToShow.connect(fill_menu)
-    mode.add_widget(lib_button)
+    c.library_button = lib_button
 
     act_edit = ctx.action(_("Modifica firma"), "move", lambda: _edit_tool(ctx, c),
                           tooltip=_("Seleziona, sposta o ridimensiona le firme inserite"))
-    mode.add_action(act_edit)
     act_embed = ctx.action(_("Incorpora le firme"), "stamp", c.embed_all,
                            tooltip=_("Incorpora le firme grafiche nel contenuto delle pagine"))
-    ctx.add_menu_action(act_embed, _("Firma"))
-    mode.add_separator()
+    act_embed.setIconText(_("Incorpora"))
+    mode.add_action(act_edit, compact=True)
+    mode.add_action(act_embed)
+
+    # --- Firma digitale: con certificato
+    mode.add_group(_("Firma digitale"), "digitale")
     act_digital = ctx.action(_("Firma digitale"), "file-badge", lambda: c.start_digital_sign(False),
                              tooltip=_("Firma il documento con un certificato"))
     act_invisible = ctx.action(_("Firma invisibile"), "eye-off", lambda: _invisible(ctx, c))
@@ -105,17 +104,25 @@ def register(ctx: Context) -> None:
                              tooltip=_("Firma con certificato e stabilisci le modifiche consentite"))
     act_field = ctx.action(_("Campo firma"), "text-cursor-input", c.start_add_field,
                            tooltip=_("Aggiungi un campo firma vuoto da far firmare"))
-    for a in (act_digital, act_invisible, act_certify, act_field):
-        mode.add_action(a)
-    mode.add_separator()
+    mode.add_action(act_digital)
+    mode.add_action(act_invisible, compact=True)
+    mode.add_action(act_certify)
+    mode.add_action(act_field)
+
+    # --- Identità: verifica e identità digitali
+    mode.add_group(_("Identità"), "identita")
     act_verify = ctx.action(_("Verifica firme"), "shield-check", lambda: _verify(ctx, c))
     act_ids = ctx.action(_("Gestisci firme e identità digitali…"), "key-round", c.manage_ids,
                          requires_document=False)
+    act_ids.setIconText(_("ID digitali"))
     act_self = ctx.action(_("Crea ID autofirmato…"), "badge-plus", c.create_self_signed, requires_document=False)
-    for a in (act_verify, act_ids):
-        mode.add_action(a)
-    ctx.add_menu_action(act_ids, _("Firma"))
-    ctx.add_menu_action(act_self, _("Firma"))
+    mode.add_action(act_verify)
+    mode.add_action(act_ids)
+    act_self.setIconText(_("Nuovo ID"))
+    mode.add_action(act_self)
+    c.actions = {"create": act_create, "initials": act_initials, "edit": act_edit, "embed": act_embed,
+                 "digital": act_digital, "invisible": act_invisible, "certify": act_certify, "field": act_field,
+                 "verify": act_verify, "ids": act_ids, "self_signed": act_self}
 
     panel = SignaturesPanel(c)
     c.panel = panel

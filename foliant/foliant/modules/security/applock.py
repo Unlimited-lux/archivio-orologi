@@ -439,7 +439,7 @@ class LockPreferences(QWidget):
 
 
 class LockDialog(QDialog):
-    """Le stesse impostazioni in una finestra (Proteggi › Blocco dell'applicazione…)."""
+    """Le stesse impostazioni in una finestra (File › Opzioni › Sicurezza › Blocco dell'applicazione…)."""
 
     def __init__(self, lock: AppLock, parent=None):
         super().__init__(parent)

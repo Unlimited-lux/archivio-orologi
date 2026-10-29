@@ -1,7 +1,10 @@
 # Stato del modulo Firma (`modules/sign`)
 
 Sezione della specifica: **9. Firma** (SIG-01…SIG-25). Modalità `firma` (ordine 90), pannello laterale
-«Firme», voci nel menu ☰ (sezione Firma) e azione rapida nella Home.
+«Firme» e azione rapida nella Home. Barra Firma in tre gruppi (stile Excel): «Firme» (Crea firma, Crea
+iniziali, Firme salvate ▾, Modifica firma, Incorpora le firme), «Firma digitale» (Firma digitale, Firma
+invisibile, Certifica, Campo firma) e «Identità» (Verifica firme, Gestisci firme e identità digitali…, Crea ID
+autofirmato…); niente più voci nel menu ☰ (test `test_ribbon.py`).
 
 **Organizzazione del codice.** La logica senza interfaccia è separata dai widget:
 - logica: `graphic.py`, `library.py`, `sync.py`, `digital.py`, `store.py`, `fonts.py`;

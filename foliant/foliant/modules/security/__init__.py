@@ -81,41 +81,27 @@ def register(ctx: Context) -> None:
         "cert_open": act(_("Apri con certificato…"), "key-round", lambda: c.open_with_certificate(),
                          requires_document=False),
     }
-    from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QMenu
-    # Policy di protezione (SEC-12): nel menu Proteggi un sottomenu con una voce per policy
+    # Policy di protezione (SEC-12): clic sul pulsante = gestione; freccia del pulsante e
+    # File › Opzioni = una voce per policy più «Gestisci policy…»
     c.actions["policies"] = act(_("Policy di protezione"), "shield-plus", c.manage_policies,
                                 requires_document=False)
     c.policy_menu = QMenu(ctx.window)
     c.policy_menu.aboutToShow.connect(lambda: c.fill_policy_menu(c.policy_menu))
-    for key in ("policies", "remove", "properties", "style", "panel", "inspect", "metadata", "flatten", "pages",
-                "text", "highlights"):
-        c.actions[key].setPriority(QAction.Priority.LowPriority)   # solo icona nella barra
-    groups = [("protect", "policies", "remove", "properties"),
-              ("area", "text", "find", "patterns", "pages", "highlights", "style", "panel", "apply"),
-              ("inspect", "sanitize", "metadata", "flatten")]
-    for n, group in enumerate(groups):
-        if n:
-            mode.add_separator()
-        for key in group:
-            mode.add_action(c.actions[key])
-    for key in ("protect", "remove", "cert_encrypt", "cert_open", "envelope", "new_envelope", "vault", "sanitize",
-                "metadata"):
-        ctx.add_menu_action(c.actions[key], _("Proteggi"))
-    menu_policy = ctx.action(_("Policy di protezione"), "shield-plus", c.manage_policies, requires_document=False)
-    menu_policy.setMenu(c.policy_menu)
-    ctx.add_menu_action(menu_policy, _("Proteggi"))
-    revoke = ctx.action(_("Revoca documenti attendibili"), "shield-x", c.revoke_trust, requires_document=False)
-    ctx.add_menu_action(revoke, _("Proteggi"))
+    c.actions["policies"].setMenu(c.policy_menu)
+    # «Cerca un comando» salta le azioni con un menu: la gestione resta cercabile con questa voce
+    c.actions["manage_policies"] = act(_("Gestisci policy…"), "shield-ellipsis", c.manage_policies,
+                                       requires_document=False)
+    c.actions["revoke"] = act(_("Revoca documenti attendibili"), "shield-x", c.revoke_trust,
+                              requires_document=False)
     # Blocco dell'applicazione (SEC-32)
     from .applock import AppLock, LockPreferences
     c.applock = AppLock.shared(lambda: c.settings())   # uno per l'applicazione: blocca tutte le finestre
-    lock_now = ctx.action(_("Blocca Foliant"), "lock-keyhole", c.lock_app, requires_document=False)
-    c.actions["lock"] = lock_now
-    ctx.add_menu_action(lock_now, _("Proteggi"))
-    lock_settings = ctx.action(_("Blocco dell'applicazione…"), "shield", c.lock_settings, requires_document=False)
-    c.actions["lock_settings"] = lock_settings
-    ctx.add_menu_action(lock_settings, _("Proteggi"))
+    c.actions["lock"] = act(_("Blocca Foliant"), "lock-keyhole", c.lock_app, requires_document=False)
+    c.actions["lock_settings"] = act(_("Blocco dell'applicazione…"), "shield", c.lock_settings,
+                                     requires_document=False)
+    _build_ribbon(mode, c)
+    _build_file_tab(ctx, c)
     c.lock_preferences = LockPreferences
     ctx.add_preferences_page(_("Sicurezza e riservatezza"), lambda parent=None: LockPreferences(c.applock, parent),
                              order=80)
@@ -173,6 +159,64 @@ def register(ctx: Context) -> None:
         lambda: c.lock_vault(auto=True) if getattr(c, "_vault", None) is not None and c._vault.unlocked else None)
     c.applock.start()                          # blocco all'avvio, prima dei file passati da riga di comando
     _update_actions(c, None)
+
+
+#: voci secondarie della barra: solo l'icona (il nome resta nel suggerimento)
+COMPACT = ("remove", "policies", "properties", "text", "pages", "highlights", "style", "panel",
+           "inspect", "metadata", "flatten")
+
+
+def _build_ribbon(mode, c: SecurityController) -> None:
+    """Barra Proteggi in tre gruppi con nome, come la barra multifunzione di Excel."""
+    a = c.actions
+    # etichette più corte nella barra (menu, scheda File e ricerca dei comandi usano il nome intero)
+    a["protect"].setIconText(_("Password"))
+    a["patterns"].setIconText(_("Dati personali"))
+    a["apply"].setIconText(_("Applica"))
+
+    def add(*keys: str) -> None:
+        for key in keys:
+            mode.add_action(a[key], compact=key in COMPACT)
+
+    mode.add_group(_("Protezione"), "protezione")
+    add("protect", "remove")
+    c.encryption_button = mode.add_menu_button(
+        _("Cifratura"), "key-square",
+        [a["cert_encrypt"], a["cert_open"], None, a["envelope"], a["new_envelope"], None, a["vault"]],
+        tooltip=_("Cifratura con certificato, buste di sicurezza e spazio protetto"), requires_document=False)
+    add("policies", "properties")
+    mode.add_group(_("Oscuramento"), "oscuramento")
+    add("area", "text", "find", "patterns", "pages", "highlights", "style", "panel", "apply")
+    mode.add_group(_("Pulizia"), "pulizia")
+    add("inspect", "sanitize", "metadata", "flatten")
+
+
+def _build_file_tab(ctx: Context, c: SecurityController) -> None:
+    """Voci della scheda File: protezione e controllo del documento in Informazioni, apertura con
+    certificato in Apri, policy, attendibilità e blocco dell'applicazione in Opzioni."""
+    a = c.actions
+    protect = _("Proteggi il documento")
+    ctx.add_file_action(a["protect"], "informazioni", protect, _("Password di apertura, stampa e modifica"),
+                        order=10)
+    ctx.add_file_action(a["remove"], "informazioni", protect, _("Toglie password e permessi"), order=11)
+    ctx.add_file_action(a["new_envelope"], "informazioni", protect, _("PDF cifrato da inviare con allegati"),
+                        order=12)
+    check = _("Controlla il documento")
+    ctx.add_file_action(a["sanitize"], "informazioni", check, _("Metadati, livelli, script e testo nascosto"),
+                        order=20)
+    ctx.add_file_action(a["metadata"], "informazioni", check, _("Vedi e cancella i metadati del documento"),
+                        order=21)
+    ctx.add_file_action(a["cert_open"], "apri", _("Apri"), _("PDF cifrati con un certificato digitale"),
+                        order=30)
+    security = _("Sicurezza")
+    ctx.add_file_action(a["policies"], "opzioni", security, _("Applica o gestisci le protezioni salvate"),
+                        order=60)
+    ctx.add_file_action(a["revoke"], "opzioni", security, _("Torna a mostrare gli avvisi sui contenuti attivi"),
+                        order=61)
+    ctx.add_file_action(a["lock"], "opzioni", security, _("Copre le finestre finché non inserisci il codice"),
+                        order=62)
+    ctx.add_file_action(a["lock_settings"], "opzioni", security,
+                        _("Codice, blocco all'avvio e dopo un periodo di inattività"), order=63)
 
 
 def _update_actions(c: SecurityController, view) -> None:
