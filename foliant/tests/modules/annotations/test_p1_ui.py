@@ -356,6 +356,13 @@ def test_ann37_38_reply_and_status_from_ui(comments, monkeypatch):
     assert module.ctrl.info(0, a).marked
 
 
+def _without_id(data: bytes) -> bytes:
+    """Il secondo elemento di /ID cambia a ogni scrittura (MuPDF lo rigenera casuale e, se i byte
+    sembrano testo, lo scrive come stringa letterale: la lunghezza varia di qualche byte)."""
+    import re
+    return re.sub(rb"/ID\s*\[.*?\]>>\s*startxref", b"/ID[]>>startxref", data, flags=re.S)
+
+
 def test_ann39_hide_annotations(comments):
     """ANN-39: «Nascondi annotazioni» → resa senza annotazioni; il file non cambia."""
     window, view, module = comments
@@ -370,7 +377,7 @@ def test_ann39_hide_annotations(comments):
     assert img.width() == pix.width
     color = img.pixelColor(int(100 * 1.0), int(450 * 1.0))
     assert color.red() > 240 and color.green() > 240   # nessun bordo rosso
-    assert len(view.document.to_bytes()) == len(before)
+    assert _without_id(view.document.to_bytes()) == _without_id(before)
     module.ctrl.set_annotations_hidden(False, view)
     img2 = view._render_page(0, 1.0)
     c2 = img2.pixelColor(100, 450)

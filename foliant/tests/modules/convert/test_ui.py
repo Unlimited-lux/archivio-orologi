@@ -293,7 +293,9 @@ def test_compress_no_reduction(window, ctrl, tmp_path, monkeypatch, messages):
     doc.save(str(path), garbage=4, deflate=True)
     view = window.open_path(str(path))
     monkeypatch.setattr(CompressDialog, "exec", lambda d: QDialog.DialogCode.Accepted)
-    monkeypatch.setattr(optimize, "compress_pdf_bytes", lambda data, *a, **k: data + b"\n%%")
+    # più grande di qualche KB: i byte del documento aperto e la dimensione del file differiscono di
+    # qualche byte (secondo elemento di /ID rigenerato a ogni scrittura, a volte come stringa letterale)
+    monkeypatch.setattr(optimize, "compress_pdf_bytes", lambda data, *a, **k: data + b"\n%" + b" " * 4096)
     res = ctrl.compress()
     assert res["reduced"] is False and not view.document.is_modified
     assert "Nessuna riduzione" in messages["notify"][0][0]
