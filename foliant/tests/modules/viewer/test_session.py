@@ -121,15 +121,17 @@ def test_document_view_applies_on_every_open(viewer_window, tmp_path):
 
 
 def test_no_history_actions_and_preferences(viewer_window):
-    viewer_window._rebuild_menu()
+    viewer_window.show_backstage()
     names = []
 
-    def walk(menu):
-        for a in menu.actions():
+    def walk(actions):
+        for a in actions:
             names.append(a.text())
             if a.menu():
-                walk(a.menu())
-    walk(viewer_window.main_menu)
+                walk(a.menu().actions())
+    walk(viewer_window.backstage.all_actions())
+    walk(a for m in viewer_window.modes.values() for a in m.toolbar.actions())
+    viewer_window.hide_backstage()
     for text in ("Ripristina la sessione all'avvio", "Non registrare la cronologia"):
         assert text not in names
     ctl = _session(viewer_window)
@@ -343,15 +345,17 @@ def test_tab_context_menu(viewer_window, tmp_path):
 
 
 def test_menu_contains_tab_actions(viewer_window):
-    viewer_window._rebuild_menu()
+    viewer_window.show_backstage()
     names = []
 
-    def walk(menu):
-        for a in menu.actions():
+    def walk(actions):
+        for a in actions:
             names.append(a.text())
             if a.menu():
-                walk(a.menu())
-    walk(viewer_window.main_menu)
+                walk(a.menu().actions())
+    walk(viewer_window.backstage.all_actions())
+    walk(a for m in viewer_window.modes.values() for a in m.toolbar.actions())
+    viewer_window.hide_backstage()
     for text in ("Riapri scheda chiusa", "Chiudi le altre schede", "Chiudi le schede a destra",
                  "Chiudi tutte le schede", "Ignora le impostazioni di apertura dei documenti"):
         assert text in names

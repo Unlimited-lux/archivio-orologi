@@ -301,9 +301,10 @@ def test_reveal_and_copy_path(fwin, ctl, sample_pdf, monkeypatch):
 
 
 def test_menu_section(fwin, ctl, sample_pdf):
-    fwin.main_menu.aboutToShow.emit()
-    texts = [a.text() for a in fwin.main_menu.actions()]
-    assert "File" in texts
+    fwin.show_backstage()
+    texts = [a.text() for a in fwin.backstage.all_actions()]
+    assert ctl.act_copy_path.text() in texts
+    fwin.hide_backstage()
 
 
 def test_files_does_not_use_recent_list(fwin, ctl, sample_pdf, tmp_path, monkeypatch):
