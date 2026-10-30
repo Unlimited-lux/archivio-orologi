@@ -364,3 +364,65 @@ def test_files_does_not_use_recent_list(fwin, ctl, sample_pdf, tmp_path, monkeyp
         text = f"{key}={s.value(key)}"
         for trace in ("zq7k", "esempio.pdf", str(tmp_path)):
             assert trace not in text, key
+
+
+# ------------------------------------------- un file aperto una volta sola (ui/open_files.py)
+def _locks() -> list[str]:
+    from foliant.core import openlock
+    folder = openlock.folder()
+    return sorted(p.name for p in folder.glob("*" + openlock.LOCK_SUFFIX)) if folder else []
+
+
+def test_rename_and_move_carry_the_lock_of_the_open_file(fwin, ctl, sample_pdf, tmp_path):
+    """Il blocco del file aperto segue la rinomina e lo spostamento: il nuovo percorso risulta
+    aperto (un'altra finestra mostra la stessa scheda), il vecchio è libero; anche la scheda di
+    un'altra finestra segue il file."""
+    from foliant.ui import open_files
+    view = fwin.open_path(sample_pdf)
+    first = _locks()
+    renamed = ctl.rename_path(sample_pdf, "rinominato")
+    assert open_files.view_for(renamed) is view and open_files.view_for(sample_pdf) is None
+    assert len(_locks()) == 1 and _locks() != first
+    dest = tmp_path / "archivio"
+    dest.mkdir()
+    [moved] = ctl.move_paths([renamed], str(dest))
+    assert open_files.view_for(moved) is view and open_files.view_for(renamed) is None and len(_locks()) == 1
+    other = fwin.new_window()
+    try:
+        assert other.open_path(moved) is view and other.tabs.count() == 0
+        fwin.close_view(view)
+        theirs = other.open_path(moved)
+        again = ctl.rename_path(moved, "dall'altra finestra")
+        assert str(theirs.document.path) == again
+        assert other.tabs.tabText(other.tabs.indexOf(theirs)) == os.path.basename(again)
+        assert open_files.view_for(again) is theirs and len(_locks()) == 1
+    finally:
+        for v in other.views():
+            other.close_view(v, ask=False)
+        other.close()
+    assert _locks() == []
+
+
+def test_file_open_in_another_process_is_not_renamed_moved_or_replaced(fwin, ctl, three_pdfs, tmp_path,
+                                                                        monkeypatch):
+    """Un altro processo Foliant ha il file (o un file che non c'è più): qui non lo si rinomina,
+    sposta o mette nel cestino, e non diventa la destinazione di una rinomina."""
+    from tests.test_open_once import LOCKER, _Child
+    uno, due, _tre = three_pdfs
+    ghost = os.path.join(os.path.dirname(uno), "eliminato.pdf")       # aperto altrove, poi eliminato
+    locker = _Child(LOCKER, due, ghost, log=tmp_path / "blocco.log")
+    try:
+        assert locker.wait_for("BLOCCO") == "FileLock FileLock"
+        assert ctl.rename_path(due, "altro.pdf") is None
+        assert ctl.move_paths([due], str(tmp_path)) == []
+        monkeypatch.setattr(ctl, "move_to_trash", lambda p: True)
+        assert ctl.trash_paths([due], confirm=False) == []
+        assert os.path.exists(due)
+        monkeypatch.setattr(ctl, "ask_conflict", lambda target: "replace")
+        assert ctl.rename_path(uno, "due.pdf") is None
+        assert ctl.rename_path(uno, "eliminato.pdf") is None
+        assert os.path.exists(uno) and not os.path.exists(ghost)
+        assert len(ctl.errors) == 5 and all("aperto" in e for e in ctl.errors), ctl.errors
+    finally:
+        locker.kill()
+    assert ctl.rename_path(due, "altro.pdf")                          # terminato l'altro processo

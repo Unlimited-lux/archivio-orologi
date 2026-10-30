@@ -196,10 +196,12 @@ def _wordy(text: str) -> bool:
 def test_viewer_ui_is_english(qtbot, tmp_path):
     from foliant.ui import theme
     from foliant.ui.main_window import MainWindow
-    pdf = _pdf(tmp_path / "prova.pdf")
     texts = {}
     try:
         for lang in ("it", "en"):
+            # una copia per finestra, con lo stesso nome: lo stesso file non si apre in due finestre
+            (tmp_path / lang).mkdir()
+            pdf = _pdf(tmp_path / lang / "prova.pdf")
             i18n.set_language(lang)
             theme.apply(QApplication.instance(), "light")
             win = MainWindow(QSettings(str(tmp_path / f"{lang}.ini"), QSettings.Format.IniFormat))

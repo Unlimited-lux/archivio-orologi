@@ -430,12 +430,36 @@ class Context(QObject):
         return self._w.views()
 
     def open_path(self, path: str, password: str | None = None) -> "DocumentView | None":
-        """Apre un file (chiede la password se serve). Restituisce la vista o None."""
+        """Apre un file (chiede la password se serve). Restituisce la vista o None. Un file già
+        aperto non si apre due volte: si mostra la sua scheda (anche in un'altra finestra) e si
+        restituisce quella; se è aperto in un altro processo Foliant, None (con un avviso)."""
         return self._w.open_path(path, password)
 
-    def open_document(self, document: Document) -> "DocumentView":
-        """Mostra in una nuova scheda un documento creato da un modulo."""
+    def open_document(self, document: Document) -> "DocumentView | None":
+        """Mostra in una nuova scheda un documento creato da un modulo. Se il documento ha il
+        percorso di un file già aperto, come `open_path` (e `document` si chiude)."""
         return self._w.add_document(document)
+
+    def view_for_path(self, path: str) -> "DocumentView | None":
+        """Scheda che ha aperto il file `path` in qualunque finestra di questo processo (stesso file
+        anche scritto in un altro modo: collegamenti, maiuscole su Windows), o None."""
+        from . import open_files
+        return open_files.view_for(path)
+
+    def file_in_use(self, path: str, ignore: "DocumentView | None" = None) -> bool:
+        """True se il file `path` è aperto in una scheda di questo processo (diversa da `ignore`)
+        o in un altro processo Foliant: da controllare prima di sostituirlo, spostarlo o eliminarlo."""
+        from . import open_files
+        busy = open_files.busy(path)
+        if busy is None:
+            return False
+        return busy.entry is None or ignore is None or busy.entry.view is not ignore
+
+    def follow_file(self, view: "DocumentView", path: str) -> bool:
+        """Il file della scheda `view` è stato rinominato o spostato: il documento lo segue
+        (percorso, titolo e suggerimento della scheda, blocco del file aperto). False se `path` era
+        già aperto altrove (controllarlo prima con `file_in_use`)."""
+        return self._window_of(view).follow_file(view, path)
 
     def save_current(self, save_as: bool = False) -> bool:
         return self._w.save_view(self.current_view(), save_as=save_as)
@@ -448,8 +472,14 @@ class Context(QObject):
     def close_view(self, view: "DocumentView | None", discard: bool = False) -> bool:
         """Chiude la scheda. Con `discard=False` come Ctrl+W (controlli `close_document` e
         domanda sulle modifiche non salvate); con `discard=True` chiude subito scartando le
-        modifiche (es. file spostato nel cestino). True se la scheda è stata chiusa."""
-        return self._w.close_view(view, ask=not discard)
+        modifiche (es. file spostato nel cestino). True se la scheda è stata chiusa. Una scheda di
+        un'altra finestra (es. da `view_for_path`) la chiude la sua finestra."""
+        return self._window_of(view).close_view(view, ask=not discard)
+
+    def _window_of(self, view: "DocumentView | None"):
+        """Finestra di Foliant che contiene la scheda `view`; questa se non la si trova."""
+        window = view.window() if view is not None else None
+        return window if window is not None and window is not view and hasattr(window, "close_view") else self._w
 
     def refresh_state(self) -> None:
         """Ricalcola titolo, azioni (annulla/ripeti, navigazione) e barra di stato della finestra."""

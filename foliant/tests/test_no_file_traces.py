@@ -4,11 +4,13 @@ del contenuto), né cronologie che li contengano.
 
 Test a scatola chiusa: un processo Foliant vero (foliant.app.main, con tutti i moduli) in un
 profilo utente isolato (HOME, XDG_*, FOLIANT_RECOVERY_DIR, XDG_RUNTIME_DIR temporanei) apre un
-PDF dalla riga di comando e uno dal dialogo «Apri», li modifica (anche con le guide), aspetta il
-salvataggio automatico di recupero, salva, «Salva con nome» e «Salva una copia» in un'altra
-cartella, passa per tutte le modalità e la Home, chiude la finestra. Poi si cerca nel profilo
-(compresi QtProject.conf e recently-used.xbel) ogni traccia dei nomi e delle cartelle: in
-UTF-8, UTF-16 (LE/BE) e come impronta MD5/SHA-1/SHA-256 del percorso o del contenuto.
+PDF dalla riga di comando e uno dal dialogo «Apri», fotografa i blocchi dei file aperti
+(core/openlock.py, che esistono solo finché i file sono aperti), li modifica (anche con le guide),
+aspetta il salvataggio automatico di recupero, salva, «Salva con nome» e «Salva una copia» in
+un'altra cartella, passa per tutte le modalità e la Home, chiude la finestra. Poi si cerca nel
+profilo (compresi QtProject.conf e recently-used.xbel) e nelle fotografie ogni traccia dei nomi e
+delle cartelle: in UTF-8, UTF-16 (LE/BE) e come impronta MD5/SHA-1/SHA-256 del percorso o del
+contenuto, anche nei nomi dei file. Chiusa la finestra non deve restare nessun blocco.
 I file che il test salva esplicitamente stanno fuori dal profilo e non vengono cercati.
 
 Il profilo parte con i dati di una versione precedente (recenti, documenti fissati, ultima
@@ -117,6 +119,15 @@ CHILD = textwrap.dedent(r'''
             window.open_dialog()                               # «Apri» con il dialogo vero
             assert any(str(v.document.path) == args["second"] for v in window.views()), "«Apri» non ha aperto il file"
             report["steps"].append("aperto dal dialogo")
+            # blocchi dei file aperti (core/openlock.py): ci sono mentre i file sono aperti, ma senza
+            # nome né percorso; se ne fa una fotografia fuori dal profilo, cercata come il profilo
+            import shutil
+            from foliant.core import openlock
+            locks = openlock.folder()
+            held = sorted(p.name for p in locks.glob("*" + openlock.LOCK_SUFFIX)) if locks else []
+            assert len(held) == 2, "blocchi dei file aperti: %d" % len(held)
+            shutil.copytree(locks, args["locks_snapshot"])
+            report["steps"].append("blocchi: %d" % len(held))
             # un'altra applicazione Qt (un altro processo) scrive la sua cronologia dei dialoghi
             import subprocess
             subprocess.run([sys.executable, "-c", args["other_app"]], check=True, timeout=60)
@@ -414,6 +425,7 @@ def _run_scenario(tmp_path):
         _legacy_profile(home, old_file, old_folder)
 
     snapshot = tmp_path / "recupero durante la sessione"
+    locks_snapshot = tmp_path / "blocchi durante la sessione"
     other_app = ("from PySide6.QtCore import QSettings\n"
                  "s = QSettings(QSettings.Scope.UserScope, 'QtProject')\n"
                  "s.beginGroup('FileDialog')\n"
@@ -421,7 +433,7 @@ def _run_scenario(tmp_path):
                  "s.setValue('lastVisited', 'file:///altra/durante')\n"
                  "s.endGroup()\ns.sync()\n")
     args = {"first": str(first), "second": str(second), "save_as": str(save_as), "copy": str(copy),
-            "recovery_snapshot": str(snapshot), "other_app": other_app}
+            "recovery_snapshot": str(snapshot), "locks_snapshot": str(locks_snapshot), "other_app": other_app}
     r = subprocess.run([sys.executable, "-c", CHILD, json.dumps(args)], cwd=ROOT, env=env,
                        capture_output=True, text=True, timeout=280)
     marker = [line for line in r.stdout.splitlines() if line.startswith("ZQ7-REPORT")]
@@ -471,8 +483,12 @@ def _run_scenario(tmp_path):
                      "documento salvato": first.read_bytes()})
     needles = _needles(paths, tok, contents)
 
+    # chiusa la finestra non resta nessun blocco dei file aperti (cartella di runtime del profilo)
+    run = home / "AppData" / "Local" / "foliant" / "run" if WINDOWS else profile / "run"
+    assert not list(run.glob("**/*.lock")), sorted(p.name for p in run.glob("**/*"))
+
     traces: list[tuple[str, str]] = []
-    for root in (profile, snapshot):
+    for root in (profile, snapshot, locks_snapshot):
         traces += _scan(root, tok, needles)
     pending = sorted({f"{where}: {what} → {_pending(where)}" for where, what in traces if _pending(where)})
     others = sorted({f"{where}: {what}" for where, what in traces if not _pending(where)})
@@ -492,11 +508,17 @@ def _pending(where: str) -> str | None:
 def _scan(root: Path, tok: dict[str, str], needles: dict[bytes, str]) -> list[tuple[str, str]]:
     """(dove, cosa) per ogni traccia; nei file INI «dove» comprende la chiave: «file [gruppo/chiave]»."""
     traces: list[tuple[str, str]] = []
+    # impronte in esadecimale: non devono fare nemmeno da nome di un file (es. un blocco)
+    hex_needles = {n.decode("ascii").lower(): label for n, label in needles.items()
+                   if n.isalnum() and n.isascii() and len(n) >= 32}
     for dirpath, dirnames, filenames in os.walk(root):
         for name in dirnames + filenames:
             for token_label, token in tok.items():
                 if token in name:
                     traces.append((str(Path(dirpath, name).relative_to(root.parent)), f"nome con «{token_label}»"))
+            for needle, label in hex_needles.items():
+                if needle in name.lower():
+                    traces.append((str(Path(dirpath, name).relative_to(root.parent)), f"nome: {label}"))
         for name in filenames:
             path = Path(dirpath, name)
             if not path.is_file() or path.is_symlink():

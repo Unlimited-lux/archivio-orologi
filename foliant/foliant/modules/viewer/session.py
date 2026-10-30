@@ -172,9 +172,12 @@ class SessionController(QObject):
             if not os.path.isfile(path):
                 self.ctx.status(_("Il file «{name}» non esiste più.").format(name=Path(path).name), 5000)
                 continue
+            already = self.ctx.view_for_path(path)
             view = self.ctx.open_path(path)
-            if view is None:
-                return None
+            if view is None or view is already:
+                # già aperto (anche in un'altra finestra o in un altro processo): se ne mostra la
+                # scheda così com'è, senza una seconda copia né la posizione di quella chiusa
+                return view
             self.apply_state(view, state)
             current = self.tabs.indexOf(view)
             if 0 <= index < self.tabs.count() and current != index:

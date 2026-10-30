@@ -128,6 +128,17 @@ Excel») il menu ☰ (143 voci in 21 sezioni, 65 raggiungibili solo da lì) è s
   (README). `add_menu_action` è superata. Proposta con prototipo e mappa delle voci pubblicata come
   pagina privata per il committente.
 
+### Un file aperto una volta sola (29/10)
+
+Su richiesta del committente («non posso modificare o visualizzare lo stesso file più volte nello
+stesso momento») lo stesso file non si apre mai due volte: né in due schede, né in due finestre
+(Ctrl+N), né in due processi Foliant. Un file già aperto mostra la sua scheda (anche nell'altra
+finestra o nell'altro processo, se il sistema lascia passare la finestra in primo piano); un
+secondo avvio che serviva solo a file già aperti lo dice ed esce. Il blocco segue il documento
+(Salva con nome, rinomina e spostamento dalla scheda File, ricarica) e si libera alla chiusura,
+all'uscita e dopo un crash. Su disco solo blocchi con il nome cifrato con chiave (HMAC), mai nomi o
+percorsi. Dettagli e API nel README del pacchetto («Nucleo: un file aperto una volta sola»).
+
 ### Problemi noti
 
 Stato del 28/10 sera, dopo la riservatezza e le correzioni dei moduli unite: suite completa verde,
@@ -139,7 +150,7 @@ numeri e date in inglese, importazione di 1.000 commenti in circa 2 s.
 Restano aperti:
 | Gravità | Area | Problema |
 |---|---|---|
-| bassa | nucleo | Su documenti con centinaia di commenti ogni modifica costa circa 0,3 s per la copia di annullamento. Il salvataggio incrementale dei PDF firmati non alza la versione PDF. Un secondo avvio mentre Foliant è occupato da più di 6 s può aprire il file due volte. |
+| bassa | nucleo | Su documenti con centinaia di commenti ogni modifica costa circa 0,3 s per la copia di annullamento. Il salvataggio incrementale dei PDF firmati non alza la versione PDF. |
 | bassa | viewer | Stampa (VIS-43): mancano ancora la scala in percentuale e «riduci solo se necessario», «Documento e timbri», la carta scelta in base al formato della pagina e la stampa PostScript; l'anteprima usa la carta della stampante predefinita, non quella scelta poi nel dialogo del sistema. |
 | — | specifica | Funzioni P1/P2 non completate e richieste al nucleo ancora aperte: elencate per ID in `foliant/modules/*/STATO.md` e in `foliant/modules/viewer/CORE_REQUESTS.md`. |
 

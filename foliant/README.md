@@ -100,6 +100,12 @@ preferenze generali (tema, lingua, unità…) e i file che salvi tu dove scegli.
   e le Jump List: vedi `docs/windows.md`.
 - Nei messaggi di errore sul terminale (che possono finire nel giornale di sistema) non compaiono
   nomi né percorsi di file.
+- Mentre un file è aperto esiste un suo file di blocco (un file non si apre due volte, anche tra
+  processi: vedi «Nucleo: un file aperto una volta sola»), in una cartella privata che su Linux sta
+  in memoria. Il nome del blocco è un'impronta con chiave segreta del percorso (HMAC-SHA256),
+  inutilizzabile senza la chiave; dentro ci sono solo il numero del processo e i nomi del programma
+  e del computer. Chiudendo il file il blocco si cancella; quelli di un'uscita anomala li toglie il
+  primo controllo successivo.
 
 ## Sviluppo
 
@@ -133,6 +139,7 @@ foliant/
     render.py     resa per stampa/immagini; annotations_hidden (flag Hidden temporaneo)
     errors.py     errori con messaggi per l'utente
     locale_defaults.py formato carta e unità di misura predefiniti (impostazioni locali e preferenze)
+    openlock.py   blocco tra processi dei file aperti (QLockFile con nome HMAC del percorso)
     platform.py   differenze tra Linux e Windows: cartelle dell'utente, processi, strumenti esterni, font, posta
     winscan.py    scanner su Windows (WIA)
   ui/          interfaccia Qt
@@ -145,7 +152,9 @@ foliant/
     theme.py        tema chiaro/scuro e colori
     icons.py        icone (nomi = file in resources/icons)
     home.py         schermata Home
-    instance.py     istanza singola: un secondo avvio consegna file e comandi alla finestra attiva
+    instance.py     istanza singola: un secondo avvio consegna file e comandi alla finestra attiva;
+                    canale di ogni processo per mostrare un file già aperto lì
+    open_files.py   un file, una scheda: registro dei file aperti nel processo, blocco che segue il documento
   modules/     funzioni, una cartella per area (scoperte automaticamente)
   api.py       tutto ciò che serve a un modulo
   i18n.py      traduzioni (sorgente italiano, catalogo inglese per modulo)
@@ -153,6 +162,66 @@ tests/
   conftest.py  fixture comuni: sample_pdf, encrypted_pdf, settings, window, make_pdf()
   modules/<nome>/  test di ciascun modulo
 ```
+
+### Nucleo: un file aperto una volta sola
+
+Lo stesso file non è mai aperto due volte nello stesso momento: né in due schede della stessa
+finestra, né in due finestre dello stesso processo (Ctrl+N), né in due processi Foliant (doppio
+clic su un file con Foliant già aperto, secondo avvio mentre il primo è occupato).
+
+- **Stesso processo** (`foliant/ui/open_files.py`): un registro in memoria lega il percorso
+  normalizzato di ogni file alla sua scheda. `open_path` di un file già aperto porta in primo piano
+  quella scheda con la sua finestra e restituisce la sua vista; nessuna seconda copia.
+- **Altri processi** (`foliant/core/openlock.py`): ogni file aperto ha un file di blocco
+  (`QLockFile`, con il PID del processo) nella cartella privata `platform.runtime_dir()`/foliant-locks
+  (0700; Linux: `$XDG_RUNTIME_DIR`, o la cartella di runtime di Qt; Windows:
+  `%LOCALAPPDATA%\foliant\run`). Chi trova il file bloccato chiede al processo che lo tiene, sul
+  canale di quel processo (`instance.process_channel(pid)`), di mostrarne la scheda; se il sistema
+  lo permette quella finestra va in primo piano (su Windows il richiedente cede prima il permesso
+  con `platform.allow_foreground`), altrimenti il suo pulsante lampeggia. Il richiedente non apre il
+  file e lo dice: un avviso nella finestra («“nome.pdf” è già aperto in un'altra finestra di
+  Foliant»). Un avvio servito solo ad aprire file già aperti altrove (niente `--create`, `--merge`,
+  `--new-window`) mostra lo stesso messaggio in una finestra di dialogo ed esce senza aprire una
+  finestra vuota: il file è comunque visibile nell'altro processo, e il messaggio dice dove
+  cercarlo anche quando il sistema non lascia passare in primo piano l'altra finestra.
+- **Istanza occupata**: se l'istanza singola non risponde entro 6 s (3 s per ogni tentativo) il
+  secondo avvio fa da sé, ma il blocco impedisce la seconda copia; le richieste rimaste arrivano
+  all'istanza quando torna libera e mostrano la scheda che c'è già.
+- **Il blocco segue il documento**: si prende prima di leggere il file (due aperture contemporanee
+  non passano entrambe), passa al nuovo percorso dopo «Salva con nome» e dopo rinomina o spostamento
+  dalla scheda File (`ctx.follow_file`), resta alla scheda nuova con la ricarica dal disco
+  (`add_document(doc, replacing=vista)`), si libera alla chiusura della scheda o della finestra,
+  all'uscita (`atexit`) e, dopo un crash, al primo controllo di un altro processo: `QLockFile`
+  riconosce il processo morto o il PID riusato da un altro programma, e ogni blocco altrui si prova
+  a cancellare, cosa che il sistema impedisce solo finché il processo che lo tiene è vivo.
+- **Vale per ogni modo di legare un file a una scheda**: `open_path` (Apri, riga di comando,
+  trascinamento, istanza singola), `add_document`/`ctx.open_document` con un documento che ha un
+  percorso (il documento passato si chiude e si restituisce la scheda esistente, o None se il file
+  è in un altro processo), «Riapri scheda chiusa» (mostra la scheda che c'è già, senza la posizione
+  di quella chiusa). «Salva con nome» e «Salva una copia» su un file aperto in un'altra scheda o in
+  un altro processo si rifiutano con un messaggio (sul file stesso del documento restano possibili);
+  la scheda File non sostituisce una destinazione aperta altrove né rinomina, sposta o mette nel
+  cestino un file aperto in un altro processo.
+- **Percorsi**: `platform.normalize_path` rende assoluto il percorso e risolve i collegamenti
+  simbolici (`realpath`; su Windows anche giunzioni, nomi brevi 8.3 e unità di rete mappate); su
+  Windows maiuscole e minuscole non contano (`normcase`).
+- **Il PDF non si blocca**: Foliant non tiene aperto il file in modo esclusivo; altri programmi lo
+  leggono e il salvataggio lo sostituisce (`platform.replace_file`) come sempre.
+- **Riservatezza**: su disco non c'è il nome né il percorso, nemmeno mentre il file è aperto. Il
+  nome del blocco è l'HMAC-SHA256 del percorso normalizzato con una chiave casuale di 32 byte
+  (`chiave`, 0600, nella stessa cartella), che si rinnova quando non resta nessun blocco; il
+  contenuto è quello di `QLockFile` (PID, nome del programma e del computer); il canale di un
+  processo si chiama solo con il PID e la richiesta di mostrare un file porta solo il nome del
+  blocco. Nessun percorso nei registri. Il registro dei file aperti sta solo in memoria.
+
+| Funzione | Uso |
+|---|---|
+| `ctx.view_for_path(p)` → `DocumentView \| None` | scheda di qualunque finestra di questo processo che ha aperto il file `p` (anche scritto in un altro modo) |
+| `ctx.file_in_use(p, ignore=None)` → bool | `p` è aperto in un'altra scheda (diversa da `ignore`) o in un altro processo Foliant: da controllare prima di sostituire, spostare o eliminare un file |
+| `ctx.follow_file(view, nuovo_percorso)` → bool | il file della scheda è stato rinominato o spostato: il documento lo segue (percorso, titolo, blocco); False se il nuovo percorso era aperto altrove |
+| `window.add_document(doc, replacing=vista)` | il documento sostituisce `vista` (ricarica dal disco): il file e il blocco passano alla nuova scheda |
+| `open_files.busy(p)` / `reserve(p, finestra)` / `follow(vista, finestra)` / `release(voce)` | registro del processo (solo nucleo) |
+| `openlock.acquire(p)` → `FileLock \| Holder \| None`, `openlock.holder(p)` | blocco tra processi: preso, tenuto da un altro processo (`pid`, `name`) o niente cartella privata (solo nucleo) |
 
 ## Scrivere un modulo
 
@@ -271,9 +340,10 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | Metodo | Uso |
 |---|---|
 | `current_view()`, `current_document()`, `views()` | vista/documento attivi |
-| `open_path(p)`, `open_document(doc)` | aprire file o mostrare un documento creato dal modulo |
+| `open_path(p)`, `open_document(doc)` | aprire file o mostrare un documento creato dal modulo. Un file già aperto non si apre due volte (vedi «Nucleo: un file aperto una volta sola»): si restituisce la sua scheda, anche di un'altra finestra, oppure None se è aperto in un altro processo Foliant; `open_document` con un documento che ha il percorso di un file già aperto chiude il documento passato |
+| `view_for_path(p)`, `file_in_use(p, ignore=None)`, `follow_file(view, p)` | file già aperti e schede che seguono un file rinominato o spostato: vedi «Nucleo: un file aperto una volta sola» |
 | `activate_view(view)` → bool | porta in primo piano la scheda, anche se è visibile la Home o un widget centrale |
-| `close_view(view, discard=False)` → bool | chiude la scheda come Ctrl+W (controlli `close_document` e domanda di salvataggio); `discard=True` chiude subito scartando le modifiche e senza controlli: da usare per le chiusure decise dal modulo (ricarica, file eliminato o spostato) |
+| `close_view(view, discard=False)` → bool | chiude la scheda come Ctrl+W (controlli `close_document` e domanda di salvataggio); `discard=True` chiude subito scartando le modifiche e senza controlli: da usare per le chiusure decise dal modulo (ricarica, file eliminato o spostato). Una scheda di un'altra finestra la chiude la sua finestra |
 | `window.save_view(view, save_as=False, recreate=False)` → bool | salva come Ctrl+S (`save_as`: Salva con nome); se il file è stato eliminato o spostato dopo l'apertura chiede se ricrearlo nella posizione originale o salvarlo altrove (NFR-12/4); `recreate=True` lo ricrea senza chiedere, anche la cartella (pulsante di una barra «file eliminato»). Se la scrittura non riesce propone «Salva con nome…» |
 | `refresh_state()` | ricalcola titolo, azioni (annulla/ripeti, Prima/Precedente/Successiva/Ultima) e barra di stato |
 | `add_mode(id, titolo, icona, order)` → `Mode` | modalità (scheda) con barra contestuale (`mode.add_group`, `add_action`, `add_widget`, `add_menu_button`, segnali `entered`/`left`) |

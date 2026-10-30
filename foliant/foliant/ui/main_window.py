@@ -20,10 +20,11 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
-from ..core.document import ACCESS, CONTENT, LOCK, Document, write_error
+from ..core import platform
+from ..core.document import ACCESS, CLOSED, CONTENT, LOCK, SAVED, Document, write_error
 from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
 from ..i18n import _, pgettext, set_language
-from . import privacy, theme
+from . import open_files, privacy, theme
 from .backstage import Backstage
 from .banners import Banner, BannerBar, DocumentTabs
 from .context import PDF_FILTER, ContextBar, Context, Mode, ToolBar
@@ -1099,44 +1100,59 @@ class MainWindow(QMainWindow):
             self.open_path(p)
 
     def open_path(self, path: str, password: str | None = None) -> DocumentView | None:
+        """Apre il file in una nuova scheda. Un file già aperto non si apre una seconda volta: se è
+        in questo processo se ne mostra la scheda (anche in un'altra finestra) e si restituisce
+        quella vista; se è in un altro processo Foliant si chiede a quello di mostrarlo, lo si dice
+        con un avviso e si restituisce None (ui/open_files.py)."""
         path = os.path.abspath(os.path.expanduser(str(path)))
-        for view in self.views():
-            if view.document.path is not None and os.path.realpath(view.document.path) == os.path.realpath(path):
-                self._show_tabs()
-                self.tabs.setCurrentWidget(view)
-                return view
-        attempts = 0
-        while True:
-            try:
-                doc = Document.open(path, password)
-                break
-            except PasswordRequired:
-                pass
-            except WrongPassword:
-                attempts += 1
-                if attempts >= 5:
-                    QMessageBox.warning(self, _("Password errata"), _("Troppi tentativi non riusciti."))
+        got = open_files.reserve(path, self)        # prima di leggere: due aperture insieme non passano
+        if isinstance(got, open_files.Busy):
+            return self._show_open_file(path, got)
+        try:
+            attempts = 0
+            while True:
+                try:
+                    doc = Document.open(path, password)
+                    break
+                except PasswordRequired:
+                    pass
+                except WrongPassword:
+                    attempts += 1
+                    if attempts >= 5:
+                        QMessageBox.warning(self, _("Password errata"), _("Troppi tentativi non riusciti."))
+                        return None
+                    QMessageBox.warning(self, _("Password errata"), _("La password non è corretta. Riprova."))
+                except DocumentError as e:
+                    QMessageBox.warning(self, _("Impossibile aprire il file"), f"{Path(path).name}\n\n{e}")
                     return None
-                QMessageBox.warning(self, _("Password errata"), _("La password non è corretta. Riprova."))
-            except DocumentError as e:
-                QMessageBox.warning(self, _("Impossibile aprire il file"), f"{Path(path).name}\n\n{e}")
-                return None
-            except Exception as e:          # errore imprevisto del motore: un file non ferma gli altri
-                # nel registro né il percorso né il messaggio (può contenere il nome del file):
-                # lo stderr può finire nel giornale di sistema, che resta su disco
-                logging.getLogger(__name__).error("apertura non riuscita (%s)", type(e).__name__)
-                QMessageBox.warning(self, _("Impossibile aprire il file"),
-                                    f"{Path(path).name}\n\n" + _("Il file non è un PDF valido oppure è danneggiato.")
-                                    + f"\n({type(e).__name__})")
-                return None
-            password, ok = QInputDialog.getText(
-                self, _("Documento protetto"),
-                _("«{name}» è protetto. Inserisci la password per aprirlo:").format(name=Path(path).name),
-                QLineEdit.EchoMode.Password)
-            if not ok:
-                return None
-        self.remember_directory(path)
-        return self.add_document(doc)
+                except Exception as e:          # errore imprevisto del motore: un file non ferma gli altri
+                    # nel registro né il percorso né il messaggio (può contenere il nome del file):
+                    # lo stderr può finire nel giornale di sistema, che resta su disco
+                    logging.getLogger(__name__).error("apertura non riuscita (%s)", type(e).__name__)
+                    QMessageBox.warning(self, _("Impossibile aprire il file"),
+                                        f"{Path(path).name}\n\n" + _("Il file non è un PDF valido oppure è danneggiato.")
+                                        + f"\n({type(e).__name__})")
+                    return None
+                password, ok = QInputDialog.getText(
+                    self, _("Documento protetto"),
+                    _("«{name}» è protetto. Inserisci la password per aprirlo:").format(name=Path(path).name),
+                    QLineEdit.EchoMode.Password)
+                if not ok:
+                    return None
+            self.remember_directory(path)
+            return self.add_document(doc, _reserved=got)
+        finally:
+            if got.view is None:                # non aperto, o convertito (immagine: nessun percorso)
+                open_files.release(got)
+
+    def _show_open_file(self, path: str, busy: "open_files.Busy") -> DocumentView | None:
+        """File già aperto: se ne mostra la scheda (questo processo) oppure lo si chiede al processo
+        Foliant che lo ha, con un avviso. Nessuna seconda copia."""
+        if busy.entry is not None:
+            return open_files.show(busy.entry)
+        open_files.ask_to_show(busy.holder)
+        self.ctx.notify(open_files.open_elsewhere_text([os.path.basename(path)]))
+        return None
 
     def add_command(self, name: str, fn: Callable) -> None:
         self._commands[name] = fn
@@ -1173,8 +1189,29 @@ class MainWindow(QMainWindow):
             views.append(view)
         return views
 
-    def add_document(self, document: Document) -> DocumentView:
-        view = DocumentView(document, self.tabs)
+    def add_document(self, document: Document, *, replacing: DocumentView | None = None,
+                     _reserved: "open_files.OpenFile | None" = None) -> DocumentView | None:
+        """Mostra `document` in una nuova scheda. Un documento con un percorso già aperto non si
+        mostra una seconda volta: `document` si chiude e si restituisce la scheda che ha il file
+        (questo processo) oppure None (altro processo Foliant, con un avviso), come `open_path`.
+        `replacing`: scheda che il documento sostituisce (ricarica dal disco): il file passa a lui."""
+        entry = _reserved
+        if entry is None and document.path is not None:
+            got = open_files.reserve(document.path, self, replacing=replacing)
+            if isinstance(got, open_files.Busy):
+                document.close()
+                return self._show_open_file(str(document.path), got)
+            entry = got
+        try:
+            view = DocumentView(document, self.tabs)
+        except BaseException:
+            if entry is not None and entry.view is None:
+                open_files.release(entry)
+            raise
+        if entry is not None:
+            open_files.bind(entry, view, self)
+        # il blocco del file segue il documento: Salva con nome lo sposta, la chiusura lo libera
+        document.add_listener(lambda _doc, kind, v=view: self._follow_file(v, kind))
         view.menu_providers = self.view_menu_providers
         mode = self.settings.value("view/mode", "continuous")
         if mode in (VIEW_SINGLE, VIEW_FACING, VIEW_COVER):
@@ -1216,6 +1253,43 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(_("Sola lettura: {reason}").format(reason=document.locked_reason), 15000)
         view.setFocus()
         return view
+
+    def _follow_file(self, view: DocumentView, kind: str) -> None:
+        if kind == SAVED:
+            open_files.follow(view, self)
+        elif kind == CLOSED:
+            entry = open_files.entry_of(view)
+            if entry is not None:
+                open_files.release(entry)
+
+    def follow_file(self, view: DocumentView, path: str | os.PathLike) -> bool:
+        """Il file di `view` è stato rinominato o spostato (es. dalla scheda File): il documento lo
+        segue (percorso, titolo e suggerimento della scheda, blocco). False se il nuovo percorso è
+        già aperto in un'altra scheda o in un altro processo: il documento passa comunque al nuovo
+        percorso, ma senza blocco (chi sposta il file lo controlla prima, `ctx.file_in_use`)."""
+        view.document.path = Path(path)
+        busy = open_files.follow(view, self)
+        self._update_tab_title(view)
+        return busy is None
+
+    def _claim_target(self, view: DocumentView, path: str, copy: bool = False):
+        """Destinazione di «Salva con nome» (`copy=False`) o «Salva una copia»: False, dopo un
+        messaggio, se il file è aperto in un'altra scheda o in un altro processo Foliant; altrimenti
+        None o, per Salva con nome su un altro file, il file preso per la scheda (`open_files.follow`
+        lo lega al documento dopo il salvataggio; se non riesce va liberato)."""
+        own = open_files.entry_of(view)
+        if own is not None and own.path == platform.normalize_path(path):
+            return None                             # il file stesso del documento
+        if copy:
+            busy = open_files.busy(path)
+        else:
+            busy = open_files.reserve(path, self)
+            if not isinstance(busy, open_files.Busy):
+                return busy
+        if busy is None:
+            return None
+        QMessageBox.warning(self, _("Salvataggio non riuscito"), open_files.in_use_text(path))
+        return False
 
     def commit_pending_edits(self, view: DocumentView | None) -> None:
         """Conferma l'editor aperto sulla pagina (testo, campo modulo) prima di salvare o chiudere.
@@ -1350,9 +1424,13 @@ class MainWindow(QMainWindow):
         info = {"path": None if as_new or doc.path is None else str(doc.path), "copy": False}
         if not self.ctx.run_guards("save_as" if as_new else "save", view, info):
             return False
+        reserved = None
         if as_new:
             path = self.ctx.ask_save_path(_("Salva con nome"), doc.display_name, PDF_FILTER)
             if not path:
+                return False
+            reserved = self._claim_target(view, path)     # file aperto altrove: niente sostituzione
+            if reserved is False:
                 return False
         try:
             if recreate:
@@ -1360,8 +1438,9 @@ class MainWindow(QMainWindow):
                     doc.path.parent.mkdir(parents=True, exist_ok=True)   # anche la cartella era sparita
                 except OSError as e:
                     raise write_error(doc.path, e) from e
-            doc.save(path)
+            doc.save(path)                      # notifica SAVED: il blocco passa al nuovo percorso
         except DocumentWriteError as e:         # disco pieno, cartella non scrivibile…: il documento resta modificato
+            self._release_unused(reserved)
             return self._write_failed(e, _("Salva con nome…"), lambda: self.save_view(view, save_as=True))
         except DocumentError as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), str(e))
@@ -1369,9 +1448,17 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, _("Salvataggio non riuscito"), _("Errore imprevisto: {e}").format(e=e))
             return False
+        finally:
+            self._release_unused(reserved)
         self.statusBar().showMessage(_("Salvato: {name}").format(name=doc.display_name), 4000)
         self._update_state()
         return True
+
+    @staticmethod
+    def _release_unused(reserved) -> None:
+        """Libera il file preso per Salva con nome se il salvataggio non lo ha legato alla scheda."""
+        if reserved and reserved.view is None:
+            open_files.release(reserved)
 
     def save_copy(self, view: DocumentView | None = None) -> bool:
         view = view if view is not None else self.current_view()
@@ -1382,6 +1469,8 @@ class MainWindow(QMainWindow):
             return False
         path = self.ctx.ask_save_path(_("Salva una copia"), view.document.display_name, PDF_FILTER)
         if not path:
+            return False
+        if self._claim_target(view, path, copy=True) is False:      # aperto altrove: non si sostituisce
             return False
         try:
             view.document.save_copy(path)

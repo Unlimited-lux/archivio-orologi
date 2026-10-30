@@ -8,7 +8,13 @@ Il resto del codice non controlla `sys.platform` né scrive percorsi di sistema:
   così i test isolano il profilo come su Linux con XDG_*.
 - `private_dir(path)`, `make_private_dir(path)`: cartella leggibile solo dall'utente (0700 su
   POSIX; su Windows le cartelle del profilo sono già protette dagli ACL dell'utente).
+- `runtime_dir()`: cartella privata per i file che servono solo mentre Foliant è aperto (blocchi
+  dei file aperti): XDG_RUNTIME_DIR su Linux, %LOCALAPPDATA%\\foliant\\run su Windows.
+- `normalize_path(path)`: forma canonica per riconoscere lo stesso file (collegamenti risolti; su
+  Windows maiuscole e minuscole indifferenti).
 - `pid_alive(pid)`: su Windows *non* si usa `os.kill(pid, 0)`, che lì termina il processo.
+- `allow_foreground(pid)`: su Windows permette a un altro processo di portare in primo piano la
+  sua finestra (istanza singola, file già aperto in un altro processo).
 - `find_tool(name)`: Tesseract, Ghostscript, qpdf, LibreOffice… anche fuori dal PATH (cartella
   dell'installatore di Foliant, Program Files, registro).
 - `subprocess_kwargs()`, `kill_tree(proc)`: niente finestre di console su Windows, gruppo di
@@ -158,6 +164,40 @@ def make_private_file(path: str | os.PathLike) -> None:
             pass
 
 
+def runtime_dir(fallbacks=()) -> Path | None:
+    """Cartella privata dell'utente per i file che servono solo mentre Foliant è aperto (blocchi
+    dei file aperti), o None se non ce n'è una sicura: meglio nessun file che una cartella condivisa.
+
+    Linux: $XDG_RUNTIME_DIR (in memoria, svuotata all'uscita dalla sessione) o, se manca o non è
+    privata, la prima privata tra `fallbacks` (la cartella di runtime di Qt, 0700); mai la /tmp
+    condivisa, dove un altro utente potrebbe occupare i nomi prima. Windows: %LOCALAPPDATA%\\foliant\\run,
+    privata per gli ACL del profilo (creata se manca)."""
+    if IS_WINDOWS:
+        path = app_dir("state") / "run"
+        try:
+            make_private_dir(path)
+        except OSError:
+            return None
+        return path if private_dir(path) else None
+    for folder in [os.environ.get("XDG_RUNTIME_DIR") or "", *fallbacks]:
+        if folder and private_dir(folder):
+            return Path(folder)
+    return None
+
+
+def normalize_path(path: str | os.PathLike) -> str:
+    """Forma canonica di un percorso, per riconoscere lo stesso file scritto in modi diversi:
+    assoluto, collegamenti simbolici risolti (su Windows anche giunzioni, nomi brevi 8.3 e unità di
+    rete mappate, con `realpath`) e, su Windows, maiuscole e minuscole indifferenti e barre uniformi
+    (`normcase`). Il file può non esistere ancora (destinazione di «Salva con nome»)."""
+    path = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    try:
+        path = os.path.realpath(path)
+    except (OSError, ValueError):       # percorso non risolvibile: resta quello assoluto
+        pass
+    return os.path.normcase(path)
+
+
 # ------------------------------------------------------------------ processi
 def pid_alive(pid) -> bool:
     """True se esiste un processo con questo pid (anche di un altro utente)."""
@@ -180,6 +220,21 @@ def pid_alive(pid) -> bool:
     except (OverflowError, OSError):
         return False
     return True
+
+
+def allow_foreground(pid: int | None = None) -> None:
+    """Windows: permette al processo `pid` (None = a qualunque processo) di portare in primo piano
+    una sua finestra. Windows lo concede solo al processo in primo piano (chi ha appena ricevuto il
+    doppio clic), che può cederlo: senza, l'altro processo farebbe solo lampeggiare il pulsante
+    nella barra delle applicazioni. Altrove non serve: nulla."""
+    if not IS_WINDOWS:
+        return
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.AllowSetForegroundWindow.argtypes = (ctypes.c_uint32,)
+        user32.AllowSetForegroundWindow(0xFFFFFFFF if not pid or pid < 0 else int(pid))   # ASFW_ANY
+    except (OSError, AttributeError, ValueError):
+        pass
 
 
 def _windows_pid_alive(pid: int) -> bool:
