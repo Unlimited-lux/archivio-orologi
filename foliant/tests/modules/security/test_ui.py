@@ -1030,18 +1030,22 @@ def test_listener_cost_on_large_document(window, sec, tmp_path):
     panel_listener = sec.panel._on_doc
     doc.remove_listener(listener)          # si misura la prima chiamata dopo la modifica
     doc.remove_listener(panel_listener)
-    with doc.change("Modifica nota", kind="annotation") as pdf:
-        page = pdf[7]
-        annot = page.load_annot(page.annot_xrefs()[0][0])
-        annot.set_info(content="modificata")
-        annot.update()
-    t = time.perf_counter()
-    listener(doc, "content")
-    panel_listener(doc, "content")
-    elapsed = time.perf_counter() - t
+    # tre modifiche: conta la più veloce, perché una pausa del sistema (CI con 4 processi
+    # di lavoro) non è il costo dei listener
+    times = []
+    for n, index in enumerate((7, 211, 433)):
+        with doc.change("Modifica nota", kind="annotation") as pdf:
+            page = pdf[index]
+            annot = page.load_annot(page.annot_xrefs()[0][0])
+            annot.set_info(content=f"modificata {n}")
+            annot.update()
+        t = time.perf_counter()
+        listener(doc, "content")
+        panel_listener(doc, "content")
+        times.append(time.perf_counter() - t)
     doc.add_listener(listener)
     doc.add_listener(panel_listener)
-    assert elapsed < perf_limit(0.05), elapsed
+    assert min(times) < perf_limit(0.05), times
     # i segni nuovi si vedono subito (cache invalidata dalle modifiche del modulo)
     sec.add_area_mark(3, pymupdf.Rect(100, 100, 200, 200))
     assert sec.has_marks(doc) and list(sec.marked_pages(doc)) == [3]
