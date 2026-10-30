@@ -27,7 +27,7 @@ import threading
 def main() -> int:
     target = sys.argv[1]
     from PySide6.QtCore import QSettings, QTimer
-    from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+    from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox
 
     from foliant.core import engine
     from foliant.core import platform
@@ -50,6 +50,7 @@ def main() -> int:
     from foliant.ui.main_window import MainWindow, app_windows, register_window
 
     messages: list[str] = []
+    seen_notes: set[int] = set()
 
     def close_modals():
         for w in QApplication.topLevelWidgets():
@@ -59,6 +60,15 @@ def main() -> int:
             elif isinstance(w, QDialog) and w.isVisible() and w.isModal():
                 messages.append(w.windowTitle())
                 w.reject()
+        # avvisi non bloccanti in basso nella finestra (ctx.notify)
+        from foliant.ui.notify import Notification
+        for win in app_windows():
+            for note in win.findChildren(Notification):
+                key = id(note)
+                if key in seen_notes:
+                    continue
+                seen_notes.add(key)
+                messages.append(" ".join(l.text() for l in note.findChildren(QLabel) if l.text()))
 
     modal_timer = QTimer()
     modal_timer.setInterval(50)
@@ -78,6 +88,7 @@ def main() -> int:
     current = {"path": target}
 
     def report(event: str, **extra):
+        close_modals()                      # anche gli avvisi comparsi in questo stesso passo
         state = {"event": event, "pid": os.getpid(),
                  "opened": len(views_of(current["path"])) if os.path.exists(current["path"]) else 0,
                  "windows": len(app_windows()), "messages": list(messages)}

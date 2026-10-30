@@ -34,13 +34,15 @@ TOKEN = "Zq7Perizia"               # nel nome dei file: non deve comparire in ne
 
 
 def _implemented() -> bool:
-    """Il blocco dell'apertura unica è presente nel nucleo (vedi il commit dell'implementazione).
+    """Il blocco dell'apertura unica è presente nel nucleo (foliant.core.openlock).
     FOLIANT_SINGLE_OPEN_FORCE=1 esegue comunque le prove (verifica del banco di prova)."""
     if os.environ.get("FOLIANT_SINGLE_OPEN_FORCE"):
         return True
-    from foliant.ui import instance, main_window
-    names = ("DocumentLock", "document_lock", "acquire_document_lock", "lock_document", "OpenFileLock")
-    return any(hasattr(mod, n) for mod in (platform, instance, main_window) for n in names)
+    try:
+        from foliant.core import openlock
+    except ImportError:
+        return False
+    return hasattr(openlock, "acquire")
 
 
 pytestmark = pytest.mark.skipif(not _implemented(), reason="apertura unica non ancora implementata nel nucleo")
