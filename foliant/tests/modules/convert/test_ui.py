@@ -763,7 +763,9 @@ def test_compress_document_reduction_survives_save(window, ctrl, tmp_path, monke
     if res["reduced"]:
         assert window.save_view(view)
         saved = os.path.getsize(path)
-        assert saved == res["after"] and saved < before
+        # «Dopo» e il file salvato sono due scritture: il secondo elemento di /ID, rigenerato a ogni
+        # scrittura, può essere scritto come stringa letterale e cambiare la lunghezza di qualche byte
+        assert abs(saved - res["after"]) <= 64 and saved < before
     else:
         assert not view.document.is_modified and os.path.getsize(path) == before
 
