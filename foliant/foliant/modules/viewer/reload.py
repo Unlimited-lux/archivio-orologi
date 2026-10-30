@@ -385,7 +385,10 @@ class ReloadController(QObject):
         previous = self.ctx.current_view()
         self._reloading = True
         try:
-            new_view = window.add_document(new_doc)
+            # la nuova scheda prende il posto della vecchia: il file (e il suo blocco) passa a lei
+            new_view = window.add_document(new_doc, replacing=view)
+            if new_view is None or new_view is view:
+                return None                 # il file risulta aperto altrove: resta la scheda di prima
             old_index = tabs.indexOf(view)
             new_index = tabs.indexOf(new_view)
             if old_index >= 0 and new_index >= 0 and new_index != old_index:

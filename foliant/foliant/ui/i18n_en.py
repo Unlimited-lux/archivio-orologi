@@ -111,6 +111,12 @@ EN = {
     "Troppi tentativi non riusciti.": "Too many failed attempts.",
     "Ultima pagina": "Last page",
     "«{name}» è protetto. Inserisci la password per aprirlo:": "“{name}” is protected. Enter the password to open it:",
+    # un file aperto una volta sola (ui/open_files.py)
+    "«{name}» è già aperto in un'altra finestra di Foliant.": "“{name}” is already open in another Foliant window.",
+    "Questi file sono già aperti in un'altra finestra di Foliant:": "These files are already open in another Foliant window:",
+    "«{name}» è aperto in un'altra scheda o finestra di Foliant: chiudilo prima di sostituirlo, oppure scegli "
+    "un altro nome.":
+        "“{name}” is open in another Foliant tab or window: close it before replacing it, or choose another name.",
     "Preferenze": "Preferences",
     "Preferenze…": "Preferences…",
     "Scorciatoie da tastiera": "Keyboard shortcuts",

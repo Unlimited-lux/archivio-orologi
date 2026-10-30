@@ -45,6 +45,13 @@ def _isolated_user_dirs(monkeypatch, tmp_path_factory):
                       ("XDG_CONFIG_HOME", "config"), ("APPDATA", "roaming"), ("LOCALAPPDATA", "locale")):
         monkeypatch.setenv(var, str(base / name))
     monkeypatch.setenv("FOLIANT_RECOVERY_DIR", str(base / "recupero"))
+    if sys.platform != "win32":
+        # cartella di runtime privata (0700): blocchi dei file aperti e canali tra processi del test
+        # (su Windows stanno in %LOCALAPPDATA%, già isolata)
+        run = base / "run"
+        run.mkdir(mode=0o700)
+        run.chmod(0o700)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(run))
     if sys.platform == "win32":
         # le QSettings() di Foliant starebbero nel registro vero (HKCU\\Software\\Foliant), comune a
         # tutti i test: qui vanno in un file INI della cartella del test, come su Linux con XDG

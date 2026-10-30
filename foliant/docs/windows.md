@@ -145,6 +145,7 @@ Disinstallazione silenziosa (per chi gestisce più PC), dalla cartella del progr
 | Sequenze delle operazioni in blocco | `%APPDATA%\Foliant` |
 | Copie di recupero dopo un arresto anomalo (cancellate alla chiusura normale) | `%LOCALAPPDATA%\foliant\recovery` |
 | Icone del tema (cache) | `%LOCALAPPDATA%\foliant\cache` |
+| Blocchi dei file aperti (solo mentre sono aperti; nomi senza percorso, vedi README) | `%LOCALAPPDATA%\foliant\run\foliant-locks` |
 | Chiavi API, password del server di marca temporale | Gestione credenziali di Windows (voci «foliant-…») |
 
 ## Riservatezza su Windows
@@ -197,6 +198,10 @@ le cronologie della shell (RecentDocs, ComDlg32) e le Jump List.
   Foliant è solo per i desktop Linux).
 - **Istanza singola**: un secondo avvio consegna i file alla finestra già aperta dello stesso
   utente nella stessa sessione di Windows (anche con più utenti collegati o Desktop remoto).
+  Un file già aperto in un altro processo Foliant non si riapre: quel processo ne mostra la scheda
+  (il secondo avvio gli cede il permesso di andare in primo piano) e il secondo lo dice ed esce. I
+  nomi dei file non distinguono maiuscole e minuscole e i percorsi si confrontano dopo aver
+  risolto collegamenti, giunzioni, nomi brevi 8.3 e unità di rete mappate.
 
 ## Riga di comando
 

@@ -1,5 +1,8 @@
 """Gestione dei file locali (VIS-03): rinomina, duplica, sposta, cestino, mostra
-nella cartella, copia percorso; le schede aperte seguono il file.
+nella cartella, copia percorso; le schede aperte seguono il file, anche in un'altra finestra
+(`ctx.follow_file`: con il percorso passa al nuovo nome anche il blocco del file aperto). Un file
+aperto in un altro processo Foliant non si rinomina, sposta o elimina, e una destinazione aperta
+in un'altra scheda o processo non si sostituisce.
 
 Comandi nella scheda File › Gestisci file: gruppo «Questo file» sul documento corrente,
 gruppo «Altri file» su file scelti. I dialoghi passano per metodi `ask_*` sostituibili nei test.
@@ -68,8 +71,11 @@ TRANSLATIONS = {
     "Il cestino del sistema non è disponibile per «{n}». Eliminarlo definitivamente? L'operazione non si può annullare.":
         "The system trash is not available for “{n}”. Delete it permanently? This cannot be undone.",
     "Gestione file": "File management",
-    "Il file «{n}» è aperto in un'altra scheda: chiudila prima di sostituirlo.":
-        "The file “{n}” is open in another tab: close it before replacing it.",
+    "Il file «{n}» è aperto in un'altra scheda o finestra di Foliant: chiudilo prima di sostituirlo.":
+        "The file “{n}” is open in another Foliant tab or window: close it before replacing it.",
+    "«{n}» è aperto in un'altra finestra di Foliant: chiudilo lì prima di rinominarlo, spostarlo o "
+    "eliminarlo.":
+        "“{n}” is open in another Foliant window: close it there before renaming, moving or deleting it.",
     "Rinominato in «{n}»": "Renamed to “{n}”",
     "Creata la copia «{n}»": "Created copy “{n}”",
     "Create {k} copie": "Created {k} copies",
@@ -153,8 +159,29 @@ class FilesController:
             act.setEnabled(enabled)
 
     def views_for(self, path: str) -> list:
-        path = _norm(path)
-        return [v for v in self.ctx.views() if v.document.path is not None and _norm(v.document.path) == path]
+        """Scheda che ha aperto il file, in qualunque finestra di Foliant di questo processo: un file
+        non è mai aperto due volte, quindi al più una."""
+        view = self.ctx.view_for_path(_norm(path))
+        return [view] if view is not None else []
+
+    def open_elsewhere(self, path: str) -> bool:
+        """Il file è aperto in un altro processo Foliant: non lo si rinomina, sposta o elimina da qui
+        (quella scheda resterebbe legata al vecchio percorso). Lo dice con un messaggio."""
+        if self.views_for(path) or not self.ctx.file_in_use(path):
+            return False
+        self.show_error(_("«{n}» è aperto in un'altra finestra di Foliant: chiudilo lì prima di rinominarlo, "
+                          "spostarlo o eliminarlo.").format(n=os.path.basename(path)))
+        return True
+
+    def target_in_use(self, src: str, target: str) -> bool:
+        """La destinazione è aperta in un'altra scheda o in un altro processo Foliant (anche se il file
+        non c'è più): non la si sostituisce. Lo dice con un messaggio."""
+        own = self.views_for(src)
+        if not self.ctx.file_in_use(target, ignore=own[0] if own else None):
+            return False
+        self.show_error(_("Il file «{n}» è aperto in un'altra scheda o finestra di Foliant: chiudilo prima di "
+                          "sostituirlo.").format(n=os.path.basename(target)))
+        return True
 
     # ============================================================== dialoghi
     def show_error(self, message: str) -> None:
@@ -241,11 +268,10 @@ class FilesController:
         return True
 
     def _follow(self, old: str, new: str) -> None:
-        """Le schede aperte seguono il file da `old` a `new`."""
-        w = self.ctx.window
+        """La scheda aperta (anche in un'altra finestra) segue il file da `old` a `new`: percorso,
+        titolo e blocco del file aperto."""
         for view in self.views_for(old):
-            view.document.path = Path(new)
-            w._update_tab_title(view)
+            self.ctx.follow_file(view, new)
         self.update_actions()
 
     def _forget(self, path: str) -> None:
@@ -258,14 +284,15 @@ class FilesController:
         """Sposta gestendo il nome già esistente (sostituisci / rinomina automatica / annulla)."""
         overwrite = False
         while True:
+            # un percorso che non esiste più può essere ancora aperto (file eliminato da fuori)
+            if not os.path.lexists(dst) and self.target_in_use(src, dst):
+                return None
             try:
                 result = F.move(src, dst, overwrite=overwrite)
             except F.NameConflict as e:
                 choice = self.ask_conflict(e.target)
                 if choice == REPLACE:
-                    if self.views_for(e.target):
-                        self.show_error(_("Il file «{n}» è aperto in un'altra scheda: chiudila prima di "
-                                          "sostituirlo.").format(n=os.path.basename(e.target)))
+                    if self.target_in_use(src, e.target):
                         return None
                     overwrite = True
                 elif choice == AUTO:
@@ -282,6 +309,8 @@ class FilesController:
     # ============================================================ operazioni
     def rename_path(self, path: str, new_name: str | None = None) -> str | None:
         path = _norm(path)
+        if self.open_elsewhere(path):
+            return None
         if new_name is None:
             new_name = self.ask_new_name(path)
             if new_name is None:
@@ -321,7 +350,7 @@ class FilesController:
         moved = []
         for p in paths:
             p = _norm(p)
-            if not self._unsaved_ok(p, losing=False):
+            if self.open_elsewhere(p) or not self._unsaved_ok(p, losing=False):
                 continue
             result = self._move_with_conflicts(p, os.path.join(_norm(folder), os.path.basename(p)))
             if result:
@@ -336,7 +365,7 @@ class FilesController:
             return []
         done = []
         for p in paths:
-            if not self._unsaved_ok(p, losing=True):
+            if self.open_elsewhere(p) or not self._unsaved_ok(p, losing=True):
                 continue
             try:
                 F._check_source(p)

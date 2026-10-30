@@ -9,7 +9,8 @@ from foliant.modules.annotations import dialogs, engine
 from .conftest import click
 
 
-def test_second_window_closed_first_still_works(comments, settings, text_pdf, qtbot, monkeypatch):
+def test_second_window_closed_first_still_works(comments, settings, text_pdf, qtbot, monkeypatch, tmp_path):
+    import shutil
     import sys
     from foliant.ui.main_window import MainWindow
     window, view, module = comments
@@ -18,7 +19,11 @@ def test_second_window_closed_first_still_works(comments, settings, text_pdf, qt
     second = MainWindow(settings)
 
     second.show()
-    v2 = second.open_path(text_pdf)
+    # un altro file: lo stesso file non si apre in due finestre (si mostrerebbe la scheda della prima)
+    other = tmp_path / "seconda finestra.pdf"
+    shutil.copyfile(text_pdf, other)
+    v2 = second.open_path(str(other))
+    assert v2 is not None and v2.window() is second
     m2 = second.ctx.annotations
     assert m2 is not module and m2.ctrl is not module.ctrl
     second.set_mode("commenta")

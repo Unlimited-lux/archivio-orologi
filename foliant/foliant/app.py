@@ -79,6 +79,32 @@ def parse_args(args: list[str], cwd: str | None = None) -> Options:
     return Options(files=files, new_window=ns.new_window, command=ns.command, unknown=list(unknown))
 
 
+def exit_if_files_open_elsewhere(options: Options) -> bool:
+    """Avvio con file già aperti in un altro processo Foliant (blocco di core/openlock.py): quel
+    processo li mostra, se il sistema lo permette, e qui non si riaprono. True se l'avvio serviva
+    solo a quei file (niente comandi, niente `--new-window`): il messaggio è stato mostrato e il
+    processo può uscire. Altrimenti si prosegue e la finestra li segnala (MainWindow.open_path)."""
+    if not options.files or options.command or options.new_window:
+        return False
+    from PySide6.QtWidgets import QMessageBox
+
+    from .core import openlock
+    from .ui import open_files
+    from .ui.icons import app_icon
+    holders = [openlock.holder(path) for path, _page in options.files]
+    if any(h is None for h in holders):
+        return False
+    silent = set()                      # processo che non risponde: non lo si aspetta per ogni file
+    for h in holders:
+        if h.pid not in silent and not open_files.ask_to_show(h):
+            silent.add(h.pid)
+    names = list(dict.fromkeys(os.path.basename(path) for path, _page in options.files))
+    box = QMessageBox(QMessageBox.Icon.Information, APP_NAME, open_files.open_elsewhere_text(names))
+    box.setWindowIcon(app_icon())
+    box.exec()
+    return True
+
+
 def install_qt_translations(app: QApplication) -> None:
     """Testi standard di Qt (Sì/No, Chiudi, Annulla, nomi dei tasti) nella lingua dell'interfaccia.
 
@@ -139,25 +165,38 @@ def main(argv: list[str] | None = None) -> int:
         print(_("foliant: opzione sconosciuta ignorata: {o}").format(o=opt), file=sys.stderr)
 
     # Istanza singola: se Foliant è già aperto gli si consegnano file e comandi e si esce.
-    from .ui.instance import InstanceServer, instance_name, open_request, send_request
-    name = instance_name()              # "" senza una cartella privata: ogni avvio fa da sé
-    if name and send_request(name, options.request()):
+    from .ui import instance
+    name = instance.instance_name()     # "" senza una cartella privata: ogni avvio fa da sé
+    platform.allow_foreground()         # Windows: l'istanza aperta può portare davanti la sua finestra
+    if name and instance.send_request(name, options.request()):
         return 0
     if name:
-        server = InstanceServer(name, app)
+        server = instance.InstanceServer(name, app)
         # collegato prima di listen(): una richiesta che arriva mentre si aprono i file di questo
         # avvio (domanda della password, avviso di errore: cicli di eventi annidati) non va persa
-        server.requestReceived.connect(lambda request: open_request(request, settings))
-        if not server.listen() and send_request(name, options.request()):
+        server.requestReceived.connect(lambda request: instance.handle_request(request, settings))
+        if not server.listen() and instance.send_request(name, options.request()):
             return 0                    # un'altra istanza è partita nel frattempo
 
     from .ui import theme
+    theme.apply(app, settings.value("theme", "system"))
+    # Qui l'istanza aperta non ha risposto (occupata da più di 6 s) o non c'è: un file già aperto
+    # da un altro processo Foliant non si riapre. Se l'avvio serviva solo a quei file, quel processo
+    # li mostra e questo esce dopo averlo detto (una finestra vuota non servirebbe a nulla).
+    if exit_if_files_open_elsewhere(options):
+        return 0
+    # canale proprio del processo: un altro avvio che trova qui un file già aperto chiede di mostrarlo
+    instance.remove_stale_channels()
+    own = instance.InstanceServer(instance.process_channel(os.getpid()), app)
+    own.requestReceived.connect(lambda request: instance.handle_request(request, settings))
+    if own.name:
+        own.listen()
+
     from .ui.main_window import MainWindow, register_window
 
-    theme.apply(app, settings.value("theme", "system"))
     window = register_window(MainWindow(settings))
     window.show()
-    open_request(options.request(), settings, window)
+    instance.open_request(options.request(), settings, window)
     if options.unknown:
         window.statusBar().showMessage(
             _("Opzioni sconosciute ignorate: {o}").format(o=" ".join(options.unknown)), 10000)

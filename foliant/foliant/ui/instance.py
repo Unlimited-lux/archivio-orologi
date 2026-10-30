@@ -2,13 +2,19 @@
 
 Il primo processo ascolta su un `QLocalServer` con un nome per utente; un avvio successivo si
 collega, invia la richiesta (JSON su una riga) e termina appena riceve «ok». Richiesta:
-`{"files": [[percorso assoluto, pagina da 1 o null], …], "new_window": bool, "command": str | null}`.
+`{"files": [[percorso assoluto, pagina da 1 o null], …], "new_window": bool, "command": str | null,
+"activate": str | null}`.
+
+Ogni processo ascolta anche su un canale proprio (`process_channel(pid)`): un altro processo che
+trova un file già aperto qui (blocco di core/openlock.py, che dice il PID) chiede di mostrarne la
+scheda con `{"activate": nome del blocco}`, senza il percorso (`show_in_process`, ui/open_files.py).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -16,8 +22,11 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from ..core import platform
 
 TIMEOUT_MS = 3000
+SHOW_TIMEOUT_MS = 1000         # richiesta di mostrare un file: se il processo è occupato arriva dopo
 MAX_REQUEST = 1 << 20          # byte: una richiesta più lunga viene scartata
 COMMANDS = ("create-pdf", "merge")
+LOCK_NAME = re.compile(r"[0-9a-f]{64}")      # nome di un blocco (HMAC-SHA256 in esadecimale)
+PROCESS_PREFIX = "foliant-"                  # canale di un processo: «foliant-<pid>»
 
 
 def _private_dir(path: str) -> bool:
@@ -29,25 +38,60 @@ def _private_dir(path: str) -> bool:
     return os.path.isdir(path) and platform.owned_by_user(st) and not st.st_mode & 0o077
 
 
-def instance_name() -> str:
-    """Canale dell'utente corrente, sempre in una cartella privata: XDG_RUNTIME_DIR o, se manca,
-    la cartella di runtime che Qt crea con permessi 0700. Un nome semplice finirebbe nella /tmp
-    condivisa, dove un altro utente potrebbe occuparlo prima e ricevere i percorsi dei file."""
-    if platform.IS_WINDOWS:
-        # named pipe: lo spazio dei nomi è unico per la macchina, quindi nel nome vanno l'utente
-        # (SID) e la sessione di accesso; chi si collega verifica anche il proprietario del server
-        sid = platform.windows_user_sid()
-        if not sid:
-            return ""
-        return f"foliant-instance-{sid}-{platform.windows_session_id() or 0}"
+def _channel(name: str) -> str:
+    """Percorso del canale `name` (socket Unix), sempre in una cartella privata: XDG_RUNTIME_DIR o,
+    se manca, la cartella di runtime che Qt crea con permessi 0700. Un nome semplice finirebbe nella
+    /tmp condivisa, dove un altro utente potrebbe occuparlo prima e ricevere i percorsi dei file."""
     from PySide6.QtCore import QStandardPaths
     candidates = [os.environ.get("XDG_RUNTIME_DIR") or "",
                   QStandardPaths.writableLocation(QStandardPaths.StandardLocation.RuntimeLocation)]
     for folder in candidates:
-        path = os.path.join(folder, "foliant-instance") if folder else ""
+        path = os.path.join(folder, name) if folder else ""
         if path and _private_dir(folder) and len(os.fsencode(path)) < 100:   # limite dei socket Unix
             return path
-    return ""                                       # nessun canale sicuro: niente istanza singola
+    return ""                                       # nessun canale sicuro
+
+
+def _windows_pipe(kind: str, *extra) -> str:
+    """Named pipe: lo spazio dei nomi è unico per la macchina, quindi nel nome vanno l'utente (SID)
+    e la sessione di accesso; chi si collega verifica anche il proprietario del server."""
+    sid = platform.windows_user_sid()
+    if not sid:
+        return ""
+    return "-".join([f"foliant-{kind}", sid, str(platform.windows_session_id() or 0), *map(str, extra)])
+
+
+def instance_name() -> str:
+    """Canale dell'istanza singola dell'utente corrente ("" senza un canale sicuro: niente istanza
+    singola, ogni avvio fa da sé)."""
+    if platform.IS_WINDOWS:
+        return _windows_pipe("instance")
+    return _channel("foliant-instance")
+
+
+def process_channel(pid: int) -> str:
+    """Canale proprio del processo `pid` (richieste di mostrare un file già aperto); "" se manca."""
+    if platform.IS_WINDOWS:
+        return _windows_pipe("process", int(pid))
+    return _channel(f"{PROCESS_PREFIX}{int(pid)}")
+
+
+def remove_stale_channels() -> None:
+    """Toglie i canali rimasti da processi terminati male (socket Unix: su Windows le named pipe
+    spariscono con il processo)."""
+    if platform.IS_WINDOWS:
+        return
+    folder = os.path.dirname(process_channel(os.getpid()))
+    if not folder:
+        return
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        m = re.fullmatch(re.escape(PROCESS_PREFIX) + r"(\d+)", name)
+        if m and not platform.pid_alive(int(m.group(1))):
+            QLocalServer.removeServer(os.path.join(folder, name))
 
 
 def clean_request(data) -> dict:
@@ -65,7 +109,10 @@ def clean_request(data) -> dict:
     command = data.get("command")
     if command is not None and command not in COMMANDS:
         raise ValueError("comando sconosciuto")
-    return {"files": files, "new_window": bool(data.get("new_window")), "command": command}
+    activate = data.get("activate")
+    if activate is not None and not (isinstance(activate, str) and LOCK_NAME.fullmatch(activate)):
+        raise ValueError("blocco non valido")
+    return {"files": files, "new_window": bool(data.get("new_window")), "command": command, "activate": activate}
 
 
 def send_request(name: str, request: dict, timeout_ms: int = TIMEOUT_MS) -> bool:
@@ -169,20 +216,49 @@ class InstanceServer(QObject):
         self.requestReceived.emit(request)
 
 
+def show_in_process(pid: int, name: str, timeout_ms: int = SHOW_TIMEOUT_MS) -> bool:
+    """Chiede al processo Foliant `pid` di mostrare la scheda del file con il blocco `name` (solo il
+    nome del blocco, mai il percorso). Su Windows gli si cede prima il diritto di andare in primo
+    piano. False se non risponde entro `timeout_ms` (occupato: la richiesta arriva quando è libero)."""
+    channel = process_channel(pid)
+    if not channel:
+        return False
+    platform.allow_foreground(pid)
+    return send_request(channel, {"files": [], "new_window": False, "command": None, "activate": name},
+                        timeout_ms)
+
+
+def handle_request(request: dict, settings):
+    """Richiesta ricevuta su un canale: mostrare un file già aperto qui, oppure aprire file e comandi."""
+    if request.get("activate"):
+        from . import open_files
+        open_files.show_name(request["activate"])
+        return None
+    return open_request(request, settings)
+
+
 def open_request(request: dict, settings, window=None):
     """Esegue una richiesta: i file vanno nella finestra attiva (una nuova con «new_window» o se
-    non ce n'è nessuna); un file già aperto ne attiva la scheda. Restituisce la finestra."""
+    non ce n'è nessuna); un file già aperto ne attiva la scheda, anche in un'altra finestra, e va
+    in primo piano quella. Restituisce la finestra portata in primo piano (quella attiva se tutti
+    i file sono aperti in un altro processo Foliant: lì vanno in primo piano, non qui)."""
+    from . import open_files
     from .main_window import active_window, open_window
     if window is None and not request.get("new_window"):
         window = active_window()
     if window is None:
         window = open_window(settings)
-    window.open_files(request.get("files") or [])
+    files = request.get("files") or []
+    elsewhere = [p for p, _n in files if (b := open_files.busy(p)) is not None and b.holder is not None]
+    views = window.open_files(files)
     command = request.get("command")
     if command:
         QTimer.singleShot(0, window, lambda: window.run_command(command))   # dopo la risposta e la finestra
-    if window.isMinimized():
-        window.showNormal()
-    window.raise_()
-    window.activateWindow()
-    return window
+    target = window
+    if views and not command:
+        owner = views[-1].window()          # l'ultimo file può essere già aperto in un'altra finestra
+        target = owner if owner is not None and owner is not views[-1] else window
+    elif files and len(elsewhere) == len(files) and not command and not request.get("new_window"):
+        return window                       # li mostra l'altro processo: questa resta dietro
+    open_files.raise_window(target)
+    return target
