@@ -3,6 +3,11 @@
 - `parse_page_ranges`: "1-3, 5, 8-" → indici di pagina.
 - `print_capability`: stampa consentita? a quale risoluzione massima (VIS-06)?
 - `placement`: scala, centratura e rotazione automatica della pagina sul foglio.
+- `sheets_for`: i fogli come escono dalla stampante (intervallo, pari/dispari, più pagine per
+  foglio, opuscolo, poster, fronte/retro, ordine inverso); funzione pura, la usano la stampa
+  e l'anteprima del dialogo.
+- `Imposition`: geometria di ogni facciata (pagine nelle celle, riquadri del poster), comune
+  all'imposizione con il motore e al disegno dell'anteprima.
 - `print_document`: disegna le pagine su un `QPagedPaintDevice` (QPrinter,
   QPdfWriter). Non tocca widget: può girare in `run_task`.
 """
@@ -10,7 +15,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from typing import Callable
 
 import pymupdf
 from PySide6.QtCore import QRectF
@@ -27,6 +33,21 @@ ACTUAL_SIZE = "actual"
 
 LAYERS_PRINT = "print"     # /Usage /Print del documento (predefinito)
 LAYERS_SCREEN = "screen"   # come a schermo
+
+# pagine dell'intervallo da stampare (numero di pagina del documento, da 1)
+PAGES_ALL = "all"
+PAGES_ODD = "odd"
+PAGES_EVEN = "even"
+
+# cosa stampare
+CONTENT_ALL = "all"             # documento e commenti
+CONTENT_DOCUMENT = "document"   # solo il documento (i valori dei campi modulo sono contenuto)
+CONTENT_FIELDS = "fields"       # solo campi e timbri, senza il contenuto delle pagine (moduli prestampati)
+
+# fronte/retro (valori di /ViewerPreferences /Duplex; "" = come la stampante)
+SIMPLEX = "Simplex"
+DUPLEX_LONG = "DuplexFlipLongEdge"
+DUPLEX_SHORT = "DuplexFlipShortEdge"
 
 
 class RangeError(ValueError):
@@ -130,7 +151,7 @@ class PrintOptions:
     copies: int = 1
     collate: bool = True
     scaling: str = FIT_PAGE
-    annotations: bool = True
+    annotations: bool = True           # commenti sì/no con «Documento e commenti» (vedi `print_content`)
     auto_rotate: bool = True
     layers: str = LAYERS_PRINT
     max_dpi: int = DEFAULT_MAX_DPI
@@ -142,12 +163,31 @@ class PrintOptions:
     nup_by_columns: bool = False       # ordine per colonne invece che per righe
     nup_border: bool = False           # bordo attorno a ogni pagina
     grayscale: bool = False            # scala di grigi invece del colore
+    page_set: str = PAGES_ALL          # solo dispari o solo pari, dopo l'intervallo
+    reverse: bool = False              # fogli in ordine inverso (l'ultimo per primo)
+    content: str = CONTENT_ALL         # cosa stampare: CONTENT_ALL, CONTENT_DOCUMENT o CONTENT_FIELDS
 
     def sequence(self) -> list[int]:
         n = max(1, int(self.copies))
         if self.collate:
             return list(self.pages) * n
         return [p for p in self.pages for _i in range(n)]
+
+
+def content_mode(annotations) -> str:
+    """Cosa stampare da un valore booleano (annotazioni sì/no) o da una costante CONTENT_*."""
+    if annotations is True:
+        return CONTENT_ALL
+    if annotations is False or annotations is None:
+        return CONTENT_DOCUMENT
+    return annotations
+
+
+def print_content(options: PrintOptions) -> str:
+    """Cosa stampare: «Documento e commenti» senza `annotations` equivale a «Solo il documento»."""
+    if options.content == CONTENT_ALL and not options.annotations:
+        return CONTENT_DOCUMENT
+    return options.content
 
 
 # ------------------------------------------------------------------ rendering
@@ -158,7 +198,7 @@ LAYOUT_POSTER = "poster"
 MM = 72 / 25.4
 
 
-def bake_for_imposition(pdf: pymupdf.Document, annotations: bool) -> None:
+def bake_for_imposition(pdf: pymupdf.Document, annotations) -> None:
     """L'imposizione copia il contenuto delle pagine, non le annotazioni: sulla copia di stampa
     si tolgono quelle che non vanno su carta (`not_printed`) e le altre diventano contenuto."""
     for i in range(pdf.page_count):
@@ -197,17 +237,9 @@ def booklet_sides(count: int, rtl: bool = False) -> list[tuple[int | None, int |
 def impose_booklet(pdf: pymupdf.Document, pages: list[int], rtl: bool = False) -> pymupdf.Document:
     """Documento con le facciate dell'opuscolo: ogni facciata è un foglio orizzontale con due
     pagine affiancate, ciascuna adattata alla propria metà (ENGINE_LOCK richiesto)."""
-    width = max(pdf[i].rect.width for i in pages)
-    height = max(pdf[i].rect.height for i in pages)
-    out = pymupdf.open()
-    for left, right in booklet_sides(len(pages), rtl):
-        sheet = out.new_page(width=2 * width, height=height)
-        for slot, pos in ((left, 0), (right, 1)):
-            if slot is None:
-                continue
-            sheet.show_pdf_page(pymupdf.Rect(pos * width, 0, (pos + 1) * width, height), pdf, pages[slot],
-                                keep_proportion=True)
-    return out
+    options = PrintOptions(pages=list(pages), layout=LAYOUT_BOOKLET, booklet_rtl=rtl)
+    imposition = Imposition(options, page_sizes(pdf), 0, 0)
+    return impose_sides(pdf, imposition, layout_sides(options, pdf.page_count))
 
 
 def poster_tiles(page_w: float, page_h: float, paper_w: float, paper_h: float,
@@ -232,29 +264,9 @@ def impose_poster(pdf: pymupdf.Document, pages: list[int], paper_w: float, paper
                   overlap_mm: float = 10.0) -> pymupdf.Document:
     """Documento con i fogli del poster (scala 100%), con i segni di taglio sul bordo della
     fascia di sovrapposizione (ENGINE_LOCK richiesto)."""
-    overlap = overlap_mm * MM
-    out = pymupdf.open()
-    for index in pages:
-        rect = pdf[index].rect
-        tiles = poster_tiles(rect.width, rect.height, paper_w, paper_h, overlap)
-        for tile in tiles:
-            sheet = out.new_page(width=paper_w, height=paper_h)
-            target = pymupdf.Rect(0, 0, tile.width, tile.height)
-            sheet.show_pdf_page(target, pdf, index, clip=tile)
-            if len(tiles) > 1:
-                shape = sheet.new_shape()
-                mark = 4 * MM
-                if tile.x0 > 0:                          # fascia condivisa con il foglio a sinistra
-                    x = overlap
-                    for y in (0, target.height - mark):
-                        shape.draw_line((x, y), (x, y + mark))
-                if tile.y0 > 0:
-                    y = overlap
-                    for x in (0, target.width - mark):
-                        shape.draw_line((x, y), (x + mark, y))
-                shape.finish(color=(0, 0, 0), width=0.3)
-                shape.commit()
-    return out
+    options = PrintOptions(pages=list(pages), layout=LAYOUT_POSTER, poster_overlap_mm=overlap_mm)
+    imposition = Imposition(options, page_sizes(pdf), paper_w, paper_h)
+    return impose_sides(pdf, imposition, layout_sides(options, pdf.page_count, imposition.tile_count))
 
 
 # ---------------------------------------------------- più pagine per foglio (VIS-43)
@@ -285,34 +297,288 @@ def impose_nup(pdf: pymupdf.Document, pages: list[int], n: int, paper_w: float, 
                by_columns: bool = False, border: bool = False) -> pymupdf.Document:
     """Documento con `n` pagine per foglio, ciascuna adattata e centrata nella sua cella,
     in ordine per righe o per colonne (ENGINE_LOCK richiesto)."""
-    width = max(pdf[i].rect.width for i in pages)
-    height = max(pdf[i].rect.height for i in pages)
-    cols, rows = nup_grid(n, width, height, paper_w, paper_h)
-    cell_w, cell_h = paper_w / cols, paper_h / rows
-    gap = 2 * MM if n > 1 else 0
-    out = pymupdf.open()
-    for start in range(0, len(pages), n):
-        sheet = out.new_page(width=paper_w, height=paper_h)
-        shape = sheet.new_shape() if border else None
-        for k, index in enumerate(pages[start:start + n]):
-            col, row = (k // rows, k % rows) if by_columns else (k % cols, k // cols)
-            cell = pymupdf.Rect(col * cell_w + gap, row * cell_h + gap,
-                                (col + 1) * cell_w - gap, (row + 1) * cell_h - gap)
+    options = PrintOptions(pages=list(pages), pages_per_sheet=n, nup_by_columns=by_columns, nup_border=border)
+    imposition = Imposition(options, page_sizes(pdf), paper_w, paper_h)
+    return impose_sides(pdf, imposition, layout_sides(options, pdf.page_count))
+
+
+def sheet_landscape(options: PrintOptions, page_w: float, page_h: float) -> bool | None:
+    """Orientamento della carta per il lavoro dalla prima pagina stampata (`page_w` × `page_h`):
+    True = orizzontale, None = quello della stampante (poster)."""
+    if options.layout == LAYOUT_BOOKLET:      # due pagine affiancate per foglio
+        return page_h >= page_w
+    if options.layout == LAYOUT_POSTER:
+        return None
+    if options.pages_per_sheet > 1:
+        return nup_sheet_orientation(options.pages_per_sheet, page_w, page_h)
+    if options.auto_rotate:
+        return page_w > page_h
+    return None
+
+
+# ------------------------------------------------- pagine, facciate e fogli (VIS-43)
+@dataclass(frozen=True)
+class Side:
+    """Facciata di un foglio. `index`: posizione nell'impaginazione (facciate in ordine naturale,
+    prima dell'ordine inverso), None per la facciata bianca aggiunta dal fronte/retro; `pages`:
+    pagine 0-based nelle celle, None = cella vuota (opuscolo); `tile`: riquadro del poster."""
+    index: int | None
+    pages: tuple[int | None, ...] = ()
+    tile: int = 0
+
+    @property
+    def blank(self) -> bool:
+        return self.index is None
+
+
+@dataclass(frozen=True)
+class Sheet:
+    """Foglio come esce dalla stampante: il fronte e, in fronte/retro, il retro."""
+    front: Side
+    back: Side | None = None
+
+    @property
+    def sides(self) -> tuple[Side, ...]:
+        return (self.front,) if self.back is None else (self.front, self.back)
+
+
+def selected_pages(options: PrintOptions, page_count: int | None = None) -> list[int]:
+    """Pagine da stampare nell'ordine dell'intervallo, poi solo le dispari o solo le pari:
+    conta il numero di pagina del documento (1, 3, 5… sono dispari), non la posizione."""
+    pages = [p for p in options.pages if page_count is None or 0 <= p < page_count]
+    if options.page_set == PAGES_ODD:
+        return [p for p in pages if p % 2 == 0]
+    if options.page_set == PAGES_EVEN:
+        return [p for p in pages if p % 2 == 1]
+    return pages
+
+
+def require_pages(options: PrintOptions, page_count: int | None = None) -> list[int]:
+    """Come `selected_pages`, ma un elenco vuoto è un errore per l'utente."""
+    pages = selected_pages(options, page_count)
+    if not pages:
+        if options.pages and options.page_set == PAGES_EVEN:
+            raise RangeError(_("L'intervallo non contiene pagine pari."))
+        if options.pages and options.page_set == PAGES_ODD:
+            raise RangeError(_("L'intervallo non contiene pagine dispari."))
+        raise RangeError(_("Nessuna pagina da stampare."))
+    return pages
+
+
+def two_sided(options: PrintOptions) -> bool:
+    """Fogli stampati sui due lati: fronte/retro scelto o opuscolo (facciate a coppie)."""
+    return options.layout == LAYOUT_BOOKLET or options.duplex in (DUPLEX_LONG, DUPLEX_SHORT)
+
+
+def imposed(options: PrintOptions) -> bool:
+    """Le facciate vanno composte (opuscolo, poster, più pagine per foglio)."""
+    return options.layout in (LAYOUT_BOOKLET, LAYOUT_POSTER) or options.pages_per_sheet > 1
+
+
+def layout_sides(options: PrintOptions, page_count: int,
+                 tiles: Callable[[int], int] | None = None) -> list[Side]:
+    """Facciate nell'ordine naturale. `tiles(pagina)`: fogli del poster per la pagina."""
+    pages = selected_pages(options, page_count)
+    if options.layout == LAYOUT_BOOKLET:
+        return [Side(k, tuple(None if s is None else pages[s] for s in pair))
+                for k, pair in enumerate(booklet_sides(len(pages), options.booklet_rtl))]
+    if options.layout == LAYOUT_POSTER:
+        out: list[Side] = []
+        for p in pages:
+            for t in range(max(1, tiles(p)) if tiles is not None else 1):
+                out.append(Side(len(out), (p,), t))
+        return out
+    n = max(1, int(options.pages_per_sheet))
+    return [Side(k, tuple(pages[i:i + n])) for k, i in enumerate(range(0, len(pages), n))]
+
+
+def sheets_for(options: PrintOptions, page_count: int,
+               tiles: Callable[[int], int] | None = None) -> list[Sheet]:
+    """Fogli di una copia come escono dalla stampante. In fronte/retro le facciate vanno a
+    coppie e l'ultimo retro, se manca, resta bianco; l'ordine inverso inverte i fogli, non le
+    facciate, così il fronte/retro e l'opuscolo restano giusti."""
+    sides = layout_sides(options, page_count, tiles)
+    if two_sided(options):
+        sheets = [Sheet(sides[i], sides[i + 1] if i + 1 < len(sides) else Side(None))
+                  for i in range(0, len(sides), 2)]
+    else:
+        sheets = [Sheet(s) for s in sides]
+    if options.reverse:
+        sheets.reverse()
+    return sheets
+
+
+def print_sides(options: PrintOptions, sheets: list[Sheet]) -> list[Side]:
+    """Facciate da inviare alla stampante con le copie: fascicolate (1 2 3, 1 2 3) o no
+    (1 1, 2 2, 3 3); in fronte/retro si ripete il foglio intero."""
+    n = max(1, int(options.copies))
+    order = sheets * n if options.collate else [s for s in sheets for _i in range(n)]
+    return [side for sheet in order for side in sheet.sides]
+
+
+def side_scaling(options: PrintOptions) -> tuple[str, bool]:
+    """Scala e rotazione automatica della facciata sulla carta: le facciate composte sono già
+    della misura della carta (più pagine per foglio, poster) o vanno adattate (opuscolo)."""
+    if options.layout == LAYOUT_BOOKLET:
+        return FIT_PAGE, True
+    if options.layout == LAYOUT_POSTER:
+        return ACTUAL_SIZE, False
+    if options.pages_per_sheet > 1:
+        return FIT_PAGE, False
+    return options.scaling, options.auto_rotate
+
+
+def page_sizes(pdf: pymupdf.Document) -> Callable[[int], tuple[float, float]]:
+    """Misure (larghezza, altezza) in punti delle pagine, con /Rotate, lette una volta sola
+    (ENGINE_LOCK richiesto alla chiamata)."""
+    cache: dict[int, tuple[float, float]] = {}
+
+    def size(index: int) -> tuple[float, float]:
+        if index not in cache:
             rect = pdf[index].rect
-            scale = min(cell.width / rect.width, cell.height / rect.height)
-            w, h = rect.width * scale, rect.height * scale
-            target = pymupdf.Rect(cell.x0 + (cell.width - w) / 2, cell.y0 + (cell.height - h) / 2,
-                                  cell.x0 + (cell.width + w) / 2, cell.y0 + (cell.height + h) / 2)
-            sheet.show_pdf_page(target, pdf, index, keep_proportion=True)
-            if shape is not None:
-                shape.draw_rect(target)
-        if shape is not None:
-            shape.finish(color=(0, 0, 0), width=0.5)
+            cache[index] = (rect.width, rect.height)
+        return cache[index]
+    return size
+
+
+@dataclass
+class SideLayout:
+    """Facciata nelle sue coordinate (punti): le pagine con il loro riquadro di destinazione
+    e, per il poster, la parte di pagina (`clip`); bordi e segni di taglio da disegnare."""
+    width: float
+    height: float
+    items: list[tuple[int, pymupdf.Rect, pymupdf.Rect | None]] = field(default_factory=list)
+    frames: list[pymupdf.Rect] = field(default_factory=list)
+    marks: list[tuple[pymupdf.Point, pymupdf.Point]] = field(default_factory=list)
+
+
+def _fit(w: float, h: float, box: pymupdf.Rect) -> pymupdf.Rect:
+    """Riquadro di `w` × `h` adattato e centrato in `box`."""
+    scale = min(box.width / w, box.height / h) if w > 0 and h > 0 else 1.0
+    fw, fh = w * scale, h * scale
+    return pymupdf.Rect(box.x0 + (box.width - fw) / 2, box.y0 + (box.height - fh) / 2,
+                        box.x0 + (box.width + fw) / 2, box.y0 + (box.height + fh) / 2)
+
+
+class Imposition:
+    """Geometria delle facciate di un lavoro. `sizes(pagina)` → (larghezza, altezza) in punti;
+    `paper_w` × `paper_h`: area stampabile. Celle dell'opuscolo e della griglia dalla pagina
+    più grande del lavoro, come nella stampa."""
+
+    def __init__(self, options: PrintOptions, sizes: Callable[[int], tuple[float, float]],
+                 paper_w: float, paper_h: float, page_count: int | None = None):
+        self.options = options
+        self.sizes = sizes
+        self.paper = (paper_w, paper_h)
+        self.layout = options.layout
+        self.n = max(1, int(options.pages_per_sheet)) if options.layout == LAYOUT_NORMAL else 1
+        self.box = (0.0, 0.0)
+        if self.layout == LAYOUT_BOOKLET or self.n > 1:
+            pages = selected_pages(options, page_count)
+            self.box = (max((sizes(p)[0] for p in pages), default=0.0),
+                        max((sizes(p)[1] for p in pages), default=0.0))
+        self.grid = nup_grid(self.n, *self.box, paper_w, paper_h) if self.n > 1 else (1, 1)
+        self._tiles: dict[int, list[pymupdf.Rect]] = {}
+
+    def tiles(self, page: int) -> list[pymupdf.Rect]:
+        if page not in self._tiles:
+            self._tiles[page] = poster_tiles(*self.sizes(page), *self.paper, self.options.poster_overlap_mm * MM)
+        return self._tiles[page]
+
+    def tile_count(self, page: int) -> int:
+        return len(self.tiles(page)) if self.layout == LAYOUT_POSTER else 1
+
+    def side(self, side: Side) -> SideLayout:
+        if self.layout == LAYOUT_BOOKLET:
+            width, height = self.box
+            out = SideLayout(2 * width, height)
+            for pos, index in enumerate(side.pages):
+                if index is not None:
+                    half = pymupdf.Rect(pos * width, 0, (pos + 1) * width, height)
+                    out.items.append((index, _fit(*self.sizes(index), half), None))
+            return out
+        if self.layout == LAYOUT_POSTER:
+            paper_w, paper_h = self.paper
+            out = SideLayout(paper_w, paper_h)
+            if not side.pages:
+                return out
+            index = side.pages[0]
+            tiles = self.tiles(index)
+            tile = tiles[min(side.tile, len(tiles) - 1)]
+            target = pymupdf.Rect(0, 0, tile.width, tile.height)
+            out.items.append((index, target, tile))
+            if len(tiles) > 1:
+                overlap, mark = self.options.poster_overlap_mm * MM, 4 * MM
+                if tile.x0 > 0:                          # fascia condivisa con il foglio a sinistra
+                    out.marks += [(pymupdf.Point(overlap, y), pymupdf.Point(overlap, y + mark))
+                                  for y in (0, target.height - mark)]
+                if tile.y0 > 0:
+                    out.marks += [(pymupdf.Point(x, overlap), pymupdf.Point(x + mark, overlap))
+                                  for x in (0, target.width - mark)]
+            return out
+        if self.n > 1:
+            paper_w, paper_h = self.paper
+            cols, rows = self.grid
+            cell_w, cell_h = paper_w / cols, paper_h / rows
+            gap = 2 * MM
+            out = SideLayout(paper_w, paper_h)
+            for k, index in enumerate(side.pages):
+                if index is None:
+                    continue
+                col, row = (k // rows, k % rows) if self.options.nup_by_columns else (k % cols, k // cols)
+                cell = pymupdf.Rect(col * cell_w + gap, row * cell_h + gap,
+                                    (col + 1) * cell_w - gap, (row + 1) * cell_h - gap)
+                target = _fit(*self.sizes(index), cell)
+                out.items.append((index, target, None))
+                if self.options.nup_border:
+                    out.frames.append(target)
+            return out
+        if not side.pages or side.pages[0] is None:
+            return SideLayout(*self.paper)
+        w, h = self.sizes(side.pages[0])
+        return SideLayout(w, h, [(side.pages[0], pymupdf.Rect(0, 0, w, h), None)])
+
+
+def impose_sides(pdf: pymupdf.Document, imposition: Imposition, sides: list[Side]) -> pymupdf.Document:
+    """Documento con una pagina per facciata, nell'ordine di `sides`, composta con il motore
+    (contenuto vettoriale; le annotazioni vanno prima cotte con `bake_for_imposition`)."""
+    out = pymupdf.open()
+    for side in sides:
+        lay = imposition.side(side)
+        sheet = out.new_page(width=lay.width, height=lay.height)
+        for index, target, clip in lay.items:
+            sheet.show_pdf_page(target, pdf, index, clip=clip, keep_proportion=True)
+        for lines, width in ((lay.frames, 0.5), (lay.marks, 0.3)):
+            if not lines:
+                continue
+            shape = sheet.new_shape()
+            for item in lines:
+                if isinstance(item, pymupdf.Rect):
+                    shape.draw_rect(item)
+                else:
+                    shape.draw_line(*item)
+            shape.finish(color=(0, 0, 0), width=width)
             shape.commit()
     return out
 
 
-def _print_copy(document, layers_mode: str) -> pymupdf.Document:
+def describe_side(side: Side) -> str:
+    """Testo della facciata per l'anteprima e le tecnologie assistive: «pagine 1, 2»."""
+    numbers = [str(p + 1) for p in side.pages if p is not None]
+    if side.blank or not numbers:
+        return _("facciata bianca")
+    if len(numbers) == 1:
+        return _("pagina {n}").format(n=numbers[0])
+    return _("pagine {n}").format(n=", ".join(numbers))
+
+
+def describe_sheet(sheet: Sheet) -> str:
+    if sheet.back is None:
+        return describe_side(sheet.front)
+    return _("fronte: {a}; retro: {b}").format(a=describe_side(sheet.front), b=describe_side(sheet.back))
+
+
+def print_copy(document, layers_mode: str) -> pymupdf.Document:
     """Copia di lavoro del documento, con lo stato dei livelli da stampare.
 
     La visibilità a schermo (VIS-20) vive solo in memoria: la si riporta sulla
@@ -359,10 +625,13 @@ def print_layer_states(pdf: pymupdf.Document) -> dict[int, bool]:
     return result
 
 
-def not_printed(pdf: pymupdf.Document, index: int, annotations: bool) -> list[int]:
+def not_printed(pdf: pymupdf.Document, index: int, annotations) -> list[int]:
     """Annotazioni della pagina che non vanno su carta (VIS-43): quelle senza il flag /Print e,
-    senza «annotazioni e commenti», tutte tranne i campi modulo, i cui valori sono contenuto
-    del documento (ENGINE_LOCK richiesto)."""
+    con «Solo il documento» (`annotations` False), tutte tranne i campi modulo, i cui valori
+    sono contenuto del documento; con «Solo campi e timbri» (CONTENT_FIELDS) restano campi
+    modulo e timbri (ENGINE_LOCK richiesto)."""
+    keep = {CONTENT_DOCUMENT: (pymupdf.PDF_ANNOT_WIDGET,),
+            CONTENT_FIELDS: (pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_STAMP)}.get(content_mode(annotations))
     hide = []
     for xref, kind, _id in pdf[index].annot_xrefs():
         try:
@@ -370,13 +639,22 @@ def not_printed(pdf: pymupdf.Document, index: int, annotations: bool) -> list[in
             flags = int(value) if k == "int" else 0
         except Exception:
             flags = 0
-        if not flags & pymupdf.PDF_ANNOT_IS_PRINT or (not annotations and kind != pymupdf.PDF_ANNOT_WIDGET):
+        if not flags & pymupdf.PDF_ANNOT_IS_PRINT or (keep is not None and kind not in keep):
             hide.append(xref)
     return hide
 
 
-def render_page(pdf: pymupdf.Document, index: int, dpi: int, annotations: bool) -> QImage:
-    """Immagine della pagina (con /Rotate del documento, mai la rotazione della vista)."""
+def strip_page_contents(pdf: pymupdf.Document, indexes) -> None:
+    """Toglie il contenuto delle pagine (testo, immagini, disegni) e lascia annotazioni e campi:
+    «Solo campi e timbri» stampa su moduli prestampati. Solo sulle copie (ENGINE_LOCK richiesto)."""
+    for index in set(indexes):
+        pdf.xref_set_key(pdf.page_xref(index), "Contents", "[]")
+
+
+def render_page(pdf: pymupdf.Document, index: int, dpi: float, annotations) -> QImage:
+    """Immagine della pagina (con /Rotate del documento, mai la rotazione della vista).
+    `annotations`: True/False (commenti sì/no) o una costante CONTENT_*; con CONTENT_FIELDS il
+    contenuto va tolto prima dalla copia (`strip_page_contents`)."""
     from foliant.api import annotations_hidden, page_pixmap
     with ENGINE_LOCK:
         zoom = dpi / 72.0
@@ -389,40 +667,49 @@ def render_page(pdf: pymupdf.Document, index: int, dpi: int, annotations: bool) 
         return QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
 
 
+def render_preview_page(pdf: pymupdf.Document, index: int, dpi: float, content: str) -> QImage:
+    """Miniatura per l'anteprima, come uscirà in stampa ma senza copiare il documento: con
+    «Solo campi e timbri» si copia la sola pagina e se ne toglie il contenuto."""
+    with ENGINE_LOCK:
+        if content != CONTENT_FIELDS:
+            return render_page(pdf, index, dpi, content)
+        single = pymupdf.open()
+        try:
+            single.insert_pdf(pdf, from_page=index, to_page=index)
+            strip_page_contents(single, [0])
+            return render_page(single, 0, dpi, content)
+        finally:
+            single.close()
+
+
 def print_document(document, device: QPagedPaintDevice, options: PrintOptions, progress=None) -> int:
-    """Disegna le pagine scelte su `device`. Restituisce il numero di fogli.
+    """Disegna i fogli scelti su `device`. Restituisce il numero di facciate inviate
+    (comprese le copie e le facciate bianche del fronte/retro).
 
     Non usa widget: si può chiamare da `run_task`. `progress.update()` solleva
     `OperationCancelled` se l'utente annulla.
     """
-    sequence = options.sequence()
-    if not sequence:
-        raise RangeError(_("Nessuna pagina da stampare."))
-    work = _print_copy(document, options.layers)
+    with ENGINE_LOCK:
+        page_count = document.pdf.page_count
+    pages = require_pages(options, page_count)
+    content = print_content(options)
+    work = print_copy(document, options.layers)
     painter = QPainter()
-    nup = options.layout == LAYOUT_NORMAL and options.pages_per_sheet > 1
-    if options.layout in (LAYOUT_BOOKLET, LAYOUT_POSTER) or nup:
-        paint0 = device.pageLayout().paintRectPoints()
-        with ENGINE_LOCK:
-            bake_for_imposition(work, options.annotations)
-            if nup:
-                imposed = impose_nup(work, list(options.pages), options.pages_per_sheet, paint0.width(),
-                                     paint0.height(), options.nup_by_columns, options.nup_border)
-            elif options.layout == LAYOUT_BOOKLET:
-                imposed = impose_booklet(work, list(options.pages), options.booklet_rtl)
-            else:
-                imposed = impose_poster(work, list(options.pages), paint0.width(), paint0.height(),
-                                        options.poster_overlap_mm)
-            work.close()
-        work = imposed
-        sheets = list(range(work.page_count))
-        n_copies = max(1, int(options.copies))
-        sequence = sheets * n_copies if options.collate else [s for s in sheets for _i in range(n_copies)]
-        options = replace(options, scaling=FIT_PAGE if options.layout == LAYOUT_BOOKLET else ACTUAL_SIZE,
-                          auto_rotate=options.layout == LAYOUT_BOOKLET)
-        if nup:            # il foglio è già della misura della carta
-            options = replace(options, scaling=FIT_PAGE, auto_rotate=False)
+    paint0 = device.pageLayout().paintRectPoints()
+    composed = imposed(options)
     try:
+        with ENGINE_LOCK:
+            if content == CONTENT_FIELDS:      # moduli prestampati: niente contenuto delle pagine
+                strip_page_contents(work, pages)
+            imposition = Imposition(options, page_sizes(work), paint0.width(), paint0.height(), page_count)
+            sequence = print_sides(options, sheets_for(options, page_count, imposition.tile_count))
+            if composed:
+                bake_for_imposition(work, content)
+                sides = impose_sides(work, imposition, layout_sides(options, page_count, imposition.tile_count))
+                work.close()
+                work = sides
+        # le facciate composte sono pagine della copia, nell'ordine naturale
+        scaling, auto_rotate = side_scaling(options)
         if not painter.begin(device):
             raise RuntimeError(_("Impossibile avviare la stampa sul dispositivo scelto."))
         resolution = device.resolution() or 72
@@ -431,15 +718,18 @@ def print_document(document, device: QPagedPaintDevice, options: PrintOptions, p
         px_per_pt = resolution / 72.0
         paper_w, paper_h = paint.width() / px_per_pt, paint.height() / px_per_pt
         total = len(sequence)
-        for n, index in enumerate(sequence):
+        for n, side in enumerate(sequence):
             if progress is not None:
                 progress.update(n / total, _("Pagina {n} di {t}").format(n=n + 1, t=total))
             if n:
                 device.newPage()
+            index = side.index if composed else (side.pages[0] if side.pages else None)
+            if side.blank or index is None:
+                continue                          # retro bianco del fronte/retro
             with ENGINE_LOCK:
                 rect = work[index].rect
-            place = placement(rect.width, rect.height, paper_w, paper_h, options.scaling, options.auto_rotate)
-            image = render_page(work, index, dpi, options.annotations)
+            place = placement(rect.width, rect.height, paper_w, paper_h, scaling, auto_rotate)
+            image = render_page(work, index, dpi, content)
             if options.grayscale:
                 image = image.convertToFormat(QImage.Format.Format_Grayscale8)
             target = QRectF(place.x * px_per_pt, place.y * px_per_pt,
