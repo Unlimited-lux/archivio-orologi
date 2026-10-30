@@ -5,7 +5,9 @@
 #  2. file, collegamenti, tipo di file e voce di disinstallazione; foliant-cli.exe --version;
 #  3. sessione senza schermo di Foliant.exe: apre il PDF, lo modifica, salva, chiude (sessione.py);
 #  4. foliant-cli blocco: OCR in italiano con il Tesseract incluso → DOCX; OCR → compressione →
-#     PDF/A con il Ghostscript incluso; compressione diretta con Ghostscript; controllo dei risultati;
+#     PDF/A con il Ghostscript incluso; compressione diretta con Ghostscript; un PDF con una tabella
+#     → XLSX, PPTX e DOCX, e DOCX con impaginazione fedele (pdf2docx, converti_fedele.py), senza
+#     altri programmi; controllo dei risultati, anche aprendo i file Office (verifica_risultati.py);
 #  5. riservatezza: nomi e percorsi dei file di prova assenti da profilo, registro ed elementi recenti;
 #  6. disinstallazione senza togliere le preferenze (devono restare), reinstallazione e
 #     disinstallazione con /RIMUOVIPREFERENZE=1 (devono sparire); file e voci del programma spariti.
@@ -53,7 +55,7 @@ function Destinazione-Collegamento([string]$lnk) {
 }
 
 # ------------------------------------------------------------------ preparazione
-Passo 'PDF di prova (pagina scansionata in italiano)'
+Passo 'PDF di prova (pagina scansionata in italiano, pagina con una tabella)'
 # nomi riconoscibili, da cercare poi nel profilo; i file stanno fuori dal profilo dell'utente
 $segreto = 'Riservato' + (Get-Random -Minimum 100000 -Maximum 999999)
 $cartella = Join-Path $Lavoro "Cartella$segreto"
@@ -62,10 +64,14 @@ $risultati = Join-Path $Lavoro 'risultati'
 New-Item -ItemType Directory -Force -Path $risultati | Out-Null
 $originale = Join-Path $risultati 'originale.pdf'
 Esegui python @("$prova\crea_pdf_scansionato.py", $originale)
+$tabella = Join-Path $risultati 'tabella.pdf'
+Esegui python @("$prova\crea_pdf_tabella.py", $tabella)
 $pdfSessione = Join-Path $cartella "Perizia$segreto.pdf"
 $pdfBlocco = Join-Path $cartella "Orologio$segreto.pdf"
+$pdfTabella = Join-Path $cartella "Inventario$segreto.pdf"
 Copy-Item $originale $pdfSessione
 Copy-Item $originale $pdfBlocco
+Copy-Item $tabella $pdfTabella
 $inizio = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 Verifica (-not (Test-Path 'HKCU:\Software\Foliant')) 'nessuna preferenza di Foliant prima della prova'
 
@@ -120,6 +126,15 @@ Esegui $cli @('blocco', '-o', 'ocr', '-o', 'compress', '-o', 'pdfa', '-p', '1:la
 Passo 'Compressione con il Ghostscript incluso'
 Esegui (Join-Path $app 'tools\ghostscript\bin\gswin64c.exe') @('-q', '-dNOPAUSE', '-dBATCH', '-dSAFER',
   '-sDEVICE=pdfwrite', '-dPDFSETTINGS=/ebook', "-sOutputFile=$risultati\gs-ebook.pdf", $pdfBlocco)
+# Excel, PowerPoint e Word con le librerie del pacchetto (openpyxl, python-pptx, python-docx,
+# pdf2docx): nessun programma da installare, a differenza della creazione di PDF da Office
+foreach ($formato in 'xlsx', 'pptx', 'docx') {
+  Passo "foliant-cli blocco: PDF con una tabella → $($formato.ToUpper())"
+  Esegui $cli @('blocco', '-o', 'convert', '-p', "format=$formato", '-d', "$risultati\tabella-$formato", $pdfTabella)
+}
+Passo 'Word con impaginazione fedele (pdf2docx) dal Foliant installato'
+Esegui $cli @('-I', '-c', "exec(open(r'$prova\converti_fedele.py',encoding='utf-8').read())",
+              $pdfTabella, "$risultati\tabella-fedele")
 Remove-Item Env:QT_QPA_PLATFORM
 
 Passo 'Controllo dei risultati (con il Foliant installato)'
@@ -129,8 +144,9 @@ Esegui $cli @('-I', '-c', "exec(open(r'$prova\verifica_risultati.py',encoding='u
 Passo 'Riservatezza: nessun nome o percorso dei file di prova'
 Verifica (Test-Path 'HKCU:\Software\Foliant') 'Foliant ha scritto le sue preferenze (HKCU\Software\Foliant)'
 Esegui python @("$prova\cerca_tracce.py", '--dal', $inizio, '--token', $segreto,
-                '--token', "Perizia$segreto", '--token', "Orologio$segreto", '--token', "Cartella$segreto",
-                '--percorso', $pdfSessione, '--percorso', $pdfBlocco, '--percorso', $cartella)
+                '--token', "Perizia$segreto", '--token', "Orologio$segreto", '--token', "Inventario$segreto",
+                '--token', "Cartella$segreto", '--percorso', $pdfSessione, '--percorso', $pdfBlocco,
+                '--percorso', $pdfTabella, '--percorso', $cartella)
 
 # ------------------------------------------------------------------ disinstallazione
 Passo 'Disinstallazione senza togliere le preferenze'
