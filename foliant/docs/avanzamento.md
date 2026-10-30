@@ -24,7 +24,7 @@
 | Motore PDF | PyMuPDF (MuPDF) | AGPL-3.0 o commerciale Artifex |
 | OCR | Tesseract 5 (ita, eng) + OpenCV per pre-elaborazione | Apache-2.0 |
 | Firma digitale | pyHanko | MIT |
-| Conversione Office | pdf2docx, openpyxl, python-pptx; LibreOffice per Office→PDF | MIT / MIT / MIT / MPL |
+| Conversione Office | pdf2docx, python-docx, openpyxl, python-pptx; LibreOffice per Office→PDF | MIT / MIT / MIT / MIT / MPL |
 | IA (facoltativa) | fornitore configurato dall'utente; chiave nel portachiavi (keyring) | MIT |
 
 Motivazione: PyMuPDF copre in un'unica libreria rendering, testo, annotazioni, moduli,

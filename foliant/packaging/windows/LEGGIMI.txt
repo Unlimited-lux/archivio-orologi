@@ -12,5 +12,12 @@ Foliant e il motore PDF PyMuPDF sono distribuiti con licenza AGPL-3.0 (licenze/A
 
 LibreOffice (facoltativo, gratuito: https://www.libreoffice.org) serve solo per creare PDF da
 documenti Office (Word, Excel, PowerPoint). Installalo quando vuoi: Foliant lo trova da solo.
+La conversione da PDF a Word, Excel e PowerPoint è inclusa e non lo richiede.
+
+Chiedono qualcosa in più: l'assistente IA (una chiave API del fornitore e Internet, oppure un
+servizio sul PC), la marca temporale delle firme (un server di marca temporale), «Invia per
+e-mail» (un programma di posta MAPI, come Outlook classico o Thunderbird) e l'OCR in lingue
+diverse da italiano e inglese (da scaricare una volta). L'elenco completo è nella tabella
+«Funzione → serve qualcosa in più?» della guida.
 
 Guida completa: docs/windows.md nel codice sorgente di Foliant.

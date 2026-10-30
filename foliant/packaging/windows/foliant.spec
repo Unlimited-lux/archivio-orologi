@@ -30,6 +30,8 @@ hidden = (collect_submodules("foliant")                 # i moduli sono scoperti
           + collect_submodules("pyhanko") + collect_submodules("pyhanko_certvalidator")
           + ["keyring.backends.Windows", "win32ctypes.core", "spellchecker"])
 datas = foliant_data_files()                            # icone, schemi XSD, JSON dei moduli
+# docx e pptx: modelli di Word e PowerPoint (default.docx, intestazioni, commenti, note…);
+# openpyxl, pdf2docx e lxml non hanno file di dati (controllo in check_bundle.py)
 for package in ("spellchecker", "docx", "pptx", "pyhanko", "pyhanko_certvalidator", "certifi"):
     datas += collect_data_files(package)
 
@@ -40,6 +42,11 @@ a = Analysis(
     datas=datas,
     # analisi del layout di PyMuPDF (onnxruntime) esclusa come nell'app (foliant/__init__.py)
     excludes=["tkinter", "onnxruntime", "pymupdf.layout", "pymupdf4llm", "pytest", "pytestqt"],
+    # python-docx e python-pptx trovano i modelli con percorsi come docx/parts/../templates/… o
+    # pptx/oxml/../templates/…: le cartelle dei loro moduli devono esistere su disco, quindi i
+    # sorgenti vanno anche in cartella. Windows risolve «..» pure se la cartella manca, Linux no:
+    # così il pacchetto non dipende da questo e lo si può provare anche su Linux.
+    module_collection_mode={"docx": "pyz+py", "pptx": "pyz+py"},
     noarchive=False,
 )
 pyz = PYZ(a.pure)

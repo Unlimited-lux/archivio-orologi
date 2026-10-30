@@ -18,8 +18,11 @@ per lo scanner).
 - Windows 10 (versione 1809 o successiva) o Windows 11, 64 bit (x64). Su Windows per processori
   ARM non è stato provato.
 - Circa 600 MB liberi su disco. Non servono i permessi di amministratore.
-- Facoltativo: **LibreOffice** (gratuito), solo per creare PDF da documenti Word, Excel e
-  PowerPoint. Tutto il resto funziona senza.
+- Nient'altro da installare per lavorare sui PDF: leggere, modificare, commentare, OCR in italiano
+  e inglese, moduli, firma con un certificato in un file, protezione, confronto, operazioni in
+  blocco e conversione da PDF a Word, Excel, PowerPoint e agli altri formati. Le funzioni che
+  chiedono qualcosa in più (un programma, Internet, un account o una chiave) sono nella tabella
+  [Funzione → serve qualcosa in più?](#funzione--serve-qualcosa-in-più).
 
 L'installatore contiene già, con i testi delle licenze nella cartella `licenze` del programma:
 
@@ -29,7 +32,39 @@ L'installatore contiene già, con i testi delle licenze nella cartella `licenze`
 | Ghostscript | PDF/A, PDF/X, stampa in blocco | AGPL-3.0 |
 | qpdf | visualizzazione web veloce | Apache-2.0 |
 
-Foliant stesso è distribuito con licenza AGPL-3.0.
+Sono incluse anche le librerie per i documenti Office (pdf2docx, python-docx, openpyxl,
+python-pptx): la conversione da PDF a Word, Excel e PowerPoint non usa Microsoft Office né
+LibreOffice. Foliant stesso è distribuito con licenza AGPL-3.0.
+
+### Funzione → serve qualcosa in più?
+
+«Internet» vuol dire che Foliant si collega al servizio indicato solo quando usi quella funzione;
+il resto del programma non usa la rete.
+
+| Funzione | Serve qualcosa in più? |
+|---|---|
+| Leggere, modificare testo e immagini, commentare, pagine, moduli, protezione, confronto, operazioni in blocco | **No** |
+| Convertire da PDF in Word, Excel, PowerPoint, testo, RTF, HTML, XML, EPUB, immagini | **No**: librerie incluse, anche per l'impaginazione «fedele» di Word. Le pagine scansionate passano dall'OCR incluso |
+| OCR in italiano e in inglese | **No**: Tesseract è incluso |
+| OCR in altre lingue | **Internet una volta**: la lingua si scarica su richiesta da *Lingue di riconoscimento*, dall'archivio `tessdata_fast` del progetto Tesseract su GitHub; in alternativa si installa un file `.traineddata` già scaricato |
+| PDF/A, PDF/X, visualizzazione web veloce | **No**: Ghostscript e qpdf sono inclusi |
+| Stampa e stampa in blocco | La stampante con il suo driver di Windows (Ghostscript per la stampa in blocco è incluso) |
+| Creare PDF da documenti Office (Word, Excel, PowerPoint, OpenDocument, RTF, Visio…) | **LibreOffice** (gratuito), vedi [sezione 4](#4-creare-pdf-da-documenti-office-facoltativo-libreoffice). Senza, Foliant spiega da dove scaricarlo. Per i documenti protetti da password la libreria è inclusa |
+| Creare PDF da immagini, foto del telefono (anche HEIC), testo, HTML, appunti, schermo | **No** |
+| Creare PDF da una pagina web | **Internet**: Foliant scarica la pagina indicata, senza cookie |
+| Creare PDF dallo scanner | Uno scanner con driver **WIA** (quello che funziona con «Scanner di Windows»); gli scanner solo TWAIN non compaiono |
+| Creare PDF dalla fotocamera | Su Windows la webcam non viene ancora rilevata: Foliant propone di importare le foto scattate con il telefono |
+| Firma digitale | Un **ID digitale in un file .p12 o .pfx**, rilasciato da un'autorità di certificazione, oppure uno autofirmato creato da Foliant. Smart card, token USB, firma remota e archivio dei certificati di Windows non sono usati |
+| Marca temporale (nella firma o «Aggiungi marca temporale al documento») | **Internet** e l'indirizzo di un **server di marca temporale** (TSA), da aggiungere in *ID digitali… › Server marca temporale* (Foliant non ne propone; un campo firma del PDF può indicarne uno suo). I server qualificati di solito richiedono un contratto, con nome utente e password o certificato client (la password va in Gestione credenziali di Windows) |
+| Verifica delle firme | **No** per la verifica; **Internet** per il controllo della revoca online (OCSP, CRL) quando lo scegli e per «Aggiungi informazioni di verifica» |
+| Sincronizzare la libreria delle firme tra più PC | Una cartella condivisa a tua scelta (OneDrive, cartella di rete…): nessun servizio di Foliant |
+| Assistente IA | **Un fornitore di modelli**: un account Anthropic con la sua **chiave API** (a consumo, dal sito del fornitore) e Internet; oppure un servizio compatibile con le API di OpenAI, anche sul tuo PC e quindi senza Internet (per esempio Ollama, `http://localhost:11434/v1`), con o senza chiave secondo il servizio. La chiave sta in Gestione credenziali di Windows. Al primo invio con un profilo Foliant chiede il consenso (revocabile) |
+| Assistente IA: creare immagini | Un profilo con un **modello per immagini** su un servizio compatibile OpenAI (Anthropic non genera immagini) |
+| Assistente IA: ricerca per significato | Facoltativo: un modello per vettori semantici su un servizio compatibile OpenAI; senza, l'ordinamento lo fa il modello della chat |
+| Assistente IA: ricerca bibliografica | **Internet**: OpenAlex o Crossref (gratuiti, senza chiave) o un servizio compatibile; si inviano solo le parole chiave |
+| Invia per e-mail | Un **programma di posta con MAPI** impostato come predefinito (Outlook classico, Thunderbird…). Con la nuova app Outlook o con la posta nel browser l'allegato va aggiunto a mano: Foliant lo segnala |
+| Lettura ad alta voce | Le voci di Windows; per l'italiano aggiungi la lingua italiana con la voce in *Impostazioni › Ora e lingua › Voce* |
+| Verifica online dei collegamenti, invio di un modulo PDF a un server | **Internet** (la verifica online dei collegamenti parte solo dopo la tua conferma) |
 
 ## 1. Scaricare l'installatore da GitHub
 
@@ -102,6 +137,7 @@ che il file «non viene scaricato di frequente», scegli **Mantieni** dal menu d
 Per trasformare in PDF documenti Word, Excel e PowerPoint Foliant usa **LibreOffice**, che non è
 incluso (è grande e serve solo a questo). Se manca, Foliant mostra il messaggio «Serve il
 programma LibreOffice… Installa LibreOffice da https://www.libreoffice.org (gratuito) e riprova».
+Il contrario, da PDF a Word, Excel e PowerPoint, non ne ha bisogno.
 
 1. Vai su <https://www.libreoffice.org> › **Scarica** e prendi la versione per **Windows x86-64**.
 2. Installalo con le opzioni proposte.
@@ -174,6 +210,8 @@ le cronologie della shell (RecentDocs, ComDlg32) e le Jump List.
 - **Aggiornamenti**: Foliant non si aggiorna da solo. Per una nuova versione scarica il nuovo
   installatore e installalo sopra: le preferenze restano.
 - **LibreOffice** non è incluso (vedi sopra): senza, non si creano PDF da documenti Office.
+- **Fotocamera**: «Crea PDF › Da fotocamera…» su Windows non trova ancora la webcam (la cerca
+  come su Linux) e propone di importare le foto dei documenti scattate con il telefono.
 - **Lingue OCR**: sono incluse italiano e inglese; altre lingue si aggiungono dalle preferenze
   dell'OCR.
 - **File aperto in un altro programma**: Windows non permette di sostituire un file aperto da un
@@ -229,21 +267,30 @@ GitHub Actions:
   Ubuntu;
 - `.github/workflows/foliant-windows-build.yml`, lavoro **build**: costruisce il pacchetto
   (`packaging/windows/`: PyInstaller in cartella unica con `foliant.spec`, Foliant.exe senza console
-  e foliant-cli.exe; strumenti raccolti da `collect_tools.ps1`; Inno Setup con `foliant.iss`) e
-  pubblica `Foliant-Setup-<versione>.exe` e `Foliant-portable-<versione>.zip` come artefatti per
-  30 giorni;
+  e foliant-cli.exe; strumenti raccolti da `collect_tools.ps1`; Inno Setup con `foliant.iss`),
+  lo prova con `check_bundle.py` (strumenti inclusi, moduli, librerie e modelli di Word, Excel e
+  PowerPoint con una conversione per formato) e pubblica `Foliant-Setup-<versione>.exe` e
+  `Foliant-portable-<versione>.zip` come artefatti per 30 giorni;
 - stesso workflow, lavoro **test-installer** su una macchina Windows pulita
   (`packaging/windows/prova/prova_installatore.ps1`): installazione silenziosa, file, collegamenti,
   tipo di file e versione; `foliant-cli.exe --version`; una sessione senza schermo di Foliant.exe
   che apre, modifica, salva e chiude un PDF (`sessione.py`); con `foliant-cli blocco` OCR in
   italiano di una pagina scansionata con il Tesseract incluso e conversione in DOCX, compressione e
-  PDF/A con il Ghostscript incluso, più una compressione diretta con Ghostscript
-  (`verifica_risultati.py` controlla il testo riconosciuto e i file); poi la **riservatezza**:
-  nomi e percorsi dei file di prova non devono comparire in `%APPDATA%`, `%LOCALAPPDATA%`, negli
-  elementi recenti di Windows né nel registro (`HKCU\Software\Foliant`, `HKCU\Software\QtProject`,
-  RecentDocs, ComDlg32) (`cerca_tracce.py`); infine disinstallazione senza preferenze (restano),
-  reinstallazione e disinstallazione con `/RIMUOVIPREFERENZE=1` (spariscono), con il controllo
-  che file, collegamenti e voci del registro del programma siano spariti.
+  PDF/A con il Ghostscript incluso, più una compressione diretta con Ghostscript; un PDF con una
+  tabella (`crea_pdf_tabella.py`) convertito in XLSX, PPTX e DOCX con `foliant-cli blocco` e in
+  DOCX con l'impaginazione fedele di pdf2docx (`converti_fedele.py`), senza altri programmi
+  (`verifica_risultati.py` controlla il testo riconosciuto e i file, e apre i file Office con
+  openpyxl, python-pptx e python-docx del Foliant installato: valori della tabella come numeri e
+  date in Excel, testo, immagine e note in PowerPoint, tabella e commento in Word); poi la
+  **riservatezza**: nomi e percorsi dei file di prova non devono comparire in `%APPDATA%`,
+  `%LOCALAPPDATA%`, negli elementi recenti di Windows né nel registro (`HKCU\Software\Foliant`,
+  `HKCU\Software\QtProject`, RecentDocs, ComDlg32) (`cerca_tracce.py`); infine disinstallazione
+  senza preferenze (restano), reinstallazione e disinstallazione con `/RIMUOVIPREFERENZE=1`
+  (spariscono), con il controllo che file, collegamenti e voci del registro del programma siano
+  spariti.
+
+Le conversioni di `check_bundle.py` e gli script della prova (PDF di prova, conversioni,
+`verifica_risultati.py`) girano anche con i sorgenti, nella suite: `tests/test_prova_windows.py`.
 
 La compressione di Foliant («Comprimi») usa il motore PDF (PyMuPDF) e non Ghostscript; Ghostscript
 serve a PDF/A, PDF/X e stampa in blocco. Per questo la prova usa Ghostscript attraverso Foliant
