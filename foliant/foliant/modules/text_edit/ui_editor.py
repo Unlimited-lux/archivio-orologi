@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QFrame, QTextEdit
 
 from ...core.engine import ENGINE_LOCK
 from ...ui.document_view import PX_PER_PT
-from .fonts import FontResolver
+from .fonts import KIND_ORIGINAL, FontResolver
 from .model import (
     ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT, SOFT_HYPHEN, Run, Style, merge_runs,
 )
@@ -34,16 +34,36 @@ _QT_ALIGN = {
 }
 
 
+def unicode_cmap(data: bytes) -> bool:
+    """True se il programma del font ha una mappa dei caratteri Unicode. I sottoinsiemi incorporati da
+    LibreOffice, Office e altri programmi spesso hanno solo una mappa per codici (Mac Roman con i
+    numeri dei glifi): a schermo i caratteri digitati prenderebbero glifi sbagliati (spazio → «7»)."""
+    try:
+        import io
+
+        from fontTools.ttLib import TTFont
+        font = TTFont(io.BytesIO(data), lazy=True, fontNumber=0)
+        return any(t.platformID == 0 or (t.platformID == 3 and t.platEncID in (1, 10))
+                   for t in font["cmap"].tables)
+    except Exception:
+        return False
+
+
 class QtFontRegistry:
     """Carica in Qt i font usati per scrivere, così il riquadro mostra i glifi reali."""
 
     def __init__(self) -> None:
         self._families: dict[str, str] = {}
+        self._unicode: dict[str, bool] = {}
 
     def family_for(self, resolver: FontResolver, style: Style) -> str:
         with ENGINE_LOCK:
             try:
                 choice = resolver.primary(style)
+                if choice.kind == KIND_ORIGINAL and not self._has_unicode_cmap(choice):
+                    # font incorporato senza mappa Unicode: nel riquadro si mostra il font di sistema
+                    # equivalente (es. Carlito per Calibri); nel PDF il testo usa comunque l'originale
+                    choice = resolver.primary(style.with_(font_xref=0))
             except Exception:
                 return style.font
             key = choice.key
@@ -62,6 +82,15 @@ class QtFontRegistry:
                     family = fams[0]
         self._families[key] = family
         return family
+
+    def _has_unicode_cmap(self, choice) -> bool:
+        if choice.key not in self._unicode:
+            try:
+                data = choice.data()
+            except Exception:
+                data = b""
+            self._unicode[choice.key] = bool(data) and unicode_cmap(data)
+        return self._unicode[choice.key]
 
 
 REGISTRY = QtFontRegistry()

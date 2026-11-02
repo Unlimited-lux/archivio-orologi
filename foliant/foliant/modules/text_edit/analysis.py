@@ -472,6 +472,52 @@ def page_rules(page: pymupdf.Page) -> list:
     return out
 
 
+def page_edges(page: pymupdf.Page) -> list[tuple[float, float, float]]:
+    """Bordi verticali della pagina (riquadro di lavoro): linee e lati dei rettangoli, come
+    (x, y0, y1). Servono a riconoscere le celle di tabella che contengono una riga di testo."""
+    out: list[tuple[float, float, float]] = []
+    try:
+        frame = frame_matrix(page)
+        for d in page.get_drawings():
+            for item in d.get("items", ()):
+                kind = item[0]
+                if kind == "l":
+                    p0, p1 = item[1] * frame, item[2] * frame
+                    if abs(p0.x - p1.x) <= 1.0 and abs(p0.y - p1.y) >= 4.0:
+                        out.append(((p0.x + p1.x) / 2, min(p0.y, p1.y), max(p0.y, p1.y)))
+                elif kind == "re":
+                    r = pymupdf.Rect(item[1]) * frame
+                    if r.height < 4.0:
+                        continue
+                    if r.width <= 2.0:                       # filetto verticale disegnato come rettangolo
+                        out.append(((r.x0 + r.x1) / 2, r.y0, r.y1))
+                    else:
+                        out.append((r.x0, r.y0, r.y1))
+                        out.append((r.x1, r.y0, r.y1))
+    except Exception:
+        return []
+    return out
+
+
+def _cell_alignment(line: Line, edges: list) -> str | None:
+    """Allineamento di una riga sola dentro una cella di tabella (bordi a sinistra e a destra alla sua
+    altezza): centrata o a destra se è così nella cella, altrimenti None (non si sa)."""
+    box = line.bbox
+    y = (box.y0 + box.y1) / 2
+    lefts = [x for x, y0, y1 in edges if y0 - 0.5 <= y <= y1 + 0.5 and x <= box.x0 + 0.5]
+    rights = [x for x, y0, y1 in edges if y0 - 0.5 <= y <= y1 + 0.5 and x >= box.x1 - 0.5]
+    if not lefts or not rights:
+        return None
+    left, right = max(lefts), min(rights)
+    ml, mr = box.x0 - left, right - box.x1
+    tol = max(1.5, 0.3 * line.size)
+    if min(ml, mr) > tol and abs(ml - mr) <= tol:
+        return ALIGN_CENTER
+    if mr <= max(tol, 0.6 * line.size) and ml > 2 * mr + tol:
+        return ALIGN_RIGHT
+    return None
+
+
 def _spread(values: list[float]) -> float:
     return max(values) - min(values) if values else 0.0
 
@@ -553,12 +599,17 @@ def _paragraphs_from_lines(lines: list[Line], align: str, x0: float, width: floa
     return [merge_runs(p) for p in paragraphs]
 
 
-def build_block(page_index: int, index: int, lines: list[Line], invisible: bool) -> TextBlock:
+def build_block(page_index: int, index: int, lines: list[Line], invisible: bool,
+                edges: list | None = None) -> TextBlock:
     rotated = not _horizontal(lines[0])
     if rotated:
         align, x0, width, indent = ALIGN_LEFT, lines[0].bbox.x0, lines[0].bbox.width, 0.0
     else:
         align, x0, width, indent = _detect_alignment(lines)
+        if len(lines) == 1 and edges and not paragraph_is_rtl(lines[0].text):
+            # una riga sola in una cella di tabella (fogli presenze, preventivi esportati da Excel):
+            # centrata o a destra come nella cella, così il testo modificato resta al suo posto
+            align = _cell_alignment(lines[0], edges) or align
     if len(lines) >= 2:
         gaps = [b.baseline - a.baseline for a, b in zip(lines, lines[1:])]
         leading = statistics.median(gaps)
@@ -580,6 +631,7 @@ def analyze_page(page: pymupdf.Page, page_index: int = 0, granularity: str = "pa
     """Blocchi di testo modificabili della pagina, in ordine di lettura."""
     extracted = extract_lines(page)
     rules = page_rules(page) if granularity != GRANULARITY_LINE else []
+    edges = page_edges(page)
     horizontal = [(ln, inv) for ln, inv in extracted if _horizontal(ln)]
     others = [(ln, inv) for ln, inv in extracted if not _horizontal(ln)]
     groups: list[tuple[list[Line], bool]] = []
@@ -591,7 +643,7 @@ def analyze_page(page: pymupdf.Page, page_index: int = 0, granularity: str = "pa
             groups.extend((g, inv) for g in group_lines(subset, rules))
     groups.extend(([ln], inv) for ln, inv in others)
     groups.sort(key=lambda g: (round(g[0][0].bbox.y0 / 4), g[0][0].bbox.x0))
-    return [build_block(page_index, i, g, inv) for i, (g, inv) in enumerate(groups)]
+    return [build_block(page_index, i, g, inv, edges) for i, (g, inv) in enumerate(groups)]
 
 
 def block_at(blocks: list[TextBlock], point: pymupdf.Point, margin: float = 2.0) -> TextBlock | None:
