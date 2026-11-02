@@ -76,9 +76,15 @@ def test_misspelled_word_flagged_with_suggestion_fast(service):
 def test_suggestions_fast_for_long_and_unknown_words(service):
     service.suggestions("prova", "it")
     for word in ("precipitevolissimevolmentx", "qwrtzpklmn", "Orologgio", "contrato"):
-        t0 = time.perf_counter()
-        service.suggestions(word, "it")
-        assert time.perf_counter() - t0 < perf_limit(0.3), word
+        # la più veloce di tre misure, senza la cache dei suggerimenti: una pausa del sistema (CI su
+        # Windows) non conta come lentezza
+        times = []
+        for _ in range(3):
+            service._suggest_cache.clear()
+            t0 = time.perf_counter()
+            service.suggestions(word, "it")
+            times.append(time.perf_counter() - t0)
+        assert min(times) < perf_limit(0.3), (word, times)
     assert service.suggestions("Orologgio", "it")[0] == "Orologio"   # maiuscola mantenuta
     assert "contratto" in service.suggestions("contrato", "it")
 

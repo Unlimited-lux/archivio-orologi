@@ -291,7 +291,9 @@ def test_replaced_file_still_watched(viewer_window, ctl, pdf30, qtbot):
         tmp = pdf30 + ".tmp"
         with open(tmp, "wb") as f:
             f.write(_pdf_bytes(3, tag))
-        os.replace(tmp, pdf30)
+        # come un editor che salva bene: su Windows il file può essere aperto per un attimo (rilettura
+        # dopo la sostituzione precedente, antivirus) e la rinomina va ritentata
+        platform.replace_file(tmp, pdf30)
         qtbot.waitUntil(lambda n=n: ctl.reload_count == n, timeout=3000)
         assert f"{tag} pagina 1" in _text(viewer_window.current_view(), 0)
 

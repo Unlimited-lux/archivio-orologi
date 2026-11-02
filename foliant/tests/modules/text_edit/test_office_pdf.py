@@ -28,12 +28,14 @@ def _block(doc, text):
     return next(b for b in analyze_page(doc[0], 0) if text in "".join(ln.text for ln in b.lines))
 
 
-def _span(doc, text):
+def _line(doc, text):
+    """(testo, riquadro) della riga che contiene `text`: senza Carlito nel sistema (CI su Windows) le
+    cifre usano un font sostitutivo, quindi la riga è fatta di più pezzi."""
     for b in doc[0].get_text("dict")["blocks"]:
         for line in b.get("lines", ()):
-            for s in line["spans"]:
-                if text in s["text"]:
-                    return s
+            joined = "".join(s["text"] for s in line["spans"])
+            if text in joined:
+                return joined, pymupdf.Rect(line["bbox"]), line["spans"][0]["origin"][1]
     raise AssertionError(text)
 
 
@@ -45,16 +47,15 @@ def test_cells_keep_their_alignment():
 
 def test_edited_note_stays_centred_in_its_cell(tmp_path):
     doc = pymupdf.open(str(PDF))
+    _t, before, baseline = _line(doc, NOTE)
     block = _block(doc, NOTE)
-    before = block.lines[0].bbox
     style = block.paragraphs[0][0].style
     replace_block(doc, 0, block, [[Run("PERMESSO 123456ciao", style)]])
     out = tmp_path / "out.pdf"
     doc.save(str(out))
-    span = _span(pymupdf.open(str(out)), "PERMESSO 123456ciao")
-    x0, _y0, x1, y1 = span["bbox"]
-    assert abs((x0 + x1) / 2 - (before.x0 + before.x1) / 2) < 1.0        # stesso centro della cella
-    assert abs(y1 - before.y1) < 0.5                                     # stessa riga
+    _t, box, new_baseline = _line(pymupdf.open(str(out)), "PERMESSO 123456ciao")
+    assert abs((box.x0 + box.x1) / 2 - (before.x0 + before.x1) / 2) < 1.0  # stesso centro della cella
+    assert abs(new_baseline - baseline) < 0.5                              # stessa linea di base
 
 
 def test_editor_shows_text_with_a_unicode_font(qapp):
