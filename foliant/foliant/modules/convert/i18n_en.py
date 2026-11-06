@@ -286,6 +286,7 @@ EN: dict[str, str] = {
     "La password non è corretta. Riprova.": "The password is incorrect. Try again.",
     "La soglia di ricampionamento deve essere maggiore della risoluzione di destinazione.": "The resampling threshold must be greater than the target resolution.",
     "La struttura del file (tabella dei riferimenti incrociati) era danneggiata ed è stata ricostruita.": "The file structure (cross-reference table) was damaged and has been rebuilt.",
+    "Il file era troncato: l'elenco delle pagine e il catalogo sono stati ricostruiti dalle pagine trovate.": "The file was truncated: the page list and the catalog have been rebuilt from the pages found.",
     "La struttura del file (xref) non è valida.": "The file structure (xref) is not valid.",
     "La versione PDF {v} non è ammessa in PDF/A-1 (massimo 1.4).": "PDF version {v} is not allowed in PDF/A-1 (maximum 1.4).",
     "Layout": "Layout",
