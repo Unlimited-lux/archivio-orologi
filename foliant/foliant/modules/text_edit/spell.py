@@ -15,7 +15,8 @@ Dizionari
 - Dizionario personale: UTF-8, una parola per riga, in
   `~/.config/foliant/dizionario_personale.txt` (o `$XDG_CONFIG_HOME/foliant/...`).
 
-Lingua: `/Lang` del catalogo del documento, altrimenti la lingua dell'interfaccia.
+Lingua: quella che riconosce più parole di un campione del testo (tra `/Lang` del catalogo,
+lingua dell'interfaccia, italiano e inglese); `/Lang` vale a pari merito.
 (La lingua dei singoli run/elementi di struttura non è ancora considerata.)
 
 Le correzioni nel documento passano da `engine.replace_block` dentro un unico
@@ -779,17 +780,63 @@ def document_language(pdf: pymupdf.Document) -> str | None:
     return code if re.fullmatch(r"[a-z]{2,3}", code) else None
 
 
+LANG_SAMPLE_WORDS = 400       # parole del documento usate per riconoscerne la lingua
+LANG_SAMPLE_PAGES = 5
+LANG_PROBES = ("it", "en")    # lingue sempre provate oltre a quella dichiarata e all'interfaccia
+
+
+def text_sample(pdf: pymupdf.Document, max_words: int = LANG_SAMPLE_WORDS,
+                max_pages: int = LANG_SAMPLE_PAGES) -> str:
+    """Campione del testo del documento (prime pagine, al più `max_words` parole)."""
+    words: list[str] = []
+    for pno in range(min(pdf.page_count, max_pages)):
+        try:
+            words += [w[4] for w in pdf[pno].get_text("words")]
+        except Exception:
+            continue
+        if len(words) >= max_words:
+            break
+    return " ".join(words[:max_words])
+
+
+def detect_language(service: SpellService, text: str, candidates: Iterable[str],
+                    preferred: str | None = None) -> str | None:
+    """Lingua che riconosce più parole di `text` tra `candidates`; a pari merito vince `preferred`."""
+    best, best_bad = None, None
+    order = [preferred] if preferred else []
+    order += [c for c in candidates if c and c != preferred]
+    for lang in order:
+        if not service.has_language(lang) or service.lexicon(lang) is None:
+            continue
+        bad = len(service.misspelled(text, lang))
+        if best_bad is None or bad < best_bad:
+            best, best_bad = lang, bad
+    return best
+
+
 def choose_language(service: SpellService, pdf: pymupdf.Document | None = None) -> str:
-    """Lingua del controllo: quella del documento, poi dell'interfaccia, poi la prima disponibile."""
+    """Lingua del controllo: quella che riconosce più parole del documento (il `/Lang` dichiarato
+    vale a pari merito: i PDF di LibreOffice dichiarano spesso «en-US» per un testo italiano),
+    poi quella dell'interfaccia, poi la prima disponibile. La scelta manuale nel dialogo F7 prevale."""
+    ui = ui_language()
     if pdf is not None:
-        lang = document_language(pdf)
-        if lang and service.has_language(lang):
-            return lang
-    lang = ui_language()
-    if service.has_language(lang):
-        return lang
+        declared = document_language(pdf)
+        preferred = declared if declared and service.has_language(declared) else \
+            ui if service.has_language(ui) else None
+        try:
+            text = text_sample(pdf)
+        except Exception:
+            text = ""
+        if text.strip():
+            found = detect_language(service, text, [declared, ui, *LANG_PROBES], preferred)
+            if found:
+                return found
+        if preferred:
+            return preferred
+    if service.has_language(ui):
+        return ui
     avail = service.available_languages()
-    return avail[0] if avail else lang
+    return avail[0] if avail else ui
 
 
 _SERVICE: SpellService | None = None
