@@ -130,3 +130,34 @@ def test_list_values_joined(tmp_path):
     pdf.close()
     rows, errors = B.collect([str(path)])
     assert errors == [] and rows[0]["colori"] == "rosso; blu"
+
+
+def test_fill_series_reads_numbers_and_dates_with_field_style(tmp_path):
+    """D-3: nella compilazione in serie «12.500» in un campo 1.234,56 € vale 12500 (non 12,5), la
+    data è normalizzata e un valore non valido è segnalato senza essere scritto."""
+    from .test_engine import price_doc
+    pdf, _xs = price_doc()
+    template = tmp_path / "prezzi.pdf"
+    pdf.save(str(template))
+    records = X.csv_records("prezzo;qta;data\n12.500;2;5/3/26\n1.234.567,89;1;7-3-2026\ndodici;3;\n".encode())
+    rep = B.fill_series(str(template), records, str(tmp_path / "out"))
+    assert len(rep["created"]) == 3
+    assert [(row, name) for row, name, _m in rep["errors"]] == [(3, "prezzo")]
+    vals = [values_of(p) for p in rep["created"]]
+    assert [(v["prezzo"], v["totale"], v["data"]) for v in vals] == [
+        ("12500", "25000", "05/03/2026"), ("1234567.89", "1234567.89", "07/03/2026"), ("", "0", "")]
+    first = pymupdf.open(rep["created"][0])
+    assert "12.500,00 €" in first[0].get_text() and "25.000,00 €" in first[0].get_text()
+
+
+def test_collect_exports_numbers_in_canonical_form(tmp_path):
+    """Raccogli dati: un prezzo memorizzato «12.500» (file compilato male in passato) si esporta
+    come 12500 secondo lo stile del campo."""
+    from .test_engine import price_doc
+    pdf, xs = price_doc()
+    pdf.xref_set_key(E._field_xref(pdf, xs["prezzo"]), "V", "(12.500)")
+    E.set_value(pdf, 0, xs["qta"], "2")
+    path = tmp_path / "vecchio.pdf"
+    pdf.save(str(path))
+    rows, errors = B.collect([str(path)])
+    assert errors == [] and rows[0]["prezzo"] == "12500"

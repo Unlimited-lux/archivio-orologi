@@ -155,26 +155,37 @@ def _decimal_comma(separator: int | None) -> bool:
     return separator in (2, 3)
 
 
-def parse_number(text: Any, separator: int | None = None) -> float | None:
+def parse_number(text: Any, separator: int | None = None, *, canonical: bool = False) -> float | None:
     """Interpreta numeri all'italiana o all'inglese («1.234,5», «1,234.5», «1'234.5», «€ 3»).
 
-    `separator`: stile dei separatori del campo (0-4) per l'input dell'utente: il testo si legge
-    secondo quello stile («12.500» con lo stile 2 è dodicimilacinquecento). Senza stile si
-    indovina, come per i valori memorizzati (canonici, con il punto decimale) e importati."""
+    `separator`: stile dei separatori del campo (0-4): il testo si legge secondo quello stile
+    («12.500» con lo stile 2 è dodicimilacinquecento). Il separatore delle migliaia vale come
+    tale solo se separa gruppi di tre cifre, altrimenti è il separatore decimale («12500.5» con
+    lo stile 2 è 12500,5; «12,5» con lo stile 0 è 12,5).
+    `canonical`: un solo punto seguito da tre cifre che non finiscono con 0 è il punto decimale
+    della forma canonica, che non ha mai zeri finali («1.234» è 1,234; «12.500» resta 12500).
+    Senza stile si indovina."""
     if text is None or isinstance(text, bool):
         return None
     if isinstance(text, (int, float)):
         return float(text) if math.isfinite(text) else None
     s = str(text).strip().replace("−", "-").replace("'", "").replace(" ", "").replace(" ", "")
     if separator is not None:
-        if _decimal_comma(separator):
-            s = s.replace(".", "")
-            if s.count(",") > 1:
+        point, group = (",", ".") if _decimal_comma(separator) else (".", ",")
+        digits = re.sub(r"[^\d.,]", "", s)
+        if point in digits:
+            if digits.count(point) > 1:
                 return None
-            s = s.replace(",", ".")
-        else:
-            s = s.replace(",", "")
-            if s.count(".") > 1:
+            s = s.replace(group, "").replace(point, ".")
+        elif group in digits:
+            grouped = re.fullmatch(r"[1-9]\d{0,2}(?:" + re.escape(group) + r"\d{3})+", digits) is not None
+            if grouped and canonical and group == "." and digits.count(".") == 1 and not digits.endswith("0"):
+                grouped = False
+            if grouped:
+                s = s.replace(group, "")
+            elif digits.count(group) == 1:
+                s = s.replace(group, ".")
+            else:
                 return None
     negative = s.startswith("(") and s.endswith(")")
     s = re.sub(r"[^\d,.\-+eE]", "", s)
@@ -199,14 +210,23 @@ def parse_number(text: Any, separator: int | None = None) -> float | None:
     return -abs(v) if negative else v
 
 
+def stored_number(fmt: "Format", raw: Any) -> float | None:
+    """Numero di un valore memorizzato (/V) di un campo con formato: forma canonica e, per i
+    valori scritti in passato con i separatori del campo («12.500», «1.234,5»), lo stile del campo."""
+    return parse_number(raw, fmt.separator if fmt.numeric else None, canonical=True)
+
+
 def canonical_number(value: float, decimals: int | None = None) -> str:
     """Forma canonica memorizzata: punto decimale, niente migliaia, 15 cifre significative."""
     if value == 0:
         return "0"
-    v = float(f"{value:.15g}")
-    if decimals is not None:
-        v = round(v, decimals)
-    s = f"{v:.10f}".rstrip("0").rstrip(".")
+    v = round(float(f"{value:.15g}"), 10 if decimals is None else decimals)
+    # cifre della rappresentazione più breve del numero, senza esponente: «1234567.89», non
+    # «1234567.8899999999» come darebbero 10 decimali fissi
+    from decimal import Decimal
+    s = format(Decimal(repr(v)), "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
     if re.fullmatch(r"-?0", s):
         return "0"
     return s
@@ -238,7 +258,7 @@ def display(fmt: Format, raw: Any) -> tuple[str, bool]:
     if not text.strip() or fmt.type == NONE:
         return text, False
     if fmt.type in (NUMBER, PERCENT):
-        v = parse_number(text)
+        v = stored_number(fmt, text)
         if v is None:
             return text, False
         if fmt.type == PERCENT:
@@ -265,13 +285,18 @@ def display(fmt: Format, raw: Any) -> tuple[str, bool]:
     return text, False
 
 
-def normalize(fmt: Format, text: str) -> str:
-    """Valore da memorizzare per l'input dell'utente. Solleva FormatError se non interpretabile."""
+def normalize(fmt: Format, text: str, *, canonical: bool = False) -> str:
+    """Valore da memorizzare per l'input dell'utente. Solleva FormatError se non interpretabile.
+
+    I numeri si leggono con lo stile del campo. Un punto seguito da tre cifre («1.234») negli
+    stili con la virgola decimale separa le migliaia, come per chi scrive a mano; nei campi con
+    almeno tre decimali, e con `canonical` (valori dei campi già in forma canonica: FDF, XFDF,
+    /V), è il punto decimale se le cifre non finiscono con 0 («12.500» resta 12500)."""
     s = (text or "").strip()
     if not s or fmt.type == NONE:
         return text
     if fmt.type in (NUMBER, PERCENT):
-        v = parse_number(s, fmt.separator)
+        v = parse_number(s, fmt.separator, canonical=canonical or fmt.decimals >= 3)
         if v is None:
             raise FormatError(_("Va inserito un numero."))
         if fmt.type == PERCENT and s.endswith("%"):
@@ -300,8 +325,9 @@ def edit_text(fmt: Format, value: str) -> str:
     separatore decimale dello stile del campo, senza migliaia («1234,5» con lo stile 2), così
     che confermarlo senza modifiche dia lo stesso valore."""
     if fmt.type in (NUMBER, PERCENT) and value and _decimal_comma(fmt.separator):
-        if parse_number(value) is not None and "," not in value:
-            return value.replace(".", ",")
+        v = stored_number(fmt, value)
+        if v is not None:
+            return canonical_number(v).replace(".", ",")
     return value
 
 

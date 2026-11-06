@@ -1174,13 +1174,30 @@ class FieldPropertiesPanel(QWidget):
             if not text:
                 nums.append(None)
                 continue
-            v = fm.parse_number(text)
+            v = self._range_number(text)
             if v is None:
                 return None, msg
             nums.append(v)
         v = E.Validation(nums[0], nums[1], self.val_minlen.value(), self.val_regex.text(),
                          self.val_message.text().strip())
         return v, v.check()
+
+    def _range_number(self, text: str) -> float | None:
+        """Minimo o massimo scritto nel pannello: nei campi numerici si legge con lo stile dei
+        separatori del campo, come il suo input («1.000» con lo stile 1.234,56 è mille)."""
+        fmt = self.current_format()
+        if not fmt.numeric:
+            return fm.parse_number(text)
+        try:
+            return float(fm.normalize(fmt, text))
+        except (fm.FormatError, ValueError):
+            return None
+
+    def _range_text(self, value: float | None) -> str:
+        """Minimo o massimo nel pannello, con il separatore decimale dello stile del campo."""
+        if value is None:
+            return ""
+        return fm.edit_text(self.current_format(), fm.canonical_number(value))
 
     def _on_validation_changed(self) -> None:
         if self._loading or not self._fields:
@@ -1983,8 +2000,8 @@ class FieldPropertiesPanel(QWidget):
     def _load_validation(self) -> None:
         v, mixed = self._common("validation")
         self._loaded_val = None if mixed else v
-        self.val_min.setText("" if v.minimum is None else fm.canonical_number(v.minimum))
-        self.val_max.setText("" if v.maximum is None else fm.canonical_number(v.maximum))
+        self.val_min.setText(self._range_text(v.minimum))
+        self.val_max.setText(self._range_text(v.maximum))
         self.val_minlen.setSuffix(_(" (misto)") if mixed else "")
         self.val_minlen.setValue(int(v.min_length or 0))
         self.val_regex.setText(v.regex)

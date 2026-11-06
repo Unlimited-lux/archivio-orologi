@@ -80,7 +80,7 @@ def test_dynamic_form_with_repeated_subform():
     out, report = out_doc(make_xfa(DYNAMIC, DYNAMIC_DATA))
     vals = E.form_values(out)
     assert vals["form1.nome"] == "Anna"
-    assert vals["form1.importo"] == "12.50"
+    assert vals["form1.importo"] == "12.5"   # forma canonica dei numeri memorizzati (dati XML «12.50»)
     assert vals["form1.nascita"] == "01/03/1990"
     assert vals["form1.privacy"] == "1"
     assert vals["form1.sesso"] == "F"
@@ -237,3 +237,13 @@ def test_translations_cover_messages():
              if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "_" and n.args
              and isinstance(n.args[0], ast.Constant)}
     assert found <= set(XC.TRANSLATIONS)
+
+
+def test_numeric_data_with_three_decimals_kept():
+    """I dati XML hanno il punto decimale: «12.500» con tre decimali è 12,5 anche nei campi con
+    lo stile 1.234,56 (non dodicimilacinquecento)."""
+    t = tpl('<field name="peso" h="8mm"><ui><numericEdit/></ui><value><decimal fracDigits="3"/></value></field>')
+    out, _report = out_doc(make_xfa(t, data("<form1><peso>12.500</peso></form1>")))
+    f = E.list_fields(out)[0]
+    assert f.value == "12.5"
+    assert fm.display(f.fmt, f.value)[0] in ("12,500", "12.500")

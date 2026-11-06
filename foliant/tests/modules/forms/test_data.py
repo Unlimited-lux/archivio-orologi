@@ -114,6 +114,54 @@ def test_import_report_unknown_rejected_and_single_undo(window, tmp_path, form_p
     assert values(view)["nome"] == "" and values(view)["cognome"] == ""
 
 
+@pytest.mark.parametrize("fmt", ["fdf", "xfdf", "csv", "json", "xml", "txt"])
+def test_import_number_and_date_with_field_style(window, tmp_path, fmt):
+    """D-3: «12.500» importato in un campo con stile 1.234,56 € vale 12500 come se fosse digitato,
+    il totale (prezzo × quantità) segue e la data è normalizzata; un valore non valido è
+    rifiutato e segnalato nel rapporto, senza essere scritto."""
+    from foliant.modules.forms.module import report_text
+    from .test_engine import price_doc
+    pdf, _xs = price_doc()
+    path = tmp_path / "prezzi.pdf"
+    pdf.save(str(path))
+    view = open_form(window, path)
+    good = tmp_path / f"dati.{fmt}"
+    good.write_bytes(X.export_data(fmt, {"prezzo": "12.500", "qta": "2", "data": "5/3/26"}))
+    report = module().import_data(str(good), row=0, view=view)
+    assert sorted(report["applied"]) == ["data", "prezzo", "qta"] and not report["rejected"]
+    v = values(view)
+    assert (v["prezzo"], v["totale"], v["data"]) == ("12500", "25000", "05/03/2026")
+    with view.document.lock:
+        text = view.document.pdf[0].get_text()
+    assert "12.500,00 €" in text and "25.000,00 €" in text and "05/03/2026" in text
+    bad = tmp_path / f"errati.{fmt}"
+    bad.write_bytes(X.export_data(fmt, {"prezzo": "dodici euro", "qta": "3", "data": "31/02/2026"}))
+    report = module().import_data(str(bad), row=0, view=view)
+    assert sorted(n for n, _w in report["rejected"]) == ["data", "prezzo"] and report["applied"] == ["qta"]
+    v = values(view)
+    assert (v["prezzo"], v["totale"], v["data"]) == ("12500", "37500", "05/03/2026")
+    assert "«prezzo»" in report_text(report) and "«data»" in report_text(report)
+
+
+@pytest.mark.parametrize("fmt", ["fdf", "xfdf", "json", "xml"])
+def test_export_import_keeps_canonical_numbers(window, tmp_path, fmt):
+    """I formati con i valori dei campi conservano la forma canonica: 1,234 resta 1,234."""
+    from .test_engine import price_doc
+    pdf, _xs = price_doc()
+    blank = tmp_path / "vuoto.pdf"
+    pdf.save(str(blank))
+    E.apply_values(pdf, {"prezzo": "1,234", "qta": "1"})
+    E.recalculate(pdf)
+    filled = tmp_path / "pieno.pdf"
+    pdf.save(str(filled))
+    view = open_form(window, filled)
+    out = tmp_path / f"dati.{fmt}"
+    module().export_data(str(out), view=view)
+    view2 = open_form(window, blank)
+    module().import_data(str(out), view=view2)
+    assert values(view2)["prezzo"] == "1.234" and values(view2)["totale"] == "1.23"
+
+
 def test_import_csv_second_row(window, tmp_path, form_pdf, monkeypatch):
     view = open_form(window, form_pdf)
     p = tmp_path / "d.csv"
@@ -195,6 +243,37 @@ def test_flatten_all_renders_same(window, tmp_path, form_pdf):
     after = again[0].get_pixmap(dpi=50).samples
     diff = sum(1 for a, b in zip(before, after) if abs(a - b) > 40)
     assert diff / len(before) < 0.01
+
+
+def test_flatten_keeps_list_box_and_combo(window, tmp_path):
+    """D-2: «Appiattisci modulo…» e Converti › Appiattisci conservano le voci della casella di
+    riepilogo (con le scelte evidenziate) e il valore dell'elenco a discesa."""
+    from foliant.modules.convert.flatten import flatten_pdf_bytes
+    from .test_engine import ACCESSORI, check_list_drawing
+    rect = pymupdf.Rect(72, 100, 272, 160)
+    pdf = pymupdf.open()
+    pdf.new_page()
+    E.create_field(pdf, 0, E.LIST, rect, "accessori", options=ACCESSORI, multiselect=True)
+    E.create_field(pdf, 0, E.COMBO, pymupdf.Rect(72, 200, 272, 220), "paese",
+                   options=[("IT", "Italia"), ("FR", "Francia")])
+    E.apply_values(pdf, {"accessori": ["Garanzia", "Libretto"], "paese": "FR"})
+    path = tmp_path / "elenchi.pdf"
+    pdf.save(str(path))
+    view = open_form(window, path)
+    with view.document.lock:
+        check_list_drawing(view.document.pdf[0], rect, ["Garanzia", "Libretto"], ["Cinturino"])
+    module().flatten(None, view)
+    out = tmp_path / "piatto.pdf"
+    view.document.save(out)
+    flat = pymupdf.open(str(out))
+    assert E.list_fields(flat) == []
+    check_list_drawing(flat[0], rect, ["Garanzia", "Libretto"], ["Cinturino"])
+    assert "Francia" in flat[0].get_text()
+    data, _report = flatten_pdf_bytes(path.read_bytes(), layers=False)
+    converted = pymupdf.open("pdf", data)
+    assert not list(converted[0].widgets())
+    check_list_drawing(converted[0], rect, ["Garanzia", "Libretto"], ["Cinturino"])
+    assert "Francia" in converted[0].get_text()
 
 
 # ---------------------------------------------------------------- moduli XML

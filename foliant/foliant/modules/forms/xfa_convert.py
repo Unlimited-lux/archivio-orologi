@@ -656,6 +656,11 @@ class _Layout:
             decimals = int(frac) if frac and frac.lstrip("-").isdigit() and int(frac) >= 0 else \
                 (0 if _path(el, "value", "integer") is not None else 2)
             props["fmt"] = fm.Format(fm.NUMBER, decimals=min(10, decimals))
+            if isinstance(value, str) and value.strip():
+                try:   # dati XML: decimale con il punto («12.500» con tre decimali è 12,5)
+                    value = fm.canonical_number(float(value.strip()))
+                except ValueError:
+                    pass
         elif ui_kind == "dateTimeEdit":
             props["fmt"] = fm.Format(fm.DATE)
             if value:

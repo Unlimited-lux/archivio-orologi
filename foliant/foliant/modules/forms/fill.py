@@ -382,7 +382,7 @@ class FormFiller(QObject):
             # FRM-34: se dati XML e campi divergono, prevalgono i dati XML
             try:
                 with doc.change(_("Allinea i campi ai dati XML"), kind="form") as pdf:
-                    E.apply_values(pdf, from_xml)
+                    E.apply_values(pdf, from_xml, field_values=True, rejected=[])
             except Exception:
                 pass
         if not needed:

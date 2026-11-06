@@ -31,6 +31,11 @@ FORMATS = {
     "txt": "TXT (*.txt)",
 }
 
+# Formati che trasportano i valori dei campi così come sono memorizzati (/V, forma canonica dei
+# numeri: «1.234» è 1,234). CSV e TXT vengono di solito da fogli di calcolo: il testo si legge
+# come se fosse digitato nel campo («1.234» con lo stile 1.234,56 è 1234).
+FIELD_VALUE_FORMATS = ("fdf", "xfdf", "json", "xml")
+
 
 class InterchangeError(Exception):
     """File di dati non valido (messaggio per l'utente)."""
@@ -325,8 +330,8 @@ def parse_json(data: bytes) -> dict[str, Any]:
                 out[full] = v
             elif v is None:
                 out[full] = ""
-            elif isinstance(v, float) and v.is_integer():
-                out[full] = str(int(v))
+            elif isinstance(v, (int, float)):
+                out[full] = v    # numero vero: nessuna ambiguità sui separatori (engine.import_value)
             else:
                 out[full] = str(v)
 

@@ -597,6 +597,8 @@ def set_value(pdf: pymupdf.Document, page: int, xref: int, value: Any) -> None:
     flags = w.field_flags or 0
     if kind == TEXT:
         text = "" if value is None else str(value)
+        if text.strip():
+            text = _canonical_text(pdf, w.xref, text)
         maxlen = int(w.text_maxlen or 0)
         if maxlen and len(text) > maxlen:
             text = text[:maxlen]
@@ -655,6 +657,19 @@ def set_value(pdf: pymupdf.Document, page: int, xref: int, value: Any) -> None:
         _regen_field(pdf, fx, page, w.xref)
     else:
         raise FormError(_("Questo campo non si compila."))
+
+
+def _canonical_text(pdf: pymupdf.Document, xref: int, text: str) -> str:
+    """Numeri e date dei campi con formato nella forma memorizzata (canonica): un valore già
+    canonico resta com'è, uno scritto con i separatori del campo si legge con il suo stile
+    («12.500» con 1.234,56 → 12500, «5/3/26» → 05/03/2026). Il testo non interpretabile resta."""
+    fmt = Format.from_script(_action_script(pdf, xref, "F"))
+    if fmt.type not in (fm.NUMBER, fm.PERCENT, fm.DATE):
+        return text
+    try:
+        return fm.normalize(fmt, text, canonical=True)
+    except fm.FormatError:
+        return text
 
 
 def _all_states(pdf: pymupdf.Document, fx: int) -> set[str]:
@@ -726,7 +741,11 @@ def rich_value(text: str) -> str:
 
 
 def regenerate(pdf: pymupdf.Document, page: int, xref: int) -> None:
-    """Rigenera l'aspetto del widget dalle chiavi del campo (valore, font, colori…)."""
+    """Rigenera l'aspetto del widget dalle chiavi del campo (valore, font, colori…).
+    Le caselle di riepilogo hanno un aspetto proprio (`list_box_appearance`)."""
+    if is_list_box(pdf, xref):
+        list_box_appearance(pdf, page, xref)
+        return
     w = find_widget(pdf, page, xref)
     annot = getattr(getattr(w, "_annot", None), "this", None)
     if annot is None:
@@ -735,6 +754,200 @@ def regenerate(pdf: pymupdf.Document, page: int, xref: int) -> None:
     from pymupdf import mupdf
     mupdf.pdf_annot_request_resynthesis(annot)
     mupdf.pdf_update_annot(annot)
+
+
+# ---------------------------------------------------------------- caselle di riepilogo (FRM-04)
+# Sfondo delle voci scelte: l'azzurro chiaro dei lettori comuni, con il testo scuro.
+LIST_HIGHLIGHT = (0.6, 0.757, 0.855)
+LIST_LEADING = 1.15        # altezza di una riga rispetto alla dimensione del carattere
+_LIST_AUTO_SIZE = 12.0     # dimensione «automatica» (0 nel /DA)
+
+
+def is_list_box(pdf: pymupdf.Document, xref: int) -> bool:
+    """Campo a scelta senza la flag Combo (casella di riepilogo)."""
+    if _inherited(pdf, xref, "FT")[1] != "/Ch":
+        return False
+    t, v = _inherited(pdf, xref, "Ff")
+    try:
+        flags = int(v) if t == "int" else 0
+    except ValueError:
+        flags = 0
+    return not flags & pymupdf.PDF_CH_FIELD_IS_COMBO
+
+
+def list_selection(pdf: pymupdf.Document, xref: int, exports: list[str], displays: list[str]) -> list[int]:
+    """Indici delle voci scelte. /I distingue le voci con lo stesso valore di esportazione, ma
+    se non corrisponde a /V prevale /V (ISO 32000, campi a scelta)."""
+    raw = _value_of(*_inherited(pdf, xref, "V"))
+    values = [str(v) for v in (raw if isinstance(raw, list) else ([raw] if raw else []))]
+    t, v = _inherited(pdf, xref, "I")
+    indices: list[int] = []
+    if t == "array":
+        try:
+            indices = sorted({int(i) for i in ps.parse(v) if isinstance(i, (int, float)) and not isinstance(i, bool)})
+        except (ps.PdfSyntaxError, TypeError, ValueError):
+            indices = []
+        indices = [i for i in indices if 0 <= i < len(exports)]
+    if indices and {exports[i] for i in indices} == set(values):
+        return indices
+    out: list[int] = []
+    for val in values:
+        pool = exports if val in exports else displays
+        i = next((k for k, e in enumerate(pool) if e == val and k not in out), None)
+        if i is not None:
+            out.append(i)
+    return sorted(out)
+
+
+def _luminance(c) -> float:
+    def ch(x: float) -> float:
+        return x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4
+    r, g, b = (list(c) + [0, 0, 0])[:3]
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+
+
+def _contrast(a, b) -> float:
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def _readable_on(color, background) -> tuple:
+    """Il colore del testo se è leggibile sullo sfondo (contrasto 4,5:1), altrimenti nero o bianco."""
+    color = tuple((list(color or (0, 0, 0)) + [0, 0, 0])[:3])
+    if _contrast(color, background) >= 4.5:
+        return color
+    return (0, 0, 0) if _contrast((0, 0, 0), background) >= _contrast((1, 1, 1), background) else (1, 1, 1)
+
+
+def _rgb(c) -> str:
+    return " ".join(_n(x) for x in (list(c) + [0, 0, 0])[:3])
+
+
+def list_box_appearance(pdf: pymupdf.Document, page: int, xref: int) -> None:
+    """Aspetto della casella di riepilogo: una riga per voce a partire da /TI, con font,
+    dimensione e colore del /DA, le voci scelte (/I o /V) su sfondo azzurro e il testo
+    ritagliato al riquadro. MuPDF per questi campi disegna un riquadro senza voci (D-2)."""
+    w_ = find_widget(pdf, page, xref)
+    annot = getattr(getattr(w_, "_annot", None), "this", None)
+    if annot is not None:
+        from pymupdf import mupdf
+        mupdf.pdf_update_annot(annot)   # una rigenerazione in sospeso del motore non deve prevalere
+    info = field_info(pdf, page, xref)
+    try:
+        r = pymupdf.Rect(ps.parse(pdf.xref_get_key(xref, "Rect")[1])).normalize()
+    except Exception:
+        return
+    rot = info.rotation % 360
+    w, h = (r.height, r.width) if rot in (90, 270) else (r.width, r.height)
+    ops: list[str] = []
+    if info.fill_color:
+        ops.append(f"{_rgb(info.fill_color)} rg 0 0 {_n(w)} {_n(h)} re f")
+    bw = info.border_width if info.border_color else 0.0
+    style = (info.border_style or "S")[:1].upper()
+    if bw:
+        bc = _rgb(info.border_color)
+        if style == "U":
+            ops.append(f"q {bc} RG {_n(bw)} w 0 {_n(bw / 2)} m {_n(w)} {_n(bw / 2)} l S Q")
+        else:
+            dash = "[3 2] 0 d " if style == "D" else ""
+            ops.append(f"q {bc} RG {_n(bw)} w {dash}{_n(bw / 2)} {_n(bw / 2)} {_n(w - bw)} {_n(h - bw)} re S Q")
+        if style in ("B", "I"):   # rilievo: lato in alto a sinistra chiaro (B) o scuro (I)
+            light, dark = ("1 g", ".75 g") if style == "B" else (".5 g", ".75 g")
+            ops.append(f"q {light} {_n(bw)} {_n(bw)} m {_n(bw)} {_n(h - bw)} l {_n(w - bw)} {_n(h - bw)} l "
+                       f"{_n(w - 2 * bw)} {_n(h - 2 * bw)} l {_n(2 * bw)} {_n(h - 2 * bw)} l {_n(2 * bw)} {_n(2 * bw)} l f "
+                       f"{dark} {_n(w - bw)} {_n(h - bw)} m {_n(w - bw)} {_n(bw)} l {_n(bw)} {_n(bw)} l "
+                       f"{_n(2 * bw)} {_n(2 * bw)} l {_n(w - 2 * bw)} {_n(2 * bw)} l {_n(w - 2 * bw)} {_n(h - 2 * bw)} l f Q")
+    pad = bw * (2 if style in ("B", "I") else 1)
+    x0, y0, x1, y1 = pad, pad, max(pad, w - pad), max(pad, h - pad)
+    iw, ih = x1 - x0, y1 - y0
+    size = info.fontsize or max(4.0, min(_LIST_AUTO_SIZE, ih / LIST_LEADING))
+    row = size * LIST_LEADING
+    displays = list(info.options)
+    n = len(displays)
+    selected = set(list_selection(pdf, xref, list(info.exports), displays))
+    full_rows = max(1, int(ih // row))
+    t, v = _inherited(pdf, xref, "TI")
+    try:
+        top = int(v) if t == "int" else None
+    except ValueError:
+        top = None
+    if top is None:   # senza /TI la prima voce scelta resta visibile
+        first = min(selected) if selected else 0
+        top = 0 if first < full_rows else min(first, max(0, n - full_rows))
+    top = max(0, min(top, n - 1)) if n else 0
+    visible = list(range(top, min(n, top + int(math.ceil(ih / row)))))
+    texts = [displays[i] for i in visible]
+    embed = any(needs_embedded_font(s) for s in texts)
+    res_font = FONTS.get(info.font) or "Helv"
+    font = _fallback_font() if embed else None
+    lines = []   # (x, linea di base, testo, colore)
+    for k, i in enumerate(visible):
+        bottom = y1 - (k + 1) * row
+        color = _readable_on(info.text_color, LIST_HIGHLIGHT) if i in selected else (info.text_color or (0, 0, 0))
+        text = displays[i]
+        tw = font.text_length(text, size) if font else pymupdf.get_text_length(
+            text, fontname=_STD_FONTS[res_font], fontsize=size)
+        x = {ALIGN_CENTER: x0 + (iw - tw) / 2, ALIGN_RIGHT: x1 - 2 - tw}.get(info.align, x0 + 2)
+        lines.append((max(x0 + 2, x), bottom + size * 0.3, text, color))   # le voci lunghe partono da sinistra
+    bands = [f"{_n(x0)} {_n(y1 - (k + 1) * row)} {_n(iw)} {_n(row)} re f"
+             for k, i in enumerate(visible) if i in selected]
+    highlight = f"{_rgb(LIST_HIGHLIGHT)} rg " + " ".join(bands) if bands else ""
+    if embed:
+        text_ops, resources = _embedded_lines(pdf, font, size, w, h, lines)
+    else:
+        _ensure_font_resource(pdf, res_font)   # lo stesso carattere del /DA, dalle risorse del modulo
+        t_, ref = pdf.xref_get_key(pdf.pdf_catalog(), f"AcroForm/DR/Font/{res_font}")
+        if t_ == "null":
+            base = {"Helv": "Helvetica", "TiRo": "Times-Roman", "Cour": "Courier"}[res_font]
+            ref = f"<</Type/Font/Subtype/Type1/BaseFont/{base}/Encoding/WinAnsiEncoding>>"
+        resources = f"<</Font<</{res_font} {ref}>>>>"
+        text_ops = "\n".join(f"BT {_rgb(c)} rg /{res_font} {_n(size)} Tf {_n(x)} {_n(base)} Td {_pdf_text(s)} Tj ET"
+                             for x, base, s, c in lines).encode("latin-1")
+    head = "\n".join(ops + ["/Tx BMC", "q", f"{_n(x0)} {_n(y0)} {_n(iw)} {_n(ih)} re W n"]
+                     + ([highlight] if highlight else []))
+    stream = head.encode("latin-1") + b"\n" + text_ops + b"\nQ\nEMC\n"
+    matrix = {90: f"0 1 -1 0 {_n(h)} 0", 180: f"-1 0 0 -1 {_n(w)} {_n(h)}", 270: f"0 -1 1 0 0 {_n(w)}"}.get(rot)
+    form = pdf.get_new_xref()
+    pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]"
+                            + (f"/Matrix[{matrix}]" if matrix else "") + f"/Resources{resources}>>")
+    pdf.update_stream(form, stream)
+    pdf.xref_set_key(xref, "AP", f"<</N {form} 0 R>>")
+
+
+def _embedded_lines(pdf: pymupdf.Document, font: pymupdf.Font, size: float, w: float, h: float,
+                    lines: list[tuple]) -> tuple[bytes, str]:
+    """Righe di testo con un carattere incorporato (sottoinsieme) per i glifi fuori da WinAnsi:
+    (contenuto, risorse) da usare in un aspetto di dimensioni w × h."""
+    tmp = pymupdf.open()
+    try:
+        tp = tmp.new_page(width=w, height=h)
+        tp.insert_font(fontname="FoliantU", fontbuffer=font.buffer)
+        for x, base, text, color in lines:
+            tp.insert_text((x, h - base), text, fontname="FoliantU", fontsize=size, color=color)
+        tmp.subset_fonts()
+        data = tmp.tobytes(garbage=3, deflate=True)
+    finally:
+        tmp.close()
+    return _page_content(pdf, data)
+
+
+def _page_content(pdf: pymupdf.Document, data: bytes) -> tuple[bytes, str]:
+    """Contenuto e risorse della prima pagina del PDF `data`, con gli oggetti copiati in `pdf`
+    (la pagina provvisoria ha l'origine in alto a sinistra: il contenuto è già in spazio PDF)."""
+    src = pymupdf.open("pdf", data)
+    try:
+        before = pdf.page_count
+        pdf.insert_pdf(src)
+    finally:
+        src.close()
+    pxref = pdf.page_xref(before)
+    t, v = pdf.xref_get_key(pxref, "Contents")
+    refs = [int(r) for r in re.findall(r"(\d+) 0 R", v)] if t in ("array", "xref") else []
+    stream = b"\n".join(pdf.xref_stream(r) or b"" for r in refs)
+    t, v = pdf.xref_get_key(pxref, "Resources")
+    res = pdf.xref_object(int(v.split()[0]), compressed=True) if t == "xref" else (v if t == "dict" else "<<>>")
+    pdf.delete_page(before)
+    return stream, res
 
 
 def _page_index_of(pdf: pymupdf.Document, widget_xref: int, hint: int | None = None) -> int | None:
@@ -759,6 +972,16 @@ def _regen_field(pdf: pymupdf.Document, fx: int, page: int, xref: int) -> None:
     kids = _widgets_of_field(pdf, fx)
     if xref not in kids:
         kids = [xref]
+    if is_list_box(pdf, xref):   # aspetto proprio: voci e scelte, senza sostituire /V
+        for k in kids:
+            pi = page if k == xref else _page_index_of(pdf, k, page)
+            if pi is None:
+                continue
+            try:
+                list_box_appearance(pdf, pi, k)
+            except FormError:
+                continue
+        return
     fmt = Format.from_script(_action_script(pdf, xref, "F"))
     saved_v = pdf.xref_get_key(fx, "V")
     saved_da = pdf.xref_get_key(fx, "DA")
@@ -831,6 +1054,10 @@ def export_value(info: FieldInfo) -> Any:
         return info.value or OFF
     if info.kind == LIST and info.multiselect:
         return list(info.value or [])
+    if info.kind == TEXT and info.fmt.numeric and info.value:
+        # numeri in forma canonica, anche se memorizzati con i separatori del campo («12.500»)
+        n = fm.stored_number(info.fmt, info.value)
+        return fm.canonical_number(n) if n is not None else info.value
     if info.kind in (TEXT, COMBO, LIST):
         return info.value or ""
     return None
@@ -851,8 +1078,40 @@ def form_values(pdf: pymupdf.Document) -> dict[str, Any]:
     return out
 
 
-def apply_values(pdf: pymupdf.Document, values: dict[str, Any], *, skip_readonly: bool = False) -> tuple[list[str], list[str]]:
-    """Applica valori per nome. Restituisce (nomi applicati, nomi sconosciuti)."""
+def import_value(info: FieldInfo, value: Any, *, field_values: bool = False) -> Any:
+    """Valore da memorizzare per un valore importato (dati del modulo, compilazione in serie,
+    dati XML): nei campi con formato passa da `normalize_input`, cioè si legge con lo stile del
+    campo come lo stesso testo digitato («12.500» con 1.234,56 € è 12500, «5/3/26» è 05/03/2026).
+    I numeri veri (int, float) non sono ambigui. `field_values`: i dati vengono da un formato che
+    trasporta i valori dei campi (FDF, XFDF, JSON, XML), già in forma canonica («1.234» è 1,234).
+    Solleva FormError se il valore non è valido per il formato."""
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    if info.kind != TEXT:
+        if is_number:   # voce o stato con un nome numerico («1», «2.5»)
+            return str(int(value)) if float(value).is_integer() else str(value)
+        return value
+    if is_number:
+        if isinstance(value, float) and not math.isfinite(value):
+            raise FormError(_("Nel campo «{n}» va inserito un numero.").format(n=info.name))
+        value = str(value) if isinstance(value, int) else fm.canonical_number(value)
+        if info.fmt.numeric:
+            return value
+    if info.fmt.type == fm.NONE or not isinstance(value, str):
+        return value
+    try:
+        return normalize_input(info, value, canonical=field_values)
+    except FormError as e:
+        raise FormError(_("«{v}» non è valido: {e}").format(v=value.strip(), e=e)) from e
+
+
+def apply_values(pdf: pymupdf.Document, values: dict[str, Any], *, skip_readonly: bool = False,
+                 field_values: bool = False,
+                 rejected: list[tuple[str, str]] | None = None) -> tuple[list[str], list[str]]:
+    """Applica valori per nome. Restituisce (nomi applicati, nomi sconosciuti).
+
+    I valori dei campi con formato si leggono con lo stile del campo (`import_value`). Un valore
+    non valido solleva FormError; con `rejected` invece si aggiunge (nome, motivo) all'elenco e
+    il campo resta com'era."""
     by_name: dict[str, list[FieldInfo]] = {}
     for f in list_fields(pdf):
         if f.kind in FILLABLE:
@@ -862,6 +1121,13 @@ def apply_values(pdf: pymupdf.Document, values: dict[str, Any], *, skip_readonly
         fields = by_name.get(name)
         if not fields:
             unknown.append(name)
+            continue
+        try:
+            value = import_value(fields[0], value, field_values=field_values)
+        except FormError as e:
+            if rejected is None:
+                raise
+            rejected.append((name, str(e)))
             continue
         done = False
         for f in fields:
@@ -1023,7 +1289,7 @@ def validate(info: FieldInfo, value: Any) -> str | None:
         return _("Il campo «{n}» ammette al massimo {k} caratteri.").format(n=info.name, k=info.maxlen)
     v = info.validation
     custom = v.message
-    num = parse_number(text) if (info.fmt.numeric or v.minimum is not None or v.maximum is not None) else None
+    num = fm.stored_number(info.fmt, text) if (info.fmt.numeric or v.minimum is not None or v.maximum is not None) else None
     if (info.fmt.numeric or v.minimum is not None or v.maximum is not None) and num is None:
         return custom or _("Nel campo «{n}» va inserito un numero.").format(n=info.name)
     if v.minimum is not None and num is not None and num < v.minimum:
@@ -1042,8 +1308,9 @@ def validate(info: FieldInfo, value: Any) -> str | None:
     return None
 
 
-def normalize_input(info: FieldInfo, text: str) -> str:
-    """Valore da memorizzare per l'input dell'utente; solleva FormError se non interpretabile."""
+def normalize_input(info: FieldInfo, text: str, *, canonical: bool = False) -> str:
+    """Valore da memorizzare per l'input dell'utente; solleva FormError se non interpretabile.
+    `canonical`: il testo è un valore di campo in forma canonica (vedi `fm.normalize`)."""
     if info.kind != TEXT:
         return text
     if not info.multiline:
@@ -1051,7 +1318,7 @@ def normalize_input(info: FieldInfo, text: str) -> str:
     else:
         text = text.replace("\r\n", "\r").replace("\n", "\r")
     try:
-        return fm.normalize(info.fmt, text)
+        return fm.normalize(info.fmt, text, canonical=canonical)
     except fm.FormatError as e:
         raise FormError(str(e)) from e
 
@@ -1210,9 +1477,11 @@ def recalculate(pdf: pymupdf.Document) -> list[str]:
     if not deps:
         return []
     values: dict[str, Any] = {}
+    formats: dict[str, Format] = {}
     for f in fields:
         if f.kind == TEXT:
             values.setdefault(f.name, f.value)
+            formats.setdefault(f.name, f.fmt)
         elif f.kind == CHECKBOX:
             values[f.name] = 1.0 if f.value or values.get(f.name) == 1.0 else 0.0
         elif f.kind in (COMBO, LIST, RADIO):
@@ -1221,6 +1490,15 @@ def recalculate(pdf: pymupdf.Document) -> list[str]:
     for f in fields:
         if f.name in deps and f.name not in first and (f.calc or f.formula):
             first[f.name] = f
+
+    def number(src: str) -> float | None:
+        v = values.get(src)
+        if isinstance(v, list):
+            v = v[0] if v else None
+        fmt = formats.get(src)
+        # i campi con formato numerico si leggono con il loro stile («12.500» con 1.234,56 è 12500)
+        return fm.stored_number(fmt, v) if fmt is not None and fmt.numeric else parse_number(v)
+
     changed: list[str] = []
     for name in calc_order(pdf):
         f = first.get(name)
@@ -1228,15 +1506,13 @@ def recalculate(pdf: pymupdf.Document) -> list[str]:
             continue
         nums = []
         for src in deps[name]:
-            v = values.get(src)
-            if isinstance(v, list):
-                v = v[0] if v else None
-            n = parse_number(v)
+            n = number(src)
             nums.append(n if n is not None else 0.0)
         if f.calc is not None:
             result = compute(f.calc.op, nums)
         else:
-            result = FX.evaluate(f.formula, values)
+            numeric = {src: number(src) for src in deps[name] if formats.get(src) is not None and formats[src].numeric}
+            result = FX.evaluate(f.formula, {**values, **{k: v for k, v in numeric.items() if v is not None}})
         text = "" if result is None else fm.canonical_number(result, f.fmt.decimals if f.fmt.numeric else None)
         if values.get(name) != text:
             values[name] = text
@@ -2767,6 +3043,15 @@ def fields_from_xfa(pdf: pymupdf.Document) -> dict[str, Any]:
     for name, path in paths.items():
         f = fields[name]
         raw = data.get(path, "")
+        if f.kind == TEXT and f.fmt.numeric and raw.strip():
+            try:
+                n = float(raw.strip())   # dati XML: numero decimale con il punto («12.500» è 12,5)
+            except ValueError:
+                n = fm.stored_number(f.fmt, raw)
+            if n is not None and math.isfinite(n):
+                if export_value(f) != fm.canonical_number(n):
+                    out[name] = n    # numero, non testo: nessuna rilettura con lo stile del campo
+                continue
         if f.kind == TEXT and f.fmt.type in (fm.DATE, fm.TIME) and raw:
             try:
                 raw = fm.normalize(f.fmt, raw)
@@ -3332,22 +3617,8 @@ def embedded_appearance(pdf: pymupdf.Document, page: int, xref: int, text: str) 
             data = tmp.tobytes(garbage=3, deflate=True)
     finally:
         tmp.close()
-    src = pymupdf.open("pdf", data)
-    try:
-        before = pdf.page_count
-        pdf.insert_pdf(src)
-    finally:
-        src.close()
-    pno = before
-    pxref = pdf.page_xref(pno)
-    t, v = pdf.xref_get_key(pxref, "Contents")
-    refs = [int(r) for r in re.findall(r"(\d+) 0 R", v)] if t in ("array", "xref") else []
-    stream = b"\n".join(pdf.xref_stream(r) or b"" for r in refs)
-    t, v = pdf.xref_get_key(pxref, "Resources")
-    res = pdf.xref_object(int(v.split()[0]), compressed=True) if t == "xref" else (v if t == "dict" else "<<>>")
-    pdf.delete_page(pno)
+    stream, res = _page_content(pdf, data)
     form = pdf.get_new_xref()
-    # la pagina provvisoria ha l'origine in alto a sinistra: il contenuto è già in spazio PDF (h di altezza)
     pdf.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {_n(w)} {_n(h)}]/Resources{res}>>")
     pdf.update_stream(form, b"/Tx BMC\n" + stream + b"\nEMC\n")
     pdf.xref_set_key(xref, "AP", f"<</N {form} 0 R>>")

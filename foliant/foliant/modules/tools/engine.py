@@ -2883,12 +2883,17 @@ def _x_form_import(data: bytes, p: dict, item, ctx) -> bytes:
     with ENGINE_LOCK:
         doc = _open(data)
         try:
-            applied, unknown = fe.apply_values(doc, values)
+            # valori dei campi con formato letti con lo stile del campo; quelli non validi non si scrivono
+            rejected: list = []
+            applied, unknown = fe.apply_values(doc, values, field_values=fmt in fx.FIELD_VALUE_FORMATS,
+                                               rejected=rejected)
             if not applied:
                 raise BatchError("FRM-04", _("Saltato: nessun campo corrisponde ai dati."), status="skipped")
             ctx.notes.append(_("{n} campi compilati").format(n=len(applied)))
             if unknown:
                 ctx.warnings.append(_("campi sconosciuti: {c}").format(c=", ".join(unknown[:5])))
+            for name, why in rejected:
+                ctx.warnings.append(_("valore rifiutato per «{n}»: {w}").format(n=name, w=why))
             return _save(doc)
         finally:
             doc.close()

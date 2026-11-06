@@ -845,8 +845,11 @@ class FormsModule(QObject):
             return
         self.ctx.status(_("Esportati {n} campi in «{f}».").format(n=n, f=os.path.basename(path)))
 
-    def import_values(self, values: dict[str, Any], view=None) -> dict:
-        """Applica i valori (un solo passo annullabile). Restituisce il rapporto."""
+    def import_values(self, values: dict[str, Any], view=None, field_values: bool = False) -> dict:
+        """Applica i valori (un solo passo annullabile). Restituisce il rapporto.
+        I valori dei campi con formato si leggono con lo stile del campo; quelli non validi
+        finiscono tra i rifiutati (`E.apply_values`). `field_values`: dati in un formato con i
+        valori dei campi in forma canonica (`X.FIELD_VALUE_FORMATS`)."""
         view = view or self._current_view()
         report = {"applied": [], "unknown": [], "rejected": []}
 
@@ -869,7 +872,7 @@ class FormsModule(QObject):
                     report["rejected"].append((name, _("campo in sola lettura")))
                     continue
                 try:
-                    E.apply_values(pdf, {name: value})
+                    E.apply_values(pdf, {name: value}, field_values=field_values)
                     report["applied"].append(name)
                 except E.FormError as e:
                     report["rejected"].append((name, str(e)))
@@ -899,7 +902,7 @@ class FormsModule(QObject):
             values = records[row]
         else:
             values = X.parse_data(fmt, data)
-        report = self.import_values(values, view)
+        report = self.import_values(values, view, field_values=fmt in X.FIELD_VALUE_FORMATS)
         if fmt == "fdf" and any(k in data for k in (b"/Ff", b"/SetFf", b"/ClrFf", b"/SetF", b"/ClrF")):
             report.setdefault("ignored", []).append(_("istruzioni di modifica dei flag"))
         return report

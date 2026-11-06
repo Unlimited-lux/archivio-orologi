@@ -162,6 +162,23 @@ def test_validation(h):
     assert h.field("a").validation == E.Validation(18, 99)
 
 
+def test_validation_range_with_field_style(h):
+    """Minimo e massimo di un campo 1.234,56 si scrivono e si mostrano con il suo stile:
+    «1.000» è mille, «0,5» è mezzo; un valore 1,234 resta 1,234 riaprendo il pannello."""
+    h.add(E.TEXT, "prezzo", 200, fmt=fm.Format(fm.NUMBER, 2, 2, 0, "€", False))
+    h.select("prezzo")
+    p = h.panel
+    p.val_min.setText("0,5")
+    p.val_max.setText("1.000")
+    p.val_max.editingFinished.emit()
+    assert h.field("prezzo").validation == E.Validation(0.5, 1000)
+    E.update_properties(h.pdf, 0, h.field("prezzo").xref, validation=E.Validation(1.234, 12500))
+    h.refresh()
+    assert (p.val_min.text(), p.val_max.text()) == ("1,234", "12500")
+    p.val_max.editingFinished.emit()
+    assert h.field("prezzo").validation == E.Validation(1.234, 12500)
+
+
 def test_validation_errors(h):
     h.select("a")
     p = h.panel

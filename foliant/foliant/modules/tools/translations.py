@@ -848,6 +848,7 @@ EN: dict[str, str] = {
     "Saltato: nessun campo corrisponde ai dati.": "Skipped: no field matches the data.",
     "Saltato: nessuna riga per questo file nei dati.": "Skipped: no row for this file in the data.",
     "campi sconosciuti: {c}": "unknown fields: {c}",
+    "valore rifiutato per «{n}»: {w}": "value rejected for “{n}”: {w}",
     "compilato": "filled",
     "dati": "data",
     "{n} campi compilati": "{n} fields filled",

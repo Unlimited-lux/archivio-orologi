@@ -141,6 +141,133 @@ def test_list_multiselect_v_and_i(form):
     assert again.xref_get_key(g.field_xref, "I") == ("array", "[0 2]")
 
 
+# ---------------------------------------------------------------- casella di riepilogo: aspetto (D-2)
+ACCESSORI = ["Garanzia", "Cinturino extra", "Libretto"]
+
+
+def _list_doc(rect, options=ACCESSORI, multiselect=True, name="accessori", rotation=0):
+    pdf = pymupdf.open()
+    pdf.new_page().set_rotation(rotation)
+    x = E.create_field(pdf, 0, E.LIST, rect, name, options=options, multiselect=multiselect)
+    return pdf, x
+
+
+def highlight_bands(page, rect, zoom=3):
+    """Fasce verticali (in punti, dall'alto) colorate di azzurro lungo il bordo destro del riquadro."""
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
+    x = int((rect.x1 - 5) * zoom)
+    flags = []
+    for y in range(int(rect.y0 * zoom), int(rect.y1 * zoom)):
+        r, g, b = pix.pixel(x, y)[:3]
+        flags.append(b > 170 and b - r > 40)
+    bands, start = [], None
+    for i, on in enumerate(flags + [False]):
+        if on and start is None:
+            start = i
+        elif not on and start is not None:
+            band = (rect.y0 + start / zoom, rect.y0 + i / zoom)
+            if bands and band[0] - bands[-1][1] < 3:   # interruzione dovuta ai glifi di una voce lunga
+                band = (bands.pop()[0], band[1])
+            bands.append(band)
+            start = None
+    return bands
+
+
+def word_middle(page, word):
+    found = [w for w in page.get_text("words") if w[4] == word]
+    assert found, (word, page.get_text())
+    return (found[0][1] + found[0][3]) / 2
+
+
+def check_list_drawing(page, rect, selected, others):
+    text = page.get_text()
+    for item in ACCESSORI:
+        assert item in text
+    bands = highlight_bands(page, rect)
+    assert len(bands) == len(selected), bands
+    for (a, b), word in zip(bands, selected):
+        assert a <= word_middle(page, word) <= b
+    for word in others:
+        y = word_middle(page, word)
+        assert not any(a <= y <= b for a, b in bands)
+
+
+@pytest.mark.parametrize("multiselect,value,selected,others", [
+    (True, ["Garanzia", "Libretto"], ["Garanzia", "Libretto"], ["Cinturino"]),
+    (False, "Libretto", ["Libretto"], ["Garanzia", "Cinturino"]),
+])
+def test_list_box_shows_items_and_selection(multiselect, value, selected, others):
+    """D-2: la casella di riepilogo mostra le voci con quelle scelte evidenziate, nel file (per
+    gli altri lettori) e dopo l'appiattimento; MuPDF da solo disegna un riquadro vuoto."""
+    rect = pymupdf.Rect(72, 100, 272, 160)
+    pdf, x = _list_doc(rect, multiselect=multiselect)
+    E.set_value(pdf, 0, x, value)
+    pdf[0].get_pixmap(dpi=30)   # una resa non deve rigenerare l'aspetto con il motore
+    again = reopen(pdf)
+    g = one(again, "accessori")
+    assert g.value == value
+    assert not E.needs_appearances(again)
+    ap = again.xref_stream(int(again.xref_get_key(g.xref, "AP/N")[1].split()[0]))
+    for item in ACCESSORI:
+        assert item.encode() in ap
+    check_list_drawing(again[0], rect, selected, others)
+    assert E.flatten(again) == 1
+    flat = reopen(again)
+    assert E.list_fields(flat) == []
+    check_list_drawing(flat[0], rect, selected, others)
+
+
+def test_list_box_font_size_color_top_index_and_clip():
+    """Font, dimensione e colore dal /DA; /TI è la prima voce visibile; testo ritagliato al riquadro."""
+    rect = pymupdf.Rect(72, 100, 172, 150)
+    items = [f"Voce {i} con un testo molto lungo che esce dal riquadro" for i in range(1, 9)]
+    pdf, x = _list_doc(rect, options=items, multiselect=False, name="voci")
+    E.update_properties(pdf, 0, x, font="Times", fontsize=14, text_color=(0.2, 0.4, 0))
+    pdf.xref_set_key(E._field_xref(pdf, x), "TI", "4")
+    E.set_value(pdf, 0, x, items[5])
+    again = reopen(pdf)
+    text = again[0].get_text()
+    assert "Voce 5" in text and "Voce 6" in text and "Voce 1 " not in text and "Voce 4" not in text
+    ap = again.xref_stream(int(again.xref_get_key(x, "AP/N")[1].split()[0]))
+    assert b"/TiRo 14 Tf" in ap and b".2 .4 0 rg" in ap.replace(b"0.", b".") and b"W n" in ap
+    bands = highlight_bands(again[0], rect)
+    assert len(bands) == 1 and bands[0][0] <= word_middle(again[0], "6") <= bands[0][1]
+    # nessun disegno fuori dal riquadro del campo
+    pix = again[0].get_pixmap(clip=pymupdf.Rect(rect.x1 + 1, rect.y0, rect.x1 + 60, rect.y1), alpha=False)
+    assert set(pix.samples) == {255}
+
+
+def test_list_box_selection_without_top_index_is_visible():
+    """Senza /TI la voce scelta oltre le righe visibili si mostra comunque."""
+    rect = pymupdf.Rect(72, 100, 222, 130)
+    items = [f"Elemento{i}" for i in range(1, 10)]
+    pdf, x = _list_doc(rect, options=items, multiselect=False, name="lungo")
+    E.set_value(pdf, 0, x, "Elemento8")
+    again = reopen(pdf)
+    bands = highlight_bands(again[0], rect)
+    assert len(bands) == 1 and bands[0][0] <= word_middle(again[0], "Elemento8") <= bands[0][1]
+
+
+def test_list_box_non_latin_items_and_rotated_page():
+    rect = pymupdf.Rect(72, 100, 272, 160)
+    pdf, x = _list_doc(rect, options=["Ελληνικά", "日本語", "Latino"], multiselect=False, name="lingue",
+                       rotation=90)
+    E.set_value(pdf, 0, x, "日本語")
+    again = reopen(pdf)
+    text = again[0].get_text()
+    assert "Ελληνικά" in text and "日本語" in text and "Latino" in text
+    E.flatten(again)
+    text = reopen(again)[0].get_text()
+    assert "Ελληνικά" in text and "日本語" in text
+
+
+def test_combo_shows_display_text_after_flatten(form):
+    f = one(form, "paese")
+    E.set_value(form, 0, f.xref, "FR")
+    E.flatten(form)
+    assert "Francia" in reopen(form)[0].get_text()
+
+
 def test_form_values_and_apply(form):
     E.apply_values(form, {"nome": "Mario", "privacy": "Yes", "scelta": "C", "paese": "IT", "colori": ["verde"]})
     vals = E.form_values(form)
@@ -364,6 +491,106 @@ def test_number_edit_text_round_trip():
             assert fm.normalize(fmt, fm.edit_text(fmt, stored)) == stored
     assert fm.edit_text(fm.Format(fm.NUMBER, 2, 2), "1234.5") == "1234,5"
     assert fm.edit_text(fm.Format(fm.NUMBER, 2, 0), "1234.5") == "1234.5"
+
+
+# ---------------------------------------------------------------- valori importati con lo stile del campo (D-3)
+PRICE = fm.Format(fm.NUMBER, 2, 2, 0, "€", False)
+
+
+def price_doc():
+    """Prezzo e totale (prezzo × quantità) con lo stile 1.234,56 €, data gg/mm/aaaa."""
+    pdf = pymupdf.open()
+    pdf.new_page()
+    xs = {"prezzo": E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 50, 250, 70), "prezzo", fmt=PRICE),
+          "qta": E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 80, 250, 100), "qta"),
+          "totale": E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 110, 250, 130), "totale", fmt=PRICE),
+          "data": E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 140, 250, 160), "data",
+                                 fmt=fm.Format(fm.DATE, pattern="dd/mm/yyyy"))}
+    E.update_properties(pdf, 0, xs["totale"], calc=E.Calculation("PRD", ["prezzo", "qta"]))
+    return pdf, xs
+
+
+@pytest.mark.parametrize("imported,stored,shown", [
+    ("12.500", "12500", "12.500,00 €"), ("12500", "12500", "12.500,00 €"), ("12500.5", "12500.5", "12.500,50 €"),
+    ("12.500,50", "12500.5", "12.500,50 €"), ("12,5", "12.5", "12,50 €"),
+    ("1.234.567,89", "1234567.89", "1.234.567,89 €"), ("12.500 €", "12500", "12.500,00 €"), ("", "", None),
+])
+def test_imported_number_follows_field_style(imported, stored, shown):
+    """D-3: un valore importato si legge con lo stile del campo, come lo stesso testo digitato:
+    «12.500» con lo stile 1.234,56 € è dodicimilacinquecento, non 12,5."""
+    pdf, xs = price_doc()
+    applied, unknown = E.apply_values(pdf, {"prezzo": imported, "qta": "2"})
+    assert applied == ["prezzo", "qta"] and unknown == []
+    assert E.recalculate(pdf) == ["totale"]
+    again = reopen(pdf)
+    assert one(again, "prezzo").value == stored
+    if shown:
+        assert shown in again[0].get_text()
+        total = fm.canonical_number(float(stored) * 2)
+        assert one(again, "totale").value == total
+        assert fm.display(PRICE, total)[0] in again[0].get_text()
+    else:
+        assert one(again, "totale").value == "0"
+
+
+def test_imported_date_and_invalid_values():
+    pdf, xs = price_doc()
+    E.apply_values(pdf, {"data": "5/3/26"})
+    assert one(pdf, "data").value == "05/03/2026"
+    E.apply_values(pdf, {"prezzo": "12.500"})
+    with pytest.raises(E.FormError):
+        E.apply_values(pdf, {"prezzo": "dodici euro"})
+    with pytest.raises(E.FormError):
+        E.apply_values(pdf, {"data": "31/02/2026"})
+    rejected = []
+    applied, _unknown = E.apply_values(pdf, {"prezzo": "1,2,3", "data": "2026-03-07", "qta": "3"}, rejected=rejected)
+    assert applied == ["data", "qta"] and [n for n, _m in rejected] == ["prezzo"]
+    assert one(pdf, "prezzo").value == "12500" and one(pdf, "data").value == "07/03/2026"
+
+
+def test_imported_numbers_as_numbers_and_field_values():
+    """I numeri veri (JSON) non sono ambigui; i valori dei campi (FDF, XFDF) sono in forma canonica:
+    «1.234» è 1,234. Il testo di un foglio di calcolo si legge come digitato: «1.234» è 1234."""
+    pdf, xs = price_doc()
+    E.apply_values(pdf, {"prezzo": 1.234})
+    assert one(pdf, "prezzo").value == "1.234"
+    E.apply_values(pdf, {"prezzo": 12500})
+    assert one(pdf, "prezzo").value == "12500"
+    E.apply_values(pdf, {"prezzo": "1.234"}, field_values=True)
+    assert one(pdf, "prezzo").value == "1.234"
+    E.apply_values(pdf, {"prezzo": "12.500"}, field_values=True)
+    assert one(pdf, "prezzo").value == "12500"
+    E.apply_values(pdf, {"prezzo": "1.234"})
+    assert one(pdf, "prezzo").value == "1234"
+
+
+def test_stored_number_read_with_field_style():
+    """Un /V scritto da un'importazione precedente («12.500») si mostra, si calcola, si esporta e
+    si modifica con lo stile del campo; i valori canonici restano quelli che sono."""
+    assert fm.display(PRICE, "12.500") == ("12.500,00 €", False)
+    assert fm.display(PRICE, "12500.5") == ("12.500,50 €", False)
+    assert fm.display(PRICE, "1.234") == ("1,23 €", False)       # forma canonica: 1,234
+    assert fm.display(PRICE, "1.234.567,89")[0] == "1.234.567,89 €"
+    assert fm.edit_text(PRICE, "12.500") == "12500"
+    assert fm.edit_text(PRICE, "1234.5") == "1234,5"
+    pdf, xs = price_doc()
+    lordo = E.create_field(pdf, 0, E.TEXT, pymupdf.Rect(50, 170, 250, 190), "lordo")
+    E.update_properties(pdf, 0, lordo, formula="prezzo * 2")
+    pdf.xref_set_key(E._field_xref(pdf, xs["prezzo"]), "V", "(12.500)")   # file già compilato male
+    E.apply_values(pdf, {"qta": "2"})
+    E.recalculate(pdf)
+    assert one(pdf, "totale").value == "25000" and one(pdf, "lordo").value == "25000"
+    assert E.form_values(pdf)["prezzo"] == "12500"
+    assert E.validate(one(pdf, "prezzo"), "12.500") is None
+
+
+def test_set_value_keeps_canonical_numbers_and_dates():
+    pdf, xs = price_doc()
+    for value, stored in (("1.234", "1.234"), ("12500.5", "12500.5"), ("12.500", "12500"), ("0.25", "0.25")):
+        E.set_value(pdf, 0, xs["prezzo"], value)
+        assert one(pdf, "prezzo").value == stored
+    E.set_value(pdf, 0, xs["data"], "5/3/26")
+    assert one(pdf, "data").value == "05/03/2026"
 
 
 def test_percent_input():

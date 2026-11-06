@@ -207,6 +207,7 @@ EN: dict[str, str] = {
     'Campi compilati: {n}': 'Fields filled in: {n}',
     'Campi non trovati nel modulo: {l}': 'Fields not found in the form: {l}',
     'Valore rifiutato per «{n}»: {w}': 'Value rejected for “{n}”: {w}',
+    '«{v}» non è valido: {e}': '“{v}” is not valid: {e}',
     'Ignorate: {w}': 'Ignored: {w}',
     'Annulla': 'Cancel',
     "I campi torneranno ai valori predefiniti (o vuoti). L'operazione si può annullare.": 'The fields will return to their default (or empty) values. The operation can be undone.',
