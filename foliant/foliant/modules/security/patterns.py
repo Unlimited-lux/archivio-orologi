@@ -210,11 +210,30 @@ def _luhn_ok(s: str) -> bool:
 _DATE_LIKE = re.compile(r"^\d{1,4}[./\-]\d{1,2}[./\-]\d{1,4}$")
 
 
+# numeri di pratica nel formato anno/numero («2026/118»)
+_YEAR_NUMBER = re.compile(r"^(?:19|20)\d{2}[ ]?/[ ]?\d{1,6}$")
+# parole che introducono un numero di protocollo, perizia, fattura…: il numero
+# che segue non è un telefono («Perizia n. 2026/118», «Fattura nr. 1234567»)
+_REF_BEFORE = re.compile(
+    r"(?:\b(?:n|nr|num|numero|prot|protocollo|perizia|fattura|fatt|rif|riferimento|ref|pratica|ordine|"
+    r"ord|doc|documento|matricola|referenza|ddt|preventivo|contratto|lotto|cod|codice)\b\.?|n°|nº)"
+    r"[ \t]*(?:n\b\.?|nr\b\.?|n°|nº)?[ \t]*[:#]?[ \t]*$", re.IGNORECASE)
+# … ma «Tel. n. 347…» resta un telefono
+_TEL_BEFORE = re.compile(r"\b(?:tel|telefono|cell|cellulare|fax|mobile|whatsapp)\b\.?[ \t]*"
+                         r"(?:n\b\.?|nr\b\.?|n°|nº)?[ \t]*[:#]?[ \t]*$", re.IGNORECASE)
+
+
+def _reference_number(text: str, start: int) -> bool:
+    """Vero se il numero che inizia in `start` è introdotto da «n.», «prot.», «fattura»…"""
+    before = text[max(0, start - 30):start]
+    return bool(_REF_BEFORE.search(before)) and not _TEL_BEFORE.search(before)
+
+
 def _phone_ok(s: str) -> bool:
     digits = re.sub(r"\D", "", s)
     if not 6 <= len(digits) <= 15:
         return False
-    if _DATE_LIKE.match(s.strip()):
+    if _DATE_LIKE.match(s.strip()) or _YEAR_NUMBER.match(s.strip()):
         return False
     # numeri «semplici» come importi con separatori di migliaia (1.234.567)
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?", s.strip()):
@@ -275,7 +294,8 @@ def builtin_patterns() -> list[Pattern]:
     """Schemi predefiniti (etichette tradotte nella lingua attiva)."""
     return [
         Pattern("email", _("Indirizzi email"),
-                r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}",
+                # parte locale con lettere accentate («lucìa@…»); dominio ASCII
+                r"[\w.%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}",
                 example="mario.rossi@esempio.it"),
         Pattern("phone", _("Numeri di telefono"),
                 r"(?<![\w+])(?:(?:\+|00)\d{1,3}[ .\-]?)?(?:\(\d{1,4}\)[ .\-]?)?\d[\d .\-/]{4,16}\d(?![\w])",
@@ -503,6 +523,12 @@ def find_in_page(page: pymupdf.Page, pattern: Pattern, page_index: int = 0,
     if pattern.id in _GENERIC:
         # numeri che fanno parte di un IBAN, una carta, una data… non sono telefoni o importi
         blocked = _specific_spans(haystack)
+        spans = [(a, b) for a, b in spans if not any(a < y and x < b for x, y in blocked)]
+    if pattern.id == "phone":
+        spans = [(a, b) for a, b in spans if not _reference_number(haystack, a)]
+    if pattern.id == "card":
+        # le cifre di un IBAN scritto a gruppi non sono anche una carta
+        blocked = list(_iban_spans(pattern_by_id("iban"), haystack))
         spans = [(a, b) for a, b in spans if not any(a < y and x < b for x, y in blocked)]
     out = []
     for start, end in spans:

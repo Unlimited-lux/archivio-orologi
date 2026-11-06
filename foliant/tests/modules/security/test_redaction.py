@@ -526,3 +526,39 @@ def test_identity_document_numbers(tmp_path):
                                "Orologio Submariner ref. 116610LN, prezzo EUR 9.500"])
     found = [m.text for m in PT.find(pdf, [PT.pattern_by_id("iddoc")])]
     assert found == ["CA12345XY", "YA1234567", "MI1234567A"]
+
+
+def test_f4_email_with_accented_local_part(tmp_path):
+    from foliant.modules.security import redaction as R2
+    pdf = _text_pdf(tmp_path, ["Perizia orologio Rolex Datejust ref. 126234",
+                               "Referente: Lucìa Ferri, lucìa@esempio.it, tel. 347 123 4567",
+                               "Copia a: francesca.nicolò_r@orologeria-esempio.it"])
+    found = [m.text for m in PT.find(pdf, [PT.pattern_by_id("email")])]
+    assert found == ["lucìa@esempio.it", "francesca.nicolò_r@orologeria-esempio.it"]
+    # nessun falso positivo: parole e numeri senza «@» restano fuori
+    assert all("@" in f for f in found)
+    marks = PT.find(pdf, [PT.pattern_by_id("email")])
+    R2.add_marks(pdf, ((m.page, r, m.text) for m in marks for r in m.rects), R2.MarkStyle(), "schema")
+    R2.apply(pdf)
+    text = pdf[0].get_text()
+    assert "lucì" not in text and "@" not in text
+    assert "Lucìa Ferri" in text and "347 123 4567" in text
+
+
+def test_f5_reference_numbers_are_not_phones(tmp_path):
+    pdf = _text_pdf(tmp_path, ["Perizia n. 2026/118 del 12/03/2026",
+                               "Fattura nr. 2026004512 - Prot. 45120331 - Rif. 123 4567",
+                               "Pratica 2025/00871, n° 3471234567",
+                               "Tel. n. 347 123 4567 - Cellulare: +39 333 765 4321"])
+    found = [m.text for m in PT.find(pdf, [PT.pattern_by_id("phone")])]
+    assert found == ["347 123 4567", "+39 333 765 4321"]
+
+
+def test_f6_grouped_iban_is_not_also_a_card(tmp_path):
+    from dataclasses import replace
+    pdf = _text_pdf(tmp_path, ["Bonifico su IBAN IT42 L123 4512 3451 2345 6789 012",
+                               "Carta di pagamento 4111 1111 1111 1111"])
+    pats = [replace(PT.pattern_by_id(k), check=None) for k in ("iban", "card")]
+    found = [(m.pattern, m.text) for m in PT.find(pdf, pats)]
+    assert ("iban", "IT42 L123 4512 3451 2345 6789 012") in found
+    assert [t for p, t in found if p == "card"] == ["4111 1111 1111 1111"]
