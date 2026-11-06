@@ -105,7 +105,8 @@ def classify_page(page: pymupdf.Page, check_mixed: bool = True, check_photo: boo
         infos = page.get_image_info()
     except Exception:
         infos = []
-    mask_rect = page.rect
+    # i riquadri di immagini e testo sono nelle coordinate della pagina non ruotata
+    mask_rect = page.rect * page.derotation_matrix
     for info in infos:
         r = pymupdf.Rect(info.get("bbox")) & mask_rect
         if r.is_empty:
@@ -129,7 +130,8 @@ def classify_page(page: pymupdf.Page, check_mixed: bool = True, check_photo: boo
     elif visible < MIN_CHARS:
         if coverage >= IMAGE_ONLY_COVERAGE:
             info.category = IMAGE_ONLY
-            if check_photo and not visible and not any(_has_characters(page, r) for r in big_images or all_images):
+            if check_photo and not visible and not any(_has_characters(page, r * page.rotation_matrix)
+                                                       for r in big_images or all_images):
                 info.category = PHOTO
         elif coverage > 0 and check_mixed and _images_have_text(page, all_images, rects):
             info.category = IMAGE_ONLY
@@ -141,7 +143,13 @@ def classify_page(page: pymupdf.Page, check_mixed: bool = True, check_photo: boo
 
 
 def _images_have_text(page: pymupdf.Page, regions: list[pymupdf.Rect], text_rects: list[pymupdf.Rect]) -> bool:
-    for r in regions:
+    # riquadri nelle coordinate non ruotate; la resa (e il ritaglio) è nella pagina visualizzata:
+    # con /Rotate 90, 180 o 270 vanno trasformati con la matrice di rotazione
+    m = page.rotation_matrix
+    for r0 in regions:
+        r = (r0 * m) & page.rect
+        if r.is_empty:
+            continue
         try:
             pix = page.get_pixmap(clip=r, dpi=100, colorspace=pymupdf.csGRAY, alpha=False)
         except Exception:
@@ -151,7 +159,7 @@ def _images_have_text(page: pymupdf.Page, regions: list[pymupdf.Rect], text_rect
         sx = pix.width / max(1e-6, r.width)
         sy = pix.height / max(1e-6, r.height)
         for t in text_rects:
-            t = t & r
+            t = (t * m) & r
             if t.is_empty:
                 continue
             x0, y0 = int((t.x0 - r.x0) * sx), int((t.y0 - r.y0) * sy)
