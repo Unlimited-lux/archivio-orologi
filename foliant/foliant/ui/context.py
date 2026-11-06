@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from PySide6.QtCore import SIGNAL, QEvent, QObject, QRect, QSettings, Qt, Signal
 from PySide6.QtGui import QAction, QFontMetrics, QKeySequence, QPainter
-from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QToolBar, QToolButton, QWidget, QWidgetAction
+from PySide6.QtWidgets import (
+    QApplication, QFileDialog, QMenu, QMessageBox, QToolBar, QToolButton, QWidget, QWidgetAction,
+)
 
 from ..core.document import Document
 from ..i18n import _
@@ -58,6 +60,17 @@ class ToolBar(QToolBar):
         super().actionEvent(event)
         if event.type() == QEvent.Type.ActionAdded:
             _tab_focusable(self, event.action())
+
+    def setObjectName(self, name: str) -> None:
+        """Il nome sceglie la regola del foglio di stile (#header, #contextbar). QToolBar calcola
+        margini e spaziatura del suo layout alla creazione, quando quella regola non vale ancora, e
+        li ricalcola a ogni cambio di stile: senza ricalcolarli subito il primo cambio di tema
+        cambierebbe la barra (C-8)."""
+        super().setObjectName(name)
+        style = self.style()
+        style.unpolish(self)            # dimentica le regole lette prima del nome
+        style.polish(self)
+        QApplication.sendEvent(self, QEvent(QEvent.Type.StyleChange))
 
 
 class ContextBar(ToolBar):

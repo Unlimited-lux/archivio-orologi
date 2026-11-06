@@ -231,6 +231,48 @@ def test_service_dialogs(window, monkeypatch):
     HelpDialog(window).close()
 
 
+def test_quick_help_describes_current_layout(window):
+    """C-12: la Guida rapida descrive la disposizione attuale: barra di accesso rapido, scheda File
+    (F10, Alt+F), schede con i gruppi (anche Visualizza), Cerca un comando (Ctrl+K), file aperto una
+    volta sola, nessuna cronologia dei file; Leggi non contiene più miniature e stampa."""
+    from PySide6.QtWidgets import QTextBrowser
+
+    from foliant.ui.dialogs import HelpDialog
+    dlg = HelpDialog(window)
+    text = dlg.findChild(QTextBrowser).toPlainText()
+    dlg.close()
+    for words in ("accesso rapido", "File", "F10", "Alt+F", "Visualizza", "gruppi", "Cerca un comando", "Ctrl+K",
+                  "una volta sola", "cronologia"):
+        assert words in text, words
+    leggi = next(line for line in text.splitlines() if "Leggi —" in line)
+    assert "stampa" not in leggi and "miniature" not in leggi, leggi
+    modes = [m.title for m in sorted(window.modes.values(), key=lambda m: m.order)]
+    missing = [t for t in modes if t not in text]
+    assert not missing, missing
+
+
+def test_theme_change_keeps_bar_heights(window, qtbot):
+    """C-8: cambiare tema dal vivo (File › Opzioni › Tema) non alza l'intestazione né le barre
+    delle schede: margini e spaziatura delle barre restano quelli dell'avvio, nei due versi."""
+    from PySide6.QtWidgets import QApplication
+    bars = [window.header] + [m.toolbar for m in window.modes.values()]
+
+    def measure():
+        QApplication.processEvents()
+        return [(b.objectName(), b.sizeHint().height(), b.layout().contentsMargins().top(),
+                 b.layout().contentsMargins().left(), b.layout().spacing()) for b in bars]
+
+    start = measure()
+    window.set_theme("dark")
+    assert measure() == start
+    window.set_theme("light")
+    assert measure() == start
+    window.set_theme("dark")
+    window.set_theme("light")
+    assert measure() == start
+    assert window.header.sizeHint().height() <= 40           # 33 px all'avvio, non 49
+
+
 def test_link_handler_extension(window, sample_pdf):
     from foliant.ui import tools
     seen = []

@@ -148,20 +148,41 @@ EN = {
     "«{name}» è in sola lettura: puoi modificarlo e salvarlo con «Salva con nome».": "“{name}” is read-only: you can edit it and save it with “Save as”.",
     "Il documento non consente la copia del contenuto.": "The document does not allow copying its content.",
     "Guida rapida di Foliant": "Foliant quick guide",
-    "Apri un PDF dalla Home o trascinandolo nella finestra. La barra in alto contiene le modalità di lavoro: ogni modalità mostra i propri strumenti nella barra sottostante.":
-        "Open a PDF from Home or by dropping it on the window. The top bar holds the working modes: each mode shows its tools in the bar below.",
+    "Apri un PDF dalla Home, con Ctrl+O o trascinandolo nella finestra: ogni documento si apre in una propria scheda, sopra la pagina.":
+        "Open a PDF from Home, with Ctrl+O or by dropping it on the window: each document opens in its own tab, above the page.",
+    "La finestra": "The window",
+    "Barra di accesso rapido": "Quick access toolbar",
+    "in alto a sinistra: Apri, Salva, Stampa, Annulla e Ripeti, sempre a portata di mano.":
+        "top left: Open, Save, Print, Undo and Redo, always at hand.",
+    "File (F10 o Alt+F)": "File (F10 or Alt+F)",
+    "la pagina dei comandi sul file: nuovo, apri, informazioni, salva, stampa, condividi, esporta, opzioni e guida. Esc torna al documento.":
+        "the page with the file commands: new, open, info, save, print, share, export, options and help. Esc goes back to the document.",
+    "Schede e gruppi": "Tabs and groups",
+    "accanto a File: ogni scheda mostra sotto i suoi comandi, divisi in gruppi con il nome scritto sotto i pulsanti. Ctrl+Alt+1…9 passa da una scheda all'altra.":
+        "next to File: each tab shows its commands below, split into groups with their name under the buttons. Ctrl+Alt+1…9 switches between tabs.",
+    "Cerca un comando (Ctrl+K)": "Search commands (Ctrl+K)",
+    "in alto a destra: scrivi il nome di una funzione, anche di un'altra scheda, sceglila con le frecce e premi Invio.":
+        "top right: type the name of a feature, even one on another tab, pick it with the arrow keys and press Enter.",
+    "Schede": "Tabs",
+    "selezione del testo, mano, zoom, vai a pagina e ricerca nel documento.":
+        "text selection, hand, zoom, go to page and search in the document.",
+    "layout delle pagine, rotazione della vista, righelli e miniature, lettura, presentazione e finestre.":
+        "page layout, view rotation, rulers and thumbnails, reading, presentation and windows.",
     "Modalità": "Modes",
-    "navigazione, zoom, ricerca, miniature, segnalibri e stampa.": "navigation, zoom, search, thumbnails, bookmarks and printing.",
-    "Commenta, Modifica, Pagine, Moduli, OCR, Converti, Proteggi, Firma, Strumenti, Assistente IA":
-        "Comment, Edit, Pages, Forms, OCR, Convert, Protect, Sign, Tools, AI assistant",
     "ciascuna raccoglie le funzioni del proprio ambito.": "each groups the functions of its area.",
     "Suggerimenti": "Tips",
     "Ogni modifica si può annullare con Ctrl+Z; il file originale cambia solo quando salvi.":
         "Every change can be undone with Ctrl+Z; the original file changes only when you save.",
-    "Ctrl+? mostra l'elenco completo delle scorciatoie da tastiera.": "Ctrl+? shows the full list of keyboard shortcuts.",
-    "Clic destro sulla pagina per i comandi contestuali.": "Right-click on the page for contextual commands.",
-    "Nelle preferenze (Ctrl+virgola) scegli tema, lingua e nome dell'autore.":
-        "In the preferences (Ctrl+comma) choose theme, language and author name.",
+    "Lo stesso file si apre una volta sola: se è già aperto, anche in un'altra finestra, Foliant ne mostra la scheda.":
+        "The same file opens only once: if it is already open, even in another window, Foliant shows its tab.",
+    "Foliant non tiene la cronologia dei file aperti: nessun nome di file resta sul computer. Ctrl+Maiusc+T riapre una scheda chiusa in questa sessione.":
+        "Foliant keeps no history of opened files: no file name is left on the computer. Ctrl+Shift+T reopens a tab closed in this session.",
+    "F6 passa tra le zone della finestra; Ctrl+? mostra l'elenco completo delle scorciatoie da tastiera.":
+        "F6 moves between the areas of the window; Ctrl+? shows the full list of keyboard shortcuts.",
+    "Clic destro sulla pagina (o Maiusc+F10) per i comandi contestuali.":
+        "Right-click on the page (or Shift+F10) for contextual commands.",
+    "In File › Opzioni scegli tema e lingua; le impostazioni (Ctrl+virgola) comprendono anche il nome dell'autore.":
+        "In File › Options choose theme and language; the settings (Ctrl+comma) also include the author name.",
     # documento: accesso, sola lettura, file riparato, salvataggio incrementale
     "Il file era danneggiato ed è stato riparato. Salvandolo verrà riscritto.":
         "The file was damaged and has been repaired. Saving it will rewrite it.",

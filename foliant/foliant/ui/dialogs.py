@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 import getpass
+from html import escape
 import inspect
 from typing import Callable
 
@@ -259,10 +260,18 @@ class ShortcutsDialog(QDialog):
 HELP_HTML = """
 <h2>{title}</h2>
 <p>{intro}</p>
+<h3>{window}</h3>
+<ul>
+<li><b>{quick}</b> — {quick_d}</li>
+<li><b>{file}</b> — {file_d}</li>
+<li><b>{tabs}</b> — {tabs_d}</li>
+<li><b>{search}</b> — {search_d}</li>
+</ul>
 <h3>{modes}</h3>
 <ul>
 <li><b>{read}</b> — {read_d}</li>
-<li><b>{others}</b> — {others_d}</li>
+<li><b>{view}</b> — {view_d}</li>
+{others}
 </ul>
 <h3>{tips}</h3>
 <ul>
@@ -270,31 +279,64 @@ HELP_HTML = """
 <li>{tip2}</li>
 <li>{tip3}</li>
 <li>{tip4}</li>
+<li>{tip5}</li>
+<li>{tip6}</li>
 </ul>
 """
+
+
+def _other_modes(parent: QWidget | None) -> str:
+    """Voce della guida con le schede dei moduli (dopo Leggi e Visualizza), come nella barra in alto."""
+    modes = getattr(parent, "modes", None) or {}
+    ordered = sorted(modes.values(), key=lambda m: (m.order, m.title))
+    names = ", ".join(m.title for m in ordered if m.id not in ("leggi", "visualizza"))
+    if not names:
+        return ""
+    what = _("ciascuna raccoglie le funzioni del proprio ambito.")
+    return f"<li><b>{escape(names)}</b> — {escape(what)}</li>"
 
 
 class HelpDialog(QDialog):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle(_("Guida rapida"))
-        self.resize(620, 520)
+        self.resize(660, 600)
         view = QTextBrowser(self)
         view.setOpenExternalLinks(False)
         view.setHtml(HELP_HTML.format(
             title=_("Guida rapida di Foliant"),
-            intro=_("Apri un PDF dalla Home o trascinandolo nella finestra. La barra in alto contiene le "
-                    "modalità di lavoro: ogni modalità mostra i propri strumenti nella barra sottostante."),
-            modes=_("Modalità"),
+            intro=_("Apri un PDF dalla Home, con Ctrl+O o trascinandolo nella finestra: ogni documento si apre "
+                    "in una propria scheda, sopra la pagina."),
+            window=_("La finestra"),
+            quick=_("Barra di accesso rapido"),
+            quick_d=_("in alto a sinistra: Apri, Salva, Stampa, Annulla e Ripeti, sempre a portata di mano."),
+            file=_("File (F10 o Alt+F)"),
+            file_d=_("la pagina dei comandi sul file: nuovo, apri, informazioni, salva, stampa, condividi, esporta, "
+                     "opzioni e guida. Esc torna al documento."),
+            tabs=_("Schede e gruppi"),
+            tabs_d=_("accanto a File: ogni scheda mostra sotto i suoi comandi, divisi in gruppi con il nome scritto "
+                     "sotto i pulsanti. Ctrl+Alt+1…9 passa da una scheda all'altra."),
+            search=_("Cerca un comando (Ctrl+K)"),
+            search_d=_("in alto a destra: scrivi il nome di una funzione, anche di un'altra scheda, sceglila con le "
+                       "frecce e premi Invio."),
+            modes=_("Schede"),
             read=_("Leggi"),
-            read_d=_("navigazione, zoom, ricerca, miniature, segnalibri e stampa."),
-            others=_("Commenta, Modifica, Pagine, Moduli, OCR, Converti, Proteggi, Firma, Strumenti, Assistente IA"),
-            others_d=_("ciascuna raccoglie le funzioni del proprio ambito."),
+            read_d=_("selezione del testo, mano, zoom, vai a pagina e ricerca nel documento."),
+            view=_("Visualizza"),
+            view_d=_("layout delle pagine, rotazione della vista, righelli e miniature, lettura, presentazione e "
+                     "finestre."),
+            others=_other_modes(parent),
             tips=_("Suggerimenti"),
             tip1=_("Ogni modifica si può annullare con Ctrl+Z; il file originale cambia solo quando salvi."),
-            tip2=_("Ctrl+? mostra l'elenco completo delle scorciatoie da tastiera."),
-            tip3=_("Clic destro sulla pagina per i comandi contestuali."),
-            tip4=_("Nelle preferenze (Ctrl+virgola) scegli tema, lingua e nome dell'autore."),
+            tip2=_("Lo stesso file si apre una volta sola: se è già aperto, anche in un'altra finestra, Foliant "
+                   "ne mostra la scheda."),
+            tip3=_("Foliant non tiene la cronologia dei file aperti: nessun nome di file resta sul computer. "
+                   "Ctrl+Maiusc+T riapre una scheda chiusa in questa sessione."),
+            tip4=_("F6 passa tra le zone della finestra; Ctrl+? mostra l'elenco completo delle scorciatoie da "
+                   "tastiera."),
+            tip5=_("Clic destro sulla pagina (o Maiusc+F10) per i comandi contestuali."),
+            tip6=_("In File › Opzioni scegli tema e lingua; le impostazioni (Ctrl+virgola) comprendono anche il "
+                   "nome dell'autore."),
         ))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.button(QDialogButtonBox.StandardButton.Close).setText(_("Chiudi"))

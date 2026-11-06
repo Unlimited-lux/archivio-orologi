@@ -21,6 +21,7 @@ LIGHT: dict[str, str | tuple] = {
     "accent_hover": "#0B6865",
     "accent_soft": "#E0F1EF",
     "accent_text": "#FFFFFF",
+    "accent_text_disabled": "#B7D8D6",   # testo disattivato su accent: ≥ 3:1, ma non bianco (C-3)
     "secondary": "#E59A2F",
     "window": "#F7F7F5",
     "surface": "#FFFFFF",
@@ -42,6 +43,7 @@ DARK: dict[str, str | tuple] = {
     "accent_hover": "#52C9C0",
     "accent_soft": "#1D3B3A",
     "accent_text": "#0E1A19",
+    "accent_text_disabled": "#205A55",
     "secondary": "#F2B45A",
     "window": "#1D2023",
     "surface": "#25292C",
@@ -231,10 +233,12 @@ QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
 QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {h('surface_alt')}; }}
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({arrow_up}); width: 10px; height: 10px; }}
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({arrow}); width: 10px; height: 10px; }}
+/* niente padding nelle barre: QToolBar lo trasforma nel margine del suo layout solo dopo un cambio
+   di stile, e il primo cambio di tema le alzerebbe di 16 px (C-8) */
 QToolBar#header {{ background: {h('surface')}; border: none; border-bottom: 1px solid {h('border')};
-    padding: 4px 8px; spacing: 4px; }}
+    spacing: 4px; }}
 QToolBar#contextbar {{ background: {h('surface')}; border: none; border-bottom: 1px solid {h('border')};
-    padding: 2px 8px; spacing: 2px; }}
+    spacing: 2px; }}
 QToolBar {{ spacing: 2px; }}
 QToolButton {{ border: 1px solid transparent; border-radius: 6px; padding: 4px 6px; color: {h('text')}; }}
 QToolButton:hover {{ background: {h('surface_alt')}; }}
@@ -255,7 +259,7 @@ QToolButton#backstageNavButton {{ color: {h('accent_text')}; border: 2px solid t
 QToolButton#backstageNavButton:hover {{ background: {h('accent_hover')}; }}
 QToolButton#backstageNavButton:checked {{ background: {h('accent_hover')}; color: {h('accent_text')}; font-weight: 600; }}
 QToolButton#backstageNavButton:focus {{ border: 2px solid {h('accent_text')}; padding: 8px 16px; }}
-QToolButton#backstageNavButton:disabled {{ color: {h('accent_soft')}; }}
+QToolButton#backstageNavButton:disabled {{ color: {h('accent_text_disabled')}; }}
 QScrollArea#backstagePage, QWidget#backstageBody {{ background: {h('surface')}; }}
 QLabel#backstageTitle {{ font-size: 26px; font-weight: 600; }}
 QLabel#backstageGroup {{ color: {h('text_muted')}; font-size: 11px; font-weight: 600; letter-spacing: 1px; }}
@@ -288,6 +292,11 @@ QToolBar#contextbar QToolButton[popupMode="2"]:focus {{ padding-right: 15px; }}
 QToolButton[modeButton="true"]:focus {{ padding: 4px 9px; }}
 QToolButton[modeButton="true"]:checked:focus {{ border-color: {h('accent_text')}; }}
 QToolButton#qt_toolbar_ext_button:focus {{ border: 2px solid {h('accent')}; }}
+/* pulsanti disattivati: testo attenuato, anche le schede e «File» (C-3); su accent un colore apposta */
+QToolButton:disabled, QToolButton:checked:disabled, QToolButton[modeButton="true"]:disabled,
+QToolButton[fileButton="true"]:disabled, QToolButton[segment="true"]:disabled {{ color: {h('text_muted')}; }}
+QToolButton[modeButton="true"]:checked:disabled, QToolButton[fileButton="true"]:checked:disabled,
+QToolButton[segment="true"]:checked:disabled {{ color: {h('accent_text_disabled')}; }}
 QPushButton {{ background: {h('surface')}; border: 1px solid {h('border')}; border-radius: 6px;
     padding: 6px 14px; color: {h('text')}; }}
 QPushButton:hover {{ background: {h('surface_alt')}; }}

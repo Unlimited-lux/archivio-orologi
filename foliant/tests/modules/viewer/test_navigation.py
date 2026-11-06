@@ -322,6 +322,30 @@ def test_ux18_rotate_view_and_rulers_shortcuts(viewer_window, sample_pdf, qtbot)
         assert nav.act_rotate_ccw.shortcut() == QKeySequence("Ctrl+Shift+-")
 
 
+@pytest.mark.parametrize("mode_id", ["leggi", "visualizza", "commenta", "pagine"])
+def test_rulers_shortcut_works_in_every_tab(viewer_window, sample_pdf, qtbot, mode_id):
+    """C-7: Ctrl+R (Righelli) vale in tutte le schede, come dice la Guida, non solo in Visualizza
+    dove c'è il pulsante; e resta una sola azione con quella scorciatoia."""
+    from PySide6.QtGui import QAction, QKeySequence
+    from PySide6.QtWidgets import QApplication
+    w = viewer_window
+    if mode_id not in w.modes:
+        pytest.skip(f"scheda {mode_id} non caricata")
+    view = w.open_path(sample_pdf)
+    w.set_mode(mode_id)
+    w.activateWindow()
+    qtbot.waitUntil(w.isActiveWindow)
+    view.setFocus()
+    target = QApplication.focusWidget() or w
+    before = w.act_rulers.isChecked()
+    qtbot.keyClick(target, Qt.Key.Key_R, Qt.KeyboardModifier.ControlModifier)
+    assert w.act_rulers.isChecked() is not before, mode_id
+    qtbot.keyClick(QApplication.focusWidget() or w, Qt.Key.Key_R, Qt.KeyboardModifier.ControlModifier)
+    assert w.act_rulers.isChecked() is before
+    owners = [a for a in w.findChildren(QAction) if QKeySequence("Ctrl+R") in a.shortcuts()]
+    assert owners == [w.act_rulers]
+
+
 def test_many_changes_refresh_navigation_once(viewer_window, sample_pdf, monkeypatch):
     """Prestazioni: più modifiche nello stesso giro di eventi → un solo aggiornamento."""
     from PySide6.QtWidgets import QApplication

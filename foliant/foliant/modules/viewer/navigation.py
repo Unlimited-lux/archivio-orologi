@@ -262,6 +262,10 @@ class NavigationController(QObject):
         rulers = getattr(w, "act_rulers", None)
         if rulers is not None:
             rulers.setShortcut(QKeySequence("Ctrl+R"))
+            # il pulsante è solo in Visualizza: senza la finestra il tasto varrebbe solo lì (una sola
+            # azione, quindi nessuna scorciatoia doppia)
+            if rulers not in w.actions():
+                w.addAction(rulers)
 
     def _scope_rotate_shortcuts(self, mode_id: str) -> None:
         """Ruota vista con Ctrl+Maiusc++ / Ctrl+Maiusc+- in Leggi e in Visualizza; nelle altre schede

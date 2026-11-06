@@ -40,6 +40,65 @@ def test_toolbar_buttons_are_reachable_with_tab(window, sample_pdf, qtbot):
     assert header_buttons[0] in reached
 
 
+def test_f6_visits_every_region(window, sample_pdf, qtbot):
+    """C-6: F6 passa per tutte le regioni della finestra (intestazione, barra della scheda, pannello
+    laterale, documento, pannello delle proprietà, barra di stato); Maiusc+F6 al contrario."""
+    from PySide6.QtWidgets import QLineEdit
+
+    view = window.open_path(sample_pdf)
+    if not window._sidebar:
+        window.ctx.add_sidebar_panel("prova_f6", "Prova", "file", QLineEdit())
+    window.show_sidebar_panel(next(iter(window._sidebar)))
+    window.ctx.add_properties_panel("prova_f6", QLineEdit())
+    window.show_properties("prova_f6")
+    window.activateWindow()
+    qtbot.waitUntil(window.isActiveWindow)
+    regions = {"intestazione": window.header, "barra della scheda": window.context_stack,
+               "pannello laterale": window.sidebar, "documento": view, "proprietà": window.properties,
+               "barra di stato": window.statusBar()}
+
+    def where():
+        focus = QApplication.focusWidget()
+        for name, region in regions.items():
+            if focus is region or (focus is not None and region.isAncestorOf(focus)):
+                return name
+        return focus
+
+    view.setFocus()
+    assert where() == "documento"
+    forward = []
+    for _ in range(6):
+        qtbot.keyClick(QApplication.focusWidget(), Qt.Key.Key_F6)
+        forward.append(where())
+    assert forward == ["proprietà", "barra di stato", "intestazione", "barra della scheda", "pannello laterale",
+                       "documento"]
+    backward = []
+    for _ in range(6):
+        qtbot.keyClick(QApplication.focusWidget(), Qt.Key.Key_F6, Qt.KeyboardModifier.ShiftModifier)
+        backward.append(where())
+    assert backward == ["pannello laterale", "barra della scheda", "intestazione", "barra di stato", "proprietà",
+                        "documento"]
+    # senza pannelli aperti le regioni nascoste si saltano
+    window.hide_properties()
+    window.sidebar.hide()
+    view.setFocus()
+    seen = []
+    for _ in range(4):
+        qtbot.keyClick(QApplication.focusWidget(), Qt.Key.Key_F6)
+        seen.append(where())
+    assert seen == ["barra di stato", "intestazione", "barra della scheda", "documento"]
+    # scheda File aperta: intestazione e scheda File
+    window.show_backstage()
+    regions = {"intestazione": window.header, "scheda File": window.backstage}
+    assert where() == "scheda File"
+    seen = []
+    for _ in range(2):
+        qtbot.keyClick(QApplication.focusWidget(), Qt.Key.Key_F6)
+        seen.append(where())
+    assert seen == ["intestazione", "scheda File"]
+    window.hide_backstage()
+
+
 def _focus_change(qtbot, widget, elsewhere):
     """Immagini di `widget` senza e con il fuoco (dato con Tab)."""
     elsewhere.setFocus(Qt.FocusReason.TabFocusReason)
@@ -194,6 +253,118 @@ def test_input_outline_is_visible_without_focus(qapp, qtbot):
             dlg.close()
     finally:
         theme.apply(qapp, "light")
+
+
+def _ink(image, background):
+    """Colore del testo disegnato: il punto più lontano dallo sfondo (lontano dai bordi
+    arrotondati, dove si vede il fondo della finestra)."""
+    best, ink = 1.0, background
+    for y in range(4, image.height() - 4):
+        for x in range(4, image.width() - 4):
+            c = image.pixelColor(x, y)
+            ratio = contrast(c, background)
+            if ratio > best:
+                best, ink = ratio, c
+    return ink
+
+
+def test_disabled_tool_buttons_look_disabled(qapp, qtbot):
+    """C-3: un pulsante disattivato con il nome (barra della scheda, schede, «File», scheda File)
+    non ha il colore di uno attivo: il testo si attenua, restando leggibile (≥ 3:1) in chiaro e in scuro."""
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
+
+    from foliant.ui import theme
+    from foliant.ui.context import ToolBar
+
+    def tool_button(parent, text, **props):
+        b = QToolButton(parent)
+        b.setText(text)
+        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        for key, value in props.items():
+            if key == "name":
+                b.setObjectName(value)
+            elif key == "checked":
+                b.setCheckable(True)
+                b.setChecked(value)
+            else:
+                b.setProperty(key, value)
+        return b
+
+    try:
+        for mode in ("light", "dark"):
+            theme.apply(qapp, mode)
+            w = QWidget()
+            qtbot.addWidget(w)
+            layout = QVBoxLayout(w)
+            bar = ToolBar("Prova")
+            bar.setObjectName("contextbar")
+            bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            pairs = {}
+            for name in ("Applica redazioni", "Assistente IA"):
+                on, off = QAction(name, w), QAction(name, w)
+                off.setEnabled(False)
+                bar.addAction(on)
+                bar.addAction(off)
+                pairs["barra " + name] = (bar.widgetForAction(on), bar.widgetForAction(off), "surface")
+            layout.addWidget(bar)
+            header = QWidget()
+            header.setObjectName("sidebar")             # fondo «surface», come la barra in alto
+            row = QHBoxLayout(header)
+            for label, props in (("scheda", {"modeButton": True}), ("scheda attiva", {"modeButton": True, "checked": True}),
+                                 ("File", {"fileButton": True}), ("pulsante attivo", {"checked": True})):
+                on, off = tool_button(header, label, **props), tool_button(header, label, **props)
+                off.setEnabled(False)
+                row.addWidget(on)
+                row.addWidget(off)
+                pairs[label] = (on, off, "surface")
+            layout.addWidget(header)
+            nav = QFrame()
+            nav.setObjectName("backstageNav")
+            nav_row = QHBoxLayout(nav)
+            on, off = tool_button(nav, "Salva", name="backstageNavButton"), tool_button(nav, "Salva", name="backstageNavButton")
+            off.setEnabled(False)
+            nav_row.addWidget(on)
+            nav_row.addWidget(off)
+            pairs["scheda File › Salva"] = (on, off, "accent")
+            layout.addWidget(nav)
+            w.show()
+            qtbot.waitExposed(w)
+            def shot(button):          # con il fondo della barra o della colonna sotto il pulsante
+                return button.parentWidget().grab(button.geometry()).toImage()
+
+            for name, (on, off, bg_name) in pairs.items():
+                bg = bg_off = theme.color(bg_name)
+                if name in ("scheda attiva", "pulsante attivo"):          # fondo del pulsante attivo
+                    bg = shot(on).pixelColor(on.width() // 2, 4)
+                    bg_off = shot(off).pixelColor(off.width() // 2, 4)
+                ink_on, ink_off = _ink(shot(on), bg), _ink(shot(off), bg_off)
+                diff = max(abs(ink_on.red() - ink_off.red()), abs(ink_on.green() - ink_off.green()),
+                           abs(ink_on.blue() - ink_off.blue()))
+                assert diff >= 40, (mode, name, ink_on.name(), ink_off.name())       # non sembra attivo
+                assert contrast(ink_off, bg_off) >= 3, (mode, name, ink_off.name(), round(contrast(ink_off, bg_off), 2))
+            w.close()
+    finally:
+        theme.apply(qapp, "light")
+
+
+def test_disabled_file_tab_command_looks_disabled(window, qtbot):
+    """C-3 nella finestra vera: senza documento «Salva» della scheda File è attenuato rispetto ad «Apri»."""
+    from foliant.ui import theme
+    try:
+        for mode in ("light", "dark"):
+            window.set_theme(mode)
+            window.show_backstage("informazioni")
+            on, off = window.backstage.nav_buttons["apri"], window.backstage.nav_buttons["salva"]
+            assert on.isEnabled() and not off.isEnabled()
+            bg = theme.color("accent")
+            inks = [_ink(b.parentWidget().grab(b.geometry()).toImage(), bg) for b in (on, off)]
+            assert max(abs(inks[0].red() - inks[1].red()), abs(inks[0].green() - inks[1].green())) >= 40, \
+                (mode, [c.name() for c in inks])
+            assert contrast(inks[1], bg) >= 3, (mode, inks[1].name())
+            window.hide_backstage()
+    finally:
+        window.set_theme("light")
 
 
 def test_menu_button_focus_keeps_arrow_space(qapp, qtbot):

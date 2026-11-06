@@ -570,23 +570,56 @@ class MainWindow(QMainWindow):
         elif self.properties.count() and self.current_view() is not None:
             self.properties.show()
 
+    def focus_regions(self) -> list[QWidget]:
+        """Regioni visitate da F6 (UX-18), nell'ordine: intestazione, barra della scheda, pannello
+        laterale, documento (o Home), pannello delle proprietà, barra di stato; con la scheda File
+        aperta, intestazione e scheda File. Le regioni nascoste si saltano."""
+        if self.backstage_visible():
+            candidates = [self.header, self.backstage]
+        else:
+            side = None
+            if self.sidebar.isVisible():
+                side = self.sidebar_stack.currentWidget() if self.sidebar_stack.isVisible() else self.sidebar
+            candidates = [self.header, self.context_stack.currentWidget(), side,
+                          self.current_view() or self.docs_stack.currentWidget(),
+                          self.properties if self.properties.isVisible() else None, self.statusBar()]
+        return [w for w in candidates if w is not None and w.isVisible()]
+
+    @staticmethod
+    def _focus_into(region: QWidget) -> bool:
+        """Fuoco a `region` o al suo primo controllo raggiungibile con Tab (le barre non lo prendono)."""
+        tab = Qt.FocusPolicy.TabFocus.value
+
+        def takes(w: QWidget) -> bool:
+            return w.isVisible() and w.isEnabled() and bool(w.focusPolicy().value & tab)
+
+        if takes(region):
+            region.setFocus(Qt.FocusReason.TabFocusReason)
+            return region.hasFocus()
+        w = region.nextInFocusChain()
+        while w is not None and w is not region:
+            if region.isAncestorOf(w) and takes(w) and w.focusProxy() is None:
+                w.setFocus(Qt.FocusReason.TabFocusReason)
+                if w.hasFocus():
+                    return True
+            w = w.nextInFocusChain()
+        return False
+
     def _cycle_focus(self, step: int) -> None:
-        regions = [w for w in (self.header, self.sidebar_stack.currentWidget() if self.sidebar.isVisible() else None,
-                               self.current_view() or self.docs_stack.currentWidget(),
-                               self.properties.currentWidget() if self.properties.isVisible() else None)
-                   if w is not None and w.isVisible()]
+        regions = self.focus_regions()
         if not regions:
             return
         focus = QApplication.focusWidget()
-        current = 0
+        current = None
         for i, w in enumerate(regions):
             if focus is not None and (focus is w or w.isAncestorOf(focus)):
                 current = i
                 break
-        target = regions[(current + step) % len(regions)]
-        target.setFocus(Qt.FocusReason.TabFocusReason)
-        if not target.hasFocus():
-            target.focusNextChild()
+        if current is None:                 # fuoco fuori dalle regioni: si parte dalla prima (o dall'ultima)
+            current = -1 if step > 0 else len(regions)
+        for k in range(1, len(regions) + 1):
+            if self._focus_into(regions[(current + k * step) % len(regions)]):
+                return
 
     def set_reopen_handler(self, fn: Callable) -> None:
         self._reopen_handler = fn

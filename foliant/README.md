@@ -300,13 +300,15 @@ La tabella UX-18 della specifica è l'unica autorità. Il nucleo registra: Ctrl+
 Ctrl+N (Nuova finestra; «Nuovo documento» non ha scorciatoia), Ctrl+S, Ctrl+Maiusc+S, Ctrl+W,
 Ctrl+Maiusc+T, Ctrl+Q (Esci: chiude tutte le finestre), Ctrl+Z, Ctrl+Maiusc+Z / Ctrl+Y, Ctrl+A,
 Ctrl++ / Ctrl+= / Ctrl+-, Ctrl+0 (adatta pagina), Ctrl+1 (dimensione reale), Ctrl+2 (adatta larghezza),
-N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6, F9,
-Maiusc+F9, F10, Maiusc+F10 / Menu (menu contestuale del widget con il fuoco), F11, Esc, Ctrl+virgola, Ctrl+?, H, V, Ctrl+R (Ruota vista). Spettano ai moduli: Ctrl+P, Ctrl+F,
-Ctrl+G, Alt+Invio, Alt+frecce, F5 (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
+N / P, Spazio, Inizio / Fine, Ctrl+L, Ctrl+Tab, Ctrl+Pag su/giù, Alt+1…9, Ctrl+Alt+0…9, F1, F6 /
+Maiusc+F6 (zone della finestra: intestazione, barra della scheda, pannello laterale, documento, pannello
+delle proprietà, barra di stato; con la scheda File aperta intestazione e scheda File), F9,
+Maiusc+F9, F10, Maiusc+F10 / Menu (menu contestuale del widget con il fuoco), F11, Esc, Ctrl+virgola, Ctrl+?, H, V. Spettano ai moduli: Ctrl+P, Ctrl+F,
+Ctrl+G, Alt+Invio, Alt+frecce, F5, Ctrl+K, Ctrl+R (Righelli, in tutte le schede) e Ctrl+Maiusc++/- (Ruota vista,
+in Leggi e Visualizza) (viewer); Ctrl+H (text_edit); Ctrl+Alt+I (ai). Una scorciatoia
 duplicata disattiva entrambe le azioni: il test `test_no_duplicate_shortcuts` lo impedisce.
-«Righelli» (Visualizza › Mostra) non ha scorciatoia: UX-18 riserva Ctrl+R ai righelli e Ctrl+Maiusc++/-
-alla rotazione della vista, ma oggi Ctrl+R è di «Ruota vista» e Ctrl+Maiusc++/- di «Ruota a
-destra/sinistra» (pages); lo scambio va deciso insieme.
+Un'azione con scorciatoia che non sta in nessuna barra visibile va aggiunta anche alla finestra
+(`window.addAction`, come fa `ctx.action(shortcut=…)`): altrimenti il tasto vale solo nella scheda che la mostra.
 Le scorciatoie specifiche di un modulo vanno **limitate alla sua modalità**:
 `ctx.action(..., shortcut="Ctrl+D", mode="pagine")` oppure `mode.scope_shortcuts(azione, ...)`.
 Così due modalità possono usare lo stesso tasto senza conflitti. Per i tasti che servono solo
@@ -356,7 +358,7 @@ riferimento: `tests/test_placement.py` (matrice completa con `FOLIANT_FULL_PLACE
 | `action(testo, icona, slot, shortcut=, checkable=, requires_document=)` | crea un'azione (disattivata senza documento) |
 | `add_file_action(azione, pagina, gruppo=None, descrizione="", order=100)` | voce della scheda **File** (pagina a tutto schermo come in Excel, F10 / Alt+F). Pagine: `"nuovo"`, `"apri"`, `"informazioni"`, `"condividi"`, `"esporta"`, `"gestisci"`, `"opzioni"`, `"guida"`; `"stampa"` è il comando Stampa della colonna di sinistra. `gruppo` = titolo del gruppo nella pagina, `descrizione` = riga sotto il nome. La voce segue testo, stato e spunta dell'azione; con `azione.menu()` apre il menu, se attivabile cambia la spunta senza chiudere la pagina; le altre chiudono la scheda File e poi eseguono l'azione. `window.backstage.page_of(azione)` / `entries(pagina)` per i test; `window.backstage.aboutToShow` prima di ogni apertura |
 | `add_quick_access_action(azione)` | pulsante della barra di accesso rapido in alto a sinistra (dopo Apri e Salva, prima di Annulla) |
-| `set_command_search(azione)` | il pulsante «Cerca un comando» in alto a destra avvia l'azione |
+| `set_command_search(azione)` | il pulsante «Cerca un comando» in alto a destra avvia l'azione. La ricerca (modulo viewer) trova le azioni anche dal nome del menu o del gruppo che le contiene, mostra accanto scheda e gruppo e avvia un comando di un'altra scheda passando a quella scheda. Per spiegare perché un'azione è disattivata: `azione.setProperty("disabledReason", _("…"))` |
 | `show_file_tab(pagina=None)` | apre la scheda File, eventualmente su una pagina |
 | `add_menu_action(azione, sezione)` | **superata**: il menu ☰ non c'è più; la voce finisce in File › «Altri comandi» nel gruppo `sezione`. Usare `add_file_action` o `mode.add_action` |
 | `add_home_action(titolo, icona, callback, descrizione, order)` | azione rapida nella Home |
