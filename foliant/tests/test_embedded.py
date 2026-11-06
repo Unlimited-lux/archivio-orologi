@@ -67,3 +67,32 @@ def test_pdfa2_keeps_pdf_attachments(tmp_path):
     out = convert_pdf(str(src), tmp_path / "perizia_a.pdf", "pdfa-2b")[0]
     names = sorted(pymupdf.open(str(out)).embfile_names())
     assert names == ["a_certificato.pdf", "c_garanzia.pdf"], names
+
+
+def test_accented_names_in_direct_file_specs():
+    """Specifiche dei file scritte nell'albero come dizionari diretti con nomi esadecimali
+    (embfile_add con lettere accentate): la lettura non tronca il dizionario e la cancellazione
+    toglie solo il file scelto."""
+    from foliant.core.embedded import embedded_entries, readable_name
+    doc = pymupdf.open()
+    doc.new_page()
+    files = {"scontrino è.txt": b"uno", "perizia.pdf": b"%PDF-1.7 due", "garanzia – Ñúñez.txt": b"tre"}
+    for name, data in files.items():
+        doc.embfile_add(name, data, filename=name, ufilename=name)
+    doc = pymupdf.open("pdf", doc.tobytes())
+    assert sorted(k for k, _x in embedded_entries(doc)) == sorted(files)
+    assert sorted(readable_name(n) for n in doc.embfile_names()) == sorted(files)
+    key = next(n for n in doc.embfile_names() if readable_name(n) == "scontrino è.txt")
+    delete_embedded(doc, key)
+    doc = pymupdf.open("pdf", doc.tobytes())
+    left = {readable_name(n): doc.embfile_get(n) for n in doc.embfile_names()}
+    assert left == {"perizia.pdf": b"%PDF-1.7 due", "garanzia – Ñúñez.txt": b"tre"}
+
+
+def test_readable_name_leaves_correct_names_alone():
+    from foliant.core.embedded import readable_name
+    assert readable_name("perizia.pdf") == "perizia.pdf"
+    assert readable_name("scontrino Ã¨.txt") == "scontrino è.txt"
+    assert readable_name("scontrino è.txt") == "scontrino è.txt"
+    assert readable_name("時計.pdf") == "時計.pdf"
+    assert readable_name("") == ""

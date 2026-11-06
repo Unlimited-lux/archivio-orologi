@@ -23,6 +23,7 @@ from typing import Callable, Iterable
 import pymupdf
 
 from foliant.core import platform
+from foliant.core.embedded import readable_name
 from foliant.core.errors import OperationCancelled
 
 from .engine import (
@@ -415,7 +416,7 @@ def _pdf_attachments(pdf: pymupdf.Document, lock) -> list[tuple[str, bytes]]:
             except Exception:
                 continue
             if data[:1024].lstrip().startswith(b"%PDF") or b"%PDF-" in data[:1024]:
-                out.append((name, data))
+                out.append((readable_name(name), data))
     return out
 
 

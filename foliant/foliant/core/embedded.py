@@ -26,6 +26,38 @@ def _pdf_string(raw: bytes) -> str:
     return raw.decode("latin-1")
 
 
+def readable_name(name: str) -> str:
+    """Nome di un allegato come lo restituisce il motore (`embfile_names`, `embfile_info`,
+    `file_info`), riportato al testo vero. PyMuPDF 2.0 restituisce i byte UTF-8 letti come
+    Latin-1: «scontrino è.txt» diventa «scontrino Ã¨.txt». I nomi già giusti restano uguali."""
+    if not name or name.isascii():
+        return name
+    try:
+        return name.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return name
+
+
+def _skip_string(data: str, i: int) -> int:
+    """Posizione dopo la stringa PDF che inizia in `i` («(…)» con annidamento ed escape, o «<…>»)."""
+    n = len(data)
+    if data[i] == "<":
+        j = data.find(">", i + 1)
+        return n if j < 0 else j + 1
+    depth, j = 1, i + 1
+    while j < n and depth:
+        ch = data[j]
+        if ch == "\\":
+            j += 2
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        j += 1
+    return j
+
+
 def _array_items(text: str) -> list:
     """Elementi di un array PDF come lo restituisce `xref_get_key`: stringhe (decodificate),
     riferimenti («N 0 R») e dizionari diretti («<<…>>»)."""
@@ -80,6 +112,10 @@ def _array_items(text: str) -> list:
                     j += 2
                     if not depth:
                         break
+                elif data[j] in "(<":
+                    # stringhe dentro il dizionario: un nome esadecimale «<FEFF…>» seguito da «>>»
+                    # non deve chiudere il dizionario un carattere prima
+                    j = _skip_string(data, j)
                 else:
                     j += 1
             out.append(("dict", data[i:j]))
@@ -172,13 +208,17 @@ def delete_embedded(pdf: pymupdf.Document, names: str | Iterable[str]) -> None:
         raise KeyError(sorted(missing)[0])
     expected = sorted(n for n in current if n not in drop)
     data_before = {n: pdf.embfile_get(n) for n in expected}
+    # le chiavi lette dall'albero sono il testo vero; quelle del motore possono essere storpiate
+    dropped = drop | {readable_name(n) for n in drop}
     try:
         entries = embedded_entries(pdf)
     except ValueError:
         entries = None
+    if entries is not None and len(entries) != len(current):
+        entries = None                      # albero letto solo in parte: meglio ricostruirlo
     if entries is not None:
-        kept = [(k, x) for k, x in entries if k not in drop]
-        removed = {x for k, x in entries if k in drop and isinstance(x, int)}
+        kept = [(k, x) for k, x in entries if k not in dropped]
+        removed = {x for k, x in entries if k in dropped and isinstance(x, int)}
         if kept:
             write_tree(pdf, kept)
         else:

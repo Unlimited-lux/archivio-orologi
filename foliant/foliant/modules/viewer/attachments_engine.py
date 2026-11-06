@@ -16,7 +16,7 @@ from datetime import datetime
 
 import pymupdf
 
-from foliant.api import delete_embedded, format_number
+from foliant.api import delete_embedded, format_number, readable_name
 
 DOCUMENT = "document"
 PAGE = "page"
@@ -182,7 +182,7 @@ def _page_attachment(pdf: pymupdf.Document, page_index: int, annot) -> Attachmen
     size = info.get("size", -1)
     if size in (None, -1):
         size = info.get("length", -1)
-    name = info.get("filename") or "allegato"
+    name = readable_name(info.get("filename") or "") or "allegato"
     return Attachment(
         kind=PAGE, key=f"p{page_index}:{xref}", filename=name, description=info.get("description") or "",
         size=int(size if size is not None else -1), created=created, modified=modified, page=page_index,
@@ -202,8 +202,8 @@ def list_attachments(pdf: pymupdf.Document) -> list[Attachment]:
         if size in (None, -1):
             size = info.get("length", -1)
         items.append(Attachment(
-            kind=DOCUMENT, key=name,
-            filename=info.get("ufilename") or info.get("filename") or name,
+            kind=DOCUMENT, key=name,      # chiave del motore: serve per leggere e togliere il file
+            filename=readable_name(info.get("ufilename") or info.get("filename") or name),
             description=info.get("description") or "",
             size=int(size if size is not None else -1),
             created=parse_pdf_date(info.get("creationDate")),
@@ -271,7 +271,7 @@ def looks_like_pdf(name: str, data: bytes) -> bool:
 
 def unique_name(pdf: pymupdf.Document, name: str) -> str:
     """Nome non ancora usato nel name tree degli allegati del documento."""
-    existing = set(pdf.embfile_names())
+    existing = {readable_name(n) for n in pdf.embfile_names()}
     if name not in existing:
         return name
     stem, ext = os.path.splitext(name)
@@ -284,9 +284,9 @@ def unique_name(pdf: pymupdf.Document, name: str) -> str:
 def add(pdf: pymupdf.Document, filename: str, data: bytes, description: str = "") -> str:
     """Aggiunge un allegato di documento; restituisce il nome usato."""
     clean = safe_filename(filename)
-    key = unique_name(pdf, clean)
-    pdf.embfile_add(key, data, filename=clean, ufilename=clean, desc=description or None)
-    return key
+    name = unique_name(pdf, clean)
+    pdf.embfile_add(name, data, filename=name, ufilename=name, desc=description or None)
+    return name
 
 
 def delete(pdf: pymupdf.Document, item: Attachment) -> None:

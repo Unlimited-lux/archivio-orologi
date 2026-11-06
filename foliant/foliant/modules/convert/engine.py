@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, OperationCancelled, _
+from foliant.api import ENGINE_LOCK, OperationCancelled, _, readable_name
 
 from .common import ConversionError, OutputFiles, RangeError, check, open_source, parse_page_range
 from .extract import NATIVE, SCANNED, PageContent, classify_page, ocr_available, ocr_languages
@@ -468,9 +468,9 @@ def _file_label(pdf: pymupdf.Document, key: str) -> str:
     spesso un prefisso di cartella come «<2>»)."""
     try:
         info = pdf.embfile_info(key)
-        return info.get("ufilename") or info.get("filename") or key
+        return readable_name(info.get("ufilename") or info.get("filename") or key)
     except Exception:
-        return key
+        return readable_name(key)
 
 
 def _attachment_names(pdf: pymupdf.Document) -> list[str]:

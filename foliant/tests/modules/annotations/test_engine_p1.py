@@ -549,6 +549,17 @@ def test_attachment_round_trip(doc):
         assert flags & f
 
 
+def test_attachment_accented_name_kept(doc):
+    """D-6: «Perizia Rolex – àè ü.pdf» resta tale in «Salva allegato con nome» e nell'XFDF."""
+    name = "Perizia Rolex – àè ü.pdf"
+    x = E.create_attachment(doc, 0, (100, 140), b"%PDF-1.7 perizia", name, STYLE, author="A")
+    d2 = reopen(doc)
+    got_name, got = E.attachment_data(d2, 0, x)
+    assert got_name == name and got == b"%PDF-1.7 perizia"
+    xfdf = E.export_xfdf(d2)
+    assert f'file="{name}"' in xfdf
+
+
 # ================================================================== ANN-30/31/32 misure
 def test_scale_calibrate():
     """ANN-30: 100 pt calibrati come 5 m → 50 pt = "2,50 m"."""

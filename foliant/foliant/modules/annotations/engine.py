@@ -23,6 +23,7 @@ from typing import Iterable, Iterator, Sequence
 import pymupdf
 
 from foliant.core import platform
+from foliant.core.embedded import readable_name
 
 try:    # testi scritti nei documenti nella lingua dell'interfaccia (NFR-25)
     from foliant.i18n import _
@@ -2256,7 +2257,7 @@ def attachment_data(pdf: pymupdf.Document, page_no: int, xref: int) -> tuple[str
     page = _page(pdf, page_no)
     annot = get_annot(page, xref)
     info = annot.file_info
-    return info.get("filename") or "allegato", annot.get_file()
+    return readable_name(info.get("filename") or "") or "allegato", annot.get_file()
 
 
 # ------------------------------------------------------------------ lettura
@@ -3584,7 +3585,7 @@ def _export_xfdf(pdf: pymupdf.Document, filename: str = "", pages: Iterable[int]
                     attrs["foliant-autofit"] = "true"
             elif t == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
                 fi = a.file_info or {}
-                attrs["file"] = fi.get("filename", "")
+                attrs["file"] = readable_name(fi.get("filename", ""))
                 attrs["icon"] = "PushPin"
             content = info.get("content", "")
             rich = _rich_body(get_rich_text(pdf, a.xref))

@@ -296,6 +296,40 @@ def test_engine_delete_middle_item_keeps_others():
     assert [a.filename for a in engine.list_attachments(doc)] == ["b.txt", "d.txt"]
 
 
+def test_accented_names_shown_saved_and_deleted(viewer_window, attach_pdf, monkeypatch, tmp_path):
+    """A-2: «scontrino è.txt» resta tale nel pannello, dopo il salvataggio e nei file estratti;
+    si toglie senza toccare gli altri allegati."""
+    view, panel = _open(viewer_window, attach_pdf)
+    f = tmp_path / "scontrino è.txt"
+    f.write_bytes(b"Scontrino cinturino")
+    g = tmp_path / "perizia Daytona – José.pdf"
+    g.write_bytes(INNER)
+    assert panel.add_files([str(f), str(g)]) == ["scontrino è.txt", "perizia Daytona – José.pdf"]
+    names = {a.filename for a in panel.items()}
+    assert {"scontrino è.txt", "perizia Daytona – José.pdf"} <= names
+    assert not any("Ã" in n for n in names)
+    # stesso nome di nuovo: numerato, non sovrascritto
+    assert panel.add_files([str(f)]) == ["scontrino è (2).txt"]
+    out = tmp_path / "salvato.pdf"
+    view.document.save_copy(str(out))
+    with pymupdf.open(str(out)) as doc:
+        items = engine.list_attachments(doc)
+        by_name = {a.filename: a for a in items}
+        assert engine.extract(doc, by_name["scontrino è.txt"]) == b"Scontrino cinturino"
+        assert engine.save_all_names(items).count("scontrino è.txt") == 1
+        before = {a.filename: engine.extract(doc, a) for a in items}
+        engine.delete(doc, by_name["perizia Daytona – José.pdf"])
+        engine.delete(doc, by_name["scontrino è.txt"])
+        after = {a.filename: engine.extract(doc, a) for a in engine.list_attachments(doc)}
+        del before["perizia Daytona – José.pdf"], before["scontrino è.txt"]
+        assert after == before
+    folder = tmp_path / "tutti"
+    folder.mkdir()
+    monkeypatch.setattr(panel, "ask_directory", lambda: str(folder))
+    panel.save_all()
+    assert "scontrino è.txt" in os.listdir(folder)
+
+
 def test_delete_page_attachment_undoable(viewer_window, page_attach_pdf, monkeypatch):
     view, panel = _open(viewer_window, page_attach_pdf)
     monkeypatch.setattr(panel, "confirm", lambda t, m: True)
