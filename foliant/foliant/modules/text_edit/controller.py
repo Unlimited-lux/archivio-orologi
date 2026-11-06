@@ -15,33 +15,15 @@ from ...i18n import _
 from ...ui import theme
 from . import engine
 from .analysis import (
-    REASON_UNDECODABLE, GroupingError, analyze_page, apply_grouping, frame_matrix, line_key, merge_blocks,
-    images_have_text_lines, page_has_images, unframe_matrix,
+    REASON_UNDECODABLE, GroupingError, analyze_page, apply_grouping, frame_matrix, line_char_counts, line_key,
+    merge_blocks, images_have_text_lines, page_has_images, unframe_matrix,
 )
 from .fonts import FontResolver
-from .model import ALIGN_LEFT, GRANULARITY_PARAGRAPH, Run, Style, TextBlock, merge_runs
+from .model import ALIGN_LEFT, GRANULARITY_PARAGRAPH, Run, Style, TextBlock, same_paragraphs
 from .ui_editor import EditorSpec, InlineEditor
 from .ui_tool import AddTextTool, EditTextTool
 
 MIME_BLOCK = "application/x-foliant-text-block"
-
-
-def _same_paragraphs(a: list[list[Run]], b: list[list[Run]]) -> bool:
-    a = [merge_runs(p) for p in a]
-    b = [merge_runs(p) for p in b]
-    while a and not a[-1]:
-        a.pop()
-    while b and not b[-1]:
-        b.pop()
-    if len(a) != len(b):
-        return False
-    for pa, pb in zip(a, b):
-        if len(pa) != len(pb):
-            return False
-        for ra, rb in zip(pa, pb):
-            if ra.text != rb.text or not ra.style.same_look(rb.style):
-                return False
-    return True
 
 
 class TextEditController(QObject):
@@ -483,7 +465,9 @@ class TextEditController(QObject):
                           width=block.width, align=block.align, leading=block.leading, indent=block.indent,
                           auto_width=block.auto_width or block.invisible or block.rotated,
                           cover=QRectF(block.bbox.x0, block.bbox.y0, block.bbox.width, block.bbox.height),
-                          default_style=block.style if not replace_all else block.style.with_(font_xref=0))
+                          default_style=block.style if not replace_all else block.style.with_(font_xref=0),
+                          slack=1.0 if len(block.lines) == 1 else 0.0,
+                          line_counts=None if block.invisible or replace_all else line_char_counts(block))
         bg, _fg = self.sample_colors(view, page, block.bbox)
         with ENGINE_LOCK:
             resolver = FontResolver(view.document.pdf)
@@ -573,7 +557,7 @@ class TextEditController(QObject):
             result = self._apply(view, _("Correggi testo OCR"), lambda pdf: engine.replace_invisible_block(
                 pdf, page, block, text))
         else:
-            if (not info.get("replace_all") and _same_paragraphs(paragraphs, block.paragraphs)
+            if (not info.get("replace_all") and same_paragraphs(paragraphs, block.paragraphs)
                     and align == block.align and abs(leading - block.leading) < 0.01
                     and abs(indent - block.indent) < 0.01 and space_after < 0.01):
                 result = None

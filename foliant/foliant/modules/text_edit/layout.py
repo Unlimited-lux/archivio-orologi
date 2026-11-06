@@ -211,6 +211,51 @@ class Composer:
         return lines
 
     # ----------------------------------------------------------- composizione
+    def _frame(self, para_atoms: list[list[_Atom]], x0: float, width: float, align: str, indent: float,
+               auto_width: bool, page_rect: pymupdf.Rect | None, anchor_width: float | None) -> tuple[float, float]:
+        """Bordo sinistro e larghezza del riquadro in cui si va a capo: con `auto_width` la larghezza del
+        testo, fino al bordo dell'area visibile."""
+        if auto_width:
+            pr = page_rect or pymupdf.Rect(0, 0, x0 + max(width, 1) * 4, 1e6)
+            anchor_w = anchor_width if anchor_width is not None else width
+            if align == ALIGN_RIGHT:
+                limit = (x0 + anchor_w) - pr.x0
+            elif align == ALIGN_CENTER:
+                c = x0 + anchor_w / 2
+                limit = 2 * min(c - pr.x0, pr.x1 - c)
+            else:
+                limit = pr.x1 - x0
+            limit = max(limit, 1.0)
+            natural = 0.0
+            for atoms in para_atoms:
+                for line_atoms, hyph in self._break(atoms, limit - indent, limit):
+                    natural = max(natural, sum(a.width for a in line_atoms))
+            eff = min(max(natural + indent, 0.0), limit)
+            if align == ALIGN_RIGHT:
+                x0 = x0 + anchor_w - eff
+            elif align == ALIGN_CENTER:
+                x0 = x0 + anchor_w / 2 - eff / 2
+            width = eff
+        return x0, max(width, 1.0)
+
+    def line_counts(self, paragraphs: list[list[Run]], *, x0: float, width: float, align: str,
+                    indent: float = 0.0, auto_width: bool = False, page_rect: pymupdf.Rect | None = None,
+                    anchor_width: float | None = None) -> list[int] | None:
+        """Dove `layout` andrà a capo: quanti caratteri visibili (non spazi né trattini morbidi) stanno su
+        ogni riga, per tutti i paragrafi di seguito. Serve al riquadro di modifica per andare a capo negli
+        stessi punti del PDF (E-4). None per i paragrafi da destra a sinistra (forme contestuali)."""
+        from .bidi import paragraph_is_rtl
+        if any(paragraph_is_rtl("".join(r.text for r in p)) for p in paragraphs):
+            return None
+        self.prepare(paragraphs)
+        para_atoms = [self._atoms(p) for p in paragraphs]
+        _x0, width = self._frame(para_atoms, x0, width, align, indent, auto_width, page_rect, anchor_width)
+        out: list[int] = []
+        for atoms in para_atoms:
+            for line_atoms, _hyph in self._break(atoms, width - indent, width):
+                out.append(sum(len(t) for a in line_atoms if not a.space for t, _s in a.segs))
+        return out
+
     def layout(self, paragraphs: list[list[Run]], *, x0: float, first_baseline: float, width: float,
                align: str, leading: float, indent: float = 0.0, auto_width: bool = False,
                page_rect: pymupdf.Rect | None = None, base_size: float | None = None,
@@ -231,29 +276,7 @@ class Composer:
                       for p, rtl in zip(paragraphs, rtl_flags)]
         self.prepare(paragraphs)
         para_atoms = [self._atoms(p) for p in paragraphs]
-        margin = 0.0
-        if auto_width:
-            pr = page_rect or pymupdf.Rect(0, 0, x0 + max(width, 1) * 4, 1e6)
-            anchor_w = anchor_width if anchor_width is not None else width
-            if align == ALIGN_RIGHT:
-                limit = (x0 + anchor_w) - pr.x0 - margin
-            elif align == ALIGN_CENTER:
-                c = x0 + anchor_w / 2
-                limit = 2 * min(c - pr.x0, pr.x1 - c) - margin
-            else:
-                limit = pr.x1 - x0 - margin
-            limit = max(limit, 1.0)
-            natural = 0.0
-            for atoms in para_atoms:
-                for line_atoms, hyph in self._break(atoms, limit - indent, limit):
-                    natural = max(natural, sum(a.width for a in line_atoms))
-            eff = min(max(natural + indent, 0.0), limit)
-            if align == ALIGN_RIGHT:
-                x0 = x0 + anchor_w - eff
-            elif align == ALIGN_CENTER:
-                x0 = x0 + anchor_w / 2 - eff / 2
-            width = eff
-        width = max(width, 1.0)
+        x0, width = self._frame(para_atoms, x0, width, align, indent, auto_width, page_rect, anchor_width)
         out: list[PlacedLine] = []
         baseline = first_baseline
         first = True

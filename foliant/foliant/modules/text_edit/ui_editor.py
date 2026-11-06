@@ -7,6 +7,7 @@ lo stesso colore, la stessa interlinea e la stessa larghezza del blocco.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
@@ -19,8 +20,10 @@ from PySide6.QtWidgets import QFrame, QTextEdit
 from ...core.engine import ENGINE_LOCK
 from ...ui.document_view import PX_PER_PT
 from .fonts import KIND_ORIGINAL, FontResolver
+from .layout import Composer
 from .model import (
-    ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT, SOFT_HYPHEN, Run, Style, merge_runs,
+    ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT, NOT_COUNTED, SOFT_HYPHEN, Run, Style, merge_runs,
+    same_paragraphs,
 )
 
 STYLE_PROP = QTextFormat.Property.UserProperty + 17
@@ -111,6 +114,8 @@ class EditorSpec:
     auto_width: bool = False
     cover: QRectF | None = None  # area originale da coprire (punti, riquadro di lavoro)
     default_style: Style | None = None
+    slack: float = 0.0          # tolleranza in più della composizione (blocchi di una riga, vedi engine)
+    line_counts: list | None = None   # caratteri per riga della pagina (analysis.line_char_counts)
 
 
 class InlineEditor(QTextEdit):
@@ -444,20 +449,119 @@ class InlineEditor(QTextEdit):
         self._wrap_px = None
         if self.spec.auto_width:
             self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-            limit = self._limit_points() * s
-            if self.document().idealWidth() > limit:
-                # come nel PDF: a capo al bordo dell'area visibile
-                self._wrap_px = limit
-                self.setLineWrapMode(QTextEdit.LineWrapMode.FixedPixelWidth)
-                self.setLineWrapColumnOrWidth(max(4, int(limit)))
+            limit = self._limit_points()
+            if self.document().idealWidth() > limit * s:
+                # come nel PDF: a capo al bordo dell'area visibile, negli stessi punti
+                self._wrap_px = self._match_wrap(limit)
         else:
-            # stessa tolleranza dell'impaginazione del PDF (arrotondamenti delle larghezze)
-            px = self.spec.width * s
-            px += max(0.3, 0.03 * self.spec.width) * s + 2
-            self._wrap_px = px
-            self.setLineWrapMode(QTextEdit.LineWrapMode.FixedPixelWidth)
-            self.setLineWrapColumnOrWidth(max(4, int(px + 0.999)))
+            self._wrap_px = self._match_wrap(self.spec.width)
         self.reposition()
+
+    # ------------------------------------------------------------ a capo come nel PDF (E-4)
+    def _match_wrap(self, width_pt: float) -> int:
+        """Imposta e restituisce la larghezza (pixel) a cui Qt va a capo negli stessi punti del PDF.
+
+        Gli a capo li decide la pagina: senza modifiche restano quelli che ha (`EditorSpec.line_counts`),
+        altrimenti quelli della composizione del motore (`layout.Composer.line_counts`, la stessa della
+        riscrittura). Qt misura il testo con il suo motore, con piccole differenze dalle misure del PDF:
+        invece di allargare il riquadro con una tolleranza (che sposta gli a capo), si cerca la larghezza
+        in pixel con cui Qt divide le righe allo stesso modo, la più vicina a quella del riquadro (il testo
+        giustificato arriva al margine della pagina). Se nessuna ci riesce, la regola del motore."""
+        s = self.scale
+        self.setLineWrapMode(QTextEdit.LineWrapMode.FixedPixelWidth)
+        rule = max(4, math.ceil((width_pt + max(0.3, 0.004 * width_pt) + self.spec.slack) * s))
+        base = max(4, round(width_pt * s))
+        for target in self._target_line_counts(width_pt):
+            found = self._search_width(target, base)
+            if found is not None:
+                self.setLineWrapColumnOrWidth(found)
+                return found
+        self.setLineWrapColumnOrWidth(rule)
+        return rule
+
+    def _search_width(self, target: list[int], base: int) -> int | None:
+        """Larghezza (pixel) con gli a capo di `target` più vicina a `base`, o None."""
+        results: dict[int, int | None] = {}
+
+        def compare(w: int) -> int | None:
+            if w not in results:
+                self.setLineWrapColumnOrWidth(w)
+                results[w] = self._compare_lines(target)
+            return results[w]
+
+        first = compare(base)
+        if first == 0:
+            return base
+        if first is not None:
+            # gli a capo di Qt cambiano in un solo verso con la larghezza: ricerca binaria del primo pixel
+            # (verso l'esterno) in cui Qt smette di andare a capo troppo presto (o troppo tardi)
+            step = 1 if first < 0 else -1
+            far = base + step * (math.ceil(base * 0.05) + 3)
+            lo, hi = (base + 1, far) if step > 0 else (max(4, far), base - 1)
+            while lo < hi:
+                mid = (lo + hi) // 2 if step > 0 else (lo + hi + 1) // 2
+                c = compare(mid)
+                if c is None:
+                    break
+                if step > 0:
+                    hi, lo = (mid, lo) if c >= 0 else (hi, mid + 1)
+                else:
+                    lo, hi = (mid, hi) if c <= 0 else (lo, mid - 1)
+            if lo == hi and compare(lo) == 0:
+                return lo
+        return None
+
+    def _target_line_counts(self, width_pt: float) -> list[list[int]]:
+        """Caratteri per riga che avrà la pagina alla conferma, in ordine di preferenza: senza modifiche la
+        pagina resta com'è (le sue righe), altrimenti il blocco viene ricomposto dal motore."""
+        out = []
+        spec = self.spec
+        if (spec.line_counts is not None and self.align == spec.align and abs(self.indent - spec.indent) < 0.01
+                and abs(self.leading - spec.leading) < 0.01 and self.space_after < 0.01
+                and same_paragraphs(self.paragraphs(), spec.paragraphs)):
+            out.append(list(spec.line_counts))
+        engine = self._engine_line_counts(width_pt)
+        if engine is not None and engine not in out:
+            out.append(engine)
+        return out
+
+    def _engine_line_counts(self, width_pt: float) -> list[int] | None:
+        try:
+            with ENGINE_LOCK:
+                composer = Composer(self.resolver)
+                composer.slack = self.spec.slack
+                return composer.line_counts(self.paragraphs(), x0=self.spec.x0, width=width_pt, align=self.align,
+                                            indent=self.indent)
+        except Exception:  # noqa: BLE001 - carattere non disponibile o font illeggibile: la regola del motore
+            return None
+
+    def _qt_line_counts(self) -> list[int]:
+        doc = self.document()
+        layout_of = doc.documentLayout()
+        out: list[int] = []
+        block = doc.begin()
+        while block.isValid():
+            layout_of.blockBoundingRect(block)          # disposizione aggiornata alla larghezza attuale
+            layout, text = block.layout(), block.text()
+            for i in range(layout.lineCount()):
+                line = layout.lineAt(i)
+                part = text[line.textStart():line.textStart() + line.textLength()]
+                out.append(sum(1 for c in part if c not in NOT_COUNTED))
+            block = block.next()
+        return out
+
+    def _compare_lines(self, target: list[int]) -> int | None:
+        """0 se Qt va a capo come `target`, -1 se va a capo prima (serve più larghezza), +1 se dopo, None se
+        i testi non corrispondono."""
+        qt = self._qt_line_counts()
+        if sum(qt) != sum(target):
+            return None
+        for a, b in zip(qt, target):
+            if a != b:
+                return -1 if a < b else 1
+        if len(qt) == len(target):
+            return 0
+        return -1 if len(qt) > len(target) else 1
 
     def reposition(self) -> None:
         try:

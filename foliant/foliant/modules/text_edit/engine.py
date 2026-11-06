@@ -98,17 +98,28 @@ def remove_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | 
     composer = Composer(resolver)
     writer = _Writer(page)
     for ln, inv in lost:
-        for w in ln.words:
-            x = w.x
-            try:
-                pieces = composer.pieces(w.text, w.style)
-            except UncoveredCharacter:
-                continue
-            for part, choice, width in pieces:
-                piece = Piece(x, part, w.style, choice, width)
-                writer.write_piece(piece, ln.baseline, render_mode=3 if inv else 0)
-                x += width
+        writer.write_line(_words_line(composer, ln, ln.words, skip_uncovered=True), render_mode=3 if inv else 0)
     writer.flush()
+
+
+def _words_line(composer: Composer, line: Line, words, dx: float = 0.0, dy: float = 0.0,
+                skip_uncovered: bool = False) -> PlacedLine:
+    """Parole di una riga originale nelle loro posizioni (spostate di dx, dy), pronte per `write_line`, che
+    mette uno spazio vero tra l'una e l'altra. Con `skip_uncovered` le parole con caratteri non disponibili
+    sono saltate, altrimenti si solleva UncoveredCharacter."""
+    pl = PlacedLine(baseline=line.baseline + dy, size=line.size)
+    for w in words:
+        x = w.x + dx
+        try:
+            pieces = composer.pieces(w.text, w.style)
+        except UncoveredCharacter:
+            if not skip_uncovered:
+                raise
+            continue
+        for part, choice, width in pieces:
+            pl.pieces.append(Piece(x, part, w.style, choice, width))
+            x += width
+    return pl
 
 
 def _redact_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | None = None) -> None:
@@ -256,6 +267,38 @@ def _draw_line(page: pymupdf.Page, p0, p1, **kw) -> None:
 
 _ACTIVE_WRITERS: list = []
 
+# distanza minima (in frazioni del corpo) tra due pezzi di una riga perché tra loro ci sia uno spazio
+_GAP_MIN = 0.1
+
+
+def _gap_space(prev: Piece, nxt: Piece) -> tuple[Piece, float] | None:
+    """Spazio vero tra due pezzi consecutivi della stessa riga: un glifo di spazio allargato in orizzontale
+    fino al pezzo successivo, con il fattore di allargamento.
+
+    Senza glifo le parole di una riga giustificata sono separate solo da un salto della penna: da 0,8 em
+    in su il motore di estrazione divide la riga in più righe, che l'analisi scambia per celle di tabella,
+    e una frase spezzata tra due righe non si ritrova più (E-1). Lo spazio non si vede: la pagina resta
+    uguale, e l'estrazione legge la riga intera con uno spazio tra le parole, come nei PDF dei programmi
+    d'ufficio."""
+    start = prev.x + prev.width
+    gap = nxt.x - start
+    size = min(prev.style.size, nxt.style.size)
+    if gap < _GAP_MIN * size or prev.text.endswith(" ") or nxt.text.startswith(" "):
+        return None
+    for ref in (prev, nxt):
+        choice = ref.choice
+        try:
+            if not choice.has_space:
+                continue
+            natural = choice.text_length(" ", ref.style.size)
+        except Exception:  # noqa: BLE001 - senza misura niente spazio (come prima)
+            continue
+        if natural <= 0.01:
+            continue
+        style = ref.style.with_(underline=False, strike=False, char_spacing=0.0, rise=0.0)
+        return Piece(start, " ", style, choice, gap), gap / natural
+    return None
+
 
 def flush_writers() -> None:
     """Completa tutte le scritture in sospeso (da chiamare prima di rileggere la pagina)."""
@@ -347,22 +390,31 @@ class _Writer:
 
     def write_line(self, line: PlacedLine, render_mode: int = 0, hscale: float = 1.0,
                    angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
-        for piece in line.pieces:
-            if not piece.text.strip():
-                continue
+        visible = [p for p in line.pieces if p.text.strip()]
+        fill = not angle and hscale == 1.0
+        for k, piece in enumerate(visible):
+            if fill and k:
+                gap = _gap_space(visible[k - 1], piece)
+                if gap is not None:
+                    space, stretch = gap
+                    self.write_piece(space, line.baseline, render_mode, stretch=stretch)
             self.write_piece(piece, line.baseline, render_mode, hscale, angle, origin)
 
     def write_piece(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
-                    angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
+                    angle: float = 0.0, origin: pymupdf.Point | None = None, stretch: float = 1.0) -> None:
+        """`stretch`: glifo allargato in orizzontale e ristretto in verticale dello stesso fattore attorno
+        alla sua origine (gli spazi tra le parole, vedi `_gap_space`): il corpo letto dall'estrazione resta
+        quello dello stile."""
         choice = piece.choice
+        extra = {"stretch": stretch} if stretch != 1.0 else {}
         if getattr(choice, "resource", None) is not None:
             # risorsa font originale: operatori di testo scritti direttamente, nessun font aggiunto
-            self._queue.append((self._write_raw, (piece, baseline, render_mode, hscale, angle, origin), {}))
+            self._queue.append((self._write_raw, (piece, baseline, render_mode, hscale, angle, origin), extra))
             return
         if not choice.base14:
             self._choices.setdefault(choice.key, choice)
             self._chars.setdefault(choice.key, set()).update(piece.text)
-        self._queue.append((self._write_piece_now, (piece, baseline, render_mode, hscale, angle, origin), {}))
+        self._queue.append((self._write_piece_now, (piece, baseline, render_mode, hscale, angle, origin), extra))
 
     def _resource_name(self, xref: int) -> str:
         """Nome della risorsa font `xref` nella pagina (aggiunta alle risorse se manca)."""
@@ -386,12 +438,14 @@ class _Writer:
         return name
 
     def _write_raw(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
-                   angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
+                   angle: float = 0.0, origin: pymupdf.Point | None = None, stretch: float = 1.0) -> None:
         st = piece.style
         enc = piece.choice.resource
         name = self._resource_name(enc.xref)
         y = baseline - st.rise
         m = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+        if stretch != 1.0:
+            m = pymupdf.Matrix(stretch, 0, 0, 1 / stretch, 0, 0)
         if hscale != 1.0:
             m = pymupdf.Matrix(hscale, 0, 0, 1, 0, 0) * m
         if angle:
@@ -446,7 +500,7 @@ class _Writer:
         doc.xref_set_key(self.page.xref, "Contents", "[" + " ".join(f"{c} 0 R" for c in contents) + "]")
 
     def _write_piece_now(self, piece: Piece, baseline: float, render_mode: int = 0, hscale: float = 1.0,
-                         angle: float = 0.0, origin: pymupdf.Point | None = None) -> None:
+                         angle: float = 0.0, origin: pymupdf.Point | None = None, stretch: float = 1.0) -> None:
         st = piece.style
         fontname = self._font(piece)
         y = baseline - st.rise
@@ -456,6 +510,8 @@ class _Writer:
             mode = 2
             border = 0.035
         m = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+        if stretch != 1.0:
+            m = pymupdf.Matrix(stretch, 0, 0, 1 / stretch, 0, 0)
         anchor = origin or pymupdf.Point(piece.x, y)
         if hscale != 1.0:
             m = pymupdf.Matrix(hscale, 0, 0, 1, 0, 0) * m
@@ -475,8 +531,8 @@ class _Writer:
         else:
             chunks = [(piece.x, piece.text)]
         for x, text in chunks:
-            if not text.strip():
-                continue
+            if not text or (not text.strip() and len(chunks) > 1):
+                continue      # uno spazio da solo (tra due parole, vedi _gap_space) invece si scrive
             pt = pymupdf.Point(x, y)
             if angle or hscale != 1.0:
                 # posizione lungo la linea di base trasformata attorno all'origine della riga
@@ -514,6 +570,29 @@ def _char_styles(runs_or_pieces) -> list[tuple[str, tuple]]:
             if not ch.isspace():
                 out.append((ch, key))
     return out
+
+
+def _foreign_lines(page: pymupdf.Page, block: TextBlock) -> list[Line] | None:
+    """Righe della pagina che non appartengono al blocco (None se la pagina non si legge)."""
+    own = {_lkey(ln) for ln in block.lines}
+    try:
+        return [ln for ln, _inv in extract_lines(page) if _lkey(ln) not in own]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _joins_neighbour(line: Line, others: list[Line] | None) -> bool:
+    """Altro testo sulla stessa linea di base a poco più di un corpo di distanza (l'altra colonna oltre una
+    canaletta stretta): se nel contenuto la riga gli finisce accanto, l'estrazione unisce le due righe."""
+    if others is None:
+        return True
+    gap_max = 1.2 * line.size      # oltre lo spazio finale della riga tenuta (0,8 em + uno spazio)
+    for o in others:
+        if abs(o.baseline - line.baseline) < 0.5:
+            gap = max(o.bbox.x0 - line.bbox.x1, line.bbox.x0 - o.bbox.x1)
+            if gap < gap_max:
+                return True
+    return False
 
 
 def _same_line(placed: PlacedLine, line: Line) -> bool:
@@ -592,10 +671,23 @@ def replace_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, para
     kept_orig: set[int] = set()
     kept_new: set[int] = set()
     if keep_unchanged and not dx and not dy:
+        # solo le righe invariate prima della prima riga cambiata: una riga invariata dopo una riscritta
+        # resterebbe nel contenuto prima di lei, e chi legge il testo nell'ordine del contenuto (Trova,
+        # copia, estrazione) spezzerebbe le frasi a cavallo delle due righe (E-1)
+        others: list[Line] | None = None
+        loaded = False
         for i, pl in enumerate(lay.lines):
-            if i < len(block.lines) and _same_line(pl, block.lines[i]):
-                kept_orig.add(i)
-                kept_new.add(i)
+            if not (i < len(block.lines) and _same_line(pl, block.lines[i])):
+                break
+            if not loaded:
+                others, loaded = _foreign_lines(page, block), True
+            if _joins_neighbour(block.lines[i], others):
+                # altro testo vicino sulla stessa linea di base (l'altra colonna): tolte le righe che seguono,
+                # nel contenuto la riga tenuta finirebbe accanto a quel testo e l'estrazione unirebbe le due
+                # righe. Si riscrive anche lei.
+                break
+            kept_orig.add(i)
+            kept_new.add(i)
     to_remove = [ln for i, ln in enumerate(block.lines) if i not in kept_orig]
     to_write = [pl for i, pl in enumerate(lay.lines) if i not in kept_new]
     if not to_remove and not to_write:
@@ -704,16 +796,7 @@ def delete_block(pdf: pymupdf.Document, page_index: int, block: TextBlock) -> No
 def _original_placed_lines(block: TextBlock, dx: float, dy: float, resolver: FontResolver,
                            composer: Composer) -> list[PlacedLine]:
     """Righe originali parola per parola nelle posizioni originali (spostamento fedele)."""
-    out = []
-    for line in block.lines:
-        pl = PlacedLine(baseline=line.baseline + dy, size=line.size)
-        for w in line.words:
-            x = w.x + dx
-            for part, choice, width in composer.pieces(w.text, w.style):
-                pl.pieces.append(Piece(x, part, w.style, choice, width))
-                x += width
-        out.append(pl)
-    return out
+    return [_words_line(composer, line, line.words, dx, dy) for line in block.lines]
 
 
 def move_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, dx: float, dy: float,
@@ -735,9 +818,8 @@ def move_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, dx: flo
     if block.invisible:
         remove_lines(src, block.lines)
         writer = _Writer(dst)
-        for ln, pl in zip(block.lines, lines):
-            for p in pl.pieces:
-                writer.write_piece(p, pl.baseline, render_mode=3)
+        for pl in lines:
+            writer.write_line(pl, render_mode=3)
         return EditResult(bbox=moved, changed=True)
     anchors = collect_anchors(src, block.bbox) if dst_index == page_index else []
     remove_lines(src, block.lines, [a["link"] for a in anchors if a["kind"] == "link"])
@@ -1021,11 +1103,7 @@ def restack_block(pdf: pymupdf.Document, page_index: int, block: TextBlock, fron
     remove_lines(page, block.lines)
     writer = _Writer(page, overlay=front)
     for pl in lines:
-        if block.invisible:
-            for p in pl.pieces:
-                writer.write_piece(p, pl.baseline, render_mode=3)
-        else:
-            writer.write_line(pl)
+        writer.write_line(pl, render_mode=3 if block.invisible else 0)
     return EditResult(bbox=block.bbox, changed=True)
 
 
@@ -1058,12 +1136,7 @@ def delete_words_in_place(pdf: pymupdf.Document, page_index: int, block: TextBlo
     remove_lines(page, [ln for ln, _k in touched])
     writer = _Writer(page)
     for line, keep in touched:
-        for w in keep:
-            x = w.x
-            for part, choice, width in composer.pieces(w.text, w.style):
-                writer.write_piece(Piece(x, part, w.style, choice, width), line.baseline,
-                                   render_mode=3 if block.invisible else 0)
-                x += width
+        writer.write_line(_words_line(composer, line, keep), render_mode=3 if block.invisible else 0)
     return removed
 
 

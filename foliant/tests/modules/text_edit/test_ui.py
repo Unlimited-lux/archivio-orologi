@@ -791,3 +791,63 @@ def test_no_document_names_in_profile(window, paragraphs_pdf, quiet, qtbot, tmp_
                     if "zq7k" in f or b"zq7k" in fh.read():
                         found.append(f)
     assert found == []
+
+
+def editor_lines(ed) -> list[str]:
+    """Righe del riquadro di modifica come le ha disposte Qt (spazi normalizzati)."""
+    ed.document().size()                          # disposizione completa
+    out = []
+    block = ed.document().begin()
+    while block.isValid():
+        layout, text = block.layout(), block.text()
+        for i in range(layout.lineCount()):
+            line = layout.lineAt(i)
+            out.append(" ".join(text[line.textStart():line.textStart() + line.textLength()].split()))
+        block = block.next()
+    return [t for t in out if t]
+
+
+@pytest.mark.parametrize("zoom", [1.0, 1.5, 2.0])
+def test_editor_wraps_where_the_pdf_will(window, quiet, qtbot, tmp_path, zoom):
+    """E-4: il riquadro va a capo negli stessi punti del PDF, senza la tolleranza in più che lo allargava
+    (432 pt diventavano 446): prima della modifica, durante la scrittura e dopo la conferma."""
+    from foliant.core.document import Document as Doc
+    from foliant.modules.text_edit import engine
+    from foliant.modules.text_edit.analysis import analyze_page
+    from foliant.modules.text_edit.model import Run, Style
+
+    from .conftest import SERIF, new_doc_with_font, save
+
+    path = save(new_doc_with_font(SERIF)[0], tmp_path / "vuoto.pdf")
+    d = Doc.open(path)
+    text = ("Art. 1. La società Bianchi & Figli, con sede in Milano, rappresentata dalla sig.ra Laura Bianchi, "
+            "cede all'acquirente, che accetta, gli orologi descritti nell'allegato A al prezzo pattuito di "
+            "€ 24.800,00, comprensivo di revisione completa del movimento, sostituzione delle guarnizioni e "
+            "verifica dell'impermeabilità; il pagamento, che deve andare a buon fine entro trenta giorni dalla "
+            "consegna, avverrà mediante bonifico sul conto intestato al venditore presso la filiale indicata.")
+    with d.change("Crea") as pdf:
+        engine.add_text(pdf, 0, pymupdf.Point(90, 100), [[Run(text, Style(font="Liberation Serif", size=12))]],
+                        width=432, align="justify", leading=14.4)
+    out = tmp_path / "contratto.pdf"
+    d.save(out)
+    view = open_in_edit_mode(window, str(out))
+    view.set_zoom(zoom)
+    ctrl = ctrl_of(window)
+    block = block_with(ctrl, view, "Art. 1.")
+    ed = ctrl.open_editor(view, 0, block)
+    assert editor_lines(ed) == [" ".join(ln.text.split()) for ln in block.lines]
+    assert ed.content_rect_points().width() < 432 * 1.01            # non più 446 pt
+    for typed in ("Il venditore dichiara che ", "ogni orologio che deve andare all'acquirente ", "a "):
+        cur = ed.textCursor()
+        cur.setPosition(len("Art. 1. "))
+        ed.setTextCursor(cur)
+        qtbot.keyClicks(ed, typed)
+        qtbot.wait(10)
+    typed_lines = editor_lines(ed)
+    ctrl.commit_editor(view)
+    with view.document.lock:
+        new = [b for b in analyze_page(view.document.pdf[0], 0) if b.text.startswith("Art. 1.")][0]
+    assert typed_lines == [" ".join(ln.text.split()) for ln in new.lines]
+    assert abs(new.lines[0].baseline - block.lines[0].baseline) < 0.1 and abs(new.x0 - block.x0) < 0.3
+    for ln in new.lines:
+        assert ln.bbox.x1 <= block.x0 + 432 + 0.3                   # nessuno sconfinamento oltre il margine

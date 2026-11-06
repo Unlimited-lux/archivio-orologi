@@ -20,6 +20,9 @@ GRANULARITY_PARAGRAPH = "paragraph"
 GRANULARITY_LINE = "line"
 
 SOFT_HYPHEN = "­"
+# caratteri che non si contano nelle righe (vedi `layout.Composer.line_counts`): spazi, separatori di riga e
+# di paragrafo, trattini morbidi
+NOT_COUNTED = frozenset(" \t\n\u2028\u2029" + SOFT_HYPHEN)
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,25 @@ class TextBlock:
 
 def paragraphs_text(paragraphs: list[Paragraph]) -> str:
     return "\n".join("".join(r.text for r in p) for p in paragraphs).replace(SOFT_HYPHEN, "")
+
+
+def same_paragraphs(a: list[Paragraph], b: list[Paragraph]) -> bool:
+    """Stesso testo con lo stesso aspetto (i paragrafi vuoti in fondo non contano)."""
+    a = [merge_runs(p) for p in a]
+    b = [merge_runs(p) for p in b]
+    while a and not a[-1]:
+        a.pop()
+    while b and not b[-1]:
+        b.pop()
+    if len(a) != len(b):
+        return False
+    for pa, pb in zip(a, b):
+        if len(pa) != len(pb):
+            return False
+        for ra, rb in zip(pa, pb):
+            if ra.text != rb.text or not ra.style.same_look(rb.style):
+                return False
+    return True
 
 
 def paragraphs_from_text(text: str, style: Style) -> list[Paragraph]:

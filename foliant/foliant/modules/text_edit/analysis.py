@@ -13,8 +13,8 @@ import pymupdf
 
 from .bidi import is_ltr_char, is_rtl_char, paragraph_is_rtl, unshape
 from .model import (
-    ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT, GRANULARITY_LINE, SOFT_HYPHEN, Line, Run, Style,
-    TextBlock, Word, color_from_int, merge_runs,
+    ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT, GRANULARITY_LINE, NOT_COUNTED, SOFT_HYPHEN, Line, Run,
+    Style, TextBlock, Word, color_from_int, merge_runs,
 )
 
 _SUBSET = re.compile(r"^[A-Z]{6}\+")
@@ -564,6 +564,31 @@ def _space_run(style: Style) -> Run:
     return Run(" ", style)
 
 
+def _soft_hyphen_at_end(line: Line, nxt: Line | None) -> bool:
+    """La riga finisce con un trattino di sillabazione che nel testo logico diventa un trattino morbido."""
+    text = line.text
+    first_next = nxt.words[0] if nxt is not None and nxt.words else None
+    return (len(text) >= 2 and text.endswith("-") and text[-2].isalpha() and first_next is not None
+            and first_next.text[:1].islower())
+
+
+def line_char_counts(block: TextBlock) -> list[int] | None:
+    """Caratteri di ogni riga del blocco contati come in `layout.Composer.line_counts` (senza spazi e
+    trattini morbidi): dove va a capo la pagina, per il riquadro di modifica (E-4). None se le righe non
+    corrispondono al testo logico del blocco."""
+    if block.rotated:
+        return None
+    out = []
+    for i, line in enumerate(block.lines):
+        n = sum(1 for c in line.text if c not in NOT_COUNTED)
+        nxt = block.lines[i + 1] if i + 1 < len(block.lines) else None
+        if nxt is not None and _soft_hyphen_at_end(line, nxt):
+            n -= 1
+        out.append(n)
+    total = sum(1 for p in block.paragraphs for r in p for c in r.text if c not in NOT_COUNTED)
+    return out if sum(out) == total else None
+
+
 def _paragraphs_from_lines(lines: list[Line], align: str, x0: float, width: float) -> list[list[Run]]:
     paragraphs: list[list[Run]] = [[]]
     for i, line in enumerate(lines):
@@ -571,10 +596,8 @@ def _paragraphs_from_lines(lines: list[Line], align: str, x0: float, width: floa
         if i < len(lines) - 1:
             nxt = lines[i + 1]
             last = runs[-1]
-            text = line.text
             first_next = nxt.words[0] if nxt.words else None
-            if (len(text) >= 2 and text.endswith("-") and text[-2].isalpha() and first_next
-                    and first_next.text[:1].islower()):
+            if _soft_hyphen_at_end(line, nxt):
                 runs[-1] = Run(last.text[:-1] + SOFT_HYPHEN, last.style)
                 paragraphs[-1].extend(runs)
                 continue

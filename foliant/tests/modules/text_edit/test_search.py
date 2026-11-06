@@ -534,3 +534,66 @@ def test_invoice_row_just_above_justified_paragraph(tmp_path, rule):
     assert new_para.align == "justify"
     for (_b0, x0), (_b1, x1) in zip(old[:-1], new[:-1]):
         assert abs(x1 - x0) <= 0.6
+
+
+# ====================================================================== E-1: righe riscritte dal motore
+_CLAUSOLA = ("Art. {n}. La società Bianchi & Figli cede all'acquirente gli orologi descritti nell'allegato al "
+             "prezzo pattuito di € 24.800,00, comprensivo dell'impermeabilità certificata, della revisione "
+             "completa del movimento e della sostituzione delle guarnizioni; il pagamento sul conto intestato a "
+             "Bianchi & Figli avviene contestualmente alla consegna e il prezzo pattuito di € 24.800,00 resta "
+             "invariato indipendentemente dalle quotazioni internazionali degli orologi da collezione.")
+
+
+def _engine_paragraphs_doc(width: float = 300.0, size: float = 11.0) -> tuple[Document, int]:
+    """Pagina con paragrafi giustificati scritti dal motore stesso (come dopo una prima modifica)."""
+    doc = pymupdf.open()
+    doc.new_page(width=612, height=792)
+    data = doc.tobytes()
+    doc.close()
+    d = Document.from_bytes(data)
+    from foliant.modules.text_edit import engine as _engine
+    st = Style(font="DejaVu Sans", size=size)
+    y = 60.0
+    n = 0
+    with d.change("Paragrafi") as pdf:
+        for k in range(4):
+            res = _engine.add_text(pdf, 0, pymupdf.Point(72, y), [[Run(_CLAUSOLA.format(n=k + 1), st)]],
+                                   width=width, align="justify", leading=round(size * 1.25, 2))
+            y = res.bbox.y1 + size
+            n += 2
+    d._saved_state = d._state
+    return d, n
+
+
+@pytest.mark.skipif(not os.path.exists(DEJAVU), reason="DejaVu Sans non installato")
+def test_engine_written_justified_paragraph_stays_one_block():
+    """Le righe giustificate scritte dal motore restano righe intere con i loro spazi: l'analisi ritrova
+    un paragrafo per blocco (non una «tabella» di parole) e il testo è quello scritto."""
+    d, _n = _engine_paragraphs_doc()
+    with d.lock:
+        blocks = S.analyze_page(d.pdf[0], 0)
+        raw = d.pdf[0].get_text("rawdict", flags=S.EXTRACT_FLAGS)
+    expected = [" ".join(_CLAUSOLA.format(n=k + 1).split()) for k in range(4)]
+    assert [" ".join(b.text.split()) for b in blocks] == expected
+    # ogni riga scritta è una riga sola anche per il motore di estrazione (niente salti tra le parole)
+    lines = [ln for b in raw["blocks"] for ln in b.get("lines", ())
+             if "".join(c["c"] for s in ln["spans"] for c in s["chars"]).strip()]
+    assert len(lines) == sum(len(b.lines) for b in blocks)
+
+
+@pytest.mark.skipif(not os.path.exists(DEJAVU), reason="DejaVu Sans non installato")
+def test_second_replace_all_finds_phrases_split_across_rewritten_lines():
+    """E-1: dopo un primo «Sostituisci tutto» le frasi spezzate tra due righe dei paragrafi riscritti si
+    trovano ancora, e il secondo «Sostituisci tutto» le sostituisce tutte."""
+    d, n = _engine_paragraphs_doc()
+    opts = S.SearchOptions(case_sensitive=True)
+    assert len(S.find_in_document(d, "€ 24.800,00", opts)) == n
+    first = S.replace_all(d, "Bianchi & Figli", "Ferretti Orologi d'Epoca", opts)
+    assert first.replaced == n
+    for phrase in ("€ 24.800,00", "prezzo pattuito", "revisione completa del movimento"):
+        expected = sum(_CLAUSOLA.format(n=k + 1).count(phrase) for k in range(4))
+        assert len(S.find_in_document(d, phrase, opts)) == expected, phrase
+    second = S.replace_all(d, "€ 24.800,00", "€ 25.900,00", opts)
+    assert second.replaced == n and second.not_replaceable == []
+    text = " ".join(_page_text(d).split())
+    assert text.count("24.800,00") == 0 and text.count("25.900,00") == n
