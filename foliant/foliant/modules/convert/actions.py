@@ -772,10 +772,11 @@ class ConvertController:
             for name in doc.pdf.embfile_names():
                 info = doc.pdf.embfile_info(name)
                 files.append((name, int(info.get("size") or 0), info.get("description") or ""))
+            labels = _embedded_labels(doc.pdf)
             folders = sorted(portfolio.folder_map(doc.pdf))
             file_folders = {name: portfolio.folder_of(doc.pdf, name) for name, _s, _d in files}
             part = portfolio.pdfa_part(doc.pdf)
-        dlg = EditPortfolioDialog(self.window, files, folders, file_folders=file_folders,
+        dlg = EditPortfolioDialog(self.window, files, folders, file_folders=file_folders, labels=labels,
                                   ask_files=lambda: self.ctx.ask_open_paths(_("Aggiungi file"), _("Tutti i file (*)")))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return None
@@ -1046,6 +1047,15 @@ class ConvertController:
         if not ok:
             return None
         level = optimize.LEVELS[levels.index(choice)]
+        # password dei PDF protetti chiesta prima, come in «Converti più file» (None = file saltato)
+        passwords: dict[str, str | None] = {}
+        for p in paths:
+            probed = self._probe_source(p, Path(p).name)
+            if probed is not None:
+                passwords[p] = probed[1]
+        paths = [p for p in paths if p in passwords]
+        if not paths:
+            return None
 
         def work(progress):
             rows = []
@@ -1053,7 +1063,8 @@ class ConvertController:
                 progress.update(k / len(paths), Path(p).name)
                 out = str(Path(p).with_name(Path(p).stem + _("_compresso") + ".pdf"))
                 try:
-                    r = optimize.compress_file(p, out, level)
+                    # un «…_compresso.pdf» già presente non si sovrascrive: «…_compresso (1).pdf»
+                    r = optimize.compress_file(p, out, level, password=passwords[p], policy="rename")
                     rows.append((p, r["before"], r["after"] if r["reduced"] else r["before"],
                                  r.get("output") or _("nessuna riduzione")))
                 except OperationCancelled:
@@ -1161,21 +1172,22 @@ class ConvertController:
                 break
             except ConversionError as e:
                 detected = getattr(e, "detected_type", None)
-                if detected and detected not in ("pdf", "unknown") and self.ctx.confirm(
-                        _("Ripara PDF"), f"{e}\n\n" + _("Creare un PDF da questo file?")):
-                    if detected in ("jpeg", "png", "tiff", "gif", "bmp", "webp"):
-                        tmp_copy = self._copy_with_extension(p, detected)
-                        try:
-                            self.create_from_images([tmp_copy] if tmp_copy else [p])
-                        finally:
-                            if tmp_copy:
-                                try:
-                                    os.unlink(tmp_copy)
-                                except OSError:
-                                    pass
-                    else:
-                        self.create_from_files([p])
-                elif not detected or detected in ("pdf", "unknown"):
+                tmp_copy = None
+                if detected and detected not in ("pdf", "unknown"):
+                    # copia temporanea con l'estensione del tipo reale (la creazione sceglie il
+                    # convertitore dall'estensione) e con il nome del file originale
+                    tmp_copy = self._copy_with_extension(p, detected)
+                if tmp_copy and self.ctx.confirm(_("Ripara PDF"), f"{e}\n\n" + _("Creare un PDF da questo file?")):
+                    try:
+                        if detected in ("jpeg", "png", "tiff", "gif", "bmp", "webp"):
+                            self.create_from_images([tmp_copy])
+                        else:
+                            self.create_from_files([tmp_copy])
+                    finally:
+                        self._remove_copy(tmp_copy)
+                elif tmp_copy:
+                    self._remove_copy(tmp_copy)
+                else:
                     self.ctx.error(_("Ripara PDF"), f"{Path(p).name}\n\n{e}")
                 continue
             except FoliantError as e:
@@ -1195,16 +1207,31 @@ class ConvertController:
 
     @staticmethod
     def _copy_with_extension(path: str, kind: str) -> str | None:
+        """Copia di `path` in una cartella temporanea, con lo stesso nome e l'estensione del tipo
+        reale `kind` (None se il tipo non si può convertire o la copia non riesce)."""
         import shutil
         import tempfile
-        ext = {"jpeg": ".jpg"}.get(kind, "." + kind)
+        ext = {"jpeg": ".jpg", "text": ".txt", "zip/docx": ".docx", "zip/xlsx": ".xlsx",
+               "zip/pptx": ".pptx", "zip/odt": ".odt", "doc": ".doc", "rtf": ".rtf", "html": ".html",
+               "xps": ".xps", "png": ".png", "tiff": ".tiff", "gif": ".gif", "bmp": ".bmp",
+               "webp": ".webp"}.get(kind)
+        if ext is None:
+            return None
         try:
-            fd, tmp = tempfile.mkstemp(suffix=ext)
-            os.close(fd)
+            folder = tempfile.mkdtemp(prefix="foliant-")
+            tmp = os.path.join(folder, Path(path).stem + ext)
             shutil.copyfile(path, tmp)
             return tmp
         except OSError:
             return None
+
+    @staticmethod
+    def _remove_copy(tmp: str) -> None:
+        try:
+            os.unlink(tmp)
+            os.rmdir(os.path.dirname(tmp))
+        except OSError:
+            pass
 
     # ============================================================ in blocco
     # formati di questa sezione che l'elaborazione in blocco di Strumenti (BAT-06) sa produrre
@@ -1309,3 +1336,33 @@ class ConvertController:
                         [(_("Dettagli"), lambda: self.ctx.info(_("Crea PDF in blocco"), "\n".join(lines)))]
                         if len(lines) > 1 else [])
         return report
+
+
+def _embedded_labels(pdf) -> dict[str, str]:
+    """Chiave dell'albero /EmbeddedFiles → nome del file da mostrare, letto da /UF (o /F).
+
+    Le chiavi scritte da altri programmi sono spesso UTF-8 lette come PDFDocEncoding
+    («perizia Rolex Ã¨.pdf»), e il motore decodifica male anche /UF: si legge la stringa
+    direttamente dalla specifica del file."""
+    import re
+
+    from foliant.core.embedded import _array_items, embedded_entries
+    labels: dict[str, str] = {}
+    try:
+        entries = embedded_entries(pdf)
+    except Exception:
+        return labels
+    pattern = re.compile(r"/(UF|F)\s*(<[0-9A-Fa-f\s]*>|\((?:\\.|[^\\)])*\))")
+    for key, spec in entries:
+        try:
+            text = pdf.xref_object(spec, compressed=True) if isinstance(spec, int) else str(spec)
+        except Exception:
+            continue
+        found = dict((m.group(1), m.group(2)) for m in pattern.finditer(text))
+        raw = found.get("UF") or found.get("F")
+        if raw:
+            items = _array_items("[" + raw + "]")
+            if items and items[0][0] == "str" and items[0][1].strip():
+                labels[key] = items[0][1]
+    return labels
+

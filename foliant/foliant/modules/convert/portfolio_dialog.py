@@ -161,7 +161,7 @@ class EditPortfolioDialog(QDialog):
     cartelle (applicati insieme come un solo passo annullabile)."""
 
     def __init__(self, parent, files: list[tuple[str, int, str]], folders: list[str], ask_files=None,
-                 file_folders: dict[str, str] | None = None):
+                 file_folders: dict[str, str] | None = None, labels: dict[str, str] | None = None):
         super().__init__(parent)
         self.setWindowTitle(_("Modifica portfolio"))
         self.resize(700, 460)
@@ -179,8 +179,11 @@ class EditPortfolioDialog(QDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         lay.addWidget(self.table, 1)
+        labels = labels or {}
         for name, size, desc in files:
-            shown = name[name.index(">") + 1:] if name.startswith("<") and ">" in name else name
+            # nome mostrato: /UF del file (i nomi accentati nelle chiavi sono spesso mal codificati)
+            shown = labels.get(name) or name
+            shown = shown[shown.index(">") + 1:] if shown.startswith("<") and ">" in shown else shown
             self._row(shown, format_number(size) + " B", desc, folder=file_folders.get(name, ""),
                       ref=("old", name))
         form = QFormLayout()

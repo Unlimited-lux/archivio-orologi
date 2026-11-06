@@ -4,6 +4,7 @@ realistici di un commerciante di orologi (dati inventati)."""
 from __future__ import annotations
 
 import datetime as dt
+import re
 import threading
 from pathlib import Path
 
@@ -228,3 +229,175 @@ def test_b22_messaggi_intervallo_in_inglese():
                 "il documento ha 1 pagina", "il documento ha {n} pagine",
                 "La pagina 0 non esiste: la numerazione parte da 1.", "Analisi della pagina {i} di {n}"):
         assert key in EN
+
+
+# ------------------------------------------------------------------ azioni (Ripara, Comprimi, Portfolio)
+@pytest.fixture
+def ctrl(window):
+    return window.ctx.convert_controller
+
+
+@pytest.fixture
+def messages(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    log = {"error": [], "info": [], "confirm": [], "notify": []}
+    monkeypatch.setattr(window.ctx, "error", lambda t, m: log["error"].append((t, m)))
+    monkeypatch.setattr(window.ctx, "info", lambda t, m: log["info"].append((t, m)))
+    monkeypatch.setattr(window.ctx, "notify", lambda text, actions=(), duration_ms=None:
+                        log["notify"].append((text, [a[0] for a in actions])))
+
+    def confirm(t, m):
+        log["confirm"].append((t, m))
+        return True
+    monkeypatch.setattr(window.ctx, "confirm", confirm)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    return log
+
+
+# ------------------------------------------------------------------ B-11
+def _libreoffice_pdf(tmp_path) -> bytes:
+    """PDF come lo scrive LibreOffice Writer: albero /Pages e catalogo in fondo al file."""
+    doc = pymupdf.open()
+    for i in range(6):
+        page = doc.new_page()
+        page.insert_text((72, 100), f"Perizia orologio numero {i + 1}: Rolex Submariner 16610, valore "
+                                    f"stimato {8000 + i * 100} euro", fontsize=11)
+    raw = doc.tobytes(garbage=0, no_new_id=True)
+    doc.close()
+    # riscrittura in stile Writer: pagine, risorse e contenuti prima; /Pages e /Catalog per ultimi
+    src = pymupdf.open(stream=raw)
+    objs = {x: src.xref_object(x, compressed=True) for x in range(1, src.xref_length())}
+    streams = {x: src.xref_stream(x) for x in objs if src.xref_is_stream(x)}
+    cat = src.pdf_catalog()
+    tree = int(src.xref_get_key(cat, "Pages")[1].split()[0])
+    order = [x for x in objs if x not in (cat, tree)] + [tree, cat]
+    out = bytearray(b"%PDF-1.7\n")
+    for x in order:
+        body = objs[x]
+        if x in streams:
+            data = streams[x]
+            body = re.sub(r"/Filter\s*/\w+|/Length\s+\d+", "", body).rstrip().rstrip(">") + f"/Length {len(data)}>>"
+            out += f"{x} 0 obj\n{body}\nstream\n".encode("latin-1") + data + b"\nendstream\nendobj\n"
+        else:
+            out += f"{x} 0 obj\n{body}\nendobj\n".encode("latin-1")
+    out += f"trailer\n<</Size {src.xref_length()} /Root {cat} 0 R>>\nstartxref\n0\n%%EOF\n".encode()
+    src.close()
+    with pymupdf.open(stream=bytes(out)) as check_doc:
+        assert check_doc.page_count == 6
+    return bytes(out)
+
+
+def test_b11_ripara_pdf_troncato_senza_albero_delle_pagine(tmp_path):
+    from foliant.modules.convert import optimize
+    data = _libreoffice_pdf(tmp_path)
+    truncated = data[: int(len(data) * 0.85)]
+    assert truncated.rfind(b"/Type/Pages") < 0 and truncated.rfind(b"/Type /Pages") < 0
+    path = tmp_path / "perizie.pdf"
+    path.write_bytes(truncated)
+    out, report = optimize.repair_file(path)
+    assert Path(out).name == "perizie_riparato.pdf"
+    with pymupdf.open(out) as d:
+        texts = [d[i].get_text() for i in range(d.page_count)]
+    assert report["pages"] == len(texts) >= 5
+    assert "Perizia orologio numero 1" in texts[0] and "numero 2" in texts[1]
+    assert any("troncato" in w for w in report["warnings"])
+
+
+# ------------------------------------------------------------------ B-12 / B-18
+def test_b12_ripara_file_di_testo_rinominato_crea_pdf_col_nome_originale(window, ctrl, messages, tmp_path,
+                                                                          monkeypatch):
+    path = tmp_path / "Nota consegna Rolex.pdf"
+    path.write_text("Consegna del Rolex Datejust 126300 al cliente Bianchi il 3 aprile 2026.\n", encoding="utf-8")
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [str(path)])
+    ctrl.repair()
+    assert not messages["error"], messages["error"]
+    assert messages["confirm"] and "file di testo" in messages["confirm"][0][1]
+    view = window.ctx.current_view()
+    assert view is not None and view.document.display_name == "Nota consegna Rolex.pdf"
+    assert "Datejust 126300" in view.document.page_text(0)
+    with pymupdf.open(stream=view.document.to_bytes()) as d:
+        assert "tmp" not in (d.metadata.get("title") or "")
+    assert list(tmp_path.iterdir()) == [path]          # nessuna copia lasciata accanto
+
+
+def test_b18_ripara_jpeg_rinominato_crea_pdf_col_nome_originale(window, ctrl, messages, tmp_path, monkeypatch):
+    import cv2
+    import numpy as np
+
+    from foliant.modules.convert.create_dialogs import ImagesDialog
+    from PySide6.QtWidgets import QDialog
+    img = np.full((300, 400, 3), 230, np.uint8)
+    cv2.putText(img, "Omega 3570.50", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
+    ok, buf = cv2.imencode(".jpg", img)
+    path = tmp_path / "Foto quadrante.pdf"
+    path.write_bytes(buf.tobytes())
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [str(path)])
+    monkeypatch.setattr(ImagesDialog, "exec", lambda d: QDialog.DialogCode.Accepted)
+    ctrl.repair()
+    assert not messages["error"], messages["error"]
+    view = window.ctx.current_view()
+    assert view is not None and view.document.display_name == "Foto quadrante.pdf"
+
+
+# ------------------------------------------------------------------ B-14
+def test_b14_comprimi_piu_file_non_sovrascrive(window, ctrl, messages, tmp_path, monkeypatch):
+    import cv2
+    import numpy as np
+    from PySide6.QtWidgets import QInputDialog
+    rng = np.random.default_rng(3)
+    doc = pymupdf.open()
+    page = doc.new_page()
+    img = (rng.random((900, 900, 3)) * 40 + 180).astype(np.uint8)
+    ok, buf = cv2.imencode(".png", img)
+    page.insert_image(page.rect, stream=buf.tobytes())
+    page.insert_text((72, 72), "Catalogo autunno 2026: Rolex, Omega, Longines", fontsize=12)
+    src = _save(doc, tmp_path / "catalogo.pdf")
+    old = tmp_path / "catalogo_compresso.pdf"
+    old.write_bytes(b"versione precedente da conservare")
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [src])
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("Bassa", True)))
+    rows = ctrl.compress_files()
+    assert rows and rows[0][3] == str(tmp_path / "catalogo_compresso (1).pdf")
+    assert old.read_bytes() == b"versione precedente da conservare"
+    assert (tmp_path / "catalogo_compresso (1).pdf").exists()
+
+
+def test_b14_comprimi_piu_file_chiede_la_password(window, ctrl, messages, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Listino riservato rivenditori " * 20, fontsize=9)
+    path = tmp_path / "listino.pdf"
+    doc.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="orologi", owner_pw="orologi")
+    doc.close()
+    monkeypatch.setattr(window.ctx, "ask_open_paths", lambda *a, **k: [str(path)])
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("Senza perdita", True)))
+    asked = []
+    monkeypatch.setattr(ctrl, "_ask_password", lambda name: asked.append(name) or "orologi")
+    rows = ctrl.compress_files()
+    assert asked == ["listino.pdf"]
+    assert rows and "errore" not in rows[0][3]
+
+
+# ------------------------------------------------------------------ B-19
+def test_b19_modifica_portfolio_nomi_accentati(window, ctrl, messages, tmp_path, monkeypatch):
+    from foliant.modules.convert.portfolio_dialog import EditPortfolioDialog
+    from PySide6.QtWidgets import QDialog
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Portfolio perizie", fontsize=12)
+    doc.embfile_add("perizia.pdf", b"%PDF-1.4 finto", filename="perizia Rolex è.pdf",
+                    ufilename="perizia Rolex è.pdf")
+    # chiave scritta in UTF-8 come fanno altri programmi (letta «perizia Rolex Ã¨.pdf»)
+    cat = doc.pdf_catalog()
+    _t, v = doc.xref_get_key(cat, "Names/EmbeddedFiles/Names")
+    spec = v.split("(perizia.pdf)", 1)[1][:-1]
+    doc.xref_set_key(cat, "Names/EmbeddedFiles/Names", f"[<{'perizia Rolex è.pdf'.encode().hex()}>{spec}]")
+    path = _save(doc, tmp_path / "portfolio.pdf")
+    window.open_path(path)
+    shown = []
+
+    def fake_exec(dlg):
+        shown.extend(dlg.table.item(r, 0).text() for r in range(dlg.table.rowCount()))
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(EditPortfolioDialog, "exec", fake_exec)
+    ctrl.edit_portfolio()
+    assert shown == ["perizia Rolex è.pdf"]
