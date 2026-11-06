@@ -947,9 +947,10 @@ class SignController(QObject):
     def _reopen(self, view, target: str) -> None:
         doc = view.document
         same = doc.path is not None and Path(target).resolve() == Path(doc.path).resolve()
+        password = getattr(doc, "password", None) or None   # la copia firmata ha la stessa password
         if same:
             self.ctx.window.close_view(view)
-        new_view = self.ctx.open_path(target)
+        new_view = self.ctx.open_path(target, password)
         if new_view is not None:
             self.verify(new_view, force=True)
         return new_view
