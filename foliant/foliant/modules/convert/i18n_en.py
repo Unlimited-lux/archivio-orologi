@@ -291,7 +291,11 @@ EN: dict[str, str] = {
     "Layout": "Layout",
     "Le modifiche si applicano al file quando salvi; puoi annullarle con Annulla.": "Changes are applied to the file when you save; you can undo them with Undo.",
     "Le pagine negli appunti non sono un PDF valido.": "The pages on the clipboard are not a valid PDF.",
-    "Le pagine {a}-{b} non esistono: il documento ha {n} pagine.": "Pages {a}-{b} do not exist: the document has {n} pages.",
+    "La pagina 0 non esiste: la numerazione parte da 1.": "Page 0 does not exist: numbering starts at 1.",
+    "il documento ha 1 pagina": "the document has 1 page",
+    "il documento ha {n} pagine": "the document has {n} pages",
+    "La pagina {p} non esiste ({has}).": "Page {p} does not exist ({has}).",
+    "Le pagine {a}-{b} non esistono ({has}).": "Pages {a}-{b} do not exist ({has}).",
     "LibreOffice ha prodotto un PDF non valido.": "LibreOffice produced an invalid PDF.",
     "LibreOffice non è riuscito a convertire «{n}»: file danneggiato, protetto o formato non supportato.{d}": "LibreOffice could not convert “{n}”: file is damaged, protected, or in an unsupported format.{d}",
     "Linearizzazione…": "Linearization…",
@@ -692,6 +696,7 @@ EN.update({
 
 EN.update({
     "Analisi del documento…": "Analyzing the document…",
+    "Analisi della pagina {i} di {n}": "Analyzing page {i} of {n}",
     "Modello del nome dei file non valido: «{t}».": "Invalid file name template: “{t}”.",
 })
 
