@@ -825,4 +825,8 @@ EN: dict[str, str] = {
     '{n} pagine': '{n} pages',
     'Impossibile leggere o scrivere il file: {e}': 'Cannot read or write the file: {e}',
     'Il file non è un PDF valido oppure è danneggiato.': 'The file is not a valid PDF or is damaged.',
+    'Termini presenti nei metadati': 'Terms found in the metadata',
+    "{terms} compare anche nei metadati del documento ({fields}). Se non li includi, resterà leggibile nelle proprietà del file anche dopo l'oscuramento.": '{terms} also appears in the document metadata ({fields}). If you do not include them, it will stay readable in the file properties after the redaction.',
+    'Oscura anche i metadati': 'Redact the metadata too',
+    'Solo le pagine': 'Pages only',
 }
