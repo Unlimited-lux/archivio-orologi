@@ -2114,7 +2114,7 @@ def active_rows(rep: S.ScanReport) -> list[tuple[str, list[str]]]:
         line = f"{where}: {detail}" if where else detail
         rows.setdefault(names.get(kind, kind), []).append(line)
     if rep.embedded_files:
-        rows.setdefault(_("File incorporati"), []).append(str(rep.embedded_files))
+        rows.setdefault(_("File incorporati"), []).extend(rep.embedded_names or [str(rep.embedded_files)])
     return [(f"{k} ({len(v)})", v) for k, v in rows.items()]
 
 
@@ -2128,7 +2128,7 @@ def inspection_rows(rep: S.ScanReport, extra: dict) -> list[tuple[str, list[str]
     if rep.hidden_layers:
         rows.append((_("Livelli nascosti: {n}").format(n=rep.hidden_layers), extra.get("layers", [])))
     if rep.comments:
-        rows.append((_("Commenti: {n}").format(n=rep.comments), []))
+        rows.append((_("Commenti: {n}").format(n=rep.comments), extra.get("comments", [])))
     if rep.form_fields:
         rows.append((_("Campi modulo: {n}").format(n=rep.form_fields), extra.get("fields", [])))
     if extra.get("hidden_text"):
