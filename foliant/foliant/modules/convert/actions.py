@@ -60,7 +60,7 @@ class ConvertController:
     def window(self):
         return self.ctx.window
 
-    def _run(self, title: str, fn, *args, **kwargs):
+    def _run(self, title: str, fn, /, *args, **kwargs):
         """Esegue in background; restituisce (ok, risultato). Gli errori sono mostrati all'utente."""
         try:
             return True, self.ctx.run_task(title, lambda progress: fn(*args, progress=progress, **kwargs))
@@ -84,7 +84,7 @@ class ConvertController:
         else:
             self.ctx.error(title.rstrip("…. "), _("Errore imprevisto: {e}").format(e=e))
 
-    def _run_background(self, title: str, on_done, fn, *args, **kwargs):
+    def _run_background(self, title: str, on_done, fn, /, *args, **kwargs):
         """Lavoro lungo NON modale: la finestra resta usabile (avanzamento e Annulla nella barra di
         stato); `on_done(risultato)` viene chiamato nel thread dell'interfaccia. Restituisce il task."""
         return self.ctx.run_task(title, lambda progress: fn(*args, progress=progress, **kwargs), modal=False,

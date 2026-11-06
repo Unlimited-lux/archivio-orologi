@@ -1253,3 +1253,16 @@ def test_export_settings_do_not_keep_document_title(window, settings, tmp_path):
     settings.sync()
     dump = " ".join(str(settings.value(k)) for k in settings.allKeys())
     assert "Rossi" not in dump
+
+
+def test_export_epub_with_title_and_author(window, ctrl, sample_pdf, tmp_path, monkeypatch, messages):
+    """Collaudo B-1: le opzioni EPUB «title» e «author» non devono scontrarsi con il titolo
+    dell'attività in background (TypeError e nessun file)."""
+    import zipfile
+    window.open_path(sample_pdf)
+    _accept_export(monkeypatch, tmp_path, fmt="epub", title="Contratto Rolex", author="Unlimited")
+    ctrl.export()
+    out = list(tmp_path.glob("*.epub"))
+    assert len(out) == 1, list(tmp_path.iterdir())
+    opf = zipfile.ZipFile(out[0]).read("OEBPS/content.opf").decode()
+    assert "Contratto Rolex" in opf
