@@ -463,6 +463,50 @@ def _merge_spans(spans: list[Span]) -> list[Span]:
     return out
 
 
+def _line_style(line: dict) -> tuple[float, bool] | None:
+    """Corpo prevalente e grassetto (quasi tutta la riga) di una riga di MuPDF."""
+    sizes: collections.Counter = collections.Counter()
+    bold = total = 0
+    for sp in line.get("spans", []):
+        n = len(sp.get("text", "").strip())
+        if not n:
+            continue
+        sizes[round(float(sp.get("size", 11)) * 2) / 2] += n
+        low = sp.get("font", "").lower()
+        if sp.get("flags", 0) & 16 or "bold" in low or "black" in low or "heavy" in low:
+            bold += n
+        total += n
+    if not total:
+        return None
+    return sizes.most_common(1)[0][0], bold >= 0.9 * total
+
+
+def _split_block(block: dict) -> list[dict]:
+    """Divide un blocco di MuPDF dove cambiano corpo o grassetto fra una riga e l'altra:
+    un titolo («Art. 1 – Premesse», 14 pt grassetto) non si fonde con la clausola che segue."""
+    lines = block.get("lines", [])
+    groups: list[list[dict]] = []
+    prev = None
+    for ln in lines:
+        style = _line_style(ln)
+        if groups and (style is None or prev is None or
+                       (abs(style[0] - prev[0]) < 1.0 and style[1] == prev[1])):
+            groups[-1].append(ln)
+        else:
+            groups.append([ln])
+        if style is not None:
+            prev = style
+    if len(groups) <= 1:
+        return [block]
+    out = []
+    for g in groups:
+        r = pymupdf.Rect(g[0]["bbox"])
+        for ln in g[1:]:
+            r |= pymupdf.Rect(ln["bbox"])
+        out.append(dict(block, lines=g, bbox=tuple(r)))
+    return out
+
+
 def _block_to_para(block: dict, links, dehyphenate: bool = True) -> Para | None:
     spans: list[Span] = []
     lines = block.get("lines", [])
@@ -644,18 +688,20 @@ def analyze_page(page: pymupdf.Page, *, ocr: str = "auto", language: str | None 
             boxes.append((bbox, ImageItem(data=img, ext=block.get("ext", "png"), width=block.get("width", 0),
                                           height=block.get("height", 0), bbox=bbox)))
         elif block.get("type") == 0:
-            para = _block_to_para(block, links, dehyphenate)
-            if para is not None and textpage is None and ocr != "never" and _garbled(para, bad_fonts):
-                # testo nativo non decodificabile (font senza /ToUnicode): OCR della sola area
-                fixed = ocr_area_text(page, bbox, language)
-                if fixed:
-                    first = para.spans[0]
-                    para.spans = [Span(fixed, first.size, first.font, first.bold, first.italic, first.color)]
-                    content.ocr_areas += 1
-                elif "testo-non-decodificabile" not in content.warnings:
-                    content.warnings.append("testo-non-decodificabile")
-            if para is not None:
-                boxes.append((bbox, para))
+            for sub in _split_block(block):
+                bbox = tuple(sub.get("bbox", bbox))
+                para = _block_to_para(sub, links, dehyphenate)
+                if para is not None and textpage is None and ocr != "never" and _garbled(para, bad_fonts):
+                    # testo nativo non decodificabile (font senza /ToUnicode): OCR della sola area
+                    fixed = ocr_area_text(page, bbox, language)
+                    if fixed:
+                        first = para.spans[0]
+                        para.spans = [Span(fixed, first.size, first.font, first.bold, first.italic, first.color)]
+                        content.ocr_areas += 1
+                    elif "testo-non-decodificabile" not in content.warnings:
+                        content.warnings.append("testo-non-decodificabile")
+                if para is not None:
+                    boxes.append((bbox, para))
     if page.rotation and textpage is None:
         # coordinate della pagina come visualizzata (ruotata), coerenti con width/height
         m = page.rotation_matrix
