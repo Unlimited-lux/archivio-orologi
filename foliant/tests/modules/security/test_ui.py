@@ -1272,3 +1272,22 @@ def test_metadata_custom_properties_dialog(window, sec, sample_pdf, monkeypatch)
     view.document.undo()
     with view.document.lock:
         assert S.read_custom(view.document.pdf) == {}
+
+
+def test_f7_inspection_lists_file_names_and_comment_text(tmp_path):
+    from foliant.modules.security import sanitize as S
+    path = tmp_path / "perizia_omega.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((60, 80), "Perizia Omega Speedmaster ref. 311.30.42.30.01.005", fontsize=11)
+    page.add_file_annot((60, 120), b"foto del fondello", "fondello.jpg")
+    note = page.add_text_annot((60, 160), "Graffio sul vetro, da segnalare al cliente")
+    note.update()
+    src.embfile_add("fattura_2026_118.pdf", b"%PDF-1.4 finta", filename="fattura_2026_118.pdf")
+    src.save(str(path))
+    pdf = pymupdf.open(path)
+    rep, extra = S.scan(pdf), S.inspect_extra(pdf)
+    rows = dict(C.inspection_rows(rep, extra))
+    assert rows["File incorporati (2)"] == ["Pagina 1: fondello.jpg", "fattura_2026_118.pdf"]
+    comments = [v for k, v in rows.items() if k.startswith("Commenti")]
+    assert comments and "Pagina 1: Graffio sul vetro, da segnalare al cliente" in comments[0]

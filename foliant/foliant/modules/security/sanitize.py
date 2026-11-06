@@ -27,6 +27,7 @@ class ScanReport:
     remote_files: int = 0      # collegamenti/azioni verso altri file
     submit_forms: int = 0      # moduli che inviano dati a un indirizzo
     embedded_files: int = 0
+    embedded_names: list[str] = field(default_factory=list)   # nomi dei file incorporati
     hidden_layers: int = 0
     comments: int = 0
     form_fields: int = 0
@@ -54,6 +55,20 @@ class ScanReport:
         if self.embedded_files:
             out.append(_("File incorporati: {n}").format(n=self.embedded_files))
         return out
+
+
+def _attachment_name(pdf: pymupdf.Document, xref: int, page: int) -> str:
+    """Nome del file allegato a un'annotazione, con la pagina."""
+    name = ""
+    for key in ("FS/UF", "FS/F"):
+        try:
+            kind, value = pdf.xref_get_key(xref, key)
+        except Exception:
+            continue
+        if kind == "string" and value:
+            name = value
+            break
+    return _("Pagina {n}: {name}").format(n=page + 1, name=name or _("allegato senza nome"))
 
 
 def _uri_of(obj: str) -> str | None:
@@ -93,6 +108,7 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000, chunk: int = 2000) -
                     owner_page[x] = i
                     if kind == pymupdf.PDF_ANNOT_FILE_ATTACHMENT:
                         rep.embedded_files += 1
+                        rep.embedded_names.append(_attachment_name(pdf, x, i))
                     if kind == pymupdf.PDF_ANNOT_WIDGET:
                         rep.form_fields += 1
                     elif kind not in (pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_REDACT, pymupdf.PDF_ANNOT_POPUP):
@@ -156,7 +172,9 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000, chunk: int = 2000) -
     rep.items.extend(("uri", "", u) for u in rep.external_links)
     with ENGINE_LOCK:
         try:
-            rep.embedded_files += pdf.embfile_count()
+            names = pdf.embfile_names()
+            rep.embedded_files += len(names)
+            rep.embedded_names.extend(names)
         except Exception:
             pass
         rep.hidden_layers = len(hidden_layers(pdf))
@@ -730,7 +748,7 @@ def format_pdf_date(value: str) -> str:
 def inspect_extra(pdf: pymupdf.Document, max_pages: int = 2000) -> dict:
     """Dettagli per l'ispezione (SEC-21) oltre a quelli di `scan()`."""
     out: dict = {"image_metadata": count_image_metadata(pdf),
-                 "metadata": [], "layers": [], "fields": [], "hidden_text": 0, "hidden_where": [],
+                 "metadata": [], "layers": [], "fields": [], "comments": [], "hidden_text": 0, "hidden_where": [],
                  "ocr_text": 0, "hidden_annots": 0, "thumbnails": 0, "bookmarks": 0, "signatures": 0}
     meta = pdf.metadata or {}
     labels = metadata_labels()
@@ -762,6 +780,12 @@ def inspect_extra(pdf: pymupdf.Document, max_pages: int = 2000) -> dict:
         for a in page.annots():
             if a.flags & (pymupdf.PDF_ANNOT_IS_HIDDEN | pymupdf.PDF_ANNOT_IS_NO_VIEW):
                 out["hidden_annots"] += 1
+            if a.type[0] in (pymupdf.PDF_ANNOT_LINK, pymupdf.PDF_ANNOT_REDACT, pymupdf.PDF_ANNOT_POPUP,
+                             pymupdf.PDF_ANNOT_WIDGET):
+                continue
+            text = " ".join(((a.info or {}).get("content") or "").split())
+            if text and len(out["comments"]) < 500:
+                out["comments"].append(_("Pagina {n}: {text}").format(n=i + 1, text=text)[:160])
         for w in page.widgets():
             if w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE:
                 out["signatures"] += 1
