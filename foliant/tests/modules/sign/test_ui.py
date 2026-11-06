@@ -1448,3 +1448,33 @@ def test_image_signature_preview_draws_the_image(qtbot):
     image.save(buf, "PNG")
     pm = item_pixmap(g.SignatureItem(origin="immagine", png=bytes(buf.data())), QSize(120, 60))
     assert pm.toImage().pixelColor(60, 30) == QColor(20, 40, 160)
+
+
+def test_f8_signed_copy_of_protected_pdf_reopens_without_asking(window, monkeypatch, tmp_path, id_a):
+    from PySide6.QtWidgets import QInputDialog
+    from foliant.modules.sign import ui_digital
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((72, 90), "Contratto di vendita - Patek Philippe Calatrava 5196", fontsize=12)
+    page.insert_text((72, 120), "Venditore: Orologeria Esempio s.r.l. - Prezzo: 18.500,00 EUR", fontsize=11)
+    path = tmp_path / "contratto_protetto.pdf"
+    src.save(str(path), encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="Vendita2026", owner_pw="Vendita2026",
+             permissions=-1)
+    view = window.open_path(str(path), "Vendita2026")
+    assert view is not None
+    asked = []
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: asked.append(a) or ("", False)))
+
+    def fake_exec(dlg):
+        dlg.digital_id = id_a[2]
+        dlg.options = digital.SignOptions(reason="Approvo", location="Milano")
+        return True
+
+    monkeypatch.setattr(ui_digital.DigitalSignDialog, "exec", fake_exec)
+    target = tmp_path / "contratto_protetto_firmato.pdf"
+    monkeypatch.setattr(window.ctx, "ask_save_path", lambda *a, **k: str(target))
+    assert _ctl(window).digital_sign(view, invisible=True)
+    assert asked == []
+    current = window.current_view()
+    assert current is not None and Path(current.document.path) == target
+    assert pymupdf.open(target).needs_pass       # la copia firmata resta protetta
