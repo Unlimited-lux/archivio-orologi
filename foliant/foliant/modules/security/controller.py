@@ -138,8 +138,10 @@ def confirm(parent, title: str, text: str, action: str) -> bool:
 def ask_unapplied(parent, n: int) -> str:
     """«apply», «keep» o «cancel» per il salvataggio con segni non applicati."""
     box = QMessageBox(QMessageBox.Icon.Warning, _("Segni di redazione non applicati"),
-                      _("Il documento contiene {n} segni di redazione non applicati: il contenuto sotto i segni "
-                        "non è ancora stato rimosso.").format(n=n), parent=parent)
+                      (_("Il documento contiene 1 segno di redazione non applicato: il contenuto sotto il segno "
+                         "non è ancora stato rimosso.") if n == 1 else
+                       _("Il documento contiene {n} segni di redazione non applicati: il contenuto sotto i segni "
+                         "non è ancora stato rimosso.")).format(n=n), parent=parent)
     apply = box.addButton(_("Applica ora"), QMessageBox.ButtonRole.AcceptRole)
     keep = box.addButton(_("Continua con i segni"), QMessageBox.ButtonRole.DestructiveRole)
     cancel = box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
@@ -564,7 +566,8 @@ class SecurityController:
         except Exception as e:
             self.ctx.error(_("Cifratura non riuscita"), str(e))
             return False
-        self.ctx.status(_("Copia cifrata per {n} destinatari salvata: {f}").format(
+        self.ctx.status((_("Copia cifrata per 1 destinatario salvata: {f}") if len(dlg.recipients) == 1 else
+                         _("Copia cifrata per {n} destinatari salvata: {f}")).format(
             n=len(dlg.recipients), f=os.path.basename(path)))
         return True
 
@@ -723,7 +726,8 @@ class SecurityController:
             except OSError as e:
                 self.ctx.error(_("Spazio protetto"), _("Impossibile leggere il file: {e}").format(e=e.strerror))
         if n:
-            self.ctx.status(_("{n} documenti aggiunti allo spazio protetto").format(n=n))
+            self.ctx.status((_("1 documento aggiunto allo spazio protetto") if n == 1 else
+                             _("{n} documenti aggiunti allo spazio protetto")).format(n=n))
         return n
 
     def move_to_vault(self, delete_original: bool | None = None) -> bool:
@@ -957,12 +961,22 @@ class SecurityController:
                 try:
                     POL.protect_file(path, POL.protected_name(path, out_dir), settings)
                     done += 1
-                except Exception as e:
+                except P.ProtectionError as e:
                     failed.append((path, str(e)))
+                except OSError as e:
+                    # niente percorso completo nel messaggio: il nome del file è già in testa alla riga
+                    failed.append((path, _("Impossibile leggere o scrivere il file: {e}").format(
+                        e=e.strerror or type(e).__name__)))
+                except Exception:       # messaggio del motore, in inglese e con il percorso
+                    failed.append((path, _("Il file non è un PDF valido oppure è danneggiato.")))
             return done, failed
 
         done, failed = self.ctx.run_task(_("Protezione dei file…"), work)
-        text = _("{n} file protetti con la policy «{p}».").format(n=done, p=name)
+        if done == 0:
+            text = _("Nessun file protetto con la policy «{p}».").format(p=name)
+        else:
+            text = (_("1 file protetto con la policy «{p}».") if done == 1 else
+                    _("{n} file protetti con la policy «{p}».")).format(n=done, p=name)
         if failed:
             text += "\n\n" + "\n".join(f"{os.path.basename(f)}: {e}" for f, e in failed)
             self.ctx.error(_("Policy di protezione"), text)
@@ -1176,7 +1190,7 @@ class SecurityController:
                 for r in rects:
                     if R.add_mark(pdf, page, r, self.style, source, covered) is not None:
                         n += 1
-        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n))
+        self.ctx.status((_("1 segno di redazione aggiunto") if n == 1 else _("{n} segni di redazione aggiunti")).format(n=n))
         return n
 
     def convert_highlights(self, document=None, xrefs: set[int] | None = None) -> int:
@@ -1200,7 +1214,7 @@ class SecurityController:
                     for r in rects:
                         if R.add_mark(pdf, i, r, self.style, "selezione") is not None:
                             n += 1
-        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n))
+        self.ctx.status((_("1 segno di redazione aggiunto") if n == 1 else _("{n} segni di redazione aggiunti")).format(n=n))
         return n
 
     def mark_matches(self, document, matches: list[PT.Match], source: str) -> int:
@@ -1253,7 +1267,9 @@ class SecurityController:
         found, empty, outside = self.ctx.run_task(_("Ricerca in corso…"), work)
         notices = []
         if empty:
-            notices.append(_("{n} pagine senza testo (scansioni): esegui l'OCR per includerle.").format(n=len(empty)))
+            notices.append((_("1 pagina senza testo (scansione): esegui l'OCR per includerla.") if len(empty) == 1
+                            else _("{n} pagine senza testo (scansioni): esegui l'OCR per includerle."))
+                           .format(n=len(empty)))
         return found + outside, notices
 
     def find_and_mark(self, mode: str = "terms") -> int:
@@ -1275,7 +1291,9 @@ class SecurityController:
         outside = [m for m in chosen if m.page < 0]
         if outside:
             self.pending_outside.setdefault(doc, []).extend(outside)
-        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n + len(outside)))
+        total = n + len(outside)
+        self.ctx.status((_("1 segno di redazione aggiunto") if total == 1 else
+                         _("{n} segni di redazione aggiunti")).format(n=total))
         self.ctx.show_properties(PANEL_ID)
         return n
 
@@ -1375,7 +1393,7 @@ class SecurityController:
         except (OSError, ValueError) as e:
             self.ctx.error(_("Importazione non riuscita"), str(e))
             return 0
-        self.ctx.status(_("{n} segni di redazione aggiunti").format(n=n))
+        self.ctx.status((_("1 segno di redazione aggiunto") if n == 1 else _("{n} segni di redazione aggiunti")).format(n=n))
         return n
 
     def restyle_marks(self, marks: list[R.Mark], style: R.MarkStyle | None = None) -> int:
@@ -1437,13 +1455,16 @@ class SecurityController:
         if not self.require_modify(doc):
             return False
         pages = sorted({m.page for m in targets})
-        title = _("Applicare {n} redazioni?").format(n=len(targets) + len(outside))
-        text = _("Il contenuto sotto {n} aree su {p} pagine verrà rimosso definitivamente (testo, immagini, "
+        total = len(targets) + len(outside)
+        title = (_("Applicare 1 redazione?") if total == 1 else _("Applicare {n} redazioni?")).format(n=total)
+        text = _("Il contenuto sotto {areas} su {pages} verrà rimosso definitivamente (testo, immagini, "
                  "grafica, commenti e campi). Puoi annullare fino al salvataggio; dopo non sarà più "
-                 "recuperabile.").format(n=len(targets), p=len(pages))
+                 "recuperabile.").format(areas=_areas(len(targets)), pages=_pages(len(pages)))
         if outside:
-            text += "\n\n" + _("Verranno cancellate anche {n} occorrenze fuori dalle pagine (metadati, segnalibri, "
-                               "commenti, campi, allegati).").format(n=len(outside))
+            text += "\n\n" + (_("Verrà cancellata anche 1 occorrenza fuori dalle pagine (metadati, segnalibri, "
+                                "commenti, campi, allegati).") if len(outside) == 1 else
+                              _("Verranno cancellate anche {n} occorrenze fuori dalle pagine (metadati, segnalibri, "
+                                "commenti, campi, allegati).")).format(n=len(outside))
         if self._has_signatures(doc):
             text += "\n\n" + _("Le firme digitali del documento risulteranno non valide.")
         if not confirm(self.parent, title, text, _("Applica")):
@@ -1472,7 +1493,8 @@ class SecurityController:
             return False
         if outside:
             self.pending_outside.pop(doc, None)
-        self.ctx.status(_("Redazioni applicate: {n} aree su {p} pagine").format(n=report.marks, p=report.pages))
+        self.ctx.status(_("Redazioni applicate: {areas} su {pages}").format(areas=_areas(report.marks),
+                                                                            pages=_pages(report.pages)))
         return True
 
     def save_guard(self, view, info: dict) -> bool:
@@ -1759,7 +1781,8 @@ class SecurityController:
         n = len(self.marks_of(doc))
         if n:
             banner.set_notice(Notice("unapplied", 1,
-                                     _("Il documento contiene {n} segni di redazione non applicati.").format(n=n),
+                                     (_("Il documento contiene 1 segno di redazione non applicato.") if n == 1 else
+                                      _("Il documento contiene {n} segni di redazione non applicati.")).format(n=n),
                                      [(_("Rivedi"), lambda: self.show_panel())]))
 
     def show_active_details(self, view) -> None:
@@ -2104,6 +2127,14 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
     rows.append((_("Azioni consentite"), allowed))
     rows.append((_("Azioni non consentite"), denied))
     return rows
+
+
+def _areas(n: int) -> str:
+    return (_("1 area") if n == 1 else _("{n} aree")).format(n=n)
+
+
+def _pages(n: int) -> str:
+    return (_("1 pagina") if n == 1 else _("{n} pagine")).format(n=n)
 
 
 def active_rows(rep: S.ScanReport) -> list[tuple[str, list[str]]]:

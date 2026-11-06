@@ -548,7 +548,7 @@ class PolicyDialog(QDialog):
             self.notice.setText(str(e))
             return
         self.reload(done[0] if done else None)
-        self.notice.setText("\n".join([_("{n} policy importate").format(n=len(done))] + notes))
+        self.notice.setText("\n".join([(_("1 policy importata") if len(done) == 1 else _("{n} policy importate")).format(n=len(done))] + notes))
 
     def _import(self) -> None:
         from PySide6.QtWidgets import QFileDialog
@@ -709,7 +709,7 @@ class FindDialog(QDialog):
             return
         for name in done:
             self._add_box("user:" + name, name, True)
-        msg = [_("{n} schemi importati").format(n=len(done))] + errors
+        msg = [(_("1 schema importato") if len(done) == 1 else _("{n} schemi importati")).format(n=len(done))] + errors
         self.notice.setText("\n".join(msg))
 
     def _import_patterns(self) -> None:
@@ -788,7 +788,8 @@ class FindDialog(QDialog):
             item.setToolTip(0, m.text)
         for key, parent in groups.items():
             parent.setText(0, f"{parent.text(0)} ({parent.childCount()})")
-        self.summary.setText(_("{n} occorrenze trovate").format(n=len(matches)) if matches
+        self.summary.setText((_("1 occorrenza trovata") if len(matches) == 1 else
+                              _("{n} occorrenze trovate")).format(n=len(matches)) if matches
                              else _("Nessuna occorrenza trovata"))
         self.ok.setEnabled(bool(matches))
 
