@@ -1382,3 +1382,55 @@ def test_ask_metadata_dialog_text(window, monkeypatch):
     assert title == "Termini presenti nei metadati"
     assert text.startswith("«Lucia Ferri» compare anche nei metadati del documento (Autore, Oggetto).")
     assert "Oscura anche i metadati" in buttons and "Solo le pagine" in buttons
+
+
+def _form_with_scripts(path, extra_keystroke=None):
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((72, 70), "Scheda di permuta - Omega Seamaster 210.30.42.20.01.001", fontsize=12)
+    fields = [
+        ("prezzo", 'AFNumber_Format(2, 0, 0, 0, "€ ", true);', 'AFNumber_Keystroke(2, 0, 0, 0, "€ ", true);'),
+        ("data_acquisto", 'AFDate_FormatEx("dd/mm/yyyy");', 'AFDate_KeystrokeEx("dd/mm/yyyy");'),
+        ("sconto", "AFPercent_Format(1, 0);", "AFPercent_Keystroke(1, 0);"),
+        ("cap", "AFSpecial_Format(0);", "AFSpecial_Keystroke(0);"),
+        ("ora", 'AFTime_FormatEx("HH:MM");', 'AFTime_KeystrokeEx("HH:MM");'),
+    ]
+    for n, (name, fmt, stroke) in enumerate(fields):
+        w = pymupdf.Widget()
+        w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+        w.field_name = name
+        w.rect = pymupdf.Rect(72, 100 + 30 * n, 260, 120 + 30 * n)
+        w.script_format = fmt
+        w.script_stroke = extra_keystroke if (extra_keystroke and n == 0) else stroke
+        if name == "sconto":
+            w.script_change = "AFRange_Validate(true, 0, true, 100);"
+        page.add_widget(w)
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = "totale"
+    w.rect = pymupdf.Rect(72, 300, 260, 320)
+    w.script_calc = 'AFSimple_Calculate("SUM", new Array ("prezzo", "sconto"));'
+    page.add_widget(w)
+    src.save(str(path))
+    return path
+
+
+def test_standard_field_formats_are_not_active_content(window, sec, tmp_path):
+    from foliant.modules.security import sanitize as S
+    path = _form_with_scripts(tmp_path / "scheda_permuta.pdf")
+    rep = S.scan(pymupdf.open(path))
+    assert rep.javascript == 0 and not rep.risky
+    view = window.open_path(str(path))
+    notice = sec.banners[view].current()
+    assert notice is None or notice.key != "active"
+
+
+def test_other_field_scripts_still_reported(tmp_path):
+    from foliant.modules.security import sanitize as S
+    path = _form_with_scripts(tmp_path / "scheda_sospetta.pdf",
+                              extra_keystroke='AFNumber_Keystroke(2, 0, 0, 0, "", true); app.launchURL("http://x.example");')
+    rep = S.scan(pymupdf.open(path))
+    assert rep.javascript == 1
+    rows = dict(C.active_rows(rep))
+    assert any("launchURL" in line for line in rows["Script (1)"])
+    assert not S.is_standard_form_script('AFNumber_Format(cifre, 0, 0, 0, "", true);')
