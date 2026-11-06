@@ -72,11 +72,17 @@ class ProposalBar:
                                         priority=priority, on_close=lambda: self.controller.dismiss(self.view))
 
     def show_document(self, count: int, missing: list[str], restricted: bool, low_res: bool,
-                      unextractable: int = 0) -> None:
+                      unextractable: int = 0, partial: bool = False) -> None:
+        """`partial`: l'analisi copre solo le prime pagine (ANALYSIS_PAGES), il conteggio è un minimo."""
         self.page = None
         scans = count - unextractable
         parts = []
-        if scans == 1:
+        if partial and scans == 1:
+            parts.append(_("Questo documento contiene almeno 1 pagina scannerizzata senza testo."))
+        elif partial and scans > 1:
+            parts.append(_("Questo documento contiene almeno {n} pagine scannerizzate senza testo.").format(
+                n=scans))
+        elif scans == 1:
             parts.append(_("Questo documento contiene 1 pagina scannerizzata senza testo."))
         elif scans > 1:
             parts.append(_("Questo documento contiene pagine scannerizzate senza testo ({n}).").format(n=scans))
@@ -391,6 +397,7 @@ class ReviewPanel(QWidget):
             self.table.setItem(i, 2, c)
         self.table.blockSignals(False)
         self.hint.setText(_("Nessuna parola da verificare.") if not self.rows else
+                          _("1 parola da verificare, evidenziata sulla pagina.") if len(self.rows) == 1 else
                           _("{n} parole da verificare, evidenziate sulla pagina.").format(n=len(self.rows)))
         enabled = bool(self.rows)
         for w in (self.edit, self.btn_fix, self.btn_ok, self.btn_all, self.btn_dict):
@@ -801,7 +808,7 @@ class OcrController(QObject):
                 restricted = False
         low = any(st.infos[i].low_resolution for i in found)
         unextractable = sum(1 for i in found if st.infos[i].category == detect.UNEXTRACTABLE)
-        st.bar.show_document(len(found), missing, restricted, low, unextractable)
+        st.bar.show_document(len(found), missing, restricted, low, unextractable, partial=not st.complete)
 
     def dismiss(self, view) -> None:
         st = self.state(view)
@@ -886,7 +893,7 @@ class OcrController(QObject):
         text = engine.format_pages(pages) if pages and pages != detected else None
         dlg = OcrDialog(self.ctx.window, page_count=view.page_count, current_page=view.current_page,
                         detected=detected, settings=self.settings(),
-                        mode=mode or str(self.settings().value("ocr/mode", engine.SEARCHABLE)), pages_text=text,
+                        mode=mode or engine.SEARCHABLE, pages_text=text,
                         infos=dict(st.infos), page_image_cb=lambda v=view: self._page_image(v),
                         existing=engine.FORCE if any(
                             st.infos.get(i) is not None and st.infos[i].category == detect.UNEXTRACTABLE
@@ -895,7 +902,8 @@ class OcrController(QObject):
                         preview_cb=lambda i, popts, v=view: self._preview(v, i, popts))
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        self.settings().setValue("ocr/mode", dlg.mode())
+        # la modalità non si ricorda: «Esegui OCR» apre sempre sul PDF ricercabile, «Rendi
+        # modificabile» e «Estrai testo» sulla loro (B-15)
         self.run_background(view, dlg.options(), dlg.selected_pages(), preview=dlg.preview,
                             new_document=dlg.new_document)
 

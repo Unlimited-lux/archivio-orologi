@@ -391,7 +391,8 @@ class OcrDialog(QDialog):
         workers = engine.OcrOptions().worker_count()
         seconds = max(1, round(todo * 4.0 / workers))
         est = _("{s} s").format(s=seconds) if seconds < 90 else _("{m} min").format(m=round(seconds / 60))
-        text = _("Da elaborare: {n} pagine · tempo stimato: circa {t}").format(n=todo, t=est)
+        text = (_("Da elaborare: 1 pagina · tempo stimato: circa {t}").format(t=est) if todo == 1 else
+                _("Da elaborare: {n} pagine · tempo stimato: circa {t}").format(n=todo, t=est))
         if skipped:
             text += " · " + _("saltate: {s}").format(
                 s=", ".join(f"{n} ({lab})" for lab, n in skipped.items()))
