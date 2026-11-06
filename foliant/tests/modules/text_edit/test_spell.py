@@ -163,7 +163,8 @@ def test_language_choice(tmp_path, service, monkeypatch):
     monkeypatch.setattr(spell_mod, "ui_language", lambda: "it")
     doc = pymupdf.open(_errors_pdf(tmp_path / "en.pdf", lang="en-US"))
     assert document_language(doc) == "en"
-    assert choose_language(service, doc) == "en"
+    # testo italiano con /Lang inglese (come nei PDF di LibreOffice): vince la lingua del testo
+    assert choose_language(service, doc) == "it"
     doc2 = pymupdf.open(_errors_pdf(tmp_path / "none.pdf"))
     assert document_language(doc2) is None
     assert choose_language(service, doc2) == "it"
