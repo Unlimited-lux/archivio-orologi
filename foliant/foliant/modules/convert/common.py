@@ -34,6 +34,14 @@ class RangeError(ConversionError):
 _END_WORDS = {"fine", "end", "ultima", "last", "n"}
 
 
+def _missing_pages(a: int, b: int, count: int) -> str:
+    """«La pagina 99 non esiste (il documento ha 3 pagine)» e varianti al plurale."""
+    has = _("il documento ha 1 pagina") if count == 1 else _("il documento ha {n} pagine").format(n=count)
+    if a == b:
+        return _("La pagina {p} non esiste ({has}).").format(p=a, has=has)
+    return _("Le pagine {a}-{b} non esistono ({has}).").format(a=a, b=b, has=has)
+
+
 def parse_page_range(expr: str | None, page_count: int, current: int = 0,
                      selected: list[int] | None = None) -> list[int]:
     """Converte un'espressione in indici di pagina (base 0), nell'ordine scritto.
@@ -80,9 +88,10 @@ def parse_page_range(expr: str | None, page_count: int, current: int = 0,
         else:
             start = end = number(part)
         lo, hi = min(start, end), max(start, end)
-        if lo < 1 or hi > page_count:
-            raise RangeError(_("Le pagine {a}-{b} non esistono: il documento ha {n} pagine.").format(
-                a=lo, b=hi, n=page_count))
+        if lo < 1:
+            raise RangeError(_("La pagina 0 non esiste: la numerazione parte da 1."))
+        if hi > page_count:
+            raise RangeError(_missing_pages(max(lo, page_count + 1), hi, page_count))
         seq = range(start, end + 1) if start <= end else range(start, end - 1, -1)
         for p in seq:
             if p - 1 not in seen:
