@@ -90,6 +90,34 @@ def kind_label(kind: str, plural: bool = False) -> str:
     return labels[kind][1 if plural else 0]
 
 
+def count_label(kind: str, n: int) -> str:
+    """Conteggio con singolare e plurale: «1 aggiunta», «0 eliminazioni», «2 modifiche» (anche in inglese)."""
+    forms = {
+        ADDED: (_("{n} aggiunta"), _("{n} aggiunte")),
+        DELETED: (_("{n} eliminazione"), _("{n} eliminazioni")),
+        MODIFIED: (_("{n} modifica"), _("{n} modifiche")),
+        FORMAT: (_("{n} di formattazione"), _("{n} di formattazione")),
+        VISUAL: (_("{n} visiva"), _("{n} visive")),
+        PAGE: (_("{n} pagina"), _("{n} pagine")),
+        IMAGE: (_("{n} immagine"), _("{n} immagini")),
+        ANNOTATION: (_("{n} annotazione"), _("{n} annotazioni")),
+        FIELD: (_("{n} campo modulo"), _("{n} campi modulo")),
+    }
+    return forms[kind][0 if n == 1 else 1].format(n=n)
+
+
+def status_count_label(status: str, n: int) -> str:
+    """«1 accettata», «2 rifiutate», «0 da verificare», «3 senza stato»."""
+    forms = {
+        "accepted": (_("{n} accettata"), _("{n} accettate")),
+        "rejected": (_("{n} rifiutata"), _("{n} rifiutate")),
+        "review": (_("{n} da verificare"), _("{n} da verificare")),
+        "": (_("{n} senza stato"), _("{n} senza stato")),
+    }
+    one, many = forms.get(status, ("{n} " + status, "{n} " + status))
+    return (one if n == 1 else many).format(n=n)
+
+
 # =============================================================================
 # Modello
 # =============================================================================
@@ -274,7 +302,7 @@ class CompareResult:
 
     def summary(self) -> str:
         c = self.counts()
-        parts = [f"{c[k]} {kind_label(k, plural=True)}" for k in KINDS if c[k] or k in (ADDED, DELETED, MODIFIED)]
+        parts = [count_label(k, c[k]) for k in KINDS if c[k] or k in (ADDED, DELETED, MODIFIED)]
         return " · ".join(parts)
 
     def map_a_to_b(self, pos: float) -> float:

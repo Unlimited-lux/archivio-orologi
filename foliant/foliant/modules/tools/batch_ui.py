@@ -439,7 +439,8 @@ class BatchWidget(QWidget):
             self.report_filter.addItem(_(label), key)
         self.report_filter.currentIndexChanged.connect(self._fill_report)
         self.report_table = QTableWidget(0, 4)
-        self.report_table.setHorizontalHeaderLabels([_("File"), _("Esito"), _("Messaggio"), _("Risultato")])
+        # «File creati», non «Risultato»: in inglese «Esito» è già «Result»
+        self.report_table.setHorizontalHeaderLabels([_("File"), _("Esito"), _("Messaggio"), _("File creati")])
         self.report_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.report_table.verticalHeader().setVisible(False)
         self.report_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

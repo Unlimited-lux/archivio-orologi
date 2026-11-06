@@ -505,3 +505,40 @@ def test_outcomes_use_non_blocking_notifications(window, pdf_builder, tmp_path, 
     window.ctx.tools_module.compare.close()
     window.ctx.tools_module.show_compare()
     assert any("Nessun confronto aperto" in t for t, _a in notes)
+
+
+@pytest.mark.parametrize("lang", ["it", "en"])
+def test_filters_not_cut_at_common_widths(window, pdf_builder, lang):
+    """Collaudo C-9: a 1280 e 1366 px, anche col pannello alla larghezza minima, i filtri non sono tagliati
+    («Eliminazioni (0», «Annotations (0»): se due colonne non ci stanno, una sola."""
+    from PySide6.QtWidgets import QApplication
+
+    from foliant import i18n
+    i18n.set_language(lang)
+    try:
+        for width in (1280, 1366):
+            window.resize(width, 800)
+            w = start(window, pdf_builder([page_lines(1)]), pdf_builder([page_lines(2)]))
+            panel = w.panel
+            for panel_width in (panel.minimumWidth(), w.outer.width() // 4):
+                w.outer.setSizes([w.outer.width() - panel_width, panel_width])
+                QApplication.processEvents()
+                assert abs(panel.width() - panel_width) <= 2, (panel.width(), panel_width)
+                for cb in panel.filters.values():
+                    assert cb.width() >= cb.sizeHint().width(), (width, panel_width, cb.text(), cb.width())
+                    assert cb.mapTo(panel, cb.rect().topRight()).x() <= panel.width()
+    finally:
+        i18n.set_language("it")
+
+
+def test_filters_two_columns_when_room(window, pdf_builder):
+    from PySide6.QtWidgets import QApplication
+    window.resize(1600, 900)
+    w = start(window, pdf_builder([page_lines(1)]), pdf_builder([page_lines(2)]))
+    w.outer.setSizes([w.outer.width() - 420, 420])
+    QApplication.processEvents()
+    rows = {cb.y() for cb in w.panel.filters.values()}
+    assert len(rows) == (len(ce.KINDS) + 1) // 2           # compatto: due colonne
+    w.outer.setSizes([w.outer.width() - w.panel.minimumWidth(), w.panel.minimumWidth()])
+    QApplication.processEvents()
+    assert len({cb.y() for cb in w.panel.filters.values()}) == len(ce.KINDS)   # stretto: una colonna

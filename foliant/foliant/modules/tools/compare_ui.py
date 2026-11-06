@@ -522,6 +522,52 @@ class DiffModel(QAbstractListModel):
         return None
 
 
+class FilterGrid(QWidget):
+    """Caselle dei filtri in due colonne se ci stanno per intero, altrimenti in una sola.
+
+    Il testo delle caselle (es. «Eliminazioni (12)») non viene mai tagliato: alle larghezze strette
+    del pannello (1280 o 1366 px di schermo) due colonne non bastano e le caselle vanno una per riga."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.boxes: list[QWidget] = []
+        self.columns = 0
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+
+    def add(self, box: QWidget) -> None:
+        self.boxes.append(box)
+        self.arrange(force=True)
+
+    def columns_for(self, width: int) -> int:
+        if not self.boxes:
+            return 1
+        need = 2 * max(b.sizeHint().width() for b in self.boxes) + max(0, self.grid.horizontalSpacing())
+        return 2 if need <= width else 1
+
+    def arrange(self, force: bool = False) -> None:
+        """Ridispone le caselle se il numero di colonne cambia (o i testi sono cambiati, con `force`)."""
+        columns = self.columns_for(self.width())
+        if columns == self.columns and not force:
+            return
+        self.columns = columns
+        for b in self.boxes:
+            self.grid.removeWidget(b)
+        for i, b in enumerate(self.boxes):
+            self.grid.addWidget(b, i // columns, i % columns)
+
+    def minimumSizeHint(self) -> QSize:
+        # la larghezza minima è quella di una colonna: il pannello può restringersi fino a lì
+        hint = super().minimumSizeHint()
+        if self.boxes:
+            hint.setWidth(max(b.sizeHint().width() for b in self.boxes))
+        return hint
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.arrange()
+
+
 class DiffPanel(QWidget):
     """Pannello con contatori, filtri, ricerca ed elenco navigabile."""
 
@@ -539,14 +585,14 @@ class DiffPanel(QWidget):
         self.summary.setObjectName("diffSummary")
         self.counter = QLabel()
         self.filters: dict[str, QCheckBox] = {}
-        fl = QGridLayout()
-        for i, kind in enumerate(ce.KINDS):
+        self.filter_grid = FilterGrid()
+        for kind in ce.KINDS:
             cb = QCheckBox(ce.kind_label(kind, plural=True).capitalize())
             cb.setChecked(True)
             cb.setIcon(icon(KIND_ICONS[kind], color=kind_color(kind).name()))
             cb.toggled.connect(self._filters_changed)
             self.filters[kind] = cb
-            fl.addWidget(cb, i // 2, i % 2)
+            self.filter_grid.add(cb)
         self.search = QLineEdit()
         self.search.setPlaceholderText(_("Cerca nelle differenze"))
         self.search.setClearButtonEnabled(True)
@@ -600,7 +646,7 @@ class DiffPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.addWidget(self.summary)
-        lay.addLayout(fl)
+        lay.addWidget(self.filter_grid)
         lay.addWidget(self.search)
         row = QHBoxLayout()
         row.addWidget(self.order, 1)
@@ -623,6 +669,7 @@ class DiffPanel(QWidget):
         for kind, cb in self.filters.items():
             n = sum(1 for d in result.differences if d.kind == kind)
             cb.setText(f"{ce.kind_label(kind, plural=True).capitalize()} ({n})")
+        self.filter_grid.arrange(force=True)          # testi più lunghi: forse non stanno più in due colonne
         self.summary.setText(result.summary())
         n_unc = sum(1 for d in result.differences if d.uncertain)
         self.uncertain_only.setVisible(n_unc > 0)
@@ -723,7 +770,7 @@ class DiffPanel(QWidget):
         shown = len(self.model.visible)
         self.counter.setText(_("Visibili {v} di {t}").format(v=shown, t=total))
         by = {st: sum(1 for d in self.model.all if d.status == st) for st in ce.STATUSES}
-        self.status_counts.setText(" · ".join(f"{n} {ce.status_label(st, plural=True)}" for st, n in by.items()))
+        self.status_counts.setText(" · ".join(ce.status_count_label(st, n) for st, n in by.items()))
         self.status_counts.setVisible(any(by.values()))
         has = shown > 0
         self.list.setVisible(has)

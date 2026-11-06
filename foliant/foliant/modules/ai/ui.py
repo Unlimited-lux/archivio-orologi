@@ -64,6 +64,17 @@ class RequestGate(QObject):
         return choice in ("send", "all")
 
 
+def _explain(action, reason: str) -> None:
+    """Suggerimento e riga di stato del comando: quelli normali, o con il motivo per cui non può partire."""
+    base = action.property("aiBaseTip")
+    if base is None:
+        base = action.toolTip()
+        action.setProperty("aiBaseTip", base)
+        action.setProperty("aiBaseStatus", action.statusTip())
+    action.setToolTip(f"{base}\n{reason}" if reason else base)
+    action.setStatusTip(reason or action.property("aiBaseStatus") or "")
+
+
 class Services:
     """Oggetti condivisi dal modulo nella finestra."""
 
@@ -124,15 +135,55 @@ class Services:
         try:
             if self.panel is not None:
                 self.panel.refresh_state()
-            configured = self.store.active(check_key=False) is not None   # il portachiavi si apre al primo uso
+            reason = self.unavailable_reason()
+            has_view = self.ctx.current_view() is not None
+            # senza fornitore i comandi restano attivi: il suggerimento dice che cosa manca e il clic lo
+            # spiega con «Apri le impostazioni» (`provider_ready`); senza documento vale prima quel motivo
             for a in getattr(self, "doc_actions", []):
-                a.setEnabled(configured and self.ctx.current_view() is not None)
+                a.setEnabled(has_view)
+                _explain(a, reason if has_view else "")
         except RuntimeError:        # finestra già distrutta (aggiornamento differito arrivato tardi)
             return
         for a in getattr(self, "profile_actions", []):
-            a.setEnabled(configured)
+            a.setEnabled(True)
+            _explain(a, reason)
         for a in getattr(self, "local_actions", []):
-            a.setEnabled(self.ctx.current_view() is not None)
+            a.setEnabled(has_view)
+
+    def unavailable_reason(self) -> str:
+        """Perché i comandi che usano il fornitore non possono partire ("" = possono).
+
+        Il portachiavi non viene interrogato: lo sblocco si chiede al primo uso (AI-01)."""
+        if not self.store.enabled():
+            return _("Le «Funzioni IA» sono disattivate: riattivale nelle Impostazioni dell'Assistente IA "
+                     "(File › Opzioni).")
+        if self.store.active(check_key=False) is None:
+            return _("Configura un fornitore nelle Impostazioni dell'Assistente IA (File › Opzioni).")
+        return ""
+
+    def provider_ready(self, command: str) -> bool:
+        """Prima di un comando che usa il fornitore. Se manca, lo spiega e offre di aprire le Impostazioni:
+        True se il comando può partire (anche subito dopo aver configurato il fornitore)."""
+        reason = self.unavailable_reason()
+        if not reason:
+            return True
+        if not self.ask_configure(command, reason):
+            return False
+        self.open_settings()
+        return not self.unavailable_reason()
+
+    def ask_configure(self, command: str, reason: str) -> bool:
+        """Finestra «serve l'Assistente IA»: True con «Apri le impostazioni». Sostituibile nei test."""
+        box = QMessageBox(self.ctx.window)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle(_("Assistente IA"))
+        box.setText(_("Per usare «{c}» serve l'Assistente IA.").format(c=command))
+        box.setInformativeText(reason + "\n" + _("Finché non è configurato, Foliant non invia nulla a servizi IA."))
+        configure = box.addButton(_("Apri le impostazioni"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(configure)
+        box.exec()
+        return box.clickedButton() is configure
 
     # ---------------------------------------------------------------- dialoghi
     def settings_page(self, parent=None):
@@ -1107,8 +1158,14 @@ class Controller:
             self.ctx.notify(_("Scheda inserita a pagina {p}.").format(p=view.current_page + 1),
                             [(_("Annulla"), doc.undo)])
 
+        def go_to(page):
+            if not doc.closed and 0 <= page < view.page_count:
+                self.ctx.activate_view(view)
+                view.go_to_page(page)
+
         dlg = ProductSheetDialog(generate, self.ctx.ask_save_path, open_document, self.ctx.window, insert=insert,
-                                 photos=len(photos), photos_reason=photos_reason)
+                                 photos=len(photos), photos_reason=photos_reason, go_to=go_to,
+                                 language=panel._answer_language() if panel is not None else "")
         self.exec_dialog(dlg)
         return dlg
 
@@ -1383,10 +1440,14 @@ def register(ctx, *, provider_factory=None) -> Services:
 
     mode.entered.connect(show_panel)
 
-    def act(text, icon_name, fn, shortcut=None, requires=True):
-        # l'abilitazione dei comandi che richiedono un documento è gestita da `services.refresh()`:
-        # restano disattivati anche finché non c'è un profilo attivo (AI-01)
-        return ctx.action(text, icon_name, fn, shortcut=shortcut, requires_document=False)
+    def act(text, icon_name, fn, shortcut=None, requires=True, provider=True):
+        # l'abilitazione dei comandi che richiedono un documento è gestita da `services.refresh()`.
+        # `provider`: il comando usa il fornitore; finché non c'è un profilo attivo (AI-01) resta attivo
+        # ma, invece di partire, spiega che cosa manca e offre di aprire le Impostazioni
+        def guarded():
+            if services.provider_ready(text.replace("&", "")):
+                fn()
+        return ctx.action(text, icon_name, guarded if provider else fn, shortcut=shortcut, requires_document=False)
 
     def run(fn_key, scope=None):
         def go():
@@ -1415,28 +1476,31 @@ def register(ctx, *, provider_factory=None) -> Services:
     a_contracts = act(_("Contratti"), "scale", lambda: controller.open_contracts(), requires=False)
     a_sheet = act(_("Scheda prodotto"), "tag", lambda: controller.open_product_sheet())
     a_rank = act(_("Confronta e classifica"), "list-ordered", lambda: controller.open_ranking(), requires=False)
-    a_gfx = act(_("Genera elemento grafico"), "image-plus", lambda: controller.generate_graphic())
+    a_gfx = act(_("Genera elemento grafico"), "image-plus", lambda: controller.generate_graphic(),
+                provider=False)   # spiega da sé se manca il modello
     a_docx = act(_("Converti in Word con l'IA"), "file-text", lambda: controller.convert_to_docx())
     a_bib = act(_("Ricerca bibliografica"), "library", lambda: controller.open_bibliography(), requires=False)
     a_cmd = act(_("Assistente comandi"), "terminal", lambda: controller.open_commands())
     a_ops = act(_("Operazioni in corso"), "activity", lambda: OperationsDialog(services, ctx.window).exec(),
-                requires=False)
+                requires=False, provider=False)
     a_open = act(_("Assistente IA"), "sparkles", lambda: (ctx.set_mode("ia"), show_panel()), "Ctrl+Alt+I",
-                 requires=False)
+                 requires=False, provider=False)
     a_tasks = act(_("Attività"), "briefcase", lambda: controller.open_tasks(), requires=False)
     a_write = act(_("Scrivi"), "pen-line", lambda: controller.open_writer(), requires=False)
     a_extract = act(_("Estrai dati"), "table", lambda: controller.choose_extraction())
     a_sem = act(_("Cerca per significato"), "search", lambda: controller.semantic_search())
     a_bm = act(_("Genera segnalibri"), "bookmark-plus", lambda: controller.generate_bookmarks())
     a_section = act(_("Riassumi sezione"), "bookmark", lambda: controller.summarize_section())
-    a_pages = act(_("Analizza pagine"), "scan-search", lambda: controller.analyze_pages())
-    a_hist = act(_("Cronologia"), "history", lambda: services.show_history(), requires=False)
-    a_log = act(_("Registro degli invii"), "list", lambda: services.show_log(), requires=False)
-    a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False)
+    a_pages = act(_("Analizza pagine"), "scan-search", lambda: controller.analyze_pages(), provider=False)
+    a_hist = act(_("Cronologia"), "history", lambda: services.show_history(), requires=False, provider=False)
+    a_log = act(_("Registro degli invii"), "list", lambda: services.show_log(), requires=False, provider=False)
+    a_set = act(_("Impostazioni dell'Assistente IA"), "settings", lambda: services.open_settings(), requires=False,
+                provider=False)
     services.doc_actions = [a_chat, a_sum, a_tr, a_exp, a_rw, a_out, a_map, a_area, a_trpdf, a_extract, a_bm,
                             a_section, a_sem, a_cmd, a_docx, a_sheet]
     services.profile_actions = [a_tasks, a_write, a_coll, a_bib, a_rank, a_contracts]
-    services.local_actions = [a_pages, a_gfx]   # la generazione spiega da sé se manca il modello   # funziona anche senza profilo (controlli locali)
+    # funzionano anche senza profilo (controlli locali; la generazione spiega da sé se manca il modello)
+    services.local_actions = [a_pages, a_gfx]
     # scheda Assistente IA divisa in gruppi come la barra multifunzione di Excel:
     # Assistente | Strumenti | Impostazioni
     # «Assistente IA» resta distinto da «Chiedi»: funziona anche senza documento e senza fornitore

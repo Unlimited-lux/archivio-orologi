@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from foliant.api import ENGINE_LOCK, DocumentError, _, atomic_write, bind_icon, theme
 
-from .compare_engine import ADDED, DELETED, MODIFIED, kind_label
+from .compare_engine import ADDED, DELETED, MODIFIED, count_label, kind_label
 
 GRANULARITIES = ("line", "word", "char")
 ENCODINGS = ("utf-8", "utf-16", "iso-8859-1", "iso-8859-15", "cp1252")
@@ -278,7 +278,7 @@ class TextCompareDialog(QDialog):
             self.list.addItem(item)
         if self.diffs:
             counts = {k: sum(1 for d in self.diffs if d.kind == k) for k in (ADDED, DELETED, MODIFIED)}
-            self.summary.setText(" · ".join(f"{v} {kind_label(k, plural=True)}" for k, v in counts.items()))
+            self.summary.setText(" · ".join(count_label(k, v) for k, v in counts.items()))
         else:
             self.summary.setText(_("I testi sono identici secondo i criteri selezionati."))
         self._highlight()

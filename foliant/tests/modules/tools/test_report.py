@@ -30,7 +30,7 @@ def test_report_summary_counts_and_links(pdf_builder):
     assert "Rapporto di confronto" in text
     counts = r.counts()
     assert f"Differenze: {len(r.differences)}" in text
-    assert f"{counts[ce.MODIFIED]} modifiche" in text
+    assert ce.count_label(ce.MODIFIED, counts[ce.MODIFIED]) in text     # «1 modifica», «2 modifiche»
     assert ha in text and hb in text
     links = [l for l in doc[0].get_links() if l["kind"] == pymupdf.LINK_GOTO]
     assert len(links) == len(r.differences)

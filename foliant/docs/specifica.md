@@ -8354,7 +8354,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 
 ### AI-01 — Configurazione del fornitore di modelli e della chiave API
 
-**Descrizione:** L'utente collega Foliant a un fornitore di modelli linguistici di sua scelta tramite uno o più profili. Per ogni profilo sceglie un fornitore dal catalogo integrato oppure un endpoint personalizzato, anche in esecuzione sul proprio computer, poi sceglie il modello e salva la propria chiave API nel portachiavi di sistema. Finché non c'è un profilo attivo, tutte le funzioni IA restano disattivate e l'app non contatta alcun servizio IA. AI-01 e AI-02 sono i requisiti di riferimento per fornitore, informativa e dati inviati di tutte le funzioni IA, anche di quelle delle altre aree (0.6).
+**Descrizione:** L'utente collega Foliant a un fornitore di modelli linguistici di sua scelta tramite uno o più profili. Per ogni profilo sceglie un fornitore dal catalogo integrato oppure un endpoint personalizzato, anche in esecuzione sul proprio computer, poi sceglie il modello e salva la propria chiave API nel portachiavi di sistema. Finché non c'è un profilo attivo l'app non contatta alcun servizio IA: i comandi IA restano visibili e attivabili ma non partono; il suggerimento e la riga di stato dicono che serve un fornitore e dove si configura (Impostazioni dell'Assistente IA, File › Opzioni) e un clic lo spiega con il pulsante «Apri le impostazioni» (dopo la configurazione il comando prosegue). AI-01 e AI-02 sono i requisiti di riferimento per fornitore, informativa e dati inviati di tutte le funzioni IA, anche di quelle delle altre aree (0.6).
 
 **Flusso:**
 1. Preferenze › Assistente IA (UX-17) › "Aggiungi profilo".
@@ -8377,7 +8377,7 @@ Convenzioni della sezione. Nel confronto **A** è la versione di riferimento (pr
 - Profilo attivo eliminato: le funzioni IA tornano disattivate.
 
 **Criteri di accettazione:**
-- Dato il primo avvio dell'app senza profili configurati, quando l'utente apre il menu o il pannello IA, allora tutti i comandi IA sono disattivati con l'invito «Configura un fornitore» e il fornitore simulato non riceve alcuna richiesta durante la sessione.
+- Dato il primo avvio dell'app senza profili configurati, quando l'utente apre il menu o il pannello IA, allora tutti i comandi IA mostrano l'invito «Configura un fornitore nelle Impostazioni dell'Assistente IA (File › Opzioni)», al clic lo spiegano offrendo «Apri le impostazioni» invece di partire, e il fornitore simulato non riceve alcuna richiesta durante la sessione.
 - Dato un profilo salvato con la chiave «chiave-di-prova-123», quando si cerca questa stringa in tutti i file scritti dall'app (impostazioni, cronologia, registro degli invii, log, cache), allora la stringa non viene trovata e il portachiavi simulato contiene una sola voce per l'id del profilo.
 - Dato il portachiavi non disponibile, quando l'utente salva il profilo scegliendo «solo per questa sessione», allora le funzioni IA si possono usare fino alla chiusura e dopo il riavvio risultano disattivate perché manca la chiave.
 - Dato il fornitore simulato che espone tre modelli, quando l'utente preme «Verifica connessione», allora l'esito è positivo e i tre modelli sono selezionabili. Se il simulato risponde «autenticazione negata», l'esito è «Chiave non valida» e il profilo non si può attivare.

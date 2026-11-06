@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from foliant.api import FoliantError, _
 
-from . import engine, extract, prompts
+from . import engine, extract, prompts, render
 from .providers import ChatRequest, Message
 
 SHORT_LIMIT = 300
@@ -146,6 +146,18 @@ def specs_to_csv(sheet: ProductSheet, sep: str = ",") -> str:
     return buf.getvalue()
 
 
+def _page_ref(spec: Spec) -> str:
+    return f"[p. {spec.pagina + 1}]" if spec.pagina is not None else ""
+
+
+def page_refs(sheet: ProductSheet) -> list[dict]:
+    """Riferimenti di pagina della tabella di `to_markdown`, nell'ordine (`render_markdown(known_refs=…)`).
+
+    Sono già verificati: `build_sheet` ha risolto ogni pagina sulle pagine dell'ambito inviato."""
+    return [render.PageRef(_page_ref(s), str(s.pagina + 1), page=s.pagina, verified=True).to_dict()
+            for s in sheet.specifiche if s.pagina is not None]
+
+
 def to_markdown(sheet: ProductSheet) -> str:
     lines = [f"# {sheet.nome}" if sheet.nome else "", "", sheet.descrizione_breve, "", sheet.descrizione, ""]
     if sheet.caratteristiche:
@@ -155,8 +167,7 @@ def to_markdown(sheet: ProductSheet) -> str:
                   f"| {_('Specifica')} | {_('Valore')} | {_('Unità')} | {_('Pagina')} |", "|---|---|---|---|"]
         for s in sheet.specifiche:
             mark = "" if s.verified else " (" + _("non verificato") + ")"
-            page = f"[p. {s.pagina + 1}]" if s.pagina is not None else ""
-            lines.append(f"| {s.nome} | {extract.format_value(s.valore)}{mark} | {s.unita} | {page} |")
+            lines.append(f"| {s.nome} | {extract.format_value(s.valore)}{mark} | {s.unita} | {_page_ref(s)} |")
         lines.append("")
     if sheet.vantaggi:
         lines += ["## " + _("Vantaggi per il cliente")] + [f"- {v}" for v in sheet.vantaggi] + [""]

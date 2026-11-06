@@ -857,6 +857,20 @@ STATUS_LABELS = {
 }
 
 
+def status_count_label(status: str, n: int) -> str:
+    """Conteggio dei file per esito, con singolare e plurale: «1 completato», «20 completati»."""
+    forms = {
+        "ok": (_("{n} completato"), _("{n} completati")),
+        "warning": (_("{n} con avviso"), _("{n} con avvisi")),
+        "error": (_("{n} errore"), _("{n} errori")),
+        "skipped": (_("{n} saltato"), _("{n} saltati")),
+        "cancelled": (_("{n} annullato"), _("{n} annullati")),
+        "not_processed": (_("{n} non elaborato"), _("{n} non elaborati")),
+    }
+    one, many = forms.get(status, ("{n} " + status, "{n} " + status))
+    return (one if n == 1 else many).format(n=n)
+
+
 @dataclass
 class FileResult:
     input: str
@@ -932,7 +946,7 @@ class JobReport:
             main = max(causes, key=causes.get) if causes else ""
             text = _("Nessun file elaborato.")
             return f"{text} {main}".strip()
-        parts = [f"{c[k]} {_(STATUS_LABELS[k]).lower()}" for k in STATUS_LABELS if c.get(k)]
+        parts = [status_count_label(k, c[k]) for k in STATUS_LABELS if c.get(k)]
         if self.finished:
             secs = (self.finished - self.started).total_seconds()
             parts.append(_("durata {s} s").format(s=format_number(secs, 1)))

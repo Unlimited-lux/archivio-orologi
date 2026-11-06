@@ -184,11 +184,13 @@ def test_extract_controller_opens_grid(window, ready, fake, tmp_path):
     assert len(dlg.result.records) == 1
 
 
-def test_p2_actions_disabled_without_profile(window, sample_pdf):
+def test_p2_actions_explain_without_profile(window, sample_pdf):
+    """Senza profilo i comandi restano attivi ma spiegano che cosa manca (collaudo C-4)."""
     window.open_path(sample_pdf)
     services = window.ctx.ai_services
     services.refresh()
-    assert all(not a.isEnabled() for a in services.doc_actions + services.profile_actions)
+    hint = "Configura un fornitore nelle Impostazioni dell'Assistente IA (File › Opzioni)"
+    assert all(a.isEnabled() and hint in a.statusTip() for a in services.doc_actions + services.profile_actions)
     assert all(a.isEnabled() for a in services.local_actions)
 
 

@@ -35,7 +35,8 @@ def test_placeholders_match():
     for it, en in ALL.items():
         it_keys = set(re.findall(r"\{(\w*)\}", it))
         en_keys = set(re.findall(r"\{(\w*)\}", en))
-        if it.startswith(("Segnaposto", "{nome}_")):   # modelli: i nomi inglesi sono alias dei campi
+        # modelli e campi dei timbri (PAG-32), mai passati a .format(): i nomi inglesi sono alias dei campi
+        if it.startswith(("Segnaposto", "{nome}_", "Pagina {pagina}", "{pagina}", "Più righe con Invio. Campi:")):
             it_keys = {ALIASES.get(k, k) for k in it_keys}
             en_keys = {ALIASES.get(k, k) for k in en_keys}
         assert it_keys == en_keys, (it, en)

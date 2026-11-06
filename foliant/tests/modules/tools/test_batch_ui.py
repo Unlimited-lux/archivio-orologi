@@ -557,3 +557,46 @@ def test_english_defaults_and_layout_fit(window):
     finally:
         app.setFont(old_font)
         set_language("it")
+
+
+def _param_labels(w) -> list[str]:
+    from PySide6.QtWidgets import QCheckBox, QLabel
+    return [l.text() for l in w.params.findChildren(QLabel)] + [c.text() for c in w.params.findChildren(QCheckBox)]
+
+
+def test_english_placeholders_in_step_labels(window):
+    """Collaudo C-11: in inglese «Title ({name} = file name)», non «{nome}»; il segnaposto inglese funziona."""
+    from foliant.i18n import set_language
+    set_language("en")
+    try:
+        w = bu.BatchWidget(window.ctx)
+        w.add_step("metadata")
+        labels = _param_labels(w)
+        assert "Title ({name} = file name)" in labels
+        w.add_step("watermark")
+        labels = _param_labels(w)
+        assert "Text ({name} = file name)" in labels
+        assert not [t for t in labels if "{nome}" in t]
+    finally:
+        set_language("it")
+
+
+def test_english_metadata_title_with_name(tmp_path):
+    p = tmp_path / "relazione.pdf"
+    build_pdf(p, [page_lines(1)])
+    out = be._x_metadata(p.read_bytes(), {"title": "Copy of {name}"}, be.QueueItem(str(p)), None)
+    assert pymupdf.open(stream=out, filetype="pdf").metadata["title"] == "Copy of relazione"
+
+
+@pytest.mark.parametrize("lang,expected", [("it", ["File", "Esito", "Messaggio", "File creati"]),
+                                           ("en", ["File", "Result", "Message", "Output files"])])
+def test_report_columns_have_distinct_names(window, lang, expected):
+    """Dubbio del collaudo: in inglese «Esito» e «Risultato» erano tutte e due «Result»."""
+    from foliant.i18n import set_language
+    set_language(lang)
+    try:
+        w = bu.BatchWidget(window.ctx)
+        headers = [w.report_table.horizontalHeaderItem(i).text() for i in range(w.report_table.columnCount())]
+        assert headers == expected and len(set(headers)) == len(headers)
+    finally:
+        set_language("it")

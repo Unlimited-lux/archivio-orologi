@@ -1178,4 +1178,13 @@ EN: dict[str, str] = {
     "Mostra il pannello dell'Assistente IA": 'Show the AI Assistant panel',
     'Analisi': 'Analysis',
     'Fornitore, modello e riservatezza': 'Provider, model and privacy',
+    # comandi senza fornitore (spiegazione al posto del comando disattivato)
+    "Configura un fornitore nelle Impostazioni dell'Assistente IA (File › Opzioni).":
+        "Set up a provider in the AI Assistant settings (File › Options).",
+    "Le «Funzioni IA» sono disattivate: riattivale nelle Impostazioni dell'Assistente IA (File › Opzioni).":
+        "“AI features” are turned off: turn them back on in the AI Assistant settings (File › Options).",
+    "Per usare «{c}» serve l'Assistente IA.": "“{c}” needs the AI Assistant.",
+    "Finché non è configurato, Foliant non invia nulla a servizi IA.":
+        "Until it is set up, Foliant sends nothing to AI services.",
+    "Apri le impostazioni": "Open settings",
 }

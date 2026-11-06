@@ -1312,7 +1312,8 @@ class PageNumbersDialog(StampDialog):
         self.fmt = QComboBox()
         self.fmt.setEditable(True)
         for item in self.FORMATS:
-            self.fmt.addItem(_(item) if "Pagina" in item else item)
+            # in inglese i formati propongono {page} e {total} (alias accettati come {pagina} e {totale})
+            self.fmt.addItem(fields.display_code(_(item) if "Pagina" in item else item))
         self.fmt.setCurrentIndex(0)
         self.field_button = FieldMenuButton()
         self.field_button.watch(self.fmt.lineEdit())
@@ -2208,12 +2209,12 @@ TRANSLATIONS: dict[str, str] = {
     'PDF:': 'PDF:',
     'Pagina 1 sulla prima pagina, pagina 2 sulle altre': 'Page 1 on the first page, page 2 on the others',
     'Pagina PDF': 'PDF page',
-    'Pagina {pagina} di {totale}': 'Page {pagina} of {totale}',
+    'Pagina {pagina} di {totale}': 'Page {page} of {total}',
     'Pagine da escludere: {e}': 'Pages to exclude: {e}',
     'Pagine pari': 'Even pages',
     'Pagine pari diverse': 'Different even pages',
     'Percentuale': 'Percentage',
-    'Più righe con Invio. Campi: {pagina}, {totale}, {data:gg/MM/aaaa}, {nome}, {titolo}…': 'Press Enter for more lines. Fields: {pagina}, {totale}, {data:gg/MM/aaaa}, {nome}, {titolo}…',
+    'Più righe con Invio. Campi: {pagina}, {totale}, {data:gg/MM/aaaa}, {nome}, {titolo}…': 'Press Enter for more lines. Fields: {page}, {total}, {date:dd/MM/yyyy}, {name}, {title}…',
     'Prima pagina': 'First page',
     'Prima pagina diversa': 'Different first page',
     'Riempi la pagina': 'Fill the page',
@@ -2243,11 +2244,11 @@ TRANSLATIONS: dict[str, str] = {
     'prima interessata': 'first affected',
     'spaziatura': 'spacing',
     'verticale': 'vertical',
-    '{pagina} numero, {totale} ultimo numero, {etichetta} etichetta di pagina': '{pagina} number, {totale} last number, {etichetta} page label',
+    '{pagina} numero, {totale} ultimo numero, {etichetta} etichetta di pagina': '{page} number, {total} last number, {label} page label',
     '{w} — pagine {p}': '{w} — pages {p}',
     'Sostituisci gli sfondi già presenti': 'Replace existing backgrounds',
-    'Pagina {pagina}': 'Page {pagina}',
-    '{pagina}/{totale}': '{pagina}/{totale}',
+    'Pagina {pagina}': 'Page {page}',
+    '{pagina}/{totale}': '{page}/{total}',
     "Nessuna": "None",
     "Lato esterno (dispari a destra)": "Outer side (odd on the right)",
     "Lato interno (dispari a sinistra)": "Inner side (odd on the left)",

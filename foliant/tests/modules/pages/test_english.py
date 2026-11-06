@@ -179,6 +179,47 @@ def test_english_placeholder_aliases(pages_window, tmp_path):
     assert D.ExtractDialog(window, view.document, [0]).template.text() == "{nome}_p{pagina}"
 
 
+ITALIAN_FIELDS = re.compile(r"\{(pagina|totale|etichetta|data|ora|nome|titolo|autore|oggetto|segnalibro|"
+                            r"intervallo|inizio|fine)\b|gg/MM/aaaa")
+
+
+def test_page_numbers_and_header_footer_propose_english_placeholders(pages_window):
+    """Collaudo C-11: in inglese Numeri di pagina e Intestazione e piè di pagina mostrano e propongono
+    {page}, {total}, {date:dd/MM/yyyy}, {name}, {title}, {label} (gli italiani restano accettati)."""
+    from foliant.modules.pages import stamp
+    from foliant.modules.pages import stamp_dialogs as S
+    window, view = pages_window
+    i18n.set_language("en")
+    try:
+        numbers = S.PageNumbersDialog(window, view.document, [0])
+        assert [numbers.fmt.itemText(i) for i in range(numbers.fmt.count())] == [
+            "{page}", "{page}/{total}", "Page {page} of {total}", "- {page} -", "{page} / {total}"]
+        assert numbers.fmt.currentText() == "{page}"
+        hf = S.HeaderFooterDialog(window, view.document, [0])
+        assert hf.fields["footer_right"].toPlainText() == "Page {page} of {total}"
+        problems = {}
+        for name, dlg in (("PageNumbers", numbers), ("HeaderFooter", hf)):
+            texts = _texts(dlg) + [a.text() for a in dlg.field_button.menu().actions()]
+            texts += [e.toPlainText() for e in getattr(dlg, "fields", {}).values()]
+            bad = sorted({t for t in texts if ITALIAN_FIELDS.search(t)})
+            if bad:
+                problems[name] = bad
+        assert not problems, problems
+        labels = " ".join(t for t in _texts(numbers) + _texts(hf))
+        assert "{label}" in labels and "{date:dd/MM/yyyy}" in labels and "{title}" in labels
+        # i modelli inglesi funzionano davvero (e quelli italiani restano accettati)
+        assert numbers.validate() is None and hf.validate() is None
+        with view.document.change("numeri") as pdf:
+            stamp.add_page_numbers(pdf, [0, 1], fmt=numbers.fmt.itemText(2))
+            stamp.add_header_footer(pdf, [2], footer_left="{name} · {pagina}/{totale}", filename="doc.pdf")
+            first, third = pdf[0].get_text(), pdf[2].get_text()
+        assert "Page 1 of 2" in first and "doc · 3/10" in third
+    finally:
+        i18n.set_language("it")
+    numbers = S.PageNumbersDialog(window, view.document, [0])
+    assert numbers.fmt.itemText(2) == "Pagina {pagina} di {totale}"
+
+
 def test_stamp_dates_follow_language(pages_window):
     """Date dei timbri senza formato esplicito: quelle della lingua (format_date del nucleo)."""
     import datetime as dt

@@ -59,7 +59,8 @@ def test_disabled_until_configured(window, ai, fake, sample_pdf):
     panel = ai.panel
     assert panel.stack.currentIndex() == 0
     assert "Configura un fornitore" in panel.configure_btn.text()
-    assert all(not a.isEnabled() for a in ai.doc_actions)
+    # i comandi non partono: spiegano che manca il fornitore (collaudo C-4)
+    assert all("Configura un fornitore" in a.toolTip() for a in ai.doc_actions)
     opened = []
     panel.open_settings = lambda: opened.append(True)
     panel.send("ciao")
