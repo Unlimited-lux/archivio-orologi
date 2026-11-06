@@ -18,6 +18,7 @@ from foliant.modules.security import dialogs as D
 from foliant.modules.security import links as L
 from foliant.modules.security import protection as P
 from foliant.modules.security import redaction as R
+from foliant.modules.security import patterns as PTX
 
 
 @pytest.fixture
@@ -1316,3 +1317,68 @@ def test_f10_singular_redaction_messages(window, sec, sample_pdf, monkeypatch):
     monkeypatch.setattr(sec.ctx, "status", lambda text, *a: status.append(text))
     assert sec.apply_redactions(None)
     assert "Redazioni applicate: 1 area su 1 pagina" in status
+
+
+def _perizia_with_metadata(tmp_path):
+    path = tmp_path / "perizia_cliente.pdf"
+    src = pymupdf.open()
+    page = src.new_page()
+    page.insert_text((72, 90), "Perizia n. 2026/118 - Rolex Submariner 124060", fontsize=12)
+    page.insert_text((72, 120), "Cliente: Lucia Ferri, via dei Mille 12, Torino", fontsize=11)
+    src.set_metadata({"title": "Perizia Rolex Submariner", "author": "Lucia Ferri",
+                      "subject": "Valutazione per Lucia Ferri", "keywords": "perizia, rolex"})
+    src.save(str(path))
+    return path
+
+
+@pytest.mark.parametrize("choice", ["include", "pages", "cancel"])
+def test_metadata_warning_before_redaction(window, sec, tmp_path, monkeypatch, choice):
+    view = window.open_path(str(_perizia_with_metadata(tmp_path)))
+    doc = view.document
+    hits = PTX.find(doc.pdf, [PTX.term_pattern("Lucia Ferri")])
+    sec.mark_matches(doc, hits, "ricerca")
+    asked = []
+    monkeypatch.setattr(C, "ask_metadata", lambda parent, h: asked.append(h) or choice)
+    monkeypatch.setattr(C, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    applied = sec.apply_redactions(None)
+    assert [h.pattern for h in asked[0]] == ["meta:author", "meta:subject"]
+    meta = doc.pdf.metadata
+    if choice == "cancel":
+        assert not applied and meta["author"] == "Lucia Ferri"
+        return
+    assert applied and "Lucia Ferri" not in doc.pdf[0].get_text()
+    if choice == "include":
+        assert "Lucia" not in meta["author"] and "Lucia" not in meta["subject"]
+        assert meta["title"] == "Perizia Rolex Submariner"
+    else:
+        assert meta["author"] == "Lucia Ferri"
+
+
+def test_no_metadata_warning_when_already_included(window, sec, tmp_path, monkeypatch):
+    view = window.open_path(str(_perizia_with_metadata(tmp_path)))
+    doc = view.document
+    found, _notices = sec.search(doc, {"terms": ["Lucia Ferri"], "outside": True})
+    sec.mark_matches(doc, [m for m in found if m.page >= 0], "ricerca")
+    sec.pending_outside[doc] = [m for m in found if m.page < 0]
+    monkeypatch.setattr(C, "ask_metadata", lambda *a: pytest.fail("avviso inatteso"))
+    monkeypatch.setattr(C, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    assert sec.apply_redactions(None)
+    assert "Lucia" not in doc.pdf.metadata["author"]
+
+
+def test_ask_metadata_dialog_text(window, monkeypatch):
+    shown = []
+
+    def fake_exec(box):
+        shown.append((box.windowTitle(), box.text(), [b.text() for b in box.buttons()]))
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    hit = PTX.Match(-1, "Lucia Ferri", [], "meta:author", "", "")
+    assert C.ask_metadata(window, [hit, PTX.Match(-1, "Lucia Ferri", [], "meta:subject", "", "")]) == "cancel"
+    title, text, buttons = shown[0]
+    assert title == "Termini presenti nei metadati"
+    assert text.startswith("«Lucia Ferri» compare anche nei metadati del documento (Autore, Oggetto).")
+    assert "Oscura anche i metadati" in buttons and "Solo le pagine" in buttons

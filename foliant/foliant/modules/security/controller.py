@@ -151,6 +151,25 @@ def ask_unapplied(parent, n: int) -> str:
     return "apply" if clicked is apply else "keep" if clicked is keep else "cancel"
 
 
+def ask_metadata(parent, hits: list[PT.Match]) -> str:
+    """«include», «pages» o «cancel» quando i termini da oscurare compaiono anche nei metadati."""
+    labels = S.metadata_labels()
+    terms = ", ".join(dict.fromkeys(f"«{h.text}»" for h in hits))
+    fields = ", ".join(dict.fromkeys(labels.get(h.pattern.partition(":")[2], h.pattern) for h in hits))
+    box = QMessageBox(QMessageBox.Icon.Warning, _("Termini presenti nei metadati"),
+                      _("{terms} compare anche nei metadati del documento ({fields}). Se non li includi, "
+                        "resterà leggibile nelle proprietà del file anche dopo l'oscuramento.").format(
+                          terms=terms, fields=fields), parent=parent)
+    include = box.addButton(_("Oscura anche i metadati"), QMessageBox.ButtonRole.AcceptRole)
+    pages = box.addButton(_("Solo le pagine"), QMessageBox.ButtonRole.DestructiveRole)
+    cancel = box.addButton(_("Annulla"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(include)
+    box.setEscapeButton(cancel)
+    box.exec()
+    clicked = box.clickedButton()
+    return "include" if clicked is include else "pages" if clicked is pages else "cancel"
+
+
 def ask_trust_scope(parent) -> str | None:
     """«document», «folder» o None (annulla)."""
     box = QMessageBox(QMessageBox.Icon.Question, _("Considera attendibile"),
@@ -1454,6 +1473,17 @@ class SecurityController:
             return False
         if not self.require_modify(doc):
             return False
+        # termini oscurati nelle pagine ma ancora leggibili in autore, oggetto…
+        known = {o.pattern for o in outside}
+        with ENGINE_LOCK:
+            hits = [h for h in metadata_matches(doc.pdf, [m.text for m in targets if not m.whole_page])
+                    if h.pattern not in known]
+        if hits:
+            choice = ask_metadata(self.parent, hits)
+            if choice == "cancel":
+                return False
+            if choice == "include":
+                outside = list(outside) + hits
         pages = sorted({m.page for m in targets})
         total = len(targets) + len(outside)
         title = (_("Applicare 1 redazione?") if total == 1 else _("Applicare {n} redazioni?")).format(n=total)
@@ -1993,6 +2023,26 @@ def outside_matches(pdf: pymupdf.Document, pats: list[PT.Pattern]) -> list[PT.Ma
             check(_("Allegato"), f"{name} {info.get('filename', '')} {info.get('desc', '')}", f"emb:{name}")
     except Exception:
         pass
+    return out
+
+
+def metadata_matches(pdf: pymupdf.Document, texts: list[str]) -> list[PT.Match]:
+    """Testi dei segni che compaiono anche nei metadati (una voce per campo, i termini
+    più lunghi prima: «Lucia Ferri» va tolto prima di «Lucia»)."""
+    import re
+    terms = sorted({" ".join(t.split()) for t in texts if t and len(" ".join(t.split())) >= 2},
+                   key=len, reverse=True)
+    if not terms:
+        return []
+    labels = S.metadata_labels()
+    meta = pdf.metadata or {}
+    out: list[PT.Match] = []
+    for k in ("title", "author", "subject", "keywords", "creator", "producer"):
+        value = meta.get(k) or ""
+        for t in terms:
+            for m in re.finditer(re.escape(t), value, re.IGNORECASE):
+                out.append(PT.Match(-1, m.group(0), [], f"meta:{k}", _("Fuori dalle pagine"),
+                                    f"{labels[k]}: {value[:80]}"))
     return out
 
 
