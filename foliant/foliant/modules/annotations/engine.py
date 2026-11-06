@@ -240,8 +240,13 @@ def hex_to_color(h: str | None) -> tuple | None:
 @contextmanager
 def unrotated(page: pymupdf.Page) -> Iterator[pymupdf.Page]:
     """Le funzioni di basso livello lavorano nello spazio pagina visualizzato:
-    togliamo temporaneamente la rotazione così da usare coordinate non ruotate."""
+    togliamo temporaneamente la rotazione così da usare coordinate non ruotate.
+
+    Alla fine /Rotate della pagina torna com'era, anche quando la rotazione è ereditata
+    da /Pages: la pagina non riceve un /Rotate proprio, che in un documento firmato la
+    farebbe risultare alterata (non solo /Annots cambiato)."""
     rot = page.rotation
+    own = page.parent.xref_get_key(page.xref, "Rotate") if rot else None
     if rot:
         page.set_rotation(0)
     try:
@@ -249,6 +254,10 @@ def unrotated(page: pymupdf.Page) -> Iterator[pymupdf.Page]:
     finally:
         if rot:
             page.set_rotation(rot)
+            if own is not None and own[0] == "null":
+                # si toglie la chiave: xref_set_key(…, "null") la lascerebbe con valore null
+                mupdf.pdf_dict_dels(mupdf.pdf_load_object(pymupdf._as_pdf_document(page.parent), page.xref),
+                                    "Rotate")
 
 
 def iter_annots(page: pymupdf.Page, types: Sequence[int] | None = None) -> Iterator[pymupdf.Annot]:

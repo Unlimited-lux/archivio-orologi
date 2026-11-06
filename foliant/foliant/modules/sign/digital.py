@@ -1597,9 +1597,23 @@ def _plural(n: int, one: str, many: str) -> str:
     return (one if n == 1 else many).format(n=n)
 
 
-def _analyze_changes(reader, signed_rev: int, filled: set | None = None) -> tuple[list[str], list[str]]:
+def _pdf_equal(a, b) -> bool:
+    """Valori PDF uguali secondo pyHanko (come in `compare_dicts`): numeri confrontati come
+    Decimal, nei file cifrati valori diretti confrontati decifrati, riferimenti per numero.
+    Esatto, senza tolleranze. Non si usa repr(): nei file cifrati i dizionari e gli array
+    diretti sono proxy di pyHanko e il loro repr contiene l'indirizzo in memoria, quindi una
+    pagina con /Resources diretto risultava sempre «cambiata»."""
+    try:
+        return bool(a == b)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _analyze_changes(reader, signed_rev: int, filled: set | None = None,
+                     kinds: dict | None = None) -> tuple[list[str], list[str]]:
     """Descrive le modifiche dopo la revisione firmata: (consentite, non consentite).
-    In `filled` (se dato) aggiunge i nomi dei campi modulo modificati."""
+    In `filled` (se dato) aggiunge i nomi dei campi modulo modificati; in `kinds` (se dato)
+    il tipo di ogni voce consentita: «firma», «modulo» o «annotazione»."""
     total = reader.xrefs.total_revisions
     if signed_rev >= total - 1:
         return [], []
@@ -1662,8 +1676,8 @@ def _analyze_changes(reader, signed_rev: int, filled: set | None = None) -> tupl
                 old_page = old.get_object(ref)
             except Exception:  # noqa: BLE001
                 continue
-            if repr(old_page.raw_get("/Contents") if "/Contents" in old_page else None) != repr(
-                    obj.raw_get("/Contents") if "/Contents" in obj else None):
+            if not _pdf_equal(old_page.raw_get("/Contents") if "/Contents" in old_page else None,
+                              obj.raw_get("/Contents") if "/Contents" in obj else None):
                 content_pages.add(page_index[key])
             other_old = {k for k in old_page.keys() if k not in ("/Annots",)}
             other_new = {k for k in obj.keys() if k not in ("/Annots",)}
@@ -1701,16 +1715,22 @@ def _analyze_changes(reader, signed_rev: int, filled: set | None = None) -> tupl
             target[pg] = target.get(pg, 0) + 1
     allowed: list[str] = []
     forbidden: list[str] = []
+    kinds = kinds if kinds is not None else {}
+
+    def allow(item: str, kind: str) -> None:
+        allowed.append(item)
+        kinds[item] = kind
+
     if sigs:
-        allowed.append(_plural(sigs, _("{n} firma aggiunta"), _("{n} firme aggiunte")))
+        allow(_plural(sigs, _("{n} firma aggiunta"), _("{n} firme aggiunte")), "firma")
     if form_fill:
-        allowed.append(_("compilazione di campi modulo"))
+        allow(_("compilazione di campi modulo"), "modulo")
     for pg, n in sorted(added_annots.items()):
-        allowed.append(_plural(n, _("{n} annotazione aggiunta"), _("{n} annotazioni aggiunte"))
-                       + " " + _("a pagina {p}").format(p=pg + 1))
+        allow(_plural(n, _("{n} annotazione aggiunta"), _("{n} annotazioni aggiunte"))
+              + " " + _("a pagina {p}").format(p=pg + 1), "annotazione")
     for pg, n in sorted(modified_annots.items()):
-        allowed.append(_plural(n, _("{n} annotazione modificata"), _("{n} annotazioni modificate"))
-                       + " " + _("a pagina {p}").format(p=pg + 1))
+        allow(_plural(n, _("{n} annotazione modificata"), _("{n} annotazioni modificate"))
+              + " " + _("a pagina {p}").format(p=pg + 1), "annotazione")
     for pg in sorted(content_pages):
         forbidden.append(_("contenuto della pagina {p}").format(p=pg + 1))
     for pg in sorted(page_struct - content_pages):
@@ -1727,11 +1747,19 @@ def _diff_policy():
     if _DIFF_POLICY is not None:
         return _DIFF_POLICY
     from pyhanko.pdf_utils import generic
-    from pyhanko.sign.diff_analysis import DEFAULT_DIFF_POLICY, ModificationLevel, StandardDiffPolicy
+    from pyhanko.sign.diff_analysis import (DEFAULT_DIFF_POLICY, FormUpdatingRule, ModificationLevel,
+                                            StandardDiffPolicy)
+    from pyhanko.sign.diff_analysis.commons import qualify
+    from pyhanko.sign.diff_analysis.rules import form_field_rules as ffr
     from pyhanko.sign.diff_analysis.rules_api import QualifiedWhitelistRule, ReferenceUpdate
 
     def is_ref(x):
         return isinstance(x, generic.IndirectObject)
+
+    def is_plain_annot(o):
+        """Annotazione che non è un widget di un campo (nota, evidenziazione, disegno…)."""
+        return (isinstance(o, generic.DictionaryObject) and "/Subtype" in o and "/Rect" in o
+                and o.get("/Subtype") != "/Widget" and "/FT" not in o)
 
     class AnnotationRule(QualifiedWhitelistRule):
         def apply_qualified(self, old, new):
@@ -1758,10 +1786,6 @@ def _diff_policy():
                 elif isinstance(obj, generic.ArrayObject):
                     for item in _raw_items(obj):
                         fresh_closure(item, acc, depth + 1)
-
-            def is_plain_annot(o):
-                return (isinstance(o, generic.DictionaryObject) and "/Subtype" in o and "/Rect" in o
-                        and o.get("/Subtype") != "/Widget" and "/FT" not in o)
 
             try:
                 pages = _page_refs(new.root)
@@ -1795,7 +1819,7 @@ def _diff_policy():
                     keys_old = set(page_old.keys()) - {"/Annots"}
                     keys_new = set(page_new.keys()) - {"/Annots"}
                     if keys_old != keys_new or any(
-                            repr(page_old.raw_get(k)) != repr(page_new.raw_get(k)) for k in keys_new):
+                            not _pdf_equal(page_old.raw_get(k), page_new.raw_get(k)) for k in keys_new):
                         continue
                     updates.append(new_refs[key])
                 if is_ref(annots_new_raw) and _ref_key(annots_new_raw) in new_refs:
@@ -1836,7 +1860,7 @@ def _diff_policy():
                 appearance_keys = {"/AP", "/AS", "/BS", "/MK"}
                 keys_old = set(obj_old.keys()) - appearance_keys
                 keys_new = set(obj_new.keys()) - appearance_keys
-                if keys_old != keys_new or any(repr(obj_old.raw_get(k)) != repr(obj_new.raw_get(k))
+                if keys_old != keys_new or any(not _pdf_equal(obj_old.raw_get(k), obj_new.raw_get(k))
                                                for k in keys_new):
                     continue
                 try:
@@ -1847,10 +1871,65 @@ def _diff_policy():
                 for dep in deps:
                     yield ModificationLevel.FORM_FILLING, ReferenceUpdate(dep)
 
+    class SigFieldCreationWithCommentsRule(ffr.SigFieldCreationRule):
+        """Creazione di campi firma come in pyHanko, ma i commenti aggiunti alle pagine non
+        bloccano il controllo dei widget dei nuovi campi firma.
+
+        pyHanko confronta la revisione firmata con ognuna delle successive: se fra le due
+        compare un nuovo campo firma, controlla tutte le annotazioni aggiunte alle pagine e
+        rifiuta quelle che non sono widget di campi firma. Così una nota salvata prima o dopo
+        una seconda firma rendeva non valida la prima. Qui le annotazioni non widget nuove
+        passano il controllo dei widget; restano da giustificare con AnnotationRule (livello
+        ANNOTATIONS), altrimenti pyHanko le segnala come modifiche non spiegate. La pagina
+        deve comunque essere identica tranne /Annots (`compare_dicts` di pyHanko)."""
+
+        def apply(self, context):
+            inner = ffr.SigFieldCreationRule(approve_widget_bindings=False,
+                                             allow_new_visible_after_certify=self.allow_new_visible_after_certify)
+            # tutto come in pyHanko tranne il controllo dei widget sulle pagine, rifatto sotto
+            yield from inner.apply(context)
+            if not self.approve_widget_bindings:
+                return
+            known: dict = {}
+            for fq_name, spec in context.field_specs.items():
+                if spec.field_type != "/Sig" or spec.old_field_ref or spec.new_field_ref is None:
+                    continue
+                field_obj = spec.new_field_ref.get_object()
+                if "/Kids" in field_obj:
+                    for kid in _raw_items(field_obj["/Kids"]):
+                        if is_ref(kid) and "/T" not in kid.get_object():
+                            known[kid.reference] = fq_name
+                else:
+                    known[spec.new_field_ref] = fq_name
+            if not known:
+                return   # nessun nuovo campo firma: come in pyHanko
+            xc = context.old.reader.xrefs
+            for pref in _page_refs(context.new.root):
+                page = pref.get_object()
+                if "/Annots" not in page:
+                    continue
+                for a in _raw_items(page["/Annots"]):
+                    if (is_ref(a) and a.reference not in known
+                            and xc.get_historical_ref(a.reference, context.old.revision) is None
+                            and is_plain_annot(a.get_object())):
+                        known[a.reference] = None
+            yield from qualify(ModificationLevel.LTA_UPDATES, ffr._walk_page_tree_annots(
+                context.old.root["/Pages"], context.new.root["/Pages"], known, context.old,
+                valid_when_locked=True, refs_seen=set()))
+
+    def form_rule_with_comments(rule):
+        if not isinstance(rule, FormUpdatingRule) or not hasattr(ffr, "_walk_page_tree_annots"):
+            return rule   # versione di pyHanko diversa: si resta sulla regola standard
+        fields = [SigFieldCreationWithCommentsRule(
+            approve_widget_bindings=r.approve_widget_bindings,
+            allow_new_visible_after_certify=r.allow_new_visible_after_certify)
+            if type(r) is ffr.SigFieldCreationRule else r for r in rule.field_rules]
+        return FormUpdatingRule(field_rules=fields, ignored_acroform_keys=rule.ignored_acroform_keys)
+
     base = DEFAULT_DIFF_POLICY
     _DIFF_POLICY = StandardDiffPolicy(
         global_rules=list(base.global_rules) + [AnnotationRule(), WidgetChildFillRule()],
-        form_rule=base.form_rule,
+        form_rule=form_rule_with_comments(base.form_rule),
     )
     return _DIFF_POLICY
 
@@ -2063,8 +2142,9 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
     # modifiche
     allowed, forbidden = [], []
     filled: set[str] = set()
+    kinds: dict[str, str] = {}
     try:
-        allowed, forbidden = _analyze_changes(reader, emb.signed_revision, filled)
+        allowed, forbidden = _analyze_changes(reader, emb.signed_revision, filled, kinds)
     except Exception:  # noqa: BLE001
         pass
     docmdp_ok = getattr(status, "docmdp_ok", None)
@@ -2077,6 +2157,12 @@ def _verify_one(st, emb, reader, roots, online, has_dss, doc_ts_revs, Validation
             touched = []
         forbidden = [_("campo bloccato modificato: «{name}»").format(name=n) for n in touched] + forbidden
         allowed = [a for a in allowed if not (touched and a == _("compilazione di campi modulo"))]
+        if not forbidden and st.docmdp_level is not None and not isinstance(diff, SuspiciousModification):
+            # modifiche riconosciute ma oltre il livello della certificazione: si dice quali
+            # (P=1 nessuna modifica; P=2 compilazione e firme; P=3 anche annotazioni)
+            beyond = {1: ("firma", "modulo", "annotazione"), 2: ("annotazione",)}.get(st.docmdp_level, ())
+            forbidden = [a for a in allowed if kinds.get(a) in beyond]
+            allowed = [a for a in allowed if a not in forbidden]
         if not forbidden:
             forbidden = [_("modifiche al documento non ammesse")]
         st.modifications = _("Modifiche non consentite: ") + ", ".join(forbidden)

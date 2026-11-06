@@ -74,3 +74,49 @@ def test_no_changes_returns_original(id_a):
     doc = Document.from_bytes(signed, modified=False)
     with doc.lock:
         assert incremental_update(signed, doc.pdf) == signed
+
+
+# --------------------------------------------------------------------------- #
+# Testo originale dei valori invariati (F-1: MediaBox di LibreOffice)
+# --------------------------------------------------------------------------- #
+
+
+def test_keep_spans_only_unchanged_imprecise_values():
+    from foliant.core.original_text import keep_spans
+
+    raw = ("<</Type/Page/MediaBox[0 0 595.303937007874 841.889763779528]/Rotate 0"
+           "/Resources<</Font<</F1 5 0 R>>/X[1.123456789 2]>>/Annots[4 0 R]/UserUnit 1.0>>")
+    old = ("<</Type/Page/MediaBox[0 0 595.30398 841.8898]/Rotate 0"
+           "/Resources<</Font<</F1 5 0 R>>/X[1.1234568 2]>>/Annots[4 0 R]/UserUnit 1>>")
+    cur = ("<</Type/Page/MediaBox[0 0 595.30398 841.8898]/Rotate 0"
+           "/Resources<</Font<</F1 5 0 R/F2 9 0 R>>/X[1.1234568 2]>>/Annots[4 0 R 8 0 R]/UserUnit 1>>")
+    spans = keep_spans(raw, old, cur)
+    got = {cur[a:b]: text for a, b, text in spans}
+    # MediaBox e /X (dentro /Resources, cambiato) tornano al testo originale; /UserUnit 1.0 = 1
+    assert got == {"[0 0 595.30398 841.8898]": "[0 0 595.303937007874 841.889763779528]",
+                   "[1.1234568 2]": "[1.123456789 2]"}
+    # un valore cambiato davvero resta quello nuovo
+    changed = cur.replace("[0 0 595.30398 841.8898]", "[0 0 600 800]")
+    assert "[0 0 600 800]" not in {changed[a:b] for a, b, _t in keep_spans(raw, old, changed)}
+    # stringhe nei file cifrati: mai dal testo del file
+    raw_s, old_s = "<</A[(x) 0.123456789]/B 1>>", "<</A[(x) .12345679]/B 1>>"
+    cur_s = "<</A[(x) .12345679]/B 2>>"
+    assert keep_spans(raw_s, old_s, cur_s) and not keep_spans(raw_s, old_s, cur_s, encrypted=True)
+
+
+def test_keep_text_falls_back_to_engine_text(id_a, monkeypatch):
+    """Se i segnaposto non si ritrovano, il salvataggio riesce comunque con il testo del motore."""
+    from foliant.core import original_text
+    from tests.modules.sign.test_libreoffice import _lo_like_pdf
+
+    signed = digital.sign_pdf(_lo_like_pdf(), id_a[2], digital.SignOptions())
+    monkeypatch.setattr(original_text, "fill_placeholders", lambda data, start, repl: None)
+    doc = Document.from_bytes(signed, modified=False)
+    with doc.change("Nota") as pdf:
+        pdf[0].add_text_annot((100, 100), "ciao")
+    with doc.lock:
+        out = incremental_update(signed, doc.pdf)
+    assert out.startswith(signed) and b"FoliantKeep" not in out
+    assert b"595.30398" in out[len(signed):]
+    r = pymupdf.open(stream=out)
+    assert len(list(r[0].annots())) == 1

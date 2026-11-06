@@ -1,6 +1,8 @@
 """Collaudo 4: richiamo con /CropBox, FDF con risposte, casella di testo esportata, note su pagine ruotate,
 ordinamento per pagina su pagine ruotate."""
 
+import re
+
 import pymupdf
 import pytest
 
@@ -157,3 +159,31 @@ def test_comments_sorted_top_down_on_rotated_page(window, tmp_path, monkeypatch)
     panel.sort.setCurrentIndex(panel.sort.findData("page"))
     keys = [tuple(i.data(0, Qt.ItemDataRole.UserRole)) for i in panel.items()]
     assert keys == [(0, rect), (0, ell)]          # il rettangolo è in alto nella vista
+
+
+@pytest.mark.parametrize("own", [False, True])
+def test_unrotated_keeps_inherited_rotation(own):
+    """/Rotate ereditato da /Pages: dopo `unrotated` (e quindi dopo una nota) la pagina non ha un
+    /Rotate proprio, che in un documento firmato la farebbe risultare alterata; un /Rotate
+    proprio resta com'era."""
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=595, height=842)
+    pages = int(pdf.xref_get_key(pdf.pdf_catalog(), "Pages")[1].split()[0])
+    pdf.xref_set_key(pages, "Rotate", "90")
+    if own:
+        page.set_rotation(270)
+    else:
+        m = pymupdf.mupdf
+        m.pdf_dict_dels(m.pdf_load_object(pymupdf._as_pdf_document(pdf), page.xref), "Rotate")
+    page = pdf[0]
+    expected = 270 if own else 90
+    before = pdf.xref_object(page.xref, compressed=True)
+    assert page.rotation == expected
+    with engine.unrotated(page):
+        assert page.rotation == 0
+    engine.create_note(pdf, 0, (100, 100), "Nota", engine.Style(), "A")
+    page = pdf[0]
+    after = pdf.xref_object(page.xref, compressed=True)
+    assert page.rotation == expected
+    assert ("/Rotate" in after) == own
+    assert re.sub(r"/Annots\[[^\]]*\]", "", after) == before

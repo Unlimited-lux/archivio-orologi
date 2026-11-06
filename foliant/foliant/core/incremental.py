@@ -24,7 +24,13 @@ Accorgimenti:
 - /Info e /Root del trailer si riportano se cambiano;
 - una pagina che torna a riferire annotazioni già presenti in una revisione
   precedente (es. ripeti dopo un salvataggio) le riscrive: altrimenti i validatori
-  vedono riferimenti «non giustificati» nella nuova revisione.
+  vedono riferimenti «non giustificati» nella nuova revisione;
+- in un oggetto esistente riscritto (la pagina che riceve una nota, il widget di un
+  campo compilato) i valori che non cambiano conservano il testo del file originale
+  (`original_text`): il motore riscriverebbe i numeri con meno cifre (MediaBox di
+  LibreOffice 595.303937007874 → 595.30398) e la pagina firmata risulterebbe
+  alterata per pyHanko e per gli altri validatori. Se la sostituzione non riesce si
+  ripiega sul testo del motore.
 
 Va usato tenendo ENGINE_LOCK.
 """
@@ -39,11 +45,16 @@ from dataclasses import dataclass
 import pymupdf
 
 from ..i18n import _
+from . import original_text
 from .errors import DocumentError
 
 
 class IncrementalSaveError(DocumentError):
     """Il salvataggio incrementale non è possibile: il messaggio spiega perché."""
+
+
+class _KeepTextFailed(Exception):
+    """Il testo originale dei valori non si è potuto rimettere: si salva con quello del motore."""
 
 
 _STREAM_KEYS = re.compile(r"/(Length|Filter|DecodeParms)\s*(\d+\s+\d+\s+R|\[[^\]]*\]|<<.*?>>|/[^\s/<>\[\]()]+|\d+)", re.S)
@@ -205,10 +216,10 @@ def _put_raw_stream(pdf: pymupdf.Document, xref: int, raw: bytes) -> bool:
         return False
 
 
-def _apply(orig: pymupdf.Document, current: pymupdf.Document, ch: Change) -> None:
+def _apply(orig: pymupdf.Document, current: pymupdf.Document, ch: Change, obj: str | None = None) -> None:
     while orig.xref_length() <= ch.xref:
         orig.get_new_xref()
-    orig.update_object(ch.xref, ch.obj)
+    orig.update_object(ch.xref, obj if obj is not None else ch.obj)
     if ch.raw is None:
         return
     if _put_raw_stream(orig, ch.xref, ch.raw):
@@ -239,11 +250,69 @@ def incremental_update(original: bytes, current: pymupdf.Document, password: str
     aperto da quei byte, eventualmente ripristinato da istantanee `garbage=0`).
     Tenere ENGINE_LOCK. Solleva IncrementalSaveError se non è possibile.
     """
+    try:
+        return _update(original, current, password, keep_text=True)
+    except _KeepTextFailed:
+        return _update(original, current, password, keep_text=False)
+
+
+def _is_encrypted(pdf: pymupdf.Document) -> bool:
+    try:
+        return pdf.xref_get_key(-1, "Encrypt")[0] != "null"
+    except Exception:
+        return True
+
+
+def _keep_text_plan(orig: pymupdf.Document, original: bytes,
+                    changes: list[Change]) -> tuple[dict[int, str], dict[bytes, bytes]]:
+    """Per gli oggetti esistenti riscritti: testo da passare al motore, con i segnaposto al
+    posto dei valori invariati da scrivere come nel file originale, e la tabella dei
+    segnaposto. Va chiamato prima di modificare `orig`."""
+    existing = [c for c in changes if c.existed and c.old is not None]
+    raw = original_text.raw_objects(orig, original, [c.xref for c in existing]) if existing else {}
+    if not raw:
+        return {}, {}
+    encrypted = _is_encrypted(orig)
+    texts: dict[int, str] = {}
+    repl: dict[bytes, bytes] = {}
+    for c in existing:
+        if c.xref not in raw:
+            continue
+        spans = original_text.keep_spans(raw[c.xref], c.old, c.obj, stream=_is_stream(orig, c.xref),
+                                         encrypted=encrypted)
+        if spans:
+            texts[c.xref], r = original_text.with_placeholders(c.obj, spans)
+            repl.update(r)
+    return texts, repl
+
+
+def _check_kept(data: bytes, password: str | None, changes: list[Change], texts: dict[int, str]) -> bool:
+    """Gli oggetti con il testo originale rimesso si leggono come quelli voluti."""
+    try:
+        check = pymupdf.open(stream=data, filetype="pdf")
+    except Exception:
+        return False
+    try:
+        if check.needs_pass and not (password and check.authenticate(password)):
+            return False
+        for c in changes:
+            if c.xref in texts:
+                stream = _is_stream(check, c.xref)
+                if _norm(_obj(check, c.xref), stream) != _norm(c.obj, stream):
+                    return False
+        return True
+    finally:
+        check.close()
+
+
+def _update(original: bytes, current: pymupdf.Document, password: str | None, *, keep_text: bool) -> bytes:
     with tempfile.TemporaryDirectory(prefix="foliant-incr-") as tmp:
         path = os.path.join(tmp, "documento.pdf")
         with open(path, "wb") as f:
             f.write(original)
         orig = _open_original(path, password)
+        texts: dict[int, str] = {}
+        repl: dict[bytes, bytes] = {}
         try:
             if orig.is_repaired:
                 raise IncrementalSaveError(_("Il file originale è danneggiato: un salvataggio incrementale non "
@@ -253,14 +322,21 @@ def incremental_update(original: bytes, current: pymupdf.Document, password: str
             trailer_changed = {k: v for k, v in trailer.items() if v and v != _trailer_key(orig, k)}
             if not changes and not trailer_changed:
                 return original
+            if keep_text:
+                try:
+                    texts, repl = _keep_text_plan(orig, original, changes)
+                except Exception:   # testo originale non ricostruibile: quello del motore
+                    texts, repl = {}, {}
             for ch in changes:
-                _apply(orig, current, ch)
+                _apply(orig, current, ch, texts.get(ch.xref))
             for k, v in trailer_changed.items():
                 orig.xref_set_key(-1, k, v)
             orig.save(path, incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP)
         except IncrementalSaveError:
             raise
         except Exception as e:
+            if keep_text and texts:
+                raise _KeepTextFailed from e
             raise IncrementalSaveError(_("Salvataggio incrementale non riuscito: {e}").format(
                 e=str(e) or e.__class__.__name__)) from e
         finally:
@@ -269,6 +345,10 @@ def incremental_update(original: bytes, current: pymupdf.Document, password: str
             data = f.read()
     if not data.startswith(original):
         raise IncrementalSaveError(_("Il salvataggio incrementale non ha conservato i byte originali."))
+    if repl:
+        data = original_text.fill_placeholders(data, len(original), repl)
+        if data is None or not _check_kept(data, password, changes, texts):
+            raise _KeepTextFailed
     return data
 
 
