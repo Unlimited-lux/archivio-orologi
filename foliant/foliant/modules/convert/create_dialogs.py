@@ -324,13 +324,15 @@ class BlankDialog(QDialog):
 
     def options(self) -> dict:
         from .create import size_from_units
+        orientation = self.orient_box.currentData()
         if self.size_box.currentData() == "custom":
             size = size_from_units(self.w.value(), self.h.value(), self.unit.currentData())
+            orientation = "as_is"      # misure personalizzate: larghezza e altezza come scritte
         else:
             size = self.size_box.currentData()
         bg = self.background
         lc = self.line_color
-        return {"size": size, "orientation": self.orient_box.currentData(), "pages": self.pages.value(),
+        return {"size": size, "orientation": orientation, "pages": self.pages.value(),
                 "background": (bg.redF(), bg.greenF(), bg.blueF()), "paper": self.paper_box.currentData(),
                 "step_mm": self.step.value() * (25.4 if self.step_inches else 1),
                 "line_color": (lc.redF(), lc.greenF(), lc.blueF())}
