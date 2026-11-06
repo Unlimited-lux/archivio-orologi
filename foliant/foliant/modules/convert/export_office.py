@@ -345,6 +345,31 @@ def _add_comments(document, work, pi: int, placed: list, job) -> None:
             job.warn(_("Un commento non è stato convertito."))
 
 
+class _CancellableDoc:
+    """Documento PyMuPDF visto da pdf2docx: ogni accesso a una pagina controlla Annulla."""
+
+    def __init__(self, doc: pymupdf.Document, progress):
+        self._doc = doc
+        self._progress = progress
+
+    def __getitem__(self, index):
+        n = len(self._doc)
+        if isinstance(index, int):
+            check(self._progress, 0.1 * index / max(1, n),
+                  _("Analisi della pagina {i} di {n}").format(i=index + 1, n=n))
+        return self._doc[index]
+
+    def __len__(self) -> int:
+        return len(self._doc)
+
+    def __iter__(self):
+        for i in range(len(self._doc)):
+            yield self[i]
+
+    def __getattr__(self, name):
+        return getattr(self._doc, name)
+
+
 def write_docx_faithful(work: pymupdf.Document, path: str, job) -> None:
     """DOCX «fedele» con pdf2docx: una sezione per pagina, posizioni preservate."""
     import logging
@@ -365,7 +390,11 @@ def write_docx_faithful(work: pymupdf.Document, path: str, job) -> None:
                          "multi_processing": False})
         with ENGINE_LOCK:
             cv.load_pages()
-            cv.parse_document(**settings)
+        check(job.progress, 0.0, _("Analisi del documento…"))
+        with ENGINE_LOCK:
+            # come cv.parse_document(), ma con Annulla controllato a ogni pagina
+            cv.pages.parse(_CancellableDoc(cv.fitz_doc, job.progress), **settings)
+        check(job.progress, 0.1, _("Analisi del documento…"))
         pages = [p for p in cv.pages if not p.skip_parsing]
         n = len(pages)
         for i, page in enumerate(pages):
@@ -378,6 +407,7 @@ def write_docx_faithful(work: pymupdf.Document, path: str, job) -> None:
         check(job.progress, 0.92, _("Scrittura del documento…"))
         with ENGINE_LOCK:
             cv.make_docx(path, **settings)
+        check(job.progress, 0.99, _("Scrittura del documento…"))
     except ConversionError:
         raise
     except Exception as e:
@@ -418,6 +448,9 @@ def detect_decimal(cells: list[str]) -> str:
 _CURRENCY = re.compile(r"^(?:[€$£]|[A-Z]{3}|S?Fr\.)\s?|\s?(?:[€$£]|[A-Z]{3}|S?Fr\.)$")
 
 
+_TIME_PATTERN = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))?")
+
+
 def parse_cell(text: str, decimal: str = ","):
     """Converte il testo di una cella in valore tipizzato: (valore, formato numerico o None).
 
@@ -436,6 +469,12 @@ def parse_cell(text: str, decimal: str = ","):
                 return dt.date(parts["y"], parts["m"], parts["d"]), "dd/mm/yyyy"
             except ValueError:
                 return raw, None
+    m = _TIME_PATTERN.fullmatch(s)
+    if m:
+        h, mi, sec = int(m.group(1)), int(m.group(2)), m.group(3)
+        if h < 24 and mi < 60 and (sec is None or int(sec) < 60):
+            return dt.time(h, mi, int(sec or 0)), "hh:mm:ss" if sec is not None else "hh:mm"
+        return raw, None
     neg = False
     if s.startswith("(") and s.endswith(")"):
         neg, s = True, s[1:-1].strip()
@@ -478,8 +517,11 @@ def parse_cell(text: str, decimal: str = ","):
     return value, fmt
 
 
-def collect_tables(work: pymupdf.Document, job, strategy: str = "lines") -> list[tuple[int, list[list[str]], int]]:
-    """Tabelle del documento: elenco (pagina sorgente, righe, n. tabella nella pagina)."""
+def collect_tables(work: pymupdf.Document, job, strategy: str = "lines",
+                   bboxes: dict | None = None) -> list[tuple[int, list[list[str]], int]]:
+    """Tabelle del documento: elenco (pagina sorgente, righe, n. tabella nella pagina).
+
+    Con `bboxes` vi registra il riquadro di ogni tabella: {(pagina di lavoro, n): Rect}."""
     found = []
     n = work.page_count
     for i in range(n):
@@ -494,9 +536,11 @@ def collect_tables(work: pymupdf.Document, job, strategy: str = "lines") -> list
                 tabs = None
             if (not tabs or not tabs.tables) and image_backed(page):
                 from .extract import grid_tables
-                for t_i, (_bbox, rows, _used) in enumerate(grid_tables(
+                for t_i, (bbox, rows, _used) in enumerate(grid_tables(
                         page.get_text("dict", flags=TEXT_FLAGS).get("blocks", []))):
                     found.append((job.source_index(i), rows, t_i + 1))
+                    if bboxes is not None:
+                        bboxes[(i, t_i + 1)] = pymupdf.Rect(bbox)
                 continue
             words = page.get_text("words", flags=TEXT_FLAGS) if tabs and tabs.tables else []
             for t_i, t in enumerate(tabs.tables if tabs else []):
@@ -504,6 +548,8 @@ def collect_tables(work: pymupdf.Document, job, strategy: str = "lines") -> list
                 rows = [r for r in rows if any((c or "").strip() for c in r)]
                 if rows and max(len(r) for r in rows) >= 2:
                     found.append((job.source_index(i), rows, t_i + 1))
+                    if bboxes is not None:
+                        bboxes[(i, t_i + 1)] = pymupdf.Rect(t.bbox)
     return found
 
 
@@ -547,7 +593,8 @@ def write_xlsx(work: pymupdf.Document, path: str, job) -> None:
     from openpyxl.utils import get_column_letter
 
     strategy = job.options.get("table_strategy", "lines")
-    tables = collect_tables(work, job, strategy)
+    bboxes: dict = {}
+    tables = collect_tables(work, job, strategy, bboxes)
     if job.options.get("merge_tables", True):
         tables = merge_tables(tables)
     sheets_mode = job.options.get("sheets", "single")     # single | page | table
@@ -577,8 +624,7 @@ def write_xlsx(work: pymupdf.Document, path: str, job) -> None:
             widths[name] = {}
         return name, sheets[name]
 
-    for ti, (page, rows, n) in enumerate(tables):
-        check(job.progress, 0.7 + 0.25 * ti / max(1, len(tables)), _("Scrittura del foglio…"))
+    def write_table(page: int, rows: list, n: int) -> None:
         name, ws = sheet_for(page, n)
         r0 = cursor[name] + (1 if cursor[name] > 1 else 0)
         header = _header_rows(rows)
@@ -618,21 +664,81 @@ def write_xlsx(work: pymupdf.Document, path: str, job) -> None:
                         ws.merge_cells(start_row=r0 + r, start_column=c + 1, end_row=r0 + r, end_column=end + 1)
                     c = end + 1
         cursor[name] = r0 + len(rows)
-    if include_text:
-        pages_with_tables = {p for p, _r, _n in tables}
+
+    def write_lines(name: str, lines: list[str]) -> None:
+        ws = sheets[name]
+        r0 = cursor[name] + (1 if cursor[name] > 1 else 0)
+        for k, line in enumerate(lines):
+            _set_text(ws.cell(row=r0 + k, column=1), normalize_text(line))
+            cursor[name] = r0 + k
+
+    if not include_text:
+        for ti, (page, rows, n) in enumerate(tables):
+            check(job.progress, 0.7 + 0.25 * ti / max(1, len(tables)), _("Scrittura del foglio…"))
+            write_table(page, rows, n)
+    else:
+        # testo e tabelle nell'ordine della pagina: il testo fuori dai riquadri delle tabelle
+        # (numero, cliente, totale di una fattura) sopra e sotto la tabella
+        work_of = {}
+        for i in range(work.page_count):
+            work_of.setdefault(job.source_index(i), i)
+        events = []          # (pagina sorgente, y, tipo, dati)
+        for ti, (page, rows, n) in enumerate(tables):
+            box = bboxes.get((work_of.get(page, -1), n))
+            events.append((page, box.y0 if box is not None else 0.0, 1, ti))
         for i in range(work.page_count):
             src = job.source_index(i)
-            if src in pages_with_tables:
-                continue
+            boxes = [b for (wi, _n), b in bboxes.items() if wi == i]
             with ENGINE_LOCK:
-                text = work[i].get_text("text", sort=True)
-            if not text.strip():
+                blocks = work[i].get_text("dict", flags=TEXT_FLAGS, sort=True).get("blocks", [])
+            for b in blocks:
+                for ln in b.get("lines", []):
+                    text = "".join(sp.get("text", "") for sp in ln.get("spans", []))
+                    if not text.strip():
+                        continue
+                    r = pymupdf.Rect(ln["bbox"])
+                    mid = pymupdf.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+                    if any(mid in box for box in boxes):
+                        continue
+                    events.append((src, r.y0, 0, (r.x0, text.strip())))
+        # righe alla stessa altezza (etichetta e valore) restano una riga, da sinistra a destra
+        events.sort(key=lambda e: (e[0], round(e[1]), e[2], e[3] if e[2] == 0 else 0))
+        table_sheet = {}     # pagina → foglio delle sue tabelle (modalità «una tabella per foglio»)
+        for page, _y, kind, data in events:
+            if kind == 1:
+                table_sheet.setdefault(page, sheet_for(page, tables[data][2])[0])
+        pending: list[tuple[int, str]] = []
+
+        def flush(page: int, name: str | None = None) -> None:
+            if not pending:
+                return
+            if name is None:
+                name = table_sheet.get(page) or sheet_for(page, 0)[0]
+            write_lines(name, [t for _p, t in pending])
+            pending.clear()
+
+        last_y = None
+        for k, (page, y, kind, data) in enumerate(events):
+            check(job.progress, 0.7 + 0.25 * k / max(1, len(events)), _("Scrittura del foglio…"))
+            if pending and pending[-1][0] != page:
+                flush(pending[-1][0])
+            if kind == 1:
+                page_t, rows, n = tables[data]
+                if sheets_mode == "table":
+                    flush(page, sheet_for(page_t, n)[0])
+                else:
+                    flush(page)
+                write_table(page_t, rows, n)
+                last_y = None
                 continue
-            name, ws = sheet_for(src, 0) if sheets_mode != "single" else sheet_for(src, 0)
-            r0 = cursor[name] + (1 if cursor[name] > 1 else 0)
-            for k, line in enumerate(l for l in text.splitlines() if l.strip()):
-                _set_text(ws.cell(row=r0 + k, column=1), normalize_text(line))
-                cursor[name] = r0 + k
+            text = data[1]
+            if pending and last_y is not None and abs(y - last_y) < 1.0 and pending[-1][0] == page:
+                pending[-1] = (page, pending[-1][1] + "  " + text)
+            else:
+                pending.append((page, text))
+            last_y = y
+        if pending:
+            flush(pending[-1][0])
     if not wb.sheetnames:
         if not tables:
             raise ConversionError(_("Non è stata trovata alcuna tabella nelle pagine scelte."))
