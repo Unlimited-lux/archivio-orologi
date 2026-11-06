@@ -6,7 +6,8 @@ password serve solo per aprire o estrarre gli allegati. Il file è scritto con p
 perché il motore non sa produrre /EFF.
 
 Nota: il motore (MuPDF 1.28) chiede comunque la password per aprire una busta, anche
-se le pagine non sono cifrate; gli altri lettori conformi mostrano la copertina.
+se le pagine non sono cifrate; Acrobat e i lettori conformi a PDF 2.0 mostrano la copertina.
+I testi dei dialoghi lo dicono (vedi CORE_REQUESTS §11 per l'apertura senza password).
 """
 from __future__ import annotations
 

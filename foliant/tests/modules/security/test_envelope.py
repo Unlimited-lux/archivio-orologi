@@ -158,3 +158,26 @@ def test_password_pair_dialog(qtbot):
     assert "coincidono" in dlg.problem()
     dlg.pw2.setText(PW)
     assert dlg.problem() == ""
+
+
+def test_f3_envelope_texts_tell_the_truth(window, sec, tmp_path, monkeypatch):
+    """Il dialogo non promette che le pagine si aprono senza password ovunque: Foliant la chiede."""
+    from foliant.modules.security import dialogs as D
+    texts = []
+    monkeypatch.setattr(D.PasswordPairDialog, "exec",
+                        lambda dlg: texts.extend(l.text() for l in dlg.findChildren(type(dlg.error))) or 0)
+    assert C.ask_envelope_password(window) is None
+    intro = " ".join(texts)
+    assert "leggibili da tutti" not in intro
+    assert "Acrobat" in intro and "Foliant" in intro and "chiedono comunque la password" in intro
+    path = tmp_path / "busta_pratica_2026_118.pdf"
+    path.write_bytes(E.encrypt_attachments(_with_attachments(), PW))
+    assert pymupdf.open(path).needs_pass          # limite del motore: la password serve anche qui
+    from foliant.core.document import Document
+    doc = Document.open(path, PW)
+    try:
+        [details] = [d for head, d in C.security_rows(doc) if "solo gli allegati" in head]
+        assert not any("leggibili senza password" in line for line in details)
+        assert any("Foliant" in line for line in details)
+    finally:
+        doc.close()

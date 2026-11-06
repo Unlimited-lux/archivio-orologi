@@ -54,8 +54,10 @@ def ask_policy_passwords(parent, policy) -> tuple[str, str] | None:
 
 def ask_envelope_password(parent) -> str | None:
     dlg = D.PasswordPairDialog(_("Password degli allegati"),
-                               _("Le pagine restano leggibili da tutti; per aprire o estrarre gli allegati servirà "
-                                 "questa password. Nomi e descrizioni degli allegati restano visibili."), parent)
+                               _("Per aprire o estrarre gli allegati servirà questa password. Le pagine restano in "
+                                 "chiaro: Adobe Acrobat e i lettori conformi a PDF 2.0 le mostrano senza password, "
+                                 "mentre Foliant e diversi altri programmi chiedono comunque la password per aprire "
+                                 "il file. Nomi e descrizioni degli allegati restano visibili."), parent)
     return dlg.pw.text() if dlg.exec() == QDialog.DialogCode.Accepted else None
 
 
@@ -2144,7 +2146,8 @@ def security_rows(doc) -> list[tuple[str, list[str]]]:
             envelope = is_envelope(doc.pdf)
         if envelope:
             rows.append((_("Busta di sicurezza: solo gli allegati sono cifrati"),
-                         [_("Le pagine sono leggibili senza password."),
+                         [_("Le pagine sono in chiaro: Adobe Acrobat le mostra senza password, Foliant e diversi "
+                            "altri programmi la chiedono comunque."),
                           _("Nomi e descrizioni degli allegati restano visibili.")]))
         if enc.get("perms_tampered"):
             rows.append((_("Permessi del documento alterati"),
