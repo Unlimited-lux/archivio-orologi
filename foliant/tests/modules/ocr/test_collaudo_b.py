@@ -99,3 +99,38 @@ def test_b4_correggi_parola_non_lascia_pezzi(window, certificato, mode):
         assert "Speedmaster" not in words and words.count("Calibro") == 1
         row = [w[4] for w in page.get_text("words", sort=True) if w[1] < rect.y1 and w[3] > rect.y0]
         assert row == ["Orologio", "Omega", "Calibro", "Professional"], row
+
+
+# ------------------------------------------------------------------ B-6
+GARANZIA = [
+    "Il venditore garantisce che il cronografo Omega Speedmaster",
+    "referenza 3570.50 è originale, revisionato e funzionante.",
+    "La garanzia copre i difetti di fabbricazione per ventiquattro",
+    "mesi dalla consegna, esclusi vetro, cinturino e urti accidentali.",
+    "Firmato a Milano il 12 marzo 2026 da Rossi Verdi Bianchi.",
+]
+
+
+@pytest.mark.parametrize("skew", [2.0, 3.5, 5.0, -4.0])
+def test_b6_ricercabile_storta_leggibile_in_poppler(tmp_path, skew):
+    """Scansione storta di 2–5°: pdftotext (Evince, Okular) legge le righe intere e in ordine."""
+    import difflib
+    import shutil
+    import subprocess
+    if not shutil.which("pdftotext"):
+        pytest.skip("pdftotext non disponibile")
+    data = open(image_pdf(tmp_path / "garanzia.pdf", [scan_image(lines=GARANZIA, skew=skew)], dpi=300),
+                "rb").read()
+    out = engine.ocr_pdf_bytes(data, ["ita"], engine.SEARCHABLE)
+    (tmp_path / "o.pdf").write_bytes(out)
+    expected = " ".join(GARANZIA).split()
+    text = subprocess.run(["pdftotext", str(tmp_path / "o.pdf"), "-"], capture_output=True, text=True,
+                          check=True).stdout
+    assert difflib.SequenceMatcher(None, text.split(), expected).ratio() >= 0.9, text
+    with pymupdf.open(stream=out) as d:
+        mu = d[0].get_text(sort=True)
+        assert difflib.SequenceMatcher(None, mu.split(), expected).ratio() >= 0.9, mu
+        # ogni parola resta sulla sua riga della scansione: il centro del riquadro trovato cade
+        # entro mezza interlinea (21,6 pt) dalla riga dell'immagine
+        hit = d[0].search_for("Speedmaster")
+        assert len(hit) == 1

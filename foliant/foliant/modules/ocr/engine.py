@@ -1082,19 +1082,59 @@ def _font_size_for_line(ln: Line, zoom: float, font: pymupdf.Font) -> float:
     return max(2.0, (h / zoom) / max(0.8, asc + desc) * 1.08)
 
 
-STRAIGHT_WORDS_DEG = 3.0   # sotto questa inclinazione il testo invisibile si scrive diritto
+STRAIGHT_WORDS_DEG = 5.5   # fino a questa inclinazione il testo invisibile si scrive diritto (poppler)
+
+
+def _invisible_line_ops(words: list, inv: pymupdf.Matrix, fname: str) -> list[str]:
+    """Operatori di una riga di testo invisibile, scritta come una sola sequenza: un Tm per
+    riga, poi spostamenti lungo la riga (Td), tutte le parole sulla linea di base media.
+
+    Poppler (Evince, Okular, pdftotext) ricompone parole e righe solo se i caratteri hanno la
+    stessa linea di base: parole a scalini o ruotate una per una venivano spezzate e riordinate.
+    Fino a `STRAIGHT_WORDS_DEG` la riga si scrive diritta (asse più vicino), oltre con la sua
+    inclinazione (MuPDF, Acrobat e i browser la leggono comunque)."""
+    pts = [(p0 * inv, p1 * inv) for p0, p1, *_r in words]
+    first, last = pts[0][0], pts[-1][1]
+    span = math.hypot(last.x - first.x, last.y - first.y)
+    if span > 1e-6:
+        ux, uy = (last.x - first.x) / span, (last.y - first.y) / span
+    else:
+        o, e = pts[0]
+        n = math.hypot(e.x - o.x, e.y - o.y) or 1.0
+        ux, uy = (e.x - o.x) / n, (e.y - o.y) / n
+    angle = math.atan2(uy, ux)
+    axis = round(angle / (math.pi / 2)) * (math.pi / 2)
+    if abs(angle - axis) < math.radians(STRAIGHT_WORDS_DEG):
+        ux, uy = round(math.cos(axis)), round(math.sin(axis))
+    nx, ny = -uy, ux
+    along = [((o.x + e.x) * ux + (o.y + e.y) * uy) / 2 for o, e in pts]     # centro lungo la riga
+    base = sum(((o.x + e.x) * nx + (o.y + e.y) * ny) / 2 for o, e in pts) / len(pts)   # base media
+    pos = along[0] - words[0][2] / 2
+    ops = [f"{ux:.5f} {uy:.5f} {-uy:.5f} {ux:.5f} {pos * ux + base * nx:.3f} {pos * uy + base * ny:.3f} Tm"]
+    for (_p0, _p1, length, natural, fs, gids, space, space_tz), centre in zip(words, along):
+        start = centre - length / 2
+        if abs(start - pos) > 1e-3:
+            ops.append(f"{start - pos:.3f} 0 Td")
+            pos = start
+        tz = 100.0 * length / natural
+        hexs = "".join(f"{g:04x}" for g in gids)
+        ops.append(f"/{fname} {fs:g} Tf {tz:.2f} Tz <{hexs}> Tj")
+        if space:
+            ops.append(f"{max(space_tz, 1.0):.2f} Tz <{space:04x}> Tj")
+    return ops
 
 
 def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: float) -> int:
-    """Livello di testo invisibile: una parola per oggetto di testo, con corpo della riga,
-    scala orizzontale (Tz) che fa coincidere la larghezza con la parola nell'immagine e
-    direzione (Tm) che segue l'inclinazione della riga.
+    """Livello di testo invisibile: una sequenza per riga (vedi `_invisible_line_ops`), con corpo
+    della riga e scala orizzontale (Tz) che fa coincidere la larghezza di ogni parola con la
+    parola nell'immagine.
 
     Il font viene incorporato (con /ToUnicode) tramite TextWriter; il contenuto è poi
     riscritto con gli operatori per parola."""
     font = get_font("sans")
     to_page = lambda x, y: (pymupdf.Point(*mapper(x, y)) * placement.display_to_page_matrix(page))  # noqa: E731
     items = []
+    lines_out: list = []
     tw = pymupdf.TextWriter(page.rect)
     for ln in res.lines:
         fs_line = _font_size_for_line(ln, zoom, font)
@@ -1138,7 +1178,8 @@ def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: f
                 nxt = ln.words[ln.words.index(word) + 1]
                 gap = max(0.0, (nxt.bbox[0] - x1) / zoom)
                 space_tz = 100.0 * min(1.0, 0.5 * gap / max(0.01, font.text_length(" ", fontsize=fs)))
-            items.append((p0, p1, length, natural, fs, gids, space, space_tz))
+            items.append((len(lines_out), p0, p1, length, natural, fs, gids, space, space_tz))
+        lines_out.append(ln)
     if not items:
         return 0
     before = set(page.get_contents())
@@ -1151,25 +1192,11 @@ def _insert_words_invisible(page: pymupdf.Page, res: PageResult, mapper, zoom: f
     fname = m.group(1).decode()
     inv = placement.page_to_pdf_matrix(page)     # coordinate standard (y in basso) → spazio PDF
     out = ["q", "BT", "3 Tr"]
-    for p0, p1, length, natural, fs, gids, space, space_tz in items:
-        o = p0 * inv
-        e = p1 * inv
-        ux, uy = (e.x - o.x) / length, (e.y - o.y) / length
-        # inclinazione lieve: parola diritta (allineata all'asse più vicino) centrata sulla sua base
-        # media, come hocrtransform. Poppler (Evince, Okular, pdftotext) spezza e riordina le parole
-        # appena ruotate; la differenza di posizione è sotto il punto.
-        angle = math.atan2(uy, ux)
-        axis = round(angle / (math.pi / 2)) * (math.pi / 2)
-        if abs(angle - axis) < math.radians(STRAIGHT_WORDS_DEG):
-            mx, my = (o.x + e.x) / 2, (o.y + e.y) / 2
-            ux, uy = round(math.cos(axis)), round(math.sin(axis))
-            o = pymupdf.Point(mx - ux * length / 2, my - uy * length / 2)
-        tz = 100.0 * length / natural
-        hexs = "".join(f"{g:04x}" for g in gids)
-        out.append(f"/{fname} {fs:g} Tf {tz:.2f} Tz {ux:.5f} {uy:.5f} {-uy:.5f} {ux:.5f} {o.x:.3f} {o.y:.3f} Tm "
-                   f"<{hexs}> Tj")
-        if space:
-            out.append(f"{max(space_tz, 1.0):.2f} Tz <{space:04x}> Tj")
+    groups: dict[int, list] = {}
+    for it in items:
+        groups.setdefault(it[0], []).append(it[1:])
+    for words in groups.values():
+        out += _invisible_line_ops(words, inv, fname)
     out += ["ET", "Q"]
     doc.update_stream(new[0], ("\n".join(out) + "\n").encode())
     for x in new[1:]:
