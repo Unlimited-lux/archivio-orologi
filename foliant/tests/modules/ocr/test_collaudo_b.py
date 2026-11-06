@@ -58,3 +58,44 @@ def test_b5_pagina_mista_ruotata_resta_mista(tmp_path, rot):
     with pymupdf.open(str(path)) as d:
         assert d[0].get_text().startswith("Scheda di valutazione")
         assert detect.classify_page(d[0]).category == detect.MIXED
+
+
+# ------------------------------------------------------------------ B-4
+def _ocr_controller():
+    from foliant.modules import ocr
+    return ocr.controller
+
+
+@pytest.fixture
+def certificato(tmp_path):
+    return image_pdf(tmp_path / "certificato.pdf", [scan_image(CERTIFICATO, dpi=300, fontsize=14)], dpi=300)
+
+
+def _lines(page, sort=True):
+    return [" ".join(ln.split()) for ln in page.get_text(sort=sort).splitlines() if ln.strip()]
+
+
+@pytest.mark.parametrize("mode", [engine.EDITABLE, engine.SEARCHABLE])
+def test_b4_correggi_parola_non_lascia_pezzi(window, certificato, mode):
+    view = window.open_path(certificato)
+    ctl = _ocr_controller()
+    ctl.run(view, engine.OcrOptions(languages=["ita"], mode=mode), [0], preview=False)
+    rect, word = next((r, w) for r, w in ctl.state(view).placed[0] if w.text == "Speedmaster")
+    assert ctl.correct_word(view, 0, rect, word, "Calibro")
+    with pymupdf.open(stream=view.document.to_bytes()) as doc:
+        page = doc[0]
+        lines = _lines(page)
+        # ordine di lettura conservato, anche per MuPDF con sort e per l'estrazione semplice
+        assert "Orologio Omega Calibro Professional" in lines, lines
+        assert lines.index("Orologio Omega Calibro Professional") == 1
+        import shutil
+        import subprocess
+        if shutil.which("pdftotext"):        # poppler (Evince, Okular)
+            doc.save(str(certificato) + ".corretto.pdf")
+            out = subprocess.run(["pdftotext", str(certificato) + ".corretto.pdf", "-"],
+                                 capture_output=True, text=True).stdout
+            assert "Orologio Omega Calibro Professional" in [" ".join(ln.split()) for ln in out.splitlines()]
+        words = [w[4] for w in page.get_text("words")]
+        assert "Speedmaster" not in words and words.count("Calibro") == 1
+        row = [w[4] for w in page.get_text("words", sort=True) if w[1] < rect.y1 and w[3] > rect.y0]
+        assert row == ["Orologio", "Omega", "Calibro", "Professional"], row

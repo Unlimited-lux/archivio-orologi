@@ -1541,37 +1541,104 @@ def ocr_page_text(source, page: int = 0, languages: list[str] | None = None, cli
     return res.text
 
 
+def _word_span(span: dict, rect: pymupdf.Rect) -> tuple[int, int] | None:
+    """Indici (primo, ultimo) dei caratteri della parola di `span` che cade in `rect`
+    (riquadro ricavato dall'immagine).
+
+    La parola intera, da spazio a spazio: il testo scritto ha posizione e larghezza del font,
+    non sempre quelle della parola nell'immagine."""
+    chars = list(span.get("chars", ()))
+    hit = [i for i, c in enumerate(chars) if c[0] != 32 and pymupdf.Rect(c[3]).intersects(rect)
+           and abs(pymupdf.Rect(c[3]) & rect) > 0.3 * abs(pymupdf.Rect(c[3]))]
+    if not hit:
+        # nessun carattere coperto per almeno il 30%: il più vicino al centro del riquadro
+        mid = pymupdf.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2)
+        cand = [i for i, c in enumerate(chars) if c[0] != 32]
+        if not cand:
+            return None
+        hit = [min(cand, key=lambda i: abs(pymupdf.Point(chars[i][2]) - mid))]
+    a, b = min(hit), max(hit)
+    while a > 0 and chars[a - 1][0] != 32:
+        a -= 1
+    while b + 1 < len(chars) and chars[b + 1][0] != 32:
+        b += 1
+    return a, b
+
+
 def replace_word(page: pymupdf.Page, rect: pymupdf.Rect, new_text: str, family: str = "sans") -> bool:
     """Corregge una parola già inserita dall'OCR (visibile o invisibile) nell'area `rect`.
 
-    Il testo nell'area viene rimosso con la redazione (immagini e grafica
-    restano intatte) e reinserito con lo stesso corpo, colore, modalità di
-    resa e direzione. Restituisce False se nell'area non c'è testo.
+    Si cerca nel testo della pagina la parola reale che interseca `rect` (riquadro della
+    parola nell'immagine); il suo riquadro intero viene rimosso con la redazione (immagini e
+    grafica restano intatte) e la parola nuova è reinserita alla sua origine, con lo stesso
+    corpo, colore, modalità di resa e direzione. Il testo invisibile occupa la stessa
+    larghezza della parola sostituita: la riga resta una riga anche per l'ordine di lettura.
+    Restituisce False se nell'area non c'è testo.
     """
     rect = pymupdf.Rect(rect)
     target = None
     for span in page.get_texttrace():
-        if pymupdf.Rect(span["bbox"]).intersects(rect):
+        if pymupdf.Rect(span["bbox"]).intersects(rect) and any(c[0] != 32 for c in span.get("chars", ())):
             inter = pymupdf.Rect(span["bbox"]) & rect
             if target is None or abs(inter) > abs(pymupdf.Rect(target["bbox"]) & rect):
                 target = span
     if target is None:
         return False
-    chars = [c for c in target["chars"] if pymupdf.Rect(c[3]).intersects(rect) and
-             abs(pymupdf.Rect(c[3]) & rect) > 0.3 * abs(pymupdf.Rect(c[3]))]
-    origin = pymupdf.Point(chars[0][2]) if chars else pymupdf.Point(rect.x0, rect.y1)
+    found = _word_span(target, rect)
+    if found is None:
+        return False
+    invisible = target["type"] == 3 or target.get("opacity", 1) == 0
+    all_chars = list(target["chars"])
+    a, b = found
+    text = unicodedata.normalize("NFC", new_text.strip())
+    if invisible:
+        chars = all_chars[a:b + 1]
+    else:
+        # testo visibile: la parola e il resto della riga si riscrivono di seguito, come in un
+        # editor (una parola più corta non lascia un vuoto che spezza la riga per i lettori)
+        # (un elemento del texttrace può contenere più righe: ci si ferma alla fine di questa)
+        dx0, dy0 = target.get("dir", (1, 0))
+        o0 = pymupdf.Point(all_chars[a][2])
+        tol = 0.3 * float(target["size"])
+        stop = a + 1
+        while stop < len(all_chars):
+            o = pymupdf.Point(all_chars[stop][2])
+            prev = pymupdf.Point(all_chars[stop - 1][2])
+            off = (o.x - o0.x) * -dy0 + (o.y - o0.y) * dx0          # distanza dalla linea di base
+            step = (o.x - prev.x) * dx0 + (o.y - prev.y) * dy0      # avanzamento lungo la riga
+            if abs(off) > tol or step < -tol:
+                break
+            stop += 1
+        chars = all_chars[a:stop]
+        while len(chars) > 1 and chars[-1][0] in (32, 9):
+            chars.pop()
+        rest = "".join(chr(c[0]) for c in all_chars[b + 1:a + len(chars)])
+        text = (text + rest) if text else rest.lstrip()
+    origin = pymupdf.Point(chars[0][2])
+    end = pymupdf.Point(chars[-1][2])
+    box = pymupdf.Rect(chars[0][3])
+    for c in chars[1:]:
+        box |= pymupdf.Rect(c[3])
     size = float(target["size"])
-    invisible = target["type"] == 3
     color = tuple(target.get("color") or (0, 0, 0))
     dx, dy = target.get("dir", (1, 0))
-    shrink = pymupdf.Rect(rect.x0 + 0.3, rect.y0 + 0.3, rect.x1 - 0.3, rect.y1 - 0.3)
-    page.add_redact_annot(shrink)
+    # redazione dell'intera parola, senza toccare spazi e parole vicine né le righe sopra e sotto:
+    # si restringe di poco lungo la riga e alla fascia centrale nell'altra direzione
+    horizontal = abs(dx) >= abs(dy)
+    if horizontal:
+        cw = box.width / max(1, len(chars))
+        ch = box.height
+        cut = pymupdf.Rect(box.x0 + 0.15 * cw, box.y0 + 0.3 * ch, box.x1 - 0.15 * cw, box.y1 - 0.3 * ch)
+    else:
+        cw = box.height / max(1, len(chars))
+        ch = box.width
+        cut = pymupdf.Rect(box.x0 + 0.3 * ch, box.y0 + 0.15 * cw, box.x1 - 0.3 * ch, box.y1 - 0.15 * cw)
+    page.add_redact_annot(cut)
     kwargs = {"images": pymupdf.PDF_REDACT_IMAGE_NONE}
     if hasattr(pymupdf, "PDF_REDACT_LINE_ART_NONE"):
         kwargs["graphics"] = pymupdf.PDF_REDACT_LINE_ART_NONE
     page.apply_redactions(**kwargs)
-    text = unicodedata.normalize("NFC", new_text.strip())
-    if not text:
+    if not text.strip():
         return True
     if family == "auto":
         name = str(target.get("font", ""))
@@ -1580,15 +1647,20 @@ def replace_word(page: pymupdf.Page, rect: pymupdf.Rect, new_text: str, family: 
         italic = "Italic" in name
         family = font_key(family, bold, italic)
     font = get_font("sans" if invisible else family)
-    if invisible and chars:
-        natural = font.text_length(text, fontsize=size) or 1.0
-        size = min(max(size * rect.width / natural, size * 0.6), size * 1.4)
+    natural = font.text_length(text, fontsize=size) or 1.0
+    # larghezza della parola sostituita: dall'origine del primo carattere alla fine dell'ultimo
+    last_w = (pymupdf.Rect(chars[-1][3]).width if horizontal else pymupdf.Rect(chars[-1][3]).height)
+    width = math.hypot(end.x - origin.x, end.y - origin.y) + last_w
+    if invisible:
+        sx = min(max(width / natural, 0.3), 3.0)          # stessa larghezza: copia e ricerca restano allineate
+    else:
+        sx = max(min(1.0, width / natural), 0.6)     # più lunga: stretta per non coprire il seguito
     tw = pymupdf.TextWriter(page.rect)
     tw.append(origin, text, font=font, fontsize=size)
     angle = -math.degrees(math.atan2(dy, dx))
     kw = {"render_mode": 3 if invisible else 0, "color": color}
-    if abs(angle) > 0.01:
-        kw["morph"] = (origin, pymupdf.Matrix(angle))
+    if abs(angle) > 0.01 or abs(sx - 1.0) > 1e-3:
+        kw["morph"] = (origin, pymupdf.Matrix(sx, 0, 0, 1, 0, 0) * pymupdf.Matrix(angle))
     placement.write_text(page, tw, **kw)
     return True
 
