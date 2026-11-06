@@ -23,7 +23,7 @@ from .. import APP_NAME, __version__
 from ..core import platform
 from ..core.document import ACCESS, CLOSED, CONTENT, LOCK, SAVED, Document, write_error
 from ..core.errors import DocumentError, DocumentWriteError, PasswordRequired, WrongPassword
-from ..i18n import _, pgettext, set_language
+from ..i18n import _, pgettext
 from . import open_files, privacy, theme
 from .backstage import Backstage
 from .banners import Banner, BannerBar, DocumentTabs
@@ -44,10 +44,12 @@ class PageField(QLineEdit):
     """Campo numero pagina: Invio per saltare alla pagina digitata."""
 
     pageRequested = Signal(int)
+    pageRejected = Signal(int, int)     # numero digitato, pagine del documento
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._max = 1
+        self._page = 1
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedWidth(64)
         self.setValidator(QIntValidator(1, 999999, self))
@@ -55,6 +57,7 @@ class PageField(QLineEdit):
 
     def set_page(self, page: int, total: int) -> None:
         self._max = max(1, total)
+        self._page = page
         if not self.hasFocus():
             self.setText(str(page))
 
@@ -68,7 +71,16 @@ class PageField(QLineEdit):
         value = self.value()
         if 1 <= value <= self._max:
             self.pageRequested.emit(value)
+        else:
+            # fuori intervallo: il campo torna alla pagina visibile e la barra di stato lo spiega
+            self.setText(str(self._page))
+            self.pageRejected.emit(value, self._max)
         self.clearFocus()
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        if self.text() != str(self._page):
+            self.setText(str(self._page))      # numero lasciato a metà senza Invio
 OPEN_FILTER = "Documenti (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp *.xps *.epub *.svg *.txt);;PDF (*.pdf);;Tutti i file (*)"
 
 # Finestre aperte dell'applicazione («Nuova finestra», istanza singola), dalla meno alla più
@@ -314,6 +326,7 @@ class MainWindow(QMainWindow):
         hl.addWidget(QLabel(_("Pagina")))
         self.page_spin = PageField(self.page_box)
         self.page_spin.pageRequested.connect(self._on_page_spin)
+        self.page_spin.pageRejected.connect(self._on_page_rejected)
         hl.addWidget(self.page_spin)
         self.page_total = QLabel("/ 0")
         hl.addWidget(self.page_total)
@@ -1678,6 +1691,13 @@ class MainWindow(QMainWindow):
             self.zoom_combo.setCurrentIndex(-1)
             self.zoom_combo.setEditText(f"{round(view.zoom * 100)}%")
 
+    def _on_page_rejected(self, value: int, total: int) -> None:
+        if total == 1:
+            text = _("Pagina «{t}» non trovata: il documento ha una sola pagina.")
+        else:
+            text = _("Pagina «{t}» non trovata: il documento ha {n} pagine.")
+        self.ctx.status(text.format(t=value or "", n=total))
+
     def _on_page_spin(self, value: int) -> None:
         self._with_view(lambda v: v.go_to_page(value - 1))
 
@@ -1815,8 +1835,9 @@ class MainWindow(QMainWindow):
             view.viewport().update()
 
     def set_language(self, key: str) -> None:
+        """Salva la lingua scelta; si applica al prossimo avvio. Cambiarla subito tradurrebbe solo
+        i testi creati da qui in poi e lascerebbe l'interfaccia metà in una lingua e metà nell'altra."""
         self.settings.setValue("language", key)
-        set_language(key)
         QMessageBox.information(self, APP_NAME, _("La lingua verrà applicata al prossimo avvio."))
 
     def about(self) -> None:

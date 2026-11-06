@@ -878,3 +878,48 @@ def test_quit_closes_every_window(settings, qtbot):
             w.close()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert app_windows() == []
+
+
+def test_page_field_out_of_range_returns_to_current_page(window, tmp_path, qtbot):
+    """A-3: «999» e Invio in un documento di 5 pagine: il campo torna alla pagina visibile,
+    la vista non si sposta e la barra di stato spiega perché."""
+    import pymupdf
+    from PySide6.QtCore import Qt
+    path = tmp_path / "registro.pdf"
+    doc = pymupdf.open()
+    for i in range(5):
+        doc.new_page().insert_text((72, 72), f"Pagina {i + 1}")
+    doc.save(str(path))
+    view = window.open_path(str(path))
+    field = window.page_spin
+    field.setFocus()
+    field.setText("3")
+    qtbot.keyClick(field, Qt.Key.Key_Return)
+    assert view.current_page == 2 and field.text() == "3"
+    messages = []
+    window.statusBar().messageChanged.connect(messages.append)
+    field.setFocus()
+    field.setText("999")
+    qtbot.keyClick(field, Qt.Key.Key_Return)
+    assert view.current_page == 2
+    assert field.text() == "3"
+    assert any("999" in m and "5" in m for m in messages)
+    # numero lasciato senza Invio: uscendo dal campo torna alla pagina visibile
+    field.setFocus()
+    field.setText("4")
+    view.setFocus()
+    assert field.text() == "3"
+    view.document._saved_state = view.document._state
+
+
+def test_language_change_applies_at_next_start(window, monkeypatch):
+    """A-4: cambiare lingua dalle Opzioni salva la scelta ma non traduce a metà l'interfaccia."""
+    from PySide6.QtWidgets import QMessageBox
+    from foliant.i18n import _, language
+    before = language()
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+    window.set_language("en" if before != "en" else "it")
+    assert language() == before
+    assert window.settings.value("language") == ("en" if before != "en" else "it")
+    assert shown == [_("La lingua verrà applicata al prossimo avvio.")]

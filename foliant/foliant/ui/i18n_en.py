@@ -215,6 +215,8 @@ EN = {
     "Il documento non contiene pagine.": "The document has no pages.",
     "Il file è danneggiato: non è possibile leggerne le pagine.": "The file is damaged: its pages cannot be read.",
     "Il file «{name}» non esiste.": "The file “{name}” does not exist.",
+    "Pagina «{t}» non trovata: il documento ha {n} pagine.": "Page “{t}” not found: the document has {n} pages.",
+    "Pagina «{t}» non trovata: il documento ha una sola pagina.": "Page “{t}” not found: the document has only one page.",
     "«{name}» è una cartella, non un file.": "“{name}” is a folder, not a file.",
     "Impossibile leggere «{name}»: {error}.": "Cannot read “{name}”: {error}.",
     "Il documento è stato chiuso.": "The document has been closed.",
