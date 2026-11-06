@@ -134,3 +134,88 @@ def test_b6_ricercabile_storta_leggibile_in_poppler(tmp_path, skew):
         # entro mezza interlinea (21,6 pt) dalla riga dell'immagine
         hit = d[0].search_for("Speedmaster")
         assert len(hit) == 1
+
+
+# ------------------------------------------------------------------ B-15
+def test_b15_esegui_ocr_apre_sempre_sul_pdf_ricercabile(window, certificato, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from foliant.modules.ocr import ui
+    view = window.open_path(certificato)
+    ctl = _ocr_controller()
+    opened = []
+
+    def fake_exec(dlg):
+        opened.append(dlg.mode())
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ui.OcrDialog, "exec", fake_exec)
+    monkeypatch.setattr(ctl, "run_background", lambda *a, **k: None)
+    ctl.extract_text()                                     # «Estrai testo»
+    ctl.open_dialog(view, mode=engine.EDITABLE)            # «Rendi modificabile»
+    ctl.actions["run"].trigger()                           # «Esegui OCR»
+    assert opened == [engine.TEXT_ONLY, engine.EDITABLE, engine.SEARCHABLE]
+    assert ctl.settings().value("ocr/mode", None) is None
+
+
+# ------------------------------------------------------------------ B-16
+def test_b16_proposta_su_documento_lungo_dice_almeno(window, tmp_path, qtbot):
+    from foliant.modules.ocr import ui
+    img = scan_image(CERTIFICATO, dpi=72, fontsize=14)
+    path = image_pdf(tmp_path / "archivio_garanzie.pdf", [img] * (ui.ANALYSIS_PAGES + 10), dpi=72)
+    shown = []
+    orig = ui.ProposalBar.show_document
+
+    def spy(bar, count, *a, **k):
+        orig(bar, count, *a, **k)
+        shown.append(bar.text)
+    mp = pytest.MonkeyPatch()
+    mp.setattr(ui.ProposalBar, "show_document", spy)
+    try:
+        window.open_path(path)
+        qtbot.waitUntil(lambda: bool(shown), timeout=15000)
+    finally:
+        mp.undo()
+    assert f"almeno {ui.ANALYSIS_PAGES} pagine scannerizzate" in shown[0], shown[0]
+
+
+def test_b16_proposta_completa_non_dice_almeno():
+    from foliant.modules.ocr import ui
+
+    class Ctl:
+        class ctx:
+            @staticmethod
+            def show_banner(*a, **k):
+                pass
+    bar = ui.ProposalBar(None, Ctl())
+    bar.show_document(3, [], False, False)
+    assert "pagine scannerizzate senza testo (3)" in bar.text and "almeno" not in bar.text
+    bar.show_document(1, [], False, False, partial=True)
+    assert "almeno 1 pagina scannerizzata senza testo" in bar.text
+
+
+# ------------------------------------------------------------------ B-21
+def test_b21_plurali(window, certificato):
+    from foliant.modules.ocr import dialogs
+    dlg = dialogs.OcrDialog(window, page_count=1, current_page=0, detected=[0], settings=_ocr_controller().settings(),
+                            mode=engine.SEARCHABLE)
+    dlg._update_summary([0])
+    assert "Da elaborare: 1 pagina ·" in dlg.summary.text(), dlg.summary.text()
+    view = window.open_path(certificato)
+    ctl = _ocr_controller()
+    ctl.run(view, engine.OcrOptions(languages=["ita"]), [0], preview=False)
+    words = [w for _r, w in ctl.state(view).placed[0]]
+    for w in words:
+        w.conf = 99.0
+    words[1].conf = 20.0
+    ctl.actions["review"].setChecked(True)
+    panel = ctl.review_panel
+    panel.set_view(view)
+    assert panel.hint.text() == "1 parola da verificare, evidenziata sulla pagina."
+    ctl.actions["review"].setChecked(False)
+
+
+def test_b21_plurali_in_inglese():
+    from foliant.modules.ocr.translations import EN
+    assert EN["Da elaborare: 1 pagina · tempo stimato: circa {t}"].startswith("To process: 1 page ·")
+    assert EN["1 parola da verificare, evidenziata sulla pagina."] == "1 word to check, highlighted on the page."
+    assert "at least {n}" in EN["Questo documento contiene almeno {n} pagine scannerizzate senza testo."]
