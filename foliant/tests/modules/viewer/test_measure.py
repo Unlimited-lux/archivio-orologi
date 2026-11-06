@@ -120,3 +120,39 @@ def test_geo_transform_exact_with_four_corners():
         a, b = _apply(c, u, v)
         assert abs(a - lat) < 1e-9 and abs(b - lon) < 1e-9
     assert fit_transform(local[:2], geo[:2]) is None
+
+
+def test_coordinate_nascoste_durante_un_messaggio(viewer_window, tmp_path, qtbot):
+    """B-20: un messaggio temporaneo della barra di stato non si sovrappone alle coordinate."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    path = tmp_path / "scheda.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Scheda di valutazione Omega Seamaster", fontsize=12)
+    doc.save(str(path))
+    view = viewer_window.open_path(str(path))
+    viewer_window.show()
+    ctl = _ctl(viewer_window)
+    ctl.set_show_coords(True)
+    r = view.page_rect(0)
+    pos = view.mapFromScene(r.center()) if hasattr(view, "mapFromScene") else r.center().toPoint()
+
+    def move():
+        ev = QMouseEvent(QEvent.Type.MouseMove, QPointF(pos), QPointF(pos), Qt.MouseButton.NoButton,
+                         Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+        ctl.eventFilter(view.viewport(), ev)
+
+    sb = viewer_window.statusBar()
+    sb.clearMessage()
+    move()
+    if not ctl.label.text():
+        import pytest
+        pytest.skip("punto fuori dalla pagina in questa geometria")
+    assert ctl.label.isVisible()
+    sb.showMessage("Documento salvato", 5000)
+    assert not ctl.label.isVisible()
+    move()                         # il cursore si muove mentre il messaggio è mostrato
+    assert not ctl.label.isVisible()
+    sb.clearMessage()
+    move()
+    assert ctl.label.isVisible()

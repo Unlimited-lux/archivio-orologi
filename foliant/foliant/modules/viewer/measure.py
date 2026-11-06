@@ -101,7 +101,10 @@ class MeasureController(QObject):
         self.label = QLabel(ctx.window)
         self.label.setProperty("muted", True)
         self.label.hide()
-        ctx.window.statusBar().addWidget(self.label)
+        sb = ctx.window.statusBar()
+        sb.addWidget(self.label)
+        # un messaggio temporaneo della barra di stato copre le coordinate: si nascondono finché c'è
+        sb.messageChanged.connect(lambda msg: self.label.hide() if msg else None)
 
         self.menu = QMenu(_("Coordinate e griglia"))
         self.act_coords = self._check(_("Mostra le coordinate del cursore"), self.show_coords, self.set_show_coords)
@@ -243,7 +246,7 @@ class MeasureController(QObject):
             if isinstance(view, DocumentView) and view is self.ctx.current_view() and not view.document.closed:
                 text = self.describe(view, ev.position())
                 self.label.setText(text)
-                self.label.setVisible(bool(text))
+                self.label.setVisible(bool(text) and not self.ctx.window.statusBar().currentMessage())
         elif ev.type() == QEvent.Type.Leave:
             self.label.hide()
         return False
