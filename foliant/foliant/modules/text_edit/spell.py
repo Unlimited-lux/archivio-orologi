@@ -405,6 +405,10 @@ class SpellService:
                     words = dict(sc.word_frequency.dictionary)
                 except Exception:
                     words = {}
+            if words:
+                from .spell_terms import EXTRA_WORDS, TERM_FREQUENCY
+                for w in EXTRA_WORDS.get(lang, ()):
+                    words.setdefault(w, TERM_FREQUENCY)
             self._builtin_words[lang] = words
         return words
 
