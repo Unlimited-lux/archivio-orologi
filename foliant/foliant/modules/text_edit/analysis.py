@@ -6,8 +6,10 @@ righe in paragrafi (stessa colonna, interlinea regolare, dimensione simile).
 
 from __future__ import annotations
 
+import bisect
 import re
 import statistics
+from dataclasses import dataclass, field
 
 import pymupdf
 
@@ -230,7 +232,9 @@ def unframe_matrix(page: pymupdf.Page) -> pymupdf.Matrix:
     return pymupdf.Matrix(page.derotation_matrix) if page.rotation else pymupdf.Matrix(1, 0, 0, 1, 0, 0)
 
 
-def extract_lines(page: pymupdf.Page) -> list[tuple[Line, bool]]:
+def extract_lines(page: pymupdf.Page, vborders: list | None = None) -> list[tuple[Line, bool]]:
+    """Righe di testo della pagina. `vborders`: bordi verticali di `page_borders` (letti dalla pagina se
+    mancano), che separano le celle di tabella scritte dal motore nella stessa riga."""
     xrefs = page_font_xrefs(page)
     frame = frame_matrix(page)
     raw = page.get_text("rawdict", flags=EXTRACT_FLAGS)
@@ -242,7 +246,9 @@ def extract_lines(page: pymupdf.Page) -> list[tuple[Line, bool]]:
             made = _make_line(raw_line, xrefs, frame)
             if made is not None:
                 out.append(made)
-    return _merge_segments(out)
+    if vborders is None:
+        vborders = page_borders(page)[0]
+    return _merge_segments(out, vborders)
 
 
 def _split_line(line: Line, index: int) -> tuple[Line, Line]:
@@ -311,8 +317,129 @@ def _split_columns(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
     return out
 
 
-def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
-    """Riunisce i segmenti della stessa riga separati da spazi larghi (testo giustificato)."""
+def _cut_key(line: Line) -> tuple:
+    return (round(line.baseline, 1), round(line.bbox.x0, 1))
+
+
+def _split_words(line: Line, cuts: list[int]) -> list[Line]:
+    """Divide una riga prima delle parole di indice `cuts` (crescenti)."""
+    out: list[Line] = []
+    cur, offset = line, 0
+    for k in cuts:
+        a, cur = _split_line(cur, k - offset)
+        offset = k
+        out.append(a)
+    out.append(cur)
+    return out
+
+
+def _border_between(x_left: float, x_right: float, line: Line, vborders: list) -> bool:
+    """Un bordo verticale passa nello spazio tra due parole (o due segmenti) della riga, staccato da
+    entrambe: il bordo tra due celle, non un tratto che tocca o attraversa il testo."""
+    y = (line.bbox.y0 + line.bbox.y1) / 2
+    for x, y0, y1 in vborders:
+        if x_left + 0.5 <= x <= x_right - 0.5 and y0 - 0.5 <= y <= y1 + 0.5:
+            return True
+    return False
+
+
+def _split_at_borders(lines: list[tuple[Line, bool]], vborders: list, cuts: set) -> list[tuple[Line, bool]]:
+    """Separa le celle di tabella che il motore ha messo nella stessa riga quando tra due parole passa un
+    bordo verticale (PDF stampati dai browser: celle vicine con poco spazio interno)."""
+    if not vborders:
+        return lines
+    out: list[tuple[Line, bool]] = []
+    for line, inv in lines:
+        ks = []
+        if _horizontal(line) and len(line.words) > 1:
+            for k in range(1, len(line.words)):
+                a, b = line.words[k - 1], line.words[k]
+                # più largo di uno spazio normale: in una cella il bordo sta nel margine interno
+                if b.x - a.x1 >= 0.35 * line.size and _border_between(a.x1, b.x, line, vborders):
+                    ks.append(k)
+        if not ks:
+            out.append((line, inv))
+            continue
+        parts = _split_words(line, ks)
+        cuts.update(_cut_key(p) for p in parts[1:])
+        out.extend((p, inv) for p in parts)
+    return out
+
+
+def _wide_gaps(line: Line) -> list[tuple[int, float, float]]:
+    """Spazi della riga molto più larghi degli altri: (indice della parola dopo, x0, x1)."""
+    gaps = _word_gaps(line)
+    out = []
+    for k, g in enumerate(gaps, 1):
+        if g < 0.6 * line.size:
+            continue
+        others = sorted(x for j, x in enumerate(gaps, 1) if j != k and x > 0)
+        typical = others[len(others) // 4] if others else 0.3 * line.size
+        if g >= 2 * typical:
+            out.append((k, line.words[k - 1].x1, line.words[k].x))
+    return out
+
+
+def _split_channels(lines: list[tuple[Line, bool]], cuts: set) -> list[tuple[Line, bool]]:
+    """Tabelle senza bordi: separa due celle che il motore ha messo nella stessa riga quando lo spazio
+    tra loro è molto più largo degli altri e prosegue, come corridoio bianco, in almeno due righe vicine,
+    con un bordo in comune (colonna allineata a sinistra o a destra). Il testo giustificato ha spazi
+    uniformi e non viene diviso."""
+    horiz = [ln for ln, _inv in lines if _horizontal(ln)]
+    if len(horiz) < 3:
+        return lines
+    wide = {id(ln): _wide_gaps(ln) for ln in horiz if len(ln.words) > 1}
+    if not any(wide.values()):
+        return lines
+    # spazi bianchi di ogni linea di base: tra i segmenti e, dentro i segmenti, quelli molto larghi
+    rows: list[tuple[float, list[tuple[float, float]]]] = []
+    for ln in sorted(horiz, key=lambda x: (x.baseline, x.bbox.x0)):
+        if rows and abs(rows[-1][0] - ln.baseline) <= 0.5:
+            rows[-1][1].append(ln)
+        else:
+            rows.append((ln.baseline, [ln]))
+    spaces: list[tuple[float, list[tuple[float, float]]]] = []
+    for base, segs in rows:
+        segs.sort(key=lambda s: s.bbox.x0)
+        ivs = [(s.bbox.x1, t.bbox.x0) for s, t in zip(segs, segs[1:])
+               if t.bbox.x0 - s.bbox.x1 >= 0.6 * max(s.size, t.size)]
+        for s in segs:
+            ivs.extend((x0, x1) for _k, x0, x1 in wide.get(id(s), ()))
+        spaces.append((base, ivs))
+
+    def channel(line: Line, x0: float, x1: float) -> bool:
+        size = line.size
+        hits, edge = 0, False
+        for base, ivs in spaces:
+            if abs(base - line.baseline) <= 0.5 or abs(base - line.baseline) > 4 * size:
+                continue
+            for u0, u1 in ivs:
+                overlap = min(x1, u1) - max(x0, u0)
+                if overlap >= max(0.2 * size, 0.5 * min(x1 - x0, u1 - u0)):
+                    hits += 1
+                    edge = edge or abs(u0 - x0) <= 1.0 or abs(u1 - x1) <= 1.0
+                    break
+        return hits >= 2 and edge
+
+    out: list[tuple[Line, bool]] = []
+    for line, inv in lines:
+        ks = [k for k, x0, x1 in wide.get(id(line), ()) if channel(line, x0, x1)]
+        if not ks:
+            out.append((line, inv))
+            continue
+        parts = _split_words(line, ks)
+        cuts.update(_cut_key(p) for p in parts[1:])
+        out.extend((p, inv) for p in parts)
+    return out
+
+
+def _merge_segments(lines: list[tuple[Line, bool]], vborders: list | None = None) -> list[tuple[Line, bool]]:
+    """Riunisce i segmenti della stessa riga separati da spazi larghi (testo giustificato), dopo aver
+    separato le celle di tabella scritte nella stessa riga."""
+    vborders = vborders or []
+    cuts: set = set()
+    lines = _split_at_borders(lines, vborders, cuts)
+    lines = _split_channels(lines, cuts)
     lines = _split_columns(lines)
     horiz = [x for x in lines if _horizontal(x[0])]
     others = [x for x in lines if not _horizontal(x[0])]
@@ -354,6 +481,9 @@ def _merge_segments(lines: list[tuple[Line, bool]]) -> list[tuple[Line, bool]]:
             # canaletta tra colonne: il segmento inizia dove iniziano altre righe e il precedente finisce
             # dove finiscono altre righe
             gutter = column(line) and end_aligned(prev)
+            # celle separate (bordo verticale in mezzo, o divise sopra): mai riunite
+            gutter = gutter or _cut_key(line) in cuts or (
+                bool(vborders) and _border_between(prev.bbox.x1, line.bbox.x0, line, vborders))
             if (pinv == inv and abs(prev.baseline - line.baseline) < 0.3 and -0.5 <= gap <= 1.2 * size
                     and 0.8 <= line.size / prev.size <= 1.25 and not gutter
                     and (justified_gap or not column(line))):
@@ -406,10 +536,58 @@ def _compatible(prev: Line, line: Line, group: list[Line]) -> float | None:
     return gap
 
 
-def group_lines(lines: list[Line], rules: list | None = None) -> list[list[Line]]:
+def _cell_box(line: Line, vborders: list, hborders: list) -> tuple | None:
+    """Cella chiusa da bordi sui quattro lati che contiene la riga, come (sinistra, alto, destra, basso);
+    None se manca un lato."""
+    box = line.bbox
+    y = (box.y0 + box.y1) / 2
+    lefts = [x for x, y0, y1 in vborders if y0 - 0.5 <= y <= y1 + 0.5 and x <= box.x0 + 0.5]
+    rights = [x for x, y0, y1 in vborders if y0 - 0.5 <= y <= y1 + 0.5 and x >= box.x1 - 0.5]
+    if not lefts or not rights:
+        return None
+    left, right = max(lefts), min(rights)
+    # sopra e sotto: bordi larghi quanto la cella (non una sottolineatura o un disegno nella cella)
+    across = [hy for hy, x0, x1 in hborders if x0 <= left + 2.0 and x1 >= right - 2.0]
+    tops = [hy for hy in across if hy <= line.baseline - 0.4 * line.size]
+    bottoms = [hy for hy in across if hy >= line.baseline]
+    if not tops or not bottoms:
+        return None
+    return (left, max(tops), right, min(bottoms))
+
+
+def _same_cell(a: tuple | None, b: tuple | None) -> bool:
+    return a is not None and b is not None and all(abs(p - q) <= 1.0 for p, q in zip(a, b))
+
+
+def cell_boxes(lines: list[Line], borders: tuple[list, list]) -> dict[int, tuple]:
+    """id(riga) -> cella chiusa da bordi che la contiene (solo le righe orizzontali in una cella di
+    tabella: le cornici alte, come il riquadro della pagina o di un pannello, non sono celle)."""
+    vborders, hborders = borders
+    if not vborders or not hborders:
+        return {}
+    out = {}
+    for ln in lines:
+        if _horizontal(ln):
+            box = _cell_box(ln, vborders, hborders)
+            if box is not None and box[3] - box[1] <= 15 * ln.size:
+                out[id(ln)] = box
+    return out
+
+
+def group_lines(lines: list[Line], rules: list | None = None, cells: dict | None = None,
+                hborders: list | None = None) -> list[list[Line]]:
     """Raggruppa righe orizzontali in paragrafi. `rules`: filetti orizzontali (rettangoli sottili),
-    che separano sempre due righe."""
+    che separano sempre due righe. `cells` (di `cell_boxes`) e `hborders`: le righe della stessa cella di
+    una tabella con bordi formano un paragrafo anche se nella riga della tabella ci sono altre celle."""
     ordered = sorted(lines, key=lambda ln: (round(ln.baseline, 1), ln.bbox.x0))
+    cells = dict(cells or {})
+    # una cella vale solo se la riga è da sola nella cella (altrimenti è una tabella senza bordi interni)
+    for ln in ordered:
+        box = cells.get(id(ln))
+        if box is not None and any(o is not ln and abs(o.baseline - ln.baseline) <= 0.5
+                                   and o.bbox.x1 > box[0] and o.bbox.x0 < box[2] for o in ordered):
+            del cells[id(ln)]
+    cell_rules = list(rules or []) + [pymupdf.Rect(x0, y, x1, y) for y, x0, x1 in (hborders or ())]
     # righe con altro testo vicino sulla stessa linea di base (celle di tabella): non si uniscono
     # a righe senza vicini (paragrafi)
     def has_neighbor(line: Line) -> bool:
@@ -428,6 +606,20 @@ def group_lines(lines: list[Line], rules: list | None = None) -> list[list[Line]
     neighbors = {id(ln): has_neighbor(ln) for ln in ordered}
     groups: list[list[Line]] = []
     for line in ordered:
+        cell = cells.get(id(line))
+        if cell is not None:
+            # riga di una cella con bordi: continua il paragrafo della stessa cella (testo andato a capo
+            # nella cella), mai attraverso un bordo orizzontale
+            best, best_d = None, None
+            for g in groups:
+                if not _same_cell(cells.get(id(g[-1])), cell) or _rule_between(g[-1], line, cell_rules):
+                    continue
+                d = _compatible(g[-1], line, g)
+                if d is not None and (best_d is None or d < best_d):
+                    best, best_d = g, d
+            if best is not None:
+                best.append(line)
+                continue
         if neighbors[id(line)]:
             # cella di tabella: blocco a sé, così una modifica non rifluisce nella riga sotto
             groups.append([line])
@@ -436,6 +628,9 @@ def group_lines(lines: list[Line], rules: list | None = None) -> list[list[Line]
         for g in groups:
             if neighbors[id(g[-1])]:
                 continue
+            other = cells.get(id(g[-1]))
+            if cell is not None and other is not None and not _same_cell(cell, other):
+                continue      # celle diverse della tabella
             if rules and _rule_between(g[-1], line, rules):
                 continue
             d = _compatible(g[-1], line, g)
@@ -458,12 +653,20 @@ def _rule_between(a: Line, b: Line, rules: list) -> bool:
     return False
 
 
-def page_rules(page: pymupdf.Page) -> list:
+def page_drawings(page: pymupdf.Page) -> list:
+    """Disegni vettoriali della pagina (una sola lettura per analisi: su pagine con molta grafica è lenta)."""
+    try:
+        return page.get_drawings()
+    except Exception:
+        return []
+
+
+def page_rules(page: pymupdf.Page, drawings: list | None = None) -> list:
     """Filetti orizzontali della pagina (riquadro di lavoro)."""
     out = []
     try:
         frame = frame_matrix(page)
-        for d in page.get_drawings():
+        for d in page_drawings(page) if drawings is None else drawings:
             r = pymupdf.Rect(d.get("rect")) * frame
             if r.height <= 2.0 and r.width >= 20:
                 out.append(r)
@@ -472,13 +675,57 @@ def page_rules(page: pymupdf.Page) -> list:
     return out
 
 
-def page_edges(page: pymupdf.Page) -> list[tuple[float, float, float]]:
+def page_borders(page: pymupdf.Page, drawings: list | None = None) -> tuple[list, list]:
+    """Bordi di tabella della pagina (riquadro di lavoro): verticali come (x, y0, y1) e orizzontali come
+    (y, x0, x1).
+
+    Solo tratti di bordo: linee, lati dei rettangoli tracciati, rettangoli pieni sottili (i bordi dei
+    browser); mai i lati dei riempimenti larghi (sfondi, evidenziazioni del testo, loghi)."""
+    vertical: list[tuple[float, float, float]] = []
+    horizontal: list[tuple[float, float, float]] = []
+    try:
+        frame = frame_matrix(page)
+        for d in page_drawings(page) if drawings is None else drawings:
+            stroked = "s" in (d.get("type") or "")
+            for item in d.get("items", ()):
+                kind = item[0]
+                if kind == "l":
+                    p0, p1 = item[1] * frame, item[2] * frame
+                    if abs(p0.x - p1.x) <= 1.0 and abs(p0.y - p1.y) >= 4.0:
+                        vertical.append(((p0.x + p1.x) / 2, min(p0.y, p1.y), max(p0.y, p1.y)))
+                    elif abs(p0.y - p1.y) <= 1.0 and abs(p0.x - p1.x) >= 4.0:
+                        horizontal.append(((p0.y + p1.y) / 2, min(p0.x, p1.x), max(p0.x, p1.x)))
+                    continue
+                if kind == "re":
+                    r = pymupdf.Rect(item[1]) * frame
+                elif kind == "qu":
+                    q = item[1]
+                    r = pymupdf.Rect(q.rect) * frame
+                    if not q.is_rectangular:
+                        continue
+                else:
+                    continue
+                if r.width <= 2.0 and r.height >= 4.0:          # filetto verticale disegnato come rettangolo
+                    vertical.append(((r.x0 + r.x1) / 2, r.y0, r.y1))
+                elif r.height <= 2.0 and r.width >= 4.0:        # filetto orizzontale
+                    horizontal.append(((r.y0 + r.y1) / 2, r.x0, r.x1))
+                elif stroked and r.width > 2.0 and r.height > 2.0:
+                    vertical.append((r.x0, r.y0, r.y1))
+                    vertical.append((r.x1, r.y0, r.y1))
+                    horizontal.append((r.y0, r.x0, r.x1))
+                    horizontal.append((r.y1, r.x0, r.x1))
+    except Exception:
+        return [], []
+    return vertical, horizontal
+
+
+def page_edges(page: pymupdf.Page, drawings: list | None = None) -> list[tuple[float, float, float]]:
     """Bordi verticali della pagina (riquadro di lavoro): linee e lati dei rettangoli, come
     (x, y0, y1). Servono a riconoscere le celle di tabella che contengono una riga di testo."""
     out: list[tuple[float, float, float]] = []
     try:
         frame = frame_matrix(page)
-        for d in page.get_drawings():
+        for d in page_drawings(page) if drawings is None else drawings:
             for item in d.get("items", ()):
                 kind = item[0]
                 if kind == "l":
@@ -502,19 +749,148 @@ def page_edges(page: pymupdf.Page) -> list[tuple[float, float, float]]:
 def _cell_alignment(line: Line, edges: list) -> str | None:
     """Allineamento di una riga sola dentro una cella di tabella (bordi a sinistra e a destra alla sua
     altezza): centrata o a destra se è così nella cella, altrimenti None (non si sa)."""
-    box = line.bbox
-    y = (box.y0 + box.y1) / 2
-    lefts = [x for x, y0, y1 in edges if y0 - 0.5 <= y <= y1 + 0.5 and x <= box.x0 + 0.5]
-    rights = [x for x, y0, y1 in edges if y0 - 0.5 <= y <= y1 + 0.5 and x >= box.x1 - 0.5]
-    if not lefts or not rights:
+    sides = _cell_sides(line, edges)
+    if sides is None:
         return None
-    left, right = max(lefts), min(rights)
+    left, right = sides
+    box = line.bbox
     ml, mr = box.x0 - left, right - box.x1
     tol = max(1.5, 0.3 * line.size)
     if min(ml, mr) > tol and abs(ml - mr) <= tol:
         return ALIGN_CENTER
     if mr <= max(tol, 0.6 * line.size) and ml > 2 * mr + tol:
         return ALIGN_RIGHT
+    return None
+
+
+def _cell_sides(line: Line, edges: list) -> tuple[float, float] | None:
+    box = line.bbox
+    y = (box.y0 + box.y1) / 2
+    lefts = [x for x, y0, y1 in edges if y0 - 0.5 <= y <= y1 + 0.5 and x <= box.x0 + 0.5]
+    rights = [x for x, y0, y1 in edges if y0 - 0.5 <= y <= y1 + 0.5 and x >= box.x1 - 0.5]
+    if not lefts or not rights:
+        return None
+    return max(lefts), min(rights)
+
+
+def _column_alignments(lines: list[Line], edges: list, page_width: float) -> dict[int, str]:
+    """Righe sole nelle celle di una stessa colonna di tabella (stessi bordi a sinistra e a destra): se
+    iniziano tutte nello stesso punto la colonna è allineata a sinistra, se finiscono tutte nello stesso
+    punto a destra, se hanno lo stesso centro è centrata. Decide anche quando il testo riempie la cella
+    (importi nelle colonne strette dei PDF stampati dai browser). Le cornici larghe quanto la pagina non
+    sono colonne. id(riga) -> allineamento."""
+    columns: list[tuple[tuple[float, float], list[Line]]] = []
+    for ln in lines:
+        sides = _cell_sides(ln, edges)
+        if sides is None or sides[1] - sides[0] > 0.6 * page_width or paragraph_is_rtl(ln.text):
+            continue
+        for key, members in columns:
+            if abs(key[0] - sides[0]) <= 1.0 and abs(key[1] - sides[1]) <= 1.0:
+                members.append(ln)
+                break
+        else:
+            columns.append((sides, [ln]))
+    out: dict[int, str] = {}
+    for _key, members in columns:
+        if len(members) < 2:
+            continue
+        tol = max(1.0, 0.15 * statistics.median(m.size for m in members))
+        lefts_eq = _spread([m.bbox.x0 for m in members]) <= tol
+        rights_eq = _spread([m.bbox.x1 for m in members]) <= tol
+        if lefts_eq and rights_eq:
+            continue                     # tutte larghe uguali: non si sa
+        if lefts_eq:
+            align = ALIGN_LEFT           # anche la più larga, che riempie la cella e sembra centrata
+        elif rights_eq:
+            align = ALIGN_RIGHT
+        elif _spread([(m.bbox.x0 + m.bbox.x1) / 2 for m in members]) <= tol:
+            align = ALIGN_CENTER
+        else:
+            continue
+        for m in members:
+            out[id(m)] = align
+    return out
+
+
+@dataclass
+class PageMargins:
+    """Margini del testo della pagina, ricavati dalle righe: bordo sinistro comune, bordi destri
+    (testo giustificato, colonne allineate a destra, simmetrico del sinistro) e centri possibili."""
+
+    width: float
+    left: float | None = None
+    rights: list = field(default_factory=list)
+    centers: list = field(default_factory=list)
+
+
+def _peaks(values: list[float], half: float = 0.6, min_count: int = 3) -> list[tuple[float, int]]:
+    """Valori ripetuti: (valore, quante volte compare entro ±`half`), al più uno per zona, i più
+    frequenti prima. Finestra fissa: valori sparsi (fine delle righe a sinistra) non si concatenano."""
+    vals = sorted(values)
+    found = []
+    for v in vals:
+        n = bisect.bisect_right(vals, v + half) - bisect.bisect_left(vals, v - half)
+        if n >= min_count:
+            found.append((v, n))
+    out: list[tuple[float, int]] = []
+    for v, n in sorted(found, key=lambda t: (-t[1], t[0])):
+        if all(abs(v - p) > 2 * half for p, _n in out):
+            out.append((v, n))
+    return out
+
+
+def page_margins(lines: list[Line], width: float) -> PageMargins:
+    horiz = [ln for ln in lines if _horizontal(ln)]
+    m = PageMargins(width=width)
+    lefts = [(x, n) for x, n in _peaks([ln.bbox.x0 for ln in horiz]) if x < width / 2]
+    if lefts:
+        m.left = lefts[0][0]
+        # testo giustificato: buona parte delle righe che iniziano sul margine sinistro finisce nello stesso punto
+        body = [ln for ln in horiz if abs(ln.bbox.x0 - m.left) <= 0.6]
+        need = max(3, len(body) // 4)
+        justified = [x for x, n in _peaks([ln.bbox.x1 for ln in body]) if n >= need and x > width / 2]
+        m.rights.extend(justified)
+        m.rights.append(width - m.left)                 # margini simmetrici (impostazione dei programmi)
+        m.centers = [(m.left + r) / 2 for r in m.rights if r > m.left]
+    # righe allineate a destra (totali, date, colonne di importi): stessa fine, inizi diversi
+    for x, _n in _peaks([ln.bbox.x1 for ln in horiz]):
+        if x <= width / 2:
+            continue
+        starts = sorted(ln.bbox.x0 for ln in horiz if abs(ln.bbox.x1 - x) <= 0.6)
+        if 1 + sum(1 for a, b in zip(starts, starts[1:]) if b - a > 1.0) >= 3:
+            m.rights.append(x)
+    m.centers.append(width / 2)
+    return m
+
+
+_LIST_MARKER = re.compile(r"^(?:[•◦▪▫■□●○‣⁃∙·*\-–—➢►✓]|\(?(?:\d{1,3}|[a-zA-Z]|[ivxlcIVXLC]{1,6})[.)°])$")
+
+
+def _margin_alignment(line: Line, others: list[Line], margins: PageMargins) -> str | None:
+    """Allineamento di una riga sola fuori dalle celle, rispetto ai margini del testo della pagina:
+    a destra se finisce sul margine destro, centrata se il suo centro è quello della pagina o del testo;
+    in entrambi i casi senza toccare il margine sinistro. Nel dubbio None (resta a sinistra): righe con
+    altro testo sulla stessa linea di base, voci di elenco, righe che iniziano dove inizia un'altra riga
+    (rientri, tabulazioni)."""
+    if not line.words or not _horizontal(line) or paragraph_is_rtl(line.text):
+        return None
+    if _LIST_MARKER.match(line.words[0].text):
+        return None
+    x0, x1 = line.bbox.x0, line.bbox.x1
+    for o in others:
+        if o is line or not _horizontal(o):
+            continue
+        if abs(o.baseline - line.baseline) <= 0.5 or abs(o.bbox.x0 - x0) <= 0.75:
+            return None
+    size = line.size
+    if x0 < (margins.left + 2 * size if margins.left is not None else 0.15 * margins.width):
+        return None
+    # senza margine sinistro riconosciuto (poche righe) solo il centro esatto della pagina
+    tol = max(1.0, 0.08 * size) if margins.left is not None else 0.5
+    if any(abs(x1 - r) <= tol for r in margins.rights):
+        return ALIGN_RIGHT
+    if any(abs((x0 + x1) / 2 - c) <= tol for c in margins.centers):
+        return ALIGN_CENTER
     return None
 
 
@@ -622,17 +998,52 @@ def _paragraphs_from_lines(lines: list[Line], align: str, x0: float, width: floa
     return [merge_runs(p) for p in paragraphs]
 
 
+@dataclass
+class PageContext:
+    """Quello che serve a `build_block` del resto della pagina: righe visibili, celle, margini."""
+
+    lines: list                                   # righe orizzontali visibili
+    margins: PageMargins
+    cells: dict = field(default_factory=dict)     # id(riga) -> cella chiusa da bordi (`cell_boxes`)
+    columns: dict = field(default_factory=dict)   # id(riga) -> allineamento della colonna di tabella
+
+
+def _cell_width(lines: list[Line], x0: float, width: float, context: PageContext) -> float:
+    """Larghezza di composizione di un paragrafo (a sinistra o giustificato) che occupa da solo una
+    cella con bordi: fino al bordo destro meno lo stesso margine interno che ha a sinistra."""
+    box = context.cells.get(id(lines[0]))
+    if box is None or not all(_same_cell(context.cells.get(id(ln)), box) for ln in lines):
+        return width
+    own = {id(ln) for ln in lines}
+    if any(id(o) not in own and _same_cell(context.cells.get(id(o)), box) for o in context.lines):
+        return width            # nella cella c'è altro testo (riquadro di pagina, cornice): non è una cella
+    left, _top, right, _bottom = box
+    pad = x0 - left
+    if pad < 0 or pad > (right - left) / 3:
+        return width
+    return max(width, right - pad - x0)
+
+
 def build_block(page_index: int, index: int, lines: list[Line], invisible: bool,
-                edges: list | None = None) -> TextBlock:
+                edges: list | None = None, context: PageContext | None = None) -> TextBlock:
     rotated = not _horizontal(lines[0])
     if rotated:
         align, x0, width, indent = ALIGN_LEFT, lines[0].bbox.x0, lines[0].bbox.width, 0.0
     else:
         align, x0, width, indent = _detect_alignment(lines)
-        if len(lines) == 1 and edges and not paragraph_is_rtl(lines[0].text):
+        if len(lines) == 1 and not paragraph_is_rtl(lines[0].text):
             # una riga sola in una cella di tabella (fogli presenze, preventivi esportati da Excel):
-            # centrata o a destra come nella cella, così il testo modificato resta al suo posto
-            align = _cell_alignment(lines[0], edges) or align
+            # centrata o a destra come la colonna o la cella, così il testo modificato resta al suo posto
+            found = context.columns.get(id(lines[0])) if context is not None else None
+            if found is None and edges:
+                found = _cell_alignment(lines[0], edges)
+            if found is None and context is not None and not invisible:
+                # fuori dalle celle: titoli centrati, date e firme a destra rispetto ai margini del testo
+                found = _margin_alignment(lines[0], context.lines, context.margins)
+            align = found or align
+        elif len(lines) > 1 and context is not None and align in (ALIGN_LEFT, ALIGN_JUSTIFY):
+            # paragrafo in una cella: va a capo dentro la cella
+            width = _cell_width(lines, x0, width, context)
     if len(lines) >= 2:
         gaps = [b.baseline - a.baseline for a, b in zip(lines, lines[1:])]
         leading = statistics.median(gaps)
@@ -652,21 +1063,28 @@ def build_block(page_index: int, index: int, lines: list[Line], invisible: bool,
 
 def analyze_page(page: pymupdf.Page, page_index: int = 0, granularity: str = "paragraph") -> list[TextBlock]:
     """Blocchi di testo modificabili della pagina, in ordine di lettura."""
-    extracted = extract_lines(page)
-    rules = page_rules(page) if granularity != GRANULARITY_LINE else []
-    edges = page_edges(page)
+    drawings = page_drawings(page)
+    borders = page_borders(page, drawings)
+    extracted = extract_lines(page, borders[0])
+    rules = page_rules(page, drawings) if granularity != GRANULARITY_LINE else []
+    edges = page_edges(page, drawings)
     horizontal = [(ln, inv) for ln, inv in extracted if _horizontal(ln)]
     others = [(ln, inv) for ln, inv in extracted if not _horizontal(ln)]
+    cells = cell_boxes([ln for ln, _inv in horizontal], borders)
     groups: list[tuple[list[Line], bool]] = []
     for inv in (False, True):
         subset = [ln for ln, i in horizontal if i == inv]
         if granularity == GRANULARITY_LINE:
             groups.extend(([ln], inv) for ln in subset)
         else:
-            groups.extend((g, inv) for g in group_lines(subset, rules))
+            groups.extend((g, inv) for g in group_lines(subset, rules, cells, borders[1]))
     groups.extend(([ln], inv) for ln, inv in others)
     groups.sort(key=lambda g: (round(g[0][0].bbox.y0 / 4), g[0][0].bbox.x0))
-    return [build_block(page_index, i, g, inv, edges) for i, (g, inv) in enumerate(groups)]
+    visible = [ln for ln, inv in horizontal if not inv]
+    singles = [g[0] for g, inv in groups if len(g) == 1 and not inv and _horizontal(g[0])]
+    context = PageContext(lines=visible, margins=page_margins(visible, page.rect.width), cells=cells,
+                          columns=_column_alignments(singles, edges, page.rect.width) if edges else {})
+    return [build_block(page_index, i, g, inv, edges, context) for i, (g, inv) in enumerate(groups)]
 
 
 def block_at(blocks: list[TextBlock], point: pymupdf.Point, margin: float = 2.0) -> TextBlock | None:

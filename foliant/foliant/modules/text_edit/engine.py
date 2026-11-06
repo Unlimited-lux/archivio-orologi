@@ -21,7 +21,7 @@ import pymupdf
 
 from ...core.errors import FoliantError
 from ...i18n import _
-from .analysis import analyze_page, extract_lines, frame_matrix, unframe_matrix
+from .analysis import analyze_page, extract_lines, frame_matrix, page_borders, unframe_matrix
 from .fonts import FontResolver, Substitution, UncoveredCharacter
 from .layout import Composer, LayoutResult, Piece, PlacedLine
 from .model import (
@@ -81,9 +81,10 @@ def remove_lines(page: pymupdf.Page, lines: list[Line], relocated_links: list | 
     if not lines:
         return
     targets = {_lkey(ln) for ln in lines}
-    before = extract_lines(page)
+    vborders = page_borders(page)[0]          # la redazione non tocca la grafica: bordi letti una volta
+    before = extract_lines(page, vborders)
     _redact_lines(page, lines, relocated_links)
-    after = extract_lines(page)
+    after = extract_lines(page, vborders)
     after_keys = {_lkey(ln) for ln, _inv in after}
     before_keys = {_lkey(ln) for ln, _inv in before}
     lost = [(ln, inv) for ln, inv in before if _lkey(ln) not in targets and _lkey(ln) not in after_keys]
