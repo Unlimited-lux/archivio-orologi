@@ -516,6 +516,33 @@ def _set_key(pdf: pymupdf.Document, xref: int, path: str, value: str) -> None:
 # Livelli (contenuto facoltativo)
 # =========================================================================
 
+def _own_resources(pdf: pymupdf.Document, xref: int) -> None:
+    """Rende propri della pagina `xref` il dizionario /Resources e il suo /XObject. Nei PDF di
+    LibreOffice e di Office, e in ogni PDF salvato con l'unione degli oggetti uguali, tutte le pagine
+    condividono lo stesso dizionario: un timbro scritto per una pagina comparirebbe (e verrebbe
+    sostituito o tolto) in tutte, per esempio «3/3» su ogni pagina."""
+    typ, val = pdf.xref_get_key(xref, "Resources")
+    if typ == "xref":
+        pdf.xref_set_key(xref, "Resources", pdf.xref_object(int(val.split()[0]), compressed=True))
+    elif typ == "null":
+        parent = xref
+        for _depth in range(32):                       # risorse ereditate dall'albero delle pagine
+            ptyp, pval = pdf.xref_get_key(parent, "Parent")
+            if ptyp != "xref":
+                break
+            parent = int(pval.split()[0])
+            rtyp, rval = pdf.xref_get_key(parent, "Resources")
+            if rtyp == "xref":
+                pdf.xref_set_key(xref, "Resources", pdf.xref_object(int(rval.split()[0]), compressed=True))
+                break
+            if rtyp == "dict":
+                pdf.xref_set_key(xref, "Resources", rval)
+                break
+    typ, val = pdf.xref_get_key(xref, "Resources/XObject")
+    if typ == "xref":
+        pdf.xref_set_key(xref, "Resources/XObject", pdf.xref_object(int(val.split()[0]), compressed=True))
+
+
 def _check_visibility(visibility: str) -> str:
     v = (visibility or "both").lower()
     if v not in VISIBILITY:
@@ -614,6 +641,8 @@ def _decode_params(raw: str) -> dict:
 def _stamp_page(pdf: pymupdf.Document, pno: int, layer: _Layer, kind: str, sid: str, *, behind: bool, oc: int,
                 record: str, subtype: str | None = None) -> None:
     """Inserisce `layer` nella pagina `pno` come timbro riconoscibile."""
+    page = pdf[pno]
+    _own_resources(pdf, page.xref)      # prima di disegnare: il nome del timbro vale solo per questa pagina
     page = pdf[pno]
     before = set(page.get_contents())
     placement.show_pdf_page(page, placement.page_rect(page), layer.doc, 0, keep_proportion=False,
@@ -1343,6 +1372,7 @@ def remove_watermarks(pdf: pymupdf.Document, pages: Iterable[int] | None = None,
                 keep.append(x)
         if not changed:
             continue
+        _own_resources(pdf, page.xref)  # togliere il nome solo da questa pagina, non da quelle che condividono
         if len(keep) == 1:
             pdf.xref_set_key(page.xref, "Contents", f"{keep[0]} 0 R")
         else:
