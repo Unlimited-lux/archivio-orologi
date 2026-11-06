@@ -168,3 +168,7 @@ class ExternalEdit(QObject):
             self.watcher.removePath(p)
         shutil.rmtree(self.dir, ignore_errors=True)
         _LIVE_DIRS.discard(self.dir)
+        try:
+            self.c.externalChanged.emit()      # la sessione può finire da sola (file eliminato)
+        except (AttributeError, RuntimeError):
+            pass
