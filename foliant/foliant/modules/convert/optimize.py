@@ -858,11 +858,26 @@ def repair_pdf_bytes(data: bytes, password=None, progress=None) -> tuple[bytes, 
     start = bytes(data).find(b"%PDF-")
     with ENGINE_LOCK:
         pymupdf.TOOLS.mupdf_warnings(reset=True)
+        rebuilt = False
         try:
             pdf = pymupdf.open(stream=bytes(data), filetype="pdf")
+            if pdf.page_count == 0 and not pdf.needs_pass:
+                pdf.close()
+                raise ValueError("nessuna pagina")
         except Exception as e:
-            raise ConversionError(_("Il file è danneggiato in modo irreparabile: non è stato possibile "
-                                    "ricostruirne la struttura.")) from e
+            # file troncato (es. LibreOffice scrive l'albero /Pages e il catalogo in fondo): pagine
+            # intere ma senza albero; si ricostruiscono albero, catalogo e trailer
+            fixed = _rebuild_page_tree(bytes(data)[max(0, start):])
+            try:
+                if fixed is None:
+                    raise ValueError("struttura non ricostruibile")
+                pdf = pymupdf.open(stream=fixed, filetype="pdf")
+                if pdf.page_count == 0:
+                    raise ValueError("nessuna pagina")
+            except Exception:
+                raise ConversionError(_("Il file è danneggiato in modo irreparabile: non è stato possibile "
+                                        "ricostruirne la struttura.")) from e
+            rebuilt = True
         try:
             if pdf.needs_pass:
                 if not password:
@@ -873,7 +888,7 @@ def repair_pdf_bytes(data: bytes, password=None, progress=None) -> tuple[bytes, 
                 prot = protection_options(pdf, password, code, True)
             else:
                 prot = {}
-            repaired = bool(getattr(pdf, "is_repaired", False)) or start > 0
+            repaired = bool(getattr(pdf, "is_repaired", False)) or start > 0 or rebuilt
             n = pdf.page_count
             expected = _expected_pages(bytes(data))
             good, lost = [], []
@@ -900,6 +915,9 @@ def repair_pdf_bytes(data: bytes, password=None, progress=None) -> tuple[bytes, 
             pages = pdf.page_count
         finally:
             pdf.close()
+    if rebuilt:
+        warnings.insert(0, _("Il file era troncato: l'elenco delle pagine e il catalogo sono stati ricostruiti "
+                             "dalle pagine trovate."))
     if repaired:
         warnings.insert(0, _("La struttura del file (tabella dei riferimenti incrociati) era danneggiata ed è "
                              "stata ricostruita."))
@@ -910,6 +928,52 @@ def repair_pdf_bytes(data: bytes, password=None, progress=None) -> tuple[bytes, 
     check(progress, 1.0, _("Fatto"))
     return out, {"repaired": repaired or bool(warnings), "pages": pages, "lost_pages": lost_numbers,
                  "warnings": warnings}
+
+
+_OBJ = re.compile(rb"(?<![0-9])(\d+)\s+(\d+)\s+obj\b")
+
+
+def _rebuild_page_tree(data: bytes) -> bytes | None:
+    """PDF troncato senza albero delle pagine: si taglia all'ultimo «endobj», si crea un /Pages
+    con le pagine orfane (/Type/Page) nell'ordine dei numeri di oggetto, poi catalogo e trailer
+    (la tabella xref la ricostruisce il motore). None se non ci sono pagine da recuperare."""
+    end = data.rfind(b"endobj")
+    if end < 0:
+        return None
+    body = data[:end + len(b"endobj")] + b"\n"
+    objects: dict[int, bytes] = {}
+    marks = list(_OBJ.finditer(body))
+    for k, m in enumerate(marks):
+        stop = marks[k + 1].start() if k + 1 < len(marks) else len(body)
+        chunk = body[m.end():stop]
+        cut = chunk.find(b"endobj")
+        if cut >= 0:
+            objects[int(m.group(1))] = chunk[:cut]
+    if not objects:
+        return None
+
+    def head(obj: bytes) -> bytes:          # dizionario dell'oggetto, senza il flusso
+        i = obj.find(b"stream")
+        return obj if i < 0 else obj[:i]
+
+    pages = sorted(n for n, o in objects.items() if re.search(rb"/Type\s*/Page\b(?!s)", head(o)))
+    if not pages:
+        return None
+    if any(re.search(rb"/Type\s*/Pages\b", head(o)) for o in objects.values()) and \
+            any(re.search(rb"/Type\s*/Catalog\b", head(o)) for o in objects.values()):
+        return None          # albero e catalogo presenti: il danno è un altro
+    parents = [int(m.group(1)) for n in pages
+               for m in [re.search(rb"/Parent\s+(\d+)\s+\d+\s+R", head(objects[n]))] if m]
+    top = max(objects) + 1
+    missing = [p for p in parents if p not in objects]
+    tree = max(set(missing), key=missing.count) if missing else top
+    top = max(top, tree + 1)
+    catalog = top
+    kids = " ".join(f"{n} 0 R" for n in pages)
+    tail = (f"{tree} 0 obj\n<< /Type /Pages /Kids [ {kids} ] /Count {len(pages)} >>\nendobj\n"
+            f"{catalog} 0 obj\n<< /Type /Catalog /Pages {tree} 0 R >>\nendobj\n"
+            f"trailer\n<< /Size {catalog + 1} /Root {catalog} 0 R >>\nstartxref\n0\n%%EOF\n")
+    return body + tail.encode("latin-1")
 
 
 def repair_file(input_path, output_path=None, password=None, progress=None, *,
