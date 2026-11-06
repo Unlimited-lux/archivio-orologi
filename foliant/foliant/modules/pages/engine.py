@@ -567,6 +567,7 @@ def delete_pages(pdf: pymupdf.Document, indices: Iterable[int]) -> int:
     prune_structure(pdf)
     prune_threads(pdf)
     rebuild_form_fields(pdf)
+    prune_named_destinations(pdf)
     return len(sel)
 
 
@@ -850,6 +851,216 @@ def prune_structure(pdf: pymupdf.Document) -> int:
     return removed
 
 
+def _pdf_items(text: str) -> list[str]:
+    """Elementi di primo livello del contenuto di un array o di un dizionario PDF:
+    stringhe (anche con spazi e parentesi), stringhe esadecimali, array e dizionari
+    annidati, riferimenti «n 0 R», nomi, numeri."""
+    text = text.strip()
+    if text.startswith("<<") and text.endswith(">>"):
+        text = text[2:-2]
+    elif text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    items: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c.isspace():
+            i += 1
+            continue
+        start = i
+        if c == "(":
+            depth = 0
+            while i < n:
+                ch = text[i]
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                i += 1
+        elif text.startswith("<<", i) or c == "[":
+            depth = 0
+            while i < n:
+                if text[i] == "(":           # stringa dentro un contenitore
+                    sub = _pdf_items(text[i:])
+                    i += len(sub[0]) if sub else 1
+                    continue
+                if text.startswith("<<", i) or text[i] == "[":
+                    depth += 1
+                    i += 2 if text[i] == "<" else 1
+                elif text.startswith(">>", i) or text[i] == "]":
+                    depth -= 1
+                    i += 2 if text[i] == ">" else 1
+                    if depth == 0:
+                        break
+                else:
+                    i += 1
+        elif c == "<":
+            j = text.find(">", i)
+            i = n if j < 0 else j + 1
+        else:
+            m = re.match(r"\d+\s+\d+\s+R\b", text[i:])
+            if m:
+                i += m.end()
+            else:
+                m = re.match(r"/?[^\s\[\]<>()/]*", text[i:])
+                i += max(1, m.end())
+        items.append(text[start:i])
+    return items
+
+
+def _dest_alive(pdf: pymupdf.Document, value: str, live: set[int], depth: int = 0) -> bool:
+    """False se la destinazione (array, dizionario con /D o riferimento) punta a una
+    pagina che non esiste più."""
+    value = value.strip()
+    x = _ref(value)
+    if x is not None:
+        if depth > 3:
+            return True
+        try:
+            value = pdf.xref_object(x, compressed=True)
+        except Exception:
+            return False
+        return _dest_alive(pdf, value, live, depth + 1)
+    if value.startswith("<<"):
+        m = re.search(r"/D\s*(\[.*\]|\d+\s+\d+\s+R)", value, re.S)
+        return _dest_alive(pdf, m.group(1), live, depth + 1) if m else True
+    if value.startswith("["):
+        items = _pdf_items(value)
+        if not items:
+            return False
+        first = items[0]
+        if first == "null":
+            return False
+        px = _ref(first)
+        return px is None or px in live
+    if value == "null":
+        return False
+    return True
+
+
+def _prune_name_tree(pdf: pymupdf.Document, node: int, live: set[int], dead: set[str],
+                     root: bool, seen: set[int]) -> tuple[str, str] | None:
+    """Toglie dal nodo (e dai figli) le voci con destinazione morta; aggiorna /Limits.
+    Restituisce (prima, ultima) chiave rimasta, None se il nodo è vuoto."""
+    if node in seen:
+        return None
+    seen.add(node)
+    keys: list[str] = []
+    kn, names = pdf.xref_get_key(node, "Names")
+    if kn == "array":
+        items = _pdf_items(names)
+        kept: list[str] = []
+        for j in range(0, len(items) - 1, 2):
+            key, val = items[j], items[j + 1]
+            if _dest_alive(pdf, val, live):
+                kept += [key, val]
+                keys.append(key)
+            else:
+                dead.add(_pdf_string(key))
+        if len(kept) != len(items):
+            pdf.xref_set_key(node, "Names", "[" + " ".join(kept) + "]")
+    kk, kids = pdf.xref_get_key(node, "Kids")
+    if kk == "array":
+        kept_kids: list[str] = []
+        for t in _split_array(kids):
+            kx = _ref(t)
+            if kx is None:
+                continue
+            limits = _prune_name_tree(pdf, kx, live, dead, False, seen)
+            if limits:
+                kept_kids.append(t)
+                keys += list(limits)
+        pdf.xref_set_key(node, "Kids", "[" + " ".join(kept_kids) + "]")
+    if not keys:
+        return None
+    first, last = keys[0], keys[-1]
+    if not root:
+        pdf.xref_set_key(node, "Limits", f"[{first} {last}]")
+    return first, last
+
+
+def _pdf_string(token: str) -> str:
+    """Testo di una stringa PDF «(…)», «<…>» o di un nome «/…» (per confrontare le chiavi)."""
+    token = token.strip()
+    if token.startswith("(") and token.endswith(")"):
+        body = token[1:-1]
+        body = re.sub(r"\\([nrtbf()\\])", lambda m: {"n": "\n", "r": "\r", "t": "\t", "b": "\b",
+                                                     "f": "\f"}.get(m.group(1), m.group(1)), body)
+        body = re.sub(r"\\([0-7]{1,3})", lambda m: chr(int(m.group(1), 8)), body)
+        if body.startswith("\xfe\xff"):
+            try:
+                return body[2:].encode("latin-1").decode("utf-16-be")
+            except Exception:
+                return body
+        return body
+    if token.startswith("<") and token.endswith(">"):
+        try:
+            raw = bytes.fromhex(re.sub(r"\s", "", token[1:-1]))
+        except ValueError:
+            return token
+        if raw.startswith(b"\xfe\xff"):
+            return raw[2:].decode("utf-16-be", "replace")
+        return raw.decode("latin-1")
+    if token.startswith("/"):
+        return re.sub(r"#([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), token[1:])
+    return token
+
+
+def prune_named_destinations(pdf: pymupdf.Document) -> int:
+    """PAG-03: dopo aver tolto pagine, rimuove le destinazioni nominate che puntano a pagine
+    non più presenti (/Names/Dests, anche con /Kids, e il vecchio /Dests del catalogo) e i
+    collegamenti che le usavano. Restituisce il numero di destinazioni rimosse."""
+    cat = pdf.pdf_catalog()
+    live = {pdf[i].xref for i in range(pdf.page_count)}
+    dead: set[str] = set()
+    # albero dei nomi
+    kind, value = pdf.xref_get_key(cat, "Names/Dests")
+    if kind == "xref":
+        _prune_name_tree(pdf, int(value.split()[0]), live, dead, True, set())
+    elif kind == "dict":
+        holder = pdf.get_new_xref()          # il dizionario diretto diventa un oggetto
+        pdf.update_object(holder, value)
+        pdf.xref_set_key(cat, "Names/Dests", f"{holder} 0 R")
+        _prune_name_tree(pdf, holder, live, dead, True, set())
+    # /Dests del catalogo (PDF 1.1)
+    kind, value = pdf.xref_get_key(cat, "Dests")
+    if kind in ("xref", "dict"):
+        if kind == "dict":
+            holder = pdf.get_new_xref()
+            pdf.update_object(holder, value)
+            pdf.xref_set_key(cat, "Dests", f"{holder} 0 R")
+        else:
+            holder = int(value.split()[0])
+        items = _pdf_items(pdf.xref_object(holder, compressed=True))
+        kept: list[str] = []
+        for j in range(0, len(items) - 1, 2):
+            if _dest_alive(pdf, items[j + 1], live):
+                kept += [items[j], items[j + 1]]
+            else:
+                dead.add(_pdf_string(items[j]))
+        if len(kept) != len(items):
+            pdf.update_object(holder, "<<" + " ".join(kept) + ">>")
+    if not dead:
+        return 0
+    # collegamenti GoTo verso destinazioni rimosse
+    for i in range(pdf.page_count):
+        page = pdf[i]
+        for link in list(page.get_links()):
+            name = link.get("nameddest")
+            if name is not None and name in dead:
+                try:
+                    page.delete_link(link)
+                except Exception:
+                    pass
+    return len(dead)
+
+
 def _fix_open_action(pdf: pymupdf.Document) -> None:
     try:
         kind, value = pdf.xref_get_key(pdf.pdf_catalog(), "OpenAction")
@@ -1035,6 +1246,7 @@ def extract_pages(pdf: pymupdf.Document, indices: Sequence[int], *, annots: bool
             _set_toc_safe(out, [t[:3] for t in _remapped_toc(toc, indices)])
         prune_structure(out)
         rebuild_form_fields(out)
+        prune_named_destinations(out)
         if not annots:
             for page in out:
                 for a in list(page.annots() or []):
@@ -1076,6 +1288,9 @@ def replace_pages(pdf: pymupdf.Document, indices: Sequence[int], src: pymupdf.Do
         count = _insert_runs(pdf, src, src_indices, base, keep_annots in ("source", "both"), False)
         k = min(len(indices), count)
         result = list(indices[:k])
+        # I campi delle pagine tolte o sostituite escono dal modulo, come in Elimina.
+        for i in indices:
+            _detach_widgets(pdf, i)
         for j in range(k):
             _transplant(pdf, base + j, indices[j], keep_annots)
         extra_src = list(range(base + k, base + count))
@@ -1102,6 +1317,8 @@ def replace_pages(pdf: pymupdf.Document, indices: Sequence[int], src: pymupdf.Do
                 fixed.append(i - removed_before)
             result = fixed
         prune_structure(pdf)
+        rebuild_form_fields(pdf)
+        prune_named_destinations(pdf)
         return result
     finally:
         if same:
