@@ -18,6 +18,27 @@ _RX_URI = re.compile(r"/S\s*/URI\b")
 _RX_GOTOR = re.compile(r"/S\s*/(?:GoToR|GoToE|ImportData)\b")
 _RX_SUBMIT = re.compile(r"/S\s*/SubmitForm\b")
 
+# Formati standard dei campi (Acrobat JavaScript API, «AF…»), scritti anche da Foliant per
+# date, numeri, percentuali…: con soli argomenti letterali non sono script da segnalare.
+_AF_FUNCTIONS = (
+    "AFNumber_Format", "AFNumber_Keystroke", "AFPercent_Format", "AFPercent_Keystroke",
+    "AFDate_Format", "AFDate_Keystroke", "AFDate_FormatEx", "AFDate_KeystrokeEx",
+    "AFTime_Format", "AFTime_Keystroke", "AFTime_FormatEx", "AFTime_KeystrokeEx",
+    "AFSpecial_Format", "AFSpecial_Keystroke", "AFSpecial_KeystrokeEx",
+    "AFRange_Validate", "AFSimple_Calculate",
+)
+_JS_SCALAR = r"""(?:[-+]?\d+(?:\.\d+)?|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|true|false)"""
+_JS_LIST = rf"(?:{_JS_SCALAR}(?:\s*,\s*{_JS_SCALAR})*)?"
+_JS_ARG = rf"(?:{_JS_SCALAR}|new\s+Array\s*\(\s*{_JS_LIST}\s*\)|\[\s*{_JS_LIST}\s*\])"
+_JS_CALL = (rf"(?:{'|'.join(_AF_FUNCTIONS)})\s*\(\s*(?:{_JS_ARG}(?:\s*,\s*{_JS_ARG})*)?\s*\)\s*;?")
+_RX_STANDARD_FORMAT = re.compile(rf"\s*(?:{_JS_CALL}\s*)+")
+_FIELD_EVENTS = ("K", "F", "V", "C")       # /AA di un campo: tasto, formato, convalida, calcolo
+
+
+def is_standard_form_script(code: str) -> bool:
+    """Vero se `code` è fatto solo di chiamate ai formati standard con argomenti letterali."""
+    return bool(code.strip()) and _RX_STANDARD_FORMAT.fullmatch(code) is not None
+
 
 @dataclass
 class ScanReport:
@@ -118,6 +139,7 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000, chunk: int = 2000) -
         n = min(pdf.xref_length(), max_objects)
     parent: dict[int, tuple[int, str]] = {}   # azione → (oggetto che la richiama, chiave)
     found: list[tuple[str, int, str]] = []     # (tipo, xref, dettaglio)
+    js_actions: dict[int, str] = {}            # azione JavaScript → codice completo
     for start in range(1, n, chunk):
         with ENGINE_LOCK:
             for xref in range(start, min(n, start + chunk)):
@@ -133,7 +155,7 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000, chunk: int = 2000) -
                 if "/S" not in obj and "/JS" not in obj:
                     continue
                 if _RX_JS.search(obj):
-                    rep.javascript += 1
+                    js_actions[xref] = _js_full(pdf, xref)
                     found.append(("javascript", xref, _js_code(pdf, xref)))
                 if _RX_LAUNCH.search(obj):
                     rep.launch += 1
@@ -152,6 +174,22 @@ def scan(pdf: pymupdf.Document, max_objects: int = 400_000, chunk: int = 2000) -
                         kind, uri = "null", ""
                     if kind == "string" and uri:
                         uris.add(uri)
+
+    # formati standard dei campi (es. AFNumber_Format scritto da Foliant): non sono un rischio
+    standard: set[int] = set()
+    with ENGINE_LOCK:
+        for xref, code in js_actions.items():
+            up = parent.get(xref)
+            if up is None or up[1] not in _FIELD_EVENTS or not is_standard_form_script(code):
+                continue
+            try:
+                owner = pdf.xref_object(up[0], compressed=True)
+            except Exception:
+                continue
+            if "/AA" in owner and ("/FT" in owner or "/Widget" in owner):
+                standard.add(xref)
+    found = [f for f in found if not (f[0] == "javascript" and f[1] in standard)]
+    rep.javascript = sum(1 for f in found if f[0] == "javascript")
 
     def where(xref: int) -> str:
         seen = set()
@@ -219,6 +257,11 @@ def _locations(pdf: pymupdf.Document) -> dict[int, str]:
 
 
 def _js_code(pdf: pymupdf.Document, xref: int) -> str:
+    code = " ".join(_js_full(pdf, xref).split())
+    return code[:400] + ("…" if len(code) > 400 else "")
+
+
+def _js_full(pdf: pymupdf.Document, xref: int) -> str:
     try:
         kind, val = pdf.xref_get_key(xref, "JS")
         if kind == "string":
@@ -229,8 +272,7 @@ def _js_code(pdf: pymupdf.Document, xref: int) -> str:
             code = ""
     except Exception:
         code = ""
-    code = " ".join(code.split())
-    return code[:400] + ("…" if len(code) > 400 else "")
+    return code
 
 
 def _target(obj: str) -> str:
