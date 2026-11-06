@@ -8,6 +8,7 @@ from __future__ import annotations
 import bisect
 import html
 import time
+import weakref
 from dataclasses import dataclass
 
 import pymupdf
@@ -360,6 +361,8 @@ class SearchController(QObject):
         # cronologia delle ricerche solo in memoria (riservatezza: mai su disco)
         self._history: list[str] = []
         self._pending_select = True
+        self._keep_current: tuple[int, int] | None = None   # (pagina, n-esimo risultato) da ritrovare
+        self._keep_by_view: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()   # solo in memoria
         self._restart_pending = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -396,15 +399,20 @@ class SearchController(QObject):
     def set_view(self, view: DocumentView | None) -> None:
         if view is self.view:
             return
+        if self.view is not None and 0 <= self.current < len(self.hits):
+            page = self.hits[self.current].page
+            self._keep_by_view[self.view] = (page, self.current - self.first_hit_of_page(page))
         if self.view is not None and not self.view.document.closed:
             self.view.set_search_hits({})
         self.view = view
         self._texts.clear()
         self._labels = None
+        self._reset_results()
         if self.bar.isVisible() and view is not None and self.bar.field.text().strip():
-            self.restart()
-        else:
-            self._reset_results()
+            # cambio di scheda: risultati aggiornati, ma la vista resta dove l'utente l'ha lasciata
+            # e il risultato corrente è quello che aveva questa scheda
+            self.restart(select=False)
+            self._keep_current = self._keep_by_view.pop(view, None)
 
     def _on_changed(self, view: DocumentView) -> None:
         if view is not self.view:
@@ -421,8 +429,8 @@ class SearchController(QObject):
             return
         self._restart_pending = False
         try:
-            self._pending_select = False
-            self.restart()
+            # documento modificato: risultati ed evidenziazioni aggiornati senza spostare la vista
+            self.restart(select=False)
         except RuntimeError:
             pass     # finestra già distrutta
 
@@ -527,6 +535,7 @@ class SearchController(QObject):
         self._timer.stop()
         self._hl_timer.stop()
         self.job = None
+        self._keep_current = None
         self.hits = []
         self._hit_pages = []
         self.current = -1
@@ -538,11 +547,19 @@ class SearchController(QObject):
         if self.view is not None and not self.view.document.closed:
             self.view.set_search_hits({})
 
-    def restart(self) -> None:
+    def restart(self, select: bool = True) -> None:
+        """Nuova ricerca. Con select=False (ripartenze non chieste dall'utente: modifica del
+        documento, cambio di scheda) il risultato corrente resta quello di prima, se esiste
+        ancora, e la vista non si sposta."""
         self._debounce.stop()
         text = self.bar.field.text().strip()
         keep_page = self.current_hit_page()
+        keep = None
+        if not select and 0 <= self.current < len(self.hits):
+            page = self.hits[self.current].page
+            keep = (page, self.current - self.first_hit_of_page(page))
         self._reset_results()
+        self._keep_current = keep
         if self.view is None or not text:
             return
         self._remember(text)
@@ -556,7 +573,7 @@ class SearchController(QObject):
             return
         self.job = SearchJob(text, self.options(), self.view.page_count, start,
                              self.page_comments if self.bar.opt_comments.isChecked() else None)
-        self._pending_select = True
+        self._pending_select = select
         self._timer.start(0)
 
     def current_hit_page(self) -> int | None:
@@ -621,6 +638,11 @@ class SearchController(QObject):
             self._pending_select = False
             self.current = pos
             self.go_to(pos, record=False)
+        elif self._keep_current is not None and self._keep_current[0] == page:
+            # stesso risultato di prima la ripartenza, selezionato senza spostare la vista
+            self.current = pos + min(self._keep_current[1], len(hits) - 1)
+            self._keep_current = None
+            self.panel.select(self.current)
 
     def _finished(self) -> None:
         job = self.job
@@ -690,14 +712,25 @@ class SearchController(QObject):
             self.open()
             return
         if self.hits:
-            self.go_to(self.current + 1)
+            if self.current < 0:
+                # nessun risultato scelto: il primo dalla pagina visibile in avanti
+                self.go_to(self._first_from_view())
+            else:
+                self.go_to(self.current + 1)
 
     def previous(self) -> None:
         if not self.bar.isVisible():
             self.open()
             return
         if self.hits:
-            self.go_to(self.current - 1)
+            if self.current < 0:
+                self.go_to(self._first_from_view() - 1)
+            else:
+                self.go_to(self.current - 1)
+
+    def _first_from_view(self) -> int:
+        page = self.view.current_page if self.view is not None else 0
+        return self.first_hit_of_page(page) % len(self.hits)
 
     def export_csv(self, path: str | None = None) -> str | None:
         if not self.hits or self.view is None:

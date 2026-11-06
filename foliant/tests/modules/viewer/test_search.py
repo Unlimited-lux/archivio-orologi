@@ -158,6 +158,49 @@ def test_search_refreshes_after_modification(viewer_window, tmp_path):
     assert len(ctl.hits) == 1
 
 
+def test_modification_keeps_view_on_the_page_being_edited(viewer_window, long_pdf):
+    """A-1: con la barra di ricerca aperta, una modifica su un'altra pagina non porta la vista al risultato."""
+    from PySide6.QtWidgets import QApplication
+    view = viewer_window.open_path(long_pdf)
+    ctl = _ctl(viewer_window)
+    assert ctl.search("numero 25 del") == 1
+    assert view.current_page == 24
+    view.go_to_page(9)
+    QApplication.processEvents()
+    with view.document.change("Nota") as pdf:
+        pdf[9].add_text_annot((100, 300), "Controllare la matricola")
+    QApplication.processEvents()
+    ctl.finish()
+    assert len(ctl.hits) == 1
+    assert view.current_page == 9
+    # il risultato resta quello di prima ed è ancora raggiungibile con F3
+    ctl.act_next.trigger()
+    assert view.current_page == 24
+    view.document._saved_state = view.document._state
+
+
+def test_tab_switch_keeps_view_and_current_result(viewer_window, long_pdf, tmp_path):
+    """A-1: tornando su una scheda con la ricerca aperta la vista non salta al risultato."""
+    from PySide6.QtWidgets import QApplication
+    view = viewer_window.open_path(long_pdf)
+    ctl = _ctl(viewer_window)
+    assert ctl.search("Contenuto numero") == 30
+    ctl.go_to(4)
+    assert view.current_page == 4
+    view.go_to_page(17)
+    QApplication.processEvents()
+    other = viewer_window.open_path(_pdf(tmp_path, [["Contenuto numero"]], name="altro.pdf"))
+    assert ctl.view is other
+    viewer_window.tabs.setCurrentWidget(view)
+    QApplication.processEvents()
+    ctl.finish()
+    assert ctl.view is view and len(ctl.hits) == 30
+    assert view.current_page == 17
+    assert ctl.hits[ctl.current].page == 4       # stesso risultato corrente di prima
+    ctl.act_next.trigger()
+    assert view.current_page == 5
+
+
 def test_many_changes_restart_search_once(viewer_window, tmp_path, monkeypatch):
     """Prestazioni: più modifiche nello stesso giro di eventi → una sola nuova ricerca."""
     from PySide6.QtWidgets import QApplication
@@ -167,7 +210,7 @@ def test_many_changes_restart_search_once(viewer_window, tmp_path, monkeypatch):
     ctl.finish()
     calls = []
     real = ctl.restart
-    monkeypatch.setattr(ctl, "restart", lambda: calls.append(1) or real())
+    monkeypatch.setattr(ctl, "restart", lambda *a, **k: calls.append(1) or real(*a, **k))
     for i in range(3):
         with view.document.change("Testo") as pdf:
             pdf[0].insert_text((72, 300 + 10 * i), "x")
