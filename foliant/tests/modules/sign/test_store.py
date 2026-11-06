@@ -165,3 +165,19 @@ def test_tsa_credentials_only_in_keyring(tmp_path, monkeypatch):
     assert cfg.list()[0].user == "mario"
     assert b"segretissima" not in cfg.path.read_bytes()
     assert store.tsa_password("https://tsa.example.org") == "segretissima"
+
+
+def test_f9_overwritten_p12_replaces_registry_entry(tmp_path):
+    reg = store.IDRegistry()
+    path = tmp_path / "lucia_ferri.p12"
+    first = d.create_self_signed(path, PASSWORD, common_name="Lucia Ferri", organization="Orologeria Esempio",
+                                 algorithm="ec-p256", years=1)
+    reg.add(path, first)
+    # stesso file sovrascritto con un nuovo ID autofirmato (nuova chiave, nuova impronta)
+    second = d.create_self_signed(path, PASSWORD, common_name="Lucia Ferri", organization="Orologeria Esempio",
+                                  algorithm="ec-p256", years=2)
+    assert second.sha256 != first.sha256
+    reg.add(path, second)
+    entries = reg.list()
+    assert [e.fingerprint for e in entries] == [second.sha256]
+    assert entries[0].default and not entries[0].missing

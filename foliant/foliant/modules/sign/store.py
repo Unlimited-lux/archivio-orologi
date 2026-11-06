@@ -133,13 +133,15 @@ class IDRegistry:
             "default": False,
             "policies": list(getattr(info, "policies", []) or []),
         }
-        replaced = False
-        for i, it in enumerate(items):
-            if it.get("fingerprint") == fp:
-                entry["default"] = bool(it.get("default"))
-                items[i] = entry
-                replaced = True
-        if not replaced:
+        # stessa identità o stesso file (un .p12 sovrascritto con un nuovo ID):
+        # la voce vecchia viene sostituita, mai duplicata
+        same = [i for i, it in enumerate(items)
+                if it.get("fingerprint") == fp or it.get("path") == entry["path"]]
+        if same:
+            entry["default"] = any(bool(items[i].get("default")) for i in same)
+            items[same[0]] = entry
+            items = [it for i, it in enumerate(items) if i not in same[1:]]
+        else:
             if not items:
                 entry["default"] = True
             items.append(entry)
