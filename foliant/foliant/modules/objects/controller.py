@@ -32,6 +32,8 @@ _last_links: list | None = None
 
 class ObjectsController(QObject):
     selectionChanged = Signal()
+    externalChanged = Signal()      # inizio o fine di una modifica esterna
+    clipboardChanged = Signal()     # appunti di sistema cambiati (per «Incolla»)
     _parsedReady = Signal(object, object)
 
     def __init__(self, ctx: "Context"):
@@ -61,6 +63,8 @@ class ObjectsController(QObject):
         ctx.documentClosed.connect(lambda v: self.stop_external()
                                    if getattr(self, "external", None) is not None and self.external.view is v else None)
         ctx.currentViewChanged.connect(self._on_view_changed)
+        # segnale a segnale: si scollega da solo quando il controller viene distrutto
+        QGuiApplication.clipboard().dataChanged.connect(self.clipboardChanged)
 
     # ================================================================ stato
     def status(self, msg: str) -> None:
@@ -465,14 +469,29 @@ class ObjectsController(QObject):
         sess = X.ExternalEdit(self, view, self.sel_page, objs[0].index)
         if sess.start():
             self.external = sess
+            self.externalChanged.emit()
             return sess
         return None
+
+    def external_active(self) -> bool:
+        """True se è in corso una modifica esterna (per «Termina modifica esterna»)."""
+        sess = getattr(self, "external", None)
+        return sess is not None and bool(sess.active)
 
     def stop_external(self) -> None:
         sess = getattr(self, "external", None)
         if sess is not None:
             sess.stop()
             self.external = None
+            self.externalChanged.emit()
+
+    def can_paste(self) -> bool:
+        """True se «Incolla» ha qualcosa da incollare: oggetti di Foliant o un'immagine negli appunti
+        (o l'ultima copia interna, quando gli appunti di sistema sono vuoti)."""
+        if clipboard_has_image():
+            return True
+        mime = QGuiApplication.clipboard().mimeData()
+        return _last_payload is not None and (mime is None or not (mime.hasText() or mime.hasImage()))
 
     # ---------------------------------------------------------------- avanzate
     def replicate(self, view) -> None:

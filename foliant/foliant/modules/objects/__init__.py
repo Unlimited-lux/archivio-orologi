@@ -108,15 +108,19 @@ def register(ctx: Context) -> None:
     sel_action("optimize", _("Ottimizza immagini…"), "shrink", c.optimize_images)
     sel_action("path_style", _("Stile del tracciato…"), "palette", c.path_style)
     sel_action("external", _("Modifica con…"), "external-link", c.edit_external)
-    acts["external_stop"] = ctx.action(_("Termina modifica esterna"), "x", c.stop_external)
+    # attiva solo durante una modifica esterna (stato gestito da _update_actions)
+    acts["external_stop"] = ctx.action(_("Termina modifica esterna"), "x", c.stop_external,
+                                       requires_document=False)
     sel_action("replicate", _("Replica su pagine…"), "copy", c.replicate)
     sel_action("transform", _("Trasforma…"), "scaling", c.transform_dialog)
     sel_action("reset_tf", _("Reimposta trasformazione"), "rotate-ccw-square", c.reset_transform)
     sel_action("decompose", _("Scomponi"), "ungroup", c.decompose)
     sel_action("group", _("Raggruppa"), "group", c.group)
-    acts["paste"] = ctx.action(_("Incolla"), "clipboard-paste", lambda: c.paste(ctx.current_view()))
+    # attive solo con qualcosa da incollare (stato gestito da _update_paste_actions)
+    acts["paste"] = ctx.action(_("Incolla"), "clipboard-paste", lambda: c.paste(ctx.current_view()),
+                               requires_document=False)
     acts["paste_in_place"] = ctx.action(_("Incolla in posizione"), "clipboard-paste",
-                                        lambda: c.paste(ctx.current_view(), in_place=True))
+                                        lambda: c.paste(ctx.current_view(), in_place=True), requires_document=False)
     for key, where, text, icon_name in (("front", E.FRONT, _("Porta in primo piano"), "bring-to-front"),
                                         ("forward", E.FORWARD, _("Porta avanti"), "arrow-up"),
                                         ("backward", E.BACKWARD, _("Porta indietro"), "arrow-down"),
@@ -297,6 +301,8 @@ def register(ctx: Context) -> None:
     ctx.add_properties_panel("oggetti", panel)
     st["panel"] = panel
     c.selectionChanged.connect(lambda: _update_actions(ctx, c))
+    c.externalChanged.connect(lambda: _update_actions(ctx, c))
+    c.clipboardChanged.connect(lambda: _update_paste_actions(ctx, c))
     if hasattr(ctx, "documentAccessChanged"):   # sblocco con password dei permessi, fine dell'OCR…
         ctx.documentAccessChanged.connect(lambda v: _update_actions(ctx, c) if v is ctx.current_view() else None)
     ctx.currentViewChanged.connect(lambda v: (_install_drop(ctx, c, v), _update_actions(ctx, c)))
@@ -390,12 +396,29 @@ def _update_actions(ctx: Context, c: ObjectsController) -> None:
     acts["optimize"].setEnabled(any(o.kind == IMAGE for o in objs))
     acts["path_style"].setEnabled(any(o.kind == PATH for o in objs))
     acts["decompose"].setEnabled(n == 1 and objs[0].kind == "composto")
+    acts["external_stop"].setEnabled(c.external_active())
+    _update_paste_actions(ctx, c)
     panel = _st(ctx).get("panel")
     if panel is not None:
         panel.refresh()
         if n and view is not None and view.tool is c.object_tool:
             ctx.show_properties("oggetti")
     _sync_tool_buttons(ctx)
+
+
+def _update_paste_actions(ctx: Context, c: ObjectsController) -> None:
+    """«Incolla» e «Incolla in posizione»: attive con un documento e qualcosa da incollare."""
+    import shiboken6
+    acts = _st(ctx).get("actions", {})
+    keys = [k for k in ("paste", "paste_in_place") if k in acts and shiboken6.isValid(acts[k])]
+    if not keys:
+        return
+    try:
+        ok = ctx.current_view() is not None and c.can_paste()
+    except RuntimeError:
+        return
+    for k in keys:
+        acts[k].setEnabled(ok)
 
 
 def _context_menu(ctx: Context, c: ObjectsController, view, pe, menu: QMenu) -> None:
