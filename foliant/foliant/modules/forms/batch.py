@@ -108,7 +108,7 @@ def collect_csv(paths: list[str], out_path: str, progress: Progress = None) -> d
     """Raccolta in un file CSV (intestazione + una riga per file, prima colonna «File»).
     Restituisce {"path", "rows", "errors"}."""
     rows, errors = collect(paths, progress)
-    data = X.export_csv(rows) if rows else (FILE_COLUMN + "\n").encode("utf-8")
+    data = X.export_csv(rows) if rows else b"\xef\xbb\xbf" + (FILE_COLUMN + "\n").encode("utf-8")
     with open(out_path, "wb") as fh:
         fh.write(data)
     return {"path": out_path, "rows": len(rows), "errors": errors}

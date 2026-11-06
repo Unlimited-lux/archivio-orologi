@@ -36,7 +36,7 @@ def test_roundtrip_formats(fmt):
 
 def test_csv_rfc4180_and_rows():
     data = X.export_csv([{"a": 'Rossi, "Mario"', "b": "1"}, {"a": "x", "b": "2"}])
-    rows = list(csv.reader(io.StringIO(data.decode())))
+    rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig")), delimiter=";"))
     assert rows[1][0] == 'Rossi, "Mario"'
     assert X.parse_csv(data, 1) == {"a": "x", "b": "2"}
     semi = "nome;eta\nAnna;30\nLuca;40\n".encode()
@@ -441,7 +441,7 @@ def test_collect_and_series_from_window(window, tmp_path, form_pdf):
         paths.append(str(p))
     out = tmp_path / "raccolta.csv"
     report = module().collect(paths, str(out))
-    rows = list(csv.reader(io.StringIO(out.read_text())))
+    rows = list(csv.reader(io.StringIO(out.read_text("utf-8-sig")), delimiter=";"))
     assert len(rows) == 4 and rows[0][0] == "File" and rows[1][0] == "c0.pdf"
     src = tmp_path / "serie.csv"
     src.write_text("nome,cognome\nAnna,Rossi\nLuca,Rossi\n")

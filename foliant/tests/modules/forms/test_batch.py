@@ -51,7 +51,7 @@ def test_collect_csv_three_files(template, tmp_path):
     csv_path = tmp_path / "raccolta.csv"
     report = B.collect_csv(rep["created"], str(csv_path), progress=lambda f, t: steps.append(f))
     assert report["rows"] == 3 and report["errors"] == []
-    rows = list(csv.reader(io.StringIO(csv_path.read_text("utf-8"))))
+    rows = list(csv.reader(io.StringIO(csv_path.read_text("utf-8-sig")), delimiter=";"))
     assert len(rows) == 4
     assert rows[0][0] == "File" and set(rows[0][1:]) == {"Nome", "Cognome", "Scelta", "Privacy"}
     assert [r[0] for r in rows[1:]] == ["1_Rossi.pdf", "2_Bianchi.pdf", "3_Verdi.pdf"]
