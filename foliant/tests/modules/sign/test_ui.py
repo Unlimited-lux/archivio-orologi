@@ -1426,3 +1426,25 @@ def test_no_document_names_in_profile(window, monkeypatch, tmp_path, id_a):
     assert all("zq7k" not in str(s.value(k)) for k in s.allKeys() if k.startswith("sign"))
     assert _profile_traces("trusted")          # controllo: la ricerca vede davvero il profilo isolato
     assert _profile_traces("zq7k") == []
+
+
+def test_image_signature_preview_draws_the_image(qtbot):
+    """Collaudo F-2: l'anteprima della firma da immagine sollevava TypeError (QSize.shrunkBy)
+    a ogni ridisegno, restava vuota e lasciava il QPainter aperto (crash alla chiusura)."""
+    from PySide6.QtCore import QBuffer, QSize
+    from PySide6.QtGui import QColor, QImage
+    from foliant.modules.sign import graphic as g
+    from foliant.modules.sign.ui_create import ImagePreview, item_pixmap
+    preview = ImagePreview()
+    qtbot.addWidget(preview)
+    preview.resize(300, 160)
+    image = QImage(200, 80, QImage.Format.Format_ARGB32)
+    image.fill(QColor(20, 40, 160))
+    preview.image = image
+    shot = preview.grab().toImage()
+    assert shot.pixelColor(150, 80) == QColor(20, 40, 160)
+    buf = QBuffer()
+    buf.open(QBuffer.OpenModeFlag.WriteOnly)
+    image.save(buf, "PNG")
+    pm = item_pixmap(g.SignatureItem(origin="immagine", png=bytes(buf.data())), QSize(120, 60))
+    assert pm.toImage().pixelColor(60, 30) == QColor(20, 40, 160)

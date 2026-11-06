@@ -86,7 +86,7 @@ def item_pixmap(item: g.SignatureItem, size: QSize) -> QPixmap:
     if item.png:
         img = QImage.fromData(item.png)
         if not img.isNull():
-            scaled = img.scaled(size.shrunkBy(QSize(6, 6)) if hasattr(size, "shrunkBy") else size,
+            scaled = img.scaled(_shrunk(size, 6),
                                 Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             p = QPainter(pm)
             p.drawImage(QPointF((size.width() - scaled.width()) / 2, (size.height() - scaled.height()) / 2), scaled)
@@ -95,6 +95,13 @@ def item_pixmap(item: g.SignatureItem, size: QSize) -> QPixmap:
 
 
 # =============================================================== area di disegno
+
+def _shrunk(size: QSize, margin: int) -> QSize:
+    """`size` meno `margin` per lato in larghezza e altezza (almeno 1 px). QSize.shrunkBy vuole
+    QMargins e con un QSize solleva TypeError, che dentro paintEvent lasciava il QPainter aperto
+    (anteprima vuota, poi crash alla chiusura)."""
+    return QSize(max(1, size.width() - margin), max(1, size.height() - margin))
+
 class DrawPad(QWidget):
     """Area di disegno 3:1 con linea di base; registra tratti (x, y, pressione)."""
 
@@ -411,8 +418,7 @@ class ImagePreview(QWidget):
             p.setPen(QColor(90, 98, 110))
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.message)
         else:
-            img = self.image.scaled(self.size().shrunkBy(QSize(12, 12)) if hasattr(self.size(), "shrunkBy")
-                                    else self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            img = self.image.scaled(_shrunk(self.size(), 12), Qt.AspectRatioMode.KeepAspectRatio,
                                     Qt.TransformationMode.SmoothTransformation)
             p.drawImage(QPointF((self.width() - img.width()) / 2, (self.height() - img.height()) / 2), img)
         p.end()
