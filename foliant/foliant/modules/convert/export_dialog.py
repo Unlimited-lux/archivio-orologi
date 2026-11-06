@@ -301,7 +301,8 @@ class ExportDialog(QDialog):
         folder_row.addWidget(self.folder_edit, 1)
         folder_row.addWidget(browse)
         df.addRow(_("Cartella"), folder_row)
-        self.name_edit = QLineEdit(name)
+        self.name_edit = QLineEdit(safe_file_name(name or ""))
+        self.name_edit.textEdited.connect(self._fix_name)
         df.addRow(_("Nome del file"), self.name_edit)
         self.policy_box = _combo([(_("Aggiungi un suffisso numerico"), "rename"), (_("Sovrascrivi"), "overwrite")])
         df.addRow(_("Se il file esiste"), self.policy_box)
@@ -449,6 +450,14 @@ class ExportDialog(QDialog):
             self.folder_edit.setText(path)
 
     # ------------------------------------------------------------- risultato
+    def _fix_name(self, text: str) -> None:
+        """«Perizia 12/2026» → «Perizia 12-2026»: la barra creerebbe una sottocartella."""
+        fixed = safe_file_name(text)
+        if fixed != text:
+            pos = self.name_edit.cursorPosition()
+            self.name_edit.setText(fixed)
+            self.name_edit.setCursorPosition(pos)
+
     def validate(self) -> bool:
         try:
             self._pages = parse_page_range(self.range_edit.text(), self.page_count, self.current_page, self.selected)
@@ -488,7 +497,7 @@ class ExportDialog(QDialog):
         ext = FORMATS[fmt][0]
         if fmt == "long-image":
             ext = ".jpg" if self.panels[fmt].values().get("image_format") == "jpeg" else ".png"
-        name = self.name_edit.text().strip()
+        name = safe_file_name(self.name_edit.text().strip())
         if name.lower().endswith(ext):
             name = name[: -len(ext)]
         return str(Path(self.folder_edit.text().strip() or ".") / (name + ext))
@@ -497,4 +506,9 @@ class ExportDialog(QDialog):
         return self.fmt, self.output_path(), self.options()
 
 
-__all__ = ["ExportDialog", "FORMAT_ORDER", "build_options", "Qt"]
+def safe_file_name(name: str) -> str:
+    """Nome di file senza separatori di cartella: «/» e «\\» diventano «-»."""
+    return name.replace("/", "-").replace("\\", "-")
+
+
+__all__ = ["ExportDialog", "safe_file_name", "FORMAT_ORDER", "build_options", "Qt"]
