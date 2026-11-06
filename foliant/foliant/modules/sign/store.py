@@ -114,7 +114,18 @@ class IDRegistry:
     def _load(self) -> list[dict]:
         raw = _read_json(self.path, {"ids": []})
         items = raw.get("ids", []) if isinstance(raw, dict) else []
-        return [{k: v for k, v in it.items() if k in self._ALLOWED} for it in items if isinstance(it, dict)]
+        items = [{k: v for k, v in it.items() if k in self._ALLOWED} for it in items if isinstance(it, dict)]
+        # voci doppie per lo stesso file (registri scritti prima della correzione di add):
+        # resta l'ultima, con l'impostazione «predefinito» di tutte, e il file viene riscritto
+        last = {it.get("path"): i for i, it in enumerate(items) if it.get("path")}
+        keep = [it for i, it in enumerate(items) if not it.get("path") or last[it["path"]] == i]
+        if len(keep) != len(items):
+            defaults = {it.get("path") for it in items if it.get("default")}
+            for it in keep:
+                if it.get("path") in defaults:
+                    it["default"] = True
+            self._save(keep)
+        return keep
 
     def _save(self, items: list[dict]) -> None:
         clean = [{k: it.get(k) for k in self._ALLOWED} for it in items]

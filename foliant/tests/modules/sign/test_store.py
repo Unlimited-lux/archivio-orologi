@@ -181,3 +181,27 @@ def test_f9_overwritten_p12_replaces_registry_entry(tmp_path):
     entries = reg.list()
     assert [e.fingerprint for e in entries] == [second.sha256]
     assert entries[0].default and not entries[0].missing
+
+
+def test_f9_existing_duplicates_cleaned_on_load(tmp_path):
+    reg = store.IDRegistry()
+    path = tmp_path / "lucia_ferri.p12"
+    old = d.create_self_signed(path, PASSWORD, common_name="Lucia Ferri", algorithm="ec-p256", years=1)
+    other_path = tmp_path / "mario_rossi.p12"
+    other = d.create_self_signed(other_path, PASSWORD, common_name="Mario Rossi", algorithm="ec-p256", years=1)
+    new = d.create_self_signed(path, PASSWORD, common_name="Lucia Ferri", algorithm="ec-p256", years=2)
+
+    def item(p, info, default):
+        return {"path": str(p.resolve()), "alias": info.subject, "fingerprint": info.sha256,
+                "subject": info.subject, "issuer": info.issuer, "not_after": info.not_after.isoformat(),
+                "default": default, "policies": []}
+
+    # registro scritto da una versione precedente: due voci per lo stesso .p12
+    reg.path.parent.mkdir(parents=True, exist_ok=True)
+    reg.path.write_text(json.dumps({"version": 1, "ids": [item(path, old, True), item(other_path, other, False),
+                                                          item(path, new, False)]}), encoding="utf-8")
+    entries = reg.list()
+    assert [e.fingerprint for e in entries] == [other.sha256, new.sha256]
+    assert reg.default().fingerprint == new.sha256
+    saved = json.loads(reg.path.read_text(encoding="utf-8"))["ids"]
+    assert [it["fingerprint"] for it in saved] == [other.sha256, new.sha256]
