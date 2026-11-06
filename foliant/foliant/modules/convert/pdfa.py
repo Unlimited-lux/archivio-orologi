@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _
+from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _, clear_embedded, delete_embedded
 from foliant.core import platform
 
 from .common import ConversionError, OutputFiles, check
@@ -424,19 +424,20 @@ def _clean_for_pdfa(pdf: pymupdf.Document, part: int) -> list[str]:
         fixes.append(_("Flag di stampa delle annotazioni corretti ({n}).").format(n=fixed_annots))
     if part == 1:
         if pdf.embfile_count():
-            for name in list(pdf.embfile_names()):
-                pdf.embfile_del(name)
+            clear_embedded(pdf)
             fixes.append(_("Allegati rimossi (non ammessi in PDF/A-1)."))
     elif part == 2:
-        removed = 0
+        drop = []
         for name in list(pdf.embfile_names()):
             try:
                 content = pdf.embfile_get(name)
             except Exception:
                 content = b""
             if not content.lstrip().startswith(b"%PDF"):
-                pdf.embfile_del(name)
-                removed += 1
+                drop.append(name)
+        if drop:
+            delete_embedded(pdf, drop)
+        removed = len(drop)
         if removed:
             fixes.append(_("Allegati non PDF rimossi ({n}): PDF/A-2 ammette solo allegati PDF/A.").format(
                 n=removed))
@@ -652,8 +653,7 @@ def convert_to_pdfa(data: bytes, level: str = "2b", password=None, progress=None
                     originals.append((name, pdf.embfile_get(name), pdf.embfile_info(name)))
                 except Exception:
                     pass
-                pdf.embfile_del(name)
-            pdf.xref_set_key(pdf.pdf_catalog(), "Names/EmbeddedFiles", "null")
+            clear_embedded(pdf)
             pages = pdf.page_count
             before = _scan(pdf, data)
             prepared = pdf.tobytes(garbage=1, encryption=pymupdf.PDF_ENCRYPT_NONE)

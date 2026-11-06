@@ -23,7 +23,7 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
-from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _
+from foliant.api import ENGINE_LOCK, PasswordRequired, WrongPassword, _, clear_embedded
 from foliant.core import platform
 from foliant.core.document import protection_options
 
@@ -367,14 +367,8 @@ def _remove_metadata(pdf) -> None:
 
 
 def _remove_attachments(pdf) -> None:
-    try:
-        for name in list(pdf.embfile_names()):
-            pdf.embfile_del(name)
-    except Exception:
-        pass
-    cat = pdf.pdf_catalog()
-    pdf.xref_set_key(cat, "Names/EmbeddedFiles", "null")
-    pdf.xref_set_key(cat, "AF", "null")
+    clear_embedded(pdf)
+    pdf.xref_set_key(pdf.pdf_catalog(), "AF", "null")
     for page in pdf:
         for annot in list(page.annots(types=[pymupdf.PDF_ANNOT_FILE_ATTACHMENT]) or []):
             page.delete_annot(annot)

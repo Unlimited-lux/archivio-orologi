@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pymupdf
 
-from foliant.api import ENGINE_LOCK, _, format_number
+from foliant.api import ENGINE_LOCK, _, delete_embedded, format_number
 
+from foliant.core.embedded import _array_items, embedded_entries
+from foliant.core.embedded import write_tree as _write_tree
 from .common import ConversionError, check
 
 SUBTYPES = {"text": "S", "number": "N", "date": "D"}
@@ -259,141 +261,10 @@ def add_files(pdf: pymupdf.Document, entries: list[dict]) -> list[str]:
 
 
 def remove_files(pdf: pymupdf.Document, names: list[str]) -> None:
-    for name in names:
-        pdf.embfile_del(name)
+    delete_embedded(pdf, names)
 
 
-# ------------------------------------------------------------ albero dei nomi
-def _pdf_string(raw: bytes) -> str:
-    if raw.startswith(b"\xfe\xff"):
-        return raw[2:].decode("utf-16-be", "replace")
-    if raw.startswith(b"\xef\xbb\xbf"):
-        return raw[3:].decode("utf-8", "replace")
-    return raw.decode("latin-1")
-
-
-def _array_items(text: str) -> list:
-    """Elementi di un array PDF come lo restituisce `xref_get_key`: stringhe (decodificate),
-    riferimenti («N 0 R») e dizionari diretti («<<…>>»)."""
-    data = text.strip()
-    if data.startswith("["):
-        data = data[1:]
-    if data.endswith("]"):
-        data = data[:-1]
-    out: list = []
-    i, n = 0, len(data)
-    esc = {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "(": "(", ")": ")", "\\": "\\"}
-    while i < n:
-        c = data[i]
-        if c.isspace():
-            i += 1
-        elif c == "(":
-            depth, buf, i = 1, bytearray(), i + 1
-            while i < n and depth:
-                ch = data[i]
-                if ch == "\\" and i + 1 < n:
-                    nx = data[i + 1]
-                    if nx in esc:
-                        buf += esc[nx].encode("latin-1")
-                        i += 2
-                    elif nx.isdigit():
-                        j = i + 1
-                        while j < n and j < i + 4 and data[j] in "01234567":
-                            j += 1
-                        buf.append(int(data[i + 1:j], 8) & 0xFF)
-                        i = j
-                    else:
-                        i += 2
-                    continue
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    depth -= 1
-                    if not depth:
-                        i += 1
-                        break
-                buf += ch.encode("latin-1", "replace")
-                i += 1
-            out.append(("str", _pdf_string(bytes(buf))))
-        elif data.startswith("<<", i):
-            depth, j = 0, i
-            while j < n:
-                if data.startswith("<<", j):
-                    depth += 1
-                    j += 2
-                elif data.startswith(">>", j):
-                    depth -= 1
-                    j += 2
-                    if not depth:
-                        break
-                else:
-                    j += 1
-            out.append(("dict", data[i:j]))
-            i = j
-        elif c == "<":
-            j = data.index(">", i)
-            out.append(("str", _pdf_string(bytes.fromhex(data[i + 1:j].replace(" ", "")))))
-            i = j + 1
-        else:
-            j = i
-            while j < n and not data[j].isspace() and data[j] not in "([<":
-                j += 1
-            tok = data[i:j]
-            parts = data[j:].split(None, 2)
-            if tok.isdigit() and len(parts) >= 2 and parts[0].isdigit() and parts[1].startswith("R"):
-                out.append(("ref", int(tok)))
-                k = data.index("R", j) + 1
-                i = k
-            else:
-                out.append(("tok", tok))
-                i = j
-    return out
-
-
-def embedded_entries(pdf: pymupdf.Document) -> list[tuple[str, int | str]]:
-    """(chiave, specifica del file) dell'albero /EmbeddedFiles, anche con /Kids: la specifica è
-    un xref oppure il testo del dizionario diretto (come lo scrive `embfile_add`)."""
-    cat = pdf.pdf_catalog()
-    kind, val = pdf.xref_get_key(cat, "Names/EmbeddedFiles")
-    entries: list[tuple[str, int]] = []
-    if kind == "null":
-        return entries
-
-    def walk(path_or_xref, depth=0):
-        if depth > 32:
-            return
-        if isinstance(path_or_xref, int):
-            names = pdf.xref_get_key(path_or_xref, "Names")
-            kids = pdf.xref_get_key(path_or_xref, "Kids")
-        else:
-            names = pdf.xref_get_key(cat, path_or_xref + "/Names")
-            kids = pdf.xref_get_key(cat, path_or_xref + "/Kids")
-        if names[0] == "array":
-            items = _array_items(names[1])
-            for k in range(0, len(items) - 1, 2):
-                if items[k][0] == "str" and items[k + 1][0] in ("ref", "dict"):
-                    entries.append((items[k][1], items[k + 1][1]))
-                elif items[k][0] == "str":
-                    raise ConversionError(_("Struttura del portfolio non supportata per questa modifica."))
-        if kids[0] == "array":
-            for kind_k, x in _array_items(kids[1]):
-                if kind_k == "ref":
-                    walk(x, depth + 1)
-    walk(int(val.split()[0]) if kind == "xref" else "Names/EmbeddedFiles")
-    return entries
-
-
-def _write_tree(pdf: pymupdf.Document, entries: list[tuple[str, int | str]]) -> None:
-    """Riscrive l'albero /EmbeddedFiles come un unico nodo ordinato (le specifiche restano le stesse)."""
-    pairs = sorted(entries, key=lambda kv: kv[0].encode("utf-16-be"))
-    tree = "[" + " ".join(f"{_s(k)} {x if isinstance(x, str) else f'{x} 0 R'}" for k, x in pairs) + "]"
-    cat = pdf.pdf_catalog()
-    node = pdf.get_new_xref()
-    pdf.update_object(node, f"<</Names {tree}>>")
-    if pdf.xref_get_key(cat, "Names")[0] == "null":
-        pdf.xref_set_key(cat, "Names", f"<</EmbeddedFiles {node} 0 R>>")
-    else:
-        pdf.xref_set_key(cat, "Names/EmbeddedFiles", f"{node} 0 R")
+# albero dei nomi: foliant/core/embedded.py
 
 
 def _folder_xrefs(pdf: pymupdf.Document) -> dict[str, int]:

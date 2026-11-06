@@ -16,7 +16,7 @@ from datetime import datetime
 
 import pymupdf
 
-from foliant.api import format_number
+from foliant.api import delete_embedded, format_number
 
 DOCUMENT = "document"
 PAGE = "page"
@@ -298,48 +298,10 @@ def delete(pdf: pymupdf.Document, item: Attachment) -> None:
     page.delete_annot(annot)
 
 
-def _embedded_signature(pdf: pymupdf.Document) -> list[tuple]:
-    out = []
-    for name in pdf.embfile_names():
-        info = pdf.embfile_info(name)
-        out.append((name, info.get("ufilename"), info.get("description"), info.get("length")))
-    return out
-
-
 def _delete_embedded(pdf: pymupdf.Document, name: str) -> None:
-    """Elimina un file dal name tree `/EmbeddedFiles`.
-
-    `Document.embfile_del` del motore (PyMuPDF 2.0) cancella la coppia
-    nome/valore sbagliata quando l'allegato non è il primo (usa l'indice
-    dell'elemento come indice dell'array [nome, valore, …]): qui si usa
-    l'indice corretto e si verifica il risultato; se l'albero non è piatto
-    (con `/Kids`) si ricostruisce l'elenco.
-    """
-    names = pdf.embfile_names()
-    if name not in names:
-        raise KeyError(name)
-    before = [e for e in _embedded_signature(pdf) if e[0] != name]
-    idx = names.index(name)
-    kind, value = pdf.xref_get_key(pdf.pdf_catalog(), "Names/EmbeddedFiles/Names")
-    if kind == "array" and hasattr(pdf, "_embfile_del"):
-        pdf._embfile_del(2 * idx)   # cancella gli elementi 2*idx+1 (valore) e 2*idx (nome)
-    else:
-        _rebuild_without(pdf, name)
-    if _embedded_signature(pdf) != before:
-        raise RuntimeError("Eliminazione dell'allegato non riuscita.")
-
-
-def _rebuild_without(pdf: pymupdf.Document, name: str) -> None:
-    keep = []
-    for other in pdf.embfile_names():
-        if other == name:
-            continue
-        info = pdf.embfile_info(other)
-        keep.append((other, pdf.embfile_get(other), info.get("filename"), info.get("ufilename"),
-                     info.get("description")))
-    pdf.xref_set_key(pdf.pdf_catalog(), "Names/EmbeddedFiles", "null")
-    for other, data, filename, ufilename, desc in keep:
-        pdf.embfile_add(other, data, filename=filename, ufilename=ufilename, desc=desc)
+    """Elimina un file dal name tree `/EmbeddedFiles` (foliant.core.embedded: `embfile_del` del
+    motore su alcuni alberi cancella la coppia sbagliata)."""
+    delete_embedded(pdf, name)
 
 
 def save_all_names(items: list[Attachment]) -> list[str]:

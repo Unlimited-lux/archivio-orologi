@@ -8,6 +8,7 @@ from .core.render import annotations_hidden, page_pixmap
 from .core.document import (
     ACCESS, CHANGE_KINDS, CLOSED, CONTENT, ENCRYPT_METADATA_SUPPORTED, LOCK, SAVED, Document, atomic_write,
 )
+from .core.embedded import clear_embedded, delete_embedded
 from .core.incremental import IncrementalSaveError
 from .core.engine import ENGINE_LOCK, try_engine
 from .core.errors import DocumentError, FoliantError, OperationCancelled, PasswordRequired, WrongPassword
@@ -30,7 +31,7 @@ from .ui.tools import (
 __all__ = [
     "page_pixmap", "annotations_hidden", "GUIDE_HORIZONTAL", "GUIDE_VERTICAL", "RULER_UNITS",
     "placement", "locale_defaults", "CLOSED", "CONTENT", "SAVED", "ACCESS", "LOCK", "CHANGE_KINDS", "ENCRYPT_METADATA_SUPPORTED",
-    "Document", "atomic_write", "IncrementalSaveError", "ENGINE_LOCK", "try_engine",
+    "Document", "atomic_write", "IncrementalSaveError", "delete_embedded", "clear_embedded", "ENGINE_LOCK", "try_engine",
     "DocumentError", "FoliantError", "OperationCancelled", "PasswordRequired", "WrongPassword",
     "_", "add_translations", "format_date", "format_number", "language", "theme", "PDF_FILTER", "Context", "Mode", "GUARD_EVENTS", "Banner",
     "FIT_PAGE", "FIT_WIDTH", "VIEW_CONTINUOUS", "VIEW_COVER", "VIEW_FACING", "VIEW_SINGLE", "DocumentView",

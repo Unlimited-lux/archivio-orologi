@@ -8,7 +8,7 @@ from typing import Callable
 
 import pymupdf
 
-from foliant.api import _
+from foliant.api import _, clear_embedded
 
 # ------------------------------------------------------------------- analisi
 
@@ -490,11 +490,7 @@ def _fallback_scrub(pdf: pymupdf.Document, o: dict[str, bool]) -> None:
         except Exception:
             continue
     if o["embedded_files"]:
-        try:
-            for name in list(pdf.embfile_names()):
-                pdf.embfile_del(name)
-        except Exception:
-            pass
+        clear_embedded(pdf)
         for _i, page in iter_pages(pdf):
             try:
                 for x in [a[0] for a in page.annot_xrefs() if a[1] == pymupdf.PDF_ANNOT_FILE_ATTACHMENT]:
@@ -550,8 +546,7 @@ def sanitize(pdf: pymupdf.Document, options: dict[str, bool],
         _remove_actions(pdf)
         rep.done.append("javascript")
     if o["embedded_files"]:
-        for name in list(pdf.embfile_names()):
-            pdf.embfile_del(name)
+        clear_embedded(pdf)
     if o["comments"]:
         step(0.8, _("Commenti"))
         for page in pdf:

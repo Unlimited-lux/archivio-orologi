@@ -292,7 +292,7 @@ def test_engine_delete_middle_item_keeps_others():
     engine.delete(doc, item)
     assert {n: doc.embfile_get(n) for n in doc.embfile_names()} == {
         "a.txt": b"a.txta.txta.txt", "b.txt": b"b.txtb.txtb.txt", "d.txt": b"d.txtd.txtd.txt"}
-    engine._rebuild_without(doc, "a.txt")
+    engine._delete_embedded(doc, "a.txt")
     assert [a.filename for a in engine.list_attachments(doc)] == ["b.txt", "d.txt"]
 
 
