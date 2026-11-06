@@ -115,9 +115,10 @@ def test_ricercabile_senza_correzioni_rendering_identico(tmp_path):
     out = engine.ocr_pdf_bytes(src, ["ita"], "searchable")
     with pymupdf.open(stream=src) as a, pymupdf.open(stream=out) as b:
         assert a[0].get_pixmap(dpi=150).samples == b[0].get_pixmap(dpi=150).samples
-        # la selezione segue la riga inclinata: le parole di una riga hanno direzione inclinata
+        # fino a 5,5° la riga invisibile si scrive diritta sulla sua linea di base media (B-6):
+        # poppler (Evince, Okular, pdftotext) la legge intera e in ordine
         line = [b for b in b[0].get_text("dict")["blocks"] if b["type"] == 0][0]["lines"][0]
-        assert abs(line["dir"][1]) > 0.05
+        assert abs(line["dir"][1]) < 1e-6
 
 
 def test_modificabile_righe_corpo_e_linea_di_base(tmp_path):
