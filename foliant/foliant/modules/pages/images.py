@@ -106,10 +106,12 @@ _EXIF_ROTATION = {1: 0, 3: 180, 6: 90, 8: 270}
 class _Frame:
     """Un'immagine pronta da collocare: stream da incorporare e geometria naturale."""
 
-    __slots__ = ("dpi_x", "dpi_y", "px_h", "px_w", "rotate", "stream")
+    __slots__ = ("dpi_known", "dpi_x", "dpi_y", "px_h", "px_w", "rotate", "stream")
 
-    def __init__(self, stream: bytes, px_w: int, px_h: int, dpi_x: float, dpi_y: float, rotate: int = 0):
+    def __init__(self, stream: bytes, px_w: int, px_h: int, dpi_x: float, dpi_y: float, rotate: int = 0,
+                 dpi_known: bool = True):
         self.stream = stream
+        self.dpi_known = dpi_known                 # False: risoluzione assente o solo segnaposto
         self.px_w, self.px_h = px_w, px_h          # dimensioni dello stream (prima della rotazione)
         self.dpi_x, self.dpi_y = dpi_x, dpi_y
         self.rotate = rotate                       # gradi orari da applicare in pagina
@@ -148,6 +150,26 @@ def _image_dpi(im, default: float) -> tuple[float, float]:
         v = _plausible_dpi(dpi, default)
         return v, v
     return default, default
+
+
+# Valori che fotocamere e programmi scrivono quando la risoluzione non è nota.
+_PLACEHOLDER_DPI = (72.0, 96.0)
+
+
+def _dpi_declared(im) -> bool:
+    """True se l'immagine dichiara una risoluzione reale: plausibile e diversa dai valori
+    segnaposto (le foto dei telefoni riportano 72 dpi senza significato)."""
+    dpi = im.info.get("dpi")
+    values = list(dpi[:2]) if isinstance(dpi, (tuple, list)) else [dpi]
+    good = []
+    for v in values:
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        if DPI_MIN_PLAUSIBLE <= v <= DPI_MAX_PLAUSIBLE and round(v) not in _PLACEHOLDER_DPI:
+            good.append(v)
+    return bool(good)
 
 
 def _exif_orientation(im) -> int:
@@ -225,6 +247,7 @@ def _frames_from_file(path: str, dpi_default: float, recompress: bool, errors: l
     fmt = (im.format or "").upper()
     n_frames = int(getattr(im, "n_frames", 1) or 1)
     frames: list[_Frame] = []
+    known = _dpi_declared(im)
 
     if fmt in _JPEG_FORMATS:
         dx, dy = _image_dpi(im, dpi_default)
@@ -240,21 +263,21 @@ def _frames_from_file(path: str, dpi_default: float, recompress: bool, errors: l
             img = ImageOps.exif_transpose(im) if orient != 1 else im
             if orient in (5, 6, 7, 8):
                 dx, dy = dy, dx
-            return [_Frame(_jpeg_bytes(img), img.width, img.height, dx, dy)]
+            return [_Frame(_jpeg_bytes(img), img.width, img.height, dx, dy, dpi_known=known)]
         if orient in _EXIF_ROTATION:
-            return [_Frame(stream, im.width, im.height, dx, dy, _EXIF_ROTATION[orient])]
+            return [_Frame(stream, im.width, im.height, dx, dy, _EXIF_ROTATION[orient], dpi_known=known)]
         img = ImageOps.exif_transpose(im)
         if orient in (5, 6, 7, 8):
             dx, dy = dy, dx
-        return [_Frame(_lossless_bytes(img), img.width, img.height, dx, dy)]
+        return [_Frame(_lossless_bytes(img), img.width, img.height, dx, dy, dpi_known=known)]
 
     if fmt in _JPX_FORMATS and not recompress:
         dx, dy = _image_dpi(im, dpi_default)
-        return [_Frame(data, im.width, im.height, dx, dy)]
+        return [_Frame(data, im.width, im.height, dx, dy, dpi_known=known)]
 
     if fmt == "PNG" and n_frames == 1 and not recompress and _exif_orientation(im) == 1:
         dx, dy = _image_dpi(im, dpi_default)
-        return [_Frame(data, im.width, im.height, dx, dy)]
+        return [_Frame(data, im.width, im.height, dx, dy, dpi_known=known)]
 
     # TIFF (tutti i fotogrammi), GIF/WebP/APNG animati (solo il primo), altri formati.
     multi = fmt == "TIFF"
@@ -274,7 +297,8 @@ def _frames_from_file(path: str, dpi_default: float, recompress: bool, errors: l
                 frame = ImageOps.exif_transpose(frame)
                 if orient in (5, 6, 7, 8):
                     dx, dy = dy, dx
-            frames.append(_Frame(_encode_frame(frame, recompress), frame.width, frame.height, dx, dy))
+            frames.append(_Frame(_encode_frame(frame, recompress), frame.width, frame.height, dx, dy,
+                                 dpi_known=known))
         except Exception:
             errors.append(_("«{n}»: fotogramma {f} danneggiato, saltato.").format(n=name, f=k + 1))
     if not frames:
@@ -302,7 +326,9 @@ def _frames_with_engine(data: bytes, name: str, dpi_default: float, errors: list
             if pix.colorspace and pix.colorspace.n == 4:
                 pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
             png = pix.tobytes("png")
-            return [_Frame(png, pix.width, pix.height, dx, dy)]
+            known = any(DPI_MIN_PLAUSIBLE <= v <= DPI_MAX_PLAUSIBLE and v not in (72, 96)
+                        for v in (pix.xres, pix.yres))
+            return [_Frame(png, pix.width, pix.height, dx, dy, dpi_known=known)]
     except Exception:
         errors.append(_("«{n}»: formato non supportato o file danneggiato.").format(n=name))
         return []
@@ -389,7 +415,8 @@ def _check_options(page_size, fit: str, margin: float) -> None:
 def images_to_pdf(paths: Sequence[str | os.PathLike], *, page_size: tuple[float, float] | None = None,
                   fit: str = "contain", margin: float = 0.0, landscape="auto", dpi_default: float = 150.0,
                   recompress: bool = False, errors: list[str] | None = None,
-                  progress: Callable[[float, str], None] | None = None) -> pymupdf.Document:
+                  progress: Callable[[float, str], None] | None = None,
+                  no_dpi_size: tuple[float, float] | None = None) -> pymupdf.Document:
     """Crea un nuovo PDF con una pagina per immagine (una per fotogramma nei TIFF).
 
     `page_size=None` → pagina della dimensione dell'immagine alla risoluzione
@@ -397,6 +424,10 @@ def images_to_pdf(paths: Sequence[str | os.PathLike], *, page_size: tuple[float,
     (larghezza, altezza) in punti con adattamento `fit` ("contain", "fill",
     "center") entro i margini `margin` (punti). `landscape="auto"` orienta la
     pagina secondo le proporzioni dell'immagine.
+
+    Con `page_size=None` e `no_dpi_size` indicato, le immagini senza una risoluzione
+    reale (assente, non plausibile o segnaposto 72/96 dpi) vanno in una pagina di
+    quel formato, adattate entro i margini con le loro proporzioni.
 
     I file illeggibili sono saltati e descritti in `errors` (insieme agli
     avvisi, ad es. GIF animate); se nessuna immagine è convertibile solleva
@@ -420,7 +451,11 @@ def images_to_pdf(paths: Sequence[str | os.PathLike], *, page_size: tuple[float,
                 frames = _frames_from_file(path, dpi_default, recompress, errors)
                 for fr in frames:
                     try:
-                        _place_frame(out, fr, page_size, fit, margin, landscape, Path(path).name, errors)
+                        if page_size is None and no_dpi_size is not None and not fr.dpi_known:
+                            _place_frame(out, fr, no_dpi_size, "contain", margin, landscape, Path(path).name,
+                                         errors)
+                        else:
+                            _place_frame(out, fr, page_size, fit, margin, landscape, Path(path).name, errors)
                     except PageOpError:
                         raise
                     except Exception:
@@ -466,6 +501,9 @@ def insert_images(pdf: pymupdf.Document, paths: Sequence[str | os.PathLike], at:
     errors: list[str] = list(options.pop("errors", None) or [])
     at = max(0, min(pdf.page_count, int(at)))
     options["page_size"] = resolve_page_size(pdf, options.get("page_size"), at)
+    if options["page_size"] is None and "dpi_default" not in options:
+        # «Come l'immagine» senza risoluzione reale: formato delle pagine del documento (A4 se vuoto).
+        options.setdefault("no_dpi_size", resolve_page_size(pdf, "adjacent", at))
     src = images_to_pdf(paths, errors=errors, **options)
     try:
         n = src.page_count
