@@ -75,6 +75,22 @@ def _lines(page, sort=True):
     return [" ".join(ln.split()) for ln in page.get_text(sort=sort).splitlines() if ln.strip()]
 
 
+def _poppler_text(path) -> str | None:
+    """Testo letto da pdftotext di poppler (Evince, Okular), in UTF-8; None se non c'è.
+    Su Windows il pdftotext disponibile può essere quello di Xpdf, che codifica e divide le righe
+    in altro modo: le verifiche su poppler valgono solo con poppler."""
+    import shutil
+    import subprocess
+    exe = shutil.which("pdftotext")
+    if not exe:
+        return None
+    probe = subprocess.run([exe, "-v"], capture_output=True)
+    if b"poppler" not in (probe.stdout + probe.stderr).lower():
+        return None
+    out = subprocess.run([exe, "-enc", "UTF-8", str(path), "-"], capture_output=True, check=True)
+    return out.stdout.decode("utf-8", "replace")
+
+
 @pytest.mark.parametrize("mode", [engine.EDITABLE, engine.SEARCHABLE])
 def test_b4_correggi_parola_non_lascia_pezzi(window, certificato, mode):
     view = window.open_path(certificato)
@@ -88,12 +104,9 @@ def test_b4_correggi_parola_non_lascia_pezzi(window, certificato, mode):
         # ordine di lettura conservato, anche per MuPDF con sort e per l'estrazione semplice
         assert "Orologio Omega Calibro Professional" in lines, lines
         assert lines.index("Orologio Omega Calibro Professional") == 1
-        import shutil
-        import subprocess
-        if shutil.which("pdftotext"):        # poppler (Evince, Okular)
-            doc.save(str(certificato) + ".corretto.pdf")
-            out = subprocess.run(["pdftotext", str(certificato) + ".corretto.pdf", "-"],
-                                 capture_output=True, text=True).stdout
+        doc.save(str(certificato) + ".corretto.pdf")
+        out = _poppler_text(str(certificato) + ".corretto.pdf")
+        if out is not None:                  # poppler (Evince, Okular)
             assert "Orologio Omega Calibro Professional" in [" ".join(ln.split()) for ln in out.splitlines()]
         words = [w[4] for w in page.get_text("words")]
         assert "Speedmaster" not in words and words.count("Calibro") == 1
@@ -115,17 +128,14 @@ GARANZIA = [
 def test_b6_ricercabile_storta_leggibile_in_poppler(tmp_path, skew):
     """Scansione storta di 2–5°: pdftotext (Evince, Okular) legge le righe intere e in ordine."""
     import difflib
-    import shutil
-    import subprocess
-    if not shutil.which("pdftotext"):
-        pytest.skip("pdftotext non disponibile")
     data = open(image_pdf(tmp_path / "garanzia.pdf", [scan_image(lines=GARANZIA, skew=skew)], dpi=300),
                 "rb").read()
     out = engine.ocr_pdf_bytes(data, ["ita"], engine.SEARCHABLE)
     (tmp_path / "o.pdf").write_bytes(out)
     expected = " ".join(GARANZIA).split()
-    text = subprocess.run(["pdftotext", str(tmp_path / "o.pdf"), "-"], capture_output=True, text=True,
-                          check=True).stdout
+    text = _poppler_text(tmp_path / "o.pdf")
+    if text is None:
+        pytest.skip("pdftotext di poppler non disponibile")
     assert difflib.SequenceMatcher(None, text.split(), expected).ratio() >= 0.9, text
     with pymupdf.open(stream=out) as d:
         mu = d[0].get_text(sort=True)
@@ -170,12 +180,15 @@ def test_b16_proposta_su_documento_lungo_dice_almeno(window, tmp_path, qtbot):
         shown.append(bar.text)
     mp = pytest.MonkeyPatch()
     mp.setattr(ui.ProposalBar, "show_document", spy)
+    final = f"almeno {ui.ANALYSIS_PAGES} pagine scannerizzate"
     try:
         window.open_path(path)
-        qtbot.waitUntil(lambda: bool(shown), timeout=15000)
+        # la proposta compare mentre l'analisi procede (su una macchina lenta «almeno 12…») e si
+        # aggiorna fino alle ANALYSIS_PAGES pagine analizzate
+        qtbot.waitUntil(lambda: bool(shown) and final in shown[-1], timeout=30000)
     finally:
         mp.undo()
-    assert f"almeno {ui.ANALYSIS_PAGES} pagine scannerizzate" in shown[0], shown[0]
+    assert all("almeno" in t for t in shown), shown
 
 
 def test_b16_proposta_completa_non_dice_almeno():
