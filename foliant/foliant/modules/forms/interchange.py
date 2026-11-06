@@ -241,8 +241,30 @@ def parse_xfdf(data: bytes) -> dict[str, Any]:
 
 
 # ====================================================================== CSV
-def export_csv(values: dict[str, Any] | list[dict[str, Any]], delimiter: str = ",") -> bytes:
-    """Una riga di intestazione con i nomi e una riga di valori per ogni record."""
+def _system_decimal_comma() -> bool:
+    """True se il separatore decimale del sistema è la virgola."""
+    try:
+        from PySide6.QtCore import QLocale
+        return QLocale.system().decimalPoint() == ","
+    except Exception:
+        return False
+
+
+def csv_delimiter() -> str:
+    """Separatore che Excel si aspetta: «;» con l'interfaccia in italiano o con la virgola
+    come separatore decimale del sistema, altrimenti «,»."""
+    from foliant.i18n import language
+    return ";" if language() == "it" or _system_decimal_comma() else ","
+
+
+def export_csv(values: dict[str, Any] | list[dict[str, Any]], delimiter: str | None = None,
+               bom: bool = True) -> bytes:
+    """Una riga di intestazione con i nomi e una riga di valori per ogni record.
+
+    UTF-8 con BOM (accenti ed € leggibili in Excel) e separatore di `csv_delimiter()`
+    se non indicato."""
+    if delimiter is None:
+        delimiter = csv_delimiter()
     rows = values if isinstance(values, list) else [values]
     names: list[str] = []
     for r in rows:
@@ -255,7 +277,7 @@ def export_csv(values: dict[str, Any] | list[dict[str, Any]], delimiter: str = "
     for r in rows:
         w.writerow(["; ".join(map(str, v)) if isinstance(v, (list, tuple)) else ("" if r.get(n) is None else str(v))
                     for n, v in ((n, r.get(n, "")) for n in names)])
-    return buf.getvalue().encode("utf-8")
+    return (b"\xef\xbb\xbf" if bom else b"") + buf.getvalue().encode("utf-8")
 
 
 def parse_csv(data: bytes, row: int = 0) -> dict[str, Any]:
@@ -400,7 +422,7 @@ def export_data(fmt: str, values: dict[str, Any], pdf_name: str = "", button_nam
     if fmt == "xml":
         return export_xml(values)
     if fmt == "txt":
-        return export_csv(values, delimiter="\t")
+        return export_csv(values, delimiter="\t", bom=False)
     raise InterchangeError(_("Formato non supportato: {f}").format(f=fmt))
 
 
