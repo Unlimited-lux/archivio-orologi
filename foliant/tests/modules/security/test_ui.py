@@ -1291,3 +1291,28 @@ def test_f7_inspection_lists_file_names_and_comment_text(tmp_path):
     assert rows["File incorporati (2)"] == ["Pagina 1: fondello.jpg", "fattura_2026_118.pdf"]
     comments = [v for k, v in rows.items() if k.startswith("Commenti")]
     assert comments and "Pagina 1: Graffio sul vetro, da segnalare al cliente" in comments[0]
+
+
+def test_f10_singular_redaction_messages(window, sec, sample_pdf, monkeypatch):
+    from foliant.i18n import set_language
+    view = window.open_path(sample_pdf)
+    with view.document.change("Segna") as pdf:
+        R.add_mark(pdf, 0, pymupdf.Rect(60, 75, 300, 110), R.MarkStyle())
+    asked, status = [], []
+    monkeypatch.setattr(C, "confirm", lambda parent, title, text, *a: asked.append((title, text)) or False)
+    assert not sec.apply_redactions(None)
+    title, text = asked[-1]
+    assert title == "Applicare 1 redazione?"
+    assert text.startswith("Il contenuto sotto 1 area su 1 pagina verrà rimosso")
+    set_language("en")
+    try:
+        assert not sec.apply_redactions(None)
+        title, text = asked[-1]
+        assert title == "Apply 1 redaction?" and "under 1 area on 1 page" in text
+    finally:
+        set_language("it")
+    monkeypatch.setattr(C, "confirm", lambda *a: True)
+    monkeypatch.setattr(window.ctx, "confirm", lambda *a: False)
+    monkeypatch.setattr(sec.ctx, "status", lambda text, *a: status.append(text))
+    assert sec.apply_redactions(None)
+    assert "Redazioni applicate: 1 area su 1 pagina" in status

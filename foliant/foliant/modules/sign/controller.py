@@ -225,7 +225,8 @@ class SignController(QObject):
         if res.changed_local:
             self.librarySynced.emit()
         if res.conflicts:
-            self.ctx.status(_("Libreria firme: {n} conflitti, conservate entrambe le versioni.").format(
+            self.ctx.status((_("Libreria firme: 1 conflitto, conservate entrambe le versioni.") if res.conflicts == 1
+                             else _("Libreria firme: {n} conflitti, conservate entrambe le versioni.")).format(
                 n=res.conflicts), 8000)
         return res
 
@@ -397,7 +398,8 @@ class SignController(QObject):
                               lambda pdf: g.repeat_signature(pdf, page, xref, pages, anchor))
         if result:
             created, shrunk = result
-            msg = _("Firma ripetuta su {n} pagine.").format(n=len(created))
+            msg = (_("Firma ripetuta su 1 pagina.") if len(created) == 1 else
+                   _("Firma ripetuta su {n} pagine.")).format(n=len(created))
             if shrunk:
                 msg += " " + _("Ridotta per entrare nelle pagine: {p}.").format(
                     p=", ".join(str(p + 1) for p in shrunk))
@@ -1276,6 +1278,9 @@ TRANSLATIONS_EN = {
     "Opacità della firma (%):": "Signature opacity (%):", "Opacità firma": "Signature opacity",
     "Ripeti firma su più pagine": "Repeat signature on several pages",
     "Firma ripetuta su {n} pagine.": "Signature repeated on {n} pages.",
+    "Firma ripetuta su 1 pagina.": "Signature repeated on 1 page.",
+    "Libreria firme: 1 conflitto, conservate entrambe le versioni.":
+        "Signature library: 1 conflict, both versions kept.",
     "Ridotta per entrare nelle pagine: {p}.": "Shrunk to fit on pages: {p}.",
     "Incorpora le firme": "Embed signatures",
     "Il documento non contiene firme grafiche da incorporare.": "The document has no graphic signatures to embed.",

@@ -107,10 +107,6 @@ EN: dict[str, str] = {
     "Ripeti segno su più pagine": "Repeat mark on multiple pages",
     "Rimuovi segni di redazione": "Remove redaction marks",
     "Applicare {n} redazioni?": "Apply {n} redactions?",
-    "Il contenuto sotto {n} aree su {p} pagine verrà rimosso definitivamente (testo, immagini, grafica, commenti e campi). Puoi annullare fino al salvataggio; dopo non sarà più recuperabile.": (
-        "Content under {n} areas on {p} pages will be permanently removed (text, images, graphics, "
-        "comments and fields). You can undo until you save; after that it cannot be recovered."
-    ),
     "Le firme digitali del documento risulteranno non valide.": (
         "The document's digital signatures will become invalid."
     ),
@@ -152,7 +148,6 @@ EN: dict[str, str] = {
     "Oscurare tutte le pagine?": "Redact all pages?",
     "Segna tutte": "Mark all",
     "Redazione non applicata": "Redaction not applied",
-    "Redazioni applicate: {n} aree su {p} pagine": "Redactions applied: {n} areas on {p} pages",
     "Salvataggio non riuscito": "Save failed",
     "Rimuovi…": "Remove…",
     "Rimozione dei dati nascosti non riuscita": "Removing hidden data failed",
@@ -808,4 +803,26 @@ EN: dict[str, str] = {
     "Torna a mostrare gli avvisi sui contenuti attivi": "Show the active content warnings again",
     "Copre le finestre finché non inserisci il codice": "Covers the windows until you enter the code",
     "Codice, blocco all'avvio e dopo un periodo di inattività": "Code, lock at startup and after a period of inactivity",
+    'Il documento contiene 1 segno di redazione non applicato: il contenuto sotto il segno non è ancora stato rimosso.': 'The document contains 1 unapplied redaction mark: the content under the mark has not been removed yet.',
+    'Copia cifrata per 1 destinatario salvata: {f}': 'Copy encrypted for 1 recipient saved: {f}',
+    '1 documento aggiunto allo spazio protetto': '1 document added to the protected space',
+    'Nessun file protetto con la policy «{p}».': 'No files protected with the “{p}” policy.',
+    '1 file protetto con la policy «{p}».': '1 file protected with the “{p}” policy.',
+    '1 segno di redazione aggiunto': '1 redaction mark added',
+    "1 pagina senza testo (scansione): esegui l'OCR per includerla.": '1 page without text (scan): run OCR to include it.',
+    'Il documento contiene 1 segno di redazione non applicato.': 'The document contains 1 unapplied redaction mark.',
+    'Applicare 1 redazione?': 'Apply 1 redaction?',
+    'Il contenuto sotto {areas} su {pages} verrà rimosso definitivamente (testo, immagini, grafica, commenti e campi). Puoi annullare fino al salvataggio; dopo non sarà più recuperabile.': 'The content under {areas} on {pages} will be permanently removed (text, images, graphics, comments and fields). You can undo until you save; after that it cannot be recovered.',
+    'Verrà cancellata anche 1 occorrenza fuori dalle pagine (metadati, segnalibri, commenti, campi, allegati).': '1 occurrence outside the pages will also be deleted (metadata, bookmarks, comments, fields, attachments).',
+    'Redazioni applicate: {areas} su {pages}': 'Redactions applied: {areas} on {pages}',
+    '1 area': '1 area',
+    '1 pagina': '1 page',
+    '1 policy importata': '1 policy imported',
+    '1 schema importato': '1 pattern imported',
+    '1 occorrenza trovata': '1 occurrence found',
+    '1 nota fusa come icona: il suo testo non è più leggibile.': '1 note flattened as an icon: its text can no longer be read.',
+    '{n} aree': '{n} areas',
+    '{n} pagine': '{n} pages',
+    'Impossibile leggere o scrivere il file: {e}': 'Cannot read or write the file: {e}',
+    'Il file non è un PDF valido oppure è danneggiato.': 'The file is not a valid PDF or is damaged.',
 }

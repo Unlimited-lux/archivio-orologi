@@ -659,7 +659,8 @@ def flatten(pdf: pymupdf.Document, opts: FlattenOptions | None = None) -> Flatte
     if opts.rasterize:
         rasterize(pdf, opts.pages, opts.dpi, rep)
     if rep.notes_lost:
-        rep.warnings.append(_("{n} note fuse come icona: il loro testo non è più leggibile.")
+        rep.warnings.append((_("1 nota fusa come icona: il suo testo non è più leggibile.") if rep.notes_lost == 1
+                             else _("{n} note fuse come icona: il loro testo non è più leggibile."))
                             .format(n=rep.notes_lost))
     return rep
 

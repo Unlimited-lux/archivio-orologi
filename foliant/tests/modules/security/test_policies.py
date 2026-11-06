@@ -190,3 +190,27 @@ def test_policy_menu(window, sec, sample_pdf):
     texts = [a.text() for a in sec.policy_menu.actions() if not a.isSeparator()]
     assert texts == ["Riservato", "Gestisci policy…"]
     assert sec.policy_menu.actions()[0].isEnabled()
+
+
+def test_f10_f11_batch_messages_plural_and_damaged_file(window, sec, tmp_path, monkeypatch):
+    sec.policy_store().add(_riservato())
+    monkeypatch.setattr(C, "ask_policy_passwords", lambda parent, policy: (OPEN_PW, PERM_PW))
+    errors, status = [], []
+    monkeypatch.setattr(sec.ctx, "error", lambda title, text: errors.append(text))
+    monkeypatch.setattr(sec.ctx, "status", lambda text, *a: status.append(text))
+    out_dir = tmp_path / "protetti"
+    out_dir.mkdir()
+    damaged = tmp_path / "perizia_danneggiata.pdf"
+    damaged.write_bytes(b"Perizia orologio - file troncato\x00\x01")
+    failed = sec.apply_policy_to_files("Riservato", [str(damaged)], str(out_dir))
+    assert [f for f, _e in failed] == [str(damaged)]
+    [text] = errors
+    assert text.startswith("Nessun file protetto con la policy «Riservato».")
+    assert "perizia_danneggiata.pdf: Il file non è un PDF valido oppure è danneggiato." in text
+    assert str(tmp_path) not in text and "Failed to open" not in text
+    good = tmp_path / "listino.pdf"
+    d = pymupdf.open()
+    d.new_page().insert_text((72, 100), "Listino: Daytona 116500LN 28.000", fontsize=12)
+    d.save(good)
+    assert sec.apply_policy_to_files("Riservato", [str(good)], str(out_dir)) == []
+    assert status[-1] == "1 file protetto con la policy «Riservato»."
