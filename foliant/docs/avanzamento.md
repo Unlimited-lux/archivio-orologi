@@ -139,6 +139,41 @@ secondo avvio che serviva solo a file già aperti lo dice ed esce. Il blocco seg
 all'uscita e dopo un crash. Su disco solo blocchi con il nome cifrato con chiave (HMAC), mai nomi o
 percorsi. Dettagli e API nel README del pacchetto («Nucleo: un file aperto una volta sola»).
 
+### Collaudo completo (6/11)
+
+Su richiesta del committente («utilizza proprio tutte le funzioni disponibili come se tu fossi un
+utente e valuta gli errori o bug») sei sessioni di collaudo hanno usato l'app vera, offscreen, area
+per area: A apertura, lettura, scheda File, stampa, un file aperto una volta sola e riservatezza;
+B conversioni e OCR; C interfaccia, Strumenti e Assistente IA; D commenti, pagine e moduli;
+E modifica del testo e degli oggetti; F protezione e firma. Hanno usato documenti realistici per
+il commercio di orologi (perizie con foto, fatture e fogli presenze di LibreOffice, contratti,
+certificati, scansioni storte e ruotate, PDF protetti, firmati, con moduli, da 300–500 pagine,
+danneggiati), interfaccia in inglese e tema scuro. Ogni difetto è stato riprodotto almeno due volte.
+
+Trovati 65 difetti certi (12 gravi), tutti corretti con un test che falliva prima della correzione;
+uno (B-7) era un falso allarme del collaudo, ma l'annullamento è comunque diventato più rapido. Gravi:
+- timbri di pagina (numeri, Bates, intestazioni) uguali su tutte le pagine con risorse condivise;
+- caselle di riepilogo dei moduli vuote; importi e date importati letti senza il formato del campo;
+- esportazione EPUB che non produceva il file; «Rimuovi» del portfolio e PDF/A-2b che toglievano
+  l'allegato sbagliato;
+- anteprima della firma da immagine invisibile e chiusura con errore;
+- firma digitale «non valida» dopo un commento sui PDF di LibreOffice (il motore arrotondava il
+  formato della pagina riscrivendola): ora i valori originali vengono rimessi esatti;
+- «Correggi» dell'OCR che lasciava pezzi della parola vecchia; scansioni ruotate a cui l'OCR
+  veniva riproposto;
+- modifica del testo: dopo un «Sostituisci tutto» alcune frasi non si trovavano più; celle
+  vicine dei PDF stampati dal browser unite.
+Tra i medi e i bassi: ricerca che spostava la vista mentre si lavorava altrove, nomi accentati
+degli allegati storpiati (difetto del motore, aggirato nel nucleo con `readable_name`), righe
+centrate o a destra e celle su più righe nella modifica del testo, a capo dell'editor diversi dal
+PDF, titoli fusi nei paragrafi in Word, orari e testo fuori tabella in Excel, Ripara PDF sui file
+di LibreOffice troncati, scansioni storte poco leggibili in Evince, destinazioni e campi rimasti
+dopo Elimina e Sostituisci, CSV per Excel italiano, foto senza risoluzione, dati personali con
+e-mail accentate e numeri di pratica, avviso sui metadati prima di oscurare, ID digitali doppi,
+«Sostituisci font» che cambiava tutta la famiglia, parole del mestiere nel dizionario (bracciale,
+cinturino, fondello…), lingua dell'ortografia presa dal testo, ricerca dei comandi, F6, Guida
+rapida, plurali e testi in inglese. Suite completa verde dopo l'unione (circa 6.000 test).
+
 ### Problemi noti
 
 Stato del 28/10 sera, dopo la riservatezza e le correzioni dei moduli unite: suite completa verde,
@@ -152,6 +187,9 @@ Restano aperti:
 |---|---|---|
 | bassa | nucleo | Su documenti con centinaia di commenti ogni modifica costa circa 0,3 s per la copia di annullamento. Il salvataggio incrementale dei PDF firmati non alza la versione PDF. |
 | bassa | viewer | Stampa (VIS-43): mancano ancora la scala in percentuale e «riduci solo se necessario», «Documento e timbri», la carta scelta in base al formato della pagina e la stampa PostScript; l'anteprima usa la carta della stampante predefinita, non quella scelta poi nel dialogo del sistema. |
+| media | security | Busta di sicurezza («Cifra solo gli allegati»): Acrobat apre le pagine senza password, Foliant e diversi altri programmi la chiedono comunque. Il dialogo ora lo dice; l'apertura senza password in Foliant richiede un intervento nel nucleo (security/CORE_REQUESTS.md §11). |
+| bassa | ocr | Scansioni storte fino a 5,5°: il testo ricercabile è scritto in righe diritte perché Evince e pdftotext lo leggano; in Foliant l'evidenziazione della ricerca può scostarsi di qualche punto alle estremità delle righe più storte. |
+| bassa | text_edit | Una riga sola fuori dalle tabelle può crescere oltre il margine destro fino al bordo della pagina; in una cella di una sola riga il testo più lungo della cella ne supera il bordo. |
 | — | specifica | Funzioni P1/P2 non completate e richieste al nucleo ancora aperte: elencate per ID in `foliant/modules/*/STATO.md` e in `foliant/modules/viewer/CORE_REQUESTS.md`. |
 
 Non prioritari per il committente (non verranno trattati salvo nuova richiesta): importazione di
@@ -235,3 +273,6 @@ video nei PDF (VIS-37), firma con smart card (SIG-23, implementazione conservata
 - 29/10 19:15–21:30 — Menu ☰ sostituito dalla disposizione in stile Excel (scheda File, gruppi con
   nome, scheda Visualizza): studio, prototipo, nucleo e adeguamento dei 12 moduli con sei agenti in
   parallelo.
+- 6/11 10:30–13:30 — Collaudo completo con sei sessioni sull'app vera (A–F): 65 difetti certi,
+  corretti da quattro agenti locali e da quattro sessioni di correzione (B, D, E, F), poi uniti con
+  la suite completa verde.
